@@ -65,7 +65,11 @@ in
     };
     variants = {
       default = { };
-      check.mode = "check";
+      # The wasm gate is plain `cargo check` (decision 108).
+      check = {
+        mode = "check";
+        allTargets = false;
+      };
       clippy = {
         mode = "clippy";
         profile = "dev";
@@ -75,14 +79,6 @@ in
         ];
       };
     };
-  };
-
-  # rusqlite's `bundled` SQLite, as the crane build ships it: the curated
-  # default's LIBSQLITE3_SYS_USE_PKG_CONFIG=1 would link nixpkgs' sqlite.
-  packages.libsqlite3-sys = {
-    env = lib.mkForce { };
-    nativeInputs = lib.mkForce [ ];
-    inputs = lib.mkForce [ ];
   };
 
   targets = {

@@ -15,20 +15,38 @@
 //! `<outer name>-<output name>` (spike B, finding 2). Its output is a
 //! directory:
 //!
-//! - `root`: a symlink to the root unit's output (or the stub's);
+//! - `root`: a symlink to the root unit's output, or for a test binary
+//!   Cargo did not build to its stub's (which succeeds and logs why);
+//! - `not-built`: for a root Cargo did not build (required features), the
+//!   reason. A product root has no `root` then and does not depend on its
+//!   stub, so products can leave it out at build time, as IFD mode does at
+//!   evaluation time;
 //! - `debug`: a symlink to the root unit's `debug` output (its debuginfo
 //!   side files), when it has one;
 //! - `breakbulk-root.json`: what the root is ([`RootInfo`]), and for a test
-//!   binary what its test run needs ([`TestSpec`]), with real paths. The
-//!   wrapper has every path in it as an input, so they are in its closure.
+//!   binary what its test run and test app need ([`TestSpec`]), with real
+//!   paths. The wrapper has every path in it as an input, so they are in its
+//!   closure.
+//!
+//! Each predicted doctest (a library of the test plan) gets the same: the
+//! doctest derivation IFD mode makes, with the package's test configuration
+//! (runner, arguments, env) from `values.json`, and a wrapper
+//! `<outer name>-<package>.doctest` whose `root` links its output, or whose
+//! `not-built` says why the plan has none.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use breakbulk_format::{Piece, Plan, Text, Unit, to_canonical_json};
+use breakbulk_format::{
+    CompileUnit, Piece, Plan, Platform, Reference, Resolve, RootKind, SrcRef, Text, Unit,
+    to_canonical_json,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::output::{Drv, Part, RootOut, RootWhat, UnitsJson, Value};
-use crate::{Error, Inputs, TOOL_SHELL, Tokens, err, keys, token_prefix, unit_outputs};
+use crate::{
+    Error, Inputs, TOOL_SHELL, Tokens, err, keys, kind_str, token_prefix, unit_outputs,
+    workspace_dir,
+};
 
 /// The key of the coreutils store path the wrappers use (`values.json`
 /// only; IFD mode has no wrappers).
@@ -48,6 +66,25 @@ pub struct Outer {
     /// clippy variants need (they have no roots). None: no such output.
     #[serde(default)]
     pub units: Option<String>,
+    /// Package name to the output for its doctest (`<package>.doctest.drv`):
+    /// the predicted doctests of a test plan. Must cover every doctest of
+    /// the plan.
+    #[serde(default)]
+    pub doctests: BTreeMap<String, String>,
+}
+
+/// The attributes a doctest derivation gets from the package's test
+/// configuration (`doctestConfig` in `lib/test-runs.nix`), each the value of
+/// [`doctest_key`] in `values.json`.
+pub const DOCTEST_CONFIG: [&str; 3] = [
+    "BREAKBULK_TEST_RUNNER",
+    "BREAKBULK_TEST_ARGS",
+    "BREAKBULK_TEST_ENV",
+];
+
+/// The `values.json` key of one doctest configuration attribute.
+pub fn doctest_key(package: &str, attr: &str) -> String {
+    format!("doctest:{package}:{attr}")
 }
 
 /// `values.json`: every input key's value, without string context, and the
@@ -140,6 +177,26 @@ pub struct TestSpec {
     /// path. Each run's `directives.json` says which of its search paths go
     /// on it (`LibraryPath::for_dylib_path` in breakbulk-unit).
     pub dylib_flags: Vec<String>,
+    /// The package's directory relative to the repository root (the source
+    /// view's root), for test apps run in a checkout; None when
+    /// `CARGO_MANIFEST_DIR` is not in a source view.
+    pub package_dir: Option<String>,
+    /// What nextest's reuse-build mode reads to run this binary.
+    pub nextest: Nextest,
+}
+
+/// nextest's `--binaries-metadata` and `--cargo-metadata` for one test
+/// binary, as `nextestSpec` in `lib/test-runs.nix` synthesizes them (keep
+/// the two in sync). Placeholders the test run replaces: `@BINARY@` (the
+/// binary), `@TARGET@` (a scratch target directory), `@WS@` (a scratch
+/// workspace root), and the string `"@LIBDIR@"` (the whole JSON value of
+/// the target's sysroot library directory, which only the Nix side knows).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Nextest {
+    pub binary_id: String,
+    pub cargo_metadata: serde_json::Value,
+    pub binaries: serde_json::Value,
 }
 
 fn is_runtime_var(k: &str) -> bool {
@@ -167,8 +224,9 @@ fn text(t: &Text, tokens: &Tokens) -> Result<String, Error> {
     })
 }
 
-/// The test spec of a test root's unit, rendered with tokens.
-fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<TestSpec, Error> {
+/// The test spec of a test root's unit, rendered with tokens. `tokens` must
+/// resolve the package's source as its test units do (`test_package`).
+fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str, root: &RootOut) -> Result<TestSpec, Error> {
     let Some(Unit::Compile(c)) = plan.units.get(unit) else {
         return err(format!("the test root unit {unit} is not a compile unit"));
     };
@@ -198,11 +256,176 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<TestSpec, Error
         .filter(|(_, u)| matches!(u, Unit::Run(r) if r.platform == c.platform))
         .map(|(id, _)| id)
         .collect();
+    let package_dir = match c.env.get("CARGO_MANIFEST_DIR") {
+        Some(Text::Concat(pieces)) => pieces.iter().find_map(|p| match p {
+            Piece::Ref(Reference::Src(s)) => Some(s.rel.clone()),
+            _ => None,
+        }),
+        _ => None,
+    };
     Ok(TestSpec {
         env,
         config_env,
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
+        package_dir,
+        nextest: nextest(tokens, plan, c, root)?,
+    })
+}
+
+/// [`Nextest`] for a test binary: nextest-metadata's `BinaryListSummary`
+/// and a `cargo metadata` document, as nextest 0.9.146 reads them (see
+/// `nextestSpec` in `lib/test-runs.nix` for the reasoning behind each
+/// field).
+fn nextest(
+    tokens: &Tokens,
+    plan: &Plan,
+    unit: &CompileUnit,
+    root: &RootOut,
+) -> Result<Nextest, Error> {
+    use serde_json::{Value as J, json};
+    let pkg_id = &unit.package;
+    let env_of = |u: &CompileUnit, k: &str| match u.env.get(k) {
+        Some(Text::Literal(s)) => s.clone(),
+        _ => String::new(),
+    };
+    let or_null = |v: String| if v.is_empty() { J::Null } else { J::String(v) };
+    // The root of the tested package's source view (its test view when it
+    // has one), under which every path package is listed.
+    let view_root = tokens.reference(&Reference::Src(SrcRef {
+        src: pkg_id.clone(),
+        rel: String::new(),
+    }))?;
+    // One unit per path package: the test unit for the tested package, else
+    // its first compile unit by id.
+    let mut path_pkgs: BTreeMap<&str, &CompileUnit> = BTreeMap::new();
+    for u in plan.units.values() {
+        if let Unit::Compile(c) = u
+            && c.package.starts_with("path+file://")
+        {
+            path_pkgs.entry(c.package.as_str()).or_insert(c);
+        }
+    }
+    let mut packages = Vec::new();
+    for (id, u) in &path_pkgs {
+        let u = if *id == pkg_id.as_str() { unit } else { u };
+        let e = |k: &str| env_of(u, k);
+        let Some(dir) = workspace_dir(plan, id) else {
+            return err(format!(
+                "nextest: {id} is not a path package under the skeleton"
+            ));
+        };
+        let dir = if dir.is_empty() {
+            view_root.clone()
+        } else {
+            format!("{view_root}/{dir}")
+        };
+        let authors: Vec<String> = e("CARGO_PKG_AUTHORS")
+            .split(':')
+            .filter(|a| !a.is_empty())
+            .map(str::to_owned)
+            .collect();
+        packages.push(json!({
+            "id": id,
+            "name": e("CARGO_PKG_NAME"),
+            "version": e("CARGO_PKG_VERSION"),
+            "authors": authors,
+            "description": or_null(e("CARGO_PKG_DESCRIPTION")),
+            "homepage": or_null(e("CARGO_PKG_HOMEPAGE")),
+            "repository": or_null(e("CARGO_PKG_REPOSITORY")),
+            "license": or_null(e("CARGO_PKG_LICENSE")),
+            "license_file": or_null(e("CARGO_PKG_LICENSE_FILE")),
+            "rust_version": or_null(e("CARGO_PKG_RUST_VERSION")),
+            "readme": null,
+            "documentation": null,
+            "source": null,
+            "dependencies": [],
+            "targets": [],
+            "features": {},
+            "manifest_path": format!("{dir}/Cargo.toml"),
+            "metadata": null,
+            "publish": null,
+            "categories": [],
+            "keywords": [],
+            "edition": "2021",
+            "links": null,
+            "default_run": null,
+        }));
+    }
+    let ids: Vec<&str> = path_pkgs.keys().copied().collect();
+    let nodes: Vec<J> = ids
+        .iter()
+        .map(|id| json!({ "id": id, "dependencies": [], "deps": [], "features": [] }))
+        .collect();
+    let cargo_metadata = json!({
+        "version": 1,
+        "packages": packages,
+        "workspace_members": ids,
+        "workspace_default_members": ids,
+        "resolve": { "nodes": nodes, "root": null },
+        "workspace_root": "@WS@",
+        "target_directory": "@TARGET@",
+        "metadata": null,
+    });
+    let kind = kind_str(root.kind);
+    let pkg_name = env_of(unit, "CARGO_PKG_NAME");
+    let binary_id = match root.kind {
+        RootKind::Lib => pkg_name.clone(),
+        RootKind::Test => format!("{pkg_name}::{}", root.target),
+        _ => format!("{pkg_name}::{kind}/{}", root.target),
+    };
+    let platform = |triple: &str| json!({ "triple": triple, "target-features": "unknown" });
+    let libdir = |triple: &str| {
+        if triple == plan.target {
+            J::String("@LIBDIR@".into())
+        } else {
+            json!({ "status": "unavailable", "reason": "breakbulk" })
+        }
+    };
+    let targets: Vec<J> = if plan.target != plan.host {
+        vec![json!({ "platform": platform(&plan.target), "libdir": libdir(&plan.target) })]
+    } else {
+        vec![]
+    };
+    let build_platform = if unit.platform == Platform::Host && plan.target != plan.host {
+        "host"
+    } else {
+        "target"
+    };
+    let mut rust_binaries = serde_json::Map::new();
+    rust_binaries.insert(
+        binary_id.clone(),
+        json!({
+            "binary-id": binary_id,
+            "binary-name": root.target,
+            "package-id": pkg_id,
+            "kind": kind,
+            "binary-path": "@BINARY@",
+            "build-platform": build_platform,
+        }),
+    );
+    let binaries = json!({
+        "rust-build-meta": {
+            "target-directory": "@TARGET@",
+            "build-directory": "@TARGET@",
+            "base-output-directories": [],
+            "non-test-binaries": {},
+            "build-script-out-dirs": {},
+            "build-script-info": {},
+            "linked-paths": [],
+            "platforms": {
+                "host": { "platform": platform(&plan.host), "libdir": libdir(&plan.host) },
+                "targets": targets,
+            },
+            "target-platforms": [platform(&plan.target)],
+            "target-platform": null,
+        },
+        "rust-binaries": rust_binaries,
+    });
+    Ok(Nextest {
+        binary_id,
+        cargo_metadata,
+        binaries,
     })
 }
 
@@ -215,17 +438,26 @@ fn wrapper(
     root: &RootOut,
     output_name: &str,
 ) -> Result<Drv, Error> {
-    let tokens = Tokens::new(inputs, prefix);
+    let mut tokens = Tokens::new(inputs, prefix);
     let (target, unit, reason) = match &root.what {
         RootWhat::Unit { unit, output } => (tokens.unit(unit, output), Some(unit.clone()), None),
-        RootWhat::Stub { reason, .. } => (
+        // A test stub succeeds and logs why, so test runs and test binaries
+        // can use it; a product stub fails, so the wrapper leaves it out.
+        RootWhat::Stub { reason, .. } if root.test => (
             tokens.unit(&format!("stub:{root_name}"), "out"),
             None,
             Some(reason.clone()),
         ),
+        RootWhat::Stub { reason, .. } => (String::new(), None, Some(reason.clone())),
     };
     let spec = match (&unit, root.test) {
-        (Some(u), true) => Some(test_spec(&tokens, &inputs.plan, u)?),
+        (Some(u), true) => {
+            // Test units see their package's test view (`sourceScope`).
+            if let Some(Unit::Compile(c)) = inputs.plan.units.get(u) {
+                tokens.test_package = Some(c.package.clone());
+            }
+            Some(test_spec(&tokens, &inputs.plan, u, root)?)
+        }
         _ => None,
     };
     let info = RootInfo {
@@ -234,7 +466,7 @@ fn wrapper(
         kind: root.kind,
         test: root.test,
         unit,
-        reason,
+        reason: reason.clone(),
         test_spec: spec,
     };
     // The unit's debuginfo side files (`debug`), for the product's `linked`
@@ -251,10 +483,79 @@ fn wrapper(
         &tokens,
         outer,
         output_name,
-        r#"mkdir "$out" && ln -s "$root" "$out/root" && { [ -z "$debugRoot" ] || ln -s "$debugRoot" "$out/debug"; } && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#,
-        [("root", target), ("debugRoot", debug), ("rootJson", json)],
+        WRAPPER_SCRIPT,
+        [
+            ("root", target),
+            ("debugRoot", debug),
+            ("notBuilt", reason.unwrap_or_default()),
+            ("rootJson", json),
+        ],
     )
     .map_err(|e| Error(format!("root {root_name}: {e}")))
+}
+
+/// Every wrapper's builder: `root`, `debug` and `not-built` when their
+/// attributes are set, `breakbulk-root.json` when `rootJson` is.
+const WRAPPER_SCRIPT: &str = r#"mkdir "$out" && { [ -z "$root" ] || ln -s "$root" "$out/root"; } && { [ -z "$debugRoot" ] || ln -s "$debugRoot" "$out/debug"; } && { [ -z "$notBuilt" ] || printf '%s\n' "$notBuilt" > "$out/not-built"; } && { [ -z "$rootJson" ] || printf '%s' "$rootJson" > "$out/breakbulk-root.json"; }"#;
+
+/// The doctest of one predicted library: the plan's doctest derivation with
+/// the package's test configuration (None when the plan has no doctest for
+/// the package), and its wrapper.
+fn doctest(
+    inputs: &Inputs,
+    prefix: &str,
+    units: &UnitsJson,
+    outer: &Outer,
+    package: &str,
+    output_name: &str,
+) -> Result<(Option<Drv>, Drv), Error> {
+    let tokens = Tokens::new(inputs, prefix);
+    let (drv, root, not_built) = match units.doctests.get(&format!("d-{package}")) {
+        Some(d) => {
+            let mut d = d.clone();
+            for a in DOCTEST_CONFIG {
+                d.attrs.insert(
+                    a.into(),
+                    Value::Parts {
+                        parts: vec![Part::Input {
+                            input: doctest_key(package, a),
+                            json: false,
+                        }],
+                    },
+                );
+            }
+            let root = tokens.unit(&doctest_node(package), "out");
+            (Some(d), root, String::new())
+        }
+        None => (
+            None,
+            String::new(),
+            format!(
+                "`{package}` has no doctests in this plan: Cargo did not run `rustdoc --test` \
+                 for it (`cargo test --doc` covers only the selected workspace members)"
+            ),
+        ),
+    };
+    let w = small_drv(
+        inputs,
+        &tokens,
+        outer,
+        output_name,
+        WRAPPER_SCRIPT,
+        [
+            ("root", root),
+            ("debugRoot", String::new()),
+            ("notBuilt", not_built),
+            ("rootJson", String::new()),
+        ],
+    )
+    .map_err(|e| Error(format!("doctest {package}: {e}")))?;
+    Ok((drv, w))
+}
+
+/// The node key of a package's doctest derivation.
+fn doctest_node(package: &str) -> String {
+    format!("doctest:{package}")
 }
 
 /// A derivation the outer derivation submits: named
@@ -358,11 +659,38 @@ pub fn dynamic_plan(
                 "the roots {other} and {name} have the same output name {output}"
             ));
         }
-        if let RootWhat::Stub { stub, .. } = &root.what {
+        if let RootWhat::Stub { stub, .. } = &root.what
+            && root.test
+        {
             drvs.insert(format!("stub:{name}"), stub.clone());
         }
         let w = wrapper(inputs, &prefix, outer, name, root, output)?;
         wrappers.push((format!("wrapper:{name}"), w, output.clone()));
+    }
+    let unpredicted: Vec<&str> = units
+        .doctests
+        .keys()
+        .filter_map(|id| id.strip_prefix("d-"))
+        .filter(|p| !outer.doctests.contains_key(*p))
+        .collect();
+    if !unpredicted.is_empty() {
+        return err(format!(
+            "the plan has doctests of {unpredicted:?}, which outer.json does not name; the \
+             Nix side predicted the doctests {:?}",
+            outer.doctests.keys().collect::<Vec<_>>()
+        ));
+    }
+    for (package, output) in &outer.doctests {
+        if let Some(other) = taken.insert(output.clone(), format!("{package} (doctest)")) {
+            return err(format!(
+                "the root {other} and the doctest of {package} have the same output name {output}"
+            ));
+        }
+        let (d, w) = doctest(inputs, &prefix, units, outer, package, output)?;
+        if let Some(d) = d {
+            drvs.insert(doctest_node(package), d);
+        }
+        wrappers.push((format!("wrapper:{package}.doctest"), w, output.clone()));
     }
     let mut order = Vec::new();
     let mut state: BTreeMap<String, bool> = BTreeMap::new();

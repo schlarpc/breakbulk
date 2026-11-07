@@ -309,7 +309,9 @@ Each is a breakbulk bug found by the trials, fixed with a regression check.
 
 ASK marks a choice for the author.
 
-1. **The native target has no default preset (ASK).** Without
+1. **The native target has no default preset.** Done (decision 105): the
+   native target gets `presets.linuxGnu` on Linux glibc hosts unless
+   another preset is set. Before: Without
    `targets.<native>.preset = presets.linuxGnu`, units link with rustc's
    self-contained `rust-lld` (`-fuse-ld=lld -B…/gcc-ld`), which bypasses
    nixpkgs' linker wrapper: no rpath for `-l` libraries (libmagic here) and
@@ -318,7 +320,9 @@ ASK marks a choice for the author.
    with an explicit preset, and every trial had to add it. Proposal: the
    native triple defaults to `presets.linuxGnu` (`preset = null` opts out).
    It changes every native unit once.
-2. **Curated `-sys` defaults change what gets built (ASK).**
+2. **Curated `-sys` defaults change what gets built.** Done (decision
+   106): the four switches are gone, the inputs stay, and the trials no
+   longer override libsqlite3-sys. Before:
    `lib/sys-defaults.nix` copies nixpkgs' `LIBSQLITE3_SYS_USE_PKG_CONFIG=1`,
    `ZSTD_SYS_USE_PKG_CONFIG=1`, `LIBGIT2_SYS_USE_PKG_CONFIG=1` and
    `AWS_LC_SYS_USE_SYSTEM=1`. Each replaces a vendored or bundled C library
@@ -346,7 +350,8 @@ ASK marks a choice for the author.
    `workspaces.<ws>.targets.<triple>.{variants, tests}` to narrow per
    target.
 
-   4b. **Check variants always include `--all-targets` (ASK).** mtgac's
+   4b. **Check variants always include `--all-targets`.** Done (decision
+   108): `variants.<v>.allTargets = false`. Before: mtgac's
    wasm gate is `cargo check` without it, and `--all-targets` fails there
    for reasons the project does not gate on (see mtgac). Proposal: a
    variant option `allTargets = true` (the default, decision 75) that a

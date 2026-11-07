@@ -637,6 +637,40 @@ in
         mkdir -p $out
       '';
 
+  # Decision 65: cm-sys leaves the cmake crate's build tree in OUT_DIR;
+  # breakbulk-unit removes its `CMakeFiles` (the configure log names
+  # randomly named try-compile directories), so two builds of the run give
+  # the same tree, except for the output's own path (a salted copy of the
+  # derivation stands in for `nix build --rebuild`, which a check cannot
+  # run). The rest of the tree stays.
+  cmake-reproducible =
+    let
+      run = lib.findFirst (d: d.name == "cm-sys-0.1.0-build-run") (throw "no cm-sys run") (
+        lib.attrValues sysNative.units.build
+      );
+      salted = derivation (run.drvAttrs // { breakbulkSalt = "cmake-reproducible"; });
+    in
+    pkgs.runCommand "cmake-reproducible"
+      {
+        a = run.out;
+        b = salted.out;
+      }
+      ''
+        [ -f $a/build/CMakeCache.txt ] && [ -f $a/build/libcm.a ] && [ -f $a/lib/libcm.a ]
+        [ ! -e $a/build/CMakeFiles ]
+        norm() {
+          cp -r --no-preserve=mode "$1" "$2"
+          grep -rlF "$1" "$2" | while read -r f; do
+            sed -i "s|$1|@out@|g" "$f"
+          done
+        }
+        norm $a ta
+        norm $b tb
+        diff -r ta tb
+        mkdir -p $out
+        (cd $a && find . | sort) > $out/files
+      '';
+
   # Cargo gives an integration test CARGO_BIN_EXE_<bin> for every bin of
   # its package, also one it does not build because a required feature is
   # off. The plan points it at a path that does not exist (as Cargo's does

@@ -251,3 +251,43 @@ fn run_mode_end_to_end() {
     let e = run(&r, &outer).unwrap_err();
     assert!(e.0.contains("signal: 6, SIGABRT"), "{e}");
 }
+
+#[test]
+fn cmake_state_is_removed_from_build_trees_only() {
+    let t = TempDir::new("cmake");
+    let out = t.path();
+    let mk = |rel: &str, body: &str| {
+        let p = out.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    // The cmake crate's tree, with the installed library beside it.
+    mk("build/CMakeCache.txt", "cache");
+    mk(
+        "build/CMakeFiles/CMakeConfigureLog.yaml",
+        "TryCompile-abcdef",
+    );
+    mk(
+        "build/CMakeFiles/CMakeScratch/TryCompile-abcdef/CMakeCache.txt",
+        "",
+    );
+    mk("build/CMakeFiles/cm.dir/cm.c.o", "obj");
+    mk("build/libcm.a", "lib");
+    mk("build/sub/CMakeFiles/sub.dir/s.c.o", "obj");
+    mk("lib/libcm.a", "lib");
+    // A `CMakeFiles` that is not next to a cache is left alone.
+    mk("other/CMakeFiles/keep", "");
+    let removed = remove_cmake_state(out).unwrap();
+    assert_eq!(removed, [out.join("build/CMakeFiles")]);
+    assert!(!out.join("build/CMakeFiles").exists());
+    for kept in [
+        "build/CMakeCache.txt",
+        "build/libcm.a",
+        "build/sub/CMakeFiles/sub.dir/s.c.o",
+        "lib/libcm.a",
+        "other/CMakeFiles/keep",
+    ] {
+        assert!(out.join(kept).exists(), "{kept} was removed");
+    }
+    assert_eq!(remove_cmake_state(out).unwrap(), Vec::<PathBuf>::new());
+}

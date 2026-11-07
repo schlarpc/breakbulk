@@ -537,6 +537,30 @@ let
           && llvm.majorFor "1.99.0" == 23
           && llvm.majorFor "1.101.0-nightly" == 23
           && llvm.majorFor "1.90.0" == 20;
+        # Outside the table (decision 41): null from the table, and the
+        # LLVM major read from `rustc -vV` (import-from-derivation). The
+        # toolchains are 1.97 (LLVM 22) and 1.99 (LLVM 23), given a version
+        # the table does not know, or none.
+        llvmOutsideTable =
+          llvm.lookup "1.102.0" == null
+          && llvm.lookup "1.89.0" == null
+          && llvm.lookup "unknown" == null
+          && llvm.lookup "1.101.0-nightly-2026-11-01" == 23;
+        llvmProbe =
+          let
+            r97 = pkgs.rust-bin.stable."1.97.0".minimal;
+          in
+          lib.versions.major
+            (llvm.packagesFor {
+              inherit pkgs;
+              rustc = r97 // {
+                version = "1.300.0";
+              };
+            }).llvm.version == "22"
+          && llvm.probe {
+            inherit pkgs;
+            rustc = removeAttrs staticRust [ "version" ];
+          } == 23;
         nixpkgsRustcLlvm =
           (llvm.packagesFor {
             inherit pkgs;

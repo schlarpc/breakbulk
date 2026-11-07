@@ -7,11 +7,16 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # The systems this flake's outputs are defined for (the nix-systems
+    # pattern, decision 55/59): x86_64-linux and aarch64-linux. A consumer
+    # overrides the list with `inputs.breakbulk.inputs.systems.follows` (or
+    # `.url`) pointing at another nix-systems flake, e.g. its own.
+    systems.url = "github:nix-systems/default-linux";
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = inputs@{ self, nixpkgs, rust-overlay, ... }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+      systems = import inputs.systems;
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
         f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
     in
@@ -65,6 +70,22 @@
         import ./tests/nix {
           inherit pkgs;
           breakbulk = self.lib;
+        }
+        # The systems come from the `systems` input (decision 55/59): with
+        # another list in its place, the outputs follow it.
+        // {
+          flake-systems =
+            let
+              other = (import ./flake.nix).outputs (inputs // {
+                self = throw "flake-systems: self is not used";
+                systems = builtins.toFile "systems.nix" ''[ "riscv64-linux" ]'';
+              });
+              names = map (o: builtins.attrNames other.${o}) [ "packages" "devShells" "apps" "checks" ];
+            in
+            assert nixpkgs.lib.assertMsg (nixpkgs.lib.all (n: n == [ "riscv64-linux" ]) names)
+              "flake-systems: outputs do not follow the systems input: ${builtins.toJSON names}";
+            assert builtins.attrNames self.checks == import inputs.systems;
+            pkgs.runCommand "flake-systems" { } "touch $out";
         }
         // import ./tests/env-capture {
           inherit pkgs;
@@ -140,6 +161,14 @@
               inherit pkgs;
               breakbulk = self.lib;
             }) [ "repos" "repo" "lockfiles" ]
+          )
+          # One git source, crates from two inheriting workspaces: argv
+          # and CARGO_PKG_* against real Cargo over a local repository.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-multi-workspace-${n}" v) (
+            builtins.removeAttrs (import ./tests/git-multi-workspace {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repo" ]
           )
           # Stable test-run inputs for content-addressed cutoff (decision
           # 61), built input-addressed; the CA check itself needs

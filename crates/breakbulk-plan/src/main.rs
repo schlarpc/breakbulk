@@ -9,7 +9,13 @@
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--spec FILE] --scratch DIR [--forbid PATH]… --out plan.json \
 //!   [--cargo-env cargo-env.json]
+//!
+//! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
+//!   --target TRIPLE [--spec FILE] --scratch DIR --cargo-env cargo-env.json
 //! ```
+//!
+//! `--cargo-env-only` writes only the dev shell's `cargo-env.json`, from the
+//! project's Cargo config files and rustc, without running Cargo.
 
 use std::process::ExitCode;
 
@@ -24,7 +30,9 @@ fn usage() -> ! {
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
          [--config X]... [--spec FILE] --scratch DIR [--forbid PATH]... --out FILE \
-         [--cargo-env FILE]"
+         [--cargo-env FILE]\n       \
+         breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
+         --target TRIPLE [--spec FILE] --scratch DIR --cargo-env FILE"
     );
     std::process::exit(2)
 }
@@ -56,6 +64,7 @@ fn main() -> ExitCode {
     };
     let mut out = None;
     let mut cargo_env_out: Option<String> = None;
+    let mut cargo_env_only = false;
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| usage());
         match a.as_str() {
@@ -102,8 +111,12 @@ fn main() -> ExitCode {
             "--spec" => opts.spec = Some(val()),
             "--out" => out = Some(val()),
             "--cargo-env" => cargo_env_out = Some(val()),
+            "--cargo-env-only" => cargo_env_only = true,
             _ => usage(),
         }
+    }
+    if cargo_env_only {
+        return write_cargo_env_only(&opts, cargo_env_out);
     }
     if [
         &opts.cargo,
@@ -134,6 +147,30 @@ fn main() -> ExitCode {
                     eprintln!("breakbulk-plan: writing {path}: {e}");
                     return ExitCode::FAILURE;
                 }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("breakbulk-plan: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn write_cargo_env_only(opts: &Options, out: Option<String>) -> ExitCode {
+    let Some(out) = out else { usage() };
+    if [&opts.rustc, &opts.skeleton, &opts.target, &opts.scratch]
+        .iter()
+        .any(|s| s.is_empty())
+    {
+        usage();
+    }
+    match breakbulk_plan::cargo_env(opts) {
+        Ok(cargo_env) => {
+            let text = serde_json::to_string(&cargo_env).expect("strings serialize");
+            if let Err(e) = std::fs::write(&out, text) {
+                eprintln!("breakbulk-plan: writing {out}: {e}");
+                return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
         }

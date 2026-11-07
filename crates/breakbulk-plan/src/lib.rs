@@ -46,6 +46,17 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
     plan_with_cargo_env(opts).map(|(p, _)| p)
 }
 
+/// The toolchain spec as Cargo environment configuration for the dev shell,
+/// without tracing: it reads only the project's Cargo config files and asks
+/// rustc (`-vV`, `--print cfg`), and never runs Cargo, so it works while
+/// the manifests are broken (decision 81). The same value as
+/// [`plan_with_cargo_env`]'s.
+pub fn cargo_env(opts: &trace::Options) -> Result<spec::CargoEnv, Error> {
+    Ok(spec::prepare_for(opts)?
+        .map(|p| p.cargo_env())
+        .unwrap_or_default())
+}
+
 /// [`plan`], plus the toolchain spec as Cargo environment configuration for
 /// the dev shell ([`spec::Prepared::cargo_env`]; empty without a spec).
 pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEnv), Error> {

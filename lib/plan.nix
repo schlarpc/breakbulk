@@ -128,7 +128,51 @@
           --scratch "$NIX_BUILD_TOP/scratch" \
           --forbid "$NIX_BUILD_TOP" \
           --forbid "$HOME" \
-          --out $out/plan.json \
-          --cargo-env $out/cargo-env.json
+          --out $out/plan.json
       '';
+
+  # The dev shell's `cargo-env.json`: the native toolchain spec as Cargo
+  # environment configuration, as the planner passes it with `--config`
+  # (crates/breakbulk-plan/src/spec.rs `CargoEnv`). Computed apart from the
+  # plan, from the project's Cargo config files and `rustc --print cfg`
+  # only, so the dev shell still opens while a manifest is broken and
+  # planning fails (decision 81).
+  #
+  #   breakbulk.mkCargoEnv pkgs { configSkeleton; wsDir; rustc; tools; target; spec; }
+  #   "''${drv}/cargo-env.json"
+  mkCargoEnv =
+    pkgs:
+    {
+      # lib/skeleton.nix mkConfigSkeleton: the config files only.
+      configSkeleton,
+      wsDir ? "",
+      rustc,
+      tools,
+      target,
+      spec ? null,
+      name ? "breakbulk-cargo-env",
+    }:
+    let
+      args = [
+        "--cargo-env-only"
+        "--rustc"
+        "${rustc}/bin/rustc"
+        "--workspace"
+        wsDir
+        "--target"
+        target
+      ]
+      ++ lib.optionals (spec != null) [
+        "--spec"
+        (builtins.toFile "breakbulk-spec.json" (builtins.unsafeDiscardStringContext (builtins.toJSON spec)))
+      ];
+    in
+    pkgs.runCommand name { } ''
+      cp -r --no-preserve=mode ${configSkeleton} "$NIX_BUILD_TOP/skeleton"
+      mkdir -p $out
+      ${tools.breakbulk-plan}/bin/breakbulk-plan ${lib.escapeShellArgs args} \
+        --skeleton "$NIX_BUILD_TOP/skeleton" \
+        --scratch "$NIX_BUILD_TOP/scratch" \
+        --cargo-env $out/cargo-env.json
+    '';
 }

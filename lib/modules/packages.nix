@@ -170,8 +170,8 @@ let
               itself, as `cargo test` runs it) or `nextest` (cargo-nextest's
               reuse-build mode over the one binary, with the project's
               nextest configuration: retries, timeouts, default filter, test
-              groups). Each binary is still its own test run. `null` means
-              `libtest`.
+              groups). Each binary is still its own test run. `null`: the
+              workspace's `test.runner`, else `libtest`.
             '';
           };
           nextest = {
@@ -179,7 +179,7 @@ let
               type = types.nullOr types.str;
               default = null;
               example = "ci";
-              description = "nextest profile for this package's test runs (`null`: `default`).";
+              description = "nextest profile for this package's test runs (`null`: the workspace's `test.nextest.profile`, else `default`).";
             };
             configFile = mkOption {
               type = types.nullOr types.path;
@@ -228,7 +228,7 @@ in
       {
         openssl-sys = { nativeInputs = p: [ p.pkg-config ]; inputs = p: [ p.openssl ]; };
         app.env.GIT_REV = self.rev or "dirty";
-        "aws-lc-sys@>=0.42".env.AWS_LC_SYS_USE_SYSTEM = "1";
+        "libsqlite3-sys".env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";  # opt in to the system SQLite
       }
     '';
     description = ''

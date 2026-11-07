@@ -527,6 +527,25 @@ in
       touch $out_
     '';
 
+  # Decision 81: the dev shell does not need the plan. With a member's
+  # Cargo.toml broken (planning would fail), the shell still evaluates and
+  # carries the native spec's Cargo env config (the default linuxGnu
+  # preset's linker), computed from Cargo config files and rustc only.
+  devshell-broken-manifest =
+    let
+      broken = mkRepo (edited "stamps" "echo 'this is [not toml' >> tool/Cargo.toml") [ (oneWs ".") ];
+      shell = broken.workspaces.main.devShell;
+      linkerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}_LINKER";
+      linker = shell.${linkerVar} or shell.env.${linkerVar} or "";
+    in
+    assert lib.assertMsg (lib.hasSuffix "cc-mold" linker) "devshell-broken-manifest: no linker in the shell (${linker})";
+    pkgs.runCommand "devshell-broken-manifest" { inherit (shell) shellHook; inherit linker; } ''
+      export HOME=$TMPDIR
+      eval "$shellHook"
+      [ -x "$linker" ]
+      echo "$linker" > $out
+    '';
+
   # Git dependencies built through units: instantiation finds each fetched
   # source under Cargo's package id, which keeps `git+` and the reference
   # query, and leaves the name out when the URL ends in it.
@@ -544,6 +563,46 @@ in
       [ "$($app/bin/app)" = "gitdep 43" ]
       touch $out
     '';
+
+  # Decision 105: the native target gets presets.linuxGnu unless another
+  # preset is set, both through `preset` and by defining the target
+  # directly from a preset (no doubled rustflags, no conflicting linker);
+  # `preset = null` turns it off. The default reaches the plan: units carry
+  # the mold linker wrapper.
+  native-preset =
+    let
+      t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).config.targets.${native};
+      dflt = t [ ];
+      off = t [ { targets.${native}.preset = lib.mkForce null; } ];
+      static = breakbulk.presets.staticGlibc { inherit pkgs; };
+      direct = t [ { targets.${native} = static; } ];
+      viaOption = t [ { targets.${native}.preset = breakbulk.presets.staticGlibc; } ];
+      linkerOf = x: builtins.unsafeDiscardStringContext (toString x.linker);
+      unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (mwInst "a").units.build);
+      checks = {
+        defaultIsLinuxGnu = lib.hasSuffix "cc-mold" (linkerOf dflt) && dflt.stagePreset == "linuxGnu";
+        offIsEmpty = off.linker == null && off.stagePreset == null;
+        directKeepsOwn = direct.stagePreset == "staticGlibc" && direct.rustflags == static.rustflags;
+        optionKeepsOwn = viaOption.stagePreset == "staticGlibc" && viaOption.rustflags == static.rustflags;
+        planUsesMold = lib.hasInfix "cc-mold" unitText;
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "native-preset: failed ${toString bad}";
+    evalCheck "native-preset" (builtins.toJSON checks);
+
+  # Decision 106: the curated -sys defaults set no switch that swaps a
+  # bundled C library for a system one; their library inputs stay.
+  sys-defaults-no-switches =
+    let
+      pkgsCfg = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).config.packages;
+      envNames = lib.concatMap (p: lib.attrNames (p.env or { })) (lib.attrValues pkgsCfg);
+      switches = lib.filter (n: builtins.match ".*_(USE_PKG_CONFIG|USE_SYSTEM|NO_VENDOR|SYSTEM)" n != null) envNames;
+      sqliteInputs = map lib.getName (pkgsCfg.libsqlite3-sys.inputs pkgs);
+    in
+    assert lib.assertMsg (switches == [ ]) "sys-defaults: system-library switches ${toString switches}";
+    assert lib.assertMsg (sqliteInputs == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs ${toString sqliteInputs}";
+    evalCheck "sys-defaults-no-switches" (toString envNames);
 
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;

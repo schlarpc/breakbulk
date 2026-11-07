@@ -225,15 +225,6 @@ in
       # magic-sys's inputs; MAGIC_DIR makes it print the search path too.
       magic-sys.env.MAGIC_DIR = "${lib.getLib pkgs.file}/lib";
 
-      # The curated default sets LIBSQLITE3_SYS_USE_PKG_CONFIG=1, which
-      # replaces rusqlite's `bundled` SQLite (what the crane build ships)
-      # with nixpkgs' sqlite.
-      libsqlite3-sys = {
-        env = lib.mkForce { };
-        nativeInputs = lib.mkForce [ ];
-        inputs = lib.mkForce [ ];
-      };
-
       # Embeds (build-script env, re-exported with rustc-env).
       datboi-runtime.env.DATBOI_COMPONENTS_DIR = "${transforms}/lib";
       datboi-ingest.env.DATBOI_COMPONENTS_DIR = "${transforms}/lib";

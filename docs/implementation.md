@@ -319,14 +319,15 @@ The instantiate derivation runs `breakbulk-instantiate --emit json` and writes `
 
 ### Dynamic-derivation mode
 
-One outer derivation per plan (`lib/dynamic.nix`) is content-addressed with text-hashed outputs and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. It is named `<ws>-<triple>-<variant>` for the build plan and `<ws>-<triple>-<variant>-test` for the test plan, because submitted outputs must be named `<outer name>-<output>` and that name appears in store paths. It has one output per predicted root, `<package>.<kind>.<target>.drv` (the root name with `/` as `.`), plus `units.drv` (below). The bench plan, when there is one, is `<ws>-<triple>-<variant>-bench`.
+One outer derivation per plan (`lib/dynamic.nix`) is content-addressed with text-hashed outputs and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. It is named `<ws>-<triple>-<variant>` for the build plan and `<ws>-<triple>-<variant>-test` for the test plan, because submitted outputs must be named `<outer name>-<output>` and that name appears in store paths. It has one output per predicted root, `<package>.<kind>.<target>.drv` (the root name with `/` as `.`), one per predicted doctest in the test plan, `<package>.doctest.drv`, plus `units.drv` (below). The bench plan, when there is one, is `<ws>-<triple>-<variant>-bench`.
 
 Its builder is `breakbulk-drv`, a separate binary with its own Cargo workspace and lockfile (`breakbulk-drv/`), so that harmonia and tokio reach neither the main `Cargo.lock`, from which every breakbulk binary is built (a harmonia update must not change `breakbulk-unit` and so every unit), nor `breakbulk-instantiate`, which IFD mode builds before evaluation can continue. It uses `breakbulk-instantiate` as a library:
 
 1. It runs the same instantiation as IFD mode over the same `sources.json`, `toolchains.json`, `overrides.json` and `roots.json`, giving the same `units.json` structure in memory.
 2. It substitutes every reference as `lib/instantiate.nix` does, from `values.json`: every input key's value without context, plus its string context as `builtins.getContext` gives it. From those contexts and the unit references it computes each derivation's input derivations and input sources exactly as `derivation` would (a plain path becomes an input source, an output an input derivation; `drvPath` strings with "all outputs" context are rejected). `BREAKBULK_UNIT` moves to `passAsFile` above the same length as in IFD mode.
 3. It writes units, root stubs and wrappers in topological order with harmonia (pinned git commit) over the restricted daemon socket in `$NIX_REMOTE`, one connection for the whole build: output paths from harmonia's `hashDerivationModulo` (input `.drv` files it wrote are kept in memory, because the builder cannot read back what it added; the others are read from the store), the ATerm added as a text-hashed object whose references are its input sources and input derivations. `nix derivation add` cannot be used: paths added during the build are not visible inside its sandbox, and it reads its inputs. Every output variable must be present (as an empty string) before hashing. A derivation with a content-addressed or deferred input stays deferred, and its dependents reference its outputs by placeholder.
-4. Each root gets a wrapper derivation named `<outer name>-<package>.<kind>.<target>`, submitted with `SubmitOutput` as that root's output. Its output is a directory: `root`, a symlink to the root unit's output (or to the root stub's), and `breakbulk-root.json`, which says whether the plan has the root (or why not) and, for a test binary, what its test run needs from the plan (runtime `CARGO_*` env, the project's `[env]` variables Cargo set on it, the `flags` of its `rustc-env` runs, and the `flags` of every run of its platform for the dynamic-library path), with real paths that are all inputs of the wrapper.
+4. Each root gets a wrapper derivation named `<outer name>-<package>.<kind>.<target>`, submitted with `SubmitOutput` as that root's output. Its output is a directory: `root`, a symlink to the root unit's output (for a test binary Cargo did not build, to its stub's, which succeeds); `not-built`, the reason, for a root Cargo did not build (a product root then has no `root` and does not depend on its stub, which is not written); `debug`, the unit's debuginfo side files; and `breakbulk-root.json`, which says whether the plan has the root (or why not) and, for a test binary, what its test run and test app need from the plan (runtime `CARGO_*` env, the project's `[env]` variables Cargo set on it, the `flags` of its `rustc-env` runs, the `flags` of every run of its platform for the dynamic-library path, the package's directory, and nextest's synthesized metadata), with real paths that are all inputs of the wrapper.
+5. Each predicted doctest gets the doctest derivation IFD mode makes, with the package's test configuration (`BREAKBULK_TEST_RUNNER`, `_ARGS`, `_ENV`, as `testRuns.doctestConfig` gives them; their values come in `values.json`, so changing them reruns the outer derivation), and a wrapper `<outer name>-<package>.doctest` linking its output as `root`, or with `not-built` when the plan has no doctest for the package. A doctest in the plan that was not predicted is an error. Doctests are predicted from the manifests as `cargo test --doc` selects them: the lib target of each selected member with `doctest` on and a `lib`, `rlib` or `proc-macro` crate type.
 
 The outer derivation's inputs are the plan, `breakbulk-drv`, the files above, and every `.drv` that a value's context names, as a plain path: the builder needs those `.drv` files to hash the units, but nothing is built before it runs except the plan. It prints one `breakbulk-drv: wrote <unit> <.drv path>` line per derivation; the dynamic-mode test compares them with IFD mode's.
 
@@ -334,10 +335,11 @@ On the evaluation side, each root is a small derivation that symlinks `builtins.
 
 What is not known at evaluation time in this mode, and what that changes:
 
-- **Unit derivations** (`ws.units`) are not available; reading them is an error. `explainSharing` needs IFD mode. Instead, the outer derivation has one more output, `units.drv`, a derivation that depends on every output of every unit of the plan (`ws.allUnits.<kind>`). Check and clippy variants, which have no roots, build their plans through it.
-- **Roots Cargo did not build** (required features) cannot be told apart from built ones at evaluation time. Their wrappers depend on the root stub, so building such a product root fails with the reason, and so does a product containing it; in IFD mode the product leaves it out. A test-run stub succeeds and logs that it was skipped, as in IFD mode.
-- **Test runs** read what they need from the wrapper's `breakbulk-root.json` at build time (`dynamic.mkTestRuns`), with the same environment, working directory, runner and arguments as IFD mode.
-- **Doctests and test apps** are not available yet: the doctest derivations are templated from the plan and would have to be written by the outer derivation with the test configuration passed in, and test apps need the plan at evaluation time.
+- **Unit derivations** (`ws.units`) are not available; reading them is an error. Instead, the outer derivation has one more output, `units.drv`, a derivation that depends on every output of every unit of the plan (`ws.allUnits.<kind>`). Check and clippy variants, which have no roots, build their plans through it. `explainSharing` reads the units through IFD mode (`ifdUnits`: importing `units.json`, which builds `breakbulk-instantiate` and the plans): they are the same derivations, except downstream of an embedded product, where it describes IFD mode's.
+- **Roots Cargo did not build** (required features) cannot be told apart from built ones at evaluation time. Their wrappers have `not-built`, checked at build time: building such a product root fails with the reason, as in IFD mode, and a product's `linked` stage leaves the root out, failing with the reasons only when no root is left (IFD mode leaves them out at evaluation time). `.unbuilt` is empty. A product whose roots all have required features (by the prediction) may be all skipped, so `repo.checks` has for it, in place of the product and its checks, a check that builds the roots Cargo built and logs the others. A skipped test binary's test run succeeds and writes the reason, as IFD mode's stub does.
+- **Test runs** read what they need from the wrapper's `breakbulk-root.json` at build time (`dynamic.mkTestRuns`), with the same environment, working directory, runner and arguments as IFD mode. With `test.runner = "nextest"` they write nextest's metadata from the wrapper's (`TestSpec.nextest`, synthesized by `breakbulk-instantiate` the way `nextestSpec` does in Nix, with the sysroot library directory filled in at build time).
+- **Doctests** are the outer derivation's (step 5); `doctests.<pkg>` links the wrapper's `root`, or, for a predicted doctest the plan lacks, logs why.
+- **Test apps** read the wrapper's `breakbulk-root.json` when they run (`dynamic.mkTestApps`). The app script depends on the wrapper, so it is resolved at build time, and its program path is a placeholder at evaluation time; `nix run` with `ca-derivations` builds it and substitutes the real path (`resolveString` in Nix's `src/nix/app.cc`). Every predicted test binary has an app; one Cargo did not build fails with the reason.
 
 The spike result is in [spikes/B-delivery.md](spikes/B-delivery.md).
 - `recursive-nix` is not used. It has an open removal proposal, and `builder-rpc-v0` replaces it for this purpose.
@@ -397,6 +399,7 @@ Nothing from the planner's environment reaches a unit.
 4. Parse stdout. Write `$flags/directives.json` (values grouped by kind, in printed order), and `$flags/metadata.json` when the package declares `links`.
 5. Fail on a non-zero exit, on death by signal (with the signal named), and on any `error` directive. Print `warning` directives.
 6. Check every `rerun-if-changed` path against the sandbox. On failure, add a hint for each missing path naming the package option to add it to; likewise for `rerun-if-env-changed` variables that are unset. On success, warn about missing paths, or fail when `strictSources` is set.
+7. Remove CMake's internal state: in every directory of `$out` that holds both `CMakeCache.txt` and `CMakeFiles/` (the `cmake` crate's `$OUT_DIR/build`), delete `CMakeFiles`. Its configure log names randomly named try-compile directories, so the run would not be reproducible, and nothing reads it after the script (the `cmake` crate reads its build tree back only within one run). The rest of the tree stays, because crates link from it (decision 65).
 
 ### Directive parsing
 
@@ -488,14 +491,18 @@ repo = breakbulk.lib.mkRepository {
       packages = null;                # null: --workspace; or a list traced with -p
     };
     variants.<v> = { profile = "release"; features = [ ]; mode = "build"; };  # build | check | clippy | coverage
+                                      # check/clippy: allTargets = true (--all-targets; false: plain `cargo check`)
     roots = null;                     # override predicted root names
     devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
+    test.runner = null;               # default test runner of its packages: libtest | nextest
+    test.nextest = { profile = null; configFile = null; package = null; };  # defaults; packages override
     benchSmoke = false;               # run each bench once in test mode, as a check
     docs.noDeps = true;               # cargo doc --no-deps (later)
   };
 
   targets.<triple> = {
     preset = breakbulk.presets.linuxGnu;  # or msvc { … }, wasmBrowser, wasmComponent, musl, staticGlibc
+                                      # default: linuxGnu for the native triple on a Linux glibc host, else null
     linker = null; cc = null; cxx = null; ar = null; cflags = [ ];
     bindgen.extraClangArgs = [ ];
     rustflags = [ ];                  # passed with --config under the key the project uses (see Invocation)
@@ -515,6 +522,7 @@ repo = breakbulk.lib.mkRepository {
       env = { }; path = [ ]; sourceScope = [ ];
       args = [ ];                     # libtest flags for every test binary, e.g. [ "--skip" "net::" ]
       includeIgnored = false;         # also run #[ignore] tests
+      runner = null;                  # libtest | nextest (null: the workspace's test.runner, else libtest)
       binaries.<binary> = { args = [ ]; enable = true; };  # enable = false: built, not run in checks
     };
     strictSources = null;             # per-package override
@@ -527,7 +535,7 @@ repo = breakbulk.lib.mkRepository {
 ```
 
 - `env` values may reference any derivation, including another workspace's products: `env.UI_DIST = repo.workspaces.ui.target.wasm32-unknown-unknown.packages.ui;`. They are passed to instantiation by reference.
-- A curated module of defaults for common `-sys` crates ships with the library. User values merge over it with ordinary module priorities.
+- A curated module of defaults for common `-sys` crates ships with the library: native inputs only, never a switch that swaps a bundled C library for a system one (decision 106; the removed ones are listed in `lib/sys-defaults.nix`). User values merge over it with ordinary module priorities.
 - An override whose `version` or name matches nothing in any lockfile is an evaluation warning, not silence.
 
 ### Outputs
@@ -553,7 +561,7 @@ repo = breakbulk.lib.mkRepository {
 The planner always passes `--target`, and local Cargo without it behaves differently: rustflags reach build scripts, every unit's `-C metadata` changes, and outputs move. The dev shell therefore:
 
 - exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
-- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`;
+- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`. A small derivation (`breakbulk-plan --cargo-env-only`) computes it by the planner's own rule from the project's Cargo config files and `rustc --print cfg`, without running Cargo, so the shell still opens when planning fails, for example on a broken `Cargo.toml` (decision 81). It is read by import-from-derivation;
 - includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 
@@ -599,6 +607,8 @@ replace-with = "breakbulk-<hash2>"
 
 The planner sees exactly the crates in the lockfile, the lockfile's checksums are verified, and two sources providing the same name and version never collide.
 
+Git crates that use workspace inheritance get the original `[workspace]` table as a stub `Cargo.toml` one level above them, so Cargo's own `find_workspace_root` does the merge. When one git source supplies inheriting crates from several workspaces (Sui's root and `external-crates/move` workspaces, for example), each workspace's table goes in its own hidden folder, `<hash>/.breakbulk-workspace-<hash>/Cargo.toml`, and each such crate's vendored manifest gets a `package.workspace` pointer to it; Cargo reads inheritable fields from a pointed-to workspace without checking membership. Directory sources only read immediate subfolders and the workspace search does not resolve symlinks, so neither nesting nor symlinks work. See [spikes/git-multi-workspace.md](spikes/git-multi-workspace.md).
+
 ### Source views
 
 A workspace package's source is `lib.fileset.toSource { root = <repository root>; fileset = …; }`. Because the root is the repository root, relative paths outside the crate resolve unchanged.
@@ -619,9 +629,9 @@ The skeleton copies file names only and needs no discovery rules; Cargo performs
 
 ## Toolchain presets
 
-The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain.
+The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain (`llvmMajor`, `llvmPackages`). The table is the fast path; for a rustc it does not cover (older than its first release, newer than the last release checked, or without a version), a tiny derivation reads the major from `rustc -vV`, through import-from-derivation (decision 41).
 
-A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Preset env is added per unit by platform, never through Cargo's `[env]`.
+A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. On a Linux (glibc) build machine the native target gets `linuxGnu` unless another preset is set, either through `targets.<native>.preset` or by defining the target directly from a preset (every preset's value carries an internal marker for this); `preset = null` turns it off (decision 105). Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Preset env is added per unit by platform, never through Cargo's `[env]`.
 
 | Preset | Linker | C toolchain | Rustflags and env (target units) | Runner | Default stages |
 | --- | --- | --- | --- | --- | --- |
@@ -736,7 +746,7 @@ Debuginfo side files (decision 89): the `linked` stage has a second output, `deb
 - **Skipped tests:** a predicted test the plan lacks gets a test-run stub that succeeds and logs the reason.
 - **Test arguments:** `test.args` and `test.binaries.<binary>.args` are passed to the binary; `includeIgnored` adds `--include-ignored`. They are part of the test-run derivation, so changing them re-runs only the affected runs. `enable = false` leaves a binary's run out of `repo.checks`. Every test run sets `RUST_TEST_THREADS=$NIX_BUILD_CORES`.
 - **Test apps:** each test binary also gets a runnable app with the test run's working directory, environment and runner, run on the user's machine. It is the escape hatch for tests that need network, and the way to rerun one binary under a debugger or with a filter. Network access inside `nix flake check` (through a fixed-output test run) is a possible later addition; impure derivations are not used.
-- **nextest.** The first milestones run libtest binaries directly. nextest support comes later, by synthesizing the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts, test groups and default filters from the nextest config apply.
+- **nextest.** Test binaries run directly (libtest) by default. With `test.runner = "nextest"`, each test run synthesizes the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts, test groups and default filters from the nextest config apply; each binary is still its own test run. The setting is per package (`packages.<name>.test.runner`, `.nextest.{profile,configFile,package}`), with a workspace-wide default (`workspaces.<ws>.test.runner` and `.test.nextest.*`, decision 93) that a package's own non-null setting overrides.
 - **Doctests:** one derivation per library crate, from the test plan's traced `rustdoc --test` command. Inputs are the crate's `rlib`, its dependencies with test-plan features, and the source view. Cargo gives `rustdoc --test` an `-L native=` for every run in the invocation, sorted by value, so the derivation also depends on the `flags` output of every run the `searchPathsOf` splice lists, and rebuilds that list at build time. Its dynamic-library path holds every host run's in-`out` search paths. It gets no `-l`. It runs with the target's runner and records the log; it appears in `repo.checks`. There is no cutoff, because compiling and running happen in one rustdoc process. If the toolchain cannot run doctests for a cross target, the derivation is a stub that logs why.
 - **Benches:** `cargo test --no-run` builds no benches, so the test plan has none. Bench binaries come only from the bench variant (`cargo bench --no-run`, bench profile), exposed for running outside Nix. With `benchSmoke`, each bench binary also runs once with `--test` as a check. Timed runs never happen inside Nix.
 
@@ -762,7 +772,7 @@ Trace golden tests and directive differential tests guard against Cargo changes;
 2. **Trace golden tests.** For each fixture, run real `cargo build -vv` and the traced planner on the same skeleton, render the plan back to concrete argv and env with the same scratch layout, and diff per unit after normalizing paths. Both sides run at the same verbosity, because verbosity changes argv (`--cap-lints`) and only `-vv` prints per-process env. The comparison also diffs target-directory file listings, which differ only in debuginfo side files. A negative control (one splice per kind, no search-path ordering) must produce diffs, so the comparison is not vacuous. Fixtures are copied outside `$HOME` before each run, because Cargo reads `.cargo/config.toml` from every ancestor directory. This runs against the oldest release in the supported window (about six months of stable), the latest stable and the latest nightly. The spike A driver (`spikes/trace-fidelity/`) is the first version.
 3. **Directive differential tests.** Generate dependency graphs and build-script outputs (several values per kind, duplicates, paths inside and outside the build directory, mixed order). Let stubs replay them so Cargo applies them, and separately expand the sentinel plan with `breakbulk-unit`'s splicing. The two argv and env sets must be identical. The same harness checks that sentinels do not change any unit's `-C metadata`.
 4. **Root prediction tests.** Compare the Nix prediction with `cargo metadata` targets over a corpus of real workspaces. The target sets must be identical, with `required-features` as the only allowed difference in what is built.
-5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical. `nix run .#test-dynamic` (`tests/dynamic/run.sh`) does this on Nix master in a private chroot store: the system Nix builds each fixture in IFD mode, everything upstream of the units is copied into the private store, and Nix master builds the fixture in dynamic-derivation mode (so the outer derivations write and build every unit) and then in IFD mode, and compares every unit `.drv` path of both plans, the product bytes and the test runs. It is opt-in, because `nix flake check` on a released Nix cannot run it.
+5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical. `nix run .#test-dynamic` (`tests/dynamic/run.sh`) does this on Nix master in a private chroot store: the system Nix builds each fixture in IFD mode, everything upstream of the units is copied into the private store, and Nix master builds the fixture in dynamic-derivation mode (so the outer derivations write and build every unit) and then in IFD mode, and compares every unit and doctest `.drv` path of both plans, the product bytes, the test runs' and doctests' outcomes, the `repo.checks` sets, the test apps and `explainSharing`. It is opt-in, because `nix flake check` on a released Nix cannot run it.
 6. **Invalidation tests.** Instantiate a fixture, apply a scripted edit, instantiate again, and compare the sets of unit `.drv` paths. Each test states which units may change. For example: changing a build stamp on the top package changes only that package's units.
 7. **Sharing tests.** For fixtures with several workspaces or variants, assert the exact set of shared unit derivations, using the same comparison as `explainSharing`.
 

@@ -58,6 +58,7 @@
   dynamic,
   products,
   variantsLib,
+  presets,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -80,6 +81,7 @@ let
     modules = bbModules ++ [ sysDefaults ] ++ userModules;
     specialArgs = {
       inherit pkgs;
+      breakbulkPresets = presets;
     }
     // specialArgs;
   };
@@ -274,12 +276,8 @@ let
         includeIgnored = false;
         sourceScope = [ ];
         binaries = { };
-        runner = null;
-        nextest = {
-          profile = null;
-          configFile = null;
-          package = null;
-        };
+        # The workspace's defaults (decision 93); package settings win.
+        inherit (cfg.workspaces.${wsName}.test) runner nextest;
       };
       # nextest reads `.config/nextest.toml` under the Cargo workspace root.
       nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";
@@ -485,6 +483,8 @@ let
     wsName: vName: v:
     if v.benches && (v.mode == "check" || v.mode == "clippy") then
       throw "breakbulk: workspaces.${wsName}.variants.${vName}: `benches` needs a build variant, not `${v.mode}`"
+    else if !v.allTargets && !(v.mode == "check" || v.mode == "clippy") then
+      throw "breakbulk: workspaces.${wsName}.variants.${vName}: `allTargets = false` needs a check or clippy variant, not `${v.mode}`"
     else
       v;
 
@@ -723,19 +723,21 @@ let
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
             }
             // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
-              # Every unit of both plans: for clippy, its lints on every
-              # workspace member.
+              # Every unit of both plans (`cargo check` and `cargo check
+              # --all-targets`): for clippy, its lints on every workspace
+              # member. With `allTargets = false`, the build plan's only
+              # (decision 108); the test plan is then never planned.
               check = variantsLib.unitsCheck {
                 inherit pkgs;
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
                 units =
+                  let
+                    kinds = [ "build" ] ++ lib.optional (checkMode wsName vName v).allTargets "test";
+                  in
                   if inst.delivery == "dynamic" then
-                    [
-                      inst.allUnits.build
-                      inst.allUnits.test
-                    ]
+                    map (k: inst.allUnits.${k}) kinds
                   else
-                    lib.attrValues inst.units.build ++ lib.attrValues inst.units.test;
+                    lib.concatMap (k: lib.attrValues inst.units.${k}) kinds;
               };
             }
           ) vs;
@@ -791,9 +793,11 @@ let
         inherit (ws.devShell) setTarget;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
         targetEnv = envStrings (cfg.targets.${nativeTriple}.env or { });
-        # How the planner passed the native spec to Cargo (IFD: the build
-        # plan of the default variant). The file names tool paths without
-        # their context; the spec's own values carry it.
+        # How the planner passes the native spec to Cargo (IFD: a small
+        # derivation that reads the project's Cargo config and asks rustc,
+        # apart from planning, so a broken manifest does not break the
+        # shell; decision 81). The file names tool paths without their
+        # context; the spec's own values carry it.
         cargoEnv =
           let
             inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
@@ -809,7 +813,7 @@ let
                 ++ spec.rustflags
             );
             withContext = builtins.replaceStrings (map builtins.unsafeDiscardStringContext values) values;
-            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/cargo-env.json"));
+            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.cargoEnv}/cargo-env.json"));
           in
           if inst == null then
             { }
@@ -829,12 +833,19 @@ let
       triple: t:
       lib.concatMapAttrs (
         pkg: p:
-        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
-          {
-            "${wsName}/${triple}/${pkg}/build" = p;
-          }
-          // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
-        )
+        # Dynamic-derivation mode cannot tell at evaluation time whether a
+        # product whose roots all have required features was built
+        # (lib/products.nix `uncertain`): its check builds the roots Cargo
+        # built and logs the others.
+        if p.uncertain or false then
+          { "${wsName}/${triple}/${pkg}/build" = p.buildCheck; }
+        else
+          lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+            {
+              "${wsName}/${triple}/${pkg}/build" = p;
+            }
+            // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
+          )
       ) t.packages
       // lib.concatMapAttrs (
         pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
@@ -877,6 +888,12 @@ let
   # dependency's store path shows up under `deps` and not as its own
   # reason. Unit keys (`-C metadata`) are never compared: they leave out
   # rustflags (spike A, S13). `.text` is a readable report.
+  #
+  # In dynamic-derivation mode it reads the unit derivations through IFD
+  # mode (importing units.json, which builds breakbulk-instantiate and the
+  # plans): they are the same derivations the outer derivation writes,
+  # except units downstream of an embedded product, which IFD mode
+  # describes as IFD mode would build them.
 
   discard = builtins.unsafeDiscardStringContext;
   planIndex = lib.concatMapAttrs (
@@ -1060,8 +1077,12 @@ let
       rb = resolvePlan b;
       pa = readPlanOf ra;
       pb = readPlanOf rb;
-      ua = ra.inst.units.${ra.kind};
-      ub = rb.inst.units.${rb.kind};
+      # In dynamic-derivation mode the unit derivations are not known at
+      # evaluation time; IFD mode's are the same derivations (except
+      # downstream of an embedded product), so they are read through it.
+      unitsOf = r: if r.inst.delivery == "dynamic" then r.inst.ifdUnits.${r.kind} else r.inst.units.${r.kind};
+      ua = unitsOf ra;
+      ub = unitsOf rb;
       la = labelled pa package;
       lb = labelled pb package;
       allA = labelled pa null;

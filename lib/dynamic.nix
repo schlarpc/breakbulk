@@ -10,6 +10,10 @@
 #     breakbulkDrv;              # d.mkBreakbulkDrv pkgs
 #     coreutils;                 # for the root wrappers
 #     outerName;                 # `<ws>-<triple>-<variant>[-test]`
+#     doctests = { };            # test plans: the predicted doctests,
+#                                # package name -> the attributes its
+#                                # doctest derivation gets from the test
+#                                # configuration (testRuns.doctestConfig)
 #   };
 #   i.outer                      the outer derivation (CA, text-hashed,
 #                                requiredSystemFeatures = builder-rpc-v0)
@@ -19,19 +23,34 @@
 #                                `breakbulkRoot` as in IFD mode, with
 #                                `dynamic = true`, `unit = "<dynamic>"` and
 #                                `wrapper` (the root wrapper's output)
+#                                A product root Cargo did not build
+#                                (required features) fails with the
+#                                reason; a test root's is the stub, which
+#                                succeeds and logs it.
+#   i.doctests.<pkg>             the doctest of each predicted library: a
+#                                small derivation linking the doctest's
+#                                output (its `log`), resolved at build
+#                                time; a log saying why, when the plan has
+#                                no doctest for the package
 #   i.allUnits                   a derivation that depends on every output
 #                                of every unit of the plan (the outer
 #                                derivation's `units.drv` output)
 #   i.units                      an error: units are not known at
 #                                evaluation time
+#   i.ifdUnits                   the same units through IFD mode (importing
+#                                units.json), for explainSharing only
 #   d.mkTestRuns { … }           test runs over i, as testRuns.mkTestRuns
+#                                (libtest and nextest), and its doctests
+#   d.mkTestApps { … }           test apps over d.mkTestRuns's result, as
+#                                testApps.mkTestApps
 #
 # The outer derivation runs `breakbulk-drv`, which runs the same
 # instantiation as IFD mode over the same input files, resolves each
 # derivation with the real paths and their string context (values.json:
 # the same input keys lib/instantiate.nix substitutes, with
-# `builtins.getContext` of each), and writes units, root stubs and one
-# wrapper per root through the `builder-rpc-v0` socket. Each wrapper is
+# `builtins.getContext` of each), and writes units, test-root stubs,
+# doctests and one wrapper per root and per doctest through the
+# `builder-rpc-v0` socket. Each wrapper is
 # submitted as the output `<root>.drv` (with `/` as `.`), named
 # `<outer name>-<root>`, as Nix requires.
 #
@@ -105,6 +124,9 @@ let
 
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
 
+  # lib/test-runs.nix (mkTestApps takes a test-runs result named testRuns).
+  testRunsLib = testRuns;
+
   mkBreakbulkDrv =
     pkgs:
     let
@@ -145,6 +167,7 @@ let
       plan,
       tools,
       roots,
+      doctests ? { },
       ...
     }:
     let
@@ -153,15 +176,22 @@ let
           "breakbulkDrv"
           "coreutils"
           "outerName"
+          "doctests"
         ]
       );
       # Without predicted roots (check and clippy plans) the outer
       # derivation has only its `units.drv` output.
       predicted = if roots == null then [ ] else roots.roots;
 
-      values = base.inputs // {
-        "dynamic:coreutils" = "${coreutils}";
-      };
+      values =
+        base.inputs
+        // {
+          "dynamic:coreutils" = "${coreutils}";
+        }
+        # Each doctest's test configuration (crate::dynamic::doctest_key).
+        // lib.concatMapAttrs (
+          pkg: attrs: lib.mapAttrs' (k: v: lib.nameValuePair "doctest:${pkg}:${k}" v) attrs
+        ) doctests;
       valuesJson = lib.mapAttrs (k: v: {
         value = unsafeDiscardStringContext v;
         context = contextList k v;
@@ -178,6 +208,9 @@ let
       names = map rootName predicted;
       outputs = lib.genAttrs names outputName;
       outputList = lib.attrValues outputs;
+      # `<package>.doctest.drv`: package names have no `.`, so these cannot
+      # be named like a root's (`<package>.<kind>.<target>.drv`).
+      doctestOutputs = lib.mapAttrs (pkg: _: outputName "${pkg}/doctest") doctests;
       dupes = lib.filter (o: lib.count (x: x == o) outputList > 1) outputList;
       # A derivation on every output of every unit; root outputs always have
       # a `.` before `.drv`, so they cannot be named like it.
@@ -205,13 +238,14 @@ let
             name = outerName;
             inherit outputs;
             units = unitsOutput;
+            doctests = doctestOutputs;
           }))
         ];
         outputs =
           if dupes != [ ] then
             throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
           else
-            outputList ++ [ unitsOutput ];
+            outputList ++ lib.attrValues doctestOutputs ++ [ unitsOutput ];
         BREAKBULK_INPUTS = context;
         __contentAddressed = true;
         outputHashMode = "text";
@@ -246,9 +280,17 @@ let
           }-${r.target}";
           inherit system wrapper;
           builder = tools.shell;
+          # A product root Cargo did not build has no `root`, only the
+          # reason (`not-built`): fail with it, as IFD mode's stub does.
           args = [
             "-c"
-            ''${coreutils}/bin/ln -s "$wrapper/root" "$out"''
+            ''
+              if [ ! -e "$wrapper/root" ]; then
+                printf 'error: %s\n' "$(<"$wrapper/not-built")" >&2
+                exit 1
+              fi
+              ${coreutils}/bin/ln -s "$wrapper/root" "$out"
+            ''
           ];
         }
         // {
@@ -262,6 +304,41 @@ let
             unit = "<dynamic>";
             reason = null;
             dynamic = true;
+            # Known at evaluation time only as the prediction: a root with
+            # required features may or may not be built (lib/products.nix).
+            requiredFeatures = r.requiredFeatures or null;
+            inherit wrapper;
+          };
+        };
+
+      # A doctest: its output (`log`), or, when the plan has no doctest for
+      # the package, a log saying why (the wrapper's `not-built`).
+      mkDoctest =
+        pkg:
+        let
+          wrapper = builtins.outputOf outer.${doctestOutputs.${pkg}}.outPath "out";
+        in
+        derivation {
+          name = storeName "${pkg}-doctest";
+          inherit system wrapper;
+          builder = tools.shell;
+          args = [
+            "-c"
+            ''
+              if [ -e "$wrapper/root" ]; then
+                ${coreutils}/bin/ln -s "$wrapper/root" "$out"
+              else
+                ${coreutils}/bin/mkdir "$out"
+                printf 'skipped: %s\n' "$(<"$wrapper/not-built")" > "$out/log"
+                ${coreutils}/bin/cat "$out/log"
+              fi
+            ''
+          ];
+        }
+        // {
+          breakbulkDoctest = {
+            package = pkg;
+            dynamic = true;
             inherit wrapper;
           };
         };
@@ -271,15 +348,48 @@ let
       inherit (base) files inputs;
       delivery = "dynamic";
       roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) predicted);
-      units = throw "breakbulk: unit derivations are not known at evaluation time in dynamic-derivation mode";
+      doctests = lib.mapAttrs (pkg: _: mkDoctest pkg) doctests;
+      units = throw "breakbulk: unit derivations are not known at evaluation time in dynamic-derivation mode (repo.explainSharing reads them through IFD mode)";
+      # The unit derivations IFD mode would make: the same .drv paths as the
+      # outer derivation writes, except downstream of an embedded product.
+      # Only explainSharing uses them; reading them imports units.json.
+      ifdUnits = base.units;
       unitsJson = null;
       doctestAttrs = { };
     };
 
+  # Shell lines (bash) that set up a test process's environment from a
+  # test root's `breakbulk-root.json` at `$info`, as testRuns.envScript does
+  # from a run spec in IFD mode: the dynamic-library path (then `extra`),
+  # the project's `[env]`, the build script's `rustc-env`, then the runtime
+  # `CARGO_*` variables (names the shell cannot export go to `__bb_env`,
+  # for `env`).
+  envFromInfo =
+    { jq, extra }:
+    ''
+      mapfile -t __bb_flags < <(${jq} -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
+      __bb_dylib=
+      if [ ''${#__bb_flags[@]} -gt 0 ]; then
+        __bb_dylib=$(${jq} -rn ${lib.escapeShellArg testRuns.dylibJq} "''${__bb_flags[@]}")
+      fi
+      for __bb_p in ${lib.escapeShellArgs extra}; do
+        __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
+      done
+      export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+      unset __bb_dylib __bb_p __bb_flags
+      eval "$(${jq} -r '.testSpec.configEnv // {} | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
+      for __bb_f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
+        eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$__bb_f/directives.json")"
+      done
+      unset __bb_f
+      __bb_env=()
+      eval "$(${jq} -r '.testSpec.env | to_entries[] | if (.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) then "export \(.key)=\(.value | @sh)" else "__bb_env+=(\("\(.key)=\(.value)" | @sh))" end' "$info")"
+    '';
+
   # Test runs over a dynamic instantiation: as testRuns.mkTestRuns, with
   # what the plan says about each test binary read at build time from its
   # wrapper's breakbulk-root.json (see crates/breakbulk-instantiate
-  # src/dynamic.rs, TestSpec). No doctests and no test apps yet.
+  # src/dynamic.rs, TestSpec), and the instantiation's doctests.
   mkTestRuns =
     {
       pkgs,
@@ -308,15 +418,10 @@ let
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
       sysroot = testRuns.testLibs pkgs (tools.rustc-sysroot or null) target;
+      extraLibs = lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib";
       jq = "${testPkgs.jq}/bin/jq";
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
-      # `test.runner = "nextest"` needs plan data at evaluation time (IFD
-      # mode only, for now): such packages run their binaries with libtest.
-      nextestPkgs = lib.attrNames (lib.filterAttrs (_: p: (p.test.runner or null) == "nextest") packages);
-      byPackage =
-        lib.warnIf (nextestPkgs != [ ])
-          "breakbulk: test.runner = \"nextest\" is not supported in dynamic-derivation mode yet; ${lib.concatStringsSep ", " nextestPkgs} run with libtest"
-          (lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots));
+      byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
 
       binaryOf =
         r: n:
@@ -334,6 +439,97 @@ let
             cp "''${files[0]}" $out/
           '';
 
+      # What both runners share: the skip check, the environment, the test
+      # configuration's env and PATH.
+      prelude = cfg: ''
+        info=$wrapper/breakbulk-root.json
+        reason=$(${jq} -r '.reason // ""' "$info")
+        if [ -n "$reason" ]; then
+          # As IFD mode's test stub: the reason, in a file.
+          printf 'skipped: %s\n' "$reason"
+          printf '%s\n' "$reason" > $out
+          exit 0
+        fi
+        ${envFromInfo {
+          inherit jq;
+          extra = extraLibs;
+        }}
+        ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
+        ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
+        export RUST_TEST_THREADS=$NIX_BUILD_CORES
+        ${lib.optionalString coverage ''
+          mkdir -p $out/profraw
+          export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
+        ''}
+      '';
+
+      # As testRuns.mkTestRuns's nextestRun, with the metadata from the
+      # wrapper (TestSpec's `nextest`); `"@LIBDIR@"` becomes the sysroot's
+      # target library directory, as nextestSpec's `libdirOf` gives it.
+      nextestScript =
+        b: cfg: args: bin:
+        let
+          nextest = if cfg.nextest.package != null then cfg.nextest.package else testPkgs.cargo-nextest;
+          runnerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] target)}_RUNNER";
+          libdir = toJSON (
+            if sysroot != null then
+              {
+                status = "available";
+                path = "${sysroot}/lib/rustlib/${target}/lib";
+              }
+            else
+              {
+                status = "unavailable";
+                reason = "breakbulk";
+              }
+          );
+        in
+        ''
+          ${lib.optionalString (
+            runnerList != [ ]
+          ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
+          ws=$TMPDIR/nextest-ws
+          mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
+          touch $ws/Cargo.toml
+          files=(${bin})
+          libdir=${lib.escapeShellArg libdir}
+          subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" -e "s|\"@LIBDIR@\"|$libdir|g"; }
+          ${jq} -c '.testSpec.nextest.binaries' "$info" | subst > $TMPDIR/binaries-metadata.json
+          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst > $TMPDIR/cargo-metadata.json
+          cd $TMPDIR
+          set +e
+          env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
+            --binaries-metadata $TMPDIR/binaries-metadata.json \
+            --cargo-metadata $TMPDIR/cargo-metadata.json \
+            ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
+            --profile ${lib.escapeShellArg cfg.nextest.profile} \
+            --no-tests=warn --color never \
+            ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee $out/log
+          status=''${PIPESTATUS[0]}
+          set -e
+          if [ -d $ws/target/nextest ]; then
+            cp -r $ws/target/nextest $out/nextest
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "test binary ${b.package} ${testRuns.binaryKey b} failed under nextest (exit status $status)" >&2
+            exit "$status"
+          fi
+        '';
+
+      libtestScript = b: args: bin: ''
+        mkdir -p /tmp/breakbulk-target-tmp $out
+        files=(${bin})
+        cd "$CARGO_MANIFEST_DIR"
+        set +e
+        env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+        status=''${PIPESTATUS[0]}
+        set -e
+        if [ "$status" -ne 0 ]; then
+          echo "test binary ${b.package} ${testRuns.binaryKey b} failed (exit status $status)" >&2
+          exit "$status"
+        fi
+      '';
+
       run =
         r:
         let
@@ -343,6 +539,7 @@ let
           cfg = testRuns.testConfig packages b.package;
           args = testRuns.testArgs cfg key;
           bin = binaryOf r n;
+          binGlob = if useCa then "${bin}/*" else "\"$wrapper\"/root/*";
         in
         testPkgs.runCommand "${name}-${n}-run"
           (
@@ -359,73 +556,116 @@ let
             }
             // caAttrs
           )
-          ''
-            info=$wrapper/breakbulk-root.json
-            reason=$(${jq} -r '.reason // ""' "$info")
-            if [ -n "$reason" ]; then
-              mkdir -p $out
-              printf 'skipped: %s\n' "$reason" | tee $out/log
-              exit 0
-            fi
-            mapfile -t dylibFlags < <(${jq} -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
-            __bb_dylib=
-            if [ ''${#dylibFlags[@]} -gt 0 ]; then
-              __bb_dylib=$(${jq} -rn ${lib.escapeShellArg testRuns.dylibJq} "''${dylibFlags[@]}")
-            fi
-            for __bb_p in ${
-              lib.escapeShellArgs (lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib")
-            }; do
-              __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
-            done
-            export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-            unset __bb_dylib __bb_p
-            # The project's `[env]`, then rustc-env, then the runtime
-            # variables: testRuns.envScript's order.
-            eval "$(${jq} -r '.testSpec.configEnv // {} | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
-            for f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
-              eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$f/directives.json")"
-            done
-            # Names the shell cannot export (CARGO_BIN_EXE_<bin-with-hyphens>)
-            # go through `env`, as in lib/test-runs.nix.
-            __bb_env=()
-            eval "$(${jq} -r '.testSpec.env | to_entries[] | if (.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) then "export \(.key)=\(.value | @sh)" else "__bb_env+=(\("\(.key)=\(.value)" | @sh))" end' "$info")"
-            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
-            export RUST_TEST_THREADS=$NIX_BUILD_CORES
-            ${lib.optionalString coverage ''
-              mkdir -p $out/profraw
-              export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
-            ''}
-            mkdir -p /tmp/breakbulk-target-tmp $out
-            files=(${if useCa then "${bin}/*" else "\"$wrapper\"/root/*"})
-            cd "$CARGO_MANIFEST_DIR"
-            set +e
-            env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
-            status=''${PIPESTATUS[0]}
-            set -e
-            if [ "$status" -ne 0 ]; then
-              echo "test binary ${b.package} ${key} failed (exit status $status)" >&2
-              exit "$status"
-            fi
-          '';
+          (
+            prelude cfg
+            + (
+              if cfg.runner == "nextest" then
+                nextestScript b cfg args binGlob
+              else if cfg.runner == "libtest" then
+                libtestScript b args binGlob
+              else
+                throw "breakbulk: packages.${b.package}.test.runner must be \"libtest\" or \"nextest\", not ${toJSON cfg.runner}"
+            )
+          );
 
       runs = lib.mapAttrs (
         _: rs: lib.listToAttrs (map (r: lib.nameValuePair (testRuns.binaryKey r.breakbulkRoot) (run r)) rs)
       ) byPackage;
 
-      checks = lib.concatMapAttrs (
-        pkg: bs:
-        lib.mapAttrs' (b: drv: lib.nameValuePair "test/${pkg}/${b}" drv) (
-          lib.filterAttrs (b: _: (testRuns.binaryConfig (testRuns.testConfig packages pkg) b).enable) bs
-        )
-      ) runs;
+      doctests = inst.doctests or { };
+
+      checks =
+        lib.concatMapAttrs (
+          pkg: bs:
+          lib.mapAttrs' (b: drv: lib.nameValuePair "test/${pkg}/${b}" drv) (
+            lib.filterAttrs (b: _: (testRuns.binaryConfig (testRuns.testConfig packages pkg) b).enable) bs
+          )
+        ) runs
+        // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) doctests;
     in
     {
-      inherit runs checks testPkgs;
-      doctests = { };
+      inherit
+        runs
+        checks
+        testPkgs
+        doctests
+        ;
+      # IFD mode's specs need the plan; test apps here read the wrappers.
       specs = { };
+      # Test roots by package and binary key, for mkTestApps.
+      roots = lib.mapAttrs (
+        _: rs: lib.listToAttrs (map (r: lib.nameValuePair (testRuns.binaryKey r.breakbulkRoot) r) rs)
+      ) byPackage;
+      inherit extraLibs;
       runner = runnerList;
     };
+
+  # Test apps over mkTestRuns's result, as testApps.mkTestApps in IFD mode,
+  # with everything it takes from the plan read at run time from the test
+  # root's wrapper (`breakbulk-root.json`): the app script depends on the
+  # wrapper, so it is resolved at build time, and `nix run` substitutes the
+  # script's real path for its placeholder (Nix's `resolveString`,
+  # src/nix/app.cc). A test binary Cargo did not build gets an app that
+  # fails with the reason.
+  mkTestApps =
+    {
+      pkgs,
+      testRuns,
+      checkout ? null,
+      packages ? { },
+      name ? "breakbulk",
+    }:
+    let
+      t = testRuns;
+      jq = "${pkgs.jq}/bin/jq";
+      app =
+        r:
+        let
+          b = r.breakbulkRoot;
+          n = storeName "${b.package}-${testRunsLib.binaryKey b}";
+          cfg = testRunsLib.testConfig packages b.package;
+          checkoutDir = lib.removeSuffix "/" (toString checkout);
+          script = pkgs.writeShellScriptBin "${name}-${n}" ''
+            set -euo pipefail
+            info=${b.wrapper}/breakbulk-root.json
+            reason=$(${jq} -r '.reason // ""' "$info")
+            if [ -n "$reason" ]; then
+              printf 'breakbulk: %s\n' "$reason" >&2
+              exit 1
+            fi
+            ${envFromInfo {
+              inherit jq;
+              extra = t.extraLibs;
+            }}
+            ${
+              if checkout == null then
+                ''dir=$CARGO_MANIFEST_DIR''
+              else
+                ''
+                  if [ "$(${jq} -r '.testSpec.packageDir == null' "$info")" = true ]; then
+                    echo "breakbulk: cannot place ${b.package} in the checkout: its CARGO_MANIFEST_DIR is not a source view path" >&2
+                    exit 1
+                  fi
+                  dir=${lib.escapeShellArg checkoutDir}
+                  __bb_rel=$(${jq} -r '.testSpec.packageDir' "$info")
+                  if [ -n "$__bb_rel" ]; then dir=$dir/$__bb_rel; fi
+                  export CARGO_MANIFEST_DIR=$dir CARGO_MANIFEST_PATH=$dir/Cargo.toml
+                ''
+            }
+            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
+            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
+            mkdir -p /tmp/breakbulk-target-tmp
+            files=(${b.wrapper}/root/*)
+            cd "$dir"
+            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
+          '';
+        in
+        {
+          type = "app";
+          program = "${script}/bin/${name}-${n}";
+        };
+    in
+    lib.mapAttrs (_: lib.mapAttrs (_: app)) t.roots;
 in
 {
   inherit
@@ -435,6 +675,7 @@ in
     outputName
     mkBreakbulkDrv
     mkTestRuns
+    mkTestApps
     ;
   instantiate = instantiateDynamic;
 }

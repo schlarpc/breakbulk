@@ -59,6 +59,18 @@ let
             Cargo's own `clippy` uses the dev profile.
           '';
         };
+        allTargets = mkOption {
+          type = types.bool;
+          default = true;
+          description = ''
+            For `check` and `clippy` variants: also check every target,
+            as `cargo check --all-targets` does (tests, examples, benches
+            in test mode, through the test plan). `false`: plain `cargo
+            check` (libraries and bins, the build plan only), for gates
+            that do not check test code. Only check and clippy variants
+            take `false`.
+          '';
+        };
         clippyArgs = mkOption {
           type = types.listOf types.str;
           default = [ ];
@@ -202,6 +214,47 @@ let
             `--target`): rustflags stay off build scripts, and `-C metadata`
             matches. Binaries then go to `target/<triple>/…`.
           '';
+        };
+
+        test = {
+          runner = mkOption {
+            type = types.nullOr (
+              types.enum [
+                "libtest"
+                "nextest"
+              ]
+            );
+            default = null;
+            example = "nextest";
+            description = ''
+              The default `packages.<name>.test.runner` for this
+              workspace's packages: `libtest` or `nextest`. A package's own
+              setting wins. `null` means `libtest`.
+            '';
+          };
+          nextest = {
+            profile = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "ci";
+              description = "The default nextest profile for this workspace's test runs; a package's `test.nextest.profile` wins (`null`: `default`).";
+            };
+            configFile = mkOption {
+              type = types.nullOr types.path;
+              default = null;
+              description = ''
+                The default nextest configuration file for this workspace's
+                test runs; a package's `test.nextest.configFile` wins.
+                `null`: the workspace's `.config/nextest.toml` when it
+                exists.
+              '';
+            };
+            package = mkOption {
+              type = types.nullOr types.package;
+              default = null;
+              description = "The default cargo-nextest for this workspace's test runs; a package's `test.nextest.package` wins.";
+            };
+          };
         };
 
         benchSmoke = mkOption {
