@@ -73,12 +73,13 @@ let
       ws,
       kind ? "build",
       cargoArgs ? [ "--workspace" ],
+      toolchain ? { inherit (pkgs) cargo rustc; },
     }:
     pkgs.runCommandCC "${fixture}-golden-${kind}"
       {
         nativeBuildInputs = [
-          pkgs.cargo
-          pkgs.rustc
+          toolchain.cargo
+          toolchain.rustc
         ];
       }
       ''
@@ -100,6 +101,38 @@ let
 
   walking-skeleton = mk "walking-skeleton" { };
   build-dep-leak-ws = mk "build-dep-leak" { };
+
+  # Older stable releases for the golden test, from rust-overlay when the
+  # package set has it (the flake's does). nixpkgs' own cargo is the third.
+  goldenToolchains = lib.optionalAttrs (pkgs ? rust-bin) (
+    lib.genAttrs [ "1.95.0" "1.97.0" ] (
+      v:
+      let
+        tc = pkgs.rust-bin.stable.${v}.minimal;
+      in
+      {
+        cargo = tc;
+        rustc = tc;
+      }
+    )
+  );
+  # The golden test of a fixture's build and test plans on each of them.
+  goldenOn =
+    fixture: args:
+    lib.concatMapAttrs (
+      v: toolchain:
+      let
+        ws = mk fixture (args // { inherit toolchain; });
+        n = "${fixture}-golden-${lib.replaceStrings [ "." ] [ "_" ] v}";
+      in
+      {
+        ${n} = golden { inherit fixture ws toolchain; };
+        "${n}-test" = golden {
+          inherit fixture ws toolchain;
+          kind = "test";
+        };
+      }
+    ) goldenToolchains;
 
   # A plan, read at evaluation time (IFD).
   readPlan =
@@ -403,3 +436,5 @@ in
         cp log $out/
       '';
 }
+// goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); }
+// goldenOn "dev-dep-features" { }
