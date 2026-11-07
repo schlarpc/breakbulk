@@ -133,70 +133,95 @@ The record of the `rustc -vV` query carries Cargo's own process environment. It 
 ### Faking a compile
 
 1. Write a record: argv (with the wrapper chain), env, cwd.
-2. Ask the real rustc for output names: the same arguments plus `--print=file-names` (it does not compile). Add the `.rmeta` and `.d` names that `--emit` implies.
+2. Ask the real rustc for output names: the same arguments plus `--print=file-names` (it does not compile, and it does not resolve `--extern` paths). Add the `.rmeta` and `.d` names that `--emit` implies. The query names every link output for every crate type, `--emit` set and `--test`, but not debuginfo side files (`.dwp`, `.dwo`; by the same logic `.pdb` and `.dSYM`, not tested). Cargo tolerates their absence during the trace.
 3. Create each output as an empty file. Write the dep-info file as `<output>: <input file>`, because Cargo parses it after every compile.
-4. When the arguments contain `--json=…artifacts…` and `--emit` includes `metadata`, print `{"$message_type":"artifact","artifact":"<rmeta path>","emit":"metadata"}` on stderr. Cargo waits for this before starting pipelined dependents.
-5. For a build-script compile (crate name `build_script_build`), copy the shim binary to the output path and write a marker file next to it naming the unit and listing the package's targets from `cargo metadata`.
+4. When the arguments contain `--json=…artifacts…` and `--emit` includes `metadata`, print one `{"$message_type":"artifact","artifact":"<path>","emit":"<kind>"}` line per output on stderr, as rustc does. Cargo waits for the metadata notification before starting pipelined dependents.
+5. For a build-script compile (crate name `build_script_build`), copy the shim binary to the output path and write `breakbulk-stub.json` next to it, naming the record directory, the `cargo metadata` file and the compile unit.
 
-When Cargo runs a stub, the stub records argv, cwd and the full env Cargo gave it, including `TARGET`, `HOST`, `PROFILE`, `OPT_LEVEL`, `DEBUG`, `CARGO_CFG_*`, `CARGO_FEATURE_*`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_MANIFEST_LINKS`, `OUT_DIR` and any `DEP_*` sentinels from upstream stubs.
+When Cargo runs a stub, the stub records argv, cwd and the full env Cargo gave it, including `TARGET`, `HOST`, `PROFILE`, `OPT_LEVEL`, `DEBUG`, `CARGO_CFG_*`, `CARGO_FEATURE_*`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_MANIFEST_LINKS`, `OUT_DIR` and any `DEP_*` sentinels from upstream stubs. It finds its package in the `cargo metadata` JSON (`$BREAKBULK_METADATA`, default `$BREAKBULK_RECORD/metadata.json`) by `CARGO_MANIFEST_DIR`, to learn the package's targets.
 
 ### Sentinel directives
 
-Each stub prints one tagged directive of every kind that applies to its package, using a tag `R` derived from its run unit:
+Each stub prints one tagged directive of every kind that applies to its package. The tag `R` is the run's hash from its `OUT_DIR`: `build/<pkg>-<hash>/out`, or `build/<pkg>/<hash>/out` in the new build-directory layout. This table is the authoritative list of sentinels, their shapes and where Cargo places them. Placement is identical on every Cargo release tested (1.95 to 1.101); the evidence and source citations are in [spike A's wrapping table](spikes/A-trace-fidelity.md#wrapping-table).
 
-| Kind | Sentinel | Printed when |
-| --- | --- | --- |
-| `rustc-cfg` | `__bb_R_cfg` | Always |
-| `rustc-check-cfg` | `cfg(__bb_R_ccfg)` | Always |
-| `rustc-env` | `__BB_R_ENV=1` | Always |
-| `rustc-link-search` | `native=<OUT_DIR>/__bb_R_search` | Always; inside the build directory, so Cargo's dynamic-library-path rule applies to it |
-| `rustc-link-lib` | `__bb_R_lib` | Always |
-| `rustc-link-arg` | `__bb_R_arg` | The package has a linkable target |
-| `rustc-link-arg-bins`, `-tests`, `-examples`, `-benches`, `-cdylib` | `__bb_R_arg_<kind>` | The package has such a target |
-| `rustc-link-arg-bin=NAME=` | `__bb_R_arg_bin_NAME` | For each bin target |
-| `metadata` | `__bb=R` | The package declares `links` |
+"R's package" is the package whose build script is run R. A run's values reach only units of the run's own platform (host or target), except the dynamic-library paths in the last rows.
 
-Stubs use the `cargo:` single-colon syntax when the package's `rust-version` predates the `cargo::` syntax. The planner then:
+| Kind | Sentinel printed | Printed when | Shape in traced argv or env | Reaches |
+| --- | --- | --- | --- | --- |
+| `rustc-cfg` | `__bb_R_cfg` | Always | `--cfg __bb_R_cfg` | Every compile of R's package (lib, bins, examples, tests, benches, all test harnesses) and its `rustdoc --test`. Not its own build script. |
+| `rustc-check-cfg` | `cfg(__bb_R_ccfg)` | Always | `--check-cfg cfg(__bb_R_ccfg)` | Same as `rustc-cfg`. |
+| `rustc-env` | `__BB_R_ENV=__bb_R_env` (`R` uppercased in the name) | Always | Env var `__BB_R_ENV` on the process | Same as `rustc-cfg`. |
+| `rustc-link-search`, inside `OUT_DIR` | `native=<OUT_DIR>/__bb_R_search` | Always | `-L native=<OUT_DIR>/__bb_R_search` | Every compile of R's package and of every package that depends on it on the same platform, any crate type. For a host run (build dependency, proc macro): the compiles of its dependents' build scripts. |
+| `rustc-link-search`, outside `OUT_DIR` | `native=/__bb_R_search_ext` | Always | `-L native=/__bb_R_search_ext` | Same as above. |
+| `rustc-link-lib` | `__bb_R_lib` | Always | `-l __bb_R_lib` | R's package only: its lib (every lib crate type, proc macro included) and lib test harness; its bins, tests, examples and benches only when the package has no lib. Never `rustdoc --test`. |
+| `rustc-link-arg` | `__bb_R_arg` | Always | `-C link-arg=__bb_R_arg` | Every compile of R's package, including rlib-only libs, the lib test harness, proc macros, and its `rustdoc --test`. |
+| `rustc-link-arg-bins` | `__bb_R_arg_bins` | The package has a bin | `-C link-arg=__bb_R_arg_bins` | R's bins and their test harnesses. |
+| `rustc-link-arg-bin` | `NAME=__bb_R_arg_bin_NAME` | For each bin | `-C link-arg=__bb_R_arg_bin_NAME` | That bin and its test harness. |
+| `rustc-link-arg-tests` | `__bb_R_arg_tests` | The package has an integration test | `-C link-arg=__bb_R_arg_tests` | Integration tests only, not lib or bin harnesses. |
+| `rustc-link-arg-examples` | `__bb_R_arg_examples` | The package has an example | `-C link-arg=__bb_R_arg_examples` | Examples. |
+| `rustc-link-arg-benches` | `__bb_R_arg_benches` | The package has a bench | `-C link-arg=__bb_R_arg_benches` | Benches (bench variant only). |
+| `rustc-link-arg-cdylib` | `__bb_R_arg_cdylib` | The package's lib has the `cdylib` crate type | `-C link-arg=__bb_R_arg_cdylib` | R's lib when built as a cdylib, not in test mode. Also cdylibs of dependent packages, a compatibility exception (from Cargo's source; not tested). |
+| `metadata` | `__bb=R` | The package declares `links` | Env var `DEP_<LINKS>___BB=R` on runs | Build-script runs of packages that **directly** depend on R's package as a normal dependency. Not transitive, and not through build dependencies. |
+| Dynamic-library path of a compile | (the inside search sentinel) | — | `LD_LIBRARY_PATH` entry `<OUT_DIR>/__bb_R_search` on the rustc process | Compiles whose package has R's package as a host plugin dependency (a proc macro, or a build dependency with a build script). |
+| Dynamic-library path of a run | (same) | — | `LD_LIBRARY_PATH` entry on the run | Runs whose build script depends on R's package. |
+| Dynamic-library path of a test process | (same) | — | `LD_LIBRARY_PATH` entries | **Every** run of the test's platform, not only dependencies. |
+| Dynamic-library path of `rustdoc --test` | (same) | — | `LD_LIBRARY_PATH` entries | Every host run. |
+| Search paths of `rustdoc --test` | both search sentinels | — | `-L native=…` | **Every** run in the invocation, both platforms, both sentinels, **sorted by value** and deduplicated. Not positional. |
+
+Cargo rejects `rustc-link-arg-bins`, `-bin=NAME`, `-tests`, `-examples` and `-benches` when the package has no such target, so the stub prints them only when the target exists. `rustc-link-arg` is printed always, because Cargo passes it to every compile of the package. The outside search sentinel is a root-level path that no real build uses, so the forbidden-literal check catches a missed splice. Stubs use the `cargo:` single-colon syntax when the package's `rust-version` predates the `cargo::` syntax (1.77). Shapes are the same in both syntaxes.
+
+The planner then:
 
 1. Finds every sentinel token in recorded argv and env.
-2. Checks that each appears in the exact shape the wrapping table expects (for example `-l`, `__bb_R_lib`). Any other shape fails the plan, naming the Cargo version, the kind and the arguments seen.
-3. Replaces each sentinel with a splice point in the plan: "run R's directives of kind K go here".
+2. Checks that each appears in the exact shape the table expects (for example `-l`, `__bb_R_lib`). Any other shape fails the plan, naming the Cargo version, the kind and the arguments seen.
+3. Replaces sentinels with splice points in the plan:
+   - `rustc-cfg`, `rustc-check-cfg`, `rustc-link-lib` and `rustc-env`: one splice per sentinel, "run R's values of kind K go here".
+   - `rustc-link-search`: one splice per sentinel, "run R's search paths inside R's `out` go here" for the inside sentinel and "R's other search paths go here" for the outside one. A literal `-L` from a `links` override stays where Cargo put it, between them.
+   - Link arguments: in a unit's argv, all of run R's link-arg sentinels are adjacent. The planner replaces the whole group with one splice that records the set of link-arg kinds present. That set is exactly the set of kinds that apply to the unit.
+   - In `rustdoc --test`, the planner replaces the whole set of sentinel `-L native=` arguments with one splice that lists every run in the invocation.
 4. Turns `DEP_<LINKS>___BB=R` in a dependent stub's env into a metadata edge from run R.
-5. Turns sentinel search paths found in dynamic-library path variables of runs and tests into dynamic-path splice points.
+5. Turns sentinel search paths found in dynamic-library path variables of compiles, runs, tests and `rustdoc --test` into dynamic-path splice points.
 6. Fails the plan if any sentinel token is left unconverted.
 
 The expected shapes are pinned by golden tests per Cargo release.
 
 ### Unit identity and graph edges
 
-- **Compile units** are keyed by Cargo's `-C metadata=<hash>` value; **build-script runs** by the `<pkg>-<hash>` component of their `OUT_DIR`. These hashes come from Cargo's stable unit identity.
-- **Edges** come from the records: a `--extern name=<path>` or `-L dependency=<dir>` path names the producing unit's output; `OUT_DIR` in a compile's env names its build-script run; the stub's path names the run's compile unit; sentinels give directive placement and metadata edges.
-- **Platform** is read from the output location: Cargo always receives `--target`, so host units write under `<scratch>/<profile>/` and target units under `<scratch>/<triple>/<profile>/`.
+- **Compile units** are keyed by Cargo's `-C metadata=<hash>` value; **build-script runs** by the `<pkg>-<hash>` (or `<pkg>/<hash>`) component of their `OUT_DIR`. These hashes come from Cargo's stable unit identity. The sentinels leave every `-C metadata` and every run hash unchanged (observed on every supported release).
+- **Keys are per plan.** `-C metadata` does not contain rustflags; Cargo hashes rustflags only into `-C extra-filename`. Two variants that differ only in rustflags (coverage, a `--cfg`) therefore share `-C metadata`, and units without `-C extra-filename` (cdylibs, and in the new layout bins and dylibs) also share output names. Unit keys identify a unit only within one plan. Sharing across plans is decided by derivation paths, and `explainSharing` compares argv and env, not hashes.
+- **Edges** come from the records: a `--extern name=<path>` or `-L dependency=<dir>` path names the producing unit's output; `OUT_DIR` in a compile's env names its build-script run; the stub's path names the run's compile unit; sentinels give directive placement and metadata edges. In the new layout each compile gets one `-L dependency=<dep's out>` per dependency instead of one shared `deps` directory.
+- **Platform** is read from the output location: Cargo always receives `--target`, so host units write under `<scratch>/<profile>/` and target units under `<scratch>/<triple>/<profile>/`, in both layouts.
 - **`links` overrides** in config (`[target.<triple>.<links>]`) need no special case. Cargo skips the build script and passes the flags directly, so they appear in the recorded arguments.
 
 ### Path rewriting
 
 Every recorded argument and env value is split into literal text and references. Any remaining absolute path that is not in the store is an error that names the unit and the argument.
 
+Cargo has two build-directory layouts. Releases up to 1.99 use the classic one. Current nightly Cargo (1.101) uses a new layout by default (opt-out `__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1`), and it will reach stable unless reverted. In the new layout every unit gets `build/<pkg>/<hash>/{out,fingerprint,run}`, compile outputs go to that unit's `out`, there is no `deps/`, build scripts are `…/out/build_script_build` with no hash and no `build-script-build` copy, and bins, dylibs, cdylibs and build scripts have no `-C extra-filename`. The planner supports both. In the new layout an output path names its unit's directory directly.
+
 | Recorded path | Becomes |
 | --- | --- |
-| `<scratch>/<triple>/<profile>/deps/<file>` | `{"out": <unit>, "output": "rmeta" or "rlib" or "bin", "file": <name>}` |
-| `<scratch>/…/build/<pkg>-<hash>/out` | `{"out": <run unit>, "output": "out"}` |
-| The stub binary path | `{"out": <compile unit>, "output": "bin"}` |
+| Classic: `<scratch>/[<triple>/]<profile>/deps/<file>` | `{"out": <unit>, "output": "rmeta" or "rlib" or "bin", "file": <name>}` |
+| Classic: `<scratch>/…/build/<pkg>-<hash>/out` | `{"out": <run unit>, "output": "out"}` |
+| New: `<scratch>/…/build/<pkg>/<hash>/out/<file>`, where `<hash>` is a compile unit's directory | `{"out": <compile unit>, "output": "rmeta" or "rlib" or "bin", "file": <name>}` |
+| New: `<scratch>/…/build/<pkg>/<hash>/out`, where `<hash>` is a run's directory | `{"out": <run unit>, "output": "out"}` |
+| The stub binary path (both layouts) | `{"out": <compile unit>, "output": "bin"}` |
 | `<skeleton>/<rel>` | `{"src": <workspace package>, "rel": <rel>}`, resolved at instantiation |
 | `<vendor dir>/<source>/<crate>/<rel>` | `{"crateSrc": <package id>, "rel": <rel>}` |
 | `/nix/store/…` | Literal; the containing store path becomes an input |
 
 Two rewrites go beyond paths:
 
-- **Same-triple linkers.** When host and target triples are equal and the host spec's linker differs from the target's, each host unit's `-C linker=` value is replaced with the host linker. The planner first checks that the unit carries exactly one `-C linker=` equal to the configured target linker. A linker set by the user's own config is left alone, because local Cargo applies it the same way.
+- **Same-triple linkers.** When host and target triples are equal, Cargo gives every host unit (build scripts, proc macros and host rlibs) `-C linker=<target linker>`, and every build-script run `RUSTC_LINKER=<target linker>`. When the host spec's linker differs from the target's, each host unit's `-C linker=` value, and `RUSTC_LINKER` on each host run, is replaced with the host linker. The planner first checks that the unit carries exactly one `-C linker=` equal to the configured target linker. A linker set by the user's own config is left alone, because local Cargo applies it the same way. (Nightly's `-Zhost-config` does not help: host rlibs still get the target linker.)
 - **Build-directory remap.** When Cargo's `trim-paths` is in effect, Cargo emits one `--remap-path-prefix=<build dir>=/cargo/build-dir`. In breakbulk the build directory is split into one store path per `OUT_DIR`, so the planner expands it into one remap per referenced `OUT_DIR`.
 
 ### Env filtering
 
-A unit's recorded env is the recorded env minus the baseline env the planner gave Cargo. That keeps exactly what Cargo set, including the project's `[env]`. Then:
+A unit's recorded env is the recorded env minus a baseline: the env of the shim's `rustc -vV` query record, which is Cargo's own process environment. That keeps exactly what Cargo set per process, including the project's `[env]`. The env the planner gave Cargo is not the right baseline: Cargo sets `SSL_CERT_FILE` and `SSL_CERT_DIR` on itself at startup and, from 1.97, `CARGO`; every child inherits them, and they are machine-specific. Then:
 
 - Drop `RUSTC_WRAPPER`, `CARGO_MAKEFLAGS` and the planner's own variables. Keep `RUSTC_WORKSPACE_WRAPPER` only in the clippy variant.
+- Rewrite `RUSTDOC` to the real rustdoc. Cargo passes `RUSTC_WRAPPER` (when set) and `RUSTDOC` as configured to every build-script run, so the trace shows the shim for both.
+- Strip `-C incremental=…` from argv. It does not affect `-C metadata`; `CARGO_INCREMENTAL` and `profile.*.incremental` do, which is why the planner never sets them.
 - Replace `NUM_JOBS` with `$NIX_BUILD_CORES`, applied by the runner at build time.
 - Never pass `RUSTC_BOOTSTRAP` to a build-script run. If it reached one, build scripts that probe for nightly would turn on nightly-only code paths. Compile units may receive it only from the pipelined split's `-Zno-codegen` backend.
 
@@ -221,7 +246,8 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
       "args": ["--crate-name", "ring", [{ "crateSrc": "…ring@0.17.14", "rel": "src/lib.rs" }], "…",
                "--extern", ["cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
                { "splice": "r-ring-…", "kind": "rustc-cfg" },
-               { "splice": "r-ring-…", "kind": "rustc-link-lib" }],
+               { "splice": "r-ring-…", "kind": "rustc-link-lib" },
+               { "splice": "r-ring-…", "kind": "rustc-link-arg", "kinds": ["rustc-link-arg"] }],
       "env": { "CARGO_PKG_NAME": "ring", "OUT_DIR": [{ "out": "r-ring-…", "output": "out" }] },
       "envSplices": [{ "splice": "r-ring-…", "kind": "rustc-env" }],
       "cwd": { "crateSrc": "…ring@0.17.14", "rel": "" },
@@ -240,11 +266,15 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
 
 ### Fields
 
-- **Argument segments.** A string is a literal argument. An array is one argument made by concatenating literals and references. A reference object is `src`, `crateSrc` or `out`. A splice object (`splice`, `kind`) expands at build time to zero or more arguments: run R's directives of that kind, wrapped by the wrapping table, in the order the script printed them.
+- **Argument segments.** A string is a literal argument. An array is one argument made by concatenating literals and references. A reference object is `src`, `crateSrc` or `out`. A splice object expands at build time to zero or more arguments, wrapped as the sentinel table shows, in the order the script printed them:
+  - `{ "splice": R, "kind": K }` for `rustc-cfg`, `rustc-check-cfg` and `rustc-link-lib`: run R's values of kind K.
+  - `{ "splice": R, "kind": "rustc-link-search", "in": "out" }` or `"in": "other"`: run R's search paths inside its `out`, or all its other search paths.
+  - `{ "splice": R, "kind": "rustc-link-arg", "kinds": [ … ] }`: run R's link arguments whose kind is in `kinds`, in printed order across kinds. A `rustc-link-arg-bin` entry carries its bin name (`"rustc-link-arg-bin=app"`). One splice per run covers every link-arg kind, because Cargo keeps one ordered list of link arguments per run; one splice per kind would reorder them.
+  - `{ "searchPathsOf": [R, …] }` (only in `rustdoc --test`): the search paths of every listed run, deduplicated and sorted by value.
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
-- **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test, bench and example binaries in a test plan.
+- **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test and example binaries in a test plan; bench binaries in the bench variant's plan.
 
 ### Invariants
 
@@ -333,17 +363,17 @@ Nothing from the planner's environment reaches a unit.
 ### `compile`
 
 1. Read `BREAKBULK_UNIT` and set up the environment contract. Replace `NUM_JOBS` with `$NIX_BUILD_CORES`.
-2. Build a dependency directory: `$TMPDIR/deps` with symlinks to the `rmeta` or `rlib` outputs of every transitive dependency. Pass one `-L dependency=$TMPDIR/deps`. This replaces Cargo's single shared `deps` directory and keeps argv short.
-3. Expand splice points from each referenced run's `flags` output, using the wrapping table and the value-dependent rules below.
+2. Build a dependency directory: `$TMPDIR/deps` with symlinks to the `rmeta` or `rlib` outputs of every transitive dependency. Pass one `-L dependency=$TMPDIR/deps`. This replaces Cargo's single shared `deps` directory (classic layout) or its one `-L dependency=` per dependency (new layout), and keeps argv short. When both Cargo and rustc are nightly, Cargo passes `-Zembed-metadata=no`: rlibs carry no metadata, and dependents get both `--extern name=lib….rlib` and `--extern name=lib….rmeta`. Units that link then need each dependency's `rmeta` output as well as its `rlib`.
+3. Expand splice points from each referenced run's `flags` output, using the sentinel table and the value-dependent rules below. Set the dynamic-library path from the unit's dynamic-path splices (the host plugin dependencies' runs).
 4. Add path remapping, unless the plan already carries Cargo's own remaps (`trimPaths`): map every source view, crate source and upstream `OUT_DIR` to a stable name (`<name>-<version>` for crates, the package's path from the repository root for workspace members), with the scope for the unit's product kind (see below).
 5. Point `--out-dir` at `$TMPDIR/out` and run the recorded program.
 6. Parse rustc's JSON diagnostics from stderr, print each `rendered` field, and drop artifact notifications. Without this, build logs are unreadable JSON.
-7. Move outputs into place: `.rmeta` to `$rmeta`, `.rlib` to `$rlib`, binaries and cdylibs to `$out`. Discard dep-info.
+7. Move outputs into place: `.rmeta` to `$rmeta`, `.rlib` to `$rlib`, binaries and cdylibs to `$out`. Discard dep-info. Debuginfo side files (`.dwp` with `split-debuginfo=packed`, `.dwo` with `unpacked`, and `.pdb` and `.dSYM` on other platforms) are not in the plan's output list, because `--print=file-names` does not name them. They are collected by scanning `$TMPDIR/out` and moved with the output they belong to.
 
 ### `run` (build scripts)
 
 1. Set up the environment contract, and set `OUT_DIR` to `$out`, which is writable and empty.
-2. For each unit in `metadataFrom`, read its `flags/metadata.json` and set `DEP_<LINKS>_<KEY>`, uppercased with `-` mapped to `_`, as Cargo does.
+2. For each unit in `metadataFrom`, read its `flags/metadata.json` and set `DEP_<LINKS>_<KEY>`, uppercased with `-` mapped to `_`, as Cargo does. Set the dynamic-library path from the run's dynamic-path splices (the runs of packages its build script depends on).
 3. Execute the script from its compile unit's output, with the package source as the working directory. The source is read-only, as it is in any Nix build.
 4. Parse stdout. Write `$flags/directives.json` (values grouped by kind, in printed order), and `$flags/metadata.json` when the package declares `links`.
 5. Fail on a non-zero exit, on death by signal (with the signal named), and on any `error` directive. Print `warning` directives.
@@ -361,7 +391,7 @@ Build-script output is a documented, line-based format: `cargo::KEY=VALUE`, or t
 | `rustc-link-lib` | Value as is | `-l <value>` |
 | `rustc-link-search` | Value as is | `-L <value>` |
 | `rustc-link-arg` and its target-specific forms | Value as is; `-bin=` splits `NAME=ARG` | `-C link-arg=<value>` |
-| `rustc-flags` | Split on whitespace into `-l` and `-L` parts; anything else is an error | As `rustc-link-lib` and `rustc-link-search` |
+| `rustc-flags` | Split on whitespace into `-l` and `-L` parts; anything else is an error | Joins the `rustc-link-lib` and `rustc-link-search` lists in printed order |
 | `metadata` | Split on the first `=` | `DEP_<LINKS>_<KEY>` for dependents' runs |
 | Unknown key, `cargo:` syntax | Treated as `metadata` | As `metadata` |
 | Unknown key, `cargo::` syntax | Error | — |
@@ -374,8 +404,11 @@ The wrapping column is also what the planner asserts against Cargo's placement o
 
 **Value-dependent rules**, each implemented explicitly and tested:
 
-- A `rustc-link-search` path is added to the dynamic-library path of runs and tests only when it lies inside an upstream run's `out`, matching Cargo's rule that only paths inside the target directory are added.
-- Duplicate values are handled as Cargo handles them; the differential tests pin this down.
+- **Search-path order.** For one compile, Cargo collects the search paths of every run in dependency order, then stable-sorts them: paths inside the printing run's own `OUT_DIR` first, all others after. Search paths from `links` overrides always count as outside. At an inside splice, put R's values that lie inside R's `out`, in printed order; at an outside splice, R's other values, in printed order.
+- **Link arguments.** All `rustc-link-arg*` kinds of one run share one list in printed order. A link-arg splice emits the run's values whose kind is in its `kinds`, in that order.
+- **Doctest search paths.** A `searchPathsOf` splice emits the search paths of all listed runs, both classes, deduplicated and sorted by value. The values are the real store paths at build time, so the order is computed then, not copied from the trace.
+- **Dynamic-library paths** keep only values inside some run's `out`, matching Cargo's rule that only paths inside the target directory are added.
+- Duplicate values within one kind are kept in printed order, as Cargo does.
 - `rustc-flags` splitting, as above.
 
 ### Source paths at run time
@@ -446,7 +479,7 @@ repo = breakbulk.lib.mkRepository {
     preset = breakbulk.presets.linuxGnu;  # or msvc { … }, wasmBrowser, wasmComponent, musl, staticGlibc
     linker = null; cc = null; cxx = null; ar = null; cflags = [ ];
     bindgen.extraClangArgs = [ ];
-    rustflags = [ ];                  # passed with --config, so it adds to .cargo/config.toml
+    rustflags = [ ];                  # passed with --config under the key the project uses (see Invocation)
     env = { };                        # added to this platform's units only
     runner = null;                    # wine, wasmtime, qemu-user, …
     testSystem = null;                # e.g. "aarch64-linux" to run tests on native builders
@@ -501,7 +534,7 @@ repo = breakbulk.lib.mkRepository {
 The planner always passes `--target`, and local Cargo without it behaves differently: rustflags reach build scripts, every unit's `-C metadata` changes, and outputs move. The dev shell therefore:
 
 - exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
-- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, `CARGO_TARGET_<TRIPLE>_LINKER`), matching the planner's `--config`;
+- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`;
 - includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 
@@ -651,13 +684,13 @@ Each check becomes `repo.checks."<ws>/<triple>/<pkg>/<name>"`. Every product get
 - **Test binaries** are roots with `test = true` in the test plan. `tests.<pkg>.<name>` is the binary's `linked` stage. Test binaries are never stripped.
 - **`CARGO_BIN_EXE_<name>`** is compile-time env recorded by the planner, and is rewritten to the bin root's `linked` output. The test's compile unit therefore depends on that link.
 - **`CARGO_TARGET_TMPDIR`** is also compile-time env, but must be writable when the test runs. It is rewritten to a fixed path under the build directory, and the test-run derivation creates that path before running (see spikes).
-- **Test runs** are one derivation per test binary. A small CA derivation copies the test binary, and the test run consumes that copy, so a byte-identical binary does not re-run. The run uses the target's `runner`, with the package source view as the working directory (as Cargo does), plus Cargo's runtime env (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`), the package's `test.env`, and `test.path` on `PATH`. Its `system` is the target's `testSystem` when set. It succeeds on exit 0, and its output records the log.
+- **Test runs** are one derivation per test binary. A small CA derivation copies the test binary, and the test run consumes that copy, so a byte-identical binary does not re-run. The run uses the target's `runner`, with the package source view as the working directory (as Cargo does), plus Cargo's runtime env (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`), the package's `test.env`, and `test.path` on `PATH`. Its `system` is the target's `testSystem` when set. Its dynamic-library path holds the in-`out` search paths of **every** run of the test's platform in the plan, not only the test's dependencies, as Cargo does. It succeeds on exit 0, and its output records the log.
 - **Skipped tests:** a predicted test the plan lacks gets a test-run stub that succeeds and logs the reason.
 - **Test arguments:** `test.args` and `test.binaries.<binary>.args` are passed to the binary; `includeIgnored` adds `--include-ignored`. They are part of the test-run derivation, so changing them re-runs only the affected runs. `enable = false` leaves a binary's run out of `repo.checks`. Every test run sets `RUST_TEST_THREADS=$NIX_BUILD_CORES`.
 - **Test apps:** each test binary also gets a runnable app with the test run's working directory, environment and runner, run on the user's machine. It is the escape hatch for tests that need network, and the way to rerun one binary under a debugger or with a filter. Network access inside `nix flake check` (through a fixed-output test run) is a possible later addition; impure derivations are not used.
 - **nextest.** The first milestones run libtest binaries directly. nextest support comes later, by synthesizing the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts, test groups and default filters from the nextest config apply.
-- **Doctests:** one derivation per library crate, from the test plan's traced `rustdoc --test` command. Inputs are the crate's `rlib`, its dependencies with test-plan features, and the source view. It runs with the target's runner and records the log; it appears in `repo.checks`. There is no cutoff, because compiling and running happen in one rustdoc process. If the toolchain cannot run doctests for a cross target, the derivation is a stub that logs why.
-- **Benches:** the test plan compiles bench targets as Cargo does. The bench variant builds optimized bench binaries, exposed for running outside Nix. With `benchSmoke`, each bench binary also runs once with `--test` as a check. Timed runs never happen inside Nix.
+- **Doctests:** one derivation per library crate, from the test plan's traced `rustdoc --test` command. Inputs are the crate's `rlib`, its dependencies with test-plan features, and the source view. Cargo gives `rustdoc --test` an `-L native=` for every run in the invocation, sorted by value, so the derivation also depends on the `flags` output of every run the `searchPathsOf` splice lists, and rebuilds that list at build time. Its dynamic-library path holds every host run's in-`out` search paths. It gets no `-l`. It runs with the target's runner and records the log; it appears in `repo.checks`. There is no cutoff, because compiling and running happen in one rustdoc process. If the toolchain cannot run doctests for a cross target, the derivation is a stub that logs why.
+- **Benches:** `cargo test --no-run` builds no benches, so the test plan has none. Bench binaries come only from the bench variant (`cargo bench --no-run`, bench profile), exposed for running outside Nix. With `benchSmoke`, each bench binary also runs once with `--test` as a check. Timed runs never happen inside Nix.
 
 ### Documentation (later)
 
@@ -678,7 +711,7 @@ An optional per-package split of a library into an `rmeta` derivation and an `rl
 Trace golden tests and directive differential tests guard against Cargo changes; invalidation and sharing tests guard the main promise, that an edit rebuilds only what it should.
 
 1. **Rust unit tests** for the directive parser (both syntaxes, every directive, malformed input), path rewriting, env filtering, splice expansion, plan canonicalization and unit ordering.
-2. **Trace golden tests.** For each fixture, run real `cargo build -v` and the traced planner on the same skeleton, render the plan back to concrete argv with the same scratch layout, and diff per unit after normalizing paths. This runs against the oldest release in the supported window (about six months of stable), the latest stable and the latest nightly.
+2. **Trace golden tests.** For each fixture, run real `cargo build -vv` and the traced planner on the same skeleton, render the plan back to concrete argv and env with the same scratch layout, and diff per unit after normalizing paths. Both sides run at the same verbosity, because verbosity changes argv (`--cap-lints`) and only `-vv` prints per-process env. The comparison also diffs target-directory file listings, which differ only in debuginfo side files. A negative control (one splice per kind, no search-path ordering) must produce diffs, so the comparison is not vacuous. Fixtures are copied outside `$HOME` before each run, because Cargo reads `.cargo/config.toml` from every ancestor directory. This runs against the oldest release in the supported window (about six months of stable), the latest stable and the latest nightly. The spike A driver (`spikes/trace-fidelity/`) is the first version.
 3. **Directive differential tests.** Generate dependency graphs and build-script outputs (several values per kind, duplicates, paths inside and outside the build directory, mixed order). Let stubs replay them so Cargo applies them, and separately expand the sentinel plan with `breakbulk-unit`'s splicing. The two argv and env sets must be identical. The same harness checks that sentinels do not change any unit's `-C metadata`.
 4. **Root prediction tests.** Compare the Nix prediction with `cargo metadata` targets over a corpus of real workspaces. The target sets must be identical, with `required-features` as the only allowed difference in what is built.
 5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical.
@@ -709,13 +742,13 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `wasm-component` | C via `wasilibc`, componentize, metadata stamp | wasm | Component has no imports |
 | `static` | musl and static-glibc products | musl x2, host | No `INTERP` or `NEEDED`; build scripts dynamic |
 | `same-triple` | Target spec with a marker linker and marker env on the host triple | host | No build-script or proc-macro unit sees either marker |
-| `variants` | Feature powerset, clippy, coverage | linux-gnu | Host units shared between build and clippy at the same profile; dependencies shared between check and clippy; no target units shared between build and coverage |
+| `variants` | Feature powerset, clippy, coverage, a custom profile that only inherits `release` | linux-gnu | Host units shared between build and clippy at the same profile; dependencies shared between check and clippy; no target units shared between build and coverage; all units shared between `release` and the custom profile |
 | `post-link` | Custom stages, `mkForce null` on `strip`, a check on `linked` | linux-gnu, msvc | Stage order; check sees unstripped bytes |
 | `source-paths` | Panics in dependencies, `splitDebug`, test binaries | linux-gnu | No source references in main outputs; `debug` references sources; editing a README in a package does not change its test binary |
-| `trim-paths` | `trim-paths = "all"` in the profile | linux-gnu, Cargo ≥ 1.101 | Cargo's remaps used, none added; path crates outside the root hashed without absolute paths |
+| `trim-paths` | `trim-paths = "all"` in the profile; a second workspace without the setting | linux-gnu, Cargo ≥ 1.101 | Cargo's remaps used, none added; path crates outside the root hashed without absolute paths; the project's setting kept; the second workspace traced again with trim-paths on |
 | `doctests` | Doctests using a dev-dependency, one `should_panic`, an edition-2024 crate | linux-gnu, aarch64 | Doctests run; cross doctests run under the runner or skip with a reason |
 | `test-control` | Tests that need network, `#[ignore]` tests, a skip list per binary | linux-gnu | Skipped tests do not run; changing a skip list re-runs only that test run; the test app runs the network test outside the sandbox |
-| `benches` | A libtest bench and a Criterion bench | linux-gnu | Bench binaries built with the bench profile; smoke checks pass with `--test` |
+| `benches` | A libtest bench and a Criterion bench | linux-gnu | Bench binaries come from the bench variant only, built with the bench profile; the test plan has none; smoke checks pass with `--test` |
 
 ### Determinism and dogfooding
 
@@ -756,7 +789,7 @@ Spikes A, B and C gate M1 and M2. The rest are measurements to take as soon as t
 
 | Spike | Question | Method | Feeds |
 | --- | --- | --- | --- |
-| A. Trace fidelity | Does Cargo accept empty outputs, synthetic dep-info and artifact notifications across releases, including pipelining and `links` overrides? Where do sentinels land, in what shapes, and do they leave `-C metadata` unchanged? Does `--target <host>` keep rustflags off host units while applying the linker? Does a path crate hash differently from two workspaces? How should breakbulk tell whether the project set `trim-paths`? Does `cargo test --doc` with a `RUSTDOC` shim record doctests without running anything? Which targets does `cargo test --no-run` build by default, and is the profile name part of a unit's identity (bench versus release)? | Shim prototype on the M1 fixtures across the supported Cargo window | M1 go or no-go; the wrapping table |
+| A. Trace fidelity | Does Cargo accept empty outputs, synthetic dep-info and artifact notifications across releases, including pipelining and `links` overrides? Where do sentinels land, in what shapes, and do they leave `-C metadata` unchanged? Does `--target <host>` keep rustflags off host units while applying the linker? Does a path crate hash differently from two workspaces? How should breakbulk tell whether the project set `trim-paths`? Does `cargo test --doc` with a `RUSTDOC` shim record doctests without running anything? Which targets does `cargo test --no-run` build by default, and is the profile name part of a unit's identity (bench versus release)? | Shim prototype on the M1 fixtures across the supported Cargo window | M1 go or no-go; the wrapping table. Done: go, see [spikes/A-trace-fidelity.md](spikes/A-trace-fidelity.md) |
 | B. Delivery mechanics | Can a `builder-rpc-v0` derivation add input-addressed unit derivations whose paths equal those Nix computes in IFD mode? How does Nix treat a stage that depends on `outputOf`? What does `post-build-hook` with `"$DRV_PATH^*"` upload? | Prototype on Nix master | M5 design; the instantiation backend |
 | C. Env capture | Do replayed captures make nixpkgs' compiler and linker wrappers behave as in a live stdenv? Does any common setup hook rely on more than environment variables? | Capture and replay for `openssl-sys`, `ring` and a bindgen crate | Env capture design |
 | Pipelining gap | How much of Cargo's pipelining gain applies to real repositories? | `cargo build --timings` on several workspaces; compute the critical path with and without starting dependents at rmeta | Whether M6's pipelined split is worth building |

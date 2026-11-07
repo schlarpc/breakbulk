@@ -68,18 +68,18 @@ They are separate because Cargo turns on dev-dependency features only when test 
 
 A `RUSTC_WRAPPER` does the following:
 
-- Forwards information queries (`-vV`, `--print cfg`, file-name queries) to the real rustc.
+- Records information queries (`-vV`, `--print cfg`, file-name queries) and forwards them to the real rustc. The `-vV` record carries Cargo's own environment, the baseline for env filtering.
 - For each compile invocation, records argv, env and working directory, writes placeholder outputs, and emits the artifact notification Cargo waits for when pipelining.
 - For each build-script compile, writes a stub executable. When Cargo runs it, the stub records the exact environment Cargo gives build scripts and prints one tagged **sentinel** directive of each applicable kind.
 
-Cargo places each sentinel exactly where it would place real output from that script: which units get it, at which position, and which dependent build scripts receive `DEP_*` metadata. The planner records those positions as splice points. Placement is therefore observed from Cargo; only the values are filled in at build time.
+Cargo places each sentinel exactly where it would place real output from that script: which units get it, at which position, and which dependent build scripts receive `DEP_*` metadata. The planner records those positions as splice points. Placement is therefore observed from Cargo; only the values are filled in at build time. A few placements depend on the values, and breakbulk applies those rules itself at build time: search paths inside the script's `OUT_DIR` come before all others, all link-argument kinds of one script form one ordered list, and doctests get every script's search paths sorted by value. [Spike A](spikes/A-trace-fidelity.md) confirmed that the traced commands, with real build-script output filled in, equal a real `cargo build` unit for unit on Cargo 1.95 to 1.101.
 
 The recorded invocations give the graph: `--extern` and `-L` paths name the producing unit, `OUT_DIR` ties a compile to its build-script run, the stub path ties a run to its compile, and sentinels give directive scoping and `DEP_*` edges. The unstable `--unit-graph` is not needed. Paths are then rewritten:
 
-- Target-directory paths become placeholders for the producing unit's outputs. Whether a unit is a host unit (build script, proc macro) or a target unit is read from where Cargo put its output.
+- Target-directory paths become placeholders for the producing unit's outputs, in both of Cargo's build-directory layouts (the classic one and the per-unit one that nightly Cargo uses by default). Whether a unit is a host unit (build script, proc macro) or a target unit is read from where Cargo put its output.
 - Source paths become store paths of the source views.
 - Tool paths must already be store paths, or planning fails with the tool's name.
-- Recorded env is kept only where Cargo set it or the configuration declared it; the planner's own sandbox env is dropped.
+- Recorded env is kept only where Cargo set it or the configuration declared it; the planner's own sandbox env, and what Cargo sets on its own process, are dropped.
 
 Each target is traced on its own. Host units come out identical for every target and are shared. A multi-target Cargo invocation is avoided because its feature resolution can differ from building each target alone.
 
@@ -95,7 +95,7 @@ Both modes produce identical unit derivation paths. The default, `mode = "auto"`
 ### 4. Units
 
 - Units are input-addressed. A cache hit is an ordinary narinfo lookup and downloads only the requested output.
-- Library units have separate `rmeta` and `rlib` outputs; compile units depend on transitive `rmeta`, link units on `rlib`.
+- Library units have separate `rmeta` and `rlib` outputs; compile units depend on transitive `rmeta`, link units on `rlib`. With a nightly toolchain, rlibs carry no metadata, so link units depend on both.
 - A build script is two units: its compile, and its run, with outputs `out` (`OUT_DIR`) and `flags`.
 - Build-script output is spliced in at the positions Cargo chose for the sentinels.
 - A unit's environment is a fixed, layered contract: a fixed base, the captured nixpkgs environment for its package's inputs, Cargo's recorded env, the toolchain spec for the unit's platform, and the package's overrides.
@@ -112,7 +112,7 @@ All user-facing configuration lives in the NixOS module system; the unit graph d
 
 A **repository** object holds any number of **workspaces**, each with its own lockfile and toolchain. Each workspace is built for a set of **targets**; each target names a toolchain preset and, optionally, the packages to select for it.
 
-Units are shared across workspaces when Cargo produces identical commands for them. For registry crates that means the same version, features, profile, toolchain and resolved dependencies. Path crates additionally depend on where they sit relative to each workspace root: Cargo hashes a crate inside the workspace root by its relative path and a crate outside it by its absolute path, and passes source paths the same way. A shared path crate therefore deduplicates when it lies **outside every workspace root that uses it**, or when every workspace is the same workspace. A crate that is a selected member in one workspace and a plain dependency in another also differs, through `CARGO_PRIMARY_PACKAGE`. A diagnostic explains why two units expected to be shared are not.
+Units are shared across workspaces when Cargo produces identical commands for them. For registry crates that means the same version, features, profile, toolchain and resolved dependencies. Path crates additionally depend on where they sit relative to each workspace root: Cargo hashes a crate inside the workspace root by its relative path and a crate outside it by its absolute path, and passes source paths the same way. A shared path crate therefore deduplicates when it lies **outside every workspace root that uses it**, or when every workspace is the same workspace. A crate that is a selected member in one workspace and a plain dependency in another also differs, through `CARGO_PRIMARY_PACKAGE`. A diagnostic explains why two units expected to be shared are not. It compares the units' commands and env, not Cargo's hashes: `-C metadata` leaves out rustflags, so two units can share it and still differ.
 
 ### What is inherited from the project
 
@@ -122,9 +122,9 @@ The planner runs the user's Cargo over the project's own `.cargo/config.toml`, s
 
 A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/`cflags`, bindgen settings, SDK store paths, extra rustflags, `env`, and `runner`. The planner resolves every tool to a store path; a non-store tool path is a hard error naming the tool.
 
-- Spec rustflags reach Cargo through `--config`, never the `RUSTFLAGS` env var. Cargo concatenates config arrays across sources, so the spec adds to `.cargo/config.toml` instead of silently replacing it.
+- Spec rustflags reach Cargo through `--config`, never the `RUSTFLAGS` env var. Cargo takes rustflags from one key only (per-target rustflags win over `[build] rustflags`) and concatenates arrays only within that key. The planner therefore reads the project's config files and adds the spec's flags under `[build]` when the project uses `[build] rustflags` and no per-target rustflags, and under `target.<triple>` otherwise. The trace confirms that both sets of flags arrived.
 - Host and target specs are separate, and the separation is enforced per unit, not per triple. Spec env never goes through Cargo's `[env]` table, which reaches every process Cargo starts; it is added to each unit according to the unit's platform. This matters most when host and target share a triple (static glibc, zig), where triple-keyed variables such as `CC_<triple>` or `CFLAGS_<triple>` cannot tell host from target.
-- Linkers: when host and target triples differ, Cargo applies each `target.<triple>.linker` correctly. When they are the same triple, Cargo applies the target linker to host units too; if the host spec's linker differs, the planner rewrites the linker value in host units after checking it is exactly the one configured.
+- Linkers: when host and target triples differ, Cargo applies each `target.<triple>.linker` correctly. When they are the same triple, Cargo applies the target linker to host units too; if the host spec's linker differs, the planner rewrites the linker value in host units after checking it is exactly the one configured. Cargo passes `-C linker` to every unit, rlibs included, and breakbulk keeps it there, so a linker change rebuilds every unit, not only those that link.
 
 ### Per-package overrides
 
@@ -154,7 +154,8 @@ Profiles, feature sets (including a feature powerset), check modes (clippy, cove
 | Check and clippy | All dependencies | Workspace members |
 | Build and coverage | Host units | Target units, whose commands carry the instrumentation flag |
 | Build and test plans | Units whose features are unaffected by dev-dependencies | Units whose features dev-dependencies change |
-| Any two profiles | Nothing | Everything; the profile is part of every unit's identity |
+| Two profiles with the same settings (`release`, `bench`, a custom profile that only inherits `release`) | Everything; a unit's identity contains the profile's settings, not its name | Nothing |
+| Two profiles with different settings (opt-level, debuginfo, …) | Nothing | Everything |
 
 Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
 
@@ -206,7 +207,7 @@ Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
 - **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change.
 - With rustc older than 1.95, every scope is remapped.
 
-Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Once it is available, breakbulk sets it by default when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above.
+Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. Once it is available, breakbulk sets it by default when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later.
 
 ### Tests as products
 
@@ -218,7 +219,7 @@ Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile
 - Tests that cannot run in the sandbox (network, a writable home, devices) are skipped with libtest's own filters, per package or per test binary. Changing a skip list re-runs only the affected test runs.
 - Every test binary also has a runnable app that sets up the same working directory, environment and runner as its test run, but runs on the user's machine: the escape hatch for network tests, debuggers and single-test reruns.
 - **Doctests** get one derivation per library crate, which runs `rustdoc --test` against the crate and its dependencies. Compiling and running happen in one rustdoc process, so doctests have no cutoff and re-run whenever the crate or anything below it changes.
-- **Benches** are compiled by the test plan, like Cargo does. A bench variant (`cargo bench --no-run`, bench profile) provides optimized bench binaries to run outside Nix. Optional smoke checks run each bench once in test mode.
+- **Benches** come only from a bench variant (`cargo bench --no-run`, bench profile), which provides optimized bench binaries to run outside Nix. `cargo test --no-run` builds no benches, so the test plan has none. Optional smoke checks run each bench once in test mode.
 
 ### Documentation
 
@@ -315,7 +316,7 @@ Islands only cut off, and products only reproduce, if outputs are byte-stable.
 
 - `-C metadata` comes from Cargo's stable unit identity, never from derivation paths or absolute paths. The planner's skeleton sits at one fixed absolute path, because Cargo hashes the absolute path of path crates outside the workspace root (until `trim-paths`).
 - Source paths are remapped as described in [Source paths and debug information](#source-paths-and-debug-information).
-- No `-C incremental` inside unit builds.
+- No `-C incremental` inside unit builds. The planner strips it from argv and never sets `CARGO_INCREMENTAL`, because the incremental setting is part of every unit's `-C metadata`.
 - A content-derived `--build-id`.
 - A built-in check rebuilds sampled units and products with `nix build --rebuild` and compares their outputs.
 
@@ -371,7 +372,7 @@ These patterns come from a survey of working Rust-in-Nix repositories. Each is e
 | Check variants (clippy, nextest, coverage, feature powerset) | A full dependency build per variant, exhausting CI disk | Variants as plan parameters; host units and check-mode dependencies shared |
 | Dev-dependency features leaking into shipped binaries | Binaries built with features plain `cargo build` would not enable | Separate build and test plans |
 | Host-vs-target leakage (`crt-static`, static archives, the wrong C compiler) | Wrapper scripts strip flags; build scripts segfault; host objects end up in wasm | Spec env and linkers scoped by unit platform |
-| Rustflags from env replacing `.cargo/config.toml` rustflags | Flags duplicated in two places | Spec rustflags passed with `--config`, concatenated |
+| Rustflags from env replacing `.cargo/config.toml` rustflags | Flags duplicated in two places | Spec rustflags passed with `--config` under the key the project uses, concatenated |
 | Build-script link directives (`rustc-link-arg-bins`, delay-load, resource files, kernel link args) | Dropped or applied to the wrong targets | Placement observed from Cargo through sentinels |
 | Post-link steps that care about order (sign without stripping, check before stripping) | Fights with the implicit fixup phase | Named stages, no implicit fixup, side-branch checks |
 | Runtime-loaded libraries (GPU, windowing, audio) | Rpaths removed by rpath shrinking | `patchelfRpath` stage after fixup |
@@ -422,7 +423,7 @@ A set of fixture workspaces covering every pattern in the catalogue. Each phase 
 
 ### Risks
 
-- **Tracing Cargo depends on Cargo internals:** the artifact-notification protocol, how build scripts are invoked, the target-directory layout, where sentinel directives land. Mitigation: golden tests that diff traced command lines against `cargo build -v`, and differential tests of directive placement, across several stable Cargo releases.
+- **Tracing Cargo depends on Cargo internals:** the artifact-notification protocol, how build scripts are invoked, the target-directory layout, where sentinel directives land. Mitigation: golden tests that diff traced command lines and env against `cargo build -vv`, and differential tests of directive placement, across several stable Cargo releases. Spike A found placement identical on Cargo 1.95 to 1.101; the build-directory layout already differs on nightly.
 - **Unreleased Nix features.** `builder-rpc-v0` is on Nix master only; Determinate Nix is based on 2.35 and lacks it. `recursive-nix`, the older route, has an open removal proposal. Mitigation: IFD is the default delivery on released Nix.
 - **CA support in Nix and caches.** Resolution fetches input contents, and several cache servers store no realisations. Mitigation: input-addressed units; CA only at the edges.
 - **Derivation overhead for tiny crates.** Per-sandbox setup can dominate small units, and the input edges grow quadratically with graph depth.
@@ -430,7 +431,6 @@ A set of fixture workspaces covering every pattern in the catalogue. Each phase 
 
 ### Open questions
 
-- Does faking rustc's outputs and emitting sentinel directives hold up across Cargo releases, especially for pipelined builds and `links` metadata?
 - How much of the pipelining gap appears on real repositories, and does it justify the pipelined split?
 - Does env capture from nixpkgs' setup hooks replay faithfully outside a live stdenv shell?
 - Is `remap-path-prefix` enough for every embedded path, or are some crates' `env!("CARGO_MANIFEST_DIR")` uses still observable?
