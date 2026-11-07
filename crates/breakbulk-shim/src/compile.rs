@@ -70,12 +70,21 @@ pub fn outputs(a: &RustcArgs, link_names: &[String]) -> Vec<Output> {
     }
     if a.emits("link") {
         if let Some(p) = explicit("link") {
-            v.push(Output { emit: "link".into(), path: p });
+            v.push(Output {
+                emit: "link".into(),
+                path: p,
+            });
         } else if let (Some(o), 1) = (&a.output, link_names.len()) {
-            v.push(Output { emit: "link".into(), path: PathBuf::from(o) });
+            v.push(Output {
+                emit: "link".into(),
+                path: PathBuf::from(o),
+            });
         } else {
             for n in link_names {
-                v.push(Output { emit: "link".into(), path: dir.join(n) });
+                v.push(Output {
+                    emit: "link".into(),
+                    path: dir.join(n),
+                });
             }
         }
     }
@@ -103,7 +112,11 @@ pub fn dep_info(outputs: &[Output], input: &str) -> String {
     // rustc lists the dep-info file first, then link outputs, then metadata.
     let mut ordered: Vec<&Output> = outputs.iter().filter(|o| o.emit == "dep-info").collect();
     ordered.extend(outputs.iter().filter(|o| o.emit == "link"));
-    ordered.extend(outputs.iter().filter(|o| o.emit != "dep-info" && o.emit != "link"));
+    ordered.extend(
+        outputs
+            .iter()
+            .filter(|o| o.emit != "dep-info" && o.emit != "link"),
+    );
     for o in ordered {
         s.push_str(&format!("{}: {input}\n\n", o.path.display()));
     }
@@ -129,7 +142,12 @@ fn is_build_script(a: &RustcArgs) -> bool {
 
 /// Runs compile mode. `program` is the wrapper chain ending in rustc,
 /// `args` the rustc arguments.
-pub fn run(record_dir: &Path, program: &[String], args: &[String], a: &RustcArgs) -> Result<(), Error> {
+pub fn run(
+    record_dir: &Path,
+    program: &[String],
+    args: &[String],
+    a: &RustcArgs,
+) -> Result<(), Error> {
     let rustc = program.last().expect("program chain is never empty");
     let link_names = if a.emits("link") {
         file_names(rustc, args)?
@@ -156,10 +174,10 @@ pub fn run(record_dir: &Path, program: &[String], args: &[String], a: &RustcArgs
 
     let input = a.input.clone().unwrap_or_default();
     for o in &outs {
-        if let Some(parent) = o.path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
-            }
+        if let Some(parent) = o.path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         }
         if o.emit == "dep-info" {
             std::fs::write(&o.path, dep_info(&outs, &input)).map_err(|e| Error::io(&o.path, e))?;
@@ -190,14 +208,29 @@ mod tests {
     #[test]
     fn lib_pipelined_outputs() {
         let a = args(&[
-            "--crate-name", "foo", "src/lib.rs", "--crate-type", "lib",
-            "--emit=dep-info,metadata,link", "-C", "extra-filename=-ab", "--out-dir", "/o",
+            "--crate-name",
+            "foo",
+            "src/lib.rs",
+            "--crate-type",
+            "lib",
+            "--emit=dep-info,metadata,link",
+            "-C",
+            "extra-filename=-ab",
+            "--out-dir",
+            "/o",
         ]);
         let o = outputs(&a, &["libfoo-ab.rlib".into()]);
-        let p: Vec<_> = o.iter().map(|o| (o.emit.as_str(), o.path.to_str().unwrap())).collect();
+        let p: Vec<_> = o
+            .iter()
+            .map(|o| (o.emit.as_str(), o.path.to_str().unwrap()))
+            .collect();
         assert_eq!(
             p,
-            [("dep-info", "/o/foo-ab.d"), ("metadata", "/o/libfoo-ab.rmeta"), ("link", "/o/libfoo-ab.rlib")]
+            [
+                ("dep-info", "/o/foo-ab.d"),
+                ("metadata", "/o/libfoo-ab.rmeta"),
+                ("link", "/o/libfoo-ab.rlib")
+            ]
         );
         assert_eq!(
             dep_info(&o, "src/lib.rs"),
@@ -207,8 +240,18 @@ mod tests {
 
     #[test]
     fn check_mode_has_no_link_outputs() {
-        let a = args(&["--crate-name", "foo", "src/main.rs", "--crate-type", "bin",
-            "--emit=dep-info,metadata", "-C", "extra-filename=-ab", "--out-dir", "/o"]);
+        let a = args(&[
+            "--crate-name",
+            "foo",
+            "src/main.rs",
+            "--crate-type",
+            "bin",
+            "--emit=dep-info,metadata",
+            "-C",
+            "extra-filename=-ab",
+            "--out-dir",
+            "/o",
+        ]);
         let o = outputs(&a, &[]);
         assert_eq!(o.len(), 2);
         assert_eq!(o[1].path, PathBuf::from("/o/libfoo-ab.rmeta"));

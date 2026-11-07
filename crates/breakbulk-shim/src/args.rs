@@ -69,7 +69,7 @@ pub struct RustcArgs {
 
 /// Splits `--opt=value` / `-Cvalue` / `--opt value` forms. Returns the option
 /// name, its value (if any) and how many argv entries were consumed.
-fn split_opt<'a>(args: &'a [String], i: usize) -> (&'a str, Option<&'a str>, usize) {
+fn split_opt(args: &[String], i: usize) -> (&str, Option<&str>, usize) {
     let a = args[i].as_str();
     if let Some(rest) = a.strip_prefix("--") {
         if let Some((name, value)) = rest.split_once('=') {
@@ -119,9 +119,7 @@ impl RustcArgs {
                 ("--print", _) => r.is_query = true,
                 ("--test", _) => r.test = true,
                 ("--crate-name", Some(v)) => r.crate_name = Some(v.to_string()),
-                ("--crate-type", Some(v)) => {
-                    r.crate_types.extend(v.split(',').map(str::to_string))
-                }
+                ("--crate-type", Some(v)) => r.crate_types.extend(v.split(',').map(str::to_string)),
                 ("--emit", Some(v)) => {
                     for part in v.split(',') {
                         match part.split_once('=') {
@@ -167,10 +165,10 @@ impl RustcArgs {
         if let Some(d) = &self.out_dir {
             return PathBuf::from(d);
         }
-        if let Some(o) = &self.output {
-            if let Some(p) = Path::new(o).parent() {
-                return p.to_path_buf();
-            }
+        if let Some(o) = &self.output
+            && let Some(p) = Path::new(o).parent()
+        {
+            return p.to_path_buf();
         }
         PathBuf::from(".")
     }
@@ -254,15 +252,17 @@ mod tests {
     #[test]
     fn queries() {
         assert!(RustcArgs::parse(&v(&["-vV"])).is_query);
-        assert!(RustcArgs::parse(&v(&[
-            "-",
-            "--crate-name",
-            "___",
-            "--print=file-names",
-            "--crate-type",
-            "bin"
-        ]))
-        .is_query);
+        assert!(
+            RustcArgs::parse(&v(&[
+                "-",
+                "--crate-name",
+                "___",
+                "--print=file-names",
+                "--crate-type",
+                "bin"
+            ]))
+            .is_query
+        );
         assert!(RustcArgs::parse(&v(&["--print", "sysroot"])).is_query);
     }
 }

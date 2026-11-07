@@ -26,7 +26,9 @@ pub fn env_map() -> Map<String, Value> {
         })
         .collect();
     vars.sort();
-    vars.into_iter().map(|(k, v)| (k, Value::String(v))).collect()
+    vars.into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect()
 }
 
 pub fn cwd() -> String {
@@ -61,7 +63,12 @@ fn sanitize(label: &str) -> String {
 }
 
 /// Writes a record atomically (write to a temporary name, then rename).
-pub fn write(dir: &Path, mode: &str, label: &str, record: Map<String, Value>) -> std::io::Result<PathBuf> {
+pub fn write(
+    dir: &Path,
+    mode: &str,
+    label: &str,
+    record: Map<String, Value>,
+) -> std::io::Result<PathBuf> {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     std::fs::create_dir_all(dir)?;
     let nanos = SystemTime::now()

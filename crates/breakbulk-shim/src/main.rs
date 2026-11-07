@@ -65,7 +65,9 @@ fn exec(program: &[String], args: &[String]) -> Result<ExitCode, Error> {
     }
     #[cfg(not(unix))]
     {
-        let status = cmd.status().map_err(|e| Error::new(format!("{}: {e}", program[0])))?;
+        let status = cmd
+            .status()
+            .map_err(|e| Error::new(format!("{}: {e}", program[0])))?;
         Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
     }
 }
@@ -85,7 +87,8 @@ fn is_rustdoc_invocation(argv0: &OsString) -> bool {
 }
 
 fn rustdoc_mode(args: Vec<String>) -> Result<ExitCode, Error> {
-    let real = std::env::var(RUSTDOC_ENV).map_err(|_| Error::new(format!("{RUSTDOC_ENV} is not set")))?;
+    let real =
+        std::env::var(RUSTDOC_ENV).map_err(|_| Error::new(format!("{RUSTDOC_ENV} is not set")))?;
     let query = args.iter().any(|a| {
         matches!(a.as_str(), "-vV" | "-Vv" | "-V" | "--version") || a.starts_with("--print")
     });
@@ -96,9 +99,13 @@ fn rustdoc_mode(args: Vec<String>) -> Result<ExitCode, Error> {
     let mut rec = record::base("rustdoc", &[real], &args);
     let a = RustcArgs::parse(&args);
     rec.insert("crateName".into(), serde_json::json!(a.crate_name));
-    rec.insert("test".into(), serde_json::json!(args.iter().any(|a| a == "--test")));
+    rec.insert(
+        "test".into(),
+        serde_json::json!(args.iter().any(|a| a == "--test")),
+    );
     let label = a.crate_name.clone().unwrap_or_else(|| "rustdoc".into());
-    record::write(&dir, "rustdoc", &label, rec).map_err(|e| Error::new(format!("writing record: {e}")))?;
+    record::write(&dir, "rustdoc", &label, rec)
+        .map_err(|e| Error::new(format!("writing record: {e}")))?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -157,7 +164,12 @@ mod tests {
     #[test]
     fn chain() {
         let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        let (p, a) = split_chain(&v(&["/bin/clippy-driver", "/bin/rustc", "--crate-name", "x"]));
+        let (p, a) = split_chain(&v(&[
+            "/bin/clippy-driver",
+            "/bin/rustc",
+            "--crate-name",
+            "x",
+        ]));
         assert_eq!(p, ["/bin/clippy-driver", "/bin/rustc"]);
         assert_eq!(a, ["--crate-name", "x"]);
         let (p, a) = split_chain(&v(&["/bin/rustc", "-vV"]));
