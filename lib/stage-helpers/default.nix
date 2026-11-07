@@ -72,7 +72,8 @@ let
 
   stageName = product: helper: "${product.name}-${helper}";
 
-  binutilsOf = cfg: pkgs: if cfg.binutils != null then cfg.binutils else pkgs.binutils-unwrapped-all-targets;
+  binutilsOf =
+    cfg: pkgs: if cfg.binutils != null then cfg.binutils else pkgs.binutils-unwrapped-all-targets;
 
   # ---------------------------------------------------------------------
   # ELF
@@ -125,62 +126,68 @@ let
       ''
   );
 
-  strip = mkHelper "strip" {
-    all = false;
-    binutils = null;
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    pkgs.runCommand (stageName product "strip") { nativeBuildInputs = [ (binutilsOf cfg pkgs) ]; } ''
-      set -euo pipefail
-      ${copyIn input}
-      ${isElfFn}
-      copyIn "$out"
-      find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-        isElf "$f" || continue
-        strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
-      done
-    ''
-  );
+  strip =
+    mkHelper "strip"
+      {
+        all = false;
+        binutils = null;
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        pkgs.runCommand (stageName product "strip") { nativeBuildInputs = [ (binutilsOf cfg pkgs) ]; } ''
+          set -euo pipefail
+          ${copyIn input}
+          ${isElfFn}
+          copyIn "$out"
+          find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+            isElf "$f" || continue
+            strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
+          done
+        ''
+      );
 
-  patchelfRpath = mkHelper "patchelfRpath" {
-    libs = [ ];
-    patchelf = null;
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    let
-      dirOf' = l: if isDerivation l || builtins.isPath l then "${l}/lib" else toString l;
-      rpath = concatStringsSep ":" (map dirOf' cfg.libs);
-      patchelf = if cfg.patchelf != null then cfg.patchelf else pkgs.patchelf;
-    in
-    if cfg.libs == [ ] then
-      throw "breakbulk stage helper `patchelfRpath`: `libs` is empty"
-    else
-      pkgs.runCommand (stageName product "patchelfRpath") { nativeBuildInputs = [ patchelf ]; } ''
-        set -euo pipefail
-        ${copyIn input}
-        ${isElfFn}
-        copyIn "$out"
-        find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-          isElf "$f" || continue
-          # Static executables and objects have no dynamic section.
-          patchelf --print-rpath "$f" >/dev/null 2>&1 || continue
-          echo "patchelfRpath: ''${f#$out/}"
-          patchelf --add-rpath ${escapeShellArg rpath} "$f"
-        done
-      ''
-  );
+  patchelfRpath =
+    mkHelper "patchelfRpath"
+      {
+        libs = [ ];
+        patchelf = null;
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          dirOf' = l: if isDerivation l || builtins.isPath l then "${l}/lib" else toString l;
+          rpath = concatStringsSep ":" (map dirOf' cfg.libs);
+          patchelf = if cfg.patchelf != null then cfg.patchelf else pkgs.patchelf;
+        in
+        if cfg.libs == [ ] then
+          throw "breakbulk stage helper `patchelfRpath`: `libs` is empty"
+        else
+          pkgs.runCommand (stageName product "patchelfRpath") { nativeBuildInputs = [ patchelf ]; } ''
+            set -euo pipefail
+            ${copyIn input}
+            ${isElfFn}
+            copyIn "$out"
+            find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              isElf "$f" || continue
+              # Static executables and objects have no dynamic section.
+              patchelf --print-rpath "$f" >/dev/null 2>&1 || continue
+              echo "patchelfRpath: ''${f#$out/}"
+              patchelf --add-rpath ${escapeShellArg rpath} "$f"
+            done
+          ''
+      );
 
   # ---------------------------------------------------------------------
   # wasm
@@ -195,71 +202,77 @@ let
     wasm="''${wasms[0]}"
   '';
 
-  bindgen = mkHelper "bindgen" {
-    target = "web";
-    wasmBindgen = null;
-    extraArgs = [ ];
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    let
-      cli =
-        if cfg.wasmBindgen != null then
-          cfg.wasmBindgen
-        else if product ? lockfile then
-          wasmBindgen.forLockfile {
-            inherit pkgs;
-            inherit (product) lockfile;
-          }
-        else if product ? lockEntries then
-          wasmBindgen.forLockfile {
-            inherit pkgs;
-            entries = product.lockEntries;
-          }
-        else
-          throw "breakbulk stage helper `bindgen` (product `${product.name}`): no wasm-bindgen CLI; the product carries no `lockfile` or `lockEntries` to match it from, so pass `bindgen { wasmBindgen = …; }`";
-    in
-    pkgs.runCommand (stageName product "bindgen") { nativeBuildInputs = [ cli ]; } ''
-      set -euo pipefail
-      ${copyIn input}
-      work=$TMPDIR/in
-      copyIn "$work"
-      ${oneWasm "bindgen"}
-      mkdir -p "$out"
-      wasm-bindgen --target ${escapeShellArg cfg.target} --out-dir "$out" \
-        ${escapeShellArgs cfg.extraArgs} "$wasm"
-    ''
-  );
+  bindgen =
+    mkHelper "bindgen"
+      {
+        target = "web";
+        wasmBindgen = null;
+        extraArgs = [ ];
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          cli =
+            if cfg.wasmBindgen != null then
+              cfg.wasmBindgen
+            else if product ? lockfile then
+              wasmBindgen.forLockfile {
+                inherit pkgs;
+                inherit (product) lockfile;
+              }
+            else if product ? lockEntries then
+              wasmBindgen.forLockfile {
+                inherit pkgs;
+                entries = product.lockEntries;
+              }
+            else
+              throw "breakbulk stage helper `bindgen` (product `${product.name}`): no wasm-bindgen CLI; the product carries no `lockfile` or `lockEntries` to match it from, so pass `bindgen { wasmBindgen = …; }`";
+        in
+        pkgs.runCommand (stageName product "bindgen") { nativeBuildInputs = [ cli ]; } ''
+          set -euo pipefail
+          ${copyIn input}
+          work=$TMPDIR/in
+          copyIn "$work"
+          ${oneWasm "bindgen"}
+          mkdir -p "$out"
+          wasm-bindgen --target ${escapeShellArg cfg.target} --out-dir "$out" \
+            ${escapeShellArgs cfg.extraArgs} "$wasm"
+        ''
+      );
 
-  wasmOpt = mkHelper "wasmOpt" {
-    flags = [ "-Oz" ];
-    binaryen = null;
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    pkgs.runCommand (stageName product "wasmOpt")
-      { nativeBuildInputs = [ (if cfg.binaryen != null then cfg.binaryen else pkgs.binaryen) ]; }
-      ''
-        set -euo pipefail
-        ${copyIn input}
-        copyIn "$out"
-        find "$out" -type f -name '*.wasm' -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-          echo "wasmOpt: ''${f#$out/}"
-          wasm-opt ${escapeShellArgs cfg.flags} "$f" -o "$f.opt"
-          mv "$f.opt" "$f"
-        done
-      ''
-  );
+  wasmOpt =
+    mkHelper "wasmOpt"
+      {
+        flags = [ "-Oz" ];
+        binaryen = null;
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        pkgs.runCommand (stageName product "wasmOpt")
+          { nativeBuildInputs = [ (if cfg.binaryen != null then cfg.binaryen else pkgs.binaryen) ]; }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            copyIn "$out"
+            find "$out" -type f -name '*.wasm' -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              echo "wasmOpt: ''${f#$out/}"
+              wasm-opt ${escapeShellArgs cfg.flags} "$f" -o "$f.opt"
+              mv "$f.opt" "$f"
+            done
+          ''
+      );
 
   # `metadata` keys map to `wasm-tools metadata add` flags: strings and lists
   # of strings become `--<kebab-key> value` (once per value); attribute sets
@@ -270,9 +283,11 @@ let
       mapAttrsToList (
         k: v:
         let
-          flag = "--" + lib.concatMapStrings (c: if lib.toLower c != c then "-" + lib.toLower c else c) (
-            lib.stringToCharacters k
-          );
+          flag =
+            "--"
+            + lib.concatMapStrings (c: if lib.toLower c != c then "-" + lib.toLower c else c) (
+              lib.stringToCharacters k
+            );
           values =
             if isAttrs v then
               mapAttrsToList (n: ver: "${n}=${ver}") v
@@ -288,54 +303,57 @@ let
       ) metadata
     );
 
-  componentize = mkHelper "componentize" {
-    adapter = null;
-    metadata = { };
-    wasmTools = null;
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    let
-      adapt =
-        if cfg.adapter == null then
-          [ ]
-        else if isAttrs cfg.adapter && !(isDerivation cfg.adapter) then
-          [
-            "--adapt"
-            "${cfg.adapter.name}=${cfg.adapter.module}"
-          ]
-        else
-          [
-            "--adapt"
-            "${cfg.adapter}"
-          ];
-      meta = metadataArgs cfg.metadata;
-    in
-    pkgs.runCommand (stageName product "componentize")
-      { nativeBuildInputs = [ (if cfg.wasmTools != null then cfg.wasmTools else pkgs.wasm-tools) ]; }
-      ''
-        set -euo pipefail
-        ${copyIn input}
-        work=$out
-        copyIn "$out"
-        ${oneWasm "componentize"}
-        wasm-tools component new "$wasm" ${escapeShellArgs adapt} -o "$wasm.component"
-        ${
-          if meta == [ ] then
-            ''mv "$wasm.component" "$wasm"''
-          else
-            ''
-              wasm-tools metadata add ${escapeShellArgs meta} "$wasm.component" -o "$wasm"
-              rm "$wasm.component"
-            ''
-        }
-      ''
-  );
+  componentize =
+    mkHelper "componentize"
+      {
+        adapter = null;
+        metadata = { };
+        wasmTools = null;
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          adapt =
+            if cfg.adapter == null then
+              [ ]
+            else if isAttrs cfg.adapter && !(isDerivation cfg.adapter) then
+              [
+                "--adapt"
+                "${cfg.adapter.name}=${cfg.adapter.module}"
+              ]
+            else
+              [
+                "--adapt"
+                "${cfg.adapter}"
+              ];
+          meta = metadataArgs cfg.metadata;
+        in
+        pkgs.runCommand (stageName product "componentize")
+          { nativeBuildInputs = [ (if cfg.wasmTools != null then cfg.wasmTools else pkgs.wasm-tools) ]; }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            work=$out
+            copyIn "$out"
+            ${oneWasm "componentize"}
+            wasm-tools component new "$wasm" ${escapeShellArgs adapt} -o "$wasm.component"
+            ${
+              if meta == [ ] then
+                ''mv "$wasm.component" "$wasm"''
+              else
+                ''
+                  wasm-tools metadata add ${escapeShellArgs meta} "$wasm.component" -o "$wasm"
+                  rm "$wasm.component"
+                ''
+            }
+          ''
+      );
 
   # ---------------------------------------------------------------------
   # Packaging
@@ -343,41 +361,44 @@ let
   # 1980-01-01T00:00:00Z, the earliest time a zip (DOS) timestamp can hold.
   zipEpoch = "315532800";
 
-  deterministicZip = mkHelper "deterministicZip" {
-    name = null;
-    zip = null;
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    let
-      fileName = if cfg.name != null then cfg.name else "${product.name}.zip";
-    in
-    pkgs.runCommand (stageName product "zip")
-      { nativeBuildInputs = [ (if cfg.zip != null then cfg.zip else pkgs.zip) ]; }
-      ''
-        set -euo pipefail
-        ${copyIn input}
-        tree=$TMPDIR/tree
-        copyIn "$tree"
-        # Normalise everything zip records: modes (0644, or 0755 when any
-        # execute bit is set), times, and entry order (byte order of the
-        # path). -X drops uid/gid and extended timestamps, -D directory
-        # entries; TZ=UTC because zip stores local time.
-        find "$tree" -type d -exec chmod 0755 {} +
-        find "$tree" -type f -perm /111 -exec chmod 0755 {} +
-        find "$tree" -type f ! -perm /111 -exec chmod 0644 {} +
-        find "$tree" -exec touch -h -d @${zipEpoch} {} +
-        mkdir -p "$out"
-        cd "$tree"
-        find . -mindepth 1 -type f | sed 's|^\./||' | LC_ALL=C sort \
-          | TZ=UTC zip -X -D -q -@ "$out"/${escapeShellArg fileName}
-      ''
-  );
+  deterministicZip =
+    mkHelper "deterministicZip"
+      {
+        name = null;
+        zip = null;
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          fileName = if cfg.name != null then cfg.name else "${product.name}.zip";
+        in
+        pkgs.runCommand (stageName product "zip")
+          { nativeBuildInputs = [ (if cfg.zip != null then cfg.zip else pkgs.zip) ]; }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            tree=$TMPDIR/tree
+            copyIn "$tree"
+            # Normalise everything zip records: modes (0644, or 0755 when any
+            # execute bit is set), times, and entry order (byte order of the
+            # path). -X drops uid/gid and extended timestamps, -D directory
+            # entries; TZ=UTC because zip stores local time.
+            find "$tree" -type d -exec chmod 0755 {} +
+            find "$tree" -type f -perm /111 -exec chmod 0755 {} +
+            find "$tree" -type f ! -perm /111 -exec chmod 0644 {} +
+            find "$tree" -exec touch -h -d @${zipEpoch} {} +
+            mkdir -p "$out"
+            cd "$tree"
+            find . -mindepth 1 -type f | sed 's|^\./||' | LC_ALL=C sort \
+              | TZ=UTC zip -X -D -q -@ "$out"/${escapeShellArg fileName}
+          ''
+      );
 
   # Final layout. The platform comes from `target.triple` (or the stage
   # pkgs' host platform):

@@ -42,8 +42,18 @@ let
   # --- evaluation tests -----------------------------------------------------
 
   dummy = _: throw "not built in evaluation tests";
-  orderOf = stages: (S.explainOrder { name = "t"; inherit stages; }).order;
-  errorOf = stages: (S.explainOrder { name = "t"; inherit stages; }).error or "";
+  orderOf =
+    stages:
+    (S.explainOrder {
+      name = "t";
+      inherit stages;
+    }).order;
+  errorOf =
+    stages:
+    (S.explainOrder {
+      name = "t";
+      inherit stages;
+    }).error or "";
   has = lib.hasInfix;
 
   evalTests = {
@@ -399,14 +409,14 @@ let
       expected = false;
     };
     testRemoveDefaultCheck = {
-      expr = lib.attrNames (
-        S.mkProduct {
-          name = "x";
-          linked = helloLinked;
-          inherit pkgs;
-          checks.noSourceReferences = null;
-        }
-      ).checks;
+      expr =
+        lib.attrNames
+          (S.mkProduct {
+            name = "x";
+            linked = helloLinked;
+            inherit pkgs;
+            checks.noSourceReferences = null;
+          }).checks;
       expected = [ ];
     };
     testHelperConfigured = {
@@ -725,16 +735,18 @@ in
       strippedAll = H.strip { all = true; } (stageArgs helloLinked);
       rpathed = H.patchelfRpath { libs = [ pkgs.zlib ]; } (stageArgs helloLinked);
     in
-    pkgs.runCommand "stages-elf-helpers" { nativeBuildInputs = [ pkgs.binutils-unwrapped-all-targets ]; } ''
-      set -euo pipefail
-      if readelf -S -W ${stripped}/hello | grep -q ' \.debug_'; then exit 1; fi
-      readelf -S -W ${stripped}/hello | grep -q ' \.symtab '
-      if readelf -S -W ${strippedAll}/hello | grep -q ' \.symtab '; then exit 1; fi
-      test "$(${strippedAll}/hello)" = "hello 42"
-      readelf -d ${rpathed}/hello | grep -E 'R(UN)?PATH' | grep -qF '${pkgs.zlib}/lib'
-      test "$(${rpathed}/hello)" = "hello 42"
-      touch $out
-    '';
+    pkgs.runCommand "stages-elf-helpers"
+      { nativeBuildInputs = [ pkgs.binutils-unwrapped-all-targets ]; }
+      ''
+        set -euo pipefail
+        if readelf -S -W ${stripped}/hello | grep -q ' \.debug_'; then exit 1; fi
+        readelf -S -W ${stripped}/hello | grep -q ' \.symtab '
+        if readelf -S -W ${strippedAll}/hello | grep -q ' \.symtab '; then exit 1; fi
+        test "$(${strippedAll}/hello)" = "hello 42"
+        readelf -d ${rpathed}/hello | grep -E 'R(UN)?PATH' | grep -qF '${pkgs.zlib}/lib'
+        test "$(${rpathed}/hello)" = "hello 42"
+        touch $out
+      '';
 
   stages-install = pkgs.runCommand "stages-install" { } ''
     set -eu
@@ -797,17 +809,18 @@ in
       '';
 
   stages-wasm-component =
-    pkgs.runCommand "stages-wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; } ''
-      set -euo pipefail
-      c=${component}/pkg/adder.wasm
-      wasm-tools print $c > print.txt
-      head -n1 print.txt | grep -q '^(component'
-      wasm-tools component wit $c | tee wit.txt
-      if grep -q import wit.txt; then echo "component has imports"; exit 1; fi
-      wasm-tools metadata show $c | tee meta.txt
-      grep -q 'adder' meta.txt
-      grep -q 'Rust.*1.99.0' meta.txt
-      grep -q 'breakbulk.*0.0.0' meta.txt
-      touch $out
-    '';
+    pkgs.runCommand "stages-wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; }
+      ''
+        set -euo pipefail
+        c=${component}/pkg/adder.wasm
+        wasm-tools print $c > print.txt
+        head -n1 print.txt | grep -q '^(component'
+        wasm-tools component wit $c | tee wit.txt
+        if grep -q import wit.txt; then echo "component has imports"; exit 1; fi
+        wasm-tools metadata show $c | tee meta.txt
+        grep -q 'adder' meta.txt
+        grep -q 'Rust.*1.99.0' meta.txt
+        grep -q 'breakbulk.*0.0.0' meta.txt
+        touch $out
+      '';
 }

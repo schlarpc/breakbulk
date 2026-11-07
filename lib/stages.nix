@@ -115,11 +115,7 @@ let
     acc: set:
     acc
     // mapAttrs (
-      n: v:
-      if v == null then
-        null
-      else
-        (if acc ? ${n} && acc.${n} != null then acc.${n} else { }) // v
+      n: v: if v == null then null else (if acc ? ${n} && acc.${n} != null then acc.${n} else { }) // v
     ) set
   ) { };
 
@@ -170,10 +166,7 @@ let
       # x must come before y.
       edge =
         x: y:
-        x != y
-        && (
-          elem x cons.${y}.after || elem y cons.${x}.before || (y == "install" && x != "install")
-        );
+        x != y && (elem x cons.${y}.after || elem y cons.${x}.before || (y == "install" && x != "install"));
 
       fmtList = l: if l == [ ] then "-" else concatStringsSep ", " l;
       width = lib.foldl' (w: n: lib.max w (lib.stringLength n)) 6 names;
@@ -186,8 +179,8 @@ let
             c = cons.${n};
           in
           "  ${pad n}  after: ${fmtList c.rawAfter}; before: ${fmtList c.rawBefore}${
-            lib.optionalString (n == "install") "; runs last"
-          }"
+              lib.optionalString (n == "install") "; runs last"
+            }"
         ) names
         ++ lib.optional (removed != [ ]) "  removed: ${concatStringsSep ", " removed}"
       );
