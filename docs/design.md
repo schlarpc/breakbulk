@@ -207,7 +207,7 @@ Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
 - **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change.
 - With rustc older than 1.95, every scope is remapped.
 
-Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. Once it is available, breakbulk sets it by default when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later.
+Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. On Cargo 1.101 and later, breakbulk sets it when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later. When the project set it, its own scope is kept.
 
 ### Tests as products
 
@@ -415,7 +415,7 @@ The traced planner comes first, delivered through IFD, because it works on every
 3. **Day-one targets.** Linux gnu and musl on x86\_64 and aarch64, static glibc, wasm (browser and components), Windows msvc. Runners and native builders for tests.
 4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations with skip lists and runnable test apps, doctests, bench binaries, clippy and coverage variants.
 5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
-6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default once stable, the docs product.
+6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default on Cargo 1.101 and later (done), the docs product.
 7. **Later targets.** wasip2, riscv64, windows-gnu, zig (done); build-std targets, Darwin on Mac builders.
 
 ### Conformance suite

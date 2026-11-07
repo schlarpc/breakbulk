@@ -5,9 +5,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::{
-    Arg, CompileUnit, CrateInfo, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget, Plan,
-    PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice,
-    SpliceKind, Text, Unit, UnitId, Variant, VariantMode, contains_sentinel,
+    Arg, CompileUnit, CrateInfo, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget, Piece,
+    Plan, PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice,
+    Splice, SpliceKind, Text, Unit, UnitId, Variant, VariantMode, contains_sentinel,
 };
 
 use crate::records::{Metadata, Package, Record, Target};
@@ -43,6 +43,76 @@ pub struct Context {
     pub config_env: BTreeSet<String>,
     /// [`breakbulk_format::plan::Plan::rust_src_remap`].
     pub rust_src_remap: Option<(String, String)>,
+    /// The planner turned on Cargo's `trim-paths` itself (the project had
+    /// not): Cargo's `--remap-path-scope` is dropped, and breakbulk sets the
+    /// scope per product kind ([`Plan::trim_paths_default`]).
+    pub trim_paths_default: bool,
+}
+
+/// What Cargo's `trim-paths` remaps its build directory to (cargo
+/// `src/compiler/trim_paths.rs`, `build_dir_remap`).
+pub const CARGO_BUILD_DIR_REMAP: &str = "/cargo/build-dir";
+
+/// Whether a compile's arguments carry Cargo's `trim-paths` remaps: the
+/// build-directory remap, which user rustflags never produce.
+pub fn has_cargo_trim_paths(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        a.strip_prefix("--remap-path-prefix=")
+            .and_then(|r| r.strip_suffix(CARGO_BUILD_DIR_REMAP))
+            .is_some_and(|r| r.ends_with('='))
+    })
+}
+
+/// Whether any compile record of the trace carries Cargo's `trim-paths`.
+pub fn trace_trims_paths(records: &[Record]) -> bool {
+    records
+        .iter()
+        .any(|r| r.mode == "compile" && has_cargo_trim_paths(&r.args))
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_trim_paths_detected() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(has_cargo_trim_paths(&a(&[
+            "--remap-path-scope=all",
+            "--remap-path-prefix=/s/t=/cargo/build-dir"
+        ])));
+        // A user's own remap never targets /cargo/build-dir exactly.
+        assert!(!has_cargo_trim_paths(&a(&["--remap-path-prefix=/s=/x"])));
+        assert!(!has_cargo_trim_paths(&a(&[
+            "--remap-path-prefix=/s=/cargo/build-dirx"
+        ])));
+    }
+
+    #[test]
+    fn whole_paths_only() {
+        assert!(names_path("/t/build/a-1/out", "/t/build/a-1/out"));
+        assert!(names_path("x=/t/build/a-1/out/gen.rs", "/t/build/a-1/out"));
+        assert!(names_path("/t/build/a-1/out:/y", "/t/build/a-1/out"));
+        assert!(!names_path("/t/build/a-1/outer", "/t/build/a-1/out"));
+    }
+}
+
+/// Whether `value` names `dir` or a path below it, as a whole path.
+fn names_path(value: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches('/');
+    let b = value.as_bytes();
+    let mut from = 0;
+    while let Some(off) = value[from..].find(dir) {
+        let end = from + off + dir.len();
+        if end == b.len() || matches!(b[end], b'/' | b':' | b' ' | b'=' | 0x1f) {
+            return true;
+        }
+        from += off + 1;
+        while !value.is_char_boundary(from) {
+            from += 1;
+        }
+    }
+    false
 }
 
 /// Variables never kept in a unit's env: the planner's own, and the ones the
@@ -59,6 +129,10 @@ const DROPPED_ENV: &[&str] = &[
 /// Cargo's own environment (from 1.97 Cargo also sets `CARGO` on itself, so
 /// subtracting the baseline would drop it).
 const ALWAYS_KEPT_ENV: &[&str] = &["CARGO"];
+
+/// The remap pairs Cargo gives build scripts under trim-paths (cargo
+/// `src/compiler/custom_build.rs`), `:`-separated.
+const TRIM_PATHS_REMAP_VAR: &str = "CARGO_TRIM_PATHS_REMAP";
 
 /// The dynamic-library path variable on the planning host.
 const DYLIB_VAR: &str = "LD_LIBRARY_PATH";
@@ -664,10 +738,13 @@ impl<'a> Builder<'a> {
         &self,
         id: &str,
         args: &[String],
+        env: &BTreeMap<String, String>,
         owner: &str,
         platform: Option<Platform>,
     ) -> Result<Vec<Arg>, Error> {
         let mut out: Vec<Arg> = Vec::new();
+        // Where Cargo's trim-paths build-directory remap was.
+        let mut build_dir_remap_at: Option<usize> = None;
         let mut search_paths: Option<(usize, Vec<UnitId>, Vec<String>)> = None;
         // In a doctest, Cargo passes one `-L` per entry of `native_dirs`, a
         // sorted set of every run's search paths and every `links`
@@ -709,6 +786,32 @@ impl<'a> Builder<'a> {
                     continue;
                 }
                 _ => {}
+            }
+            // Cargo's trim-paths remaps its one build directory; breakbulk
+            // has one store path per OUT_DIR instead ("Path rewriting").
+            if let Some(from) = a
+                .strip_prefix("--remap-path-prefix=")
+                .and_then(|r| r.strip_suffix(CARGO_BUILD_DIR_REMAP))
+                .and_then(|r| r.strip_suffix('='))
+            {
+                if from.trim_end_matches('/') != self.ctx.scratch.trim_end_matches('/') {
+                    bail!(
+                        "unit {id}: Cargo's trim-paths remaps `{from}`, not the planner's build \
+                         directory {}",
+                        self.ctx.scratch
+                    );
+                }
+                build_dir_remap_at = Some(out.len());
+                last_was_link_arg_of = None;
+                i += 1;
+                continue;
+            }
+            // When breakbulk turned trim-paths on, it sets the scope per
+            // product kind at instantiation.
+            if self.ctx.trim_paths_default && a.starts_with("--remap-path-scope=") {
+                last_was_link_arg_of = None;
+                i += 1;
+                continue;
             }
             if let Some(n) = next
                 && matches!(a, "--cfg" | "--check-cfg" | "-l" | "-L" | "-C")
@@ -831,8 +934,9 @@ impl<'a> Builder<'a> {
             out.push(t.into());
             i += 1;
         }
-        if args.iter().any(|a| a.contains("=/cargo/build-dir")) {
-            bail!("unit {id}: Cargo's trim-paths is in effect; breakbulk does not support it yet");
+        if let Some(at) = build_dir_remap_at {
+            let remaps = self.build_dir_remaps(&out, env);
+            out.splice(at..at, remaps);
         }
         if let Some((at, mut runs, mut literals)) = search_paths {
             runs.sort();
@@ -845,6 +949,66 @@ impl<'a> Builder<'a> {
             });
         }
         Ok(out)
+    }
+
+    /// A run's `CARGO_TRIM_PATHS_REMAP` without the build-directory pair.
+    /// The run's own `OUT_DIR` is its `out`, which its derivation cannot
+    /// name; C code the script compiles there is still remapped, by
+    /// breakbulk's own prefix map for it (`outDirRemap`).
+    fn without_build_dir_remap(&self, value: &str) -> String {
+        let pair = format!(
+            "{}={CARGO_BUILD_DIR_REMAP}",
+            self.ctx.scratch.trim_end_matches('/')
+        );
+        value
+            .split(':')
+            .filter(|p| *p != pair)
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
+    /// Cargo's trim-paths build-directory remap, expanded: one
+    /// `--remap-path-prefix=<OUT_DIR>=/cargo/build-dir/<rel>` per run whose
+    /// `OUT_DIR` the unit names (in its env, normally as `OUT_DIR`, or in a
+    /// converted argument), so paths below it read as they do under Cargo.
+    /// Sorted by run.
+    fn build_dir_remaps(&self, args: &[Arg], env: &BTreeMap<String, String>) -> Vec<Arg> {
+        let mut runs = BTreeSet::new();
+        for a in args {
+            let Arg::Concat(pieces) = a else { continue };
+            for p in pieces {
+                if let Piece::Ref(Reference::Out(o)) = p
+                    && self.runs.iter().any(|r| r.id == o.out)
+                {
+                    runs.insert(o.out.clone());
+                }
+            }
+        }
+        // Values with sentinels (dynamic-library paths of host plugin
+        // dependencies) name search paths, not code.
+        for v in env.values().filter(|v| !contains_sentinel(v)) {
+            for (dir, run) in &self.rw.run_dirs {
+                if names_path(v, dir) {
+                    runs.insert(run.clone());
+                }
+            }
+        }
+        let scratch = self.ctx.scratch.trim_end_matches('/');
+        runs.into_iter()
+            .filter_map(|run| {
+                let r = self.runs.iter().find(|r| r.id == run)?;
+                let rel = under(&r.out_dir, scratch)?.to_owned();
+                Some(Arg::Concat(vec![
+                    Piece::Literal("--remap-path-prefix=".into()),
+                    Piece::Ref(Reference::Out(OutRef {
+                        out: run,
+                        output: "out".into(),
+                        file: None,
+                    })),
+                    Piece::Literal(format!("={CARGO_BUILD_DIR_REMAP}/{rel}")),
+                ]))
+            })
+            .collect()
     }
 
     /// Convert a recorded env: `rustc-env` sentinels become env splices,
@@ -885,7 +1049,7 @@ impl<'a> Builder<'a> {
     fn compile_unit(&self, c: &CompileRec<'a>) -> Result<Unit, Error> {
         let id = &c.id;
         let args = &c.rec.args;
-        let out = self.convert_args(id, args, &c.package.id, Some(c.platform))?;
+        let out = self.convert_args(id, args, &c.rec.env, &c.package.id, Some(c.platform))?;
         let (mut env, env_splices, dylib) =
             self.convert_env(id, &c.rec.env, &c.package.id, args)?;
         // The clippy variant: `cargo clippy` passes clippy's own arguments
@@ -970,6 +1134,9 @@ impl<'a> Builder<'a> {
                 return Err(self.shape_error(id, "env", &format!("`{k}={v}`"), &[]));
             }
             env.insert(k.clone(), v.clone());
+        }
+        if let Some(v) = env.get_mut(TRIM_PATHS_REMAP_VAR) {
+            *v = self.without_build_dir_remap(v);
         }
         let (env, dylib) = self.rewrite_env(id, &r.package.id, self.filter_env(&env, true))?;
         let cwd = self
@@ -1088,7 +1255,7 @@ impl<'a> Builder<'a> {
             }
             let package = self.package_of(rec)?;
             let id = format!("d-{}", package.name);
-            let args = self.convert_args(&id, &rec.args, &package.id, None)?;
+            let args = self.convert_args(&id, &rec.args, &rec.env, &package.id, None)?;
             let (env, env_splices, dylib) =
                 self.convert_env(&id, &rec.env, &package.id, &rec.args)?;
             let program = rec
@@ -1134,6 +1301,28 @@ impl<'a> Builder<'a> {
         Ok(out)
     }
 
+    /// Whether Cargo's trim-paths is in effect: for every compile unit or
+    /// for none. A profile override that sets it for some packages only
+    /// would need breakbulk's own remaps on the others; that is not
+    /// supported. Doctests are not counted: rustdoc gets remaps only with
+    /// `trim-paths = "all"`.
+    fn trim_paths(&self) -> Result<bool, Error> {
+        let (with, without): (Vec<_>, Vec<_>) = self
+            .compiles
+            .iter()
+            .partition(|c| has_cargo_trim_paths(&c.rec.args));
+        match (with.first(), without.first()) {
+            (Some(a), Some(b)) => bail!(
+                "Cargo's trim-paths is on for some units and off for others (unit {} has it, \
+                 unit {} does not), for example through a per-package profile override; \
+                 breakbulk supports it for all units or none",
+                a.id,
+                b.id
+            ),
+            (with, _) => Ok(with.is_some()),
+        }
+    }
+
     pub fn plan(&self) -> Result<Plan, Error> {
         let mut units = BTreeMap::new();
         let mut errors = Vec::new();
@@ -1165,7 +1354,8 @@ impl<'a> Builder<'a> {
             target: self.ctx.target.clone(),
             variant: self.ctx.variant.clone(),
             skeleton_root: self.ctx.skeleton.clone(),
-            trim_paths: false,
+            trim_paths: self.trim_paths()?,
+            trim_paths_default: self.ctx.trim_paths_default,
             units,
             roots: self.roots(),
             doctests: self.doctests()?,

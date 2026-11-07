@@ -401,8 +401,9 @@ pub struct RenderedCompile {
     /// Empty when Cargo's own `trim-paths` remaps are in the arguments.
     /// The same pairs become `-ffile-prefix-map` in `NIX_CFLAGS_COMPILE`.
     pub remap: Vec<(String, String)>,
-    /// The `--remap-path-scope` value to add with `remap`; `None` adds no
-    /// scope flag, which means every scope.
+    /// The `--remap-path-scope` value to add, for `remap` or for Cargo's
+    /// own trim-paths remaps in the arguments; `None` adds no scope flag,
+    /// which means every scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remap_scope: Option<String>,
     /// Layer 2 of the environment contract: an env capture's `env.json` (a

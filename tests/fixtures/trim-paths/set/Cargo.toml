@@ -1,0 +1,8 @@
+# The project sets trim-paths itself: breakbulk keeps Cargo's remaps and
+# scope as they are, adds none, and does not trace again.
+[workspace]
+resolver = "2"
+members = ["app"]
+
+[profile.dev]
+trim-paths = "all"

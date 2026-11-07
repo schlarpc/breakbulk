@@ -1,0 +1,11 @@
+# A path crate outside both workspace roots (`set` and `default`). With
+# Cargo's trim-paths, Cargo hashes it without its absolute path, and its
+# paths read `/cargo/deps/shared-0.1.0/…`. Its build script generates code
+# that `include!`s from OUT_DIR, whose paths read `/cargo/build-dir/…`.
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+itoa = "1.0.11"

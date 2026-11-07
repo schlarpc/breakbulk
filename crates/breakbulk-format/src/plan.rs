@@ -34,8 +34,15 @@ pub struct Plan {
     pub variant: Variant,
     /// The canonical absolute skeleton path planning ran at.
     pub skeleton_root: String,
-    /// Whether Cargo's `trim-paths` was in effect.
+    /// Whether Cargo's `trim-paths` was in effect: every compile unit
+    /// carries Cargo's own remaps, and breakbulk adds none.
     pub trim_paths: bool,
+    /// Whether the planner turned `trim-paths` on itself, because the
+    /// project had not ("trim-paths" in `docs/implementation.md`). Cargo's
+    /// `--remap-path-scope` is then left out of the plan, and breakbulk
+    /// sets the scope per product kind, as with its own remaps.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trim_paths_default: bool,
     pub units: BTreeMap<UnitId, Unit>,
     /// The plan's products. Sorted.
     pub roots: Vec<Root>,

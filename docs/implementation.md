@@ -106,15 +106,17 @@ Benches therefore come only from the bench variant.
 
 ### trim-paths
 
-Cargo's `trim-paths` profile setting is stable from Cargo 1.101. On earlier releases any `trim-paths` setting is a hard error, so it is always off there. Its default is `none` for every profile, `release` included.
+Cargo's `trim-paths` profile setting is stable from Cargo 1.101 (nightly 1.101 included). On earlier releases any `trim-paths` setting is a hard error, so it is always off there. Its default is `none` for every profile, `release` included. Its values are `none`, `object` and `all` (cargo `TomlTrimPaths`).
 
-- **Detection.** A unit is under Cargo's trim-paths when its argv has `--remap-path-scope=…` followed by `--remap-path-prefix` pairs ending in `…=/cargo/build-dir` and `…=/rustc/<commit>`. User rustflags never produce the `/cargo/build-dir` pair. The plan header's `trimPaths` records the result.
-- **Default.** A profile setting from `--config` overrides the manifest's, so passing it blindly would replace the project's own choice. The planner traces once. Only when the trace shows trim-paths off and Cargo is 1.101 or later does it trace again with `--config profile.<profile>.trim-paths=…`. Reading the profiles from the manifests instead would mean encoding Cargo's profile merging.
-- With trim-paths on, path crates outside the workspace root hash without their absolute path, and build-script runs get `CARGO_TRIM_PATHS_SCOPE`.
+- **Detection.** A unit is under Cargo's trim-paths when its argv has `--remap-path-prefix=<build dir>=/cargo/build-dir`; user rustflags never produce that pair. Cargo also passes `--remap-path-scope=<value>` and one pair each for the package (`<workspace root>=.`, or `<package root>=/cargo/deps/<name>-<version>` for packages outside the workspace root, vendored registry crates included) and the sysroot (`<sysroot>/lib/rustlib/src/rust=/rustc/<commit>`) (cargo `src/compiler/trim_paths.rs`, `trim_paths_remap`). The plan header's `trimPaths` records the result. trim-paths on for some compile units and off for others (a per-package profile override) fails the plan; doctests are not counted, because rustdoc gets remaps only with `all`.
+- **Default.** A profile setting from `--config` overrides the manifest's, so passing it blindly would replace the project's own choice. The planner traces once. Only when the trace shows trim-paths off and Cargo is 1.101 or later does it trace again, in its own scratch directory, with `--config profile.<profile>.trim-paths="all"`, and sets `trimPathsDefault` in the plan header. Reading the profiles from the manifests instead would mean encoding Cargo's profile merging. An explicit `trim-paths = "none"` in the project cannot be told apart from the default and is overridden too. A nightly 1.101 from before the setting was stable rejects it; the planner then keeps the first trace and warns.
+- **Scope.** With the project's own setting, Cargo's `--remap-path-scope` stays in argv. With `trimPathsDefault`, the planner drops it, and `breakbulk-unit` adds the scope per product kind, as for its own remaps (see [Source paths at run time](#source-paths-at-run-time)): shipped units keep store paths in debug info, test binaries remap every scope. `all` is passed rather than `object` so that `rustdoc --test` gets remaps too.
+- With trim-paths on, path crates outside the workspace root hash without their absolute path (cargo `src/workspace/source_id.rs`, `SourceId::stable_hash`: "not hashed at all"; c82e769), so the skeleton location no longer matters (see below). Build-script runs get `CARGO_TRIM_PATHS_SCOPE` and `CARGO_TRIM_PATHS_REMAP` (the same pairs, `:`-separated; cc-rs turns them into `-f*-prefix-map` flags). The run's own build-directory pair is left out of `CARGO_TRIM_PATHS_REMAP`, because the run's `OUT_DIR` is its own `out`, which its derivation cannot name; C code compiled there is still remapped by breakbulk's own prefix map for it.
+- The golden and differential tests give the reference `cargo build` the same `--config` when the plan has `trimPathsDefault`, and compare Cargo's one build-directory pair with the plan's expanded ones (below).
 
 ### Fixed skeleton location
 
-Cargo hashes the absolute path of a path crate that lies outside the workspace root into its `-C metadata`. The planner therefore places the skeleton at one canonical absolute path inside the sandbox and records it in the plan header. When a workspace has path dependencies outside its root, `trim-paths` is not in effect, and the canonical path is not available (non-default `sandbox-build-dir`, an unsandboxed build, macOS), planning fails with a message naming the crates affected. Otherwise the location does not matter and no check is made.
+Cargo hashes the absolute path of a path crate that lies outside the workspace root into its `-C metadata`, unless `trim-paths` is in effect. The planner therefore places the skeleton at one canonical absolute path inside the sandbox and records it in the plan header. When a workspace has path dependencies outside its root, `trim-paths` is not in effect after the planner's second trace, and the canonical path is not available (non-default `sandbox-build-dir`, an unsandboxed build, macOS), planning fails with a message naming the crates affected. Otherwise the location does not matter and no check is made.
 
 ### `breakbulk-shim` modes
 
@@ -214,7 +216,7 @@ Cargo has two build-directory layouts. Releases up to 1.99 use the classic one. 
 Two rewrites go beyond paths:
 
 - **Same-triple linkers.** When host and target triples are equal, Cargo gives every host unit (build scripts, proc macros and host rlibs) `-C linker=<target linker>`, and every build-script run `RUSTC_LINKER=<target linker>`. When the host spec's linker differs from the target's, each host unit's `-C linker=` value, and `RUSTC_LINKER` on each host run, is replaced with the host linker. The planner first checks that the unit carries exactly one `-C linker=` equal to the configured target linker. A linker set by the user's own config is left alone, because local Cargo applies it the same way. (Nightly's `-Zhost-config` does not help: host rlibs still get the target linker.)
-- **Build-directory remap.** When Cargo's `trim-paths` is in effect, Cargo emits one `--remap-path-prefix=<build dir>=/cargo/build-dir`. In breakbulk the build directory is split into one store path per `OUT_DIR`, so the planner expands it into one remap per referenced `OUT_DIR`.
+- **Build-directory remap.** When Cargo's `trim-paths` is in effect, Cargo emits one `--remap-path-prefix=<build dir>=/cargo/build-dir`. In breakbulk the build directory is split into one store path per `OUT_DIR`, so the planner expands it, in place, into one `--remap-path-prefix=<run's out>=/cargo/build-dir/<OUT_DIR relative to the build directory>` per run whose `OUT_DIR` the unit names (normally its own `OUT_DIR`; values with sentinels, which name search paths, do not count). Paths below it then read exactly as under Cargo, for example `/cargo/build-dir/x86_64-unknown-linux-gnu/debug/build/shared/<hash>/out/gen.rs` for `include!(concat!(env!("OUT_DIR"), …))`. A unit that names no `OUT_DIR` gets none.
 
 ### Env filtering
 
@@ -236,7 +238,7 @@ A unit's recorded env is the recorded env minus a baseline: the env of the shim'
   "kind": "build",
   "cargo": "1.96.1", "rustc": "1.96.1 (…)", "host": "x86_64-unknown-linux-gnu",
   "target": "wasm32-unknown-unknown", "variant": { "profile": "release", "features": [], "mode": "build" },
-  "skeletonRoot": "/build/skeleton", "trimPaths": false,
+  "skeletonRoot": "/build/skeleton", "trimPaths": false, "trimPathsDefault": false,
   "units": {
     "c-8f3a1d2e9b0c4f17": {
       "kind": "compile",
@@ -275,6 +277,7 @@ A unit's recorded env is the recorded env minus a baseline: the env of the shim'
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
+- **`trimPaths`** and **`trimPathsDefault`** (omitted when false): see [trim-paths](#trim-paths).
 - **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test and example binaries in a test plan; bench binaries in the bench variant's plan.
 
 ### Invariants
@@ -384,7 +387,7 @@ Nothing from the planner's environment reaches a unit.
    - Units that link (bins, tests, proc macros, cdylibs, build scripts) and doctests still name every `rlib` as an input. An `rlib` output cannot carry such a manifest: Nix records references only to paths in the builder's input closure, and a library compile has only `rmeta` inputs. `rlib` outputs carry no references, so fetching an `rmeta` never fetches an `rlib`.
    - When both Cargo and rustc are nightly, Cargo passes `-Zembed-metadata=no`: rlibs carry no metadata, and dependents get both `--extern name=lib….rlib` and `--extern name=lib….rmeta`. Units that link then also take every `rmeta` below them from the manifests.
 3. Expand splice points from each referenced run's `flags` output, using the sentinel table and the value-dependent rules below. Set the dynamic-library path from the unit's dynamic-path splices (the host plugin dependencies' runs).
-4. Add path remapping, unless the plan already carries Cargo's own remaps (`trimPaths`): map every source view, crate source and upstream `OUT_DIR` to a stable name (`<name>-<version>` for crates, the package's path from the repository root for workspace members), with the scope for the unit's product kind (see below).
+4. Add path remapping, unless the plan already carries Cargo's own remaps (`trimPaths`): map every source view, crate source and upstream `OUT_DIR` to a stable name (`<name>-<version>` for crates, the package's path from the repository root for workspace members), with the scope for the unit's product kind (see below). With Cargo's remaps and `trimPathsDefault`, add only the scope.
 5. Point `--out-dir` at `$TMPDIR/out` and run the recorded program.
 6. Parse rustc's JSON diagnostics from stderr, print each `rendered` field, and drop artifact notifications. Without this, build logs are unreadable JSON.
 7. Move outputs into place: `.rmeta` to `$rmeta`, `.rlib` to `$rlib`, binaries and cdylibs to `$out`. Discard dep-info. Debuginfo side files (`.dwp` with `split-debuginfo=packed`, `.dwo` with `unpacked`, and `.pdb` and `.dSYM` on other platforms) are not in the plan's output list, because `--print=file-names` does not name them. They are collected by scanning `$TMPDIR/out` for `.pdb`, `.dwp` and `.dwo` files and moved, under rustc's names, to the unit's `debug` output; units without one (libraries, host units) discard them with a warning.
@@ -440,7 +443,7 @@ Path remapping uses rustc's `--remap-path-scope` (stable since 1.95):
 | Test binaries, and products without `splitDebug` | All scopes |
 | Any unit, with rustc older than 1.95 | All scopes (no scope flag) |
 
-When Cargo's `trim-paths` is in effect, Cargo's own remaps and scope are used instead, and breakbulk adds none of its own, because rustc picks one remap when several match.
+When Cargo's `trim-paths` is in effect, Cargo's own remaps are used instead, and breakbulk adds none of its own, because rustc picks one remap when several match. The scope is Cargo's when the project set trim-paths, and the table's when the planner did (`trimPathsDefault`).
 
 `CARGO_MANIFEST_DIR` must be the real source-view store path: crates use it in `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), …))` and in build scripts. Remapping does not rewrite `env!` values, so a binary can still retain a source store path. Every product therefore gets a default check that fails when its main output references a source path. The `debug` output is allowed to.
 
@@ -794,7 +797,7 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `variants` | Feature powerset, clippy, coverage, a custom profile that only inherits `release` | linux-gnu | Host units shared between build and clippy at the same profile; dependencies shared between check and clippy; no target units shared between build and coverage; all units shared between `release` and the custom profile |
 | `post-link` | Custom stages, `mkForce null` on `strip`, a check on `linked` | linux-gnu, msvc | Stage order; check sees unstripped bytes |
 | `source-paths` | Panics in dependencies, `splitDebug`, test binaries | linux-gnu | No source references in main outputs; `debug` references sources; editing a README in a package does not change its test binary |
-| `trim-paths` | `trim-paths = "all"` in the profile; a second workspace without the setting | linux-gnu, Cargo ≥ 1.101 | Cargo's remaps used, none added; path crates outside the root hashed without absolute paths; the project's setting kept; the second workspace traced again with trim-paths on |
+| `trim-paths` | `trim-paths = "all"` in the profile; a second workspace without the setting; a path crate outside both roots with generated code in `OUT_DIR` | linux-gnu, Cargo ≥ 1.101 (nightly) | Cargo's remaps used, none added; path crates outside the root hashed without absolute paths (one `-C metadata` in both workspaces and at two other skeleton locations; stable 1.99 refuses those locations); the project's setting and scope kept; the second workspace traced again with trim-paths on and scoped per product kind; `OUT_DIR` paths read `/cargo/build-dir/…`; products have no source references; the second workspace's debug output works in gdb; tests pass (`products-trim-paths`) |
 | `doctests` | Doctests using a dev-dependency, one `should_panic`, an edition-2024 crate | linux-gnu, aarch64 | Doctests run; cross doctests run under the runner or skip with a reason |
 | `test-control` | Tests that need network, `#[ignore]` tests, a skip list per binary | linux-gnu | Skipped tests do not run; changing a skip list re-runs only that test run; the test app runs the network test outside the sandbox |
 | `benches` | A libtest bench and a Criterion bench | linux-gnu | Bench binaries come from the bench variant only, built with the bench profile; the test plan has none; smoke checks pass with `--test` |
@@ -828,7 +831,7 @@ Each milestone ends with fixtures passing in CI, so progress is measured by patt
    - **Exit:** `post-link`, `embed`, `variants`, `source-paths`, `doctests`, `test-control` and `benches` pass. One of the author's multi-workspace repositories with an embedded product builds end to end, with its CI using `repo.checks`.
 6. **M5: Dynamic-derivation delivery.** The outer derivation on `builder-rpc-v0`, root submission, `mode = "auto"` detection. Developed against Nix master; becomes the automatic choice once a release ships the feature.
    - **Exit:** every fixture passes in both modes with identical unit derivation paths and identical product bytes.
-7. **M6: Below-crate seams and measurement.** The pipelined split with its backends, the history-replay harness reporting rmeta stability per edit, optional dep-info source narrowing, nextest integration, the documentation product, `trim-paths` by default once Cargo 1.101 is stable, and full-CA units once Nix resolves derivations without fetching input contents.
+7. **M6: Below-crate seams and measurement.** The pipelined split with its backends, the history-replay harness reporting rmeta stability per edit, optional dep-info source narrowing, nextest integration, the documentation product, `trim-paths` by default on Cargo 1.101 and later (done; tested on nightly 1.101), and full-CA units once Nix resolves derivations without fetching input contents.
    - **Exit:** a published measurement on stable and on nightly with relink-don't-rebuild flags, and a go or no-go on each pipelining backend.
 8. **M7: Later targets.** wasip2, riscv64, windows-gnu, build-std targets, Darwin on Mac builders, zig.
    - **Status:** wasip2, riscv64, windows-gnu and windows-gnullvm (x86\_64), and zig pass their fixtures (`tests/presets/m7.nix`). build-std fails at planning and Darwin is not started; see "Toolchain presets".

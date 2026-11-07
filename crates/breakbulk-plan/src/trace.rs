@@ -64,6 +64,9 @@ pub struct Options {
     pub forbidden: Vec<String>,
     /// The toolchain spec file (`--spec`, see [`crate::spec`]).
     pub spec: Option<String>,
+    /// Set by the planner for its second trace, which turns Cargo's
+    /// `trim-paths` on ([`crate::plan`]).
+    pub trim_paths_default: bool,
 }
 
 /// What one trace produced.
@@ -99,6 +102,7 @@ impl Trace {
             keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
+            trim_paths_default: opts.trim_paths_default,
         })
     }
 }
@@ -248,7 +252,9 @@ fn selection_args(opts: &Options) -> Vec<String> {
 
 /// Fail when the skeleton is not at its canonical location and a path
 /// package lies outside the workspace root ("Fixed skeleton location").
-fn check_location(opts: &Options, metadata: &Metadata) -> Result<(), Error> {
+/// Not needed when Cargo's `trim-paths` is in effect: Cargo then hashes
+/// such a package without its absolute path.
+pub fn check_location(opts: &Options, metadata: &Metadata) -> Result<(), Error> {
     let Some(canonical) = &opts.canonical_root else {
         return Ok(());
     };
@@ -343,7 +349,6 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     std::fs::write(&meta_path, &meta_text)
         .map_err(|e| Error(format!("writing {}: {e}", meta_path.display())))?;
     let metadata = Metadata::read(&meta_path)?;
-    check_location(opts, &metadata)?;
 
     let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
     if opts.mode == VariantMode::Clippy && opts.clippy_driver.is_none() {
@@ -398,6 +403,49 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         host,
         rust_src_remap,
     })
+}
+
+/// Whether Cargo's `trim-paths` profile setting exists: stable from Cargo
+/// 1.101 (nightly 1.101 included); a hard error before. `version` is
+/// `cargo -V` without `cargo `.
+pub fn has_trim_paths(version: &str) -> bool {
+    let mut parts = version
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u64>().unwrap_or(0));
+    match (parts.next(), parts.next()) {
+        (Some(major), Some(minor)) => (major, minor) >= (1, 101),
+        _ => false,
+    }
+}
+
+/// The options of the planner's second trace, which turns on Cargo's
+/// `trim-paths` for the profile: `--config` overrides the manifests'
+/// setting, which is why it is only passed when the first trace showed it
+/// off. Its own scratch directory, so the first trace's records and
+/// target directory stay apart.
+pub fn with_trim_paths(opts: &Options) -> Options {
+    let mut o = opts.clone();
+    o.scratch = format!("{}/trim-paths", opts.scratch.trim_end_matches('/'));
+    o.configs
+        .push(format!("profile.{}.trim-paths=\"all\"", opts.profile));
+    o.trim_paths_default = true;
+    o
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trim_paths_from_cargo_1_101() {
+        assert!(!has_trim_paths("1.99.0 (abc 2026-09-01)"));
+        assert!(!has_trim_paths("1.100.0-nightly (abc 2026-09-01)"));
+        assert!(has_trim_paths("1.101.0-nightly (3c747ea3e 2026-11-03)"));
+        assert!(has_trim_paths("1.101.0"));
+        assert!(has_trim_paths("1.102.1"));
+        assert!(!has_trim_paths(""));
+    }
 }
 
 /// Whether `cargo test --doc` has anything to do: a selected member with a
