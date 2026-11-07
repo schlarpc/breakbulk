@@ -41,6 +41,15 @@
 # them out (bin/, lib/, pkg/ for wasm). A package whose roots were all
 # skipped (required features) is the first root's stub, which fails with
 # the reason.
+#
+# In dynamic-derivation mode whether Cargo built a root is known only at
+# build time, from its wrapper (`not-built`, lib/dynamic.nix): `linked`
+# leaves such roots out then, and fails with their reasons when it is left
+# with none. `.unbuilt` is empty. A product whose every root has required
+# features (by the prediction) may be all skipped, so `.uncertain` is set
+# and repo.checks uses `.buildCheck` for it instead of the product and its
+# checks: a derivation that builds every built root's unit and logs the
+# skipped ones, which succeeds in both cases.
 { lib, stages }:
 let
   inherit (lib)
@@ -92,12 +101,21 @@ let
     else
       null;
 
+  isDynamic = r: r.breakbulkRoot.dynamic or false;
+
   # The `linked` stage of one package: a directory of symlinks (`out`), and
   # the root units' debuginfo side files (`debug`) under the names Cargo
   # uplifts them to: a bin's `.dwp` renamed as the bin is (`<bin>.dwp`),
   # `.pdb` and `.dwo` under rustc's names, which the binaries record.
+  # Dynamic-derivation roots are read through their wrappers and left out
+  # when not built.
   mkLinked =
     pkgs: pkg: built:
+    let
+      # Only dynamic-derivation roots need the build-time bookkeeping; IFD
+      # mode's script stays as it was.
+      anyDyn = lib.any isDynamic built;
+    in
     pkgs.runCommand "${pkg}-linked"
       {
         outputs = [
@@ -122,17 +140,32 @@ let
             ln -s "$1" "$dir/$2"
           }
         ''
+        + lib.optionalString anyDyn ''
+          linked=0
+          skipped=()
+        ''
         + concatMapStrings (
           r:
           let
             dbg = debugOf r;
             bin = r.breakbulkRoot.kind == "bin";
             target = lib.escapeShellArg r.breakbulkRoot.target;
+            dyn = isDynamic r;
+            w = r.breakbulkRoot.wrapper or null;
+            src = if dyn then "${w}/root" else "${r}";
           in
-          (
+          lib.optionalString dyn ''
+            if [ -e ${w}/not-built ]; then
+              skipped+=("$(<${w}/not-built)")
+            else
+          ''
+          + lib.optionalString dyn ''
+            linked=$((linked + 1))
+          ''
+          + (
             if bin then
               ''
-                for f in ${r}/*; do
+                for f in ${src}/*; do
                   b=''${f##*/}
                   stem=''${b%%.*}
                   link "$f" ${target}"''${b#"$stem"}"
@@ -140,7 +173,7 @@ let
               ''
             else
               ''
-                for f in ${r}/*; do
+                for f in ${src}/*; do
                   link "$f" "''${f##*/}"
                 done
               ''
@@ -157,8 +190,43 @@ let
               done
             fi
           ''
+          + lib.optionalString dyn ''
+            fi
+          ''
         ) built
+        + lib.optionalString anyDyn ''
+          for s in "''${skipped[@]}"; do
+            printf 'breakbulk: left out of ${pkg}: %s\n' "$s" >&2
+          done
+          if [ "$linked" -eq 0 ] && [ ''${#skipped[@]} -gt 0 ]; then
+            printf 'error: %s\n' "''${skipped[@]}" >&2
+            exit 1
+          fi
+        ''
       );
+
+  # Dynamic-derivation mode, for repo.checks: every root's wrapper (which
+  # builds its unit, when Cargo built it), with a log naming each root and
+  # whether it was built. Succeeds whether or not any root was built.
+  mkBuildCheck =
+    pkgs: pkg: rs:
+    pkgs.runCommand "${pkg}-roots"
+      {
+        wrappers = map (r: r.breakbulkRoot.wrapper) rs;
+        names = map rootName rs;
+      }
+      ''
+        mkdir -p $out
+        w=($wrappers)
+        n=($names)
+        for i in "''${!w[@]}"; do
+          if [ -e "''${w[$i]}/not-built" ]; then
+            printf '%s: skipped: %s\n' "''${n[$i]}" "$(<"''${w[$i]}/not-built")"
+          else
+            printf '%s: built\n' "''${n[$i]}"
+          fi
+        done | tee $out/log
+      '';
 
   # The scope of non-test units for a target: debug info keeps real store
   # paths only when the target's products split it off.
@@ -226,13 +294,19 @@ let
             inherit pkgs ca sourcePaths;
             info = lib.optionalAttrs (lockfile != null) { inherit lockfile; };
           };
+          # Dynamic-derivation mode: every root may be skipped when each
+          # has required features.
+          uncertain = lib.all (
+            r: isDynamic r && (r.breakbulkRoot.requiredFeatures or null) != null && r.breakbulkRoot.requiredFeatures != [ ]
+          ) rs;
           extra = {
-            inherit roots;
+            inherit roots uncertain;
             unbuilt = map (r: {
               root = rootName r;
               inherit (r.breakbulkRoot) reason;
             }) unbuilt;
-          };
+          }
+          // lib.optionalAttrs uncertain { buildCheck = mkBuildCheck pkgs pkg rs; };
         in
         (if built == [ ] then head rs else p) // extra;
     in

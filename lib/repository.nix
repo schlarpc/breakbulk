@@ -829,12 +829,19 @@ let
       triple: t:
       lib.concatMapAttrs (
         pkg: p:
-        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
-          {
-            "${wsName}/${triple}/${pkg}/build" = p;
-          }
-          // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
-        )
+        # Dynamic-derivation mode cannot tell at evaluation time whether a
+        # product whose roots all have required features was built
+        # (lib/products.nix `uncertain`): its check builds the roots Cargo
+        # built and logs the others.
+        if p.uncertain or false then
+          { "${wsName}/${triple}/${pkg}/build" = p.buildCheck; }
+        else
+          lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+            {
+              "${wsName}/${triple}/${pkg}/build" = p;
+            }
+            // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
+          )
       ) t.packages
       // lib.concatMapAttrs (
         pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
@@ -877,6 +884,12 @@ let
   # dependency's store path shows up under `deps` and not as its own
   # reason. Unit keys (`-C metadata`) are never compared: they leave out
   # rustflags (spike A, S13). `.text` is a readable report.
+  #
+  # In dynamic-derivation mode it reads the unit derivations through IFD
+  # mode (importing units.json, which builds breakbulk-instantiate and the
+  # plans): they are the same derivations the outer derivation writes,
+  # except units downstream of an embedded product, which IFD mode
+  # describes as IFD mode would build them.
 
   discard = builtins.unsafeDiscardStringContext;
   planIndex = lib.concatMapAttrs (
@@ -1060,8 +1073,12 @@ let
       rb = resolvePlan b;
       pa = readPlanOf ra;
       pb = readPlanOf rb;
-      ua = ra.inst.units.${ra.kind};
-      ub = rb.inst.units.${rb.kind};
+      # In dynamic-derivation mode the unit derivations are not known at
+      # evaluation time; IFD mode's are the same derivations (except
+      # downstream of an embedded product), so they are read through it.
+      unitsOf = r: if r.inst.delivery == "dynamic" then r.inst.ifdUnits.${r.kind} else r.inst.units.${r.kind};
+      ua = unitsOf ra;
+      ub = unitsOf rb;
       la = labelled pa package;
       lb = labelled pb package;
       allA = labelled pa null;

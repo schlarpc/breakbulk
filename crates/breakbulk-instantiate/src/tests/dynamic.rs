@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 use crate::dynamic::{
-    COREUTILS_KEY, Context, InputValue, Outer, Values, Written, dynamic_plan, resolve,
+    COREUTILS_KEY, Context, DOCTEST_CONFIG, InputValue, Outer, Values, Written, doctest_key,
+    dynamic_plan, resolve,
 };
 
 const COREUTILS: &str = "/nix/store/77777777777777777777777777777777-coreutils";
@@ -87,6 +88,7 @@ fn outer(names: &[&str]) -> Outer {
             .map(|n| (n.to_string(), format!("{}.drv", n.replace('/', "."))))
             .collect(),
         units: Some("units.drv".into()),
+        doctests: BTreeMap::new(),
     }
 }
 
@@ -220,6 +222,8 @@ fn nodes_are_in_dependency_order() {
         ]
     );
     assert!(pos.contains_key("stub:smokeapp/test/it"));
+    // A product stub fails, so it is not written: its wrapper says why.
+    assert!(!pos.contains_key("stub:smokeapp/bin/admin-cli"));
     assert_eq!(plan.nodes.last().unwrap().key, "wrapper:*units");
 }
 
@@ -268,13 +272,23 @@ fn wrappers() {
     assert_eq!(info["reason"], serde_json::Value::Null);
     assert!(info.get("testSpec").is_none());
 
-    // A product root Cargo did not build: the wrapper is the stub's.
+    assert_eq!(w.env["notBuilt"], "");
+
+    // A product root Cargo did not build: no `root`, a `not-built` marker
+    // with the reason, and no dependency on the (failing) stub.
     let w = by_key["wrapper:smokeapp/bin/admin-cli"];
-    assert_eq!(
-        w.env["root"],
-        unit_path("stub:smokeapp/bin/admin-cli", "out")
-    );
+    assert_eq!(w.env["root"], "");
     assert_eq!(w.env["debugRoot"], "");
+    assert!(
+        w.env["notBuilt"].contains("required features `[cli]`"),
+        "{}",
+        w.env["notBuilt"]
+    );
+    assert!(
+        !w.input_drvs.keys().any(|d| d.contains("stub")),
+        "{:?}",
+        w.input_drvs
+    );
     let info: serde_json::Value = serde_json::from_str(&w.env["rootJson"]).unwrap();
     assert!(
         info["reason"]
@@ -283,6 +297,15 @@ fn wrappers() {
             .contains("required features `[cli]`")
     );
     assert_eq!(info["unit"], serde_json::Value::Null);
+
+    // A test root Cargo did not build: `root` is its stub, which succeeds.
+    let w = by_key["wrapper:smokeapp/test/it"];
+    assert_eq!(w.env["root"], unit_path("stub:smokeapp/test/it", "out"));
+    assert!(
+        w.env["notBuilt"].contains("was skipped"),
+        "{}",
+        w.env["notBuilt"]
+    );
 }
 
 #[test]
@@ -392,6 +415,124 @@ fn test_spec_of_a_test_root() {
     for r in runs {
         assert!(w.input_drvs[&drv_of(r)].contains("flags"));
     }
+    // The package directory, for test apps in a checkout.
+    assert_eq!(spec["packageDir"], "smokeapp");
+    // nextest's metadata, as lib/test-runs.nix's nextestSpec has it.
+    let nx = &spec["nextest"];
+    assert_eq!(nx["binaryId"], "smokeapp::bin/smokeapp");
+    let bin = &nx["binaries"]["rust-binaries"]["smokeapp::bin/smokeapp"];
+    assert_eq!(bin["binary-path"], "@BINARY@");
+    assert_eq!(bin["kind"], "bin");
+    assert_eq!(bin["build-platform"], "target");
+    assert_eq!(
+        nx["binaries"]["rust-build-meta"]["platforms"]["host"]["libdir"],
+        "@LIBDIR@"
+    );
+    let meta = &nx["cargoMetadata"];
+    assert_eq!(meta["workspace_root"], "@WS@");
+    let pkgs = meta["packages"].as_array().unwrap();
+    assert_eq!(pkgs.len(), 2);
+    let view = input_value("src:smokeapp");
+    for p in pkgs {
+        let m = p["manifest_path"].as_str().unwrap();
+        assert!(m.starts_with(&format!("{view}/")), "{m}");
+    }
+    let app = pkgs.iter().find(|p| p["name"] == "smokeapp").unwrap();
+    assert_eq!(app["manifest_path"], format!("{view}/smokeapp/Cargo.toml"));
+    assert_eq!(app["version"], "0.1.0");
+}
+
+/// The plan with a doctest for `smokelib`, made from its library unit.
+fn with_doctest(mut inputs: Inputs) -> Inputs {
+    let Some(breakbulk_format::Unit::Compile(c)) = inputs.plan.units.get(LIB).cloned() else {
+        panic!()
+    };
+    inputs.plan.doctests.insert(
+        "d-smokelib".into(),
+        breakbulk_format::Doctest {
+            package: c.package,
+            krate: c.krate,
+            program: c.program,
+            args: c.args,
+            env: c.env,
+            env_splices: c.env_splices,
+            dylib_path_from: c.dylib_path_from,
+            cwd: c.cwd,
+        },
+    );
+    inputs
+}
+
+#[test]
+fn doctests() {
+    let inputs = with_doctest(dyn_inputs());
+    let units = instantiate(&inputs).unwrap();
+    let mut o = outer(&ROOTS);
+    for p in ["smokelib", "smokeapp"] {
+        o.doctests.insert(p.into(), format!("{p}.doctest.drv"));
+    }
+    let plan = dynamic_plan(&inputs, &units, &o).unwrap();
+    let mut vals = values(&inputs);
+    for p in ["smokelib", "smokeapp"] {
+        for a in DOCTEST_CONFIG {
+            vals.insert(
+                doctest_key(p, a),
+                InputValue {
+                    value: format!("{p} {a}"),
+                    context: vec![],
+                },
+            );
+        }
+    }
+    let mut written = BTreeMap::new();
+    let mut by_key = BTreeMap::new();
+    for n in &plan.nodes {
+        let r = resolve(&n.drv, &vals, &written, units.pass_as_file_above).unwrap();
+        written.insert(
+            n.key.clone(),
+            Written {
+                drv_path: drv_of(&n.key),
+                outputs: r
+                    .outputs
+                    .iter()
+                    .map(|o| (o.clone(), unit_path(&n.key, o)))
+                    .collect(),
+            },
+        );
+        by_key.insert(n.key.clone(), (r, n.submit_as.clone()));
+    }
+    // The doctest derivation is IFD mode's, plus the test configuration.
+    let (d, submit) = &by_key["doctest:smokelib"];
+    assert_eq!(submit, &None);
+    let ifd = &units.doctests["d-smokelib"];
+    for k in ifd.attrs.keys() {
+        if k != "args" && k != "outputs" {
+            assert_eq!(d.env[k], attr(ifd, k), "{k}");
+        }
+    }
+    assert_eq!(d.args, ["doctest"]);
+    for a in DOCTEST_CONFIG {
+        assert_eq!(d.env[a], format!("smokelib {a}"));
+    }
+    // Its wrapper, submitted as `<package>.doctest.drv`.
+    let (w, submit) = &by_key["wrapper:smokelib.doctest"];
+    assert_eq!(submit.as_deref(), Some("smokelib.doctest.drv"));
+    assert_eq!(w.name, "ws-x86_64-unknown-linux-gnu-dev-smokelib.doctest");
+    assert_eq!(w.env["root"], unit_path("doctest:smokelib", "out"));
+    assert_eq!(w.env["notBuilt"], "");
+    // A predicted doctest the plan lacks: a wrapper that says why.
+    let (w, _) = &by_key["wrapper:smokeapp.doctest"];
+    assert_eq!(w.env["root"], "");
+    assert!(
+        w.env["notBuilt"].contains("no doctests"),
+        "{}",
+        w.env["notBuilt"]
+    );
+    assert!(!by_key.contains_key("doctest:smokeapp"));
+
+    // A doctest of the plan that was not predicted is an error.
+    let e = dynamic_plan(&inputs, &units, &outer(&ROOTS)).unwrap_err().0;
+    assert!(e.contains("smokelib"), "{e}");
 }
 
 #[test]

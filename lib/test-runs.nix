@@ -411,6 +411,9 @@ rec {
   #     `rustc-env`, `[env]`), so the process sees what a libtest run sees;
   #   - dependency edges are not synthesized: `deps()` and `rdeps()`
   #     filtersets see none.
+  #
+  # Dynamic-derivation mode synthesizes the same in Rust (`nextest` in
+  # crates/breakbulk-instantiate/src/dynamic.rs); keep the two in sync.
   nextestSpec =
     {
       plan,
@@ -578,6 +581,29 @@ rec {
       enable = true;
     }
     // (cfg.binaries.${binary} or { });
+
+  # The attributes a package's doctest derivation gets from its test
+  # configuration: the runner (a list), `test.args` with
+  # `--include-ignored` when `test.includeIgnored`, and `test.env` with
+  # `test.path` as PATH. Dynamic-derivation mode passes the same strings to
+  # its outer derivation (lib/dynamic.nix), so both modes write the same
+  # doctest derivation.
+  doctestConfig =
+    {
+      packages,
+      runner ? null,
+    }:
+    pkg:
+    let
+      cfg = testConfig packages pkg;
+    in
+    {
+      BREAKBULK_TEST_RUNNER = toJSON (if runner == null then [ ] else lib.toList runner);
+      BREAKBULK_TEST_ARGS = toJSON (cfg.args ++ lib.optional cfg.includeIgnored "--include-ignored");
+      BREAKBULK_TEST_ENV = toJSON (
+        cfg.env // lib.optionalAttrs (cfg.path != [ ]) { PATH = lib.makeBinPath cfg.path; }
+      );
+    };
 
   # libtest arguments of one binary.
   testArgs =
@@ -807,20 +833,7 @@ rec {
       ) byPackage;
 
       doctests = lib.mapAttrs (
-        pkg: attrs:
-        let
-          cfg = testConfig packages pkg;
-        in
-        derivation (
-          attrs
-          // {
-            BREAKBULK_TEST_RUNNER = toJSON runnerList;
-            BREAKBULK_TEST_ARGS = toJSON (cfg.args ++ lib.optional cfg.includeIgnored "--include-ignored");
-            BREAKBULK_TEST_ENV = toJSON (
-              cfg.env // lib.optionalAttrs (cfg.path != [ ]) { PATH = lib.makeBinPath cfg.path; }
-            );
-          }
-        )
+        pkg: attrs: derivation (attrs // doctestConfig { inherit packages runner; } pkg)
       ) (inst.doctestAttrs or { });
 
       checks =

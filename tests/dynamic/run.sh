@@ -19,8 +19,13 @@
 #
 #   - every unit .drv path the outer derivations wrote equals IFD mode's,
 #     for the build and the test plan, and both modes have the same units;
+#     so does every doctest .drv path;
 #   - every product has the same bytes in both modes;
-#   - every test run succeeded in both modes.
+#   - every test run and doctest succeeded in both modes, with the same
+#     test outcomes (libtest's `test … ok` lines, nextest's status lines
+#     without timings), and both modes have the same repo.checks, all built;
+#   - the test apps of test-control behave the same in both modes;
+#   - repo.explainSharing works in dynamic mode.
 #
 # The system daemon's configuration and /etc/nix are not touched: Nix master
 # runs as the calling user against `local?root=$WORK/store` with its own
@@ -46,7 +51,7 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives embed config-env)
+  fixtures=(walking-skeleton directives embed config-env doctests test-control required-features nextest)
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }
@@ -159,7 +164,7 @@ for f in "${fixtures[@]}"; do
   mapfile -t keys < <(python3 -c 'import json, sys; print("\n".join(sorted(json.load(open(sys.argv[1])))))' "$ifdUnits")
   for key in "${keys[@]}"; do
     outer=$(nixm path-info --derivation -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "outer.$f.\"$key\"")
-    nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\) \(.*\)$/\1 \2/p' >"$WORK/units.dynamic"
+    nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\|doctest:[^ ]*\) \(.*\)$/\1 \2/p' >"$WORK/units.dynamic"
     if ! python3 - "$ifdUnits" "$key" "$WORK/units.dynamic" "$mayDiffer" <<'EOF'; then
 import json, re, sys
 ifd = json.load(open(sys.argv[1]))[sys.argv[2]]
@@ -204,13 +209,65 @@ EOF
       status=1
     fi
   done
-  # Test runs: built (so passed) in both modes, the same set.
-  (cd "$(real "$dyn")/runs" && find . -mindepth 1 | sort) >"$WORK/$f-runs.dynamic"
-  (cd "$(real "$ifd")/runs" && find . -mindepth 1 | sort) >"$WORK/$f-runs.ifd"
-  if diff -u "$WORK/$f-runs.ifd" "$WORK/$f-runs.dynamic"; then
-    echo "$f: $(grep -c . "$WORK/$f-runs.ifd") test-run entries passed in both modes" >&2
+  # Test runs, doctests and checks: built (so passed) in both modes, the
+  # same sets.
+  for what in runs doctests checks; do
+    for m in dyn ifd; do
+      d=$(real "${!m}")/$what
+      if [ -d "$d" ]; then (cd "$d" && find . -mindepth 1 | sort); fi >"$WORK/$f-$what.$m"
+    done
+    if diff -u "$WORK/$f-$what.ifd" "$WORK/$f-$what.dyn"; then
+      echo "$f: $(grep -c . "$WORK/$f-$what.ifd") $what entries built in both modes" >&2
+    else
+      echo "FAIL: $f: different $what" >&2
+      status=1
+    fi
+  done
+  # The same test outcomes: each log's result lines, timings removed.
+  if ! python3 - "$WORK/store" "$(real "$ifd")" "$(real "$dyn")" <<'EOF'; then
+import os, re, sys
+store, ifd, dyn = sys.argv[1:]
+line = re.compile(r"^(test .* \.\.\. .*|\s*(PASS|FAIL|SKIP|TRY \d+ \w+|SIGSEGV|TIMEOUT|TMT|SLOW|SIGKILL)\b.*|.*skipped: .*)$")
+def resolve(p):
+    # Follow symlinks inside the private store (absolute /nix/store targets).
+    for _ in range(40):
+        if not os.path.islink(p):
+            return p
+        t = os.readlink(p)
+        p = store + t if t.startswith("/nix/store/") else os.path.join(os.path.dirname(p), t)
+    raise SystemExit(f"symlink loop at {p}")
+def outcomes(root):
+    out = {}
+    for sub in ("runs", "doctests", "apps"):
+        top = resolve(os.path.join(root, sub))
+        for dirpath, dirs, files in os.walk(top):
+            for n in dirs + files:
+                p = os.path.join(dirpath, n)
+                rel = os.path.join(sub, os.path.relpath(p, top))
+                t = resolve(p)
+                for log in (t, os.path.join(t, "log"), os.path.join(t, "tests")):
+                    if os.path.isfile(log):
+                        with open(log, errors="replace") as fh:
+                            ls = [re.sub(r"\[[^\]]*\]", "[]", l.rstrip()) for l in fh if line.match(l.rstrip())]
+                        out[rel] = sorted(set(ls))
+                        break
+    return out
+a, b = outcomes(ifd), outcomes(dyn)
+bad = [k for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+for k in bad:
+    print(f"  {k}:\n    IFD     {a.get(k)}\n    dynamic {b.get(k)}", file=sys.stderr)
+n = sum(len(v) for v in a.values())
+print(f"{len(a)} logs, {n} test outcomes: {'identical' if not bad else 'DIFFERENT'} in both modes", file=sys.stderr)
+sys.exit(1 if bad or not a else 0)
+EOF
+    echo "FAIL: $f: different test outcomes" >&2
+    status=1
+  fi
+  # explainSharing in dynamic mode (through IFD mode's units.json).
+  if [ "$(nixm eval --json -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "explain.$f")" = true ]; then
+    echo "$f: explainSharing works in dynamic-derivation mode" >&2
   else
-    echo "FAIL: $f: different test runs" >&2
+    echo "FAIL: $f: explainSharing in dynamic-derivation mode" >&2
     status=1
   fi
 done

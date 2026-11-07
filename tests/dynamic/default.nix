@@ -7,13 +7,19 @@
 #
 # Attributes:
 #   repos.<fixture>          the mkRepository results
-#   build.<fixture>          a derivation linking every product and test
-#                            run of the fixture's default variants
-#                            (products/<ws>/<pkg>, runs/<ws>/<pkg>/<binary>;
+#   build.<fixture>          a derivation linking every product, test
+#                            run and doctest of the fixture's default
+#                            variants (products/<ws>/<pkg>,
+#                            runs/<ws>/<pkg>/<binary>, doctests/<ws>/<pkg>;
 #                            in dynamic mode also units-<ws>-<kind>, every
-#                            unit of each plan)
-#   unitDrvs.<fixture>       a JSON file: "<ws>/<kind>" -> unit id -> .drv
-#                            path (IFD mode)
+#                            unit of each plan), its repo.checks
+#                            (checks/<name>), and for test-control `apps`,
+#                            a run of its test apps
+#   unitDrvs.<fixture>       a JSON file: "<ws>/<kind>" -> unit id (or
+#                            `doctest:<pkg>`) -> .drv path (IFD mode)
+#   explain.<fixture>        whether repo.explainSharing finds every unit
+#                            of the first workspace's build plan shared
+#                            with itself (it must)
 #   outer.<fixture>."<ws>/<kind>"   the outer derivations (dynamic mode)
 #   mayDiffer.<fixture>      a regex of unit derivation names that may
 #                            differ between the modes (embedding chains)
@@ -57,6 +63,17 @@ let
       path = ".";
       variants.default.profile = "dev";
     };
+  };
+
+  # test-control's test configuration, as tests/test-runs uses it: a
+  # per-binary skip list, test.env and test.path.
+  ctlTest = {
+    env.CTL_EXPECT_NIX = "1";
+    path = [ pkgs.hello ];
+    binaries.net.args = [
+      "--skip"
+      "needs_network"
+    ];
   };
 
   directivesPackages = [
@@ -111,7 +128,97 @@ let
         oneWs
       ];
     };
+    # Doctests: a dev-dependency, should_panic, rustc-env and rustc-cfg
+    # from a build script, an edition-2024 crate.
+    doctests = mkRepo "doctests" [ oneWs ];
+    # Skip lists, #[ignore], a skipped (required-features) test, the
+    # runtime env; its test apps are `apps` in build.test-control.
+    # With ca-derivations on (as here), IFD mode's test runs put
+    # content-addressed copies of the build scripts' library directories on
+    # the dynamic-library path (decision 61, testRuns.stableSpec), which the
+    # env binary's exact-path assertion rejects; its test runs skip that
+    # test, and the test apps (no copies) run it in both modes.
+    test-control = mkRepo "test-control" [
+      oneWs
+      {
+        packages.ctl.test = ctlTest // {
+          binaries = ctlTest.binaries // {
+            env.args = [
+              "--skip"
+              "dylib_path_has_only_out_dir_search_paths"
+            ];
+          };
+        };
+      }
+    ];
+    # A product with a bin Cargo skips (required features): left out.
+    required-features = mkRepo "required-features" [ oneWs ];
+    # nextest runs, from the metadata the wrappers carry in dynamic mode.
+    nextest = mkRepo "nextest" [
+      oneWs
+      {
+        packages.nx.test = {
+          runner = "nextest";
+          nextest.profile = "ci";
+          env.NX_FROM_TEST_ENV = "yes";
+          env.NX_EXPECT_NIX = "1";
+        };
+        packages.other.test.runner = "nextest";
+      }
+    ];
   };
+
+  isDynamic = breakbulk.dynamic.resolveMode mode == "dynamic";
+
+  # Test apps run outside a test run (as tests/test-runs `test-control-app`):
+  # the network binary with the skipped test filtered out, and the env
+  # binary against a checkout of the fixture (mkWorkspace, for `checkout`).
+  ctlApps =
+    let
+      mkCtl =
+        args:
+        breakbulk.mkWorkspace pkgs (
+          {
+            root = fixtures + "/test-control";
+            inherit tools;
+            name = "test-control";
+            delivery = breakbulk.dynamic.resolveMode mode;
+            packages.ctl.test = ctlTest;
+          }
+          // args
+        );
+      ws = mkCtl { };
+      wsCheckout = mkCtl { checkout = "/build/checkout"; };
+    in
+    pkgs.runCommand "test-control-apps-${mode}"
+      (
+        {
+          net = ws.testApps.ctl.net.program;
+          envApp = wsCheckout.testApps.ctl.env.program;
+        }
+        # IFD mode has no app for a test binary Cargo did not build.
+        // lib.optionalAttrs isDynamic { skipped = ws.testApps.ctl.needs_feat.program; }
+      )
+      ''
+        $net --skip needs_network | tee net.log
+        grep -q 'test offline_ok ... ok' net.log
+        cp -r --no-preserve=mode ${fixtures + "/test-control"} /build/checkout
+        export NIX_BUILD_CORES RUST_TEST_THREADS=$NIX_BUILD_CORES
+        $envApp --nocapture | tee env.log
+        grep -q 'CARGO_MANIFEST_DIR=/build/checkout$' env.log
+        grep -q 'cwd=/build/checkout$' env.log
+        grep -q 'test result: ok. 4 passed' env.log
+        ${lib.optionalString isDynamic ''
+          if $skipped 2> skipped.log; then
+            echo "the app of a skipped test succeeded" >&2
+            exit 1
+          fi
+          cat skipped.log
+          grep -q 'needs_feat. was skipped' skipped.log
+        ''}
+        mkdir -p $out
+        grep -h '^test .* \.\.\. ' net.log env.log | sort > $out/tests
+      '';
 
   # Products differ between the modes (resolved at build time in dynamic
   # mode), so the units downstream of an embedded product do too: the
@@ -154,8 +261,26 @@ let
               ) (inst repo wsName).testRuns
             )
           )
+          + lib.concatStrings (
+            lib.mapAttrsToList (p: d: ''
+              mkdir -p $out/doctests/${wsName}
+              ln -s ${d} $out/doctests/${wsName}/${p}
+            '') (inst repo wsName).doctests
+          )
         ) repo.workspaces
       )
+      # repo.checks (what `nix flake check` builds), every one.
+      + ''
+        mkdir -p $out/checks
+      ''
+      + lib.concatStrings (
+        lib.mapAttrsToList (n: d: ''
+          ln -s ${d} "$out/checks/${lib.replaceStrings [ "/" ] [ "-" ] n}"
+        '') repo.checks
+      )
+      + lib.optionalString (name == "test-control") ''
+        ln -s ${ctlApps} $out/apps
+      ''
     );
 
   discard = builtins.unsafeDiscardStringContext;
@@ -169,7 +294,11 @@ let
           lib.mapAttrs'
             (kind: us: lib.nameValuePair "${wsName}/${kind}" (lib.mapAttrs (_: u: discard u.drvPath) us))
             {
-              inherit ((inst repo wsName).units) build test;
+              inherit ((inst repo wsName).units) build;
+              # The test plan's outer derivation also writes the doctests.
+              test =
+                (inst repo wsName).units.test
+                // lib.mapAttrs' (p: d: lib.nameValuePair "doctest:${p}" d) (inst repo wsName).doctests;
             }
         ) repo.workspaces
       )
@@ -225,4 +354,14 @@ in
     ) repo.workspaces
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
+  explain = lib.mapAttrs (
+    _: repo:
+    let
+      ws = lib.head (lib.attrNames repo.workspaces);
+    in
+    (repo.explainSharing {
+      a = ws;
+      b = ws;
+    }).shared
+  ) repos;
 }

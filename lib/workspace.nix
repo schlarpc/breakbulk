@@ -265,6 +265,13 @@ let
   # Dynamic-derivation mode: the outer derivation is named
   # `<ws>-<triple>-<variant>` for the build plan (decision 27), with `-test`
   # for the test plan, since each plan has its own.
+  # The libraries `cargo test --doc` covers (roots.nix `doc`) among the
+  # selected members: in dynamic-derivation mode the test plan's outer
+  # derivation writes their doctests, with the test configuration IFD mode
+  # gives them (testRuns.doctestConfig), so it must know them up front.
+  predictedDoctests = lib.filterAttrs (
+    n: p: p.roots.doc != [ ] && (select == [ ] || lib.elem n select)
+  ) wsRoots;
   instantiateWith =
     kind: args:
     if isDynamic then
@@ -274,6 +281,11 @@ let
           inherit breakbulkDrv;
           inherit (pkgs) coreutils;
           outerName = if kind == "build" then name else "${name}-${kind}";
+          doctests = lib.optionalAttrs (kind == "test" && !checking) (
+            lib.mapAttrs (
+              pkg: _: testRuns.doctestConfig { inherit packages runner; } pkg
+            ) predictedDoctests
+          );
         }
       )
     else
@@ -322,7 +334,16 @@ let
   install =
     dir: fileName: r:
     pkgs.runCommand fileName { } ''
-      files=(${r}/*)
+      ${
+        # Dynamic-derivation mode: a test binary Cargo did not build is its
+        # stub's output (a file with the reason), as in IFD mode.
+        lib.optionalString (r.breakbulkRoot.dynamic or false) ''
+          if [ ! -d ${r} ]; then
+            ln -s ${r} $out
+            exit 0
+          fi
+        ''
+      }files=(${r}/*)
       if [ ''${#files[@]} -ne 1 ]; then
         echo "expected one file in ${r}, found: ''${files[*]}" >&2
         exit 1
@@ -381,6 +402,15 @@ in
     build = built.outer;
     test = tested.outer;
   };
+  # Dynamic-derivation mode: the unit derivations through IFD mode, for
+  # explainSharing (lib/dynamic.nix `ifdUnits`).
+  ifdUnits = lib.optionalAttrs isDynamic (
+    {
+      build = built.ifdUnits;
+      test = tested.ifdUnits;
+    }
+    // lib.optionalAttrs bench { bench = benched.ifdUnits; }
+  );
   # Dynamic-derivation mode: a derivation per plan kind that builds every
   # unit (ws.units is not known at evaluation time).
   allUnits = lib.optionalAttrs isDynamic (
@@ -426,7 +456,7 @@ in
     _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" r.breakbulkRoot.target r)
   ) bins;
   testRuns = tr.runs;
-  testApps = testApps.mkTestApps {
+  testApps = (if isDynamic then dynamic.mkTestApps else testApps.mkTestApps) {
     inherit
       pkgs
       checkout
