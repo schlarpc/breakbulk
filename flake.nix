@@ -141,6 +141,14 @@
               breakbulk = self.lib;
             }) [ "repos" "repo" "lockfiles" ]
           )
+          # One git source, crates from two inheriting workspaces: argv
+          # and CARGO_PKG_* against real Cargo over a local repository.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-multi-workspace-${n}" v) (
+            builtins.removeAttrs (import ./tests/git-multi-workspace {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repo" ]
+          )
           # Stable test-run inputs for content-addressed cutoff (decision
           # 61), built input-addressed; the CA check itself needs
           # ca-derivations: tests/test-cutoff/run.sh (private store).

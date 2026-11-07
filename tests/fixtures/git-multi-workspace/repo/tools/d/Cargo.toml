@@ -1,0 +1,7 @@
+[package]
+name = "d"
+version.workspace = true
+edition.workspace = true
+
+[features]
+extra = []
