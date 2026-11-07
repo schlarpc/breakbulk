@@ -263,7 +263,10 @@ let
         not-in-any-lockfile.env.X = "1";
         app-b.test.args = [ "--skip" "slow" ];
       };
-      targets.${native}.rustflags = [ "-Cfoo" ];
+      targets.${native} = {
+        rustflags = [ "-Cfoo" ];
+        env.TARGET_MARK = "t";
+      };
     }
   ];
   inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
@@ -300,6 +303,10 @@ in
     assert lib.assertMsg (bc == lib.sort lib.lessThan (sharedEverywhere ++ [ "inner-0.1.0-lib" ]))
       "multi-ws: shared by b, c: ${builtins.toJSON bc}";
     assert lib.assertMsg (ab == sharedEverywhere) "multi-ws: shared by a, b: ${builtins.toJSON ab}";
+    # repo.sources: fetched once for all lockfiles, by name and name@version.
+    assert lib.assertMsg (
+      multiWs.sources ? itoa && multiWs.sources ? "libc@0.2.191" && !(multiWs.sources ? shared)
+    ) "multi-ws: sources ${builtins.toJSON (lib.attrNames multiWs.sources)}";
     # explainSharing names why `inner` differs: Cargo passes a member's
     # source path relative to the workspace root and runs rustc there, and
     # marks it as a primary package.
@@ -439,6 +446,10 @@ in
     assert lib.assertMsg (itoa.ITOA_CARET or null == "1" && !(itoa ? ITOA_TWO)) "overrides: itoa env ${builtins.toJSON itoa}";
     assert lib.assertMsg (libc.LIBC or null == "exact" && libcRun.LIBC or null == "exact") "overrides: libc env ${builtins.toJSON libc}";
     assert lib.assertMsg (!((envOf "shared-0.1.0-lib") ? LIBC)) "overrides: libc's env reached shared";
+    # targets.<triple>.env reaches target units only, never host units
+    # (build-script compiles).
+    assert lib.assertMsg (libc.TARGET_MARK or null == "t" && !((envOf "libc-0.2.191-build-script") ? TARGET_MARK))
+      "overrides: target env placement";
     assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package") "overrides: no unmatched warning: ${builtins.toJSON ws}";
     assert lib.assertMsg (has "`packages.itoa` matches no package") "overrides: itoa >=2 should match nothing";
     assert lib.assertMsg (has "packages.app-b.test.args") "overrides: no warning for test.args";
