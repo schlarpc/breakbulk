@@ -196,7 +196,6 @@ fn file_name(p: &str) -> &str {
     p.rsplit_once('/').map_or(p, |(_, f)| f)
 }
 
-/// `cargo metadata`'s description of a package's targets, for run units.
 /// The `-L` pairs of a traced `rustdoc --test` that hold Cargo's
 /// `native_dirs`: the contiguous block of `-L <path>` pairs (not
 /// `-L dependency=`) around the search sentinels, as (index of the first
@@ -229,6 +228,7 @@ fn doctest_native_block(args: &[String]) -> Option<(usize, usize)> {
     Some((from, to))
 }
 
+/// `cargo metadata`'s description of a package's targets, for run units.
 fn package_targets(p: &Package) -> Vec<PackageTarget> {
     let mut v: Vec<PackageTarget> = p
         .targets

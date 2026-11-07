@@ -246,25 +246,6 @@ impl Outer {
         }
     }
 
-    /// The unit's `-frandom-seed`, computed as nixpkgs'
-    /// `setup-hooks/reproducible-builds.sh` does: the first 10 characters of
-    /// the base name of `$NIX_OUTPATH_USED_AS_RANDOM_SEED`, or else of `$out`.
-    /// Library compile units have no `out`; they use their first output
-    /// (`$outputs` lists them), where stdenv would use an empty seed. `None`
-    /// when no output is known.
-    pub fn random_seed(&self) -> Option<String> {
-        let nonempty = |k: &str| self.get(k).filter(|s| !s.is_empty());
-        let path = nonempty("NIX_OUTPATH_USED_AS_RANDOM_SEED")
-            .or_else(|| nonempty("out"))
-            .or_else(|| {
-                self.get("outputs")
-                    .and_then(|o| o.split_whitespace().next())
-                    .and_then(nonempty)
-            })?;
-        let base = path.rsplit('/').next().unwrap_or(path);
-        Some(base.chars().take(10).collect())
-    }
-
     /// Layer 1.
     pub fn base(&self) -> BTreeMap<String, String> {
         let mut env: BTreeMap<String, String> = FIXED_BASE

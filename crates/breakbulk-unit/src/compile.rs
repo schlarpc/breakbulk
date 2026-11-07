@@ -165,7 +165,7 @@ pub fn invocation(
         .map(|p| read_capture(Path::new(p)))
         .transpose()?;
     let cflags = CFlags {
-        random_seed: c.seed.clone().or_else(|| outer.random_seed()),
+        random_seed: c.seed.clone(),
         prefix_maps: c.remap.clone(),
     };
     Ok(Invocation {

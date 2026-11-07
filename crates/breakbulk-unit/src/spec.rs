@@ -414,8 +414,8 @@ pub struct RenderedCompile {
     /// run). Unlike stdenv's seed from the output path, it does not change
     /// when an input changes without changing the unit (a new
     /// `breakbulk-unit`, a new env capture), so C objects with debug info,
-    /// which record the flag, keep their bytes. `None`: the seed comes from
-    /// the output path, as stdenv computes it.
+    /// which record the flag, keep their bytes. The renderer always sets
+    /// it; `None` adds no seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
 }
@@ -524,8 +524,8 @@ pub struct RenderedRun {
     /// run). Unlike stdenv's seed from the output path, it does not change
     /// when an input changes without changing the unit (a new
     /// `breakbulk-unit`, a new env capture), so C objects with debug info,
-    /// which record the flag, keep their bytes. `None`: the seed comes from
-    /// the output path, as stdenv computes it.
+    /// which record the flag, keep their bytes. The renderer always sets
+    /// it; `None` adds no seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
 }

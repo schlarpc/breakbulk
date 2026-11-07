@@ -62,13 +62,13 @@ pub fn run_env(r: &RenderedRun, out: &Path, metadata: &[MetadataFile]) -> BTreeM
 
 /// What the run adds to C flags: its own random seed, and a prefix map for
 /// each remapped path, including its own `OUT_DIR`.
-pub fn run_cflags(r: &RenderedRun, outer: &Outer, out: &Path) -> CFlags {
+pub fn run_cflags(r: &RenderedRun, out: &Path) -> CFlags {
     let mut prefix_maps = r.remap.clone();
     if let Some(name) = &r.out_dir_remap {
         prefix_maps.push((out.display().to_string(), name.clone()));
     }
     CFlags {
-        random_seed: r.seed.clone().or_else(|| outer.random_seed()),
+        random_seed: r.seed.clone(),
         prefix_maps,
     }
 }
@@ -297,12 +297,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .collect::<Result<BTreeMap<String, BuildOutput>, Error>>()?;
     let mut unit_env = run_env(r, &out, &metadata);
     expand_dylib_path(&mut unit_env, &r.dylib_path_from, |f| dylib_dirs.get(f))?;
-    let env = layered(
-        outer,
-        capture.as_ref(),
-        &unit_env,
-        &run_cflags(r, outer, &out),
-    );
+    let env = layered(outer, capture.as_ref(), &unit_env, &run_cflags(r, &out));
     let argv = vec![script_path(Path::new(&r.script))?.display().to_string()];
     let cwd = PathBuf::from(&r.cwd);
 

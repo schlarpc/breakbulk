@@ -161,7 +161,7 @@ Each stub prints one tagged directive of every kind that applies to its package.
 | `rustc-link-arg-tests` | `__bb_R_arg_tests` | The package has an integration test | `-C link-arg=__bb_R_arg_tests` | Integration tests only, not lib or bin harnesses. |
 | `rustc-link-arg-examples` | `__bb_R_arg_examples` | The package has an example | `-C link-arg=__bb_R_arg_examples` | Examples. |
 | `rustc-link-arg-benches` | `__bb_R_arg_benches` | The package has a bench | `-C link-arg=__bb_R_arg_benches` | Benches (bench variant only). |
-| `rustc-link-arg-cdylib` | `__bb_R_arg_cdylib` | The package's lib has the `cdylib` crate type | `-C link-arg=__bb_R_arg_cdylib` | R's lib when built as a cdylib, not in test mode. Also cdylibs of dependent packages, a compatibility exception (from Cargo's source; not tested). |
+| `rustc-link-arg-cdylib` | `__bb_R_arg_cdylib` | Always | `-C link-arg=__bb_R_arg_cdylib` | R's lib when built as a cdylib, not in test mode; also the cdylibs of packages that depend on R's package, a compatibility exception Cargo keeps (rust-lang/cargo#9562; `add_native_deps` in `src/compiler/mod.rs`), which the directive differential test exercises. Printed even when R's package has no cdylib, for those dependents. |
 | `metadata` | `__bb=R` | The package declares `links` | Env var `DEP_<LINKS>___BB=R` on runs | Build-script runs of packages that **directly** depend on R's package as a normal dependency. Not transitive, and not through build dependencies. |
 | Dynamic-library path of a compile | (the inside search sentinel) | — | `LD_LIBRARY_PATH` entry `<OUT_DIR>/__bb_R_search` on the rustc process | Compiles whose package has R's package as a host plugin dependency (a proc macro, or a build dependency with a build script). |
 | Dynamic-library path of a run | (same) | — | `LD_LIBRARY_PATH` entry on the run | Runs whose build script depends on R's package. |
@@ -169,7 +169,7 @@ Each stub prints one tagged directive of every kind that applies to its package.
 | Dynamic-library path of `rustdoc --test` | (same) | — | `LD_LIBRARY_PATH` entries | Every host run. |
 | Search paths of `rustdoc --test` | both search sentinels | — | `-L native=…` | **Every** run in the invocation, both platforms, both sentinels, **sorted by value** and deduplicated. Not positional. |
 
-Cargo rejects `rustc-link-arg-bins`, `-bin=NAME`, `-tests`, `-examples` and `-benches` when the package has no such target, so the stub prints them only when the target exists. `rustc-link-arg` is printed always, because Cargo passes it to every compile of the package. The outside search sentinel is a root-level path that no real build uses, so the forbidden-literal check catches a missed splice. Stubs use the `cargo:` single-colon syntax when the package's `rust-version` predates the `cargo::` syntax (1.77). Shapes are the same in both syntaxes.
+Cargo rejects `rustc-link-arg-bins`, `-bin=NAME`, `-tests`, `-examples` and `-benches` when the package has no such target, so the stub prints them only when the target exists. `rustc-link-arg` is printed always, because Cargo passes it to every compile of the package; so is `rustc-link-arg-cdylib`, which Cargo accepts without a cdylib target (with a warning) and passes to dependents' cdylibs. The outside search sentinel is a root-level path that no real build uses, so the forbidden-literal check catches a missed splice. Stubs use the `cargo:` single-colon syntax when the package's `rust-version` predates the `cargo::` syntax (1.77). Shapes are the same in both syntaxes.
 
 The planner then:
 

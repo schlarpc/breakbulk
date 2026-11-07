@@ -19,8 +19,7 @@ pub use doctest::render_doctest;
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;
 pub use render::{
-    Resolve, default_remap_scope, is_linking, merge_layer_with, remap_bases, render_unit,
-    render_unit_in, unit_env_value,
+    Resolve, is_linking, merge_layer_with, remap_bases, render_unit, render_unit_in, unit_env_value,
 };
 pub use validate::{
     ValidationError, ValidationOptions, contains_path, contains_sentinel, literal_store_paths,
