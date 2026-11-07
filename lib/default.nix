@@ -8,6 +8,7 @@
 #   breakbulk.mkFetch pkgs { registries; gitHashes; ... }
 #   breakbulk.mkVendor pkgs { fetch; entries; ... }
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
+#   breakbulk.xwinSdk { pkgs; crt; sdk; arches; hash; }   (unfree; FOD)
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
 # breakbulk.predictedRoots { ... }.
 { lib }:
@@ -66,4 +67,6 @@ in
     }).mkVendor;
 
   mkSkeleton = skeleton.mkSkeleton;
+
+  xwinSdk = import ./xwin-sdk.nix { inherit lib; };
 }
