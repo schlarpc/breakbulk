@@ -27,6 +27,7 @@ version = "0.1.0"
 name = "breakbulk-unit"
 version = "0.1.0"
 dependencies = [
+ "breakbulk-format",
  "serde",
  "serde_json",
 ]

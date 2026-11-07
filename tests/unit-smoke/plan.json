@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "kind": "build",
+  "cargo": "1.99.0",
+  "rustc": "1.99.0",
+  "host": "x86_64-unknown-linux-gnu",
+  "target": "x86_64-unknown-linux-gnu",
+  "variant": { "profile": "dev", "features": [], "mode": "build" },
+  "skeletonRoot": "/build/skeleton",
+  "trimPaths": false,
+  "units": {
+    "c-138fecd4c9176bd0": {
+      "kind": "compile",
+      "package": "path+file:///build/skeleton/smokelib#0.1.0",
+      "crate": { "name": "build_script_build", "types": ["bin"], "edition": "2024" },
+      "platform": "host",
+      "program": ["@bb:rustc@"],
+      "args": [
+        "--crate-name", "build_script_build", "--edition=2024", "smokelib/build.rs",
+        "--error-format=json", "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+        "--crate-type", "bin", "--emit=dep-info,link", "-C", "embed-bitcode=no",
+        "-C", "debuginfo=2", "--check-cfg", "cfg(docsrs,test)", "--check-cfg", "cfg(feature, values())",
+        "-C", "metadata=138fecd4c9176bd0", "-C", "extra-filename=-57c1fadee8f21670"
+      ],
+      "env": {
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": [{ "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib" }],
+        "CARGO_MANIFEST_PATH": [{ "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib/Cargo.toml" }],
+        "CARGO_PKG_AUTHORS": "", "CARGO_PKG_DESCRIPTION": "", "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_LICENSE": "", "CARGO_PKG_LICENSE_FILE": "", "CARGO_PKG_NAME": "smokelib",
+        "CARGO_PKG_README": "", "CARGO_PKG_REPOSITORY": "", "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.1.0", "CARGO_PKG_VERSION_MAJOR": "0", "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0", "CARGO_PKG_VERSION_PRE": "", "CARGO_PRIMARY_PACKAGE": "1"
+      },
+      "envSplices": [],
+      "cwd": { "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "" },
+      "outputs": { "bin": ["build_script_build-57c1fadee8f21670"] }
+    },
+    "r-smokelib-63aa584f9c6a6c6c": {
+      "kind": "run",
+      "package": "path+file:///build/skeleton/smokelib#0.1.0",
+      "platform": "target",
+      "script": { "out": "c-138fecd4c9176bd0", "output": "bin", "file": "build_script_build-57c1fadee8f21670" },
+      "env": {
+        "CARGO_CFG_DEBUG_ASSERTIONS": "", "CARGO_CFG_FEATURE": "", "CARGO_CFG_PANIC": "unwind",
+        "CARGO_CFG_TARGET_ABI": "", "CARGO_CFG_TARGET_ARCH": "x86_64", "CARGO_CFG_TARGET_ENDIAN": "little",
+        "CARGO_CFG_TARGET_ENV": "gnu", "CARGO_CFG_TARGET_FAMILY": "unix",
+        "CARGO_CFG_TARGET_FEATURE": "fxsr,sse,sse2", "CARGO_CFG_TARGET_HAS_ATOMIC": "16,32,64,8,ptr",
+        "CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT": "16,32,64,8,ptr",
+        "CARGO_CFG_TARGET_OS": "linux", "CARGO_CFG_TARGET_POINTER_WIDTH": "64",
+        "CARGO_CFG_TARGET_VENDOR": "unknown", "CARGO_CFG_UNIX": "", "CARGO_ENCODED_RUSTFLAGS": "",
+        "CARGO_MANIFEST_DIR": [{ "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib" }],
+        "CARGO_MANIFEST_PATH": [{ "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib/Cargo.toml" }],
+        "CARGO_PKG_AUTHORS": "", "CARGO_PKG_DESCRIPTION": "", "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_LICENSE": "", "CARGO_PKG_LICENSE_FILE": "", "CARGO_PKG_NAME": "smokelib",
+        "CARGO_PKG_README": "", "CARGO_PKG_REPOSITORY": "", "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.1.0", "CARGO_PKG_VERSION_MAJOR": "0", "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0", "CARGO_PKG_VERSION_PRE": "",
+        "DEBUG": "true", "HOST": "x86_64-unknown-linux-gnu", "NUM_JOBS": "8", "OPT_LEVEL": "0",
+        "OUT_DIR": [{ "out": "r-smokelib-63aa584f9c6a6c6c", "output": "out" }],
+        "PROFILE": "debug", "RUSTC": "@bb:rustc@", "TARGET": "x86_64-unknown-linux-gnu"
+      },
+      "cwd": { "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib" },
+      "metadataFrom": [],
+      "targets": [
+        { "name": "build-script-build", "kind": ["custom-build"] },
+        { "name": "smokelib", "kind": ["lib"] }
+      ],
+      "nightlyFeaturesAllowed": false
+    },
+    "c-a0e9aa7440d71279": {
+      "kind": "compile",
+      "package": "path+file:///build/skeleton/smokelib#0.1.0",
+      "crate": { "name": "smokelib", "types": ["lib"], "edition": "2024" },
+      "platform": "target",
+      "program": ["@bb:rustc@"],
+      "args": [
+        "--crate-name", "smokelib", "--edition=2024", "smokelib/src/lib.rs",
+        "--error-format=json", "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+        "--crate-type", "lib", "--emit=dep-info,metadata,link", "-C", "embed-bitcode=no",
+        "-C", "debuginfo=2", "--check-cfg", "cfg(docsrs,test)", "--check-cfg", "cfg(feature, values())",
+        "-C", "metadata=a0e9aa7440d71279", "-C", "extra-filename=-87e5d8c802f76f4a",
+        "--target", "x86_64-unknown-linux-gnu",
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search" },
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-cfg" },
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-check-cfg" }
+      ],
+      "env": {
+        "CARGO_CRATE_NAME": "smokelib",
+        "CARGO_MANIFEST_DIR": [{ "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib" }],
+        "CARGO_MANIFEST_PATH": [{ "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib/Cargo.toml" }],
+        "CARGO_PKG_AUTHORS": "", "CARGO_PKG_DESCRIPTION": "", "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_LICENSE": "", "CARGO_PKG_LICENSE_FILE": "", "CARGO_PKG_NAME": "smokelib",
+        "CARGO_PKG_README": "", "CARGO_PKG_REPOSITORY": "", "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.1.0", "CARGO_PKG_VERSION_MAJOR": "0", "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0", "CARGO_PKG_VERSION_PRE": "", "CARGO_PRIMARY_PACKAGE": "1",
+        "OUT_DIR": [{ "out": "r-smokelib-63aa584f9c6a6c6c", "output": "out" }]
+      },
+      "envSplices": [{ "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-env" }],
+      "cwd": { "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "" },
+      "outputs": {
+        "rmeta": ["libsmokelib-87e5d8c802f76f4a.rmeta"],
+        "rlib": ["libsmokelib-87e5d8c802f76f4a.rlib"]
+      }
+    },
+    "c-a6654c0a89d81026": {
+      "kind": "compile",
+      "package": "path+file:///build/skeleton/smokeapp#0.1.0",
+      "crate": { "name": "smokeapp", "types": ["bin"], "edition": "2024" },
+      "platform": "target",
+      "program": ["@bb:rustc@"],
+      "args": [
+        "--crate-name", "smokeapp", "--edition=2024", "smokeapp/src/main.rs",
+        "--error-format=json", "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+        "--crate-type", "bin", "--emit=dep-info,link", "-C", "embed-bitcode=no",
+        "-C", "debuginfo=2", "--check-cfg", "cfg(docsrs,test)", "--check-cfg", "cfg(feature, values())",
+        "-C", "metadata=a6654c0a89d81026", "-C", "extra-filename=-b0ba845afe70cf35",
+        "--target", "x86_64-unknown-linux-gnu",
+        "--extern", ["smokelib=", { "out": "c-a0e9aa7440d71279", "output": "rlib", "file": "libsmokelib-87e5d8c802f76f4a.rlib" }],
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search" }
+      ],
+      "env": {
+        "CARGO_BIN_NAME": "smokeapp", "CARGO_CRATE_NAME": "smokeapp",
+        "CARGO_MANIFEST_DIR": [{ "src": "path+file:///build/skeleton/smokeapp#0.1.0", "rel": "smokeapp" }],
+        "CARGO_MANIFEST_PATH": [{ "src": "path+file:///build/skeleton/smokeapp#0.1.0", "rel": "smokeapp/Cargo.toml" }],
+        "CARGO_PKG_AUTHORS": "", "CARGO_PKG_DESCRIPTION": "", "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_LICENSE": "", "CARGO_PKG_LICENSE_FILE": "", "CARGO_PKG_NAME": "smokeapp",
+        "CARGO_PKG_README": "", "CARGO_PKG_REPOSITORY": "", "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.1.0", "CARGO_PKG_VERSION_MAJOR": "0", "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0", "CARGO_PKG_VERSION_PRE": "", "CARGO_PRIMARY_PACKAGE": "1"
+      },
+      "envSplices": [],
+      "cwd": { "src": "path+file:///build/skeleton/smokeapp#0.1.0", "rel": "" },
+      "outputs": { "bin": ["smokeapp-b0ba845afe70cf35"] }
+    }
+  },
+  "roots": [
+    { "package": "path+file:///build/skeleton/smokeapp#0.1.0", "target": "smokeapp", "kind": "bin", "unit": "c-a6654c0a89d81026", "test": false }
+  ]
+}
