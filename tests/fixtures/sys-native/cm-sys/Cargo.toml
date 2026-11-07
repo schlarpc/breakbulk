@@ -1,0 +1,8 @@
+[package]
+name = "cm-sys"
+version.workspace = true
+edition.workspace = true
+links = "cm"
+
+[build-dependencies]
+cmake = "0.1"

@@ -1,0 +1,4 @@
+[package]
+name = "plain"
+version.workspace = true
+edition.workspace = true

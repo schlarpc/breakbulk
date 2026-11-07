@@ -113,7 +113,7 @@ fn resolve(parts: &[Part]) -> String {
         .iter()
         .map(|p| match p {
             Part::Literal(s) => s.clone(),
-            Part::Unit { unit, output } => unit_path(unit, output),
+            Part::Unit { unit, output, .. } => unit_path(unit, output),
             Part::Input { input, json } => {
                 let v = input_value(input);
                 if *json {

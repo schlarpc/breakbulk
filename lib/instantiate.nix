@@ -184,7 +184,10 @@ rec {
         if isString p then
           p
         else if p ? unit then
-          units.${p.unit}.${p.output}.outPath
+          # A weak reference names a path the unit reaches through its
+          # dependencies' references (their manifests), not as an input.
+          (if p.weak or false then unsafeDiscardStringContext else lib.id)
+            units.${p.unit}.${p.output}.outPath
         else if p.json or false then
           input inputsJson p.input
         else
@@ -202,7 +205,7 @@ rec {
       mkDrv = d: derivation (drvAttrs d);
 
       units =
-        assert lib.assertMsg (json.version == 1) "breakbulk: units.json version ${toString json.version} is not supported";
+        assert lib.assertMsg (json.version == 2) "breakbulk: units.json version ${toString json.version} is not supported";
         lib.mapAttrs (_: mkDrv) json.units;
 
       rootsOut = lib.mapAttrs (

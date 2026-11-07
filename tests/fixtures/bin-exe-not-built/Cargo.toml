@@ -1,0 +1,17 @@
+# A package with a bin that needs a feature that is off, and an integration
+# test. Cargo still sets CARGO_BIN_EXE_extra on the test, naming a file it
+# never builds; planning must accept that.
+[package]
+name = "tool"
+version = "0.1.0"
+edition = "2021"
+
+# Its own workspace, not a member of breakbulk's.
+[workspace]
+
+[features]
+extra = []
+
+[[bin]]
+name = "extra"
+required-features = ["extra"]

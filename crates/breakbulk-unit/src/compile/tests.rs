@@ -25,9 +25,13 @@ fn unit(args: &[&str]) -> RenderedCompile {
         cwd: "/nix/store/x-src".into(),
         outputs: BTreeMap::from([("bin".into(), vec!["app-1".into()])]),
         deps: vec![],
+        dep_manifests: vec![],
+        link_manifest_crates: false,
+        manifest_crates: vec![],
         remap: vec![],
         remap_scope: None,
         env_capture: None,
+        seed: None,
     }
 }
 

@@ -6,6 +6,11 @@
 //!
 //! - `{"unit": <id>, "output": <name>}`: the output path of another unit
 //!   derivation, `units.<id>.<name>`;
+//! - `{"unit": <id>, "output": <name>, "weak": true}`: the same path without
+//!   its string context, so it is not an input of the derivation. Used for
+//!   the `flags` of runs a unit reaches through its dependencies' manifests
+//!   (`breakbulk_format::deps`), which Nix puts in the sandbox through the
+//!   dependencies' references;
 //! - `{"input": <key>}`: the evaluation-time value with that key (a source
 //!   view, crate source, tool, env capture or env value), with its string
 //!   context;
@@ -24,7 +29,7 @@ use breakbulk_format::RootKind;
 use serde::Serialize;
 
 /// The version of the `units.json` format.
-pub const UNITS_VERSION: u32 = 1;
+pub const UNITS_VERSION: u32 = 2;
 
 /// `BREAKBULK_UNIT` values longer than this many bytes, after the Nix side
 /// has substituted every reference, are passed with `passAsFile`. Linux
@@ -73,6 +78,8 @@ pub enum Part {
     Unit {
         unit: String,
         output: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        weak: bool,
     },
     Input {
         input: String,

@@ -7,7 +7,10 @@ use breakbulk_unit::spec::{RenderedArg, RenderedCompile};
 
 use crate::normalize::{normalize_arg, normalize_text};
 use crate::plan::{Arg, Plan, Reference, Text, Unit};
-use crate::render::{Resolve, crate_deps_of, env, splice, text};
+use std::collections::BTreeSet;
+
+use crate::deps::doctest_deps;
+use crate::render::{Resolve, env, flags, splice, text};
 
 /// Render doctest `id` (`d-<package>`) of `plan`. The doctest is rendered as
 /// a linking compile unit with no outputs and no remapping (rustdoc keeps
@@ -65,6 +68,8 @@ pub fn render_doctest<R: Resolve>(
     let env_capture = r.env_capture(&id, &unit)?;
     let mut env = env(&c.env, r)?;
     merge_layer(&mut env, overlay);
+    // A doctest reads no manifests: every run it splices is an input.
+    let strong = BTreeSet::new();
     let compile = RenderedCompile {
         package: c.package.clone(),
         krate: c.krate.clone(),
@@ -81,7 +86,7 @@ pub fn render_doctest<R: Resolve>(
                 Ok(match a {
                     Arg::Literal(s) => RenderedArg::Literal(s.clone()),
                     Arg::Concat(p) => RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?),
-                    Arg::Splice(s) => RenderedArg::Splice(splice(s, r)?),
+                    Arg::Splice(s) => RenderedArg::Splice(splice(s, r, &strong)?),
                     Arg::SearchPaths(_) => unreachable!("as_compile drops searchPathsOf"),
                 })
             })
@@ -90,22 +95,27 @@ pub fn render_doctest<R: Resolve>(
         env_splices: c
             .env_splices
             .iter()
-            .map(|s| splice(s, r))
+            .map(|s| splice(s, r, &strong))
             .collect::<Result<_, _>>()?,
         dylib_path_from: c
             .dylib_path_from
             .iter()
-            .map(|u| r.flags(u))
+            .map(|u| flags(u, r, &strong))
             .collect::<Result<_, _>>()?,
         cwd: r.reference(&c.cwd)?,
         outputs: Default::default(),
-        deps: crate_deps_of(plan, &c)
+        deps: doctest_deps(plan, &c)
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))
             .collect::<Result<_, _>>()?,
+        dep_manifests: Vec::new(),
+        link_manifest_crates: false,
+        manifest_crates: Vec::new(),
         remap: Vec::new(),
         remap_scope: None,
         env_capture,
+        // rustdoc compiles no C; the doctest adds no C flags.
+        seed: None,
     };
     Ok(RenderedDoctest {
         kind: DoctestKind::Doctest,

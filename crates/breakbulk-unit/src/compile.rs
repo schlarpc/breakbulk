@@ -1,8 +1,9 @@
 //! `compile` mode: one rustc invocation.
 //!
 //! 1. Set up the environment contract ([`crate::env`]).
-//! 2. Symlink every transitive dependency's crate file into `$TMPDIR/deps`
-//!    and pass it as the one `-L dependency=`.
+//! 2. Symlink every dependency's crate file into `$TMPDIR/deps` (those the
+//!    unit lists, and those its dependencies' manifests name; see
+//!    [`crate::manifest`]) and pass it as the one `-L dependency=`.
 //! 3. Expand splice points from the referenced runs' `flags` outputs.
 //! 4. Add path remapping (`--remap-path-prefix`, `--remap-path-scope`).
 //! 5. Point `--out-dir` at `$TMPDIR/out` and run the program.
@@ -10,6 +11,7 @@
 //!    notifications.
 //! 7. Move the listed outputs to their derivation outputs; discard the rest
 //!    (dep-info).
+//! 8. For a library, write its own manifest into its `rmeta` output.
 //!
 //! The plan carries no `--out-dir`, no `-L dependency=` and no
 //! `-C incremental`: those name Cargo's shared target directory, which does
@@ -24,9 +26,9 @@ use crate::diag::{Line, classify};
 use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{RenderedArg, RenderedCompile, derivation_output};
+use crate::spec::{RenderedArg, RenderedCompile, SpliceKind, derivation_output};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
-use crate::{Error, io_err, read_directives};
+use crate::{Error, io_err, manifest, read_directives};
 
 /// The directories a compile works in, under `$TMPDIR`.
 #[derive(Clone, Debug)]
@@ -162,7 +164,7 @@ pub fn invocation(
         .map(|p| read_capture(Path::new(p)))
         .transpose()?;
     let cflags = CFlags {
-        random_seed: outer.random_seed(),
+        random_seed: c.seed.clone().or_else(|| outer.random_seed()),
         prefix_maps: c.remap.clone(),
     };
     Ok(Invocation {
@@ -311,15 +313,63 @@ pub(crate) fn move_file(src: &Path, dst: &Path) -> Result<(), Error> {
     std::fs::remove_file(src).map_err(|e| io_err("removing", src, e))
 }
 
+/// Every crate file for the dependency directory: `deps`, plus what the
+/// manifests below name when the unit does not link.
+pub fn all_deps(c: &RenderedCompile, below: &manifest::Below) -> Vec<String> {
+    let mut deps = c.deps.clone();
+    if c.link_manifest_crates {
+        deps.extend(below.crates.iter().cloned());
+    }
+    deps
+}
+
+/// The unit's own manifest, for its `rmeta` output: its `.rmeta` file(s) in
+/// `rmeta_dir`, the crates no manifest below names, the `flags` of its
+/// `rustc-link-search` splices that no manifest below names, and its
+/// dependencies' manifests. `None` for a unit without an `rmeta` output.
+pub fn own_manifest(
+    c: &RenderedCompile,
+    rmeta_dir: &Path,
+    below: &manifest::Below,
+) -> Option<manifest::Manifest> {
+    let files = c.outputs.get("rmeta")?;
+    let mut m = manifest::Manifest {
+        crates: files
+            .iter()
+            .map(|f| rmeta_dir.join(f).display().to_string())
+            .collect(),
+        flags: BTreeSet::new(),
+        deps: c.dep_manifests.iter().cloned().collect(),
+    };
+    m.crates.extend(c.manifest_crates.iter().cloned());
+    for a in &c.args {
+        if let RenderedArg::Splice(s) = a
+            && s.kind == SpliceKind::RustcLinkSearch
+            && !below.flags.contains(&s.splice)
+        {
+            m.flags.insert(s.splice.clone());
+        }
+    }
+    Some(m)
+}
+
 /// The whole `compile` mode.
 pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     let dirs = WorkDirs::under(&outer.tmpdir());
+    let below = manifest::walk(&c.dep_manifests)?;
     let directives = load_directives(c)?;
     let inv = invocation(c, outer, &directives, &dirs)?;
-    link_deps(&c.deps, &dirs.deps)?;
+    link_deps(&all_deps(c, &below), &dirs.deps)?;
     fresh_dir(&dirs.out)?;
     run_rustc(&inv, &c.krate.name)?;
-    collect_outputs(&c.outputs, &dirs.out, |o| outer.output(o))
+    collect_outputs(&c.outputs, &dirs.out, |o| outer.output(o))?;
+    if c.outputs.contains_key("rmeta") {
+        let dir = outer.output("rmeta")?;
+        if let Some(m) = own_manifest(c, &dir, &below) {
+            manifest::write(&dir, &m)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

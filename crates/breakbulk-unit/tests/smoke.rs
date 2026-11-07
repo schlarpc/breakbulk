@@ -332,19 +332,12 @@ fn smoke() {
         "smoke ok: hello-from-build 42 c=6\n"
     );
 
-    // The build script's C compiler got the unit's seed (from its `out`, as
-    // stdenv computes it) and a prefix map for the source and OUT_DIR.
+    // The build script's C compiler got the unit's seed (its plan key) and a
+    // prefix map for the source and OUT_DIR.
     let run_out = out_path(run, "out");
     let cflags = std::fs::read_to_string(run_out.join("nix-cflags-compile.txt")).unwrap();
-    let seed: String = run_out
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .chars()
-        .take(10)
-        .collect();
     assert!(
-        cflags.starts_with(&format!(" -frandom-seed={seed}")),
+        cflags.starts_with(&format!(" -frandom-seed={run} ")),
         "{cflags}"
     );
     for map in [
