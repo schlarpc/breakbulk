@@ -21,6 +21,7 @@
 #   breakbulk.modules           the option declarations (lib/modules)
 #   breakbulk.sysDefaults       the curated -sys crate module
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
+#   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
 { lib }:
 let
   util = import ./util.nix { inherit lib; };
@@ -119,6 +120,8 @@ in
   mkSkeleton = skeleton.mkSkeleton;
 
   modules = import ./modules;
+  # imports = [ breakbulk.lib.flakeModule ]; in a flake-parts flake.
+  flakeModule = import ./modules/flake-parts.nix { inherit mkRepository; };
   sysDefaults = ./sys-defaults.nix;
   versionReq = import ./modules/version-req.nix { inherit lib; };
 
