@@ -21,6 +21,10 @@
 #                     product and the test binaries run inside a CentOS 7
 #                     userland (glibc 2.17 and its own loader) with bwrap,
 #                     not through the build machine's ld.so
+#   zig-native-*      HEAVY (builds OpenSSL and zlib with zig cc, ~5 min):
+#                     presets.zig's rebuildInputs; openssl-sys and libz-sys
+#                     link the rebuilt libraries; product and tests in the
+#                     CentOS 7 container
 #
 # tests/fixtures/build-std is exploratory and not a check: planning fails
 # (docs/implementation.md "build-std").
@@ -340,6 +344,85 @@ let
       '';
       # libtest under CentOS 7, `runs_on_expected_glibc` included.
       zig-centos7-test = t.testRuns.app."bin/app";
+    }
+    // zigNativeChecks;
+
+  # Native libraries rebuilt with zig cc against glibc 2.17 (decision 102):
+  # openssl-sys and libz-sys find them through breakbulk's sysDefaults
+  # (pkg-config, `inputs = p: [ p.openssl … ]`), called with the preset's
+  # package set. KNOWN GAP: zlib's configure does not recognise the
+  # wrapped zig cc as gcc and finds "no shared library support", so the
+  # rebuilt zlib is static only and libz-sys links its libz.a (still built
+  # by zig cc). OpenSSL is shared. The product links libssl dynamically; zig adds no rpath, so
+  # runs set LD_LIBRARY_PATH to the rebuilt libraries, as a deployment
+  # would ship them next to the program.
+  zigNativePreset = presets.zig {
+    glibc = "2.17";
+    rebuildInputs = [
+      "openssl"
+      "zlib"
+    ];
+  };
+  zigNativeLibs =
+    let
+      set = (zigNativePreset { inherit pkgs; }).packageSet.content;
+    in
+    {
+      inherit (set.breakbulkZigRebuilt) openssl zlib;
+      # The package set hands out the rebuilt packages, nixpkgs' otherwise
+      # (any other derivation with an evaluation warning; checked by hand:
+      # reading `set.curl` warns "a package input uses nixpkgs' `curl`…").
+      check =
+        set.openssl == set.breakbulkZigRebuilt.openssl
+        && set.openssl.drvPath != pkgs.openssl.drvPath
+        && set ? lib
+        && set.stdenv == pkgs.stdenv;
+    };
+  zigNativeLdPath = lib.makeLibraryPath [
+    zigNativeLibs.openssl
+    zigNativeLibs.zlib
+  ];
+  zigNativeRepo = mkRepo (fixtures + "/zig-native") [
+    {
+      workspaces.main = wsWith zigRust [ native ];
+      targets.${native} = {
+        preset = zigNativePreset;
+        runner = centos7Runner;
+      };
+      packages.app.test.env.LD_LIBRARY_PATH = zigNativeLdPath;
+    }
+  ];
+  zigNativeChecks =
+    let
+      t = zigNativeRepo.workspaces.main.target.${native};
+      bin = "${t.packages.app}/bin/app";
+      inherit (zigNativeLibs) openssl zlib;
+    in
+    assert lib.assertMsg zigNativeLibs.check "zig: rebuildInputs package set";
+    {
+      # HEAVY: builds OpenSSL with zig cc (about 5 minutes on 4 cores).
+      # The product and the libraries it loads need GLIBC_2.17 at most;
+      # it runs in the CentOS 7 container.
+      zig-native-centos7-run =
+        pkgs.runCommand "zig-native-centos7-run"
+          {
+            nativeBuildInputs = [ pkgs.buildPackages.binutils ];
+          }
+          ''
+            mkdir -p $out
+            for f in ${bin} ${lib.getLib openssl}/lib/libssl.so.3 ${lib.getLib openssl}/lib/libcrypto.so.3; do
+              v=$(objdump -T "$f" | { grep -o 'GLIBC_[0-9.]*' || true; } | sort -uV | tail -n1)
+              echo "$f: $v" | tee -a $out/versions.txt
+              newest=$(printf '%s\n' "$v" GLIBC_2.17 | sort -V | tail -n1)
+              [ "$newest" = GLIBC_2.17 ] || { echo "$f needs $v"; exit 1; }
+            done
+            readelf -dW ${bin} | grep NEEDED | tee $out/needed.txt
+            grep -q libcrypto.so.3 $out/needed.txt
+            readelf -dW ${lib.getLib openssl}/lib/libssl.so.3 | grep -q 'SONAME.*libssl.so.3'
+            LD_LIBRARY_PATH=${zigNativeLdPath} ${centos7Runner} ${bin} | tee $out/out.txt
+            grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
+          '';
+      zig-native-centos7-test = t.testRuns.app."lib/app";
     };
 in
 {
