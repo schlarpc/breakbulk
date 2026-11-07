@@ -369,6 +369,9 @@ let
             done
             export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
             unset __bb_dylib __bb_p
+            # The project's `[env]`, then rustc-env, then the runtime
+            # variables: testRuns.envScript's order.
+            eval "$(${jq} -r '.testSpec.configEnv // {} | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
             for f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
               eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$f/directives.json")"
             done

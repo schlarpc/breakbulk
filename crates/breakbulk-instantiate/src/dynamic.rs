@@ -127,6 +127,10 @@ pub struct TestSpec {
     /// The test unit's recorded env that a test process gets at run time:
     /// `CARGO`, `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_PKG_*`.
     pub env: BTreeMap<String, String>,
+    /// The project's `[env]` variables Cargo set on the test unit (the
+    /// plan's `configEnv`), which `cargo test` also sets on the test
+    /// process; not the runtime variables above, not `LD_LIBRARY_PATH`.
+    pub config_env: BTreeMap<String, String>,
     /// `flags` outputs of the runs whose `rustc-env` values the process gets.
     pub env_flags: Vec<String>,
     /// `flags` and `out` of every run of the unit's platform, for the
@@ -165,8 +169,16 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<TestSpec, Error
         return err(format!("the test root unit {unit} is not a compile unit"));
     };
     let mut env = BTreeMap::new();
-    for (k, v) in c.env.iter().filter(|(k, _)| is_runtime_var(k)) {
-        env.insert(
+    let mut config_env = BTreeMap::new();
+    for (k, v) in &c.env {
+        let into = if is_runtime_var(k) {
+            &mut env
+        } else if plan.config_env.contains(k) && k != "LD_LIBRARY_PATH" {
+            &mut config_env
+        } else {
+            continue;
+        };
+        into.insert(
             k.clone(),
             tokens.tokenize_store_paths(unit, &text(v, tokens)?)?,
         );
@@ -184,6 +196,7 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<TestSpec, Error
         .collect();
     Ok(TestSpec {
         env,
+        config_env,
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
         dylib_outs: runs.iter().map(|id| tokens.unit(id, "out")).collect(),

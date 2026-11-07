@@ -99,6 +99,16 @@ let
         ];
       in
       repo;
+    # The project's `[env]` (tests/loose-ends, config-env): the fixture's
+    # tests assert the values, so its test runs check them in both modes.
+    config-env = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = ../loose-ends/fixtures/config-env;
+      modules = [
+        { inherit mode; }
+        oneWs
+      ];
+    };
   };
 
   # Products differ between the modes (resolved at build time in dynamic
