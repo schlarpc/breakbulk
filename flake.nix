@@ -104,6 +104,10 @@
               inherit pkgs;
               breakbulk = self.lib;
             };
+            d = import ./tests/differential {
+              inherit pkgs;
+              breakbulk = self.lib;
+            };
           in
           {
             instantiate = t.check;
@@ -116,12 +120,11 @@
             # Directive differential test: 32 random workspaces, real
             # `cargo build -vv` and `cargo test --no-run -vv` against the
             # traced plans, argv and env per unit. No network.
-            differential = (import ./tests/differential {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }).differential;
+            differential = d.differential;
             instantiate-eval = t.eval-checks;
           }
+          # The same on rust-overlay's 1.95, 1.97 and nightly, 6 seeds each.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "differential-${n}" v) d.versions
           # End-to-end fixtures through the traced planner (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
             builtins.removeAttrs p [ "workspaces" ]

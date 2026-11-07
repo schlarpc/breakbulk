@@ -345,6 +345,10 @@ pub fn compare(plan: &Plan, log: &str, target: &Path, metadata: &Metadata) -> Re
 /// - `CARGO_TARGET_TMPDIR`, which the plan points at a fixed directory, and
 ///   `CARGO_BIN_EXE_*`, which name the bin's linked output rather than
 ///   Cargo's uplifted copy: only their presence is compared.
+/// - `CARGO`, with symlinks resolved: Cargo sets it to its own executable
+///   as the OS reports it, and the planner keeps the toolchain path it was
+///   given when that is the same file (a symlink tree such as rust-overlay's
+///   toolchains), so only the file is compared.
 fn normal_env(
     env: &BTreeMap<String, String>,
     target: &Path,
@@ -370,18 +374,27 @@ fn normal_env(
             kept.join(":")
         } else if k == "OUT_DIR"
             && (v.starts_with(OVERRIDDEN_OUT_DIR)
-                || (Path::new(v).starts_with(target) && !Path::new(v).is_dir()))
+                || (Path::new(v).starts_with(target) && !Path::new(v).is_dir())
+                || (Path::new(v).starts_with(target) && is_empty_dir(Path::new(v))))
         {
             // A package whose build script a `links` override replaces.
+            // Classic layout: Cargo's OUT_DIR does not exist. New layout
+            // (nightly 1.101): it exists, empty.
             "(a directory that does not exist)".to_owned()
         } else if k == "CARGO_TARGET_TMPDIR" || k.starts_with("CARGO_BIN_EXE_") {
             "(a path)".to_owned()
+        } else if k == "CARGO" {
+            std::fs::canonicalize(v).map_or_else(|_| v.clone(), |p| p.display().to_string())
         } else {
             v.clone()
         };
         out.insert(k.clone(), v);
     }
     out
+}
+
+fn is_empty_dir(p: &Path) -> bool {
+    std::fs::read_dir(p).is_ok_and(|mut d| d.next().is_none())
 }
 
 /// One line per variable that differs.
@@ -691,7 +704,16 @@ fn compare_doctests(
         };
         report.compared += 1;
         // Cargo's own `-L dependency=` directories: breakbulk passes its own.
+        // The classic layout has one `deps` directory; the new layout one
+        // unit directory (`…/build/<pkg>/<hash>/out`) per dependency, the
+        // build script's compile included. A build script's own
+        // `rustc-link-search=dependency=…` is in the traced list too.
         let r = &real[*id];
+        let traced_deps: BTreeSet<&str> = got
+            .windows(2)
+            .filter(|w| w[0] == "-L")
+            .filter_map(|w| w[1].strip_prefix("dependency="))
+            .collect();
         let mut want = Vec::new();
         let mut i = 0;
         while i < r.args.len() {
@@ -699,7 +721,12 @@ fn compare_doctests(
                 && r.args
                     .get(i + 1)
                     .and_then(|v| v.strip_prefix("dependency="))
-                    .is_some_and(|v| v.ends_with("/deps"))
+                    .is_some_and(|v| {
+                        v.ends_with("/deps")
+                            || (v.ends_with("/out")
+                                && v.contains("/build/")
+                                && !traced_deps.contains(v))
+                    })
             {
                 i += 2;
                 continue;
@@ -755,6 +782,24 @@ mod tests {
                 "x=1"
             ]
         );
+    }
+
+    #[test]
+    fn cargo_compared_as_a_file() {
+        let dir = std::env::temp_dir().join(format!("bb-golden-cargo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("cargo-real");
+        let link = dir.join("cargo-link");
+        let other = dir.join("cargo-other");
+        std::fs::write(&real, "").unwrap();
+        std::fs::write(&other, "").unwrap();
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let env = |v: &Path| BTreeMap::from([("CARGO".to_owned(), v.display().to_string())]);
+        let t = Path::new("/nonexistent-target");
+        assert_eq!(normal_env(&env(&real), t, &[]), normal_env(&env(&link), t, &[]));
+        assert_ne!(normal_env(&env(&real), t, &[]), normal_env(&env(&other), t, &[]));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
