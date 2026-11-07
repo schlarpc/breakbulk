@@ -215,6 +215,108 @@ let
       '';
     };
 
+  # --- cross sys-native (aarch64) ----------------------------------------------
+  #
+  # M1's sys-native fixture for aarch64-unknown-linux-gnu: pkg-config +
+  # openssl, cmake and bindgen + cc, each declared on its own package and
+  # captured with the aarch64 cross stdenv for target units. The product
+  # runs under qemu-user.
+
+  a64 = "aarch64-unknown-linux-gnu";
+  crossRust = rustWith [ a64 ];
+  sysNativeCross = mkRepo (fixtures + "/sys-native") [
+    {
+      workspaces.main = {
+        toolchain = {
+          rustc = crossRust;
+          cargo = crossRust;
+        };
+        targets.${a64} = { };
+        variants.default.profile = "dev";
+      };
+      targets.${a64}.preset = presets.linuxGnu;
+      packages = {
+        openssl-sys = {
+          nativeInputs = p: [ p.pkg-config ];
+          inputs = p: [ p.openssl ];
+        };
+        cm-sys.nativeInputs = p: [ p.cmake ];
+        bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
+      };
+    }
+  ];
+  sysNativeCrossChecks =
+    let
+      t = sysNativeCross.workspaces.main.target.${a64};
+    in
+    {
+      sys-native-aarch64 = pkgs.runCommand "sys-native-aarch64" { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; } ''
+        readelf -hW ${t.packages.app}/bin/app | grep -q 'Machine:.*AArch64'
+        ${lib.escapeShellArgs t.runner} ${t.packages.app}/bin/app | tee $out
+        grep -qx "openssl=3+ cm=42 bg=7 plain-saw=none" $out
+      '';
+    };
+
+  # --- msvc ---------------------------------------------------------------------
+  #
+  # C (clang-cl), bindgen, and a resource linked with rustc-link-arg-bins,
+  # through the msvc preset. x86_64 runs (product and tests) under wine;
+  # aarch64 compiles and links.
+
+  msvcTriples = [
+    "x86_64-pc-windows-msvc"
+    "aarch64-pc-windows-msvc"
+  ];
+  msvcRust = rustWith msvcTriples;
+  sdk = breakbulk.xwinSdk {
+    pkgs = xwinPkgs;
+    manifestVersion = 17;
+    crt = "14.44.17.14";
+    sdk = "10.0.26100";
+    arches = [
+      "x86_64"
+      "aarch64"
+    ];
+    hash = "sha256-22dqk0tKSbC4bnfsnhhsG0aEJfUHb3JJNL3TnZGFVa0=";
+  };
+  msvc = mkRepo (fixtures + "/msvc") [
+    {
+      workspaces.main = {
+        toolchain = {
+          rustc = msvcRust;
+          cargo = msvcRust;
+        };
+        targets = lib.genAttrs msvcTriples (_: { });
+        variants.default.profile = "release";
+      };
+      targets = lib.genAttrs msvcTriples (_: {
+        preset = presets.msvc {
+          inherit sdk;
+          rustc = msvcRust;
+        };
+      });
+    }
+  ];
+  msvcChecks =
+    let
+      t = triple: msvc.workspaces.main.target.${triple};
+      x = t "x86_64-pc-windows-msvc";
+      a = t "aarch64-pc-windows-msvc";
+      expect = "smoke: c_add=42 pid_match=true resource=resource-ok";
+    in
+    lib.optionalAttrs (xwinPkgs != null) {
+      msvc-x86_64-run = pkgs.runCommand "msvc-x86_64-run" { } ''
+        ${lib.escapeShellArgs x.runner} ${x.packages.msvc-smoke}/bin/msvc-smoke > out.txt
+        tr -d '\r' < out.txt | tee $out
+        grep -qxF ${lib.escapeShellArg expect} $out
+      '';
+      msvc-x86_64-test = x.testRuns.msvc-smoke."bin/msvc-smoke";
+      msvc-aarch64-build = pkgs.runCommand "msvc-aarch64-build" { nativeBuildInputs = [ pkgs.file ]; } ''
+        file ${a.packages.msvc-smoke}/bin/msvc-smoke | tee $out
+        grep -qi 'PE32+ executable.*\(aarch64\|arm64\)' $out
+      '';
+    };
+
   # --- evaluation-time checks on preset values ---------------------------------
 
   presetsEval =
@@ -262,7 +364,13 @@ let
 in
 {
   repos = {
-    inherit sameTriple musl glibcStatic;
+    inherit
+      sameTriple
+      musl
+      glibcStatic
+      sysNativeCross
+      msvc
+      ;
   };
   checks = {
   presets-eval = presetsEval;
@@ -280,6 +388,7 @@ in
   }
   // staticChecks "static-glibc" glibcStatic native
 // staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl"
-// staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
-  ;
+  // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
+  // sysNativeCrossChecks
+  // msvcChecks;
 }
