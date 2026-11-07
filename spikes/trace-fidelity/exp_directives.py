@@ -23,6 +23,9 @@ COMMANDS = {
     "check": ["check", "-vv", "--offline", "--workspace", T],
     "test-no-run": ["test", "--no-run", "-vv", "--offline", "--workspace", T],
     "build-no-target": ["build", "-vv", "--offline", "--workspace"],
+    # Split debuginfo: rustc writes .dwp/.dwo files that --print=file-names does not name.
+    "split-packed": ["build", "-vv", "--offline", "--workspace", T, "--config", 'profile.dev.split-debuginfo="packed"'],
+    "split-unpacked": ["build", "-vv", "--offline", "--workspace", T, "--config", 'profile.dev.split-debuginfo="unpacked"'],
     # `links` overrides: Cargo skips a-sys's and hostdep's build scripts and
     # passes these values itself (including DEP_A_KEY to b-sys's script).
     "links-override": [
