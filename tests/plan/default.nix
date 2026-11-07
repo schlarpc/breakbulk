@@ -95,4 +95,16 @@ in
         mkdir -p $out
         echo "$got" > $out/output
       '';
+
+  # The test plan: the bin's test harness, built from `cargo test --no-run`.
+  walking-skeleton-test =
+    pkgs.runCommand "walking-skeleton-test-check"
+      { t = walking-skeleton.testBins."walking-skeleton/bin-test/walking-skeleton"; }
+      ''
+        $t/bin/walking-skeleton | tee log
+        grep -q 'test tests::build_script_reached_the_test_harness ... ok' log
+        grep -q 'test result: ok. 1 passed' log
+        mkdir -p $out
+        cp log $out/
+      '';
 }

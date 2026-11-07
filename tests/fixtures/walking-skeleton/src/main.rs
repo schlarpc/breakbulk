@@ -16,3 +16,13 @@ fn main() {
         generated::PROFILE
     );
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn build_script_reached_the_test_harness() {
+        assert!(cfg!(walking_skeleton));
+        assert_eq!(env!("WS_FROM_BUILD"), "hello-from-build-script");
+        assert_eq!(super::generated::ANSWER, 42);
+    }
+}
