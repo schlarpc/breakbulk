@@ -476,6 +476,15 @@ in
 
   # Later targets (M7), one file each.
   wasip2 = mkPreset (import ./wasip2.nix { inherit lib wasmCommon runners; });
+  zig = mkPreset (
+    import ./zig.nix {
+      inherit
+        lib
+        driverWrapper
+        hostSpec
+        ;
+    }
+  );
   windowsGnu = mkPreset (
     import ./windows-gnu.nix {
       inherit

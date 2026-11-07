@@ -206,10 +206,62 @@ let
   windowsGnuChecks =
     windowsGnuChecksFor "windows-gnu" "x86_64-pc-windows-gnu"
     // windowsGnuChecksFor "windows-gnullvm" "x86_64-pc-windows-gnullvm";
+
+  # --- zig -----------------------------------------------------------------------
+
+  native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  zigRust = rustWith [ ];
+  zigRepo = mkRepo (fixtures + "/zig") [
+    {
+      workspaces.main = wsWith zigRust [ native ];
+      targets.${native}.preset = presets.zig { glibc = "2.17"; };
+    }
+  ];
+  zigChecks =
+    let
+      t = zigRepo.workspaces.main.target.${native};
+      bin = "${t.packages.app}/bin/app";
+      inst = zigRepo.workspaces.main.instances.${native}.default;
+      plan = builtins.fromJSON (
+        builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
+      );
+      hostCompiles = lib.filter (u: u.platform == "host" && u.kind == "compile") (
+        lib.attrValues plan.units
+      );
+      zigInHost = lib.filter (u: lib.hasInfix "zig-cc" (builtins.toJSON u)) hostCompiles;
+    in
+    assert lib.assertMsg (hostCompiles != [ ]) "zig: expected host compiles";
+    assert lib.assertMsg (zigInHost == [ ]) "zig: host units use the zig linker";
+    {
+      # Every versioned GLIBC symbol the product imports is 2.17 or older;
+      # it runs on the build machine's newer glibc.
+      zig-glibc =
+        pkgs.runCommand "zig-glibc"
+          {
+            nativeBuildInputs = [ pkgs.buildPackages.binutils ];
+          }
+          ''
+            objdump -T ${bin} | grep -o 'GLIBC_[0-9.]*' | sort -uV | tee versions.txt
+            max=$(tail -n1 versions.txt)
+            echo "newest: $max"
+            newest=$(printf '%s\n' "$max" GLIBC_2.17 | sort -V | tail -n1)
+            [ "$newest" = GLIBC_2.17 ] || { echo "$max is newer than GLIBC_2.17"; exit 1; }
+            ${lib.escapeShellArgs t.runner} ${bin} a b | tee out.txt
+            grep -qx "zig: headers=2.17 args=3 runtime-ok=true" out.txt
+            mkdir -p $out
+            cp versions.txt out.txt $out/
+          '';
+      zig-test = t.testRuns.app."bin/app";
+    };
 in
 {
   repos = {
-    inherit wasip2Repo riscv64Repo windowsGnuRepo;
+    inherit
+      wasip2Repo
+      riscv64Repo
+      windowsGnuRepo
+      zigRepo
+      ;
   };
-  checks = wasip2Checks // riscv64Checks // windowsGnuChecks;
+  checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks;
 }

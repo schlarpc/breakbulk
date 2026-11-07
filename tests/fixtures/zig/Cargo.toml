@@ -1,0 +1,7 @@
+# zig (M7): the host triple linked against glibc 2.17 by `zig cc`, with C
+# code compiled by `zig cc` too. A build script (a host unit) keeps the
+# host linker. The product's newest GLIBC symbol version must be 2.17 or
+# older; tests run natively.
+[workspace]
+resolver = "3"
+members = ["app"]
