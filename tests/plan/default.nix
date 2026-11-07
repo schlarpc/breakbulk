@@ -121,7 +121,7 @@ let
     ];
     buildInputs = [ pkgs.openssl ];
   };
-  sysNative = mk "sys-native" {
+  sysNativeArgs = {
     packages = {
       openssl-sys = {
         nativeInputs = p: [ p.pkg-config ];
@@ -132,36 +132,45 @@ let
       bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
     };
   };
+  sysNative = mk "sys-native" sysNativeArgs;
 
-  # Older stable releases for the golden test, from rust-overlay when the
-  # package set has it (the flake's does). nixpkgs' own cargo is the third.
+  # The other releases of the supported window for the golden test, from
+  # rust-overlay when the package set has it (the flake's does): the oldest
+  # stable (1.95), one between, and the latest nightly (new build-directory
+  # layout, -Zembed-metadata=no). nixpkgs' own cargo (1.99) is the latest
+  # stable, tested by the checks above.
   goldenToolchains = lib.optionalAttrs (pkgs ? rust-bin) (
-    lib.genAttrs [ "1.95.0" "1.97.0" ] (
-      v:
-      let
-        tc = pkgs.rust-bin.stable.${v}.minimal;
-      in
-      {
+    lib.mapAttrs
+      (_: tc: {
         cargo = tc;
         rustc = tc;
+      })
+      {
+        "1_95" = pkgs.rust-bin.stable."1.95.0".minimal;
+        "1_97" = pkgs.rust-bin.stable."1.97.0".minimal;
+        nightly = pkgs.rust-bin.nightly.latest.minimal;
       }
-    )
   );
-  # The golden test of a fixture's build and test plans on each of them.
+  # The golden test of a fixture's build and test plans on each of them:
+  # `<fixture>-golden-<label>` and `<fixture>-golden-<label>-test`.
+  # `args` go to mkWorkspace; `goldenArgs` to `golden` (native inputs).
   goldenOn =
-    fixture: args:
+    fixture: args: goldenArgs:
     lib.concatMapAttrs (
       v: toolchain:
       let
         ws = mk fixture (args // { inherit toolchain; });
-        n = "${fixture}-golden-${lib.replaceStrings [ "." ] [ "_" ] v}";
+        n = "${fixture}-golden-${v}";
       in
       {
-        ${n} = golden { inherit fixture ws toolchain; };
-        "${n}-test" = golden {
-          inherit fixture ws toolchain;
-          kind = "test";
-        };
+        ${n} = golden ({ inherit fixture ws toolchain; } // goldenArgs);
+        "${n}-test" = golden (
+          {
+            inherit fixture ws toolchain;
+            kind = "test";
+          }
+          // goldenArgs
+        );
       }
     ) goldenToolchains;
 
@@ -723,8 +732,12 @@ in
         cp log $out/
       '';
 }
-// goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); }
-// goldenOn "dev-dep-features" { }
+// goldenOn "walking-skeleton" { } { }
+// goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); } { }
+// goldenOn "build-dep-leak" { } { }
+// goldenOn "crate-types" { } { }
+// goldenOn "dev-dep-features" { } { }
+// goldenOn "sys-native" sysNativeArgs sysNativeInputs
 # Nightly Cargo and rustc (rust-overlay's latest): the new build-directory
 # layout and `-Zembed-metadata=no`. The golden tests of the walking skeleton
 # and the directives fixture, and their products, which link against rlibs

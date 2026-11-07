@@ -104,6 +104,10 @@
               inherit pkgs;
               breakbulk = self.lib;
             };
+            d = import ./tests/differential {
+              inherit pkgs;
+              breakbulk = self.lib;
+            };
           in
           {
             instantiate = t.check;
@@ -116,12 +120,11 @@
             # Directive differential test: 32 random workspaces, real
             # `cargo build -vv` and `cargo test --no-run -vv` against the
             # traced plans, argv and env per unit. No network.
-            differential = (import ./tests/differential {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }).differential;
+            differential = d.differential;
             instantiate-eval = t.eval-checks;
           }
+          # The same on rust-overlay's 1.95, 1.97 and nightly, 6 seeds each.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "differential-${n}" v) d.versions
           # End-to-end fixtures through the traced planner (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
             builtins.removeAttrs p [ "workspaces" ]
@@ -130,6 +133,23 @@
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "repository-${n}" v) (
             builtins.removeAttrs r [ "repos" ]
           )
+          # A git source locked at two revisions by different workspaces;
+          # git package ids against real Cargo's (a local repository).
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-revisions-${n}" v) (
+            builtins.removeAttrs (import ./tests/git-revisions {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repos" "repo" "lockfiles" ]
+          )
+          # Stable test-run inputs for content-addressed cutoff (decision
+          # 61), built input-addressed; the CA check itself needs
+          # ca-derivations: tests/test-cutoff/run.sh (private store).
+          // {
+            test-cutoff-stable-inputs = (import ./tests/test-cutoff {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }).stable-inputs;
+          }
           # Test runs, doctests and test apps over the doctests and
           # test-control fixtures (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-runs-${n}" v) (
