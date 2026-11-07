@@ -26,6 +26,33 @@ in
   inherit transforms;
   datboi = repo.workspaces.host.packages.datboi;
   emu-ds = repo.workspaces.emu-ds.target.${wasm}.packages.datboi-emu-ds;
+  # What the flake's checks run, from repo.checks: the host workspace's
+  # products, tests and clippy, and the components' native unit tests
+  # (nextest there, so no doctests; doctests are in `doctests`). Left out:
+  # the components' wasm32 test runs and doctests, which repo.checks has
+  # because every target of a workspace gets test plans.
+  ci =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      keep =
+        n:
+        !(lib.hasSuffix "/doctest" n)
+        && (lib.hasPrefix "host/" n || (lib.hasInfix "/${native}/" n && lib.hasInfix "/test-" n));
+    in
+    pkgs.linkFarm "datboi2-ci" (
+      lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) (
+        lib.filterAttrs (n: _: keep n) repo.checks
+      )
+      // {
+        inherit transforms;
+        emu-ds = repo.workspaces.emu-ds.target.${wasm}.packages.datboi-emu-ds;
+      }
+    );
+  doctests = pkgs.linkFarm "datboi2-doctests" (
+    lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) (
+      lib.filterAttrs (n: _: lib.hasPrefix "host/" n && lib.hasSuffix "/doctest" n) repo.checks
+    )
+  );
   build = pkgs.linkFarm "datboi2-build" {
     datboi = repo.workspaces.host.packages.datboi;
     inherit transforms;

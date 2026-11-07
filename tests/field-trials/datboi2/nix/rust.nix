@@ -204,6 +204,15 @@ in
       # The host side of the same worlds (wasmtime's bindgen!).
       datboi-runtime.extraSources = [ "wit" ];
       # Tests that include_bytes! fixtures of sibling crates.
+      # These pin the blake3 of the crane-built components, whose bytes
+      # carry crane's build paths in panic locations (/build/nest/…, the
+      # vendor directory) and the wit-component version of the flake's
+      # wasm-tools. breakbulk's components differ, deterministically; a
+      # migration re-pins them.
+      datboi-runtime.test.args = [
+        "--skip"
+        "component_bytes_are_pinned"
+      ];
       datboi-runtime.test.sourceScope = [
         "crates/datboi-ingest/tests/fixtures"
         "crates/datboi-xf-xgd1-prng/data"
@@ -233,6 +242,12 @@ in
         DATBOI_MAGIC_DB = "${magicDb}";
         DATBOI_EMU_DS = "${repo.workspaces.emu-ds.target.${wasm}.packages.datboi-emu-ds}";
       };
+
+      # datboi-gen-openapi is a dev tool that writes
+      # $CARGO_MANIFEST_DIR/openapi.json, so it names its source on
+      # purpose (the default check caught it; crane's build embeds
+      # /build/source there).
+      datboi-api.checks.noSourceReferences = null;
 
       # The D62 fsck-in-CI gate.
       datboi.test = {
