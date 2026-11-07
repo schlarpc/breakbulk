@@ -1,0 +1,16 @@
+[package]
+name = "rf"
+version.workspace = true
+edition.workspace = true
+
+[features]
+cli = []
+
+[[bin]]
+name = "rf"
+path = "src/main.rs"
+
+[[bin]]
+name = "admin"
+path = "src/bin/admin.rs"
+required-features = ["cli"]

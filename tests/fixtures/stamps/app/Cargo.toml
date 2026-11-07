@@ -1,0 +1,8 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+util = { path = "../util" }
+itoa = "=1.0.11"

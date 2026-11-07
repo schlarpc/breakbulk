@@ -1,0 +1,12 @@
+[package]
+name = "rft"
+version.workspace = true
+edition.workspace = true
+
+[features]
+extra = []
+
+[[test]]
+name = "needs-extra"
+path = "tests/needs-extra.rs"
+required-features = ["extra"]

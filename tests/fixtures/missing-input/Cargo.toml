@@ -1,0 +1,8 @@
+# A -sys crate whose build script needs an input that is not declared:
+# MYLIB_DIR (rerun-if-env-changed) and ../vendor/mylib.txt
+# (rerun-if-changed, outside the crate directory). Without configuration the
+# build-script run fails and its message names
+# `packages.mylib-sys.env.MYLIB_DIR` and `packages.mylib-sys.extraSources`.
+[workspace]
+resolver = "2"
+members = ["mylib-sys", "app"]

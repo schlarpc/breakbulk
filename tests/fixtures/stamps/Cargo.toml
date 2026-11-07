@@ -1,0 +1,10 @@
+# Build stamps per package: `app` compiles in GIT_REV and
+# SOURCE_DATE_EPOCH from its package env; `tool` and `util` (with a build
+# script) are not stamped, so changing a stamp changes only `app`'s units.
+[workspace]
+resolver = "2"
+members = ["app", "tool", "util"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
