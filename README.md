@@ -49,7 +49,7 @@ breakbulk is a flake. Its library is `breakbulk.lib`.
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    breakbulk.url = "<where you keep breakbulk>";
+    breakbulk.url = "github:schlarpc/breakbulk";
   };
 
   outputs = { self, nixpkgs, breakbulk }:
