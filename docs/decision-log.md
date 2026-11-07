@@ -590,3 +590,58 @@ the build step's output path, and GCC writes that into debug info. So any
 change to a crate's build step, even one that doesn't change the code,
 changed the binary's bytes. The seed will instead come from Cargo's own ID
 for the unit, which only changes when the crate actually changes.
+
+## 55. FYI: milestone M2's configuration layer works
+
+`mkRepository` with NixOS-style module options now drives everything: many
+workspaces in one repository, per-package settings, a curated set of
+defaults for common `-sys` crates (copied from nixpkgs), a dev shell, and
+`explainSharing`. Passing tests:
+- three workspaces share exactly the crates they should; where they don't,
+  `explainSharing` names the reason (for example "different source path"
+  or "member here, dependency there");
+- editing an unrelated sibling file rebuilds nothing; editing a build stamp
+  rebuilds only the stamped package;
+- outputs that Cargo skips for missing features fail (products) or report
+  "skipped" (tests) with the reason;
+- a missing native dependency fails naming the option to set.
+Options not implemented yet give an evaluation warning, or an error where
+silently ignoring them would build the wrong thing.
+
+## 56. ASK: when two settings apply to the same package
+
+You can configure a package as `packages.openssl-sys` (all versions) and
+`packages."openssl-sys@^0.9"` (some versions). Both apply; the
+version-specific one is applied last, so its environment variables win and
+its input lists are added to the other's. Alternative: the most specific
+entry replaces the general one entirely.
+
+## 57. ASK: your settings add to the built-in `-sys` crate defaults
+
+breakbulk ships default native dependencies for common `-sys` crates. If you
+also set `inputs` for such a crate, yours are added to the defaults; use
+`lib.mkForce` to replace them, or `sysDefaults.enable = false` to drop all
+defaults. Alternative: any setting of yours replaces the default silently,
+which is easier to reason about for a single crate but surprising when you
+only meant to add one library.
+
+## 58. ASK: what the dev shell warns about
+
+The dev shell warns about settings in your shell environment that the
+planner won't see: `CARGO_*` variables (except ones that only affect output
+location, terminal, network or credentials), plus `RUSTFLAGS`,
+`RUSTDOCFLAGS`, `RUSTC`, `RUSTDOC`, the rustc wrapper variables, and a
+`config.toml` in your Cargo home. The docs only mentioned `CARGO_*`. Is
+that list right, too noisy, or missing anything you use?
+
+## 59. FYI: naming of outputs
+
+- `packages.<pkg>` holds the package's binaries in `bin/` and its C
+  libraries in `lib/`.
+- Tests are named by test name; a library's own unit tests are `lib`, a
+  binary's are `bin-<name>`, an example's are `example-<name>`.
+- The default variant is called `default` and uses the `release` profile.
+- Extra options beyond the docs: per-variant `noDefaultFeatures` and
+  `allFeatures`; `defaultVariant`; `gitSubdirs`, `gitSubmodules`;
+  `sysDefaults.enable`.
+- A flake-parts module is available as `breakbulk.lib.flakeModule`.

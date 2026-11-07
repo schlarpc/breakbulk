@@ -1,0 +1,17 @@
+# Targets Cargo skips unless features are enabled: the bin `admin` (in
+# `rf`) needs `cli`, the integration test `needs-extra` (in `rft`) needs
+# `extra`. They still have attributes: the product root is a stub that
+# fails with the reason, the test root a stub that succeeds and says it was
+# skipped. A variant with the features builds both.
+#
+# The skipped bin and the skipped test are in different packages on
+# purpose: Cargo gives every integration test CARGO_BIN_EXE_<bin> for every
+# bin of its package, skipped bins included (cargo src/compiler/artifact.rs
+# `get_env`), and breakbulk-plan does not handle that path yet.
+[workspace]
+resolver = "2"
+members = ["rf", "rft"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

@@ -26,6 +26,17 @@
 #   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target>
 #   ws.plans.{build,test}      the plan derivations ($out/plan.json)
 #   ws.units.{build,test}      every unit derivation, by unit id
+#
+# Arguments added for mkRepository (lib/repository.nix), all optional:
+#   select = [ "<pkg>" ];      plan with -p for each instead of --workspace
+#   noDefaultFeatures, allFeatures   passed to the planner
+#   variant = "<name>";        the variant's name in root stubs' messages
+#   packageOverrides."<name>@<version>" = { host = { env; envCapture; };
+#     target = { ... }; strictSources; }   as breakbulk.instantiate takes them
+#   strictSources = false;     the repository-wide default
+#   targetEnv = { };           the target spec's env (target units only)
+# Path packages outside the workspace root (in the skeleton's closure) get
+# source views too, keyed by their directory like members.
 {
   lib,
   util,
@@ -57,6 +68,13 @@ pkgs:
   packages ? { },
   tools ? mkTools pkgs,
   name ? "breakbulk",
+  select ? [ ],
+  noDefaultFeatures ? false,
+  allFeatures ? false,
+  variant ? profile,
+  packageOverrides ? { },
+  strictSources ? false,
+  targetEnv ? { },
 }:
 let
   wsDir = util.normalizeRel path;
@@ -74,7 +92,22 @@ let
     map (e: lib.nameValuePair (crateId e) (fetch.crateSource e).path) (lockfile.remoteEntries entries)
   );
   views = sourceViews.workspaceViews { inherit root wsDir extraSources; };
-  workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views;
+  # Path packages Cargo loads from outside the workspace root.
+  closureDirs = skel.passthru.description.packages;
+  memberDirs = lib.catAttrs "dir" (lib.attrValues views);
+  outsideViews = lib.genAttrs (lib.filter (d: !(lib.elem d memberDirs)) closureDirs) (
+    dir:
+    let
+      pkgName = (builtins.fromTOML (builtins.readFile (root + "/${util.joinRel dir "Cargo.toml"}"))).package.name;
+    in
+    sourceViews.sourceView {
+      inherit root;
+      pkgDir = dir;
+      memberDirs = closureDirs;
+      extraSources = extraSources.${pkgName} or [ ];
+    }
+  );
+  workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views // outsideViews;
 
   plans = lib.genAttrs [ "build" "test" ] (
     kind:
@@ -88,7 +121,10 @@ let
         features
         configs
         wsDir
+        noDefaultFeatures
+        allFeatures
         ;
+      packages = select;
       inherit (toolchain) cargo rustc;
       skeleton = skel;
       name = "${name}-plan";
@@ -139,12 +175,18 @@ let
         shell = "${pkgs.bash}/bin/bash";
       };
       host.envCapture = captures.host;
-      target.envCapture = captures.target;
-      inherit overrides;
+      target = {
+        envCapture = captures.target;
+        env = targetEnv;
+      };
+      # `packages` (by name) and mkRepository's `packageOverrides` (by name
+      # or name@version, already in instantiate's shape); the latter win.
+      overrides = overrides // packageOverrides;
+      inherit strictSources;
       roots = predictedRoots {
         workspaceRoots = wsRoots;
         planKind = kind;
-        variant = profile;
+        inherit variant;
       };
       name = "${name}-${kind}-units";
     };

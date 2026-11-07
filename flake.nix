@@ -70,6 +70,10 @@
               inherit pkgs;
               breakbulk = self.lib;
             };
+            r = import ./tests/repository {
+              inherit pkgs;
+              breakbulk = self.lib;
+            };
           in
           {
             instantiate = t.check;
@@ -78,6 +82,10 @@
           # End-to-end fixtures through the traced planner (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
             builtins.removeAttrs p [ "workspaces" ]
+          )
+          # mkRepository (M2): sharing, invalidation and override tests.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "repository-${n}" v) (
+            builtins.removeAttrs r [ "repos" ]
           )
         ));
     };
