@@ -23,6 +23,17 @@ COMMANDS = {
     "check": ["check", "-vv", "--offline", "--workspace", T],
     "test-no-run": ["test", "--no-run", "-vv", "--offline", "--workspace", T],
     "build-no-target": ["build", "-vv", "--offline", "--workspace"],
+    # `links` overrides: Cargo skips a-sys's and hostdep's build scripts and
+    # passes these values itself (including DEP_A_KEY to b-sys's script).
+    "links-override": [
+        "build", "-vv", "--offline", "--workspace", T,
+        "--config", f'target.{bb.HOST}.a.rustc-link-lib=["m"]',
+        "--config", f'target.{bb.HOST}.a.rustc-link-search=["native=/tmp/bb-override-a"]',
+        "--config", f'target.{bb.HOST}.a.rustc-cfg=["over_a"]',
+        "--config", f'target.{bb.HOST}.a.rustc-env.REAL_A_SYS_ENV="over"',
+        "--config", f'target.{bb.HOST}.a.key="over_val"',
+        "--config", f'target.{bb.HOST}.hostdep.rustc-cfg=["over_hostdep"]',
+    ],
 }
 
 

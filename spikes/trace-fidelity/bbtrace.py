@@ -280,6 +280,7 @@ def norm(run: Run, s: str):
 SENT_ARG = re.compile(r"^__bb_([0-9a-z]+)_(cfg|lib)$")
 SENT_CCFG = re.compile(r"^cfg\(__bb_([0-9a-z]+)_ccfg\)$")
 SENT_SEARCH = re.compile(r"^native=(.*)/__bb_([0-9a-z]+)_search$")
+SENT_SEARCH_EXT = re.compile(r"^native=/__bb_([0-9a-z]+)_search_ext$")
 SENT_LINKARG = re.compile(r"^link-arg=__bb_([0-9a-z]+)_(arg(?:_bins|_tests|_examples|_benches|_cdylib|_bin_.+)?)$")
 SENT_ENV = re.compile(r"^__BB_([0-9A-Z]+)_ENV$")
 SENT_DEP = re.compile(r"^DEP_(.+)___BB$")
@@ -331,24 +332,27 @@ def expand_args(args, dirs, shapes):
             i += 2
             continue
         if a == "-L" and b and SENT_SEARCH.match(b):
-            # A contiguous group of search sentinels: expand every run's paths
-            # in order, then move paths inside the run's own OUT_DIR first
-            # (Cargo's LibraryPath::CargoArtifact before External, stable).
-            group = []
-            while i < len(args) and args[i] == "-L" and i + 1 < len(args) and SENT_SEARCH.match(args[i + 1]):
-                group.append(SENT_SEARCH.match(args[i + 1]).group(2))
-                i += 2
-            shapes.add(("rustc-link-search", "-L <v>"))
-            vals = []
-            for r in group:
-                od = dirs[r][0]
-                for p in dirs[r][1]["paths"]:
-                    vals.append((0 if strip_kind(p).startswith(od) else 1, p))
+            # Inside-OUT_DIR sentinel: R's values inside its own OUT_DIR, in order.
+            m = SENT_SEARCH.match(b)
+            r = m.group(2)
+            shapes.add(("rustc-link-search", "-L <v> (values inside R's OUT_DIR)"))
+            COUNTS["rustc-link-search"] = COUNTS.get("rustc-link-search", 0) + 1
+            od = dirs[r][0]
+            for p in dirs[r][1]["paths"]:
+                if NAIVE or strip_kind(p).startswith(od):
+                    out += ["-L", p]
+            i += 2
+            continue
+        if a == "-L" and b and SENT_SEARCH_EXT.match(b):
+            # Outside sentinel: R's other values, in order.
+            r = SENT_SEARCH_EXT.match(b).group(1)
+            shapes.add(("rustc-link-search", "-L <v> (values outside R's OUT_DIR)"))
+            od = dirs[r][0]
             if not NAIVE:
-                vals.sort(key=lambda t: t[0])
-            COUNTS["rustc-link-search"] = COUNTS.get("rustc-link-search", 0) + len(group)
-            for _, p in vals:
-                out += ["-L", p]
+                for p in dirs[r][1]["paths"]:
+                    if not strip_kind(p).startswith(od):
+                        out += ["-L", p]
+            i += 2
             continue
         if a == "-C" and b and SENT_LINKARG.match(b):
             r = SENT_LINKARG.match(b).group(1)

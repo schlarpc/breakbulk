@@ -147,10 +147,15 @@ pub fn sentinels(tag: &str, out_dir: &Path, targets: &PackageTargets, links: boo
         ("rustc-cfg".into(), format!("__bb_{r}_cfg")),
         ("rustc-check-cfg".into(), format!("cfg(__bb_{r}_ccfg)")),
         ("rustc-env".into(), format!("__BB_{}_ENV=__bb_{r}_env", r.to_ascii_uppercase())),
+        // Cargo puts search paths inside the printing script's OUT_DIR before
+        // all other paths (`LibraryPath::CargoArtifact` before `External`,
+        // stable sort over every linked script's output). Two sentinels, one
+        // of each class, show where each class of R's values goes.
         (
             "rustc-link-search".into(),
             format!("native={}", out_dir.join(format!("__bb_{r}_search")).display()),
         ),
+        ("rustc-link-search".into(), format!("native=/__bb_{r}_search_ext")),
         ("rustc-link-lib".into(), format!("__bb_{r}_lib")),
         ("rustc-link-arg".into(), format!("__bb_{r}_arg")),
     ];
@@ -259,10 +264,11 @@ mod tests {
         let keys: Vec<&str> = s.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(
             keys,
-            ["rustc-cfg", "rustc-check-cfg", "rustc-env", "rustc-link-search", "rustc-link-lib",
+            ["rustc-cfg", "rustc-check-cfg", "rustc-env", "rustc-link-search", "rustc-link-search", "rustc-link-lib",
              "rustc-link-arg", "rustc-link-arg-bins", "rustc-link-arg-bin", "rustc-link-arg-tests", "metadata"]
         );
-        assert_eq!(s[7].1, "app=__bb_ab_arg_bin_app");
+        assert_eq!(s[8].1, "app=__bb_ab_arg_bin_app");
         assert_eq!(s[3].1, "native=/o/__bb_ab_search");
+        assert_eq!(s[4].1, "native=/__bb_ab_search_ext");
     }
 }
