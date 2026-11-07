@@ -17,15 +17,22 @@
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
 #   variants         build, check, clippy (with and without clippy
-#                    arguments), a custom profile inheriting release and a
-#                    feature powerset: host units shared between build and
-#                    clippy at the same profile; every dependency unit
-#                    shared between check and clippy, members not; every
-#                    unit shared between release and the custom profile;
+#                    arguments), coverage, a custom profile inheriting
+#                    release and a feature powerset: host units shared
+#                    between build and clippy at the same profile; every
+#                    dependency unit shared between check and clippy,
+#                    members not; no target unit shared between build and
+#                    coverage, every host unit shared; every unit shared
+#                    between release and the custom profile;
 #                    the powerset's products have their features; the check
 #                    and clippy variants' unit checks build
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
+#   variants-coverage   with rust-overlay's 1.99 (nixpkgs' rustc 1.99
+#                    builds instrumented multi-crate binaries that crash
+#                    in the profiler runtime at exit, with plain Cargo
+#                    too): the coverage product writes a profile, and the
+#                    coverage test run keeps its profiles in $out/profraw
 #   embed            products as inputs: `packages.embedder.env` names
 #                    another workspace's product, which `embedder` embeds
 #                    with include_bytes!; the host workspace's instantiation
@@ -42,15 +49,21 @@
 #
 # `repos` exposes each repository for debugging.
 {
-  pkgs ? import (
+  # nixpkgs and rust-overlay as the flake pins them (the flake's checks
+  # pass its own pkgs, which has the overlay).
+  pkgs ?
     let
-      n = (builtins.fromJSON (builtins.readFile ../../flake.lock)).nodes.nixpkgs.locked;
+      lock = (builtins.fromJSON (builtins.readFile ../../flake.lock)).nodes;
+      fetch =
+        n:
+        fetchTarball {
+          url = "https://github.com/${n.owner}/${n.repo}/archive/${n.rev}.tar.gz";
+          sha256 = n.narHash;
+        };
     in
-    fetchTarball {
-      url = "https://github.com/${n.owner}/${n.repo}/archive/${n.rev}.tar.gz";
-      sha256 = n.narHash;
-    }
-  ) { },
+    import (fetch lock.nixpkgs.locked) {
+      overlays = [ (import (fetch lock.rust-overlay.locked)) ];
+    },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
 }:
 let
@@ -255,6 +268,10 @@ let
             mode = "clippy";
             profile = "release";
           };
+          coverage = {
+            mode = "coverage";
+            profile = "release";
+          };
           strict = {
             mode = "clippy";
             profile = "release";
@@ -276,6 +293,24 @@ let
     }
   ];
   vt = variantsRepo.workspaces.main.target.${native};
+
+  # Coverage with an upstream toolchain (see variants-coverage).
+  overlayRust = pkgs.rust-bin.stable."1.99.0".minimal;
+  coverageRepo = mkRepo (fixtures + "/variants") [
+    {
+      workspaces.main = {
+        path = "ws";
+        toolchain = {
+          rustc = overlayRust;
+          cargo = overlayRust;
+        };
+        variants.default = {
+          mode = "coverage";
+          profile = "release";
+        };
+      };
+    }
+  ];
 
   # --- embed ---------------------------------------------------------------------
 
@@ -491,7 +526,23 @@ in
       # differs from the build variant's (sanity check for the comparison).
       libDiffers = (d "default" "build")."hostdep-0.1.0-lib" != (d "check" "build")."hostdep-0.1.0-lib";
       fpNames = lib.attrNames (lib.filterAttrs (n: _: lib.hasPrefix "fp-" n) vt.variants);
+      # Build vs coverage, both plans: units by platform, compared by
+      # derivation path.
+      platformOf = u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
+      unitsBy =
+        vName: platform:
+        lib.concatMap (
+          k: lib.filter (u: platformOf u == platform) (lib.attrValues (unitsOf variantsRepo vName k))
+        ) [ "build" "test" ];
+      drvSet = us: lib.genAttrs (map (u: builtins.unsafeDiscardStringContext u.drvPath) us) (_: true);
+      sharedTarget = lib.filter (u: (drvSet (unitsBy "coverage" "target")) ? ${builtins.unsafeDiscardStringContext u.drvPath}) (
+        unitsBy "default" "target"
+      );
+      hostCov = drvSet (unitsBy "coverage" "host");
+      unsharedHost = lib.filter (u: !(hostCov ? ${builtins.unsafeDiscardStringContext u.drvPath})) (unitsBy "default" "host");
     in
+    assert lib.assertMsg (sharedTarget == [ ]) "variants: target units shared between build and coverage: ${builtins.toJSON (map (u: u.name) sharedTarget)}";
+    assert lib.assertMsg (unsharedHost == [ ] && unitsBy "default" "host" != [ ]) "variants: host units not shared between build and coverage: ${builtins.toJSON (map (u: u.name) unsharedHost)}";
     assert lib.assertMsg (buildVsClippy == [ ]) "variants: host units differ between build and clippy: ${builtins.toJSON buildVsClippy}";
     assert lib.assertMsg (checkVsClippy == [ ]) "variants: dependency units differ between check and clippy: ${builtins.toJSON checkVsClippy}";
     assert lib.assertMsg (membersDiffer == [ ]) "variants: member units shared between check and clippy: ${builtins.toJSON membersDiffer}";
@@ -519,7 +570,26 @@ in
         [ "$($custom/bin/app)" = "app 42 x=true y=false host=7" ]
         [ "$($none/bin/app)" = "app 42 x=false y=false host=7" ]
         [ "$($both/bin/app)" = "app 42 x=true y=true host=7" ]
+
         cat $check/units $clippy/units > $out
+      '';
+
+  variants-coverage =
+    let
+      t = coverageRepo.workspaces.main.target.${native};
+    in
+    pkgs.runCommand "variants-coverage"
+      {
+        app = t.packages.app;
+        run = t.testRuns.lib-a."lib/lib_a";
+      }
+      ''
+        set -euo pipefail
+        LLVM_PROFILE_FILE=$TMPDIR/app.profraw $app/bin/app
+        [ -s $TMPDIR/app.profraw ]
+        ls -l $run/profraw/
+        [ -s "$(echo $run/profraw/*.profraw)" ]
+        touch $out
       '';
 
   variants-clippy-strict =

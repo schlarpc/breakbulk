@@ -189,7 +189,11 @@ impl Resolve for RealPaths<'_> {
             .args
             .iter()
             .any(|a| matches!(a, breakbulk_format::Arg::Literal(s) if s == "--test"));
-        (!test && has_remap_scope(&self.0.plan.rustc)).then(|| scope.clone())
+        let scope = match c.platform {
+            breakbulk_format::Platform::Target => scope.clone(),
+            breakbulk_format::Platform::Host => scope.replace(",coverage", ""),
+        };
+        (!test && has_remap_scope(&self.0.plan.rustc)).then_some(scope)
     }
     fn env_capture(&self, _: &UnitId, u: &Unit) -> Result<Option<String>, String> {
         let p = platform(u);
@@ -271,6 +275,17 @@ fn shipped_remap_scope() {
         assert_eq!(scopes[id].as_deref(), Some("macro,diagnostics"), "{id}");
     }
     assert_eq!(scopes[RUN], None);
+    // Coverage: host units (the build script) leave the coverage scope out.
+    inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics,coverage".into());
+    let scopes = scope_of(&inputs);
+    for id in [APP, LIB] {
+        assert_eq!(
+            scopes[id].as_deref(),
+            Some("macro,diagnostics,coverage"),
+            "{id}"
+        );
+    }
+    assert_eq!(scopes[SCRIPT].as_deref(), Some("macro,diagnostics"));
     // rustc before 1.95 has no --remap-path-scope.
     inputs.plan.rustc = "1.94.1 (e408947bf 2026-01-01)".into();
     assert!(scope_of(&inputs).values().all(Option::is_none));

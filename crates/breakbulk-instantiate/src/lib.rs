@@ -343,8 +343,19 @@ impl Resolve for Tokens<'_> {
         // Test harnesses remap every scope; so does everything without a
         // shipped scope (no `splitDebug`) or on rustc before 1.95.
         let scope = self.inputs.toolchains.shipped_remap_scope.as_deref()?;
-        (has_remap_scope(&self.inputs.plan.rustc) && !is_test_compile(unit))
-            .then(|| scope.to_owned())
+        if !has_remap_scope(&self.inputs.plan.rustc) || is_test_compile(unit) {
+            return None;
+        }
+        // Coverage instruments target units only (the spec's rustflags), so
+        // host units keep the build variant's scope and stay shared with it.
+        Some(match unit.platform {
+            Platform::Target => scope.to_owned(),
+            Platform::Host => scope
+                .split(',')
+                .filter(|s| *s != "coverage")
+                .collect::<Vec<_>>()
+                .join(","),
+        })
     }
 
     fn env_capture(&self, _id: &UnitId, unit: &Unit) -> Result<Option<String>, Error> {
