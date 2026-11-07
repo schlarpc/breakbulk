@@ -6,8 +6,9 @@
 #    rustflags to build scripts, computes different `-C metadata` and puts
 #    outputs elsewhere.
 #  - The native target's toolchain spec as Cargo env config, as the
-#    planner chose it (`cargo-env.json` next to the build plan of the
-#    default variant): CARGO_TARGET_<TRIPLE>_LINKER, and the spec's
+#    planner chooses it (`cargo-env.json` from lib/plan.nix mkCargoEnv,
+#    which reads only Cargo config files and rustc, so the shell opens
+#    while a manifest is broken): CARGO_TARGET_<TRIPLE>_LINKER, and the spec's
 #    rustflags as CARGO_TARGET_<TRIPLE>_RUSTFLAGS or CARGO_BUILD_RUSTFLAGS,
 #    whichever key the planner's `--config` used. Cargo appends these lists
 #    to the project's own, as it appends `--config` lists.

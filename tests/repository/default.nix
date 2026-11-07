@@ -527,6 +527,25 @@ in
       touch $out_
     '';
 
+  # Decision 81: the dev shell does not need the plan. With a member's
+  # Cargo.toml broken (planning would fail), the shell still evaluates and
+  # carries the native spec's Cargo env config (the default linuxGnu
+  # preset's linker), computed from Cargo config files and rustc only.
+  devshell-broken-manifest =
+    let
+      broken = mkRepo (edited "stamps" "echo 'this is [not toml' >> tool/Cargo.toml") [ (oneWs ".") ];
+      shell = broken.workspaces.main.devShell;
+      linkerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}_LINKER";
+      linker = shell.${linkerVar} or shell.env.${linkerVar} or "";
+    in
+    assert lib.assertMsg (lib.hasSuffix "cc-mold" linker) "devshell-broken-manifest: no linker in the shell (${linker})";
+    pkgs.runCommand "devshell-broken-manifest" { inherit (shell) shellHook; inherit linker; } ''
+      export HOME=$TMPDIR
+      eval "$shellHook"
+      [ -x "$linker" ]
+      echo "$linker" > $out
+    '';
+
   # Git dependencies built through units: instantiation finds each fetched
   # source under Cargo's package id, which keeps `git+` and the reference
   # query, and leaves the name out when the URL ends in it.

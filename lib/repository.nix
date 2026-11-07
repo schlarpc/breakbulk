@@ -793,9 +793,11 @@ let
         inherit (ws.devShell) setTarget;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
         targetEnv = envStrings (cfg.targets.${nativeTriple}.env or { });
-        # How the planner passed the native spec to Cargo (IFD: the build
-        # plan of the default variant). The file names tool paths without
-        # their context; the spec's own values carry it.
+        # How the planner passes the native spec to Cargo (IFD: a small
+        # derivation that reads the project's Cargo config and asks rustc,
+        # apart from planning, so a broken manifest does not break the
+        # shell; decision 81). The file names tool paths without their
+        # context; the spec's own values carry it.
         cargoEnv =
           let
             inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
@@ -811,7 +813,7 @@ let
                 ++ spec.rustflags
             );
             withContext = builtins.replaceStrings (map builtins.unsafeDiscardStringContext values) values;
-            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/cargo-env.json"));
+            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.cargoEnv}/cargo-env.json"));
           in
           if inst == null then
             { }

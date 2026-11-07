@@ -180,6 +180,43 @@ rec {
       inherit (c) packages workspaceRoots;
     };
 
+  # The project's Cargo config files for a workspace (`.cargo/config.toml`
+  # or `.cargo/config` in the workspace directory and every ancestor up to
+  # the repository root), as relative paths. Unlike `describe`, it reads
+  # no manifest, so it works while a manifest is broken.
+  configFiles =
+    { root, wsDir ? "" }:
+    filter (existsFile root) (
+      concatLists (
+        map (d: [
+          (util.joinRel d ".cargo/config.toml")
+          (util.joinRel d ".cargo/config")
+        ]) (ancestors wsDir)
+      )
+    );
+
+  # A tree with only those config files and the workspace directory: what
+  # the dev shell's `cargo-env.json` derivation reads (lib/plan.nix
+  # mkCargoEnv; decision 81).
+  mkConfigSkeleton =
+    pkgs:
+    {
+      root,
+      wsDir ? "",
+      name ? "breakbulk-config-skeleton",
+    }:
+    let
+      files = configFiles { inherit root wsDir; };
+      tree = lib.fileset.toSource {
+        inherit root;
+        fileset = lib.fileset.unions (map (manifest.at root) files);
+      };
+    in
+    pkgs.runCommand name { } ''
+      mkdir -p $out/${lib.escapeShellArg wsDir}
+      ${lib.optionalString (files != [ ]) "cp -r --no-preserve=mode ${tree}/. $out/"}
+    '';
+
   mkSkeleton =
     pkgs:
     {

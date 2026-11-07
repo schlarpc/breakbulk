@@ -559,7 +559,7 @@ repo = breakbulk.lib.mkRepository {
 The planner always passes `--target`, and local Cargo without it behaves differently: rustflags reach build scripts, every unit's `-C metadata` changes, and outputs move. The dev shell therefore:
 
 - exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
-- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`;
+- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`. A small derivation (`breakbulk-plan --cargo-env-only`) computes it by the planner's own rule from the project's Cargo config files and `rustc --print cfg`, without running Cargo, so the shell still opens when planning fails, for example on a broken `Cargo.toml` (decision 81). It is read by import-from-derivation;
 - includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 
