@@ -268,7 +268,7 @@ in
         mkdir -p $out/bin
         cp ${app}/smokeapp-b0ba845afe70cf35 $out/bin/smokeapp
         $out/bin/smokeapp | tee $out/log
-        grep -qx 'smoke ok: hello-from-build 42' $out/log
+        grep -qx 'smoke ok: hello-from-build 42 c=6' $out/log
         grep -q 'smoke_cfg' ${run.flags}/directives.json
         grep -qx '`it` was skipped: .*' ${inst.roots."smokeapp/test/it"}
       '';
