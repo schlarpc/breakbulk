@@ -14,6 +14,8 @@ Rust 1.95 as its minimum. That matches the oldest Cargo in the support window
 breakbulk can build. If you want breakbulk's own binaries to build on an
 older compiler, say which one.
 
+> ack
+
 ## 2. FYI: test toolchains come from rust-overlay
 
 The flake pins `nixos-unstable` for nixpkgs and adds `oxalica/rust-overlay`
@@ -21,6 +23,8 @@ so tests can run against several Cargo releases (1.95, 1.97, 1.99 and
 nightly). rust-overlay is used only for breakbulk's own tests and dev shell;
 users still bring their own toolchain. If you prefer fenix, it is a small
 swap.
+
+> ack
 
 ## 3. FYI: how the work is being split
 
@@ -32,6 +36,7 @@ crates, builds the planning skeleton and predicts output names. Each runs on
 its own branch and is merged after review. Spike write-ups land in
 `docs/spikes/`.
 
+> ack
 
 ## 4. FYI: `breakbulk-unit` depends on `serde` and `serde_json`
 
@@ -44,6 +49,8 @@ own escaping bugs; `serde_json` is mature, and its version only changes when
 `Cargo.lock` is deliberately updated. If you want no dependencies at all,
 the cost is that hand-written parser.
 
+> ack
+
 ## 5. ASK: the `BREAKBULK_UNIT` types live in `breakbulk-unit`, not `breakbulk-format`
 
 The per-unit types (`RenderedUnit`, splice kinds, package targets) are defined
@@ -54,6 +61,8 @@ edit to the plan format (a new header field, a validation rule) change
 (`wrap`) and the splice shape check are shared the same way, so the planner
 checks sentinels with the same code that expands them. If you prefer a third
 tiny crate for the shared types, it is a mechanical move.
+
+>would third tiny crate incur more rebuilds? are there types in -unit that -unit itself doesn't care about
 
 ## 6. FYI: run units carry four fields the plan example does not show
 
@@ -66,6 +75,8 @@ last three are what Cargo's directive parser takes as arguments: the
 needs a test target, and `rustc-env=RUSTC_BOOTSTRAP=…` is an error on stable
 but only a warning on nightly. The `rustc-link-arg-bin` splice carries the
 bin name in a `bin` field.
+
+>ack. how solid do we feel about these going forward?
 
 ## 7. FYI: two directive kinds are expanded across splice points, not one at a time
 
@@ -92,6 +103,8 @@ Cargo interleaves with the scripts' outside paths in dependency order;
 breakbulk would put them after. The differential tests will show if this
 matters.
 
+> ack
+
 ## 8. ASK: an `error` directive with leading spaces does not fail the run in Cargo
 
 Cargo fails a successful run only for stdout lines that begin exactly with
@@ -101,6 +114,8 @@ says breakbulk fails "on any `error` directive". The parser offers both
 rules (`streamed_log_messages` is Cargo's; `BuildOutput::has_errors` is the
 stricter one). The default for run mode is Cargo's rule, for parity. Say if
 you want the stricter one.
+
+>stick with cargo
 
 ## 9. FYI: what canonical `plan.json` means
 
@@ -112,12 +127,16 @@ string. Arrays that are sets (`roots`, `features`, crate types, a run's
 `targets`, `metadataFrom`) are sorted; arrays whose order matters (`args`,
 `program`, `envSplices`) are not.
 
+> ack. do we express set-ness vs list-ness in our rust types?
+
 ## 10. FYI: the plan example in the implementation doc has one argument wrong
 
 `["--extern", "cfg_if=", {"out": …}]` is one array, so by the format's own
 rule it is one argument, `--externcfg_if=<path>`. It should read
 `"--extern", ["cfg_if=", {"out": …}]`. The code follows the rule, not the
 example.
+
+> ack
 
 ## 11. FYI: how forbidden literals and sentinels are detected
 
@@ -128,6 +147,8 @@ is `__bb` in any case followed by a non-alphanumeric character or the end, which
 covers `__bb_R_cfg`, `__BB_R_ENV`, `__bb=R` and `DEP_X___BB`. The shim's
 sentinel names must keep that prefix.
 
+>ack
+
 ## 12. FYI: not done yet: dynamic-library path splices
 
 The planner turns sentinel search paths found in `LD_LIBRARY_PATH`-style
@@ -137,6 +158,8 @@ work: Cargo's rule for these variables keeps paths inside the whole build
 directory (any script's `OUT_DIR`), not only inside the printing script's
 own `OUT_DIR`, which is the rule for `-L` ordering. In breakbulk that means
 "inside any run's `out`".
+
+>i'm not sure what the consequences of this are
 
 ## 13. ASK: git dependencies that inherit settings from their own workspace
 
@@ -150,6 +173,8 @@ rules, which change between Cargo releases. Limits: a single git repository
 whose crates belong to two different workspaces fails with a clear error.
 Tell me if you have such a dependency.
 
+>let's discuss this some more
+
 ## 14. ASK: `gitHashes` uses a different hash than crane's `outputHashes`
 
 To let a binary cache serve a git dependency instead of cloning it on each
@@ -161,6 +186,8 @@ are the full `Cargo.lock` source string including the commit. If you would
 rather copy hashes over from existing crane setups, this would have to
 change to a build-time fetch, which needs import-from-derivation.
 
+>why does crane do it that way? what's the tradeoff
+
 ## 15. ASK: crate source paths change when nixpkgs changes
 
 Each downloaded `.crate` file is fixed (same hash forever), but unpacking it
@@ -169,6 +196,8 @@ a new source path, and every crate rebuilds. This usually costs nothing extra,
 because a nixpkgs bump usually changes the compiler too. If you want crate
 sources to survive nixpkgs bumps (for example, when you pin the compiler
 separately from nixpkgs), breakbulk can unpack with its own pinned tools.
+
+>seems fine as is
 
 ## 16. FYI: smaller findings from the Nix library work
 
@@ -186,6 +215,8 @@ separately from nixpkgs), breakbulk can unpack with its own pinned tools.
   Nix sandbox that is harmless, but for local tests in a home directory it
   picks up `~/.cargo/config.toml`, so local trace tests must run outside
   the home directory.
+  
+>ack
 
 ## 17. ASK: one library, two path-hiding settings (shipped code vs tests)
 
@@ -206,6 +237,8 @@ libraries twice (once per setting), which doubles their build cost in
 exchange for fewer test re-runs. Third option: strip debug info from the test
 binary copy that the test run uses, keeping a debug copy aside.
 
+>let's discuss more
+
 ## 18. FYI: the unit builder works end to end
 
 `breakbulk-unit` (the program that builds every unit) now compiles crates and
@@ -222,6 +255,8 @@ rebuild, and no source or build-script path leaks into the binary. Details:
   variable, because Linux limits one variable to 128 KiB.
 - Proc macros' compiled library is stored in the same output slot as normal
   libraries' `.rlib` (internal detail).
+  
+>ack
 
 ## 19. FYI: environment capture works (spike C: go)
 
@@ -232,6 +267,8 @@ that saved environment gave byte-identical results to `buildRustPackage` for
 `openssl-sys`, `ring` and a bindgen crate, both natively and when
 cross-compiling to aarch64. Write-up: `docs/spikes/C-env-capture.md`.
 
+>ack. is the stdenv overridable if needed?
+
 ## 20. ASK: how you name a package's libraries for build scripts
 
 Build scripts and proc macros run on the build machine, so the libraries
@@ -240,6 +277,8 @@ a function, `inputs = p: [ p.openssl ]`, and breakbulk calls it with the
 right package set for each side. The alternative is two lists you fill in
 yourself (`inputs` and `host.inputs = [ buildPackages.openssl ]`), which is
 more explicit but easy to get wrong silently. Default: the function form.
+
+>agree on function form.
 
 ## 21. ASK: build-machine C code is hardened more than in `buildRustPackage`
 
@@ -250,11 +289,15 @@ nixpkgs one. This only matters if some build script's C code fails to compile
 with hardening. Default: keep hardening on; a per-package switch can turn it
 off if needed.
 
+>agree
+
 ## 22. FYI: build timestamp comes from one place
 
 `SOURCE_DATE_EPOCH` is set in the fixed base of every unit (to nixpkgs'
 default, 1980), not in each captured environment, so a per-package build
 stamp overrides it in exactly one place.
+
+>ack
 
 ## 23. FYI: C code's debug info will have source paths hidden too
 
@@ -262,6 +305,8 @@ Crates like `ring` compile C with debug info that embeds their source path.
 Rust's path hiding doesn't touch C, so units will add the matching
 `-ffile-prefix-map` flags to C compiler flags. Without it, shipped binaries
 could still reference crate sources.
+
+>ack
 
 ## 24. FYI: Nix's dynamic-derivation route works, with changes (spike B: go)
 
@@ -274,6 +319,8 @@ were made: Nix's own `nix derivation add` command can't be used for this, and
 the feared extra recompiles for embedded products on caches like FlakeHub
 don't happen. Write-up: `docs/spikes/B-delivery.md`.
 
+>ack
+
 ## 25. ASK: use the harmonia library to write build steps in dynamic mode
 
 The dynamic route has to write many small build-step files into the Nix store
@@ -285,6 +332,8 @@ commit. Alternative: shell out to `nix store add` and let Nix scan for
 references, which is slower and less precise. Default: harmonia, pinned.
 This only matters for milestone M5.
 
+> agree
+
 ## 26. ASK: pushing to a public cache in dynamic mode uploads your source
 
 In the dynamic route, the usual "push everything this build used" command
@@ -294,6 +343,8 @@ a public cache. Options: just document it (default), or have breakbulk print
 a warning when it detects the pattern. Tell me if you want the warning or a
 different default.
 
+>document seems fine? not sure why this is dynamic mode specific though
+
 ## 27. FYI: product names in dynamic mode include workspace, target and variant
 
 Nix requires the names of dynamically produced outputs to start with the name
@@ -302,6 +353,8 @@ of the step that produced them. breakbulk names that step
 `…-app-x86_64-unknown-linux-gnu-release-server`. Tell me if you'd prefer a
 different scheme.
 
+>ack
+
 ## 28. FYI: the first post-link step of a product will not be content-addressed
 
 The step that picks up a product's raw link output (`linked`) can be a plain
@@ -309,6 +362,8 @@ step rather than a content-addressed one; both work. Plain is chosen because
 caches that don't store the extra records content-addressing needs (FlakeHub
 Cache) can still serve it. The later stages (strip, sign, ...) stay
 content-addressed so an unchanged input doesn't re-run them.
+
+>ack
 
 ## 29. ASK: the generated per-crate build file contains names, not paths
 
@@ -323,6 +378,8 @@ be built before Nix can read the file. Cost: Nix does a bit more string work
 per unit at evaluation time. This needs measuring on a graph with ~1,000
 units; if it is too slow, the fallback is the original design.
 
+>ack
+
 ## 30. ASK: names of outputs inside a workspace
 
 Each predicted output is named `<package>/<kind>/<target>`, for example
@@ -332,12 +389,16 @@ as a test (unit tests inside `src/main.rs`) gets `bin-test`:
 names (`packages.app`, `tests.app.integration`) are built from them later.
 Tell me if you want a different internal scheme before it spreads.
 
+> ack
+
 ## 31. FYI: a library's own unit tests aren't predicted yet
 
 `cargo test` also builds each library's `#[cfg(test)]` unit tests as a test
 binary. The output-name prediction doesn't list those yet. This will be
 fixed when the planner lands. Benchmarks that Cargo didn't select count as
 "skipped" (succeed with a message) rather than failing.
+
+>ack
 
 ## 32. FYI: tracing Cargo works (spike A: go)
 
@@ -349,6 +410,8 @@ commands, with build-script output filled in afterwards, matched a real
 build-script output lands is identical across all four versions. Write-up:
 `docs/spikes/A-trace-fidelity.md`. A few doc statements were wrong and are
 being corrected (benches, profiles, see 35).
+
+> ack
 
 ## 33. ASK: projects that set `rustflags` under `[build]`
 
@@ -364,6 +427,8 @@ trace then confirms both sets of flags arrived. Alternatives: require
 projects to use per-target flags (simplest, but a trap), or fail planning
 with a message when both are present.
 
+>ack
+
 ## 34. ASK: turning on Cargo's built-in path hiding (`trim-paths`)
 
 Cargo 1.101 (not yet released as stable) can hide source paths itself, and
@@ -374,6 +439,8 @@ path hiding is off and Cargo is new enough, plan again with it on. Planning
 reruns only when manifests or the lockfile change and is quick compared to a
 build. Alternative: never turn it on automatically and keep breakbulk's own
 path hiding (works on all versions). Only relevant from Cargo 1.101.
+
+>ack. lets make sure we test this
 
 ## 35. FYI: corrections to the design from the tracing spike
 
@@ -390,6 +457,8 @@ path hiding (works on all versions). Only relevant from Cargo 1.101.
   needs both files of each dependency.
 - The design's "rustflags are concatenated with project config" was only
   true when both use the same config key (see 33).
+  
+>ack
 
 ## 36. ASK: C code's debug info names sources by short names
 
@@ -405,6 +474,8 @@ leave C debug info alone and only hide `__FILE__`, at the risk of shipped
 binaries keeping a reference to crate sources if debug info isn't split off.
 Default: hide everywhere.
 
+>ack
+
 ## 37. FYI: environment capture is in production code
 
 - Variables that hold lists (`PATH`, `PKG_CONFIG_PATH`, C/linker flag
@@ -416,6 +487,8 @@ Default: hide everywhere.
   use compilers without that wrapper and will need to add it themselves.
 - A captured environment for host tools is the same derivation whether the
   build is native or cross, so it's built once and shared.
+  
+>ack
 
 ## 38. FYI: Windows (msvc) and wasm groundwork works
 
@@ -431,6 +504,8 @@ Default: hide everywhere.
 - Unfree permission is granted only to the SDK package. Note: your personal
   `~/.config/nixpkgs/config.nix` allows all unfree packages, which hides
   this in impure evaluations; flake checks are unaffected.
+  
+>ack
 
 ## 39. ASK: Windows builds need a small linker fix to be reproducible
 
@@ -442,6 +517,8 @@ inputs to a fixed path first makes rebuilds identical. Question: keep it as
 part of the Windows preset (default; only Windows pays for it), or move it
 into breakbulk's unit builder for all targets?
 
+>is this a generic fixup step that we're extending in a pre-shipped windows profile, or more hardcoded than that?
+
 ## 40. ASK: how strictly to pin the Windows SDK download
 
 By default the SDK download reads Microsoft's live catalogue. The C runtime
@@ -450,6 +527,8 @@ Microsoft; if that happens, a fresh machine's build fails with a hash
 mismatch (it never silently changes). You can additionally pin the
 catalogue file itself (`channelManifest`), which removes that risk unless
 Microsoft deletes old catalogue URLs. Default: optional. Make it required?
+
+>optional
 
 ## 41. ASK: choosing the LLVM tools that match your Rust compiler
 
@@ -460,12 +539,16 @@ mapping Rust version to LLVM major version, shipped with breakbulk, with an
 option to override. Alternative: ask rustc at build time, which would need
 import-from-derivation to pick the tool package.
 
+>table mapping as optimization with fallback to IFD? unless you disagree, loosely held
+
 ## 42. ASK: should slow tests run in plain `nix flake check`?
 
 Windows SDK download (252 MB), wine runs and cross toolchains make
 `nix flake check` slow. They currently run there (marked HEAVY in
 `flake.nix`). Alternative: a separate `heavyChecks` output that CI runs
 explicitly. Default: keep them in `checks`.
+
+>keep
 
 ## 43. FYI: evaluation speed is fine; graph size grows too fast (scale test)
 
@@ -476,6 +559,8 @@ all crates below it as inputs, so the total grows roughly with the square of
 the crate count: at ~3,700 crates, 154 MB of Nix build-step files and ~10 s
 of evaluation, and about 1.5 minutes to write them the first time.
 Write-up: `docs/spikes/scale.md`.
+
+>probably deserves an optimization pass
 
 ## 44. ASK: list only direct dependencies on each library build step
 
@@ -489,6 +574,8 @@ build-step files 154 MB → 16 MB, evaluation and setup about 10× faster.
 Default: do it, after the planner lands (it touches the plan format and the
 unit builder).
 
+>agree
+
 ## 45. ASK: Nix's fixed cost per build step vs. the "≤ 2× crane" budget
 
 Nix spends 35–50 ms setting up each build step, and does this one step at a
@@ -501,12 +588,16 @@ it and measure on real projects (default), report it upstream to Nix
 (setting sandboxes up in parallel), or merge tiny crates into one step (not
 recommended: loses per-crate sharing).
 
+>accept
+
 ## 46. FYI: every extra binary cache slows cold builds
 
 Nix looks up each new build step on every configured cache before building.
 With the four caches configured on this machine, that added 7 s per 300
 crates. This will go in the docs as a tip: a project with a private cache
 can limit substituters for breakbulk builds.
+
+>ack
 
 ## 47. FYI: milestone M1's core works end to end
 
@@ -520,6 +611,8 @@ exactly on 1.95, 1.97 and 1.99, and rebuilds are bit-identical. Still open
 for M1: the `sys-native` fixture, a randomized directive test, nightly
 Cargo's new layout, and toolchain presets (M3).
 
+>ack
+
 ## 48. ASK: every crate sees which `cargo` built it
 
 Cargo 1.97+ tells every compile and build script the path of the `cargo`
@@ -527,6 +620,8 @@ binary (`CARGO`), which some crates use. breakbulk keeps it, so updating
 Cargo rebuilds every crate. In practice Cargo and rustc are updated together
 and a rustc update rebuilds everything anyway. Alternative: drop it, which
 breaks the rare crate that reads `env!("CARGO")`. Default: keep.
+
+>keep
 
 ## 49. FYI: smaller planner choices
 
@@ -541,6 +636,8 @@ breaks the rare crate that reads `env!("CARGO")`. Default: keep.
 - A library's own unit tests are now predicted as outputs (closes 31).
 - Projects that turn on Cargo's `trim-paths` fail planning with "not
   supported yet"; this can't happen before Cargo 1.101.
+  
+>ack
 
 ## 50. FYI: breakbulk's unit builder will get its own narrow source
 
@@ -548,6 +645,8 @@ Right now all four breakbulk programs are built from the same source tree,
 so any planner change would also rebuild the unit builder and therefore
 every crate of every project. The unit builder will be built from only its
 own files, so only changes to it cause a full rebuild.
+
+>ack
 
 ## 51. FYI: post-link stages work
 
@@ -558,6 +657,8 @@ reorderable. Checks can look at any intermediate step (for example the
 unstripped binary). Every product gets a default check that fails if the
 shipped output still references source code. Debuggers find symbols in the
 split-off debug output. Zips are byte-identical across rebuilds.
+
+>ack
 
 ## 52. ASK: content-addressed steps only when Nix supports them
 
@@ -572,6 +673,8 @@ with `ca = true/false`. Effect for you today: on your current Nix setup
 (no experimental features), test runs and post-link steps re-run whenever
 their binary's build step changes, even if the bytes are identical.
 
+>ack
+
 ## 53. ASK: three rules for ordering post-link steps
 
 - If two steps' order isn't determined by their `after`/`before`
@@ -582,6 +685,8 @@ their binary's build step changes, even if the bytes are identical.
 - When you remove a step (`= null`), steps that said "after it" move up
   to its place instead of failing. A reference to a step name that never
   existed is still an error.
+  
+>agree. should this just be an error or is that bad ergos? agree, nulling is effectively nooping
 
 ## 54. FYI: C debug info would have defeated "same bytes, skip re-run"
 
@@ -590,6 +695,8 @@ the build step's output path, and GCC writes that into debug info. So any
 change to a crate's build step, even one that doesn't change the code,
 changed the binary's bytes. The seed will instead come from Cargo's own ID
 for the unit, which only changes when the crate actually changes.
+
+>ack
 
 ## 55. FYI: milestone M2's configuration layer works
 
@@ -608,6 +715,8 @@ defaults for common `-sys` crates (copied from nixpkgs), a dev shell, and
 Options not implemented yet give an evaluation warning, or an error where
 silently ignoring them would build the wrong thing.
 
+>"curated set" fairly well separated and easily extensible (should we adopt the nix-systems flake pattern for extension or is that overkill)? ack the rest
+
 ## 56. ASK: when two settings apply to the same package
 
 You can configure a package as `packages.openssl-sys` (all versions) and
@@ -615,6 +724,8 @@ You can configure a package as `packages.openssl-sys` (all versions) and
 version-specific one is applied last, so its environment variables win and
 its input lists are added to the other's. Alternative: the most specific
 entry replaces the general one entirely.
+
+>ack
 
 ## 57. ASK: your settings add to the built-in `-sys` crate defaults
 
@@ -625,6 +736,8 @@ defaults. Alternative: any setting of yours replaces the default silently,
 which is easier to reason about for a single crate but surprising when you
 only meant to add one library.
 
+>ack.
+
 ## 58. ASK: what the dev shell warns about
 
 The dev shell warns about settings in your shell environment that the
@@ -633,6 +746,8 @@ location, terminal, network or credentials), plus `RUSTFLAGS`,
 `RUSTDOCFLAGS`, `RUSTC`, `RUSTDOC`, the rustc wrapper variables, and a
 `config.toml` in your Cargo home. The docs only mentioned `CARGO_*`. Is
 that list right, too noisy, or missing anything you use?
+
+>sounds reasonable.
 
 ## 59. FYI: naming of outputs
 
@@ -646,6 +761,8 @@ that list right, too noisy, or missing anything you use?
   `sysDefaults.enable`.
 - A flake-parts module is available as `breakbulk.lib.flakeModule`.
 
+>ack. do we integrate with nix-systems if relevant?
+
 ## 60. FYI: tests run as Nix build steps
 
 Each test binary gets its own test-run step with Cargo's environment,
@@ -654,6 +771,8 @@ output identical to `cargo test --doc`; each test binary also has a runnable
 app for running outside the sandbox (network tests, debuggers). Changing one
 binary's skip list re-runs only that binary's tests. `CARGO_BIN_EXE_<name>`
 points at the real built binary.
+
+>ack
 
 ## 61. ASK: "identical test binary, skip the re-run" barely works yet
 
@@ -671,6 +790,8 @@ those build-script library directories, so their paths stay the same when
 their contents do. Default: do it later in M4/M6. (Reminder: on your current
 Nix setup content-addressing is off anyway, see 52.)
 
+>discuss
+
 ## 62. ASK: test apps run everything
 
 The runnable test apps (for running outside the sandbox) deliberately don't
@@ -678,6 +799,8 @@ apply your skip lists or test arguments, since their purpose is to run what
 the sandbox skips. They do use the same environment, working directory and
 runner. Alternative: apply the same arguments by default and let you add
 more on the command line.
+
+>discuss
 
 ## 63. FYI: test naming and gaps
 
@@ -687,6 +810,8 @@ more on the command line.
   came from it). To fix.
 - Test runs get a plain shell environment without a C compiler; tests that
   compile C need it added via `test.path`.
+  
+>ack. let's make sure that gets fixed
 
 ## 64. FYI: the graph-size fix landed, with measured results
 
@@ -704,6 +829,8 @@ Other M1 items also done:
 - C compiler seeds now come from Cargo's unit ID (entry 54);
 - test binaries for packages with feature-gated binaries now plan
   correctly.
+  
+>ack.
 
 ## 65. ASK: CMake leaves non-reproducible files in build-script output
 
@@ -716,6 +843,8 @@ build-script output after the script runs (default proposal: it is never
 read by later steps); (b) accept it and exempt such steps from the
 reproducibility check; (c) leave as is.
 
+>downsides of a? sounds good to me but idk
+
 ## 66. FYI: a test that runs a feature-gated binary Cargo didn't build
 
 If a binary is skipped because its required features are off, Cargo still
@@ -723,6 +852,8 @@ tells integration tests where it would be. breakbulk points that at a
 path that never exists, so a test that runs it fails, as under Cargo.
 Alternative: point it at a stub that fails with "not built because
 features X are off", which gives a clearer message but differs from Cargo.
+
+>ack
 
 ## 67. FYI: milestone M3's day-one targets work
 
@@ -740,6 +871,8 @@ Not working yet: headless Chromium as a test runner (crashes in the
 sandbox; Node works), cross-language LTO, and testing on a real aarch64
 build machine.
 
+>ack. LTO planned?
+
 ## 68. ASK: breakbulk overrides rustc's built-in linker on Linux
 
 Since about Rust 1.90, rustc links Linux x86_64 programs with its own bundled
@@ -750,6 +883,8 @@ removes rustc's "use the bundled linker" arguments and links with mold.
 Alternative: use the official flag for your own code only and let build
 scripts keep rustc's bundled linker.
 
+>discuss. should we use rustc's built in linker? how is our linker selection handled, is it a hardcoded table or more principled?
+
 ## 69. ASK: fully static glibc builds are position-independent
 
 The docs said static glibc builds use `relocation-model=static`. With the
@@ -758,6 +893,8 @@ fine). Default now: static position-independent executables (static-pie),
 which work with mold. `relocationModel = "static"` brings back the old
 setting. Alternative: keep non-PIE and use the slower bfd linker for this
 preset.
+
+>ack, any downsides to static pie? _slightly_ slower code i assume?
 
 ## 70. ASK: Windows and wasm presets need your compiler passed in
 
@@ -768,6 +905,8 @@ while compilers are chosen per workspace. So you write
 cleaner design would let a preset read the workspace's compiler itself;
 that needs targets to become per-workspace, which is a bigger change. Worth
 doing?
+
+>probably worth doing.
 
 ## 71. FYI: smaller preset choices
 
@@ -781,6 +920,8 @@ doing?
 - breakbulk now reads `include` and `cfg(...)` keys in your
   `.cargo/config.toml` when deciding where to add its compiler flags
   (entry 33).
+  
+>ack
 
 ## 72. FYI: milestone M4's products and variants work
 
@@ -796,6 +937,8 @@ the embed test, Windows post-link tests, separate source scopes for tests
 (`test.sourceScope`), and trying one of your real repositories end to end
 (that is the M4 exit criterion; it needs your input on which repo).
 
+>ack
+
 ## 73. ASK: coverage builds crash with nixpkgs' Rust 1.99
 
 Coverage-instrumented programs built with nixpkgs' rustc 1.99 crash when
@@ -804,6 +947,8 @@ does the same, so it isn't breakbulk's fault; rust-overlay's 1.99 works,
 and the test uses that. It looks like a nixpkgs bug. Want me to dig in and
 prepare an upstream report (I won't file anything without your OK)?
 
+>yes, in a subagent
+
 ## 74. ASK: build IDs are turned on for targets that split debug info
 
 Splitting debug info needs a build ID in each binary. breakbulk turns on
@@ -811,6 +956,8 @@ nixpkgs' own linker-wrapper switch for it (`NIX_SET_BUILD_ID=1`) on target
 build steps when the target's steps include splitting debug info. This
 changed every target build step once. Alternative: each preset passes the
 linker flag itself.
+
+>ack
 
 ## 75. ASK: lint variants and benchmarks
 
@@ -821,6 +968,8 @@ linker flag itself.
   variant if it has benches, else from the one variant that does; if
   several do, that's an error asking you to pick.
 Do these match how you'd want to configure them?
+
+>ack
 
 ## 76. FYI: smaller product choices
 
@@ -833,6 +982,8 @@ Do these match how you'd want to configure them?
 - Products keep file extensions (`bin/app.exe` on Windows).
 - `clippyArgs` works like `cargo clippy -- ARGS` and reaches only your own
   crates, so dependencies stay shared with `check`.
+  
+>ack
 
 ## 77. FYI: milestone M5's dynamic-derivation mode works on Nix master
 
@@ -847,6 +998,8 @@ Nix (expected 2.36) has the feature and you enable `dynamic-derivations`
 The harmonia library lives in a separate small program with its own
 lockfile, so its updates never rebuild your crates.
 
+>ack
+
 ## 78. ASK: dynamic mode gaps
 
 - Doctests and runnable test apps don't exist in dynamic mode yet; doctests
@@ -856,6 +1009,8 @@ lockfile, so its updates never rebuild your crates.
   fails with the reason in dynamic mode, while the default mode quietly
   leaves that binary out. Matching the default mode needs a "not built"
   marker checked at build time. Default: make them match.
+  
+>do it now. match them.
 
 ## 79. FYI: trying breakbulk on your own repositories (read-only copies)
 
@@ -867,6 +1022,8 @@ modified, built in place, or pushed anywhere, and secrets like `.env`
 files are skipped. Only the breakbulk module files (no source) go into
 `tests/field-trials/`, and findings go into `docs/field-trials.md`. If you'd
 rather some repositories stay out of this, say which.
+
+>ack, good
 
 ## 80. FYI: loose ends fixed, README and options reference added
 
@@ -883,6 +1040,8 @@ rather some repositories stay out of this, say which.
 - `README.md` (overview, status, quickstart, limitations) and
   `docs/options.md` (generated from the module options; a check keeps it
   in sync) are new.
+  
+>ack
 
 ## 81. ASK: opening the dev shell now runs the planner once
 
@@ -892,6 +1051,8 @@ when manifests, lockfile or config change, but the first `nix develop` is
 slower. Alternative: compute the flags in Nix without the planner,
 duplicating one small rule. Default: run the planner.
 
+>ack. what happens when the planner fails (eg cargo.toml is broken)
+
 ## 82. FYI: breakbulk builds itself, within the speed budget
 
 breakbulk's own workspace now builds through breakbulk (`checks.self-host`),
@@ -900,6 +1061,8 @@ build of breakbulk's 39 crates on a busy machine: `cargo build --release`
 18–29 s, nixpkgs `buildRustPackage` 25–49 s, breakbulk 38–50 s, so roughly
 1.4× the crane-style build, inside the "≤ 2× crane" budget (noisy; needs a
 quiet machine to confirm). This partly answers entry 45 for real crates.
+
+>ack, will this be able to actually self-bootstrap when consumed as a crate?
 
 ## 83. FYI: a randomized test against real Cargo found and fixed 7 bugs
 
@@ -913,6 +1076,8 @@ libraries from dependencies, and two planner crashes (a build script
 replaced by a config override; a workspace member that is also a
 build-time dependency).
 
+>ack
+
 ## 84. ASK: one rule for "this library path is inside the build"
 
 Cargo adds a build script's library paths to the runtime library path only
@@ -923,10 +1088,14 @@ received metadata from. A path reaching some other build script's output
 by another route would be missed. This doesn't seem to happen in practice;
 tell me if you know a crate that does it.
 
+>idk man, research in a subagent?
+
 ## 85. ASK: doctests use the wider test source scope too
 
 `test.sourceScope` (entry 80) also applies to the package's doctests, since
 they are tests. Alternative: only test binaries get the wider view.
+
+>agree
 
 ## 86. FYI: hardening across Cargo versions, test cutoff, git dependencies
 
@@ -940,6 +1109,8 @@ they are tests. Alternative: only test binaries get the wider view.
   from Cargo, so any git dependency failed. Fixed (found independently by
   two agents) and tested with a local repository locked at two revisions
   by different workspaces.
+  
+>ack
 
 ## 87. ASK: opt-in heavy tests as `nix run` commands
 
@@ -948,6 +1119,8 @@ features your system Nix doesn't enable: dynamic mode (`nix run
 .#test-dynamic`) and content-addressed test cutoff (currently
 `tests/test-cutoff/run.sh`). Proposed: give the second a `nix run
 .#test-cutoff` entry too, so all opt-in tests are found the same way.
+
+>why not test.dynamic or similar? or is there a way to make a check derivation not run by default?
 
 ## 88. FYI: independent code review fixed 5 bugs
 
@@ -959,6 +1132,8 @@ merged differently from Cargo; and a hidden skeleton path that escaped
 validation. Each has a regression test. The unit builder changed, so every
 crate rebuilds once.
 
+>ack
+
 ## 89. ASK: where Windows `.pdb` and DWARF `.dwp` debug files go
 
 The compiler doesn't announce these files, and the unit builder currently
@@ -969,6 +1144,8 @@ separate `debug` output on binary build steps, which products' install
 step copies into their own `debug` output, matching how Linux debug info
 is split. Default: do that.
 
+>do it
+
 ## 90. ASK: one package opting out of debug splitting
 
 How source paths are hidden is decided per target (entry 76). The review
@@ -978,6 +1155,8 @@ fails; a package that adds `splitDebug` on a target without it gets no
 build ID. Options: (a) keep per-target and document "change stages per
 target, not per package" (default); (b) compile the affected libraries
 twice when packages disagree.
+
+>a
 
 ## 91. FYI: M6 measurements: pipelining split and rmeta cutoff are no-go for now
 
@@ -997,6 +1176,8 @@ Details in `docs/spikes/m6-measurements.md`.
   (1.8 GB including the compiler) before Nix can tell the run is cached,
   versus 440 bytes for an ordinary test run. This confirms the design's
   choice to keep content-addressing off for caches serving fresh machines.
+  
+>agree, let's document these as future state though. CA test is brutal wtf
 
 ## 92. FYI: nextest support
 
@@ -1005,10 +1186,14 @@ through nextest, honoring `.config/nextest.toml` (retries, timeouts, default
 filters, JUnit output, test threads). Each binary is still its own Nix test
 run.
 
+>is that inferable? or is it always a user flip in the flake
+
 ## 93. ASK: make nextest a workspace-wide switch?
 
 nextest's config is workspace-wide, but the switch is per package, so you'd
 repeat it for each package. Proposed: also allow a workspace-level default.
+
+>agree
 
 ## 94. ASK: test runs depend on the whole Rust toolchain
 
@@ -1017,12 +1202,16 @@ the whole toolchain (1.1 GB) to get them. On a fresh machine that's a big
 download for content-addressed runs. Proposed: a small derivation holding
 only those files. Default: do it.
 
+>ack
+
 ## 95. ASK: what to ask rustc upstream for
 
 The design plans to ask the Rust project for a "physical split" of library
 metadata (what dependents read vs. everything else). The measurements show
 the request should explicitly name the per-file source hashes, which today
 change the interface file on every edit. Nothing will be filed without you.
+
+>ack
 
 ## 96. FYI: review follow-ups done
 
@@ -1040,6 +1229,8 @@ change the interface file on every edit. Nothing will be filed without you.
   another system. Dead code removed.
 - nextest in dynamic mode still falls back to plain libtest with a warning.
 
+>are the debug files useful when separated like that? have we proven they work?
+
 ## 97. ASK: every binary build step gets an extra (usually empty) `debug` output
 
 Nix needs a build step's outputs declared up front, so every binary, test
@@ -1048,3 +1239,144 @@ compiler wrote side files. Downloading a binary never fetches it. Cost:
 one extra small store path per such step. Alternative: declare it only on
 Windows targets or when your profile sets `split-debuginfo`, which saves
 paths but could miss a case.
+
+>discuss
+
+## 98. FYI: milestone M7's later targets work
+
+wasm32-wasip2, riscv64 Linux, Windows via MinGW (`windows-gnu` and
+`windows-gnullvm`) and a zig preset that targets glibc 2.17 all build, and
+their tests pass under their runners (wasmtime, qemu, wine). Windows MinGW
+and zig outputs rebuild byte-identically. riscv64 needs no new preset;
+`linuxGnu` with that triple works, `-sys` crates included. Building the
+standard library from source (`-Zbuild-std`) doesn't plan yet: Cargo wants
+the standard library's own crates.io dependencies, which breakbulk doesn't
+vendor. The fix is described in the implementation doc. Darwin has notes
+only (no Mac builders).
+
+>ack. we going to fix those gaps?
+
+## 99. ASK: C libraries for wasip2
+
+The design said to turn off Rust's bundled copy of the WASI C library so C
+headers and library match. On wasip2 that switch also removes the program's
+start-up code, so nothing links. Instead, breakbulk puts nixpkgs' copy first
+and swaps in its start-up files. Alternative: leave Rust's copy alone,
+simpler but with mismatched C headers and library versions.
+
+>ack, i think? discuss
+
+## 100. ASK: where wasip2 command-line programs are installed
+
+All wasm targets install into `pkg/`. For wasip2 programs meant to run
+under wasmtime, `bin/` would be more natural. Default: keep `pkg/`;
+switching is a small change to the install step.
+
+>pkg seems fine?
+
+## 101. ASK: Windows MinGW programs link their runtime statically
+
+Otherwise the `.exe` needs a GCC runtime DLL that isn't shipped next to it,
+so it won't run on its own (or under wine). Default: static.
+
+>ack
+
+## 102. ASK: the zig preset and native libraries
+
+zig targets an old glibc (2.17), but native libraries from nixpkgs (openssl
+and so on) are built against a new glibc, which defeats the purpose. The
+preset is meant for projects whose C code is bundled. Should breakbulk warn
+when a package on a zig target declares native inputs? Default: document
+only.
+
+>shouldn't that incur a rebuild? or is that scope creep
+
+## 103. ASK: zig tests don't prove the program runs on old glibc
+
+zig-built programs ask for the standard Linux loader path, which the Nix
+sandbox doesn't have, so tests run them through the build machine's newer
+glibc. That works (glibc is backward compatible) but doesn't prove the
+program runs on glibc 2.17; only a symbol-version check does that today.
+Option: run tests in a container or VM with an old glibc (heavy).
+Default: symbol-version check only.
+
+>we should add a real test with a container
+
+## 104. FYI: field trials on your repositories: datboi2 builds end to end
+
+Full write-up: `docs/field-trials.md`. On read-only copies:
+- **datboi2** (11 workspaces, a nightly workspace with git dependencies,
+  8 wasm components, 4 embedded products) builds end to end, and the
+  checks its CI runs pass from `repo.checks`. This meets M4's exit
+  criterion. Cold build of the main binary: breakbulk 532 s vs crane 969 s
+  (crane's number includes its extra check/test passes; vs crane's build
+  alone breakbulk is ~1.2×). One-line edit to the leaf binary: 40 s vs
+  206 s. Busy machine, single runs.
+- **kmsrsos** builds for native, static musl and Windows x86_64/aarch64;
+  build, clippy and tests pass.
+- **mtgac** partly works (see 108 and 110).
+Eight breakbulk bugs were found and fixed, each with a regression check.
+
+>what is "native" in kmsrsos? host == target?
+
+## 105. ASK: use the Linux preset by default for the native target
+
+Without a preset, the native target links with rustc's bundled linker and
+skips nixpkgs' linker wrapper; every trial had to add `presets.linuxGnu`.
+The design already says the linker choice is automatic. Proposed: the
+native target gets `linuxGnu` unless you set another preset. Rebuilds every
+native crate once.
+
+>agree
+
+## 106. ASK: the curated `-sys` defaults switch crates to system libraries
+
+Some curated defaults (copied from nixpkgs) set variables like
+`LIBSQLITE3_SYS_USE_PKG_CONFIG`, which silently swap a crate's bundled C
+library (for example rusqlite's `bundled` feature) for nixpkgs' copy. That
+changes what gets built behind your back. Proposed: drop those switches
+from the defaults, keep the library inputs.
+
+>agree
+
+## 107. ASK: native libraries for binaries that link a `-sys` crate
+
+A package's native inputs reach only that package's own build steps. When
+a `-sys` crate prints just `-lmagic` (no search path), the final binary's
+link step, which belongs to another package, can't find the library;
+datboi2 needed `MAGIC_DIR` set by hand. Options: (a) pass each package's
+library search paths along to every binary that depends on it (closest to
+how it works locally); (b) keep it per package and document. Needs your
+call.
+
+>i think A sounds right, discuss?
+
+## 108. ASK: check variants without `--all-targets`
+
+Check and clippy variants always check all targets (entry 75). mtgac's wasm
+check gate doesn't, so it fails under breakbulk. Proposed: an `allTargets`
+switch on variants, default on.
+
+>agree
+
+## 109. FYI: other gaps from the trials, by priority
+
+Listed at the end of `docs/field-trials.md`. The main ones: variants and
+test plans can't be narrowed to one target; only the default variant's
+tests reach `repo.checks`; modules don't receive `root` or the repository
+object; first evaluation in import-from-derivation mode is slow (~4 min
+for datboi2, mostly fetching crates one by one); the "no source
+references" check doesn't look for toolchain paths; no per-package
+feature powerset.
+
+>are we fixing these?
+
+## 110. ASK: embedding a product at a fixed path in the source
+
+mtgac's UI is embedded with rust-embed, which reads files from a fixed
+path relative to the source rather than from an environment variable.
+breakbulk can pass products only through environment variables. Option:
+let a package place a product at a path inside its source view (only that
+package's build steps would change). Default: not implemented yet.
+
+>this is similar to other forms of input like env vars right?
