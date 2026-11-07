@@ -645,3 +645,45 @@ that list right, too noisy, or missing anything you use?
   `allFeatures`; `defaultVariant`; `gitSubdirs`, `gitSubmodules`;
   `sysDefaults.enable`.
 - A flake-parts module is available as `breakbulk.lib.flakeModule`.
+
+## 60. FYI: tests run as Nix build steps
+
+Each test binary gets its own test-run step with Cargo's environment,
+working directory and library paths; doctests run once per library, with
+output identical to `cargo test --doc`; each test binary also has a runnable
+app for running outside the sandbox (network tests, debuggers). Changing one
+binary's skip list re-runs only that binary's tests. `CARGO_BIN_EXE_<name>`
+points at the real built binary.
+
+## 61. ASK: "identical test binary, skip the re-run" barely works yet
+
+The design promises that a test binary whose bytes didn't change isn't
+re-run. Tested with content-addressing enabled: it still re-runs, because
+two other inputs of every test run change on any edit:
+- the test's working directory is the package's source tree (Cargo does
+  the same), so editing any file in that package re-runs its tests; this
+  one is arguably correct, since tests may read those files;
+- following Cargo's rule, every test's library search path lists the
+  output of every build script in the workspace, so editing any package
+  that has a build script re-runs every test.
+Suggested fix for the second: a small content-addressed step that copies
+those build-script library directories, so their paths stay the same when
+their contents do. Default: do it later in M4/M6. (Reminder: on your current
+Nix setup content-addressing is off anyway, see 52.)
+
+## 62. ASK: test apps run everything
+
+The runnable test apps (for running outside the sandbox) deliberately don't
+apply your skip lists or test arguments, since their purpose is to run what
+the sandbox skips. They do use the same environment, working directory and
+runner. Alternative: apply the same arguments by default and let you add
+more on the command line.
+
+## 63. FYI: test naming and gaps
+
+- Checks are named `test/<pkg>/<binary>` and `doctest/<pkg>`.
+- The project's `[env]` table from `.cargo/config.toml` doesn't reach test
+  processes yet (Cargo applies it; the plan doesn't record which variables
+  came from it). To fix.
+- Test runs get a plain shell environment without a C compiler; tests that
+  compile C need it added via `test.path`.
