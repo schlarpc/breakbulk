@@ -306,7 +306,13 @@ let
       sysroot = tools.rustc-sysroot or null;
       jq = "${testPkgs.jq}/bin/jq";
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
-      byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
+      # `test.runner = "nextest"` needs plan data at evaluation time (IFD
+      # mode only, for now): such packages run their binaries with libtest.
+      nextestPkgs = lib.attrNames (lib.filterAttrs (_: p: (p.test.runner or null) == "nextest") packages);
+      byPackage =
+        lib.warnIf (nextestPkgs != [ ])
+          "breakbulk: test.runner = \"nextest\" is not supported in dynamic-derivation mode yet; ${lib.concatStringsSep ", " nextestPkgs} run with libtest"
+          (lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots));
 
       binaryOf =
         r: n:

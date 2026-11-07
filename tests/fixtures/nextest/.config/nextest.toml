@@ -1,0 +1,15 @@
+[profile.default]
+retries = 1
+
+[profile.ci]
+retries = 2
+# Names another package, so the synthesized cargo metadata must list it.
+default-filter = "not test(/^excluded_/) & (package(nx) | package(other))"
+fail-fast = false
+
+[[profile.ci.overrides]]
+filter = "test(hangs_once)"
+slow-timeout = { period = "1s", terminate-after = 2 }
+
+[profile.ci.junit]
+path = "junit.xml"

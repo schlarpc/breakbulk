@@ -978,3 +978,48 @@ fails; a package that adds `splitDebug` on a target without it gets no
 build ID. Options: (a) keep per-target and document "change stages per
 target, not per package" (default); (b) compile the affected libraries
 twice when packages disagree.
+
+## 91. FYI: M6 measurements: pipelining split and rmeta cutoff are no-go for now
+
+Details in `docs/spikes/m6-measurements.md`.
+- **Pipelining.** Cargo starting dependents early saves 5–39% on real
+  workspaces at 8 cores (ripgrep 39%, rust-analyzer 27%, helix 5%). The
+  cheap ways for breakbulk to recover it compile each library's front end
+  twice, which costs 23–49% more CPU and is slower at 4 cores. Not worth
+  building. The only approach that keeps the gain (pausing and resuming the
+  compiler process, "CRIU") is worth a spike later.
+- **Skipping rebuilds when a library's interface file is unchanged.** It
+  can't work today: rustc writes a hash of every source file into the
+  interface file, so even adding a comment changes it. Replaying 50 real
+  ripgrep commits saved 1% of library compiles. Rust's planned fix
+  (`-Zpublic-api-hash`) isn't in nightly yet.
+- **CA test runs on a fresh machine** download all their inputs first
+  (1.8 GB including the compiler) before Nix can tell the run is cached,
+  versus 440 bytes for an ordinary test run. This confirms the design's
+  choice to keep content-addressing off for caches serving fresh machines.
+
+## 92. FYI: nextest support
+
+`packages.<name>.test.runner = "nextest"` runs that package's test binaries
+through nextest, honoring `.config/nextest.toml` (retries, timeouts, default
+filters, JUnit output, test threads). Each binary is still its own Nix test
+run.
+
+## 93. ASK: make nextest a workspace-wide switch?
+
+nextest's config is workspace-wide, but the switch is per package, so you'd
+repeat it for each package. Proposed: also allow a workspace-level default.
+
+## 94. ASK: test runs depend on the whole Rust toolchain
+
+Test runs need only the Rust standard library's runtime files, but depend on
+the whole toolchain (1.1 GB) to get them. On a fresh machine that's a big
+download for content-addressed runs. Proposed: a small derivation holding
+only those files. Default: do it.
+
+## 95. ASK: what to ask rustc upstream for
+
+The design plans to ask the Rust project for a "physical split" of library
+metadata (what dependents read vs. everything else). The measurements show
+the request should explicitly name the per-file source hashes, which today
+change the interface file on every edit. Nothing will be filed without you.
