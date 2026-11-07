@@ -560,7 +560,11 @@ rec {
         if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
           pkgs
         else
-          import pkgs.path { system = testSystem; },
+          import pkgs.path {
+            system = testSystem;
+            # The user's overlays and config (allowUnfree, …) carry over.
+            inherit (pkgs) overlays config;
+          },
       packages ? { },
       ca ? null,
       coverage ? false,
