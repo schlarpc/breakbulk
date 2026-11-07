@@ -171,9 +171,7 @@ def graph(meta):
     return nodes
 
 
-def changed_packages(src, prev, cur, gprev, gcur):
-    files = git(src, "diff", "--name-only", prev, cur).split()
-    root = git(src, "rev-parse", "--show-toplevel").strip()
+def changed_packages(files, root, gprev, gcur):
     members = sorted(((v["dir"], k) for k, v in gcur.items() if v["member"]),
                      key=lambda x: -len(x[0]))
     changed, other = set(), []
@@ -233,14 +231,18 @@ def compare(gp, gc, lp, lc, changed):
     rmeta_changed = {k for k in libs_c if differs(k, "rmeta")}
     rlib_changed = {k for k in libs_c if differs(k, "rlib")}
     src_libs = {k for k in changed if k in gc and gc[k]["has_lib"]}
-    ia_lib = closure_dependents(gc, src_libs) & set(libs_c)
+    # Libraries whose own inputs changed although no file of theirs did
+    # (features, flags, a new version in Cargo.lock): their rmeta changed
+    # and no direct dependency's did. Input addressing rebuilds them too.
+    self_changed = {k for k in rmeta_changed if not (gc[k]["normal"] & rmeta_changed)}
+    ia_lib = closure_dependents(gc, src_libs | self_changed) & set(libs_c)
     cut_lib = {k for k in libs_c if k in src_libs or (gc[k]["normal"] & rmeta_changed)}
     ia_link = cut_link = 0
     for k, v in gc.items():
         if not v["member"] or not v["link"]:
             continue
         deps = transitive_deps(gc, k, True)
-        if k in changed or deps & ia_lib:
+        if k in changed or deps & (ia_lib | rlib_changed):
             ia_link += v["link"]
         if k in changed or deps & rlib_changed:
             cut_link += v["link"]
@@ -256,6 +258,54 @@ def compare(gp, gc, lp, lc, changed):
         "libs_total": len(libs_c),
         "link_total": sum(v["link"] for v in gc.values() if v["member"]),
     }
+
+
+def make_rows(snaps, pairinfo, root):
+    rows = []
+    for c, info in pairinfo.items():
+        p = info["parent"]
+        sp, sc = snaps.get(p, {}), snaps.get(c, {})
+        if "libs" not in sp or "libs" not in sc:
+            rows.append({"commit": c, "subject": info["subject"], "skipped": "build failed",
+                         "error": (sp.get("error") or sc.get("error") or "")[-500:]})
+            continue
+        changed, files, other = changed_packages(info["files"], root, sp["graph"], sc["graph"])
+        row = {"commit": c, "subject": info["subject"], "files": len(files), "outside_members": other}
+        row.update(compare(sp["graph"], sc["graph"], sp["libs"], sc["libs"], changed))
+        rows.append(row)
+    return rows
+
+
+def dump_snaps(snaps):
+    """Snapshots as JSON (sets as sorted lists), for --reanalyze."""
+    out = {}
+    for rev, s in snaps.items():
+        if "graph" in s:
+            g = {k: dict(v, normal=sorted(v["normal"]), dev=sorted(v["dev"])) for k, v in s["graph"].items()}
+            out[rev] = {"libs": s["libs"], "graph": g}
+        else:
+            out[rev] = s
+    return out
+
+
+def load_snaps(js):
+    out = {}
+    for rev, s in js.items():
+        if "graph" in s:
+            g = {k: dict(v, normal=set(v["normal"]), dev=set(v["dev"])) for k, v in s["graph"].items()}
+            out[rev] = {"libs": s["libs"], "graph": g}
+        else:
+            out[rev] = s
+    return out
+
+
+def reanalyze(path):
+    """Recompute every row from the snapshots saved in a results file."""
+    results = json.load(open(path))
+    for t in results["toolchains"].values():
+        t["rows"] = make_rows(load_snaps(t["snapshots"]), t["pairs"], t["root"])
+    json.dump(results, open(path, "w"), indent=1)
+    summarize(results)
 
 
 def main():
@@ -308,18 +358,15 @@ def main():
             snaps[rev] = {"libs": libs, "graph": graph(meta)} if libs is not None else {"error": err}
             print(f"[{tc.name}] {i + 1}/{len(order)} {rev[:10]} "
                   f"{'ERR' if libs is None else 'ok'} {time.time() - t0:.0f}s", file=sys.stderr)
-        rows = []
+        pairinfo = {}
         for p, c in pairs:
-            subject = git(a.repo, "log", "-1", "--format=%s", c).strip()
-            sp, sc = snaps.get(p, {}), snaps.get(c, {})
-            if "libs" not in sp or "libs" not in sc:
-                rows.append({"commit": c, "subject": subject, "skipped": "build failed",
-                             "error": (sp.get("error") or sc.get("error") or "")[-500:]})
-                continue
-            changed, files, other = changed_packages(src, p, c, sp["graph"], sc["graph"])
-            row = {"commit": c, "subject": subject, "files": len(files), "outside_members": other}
-            row.update(compare(sp["graph"], sc["graph"], sp["libs"], sc["libs"], changed))
-            rows.append(row)
+            pairinfo[c] = {
+                "parent": p,
+                "subject": git(a.repo, "log", "-1", "--format=%s", c).strip(),
+                "files": git(src, "diff", "--name-only", p, c).split(),
+            }
+        root = git(src, "rev-parse", "--show-toplevel").strip()
+        rows = make_rows(snaps, pairinfo, root)
         control = None
         if not a.no_control and order:
             # Clean rebuild of the last commit at the same target path (the
@@ -338,7 +385,9 @@ def main():
             shutil.rmtree(tdir, ignore_errors=True)
             os.rename(aside, tdir)
         results["toolchains"][tc.name] = {"rustc": version, "rustflags": tc.rustflags,
-                                          "rows": rows, "control_mismatch": control}
+                                          "rows": rows, "control_mismatch": control,
+                                          "pairs": pairinfo, "root": root,
+                                          "snapshots": dump_snaps(snaps)}
         json.dump(results, open(a.out, "w"), indent=1)
     summarize(results)
 
@@ -371,5 +420,7 @@ def summarize(results):
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--summarize":
         summarize(json.load(open(sys.argv[2])))
+    elif len(sys.argv) == 3 and sys.argv[1] == "--reanalyze":
+        reanalyze(sys.argv[2])
     else:
         main()
