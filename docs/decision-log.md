@@ -338,3 +338,55 @@ Tell me if you want a different internal scheme before it spreads.
 binary. The output-name prediction doesn't list those yet. This will be
 fixed when the planner lands. Benchmarks that Cargo didn't select count as
 "skipped" (succeed with a message) rather than failing.
+
+## 32. FYI: tracing Cargo works (spike A: go)
+
+The central bet of the design holds: breakbulk can run your real Cargo with
+a stand-in compiler, record exactly what Cargo would run, and later
+reproduce it. On Cargo 1.95, 1.97, 1.99 and current nightly, the recorded
+commands, with build-script output filled in afterwards, matched a real
+`cargo build` exactly for every unit (32 of 32 comparisons). Where
+build-script output lands is identical across all four versions. Write-up:
+`docs/spikes/A-trace-fidelity.md`. A few doc statements were wrong and are
+being corrected (benches, profiles, see 35).
+
+## 33. ASK: projects that set `rustflags` under `[build]`
+
+Cargo takes extra compiler flags from exactly one place: per-target settings
+(`[target.x86_64-unknown-linux-gnu] rustflags`) win, and `[build] rustflags`
+is then ignored entirely. breakbulk's toolchain presets add flags (for
+example `+crt-static` for static builds) as per-target settings, so a
+project that puts its own flags under `[build]` would silently lose them.
+Proposed default: the planner reads the project's `.cargo/config.toml`
+files (a documented format), and if the project uses `[build] rustflags`
+and no per-target flags, breakbulk adds its flags under `[build]` too; the
+trace then confirms both sets of flags arrived. Alternatives: require
+projects to use per-target flags (simplest, but a trap), or fail planning
+with a message when both are present.
+
+## 34. ASK: turning on Cargo's built-in path hiding (`trim-paths`)
+
+Cargo 1.101 (not yet released as stable) can hide source paths itself, and
+the design says breakbulk should switch it on when the project hasn't
+chosen. breakbulk can't tell from outside whether the project chose, without
+copying Cargo's profile rules. Proposed: plan once; if the result shows
+path hiding is off and Cargo is new enough, plan again with it on. Planning
+reruns only when manifests or the lockfile change and is quick compared to a
+build. Alternative: never turn it on automatically and keep breakbulk's own
+path hiding (works on all versions). Only relevant from Cargo 1.101.
+
+## 35. FYI: corrections to the design from the tracing spike
+
+- `cargo test --no-run` does not build benchmarks; they come only from the
+  separate bench variant.
+- Two profiles with the same settings (for example `release` and `bench`)
+  produce identical, shared build steps. Only differing settings separate
+  them.
+- Changing the linker rebuilds every crate, not just binaries, because Cargo
+  passes the linker to every compile. breakbulk keeps Cargo's behavior.
+- Current nightly Cargo uses a new layout for its build directory; breakbulk
+  will support both layouts.
+- Nightly toolchains split library metadata out of `.rlib` files, so linking
+  needs both files of each dependency.
+- The design's "rustflags are concatenated with project config" was only
+  true when both use the same config key (see 33).
