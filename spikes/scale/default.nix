@@ -17,11 +17,22 @@
 #   sources     the source map alone (to time its evaluation separately)
 #   instantiateBin  the breakbulk-instantiate package
 #   unitsJson   the instantiate derivation
+#   trivial     trivialCount bare derivations (per-derivation cost baseline)
+#   wide.all    wideCount bare derivations with wideInputs inputs each
 {
   dir,
   # A value placed in every unit's env (BB_SALT), to get fresh unit .drv
   # files without rerunning instantiation (only the key reaches it).
   salt ? "0",
+  # How many independent trivial derivations `trivial` has.
+  trivialCount ? "100",
+  # `wide`: how many derivations, and how many inputs each.
+  wideCount ? "200",
+  wideInputs ? "0",
+  # "drvs": each wide derivation lists the inputs itself; "refs": it lists
+  # one bundle derivation whose output references them (same sandbox
+  # closure, one input derivation).
+  wideVia ? "drvs",
   pkgs ? import (
     let
       n = (builtins.fromJSON (builtins.readFile ../../flake.lock)).nodes.nixpkgs.locked;
@@ -120,6 +131,86 @@ in
     lib.foldl' (n: d: n + builtins.stringLength (value d.attrs.BREAKBULK_UNIT)) 0 (
       builtins.attrValues unitsData.units
     );
+  # The bare cost of a derivation: trivialCount independent ones, each bash
+  # writing one file, and one that depends on all of them.
+  trivial =
+    let
+      one =
+        i:
+        derivation {
+          name = "scale-trivial-${toString i}";
+          inherit system salt;
+          builder = "${pkgs.bash}/bin/bash";
+          args = [
+            "-c"
+            "echo $salt > $out"
+          ];
+        };
+    in
+    derivation {
+      name = "scale-trivial-all";
+      inherit system;
+      builder = "${pkgs.bash}/bin/bash";
+      deps = map one (lib.range 1 (lib.toInt trivialCount));
+      args = [
+        "-c"
+        "echo $deps > $out"
+      ];
+    };
+
+  # The cost of inputs: wideCount independent derivations, each with the
+  # same wideInputs small store paths as inputs (built once, unsalted).
+  wide =
+    let
+      base = map (
+        i:
+        derivation {
+          name = "scale-wide-input-${toString i}";
+          inherit system;
+          builder = "${pkgs.bash}/bin/bash";
+          args = [
+            "-c"
+            "echo ${toString i} > $out"
+          ];
+        }
+      ) (lib.range 1 (lib.toInt wideInputs));
+      bundle = derivation {
+        name = "scale-wide-bundle";
+        inherit system;
+        builder = "${pkgs.bash}/bin/bash";
+        deps = base;
+        args = [
+          "-c"
+          "echo $deps > $out"
+        ];
+      };
+      one =
+        i:
+        derivation {
+          name = "scale-wide-${toString i}";
+          inherit system salt;
+          deps = if wideVia == "refs" then [ bundle ] else base;
+          builder = "${pkgs.bash}/bin/bash";
+          args = [
+            "-c"
+            "echo $salt > $out"
+          ];
+        };
+    in
+    {
+      inputs = bundle;
+      all = derivation {
+        name = "scale-wide-all";
+        inherit system;
+        builder = "${pkgs.bash}/bin/bash";
+        deps = map one (lib.range 1 (lib.toInt wideCount));
+        args = [
+          "-c"
+          "echo $deps > $out"
+        ];
+      };
+    };
+
   check = pkgs.runCommand "scale-check" { } ''
     ${root}/app-* | tee $out
     grep -q '^scale ok: ' $out
