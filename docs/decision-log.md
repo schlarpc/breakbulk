@@ -867,3 +867,27 @@ modified, built in place, or pushed anywhere, and secrets like `.env`
 files are skipped. Only the breakbulk module files (no source) go into
 `tests/field-trials/`, and findings go into `docs/field-trials.md`. If you'd
 rather some repositories stay out of this, say which.
+
+## 80. FYI: loose ends fixed, README and options reference added
+
+- Fixed a real bug: variables from your `.cargo/config.toml` `[env]` table
+  were dropped from every crate, so `env!("X")` on such a variable failed.
+  They now reach compiles, test runs and doctests as under Cargo.
+- Per-package settings now add to toolchain list variables like `PATH`
+  instead of replacing them.
+- `packages.<name>.test.sourceScope` works: tests can see a wider part of
+  the repository without affecting the package's other build steps.
+- The dev shell sets the same linker and compiler flags the planner uses,
+  so `cargo build` in the shell produces the same crate IDs as breakbulk.
+- A native program can embed a wasm component built by another workspace.
+- `README.md` (overview, status, quickstart, limitations) and
+  `docs/options.md` (generated from the module options; a check keeps it
+  in sync) are new.
+
+## 81. ASK: opening the dev shell now runs the planner once
+
+To export exactly the flags the planner uses, evaluating the dev shell now
+builds the native build plan first (import-from-derivation). It reruns only
+when manifests, lockfile or config change, but the first `nix develop` is
+slower. Alternative: compute the flags in Nix without the planner,
+duplicating one small rule. Default: run the planner.
