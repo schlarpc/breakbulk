@@ -14,7 +14,9 @@
 #     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers;
 #     preset stage sets in breakbulk.stages.defaultStages)
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
-# breakbulk.predictedRoots { ... }.
+# breakbulk.predictedRoots { ... }. Dynamic-derivation mode (M5):
+# breakbulk.dynamic.{instantiate, mkTestRuns, mkBreakbulkDrv, available}
+# (lib/dynamic.nix).
 # Planning and the M1 end-to-end entry:
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
 #   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
@@ -52,6 +54,14 @@ let
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;
+  };
+  dynamic = import ./dynamic.nix {
+    inherit
+      lib
+      instantiate
+      testRuns
+      stages
+      ;
   };
   llvmVersions = import ./llvm-versions.nix { inherit lib; };
   runners = import ./runners.nix { inherit lib; };
@@ -108,6 +118,7 @@ let
       mkPlan
       testRuns
       testApps
+      dynamic
       ;
   };
 
@@ -121,6 +132,7 @@ let
       mkFetch
       mkTools
       mkWorkspace
+      dynamic
       ;
   };
 in
@@ -141,6 +153,7 @@ in
     mkTools
     mkPlan
     mkWorkspace
+    dynamic
     ;
 
   mkSkeleton = skeleton.mkSkeleton;

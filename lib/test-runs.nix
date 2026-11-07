@@ -96,7 +96,7 @@ let
   '';
 in
 rec {
-  inherit binaryKey;
+  inherit binaryKey dylibJq;
 
   # Resolve plan text (a string, or a list of pieces) to a string with
   # string context: `src`, `crateSrc` and `out` references as instantiation

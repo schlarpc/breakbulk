@@ -45,6 +45,7 @@
   mkFetch,
   mkTools,
   mkWorkspace,
+  dynamic,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -385,6 +386,7 @@ let
       inherit (cfg) strictSources;
       targetEnv = envStrings (cfg.targets.${triple}.env or { });
       name = "${wsName}-${triple}-${vName}";
+      inherit delivery;
       inherit (specFor wsName triple) runner testSystem;
     }
     // (specFor wsName triple).mkWorkspace
@@ -552,13 +554,10 @@ let
 
   warnings = cfg.warnings ++ unmatchedWarnings;
   warned = x: lib.foldr (w: acc: lib.warn w acc) x warnings;
-  checkedMode =
-    x:
-    if cfg.mode == "dynamic" then
-      throw "breakbulk: mode = \"dynamic\" is not implemented yet (M5); use \"ifd\" or \"auto\""
-    else
-      x;
-  guard = x: checkedMode (warned x);
+  # `mode = "auto"`: dynamic-derivation mode when the evaluator has
+  # `builtins.outputOf` and is Nix 2.36 or later (lib/dynamic.nix).
+  delivery = dynamic.resolveMode cfg.mode;
+  guard = warned;
 
   # --- explainSharing --------------------------------------------------------
   #

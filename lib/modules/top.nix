@@ -16,10 +16,17 @@ in
       description = ''
         How unit derivations reach Nix. `ifd`: breakbulk-instantiate writes
         units.json, which Nix imports (import-from-derivation). `dynamic`:
-        dynamic derivations through `builder-rpc-v0` (M5, not implemented
-        yet; selecting it is an error). `auto` picks `dynamic` when the
-        evaluator supports it and `ifd` otherwise; until M5 it always picks
-        `ifd`.
+        an outer derivation writes the unit derivations through Nix's
+        `builder-rpc-v0` interface and products reach them with
+        `builtins.outputOf` (needs Nix 2.36 or later with the
+        `dynamic-derivations` and `ca-derivations` experimental features).
+        `auto` picks `dynamic` when the evaluator has `builtins.outputOf`
+        and is Nix 2.36 or later, and `ifd` otherwise. A daemon or builder
+        older than the evaluator fails with Nix's own "missing system
+        features" error naming `builder-rpc-v0`; set `ifd` then. Unit
+        derivations are identical in both modes; products are not (they are
+        resolved at build time in `dynamic`), so teams that mix Nix versions
+        should pin the mode.
       '';
     };
 

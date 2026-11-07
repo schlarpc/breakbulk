@@ -63,6 +63,7 @@
   mkPlan,
   testRuns,
   testApps,
+  dynamic,
 }:
 pkgs:
 {
@@ -91,6 +92,10 @@ pkgs:
   testSystem ? null,
   ca ? null,
   checkout ? null,
+  # How unit derivations reach Nix: "ifd" (units.json, imported) or
+  # "dynamic" (an outer derivation writes them through builder-rpc-v0;
+  # lib/dynamic.nix). mkRepository resolves `mode = "auto"`.
+  delivery ? "ifd",
   # The target's toolchain spec (M3, from lib/repository.nix):
   #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)
   #   specTools.<name> = <store path>  tool paths the spec puts in the plan
@@ -202,9 +207,28 @@ let
   )
   // specTools;
 
+  isDynamic = delivery == "dynamic";
+  breakbulkDrv = tools.breakbulk-drv or (dynamic.mkBreakbulkDrv pkgs);
+  # Dynamic-derivation mode: the outer derivation is named
+  # `<ws>-<triple>-<variant>` for the build plan (decision 27), with `-test`
+  # for the test plan, since each plan has its own.
+  instantiateWith =
+    kind: args:
+    if isDynamic then
+      dynamic.instantiate (
+        args
+        // {
+          inherit breakbulkDrv;
+          inherit (pkgs) coreutils;
+          outerName = if kind == "build" then name else "${name}-${kind}";
+        }
+      )
+    else
+      instantiate args;
+
   inst =
     kind:
-    instantiate {
+    instantiateWith kind {
       breakbulkInstantiate = tools.breakbulk-instantiate;
       inherit system;
       plan = "${plans.${kind}}/plan.json";
@@ -245,7 +269,7 @@ let
       install -D -m755 "''${files[0]}" $out/${dir}/${fileName}
     '';
 
-  tr = testRuns.mkTestRuns {
+  tr = (if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
     inherit
       pkgs
       target
@@ -282,6 +306,12 @@ in
   unitsJson = {
     build = built.unitsJson;
     test = tested.unitsJson;
+  };
+  inherit delivery;
+  # Dynamic-derivation mode: the outer derivations, by plan kind.
+  outer = lib.optionalAttrs isDynamic {
+    build = built.outer;
+    test = tested.outer;
   };
   packages = lib.mapAttrs' (
     _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" r.breakbulkRoot.target r)
