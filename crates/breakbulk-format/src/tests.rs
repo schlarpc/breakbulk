@@ -724,6 +724,51 @@ impl Resolve for Weak {
     }
 }
 
+/// The breadth-first search `crate_deps` was before it was memoized, as a
+/// reference.
+fn naive_crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
+    use crate::deps::{direct_crate_refs, is_proc_macro};
+    let Some(Unit::Compile(c)) = plan.units.get(id) else {
+        panic!("{id} is not a compile unit of the plan");
+    };
+    let want = if is_linking(c) { "rlib" } else { "rmeta" };
+    let mut out: BTreeSet<OutRef> = BTreeSet::new();
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut queue: std::collections::VecDeque<&str> = Default::default();
+    for o in direct_crate_refs(plan, c) {
+        out.insert(o.clone());
+        if seen.insert(&o.out) {
+            queue.push_back(&o.out);
+        }
+    }
+    while let Some(dep) = queue.pop_front() {
+        let Some(Unit::Compile(d)) = plan.units.get(dep) else {
+            continue;
+        };
+        if is_proc_macro(d) {
+            continue;
+        }
+        for o in direct_crate_refs(plan, d) {
+            let Some(Unit::Compile(e)) = plan.units.get(&o.out) else {
+                continue;
+            };
+            let chosen = match e.outputs.get(want) {
+                Some(files) if files.len() == 1 && !is_proc_macro(e) => OutRef {
+                    out: o.out.clone(),
+                    output: want.to_owned(),
+                    file: files.iter().next().cloned(),
+                },
+                _ => o.clone(),
+            };
+            out.insert(chosen);
+            if seen.insert(&o.out) {
+                queue.push_back(&o.out);
+            }
+        }
+    }
+    out
+}
+
 /// Every compile unit's dependency directory, built the way
 /// `breakbulk-unit` builds it from the rendered units and the manifests their
 /// `rmeta` outputs would hold, equals [`crate_deps`]; and every run a unit
@@ -772,7 +817,11 @@ pub(crate) fn check_manifests(p: &Plan) -> Result<usize, String> {
             if c.link_manifest_crates {
                 have.extend(below.crates.iter().cloned());
             }
-            let want: BTreeSet<String> = crate_deps(p, id)
+            let reference = naive_crate_deps(p, id);
+            if graph.crate_deps(id) != reference {
+                return Err(format!("{id}: memoized crate_deps differs from the search"));
+            }
+            let want: BTreeSet<String> = reference
                 .into_iter()
                 .map(|o| Fake.reference(&Reference::Out(o)).unwrap())
                 .collect();
