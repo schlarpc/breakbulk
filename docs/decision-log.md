@@ -1424,3 +1424,37 @@ preset. Should it get `linuxMusl`?
 You said `nix-systems/default`; the flake uses `default-linux` because
 `default` also lists the two macOS systems, which breakbulk doesn't support
 yet. It's a one-line switch once Darwin works.
+
+## 117. FYI: the coverage crash is a nixpkgs bug, already fixed upstream (resolves 73)
+
+nixpkgs builds Rust 1.99 against LLVM 21 but compiles its coverage runtime
+from LLVM 23 sources; LLVM 23 changed the coverage record layout, so
+instrumented programs crash at exit. Already reported (nixpkgs#576588) and
+fixed on nixpkgs master (PR #578990, "rustc: use llvmPackages_23"), not yet
+in `nixos-unstable`. Details and a two-line reproducer:
+`docs/spikes/research-coverage-and-libpath.md`.
+
+## 118. ASK: coverage follow-ups
+
+- When breakbulk's pinned nixpkgs has the fix, should the coverage test
+  switch back to nixpkgs' Rust, or run with both toolchains?
+- Add a small per-toolchain "does coverage work" probe that fails with a
+  clear message, so a future mismatch doesn't show up as a crash at exit?
+- Two upstream drafts exist (a nixpkgs follow-up to prevent recurrence, and
+  a Cargo bug: with `build.build-dir` outside `target/`, Cargo drops build
+  scripts' library paths from `LD_LIBRARY_PATH`). Want either filed? Nothing
+  has been sent.
+
+## 119. FYI: one rule for "library path inside the build" (resolves 84)
+
+Cargo's real rule is a plain path-prefix check against its target
+directory. breakbulk now uses one rule in all four places (compiles, build
+scripts, tests, doctests): a path counts if it's inside the printing build
+script's own output or inside the output of a build script it received
+`links` metadata from. A survey of 1,207 popular crates (94 printing library
+search paths) found none that reach another build script's output any other
+way. The Cargo-like "any build script's output" rule would make every
+compile with a proc macro rebuild whenever any build script anywhere
+changed. Two crates (`sdl2-sys` bundled, `ort-sys` copy-dylibs) copy
+libraries into Cargo's target directory itself; no rule can support that in
+a sandbox, so that's a separate known gap.
