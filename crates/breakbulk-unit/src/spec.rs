@@ -265,9 +265,13 @@ pub struct RenderedRun {
     pub platform: Platform,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub links: Option<String>,
-    /// The build-script executable.
+    /// The build-script executable, or its compile unit's `bin` output
+    /// directory holding exactly one file.
     pub script: String,
+    /// Layers 3 to 5 of the environment contract, merged. Has no `OUT_DIR`:
+    /// `breakbulk-unit` sets it to the run's own `out`.
     pub env: BTreeMap<String, String>,
+    /// The package directory; the script runs here.
     pub cwd: String,
     /// The `flags` directories of the upstream runs whose `metadata.json`
     /// becomes `DEP_<LINKS>_<KEY>` in this run's env.
