@@ -85,6 +85,11 @@ let
       ''
         mkdir -p $out
         link() {
+          # A library with two linkable crate types (cdylib and staticlib)
+          # is one unit and several roots: each root names every file.
+          if [ -e "$out/$2" ] && [ "$(readlink -f "$out/$2")" = "$(readlink -f "$1")" ]; then
+            return
+          fi
           if [ -e "$out/$2" ]; then
             echo "breakbulk: two roots of ${pkg} produce $2" >&2
             exit 1
