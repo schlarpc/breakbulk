@@ -11,9 +11,17 @@
 #                    (noSourceReferences passes); panics and file!() in a
 #                    dependency print remapped paths; the debug output
 #                    references the dependency's source view and the
-#                    registry crate's source; gdb lists source lines from
-#                    it; non-test units remap macro,diagnostics, test
-#                    harnesses every scope; dep's tests pass
+#                    registry crate's source; gdb, given only the debug
+#                    output's lib/debug as its debug-file-directory, runs
+#                    the product to a breakpoint in the dependency `dep`
+#                    and prints a backtrace with dep's and app's source
+#                    files and lines, and the source line itself; non-test
+#                    units remap macro,diagnostics, test harnesses every
+#                    scope; dep's tests pass
+#   source-paths-dwp the same with split-debuginfo = "packed" (a `packed`
+#                    profile): the DWARF is in app.dwp, which splitDebug
+#                    puts next to the separate debug file, where gdb finds
+#                    it; gdb's backtrace and source lines as above
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
 #   variants         build, check, clippy (with and without clippy
@@ -42,6 +50,20 @@
 #                    extracted payload runs
 #   embed-invalidation   editing the payload changes only the embedding
 #                    chain's units (embedder and host), not `other`'s
+#   trim-paths       Cargo's trim-paths, with rust-overlay's nightly (Cargo
+#                    1.101): workspace `set` sets it in its dev profile, so
+#                    its plan keeps Cargo's remaps and scope and is traced
+#                    once; workspace `default` does not, so the planner
+#                    traces again with it on and drops Cargo's scope. Both:
+#                    breakbulk adds no remaps of its own; the shared path
+#                    crate outside both roots gets one `-C metadata` in both,
+#                    and the same when planned at two other skeleton
+#                    locations (Cargo hashes it without its absolute path;
+#                    stable 1.99 refuses to plan there); OUT_DIR paths read
+#                    `/cargo/build-dir/…`; products have no source
+#                    references; `default`'s debug info keeps store paths
+#                    (gdb lists the shared crate's source), `set`'s does
+#                    not (scope `all`); `default`'s tests pass
 #   benches          a libtest-harness bench and a Criterion bench come
 #                    from the bench variant only (`cargo bench --no-run`,
 #                    bench profile, opt-level 3); the test plan has none;
@@ -262,10 +284,52 @@ let
 
   # --- source-paths ------------------------------------------------------------
 
-  spModules = [ (oneWs "." "dev") ];
+  spModules = [
+    (oneWs "." "dev")
+    { workspaces.main.variants.packed.profile = "packed"; }
+  ];
   sourcePaths = mkRepo (fixtures + "/source-paths") spModules;
   sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
   spApp = sourcePaths.workspaces.main.packages.app;
+
+  # --- trim-paths ----------------------------------------------------------------
+
+  trimRust = pkgs.rust-bin.nightly.latest.minimal;
+  trimPathsRepo = mkRepo (fixtures + "/trim-paths") [
+    {
+      workspaces = lib.genAttrs [ "set" "default" ] (w: {
+        path = w;
+        toolchain = {
+          rustc = trimRust;
+          cargo = trimRust;
+        };
+        variants.default.profile = "dev";
+      });
+    }
+  ];
+
+  # gdb on $app/bin/app with only $debug/lib/debug as its debug-file-directory
+  # (what installing the debug output gives): a breakpoint in the
+  # dependency `dep`, a backtrace through it into `app`, with the source
+  # files and lines from the debug info (store paths of the source views,
+  # which the debug output references), and the source line itself. Inside
+  # the sandbox; ASLR stays on (no personality change). Needs $app, $debug
+  # and $depView.
+  gdbCheck = ''
+    gdb -batch -nx -iex "set debug-file-directory $debug/lib/debug" \
+      -ex 'break dep::boom' -ex run -ex bt -ex 'frame 0' -ex 'info source' -ex list \
+      $app/bin/app > gdb.txt 2>&1 || true
+    cat gdb.txt
+    # Frame 0 in dep with its file and line; app's frames below it. The
+    # debug info names files relative to the compilation directory, the
+    # source view (rustc's working directory).
+    grep -E '^#0 +dep::boom .* at dep/src/lib.rs:1[0-9]$' gdb.txt
+    grep -E '^#[1-9] .*app::main.* at app/src/main.rs:[0-9]+$' gdb.txt
+    # gdb read the file from the dependency's source view, which the debug
+    # output references.
+    grep -qxF "Located in $depView/dep/src/lib.rs" gdb.txt
+    grep -qF 'panic!("boom {n}");' gdb.txt
+  '';
 
   # --- variants ------------------------------------------------------------------
 
@@ -397,6 +461,7 @@ in
       postLink
       sourcePaths
       sourcePathsReadme
+      trimPathsRepo
       variantsRepo
       benchesRepo
       embed
@@ -775,12 +840,206 @@ in
         grep -qxF "$depView" $debugClosure/store-paths
         grep -qxF "$itoaSrc" $debugClosure/store-paths
         grep -qxF "$depView" $linkedClosure/store-paths
-        # gdb finds the split debug info by build ID and lists the source.
-        gdb -batch -nx -iex "set debug-file-directory $debug/lib/debug" \
-          -ex 'list dep::boom' $app/bin/app > gdb.txt 2>&1 || true
+        # gdb finds the split debug info by build ID: it runs the product
+        # to a breakpoint in the dependency, prints the backtrace through
+        # it with source files and lines, and lists the source.
+        ${gdbCheck}
+        cat $depTests/log
+        touch $out
+      '';
+
+  source-paths-dwp =
+    let
+      p = sourcePaths.workspaces.main.target.${native}.variants.packed.packages.app;
+    in
+    pkgs.runCommand "source-paths-dwp"
+      {
+        nativeBuildInputs = [
+          pkgs.gdb
+          pkgs.binutils-unwrapped
+        ];
+        app = p;
+        debug = p.debug;
+        linkedDebug = p.stages.linked.debug;
+        noSrc = p.checks.noSourceReferences;
+        depView = builtins.unsafeDiscardStringContext "${(inst sourcePaths).sources.workspace.dep}";
+      }
+      ''
+        set -euo pipefail
+        $app/bin/app > run.txt
+        grep -qxF 'formatted 42' run.txt
+        # rustc wrote a .dwp (packed) and the link unit kept it.
+        test -f $linkedDebug/app.dwp
+        readelf -S -W $linkedDebug/app.dwp | grep -q '\.debug_info\.dwo'
+        # splitDebug put it next to the separate debug file, under the
+        # binary's name; the install-layout path is a link to it.
+        id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
+        test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
+        test -L $debug/bin/app.dwp
+        test -f $debug/bin/app.dwp
+        ${gdbCheck}
+        mkdir -p $out
+        cp gdb.txt $out/
+      '';
+
+  trim-paths =
+    let
+      wsOf = w: trimPathsRepo.workspaces.${w};
+      instOf = w: (wsOf w).instances.${native}.default;
+      planOf =
+        w: kind:
+        builtins.fromJSON (
+          builtins.unsafeDiscardStringContext (builtins.readFile "${(instOf w).plans.${kind}}/plan.json")
+        );
+      compiles = p: lib.filterAttrs (_: u: u.kind == "compile") p.units;
+      hasArg = pred: u: lib.any pred (map (a: if builtins.isString a then a else "") u.args);
+      rendered =
+        w: kind:
+        lib.listToAttrs (
+          map (
+            u:
+            lib.nameValuePair u.name (
+              builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)
+            )
+          ) (lib.attrValues (instOf w).units.${kind})
+        );
+      plans = lib.genAttrs [ "set" "default" ] (w: lib.genAttrs [ "build" "test" ] (planOf w));
+      allCompiles = w: compiles plans.${w}.build // compiles plans.${w}.test;
+      # The shared crate's library unit key in a plan.
+      sharedKey =
+        p:
+        lib.attrNames (
+          lib.filterAttrs (
+            _: u: u.kind == "compile" && u.crate.name == "shared" && u.crate.types == [ "lib" ]
+          ) p.units
+        );
+      renderedCompiles =
+        w: lib.filterAttrs (_: u: u.kind == "compile") (rendered w "build" // rendered w "test");
+      ownRemaps = w: lib.filterAttrs (_: u: (u.remap or [ ]) != [ ]) (renderedCompiles w);
+      scopes = w: lib.mapAttrs (_: u: u.remapScope or null) (renderedCompiles w);
+      wantDefault = {
+        "app-0.1.0-bin" = "macro,diagnostics";
+        "shared-0.1.0-lib" = "macro,diagnostics";
+        "itoa-1.0.11-lib" = "macro,diagnostics";
+        "lib-0.1.0-test" = null;
+      };
+      badDefault = lib.filterAttrs (n: s: ((scopes "default").${n} or "missing") != s) wantDefault;
+      setScoped = lib.filterAttrs (_: s: s != null) (scopes "set");
+      setNoScope = lib.filterAttrs (
+        _: u: !(hasArg (a: a == "--remap-path-scope=all") u)
+      ) (allCompiles "set");
+      defaultScope = lib.filterAttrs (
+        _: u: hasArg (lib.hasPrefix "--remap-path-scope") u
+      ) (allCompiles "default");
+      # A build-directory remap per OUT_DIR, as the shared crate's lib has.
+      sharedLib = lib.head (
+        lib.attrValues (
+          lib.filterAttrs (
+            _: u: u.kind == "compile" && u.crate.name == "shared" && u.crate.types == [ "lib" ]
+          ) plans.default.build.units
+        )
+      );
+      buildDirRemaps = lib.filter (
+        a: builtins.isList a && builtins.isString (lib.last a) && lib.hasPrefix "=/cargo/build-dir/" (lib.last a)
+      ) sharedLib.args;
+      app = w: (wsOf w).packages.app;
+      # The planner run directly on the `default` workspace's skeleton at
+      # another location than /build/skeleton.
+      planAt =
+        name: rust: dir:
+        let
+          ws = wsOf "default";
+          i = instOf "default";
+        in
+        pkgs.runCommand "trim-paths-plan-${name}" { } ''
+          mkdir -p "$(dirname ${dir})"
+          cp -r --no-preserve=mode ${i.skeleton} ${dir}
+          mkdir -p $out
+          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --target ${native} --profile dev             --config ${i.vendor.configFile}             --scratch $NIX_BUILD_TOP/scratch --forbid $NIX_BUILD_TOP --forbid $HOME             --out $out/plan.json 2> $out/log || true
+          cat $out/log
+        '';
+      readPlanAt =
+        d:
+        let
+          f = "${d}/plan.json";
+        in
+        builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile f));
+      atA = planAt "a" trimRust "$NIX_BUILD_TOP/a/skeleton";
+      atB = planAt "b" trimRust "$NIX_BUILD_TOP/elsewhere/b/sk";
+      stableAt = planAt "stable" pkgs.rust-bin.stable."1.99.0".minimal "$NIX_BUILD_TOP/a/skeleton";
+    in
+    assert lib.assertMsg (
+      plans.set.build.trimPaths && !(plans.set.build.trimPathsDefault or false)
+    ) "trim-paths: set's plan: trimPaths ${builtins.toJSON plans.set.build.trimPaths}";
+    assert lib.assertMsg (
+      plans.default.build.trimPaths && plans.default.build.trimPathsDefault
+      && plans.default.test.trimPathsDefault
+    ) "trim-paths: default's plan was not traced again with trim-paths on";
+    assert lib.assertMsg (
+      setNoScope == { }
+    ) "trim-paths: set's units without Cargo's scope: ${toString (lib.attrNames setNoScope)}";
+    assert lib.assertMsg (
+      defaultScope == { }
+    ) "trim-paths: default's units kept Cargo's scope: ${toString (lib.attrNames defaultScope)}";
+    assert lib.assertMsg (ownRemaps "set" == { } && ownRemaps "default" == { })
+      "trim-paths: breakbulk added remaps: ${toString (lib.attrNames (ownRemaps "set" // ownRemaps "default"))}";
+    assert lib.assertMsg (setScoped == { }) "trim-paths: set's units got a breakbulk scope: ${builtins.toJSON setScoped}";
+    assert lib.assertMsg (
+      badDefault == { }
+    ) "trim-paths: default's scopes ${builtins.toJSON (scopes "default")}";
+    assert lib.assertMsg (
+      lib.length buildDirRemaps == 1
+    ) "trim-paths: shared's build-directory remaps: ${builtins.toJSON buildDirRemaps}";
+    # Hashed without its absolute path: one key in both workspaces and at
+    # two other locations.
+    assert lib.assertMsg (
+      sharedKey plans.set.build == sharedKey plans.default.build
+      && lib.length (sharedKey plans.set.build) == 1
+    ) "trim-paths: shared's keys ${builtins.toJSON [ (sharedKey plans.set.build) (sharedKey plans.default.build) ]}";
+    assert lib.assertMsg (
+      sharedKey (readPlanAt atA) == sharedKey plans.default.build
+      && sharedKey (readPlanAt atB) == sharedKey plans.default.build
+    ) "trim-paths: shared's key depends on the skeleton location";
+    pkgs.runCommand "trim-paths"
+      {
+        nativeBuildInputs = [ pkgs.gdb ];
+        setApp = app "set";
+        defaultApp = app "default";
+        defaultDebug = (app "default").debug;
+        setDebugClosure = pkgs.closureInfo { rootPaths = [ (app "set").debug ]; };
+        defaultDebugClosure = pkgs.closureInfo { rootPaths = [ (app "default").debug ]; };
+        noSrcSet = (app "set").checks.noSourceReferences;
+        noSrcDefault = (app "default").checks.noSourceReferences;
+        sharedView = builtins.unsafeDiscardStringContext "${(instOf "default").sources.workspace.shared}";
+        tests = (wsOf "default").testRuns.lib."lib/lib";
+        inherit stableAt;
+      }
+      ''
+        set -euo pipefail
+        for a in $setApp $defaultApp; do
+          $a/bin/app > run.txt
+          cat run.txt
+          grep -qxF 'main is app/src/main.rs' run.txt
+          grep -qxF 'shared is /cargo/deps/shared-0.1.0/src/lib.rs' run.txt
+          grep -qE '^generated is /cargo/build-dir/${native}/debug/build/shared[-/][0-9a-f]+/out/gen.rs$' run.txt
+          grep -qxF 'formatted 42' run.txt
+          grep -qxF 'panicked at /cargo/deps/shared-0.1.0/src/lib.rs:18' run.txt
+        done
+        # default: debug info keeps store paths (scope macro,diagnostics),
+        # so the debug output references the sources and gdb lists them.
+        grep -qxF "$sharedView" $defaultDebugClosure/store-paths
+        gdb -batch -nx -iex "set debug-file-directory $defaultDebug/lib/debug"           -ex 'list shared::boom' $defaultApp/bin/app > gdb.txt 2>&1 || true
         cat gdb.txt
         grep -qF 'panic!("boom {n}");' gdb.txt
-        cat $depTests/log
+        # set: the project's scope (all) remaps debug info too.
+        if grep -qxF "$sharedView" $setDebugClosure/store-paths; then
+          echo "set's debug output references the shared crate's source" >&2; exit 1
+        fi
+        # Stable 1.99 has no trim-paths: at another location, planning
+        # refuses, naming the crate whose absolute path Cargo would hash.
+        grep -q 'shared 0.1.0' $stableAt/log
+        test ! -e $stableAt/plan.json
+        cat $tests/log
         touch $out
       '';
 

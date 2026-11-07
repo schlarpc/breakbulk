@@ -96,6 +96,11 @@ let
         cp -r --no-preserve=mode ${fixtures + "/${fixture}"} "$NIX_BUILD_TOP/skeleton"
         cd "$NIX_BUILD_TOP/skeleton"
         common=(--frozen --offline --config ${ws.vendor.configFile})
+        # When the planner turned Cargo's trim-paths on (Cargo >= 1.101 and
+        # the project did not), the reference build does the same.
+        if grep -q '"trimPathsDefault":true' ${ws.plans.${kind}}/plan.json; then
+          common+=(--config 'profile.dev.trim-paths="all"')
+        fi
         cargo metadata --format-version 1 "''${common[@]}" > $TMPDIR/metadata.json
         cargo ${if kind == "build" then "build" else "test --no-run"} -v \
           ${lib.escapeShellArgs cargoArgs} "''${common[@]}" \

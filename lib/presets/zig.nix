@@ -30,6 +30,18 @@
   # Extra `zig cc` invocations' flags to warm the cache with, e.g.
   # [ "-lc++" ] for C++ code.
   warmFlags ? [ ],
+  # Names of nixpkgs packages to rebuild with `zig cc` against `glibc`
+  # (decision 102), e.g. [ "openssl" "zlib" ]: `packages.<name>.inputs`
+  # functions get these from the target's package set instead of nixpkgs'
+  # builds, which need nixpkgs' newer glibc. Each is
+  # `pkgs.<name>.override { stdenv = zigStdenv; … }`, with the other
+  # rebuilt packages passed for the arguments it takes, and its test
+  # phases off (test programs ask for the FHS loader, which the sandbox
+  # lacks). Opt-in: the rebuilds are not in any binary cache (openssl takes
+  # about 5 minutes on 4 cores), and only C libraries whose own library
+  # dependencies are listed too, or have none, are correct. Every other
+  # library input still comes from nixpkgs and gets an evaluation warning.
+  rebuildInputs ? [ ],
   ...
 }:
 let
@@ -91,9 +103,98 @@ let
   zigCc = zigTool "zig-cc-${zigTarget}" "cc -target ${zigTarget}";
   zigCxx = zigTool "zig-cxx-${zigTarget}" "c++ -target ${zigTarget}";
   zigAr = zigTool "zig-ar" "ar";
+
+  # A nixpkgs stdenv whose C compiler is `zig cc` for `zigTarget`, behind
+  # nixpkgs' cc-wrapper with no libc (zig brings its own glibc stubs and
+  # headers), so setup hooks, NIX_CFLAGS_COMPILE and NIX_LDFLAGS work as
+  # usual. The wrapped compiler claims not to be clang: for clang the
+  # wrapper adds nixpkgs gcc's libstdc++ (`--gcc-toolchain`, `-cxx-isystem`)
+  # and passes arguments in a response file with backslash-escaped commas,
+  # which zig's parser keeps, so `-Wl,-soname,…` and `-Wl,-rpath,…` were
+  # dropped (zig 0.17.0, nixpkgs cc-wrapper `use_response_file_by_default`).
+  zigStdenv =
+    let
+      unwrapped =
+        bp.runCommand "zig-cc-${zigTarget}"
+          {
+            passthru = {
+              isClang = false;
+              langC = true;
+              langCC = true;
+            };
+          }
+          ''
+            mkdir -p $out/bin $out/lib
+            ln -s ${zigCc} $out/bin/cc
+            ln -s ${zigCxx} $out/bin/c++
+            ln -s ${zigCc} $out/bin/gcc
+            ln -s ${zigCxx} $out/bin/g++
+          '';
+      llvmBin = "${bp.llvmPackages.bintools-unwrapped}/bin";
+      bintools = bp.wrapBintoolsWith {
+        bintools = bp.runCommand "zig-bintools-${zigTarget}" { } ''
+          mkdir -p $out/bin
+          ln -s ${zigAr} $out/bin/ar
+          for t in nm objcopy objdump ranlib readelf strip size strings; do
+            ln -s ${llvmBin}/llvm-$t $out/bin/$t
+          done
+          ln -s ${llvmBin}/ld.lld $out/bin/ld
+        '';
+        libc = null;
+      };
+    in
+    pkgs.overrideCC pkgs.stdenv (
+      bp.wrapCCWith {
+        cc = unwrapped;
+        libc = null;
+        inherit bintools;
+      }
+    );
+
+  rebuilt = lib.fix (
+    self:
+    lib.genAttrs rebuildInputs (
+      n:
+      let
+        p = pkgs.${n} or (throw "breakbulk.presets.zig: rebuildInputs: nixpkgs has no package `${n}`");
+        deps = lib.intersectAttrs (lib.functionArgs p.override) (removeAttrs self [ n ]);
+      in
+      (p.override ({ stdenv = zigStdenv; } // deps)).overrideAttrs {
+        doCheck = false;
+        doInstallCheck = false;
+      }
+    )
+  );
+
+  # The target's package set: nixpkgs, with the rebuilt packages in place
+  # and a warning on any other package a package's `inputs` takes, since
+  # it was built against nixpkgs' glibc. Tools (`nativeInputs`) come from
+  # `buildPackages`, which is nixpkgs' own and never warns.
+  isDrv = v: builtins.isAttrs v && (v.type or null) == "derivation";
+  quiet = [
+    "stdenv"
+    "stdenvNoCC"
+  ];
+  packageSet =
+    if rebuildInputs != [ ] && triple != pkgs.stdenv.hostPlatform.rust.rustcTarget then
+      throw "breakbulk.presets.zig: rebuildInputs needs the native triple (${pkgs.stdenv.hostPlatform.rust.rustcTarget}), not ${triple}"
+    else
+      builtins.mapAttrs (
+        n: v:
+        rebuilt.${n} or (
+          if lib.elem n quiet || !(isDrv v) then
+            v
+          else
+            lib.warn "breakbulk.presets.zig: a package input uses nixpkgs' `${n}`, which needs nixpkgs' glibc, not ${glibc}; rebuild it with `presets.zig { rebuildInputs = [ \"${n}\" ]; }` or use the crate's vendored C code" v
+        )
+      ) pkgs
+      // {
+        inherit zigStdenv;
+        breakbulkZigRebuilt = rebuilt;
+      };
 in
 {
-  packageSet = mkDefault pkgs;
+  packageSet = mkDefault packageSet;
   # driverWrapper drops the `-fuse-ld=lld -B…/gcc-ld` rustc adds on
   # x86_64 (rustc's self-contained rust-lld); zig links with its own lld.
   linker = mkDefault (driverWrapper pkgs "zig-cc-link-${zigTarget}" zigCc "");

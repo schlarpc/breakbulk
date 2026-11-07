@@ -1,0 +1,9 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+openssl-sys = "0.9"
+libz-sys = { version = "1", default-features = false, features = ["libc"] }

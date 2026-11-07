@@ -106,6 +106,11 @@ let
         # as Cargo was configured.
         export RUSTC=${rustc}/bin/rustc RUSTDOC=${rustc}/bin/rustdoc
         common=(--workspace --offline --frozen --target ${target} --profile dev -vv)
+        # When the planner turned Cargo's trim-paths on (Cargo >= 1.101 and
+        # the project did not), the reference build does the same.
+        if grep -q '"trimPathsDefault":true' $out/plan-build.json; then
+          common+=(--config 'profile.dev.trim-paths="all"')
+        fi
         cargo build "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-build\"" \
           > $out/build.stdout 2> $out/build.log || { cat $out/build.log; exit 1; }
         cargo test --no-run "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-test\"" \

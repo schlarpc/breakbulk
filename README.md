@@ -33,7 +33,7 @@ breakbulk is young. Its first users are the author's own repositories.
 | M4 | Post-link stages, test runs, doctests, benches, clippy, coverage, products as inputs | Done, except Windows post-link tests and the exit check on a real multi-workspace repository |
 | M5 | Dynamic-derivation delivery (no import-from-derivation) | Works on Nix master. It turns on by itself once a released Nix has the feature. Test: `nix run .#test-dynamic`. Doctests and test apps are not in this mode yet |
 | M6 | Pipelined split, dep-info source narrowing, nextest, docs product, measurements | Not started |
-| M7 | Later targets: wasip2, riscv64, windows-gnu, build-std, Darwin, zig | wasip2, riscv64, windows-gnu (and gnullvm) and zig done. build-std fails at planning; Darwin not started (no Mac builders) |
+| M7 | Later targets: wasip2, riscv64, windows-gnu, build-std, Darwin, zig | wasip2, riscv64, windows-gnu (and gnullvm), zig and build-std done; Darwin not started (no Mac builders) |
 
 ## Quickstart
 
@@ -160,7 +160,8 @@ dev shell warns when it sees them.
 
 The Windows preset needs the Microsoft CRT and Windows SDK, which are
 unfree. breakbulk downloads them with `breakbulk.xwinSdk`. build-std
-targets and Darwin are not supported yet.
+(`-Zbuild-std`) works with a nightly that has `rust-src`. Darwin is not
+supported yet.
 
 ## Known limitations
 

@@ -112,7 +112,7 @@ pub fn render_doctest<R: Resolve>(
             .iter()
             .map(|u| flags(u, r, &strong))
             .collect::<Result<_, _>>()?,
-        cwd: r.reference(&c.cwd)?,
+        cwd: c.cwd.render(r)?,
         outputs: Default::default(),
         deps: doctest_deps(plan, &c)
             .into_iter()
