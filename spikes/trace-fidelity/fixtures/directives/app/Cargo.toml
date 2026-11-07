@@ -1,0 +1,20 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+c = { path = "../c" }
+pm = { path = "../pm" }
+oldsyn = { path = "../oldsyn" }
+
+[build-dependencies]
+hostdep = { path = "../hostdep" }
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+
+[[bin]]
+name = "app-tool"
+path = "src/bin/tool.rs"

@@ -1,0 +1,8 @@
+[package]
+name = "b-sys"
+version.workspace = true
+edition.workspace = true
+links = "b"
+
+[dependencies]
+a-sys = { path = "../a-sys" }

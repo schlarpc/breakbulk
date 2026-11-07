@@ -1,0 +1,14 @@
+[package]
+name = "c"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+b-sys = { path = "../b-sys" }
+
+[[bench]]
+name = "cb"
+harness = false

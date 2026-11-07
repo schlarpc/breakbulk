@@ -111,6 +111,15 @@ fn wrapper_mode(argv: Vec<String>) -> Result<ExitCode, Error> {
     }
     let a = RustcArgs::parse(&args);
     if a.is_query || a.crate_name.is_none() || a.input.is_none() {
+        // Queries are recorded too: their env is Cargo's own process env
+        // (Cargo adds nothing to it), which is the baseline the planner
+        // subtracts. It includes variables Cargo sets on itself at startup,
+        // such as SSL_CERT_FILE from openssl-probe.
+        if let Ok(dir) = record_dir() {
+            let rec = record::base("query", &program, &args);
+            record::write(&dir, "query", "rustc", rec)
+                .map_err(|e| Error::new(format!("writing record: {e}")))?;
+        }
         return exec(&program, &args);
     }
     compile::run(&record_dir()?, &program, &args, &a)?;
