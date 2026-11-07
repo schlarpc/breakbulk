@@ -28,9 +28,15 @@
       # Library tests. `roots-metadata-crates-io` uses import-from-derivation
       # and downloads from crates.io; `vendor-collision` fetches two GitHub
       # repositories during evaluation.
-      checks = forAllSystems (pkgs: import ./tests/nix {
-        inherit pkgs;
-        breakbulk = self.lib;
-      });
+      checks = forAllSystems (pkgs:
+        import ./tests/nix {
+          inherit pkgs;
+          breakbulk = self.lib;
+        }
+        # Env capture (builds a cross toolchain) and the unit smoke test.
+        // import ./tests/env-capture {
+          inherit pkgs;
+          breakbulk = self.lib;
+        });
     };
 }

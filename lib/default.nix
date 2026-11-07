@@ -4,6 +4,7 @@
 #
 # Pure parts (no pkgs): util, lockfile, manifest, roots, sourceViews,
 # skeleton.describe. Parts that create derivations take pkgs:
+#   breakbulk.envCapture.forPackage { pkgs; platform; name; nativeInputs; inputs; }
 #   breakbulk.mkFetch pkgs { registries; gitHashes; ... }
 #   breakbulk.mkVendor pkgs { fetch; entries; ... }
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
@@ -14,6 +15,7 @@ let
   manifest = import ./manifest.nix { inherit lib util; };
   roots = import ./roots.nix { inherit lib util manifest; };
   sourceViews = import ./source-views.nix { inherit lib util manifest; };
+  envCapture = import ./env-capture.nix { inherit lib; };
   skeleton = import ./skeleton.nix {
     inherit
       lib
@@ -31,6 +33,7 @@ in
     roots
     sourceViews
     skeleton
+    envCapture
     ;
 
   mkFetch =
