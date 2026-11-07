@@ -72,6 +72,103 @@ rec {
       });
     };
 
+  # End to end: the fixture (openssl-sys, ring, zstd-sys+bindgen) built
+  #  - live: nixpkgs buildRustPackage, all inputs in one live stdenv;
+  #  - replay: real cargo in a plain derivation; each unit gets only the
+  #    replayed capture for its (platform, package).
+  mkE2E = tp:
+    let
+      bp = tp.buildPackages;
+      hostTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      targetTriple = tp.stdenv.hostPlatform.rust.rustcTarget;
+      isCross = hostTriple != targetTriple;
+      cap = import ./capture.nix { buildPackages = pkgs; };
+      seed = "bbseed0000";
+      captures = {
+        # Host units (build scripts, proc macros, their deps) need no inputs here.
+        host."*" = cap { stdenv = pkgs.stdenv; name = "e2e-host-base"; };
+        target."*" = cap { stdenv = tp.stdenv; name = "e2e-target-base"; };
+        target.openssl-sys = cap {
+          stdenv = tp.stdenv; name = "e2e-openssl-sys";
+          nativeInputs = [ bp.pkg-config ]; inputs = [ tp.openssl ];
+        };
+        target.zstd-sys = cap {
+          stdenv = tp.stdenv; name = "e2e-zstd-sys";
+          nativeInputs = [ bp.rustPlatform.bindgenHook bp.pkg-config ]; inputs = [ tp.zstd ];
+        };
+      };
+      # Mirrors cargoSetupHook's generated config (pkgs/build-support/rust/hooks/default.nix).
+      linkerConfig = lib.optionalString isCross ''
+        [target."${targetTriple}"]
+        "linker" = "${tp.stdenv.cc}/bin/${tp.stdenv.cc.targetPrefix}cc"
+        "rustflags" = [ "-Ctarget-feature=-crt-static", "-Cforce-frame-pointers=yes" ]
+      '' + ''
+        [target."${hostTriple}"]
+        "linker" = "${pkgs.stdenv.cc}/bin/cc"
+        "rustflags" = [ "-Cforce-frame-pointers=yes" ]
+      '';
+      vendor = pkgs.rustPlatform.importCargoLock { lockFile = ./fixture/Cargo.lock; };
+    in
+    {
+      inherit captures;
+      live = tp.rustPlatform.buildRustPackage {
+        pname = "e2e-live";
+        version = "0.1.0";
+        src = ./fixture;
+        cargoLock.lockFile = ./fixture/Cargo.lock;
+        nativeBuildInputs = [ bp.pkg-config bp.rustPlatform.bindgenHook ];
+        buildInputs = [ tp.openssl tp.zstd ];
+        NIX_OUTPATH_USED_AS_RANDOM_SEED = seed;
+        doCheck = false;
+        dontFixup = true;
+        # cargo-auditable embeds a dependency list; keep binaries comparable.
+        auditable = false;
+        installPhase = "bash ${./driver/collect.sh} ${targetTriple}";
+      };
+      # Control: the live build without stdenv's "-rpath $out/lib", the one
+      # difference the capture introduces on purpose.
+      liveNoSelfRpath = (mkE2E tp).live.overrideAttrs { NIX_NO_SELF_RPATH = "1"; };
+      replay = derivation {
+        name = "e2e-replay-${targetTriple}";
+        inherit (pkgs) system;
+        builder = "${pkgs.bash}/bin/bash";
+        args = [ ./driver/build.sh ];
+        src = ./fixture;
+        cargoConfig = ''
+          [source.crates-io]
+          replace-with = "vendored-sources"
+          [source.vendored-sources]
+          directory = "/build/cargo-vendor-dir"
+        '' + linkerConfig;
+        inherit vendor;
+        toolPath = lib.makeBinPath [ bp.cargo bp.rustc pkgs.coreutils pkgs.bash pkgs.gnused ];
+        BB_CAPTURES = builtins.toJSON (lib.mapAttrs (_: lib.mapAttrs (_: c: "${c}/env.json")) captures);
+        # Toolchain-spec layer: the same variables nixpkgs' cargoBuildHook
+        # passes (pkgs/build-support/rust/lib/default.nix, envVars.setEnv).
+        "CC_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}" = "${pkgs.stdenv.cc}/bin/cc";
+        "CXX_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}" = "${pkgs.stdenv.cc}/bin/c++";
+        HOST_CC = "${pkgs.stdenv.cc}/bin/cc";
+        HOST_CXX = "${pkgs.stdenv.cc}/bin/c++";
+        ${if isCross then "CC_${tp.stdenv.hostPlatform.rust.cargoEnvVarTarget}" else null} =
+          "${tp.stdenv.cc}/bin/${tp.stdenv.cc.targetPrefix}cc";
+        ${if isCross then "CXX_${tp.stdenv.hostPlatform.rust.cargoEnvVarTarget}" else null} =
+          "${tp.stdenv.cc}/bin/${tp.stdenv.cc.targetPrefix}c++";
+        BB_JQ = "${pkgs.jq}/bin/jq";
+        BB_SEED = seed;
+        BB_BASH = "${pkgs.bash}/bin/bash";
+        BB_DRIVER = ./driver;
+        BB_HOST_TRIPLE = hostTriple;
+        BB_TARGET_TRIPLE = targetTriple;
+        triple = targetTriple;
+        collect = ./driver/collect.sh;
+      };
+    };
+
+  e2e = {
+    native = mkE2E pkgs;
+    cross = mkE2E cross;
+  };
+
   probes = {
     base = probePair { stdenv = pkgs.stdenv; capture = captures.base; };
     openssl = probePair {
