@@ -236,6 +236,7 @@ pub fn render_unit_in<R: Resolve>(
                         Ok((from, r.remap_name(b)?))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                remap.extend(plan.rust_src_remap.clone());
                 remap.sort();
                 remap.dedup();
                 (remap, r.remap_scope(id, c))

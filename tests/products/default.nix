@@ -763,6 +763,45 @@ in
       touch $out
     '';
 
+  # A toolchain with the rust-src component (rust-overlay's `default`
+  # profile has it): rustc names std's files by the local copy's store path,
+  # so without the planner's /rustc/<hash> remap the product referenced the
+  # whole toolchain (field trials: every datboi2 binary and wasm component).
+  # The product's runtime references stay glibc and gcc's libs.
+  rust-src =
+    let
+      tc = pkgs.rust-bin.stable."1.99.0".minimal.override { extensions = [ "rust-src" ]; };
+      repo = mkRepo (fixtures + "/stdpaths") [
+        {
+          workspaces.main.toolchain = {
+            rustc = tc;
+            cargo = tc;
+          };
+          targets.${native}.preset = breakbulk.presets.linuxGnu;
+        }
+      ];
+      plan = builtins.fromJSON (
+        builtins.unsafeDiscardStringContext (
+          builtins.readFile "${repo.workspaces.main.plans.${native}.default.build}/plan.json"
+        )
+      );
+    in
+    assert lib.assertMsg (plan ? rustSrcRemap) "rust-src: the plan has no rustSrcRemap";
+    pkgs.runCommand "rust-src"
+      {
+        app = repo.workspaces.main.packages.stdpaths;
+        refs = pkgs.writeClosure [ repo.workspaces.main.packages.stdpaths ];
+      }
+      ''
+        $app/bin/stdpaths x | grep -qx 'a,b,x'
+        # Any rust-overlay path (the joined toolchain or a component).
+        if grep -e '-rust-' $refs; then
+          echo "the product references the toolchain" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
   post-link =
     let
       checkNames = lib.attrNames postLink.checks;

@@ -73,6 +73,8 @@ pub struct Trace {
     pub cargo_version: String,
     pub rustc_version: String,
     pub host: String,
+    /// [`breakbulk_format::plan::Plan::rust_src_remap`].
+    pub rust_src_remap: Option<(String, String)>,
 }
 
 impl Trace {
@@ -96,6 +98,7 @@ impl Trace {
             nightly: self.cargo_version.contains("-nightly") || self.cargo_version.contains("-dev"),
             keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
             config_env: project.applied_env(&cargo_env_names(opts)),
+            rust_src_remap: self.rust_src_remap.clone(),
         })
     }
 }
@@ -138,6 +141,32 @@ fn workspace_dir(opts: &Options) -> PathBuf {
     } else {
         root.join(&opts.workspace)
     }
+}
+
+/// The remap of the toolchain's `rust-src` copy to rustc's virtual
+/// `/rustc/<commit-hash>` ([`breakbulk_format::plan::Plan::rust_src_remap`]),
+/// when the sysroot has one and rustc names its commit.
+fn rust_src_remap(opts: &Options, rustc_vv: &str) -> Result<Option<(String, String)>, Error> {
+    let Some(hash) = rustc_vv
+        .lines()
+        .find_map(|l| l.strip_prefix("commit-hash: "))
+        .map(str::trim)
+        .filter(|h| !h.is_empty() && *h != "unknown")
+    else {
+        return Ok(None);
+    };
+    let sysroot = output(
+        {
+            let mut c = command(opts, &opts.rustc);
+            c.args(["--print", "sysroot"]);
+            c
+        },
+        "rustc --print sysroot",
+    )?;
+    let src = Path::new(sysroot.trim()).join("lib/rustlib/src/rust");
+    Ok(src
+        .is_dir()
+        .then(|| (src.display().to_string(), format!("/rustc/{hash}"))))
 }
 
 fn mkdir(p: &Path) -> Result<(), Error> {
@@ -303,6 +332,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .find_map(|l| l.strip_prefix("host: "))
         .map(|h| h.trim().to_owned())
         .ok_or_else(|| Error("`rustc -vV` names no host".into()))?;
+    let rust_src_remap = rust_src_remap(opts, &rustc_vv)?;
 
     // cargo metadata, for the stubs and for the planner.
     let mut cmd = command(opts, &opts.cargo);
@@ -366,6 +396,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         cargo_version,
         rustc_version,
         host,
+        rust_src_remap,
     })
 }
 

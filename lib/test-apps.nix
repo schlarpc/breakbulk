@@ -69,7 +69,7 @@
             mkdir -p /tmp/breakbulk-target-tmp
             files=(${spec.unitOut}/*)
             cd ${lib.escapeShellArg dir}
-            exec ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
+            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
           '';
         in
         {

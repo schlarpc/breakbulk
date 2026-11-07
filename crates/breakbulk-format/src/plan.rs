@@ -49,6 +49,16 @@ pub struct Plan {
     /// `cargo test` gives them to test processes.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub config_env: BTreeSet<String>,
+    /// When the toolchain ships the `rust-src` component: the remap
+    /// `[<sysroot>/lib/rustlib/src/rust, /rustc/<commit-hash>]`. rustc
+    /// rewrites standard-library paths (`/rustc/<hash>/library/…`) to that
+    /// local copy, so without it panic locations in std code instantiated
+    /// in the user's crates name the toolchain's store path, and every
+    /// product references the whole toolchain. Cargo's `trim-paths` adds
+    /// the same remap (cargo 0.97.0, `core/compiler/mod.rs`,
+    /// `sysroot_remap`); breakbulk adds it to its own remaps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_src_remap: Option<(String, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

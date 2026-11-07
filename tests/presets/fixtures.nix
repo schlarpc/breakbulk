@@ -397,6 +397,29 @@ let
       targets.${wasm}.preset = presets.wasmBrowser { rustc = wasmRust; };
     }
   ];
+  # Package inputs on a target without a package set (field trials: the
+  # curated libsqlite3-sys default failed evaluation of a workspace with a
+  # wasm32 target whose wasm plan never builds it). Host units get the
+  # build machine's capture; target units would fail when built.
+  wasmHostInputs = mkRepo (fixtures + "/wasm-browser") [
+    {
+      workspaces.main = wasmWs;
+      targets.${wasm}.preset = presets.wasmBrowser { rustc = wasmRust; };
+      packages.wasm-bindgen-macro.inputs = p: [ p.zlib ];
+    }
+  ];
+  wasmHostInputsCheck =
+    let
+      i = wasmHostInputs.workspaces.main.instances.${wasm}.default;
+      macro = lib.filter (u: u.name == "wasm-bindgen-macro-0.2.130-lib") (lib.attrValues i.units.build);
+      capture = builtins.fromJSON (unitText (lib.head macro));
+    in
+    assert lib.assertMsg (lib.length macro == 1) "wasm-host-inputs: no wasm-bindgen-macro unit";
+    assert lib.assertMsg (lib.hasInfix "breakbulk-env-wasm-bindgen-macro" (capture.envCapture or ""))
+      "wasm-host-inputs: the macro's unit has capture ${capture.envCapture or "none"}";
+    pkgs.runCommand "wasm-host-inputs" {
+      ui = wasmHostInputs.workspaces.main.target.${wasm}.packages.ui;
+    } "ls $ui/pkg/*.wasm > $out";
   wasmBrowserChecks =
     let
       t = wasmBrowser.workspaces.main.target.${wasm};
@@ -525,6 +548,23 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
+        # `crtStatic = true` adds the flag (the option once shadowed the
+        # flag list, and the preset failed with "expected a list but found
+        # a Boolean"; found in the field trials).
+        msvcCrtStatic =
+          let
+            p = presets.msvc {
+              inherit pkgs;
+              arch = "x86_64";
+              llvmMajor = 22;
+              crtStatic = true;
+              sdk = {
+                includeDirs = [ "/inc" ];
+                libDirs.x86_64 = [ "/lib" ];
+              };
+            };
+          in
+          lib.elem "target-feature=+crt-static" p.rustflags;
       };
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in
@@ -547,6 +587,7 @@ in
   };
   checks = {
     presets-eval = presetsEval;
+    wasm-host-inputs = wasmHostInputsCheck;
 
     same-triple-eval = sameTripleEval;
     same-triple-build = pkgs.runCommand "same-triple-run" { } ''

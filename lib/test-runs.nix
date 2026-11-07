@@ -86,14 +86,19 @@ let
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
 
   # Values of the recorded env that a test process gets at run time
-  # (`fill_env`). The others (`CARGO_CRATE_NAME`, `CARGO_BIN_EXE_*`,
-  # `OUT_DIR`, `CARGO_TARGET_TMPDIR`, …) are compile-time only.
+  # (`fill_env`), plus `CARGO_BIN_EXE_*`, which Cargo also sets on test
+  # processes (cargo 0.97.0, `ops/cargo_test.rs`: the `unit_output` env
+  # from `artifact::get_env`; assert_cmd reads it at run time). The others
+  # (`CARGO_CRATE_NAME`, `OUT_DIR`, `CARGO_TARGET_TMPDIR`, …) are
+  # compile-time only. Keep in sync with `is_runtime_var` in
+  # crates/breakbulk-instantiate/src/dynamic.rs.
   isRuntimeVar =
     k:
     k == "CARGO"
     || k == "CARGO_MANIFEST_DIR"
     || k == "CARGO_MANIFEST_PATH"
-    || lib.hasPrefix "CARGO_PKG_" k;
+    || lib.hasPrefix "CARGO_PKG_" k
+    || lib.hasPrefix "CARGO_BIN_EXE_" k;
 
   # The dynamic-library path, computed at run time from the runs' `flags`
   # outputs: every search path value (sorted by path component, as Cargo's
@@ -259,6 +264,7 @@ rec {
       env = spec.env // vars;
     in
     ''
+      __bb_env=()
       __bb_dylib=${
         if spec.dylib.flags == [ ] then
           "''"
@@ -284,7 +290,17 @@ rec {
     + lib.concatMapStrings (f: ''
       eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' ${lib.escapeShellArg "${f}/directives.json"})"
     '') spec.envFlags
-    + lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") env);
+    + lib.concatStrings (lib.mapAttrsToList exportOrEnv env);
+
+  # `export` for a name the shell takes, else an entry of `__bb_env`, which
+  # the run passes through `env`: Cargo's `CARGO_BIN_EXE_<bin>` keeps the
+  # bin's name, hyphens included.
+  exportOrEnv =
+    k: v:
+    if builtins.match "[A-Za-z_][A-Za-z0-9_]*" k != null then
+      "export ${k}=${lib.escapeShellArg v}\n"
+    else
+      "__bb_env+=(${lib.escapeShellArg "${k}=${v}"})\n";
 
   # Decision 61: stable inputs for content-addressed test runs. A run spec
   # names the `flags` and `out` of every build-script run of its platform
@@ -697,7 +713,7 @@ rec {
             subst "$nextestCargoMetadataPath" > $TMPDIR/cargo-metadata.json
             cd $TMPDIR
             set +e
-            ${nextest}/bin/cargo-nextest nextest run \
+            env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
               --binaries-metadata $TMPDIR/binaries-metadata.json \
               --cargo-metadata $TMPDIR/cargo-metadata.json \
               ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
@@ -763,7 +779,7 @@ rec {
               files=(${bin}/*)
               cd ${lib.escapeShellArg s.sourceDir}
               set +e
-              ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+              env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
               status=''${PIPESTATUS[0]}
               set -e
               if [ "$status" -ne 0 ]; then

@@ -659,6 +659,67 @@ in
       cp log $out/
     '';
 
+  # A cargo wrapped like rust-overlay's (which exports LD_LIBRARY_PATH for
+  # libsecret): Cargo appends its own process's value to every dynamic
+  # library path it sets, and that value is the planner's, so it must not
+  # reach the plan (field trials: it failed planning with "not a declared
+  # toolchain input"). The marker is a store path no unit may name.
+  inherited-dylib-path =
+    let
+      marker = pkgs.writeTextDir "lib/marker" "";
+      cargo =
+        (pkgs.symlinkJoin {
+          name = "cargo-wrapped";
+          paths = [ pkgs.cargo ];
+          postBuild = ''
+            rm $out/bin/cargo
+            cat > $out/bin/cargo <<EOF
+            #!${pkgs.runtimeShell}
+            export LD_LIBRARY_PATH=${marker}/lib\''${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
+            exec ${pkgs.cargo}/bin/cargo "\$@"
+            EOF
+            chmod +x $out/bin/cargo
+          '';
+        })
+        // {
+          paths = [ pkgs.cargo ];
+        };
+      toolchain = {
+        inherit cargo;
+        inherit (pkgs) rustc;
+      };
+      ws = mk "walking-skeleton" { inherit toolchain; };
+      # Compiles with host plugin dependencies (proc macros, build
+      # dependencies with build scripts) get those runs' paths after the
+      # inherited value.
+      dir = mk "directives" {
+        inherit toolchain;
+        extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+      };
+      units = lib.concatMap (p: lib.attrValues p.units) [
+        (readPlan ws "build")
+        (readPlan dir "build")
+        (readPlan dir "test")
+      ];
+      dylibs = lib.concatMap (u: lib.optional (u ? env.LD_LIBRARY_PATH) u.env.LD_LIBRARY_PATH) units;
+      leaked = lib.filter (
+        v: lib.hasInfix (builtins.unsafeDiscardStringContext "${marker}") (builtins.toJSON v)
+      ) dylibs;
+    in
+    assert lib.assertMsg (dylibs != [ ]) "inherited-dylib-path: no unit has LD_LIBRARY_PATH";
+    assert lib.assertMsg (leaked == [ ]) "inherited-dylib-path: ${builtins.toJSON leaked}";
+    pkgs.runCommand "inherited-dylib-path-check"
+      {
+        bb = ws.packages.walking-skeleton;
+        app = dir.packages.app;
+      }
+      ''
+        $bb/bin/walking-skeleton | grep -q '^walking-skeleton 42 '
+        [ "$($app/bin/app)" = "a_sys 42 2" ]
+        mkdir -p $out
+        echo ${lib.escapeShellArg (builtins.toJSON dylibs)} > $out/report
+      '';
+
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =
     pkgs.runCommand "walking-skeleton-test-check"

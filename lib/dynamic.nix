@@ -385,7 +385,10 @@ let
             for f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
               eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$f/directives.json")"
             done
-            eval "$(${jq} -r '.testSpec.env | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
+            # Names the shell cannot export (CARGO_BIN_EXE_<bin-with-hyphens>)
+            # go through `env`, as in lib/test-runs.nix.
+            __bb_env=()
+            eval "$(${jq} -r '.testSpec.env | to_entries[] | if (.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) then "export \(.key)=\(.value | @sh)" else "__bb_env+=(\("\(.key)=\(.value)" | @sh))" end' "$info")"
             ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
             ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
             export RUST_TEST_THREADS=$NIX_BUILD_CORES
@@ -397,7 +400,7 @@ let
             files=(${if useCa then "${bin}/*" else "\"$wrapper\"/root/*"})
             cd "$CARGO_MANIFEST_DIR"
             set +e
-            ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+            env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
             status=''${PIPESTATUS[0]}
             set -e
             if [ "$status" -ne 0 ]; then

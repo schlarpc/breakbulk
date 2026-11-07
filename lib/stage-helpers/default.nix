@@ -285,10 +285,23 @@ let
         ''
       );
 
+  # `features`: the wasm features wasm-opt may assume, as `--enable-<f>`.
+  # The default is what rustc enables on wasm32-unknown-unknown since 1.87
+  # (its CARGO_CFG_TARGET_FEATURE); wasm-opt's own default is the MVP, and
+  # it rejects a Rust module using memory.copy ("memory.copy operations
+  # require bulk memory operations").
   wasmOpt =
     mkHelper "wasmOpt"
       {
         flags = [ "-Oz" ];
+        features = [
+          "bulk-memory"
+          "multivalue"
+          "mutable-globals"
+          "nontrapping-float-to-int"
+          "reference-types"
+          "sign-ext"
+        ];
         binaryen = null;
       }
       (
@@ -307,7 +320,7 @@ let
             copyIn "$out"
             find "$out" -type f -name '*.wasm' -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
               echo "wasmOpt: ''${f#$out/}"
-              wasm-opt ${escapeShellArgs cfg.flags} "$f" -o "$f.opt"
+              wasm-opt ${escapeShellArgs (cfg.flags ++ map (f: "--enable-${f}") cfg.features)} "$f" -o "$f.opt"
               mv "$f.opt" "$f"
             done
           ''

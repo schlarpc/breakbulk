@@ -127,7 +127,8 @@ pub struct RootInfo {
 #[serde(rename_all = "camelCase")]
 pub struct TestSpec {
     /// The test unit's recorded env that a test process gets at run time:
-    /// `CARGO`, `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_PKG_*`.
+    /// `CARGO`, `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_PKG_*`,
+    /// `CARGO_BIN_EXE_*` (`isRuntimeVar` in `lib/test-runs.nix`).
     pub env: BTreeMap<String, String>,
     /// The project's `[env]` variables Cargo set on the test unit (the
     /// plan's `configEnv`), which `cargo test` also sets on the test
@@ -146,6 +147,7 @@ fn is_runtime_var(k: &str) -> bool {
         || k == "CARGO_MANIFEST_DIR"
         || k == "CARGO_MANIFEST_PATH"
         || k.starts_with("CARGO_PKG_")
+        || k.starts_with("CARGO_BIN_EXE_")
 }
 
 fn text(t: &Text, tokens: &Tokens) -> Result<String, Error> {

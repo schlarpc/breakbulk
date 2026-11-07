@@ -41,6 +41,8 @@ pub struct Context {
     /// The variables the project's `[env]` table sets on Cargo's
     /// processes ([`crate::spec::ProjectConfig::applied_env`]).
     pub config_env: BTreeSet<String>,
+    /// [`breakbulk_format::plan::Plan::rust_src_remap`].
+    pub rust_src_remap: Option<(String, String)>,
 }
 
 /// Variables never kept in a unit's env: the planner's own, and the ones the
@@ -529,7 +531,33 @@ impl<'a> Builder<'a> {
     fn dylib_path(&self, unit: &str, value: &str) -> Result<(Vec<UnitId>, Option<String>), Error> {
         let mut runs = Vec::new();
         let mut kept = Vec::new();
-        for e in value.split(':').filter(|e| !e.is_empty()) {
+        let mut entries: Vec<&str> = value.split(':').filter(|e| !e.is_empty()).collect();
+        // Cargo appends its own process's value to the paths it adds, or
+        // uses that value alone when it already starts with them (cargo
+        // 0.97.0, `core/compiler/compilation.rs`, `fill_env`:
+        // `search_path.extend(paths::dylib_path())`); a compile with host
+        // plugin dependencies then gets their runs' paths appended after it
+        // (`core/compiler/mod.rs`, `add_plugin_deps`). That inherited value
+        // is the planner's environment, not the unit's (rust-overlay's cargo
+        // wrapper puts libsecret there), so it never reaches a unit: drop
+        // the last occurrence of it that only run paths follow.
+        let inherited: Vec<&str> = self
+            .baseline
+            .get(DYLIB_VAR)
+            .map(|v| v.split(':').filter(|e| !e.is_empty()).collect())
+            .unwrap_or_default();
+        if !inherited.is_empty() && entries.len() >= inherited.len() {
+            let found = (0..=entries.len() - inherited.len()).rev().find(|&i| {
+                entries[i..i + inherited.len()] == inherited[..]
+                    && entries[i + inherited.len()..]
+                        .iter()
+                        .all(|e| dylib_sentinel(e).is_some())
+            });
+            if let Some(i) = found {
+                entries.drain(i..i + inherited.len());
+            }
+        }
+        for e in entries {
             if let Some((tag, dir)) = dylib_sentinel(e) {
                 let r = self.run_id(&tag, &|| format!("unit {unit}: {DYLIB_VAR}"))?;
                 if dir != r.out_dir {
@@ -1142,6 +1170,7 @@ impl<'a> Builder<'a> {
             roots: self.roots(),
             doctests: self.doctests()?,
             config_env: self.ctx.config_env.clone(),
+            rust_src_remap: self.ctx.rust_src_remap.clone(),
         };
         plan.normalize();
         Ok(plan)
