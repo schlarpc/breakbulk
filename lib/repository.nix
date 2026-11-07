@@ -378,7 +378,10 @@ let
           capture =
             platform: nativeInputs: inputs:
             let
-              p = targetPkgs triple;
+              # A target without a package set (msvc, wasm32-unknown-unknown)
+              # still has the build machine's for its host units.
+              hasSet = (cfg.targets.${triple}.packageSet or null) != null || triple == nativeTriple;
+              p = if hasSet || platform == "host" then (if hasSet then targetPkgs triple else pkgs) else null;
               sets =
                 if platform == "target" then
                   {
@@ -390,8 +393,28 @@ let
                     host = p.buildPackages;
                     build = p.buildPackages.buildPackages;
                   };
+              # Target units of such a target cannot have library inputs.
+              # The error belongs to the units that would use them, so a
+              # package that never builds for this target (a curated
+              # -sys default, a native-only crate) costs nothing: its
+              # capture is a derivation that fails with the reason.
+              noSet =
+                let
+                  probe = builtins.tryEval (
+                    inputs (throw "no package set") == [ ] && nativeInputs pkgs.buildPackages == [ ]
+                  );
+                in
+                if probe.success && probe.value then
+                  null
+                else
+                  pkgs.runCommand "breakbulk-env-${e.name}-no-package-set" { } ''
+                    echo ${lib.escapeShellArg "breakbulk: package inputs of ${e.name} on target ${triple} need that target's nixpkgs package set (`targets.${triple}.packageSet`, which the Linux presets set); this target has none"} >&2
+                    exit 1
+                  '';
             in
-            if nativeInputs sets.build == [ ] && inputs sets.host == [ ] then
+            if p == null then
+              noSet
+            else if nativeInputs sets.build == [ ] && inputs sets.host == [ ] then
               null
             else
               envCapture.forPackage {
