@@ -253,15 +253,17 @@ The instantiate derivation runs `breakbulk-instantiate --emit json` and writes `
 
 ### Dynamic-derivation mode
 
-The instantiate derivation is content-addressed with a text-hashed output and requires the system feature `builder-rpc-v0`. Its name, `breakbulk-instantiate-requires-builder-rpc-v0`, makes Nix's error self-explanatory when no builder supports the feature.
+The instantiate derivation is content-addressed with a text-hashed output and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. Its name is `<ws>-<triple>-<variant>`, because submitted outputs must be named `<outer name>-<root>.drv` and that name appears in product paths.
 
-- Units are added in topological order with `nix derivation add`, or with harmonia's derivation types if they fit; spike B decides. Either way the input-addressed output paths must equal the ones Nix computes in IFD mode.
-- Each root is handed back with `nix store submit-output`, as an output named `<root>.drv`.
+- Units are written in topological order with harmonia's derivation hashing and store protocol over the restricted daemon socket. `nix derivation add` cannot be used: paths added during the build are not visible inside its sandbox, and it reads its inputs. Spike B confirmed `.drv` and output paths equal IFD mode's. Every output variable must be present (as an empty string) before hashing.
+- Each root gets a tiny wrapper derivation that symlinks the root unit's output, written as `<outer name>-<root>.drv` and handed back with `nix store submit-output`. Units downstream of an embedded product are deferred and refer to it by placeholder.
+
+The spike result is in [spikes/B-delivery.md](spikes/B-delivery.md).
 - `recursive-nix` is not used. It has an open removal proposal, and `builder-rpc-v0` replaces it for this purpose.
 
 ### Mode selection
 
-`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.nixVersion` is at least the first release that ships `builder-rpc-v0`. Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it. `mode = "ifd"` and `mode = "dynamic"` override the choice. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
+`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`). Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it. `mode = "ifd"` and `mode = "dynamic"` override the choice. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
 
 Unit derivations are identical in both modes. Products are not (resolved at build time in dynamic-derivation mode, input-addressed in IFD mode), so teams that mix Nix versions should pin the mode to share product cache entries.
 

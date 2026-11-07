@@ -292,7 +292,7 @@ Content addressing is used where cutoff pays off and a CA node's direct inputs a
 - **Post-link stages** are CA. Identical input, no re-run of later stages.
 - **Embedded products.** In dynamic-derivation mode, products are always resolved at build time, because their first stage depends on a unit derivation that exists only after instantiation. A unit that embeds a product is therefore resolved too, and an identical product does not rebuild it. In IFD mode, products are input-addressed unless CA embedding is turned on.
 
-Rule: no input-addressed derivation sits downstream of a CA node, except the embedding chain, whose cost is documented. On caches without realisations, islands degrade gracefully: stages and test runs re-run; units are still substituted. The embedding chain in dynamic-derivation mode is the exception: it is recompiled. Repositories with embeds on such caches should use IFD mode or a cache that stores realisations.
+Rule: no input-addressed derivation sits downstream of a CA node, except the embedding chain, whose cost is documented. On caches without realisations, islands degrade gracefully: stages and test runs re-run; units are still substituted. The embedding chain in dynamic-derivation mode is deferred (resolved at build time) rather than CA, so it is still substituted as long as the product it embeds reproduces with the same bytes.
 
 **Full-CA units** remain a mode switch for when Nix resolves derivations from realisations without fetching input contents. Instantiation is templating, so it can emit either form.
 
@@ -350,9 +350,10 @@ Every backend falls back to an unsplit compile, checks that the `rlib`'s crate h
 ### Operational notes
 
 - Push with `nix copy --to <cache> .#…` or `nix copy "$DRV_PATH^*"` in a `post-build-hook`; plain `nix copy` of store paths uploads no realisations.
-- CA islands need a cache that stores realisations (a `nix copy` S3 or HTTP cache does). Units do not.
+- CA islands need a cache that stores realisations (a `nix copy` S3 or HTTP cache does, under `build-trace-v2/`). Units do not.
+- In dynamic-derivation mode, pushing the instantiation step with `"$DRV_PATH^*"` also uploads the workspace's source views, which matters for private code on a public cache.
 - With no remote cache, the local store serves every role, including CA islands and embed cutoff.
-- On FlakeHub Cache, units substitute and islands re-run. Repositories that embed products should pin `mode = "ifd"` there, because the embedding chain recompiles in dynamic-derivation mode. First-class support for FlakeHub Cache and harmonia is low priority.
+- On FlakeHub Cache, units substitute and islands re-run. First-class support for FlakeHub Cache and harmonia is low priority.
 
 ## Patterns the design must support
 

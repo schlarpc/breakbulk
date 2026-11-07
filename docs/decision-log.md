@@ -262,3 +262,50 @@ Crates like `ring` compile C with debug info that embeds their source path.
 Rust's path hiding doesn't touch C, so units will add the matching
 `-ffile-prefix-map` flags to C compiler flags. Without it, shipped binaries
 could still reference crate sources.
+
+## 24. FYI: Nix's dynamic-derivation route works, with changes (spike B: go)
+
+The plan's second delivery route, where Nix itself writes the per-crate build
+steps during the build (instead of reading a generated JSON file), works on
+Nix's development branch. It produces exactly the same build step IDs as the
+JSON route, so the two share cache entries. It will first be in a released
+Nix as 2.36; Determinate Nix doesn't have it yet. Two corrections to the docs
+were made: Nix's own `nix derivation add` command can't be used for this, and
+the feared extra recompiles for embedded products on caches like FlakeHub
+don't happen. Write-up: `docs/spikes/B-delivery.md`.
+
+## 25. ASK: use the harmonia library to write build steps in dynamic mode
+
+The dynamic route has to write many small build-step files into the Nix store
+from inside a build. Nix's command-line tool can't do that here; the
+`harmonia` Rust library (MIT, by the Nix community; used for binary cache
+servers) can, and gave byte-identical results. Catch: harmonia is
+pre-release (version 0.0.0-alpha), so breakbulk would pin a specific git
+commit. Alternative: shell out to `nix store add` and let Nix scan for
+references, which is slower and less precise. Default: harmonia, pinned.
+This only matters for milestone M5.
+
+## 26. ASK: pushing to a public cache in dynamic mode uploads your source
+
+In the dynamic route, the usual "push everything this build used" command
+also uploads the filtered source trees of your workspace packages. That's
+fine for a private cache or open-source code, but would leak private code to
+a public cache. Options: just document it (default), or have breakbulk print
+a warning when it detects the pattern. Tell me if you want the warning or a
+different default.
+
+## 27. FYI: product names in dynamic mode include workspace, target and variant
+
+Nix requires the names of dynamically produced outputs to start with the name
+of the step that produced them. breakbulk names that step
+`<workspace>-<target>-<variant>`, so product store paths look like
+`…-app-x86_64-unknown-linux-gnu-release-server`. Tell me if you'd prefer a
+different scheme.
+
+## 28. FYI: the first post-link step of a product will not be content-addressed
+
+The step that picks up a product's raw link output (`linked`) can be a plain
+step rather than a content-addressed one; both work. Plain is chosen because
+caches that don't store the extra records content-addressing needs (FlakeHub
+Cache) can still serve it. The later stages (strip, sign, ...) stay
+content-addressed so an unchanged input doesn't re-run them.
