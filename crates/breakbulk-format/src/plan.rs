@@ -50,6 +50,8 @@ pub struct Plan {
 pub enum PlanKind {
     Build,
     Test,
+    /// `cargo bench --no-run`: bench binaries and harnesses in bench mode.
+    Bench,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

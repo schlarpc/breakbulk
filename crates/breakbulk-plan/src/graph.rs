@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use breakbulk_format::{
     Arg, CompileUnit, CrateInfo, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget, Plan,
     PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice,
-    SpliceKind, Text, Unit, UnitId, Variant, contains_sentinel,
+    SpliceKind, Text, Unit, UnitId, Variant, VariantMode, contains_sentinel,
 };
 
 use crate::records::{Metadata, Package, Record, Target};
@@ -713,7 +713,19 @@ impl<'a> Builder<'a> {
         let id = &c.id;
         let args = &c.rec.args;
         let out = self.convert_args(id, args, &c.package.id, Some(c.platform))?;
-        let (env, env_splices, dylib) = self.convert_env(id, &c.rec.env, &c.package.id, args)?;
+        let (mut env, env_splices, dylib) =
+            self.convert_env(id, &c.rec.env, &c.package.id, args)?;
+        // The clippy variant: `cargo clippy` passes clippy's own arguments
+        // (`-- -D warnings`) to clippy-driver in `CLIPPY_ARGS`, which Cargo
+        // inherits to every rustc it starts; keep it only where
+        // clippy-driver runs (a wrapper chain), so dependencies stay shared
+        // with the check variant.
+        if self.ctx.keep_workspace_wrapper
+            && c.rec.program.len() > 1
+            && let Some(v) = c.rec.env.get("CLIPPY_ARGS")
+        {
+            env.insert("CLIPPY_ARGS".into(), Text::Literal(v.clone()));
+        }
 
         let program = c
             .rec
@@ -808,9 +820,18 @@ impl<'a> Builder<'a> {
 
     /// The plan's products ("Fields", `roots`): in a build plan, bins and
     /// linkable library crate types of selected packages; in a test plan,
-    /// every test harness and every example.
+    /// every test harness and every example; in a bench plan, every bench
+    /// (with or without the libtest harness) and the lib and bin harnesses
+    /// in bench mode. Check and clippy variants link nothing and have no
+    /// roots.
     fn roots(&self) -> Vec<Root> {
         let mut roots = Vec::new();
+        if matches!(
+            self.ctx.variant.mode,
+            VariantMode::Check | VariantMode::Clippy
+        ) {
+            return roots;
+        }
         for c in &self.compiles {
             if c.rec.env.get("CARGO_PRIMARY_PACKAGE").map(String::as_str) != Some("1") {
                 continue;
@@ -819,12 +840,22 @@ impl<'a> Builder<'a> {
             if t.has_kind("custom-build") {
                 continue;
             }
+            // An integration test or bench without the libtest harness
+            // (`harness = false`, e.g. Criterion) is compiled as a plain
+            // bin, but it is a test or bench plan's test root all the same,
+            // as root prediction has it.
+            let unharnessed = match self.ctx.kind {
+                PlanKind::Test => t.has_kind("test"),
+                PlanKind::Bench => t.has_kind("bench"),
+                PlanKind::Build => false,
+            };
+            let test = c.test || unharnessed;
             let root = |kind| Root {
                 package: c.package.id.clone(),
                 target: t.name.clone(),
                 kind,
                 unit: c.id.clone(),
-                test: c.test,
+                test,
             };
             let kinds: Vec<RootKind> = match self.ctx.kind {
                 PlanKind::Build if !c.test => {
@@ -844,7 +875,7 @@ impl<'a> Builder<'a> {
                         vec![]
                     }
                 }
-                PlanKind::Test if c.test => vec![if t.has_kind("bin") {
+                PlanKind::Test if test => vec![if t.has_kind("bin") {
                     RootKind::Bin
                 } else if t.has_kind("test") {
                     RootKind::Test
@@ -856,6 +887,12 @@ impl<'a> Builder<'a> {
                     RootKind::Lib
                 }],
                 PlanKind::Test if t.has_kind("example") => vec![RootKind::Example],
+                PlanKind::Bench if t.has_kind("bench") => vec![RootKind::Bench],
+                PlanKind::Bench if c.test => vec![if t.has_kind("bin") {
+                    RootKind::Bin
+                } else {
+                    RootKind::Lib
+                }],
                 _ => vec![],
             };
             roots.extend(kinds.into_iter().map(root));
