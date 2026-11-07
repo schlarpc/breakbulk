@@ -7,6 +7,15 @@
 #   post-link        stage order from target and package stages; a stage
 #                    removed with mkForce null; a check on `linked` sees
 #                    unstripped bytes; checks in repo.checks
+#   source-paths     no source reference in the product's main output
+#                    (noSourceReferences passes); panics and file!() in a
+#                    dependency print remapped paths; the debug output
+#                    references the dependency's source view and the
+#                    registry crate's source; gdb lists source lines from
+#                    it; non-test units remap macro,diagnostics, test
+#                    harnesses every scope; dep's tests pass
+#   source-paths-readme   editing dep's README changes its test binary's
+#                    derivation but not its bytes
 #
 # `repos` exposes each repository for debugging.
 {
@@ -48,6 +57,30 @@ let
       mkdir -p $out
       printf '%s\n' "$report" > $out/report
     '';
+
+  # A copy of a fixture with an edit applied, usable as a repository root.
+  edited =
+    fixture: script:
+    let
+      drv = pkgs.runCommand "${fixture}-edited" { } ''
+        cp -r --no-preserve=mode ${fixtures + "/${fixture}"} $out
+        cd $out
+        ${script}
+      '';
+    in
+    builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
+
+  inst = repo: repo.workspaces.main.instances.${native}.default;
+
+  # Rendered BREAKBULK_UNIT of each unit of a plan kind, by derivation name.
+  renderedUnits =
+    repo: kind:
+    lib.listToAttrs (
+      map (
+        u:
+        lib.nameValuePair u.name (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT))
+      ) (lib.attrValues (inst repo).units.${kind})
+    );
 
   # --- post-link ---------------------------------------------------------------
 
@@ -115,11 +148,86 @@ let
   ];
   plServer = postLink.workspaces.main.packages.server;
   plTool = postLink.workspaces.main.packages.tool;
+
+  # --- source-paths ------------------------------------------------------------
+
+  spModules = [ (oneWs "." "dev") ];
+  sourcePaths = mkRepo (fixtures + "/source-paths") spModules;
+  sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
+  spApp = sourcePaths.workspaces.main.packages.app;
 in
 {
   repos = {
-    inherit postLink;
+    inherit postLink sourcePaths sourcePathsReadme;
   };
+
+  source-paths =
+    let
+      i = inst sourcePaths;
+      depView = i.sources.workspace.dep;
+      itoaSrc = lib.head (lib.attrValues (lib.filterAttrs (id: _: lib.hasSuffix "#itoa@1.0.11" id) i.sources.crates));
+      build = renderedUnits sourcePaths "build";
+      test = renderedUnits sourcePaths "test";
+      scopes = lib.mapAttrs (_: u: u.remapScope or null) (lib.filterAttrs (_: u: u.kind == "compile") (build // test));
+      want = {
+        "app-0.1.0-bin" = "macro,diagnostics";
+        "dep-0.1.0-lib" = "macro,diagnostics";
+        "itoa-1.0.11-lib" = "macro,diagnostics";
+        "app-0.1.0-test" = null;
+        "dep-0.1.0-test" = null;
+      };
+      bad = lib.filterAttrs (n: s: (scopes.${n} or "missing") != s) want;
+    in
+    assert lib.assertMsg (bad == { }) "source-paths: remap scopes ${builtins.toJSON scopes}";
+    assert lib.assertMsg (spApp.stageOrder == [
+      "splitDebug"
+      "install"
+    ]) "source-paths: stages ${builtins.toJSON spApp.stageOrder}";
+    pkgs.runCommand "source-paths"
+      {
+        nativeBuildInputs = [ pkgs.gdb ];
+        app = spApp;
+        debug = spApp.debug;
+        debugClosure = pkgs.closureInfo { rootPaths = [ spApp.debug ]; };
+        # Negative control: before splitDebug, the binary does reference
+        # the sources (debug info keeps real paths), so noSourceReferences
+        # is not passing vacuously.
+        linkedClosure = pkgs.closureInfo { rootPaths = [ spApp.stages.linked ]; };
+        noSrc = spApp.checks.noSourceReferences;
+        depView = builtins.unsafeDiscardStringContext "${depView}";
+        itoaSrc = builtins.unsafeDiscardStringContext "${itoaSrc}";
+        depTests = sourcePaths.workspaces.main.testRuns.dep.lib;
+      }
+      ''
+        set -euo pipefail
+        $app/bin/app > run.txt
+        cat run.txt
+        grep -qxF 'dep is dep/src/lib.rs' run.txt
+        grep -qxF 'formatted 42' run.txt
+        grep -qxF 'panicked at dep/src/lib.rs:16' run.txt
+        # The debug output references exactly the sources a debugger needs.
+        grep -qxF "$depView" $debugClosure/store-paths
+        grep -qxF "$itoaSrc" $debugClosure/store-paths
+        grep -qxF "$depView" $linkedClosure/store-paths
+        # gdb finds the split debug info by build ID and lists the source.
+        gdb -batch -nx -iex "set debug-file-directory $debug/lib/debug" \
+          -ex 'list dep::boom' $app/bin/app > gdb.txt 2>&1 || true
+        cat gdb.txt
+        grep -qF 'panic!("boom {n}");' gdb.txt
+        cat $depTests/log
+        touch $out
+      '';
+
+  source-paths-readme =
+    let
+      before = sourcePaths.workspaces.main.tests.dep.lib;
+      after = sourcePathsReadme.workspaces.main.tests.dep.lib;
+    in
+    assert lib.assertMsg (before.drvPath != after.drvPath) "source-paths-readme: the README edit changed no derivation";
+    pkgs.runCommand "source-paths-readme" { inherit before after; } ''
+      cmp $before/bin/dep $after/bin/dep
+      touch $out
+    '';
 
   post-link =
     let
