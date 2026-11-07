@@ -7,6 +7,8 @@
 #   breakbulk.mkFetch pkgs { registries; gitHashes; ... }
 #   breakbulk.mkVendor pkgs { fetch; entries; ... }
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
+# Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
+# breakbulk.predictedRoots { ... }.
 { lib }:
 let
   util = import ./util.nix { inherit lib; };
@@ -22,9 +24,12 @@ let
       roots
       ;
   };
+  inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
 in
 {
   inherit
+    instantiate
+    predictedRoots
     util
     lockfile
     manifest
