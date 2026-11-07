@@ -261,6 +261,7 @@ let
         libc.env.LIBC = "plain";
         "libc@=0.2.191".env.LIBC = "exact";
         not-in-any-lockfile.env.X = "1";
+        shared.nativeInputs = p: [ p.pkg-config ];
         app-b.test.args = [ "--skip" "slow" ];
       };
       targets.${native} = {
@@ -440,9 +441,19 @@ in
       itoa = envOf "itoa-1.0.11-lib";
       libc = envOf "libc-0.2.191-lib";
       libcRun = envOf "libc-0.2.191-build-run";
+      captureOf =
+        n:
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).envCapture or "";
       ws = overrideRepo.warnings;
       has = s: lib.any (lib.hasInfix s) ws;
     in
+    # Inputs give the package its own env capture on both platforms; other
+    # packages keep the base capture.
+    assert lib.assertMsg (
+      lib.hasInfix "breakbulk-env-shared" (captureOf "shared-0.1.0-lib")
+      && lib.hasInfix "breakbulk-env-shared" (captureOf "shared-0.1.0-build-script")
+      && lib.hasInfix "breakbulk-env-base" (captureOf "itoa-1.0.11-lib")
+    ) "overrides: env captures `${captureOf "shared-0.1.0-lib"}` `${captureOf "itoa-1.0.11-lib"}`";
     assert lib.assertMsg (itoa.ITOA_CARET or null == "1" && !(itoa ? ITOA_TWO)) "overrides: itoa env ${builtins.toJSON itoa}";
     assert lib.assertMsg (libc.LIBC or null == "exact" && libcRun.LIBC or null == "exact") "overrides: libc env ${builtins.toJSON libc}";
     assert lib.assertMsg (!((envOf "shared-0.1.0-lib") ? LIBC)) "overrides: libc's env reached shared";
