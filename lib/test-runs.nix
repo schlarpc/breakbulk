@@ -79,14 +79,19 @@ let
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
 
   # Values of the recorded env that a test process gets at run time
-  # (`fill_env`). The others (`CARGO_CRATE_NAME`, `CARGO_BIN_EXE_*`,
-  # `OUT_DIR`, `CARGO_TARGET_TMPDIR`, …) are compile-time only.
+  # (`fill_env`), plus `CARGO_BIN_EXE_*`, which Cargo also sets on test
+  # processes (cargo 0.97.0, `ops/cargo_test.rs`: the `unit_output` env
+  # from `artifact::get_env`; assert_cmd reads it at run time). The others
+  # (`CARGO_CRATE_NAME`, `OUT_DIR`, `CARGO_TARGET_TMPDIR`, …) are
+  # compile-time only. Keep in sync with `is_runtime_var` in
+  # crates/breakbulk-instantiate/src/dynamic.rs.
   isRuntimeVar =
     k:
     k == "CARGO"
     || k == "CARGO_MANIFEST_DIR"
     || k == "CARGO_MANIFEST_PATH"
-    || lib.hasPrefix "CARGO_PKG_" k;
+    || lib.hasPrefix "CARGO_PKG_" k
+    || lib.hasPrefix "CARGO_BIN_EXE_" k;
 
   # The dynamic-library path, computed at run time from the runs' `flags`
   # outputs: every search path value (sorted by path component, as Cargo's

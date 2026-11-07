@@ -183,6 +183,7 @@ let
           grep -q "test $t ... ok" $envRun/log
         done
         grep -q 'test runs_the_bin ... ok' $binExe/log
+        grep -q 'test bin_exe_at_run_time ... ok' $binExe/log
         grep -q 'running 0 tests' $bin/log
         grep -q '`needs_feat` was skipped: not built by Cargo' $stub
         grep -q 'running 0 tests' $doctest/log
