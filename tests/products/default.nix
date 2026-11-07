@@ -26,6 +26,15 @@
 #                    and clippy variants' unit checks build
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
+#   embed            products as inputs: `packages.embedder.env` names
+#                    another workspace's product, which `embedder` embeds
+#                    with include_bytes!; the host workspace's instantiation
+#                    (units.json) does not depend on the product, only the
+#                    embedding unit's env names it, and `other`'s units do
+#                    not reference it; the host binary carries it and the
+#                    extracted payload runs
+#   embed-invalidation   editing the payload changes only the embedding
+#                    chain's units (embedder and host), not `other`'s
 #   benches          a libtest-harness bench and a Criterion bench come
 #                    from the bench variant only (`cargo bench --no-run`,
 #                    bench profile, opt-level 3); the test plan has none;
@@ -268,6 +277,45 @@ let
   ];
   vt = variantsRepo.workspaces.main.target.${native};
 
+  # --- embed ---------------------------------------------------------------------
+
+  # A repository whose `host` workspace embeds the `payload` workspace's
+  # product. The module refers to the repository itself; Nix's laziness
+  # makes that fine, since building `payload` never reads `embedder`'s env.
+  embedRepo =
+    root:
+    let
+      repo = mkRepo root [
+        {
+          workspaces = {
+            payload = {
+              path = "payload";
+              variants.default.profile = "dev";
+            };
+            host = {
+              path = "host";
+              variants.default.profile = "dev";
+            };
+          };
+          packages.embedder.env.PAYLOAD_BIN = "${repo.workspaces.payload.packages.payload}/bin/payload";
+        }
+      ];
+    in
+    repo;
+  embed = embedRepo (fixtures + "/embed");
+  embedEdited = embedRepo (edited "embed" "echo '// v2' >> payload/src/main.rs");
+  hostInst = repo: repo.workspaces.host.instances.${native}.default;
+  # A derivation's .drv file without its outputs: exportReferencesGraph of
+  # it is the closure of build inputs, and building it builds nothing.
+  drvOnly = d: builtins.unsafeDiscardOutputDependency d.drvPath;
+  hostDrvs =
+    repo:
+    lib.listToAttrs (
+      map (u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) (
+        lib.attrValues (hostInst repo).units.build ++ lib.attrValues (hostInst repo).units.test
+      )
+    );
+
   # --- benches -------------------------------------------------------------------
 
   benchesRepo = mkRepo (fixtures + "/benches") [
@@ -294,8 +342,76 @@ in
       sourcePathsReadme
       variantsRepo
       benchesRepo
+      embed
       ;
   };
+
+  embed =
+    let
+      i = hostInst embed;
+      payload = embed.workspaces.payload.packages.payload;
+      payloadOut = builtins.unsafeDiscardStringContext payload.outPath;
+      units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
+      naming = lib.filter (u: lib.hasInfix payloadOut (u.drvAttrs.BREAKBULK_UNIT or "")) units;
+      namingNames = lib.sort lib.lessThan (lib.unique (map (u: u.name) naming));
+      other = lib.filter (u: lib.hasPrefix "other-" u.name) units;
+    in
+    assert lib.assertMsg (namingNames == [
+      "embedder-0.1.0-lib"
+      "embedder-0.1.0-test"
+    ]) "embed: units naming the product: ${builtins.toJSON namingNames}";
+    pkgs.runCommand "embed"
+      {
+        host = embed.workspaces.host.packages.host;
+        hostChecks = lib.attrValues embed.workspaces.host.packages.host.checks;
+        payloadDrv = builtins.unsafeDiscardStringContext payload.drvPath;
+        # The closure of the host workspace's instantiation (both plans)
+        # and of `other`'s unit derivations: none may contain the product.
+        exportReferencesGraph = [
+          "instBuild"
+          (drvOnly i.unitsJson.build)
+          "instTest"
+          (drvOnly i.unitsJson.test)
+        ]
+        ++ lib.concatLists (lib.imap0 (n: u: [ "other${toString n}" (drvOnly u) ]) other)
+        # Positive control: the embedding chain does depend on it.
+        ++ [
+          "chainEmbedder"
+          (drvOnly (lib.findFirst (u: u.name == "embedder-0.1.0-lib") null units))
+          "chainHost"
+          (drvOnly (lib.findFirst (u: u.name == "host-0.1.0-bin") null units))
+        ];
+      }
+      ''
+        set -euo pipefail
+        for g in instBuild instTest other*; do
+          if grep -qxF "$payloadDrv" "$g"; then
+            echo "$g depends on the embedded product $payloadDrv" >&2
+            exit 1
+          fi
+        done
+        grep -qxF "$payloadDrv" chainEmbedder
+        grep -qxF "$payloadDrv" chainHost
+        $host/bin/host $TMPDIR/payload | tee run.txt
+        grep -q '^host embeds [0-9]* bytes, magic 7f454c46$' run.txt
+        chmod +x $TMPDIR/payload
+        [ "$($TMPDIR/payload)" = "payload says hi" ]
+        touch $out
+      '';
+
+  embed-invalidation =
+    let
+      b = hostDrvs embed;
+      a = hostDrvs embedEdited;
+      changed = lib.sort lib.lessThan (lib.unique (lib.attrValues (lib.filterAttrs (d: _: !(b ? ${d})) a)));
+    in
+    assert lib.assertMsg (changed == [
+      "embedder-0.1.0-lib"
+      "embedder-0.1.0-test"
+      "host-0.1.0-bin"
+      "host-0.1.0-test"
+    ]) "embed-invalidation: changed units ${builtins.toJSON changed}";
+    evalCheck "embed-invalidation" (builtins.toJSON changed);
 
   benches =
     let
