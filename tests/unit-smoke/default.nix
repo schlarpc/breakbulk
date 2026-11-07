@@ -103,7 +103,8 @@ in
 
         cflags=$(cat ${run.out}/nix-cflags-compile.txt)
         echo "NIX_CFLAGS_COMPILE seen by the build script: $cflags"
-        seed=$(basename ${run.out} | cut -c1-10)
+        # The seed is the run's plan key, not derived from its output path.
+        seed=r-smokelib-63aa584f9c6a6c6c
         case "$cflags" in
           " -frandom-seed=$seed "*) ;;
           *) echo "FAIL: the unit's seed is not first"; exit 1 ;;

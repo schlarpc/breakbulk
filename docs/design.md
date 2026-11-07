@@ -95,7 +95,7 @@ Both modes produce identical unit derivation paths. The default, `mode = "auto"`
 ### 4. Units
 
 - Units are input-addressed. A cache hit is an ordinary narinfo lookup and downloads only the requested output.
-- Library units have separate `rmeta` and `rlib` outputs; compile units depend on transitive `rmeta`, link units on `rlib`. With a nightly toolchain, rlibs carry no metadata, so link units depend on both.
+- Library units have separate `rmeta` and `rlib` outputs; compile units need every transitive `rmeta`, link units every `rlib`. A library unit lists only its direct dependencies as inputs: each `rmeta` output carries a manifest naming what lies below it, and Nix's reference scanning brings that into the sandbox, so the graph's inputs grow with its edges rather than with the square of its size. Link units list every `rlib`. With a nightly toolchain, rlibs carry no metadata, so link units also take every `rmeta`.
 - A build script is two units: its compile, and its run, with outputs `out` (`OUT_DIR`) and `flags`.
 - Build-script output is spliced in at the positions Cargo chose for the sentinels.
 - A unit's environment is a fixed, layered contract: a fixed base, the captured nixpkgs environment for its package's inputs, Cargo's recorded env, the toolchain spec for the unit's platform, and the package's overrides.
@@ -331,7 +331,7 @@ Today a dependent rebuilds after almost any upstream edit, because rustc's crate
 
 ### Seams below the crate
 
-- **rmeta and rlib as separate outputs.** Compile units depend only on transitive `rmeta`; link units consume `rlib`. A machine building one crate on cached dependencies downloads only their `rmeta`; check and clippy variants consume only `rmeta`; full-CA units would cut off on `rmeta` bytes.
+- **rmeta and rlib as separate outputs.** Compile units need only transitive `rmeta` (reached through their direct dependencies' manifests); link units consume `rlib`. A machine building one crate on cached dependencies downloads only their `rmeta`; check and clippy variants consume only `rmeta`; full-CA units would cut off on `rmeta` bytes.
 - **Source narrowing from dep-info.** An optional stage derives each crate's exact file set, so edits to files outside its module tree change nothing. The cost is re-running macro expansion. File reads by proc macros are not tracked and must be declared.
 - **Separate link derivations** need nightly `-Zno-link`/`-Zlink-only`, so linking stays inside bin and test units for now.
 - **Rejected: impure caches.** Rustc incremental state or a shared compiler cache mounted into the sandbox would give reuse within a crate, but outputs would depend on build history and could not be cached or shared. That reuse belongs to local `cargo`.
