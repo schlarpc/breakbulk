@@ -9,6 +9,7 @@
 //! tokens. So the unit text Nix assembles is byte for byte what rendering
 //! with the real paths gives, which is what dynamic-derivation mode will do.
 
+pub mod dynamic;
 pub mod inputs;
 pub mod output;
 

@@ -63,6 +63,7 @@
   mkPlan,
   testRuns,
   testApps,
+  dynamic,
 }:
 pkgs:
 {
@@ -91,6 +92,10 @@ pkgs:
   testSystem ? null,
   ca ? null,
   checkout ? null,
+  # How unit derivations reach Nix: "ifd" (units.json, imported) or
+  # "dynamic" (an outer derivation writes them through builder-rpc-v0;
+  # lib/dynamic.nix). mkRepository resolves `mode = "auto"`.
+  delivery ? "ifd",
   # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
@@ -220,9 +225,28 @@ let
   // specTools
   // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
+  isDynamic = delivery == "dynamic";
+  breakbulkDrv = tools.breakbulk-drv or (dynamic.mkBreakbulkDrv pkgs);
+  # Dynamic-derivation mode: the outer derivation is named
+  # `<ws>-<triple>-<variant>` for the build plan (decision 27), with `-test`
+  # for the test plan, since each plan has its own.
+  instantiateWith =
+    kind: args:
+    if isDynamic then
+      dynamic.instantiate (
+        args
+        // {
+          inherit breakbulkDrv;
+          inherit (pkgs) coreutils;
+          outerName = if kind == "build" then name else "${name}-${kind}";
+        }
+      )
+    else
+      instantiate args;
+
   inst =
     kind:
-    instantiate {
+    instantiateWith kind {
       breakbulkInstantiate = tools.breakbulk-instantiate;
       inherit system;
       plan = "${plans.${kind}}/plan.json";
@@ -268,7 +292,7 @@ let
       install -D -m755 "''${files[0]}" $out/${dir}/${fileName}
     '';
 
-  tr = testRuns.mkTestRuns {
+  tr = (if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
     inherit
       pkgs
       target
@@ -309,6 +333,21 @@ in
     test = tested.unitsJson;
   }
   // lib.optionalAttrs bench { bench = benched.unitsJson; };
+  inherit delivery;
+  # Dynamic-derivation mode: the outer derivations, by plan kind.
+  outer = lib.optionalAttrs isDynamic {
+    build = built.outer;
+    test = tested.outer;
+  };
+  # Dynamic-derivation mode: a derivation per plan kind that builds every
+  # unit (ws.units is not known at evaluation time).
+  allUnits = lib.optionalAttrs isDynamic (
+    {
+      build = built.allUnits;
+      test = tested.allUnits;
+    }
+    // lib.optionalAttrs bench { bench = benched.allUnits; }
+  );
   # Bench-plan roots (benches and harnesses in bench mode), by root name.
   benches = if bench then benched.roots else { };
   # Smoke runs of the bench plan's binaries: each once with `--test`, in
@@ -318,7 +357,7 @@ in
     if !bench then
       { }
     else
-      (testRuns.mkTestRuns {
+      ((if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
         inherit
           pkgs
           target

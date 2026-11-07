@@ -833,3 +833,37 @@ Do these match how you'd want to configure them?
 - Products keep file extensions (`bin/app.exe` on Windows).
 - `clippyArgs` works like `cargo clippy -- ARGS` and reaches only your own
   crates, so dependencies stay shared with `check`.
+
+## 77. FYI: milestone M5's dynamic-derivation mode works on Nix master
+
+With a development build of Nix (in a private store; your system Nix was
+not touched), breakbulk can now have Nix itself create the per-crate build
+steps during the build, with no import-from-derivation. Results on three
+test projects: the same build-step IDs as the default mode, byte-identical
+products, and all test runs pass. It turns on automatically once a released
+Nix (expected 2.36) has the feature and you enable `dynamic-derivations`
+(in both the evaluator and the daemon). Run the test with
+`nix run .#test-dynamic` (builds Nix master; ~13 GB private store).
+The harmonia library lives in a separate small program with its own
+lockfile, so its updates never rebuild your crates.
+
+## 78. ASK: dynamic mode gaps
+
+- Doctests and runnable test apps don't exist in dynamic mode yet; doctests
+  are doable next. Worth it now, or wait until a Nix release ships the
+  feature?
+- A product containing a binary that Cargo skipped (required features off)
+  fails with the reason in dynamic mode, while the default mode quietly
+  leaves that binary out. Matching the default mode needs a "not built"
+  marker checked at build time. Default: make them match.
+
+## 79. FYI: trying breakbulk on your own repositories (read-only copies)
+
+To meet milestone M4's exit criterion ("one of the author's real
+repositories builds end to end"), an agent is copying a few of your Rust
+repositories from your home directory into a scratch directory and
+building the copies with breakbulk. Your repositories themselves are not
+modified, built in place, or pushed anywhere, and secrets like `.env`
+files are skipped. Only the breakbulk module files (no source) go into
+`tests/field-trials/`, and findings go into `docs/field-trials.md`. If you'd
+rather some repositories stay out of this, say which.

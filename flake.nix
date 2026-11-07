@@ -39,6 +39,22 @@
         };
       });
 
+      # HEAVY and opt-in: dynamic-derivation mode (M5) against IFD mode, on
+      # Nix master (built from a pinned commit) in a private chroot store
+      # under $WORK (default $TMPDIR/breakbulk-dynamic). `nix flake check`
+      # cannot run it: stock Nix has no builder-rpc-v0.
+      #   nix run .#test-dynamic -- [fixture ...]
+      apps = forAllSystems (pkgs: {
+        test-dynamic = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "test-dynamic" ''
+            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.python3 pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.gnugrep ]}
+            export REPO=''${REPO:-${self}}
+            exec ${pkgs.bash}/bin/bash "$REPO/tests/dynamic/run.sh" "$@"
+          '');
+        };
+      });
+
       # Library tests. `roots-metadata-crates-io` uses import-from-derivation
       # and downloads from crates.io; `vendor-collision` fetches two GitHub
       # repositories during evaluation. `instantiate` and `instantiate-eval`
@@ -130,6 +146,9 @@
               breakbulk = self.lib;
             }) [ "repos" ]
           )
+          # Dynamic-derivation mode's outer-derivation builder compiles (its
+          # behaviour needs Nix master: `nix run .#test-dynamic`).
+          // { breakbulk-drv = self.lib.dynamic.mkBreakbulkDrv pkgs; }
         ));
     };
 }
