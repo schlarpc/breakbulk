@@ -17,7 +17,7 @@ fn main() {
     // Threads, time and env: std's usual glibc imports.
     let t = std::thread::spawn(|| std::env::args().count()).join().unwrap();
     let _ = std::time::SystemTime::now();
-    println!("zig: headers=2.{} args={t} runtime-ok={}", header_minor(), !runtime().is_empty());
+    println!("zig: headers=2.{} args={t} runtime={}", header_minor(), runtime());
 }
 
 #[cfg(test)]
@@ -31,6 +31,15 @@ mod tests {
     fn runs_on_new_glibc() {
         let v = super::runtime();
         assert!(v.starts_with("2."), "{v}");
+    }
+
+    // Set by the container test run (tests/presets/m7.nix, zig-centos7-*):
+    // the glibc the test binary really runs on.
+    #[test]
+    fn runs_on_expected_glibc() {
+        if let Ok(want) = std::env::var("BB_EXPECT_RUNTIME_GLIBC") {
+            assert_eq!(super::runtime(), want);
+        }
     }
 
     #[test]

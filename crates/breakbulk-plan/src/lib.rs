@@ -10,6 +10,7 @@
 //! - [`spec`] passes the toolchain spec's rustflags and linkers to Cargo,
 //!   confirms they arrived, and rewrites same-triple host linkers.
 
+pub mod build_std;
 pub mod golden;
 pub mod graph;
 pub mod records;
@@ -65,8 +66,37 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
     if let Some(p) = &prepared {
         traced.configs.push(p.config.display().to_string());
     }
+    if let Some(v) = trace::std_vendor(&traced)? {
+        traced.configs.push(v.config.clone());
+        traced.std_vendor = Some(v);
+    }
+    let first = trace::run(&traced)?;
+    // Cargo's trim-paths ("trim-paths" in docs/implementation.md): when the
+    // project has not turned it on and Cargo has it, trace again with it on.
+    let (traced, t) = if !graph::trace_trims_paths(&first.records)
+        && trace::has_trim_paths(&first.cargo_version)
+    {
+        let o = trace::with_trim_paths(&traced);
+        match trace::run(&o) {
+            Ok(t) => (o, t),
+            // A nightly from before the setting was stable.
+            Err(e) if e.0.contains("trim-paths") => {
+                eprintln!(
+                    "breakbulk-plan: warning: Cargo {} rejected trim-paths; using breakbulk's own \
+                     path remapping:\n{e}",
+                    first.cargo_version
+                );
+                (traced, first)
+            }
+            Err(e) => return Err(e),
+        }
+    } else {
+        (traced, first)
+    };
     let opts = &traced;
-    let t = trace::run(opts)?;
+    if !graph::trace_trims_paths(&t.records) {
+        trace::check_location(opts, &t.metadata)?;
+    }
     let ctx = t.context(opts)?;
     let b = graph::Builder::new(&ctx, &t.metadata, &t.records)?;
     let mut plan = b.plan()?;

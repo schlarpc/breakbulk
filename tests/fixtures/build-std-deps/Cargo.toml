@@ -1,0 +1,13 @@
+# build-std with std (M7): a hosted program on the host triple with the
+# whole standard library rebuilt from the nightly toolchain's rust-src
+# (`-Zbuild-std`, from .cargo/config.toml). std's own crates.io
+# dependencies (hashbrown, libc, addr2line, …) are not in this lockfile;
+# they come from rust-src's vendored copies (docs/implementation.md,
+# "build-std").
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]

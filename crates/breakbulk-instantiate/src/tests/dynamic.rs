@@ -328,7 +328,9 @@ fn test_spec_of_a_test_root() {
     // `[env]` variables Cargo set (the plan's configEnv), one of them a
     // `relative` path into the package source; and one the plan does not
     // name (not from `[env]`).
-    let src = c.cwd.clone();
+    let breakbulk_format::Cwd::Ref(src) = c.cwd.clone() else {
+        panic!("the smoke unit has a reference as its cwd")
+    };
     c.env.insert(
         "BB_PLAIN".into(),
         breakbulk_format::Text::Literal("plain".into()),

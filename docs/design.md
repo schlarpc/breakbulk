@@ -207,7 +207,7 @@ Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
 - **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change.
 - With rustc older than 1.95, every scope is remapped.
 
-Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. Once it is available, breakbulk sets it by default when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later.
+Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. On Cargo 1.101 and later, breakbulk sets it when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later. When the project set it, its own scope is kept.
 
 ### Tests as products
 
@@ -227,7 +227,7 @@ Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile
 
 ## Targets and toolchains
 
-Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component wasm, and Windows msvc. The later targets (M7) are presets, not a redesign: wasip2, riscv64, windows-gnu and windows-gnullvm, and zig work; build-std and Darwin do not yet (see below).
+Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component wasm, and Windows msvc. The later targets (M7) are presets, not a redesign: wasip2, riscv64, windows-gnu and windows-gnullvm, zig and build-std work; Darwin does not yet (see below).
 
 | Target | Phase | Toolchain | Linker | Runner |
 | --- | --- | --- | --- | --- |
@@ -241,7 +241,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
 | Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
-| x86\_64-unknown-none (build-std) | Later; planning fails today | nightly, user-supplied | lld | none |
+| x86\_64-unknown-none (build-std) | M7 | nightly with `rust-src`, user-supplied | rustc's own (rust-lld) | none |
 | aarch64-apple-darwin | Later; no Mac builders | user's, built on Mac builders | ld64 or lld | native |
 
 ### Bring your own toolchain
@@ -276,7 +276,7 @@ Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust'
 
 ### Zig
 
-A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case.
+A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
 
 ## Content addressing and early cutoff
 
@@ -416,8 +416,8 @@ The traced planner comes first, delivered through IFD, because it works on every
 3. **Day-one targets.** Linux gnu and musl on x86\_64 and aarch64, static glibc, wasm (browser and components), Windows msvc. Runners and native builders for tests.
 4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations with skip lists and runnable test apps, doctests, bench binaries, clippy and coverage variants.
 5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
-6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default once stable, the docs product.
-7. **Later targets.** wasip2, riscv64, windows-gnu, zig (done); build-std targets, Darwin on Mac builders.
+6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default on Cargo 1.101 and later (done), the docs product.
+7. **Later targets.** wasip2, riscv64, windows-gnu, zig, build-std targets (done); Darwin on Mac builders.
 
 ### Conformance suite
 

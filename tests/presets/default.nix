@@ -234,3 +234,7 @@ in
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
   (import ./m7.nix { inherit pkgs breakbulk; }).checks
 )
+# -Zbuild-std (./build-std.nix): rust-overlay's nightly with rust-src.
+// lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
+  import ./build-std.nix { inherit pkgs breakbulk; }
+)
