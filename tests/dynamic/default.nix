@@ -135,21 +135,11 @@ let
     # runtime env; its test apps are `apps` in build.test-control.
     # With ca-derivations on (as here), IFD mode's test runs put
     # content-addressed copies of the build scripts' library directories on
-    # the dynamic-library path (decision 61, testRuns.stableSpec), which the
-    # env binary's exact-path assertion rejects; its test runs skip that
-    # test, and the test apps (no copies) run it in both modes.
+    # the dynamic-library path (decision 61, testRuns.stableSpec); the env
+    # binary's dylib-path test accepts those copies.
     test-control = mkRepo "test-control" [
       oneWs
-      {
-        packages.ctl.test = ctlTest // {
-          binaries = ctlTest.binaries // {
-            env.args = [
-              "--skip"
-              "dylib_path_has_only_out_dir_search_paths"
-            ];
-          };
-        };
-      }
+      { packages.ctl.test = ctlTest; }
     ];
     # A product with a bin Cargo skips (required features): left out.
     required-features = mkRepo "required-features" [ oneWs ];

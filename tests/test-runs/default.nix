@@ -16,6 +16,9 @@
 #                           a skipped stub; runtime env, cwd, rustc-env,
 #                           dynamic-library path, CARGO_TARGET_TMPDIR,
 #                           test.env, test.path, RUST_TEST_THREADS
+#   test-control-stable-dylibs   the env binary's dylib-path test passes
+#                           with the stable (content-addressed) copies of
+#                           the build scripts' library directories
 #   test-control-include-ignored   includeIgnored runs the ignored tests
 #   test-control-skip-list  changing one binary's skip list changes that
 #                           test run's derivation only (drv paths compared)
@@ -196,6 +199,38 @@ let
         grep -q 'running 0 tests' $doctest/log
         mkdir -p $out
       '';
+
+  # The env binary's dylib-path test with the stable inputs that
+  # content-addressed test runs use (testRuns.stableSpec, decision 61),
+  # built input-addressed as stock Nix cannot build CA: the build script's
+  # library directory is on the path as a copy, which the test accepts.
+  testControlStableDylibs =
+    let
+      s = ctl.testRuns.ctl.env.passthru.breakbulkTest;
+      stable = breakbulk.testRuns.stableSpec {
+        inherit pkgs;
+        spec = s;
+        caAttrs = { };
+        name = "test-control";
+      };
+    in
+    assert lib.assertMsg (stable.dylib.stable != null) "test-control-stable-dylibs: no stable copy";
+    pkgs.runCommand "test-runs-test-control-stable-dylibs" { } ''
+      ${breakbulk.testRuns.envScript {
+        spec = stable;
+        jq = "${pkgs.jq}/bin/jq";
+      }}
+      case :$LD_LIBRARY_PATH: in
+        *:${stable.dylib.stable}/dylib/*) ;;
+        *) echo "no stable copy on $LD_LIBRARY_PATH" >&2; exit 1 ;;
+      esac
+      files=(${s.unitOut}/*)
+      cd ${lib.escapeShellArg s.sourceDir}
+      "''${files[0]}" --exact dylib_path_has_only_out_dir_search_paths | tee $TMPDIR/log
+      grep -q 'test dylib_path_has_only_out_dir_search_paths ... ok' $TMPDIR/log
+      mkdir -p $out
+      cp $TMPDIR/log $out/
+    '';
 
   # includeIgnored adds --include-ignored to every binary of the package.
   ctlIgnored = mk "test-control" {
@@ -485,6 +520,7 @@ in
   runner = testRunner;
   inherit doctests;
   test-control = testControl;
+  test-control-stable-dylibs = testControlStableDylibs;
   test-control-include-ignored = testControlIncludeIgnored;
   test-control-skip-list = testControlSkipList;
   test-control-bin-exe = testControlBinExe;
