@@ -19,7 +19,8 @@
 #                - tools, sources and env captures that cannot be built do
 #                  not stop instantiation: nothing but the plan and the
 #                  instantiate binary is realised before units.json is read;
-#                - stubs for predicted roots the plan lacks.
+#                - stubs for predicted roots the plan lacks, and
+#                  predictedRoots over the fixture's manifests.
 {
   pkgs ? import (
     let
@@ -219,6 +220,16 @@ let
     nothing-else-realised = builtins.deepSeq (drvPaths unbuildable) true;
     builder = inst.units.c-a6654c0a89d81026.builder == "${smoke.breakbulk-unit}/bin/breakbulk-unit";
     no-pass-as-file = !(inst.units.c-a6654c0a89d81026.drvAttrs ? passAsFile);
+    # The fixture's own prediction for the build plan is the one root above.
+    predicted-from-manifests =
+      (breakbulk.predictedRoots {
+        workspaceRoots = breakbulk.roots.workspaceRoots { root = ../unit-smoke/fixture; };
+        planKind = "build";
+        variant = "dev";
+      }) == {
+        variant = "dev";
+        roots = [ (builtins.head predicted.roots) ];
+      };
     stubs =
       inst.roots."smokeapp/bin/admin-cli".breakbulkRoot.reason
       == "`admin-cli` was not built by Cargo in variant `dev`: required features `[cli]` not enabled"
