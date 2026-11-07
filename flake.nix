@@ -29,9 +29,14 @@
       # and downloads from crates.io; `vendor-collision` fetches two GitHub
       # repositories during evaluation. `instantiate` and `instantiate-eval`
       # (IFD) build the unit-smoke plan through breakbulk-instantiate; that
-      # plan targets x86_64-unknown-linux-gnu.
+      # plan targets x86_64-unknown-linux-gnu. Env capture builds a cross
+      # toolchain.
       checks = forAllSystems (pkgs:
         import ./tests/nix {
+          inherit pkgs;
+          breakbulk = self.lib;
+        }
+        // import ./tests/env-capture {
           inherit pkgs;
           breakbulk = self.lib;
         }

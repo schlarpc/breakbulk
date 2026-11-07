@@ -24,6 +24,8 @@ fn unit(cwd: &Path) -> RenderedRun {
         }],
         nightly_features_allowed: false,
         env_capture: None,
+        remap: vec![],
+        out_dir_remap: None,
         strict_sources: false,
     }
 }

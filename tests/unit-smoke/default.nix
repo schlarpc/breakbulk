@@ -44,15 +44,9 @@ let
     name = "unit-smoke-source";
   };
 
-  # Stands in for the base env capture: what rustc needs to link.
-  capture = pkgs.writeText "unit-smoke-env.json" (
-    builtins.toJSON {
-      PATH = lib.makeBinPath [
-        pkgs.stdenv.cc
-        pkgs.coreutils
-      ];
-    }
-  );
+  # The real base env capture (lib/env-capture.nix). On this native build
+  # host and target units share it.
+  capture = (import ../../lib/env-capture.nix { inherit lib; }).base { inherit pkgs; };
 
   specials = {
     src = "${src}";
@@ -88,7 +82,10 @@ in
     ;
 
   # Runs the binary, and fails if it references its sources or the build
-  # script's OUT_DIR (path remapping covers every scope here).
+  # script's OUT_DIR (path remapping covers every scope here). The build
+  # script compiled C through the capture's compiler wrapper: the unit's
+  # -frandom-seed and -ffile-prefix-map reached it, and the C archive names
+  # its source only by the remapped path.
   check =
     pkgs.runCommand "unit-smoke-check"
       {
@@ -101,7 +98,36 @@ in
         mkdir -p $out/bin
         cp ${app}/smokeapp-b0ba845afe70cf35 $out/bin/smokeapp
         $out/bin/smokeapp | tee $out/log
-        grep -qx 'smoke ok: hello-from-build 42' $out/log
+        grep -qx 'smoke ok: hello-from-build 42 c=6' $out/log
         grep -q 'smoke_cfg' ${run.flags}/directives.json
+
+        cflags=$(cat ${run.out}/nix-cflags-compile.txt)
+        echo "NIX_CFLAGS_COMPILE seen by the build script: $cflags"
+        seed=$(basename ${run.out} | cut -c1-10)
+        case "$cflags" in
+          " -frandom-seed=$seed "*) ;;
+          *) echo "FAIL: the unit's seed is not first"; exit 1 ;;
+        esac
+        for map in "-ffile-prefix-map=${src}=." \
+                   "-ffile-prefix-map=${run.out}=/breakbulk/build/r-smokelib-63aa584f9c6a6c6c"; do
+          case "$cflags" in
+            *" $map"*) ;;
+            *) echo "FAIL: $map missing"; exit 1 ;;
+          esac
+        done
+
+        # gcc compresses the objects' debug sections, and nixpkgs' gcc
+        # writes __FILE__ under the store with an upper-cased hash; look at
+        # decompressed bytes, ignoring case.
+        objcopy=${pkgs.binutils-unwrapped}/bin/objcopy
+        $objcopy --decompress-debug-sections ${run.out}/native/libsmokec.a smokec.a
+        if grep -q -a -i -F ${src} smokec.a; then
+          echo "FAIL: libsmokec.a contains the source path"; exit 1
+        fi
+        grep -q -a -F ./smokelib/csrc/smoke.c smokec.a
+        # Control: without the prefix map the same compile embeds the path.
+        ${pkgs.stdenv.cc}/bin/cc -c -g3 -O1 -fPIC ${src}/smokelib/csrc/smoke.c -o control.o
+        $objcopy --decompress-debug-sections control.o control-plain.o
+        grep -q -a -F ${src} control-plain.o
       '';
 }

@@ -82,6 +82,7 @@
         "-C", "metadata=a0e9aa7440d71279", "-C", "extra-filename=-87e5d8c802f76f4a",
         "--target", "x86_64-unknown-linux-gnu",
         { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search" },
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-lib" },
         { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-cfg" },
         { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-check-cfg" }
       ],

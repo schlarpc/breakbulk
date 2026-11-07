@@ -22,7 +22,7 @@ use crate::compile::fresh_dir;
 use crate::directives::{
     BuildOutput, LogMessage, MetadataFile, ParseContext, Severity, parse, streamed_log_messages,
 };
-use crate::env::{Outer, layered, read_capture};
+use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
 use crate::{DIRECTIVES_FILE, Error, METADATA_FILE, io_err, read_metadata, write_json};
@@ -55,6 +55,19 @@ pub fn run_env(r: &RenderedRun, out: &Path, metadata: &[MetadataFile]) -> BTreeM
     }
     env.insert("OUT_DIR".into(), out.display().to_string());
     env
+}
+
+/// What the run adds to C flags: its own random seed, and a prefix map for
+/// each remapped path, including its own `OUT_DIR`.
+pub fn run_cflags(r: &RenderedRun, outer: &Outer, out: &Path) -> CFlags {
+    let mut prefix_maps = r.remap.clone();
+    if let Some(name) = &r.out_dir_remap {
+        prefix_maps.push((out.display().to_string(), name.clone()));
+    }
+    CFlags {
+        random_seed: outer.random_seed(),
+        prefix_maps,
+    }
 }
 
 /// The `packages.<name>` option prefix for hints.
@@ -271,7 +284,12 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .as_deref()
         .map(|p| read_capture(Path::new(p)))
         .transpose()?;
-    let env = layered(outer, capture.as_ref(), &run_env(r, &out, &metadata));
+    let env = layered(
+        outer,
+        capture.as_ref(),
+        &run_env(r, &out, &metadata),
+        &run_cflags(r, outer, &out),
+    );
     let argv = vec![script_path(Path::new(&r.script))?.display().to_string()];
     let cwd = PathBuf::from(&r.cwd);
 

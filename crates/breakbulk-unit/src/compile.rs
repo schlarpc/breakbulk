@@ -22,7 +22,7 @@ use std::process::Stdio;
 
 use crate::diag::{Line, classify};
 use crate::directives::BuildOutput;
-use crate::env::{Outer, layered, read_capture};
+use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedArg, RenderedCompile, derivation_output};
 use crate::splice::{expand_args, expand_env};
@@ -159,9 +159,13 @@ pub fn invocation(
         .as_deref()
         .map(|p| read_capture(Path::new(p)))
         .transpose()?;
+    let cflags = CFlags {
+        random_seed: outer.random_seed(),
+        prefix_maps: c.remap.clone(),
+    };
     Ok(Invocation {
         argv,
-        env: layered(outer, capture.as_ref(), &unit_env),
+        env: layered(outer, capture.as_ref(), &unit_env, &cflags),
         cwd: PathBuf::from(&c.cwd),
     })
 }

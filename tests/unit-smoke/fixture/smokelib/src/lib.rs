@@ -7,3 +7,12 @@ pub const SMOKE_ENV: &str = env!("SMOKE_ENV");
 pub fn cfg_reached() -> bool {
     cfg!(smoke_cfg)
 }
+
+unsafe extern "C" {
+    fn smoke_c_answer() -> std::ffi::c_int;
+}
+
+/// From the C library the build script compiled (`rustc-link-lib`).
+pub fn c_answer() -> i32 {
+    unsafe { smoke_c_answer() }
+}
