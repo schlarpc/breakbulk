@@ -25,8 +25,8 @@
 #
 # Presets that use LLVM tools (msvc, wasm, linuxGnu with crossLanguageLto)
 # need the LLVM matching rustc: pass `rustc` (your toolchain; its version is
-# looked up in breakbulk.llvmVersions, or nixpkgs' rustc.llvmPackages is
-# used), `llvmMajor`, or `llvmPackages`.
+# looked up in breakbulk.llvmVersions, read from `rustc -vV` (IFD) when
+# the table does not cover it, or nixpkgs' rustc.llvmPackages is used), `llvmMajor`, or `llvmPackages`.
 {
   lib,
   llvmVersions,

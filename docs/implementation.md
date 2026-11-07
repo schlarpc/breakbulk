@@ -625,7 +625,7 @@ The skeleton copies file names only and needs no discovery rules; Cargo performs
 
 ## Toolchain presets
 
-The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain.
+The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain (`llvmMajor`, `llvmPackages`). The table is the fast path; for a rustc it does not cover (older than its first release, newer than the last release checked, or without a version), a tiny derivation reads the major from `rustc -vV`, through import-from-derivation (decision 41).
 
 A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. On a Linux (glibc) build machine the native target gets `linuxGnu` unless another preset is set, either through `targets.<native>.preset` or by defining the target directly from a preset (every preset's value carries an internal marker for this); `preset = null` turns it off (decision 105). Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Preset env is added per unit by platform, never through Cargo's `[env]`.
 
