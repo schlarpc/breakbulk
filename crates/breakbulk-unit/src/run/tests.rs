@@ -39,6 +39,7 @@ fn judge_with(r: &RenderedRun, status: i32, stdout: &str) -> Result<Success, Err
         argv: &["/s/build-script-build".into()],
         env: &env,
         out: Path::new("/o"),
+        upstream_out_dirs: &[],
         status: ExitStatus::from_raw(status),
         stdout: stdout.as_bytes(),
     })
@@ -155,10 +156,12 @@ fn dep_env_and_out_dir() {
         MetadataFile {
             links: "z".into(),
             metadata: vec![("include".into(), "/z/inc".into())],
+            out: None,
         },
         MetadataFile {
             links: "open-ssl".into(),
             metadata: vec![("version-number".into(), "30".into())],
+            out: None,
         },
     ];
     let env = run_env(&r2, Path::new("/nix/store/o-out"), &md);
@@ -207,6 +210,7 @@ fn run_mode_end_to_end() {
         &MetadataFile {
             links: "up".into(),
             metadata: vec![("key".into(), "v".into())],
+            out: Some("/up-out".into()),
         },
     )
     .unwrap();

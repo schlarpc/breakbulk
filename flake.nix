@@ -19,6 +19,20 @@
       # The evaluation-time library (see lib/default.nix).
       lib = import ./lib { inherit (nixpkgs) lib; };
 
+      # breakbulk built by breakbulk (./breakbulk.nix, tests/self-host):
+      # breakbulk-bb-<package>, each with bin/<program>. The binaries plans
+      # and units use still come from lib/tools.nix (the bootstrap). The
+      # names are listed here: the products' names come from the plan,
+      # and listing the flake's packages must not plan (IFD).
+      packages = forAllSystems (pkgs:
+        let
+          selfBuilt = (import ./tests/self-host {
+            inherit pkgs;
+            breakbulk = self.lib;
+          }).selfBuilt;
+        in
+        nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "breakbulk-bb-${n}" v) selfBuilt);
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.rust-analyzer ];
@@ -93,6 +107,19 @@
           in
           {
             instantiate = t.check;
+            # breakbulk builds itself; the self-built programs give
+            # byte-identical plans, units.json and products (IFD).
+            self-host = (import ./tests/self-host {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }).self-host;
+            # Directive differential test: 32 random workspaces, real
+            # `cargo build -vv` and `cargo test --no-run -vv` against the
+            # traced plans, argv and env per unit. No network.
+            differential = (import ./tests/differential {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }).differential;
             instantiate-eval = t.eval-checks;
           }
           # End-to-end fixtures through the traced planner (IFD).

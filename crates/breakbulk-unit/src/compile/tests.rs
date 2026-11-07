@@ -115,6 +115,7 @@ fn invocation_expands_splices_and_env() {
         library_paths: vec![LibraryPath {
             value: "native=/nix/store/r-out/native".into(),
             in_out_dir: true,
+            in_build_dir: true,
         }],
         env: vec![("SMOKE".into(), "1".into())],
         ..Default::default()
