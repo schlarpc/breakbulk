@@ -29,6 +29,10 @@
 #                harness name the product; the host workspace's
 #                instantiation and `util`'s units do not depend on it; the
 #                embedded bytes are a valid component.
+#   cfg-rustflags  spec rustflags that turn on a `target.'cfg(…)'` key: the
+#                planner asks rustc for the cfg with Cargo's rustflags and
+#                puts the spec's flags under the target key; the product
+#                matches local `cargo run` with the same `--config`.
 {
   pkgs ? import (
     let
@@ -349,6 +353,51 @@ let
         cp run.txt $out/
       '';
 
+  # --- cfg-rustflags ----------------------------------------------------------
+
+  # The spec's `--cfg bb_spec` turns on the project's `target.'cfg(bb_spec)'`
+  # key, which replaces `build.rustflags`. The planner asks rustc for the
+  # cfg with the rustflags Cargo would use, so it puts the spec's flags
+  # under the target key; with them under `build`, Cargo drops them and
+  # planning fails. The product prints what local Cargo's does with the
+  # same `--config`.
+  cfgRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/cfg-rustflags";
+    modules = [
+      {
+        workspaces.main = { };
+        targets.${native}.rustflags = [
+          "--cfg"
+          "bb_spec"
+        ];
+      }
+    ];
+  };
+  cfgRustflags =
+    pkgs.runCommandCC "loose-ends-cfg-rustflags"
+      {
+        nativeBuildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+        ];
+        product = cfgRepo.workspaces.main.packages.cfg-rustflags;
+        fixture = fixtures + "/cfg-rustflags";
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode $fixture ws
+        cd ws
+        cargo run -q --offline --frozen --target ${native} \
+          --config 'target.${native}.rustflags=["--cfg","bb_spec"]' > want
+        $product/bin/cfg-rustflags > got
+        cat got
+        diff -u want got
+        [ "$(cat got)" = "spec=true key=true build=false" ]
+        mkdir -p $out
+        cp got $out/
+      '';
+
   # --- docs/options.md --------------------------------------------------------
 
   # The module options as Markdown (mkRepository's optionsDoc).
@@ -382,10 +431,12 @@ in
   test-scope = testScope;
   inherit devshell;
   wasm-embed = wasmEmbedCheck;
+  cfg-rustflags = cfgRustflags;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;
     devshell = shellRepo;
     wasm-embed = wasmEmbed;
+    cfg-rustflags = cfgRepo;
   };
 }
