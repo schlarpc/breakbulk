@@ -15,3 +15,8 @@ extra = []
 [[test]]
 name = "needs_feat"
 required-features = ["extra"]
+
+# A bin whose name the shell cannot export: CARGO_BIN_EXE_ctl-extra.
+[[bin]]
+name = "ctl-extra"
+test = false

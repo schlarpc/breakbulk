@@ -236,6 +236,7 @@ rec {
       env = spec.env // vars;
     in
     ''
+      __bb_env=()
       __bb_dylib=${
         if spec.dylib.flags == [ ] then
           "''"
@@ -261,7 +262,17 @@ rec {
     + lib.concatMapStrings (f: ''
       eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' ${lib.escapeShellArg "${f}/directives.json"})"
     '') spec.envFlags
-    + lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") env);
+    + lib.concatStrings (lib.mapAttrsToList exportOrEnv env);
+
+  # `export` for a name the shell takes, else an entry of `__bb_env`, which
+  # the run passes through `env`: Cargo's `CARGO_BIN_EXE_<bin>` keeps the
+  # bin's name, hyphens included.
+  exportOrEnv =
+    k: v:
+    if builtins.match "[A-Za-z_][A-Za-z0-9_]*" k != null then
+      "export ${k}=${lib.escapeShellArg v}\n"
+    else
+      "__bb_env+=(${lib.escapeShellArg "${k}=${v}"})\n";
 
   # Decision 61: stable inputs for content-addressed test runs. A run spec
   # names the `flags` and `out` of every build-script run of its platform
@@ -454,7 +465,7 @@ rec {
             files=(${bin}/*)
             cd ${lib.escapeShellArg s.sourceDir}
             set +e
-            ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+            env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
             status=''${PIPESTATUS[0]}
             set -e
             if [ "$status" -ne 0 ]; then

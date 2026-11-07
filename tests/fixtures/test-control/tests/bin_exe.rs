@@ -16,4 +16,9 @@ fn bin_exe_at_run_time() {
         std::env::var("CARGO_BIN_EXE_ctl").as_deref(),
         Ok(env!("CARGO_BIN_EXE_ctl"))
     );
+    // A name with a hyphen, which a shell cannot `export`.
+    assert_eq!(
+        std::env::var("CARGO_BIN_EXE_ctl-extra").as_deref(),
+        Ok(env!("CARGO_BIN_EXE_ctl-extra"))
+    );
 }
