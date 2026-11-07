@@ -16,6 +16,11 @@
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
 #   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
 #   breakbulk.mkWorkspace pkgs { root; path; toolchain; ... }  (lib/workspace.nix)
+# The module-system entry point (M2):
+#   breakbulk.mkRepository { pkgs; root; modules; }  (lib/repository.nix)
+#   breakbulk.modules           the option declarations (lib/modules)
+#   breakbulk.sysDefaults       the curated -sys crate module
+#   breakbulk.versionReq        Cargo version requirements (matches req ver)
 { lib }:
 let
   util = import ./util.nix { inherit lib; };
@@ -78,9 +83,23 @@ let
       mkPlan
       ;
   };
+
+  mkRepository = import ./repository.nix {
+    inherit
+      lib
+      util
+      lockfile
+      manifest
+      envCapture
+      mkFetch
+      mkTools
+      mkWorkspace
+      ;
+  };
 in
 {
   inherit
+    mkRepository
     instantiate
     predictedRoots
     util
@@ -98,6 +117,10 @@ in
     ;
 
   mkSkeleton = skeleton.mkSkeleton;
+
+  modules = import ./modules;
+  sysDefaults = ./sys-defaults.nix;
+  versionReq = import ./modules/version-req.nix { inherit lib; };
 
   xwinSdk = import ./xwin-sdk.nix { inherit lib; };
 
