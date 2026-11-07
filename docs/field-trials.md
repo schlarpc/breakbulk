@@ -350,7 +350,8 @@ ASK marks a choice for the author.
    `workspaces.<ws>.targets.<triple>.{variants, tests}` to narrow per
    target.
 
-   4b. **Check variants always include `--all-targets` (ASK).** mtgac's
+   4b. **Check variants always include `--all-targets`.** Done (decision
+   108): `variants.<v>.allTargets = false`. Before: mtgac's
    wasm gate is `cargo check` without it, and `--all-targets` fails there
    for reasons the project does not gate on (see mtgac). Proposal: a
    variant option `allTargets = true` (the default, decision 75) that a

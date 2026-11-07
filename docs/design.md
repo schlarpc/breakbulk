@@ -157,7 +157,7 @@ Profiles, feature sets (including a feature powerset), check modes (clippy, cove
 | Two profiles with the same settings (`release`, `bench`, a custom profile that only inherits `release`) | Everything; a unit's identity contains the profile's settings, not its name | Nothing |
 | Two profiles with different settings (opt-level, debuginfo, …) | Nothing | Everything |
 
-Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
+Check and clippy variants check every target, as `cargo check --all-targets` does, unless the variant turns that off for a gate that runs plain `cargo check`. Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
 
 ## Products and stages
 

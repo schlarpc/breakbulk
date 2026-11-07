@@ -59,6 +59,18 @@ let
             Cargo's own `clippy` uses the dev profile.
           '';
         };
+        allTargets = mkOption {
+          type = types.bool;
+          default = true;
+          description = ''
+            For `check` and `clippy` variants: also check every target,
+            as `cargo check --all-targets` does (tests, examples, benches
+            in test mode, through the test plan). `false`: plain `cargo
+            check` (libraries and bins, the build plan only), for gates
+            that do not check test code. Only check and clippy variants
+            take `false`.
+          '';
+        };
         clippyArgs = mkOption {
           type = types.listOf types.str;
           default = [ ];

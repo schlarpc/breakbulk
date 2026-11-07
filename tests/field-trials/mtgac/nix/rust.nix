@@ -65,7 +65,11 @@ in
     };
     variants = {
       default = { };
-      check.mode = "check";
+      # The wasm gate is plain `cargo check` (decision 108).
+      check = {
+        mode = "check";
+        allTargets = false;
+      };
       clippy = {
         mode = "clippy";
         profile = "dev";

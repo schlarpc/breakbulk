@@ -488,6 +488,7 @@ repo = breakbulk.lib.mkRepository {
       packages = null;                # null: --workspace; or a list traced with -p
     };
     variants.<v> = { profile = "release"; features = [ ]; mode = "build"; };  # build | check | clippy | coverage
+                                      # check/clippy: allTargets = true (--all-targets; false: plain `cargo check`)
     roots = null;                     # override predicted root names
     devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
     benchSmoke = false;               # run each bench once in test mode, as a check

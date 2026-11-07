@@ -2131,6 +2131,34 @@ false
 
 
 
+## workspaces\.\<name>\.variants\.\<name>\.allTargets
+
+
+
+For ` check ` and ` clippy ` variants: also check every target,
+as ` cargo check --all-targets ` does (tests, examples, benches
+in test mode, through the test plan)\. ` false `: plain ` cargo check ` (libraries and bins, the build plan only), for gates
+that do not check test code\. Only check and clippy variants
+take ` false `\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.variants\.\<name>\.benches
 
 

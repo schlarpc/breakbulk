@@ -487,6 +487,8 @@ let
     wsName: vName: v:
     if v.benches && (v.mode == "check" || v.mode == "clippy") then
       throw "breakbulk: workspaces.${wsName}.variants.${vName}: `benches` needs a build variant, not `${v.mode}`"
+    else if !v.allTargets && !(v.mode == "check" || v.mode == "clippy") then
+      throw "breakbulk: workspaces.${wsName}.variants.${vName}: `allTargets = false` needs a check or clippy variant, not `${v.mode}`"
     else
       v;
 
@@ -725,19 +727,21 @@ let
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
             }
             // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
-              # Every unit of both plans: for clippy, its lints on every
-              # workspace member.
+              # Every unit of both plans (`cargo check` and `cargo check
+              # --all-targets`): for clippy, its lints on every workspace
+              # member. With `allTargets = false`, the build plan's only
+              # (decision 108); the test plan is then never planned.
               check = variantsLib.unitsCheck {
                 inherit pkgs;
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
                 units =
+                  let
+                    kinds = [ "build" ] ++ lib.optional (checkMode wsName vName v).allTargets "test";
+                  in
                   if inst.delivery == "dynamic" then
-                    [
-                      inst.allUnits.build
-                      inst.allUnits.test
-                    ]
+                    map (k: inst.allUnits.${k}) kinds
                   else
-                    lib.attrValues inst.units.build ++ lib.attrValues inst.units.test;
+                    lib.concatMap (k: lib.attrValues inst.units.${k}) kinds;
               };
             }
           ) vs;
