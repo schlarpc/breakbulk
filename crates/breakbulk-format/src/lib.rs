@@ -19,14 +19,16 @@ pub use doctest::render_doctest;
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;
 pub use render::{
-    Resolve, default_remap_scope, is_linking, remap_bases, render_unit, render_unit_in,
-    unit_env_value,
+    Resolve, default_remap_scope, is_linking, merge_layer_with, remap_bases, render_unit,
+    render_unit_in, unit_env_value,
 };
 pub use validate::{
     ValidationError, ValidationOptions, contains_path, contains_sentinel, literal_store_paths,
     validate,
 };
 
+/// The environment contract's layer merging, shared with instantiation.
+pub use breakbulk_unit::env::append as append_env_list;
 /// The per-unit `BREAKBULK_UNIT` types, defined by `breakbulk-unit`.
 pub use breakbulk_unit::spec as rendered;
 /// The wrapping table, shared with the planner's sentinel checks.

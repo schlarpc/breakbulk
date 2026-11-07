@@ -188,6 +188,10 @@ rec {
           # dependencies' references (their manifests), not as an input.
           (if p.weak or false then unsafeDiscardStringContext else lib.id)
             units.${p.unit}.${p.output}.outPath
+        else if p ? join then
+          # A list-like variable set by several env layers: the non-empty
+          # layers, joined (breakbulk_unit::env::append).
+          lib.concatStringsSep p.sep (lib.filter (s: s != "") (map (lib.concatMapStrings part) p.join))
         else if p.json or false then
           input inputsJson p.input
         else

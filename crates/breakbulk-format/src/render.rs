@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use breakbulk_unit::env::merge_layer;
+use breakbulk_unit::env::{append, list_separator};
 use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUnit};
 
 use crate::deps::Graph;
@@ -58,6 +58,31 @@ pub trait Resolve {
     fn strict_sources(&self, _id: &UnitId, _run: &RunUnit) -> bool {
         false
     }
+    /// A list-like variable's `earlier` value followed by `later`, with
+    /// `sep` between them ([`breakbulk_unit::env::append`]): an empty side
+    /// is left out. A resolver whose values are placeholders, whose
+    /// emptiness is known only once they are substituted, overrides this.
+    fn append_list(&self, sep: char, earlier: &str, later: &str) -> Result<String, Self::Error> {
+        Ok(append(sep, earlier, later))
+    }
+}
+
+/// [`breakbulk_unit::env::merge_layer`] through [`Resolve::append_list`]:
+/// `layer`'s values replace those in `env`, except that list-like variables
+/// are appended.
+pub fn merge_layer_with<R: Resolve>(
+    r: &R,
+    env: &mut BTreeMap<String, String>,
+    layer: BTreeMap<String, String>,
+) -> Result<(), R::Error> {
+    for (k, v) in layer {
+        let merged = match (list_separator(&k), env.get(&k)) {
+            (Some(sep), Some(earlier)) => r.append_list(sep, earlier, &v)?,
+            _ => v,
+        };
+        env.insert(k, merged);
+    }
+    Ok(())
 }
 
 pub(crate) fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
@@ -221,7 +246,7 @@ pub fn render_unit_in<R: Resolve>(
                 })
             };
             let mut env = env(&c.env, r)?;
-            merge_layer(&mut env, overlay);
+            merge_layer_with(r, &mut env, overlay)?;
             let (remap, remap_scope) = if plan.trim_paths {
                 (Vec::new(), None)
             } else {
@@ -299,7 +324,7 @@ pub fn render_unit_in<R: Resolve>(
             let mut recorded = run.env.clone();
             recorded.remove("OUT_DIR");
             let mut env = env(&recorded, r)?;
-            merge_layer(&mut env, overlay);
+            merge_layer_with(r, &mut env, overlay)?;
             RenderedUnit::Run(RenderedRun {
                 package: run.package.clone(),
                 platform: run.platform,

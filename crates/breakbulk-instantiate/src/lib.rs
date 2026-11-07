@@ -19,8 +19,8 @@ use std::fmt;
 use breakbulk_format::rendered::{derivation_output, package_name_version};
 use breakbulk_format::{
     Arg, CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, Unit,
-    UnitId, ValidationOptions, render_doctest, render_unit_in, to_canonical_json, unit_env_value,
-    validate,
+    UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in, to_canonical_json,
+    unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -70,6 +70,13 @@ enum Ref {
     Input {
         key: String,
         json: bool,
+    },
+    /// A list-like variable's layers, joined with `sep` after the Nix side
+    /// has substituted them, leaving empty ones out (as
+    /// `breakbulk_unit::env::append` does). Each item is text with tokens.
+    Join {
+        sep: char,
+        items: Vec<String>,
     },
 }
 
@@ -167,7 +174,6 @@ impl<'a> Tokens<'a> {
 
     /// Split `text` at this resolver's tokens.
     fn split(&self, text: &str) -> Result<Vec<Part>, Error> {
-        let refs = self.refs.borrow();
         let mut parts = Vec::new();
         let mut rest = text;
         while let Some(i) = rest.find(self.prefix) {
@@ -181,15 +187,16 @@ impl<'a> Tokens<'a> {
             let n: usize = after[..end]
                 .parse()
                 .map_err(|_| Error(format!("malformed token in {text}")))?;
-            parts.push(match refs.get(n) {
-                Some(Ref::Unit { unit, output, weak }) => Part::Unit {
-                    unit: unit.clone(),
-                    output: output.clone(),
-                    weak: *weak,
-                },
-                Some(Ref::Input { key, json }) => Part::Input {
-                    input: key.clone(),
-                    json: *json,
+            let r = self.refs.borrow().get(n).cloned();
+            parts.push(match r {
+                Some(Ref::Unit { unit, output, weak }) => Part::Unit { unit, output, weak },
+                Some(Ref::Input { key, json }) => Part::Input { input: key, json },
+                Some(Ref::Join { sep, items }) => Part::Join {
+                    join: items
+                        .iter()
+                        .map(|i| self.split(i))
+                        .collect::<Result<_, _>>()?,
+                    sep: sep.to_string(),
                 },
                 None => return err(format!("unknown token {n} in {text}")),
             });
@@ -384,9 +391,13 @@ impl Resolve for Tokens<'_> {
             .map(|v| (v.clone(), self.json_input(keys::env(p, v))))
             .collect();
         if let Some((key, o)) = self.package_override(unit.package()) {
-            for v in &o.platform(p).env {
-                env.insert(v.clone(), self.json_input(keys::override_env(&key, p, v)));
-            }
+            let layer = o
+                .platform(p)
+                .env
+                .iter()
+                .map(|v| (v.clone(), self.json_input(keys::override_env(&key, p, v))))
+                .collect();
+            merge_layer_with(self, &mut env, layer)?;
         }
         Ok(env)
     }
@@ -395,6 +406,21 @@ impl Resolve for Tokens<'_> {
         self.package_override(&run.package)
             .and_then(|(_, o)| o.strict_sources)
             .unwrap_or(self.inputs.overrides.strict_sources)
+    }
+
+    /// Values from the Nix side are tokens whose emptiness is unknown here,
+    /// so a side with a token is joined by the Nix side ([`Ref::Join`]).
+    /// Literal store paths in a side are tokenized first: the join's items
+    /// never reach [`Tokens::tokenize_store_paths`] through the unit text.
+    fn append_list(&self, sep: char, earlier: &str, later: &str) -> Result<String, Error> {
+        if !earlier.contains(self.prefix) && !later.contains(self.prefix) {
+            return Ok(breakbulk_format::append_env_list(sep, earlier, later));
+        }
+        let items = [earlier, later]
+            .into_iter()
+            .map(|t| self.tokenize_store_paths("(env layer)", t))
+            .collect::<Result<_, _>>()?;
+        Ok(self.token(Ref::Join { sep, items }))
     }
 }
 
