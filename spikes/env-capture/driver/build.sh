@@ -6,6 +6,8 @@
 # BB_* (see overlay.sh), triple, collect.
 set -eu
 export PATH="$toolPath"
+# Fixed base layer (the capture no longer carries it).
+export SOURCE_DATE_EPOCH=315532800
 cd "$NIX_BUILD_TOP"
 # Same layout as buildRustPackage (cargoSetupHook copies the vendor dir into
 # the build dir), so source paths in C debug info match.

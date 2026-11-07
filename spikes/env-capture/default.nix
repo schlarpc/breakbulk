@@ -4,9 +4,21 @@ let
   captureEnv = import ./capture.nix { inherit (pkgs) buildPackages; };
   cross = pkgs.pkgsCross.aarch64-multiplatform;
   crossCapture = import ./capture.nix { inherit (cross) buildPackages; };
+  envCapture = import ../../lib/env-capture.nix { inherit lib; };
 in
 rec {
-  inherit pkgs cross;
+  inherit pkgs cross envCapture;
+
+  # The draft library function over the broad set of common hooks.
+  libBroad = envCapture.capture {
+    inherit pkgs; name = "broad"; debug = true;
+    nativeInputs = p: with p; [
+      pkg-config cmake perl python3 protobuf nasm autoconf automake libtool
+      gettext rustPlatform.bindgenHook gobject-introspection glib makeWrapper
+      meson ninja
+    ];
+    inputs = p: with p; [ openssl zstd sqlite glib dbus ];
+  };
 
   captures = {
     # No inputs: what every package without inputs gets.
@@ -96,19 +108,22 @@ rec {
       hostTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       targetTriple = tp.stdenv.hostPlatform.rust.rustcTarget;
       isCross = hostTriple != targetTriple;
-      cap = import ./capture.nix { buildPackages = pkgs; };
+      # The draft library function, not the spike's capture.nix.
+      cap = args: envCapture.capture ({ pkgs = tp; } // args);
       seed = "bbseed0000";
       captures = {
         # Host units (build scripts, proc macros, their deps) need no inputs here.
-        host."*" = cap { stdenv = pkgs.stdenv; name = "e2e-host-base"; };
-        target."*" = cap { stdenv = tp.stdenv; name = "e2e-target-base"; };
+        host."*" = cap { platform = "host"; };
+        target."*" = cap { platform = "target"; };
         target.openssl-sys = cap {
-          stdenv = tp.stdenv; name = "e2e-openssl-sys";
-          nativeInputs = [ bp.pkg-config ]; inputs = [ tp.openssl ];
+          name = "openssl-sys";
+          nativeInputs = p: [ p.pkg-config ];
+          inputs = p: [ p.openssl ];
         };
         target.zstd-sys = cap {
-          stdenv = tp.stdenv; name = "e2e-zstd-sys";
-          nativeInputs = [ bp.rustPlatform.bindgenHook bp.pkg-config ]; inputs = [ tp.zstd ];
+          name = "zstd-sys";
+          nativeInputs = p: [ p.rustPlatform.bindgenHook p.pkg-config ];
+          inputs = p: [ p.zstd ];
         };
       };
       # Mirrors cargoSetupHook's generated config (pkgs/build-support/rust/hooks/default.nix).
