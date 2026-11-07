@@ -1,0 +1,10 @@
+[package]
+name = "proc"
+version.workspace = true
+edition.workspace = true
+autotests = false
+autoexamples = false
+
+[lib]
+proc-macro = true
+doctest = false

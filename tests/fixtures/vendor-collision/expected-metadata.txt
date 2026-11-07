@@ -1,0 +1,7 @@
+--crate-name cfg_if  -C metadata=afaf7160e16a275c
+--crate-name itoa  -C metadata=0ea458117e1faa0e
+--crate-name itoa  -C metadata=86368cec710040ea
+--crate-name num_conv  -C metadata=14e1a36ba8787a8c
+--crate-name time_core  -C metadata=877eb7e1bc9a4cc4
+--crate-name time_macros  -C metadata=38e33fe7f31a6f87
+--crate-name vendor_collision  -C metadata=57ea88f66fa0c969

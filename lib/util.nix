@@ -1,0 +1,196 @@
+# Small helpers shared by the evaluation-time library. No pkgs needed.
+{ lib }:
+let
+  inherit (builtins)
+    attrNames
+    concatStringsSep
+    filter
+    hashString
+    isAttrs
+    isBool
+    isFloat
+    isInt
+    isList
+    isString
+    length
+    match
+    replaceStrings
+    split
+    substring
+    toJSON
+    ;
+in
+rec {
+  sha256 = hashString "sha256";
+
+  # Percent-decoding as done by the `url` crate's `query_pairs` (form
+  # urlencoded): `%XX` sequences and `+` as space. Only the code points that
+  # can appear in git ref names and URLs are covered; anything else is left
+  # encoded, which makes a mismatch visible instead of silent.
+  percentDecode =
+    let
+      codes = {
+        "%20" = " "; "%25" = "%"; "%21" = "!"; "%22" = "\""; "%23" = "#"; "%24" = "$";
+        "%26" = "&"; "%27" = "'"; "%28" = "("; "%29" = ")"; "%2A" = "*";
+        "%2B" = "+"; "%2C" = ","; "%2F" = "/"; "%3A" = ":"; "%3B" = ";";
+        "%3C" = "<"; "%3D" = "="; "%3E" = ">"; "%3F" = "?"; "%40" = "@";
+        "%5B" = "["; "%5C" = "\\"; "%5D" = "]"; "%5E" = "^"; "%60" = "`";
+        "%7B" = "{"; "%7C" = "|"; "%7D" = "}"; "%7E" = "~";
+      };
+      lower = lib.mapAttrs' (k: v: lib.nameValuePair (lib.toLower k) v) codes;
+      all = codes // lower;
+    in
+    s:
+    # One left-to-right pass, so `%2541` decodes to `%41`, not `A`.
+    (
+      replaceStrings ([ "+" ] ++ attrNames all) ([ " " ] ++ map (k: all.${k}) (attrNames all)) s
+    );
+
+  # Split a string on a literal separator.
+  splitOn = sep: s: filter isString (split (lib.escapeRegex sep) s);
+
+  # Normalize a relative path string: drop "." and empty components, resolve
+  # ".." against earlier components. Leading ".." that cannot be resolved are
+  # kept. Returns "" for the current directory.
+  normalizeRel =
+    p:
+    let
+      parts = filter (c: c != "" && c != ".") (splitOn "/" p);
+      step =
+        acc: c:
+        if c == ".." && acc != [ ] && lib.last acc != ".." then lib.init acc else acc ++ [ c ];
+    in
+    concatStringsSep "/" (lib.foldl' step [ ] parts);
+
+  # Join relative path strings and normalize.
+  joinRel = a: b: normalizeRel (if a == "" then b else if b == "" then a else "${a}/${b}");
+
+  # `a` relative to `b`, both normalized relative paths from the same root.
+  relativeTo =
+    a: b:
+    let
+      as = filter (c: c != "") (splitOn "/" a);
+      bs = filter (c: c != "") (splitOn "/" b);
+      common =
+        let
+          go = i: if i < length as && i < length bs && builtins.elemAt as i == builtins.elemAt bs i then go (i + 1) else i;
+        in
+        go 0;
+      ups = lib.genList (_: "..") (length bs - common);
+      downs = lib.drop common as;
+    in
+    concatStringsSep "/" (ups ++ downs);
+
+  # Whether relative path `p` is `dir` or below it (both normalized).
+  isUnder =
+    dir: p:
+    let
+      r = relativeTo p dir;
+    in
+    r != ".." && !(lib.hasPrefix "../" r);
+
+  # Glob matching for one path component, as the `glob` crate does for
+  # workspace `members`: `*`, `?`, `[...]` and `[!...]`.
+  globComponentRegex =
+    pat:
+    let
+      chars = lib.stringToCharacters pat;
+      go =
+        cs: inClass:
+        if cs == [ ] then
+          ""
+        else
+          let
+            c = builtins.head cs;
+            rest = builtins.tail cs;
+          in
+          if inClass then
+            (if c == "]" then "]" else if c == "\\" then "\\\\" else c) + go rest (c != "]")
+          else if c == "*" then
+            "[^/]*" + go rest false
+          else if c == "?" then
+            "[^/]" + go rest false
+          else if c == "[" then
+            (if rest != [ ] && builtins.head rest == "!" then "[^" + go (builtins.tail rest) true else "[" + go rest true)
+          else
+            lib.escapeRegex c + go rest false;
+    in
+    go chars false;
+
+  hasGlobChars = s: match ".*[][*?].*" s != null;
+
+  # Expand a glob relative to `root` (a path). Returns normalized relative
+  # strings of existing entries. Supports `*`, `?`, `[..]` per component and
+  # `**` as "any number of directories".
+  expandGlob =
+    root: pattern:
+    let
+      comps = filter (c: c != "" && c != ".") (splitOn "/" pattern);
+      entries = rel: let p = if rel == "" then root else root + "/${rel}"; in
+        if builtins.pathExists p && builtins.readFileType p == "directory" then builtins.readDir p else { };
+      isDirAt = rel: let p = if rel == "" then root else root + "/${rel}"; in
+        builtins.pathExists p && builtins.readFileType p == "directory";
+      go =
+        rel: cs:
+        if cs == [ ] then
+          [ rel ]
+        else
+          let
+            c = builtins.head cs;
+            rest = builtins.tail cs;
+            sub = n: joinRel rel n;
+          in
+          if c == "**" then
+            # zero or more directories
+            go rel rest
+            ++ lib.concatMap (n: go (sub n) cs) (
+              filter (n: (entries rel).${n} == "directory") (attrNames (entries rel))
+            )
+          else if c == ".." then
+            go (joinRel rel "..") rest
+          else if hasGlobChars c then
+            let
+              re = globComponentRegex c;
+              # Cargo calls `glob::glob`, whose default MatchOptions have
+              # require_literal_leading_dot = false: wildcards match dotfiles.
+              names = filter (n: match re n != null) (attrNames (entries rel));
+            in
+            lib.concatMap (n: go (sub n) rest) (lib.sort (a: b: a < b) names)
+          else
+            let
+              r = sub c;
+            in
+            if rest == [ ] then (if builtins.pathExists (if r == "" then root else root + "/${r}") then [ r ] else [ ])
+            else if isDirAt r then go r rest
+            else [ ];
+    in
+    lib.unique (go "" comps);
+
+  # Serialize a value as produced by builtins.fromTOML back to TOML. Every
+  # table below the top level is written inline, which keeps the writer tiny
+  # and is valid TOML 1.0. Strings use JSON escapes, which are a subset of
+  # TOML basic-string escapes.
+  toTOML =
+    attrs:
+    let
+      key = k: toJSON k;
+      value =
+        v:
+        if isString v then
+          toJSON v
+        else if isBool v then
+          (if v then "true" else "false")
+        else if isInt v || isFloat v then
+          toJSON v
+        else if isList v then
+          "[" + concatStringsSep ", " (map value v) + "]"
+        else if isAttrs v then
+          "{ " + concatStringsSep ", " (lib.mapAttrsToList (k: x: "${key k} = ${value x}") v) + " }"
+        else
+          throw "toTOML: unsupported value of type ${builtins.typeOf v}";
+    in
+    concatStringsSep "" (lib.mapAttrsToList (k: v: "${key k} = ${value v}\n") attrs);
+
+  # A short, stable identifier for a string, for directory and source names.
+  shortHash = s: substring 0 16 (sha256 s);
+}
