@@ -4,7 +4,7 @@ Nov 7, 2026 · measurements for M6 (below-crate seams)
 
 | Question | Verdict |
 | --- | --- |
-| Is the pipelined split worth building? | **Not now.** The gap is real (measured 5–39% on a cold `-j8` release build, simulated up to 67% on a deep chain), but the stable backends (rerun and stop, `-Zno-codegen`) run the frontend twice and are *slower* than no split at 4 cores on every mid-size workspace, and break even at 8. Only the CRIU backend keeps the gain. Next step: the CRIU spike, then an opt-in per package. |
+| Is the pipelined split worth building? | **Not now.** The gap is real (measured 5–39% on a cold `-j8` release build, simulated up to 67% on a deep chain), but the stable backends (rerun and stop, `-Zno-codegen`) run the frontend twice and are *slower* than no split at 4 cores on the wide workspaces (helix, nushell), and break even or lose at 8. Only the CRIU backend keeps the gain. Next step: the CRIU spike, then an opt-in per package. |
 | Does early cutoff on rmeta bytes save rebuilds? | **No, on stable and on today's nightly.** rmeta embeds the MD5 of every source file, so any edit changes the edited crate's rmeta, and every dependent's rmeta embeds that crate's hash. `-Zpublic-api-hash` is not in nightly 2026-11-06. Replaying 31 breakbulk and 50 ripgrep commits: cutoff on rmeta would have skipped 4% and 1% of library compiles, identically on stable, nightly, and nightly with the old crate hash. |
 | Can synthesized `binaries-metadata` drive nextest over store paths? | **Go, and done.** `packages.<name>.test.runner = "nextest"` runs each test binary through nextest's reuse-build mode with the project's nextest configuration. Fixture and checks pass. |
 | What does a CA test run cost on a cold machine? | **A lot.** Substituting one CA test run downloaded 58 paths, 1.83 GB (rustc and LLVM among them) in 37 s from a local file cache; the input-addressed run downloaded 1 path, 440 bytes, in 0.28 s. Keep CA islands off by default for caches used by fresh machines (decision 52 already does), and drop the sysroot from test runs' inputs. |
@@ -102,8 +102,9 @@ What this says:
   build is faster than simulated: measured 27%, simulated 66%. The
   simulation is an upper bound for codegen-heavy chains.
 - **The rerun backends lose where it matters.** Running the frontend twice
-  adds 25–45% CPU. At 4 cores that makes every workspace except
-  rust-analyzer slower than not splitting at all (−16% to −37%). At 8
+  adds 23–49% CPU (frontend time of every split library). At 4 cores that
+  makes helix, nushell and ripgrep dev slower than not splitting at all
+  (−16% to −37%); only rust-analyzer and ripgrep release still gain. At 8
   cores it is break-even on wide workspaces and loses on nushell. Only with
   16 cores, or on a deep chain, does it match pipelining.
 - **Incremental builds look like the deep chain.** After an edit low in
