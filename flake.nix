@@ -27,10 +27,25 @@
 
       # Library tests. `roots-metadata-crates-io` uses import-from-derivation
       # and downloads from crates.io; `vendor-collision` fetches two GitHub
-      # repositories during evaluation.
-      checks = forAllSystems (pkgs: import ./tests/nix {
-        inherit pkgs;
-        breakbulk = self.lib;
-      });
+      # repositories during evaluation. `instantiate` and `instantiate-eval`
+      # (IFD) build the unit-smoke plan through breakbulk-instantiate; that
+      # plan targets x86_64-unknown-linux-gnu.
+      checks = forAllSystems (pkgs:
+        import ./tests/nix {
+          inherit pkgs;
+          breakbulk = self.lib;
+        }
+        // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") (
+          let
+            t = import ./tests/instantiate {
+              inherit pkgs;
+              breakbulk = self.lib;
+            };
+          in
+          {
+            instantiate = t.check;
+            instantiate-eval = t.eval-checks;
+          }
+        ));
     };
 }

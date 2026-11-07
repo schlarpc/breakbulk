@@ -1,0 +1,265 @@
+# Instantiation in IFD mode: run `breakbulk-instantiate --emit json` over a
+# plan in a derivation, import its `units.json`, and turn each entry into a
+# unit derivation.
+#
+#   inst = breakbulk.instantiate { ... };
+#   inst.units.<unit id>        the unit derivations (fixed point)
+#   inst.roots."<package>/<kind>/<target>"
+#                               a root: the root unit's output, or a stub
+#                               (`.breakbulkRoot` says which)
+#   inst.unitsJson              the instantiate derivation (its output is
+#                               units.json)
+#
+# The instantiate derivation sees only names and tool paths, never a value
+# with string context: units.json names every input by key, and this file
+# substitutes the real value, with its context, for each key. So importing
+# units.json realises the plan and the breakbulk-instantiate binary and
+# nothing else: no toolchain, crate source, env capture or override value is
+# built, and a source edit or a changed env value does not rerun the
+# instantiate derivation at all (only the plan's and the keys' changes do).
+# See crates/breakbulk-instantiate/src/output.rs for the format.
+{ lib }:
+let
+  inherit (builtins)
+    fromJSON
+    isAttrs
+    isPath
+    isString
+    readFile
+    stringLength
+    substring
+    toFile
+    toJSON
+    unsafeDiscardStringContext
+    ;
+
+  # A value as a string, keeping its context. Paths are copied to the store
+  # (`toString` of a path would give its original location).
+  str = v: if isPath v || isAttrs v then "${v}" else toString v;
+
+  # The inside of a JSON string literal; `toJSON` keeps the context.
+  jsonInside =
+    s:
+    let
+      j = toJSON s;
+    in
+    substring 1 (stringLength j - 2) j;
+
+  platforms = [
+    "host"
+    "target"
+  ];
+in
+rec {
+  instantiate =
+    {
+      # The breakbulk-instantiate package (with bin/breakbulk-instantiate).
+      breakbulkInstantiate,
+      # The system that runs the instantiate derivation and builds units.
+      system,
+      # plan.json: a path, or a string such as "${planDrv}/plan.json".
+      plan,
+      # sources.workspace."<dir relative to the repository root>" = source view
+      # sources.crates."<Cargo package id>" = fetched crate source
+      sources ? { },
+      # Tool name to a store path or a path inside one. Must include
+      # `breakbulk-unit` (the builder executable) and `shell` (bash, for root
+      # stubs). Every literal store path in the plan must start with one.
+      tools,
+      # The toolchain spec per platform: env values, and the base env
+      # capture (an env.json file) or null.
+      host ? { },
+      target ? { },
+      # overrides."<name>" or ."<name>@<version>" = {
+      #   host = { env = { }; envCapture = null; };
+      #   target = { env = { }; envCapture = null; };
+      #   strictSources = null;
+      # }
+      # with package-wide and per-triple settings already merged per platform.
+      overrides ? { },
+      strictSources ? false,
+      # { variant = "<name>"; roots = [ { package; target; kind; test;
+      # requiredFeatures; } ]; } (see predictedRoots), or null to take the
+      # plan's roots as they are.
+      roots ? null,
+      name ? "breakbulk-units",
+      storeDir ? builtins.storeDir,
+    }:
+    let
+      workspace = sources.workspace or { };
+      crates = sources.crates or { };
+      spec = p: { env = { }; envCapture = null; } // p;
+      platformSpec = { inherit host target; };
+      ovPlatform = o: p: spec (o.${p} or { });
+
+      # --- the instantiate derivation's inputs: keys and tool paths only ---
+
+      noCtx = v: unsafeDiscardStringContext (str v);
+      platformJson = s: {
+        env = lib.attrNames (spec s).env;
+        envCapture = (spec s).envCapture != null;
+      };
+      sourcesFile = toFile "sources.json" (toJSON {
+        workspace = lib.attrNames workspace;
+        crates = lib.attrNames crates;
+      });
+      toolchainsFile = toFile "toolchains.json" (toJSON {
+        inherit system storeDir;
+        tools = lib.mapAttrs (_: noCtx) tools;
+        host = platformJson host;
+        target = platformJson target;
+      });
+      overridesFile = toFile "overrides.json" (toJSON {
+        inherit strictSources;
+        packages = lib.mapAttrs (
+          _: o:
+          lib.genAttrs platforms (p: platformJson (ovPlatform o p))
+          // lib.optionalAttrs ((o.strictSources or null) != null) { inherit (o) strictSources; }
+        ) overrides;
+      });
+      rootsFile = toFile "roots.json" (toJSON roots);
+
+      unitsJson = derivation {
+        name = "${name}.json";
+        inherit system;
+        builder = "${breakbulkInstantiate}/bin/breakbulk-instantiate";
+        args = [
+          "--emit"
+          "json"
+          "--plan"
+          plan
+          "--sources"
+          sourcesFile
+          "--toolchains"
+          toolchainsFile
+          "--overrides"
+          overridesFile
+        ]
+        ++ lib.optionals (roots != null) [
+          "--roots"
+          rootsFile
+        ];
+      };
+
+      json = fromJSON (readFile unitsJson);
+
+      # --- substitution -----------------------------------------------------
+
+      # Every key units.json may name, with its value (and context).
+      inputs =
+        lib.mapAttrs' (d: v: lib.nameValuePair "src:${d}" (str v)) workspace
+        // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
+        // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
+        // lib.concatMapAttrs (
+          p: s:
+          lib.mapAttrs' (k: v: lib.nameValuePair "env:${p}:${k}" (str v)) (spec s).env
+          // lib.optionalAttrs ((spec s).envCapture != null) { "capture:${p}" = str (spec s).envCapture; }
+        ) platformSpec
+        // lib.concatMapAttrs (
+          pkg: o:
+          lib.concatMapAttrs (
+            p: _:
+            let
+              s = ovPlatform o p;
+            in
+            lib.mapAttrs' (k: v: lib.nameValuePair "override:${pkg}:env:${p}:${k}" (str v)) s.env
+            // lib.optionalAttrs (s.envCapture != null) { "override:${pkg}:capture:${p}" = str s.envCapture; }
+          ) platformSpec
+        ) overrides;
+      inputsJson = lib.mapAttrs (_: jsonInside) inputs;
+
+      input =
+        set: k:
+        set.${k} or (throw "breakbulk: units.json names the input `${k}`, which was not given to instantiate");
+
+      part =
+        p:
+        if isString p then
+          p
+        else if p ? unit then
+          units.${p.unit}.${p.output}.outPath
+        else if p.json or false then
+          input inputsJson p.input
+        else
+          input inputs p.input;
+
+      value = v: if isAttrs v then lib.concatMapStrings part v.parts else v;
+
+      mkDrv =
+        d:
+        let
+          attrs = lib.mapAttrs (_: value) d.attrs;
+          big = attrs ? BREAKBULK_UNIT && stringLength attrs.BREAKBULK_UNIT > json.passAsFileAbove;
+        in
+        derivation (attrs // lib.optionalAttrs big { passAsFile = [ "BREAKBULK_UNIT" ]; });
+
+      units =
+        assert lib.assertMsg (json.version == 1) "breakbulk: units.json version ${toString json.version} is not supported";
+        lib.mapAttrs (_: mkDrv) json.units;
+
+      rootsOut = lib.mapAttrs (
+        _: r:
+        (if r ? unit then units.${r.unit}.${r.output} else mkDrv r.stub)
+        // {
+          breakbulkRoot = {
+            inherit (r)
+              package
+              target
+              kind
+              test
+              ;
+            unit = r.unit or null;
+            reason = r.reason or null;
+          };
+        }
+      ) json.roots;
+    in
+    {
+      inherit units unitsJson;
+      roots = rootsOut;
+    };
+
+  # The predicted roots of one plan kind ("build", "test" or "bench"), in the
+  # shape `instantiate` takes, from roots.workspaceRoots.
+  #
+  # A library is a root of a build plan once per linkable crate type
+  # (cdylib, dylib, staticlib). A library's own unit-test binary in the test
+  # and bench plans is left out: plan.json has no root kind for it yet.
+  predictedRoots =
+    {
+      workspaceRoots,
+      planKind,
+      variant,
+    }:
+    let
+      one =
+        pkg: r:
+        let
+          base = {
+            package = pkg;
+            target = r.name;
+            requiredFeatures = r.requiredFeatures;
+            test = r.mode != "build";
+          };
+        in
+        if r.kind == "lib" then
+          if r.mode == "build" then
+            map (k: base // { kind = k; }) (
+              lib.filter (k: lib.elem k r.crateTypes) [
+                "cdylib"
+                "dylib"
+                "staticlib"
+              ]
+            )
+          else
+            [ ]
+        else
+          [ (base // { inherit (r) kind; }) ];
+    in
+    {
+      inherit variant;
+      roots = lib.concatLists (
+        lib.mapAttrsToList (pkg: p: lib.concatMap (one pkg) p.roots.${planKind}) workspaceRoots
+      );
+    };
+}

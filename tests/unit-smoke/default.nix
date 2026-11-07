@@ -80,7 +80,12 @@ let
   run = units.r-smokelib-63aa584f9c6a6c6c;
 in
 {
-  inherit breakbulk-unit units;
+  inherit
+    breakbulk-unit
+    units
+    src
+    capture
+    ;
 
   # Runs the binary, and fails if it references its sources or the build
   # script's OUT_DIR (path remapping covers every scope here).
