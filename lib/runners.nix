@@ -63,6 +63,9 @@ in
       extraArgs ? [ ],
     }:
     script pkgs "breakbulk-runner-wasmtime" ''
+      # wasmtime caches compiled components under $XDG_CACHE_HOME (or
+      # $HOME/.cache), which is unwritable in the sandbox.
+      export XDG_CACHE_HOME="''${TMPDIR:-/tmp}/wasmtime-cache"
       exec ${wasmtime}/bin/wasmtime run ${lib.escapeShellArgs extraArgs} "$@"
     '';
 

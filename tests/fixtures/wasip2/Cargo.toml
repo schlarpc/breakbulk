@@ -1,0 +1,7 @@
+# wasip2 (M7): a wasm32-wasip2 std program built as a component by rustc's
+# own wasm-component-ld, with C code compiled against nixpkgs' wasilibc for
+# wasip2 (stdio and string functions, so headers and libc.a must match).
+# Unit tests and an integration test run under wasmtime.
+[workspace]
+resolver = "3"
+members = ["app"]

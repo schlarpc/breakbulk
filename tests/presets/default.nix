@@ -230,3 +230,7 @@ in
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
   (import ./fixtures.nix { inherit pkgs breakbulk xwinPkgs; }).checks
 )
+# M7 fixtures (./m7.nix): later targets, with the same requirements.
+// lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
+  (import ./m7.nix { inherit pkgs breakbulk; }).checks
+)
