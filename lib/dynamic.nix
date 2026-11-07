@@ -58,8 +58,7 @@ let
   # first released in 2.36. Master reports `2.36.0pre…`, which compares
   # below "2.36", hence "2.36pre". Determinate Nix reports its upstream
   # base (2.35.x) and lacks builder-rpc-v0.
-  available =
-    builtins ? outputOf && builtins.compareVersions builtins.nixVersion "2.36pre" >= 0;
+  available = builtins ? outputOf && builtins.compareVersions builtins.nixVersion "2.36pre" >= 0;
 
   resolveMode =
     mode:
@@ -72,8 +71,7 @@ let
 
   # A root's name, as breakbulk-instantiate's `root_name`.
   rootName =
-    r:
-    "${r.package}/${if r.test && r.kind != "test" then "${r.kind}-test" else r.kind}/${r.target}";
+    r: "${r.package}/${if r.test && r.kind != "test" then "${r.kind}-test" else r.kind}/${r.target}";
 
   validName = s: builtins.match "[A-Za-z0-9+._?=-]+" s != null && !(lib.hasPrefix "." s);
 
@@ -171,7 +169,11 @@ let
       # Every store path any value depends on, as a plain path: a derivation
       # output becomes its .drv file (drv-only: nothing is built).
       contextPaths = lib.unique (lib.concatMap (v: lib.attrNames (getContext v)) (lib.attrValues values));
-      context = builtins.appendContext "" (lib.genAttrs contextPaths (_: { path = true; }));
+      context = builtins.appendContext "" (
+        lib.genAttrs contextPaths (_: {
+          path = true;
+        })
+      );
 
       names = map rootName predicted;
       outputs = lib.genAttrs names outputName;
@@ -239,7 +241,9 @@ let
           wrapper = wrapperOf n;
         in
         derivation {
-          name = storeName "${r.package}-${r.kind}${lib.optionalString (r.test && r.kind != "test") "-test"}-${r.target}";
+          name = storeName "${r.package}-${r.kind}${
+            lib.optionalString (r.test && r.kind != "test") "-test"
+          }-${r.target}";
           inherit system wrapper;
           builder = tools.shell;
           args = [
@@ -358,7 +362,9 @@ let
             if [ ''${#dylibFlags[@]} -gt 0 ]; then
               __bb_dylib=$(${jq} -rn --argjson outs "$(${jq} -c '.testSpec.dylibOuts' "$info")" ${lib.escapeShellArg testRuns.dylibJq} "''${dylibFlags[@]}")
             fi
-            for __bb_p in ${lib.escapeShellArgs (lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib")}; do
+            for __bb_p in ${
+              lib.escapeShellArgs (lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib")
+            }; do
               __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
             done
             export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

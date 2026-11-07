@@ -72,7 +72,11 @@ let
     # Every build script includes ../common/build_common.rs.
     directives = mkRepo "directives" [
       oneWs
-      { packages = lib.genAttrs directivesPackages (_: { extraSources = [ "common" ]; }); }
+      {
+        packages = lib.genAttrs directivesPackages (_: {
+          extraSources = [ "common" ];
+        });
+      }
     ];
     # The `host` workspace embeds the `payload` workspace's product, as in
     # tests/products (embed).
@@ -143,9 +147,11 @@ let
       builtins.toJSON (
         lib.concatMapAttrs (
           wsName: _:
-          lib.mapAttrs' (kind: us: lib.nameValuePair "${wsName}/${kind}" (lib.mapAttrs (_: u: discard u.drvPath) us)) {
-            inherit ((inst repo wsName).units) build test;
-          }
+          lib.mapAttrs'
+            (kind: us: lib.nameValuePair "${wsName}/${kind}" (lib.mapAttrs (_: u: discard u.drvPath) us))
+            {
+              inherit ((inst repo wsName).units) build test;
+            }
         ) repo.workspaces
       )
     );
@@ -171,7 +177,9 @@ let
       lib.concatMap (
         repo:
         lib.concatLists (
-          lib.mapAttrsToList (wsName: _: map toString (lib.attrValues (inst repo wsName).plans)) repo.workspaces
+          lib.mapAttrsToList (
+            wsName: _: map toString (lib.attrValues (inst repo wsName).plans)
+          ) repo.workspaces
         )
       ) (lib.attrValues repos)
       ++ map toString (lib.attrValues (inst lintRepo "main").plans)

@@ -319,7 +319,7 @@ The instantiate derivation runs `breakbulk-instantiate --emit json` and writes `
 
 ### Dynamic-derivation mode
 
-One outer derivation per plan (`lib/dynamic.nix`) is content-addressed with text-hashed outputs and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. It is named `<ws>-<triple>-<variant>` for the build plan and `<ws>-<triple>-<variant>-test` for the test plan, because submitted outputs must be named `<outer name>-<output>` and that name appears in store paths. It has one output per predicted root, `<package>.<kind>.<target>.drv` (the root name with `/` as `.`).
+One outer derivation per plan (`lib/dynamic.nix`) is content-addressed with text-hashed outputs and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. It is named `<ws>-<triple>-<variant>` for the build plan and `<ws>-<triple>-<variant>-test` for the test plan, because submitted outputs must be named `<outer name>-<output>` and that name appears in store paths. It has one output per predicted root, `<package>.<kind>.<target>.drv` (the root name with `/` as `.`), plus `units.drv` (below). The bench plan, when there is one, is `<ws>-<triple>-<variant>-bench`.
 
 Its builder is `breakbulk-drv`, a separate binary with its own Cargo workspace and lockfile (`breakbulk-drv/`), so that harmonia and tokio reach neither the main `Cargo.lock`, from which every breakbulk binary is built (a harmonia update must not change `breakbulk-unit` and so every unit), nor `breakbulk-instantiate`, which IFD mode builds before evaluation can continue. It uses `breakbulk-instantiate` as a library:
 
@@ -334,7 +334,7 @@ On the evaluation side, each root is a small derivation that symlinks `builtins.
 
 What is not known at evaluation time in this mode, and what that changes:
 
-- **Unit derivations** (`ws.units`) are not available; reading them is an error. `explainSharing` needs IFD mode.
+- **Unit derivations** (`ws.units`) are not available; reading them is an error. `explainSharing` needs IFD mode. Instead, the outer derivation has one more output, `units.drv`, a derivation that depends on every output of every unit of the plan (`ws.allUnits.<kind>`). Check and clippy variants, which have no roots, build their plans through it.
 - **Roots Cargo did not build** (required features) cannot be told apart from built ones at evaluation time. Their wrappers depend on the root stub, so building such a product root fails with the reason, and so does a product containing it; in IFD mode the product leaves it out. A test-run stub succeeds and logs that it was skipped, as in IFD mode.
 - **Test runs** read what they need from the wrapper's `breakbulk-root.json` at build time (`dynamic.mkTestRuns`), with the same environment, working directory, runner and arguments as IFD mode.
 - **Doctests and test apps** are not available yet: the doctest derivations are templated from the plan and would have to be written by the outer derivation with the test configuration passed in, and test apps need the plan at evaluation time.
