@@ -19,6 +19,8 @@
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
 #   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
 #   breakbulk.mkWorkspace pkgs { root; path; toolchain; ... }  (lib/workspace.nix)
+# Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
+#   breakbulk.testApps.mkTestApps { ... } (runnable apps)
 { lib }:
 let
   util = import ./util.nix { inherit lib; };
@@ -38,6 +40,11 @@ let
   inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix { inherit lib wasmBindgen; };
+  testRuns = import ./test-runs.nix { inherit lib stages; };
+  testApps = import ./test-apps.nix {
+    inherit lib;
+    testRunsLib = testRuns;
+  };
 
   mkFetch =
     pkgs:
@@ -81,6 +88,8 @@ let
       mkVendor
       mkTools
       mkPlan
+      testRuns
+      testApps
       ;
   };
 in
@@ -106,7 +115,7 @@ in
 
   xwinSdk = import ./xwin-sdk.nix { inherit lib; };
 
-  inherit wasmBindgen stages;
+  inherit wasmBindgen stages testRuns testApps;
   inherit (stages) mkProduct;
   stageHelpers = stages.helpers;
 }

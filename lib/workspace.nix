@@ -19,6 +19,16 @@
 #   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target>
 #   ws.plans.{build,test}      the plan derivations ($out/plan.json)
 #   ws.units.{build,test}      every unit derivation, by unit id
+#   ws.testRuns.<pkg>.<binary> test-run derivations (lib/test-runs.nix)
+#   ws.testApps.<pkg>.<binary> runnable apps (lib/test-apps.nix)
+#   ws.doctests.<pkg>          doctest derivations
+#   ws.checks."test/<pkg>/<binary>", ."doctest/<pkg>"
+#                              enabled test runs and doctests, flat
+#
+# Test options (M2's module options take these over): `runner` (null or a
+# list), `testSystem`, `packages.<name>.test` (env, path, args,
+# includeIgnored, binaries.<binary>.{args,enable}), `ca` (null: automatic),
+# `checkout` (the user's checkout of the repository root, for test apps).
 {
   lib,
   util,
@@ -33,6 +43,8 @@
   mkVendor,
   mkTools,
   mkPlan,
+  testRuns,
+  testApps,
 }:
 pkgs:
 {
@@ -48,6 +60,11 @@ pkgs:
   extraSources ? { },
   tools ? mkTools pkgs,
   name ? "breakbulk",
+  runner ? null,
+  testSystem ? null,
+  packages ? { },
+  ca ? null,
+  checkout ? null,
 }:
 let
   wsDir = util.normalizeRel path;
@@ -99,6 +116,15 @@ let
 
   wsRoots = roots.workspaceRoots { inherit root wsDir; };
 
+  unitTools = {
+    rustc = toolchain.rustc;
+    # The sysroot, which Cargo puts on build scripts' library path.
+    rustc-sysroot = toolchain.rustc.unwrapped or toolchain.rustc;
+    cargo = toolchain.cargo;
+    breakbulk-unit = "${tools.breakbulk-unit}/bin/breakbulk-unit";
+    shell = "${pkgs.bash}/bin/bash";
+  };
+
   inst =
     kind:
     instantiate {
@@ -106,14 +132,7 @@ let
       inherit system;
       plan = "${plans.${kind}}/plan.json";
       sources = { inherit workspace crates; };
-      tools = {
-        rustc = toolchain.rustc;
-        # The sysroot, which Cargo puts on build scripts' library path.
-        rustc-sysroot = toolchain.rustc.unwrapped or toolchain.rustc;
-        cargo = toolchain.cargo;
-        breakbulk-unit = "${tools.breakbulk-unit}/bin/breakbulk-unit";
-        shell = "${pkgs.bash}/bin/bash";
-      };
+      tools = unitTools;
       host.envCapture = captures.host;
       target.envCapture = captures.target;
       roots = predictedRoots {
@@ -139,6 +158,22 @@ let
       install -D -m755 "''${files[0]}" $out/${dir}/${fileName}
     '';
 
+  tr = testRuns.mkTestRuns {
+    inherit
+      pkgs
+      target
+      runner
+      testSystem
+      packages
+      ca
+      name
+      ;
+    plan = plans.test;
+    inst = tested;
+    sources = { inherit workspace crates; };
+    tools = unitTools;
+  };
+
   bins = lib.filterAttrs (_: r: r.breakbulkRoot.kind == "bin" && !r.breakbulkRoot.test) built.roots;
 in
 {
@@ -163,6 +198,17 @@ in
   packages = lib.mapAttrs' (
     _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" r.breakbulkRoot.target r)
   ) bins;
+  testRuns = tr.runs;
+  testApps = testApps.mkTestApps {
+    inherit
+      pkgs
+      checkout
+      packages
+      name
+      ;
+    testRuns = tr;
+  };
+  inherit (tr) doctests checks;
   # Test binaries by root name, installed as $out/bin/<target>.
   testBins = lib.mapAttrs (
     _: r: if r.breakbulkRoot.unit == null then r else install "bin" r.breakbulkRoot.target r
