@@ -370,7 +370,7 @@ let
       mapfile -t __bb_flags < <(${jq} -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
       __bb_dylib=
       if [ ''${#__bb_flags[@]} -gt 0 ]; then
-        __bb_dylib=$(${jq} -rn --argjson outs "$(${jq} -c '.testSpec.dylibOuts' "$info")" ${lib.escapeShellArg testRuns.dylibJq} "''${__bb_flags[@]}")
+        __bb_dylib=$(${jq} -rn ${lib.escapeShellArg testRuns.dylibJq} "''${__bb_flags[@]}")
       fi
       for __bb_p in ${lib.escapeShellArgs extra}; do
         __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
