@@ -319,6 +319,7 @@ Islands only cut off, and products only reproduce, if outputs are byte-stable.
 - Source paths are remapped as described in [Source paths and debug information](#source-paths-and-debug-information).
 - No `-C incremental` inside unit builds. The planner strips it from argv and never sets `CARGO_INCREMENTAL`, because the incremental setting is part of every unit's `-C metadata`.
 - A content-derived `--build-id`.
+- CMake's internal state (`CMakeFiles`, with its configure log) is removed from build-script output after the run; the rest of the build tree is kept.
 - A built-in check rebuilds sampled units and products with `nix build --rebuild` and compares their outputs.
 
 ### The rustc limit, and what is changing

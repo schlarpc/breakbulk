@@ -397,6 +397,7 @@ Nothing from the planner's environment reaches a unit.
 4. Parse stdout. Write `$flags/directives.json` (values grouped by kind, in printed order), and `$flags/metadata.json` when the package declares `links`.
 5. Fail on a non-zero exit, on death by signal (with the signal named), and on any `error` directive. Print `warning` directives.
 6. Check every `rerun-if-changed` path against the sandbox. On failure, add a hint for each missing path naming the package option to add it to; likewise for `rerun-if-env-changed` variables that are unset. On success, warn about missing paths, or fail when `strictSources` is set.
+7. Remove CMake's internal state: in every directory of `$out` that holds both `CMakeCache.txt` and `CMakeFiles/` (the `cmake` crate's `$OUT_DIR/build`), delete `CMakeFiles`. Its configure log names randomly named try-compile directories, so the run would not be reproducible, and nothing reads it after the script (the `cmake` crate reads its build tree back only within one run). The rest of the tree stays, because crates link from it (decision 65).
 
 ### Directive parsing
 
