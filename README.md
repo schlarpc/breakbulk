@@ -33,7 +33,7 @@ breakbulk is young. Its first users are the author's own repositories.
 | M4 | Post-link stages, test runs, doctests, benches, clippy, coverage, products as inputs | Done, except Windows post-link tests and the exit check on a real multi-workspace repository |
 | M5 | Dynamic-derivation delivery (no import-from-derivation) | Works on Nix master. It turns on by itself once a released Nix has the feature. Test: `nix run .#test-dynamic`. Doctests and test apps are not in this mode yet |
 | M6 | Pipelined split, dep-info source narrowing, nextest, docs product, measurements | Not started |
-| M7 | Later targets: wasip2, riscv64, windows-gnu, build-std, Darwin, zig | Not started |
+| M7 | Later targets: wasip2, riscv64, windows-gnu, build-std, Darwin, zig | wasip2, riscv64, windows-gnu (and gnullvm) and zig done. build-std fails at planning; Darwin not started (no Mac builders) |
 
 ## Quickstart
 
@@ -120,7 +120,7 @@ All configuration is in NixOS-style modules. The full list of options is in
   benches).
 - `targets.<triple>`: the toolchain spec of a target. Start from a preset
   (`breakbulk.presets.linuxGnu`, `linuxMusl`, `staticGlibc`, `msvc`,
-  `wasmBrowser`, `wasmComponent`) and override any field: linker, C
+  `wasmBrowser`, `wasmComponent`, `wasip2`, `windowsGnu`, `zig`) and override any field: linker, C
   compiler, rustflags, env, test runner, post-link stages.
 - `packages.<name>`: settings for one package's units only: `env`,
   `nativeInputs`, `inputs`, `extraSources`, stages, checks, and `test`
@@ -145,10 +145,14 @@ dev shell warns when it sees them.
 | wasm32-unknown-unknown, browser | `wasmBrowser` | lld (wasm) | wasm-bindgen test runner with Node |
 | wasm32-unknown-unknown, component | `wasmComponent` | lld (wasm) | wasmtime |
 | x86\_64 and aarch64 Windows msvc | `msvc` | lld-link | wine (x86\_64) |
+| wasm32-wasip2 | `wasip2` | rustc's wasm-component-ld | wasmtime |
+| riscv64gc Linux gnu | `linuxGnu` | mold | qemu-user |
+| x86\_64 Windows gnu and gnullvm (mingw-w64) | `windowsGnu` | lld | wine |
+| Host triple, old glibc (e.g. 2.17) | `zig` | zig cc | native |
 
 The Windows preset needs the Microsoft CRT and Windows SDK, which are
-unfree. breakbulk downloads them with `breakbulk.xwinSdk`. Later targets
-(wasip2, riscv64, windows-gnu, build-std, Darwin) are planned, not built.
+unfree. breakbulk downloads them with `breakbulk.xwinSdk`. build-std
+targets and Darwin are not supported yet.
 
 ## Known limitations
 

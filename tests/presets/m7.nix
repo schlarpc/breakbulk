@@ -9,6 +9,17 @@
 #   riscv64-*         riscv64gc-unknown-linux-gnu via linuxGnu (nixpkgs cross,
 #                     mold), openssl-sys and zstd-sys from the cross env
 #                     capture; product and tests under qemu-riscv64
+#   windows-gnu-*     x86_64-pc-windows-gnu (mingw gcc, msvcrt) and
+#   windows-gnullvm-* x86_64-pc-windows-gnullvm (LLVM mingw, ucrt), lld,
+#                     +crt-static: only system DLLs, PE time stamp 0; run
+#                     and tests under wine. Determinism was checked by hand
+#                     (`nix-build --check` on the .exe link units)
+#   zig-*             host triple against glibc 2.17 with zig cc; newest
+#                     GLIBC symbol version 2.17 (objdump -T); host units
+#                     keep the host linker (asserted on the plan)
+#
+# tests/fixtures/build-std is exploratory and not a check: planning fails
+# (docs/implementation.md "build-std").
 {
   pkgs,
   breakbulk,

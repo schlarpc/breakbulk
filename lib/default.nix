@@ -180,7 +180,8 @@ in
     ;
 
   # Toolchain presets (M3): breakbulk.presets.{linuxGnu, linuxMusl,
-  # staticGlibc, msvc, wasmBrowser, wasmComponent}; runners; the Rust to
+  # staticGlibc, msvc, wasmBrowser, wasmComponent} and (M7) {wasip2,
+  # windowsGnu, zig}; runners; the Rust to
   # LLVM version table.
   inherit presets runners llvmVersions;
   inherit (stages) mkProduct;

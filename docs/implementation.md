@@ -631,6 +631,10 @@ A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple
 | `msvc { arch; sdk }` | `lld-link` | `clang-cl`, `llvm-lib` from the LLVM matching rustc | `-Lnative=` for CRT, `um` and `ucrt` libs; `CFLAGS_<triple>` with `-imsvc`; `BINDGEN_EXTRA_CLANG_ARGS_<triple>` with `-isystem`; `RC`, `RCFLAGS`, `LIB`; optional `+crt-static` | `wine` with a `WINEPREFIX` in `$TMPDIR` | none |
 | `wasmBrowser` | lld from rustc's target spec, version-matched | unwrapped clang targeting wasm32 | none by default | `wasm-bindgen-test-runner` + headless Chromium, or Node | `bindgen` → `wasmOpt` |
 | `wasmComponent` | as `wasmBrowser` | clang + `wasilibc` when C is present | `-C link-self-contained=no` + `-L` to `wasilibc` when C is present | `wasmtime` | `wasmOpt` (optional) → `componentize` |
+| `wasip2` | rustc's own `wasm-component-ld` (found on the PATH rustc gives its linker), through a wrapper adding `--wasm-ld-path` to the version-matched `wasm-ld` | unwrapped clang + nixpkgs `wasilibc` rebuilt for `wasm32-wasip2`, when `withC` | `-L native=` to that `wasilibc`, ahead of rustc's self-contained directory; the wrapper swaps rustc's `crt1-command.o`/`crt1-reactor.o` for wasilibc's | `wasmtime` | none |
+| `linuxGnu` for `riscv64gc-unknown-linux-gnu` | as `linuxGnu` (`pkgsCross.riscv64`) | as `linuxGnu` | as `linuxGnu` | `qemu-riscv64` | `splitDebug` |
+| `windowsGnu` | the toolchain's C driver with `-fuse-ld=lld`, `--no-insert-timestamp`, and an `ld.lld` shim that drops GCC's default `-pie` | `pkgsCross.mingwW64` (gcc, msvcrt) for `-gnu`; nixpkgs' `mingw-ucrt-x86_64-llvm` (clang, ucrt) for `-gnullvm` | `+crt-static` by default (only system DLLs); `-L native=` winpthreads for `-gnu` | `wine` (x86\_64, i686) | none |
+| `zig { glibc }` | `zig cc -target <arch>-linux-gnu.<glibc>` | the same `zig cc`, `zig c++`, `zig ar` | none | the build machine's `ld.so` (zig links the FHS loader path) | `splitDebug` |
 
 ### msvc
 
@@ -658,9 +662,25 @@ The include directories are passed twice in different syntax: `-imsvc` for `clan
 - **wasm-bindgen version.** The `bindgen` stage reads the `wasm-bindgen` version from the workspace's `Cargo.lock`. It picks the matching `wasm-bindgen-cli_<version>` from nixpkgs, or builds that version from crates.io with a hash from a table shipped with the library. If neither exists, evaluation fails naming the version.
 - **Unwrapped clang.** C code uses clang from the LLVM matching rustc, never the stdenv compiler wrapper. A wrapped gcc can silently produce host objects for a wasm target.
 
-### Zig (later)
+### wasip2
 
-For an old glibc version: `zig cc -target <arch>-linux-gnu.<glibc>` wrappers as linker and C compiler for target units. The host triple is the same, so host units keep the host linker through the planner's linker rewrite. A separate derivation pre-warms zig's global cache for the target, and `breakbulk-unit` copies it into `$TMPDIR` before each unit.
+`-C link-self-contained=no` is the wrong switch on `wasm32-wasip2`: rustc's target spec lists `crt1-command.o` only among its self-contained objects (`rustc_target` `targets/wasm32_wasip2.rs`, `crt_objects.rs`), so turning self-contained linking off links executables without `_start` ("entry symbol not defined"). The preset leaves it on and instead puts nixpkgs' wasi-libc directory before rustc's on the search path (user `-L` comes first in `rustc_codegen_ssa` `back/link.rs`), and its linker wrapper replaces the crt1 objects. Only `libunwind.a` still comes from rustc. Rust 1.99 bundles wasi-libc from wasi-sdk 33; nixpkgs has 32, rebuilt for wasip2 without shared libraries. Products are components, installed under `pkg/` like every wasm product. The wasmtime runner keeps its compilation cache in `$TMPDIR`.
+
+### windows-gnu
+
+GCC 15 and later passes `-pie` to the linker for every executable (its link spec `%{static|shared|r:;!no-pie:-pie}`). GNU ld reads it as `--dynamicbase` for PE; lld's MinGW driver rejects it, so the preset's `ld.lld` drops it (lld's MinGW driver uses `--dynamicbase` by default, and rustc passes it too). lld stamps PE headers with the current time unless told otherwise (`lld/MinGW/Driver.cpp`), hence `--no-insert-timestamp`. With these, the `.exe` link units of both triples pass `nix-build --check`. nixpkgs' mingw gcc keeps winpthreads outside the toolchain, and rustc's `+crt-static` link asks for `-l:libpthread.a`, hence the extra search path. aarch64 `-gnullvm` maps to `pkgsCross.ucrtAarch64` but is untested.
+
+### Zig
+
+For an old glibc version: `zig cc -target <arch>-linux-gnu.<glibc>` wrappers as linker, C and C++ compiler and archiver for target units. The host triple is the same, so host units keep the host linker through the planner's linker rewrite. A separate derivation pre-warms zig's global cache for the target (an executable and a shared library linked with the libraries rustc passes). zig refuses a read-only cache (`manifest_create AccessDenied`, zig 0.17.0), but a copy at another path is a full hit: about 60 MB, copied in well under 0.1 s, against about 10 s to rebuild it. The wrapper itself copies the cache into `$TMPDIR` on first use in a unit (copy aside, then rename, so parallel cc jobs do not race), so `breakbulk-unit` has no zig special case. The wrapper also drops the `--target=<Rust triple>` the cc crate passes, which zig cannot parse. Test binaries name the FHS loader `/lib64/ld-linux-x86-64.so.2`, which a Nix sandbox lacks, so the runner starts them through the build machine's `ld.so`. Native libraries from `packages.<name>.inputs` are nixpkgs builds against nixpkgs' newer glibc and defeat the purpose; the preset is for programs whose C code is vendored.
+
+### build-std (not working yet)
+
+A nightly toolchain with `rust-src` and `[unstable] build-std = ["core", "compiler_builtins"]` in the project's config builds `x86_64-unknown-none` with plain Cargo. Under breakbulk, planning fails: Cargo resolves the standard library's own workspace (`library/Cargo.lock` in `rust-src`) even for `core` only, and its crates.io dependencies (`hashbrown`, `libc`, `rustc-literal-escaper`, …) are not in the project's lockfile, so the offline planner's vendor directory lacks them ("no matching package named `rustc-literal-escaper`"). Next steps: fetch the crates in the toolchain's `library/Cargo.lock` like the project's own (they have checksums) and add them to the planning vendor directory and the unit sources; then check that units whose sources are in the toolchain's store path are remapped and keyed correctly, and that `-Z` flags reach them. The exploratory fixture is `tests/fixtures/build-std` (not a check).
+
+### Darwin (not started)
+
+There are no Mac builders here. What it would take: the planner and units must run on `aarch64-darwin` (the Nix sandbox on macOS is weaker, so the determinism check matters more); the linker is the nixpkgs Darwin cc wrapper (ld64, or lld for cross-language LTO) with the SDK from nixpkgs' `apple-sdk`; products need the Darwin stages already listed in design.md (`dsymutil`, `strip`, ad-hoc code signing, which must come last since it hashes the binary); split debug info is `.dSYM` bundles, not `.debug` files; and `-C split-debuginfo` defaults differ (`unpacked` on macOS), which changes what the linking unit must capture. Cross-building to Darwin from Linux is out of scope (SDK licensing); tests need a native builder (`testSystem`).
 
 ## Products, stages and tests
 
@@ -811,6 +831,7 @@ Each milestone ends with fixtures passing in CI, so progress is measured by patt
 7. **M6: Below-crate seams and measurement.** The pipelined split with its backends, the history-replay harness reporting rmeta stability per edit, optional dep-info source narrowing, nextest integration, the documentation product, `trim-paths` by default once Cargo 1.101 is stable, and full-CA units once Nix resolves derivations without fetching input contents.
    - **Exit:** a published measurement on stable and on nightly with relink-don't-rebuild flags, and a go or no-go on each pipelining backend.
 8. **M7: Later targets.** wasip2, riscv64, windows-gnu, build-std targets, Darwin on Mac builders, zig.
+   - **Status:** wasip2, riscv64, windows-gnu and windows-gnullvm (x86\_64), and zig pass their fixtures (`tests/presets/m7.nix`). build-std fails at planning and Darwin is not started; see "Toolchain presets".
 
 ## Spikes and open questions
 
@@ -828,4 +849,4 @@ Spikes A, B and C gate M1 and M2. The rest are measurements to take as soon as t
 | Graph size | How large do instantiated derivations get with transitive inputs, and how fast is instantiation? | Instantiate a 1,000-unit graph in both modes | Store write batching; evaluation time in IFD mode |
 | CRIU in a sandbox | Can a builder checkpoint and restore rustc inside a nested namespace in the Nix sandbox, and is the rlib byte-identical to a normal compile? | Prototype outside Nix, then inside | The CRIU pipelining backend |
 | nextest reuse | Can a synthesized `binaries-metadata` file drive nextest over binaries that live in separate store paths? | Prototype with one fixture | M6 nextest integration |
-| Zig cache | Does zig accept a pre-warmed global cache that is read-only or only partly populated? | Try both on one target | The zig preset |
+| Zig cache | Does zig accept a pre-warmed global cache that is read-only or only partly populated? | Try both on one target | The zig preset. Done: read-only fails; a writable copy at another path is a full hit (see "Zig") |
