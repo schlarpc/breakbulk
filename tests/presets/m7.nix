@@ -6,6 +6,9 @@
 #   wasip2-*          wasm32-wasip2 std component (rustc's wasm-component-ld),
 #                     C against nixpkgs' wasi-libc built for wasip2 (built
 #                     here, not cached by Hydra); tests under wasmtime
+#   riscv64-*         riscv64gc-unknown-linux-gnu via linuxGnu (nixpkgs cross,
+#                     mold), openssl-sys and zstd-sys from the cross env
+#                     capture; product and tests under qemu-riscv64
 {
   pkgs,
   breakbulk,
@@ -112,10 +115,46 @@ let
       wasip2-test-bin = t.testRuns.app."bin/app";
       wasip2-test-it = t.testRuns.app.it;
     };
+
+  # --- riscv64 -------------------------------------------------------------------
+
+  rv = "riscv64gc-unknown-linux-gnu";
+  rvRust = rustWith [ rv ];
+  riscv64Repo = mkRepo (fixtures + "/riscv64") [
+    {
+      workspaces.main = wsWith rvRust [ rv ];
+      targets.${rv}.preset = presets.linuxGnu;
+      # openssl-sys and zstd-sys get pkg-config and the riscv64 openssl and
+      # zstd from breakbulk's sysDefaults (lib/sys-defaults.nix), captured
+      # with the riscv64 cross stdenv.
+    }
+  ];
+  riscv64Checks =
+    let
+      t = riscv64Repo.workspaces.main.target.${rv};
+    in
+    {
+      # A RISC-V ELF linked by mold, against the riscv64 OpenSSL, running
+      # under qemu-riscv64.
+      riscv64-run =
+        pkgs.runCommand "riscv64-run" { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; }
+          ''
+            f=${t.packages.app}/bin/app
+            readelf -hW $f | grep -q 'Machine:.*RISC-V'
+            readelf -p .comment $f | grep -q mold
+            readelf -dW $f | grep NEEDED | tee needed.txt
+            grep -q libcrypto.so needed.txt; grep -q libzstd.so needed.txt
+            ${lib.escapeShellArgs t.runner} $f | tee out.txt
+            grep -qx "arch=riscv64 openssl=3+ zstd=ok" out.txt
+            mkdir -p $out
+            cp needed.txt out.txt $out/
+          '';
+      riscv64-test-lib = t.testRuns.app."lib/app";
+    };
 in
 {
   repos = {
-    inherit wasip2Repo;
+    inherit wasip2Repo riscv64Repo;
   };
-  checks = wasip2Checks;
+  checks = wasip2Checks // riscv64Checks;
 }

@@ -1,0 +1,8 @@
+# riscv64 (M7): riscv64gc-unknown-linux-gnu through the linuxGnu preset
+# with nixpkgs' riscv64 cross toolchain. Two -sys crates exercise the
+# cross env capture: openssl-sys and zstd-sys find the riscv64 OpenSSL and
+# zstd with pkg-config (breakbulk's sysDefaults declare them; inputs come
+# from the target package set). Tests run under qemu-user.
+[workspace]
+resolver = "3"
+members = ["app"]
