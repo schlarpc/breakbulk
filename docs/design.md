@@ -174,7 +174,7 @@ Check and clippy variants should use the same profile as the main build variant 
 | Preset | Default stages |
 | --- | --- |
 | Linux gnu / musl | `splitDebug` |
-| Windows msvc | none (PDBs are already separate) |
+| Windows msvc | none (PDBs are already separate; `install` puts them in the `debug` output) |
 | wasm, browser | `bindgen` → `wasmOpt` |
 | wasm, component | `wasmOpt` → `componentize` |
 | Darwin (later) | `dsymutil` → `strip` → `adhocSign` |

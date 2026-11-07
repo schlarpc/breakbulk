@@ -307,7 +307,7 @@ Instantiation therefore realises nothing except the plan and the source views. N
 | `name` | `<crate>-<version>-<kind>`, for example `ring-0.17.14-lib` or `ring-0.17.14-build-run` |
 | `builder` / `args` | `breakbulk-unit`, `["unit"]` |
 | `env.BREAKBULK_UNIT` | Canonical JSON of the unit with every reference rendered |
-| `outputs` | Library: `rmeta`, `rlib`. Bin or test: `out`. Build-script run: `out`, `flags`. Input-addressed |
+| `outputs` | Library: `rmeta`, `rlib`. Bin or test: `out`. Build-script run: `out`, `flags`. Target-platform linking units (bins, tests, examples, cdylibs, dylibs, staticlibs) also `debug`, last, for their debuginfo side files; it is declared always, because Nix outputs are fixed before the build, and is empty unless rustc writes side files. Input-addressed |
 | `inputs` | `Built{drv, output}` for each referenced unit output, crate source, toolchain component and env capture; `Opaque` for each source view |
 | `system` | The builder platform: the planner's system for compile units |
 
@@ -387,7 +387,7 @@ Nothing from the planner's environment reaches a unit.
 4. Add path remapping, unless the plan already carries Cargo's own remaps (`trimPaths`): map every source view, crate source and upstream `OUT_DIR` to a stable name (`<name>-<version>` for crates, the package's path from the repository root for workspace members), with the scope for the unit's product kind (see below).
 5. Point `--out-dir` at `$TMPDIR/out` and run the recorded program.
 6. Parse rustc's JSON diagnostics from stderr, print each `rendered` field, and drop artifact notifications. Without this, build logs are unreadable JSON.
-7. Move outputs into place: `.rmeta` to `$rmeta`, `.rlib` to `$rlib`, binaries and cdylibs to `$out`. Discard dep-info. Debuginfo side files (`.dwp` with `split-debuginfo=packed`, `.dwo` with `unpacked`, and `.pdb` and `.dSYM` on other platforms) are not in the plan's output list, because `--print=file-names` does not name them. They are collected by scanning `$TMPDIR/out` and moved with the output they belong to.
+7. Move outputs into place: `.rmeta` to `$rmeta`, `.rlib` to `$rlib`, binaries and cdylibs to `$out`. Discard dep-info. Debuginfo side files (`.dwp` with `split-debuginfo=packed`, `.dwo` with `unpacked`, and `.pdb` and `.dSYM` on other platforms) are not in the plan's output list, because `--print=file-names` does not name them. They are collected by scanning `$TMPDIR/out` for `.pdb`, `.dwp` and `.dwo` files and moved, under rustc's names, to the unit's `debug` output; units without one (libraries, host units) discard them with a warning.
 
 ### `run` (build scripts)
 
@@ -692,6 +692,8 @@ checks.<name> = { on = "linked"; run = { input, product, pkgs }: <derivation>; }
 
 Each check becomes `repo.checks."<ws>/<triple>/<pkg>/<name>"`. Every product gets `noSourceReferences` by default, which fails if the main output's runtime closure contains a source-view or crate-source store path. The `debug` output is exempt.
 
+Debuginfo side files (decision 89): the `linked` stage has a second output, `debug`, with the root units' `.pdb`, `.dwp` and `.dwo` files under the names Cargo uplifts them to (a bin's `.dwp` as `<bin>.dwp`; `.pdb` and `.dwo` under rustc's names, which the binaries record). Stages see it as `product.linkedDebug`. `splitDebug` copies the files into its `debug` output; without an earlier stage that splits debug information, `install` writes them to its own `debug` output in the install layout (`$debug/bin/app.pdb` for `$out/bin/app.exe`). `products.<pkg>.debug` is the last such output. On msvc the PDB references the sources and the rlibs it was linked from; the main output references neither.
+
 ### Stage helpers
 
 | Helper | Does |
@@ -703,7 +705,7 @@ Each check becomes `repo.checks."<ws>/<triple>/<pkg>/<name>"`. Every product get
 | `wasmOpt { flags ? [ "-Oz" ] }` | `wasm-opt` on a core module |
 | `componentize { adapter ? null; metadata ? { } }` | `wasm-tools component new`, then `wasm-tools metadata add` |
 | `deterministicZip` | Sorted entries, fixed timestamps, no extra attributes |
-| `install` | Final layout |
+| `install` | Final layout; the link units' debuginfo side files (`.pdb`) in a `debug` output in the same layout, when no earlier stage split debug information |
 
 ### Tests
 

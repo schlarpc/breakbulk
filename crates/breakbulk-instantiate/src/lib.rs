@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use breakbulk_format::rendered::{derivation_output, package_name_version};
+use breakbulk_format::rendered::{DEBUG_OUTPUT, derivation_output, package_name_version};
 use breakbulk_format::{
     Arg, CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, Unit,
     UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in, to_canonical_json,
@@ -549,7 +549,8 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
     store_name(&format!("{pkg}-{version}-{kind}"))
 }
 
-/// A unit derivation's outputs.
+/// A unit derivation's outputs: sorted, then `debug` last, so that it is
+/// never the default (first) output.
 pub fn unit_outputs(unit: &Unit) -> Vec<String> {
     match unit {
         Unit::Compile(c) => c
@@ -558,6 +559,7 @@ pub fn unit_outputs(unit: &Unit) -> Vec<String> {
             .map(|o| derivation_output(o).to_owned())
             .collect::<BTreeSet<_>>()
             .into_iter()
+            .chain(c.has_debug_output().then(|| DEBUG_OUTPUT.to_owned()))
             .collect(),
         Unit::Run(_) => vec!["flags".into(), "out".into()],
     }

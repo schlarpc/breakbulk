@@ -257,8 +257,11 @@ fn wrappers() {
     assert_eq!(w.builder, SHELL);
     assert_eq!(w.outputs, ["out"]);
     assert_eq!(w.env["root"], unit_path(APP, "out"));
+    // The bin's debuginfo side files, linked as `debug`.
+    assert_eq!(w.env["debugRoot"], unit_path(APP, "debug"));
     assert_eq!(w.env["PATH"], format!("{COREUTILS}/bin"));
     assert!(w.input_drvs[&drv_of(APP)].contains("out"));
+    assert!(w.input_drvs[&drv_of(APP)].contains("debug"));
     assert!(w.input_drvs[&drv_of("coreutils")].contains("out"));
     let info: serde_json::Value = serde_json::from_str(&w.env["rootJson"]).unwrap();
     assert_eq!(info["unit"], APP);
@@ -271,6 +274,7 @@ fn wrappers() {
         w.env["root"],
         unit_path("stub:smokeapp/bin/admin-cli", "out")
     );
+    assert_eq!(w.env["debugRoot"], "");
     let info: serde_json::Value = serde_json::from_str(&w.env["rootJson"]).unwrap();
     assert!(
         info["reason"]

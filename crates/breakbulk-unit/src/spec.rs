@@ -463,6 +463,10 @@ pub fn package_spec(id: &str) -> String {
 }
 
 /// The derivation output a compile output name goes to: `bin` → `out`.
+/// The output of a linking unit that receives its debuginfo side files
+/// (`.pdb`, `.dwp`, `.dwo`). The unit lists it in `outputs` with no files.
+pub const DEBUG_OUTPUT: &str = "debug";
+
 pub fn derivation_output(output: &str) -> &str {
     match output {
         "bin" => "out",

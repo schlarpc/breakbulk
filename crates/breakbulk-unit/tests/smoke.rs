@@ -138,6 +138,7 @@ fn derivation_outputs(u: &Unit) -> Vec<String> {
             .outputs
             .keys()
             .map(|o| derivation_output(o).to_owned())
+            .chain(c.has_debug_output().then(|| "debug".to_owned()))
             .collect(),
         Unit::Run(_) => vec!["flags".into(), "out".into()],
     }

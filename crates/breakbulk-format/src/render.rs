@@ -306,6 +306,10 @@ pub fn render_unit_in<R: Resolve>(
                     .outputs
                     .iter()
                     .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+                    .chain(
+                        c.has_debug_output()
+                            .then(|| (breakbulk_unit::spec::DEBUG_OUTPUT.to_owned(), Vec::new())),
+                    )
                     .collect(),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,

@@ -16,6 +16,8 @@
 //! directory:
 //!
 //! - `root`: a symlink to the root unit's output (or the stub's);
+//! - `debug`: a symlink to the root unit's `debug` output (its debuginfo
+//!   side files), when it has one;
 //! - `breakbulk-root.json`: what the root is ([`RootInfo`]), and for a test
 //!   binary what its test run needs ([`TestSpec`]), with real paths. The
 //!   wrapper has every path in it as an input, so they are in its closure.
@@ -234,14 +236,22 @@ fn wrapper(
         reason,
         test_spec: spec,
     };
+    // The unit's debuginfo side files (`debug`), for the product's `linked`
+    // stage, when the unit has that output.
+    let debug = match &info.unit {
+        Some(u) if matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output()) => {
+            tokens.unit(u, crate::DEBUG_OUTPUT)
+        }
+        _ => String::new(),
+    };
     let json = to_canonical_json(&info).map_err(|e| Error(e.to_string()))?;
     small_drv(
         inputs,
         &tokens,
         outer,
         output_name,
-        r#"mkdir "$out" && ln -s "$root" "$out/root" && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#,
-        [("root", target), ("rootJson", json)],
+        r#"mkdir "$out" && ln -s "$root" "$out/root" && { [ -z "$debugRoot" ] || ln -s "$debugRoot" "$out/debug"; } && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#,
+        [("root", target), ("debugRoot", debug), ("rootJson", json)],
     )
     .map_err(|e| Error(format!("root {root_name}: {e}")))
 }
