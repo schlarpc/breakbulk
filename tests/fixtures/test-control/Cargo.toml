@@ -1,0 +1,17 @@
+# Test control ("test-control" in docs/implementation.md): #[ignore] tests,
+# a network test skipped by a per-binary skip list, a test that runs the
+# package's bin through CARGO_BIN_EXE_ctl, a test that needs a feature, and
+# tests of the runtime environment a test run gives (working directory,
+# CARGO_* variables, the build script's rustc-env, the dynamic-library path,
+# CARGO_TARGET_TMPDIR). One package at the repository root.
+[package]
+name = "ctl"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+extra = []
+
+[[test]]
+name = "needs_feat"
+required-features = ["extra"]

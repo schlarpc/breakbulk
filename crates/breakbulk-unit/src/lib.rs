@@ -6,6 +6,7 @@
 pub mod compile;
 pub mod diag;
 pub mod directives;
+pub mod doctest;
 pub mod env;
 pub mod process;
 pub mod run;
