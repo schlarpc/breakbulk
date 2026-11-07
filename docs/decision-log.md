@@ -507,3 +507,44 @@ Nix looks up each new build step on every configured cache before building.
 With the four caches configured on this machine, that added 7 s per 300
 crates. This will go in the docs as a tip: a project with a private cache
 can limit substituters for breakbulk builds.
+
+## 47. FYI: milestone M1's core works end to end
+
+`breakbulk-plan` now traces a real workspace, and `mkWorkspace` builds it
+crate by crate through Nix (import-from-derivation mode). Passing: the
+walking skeleton (one binary, one crates.io dependency, one build script),
+plus the `directives`, `build-dep-leak`, `crate-types` and
+`dev-dep-features` fixtures and a build-script-killed-by-signal test. Every
+product behaves like plain `cargo build`'s, unit commands match real Cargo
+exactly on 1.95, 1.97 and 1.99, and rebuilds are bit-identical. Still open
+for M1: the `sys-native` fixture, a randomized directive test, nightly
+Cargo's new layout, and toolchain presets (M3).
+
+## 48. ASK: every crate sees which `cargo` built it
+
+Cargo 1.97+ tells every compile and build script the path of the `cargo`
+binary (`CARGO`), which some crates use. breakbulk keeps it, so updating
+Cargo rebuilds every crate. In practice Cargo and rustc are updated together
+and a rustc update rebuilds everything anyway. Alternative: drop it, which
+breaks the rare crate that reads `env!("CARGO")`. Default: keep.
+
+## 49. FYI: smaller planner choices
+
+- Test binaries that ask Cargo for a scratch directory
+  (`CARGO_TARGET_TMPDIR`) get `/tmp/breakbulk-target-tmp`; the test run
+  step creates it.
+- The planner sets its compiler wrapper and directories with `--config`
+  (which wins over project config) instead of environment variables.
+- Build-job counts are recorded as 1 in plans and replaced with the real
+  core count at build time, so the planning machine's core count never
+  affects build step identity.
+- A library's own unit tests are now predicted as outputs (closes 31).
+- Projects that turn on Cargo's `trim-paths` fail planning with "not
+  supported yet"; this can't happen before Cargo 1.101.
+
+## 50. FYI: breakbulk's unit builder will get its own narrow source
+
+Right now all four breakbulk programs are built from the same source tree,
+so any planner change would also rebuild the unit builder and therefore
+every crate of every project. The unit builder will be built from only its
+own files, so only changes to it cause a full rebuild.
