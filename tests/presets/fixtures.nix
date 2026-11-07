@@ -317,6 +317,115 @@ let
       '';
     };
 
+  # --- wasm ----------------------------------------------------------------------
+
+  wasm = "wasm32-unknown-unknown";
+  wasmRust = rustWith [ wasm ];
+  wasmWs = {
+    toolchain = {
+      rustc = wasmRust;
+      cargo = wasmRust;
+    };
+    targets.${wasm} = { };
+    variants.default.profile = "release";
+  };
+
+  # wasm-bindgen + ring (C via unwrapped clang) + getrandom's wasm_js cfg
+  # from the project's config; tests under wasm-bindgen-test-runner (Node),
+  # the runner matching the locked wasm-bindgen.
+  wasmBrowser = mkRepo (fixtures + "/wasm-browser") [
+    {
+      workspaces.main = wasmWs;
+      targets.${wasm}.preset = presets.wasmBrowser { rustc = wasmRust; };
+    }
+  ];
+  wasmBrowserChecks =
+    let
+      t = wasmBrowser.workspaces.main.target.${wasm};
+      product = breakbulk.mkProduct {
+        name = "ui";
+        linked = t.packages.ui.roots."cdylib/ui";
+        stages = breakbulk.stages.defaultStages.wasmBrowser;
+        target.triple = wasm;
+        info.lockfile = fixtures + "/wasm-browser/Cargo.lock";
+        inherit pkgs;
+      };
+    in
+    {
+      wasm-browser-test = t.testRuns.ui.web;
+      # The bindgen stage with the lockfile-matched CLI (0.2.130), then
+      # wasm-opt; the JS glue loads in Node and computes the digest.
+      wasm-browser-bindgen =
+        pkgs.runCommand "wasm-browser-bindgen"
+          {
+            nativeBuildInputs = [ pkgs.nodejs ];
+            bindgen = product.stages.bindgen;
+          }
+          ''
+            ls $bindgen ${product}
+            cp -r ${product.stages.bindgen} pkg
+            chmod -R u+w pkg
+            # --target web glue: instantiate from bytes in Node.
+            cat > run.mjs <<'EOF'
+            import fs from 'node:fs';
+            import init, { digest_hex } from './pkg/ui.js';
+            await init({ module_or_path: fs.readFileSync('./pkg/ui_bg.wasm') });
+            console.log(digest_hex('abc'));
+            EOF
+            node run.mjs | tee $out
+            grep -qx ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad $out
+          '';
+    };
+
+  # C via wasilibc, componentized, no imports.
+  wasmComponent = mkRepo (fixtures + "/wasm-component") [
+    {
+      workspaces.main = wasmWs;
+      targets.${wasm}.preset = presets.wasmComponent {
+        rustc = wasmRust;
+        withC = true;
+      };
+    }
+  ];
+  wasmComponentChecks =
+    let
+      t = wasmComponent.workspaces.main.target.${wasm};
+      product = breakbulk.mkProduct {
+        name = "comp";
+        linked = t.packages.comp.roots."cdylib/comp";
+        stages = breakbulk.stages.merge [
+          breakbulk.stages.defaultStages.wasmComponent
+          {
+            componentize.run = breakbulk.stageHelpers.componentize {
+              metadata = {
+                name = "comp";
+                processedBy.breakbulk = "0.1.0";
+              };
+            };
+          }
+        ];
+        target.triple = wasm;
+        inherit pkgs;
+      };
+    in
+    {
+      wasm-component = pkgs.runCommand "wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; } ''
+        core=$(echo ${t.packages.comp.roots."cdylib/comp"}/*.wasm)
+        comp=$(echo ${product.stages.componentize}/*.wasm)
+        wasm-tools print "$core" > core.wat
+        if grep -q '(import' core.wat; then echo "the core module has imports:"; grep '(import' core.wat; exit 1; fi
+        grep -q '(export "checksum"' core.wat
+        wasm-tools validate --features component-model "$comp"
+        wasm-tools component wit "$comp" > comp.wit
+        cat comp.wit
+        if grep -q '^ *import' comp.wit; then echo "the component has imports"; exit 1; fi
+        wasm-tools metadata show "$comp" | tee meta.txt
+        grep -q breakbulk meta.txt
+        mkdir -p $out
+        cp core.wat comp.wit meta.txt $out/
+      '';
+    };
+
   # --- evaluation-time checks on preset values ---------------------------------
 
   presetsEval =
@@ -370,6 +479,8 @@ in
       glibcStatic
       sysNativeCross
       msvc
+      wasmBrowser
+      wasmComponent
       ;
   };
   checks = {
@@ -390,5 +501,7 @@ in
 // staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl"
   // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
   // sysNativeCrossChecks
-  // msvcChecks;
+  // msvcChecks
+  // wasmBrowserChecks
+  // wasmComponentChecks;
 }

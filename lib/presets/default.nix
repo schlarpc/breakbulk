@@ -376,7 +376,6 @@ in
         )
       }/bin/lld-link-stable";
       cflags = [ "--target=${triple}" ] ++ lib.concatMap (d: [ "-imsvc" d ]) incdirs;
-      t = envName triple;
     in
     assert lib.assertMsg (triple == "${arch}-pc-windows-msvc") "breakbulk.presets.msvc: triple ${triple} does not match arch ${arch}";
     {
@@ -459,12 +458,13 @@ in
       triple ? "wasm32-unknown-unknown",
       withC ? false,
       wasilibc ? pkgs.pkgsCross.wasi32.wasilibc,
+      # The multiarch directory wasilibc installs headers and libraries under.
+      wasiTriple ? "wasm32-wasip1",
       ...
     }@args:
     let
       c = wasmCommon args;
-      t = envName triple;
-      inc = "-isystem ${lib.getDev wasilibc}/include";
+      inc = "-isystem ${lib.getDev wasilibc}/include/${wasiTriple}";
     in
     c
     // lib.optionalAttrs withC {
@@ -472,7 +472,7 @@ in
         "-C"
         "link-self-contained=no"
         "-L"
-        "native=${wasilibc}/lib"
+        "native=${wasilibc}/lib/${wasiTriple}"
       ];
       cflags = [ inc ];
       bindgen.extraClangArgs = [

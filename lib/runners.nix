@@ -71,7 +71,9 @@ in
   # browser = "node": tests run in Node.js (wasm-bindgen-test's default for
   # tests without `run_in_browser`). browser = "chromium": headless
   # Chromium through chromedriver, with a profile under $TMPDIR; tests
-  # marked `run_in_browser` need it.
+  # marked `run_in_browser` need it. Not yet working inside the Nix
+  # sandbox: chromedriver starts Chromium, but its renderer dies ("Unable to
+  # receive message from renderer"); Node is the tested default.
   wasmBindgenTest =
     {
       pkgs,
@@ -94,6 +96,8 @@ in
       ''
       + lib.optionalString (browser == "chromium") ''
         export CHROMEDRIVER=${chromedriver}/bin/chromedriver
+        # Run tests in the browser even without `run_in_browser`.
+        export WASM_BINDGEN_USE_BROWSER=1
         export WASM_BINDGEN_TEST_TIMEOUT="''${WASM_BINDGEN_TEST_TIMEOUT:-120}"
         # wasm-bindgen-test-runner reads webdriver.json from the working
         # directory for extra capabilities.
@@ -102,7 +106,8 @@ in
         cat > "$work/webdriver.json" <<EOF
         {"goog:chromeOptions": {"binary": "${chromium}/bin/chromium",
           "args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
-                   "--disable-gpu", "--user-data-dir=$tmp/chromium-profile"]}}
+                   "--disable-gpu", "--no-zygote", "--disable-crash-reporter",
+                   "--disable-breakpad", "--user-data-dir=$tmp/chromium-profile"]}}
         EOF
         prog="$(readlink -f "$1")"; shift
         cd "$work"
