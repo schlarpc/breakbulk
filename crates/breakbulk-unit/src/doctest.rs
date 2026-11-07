@@ -41,7 +41,7 @@ use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, layered, merge_layer, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedArg, RenderedCompile};
-use crate::splice::{check_arg_splices, expand_args, expand_dylib_path, expand_env};
+use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
 use crate::{Error, io_err, read_directives};
 
 pub const RUNNER_VAR: &str = "BREAKBULK_TEST_RUNNER";
@@ -208,7 +208,7 @@ pub fn invocation(
     ]);
 
     let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
-    expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
+    prepend_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = c
         .env_capture
         .as_deref()
@@ -316,6 +316,7 @@ mod tests {
                 .map(|p| LibraryPath {
                     value: (*p).to_owned(),
                     in_out_dir: false,
+                    in_build_dir: false,
                 })
                 .collect(),
             ..BuildOutput::default()

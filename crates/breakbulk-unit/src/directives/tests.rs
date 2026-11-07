@@ -27,6 +27,7 @@ fn ctx_with<'a>(targets: &'a [PackageTarget], msrv: Option<&'a str>) -> ParseCon
         nightly_features_allowed: false,
         targets,
         rust_version: msrv,
+        upstream_out_dirs: &[],
     }
 }
 
@@ -81,11 +82,13 @@ fn every_key_new_syntax() {
         vec![
             LibraryPath {
                 value: format!("native={OUT}/lib"),
-                in_out_dir: true
+                in_out_dir: true,
+                in_build_dir: true,
             },
             LibraryPath {
                 value: "/usr/lib".into(),
-                in_out_dir: false
+                in_out_dir: false,
+                in_build_dir: false,
             },
         ]
     );
@@ -341,6 +344,46 @@ fn link_search_classification() {
 }
 
 #[test]
+fn link_search_in_build_dir() {
+    let t = targets();
+    let up = [std::path::PathBuf::from("/up/out")];
+    let mut ctx = ctx_with(&t, None);
+    ctx.upstream_out_dirs = &up;
+    let out = parse(
+        format!(
+            "cargo::rustc-link-search=native={OUT}/lib\n\
+             cargo::rustc-link-search=native=/up/out/lib\n\
+             cargo::rustc-flags=-L /up/out\n\
+             cargo::rustc-link-search=/up/outside\n\
+             cargo::rustc-link-search=/usr/lib\n"
+        )
+        .as_bytes(),
+        &ctx,
+    )
+    .unwrap();
+    let got: Vec<(bool, bool)> = out
+        .library_paths
+        .iter()
+        .map(|p| (p.in_out_dir, p.in_build_dir))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (true, true),
+            (false, true),
+            (false, true),
+            (false, false),
+            (false, false)
+        ]
+    );
+    // Written only when set; files without it read as `in_out_dir`.
+    let j = serde_json::to_string(&out.library_paths[3]).unwrap();
+    assert!(!j.contains("inBuildDir"), "{j}");
+    let old: LibraryPath = serde_json::from_str(r#"{"value":"/o/lib","inOutDir":true}"#).unwrap();
+    assert!(old.for_dylib_path());
+}
+
+#[test]
 fn link_arg_target_validation() {
     let lib_only = vec![PackageTarget {
         name: "l".into(),
@@ -551,6 +594,7 @@ fn envify_and_metadata_env() {
     let m = MetadataFile {
         links: "openssl".into(),
         metadata: kv(&[("include", "/i"), ("version-number", "30000")]),
+        out: None,
     };
     assert_eq!(
         m.env(),

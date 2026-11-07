@@ -1030,6 +1030,7 @@ fn render_and_expand() {
         library_paths: vec![LibraryPath {
             value: "native=/nix/store/r-ring-out".into(),
             in_out_dir: true,
+            in_build_dir: true,
         }],
         env: vec![("RING_CORE_PREFIX".into(), "ring_core_".into())],
         ..Default::default()

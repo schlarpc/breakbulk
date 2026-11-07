@@ -32,7 +32,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::directives::BuildOutput;
+use crate::directives::{BuildOutput, search_path_without_kind};
 use crate::spec::{RenderedArg, SearchIn, Splice, SpliceKind};
 
 /// The arguments one directive value becomes, or `None` for `rustc-env`,
@@ -189,11 +189,39 @@ pub const DYLIB_PATH_VAR: &str = if cfg!(windows) {
     "LD_LIBRARY_PATH"
 };
 
-/// Expand dynamic-path splices into `env`: each run's search paths that lie
-/// inside its own `out` (without their `native=`-style kind), in order, go
-/// before the variable's recorded value. Cargo keeps only paths inside its
-/// target directory (`filter_dynamic_search_path`); breakbulk keeps those
-/// inside the printing run's `out`.
+/// The search paths of `runs` that go on a dynamic-library path, without
+/// their `native=`-style kind, in run order and printed order, duplicates
+/// kept. Cargo keeps only paths inside its target directory
+/// (`filter_dynamic_search_path`); breakbulk keeps those inside the printing
+/// run's `out` or an upstream run's ([`LibraryPath::for_dylib_path`]).
+///
+/// [`LibraryPath::for_dylib_path`]: crate::directives::LibraryPath::for_dylib_path
+fn dylib_paths<'a>(
+    runs: &[String],
+    directives: impl Fn(&str) -> Option<&'a BuildOutput>,
+) -> Result<Vec<String>, SpliceError> {
+    let mut paths = Vec::new();
+    for r in runs {
+        let d = directives(r).ok_or_else(|| {
+            SpliceError(format!(
+                "no directives for the dynamic-path splice from {r}"
+            ))
+        })?;
+        for p in d.library_paths.iter().filter(|p| p.for_dylib_path()) {
+            paths.push(search_path_without_kind(&p.value).to_owned());
+        }
+    }
+    Ok(paths)
+}
+
+const DYLIB_PATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
+
+/// Expand the dynamic-path splices of a compile or a build-script run into
+/// `env`: the runs' paths ([`dylib_paths`]) go after the variable's
+/// recorded value. This is Cargo's `add_plugin_deps` (`src/compiler/mod.rs`,
+/// Cargo 0.100.0 at 5f94df4), used for both: it appends each plugin's
+/// filtered paths to the value `fill_env` set, and neither sorts nor
+/// deduplicates them.
 pub fn expand_dylib_path<'a>(
     env: &mut BTreeMap<String, String>,
     runs: &[String],
@@ -202,29 +230,40 @@ pub fn expand_dylib_path<'a>(
     if runs.is_empty() {
         return Ok(());
     }
+    let mut paths = Vec::new();
+    if let Some(old) = env.get(DYLIB_PATH_VAR).filter(|v| !v.is_empty()) {
+        paths.push(old.clone());
+    }
+    paths.extend(dylib_paths(runs, directives)?);
+    if !paths.is_empty() {
+        env.insert(DYLIB_PATH_VAR.into(), paths.join(DYLIB_PATH_SEP));
+    }
+    Ok(())
+}
+
+/// Expand the dynamic-path splices of a `rustdoc --test` into `env`: the
+/// runs' paths ([`dylib_paths`]), first occurrences only, go before the
+/// variable's recorded value. Cargo's `fill_env` for rustdoc puts the
+/// native directories of every run before its other entries.
+pub fn prepend_dylib_path<'a>(
+    env: &mut BTreeMap<String, String>,
+    runs: &[String],
+    directives: impl Fn(&str) -> Option<&'a BuildOutput>,
+) -> Result<(), SpliceError> {
+    if runs.is_empty() {
+        return Ok(());
+    }
     let mut paths: Vec<String> = Vec::new();
-    for r in runs {
-        let d = directives(r).ok_or_else(|| {
-            SpliceError(format!(
-                "no directives for the dynamic-path splice from {r}"
-            ))
-        })?;
-        for p in d.library_paths.iter().filter(|p| p.in_out_dir) {
-            let path = match p.value.split_once('=') {
-                Some(("native" | "crate" | "dependency" | "framework" | "all", rest)) => rest,
-                _ => p.value.as_str(),
-            };
-            if !paths.iter().any(|x| x == path) {
-                paths.push(path.to_owned());
-            }
+    for p in dylib_paths(runs, directives)? {
+        if !paths.contains(&p) {
+            paths.push(p);
         }
     }
-    let sep = if cfg!(windows) { ";" } else { ":" };
     if let Some(old) = env.get(DYLIB_PATH_VAR).filter(|v| !v.is_empty()) {
         paths.push(old.clone());
     }
     if !paths.is_empty() {
-        env.insert(DYLIB_PATH_VAR.into(), paths.join(sep));
+        env.insert(DYLIB_PATH_VAR.into(), paths.join(DYLIB_PATH_SEP));
     }
     Ok(())
 }

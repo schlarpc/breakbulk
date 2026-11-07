@@ -4,20 +4,28 @@
 //!
 //! ```text
 //! breakbulk-plan-golden --plan plan.json --log build.log \
-//!   --target-dir DIR --metadata metadata.json
+//!   --target-dir DIR --metadata metadata.json [--env]
 //! ```
+//!
+//! With `--env` (and a `-vv` log), env is compared too: every compile's and
+//! every build-script run's.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use breakbulk_format::Plan;
-use breakbulk_plan::golden::compare;
+use breakbulk_plan::golden::{CompareOptions, compare_with};
 use breakbulk_plan::records::Metadata;
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let (mut plan, mut log, mut target, mut metadata) = (None, None, None, None);
+    let mut opts = CompareOptions::default();
     while let Some(a) = args.next() {
+        if a == "--env" {
+            opts.env = true;
+            continue;
+        }
         let v = args.next();
         match a.as_str() {
             "--plan" => plan = v,
@@ -30,7 +38,7 @@ fn main() -> ExitCode {
     let (Some(plan), Some(log), Some(target), Some(metadata)) = (plan, log, target, metadata)
     else {
         eprintln!(
-            "usage: breakbulk-plan-golden --plan FILE --log FILE --target-dir DIR --metadata FILE"
+            "usage: breakbulk-plan-golden --plan FILE --log FILE --target-dir DIR --metadata FILE [--env]"
         );
         return ExitCode::from(2);
     };
@@ -38,13 +46,19 @@ fn main() -> ExitCode {
     let plan = Plan::from_json(&read(&plan)).unwrap_or_else(|e| panic!("{e}"));
     let metadata =
         Metadata::read(PathBuf::from(&metadata).as_path()).unwrap_or_else(|e| panic!("{e}"));
-    let report = compare(&plan, &read(&log), &PathBuf::from(target), &metadata);
+    let report = compare_with(&plan, &read(&log), &PathBuf::from(target), &metadata, opts);
     println!(
-        "compared {} compile units (Cargo {})",
-        report.compared, plan.cargo
+        "compared {} units{} (Cargo {})",
+        report.compared,
+        if opts.env {
+            ", argv and env"
+        } else {
+            ", argv only"
+        },
+        plan.cargo
     );
     if report.problems.is_empty() {
-        println!("golden: traced argv equals the real build's for every unit");
+        println!("golden: the traced plan equals the real build for every unit");
         ExitCode::SUCCESS
     } else {
         for p in &report.problems {

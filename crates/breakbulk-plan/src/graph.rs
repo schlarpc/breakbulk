@@ -69,6 +69,11 @@ pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
 /// test that runs it fails as it does under Cargo.
 pub const NOT_BUILT_BIN_DIR: &str = "/breakbulk/not-built";
 
+/// Where `OUT_DIR` points for a package whose build script a `links`
+/// override in config replaces: `<this>/<pkg>-<hash>/out` (the part of
+/// Cargo's path after `build/`), which never exists, as Cargo's does not.
+pub const OVERRIDDEN_OUT_DIR: &str = "/breakbulk/overridden";
+
 fn arg_value<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -533,6 +538,27 @@ impl<'a> Builder<'a> {
                 );
                 continue;
             }
+            // A `links` override in config replaces the package's build
+            // script: Cargo never runs it and never creates its OUT_DIR
+            // (`custom_build::prepare` skips `build_work`, which creates
+            // it), but still sets OUT_DIR on the package's compiles
+            // (`build_base_args`'s first run dependency). Cargo 0.100.0 at
+            // 5f94df4, `src/compiler/custom_build.rs` and
+            // `src/compiler/mod.rs`. There is no run unit to point at; the
+            // value becomes a path that does not exist, as Cargo's does not.
+            if k == "OUT_DIR"
+                && self
+                    .metadata
+                    .packages
+                    .iter()
+                    .any(|p| p.id == owner && p.links.is_some())
+                && self.rw.in_scratch(&v)
+                && self.rw.text(&v, Some(owner)).is_err()
+                && let Some((_, tail)) = v.rsplit_once("/build/")
+            {
+                out.insert(k, Text::Literal(format!("{OVERRIDDEN_OUT_DIR}/{tail}")));
+                continue;
+            }
             // Cargo sets CARGO to its own executable as the OS reports it,
             // with symlinks resolved (`std::env::current_exe`). In a
             // toolchain that is a symlink tree (rust-overlay's), that is a
@@ -869,7 +895,12 @@ impl<'a> Builder<'a> {
                 test: c.test,
             };
             let kinds: Vec<RootKind> = match self.ctx.kind {
-                PlanKind::Build if !c.test => {
+                // A workspace member that is also a build dependency is
+                // compiled for the host too, and Cargo marks that unit
+                // primary as well (CARGO_PRIMARY_PACKAGE). Products are the
+                // target's. (Test harnesses stay: a proc macro's is a host
+                // unit, and the only one.)
+                PlanKind::Build if !c.test && c.platform == Platform::Target => {
                     if t.has_kind("bin") {
                         vec![RootKind::Bin]
                     } else if t.is_lib() {
