@@ -121,7 +121,8 @@ All configuration is in NixOS-style modules. The full list of options is in
 - `targets.<triple>`: the toolchain spec of a target. Start from a preset
   (`breakbulk.presets.linuxGnu`, `linuxMusl`, `staticGlibc`, `msvc`,
   `wasmBrowser`, `wasmComponent`, `wasip2`, `windowsGnu`, `zig`) and override any field: linker, C
-  compiler, rustflags, env, test runner, post-link stages.
+  compiler, rustflags, env, test runner, post-link stages. On Linux the
+  native target uses `linuxGnu` unless you set another preset.
 - `packages.<name>`: settings for one package's units only: `env`,
   `nativeInputs`, `inputs`, `extraSources`, stages, checks, and `test`
   settings (env, extra `PATH`, libtest arguments, skip lists, a wider

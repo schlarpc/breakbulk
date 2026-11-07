@@ -45,7 +45,7 @@ let
         let
           a = bound // args;
         in
-        if a ? pkgs then f a else go a;
+        if a ? pkgs then f a // { presetDirect = true; } else go a;
     in
     go { };
 

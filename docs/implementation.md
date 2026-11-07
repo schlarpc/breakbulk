@@ -496,6 +496,7 @@ repo = breakbulk.lib.mkRepository {
 
   targets.<triple> = {
     preset = breakbulk.presets.linuxGnu;  # or msvc { … }, wasmBrowser, wasmComponent, musl, staticGlibc
+                                      # default: linuxGnu for the native triple on a Linux glibc host, else null
     linker = null; cc = null; cxx = null; ar = null; cflags = [ ];
     bindgen.extraClangArgs = [ ];
     rustflags = [ ];                  # passed with --config under the key the project uses (see Invocation)
@@ -621,7 +622,7 @@ The skeleton copies file names only and needs no discovery rules; Cargo performs
 
 The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain.
 
-A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Preset env is added per unit by platform, never through Cargo's `[env]`.
+A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. On a Linux (glibc) build machine the native target gets `linuxGnu` unless another preset is set, either through `targets.<native>.preset` or by defining the target directly from a preset (every preset's value carries an internal marker for this); `preset = null` turns it off (decision 105). Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Preset env is added per unit by platform, never through Cargo's `[env]`.
 
 | Preset | Linker | C toolchain | Rustflags and env (target units) | Runner | Default stages |
 | --- | --- | --- | --- | --- | --- |

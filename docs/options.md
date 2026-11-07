@@ -1229,9 +1229,10 @@ true
 
 
 Toolchain specs per target triple\. A workspace builds for the triples
-in ` workspaces.<ws>.targets `; their specs come from here\. A triple
-with no entry uses an empty spec (the native toolchain as Cargo
-finds it)\.
+in ` workspaces.<ws>.targets `; their specs come from here\. On a Linux
+(glibc) build machine the native triple always has an entry, with
+` presets.linuxGnu ` by default\. Any other triple with no entry uses an
+empty spec (the toolchain as Cargo finds it)\.
 
 
 
@@ -1542,6 +1543,8 @@ fields below at default priority, so fields set here override
 the preset’s (lists concatenate; use ` lib.mkForce ` to replace
 one)\. Equivalent to defining the target as
 ` breakbulk.presets.<name> { inherit pkgs; triple = …; } `\.
+Set ` null ` to use no preset on the native target (rustc’s own
+linker choice and the C toolchain Cargo finds)\.
 
 
 
@@ -1551,10 +1554,9 @@ null or (function that evaluates to a(n) raw value)
 
 
 *Default:*
-
-```nix
-null
-```
+` breakbulk.presets.linuxGnu ` for the native triple when the build
+machine is Linux with glibc, unless the target is defined directly
+from a preset; ` null ` otherwise
 
 
 

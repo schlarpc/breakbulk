@@ -136,6 +136,7 @@ let
       mkWorkspace
       dynamic
       products
+      presets
       ;
     variantsLib = variants;
   };

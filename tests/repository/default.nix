@@ -545,6 +545,33 @@ in
       touch $out
     '';
 
+  # Decision 105: the native target gets presets.linuxGnu unless another
+  # preset is set, both through `preset` and by defining the target
+  # directly from a preset (no doubled rustflags, no conflicting linker);
+  # `preset = null` turns it off. The default reaches the plan: units carry
+  # the mold linker wrapper.
+  native-preset =
+    let
+      t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).config.targets.${native};
+      dflt = t [ ];
+      off = t [ { targets.${native}.preset = lib.mkForce null; } ];
+      static = breakbulk.presets.staticGlibc { inherit pkgs; };
+      direct = t [ { targets.${native} = static; } ];
+      viaOption = t [ { targets.${native}.preset = breakbulk.presets.staticGlibc; } ];
+      linkerOf = x: builtins.unsafeDiscardStringContext (toString x.linker);
+      unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (mwInst "a").units.build);
+      checks = {
+        defaultIsLinuxGnu = lib.hasSuffix "cc-mold" (linkerOf dflt) && dflt.stagePreset == "linuxGnu";
+        offIsEmpty = off.linker == null && off.stagePreset == null;
+        directKeepsOwn = direct.stagePreset == "staticGlibc" && direct.rustflags == static.rustflags;
+        optionKeepsOwn = viaOption.stagePreset == "staticGlibc" && viaOption.rustflags == static.rustflags;
+        planUsesMold = lib.hasInfix "cc-mold" unitText;
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "native-preset: failed ${toString bad}";
+    evalCheck "native-preset" (builtins.toJSON checks);
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }

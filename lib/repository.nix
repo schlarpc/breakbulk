@@ -58,6 +58,7 @@
   dynamic,
   products,
   variantsLib,
+  presets,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -80,6 +81,7 @@ let
     modules = bbModules ++ [ sysDefaults ] ++ userModules;
     specialArgs = {
       inherit pkgs;
+      breakbulkPresets = presets;
     }
     // specialArgs;
   };

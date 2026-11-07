@@ -21,10 +21,19 @@
   lib,
   config,
   pkgs,
+  breakbulkPresets,
   ...
 }:
 let
   inherit (lib) types mkOption;
+
+  # Decision 105: on a Linux (glibc) build machine the native target gets
+  # `presets.linuxGnu` unless another preset is set, so the native linker is
+  # nixpkgs' wrapped cc with mold, as on every other target, instead of
+  # rustc's bundled rust-lld. A target defined directly from a preset
+  # (`targets.<t> = breakbulk.presets.zig { … }`) counts as having one.
+  nativeTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  nativeDefault = pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isGnu;
   bt = import ./types.nix { inherit lib; };
   tool = types.nullOr (
     types.oneOf [
@@ -87,7 +96,16 @@ let
       options = {
         preset = mkOption {
           type = types.nullOr (types.functionTo types.raw);
-          default = null;
+          default =
+            if name == nativeTriple && nativeDefault && !config.presetDirect then
+              breakbulkPresets.linuxGnu
+            else
+              null;
+          defaultText = lib.literalMD ''
+            `breakbulk.presets.linuxGnu` for the native triple when the build
+            machine is Linux with glibc, unless the target is defined directly
+            from a preset; `null` otherwise
+          '';
           example = lib.literalExpression "breakbulk.presets.linuxMusl";
           description = ''
             A toolchain preset (`breakbulk.presets.*`, or a preset with its
@@ -97,7 +115,16 @@ let
             the preset's (lists concatenate; use `lib.mkForce` to replace
             one). Equivalent to defining the target as
             `breakbulk.presets.<name> { inherit pkgs; triple = …; }`.
+            Set `null` to use no preset on the native target (rustc's own
+            linker choice and the C toolchain Cargo finds).
           '';
+        };
+        presetDirect = mkOption {
+          type = types.bool;
+          default = false;
+          internal = true;
+          visible = false;
+          description = "Set by every preset's value, so a target defined directly from a preset gets no default preset.";
         };
         packageSet = mkOption {
           type = types.nullOr types.raw;
@@ -260,11 +287,15 @@ in
     default = { };
     description = ''
       Toolchain specs per target triple. A workspace builds for the triples
-      in `workspaces.<ws>.targets`; their specs come from here. A triple
-      with no entry uses an empty spec (the native toolchain as Cargo
-      finds it).
+      in `workspaces.<ws>.targets`; their specs come from here. On a Linux
+      (glibc) build machine the native triple always has an entry, with
+      `presets.linuxGnu` by default. Any other triple with no entry uses an
+      empty spec (the toolchain as Cargo finds it).
     '';
   };
+
+  # The native target always has an entry, so its default preset applies.
+  config.targets = lib.mkIf nativeDefault { ${nativeTriple} = { }; };
 
   config.warnings = lib.concatMap (t: t.warnings) (lib.attrValues config.targets);
 }
