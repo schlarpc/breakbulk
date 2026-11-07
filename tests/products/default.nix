@@ -456,7 +456,7 @@ in
         noSrc = spApp.checks.noSourceReferences;
         depView = builtins.unsafeDiscardStringContext "${depView}";
         itoaSrc = builtins.unsafeDiscardStringContext "${itoaSrc}";
-        depTests = sourcePaths.workspaces.main.testRuns.dep.lib;
+        depTests = sourcePaths.workspaces.main.testRuns.dep."lib/dep";
       }
       ''
         set -euo pipefail
