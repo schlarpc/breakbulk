@@ -1,0 +1,18 @@
+[package]
+name = "normalized"
+version = "0.1.0"
+edition = "2024"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+build = false
+
+[lib]
+name = "normalized"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tool"
+path = "src/tool.rs"

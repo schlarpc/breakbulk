@@ -1,0 +1,16 @@
+[package]
+name = "edition2015"
+version = "0.1.0"
+
+[lib]
+name = "legacy"
+
+[[bin]]
+name = "explicit"
+path = "src/explicit.rs"
+
+[[bench]]
+name = "bench"
+
+[[test]]
+name = "t1"
