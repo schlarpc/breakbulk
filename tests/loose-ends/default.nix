@@ -348,8 +348,36 @@ let
         mkdir -p $out
         cp run.txt $out/
       '';
+
+  # --- docs/options.md --------------------------------------------------------
+
+  # The module options as Markdown (mkRepository's optionsDoc).
+  optionsMd = pkgs.runCommand "breakbulk-options.md" { } ''
+    {
+      echo '# breakbulk: options'
+      echo
+      echo 'Generated from the module options (`repo.optionsDoc`). Do not edit.'
+      echo 'Regenerate with `tests/loose-ends/update-options-doc.sh`.'
+      echo
+      cat ${shellRepo.optionsDoc.optionsCommonMark}
+    } > $out
+  '';
 in
 {
+  # Builds the generated Markdown; `options-doc-in-sync` compares it.
+  options-md = optionsMd;
+  options-doc-in-sync =
+    pkgs.runCommand "options-doc-in-sync"
+      {
+        committed = ../../docs/options.md;
+      }
+      ''
+        if ! diff -u $committed ${optionsMd}; then
+          echo "docs/options.md is out of date; run tests/loose-ends/update-options-doc.sh" >&2
+          exit 1
+        fi
+        touch $out
+      '';
   config-env = configEnv;
   test-scope = testScope;
   inherit devshell;

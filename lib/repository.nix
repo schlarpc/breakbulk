@@ -1100,5 +1100,26 @@ in
       "warnings"
     ];
     warningsAreErrors = false;
+    # Declarations as paths in breakbulk's repository (docs/options.md links
+    # them from docs/), not store paths.
+    transformOptions =
+      opt:
+      opt
+      // {
+        declarations = map (
+          d:
+          let
+            parts = lib.splitString "/lib/" (toString d);
+            rel = "lib/${lib.last parts}";
+          in
+          if lib.length parts > 1 then
+            {
+              name = rel;
+              url = "../${rel}";
+            }
+          else
+            d
+        ) opt.declarations;
+      };
   };
 }
