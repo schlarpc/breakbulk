@@ -600,6 +600,8 @@ The skeleton copies file names only and needs no discovery rules; Cargo performs
 
 ## Toolchain presets
 
+The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain.
+
 A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Preset env is added per unit by platform, never through Cargo's `[env]`.
 
 | Preset | Linker | C toolchain | Rustflags and env (target units) | Runner | Default stages |
@@ -607,7 +609,7 @@ A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple
 | `linuxGnu` | mold via wrapped bintools (`-fuse-ld=mold`); lld when cross-language LTO is on | `pkgsCross.<x>.stdenv.cc` | `CC_<triple>`, `AR_<triple>` | native; `qemu-user` when cross without a builder | `splitDebug` |
 | `linuxMusl` | as `linuxGnu` | `pkgsCross.<x>-musl.stdenv.cc` | `+crt-static` | as `linuxGnu` | `splitDebug` |
 | `staticGlibc` | mold, same as host | host `cc` | `+crt-static`, `-C relocation-model=static`, `-L native=` for `glibc.static` and the declared static archives; static `pkg-config` mode | native | `splitDebug` |
-| `msvc { arch; sdk }` | `lld-link` | `clang-cl`, `llvm-lib` from `rustc.llvmPackages` | `-Lnative=` for CRT, `um` and `ucrt` libs; `CFLAGS_<triple>` with `-imsvc`; `BINDGEN_EXTRA_CLANG_ARGS_<triple>` with `-isystem`; `RC`, `RCFLAGS`, `LIB`; optional `+crt-static` | `wine` with a `WINEPREFIX` in `$TMPDIR` | none |
+| `msvc { arch; sdk }` | `lld-link` | `clang-cl`, `llvm-lib` from the LLVM matching rustc | `-Lnative=` for CRT, `um` and `ucrt` libs; `CFLAGS_<triple>` with `-imsvc`; `BINDGEN_EXTRA_CLANG_ARGS_<triple>` with `-isystem`; `RC`, `RCFLAGS`, `LIB`; optional `+crt-static` | `wine` with a `WINEPREFIX` in `$TMPDIR` | none |
 | `wasmBrowser` | lld from rustc's target spec, version-matched | unwrapped clang targeting wasm32 | none by default | `wasm-bindgen-test-runner` + headless Chromium, or Node | `bindgen` → `wasmOpt` |
 | `wasmComponent` | as `wasmBrowser` | clang + `wasilibc` when C is present | `-C link-self-contained=no` + `-L` to `wasilibc` when C is present | `wasmtime` | `wasmOpt` (optional) → `componentize` |
 
@@ -617,7 +619,10 @@ A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple
 targets.x86_64-pc-windows-msvc.preset = breakbulk.presets.msvc {
   arch = "x86_64";
   sdk = breakbulk.xwinSdk {            # fixed-output; meta.license = unfree
+    inherit pkgs;
     manifestVersion = 17; crt = "14.44.17.14"; sdk = "10.0.26100";
+    arches = [ "x86_64" "aarch64" ];  # one download can serve both; the hash depends on the set
+    channelManifest = null;           # optional: pin Microsoft's channel manifest too
     hash = "sha256-…";
   };
   crtStatic = true;
@@ -625,12 +630,14 @@ targets.x86_64-pc-windows-msvc.preset = breakbulk.presets.msvc {
 };
 ```
 
-The include directories are passed twice in different syntax: `-imsvc` for `clang-cl` and `-isystem` for bindgen's libclang. `aarch64` uses the same preset with `arch = "aarch64"`.
+The include directories are passed twice in different syntax: `-imsvc` for `clang-cl` and `-isystem` for bindgen's libclang. `aarch64` uses the same preset with `arch = "aarch64"`. `RC`, `RCFLAGS`, `LIB` and `INCLUDE` have no target suffix, so the preset applies them to target units only.
+
+`lld-link` records the path of rustc's randomly named temporary directory in the PDB, and the PDB's hash goes into the `.exe`, so links are not reproducible as is (`/Brepro` does not help). The preset's linker is a wrapper that copies those inputs to a fixed path before linking. Details are in [spikes/msvc.md](spikes/msvc.md).
 
 ### wasm
 
 - **wasm-bindgen version.** The `bindgen` stage reads the `wasm-bindgen` version from the workspace's `Cargo.lock`. It picks the matching `wasm-bindgen-cli_<version>` from nixpkgs, or builds that version from crates.io with a hash from a table shipped with the library. If neither exists, evaluation fails naming the version.
-- **Unwrapped clang.** C code uses clang from `rustc.llvmPackages`, never the stdenv compiler wrapper. A wrapped gcc can silently produce host objects for a wasm target.
+- **Unwrapped clang.** C code uses clang from the LLVM matching rustc, never the stdenv compiler wrapper. A wrapped gcc can silently produce host objects for a wasm target.
 
 ### Zig (later)
 

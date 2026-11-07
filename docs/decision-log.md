@@ -416,3 +416,94 @@ Default: hide everywhere.
   use compilers without that wrapper and will need to add it themselves.
 - A captured environment for host tools is the same derivation whether the
   build is native or cross, so it's built once and shared.
+
+## 38. FYI: Windows (msvc) and wasm groundwork works
+
+- breakbulk can download Microsoft's C runtime and Windows SDK (via the
+  `xwin` tool) as a pinned, reproducible Nix download, marked unfree. A test
+  program with C code, generated bindings, a Windows resource and Windows API
+  calls cross-compiles from Linux and runs under wine; the ARM64 Windows
+  build compiles and links. Write-up: `docs/spikes/msvc.md`.
+- The `wasm-bindgen` command-line tool is picked to match the exact version
+  in your `Cargo.lock`, from nixpkgs when it has it, else built from a
+  table of known hashes (seeded with 0.2.123 and 0.2.125–0.2.130).
+  Unknown versions fail with a message naming the version.
+- Unfree permission is granted only to the SDK package. Note: your personal
+  `~/.config/nixpkgs/config.nix` allows all unfree packages, which hides
+  this in impure evaluations; flake checks are unaffected.
+
+## 39. ASK: Windows builds need a small linker fix to be reproducible
+
+Windows `.exe` files came out different on every rebuild: the linker writes
+the path of a randomly named temporary folder into the debug-symbol file,
+and that file's hash goes into the `.exe`. Microsoft's own "reproducible"
+switch doesn't fix it. A small wrapper around the linker that copies the
+inputs to a fixed path first makes rebuilds identical. Question: keep it as
+part of the Windows preset (default; only Windows pays for it), or move it
+into breakbulk's unit builder for all targets?
+
+## 40. ASK: how strictly to pin the Windows SDK download
+
+By default the SDK download reads Microsoft's live catalogue. The C runtime
+version is exact, but files within SDK 10.0.26100 can be updated by
+Microsoft; if that happens, a fresh machine's build fails with a hash
+mismatch (it never silently changes). You can additionally pin the
+catalogue file itself (`channelManifest`), which removes that risk unless
+Microsoft deletes old catalogue URLs. Default: optional. Make it required?
+
+## 41. ASK: choosing the LLVM tools that match your Rust compiler
+
+Windows and wasm builds use LLVM tools (linker, C compiler) that should match
+the LLVM version inside rustc. Only nixpkgs' own rustc says which LLVM it
+uses; toolchains from rust-overlay or fenix don't. Proposed: a small table
+mapping Rust version to LLVM major version, shipped with breakbulk, with an
+option to override. Alternative: ask rustc at build time, which would need
+import-from-derivation to pick the tool package.
+
+## 42. ASK: should slow tests run in plain `nix flake check`?
+
+Windows SDK download (252 MB), wine runs and cross toolchains make
+`nix flake check` slow. They currently run there (marked HEAVY in
+`flake.nix`). Alternative: a separate `heavyChecks` output that CI runs
+explicitly. Default: keep them in `checks`.
+
+## 43. FYI: evaluation speed is fine; graph size grows too fast (scale test)
+
+A synthetic workspace shaped like zed's real lockfile was run at 300, 1,000
+and ~3,700 crates. Filling in names at evaluation time (entry 29) costs only
+3–6% of evaluation, so it stays. But every crate's build step currently lists
+all crates below it as inputs, so the total grows roughly with the square of
+the crate count: at ~3,700 crates, 154 MB of Nix build-step files and ~10 s
+of evaluation, and about 1.5 minutes to write them the first time.
+Write-up: `docs/spikes/scale.md`.
+
+## 44. ASK: list only direct dependencies on each library build step
+
+Fix for 43: each library build step lists only its direct dependencies;
+the indirect ones still reach the compiler, because each library's output
+carries a small file naming the ones below it, and Nix copies those along
+automatically. What gets rebuilt, and what compiler commands run, stays
+exactly the same; downloading from a cache still fetches only the small
+metadata files, not the full libraries. Estimated effect at ~3,700 crates:
+build-step files 154 MB → 16 MB, evaluation and setup about 10× faster.
+Default: do it, after the planner lands (it touches the plan format and the
+unit builder).
+
+## 45. ASK: Nix's fixed cost per build step vs. the "≤ 2× crane" budget
+
+Nix spends 35–50 ms setting up each build step, and does this one step at a
+time even when building in parallel (it's in Nix's main build loop). For
+tiny crates (well under 0.1 s of compile each), a cold breakbulk build was
+3.7–5.2× slower than `cargo build -j8`. The design says more than ~2× crane
+is a bug to investigate. Real crates compile for much longer, so the share is
+smaller; the planner's real-project measurement will tell. Options: accept
+it and measure on real projects (default), report it upstream to Nix
+(setting sandboxes up in parallel), or merge tiny crates into one step (not
+recommended: loses per-crate sharing).
+
+## 46. FYI: every extra binary cache slows cold builds
+
+Nix looks up each new build step on every configured cache before building.
+With the four caches configured on this machine, that added 7 s per 300
+crates. This will go in the docs as a tip: a project with a private cache
+can limit substituters for breakbulk builds.

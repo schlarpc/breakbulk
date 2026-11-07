@@ -254,7 +254,7 @@ Supported Cargo releases form a rolling window: roughly the last six months of s
 The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable.
 
 - Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
-- Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from `rustc.llvmPackages`, so the LLVM version matches rustc.
+- Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM).
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
 - **wild** is an opt-in preset, gated by the determinism check.
 - Never rustup's self-contained `rust-lld`, which bypasses the Nix linker wrapper.
