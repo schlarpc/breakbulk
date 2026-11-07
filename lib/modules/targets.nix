@@ -4,7 +4,6 @@ let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
   M3 = bt.notImplemented "M3";
-  M4 = bt.notImplemented "M4";
   tool = types.nullOr (
     types.oneOf [
       types.str
@@ -87,11 +86,50 @@ let
           example = "aarch64-linux";
           description = "The Nix system that runs this target's test runs, so Nix sends them to native builders.";
         });
-        stages = M4 (mkOption {
+        stages = mkOption {
           type = bt.stages;
           default = { };
-          description = "Default post-link stages for this target's products.";
-        });
+          example = lib.literalExpression ''
+            {
+              strip = { after = "splitDebug"; run = breakbulk.stageHelpers.strip; };
+              splitDebug = lib.mkForce null;   # remove a default stage
+            }
+          '';
+          description = ''
+            Post-link stages for this target's products, merged over the
+            stage preset's defaults (`stagePreset`). A stage is
+            `{ after ? null; before ? null; run = { input, product, target,
+            pkgs }: <derivation>; }`; `null` removes one. Package settings
+            (`packages.<name>.stages`) merge over these.
+          '';
+        };
+        checks = mkOption {
+          type = bt.stages;
+          default = { };
+          description = ''
+            Checks on this target's products: `{ on ? <the product>; run =
+            { input, product, pkgs }: <derivation>; }`, where `on` names a
+            stage (`linked` for the raw link output). Every product also
+            gets `noSourceReferences`; `null` removes a check. Checks appear
+            in `repo.checks` as `<ws>/<triple>/<pkg>/<name>`.
+          '';
+        };
+        stagePreset = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "wasmBrowser";
+          description = ''
+            Which default stage chain this target's products get
+            (`breakbulk.stages.defaultStageNames`: `linuxGnu`,
+            `linuxMusl`, `staticGlibc` split debug info; `msvc` none;
+            `wasmBrowser` bindgen and wasmOpt; `wasmComponent` wasmOpt and
+            componentize). `null` picks by triple: Linux targets split debug
+            info, msvc and others get none. Toolchain presets set it.
+            Whether the chain contains `splitDebug` also decides how source
+            paths are remapped (debug info keeps real paths only when it is
+            split off).
+          '';
+        };
 
         warnings = bt.warningsOption;
       };
@@ -112,7 +150,6 @@ let
           [ "runner" ]
           [ "testSystem" ]
         ];
-        M4 = [ [ "stages" ] ];
       };
     };
 in

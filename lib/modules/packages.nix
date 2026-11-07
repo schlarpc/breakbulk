@@ -13,16 +13,16 @@ let
         env = bt.mkEnv "Environment for this package's units on this target (target units only).";
         nativeInputs = bt.mkInputs "Build-machine tools for this package's units on this target (target units only).";
         inputs = bt.mkInputs "Libraries for this package's units on this target (target units only).";
-        stages = M4 (mkOption {
+        stages = mkOption {
           type = bt.stages;
           default = { };
           description = "Post-link stages for this package's products on this target.";
-        });
-        checks = M4 (mkOption {
+        };
+        checks = mkOption {
           type = bt.stages;
           default = { };
           description = "Checks on this package's products on this target.";
-        });
+        };
       };
     };
 
@@ -107,30 +107,30 @@ let
           description = "Settings for this package's target units on one target triple.";
         };
 
-        stages = M4 (mkOption {
+        stages = mkOption {
           type = bt.stages;
           default = { };
           description = "Post-link stages for this package's products, on every target.";
-        });
-        checks = M4 (mkOption {
+        };
+        checks = mkOption {
           type = bt.stages;
           default = { };
           description = "Checks on this package's products, on every target.";
-        });
+        };
 
         test = {
-          env = M4 (bt.mkEnv "Environment for this package's test runs.");
-          path = M4 (mkOption {
+          env = bt.mkEnv "Environment for this package's test runs.";
+          path = mkOption {
             type = types.listOf types.package;
             default = [ ];
             description = "Packages added to `PATH` in this package's test runs.";
-          });
+          };
           sourceScope = M4 (mkOption {
             type = types.listOf (types.either types.path types.str);
             default = [ ];
             description = "Extra repository paths in the source view of this package's test units, for tests that read repository files.";
           });
-          args = M4 (mkOption {
+          args = mkOption {
             type = types.listOf types.str;
             default = [ ];
             example = [
@@ -138,17 +138,17 @@ let
               "net::"
             ];
             description = "libtest arguments for every test binary of this package.";
-          });
-          includeIgnored = M4 (mkOption {
+          };
+          includeIgnored = mkOption {
             type = types.bool;
             default = false;
             description = "Also run `#[ignore]` tests.";
-          });
-          binaries = M4 (mkOption {
+          };
+          binaries = mkOption {
             type = types.attrsOf (types.submodule testBinary);
             default = { };
             description = "Per test binary settings.";
-          });
+          };
         };
 
         strictSources = mkOption {
@@ -169,44 +169,13 @@ let
       config.warnings =
         bt.unimplementedWarnings "packages.${lib.strings.escapeNixIdentifier name}" options {
           M4 = [
-            [ "stages" ]
-            [ "checks" ]
-            [
-              "test"
-              "env"
-            ]
-            [
-              "test"
-              "path"
-            ]
             [
               "test"
               "sourceScope"
             ]
-            [
-              "test"
-              "args"
-            ]
-            [
-              "test"
-              "includeIgnored"
-            ]
-            [
-              "test"
-              "binaries"
-            ]
           ];
           M6 = [ [ "pipelining" ] ];
-        }
-        ++ lib.concatLists (
-          lib.mapAttrsToList (
-            t: o:
-            map (
-              k:
-              "breakbulk: `packages.${lib.strings.escapeNixIdentifier name}.target.${t}.${k}` is set but not implemented yet (M4); it has no effect."
-            ) (lib.filter (k: o.${k} != { }) [ "stages" "checks" ])
-          ) config.target
-        );
+        };
     };
 in
 {

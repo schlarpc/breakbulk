@@ -25,12 +25,22 @@
 #   repo.config, repo.options                             the evaluated modules
 #   repo.optionsDoc                                       nixosOptionsDoc of them
 #
-# A product (`packages.<pkg>`) is the package's build-plan roots (bins in
-# bin/, cdylibs, dylibs and staticlibs in lib/), copied into one output.
-# Roots Cargo did not build (required features) are left out and listed in
-# `.unbuilt`; when no root was built, the product is the first stub, which
-# fails with the reason. Every root is also under `.roots."<kind>/<target>"`.
-# Stages, debug outputs and test runs come with M4.
+#   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
+#   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  runnable apps
+#   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
+#
+# A product (`packages.<pkg>`) is the package's build-plan roots (bins,
+# cdylibs, dylibs and staticlibs) passed through the target's post-link
+# stages and installed (bins in bin/, libraries in lib/): see
+# lib/products.nix. `.stages.<name>` gives every stage, `.debug` the split
+# debug info, `.checks.<name>` the checks. Roots Cargo did not build
+# (required features) are left out and listed in `.unbuilt`; when no root
+# was built, the product is the first stub, which fails with the reason.
+# Every root is also under `.roots."<kind>/<target>"`.
+#
+# repo.checks (default variant): `<ws>/<triple>/<pkg>/build` (the
+# product), `…/<pkg>/<check>` (its checks), `…/<pkg>/test-<name>` (enabled
+# test runs) and `…/<pkg>/doctest`.
 #
 # Test names (`tests.<pkg>.<name>`): an integration test by its name, the
 # library's unit tests as `lib`, a bin's unit tests as `bin-<name>`, an
@@ -45,6 +55,7 @@
   mkFetch,
   mkTools,
   mkWorkspace,
+  products,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -196,6 +207,73 @@ let
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
+  # The `packages.<name>` keys matching a workspace's path package `pkg`
+  # (unversioned keys first).
+  memberKeys =
+    wsName: pkg:
+    let
+      es = lib.filter (e: e.name == pkg && e.source or null == null) locks.${wsName};
+    in
+    lib.filter (k: lib.any (overrideMatches k) es) orderedKeys;
+
+  # Product settings for mkProducts: each key's stages and checks, then its
+  # target.<triple> stages and checks.
+  productConfig =
+    wsName: triple: pkg:
+    lib.concatMap (
+      k:
+      let
+        o = cfg.packages.${k};
+        t = o.target.${triple} or { };
+      in
+      [
+        { inherit (o) stages checks; }
+        {
+          stages = t.stages or { };
+          checks = t.checks or { };
+        }
+      ]
+    ) (memberKeys wsName pkg);
+
+  # packages.<name>.test merged over matching keys, for mkTestRuns:
+  # `{ <pkg> = { test = …; }; }` for the workspace's path packages.
+  testConfigs =
+    wsName:
+    let
+      members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
+      mergeTest = a: b: {
+        env = a.env // envStrings b.env;
+        path = a.path ++ b.path;
+        args = a.args ++ b.args;
+        includeIgnored = a.includeIgnored || b.includeIgnored;
+        binaries = lib.zipAttrsWith (
+          _:
+          lib.foldl'
+            (x: y: {
+              args = x.args ++ y.args;
+              enable = x.enable && y.enable;
+            })
+            {
+              args = [ ];
+              enable = true;
+            }
+        ) [
+          a.binaries
+          b.binaries
+        ];
+      };
+      empty = {
+        env = { };
+        path = [ ];
+        args = [ ];
+        includeIgnored = false;
+        binaries = { };
+      };
+    in
+    lib.genAttrs members (pkg: {
+      test = lib.foldl' (acc: k: mergeTest acc cfg.packages.${k}.test) empty (memberKeys wsName pkg);
+    });
+
   # The package set of a target's units. Cross package sets come with the
   # presets (M3).
   targetPkgs =
@@ -279,6 +357,17 @@ let
     else
       v;
 
+  targetCfg = triple: cfg.targets.${triple} or { };
+
+  shippedRemapScopeOf =
+    triple: v:
+    products.shippedRemapScope {
+      inherit triple;
+      stagePreset = (targetCfg triple).stagePreset or null;
+      targetStages = (targetCfg triple).stages or { };
+      coverage = v.mode == "coverage";
+    };
+
   instance =
     wsName: ws: triple: vName:
     let
@@ -304,64 +393,34 @@ let
       extraSources = extraSourcesOf entries;
       packageOverrides = instOverrides entries triple;
       inherit (cfg) strictSources;
-      targetEnv = envStrings (cfg.targets.${triple}.env or { });
+      # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
+      # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
+      # set, as stdenv's separateDebugInfo does. Target units only.
+      targetEnv =
+        lib.optionalAttrs (shippedRemapScopeOf triple v != null) { NIX_SET_BUILD_ID = "1"; }
+        // envStrings (cfg.targets.${triple}.env or { });
       name = "${wsName}-${triple}-${vName}";
+      shippedRemapScope = shippedRemapScopeOf triple v;
+      packages = testConfigs wsName;
+      inherit (cfg) ca;
     };
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
-  # One product per package from its build-plan roots.
-  products =
-    inst: sel:
-    let
-      byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.roots);
-      selected = if sel == null then byPkg else lib.filterAttrs (n: _: lib.elem n sel) byPkg;
-      product =
-        pkg: rs:
-        let
-          built = lib.filter (r: r.breakbulkRoot.unit != null) rs;
-          unbuilt = lib.filter (r: r.breakbulkRoot.unit == null) rs;
-          roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) r) rs);
-          dirOf = r: if r.breakbulkRoot.kind == "bin" then "bin" else "lib";
-          drv =
-            if built == [ ] then
-              lib.head rs
-            else
-              pkgs.runCommand pkg { } (
-                ''
-                  mkdir -p $out
-                ''
-                + lib.concatMapStrings (
-                  r:
-                  if r.breakbulkRoot.kind == "bin" then
-                    # Cargo's own copy is named after the target, without
-                    # the -C extra-filename hash.
-                    ''
-                      files=(${r}/*)
-                      if [ ''${#files[@]} -ne 1 ]; then
-                        echo "expected one file in ${r}, found: ''${files[*]}" >&2
-                        exit 1
-                      fi
-                      install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}
-                    ''
-                  else
-                    ''
-                      mkdir -p $out/${dirOf r}
-                      cp -L --no-preserve=mode ${r}/* $out/${dirOf r}/
-                    ''
-                ) built
-              );
-        in
-        drv
-        // {
-          inherit roots;
-          unbuilt = map (r: {
-            root = rootName r;
-            inherit (r.breakbulkRoot) reason;
-          }) unbuilt;
-        };
-    in
-    lib.mapAttrs product selected;
+  # One product per package: its build-plan roots through the target's
+  # stages (lib/products.nix).
+  productsOf =
+    wsName: ws: triple: inst: sel:
+    products.mkProducts {
+      inherit pkgs inst triple;
+      select = sel;
+      stagePreset = (targetCfg triple).stagePreset or null;
+      targetStages = (targetCfg triple).stages or { };
+      targetChecks = (targetCfg triple).checks or { };
+      packageConfig = productConfig wsName triple;
+      inherit (cfg) ca;
+      lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
+    };
 
   testName =
     r:
@@ -374,6 +433,42 @@ let
       "lib"
     else
       "${b.kind}-${b.target}";
+
+  selectPkgs = sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
+
+  # testRuns.<pkg>.<name>: test runs, named as `tests` names test
+  # binaries; `.enabled` holds those whose run is enabled
+  # (`test.binaries.<binary>.enable`).
+  namedRuns =
+    inst: sel:
+    let
+      split = key: builtins.match "([a-z]+)/(.*)" key;
+      short =
+        key:
+        let
+          m = split key;
+        in
+        if m == null then
+          key
+        else if lib.head m == "lib" then
+          "lib"
+        else
+          "${lib.head m}-${lib.last m}";
+      long = key: if split key == null then "test/${key}" else key;
+    in
+    lib.mapAttrs (
+      pkg: runs:
+      let
+        keys = lib.attrNames runs;
+        counts = lib.groupBy short keys;
+        nameOf = k: if lib.length counts.${short k} > 1 then long k else short k;
+        pick = ks: lib.listToAttrs (map (k: lib.nameValuePair (nameOf k) runs.${k}) ks);
+      in
+      pick keys
+      // {
+        enabled = pick (lib.filter (k: inst.checks ? "test/${pkg}/${k}") keys);
+      }
+    ) (selectPkgs sel inst.testRuns);
 
   # tests.<pkg>.<name>: test-plan roots installed as $out/bin/<target>
   # (stubs as they are).
@@ -409,8 +504,11 @@ let
         let
           sel = ws.targets.${triple}.packages;
           variants = lib.mapAttrs (_: inst: {
-            packages = products inst sel;
+            packages = productsOf wsName ws triple inst sel;
             tests = testsOf inst sel;
+            testRuns = namedRuns inst sel;
+            testApps = selectPkgs sel inst.testApps;
+            doctests = selectPkgs sel inst.doctests;
           }) vs;
           dflt =
             variants.${ws.defaultVariant}
@@ -418,7 +516,13 @@ let
         in
         {
           inherit variants;
-          inherit (dflt) packages tests;
+          inherit (dflt)
+            packages
+            tests
+            testRuns
+            testApps
+            doctests
+            ;
         }
       ) instances;
     in
@@ -427,6 +531,7 @@ let
       target = perTarget;
       packages = perTarget.${nativeTriple}.packages or { };
       tests = perTarget.${nativeTriple}.tests or { };
+      testRuns = perTarget.${nativeTriple}.testRuns or { };
       plans = lib.mapAttrs (_: lib.mapAttrs (_: inst: inst.plans)) instances;
       devShell = mkDevShell {
         inherit pkgs nativeTriple;
@@ -440,21 +545,26 @@ let
 
   workspaces = lib.mapAttrs workspaceOut cfg.workspaces;
 
-  # repo.checks: every product that built something, and every test
-  # binary (test runs come with M4).
+  # repo.checks, for the default variant of every workspace and target:
+  # every product that built something (`build`) and its checks; every
+  # enabled test run (`test-<name>`, named as in `tests`) and doctest.
   checks = lib.concatMapAttrs (
     wsName: w:
     lib.concatMapAttrs (
       triple: t:
       lib.concatMapAttrs (
         pkg: p:
-        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) {
-          "${wsName}/${triple}/${pkg}/build" = p;
-        }
+        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+          {
+            "${wsName}/${triple}/${pkg}/build" = p;
+          }
+          // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
+        )
       ) t.packages
       // lib.concatMapAttrs (
-        pkg: ts: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) ts
-      ) t.tests
+        pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
+      ) t.testRuns
+      // lib.mapAttrs' (pkg: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/doctest" d) t.doctests
     ) w.target
   ) workspaces;
 

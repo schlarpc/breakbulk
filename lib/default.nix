@@ -47,6 +47,7 @@ let
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix { inherit lib wasmBindgen; };
   testRuns = import ./test-runs.nix { inherit lib stages; };
+  products = import ./products.nix { inherit lib stages; };
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;
@@ -109,6 +110,7 @@ let
       mkFetch
       mkTools
       mkWorkspace
+      products
       ;
   };
 in
@@ -141,7 +143,13 @@ in
 
   xwinSdk = import ./xwin-sdk.nix { inherit lib; };
 
-  inherit wasmBindgen stages testRuns testApps;
+  inherit
+    wasmBindgen
+    stages
+    testRuns
+    testApps
+    products
+    ;
   inherit (stages) mkProduct;
   stageHelpers = stages.helpers;
 }
