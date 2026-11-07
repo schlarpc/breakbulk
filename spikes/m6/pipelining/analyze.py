@@ -89,6 +89,21 @@ def build_jobs(units, timing, mode, overhead):
             j = dep["index"]
             pipe = rlib_only(u) and rlib_only(units[j])
             edges.append((i, j, pipe))
+        # A unit that links (or otherwise needs object code) waits for every
+        # transitive dependency to finish, not only its direct ones (cargo
+        # src/compiler/job_queue/mod.rs, `depend_on_deps_of_deps`).
+        if not rlib_only(u):
+            seen = set()
+            stack = [d["index"] for d in u["dependencies"]]
+            while stack:
+                j = stack.pop()
+                for d in units[j]["dependencies"]:
+                    k = d["index"]
+                    if k not in seen:
+                        seen.add(k)
+                        stack.append(k)
+            direct = {d["index"] for d in u["dependencies"]}
+            edges.extend((i, k, False) for k in seen - direct)
     needs_rmeta = {j for (i, j, p) in edges if p}
 
     jobs = []  # each: {"name", "dur", "marks": {"rmeta": t, "done": d}, "deps": [(jobidx, mark)]}

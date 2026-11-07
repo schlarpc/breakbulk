@@ -24,14 +24,16 @@ unset CARGO_BUILD_TARGET RUSTFLAGS CARGO_INCREMENTAL CARGO_BUILD_BUILD_DIR
 export HELIX_DISABLE_AUTO_GRAMMAR_BUILD=1
 cd "$dir"
 cargo fetch --locked
-res=$OUT/$name-$profile
+res=$OUT/$name-$profile${NOPIPE:+-nopipe}
 mkdir -p "$res"
 # --unit-graph is unstable; RUSTC_BOOTSTRAP only for this graph-only call.
 RUSTC_BOOTSTRAP=1 cargo build --locked --profile "$profile" "$@" \
   -Z unstable-options --unit-graph > "$res/unit-graph.json"
 rm -rf "$CARGO_TARGET_DIR"
 start=$(date +%s)
+if [ -n "${NOPIPE:-}" ]; then export RUSTC_WRAPPER=$(dirname "$(readlink -f "$0")")/no-pipelining-wrapper.sh; fi
 cargo build --locked --profile "$profile" "$@" -j"$JOBS" --timings 2> "$res/build.log"
+unset RUSTC_WRAPPER
 end=$(date +%s)
 cp "$CARGO_TARGET_DIR"/cargo-timings/cargo-timing.html "$res/"
 printf '{"name":"%s","rev":"%s","profile":"%s","jobs":%s,"wall":%s,"args":"%s","loadavg":"%s"}\n' \
