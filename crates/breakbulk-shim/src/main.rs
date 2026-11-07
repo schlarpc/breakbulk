@@ -7,7 +7,7 @@
 //! | --- | --- | --- |
 //! | Build-script stub | `breakbulk-stub.json` beside the running executable | record env, print sentinels |
 //! | Rustdoc | the executable's file name contains `rustdoc` | queries go to the real rustdoc; otherwise record, exit 0 |
-//! | Query | `-vV`, `-V`, `--version`, any `--print`, or `-` as input | `exec` the real rustc |
+//! | Query | `-vV`, `-V`, `--version`, any `--print`, or `-` as input | record (env = Cargo's own env), then `exec` the real rustc |
 //! | Compile | `--crate-name` and an input file | record, fake outputs |
 //!
 //! As `RUSTC_WRAPPER` the shim is started as `shim [workspace-wrapper] rustc ARGS…`.
