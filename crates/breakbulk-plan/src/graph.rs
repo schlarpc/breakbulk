@@ -486,7 +486,23 @@ impl<'a> Builder<'a> {
     fn dylib_path(&self, unit: &str, value: &str) -> Result<(Vec<UnitId>, Option<String>), Error> {
         let mut runs = Vec::new();
         let mut kept = Vec::new();
-        for e in value.split(':').filter(|e| !e.is_empty()) {
+        let entries: Vec<&str> = value.split(':').filter(|e| !e.is_empty()).collect();
+        // Cargo appends its own process's value to the paths it adds, or
+        // uses that value alone when it already starts with them (cargo
+        // 0.97.0, `core/compiler/compilation.rs`, `fill_env`:
+        // `search_path.extend(paths::dylib_path())`). That value is the
+        // planner's environment, not the unit's (rust-overlay's cargo
+        // wrapper puts libsecret there), so it never reaches a unit.
+        let inherited: Vec<&str> = self
+            .baseline
+            .get(DYLIB_VAR)
+            .map(|v| v.split(':').filter(|e| !e.is_empty()).collect())
+            .unwrap_or_default();
+        let entries = match entries.len().checked_sub(inherited.len()) {
+            Some(n) if !inherited.is_empty() && entries[n..] == inherited[..] => &entries[..n],
+            _ => &entries[..],
+        };
+        for &e in entries {
             if let Some((tag, dir)) = dylib_sentinel(e) {
                 let r = self.run_id(&tag, &|| format!("unit {unit}: {DYLIB_VAR}"))?;
                 if dir != r.out_dir {
