@@ -19,7 +19,7 @@ use std::fmt;
 use breakbulk_format::rendered::{derivation_output, package_name_version};
 use breakbulk_format::{
     Arg, CompileUnit, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, Unit, UnitId,
-    ValidationOptions, render_unit, to_canonical_json, unit_env_value, validate,
+    ValidationOptions, render_doctest, render_unit, to_canonical_json, unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -491,6 +491,44 @@ fn instantiate_unit(inputs: &Inputs, prefix: &str, id: &UnitId) -> Result<Drv, E
     Ok(Drv { attrs })
 }
 
+/// A doctest's derivation: `breakbulk-unit doctest` over the rendered
+/// doctest, named `<package>-<version>-doctest`, with the one output `out`
+/// (the log).
+fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, Error> {
+    let d = &inputs.plan.doctests[id];
+    let tokens = Tokens::new(inputs, prefix);
+    let rendered = render_doctest(&inputs.plan, id, &tokens)
+        .map_err(|e| Error(format!("doctest {id}: {e}")))?;
+    let text = to_canonical_json(&rendered).map_err(|e| Error(format!("doctest {id}: {e}")))?;
+    let text = tokens.tokenize_store_paths(id, &text)?;
+    let builder = tokens.input(keys::tool(TOOL_UNIT));
+    let (pkg, version) = package_name_version(&d.package).unwrap_or((id, "0"));
+    let mut attrs = BTreeMap::new();
+    attrs.insert(
+        "name".into(),
+        Value::String(store_name(&format!("{pkg}-{version}-doctest"))),
+    );
+    attrs.insert(
+        "builder".into(),
+        Value::Parts {
+            parts: tokens.split(&builder)?,
+        },
+    );
+    attrs.insert("args".into(), Value::Strings(vec!["doctest".into()]));
+    attrs.insert(
+        "system".into(),
+        Value::String(inputs.toolchains.system.clone()),
+    );
+    attrs.insert("outputs".into(), Value::Strings(vec!["out".into()]));
+    attrs.insert(
+        "BREAKBULK_UNIT".into(),
+        Value::Parts {
+            parts: tokens.split(&text)?,
+        },
+    );
+    Ok(Drv { attrs })
+}
+
 /// How a root is matched between the plan and the prediction.
 type RootKey = (String, RootKind, String, bool);
 
@@ -692,6 +730,15 @@ pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
             Err(e) => errors.push(e.0),
         }
     }
+    let mut doctests = BTreeMap::new();
+    for id in inputs.plan.doctests.keys() {
+        match instantiate_doctest(inputs, &prefix, id) {
+            Ok(d) => {
+                doctests.insert(id.clone(), d);
+            }
+            Err(e) => errors.push(e.0),
+        }
+    }
     if !errors.is_empty() {
         return err(errors.join("\n"));
     }
@@ -700,6 +747,7 @@ pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
         pass_as_file_above: PASS_AS_FILE_ABOVE,
         units,
         roots: instantiate_roots(inputs, &prefix)?,
+        doctests,
     })
 }
 

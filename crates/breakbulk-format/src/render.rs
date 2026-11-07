@@ -52,7 +52,7 @@ pub trait Resolve {
     }
 }
 
-fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
+pub(crate) fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
     match t {
         Text::Literal(s) => Ok(s.clone()),
         Text::Concat(pieces) => {
@@ -68,7 +68,7 @@ fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
     }
 }
 
-fn env<R: Resolve>(
+pub(crate) fn env<R: Resolve>(
     e: &BTreeMap<String, Text>,
     r: &R,
 ) -> Result<BTreeMap<String, String>, R::Error> {
@@ -77,7 +77,10 @@ fn env<R: Resolve>(
         .collect()
 }
 
-fn splice<R: Resolve>(s: &Splice, r: &R) -> Result<breakbulk_unit::spec::Splice<String>, R::Error> {
+pub(crate) fn splice<R: Resolve>(
+    s: &Splice,
+    r: &R,
+) -> Result<breakbulk_unit::spec::Splice<String>, R::Error> {
     let flags = r.flags(&s.splice)?;
     Ok(s.map(|_| flags))
 }
@@ -137,6 +140,12 @@ pub fn crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
     let Some(Unit::Compile(c)) = plan.units.get(id) else {
         panic!("{id} is not a compile unit of the plan");
     };
+    crate_deps_of(plan, c)
+}
+
+/// [`crate_deps`] of a compile unit that need not be one of the plan's
+/// units (a doctest's [`crate::Doctest::as_compile`]).
+pub fn crate_deps_of(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
     let want = if is_linking(c) { "rlib" } else { "rmeta" };
     let mut out: BTreeSet<OutRef> = BTreeSet::new();
     let mut seen: BTreeSet<&str> = BTreeSet::new();

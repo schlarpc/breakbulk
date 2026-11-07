@@ -43,6 +43,10 @@ pub struct UnitsJson {
     pub units: BTreeMap<String, Drv>,
     /// Root name to root.
     pub roots: BTreeMap<String, RootOut>,
+    /// Test plans: the plan's doctest id (`d-<package>`) to its doctest
+    /// derivation (`breakbulk-unit doctest`, output `out`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub doctests: BTreeMap<String, Drv>,
 }
 
 /// The attributes of one derivation, passed to `derivation` after
