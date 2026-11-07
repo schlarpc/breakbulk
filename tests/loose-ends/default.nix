@@ -14,6 +14,13 @@
 #                directory and passes; widening the scope changes exactly
 #                a's test harnesses and doctest (no build-plan unit, no unit
 #                or test run of b); the option gives no warning.
+#   devshell     the walking skeleton with the linuxGnu preset and extra
+#                rustflags: the dev shell exports CARGO_BUILD_TARGET and the
+#                spec as CARGO_TARGET_<TRIPLE>_{LINKER,RUSTFLAGS}; a local
+#                `cargo build -v --release` in that environment, outside any
+#                home directory, gives exactly the plan's `-C metadata`
+#                values, and every target unit gets the spec's linker and
+#                rustflags.
 {
   pkgs ? import (
     let
@@ -170,12 +177,83 @@ let
         mkdir -p $out
         echo ${lib.escapeShellArg (builtins.toJSON got)} > $out/changed
       '';
+
+  # --- devshell ---------------------------------------------------------------
+
+  # The walking skeleton with the linuxGnu preset (a mold linker wrapper)
+  # and extra spec rustflags; the default variant (release).
+  shellRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = ../fixtures/walking-skeleton;
+    modules = [
+      {
+        workspaces.main = { };
+        targets.${native} = {
+          preset = breakbulk.presets.linuxGnu;
+          rustflags = [
+            "--cfg"
+            "bb_devshell"
+          ];
+        };
+      }
+    ];
+  };
+  shellInst = shellRepo.workspaces.main.instances.${native}.default;
+  devShell = shellRepo.workspaces.main.devShell;
+
+  # Local `cargo build -v --release` in the dev shell's environment (the
+  # shell derivation, made buildable), staged outside any home directory,
+  # with the planner's source replacement so it builds offline. The set of
+  # `-C metadata` values equals the plan's compile unit keys, and every
+  # target unit gets the spec's linker and rustflags.
+  devshell =
+    let
+      envVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}";
+      shellEnv = devShell.drvAttrs;
+    in
+    assert lib.assertMsg (
+      shellEnv.CARGO_BUILD_TARGET or null == native
+    ) "devshell: CARGO_BUILD_TARGET is not set";
+    assert lib.assertMsg (
+      (shellEnv."${envVar}_RUSTFLAGS" or null) == "--cfg bb_devshell"
+    ) "devshell: ${envVar}_RUSTFLAGS is ${builtins.toJSON (shellEnv."${envVar}_RUSTFLAGS" or null)}";
+    assert lib.assertMsg (shellEnv ? "${envVar}_LINKER") "devshell: ${envVar}_LINKER is not set";
+    devShell.overrideAttrs (_: {
+      name = "loose-ends-devshell";
+      phases = [ "buildPhase" ];
+      plan = "${shellInst.plans.build}/plan.json";
+      vendorConfig = shellInst.vendor.configFile;
+      fixture = ../fixtures/walking-skeleton;
+      jq = "${pkgs.jq}/bin/jq";
+      buildPhase = ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode $fixture $TMPDIR/ws
+        cd $TMPDIR/ws
+        echo "$CARGO_BUILD_TARGET ''$${envVar}_LINKER ''$${envVar}_RUSTFLAGS"
+        cargo build -v --release --offline --frozen --config "$vendorConfig" 2>&1 | tee $TMPDIR/log
+        grep -o -- '-C metadata=[0-9a-f]*' $TMPDIR/log | sed 's/.*=/c-/' | sort -u > local
+        $jq -r '.units | keys[] | select(startswith("c-"))' $plan | sort -u > planned
+        echo "planned:"; cat planned
+        diff -u planned local
+        # Target units (those built with --target) carry the spec.
+        grep -- '--target ${native}' $TMPDIR/log | grep -v 'build_script_build' > target-lines
+        [ -s target-lines ]
+        while read -r l; do
+          case "$l" in *"-C linker=''$${envVar}_LINKER"*) ;; *) echo "no spec linker: $l" >&2; exit 1 ;; esac
+          case "$l" in *"--cfg bb_devshell"*) ;; *) echo "no spec rustflags: $l" >&2; exit 1 ;; esac
+        done < target-lines
+        mkdir -p $out
+        cp local $out/
+      '';
+    });
 in
 {
   config-env = configEnv;
   test-scope = testScope;
+  inherit devshell;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;
+    devshell = shellRepo;
   };
 }

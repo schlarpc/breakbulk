@@ -740,6 +740,30 @@ let
         inherit (ws.devShell) setTarget;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
         targetEnv = envStrings (cfg.targets.${nativeTriple}.env or { });
+        # How the planner passed the native spec to Cargo (IFD: the build
+        # plan of the default variant). The file names tool paths without
+        # their context; the spec's own values carry it.
+        cargoEnv =
+          let
+            inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
+            spec = (specFor wsName nativeTriple).mkWorkspace.spec or null;
+            values = lib.filter builtins.isString (
+              if spec == null then
+                [ ]
+              else
+                [
+                  spec.linker
+                  spec.hostLinker
+                ]
+                ++ spec.rustflags
+            );
+            withContext = builtins.replaceStrings (map builtins.unsafeDiscardStringContext values) values;
+            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/cargo-env.json"));
+          in
+          if inst == null then
+            { }
+          else
+            j // { env = lib.mapAttrs (_: withContext) j.env; };
       };
     };
 

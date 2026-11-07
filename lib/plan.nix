@@ -128,6 +128,7 @@
           --scratch "$NIX_BUILD_TOP/scratch" \
           --forbid "$NIX_BUILD_TOP" \
           --forbid "$HOME" \
-          --out $out/plan.json
+          --out $out/plan.json \
+          --cargo-env $out/cargo-env.json
       '';
 }

@@ -7,7 +7,8 @@
 //!   --kind build|test|bench [--mode build|check|clippy|coverage] \
 //!   [--clippy-driver PATH] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
-//!   [--config FILE-OR-VALUE]… [--spec FILE] --scratch DIR [--forbid PATH]… --out plan.json
+//!   [--config FILE-OR-VALUE]… [--spec FILE] --scratch DIR [--forbid PATH]… --out plan.json \
+//!   [--cargo-env cargo-env.json]
 //! ```
 
 use std::process::ExitCode;
@@ -22,7 +23,8 @@ fn usage() -> ! {
          [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-arg A]... \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
-         [--config X]... [--spec FILE] --scratch DIR [--forbid PATH]... --out FILE"
+         [--config X]... [--spec FILE] --scratch DIR [--forbid PATH]... --out FILE \
+         [--cargo-env FILE]"
     );
     std::process::exit(2)
 }
@@ -53,6 +55,7 @@ fn main() -> ExitCode {
         spec: None,
     };
     let mut out = None;
+    let mut cargo_env_out: Option<String> = None;
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| usage());
         match a.as_str() {
@@ -98,6 +101,7 @@ fn main() -> ExitCode {
             "--forbid" => opts.forbidden.push(val()),
             "--spec" => opts.spec = Some(val()),
             "--out" => out = Some(val()),
+            "--cargo-env" => cargo_env_out = Some(val()),
             _ => usage(),
         }
     }
@@ -116,13 +120,20 @@ fn main() -> ExitCode {
         usage();
     }
     let Some(out) = out else { usage() };
-    match breakbulk_plan::plan(&opts) {
-        Ok(plan) => {
+    match breakbulk_plan::plan_with_cargo_env(&opts) {
+        Ok((plan, cargo_env)) => {
             let mut text = plan.to_canonical_json();
             text.push('\n');
             if let Err(e) = std::fs::write(&out, text) {
                 eprintln!("breakbulk-plan: writing {out}: {e}");
                 return ExitCode::FAILURE;
+            }
+            if let Some(path) = cargo_env_out {
+                let text = serde_json::to_string(&cargo_env).expect("strings serialize");
+                if let Err(e) = std::fs::write(&path, text) {
+                    eprintln!("breakbulk-plan: writing {path}: {e}");
+                    return ExitCode::FAILURE;
+                }
             }
             ExitCode::SUCCESS
         }

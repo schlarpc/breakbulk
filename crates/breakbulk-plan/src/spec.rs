@@ -317,6 +317,75 @@ pub fn config_text(spec: &Spec, key: RustflagsKey, target: &str, host: &str) -> 
     out
 }
 
+/// The spec's `--config` as Cargo's environment configuration, for the dev
+/// shell ("Dev shell" in `docs/implementation.md`): local Cargo given these
+/// variables applies the spec as the planner's `--config` does. Cargo
+/// appends an environment list to the config files' list for the same key
+/// (`GlobalContext::get_cv_with_env`, "Lists are always merged"), as it
+/// appends a `--config` list, so the project's own flags stay first.
+///
+/// An environment list is split on whitespace, so a flag containing
+/// whitespace cannot be passed this way; such flags are returned as
+/// warnings instead.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct CargoEnv {
+    pub env: BTreeMap<String, String>,
+    pub warnings: Vec<String>,
+}
+
+/// `CARGO_TARGET_<TRIPLE>_<KEY>`: the triple uppercased, with `-` and `.`
+/// as `_` (Cargo's `ConfigKey::as_env_key`).
+pub fn target_env_var(triple: &str, key: &str) -> String {
+    let t: String = triple
+        .chars()
+        .map(|c| match c {
+            '-' | '.' => '_',
+            c => c.to_ascii_uppercase(),
+        })
+        .collect();
+    format!("CARGO_TARGET_{t}_{key}")
+}
+
+impl Prepared {
+    pub fn cargo_env(&self) -> CargoEnv {
+        let mut out = CargoEnv::default();
+        if !self.spec.rustflags.is_empty() {
+            let var = match self.key {
+                RustflagsKey::Build => "CARGO_BUILD_RUSTFLAGS".to_owned(),
+                RustflagsKey::Target => target_env_var(&self.target, "RUSTFLAGS"),
+            };
+            let (ok, bad): (Vec<&String>, Vec<&String>) = self
+                .spec
+                .rustflags
+                .iter()
+                .partition(|f| !f.contains(char::is_whitespace));
+            for f in bad {
+                out.warnings.push(format!(
+                    "the rustflag `{f}` contains whitespace; {var} cannot carry it"
+                ));
+            }
+            let joined: Vec<&str> = ok.iter().map(|s| s.as_str()).collect();
+            out.env.insert(var, joined.join(" "));
+        }
+        if let Some(l) = &self.spec.linker {
+            out.env
+                .insert(target_env_var(&self.target, "LINKER"), l.clone());
+        }
+        if let Some(l) = &self.spec.host_linker {
+            if self.host != self.target {
+                out.env
+                    .insert(target_env_var(&self.host, "LINKER"), l.clone());
+            } else if self.spec.linker.as_ref() != Some(l) {
+                out.warnings.push(format!(
+                    "the host linker {l} differs from the target linker on the same triple; \
+                     local Cargo gives build scripts the target linker"
+                ));
+            }
+        }
+        out
+    }
+}
+
 /// One line of `rustc --print cfg`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CfgValue {
@@ -500,6 +569,10 @@ impl Parser {
 pub struct Prepared {
     pub spec: Spec,
     pub key: RustflagsKey,
+    /// The host triple, for the host linker.
+    pub host: String,
+    /// The target triple.
+    pub target: String,
     /// The project's rustflags of the chosen source.
     pub project_flags: Vec<String>,
     /// The generated `--config` file.
@@ -532,6 +605,8 @@ pub fn prepare(
     Ok(Prepared {
         spec,
         key,
+        host: host.to_owned(),
+        target: target.to_owned(),
         project_flags,
         config,
     })
@@ -762,6 +837,56 @@ mod tests {
         );
         c.files = keep;
         c
+    }
+
+    #[test]
+    fn cargo_env_for_the_dev_shell() {
+        let prepared = |key, host: &str| Prepared {
+            spec: Spec {
+                rustflags: vec![
+                    "-C".into(),
+                    "target-feature=+crt-static".into(),
+                    "a b".into(),
+                ],
+                linker: Some("/nix/store/x-cc/bin/cc".into()),
+                host_linker: Some("/nix/store/y-cc/bin/cc".into()),
+            },
+            key,
+            host: host.into(),
+            target: "aarch64-unknown-linux-musl".into(),
+            project_flags: vec![],
+            config: PathBuf::new(),
+        };
+        let e = prepared(RustflagsKey::Target, "x86_64-unknown-linux-gnu").cargo_env();
+        assert_eq!(
+            e.env,
+            BTreeMap::from([
+                (
+                    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER".into(),
+                    "/nix/store/x-cc/bin/cc".into()
+                ),
+                (
+                    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS".into(),
+                    "-C target-feature=+crt-static".into()
+                ),
+                (
+                    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER".into(),
+                    "/nix/store/y-cc/bin/cc".into()
+                ),
+            ])
+        );
+        assert_eq!(e.warnings.len(), 1, "{:?}", e.warnings);
+        let e = prepared(RustflagsKey::Build, "aarch64-unknown-linux-musl").cargo_env();
+        assert_eq!(
+            e.env["CARGO_BUILD_RUSTFLAGS"],
+            "-C target-feature=+crt-static"
+        );
+        // Same triple, different host linker: not expressible.
+        assert_eq!(e.warnings.len(), 2, "{:?}", e.warnings);
+        assert_eq!(
+            target_env_var("thumbv7em-none-eabihf.json", "LINKER"),
+            "CARGO_TARGET_THUMBV7EM_NONE_EABIHF_JSON_LINKER"
+        );
     }
 
     #[test]
