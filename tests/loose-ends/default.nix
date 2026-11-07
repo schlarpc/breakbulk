@@ -37,6 +37,8 @@
 #                test gets its own as CARGO_BIN_EXE_tool; a bench with
 #                `test = true` is `bench-<name>` in tests, testRuns and
 #                checks alike.
+#   runner-list  `targets.<triple>.runner` as a list (program and arguments):
+#                the test run runs `env BB_RUNNER=1 <binary>`.
 {
   pkgs ? import (
     let
@@ -438,6 +440,33 @@ let
         touch $out
       '';
 
+  # --- runner-list ------------------------------------------------------------
+
+  # `targets.<triple>.runner` as a list (program and arguments, as Cargo's
+  # runner array): `env BB_RUNNER=1 <binary> <args…>`.
+  runnerList =
+    let
+      repo = breakbulk.mkRepository {
+        inherit pkgs tools;
+        root = fixtures + "/names";
+        modules = [
+          {
+            workspaces.main.variants.default.profile = "dev";
+            targets.${native}.runner = [
+              "${pkgs.coreutils}/bin/env"
+              "BB_RUNNER=1"
+            ];
+          }
+        ];
+      };
+      t = repo.workspaces.main.target.${native};
+    in
+    assert lib.assertMsg (t.runner == [
+      "${pkgs.coreutils}/bin/env"
+      "BB_RUNNER=1"
+    ]) "runner-list: the runner is ${builtins.toJSON t.runner}";
+    t.namedTestRuns.a.runs_tool;
+
   # --- docs/options.md --------------------------------------------------------
 
   # The module options as Markdown (mkRepository's optionsDoc).
@@ -473,6 +502,7 @@ in
   wasm-embed = wasmEmbedCheck;
   cfg-rustflags = cfgRustflags;
   inherit names;
+  runner-list = runnerList;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;

@@ -385,7 +385,9 @@ let
           targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
           targetEnv = envStrings (cEnv // t.env);
         };
-        runner = if runner == null then null else [ "${runner}" ];
+        # A program, or a list: program and arguments (as Cargo's
+        # `target.<triple>.runner` takes a string or an array).
+        runner = if runner == null then null else map (x: "${x}") (lib.toList runner);
         inherit (t) testSystem;
       };
 

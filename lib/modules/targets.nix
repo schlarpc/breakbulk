@@ -169,7 +169,8 @@ let
           description = ''
             The program that runs this target's test binaries (wine,
             wasmtime, qemu-user, …), invoked as `<runner> <binary> <args…>`
-            like Cargo's `target.<triple>.runner`. `null`: run directly.
+            like Cargo's `target.<triple>.runner`: a program, or a list of
+            the program and its first arguments. `null`: run directly.
             May be a function `{ lockfile, workspace }: <runner>` for runners
             that depend on the workspace (wasm-bindgen-test-runner must
             match the locked wasm-bindgen).
