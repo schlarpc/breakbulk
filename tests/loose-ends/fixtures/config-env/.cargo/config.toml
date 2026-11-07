@@ -1,0 +1,9 @@
+# Cargo's `[env]` table, in every form Cargo documents.
+[env]
+BB_PLAIN = "plain-value"
+# Relative to the directory that holds `.cargo/`.
+BB_REL = { value = "data/greeting.txt", relative = true }
+# Cargo's own environment has HOME, so only `force` applies this.
+HOME = { value = "/forced-home", force = true }
+# Cargo's own environment has PATH; without `force` Cargo leaves it alone.
+PATH = "/not-forced-path"

@@ -50,7 +50,7 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
     }
     let opts = &traced;
     let t = trace::run(opts)?;
-    let ctx = t.context(opts);
+    let ctx = t.context(opts)?;
     let b = graph::Builder::new(&ctx, &t.metadata, &t.records)?;
     let mut plan = b.plan()?;
     if let Some(p) = &prepared {

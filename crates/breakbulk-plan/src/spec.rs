@@ -27,7 +27,7 @@
 //!   configured) and every project rustflag of the chosen source, and the
 //!   spec's linker.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -77,6 +77,8 @@ pub struct ProjectConfig {
     pub build_rustflags: Option<Vec<String>>,
     /// `target.<key>.rustflags` by key (a triple or `cfg(…)`), merged.
     pub target_rustflags: BTreeMap<String, Vec<String>>,
+    /// The `[env]` table's variables, with their `force` flag, merged.
+    pub env: BTreeMap<String, bool>,
     /// The files read, in precedence order (lowest first).
     pub files: Vec<PathBuf>,
 }
@@ -174,6 +176,27 @@ impl ProjectConfig {
             let v = string_list(b, &format!("{what}: build.rustflags"))?;
             self.build_rustflags.get_or_insert_with(Vec::new).extend(v);
         }
+        match table.get("env") {
+            None => {}
+            Some(toml::Value::Table(env)) => {
+                for (k, v) in env {
+                    // `NAME = "value"`, or `NAME = { value, force, relative }`
+                    // (Cargo's `EnvConfigValue`). A deeper file's table
+                    // merges into a shallower one's; a string replaces it.
+                    let force = match v {
+                        toml::Value::String(_) => false,
+                        toml::Value::Table(t) => match t.get("force") {
+                            Some(toml::Value::Boolean(f)) => *f,
+                            None => self.env.get(k).copied().unwrap_or(false),
+                            Some(_) => bail!("{what}: env.{k}.force: expected a boolean"),
+                        },
+                        _ => bail!("{what}: env.{k}: expected a string or a table"),
+                    };
+                    self.env.insert(k.clone(), force);
+                }
+            }
+            Some(_) => bail!("{what}: `env` is not a table"),
+        }
         if let Some(toml::Value::Table(targets)) = table.get("target") {
             for (key, t) in targets {
                 if let Some(r) = t.get("rustflags") {
@@ -208,6 +231,20 @@ impl ProjectConfig {
             }
         }
         Ok(flags)
+    }
+}
+
+impl ProjectConfig {
+    /// The `[env]` variables Cargo sets on the processes it starts, when its
+    /// own environment has the variables `cargo_env`: every one with
+    /// `force`, and the others only when Cargo's environment lacks them
+    /// (`GlobalContext::env_config`; the Cargo book's `[env]` section).
+    pub fn applied_env(&self, cargo_env: &BTreeSet<String>) -> BTreeSet<String> {
+        self.env
+            .iter()
+            .filter(|(k, force)| **force || !cargo_env.contains(*k))
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 }
 
@@ -725,6 +762,43 @@ mod tests {
         );
         c.files = keep;
         c
+    }
+
+    #[test]
+    fn env_table() {
+        let d = dir(&[
+            (
+                ".cargo/config.toml",
+                "[env]\nPLAIN = \"a\"\nFORCED = { value = \"b\", force = true }\n\
+                 PATH = \"/nope\"\nHOME = { value = \"/h\", force = true }\n\
+                 LATER = { value = \"x\", force = true }\n",
+            ),
+            (
+                "ws/.cargo/config.toml",
+                "[env]\nREL = { value = \"d\", relative = true }\n\
+                 FORCED = { value = \"c\" }\nLATER = \"y\"\n",
+            ),
+        ]);
+        let c = read(&d, "ws");
+        assert_eq!(
+            c.env,
+            BTreeMap::from([
+                ("FORCED".into(), true),
+                ("HOME".into(), true),
+                ("LATER".into(), false),
+                ("PATH".into(), false),
+                ("PLAIN".into(), false),
+                ("REL".into(), false),
+            ])
+        );
+        let cargo_env: BTreeSet<String> = ["PATH", "HOME", "LATER"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            c.applied_env(&cargo_env).into_iter().collect::<Vec<_>>(),
+            ["FORCED", "HOME", "PLAIN", "REL"]
+        );
     }
 
     #[test]

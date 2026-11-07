@@ -43,6 +43,12 @@ pub struct Plan {
     /// `d-<package name>`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub doctests: BTreeMap<String, Doctest>,
+    /// The variables the project's `[env]` config table sets on the
+    /// processes Cargo starts. Units keep them in their recorded env;
+    /// test runs take their values from the test unit's recorded env, as
+    /// `cargo test` gives them to test processes.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub config_env: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

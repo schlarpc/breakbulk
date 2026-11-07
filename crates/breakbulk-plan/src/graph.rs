@@ -38,6 +38,9 @@ pub struct Context {
     pub nightly: bool,
     /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
     pub keep_workspace_wrapper: bool,
+    /// The variables the project's `[env]` table sets on Cargo's
+    /// processes ([`crate::spec::ProjectConfig::applied_env`]).
+    pub config_env: BTreeSet<String>,
 }
 
 /// Variables never kept in a unit's env: the planner's own, and the ones the
@@ -463,7 +466,13 @@ impl<'a> Builder<'a> {
             if run && k == "RUSTC_BOOTSTRAP" {
                 continue;
             }
-            if self.baseline.get(k) == Some(v) && !ALWAYS_KEPT_ENV.contains(&k.as_str()) {
+            // Cargo applies `[env]` to its `rustc -vV` query too
+            // (`apply_env_config` in `Rustc::new`), so the baseline has
+            // those variables; they are still per-process env.
+            if self.baseline.get(k) == Some(v)
+                && !ALWAYS_KEPT_ENV.contains(&k.as_str())
+                && !self.ctx.config_env.contains(k)
+            {
                 continue;
             }
             let v = if run && k == "RUSTDOC" {
@@ -1033,6 +1042,7 @@ impl<'a> Builder<'a> {
             units,
             roots: self.roots(),
             doctests: self.doctests()?,
+            config_env: self.ctx.config_env.clone(),
         };
         plan.normalize();
         Ok(plan)

@@ -8,6 +8,7 @@
 //! config cannot redirect any of them. The project's own config files apply
 //! as they do locally; nothing from the user's home is visible.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -75,8 +76,9 @@ pub struct Trace {
 }
 
 impl Trace {
-    pub fn context(&self, opts: &Options) -> Context {
-        Context {
+    pub fn context(&self, opts: &Options) -> Result<Context, Error> {
+        let project = crate::spec::ProjectConfig::read(&workspace_dir(opts), None)?;
+        Ok(Context {
             scratch: target_dir(opts),
             skeleton: opts.skeleton.trim_end_matches('/').to_owned(),
             host: self.host.clone(),
@@ -93,9 +95,37 @@ impl Trace {
             cargo: opts.cargo.clone(),
             nightly: self.cargo_version.contains("-nightly") || self.cargo_version.contains("-dev"),
             keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
-        }
+            config_env: project.applied_env(&cargo_env_names(opts)),
+        })
     }
 }
+
+/// The variables of the environment the planner starts traced Cargo
+/// invocations with ([`command`] and [`run`]).
+fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
+    let mut names: BTreeSet<String> = BASE_ENV
+        .iter()
+        .filter(|k| std::env::var_os(k).is_some())
+        .chain(&[
+            "HOME",
+            "CARGO_HOME",
+            "BREAKBULK_RUSTDOC",
+            "BREAKBULK_METADATA",
+            "BREAKBULK_RECORD",
+        ])
+        .map(|k| (*k).to_owned())
+        .collect();
+    if opts.clippy_driver.is_some() && opts.mode == VariantMode::Clippy {
+        names.insert("RUSTC_WORKSPACE_WRAPPER".into());
+        if !opts.clippy_args.is_empty() {
+            names.insert("CLIPPY_ARGS".into());
+        }
+    }
+    names
+}
+
+/// Variables passed through from the planner's own environment.
+const BASE_ENV: [&str; 2] = ["PATH", "TMPDIR"];
 
 fn target_dir(opts: &Options) -> String {
     format!("{}/target", opts.scratch.trim_end_matches('/'))
@@ -123,7 +153,7 @@ fn command(opts: &Options, program: &str) -> Command {
     let scratch = Path::new(&opts.scratch);
     let mut cmd = Command::new(program);
     cmd.env_clear();
-    for k in ["PATH", "TMPDIR"] {
+    for k in BASE_ENV {
         if let Some(v) = std::env::var_os(k) {
             cmd.env(k, v);
         }

@@ -103,6 +103,14 @@
               breakbulk = self.lib;
             }) [ "repos" ]
           )
+          # Loose ends: [env] in test runs, test.sourceScope, the dev
+          # shell's Cargo env config, wasm embedding, docs/options.md.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "loose-ends-${n}" v) (
+            builtins.removeAttrs (import ./tests/loose-ends {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "workspaces" ]
+          )
         ));
     };
 }
