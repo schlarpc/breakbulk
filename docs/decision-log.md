@@ -856,3 +856,14 @@ lockfile, so its updates never rebuild your crates.
   fails with the reason in dynamic mode, while the default mode quietly
   leaves that binary out. Matching the default mode needs a "not built"
   marker checked at build time. Default: make them match.
+
+## 79. FYI: trying breakbulk on your own repositories (read-only copies)
+
+To meet milestone M4's exit criterion ("one of the author's real
+repositories builds end to end"), an agent is copying a few of your Rust
+repositories from your home directory into a scratch directory and
+building the copies with breakbulk. Your repositories themselves are not
+modified, built in place, or pushed anywhere, and secrets like `.env`
+files are skipped. Only the breakbulk module files (no source) go into
+`tests/field-trials/`, and findings go into `docs/field-trials.md`. If you'd
+rather some repositories stay out of this, say which.
