@@ -302,7 +302,7 @@ let
       variant = vName;
       select = if sel == null then [ ] else sel;
       extraSources = extraSourcesOf entries;
-      overrides = instOverrides entries triple;
+      packageOverrides = instOverrides entries triple;
       inherit (cfg) strictSources;
       targetEnv = envStrings (cfg.targets.${triple}.env or { });
       name = "${wsName}-${triple}-${vName}";

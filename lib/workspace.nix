@@ -24,7 +24,7 @@
 #   select = [ "<pkg>" ];      plan with -p for each instead of --workspace
 #   noDefaultFeatures, allFeatures   passed to the planner
 #   variant = "<name>";        the variant's name in root stubs' messages
-#   overrides."<name>@<version>" = { host = { env; envCapture; };
+#   packageOverrides."<name>@<version>" = { host = { env; envCapture; };
 #     target = { ... }; strictSources; }   as breakbulk.instantiate takes them
 #   strictSources = false;     the repository-wide default
 #   targetEnv = { };           the target spec's env (target units only)
@@ -63,7 +63,7 @@ pkgs:
   noDefaultFeatures ? false,
   allFeatures ? false,
   variant ? profile,
-  overrides ? { },
+  packageOverrides ? { },
   strictSources ? false,
   targetEnv ? { },
 }:
@@ -155,7 +155,8 @@ let
         envCapture = captures.target;
         env = targetEnv;
       };
-      inherit overrides strictSources;
+      overrides = packageOverrides;
+      inherit strictSources;
       roots = predictedRoots {
         workspaceRoots = wsRoots;
         planKind = kind;
