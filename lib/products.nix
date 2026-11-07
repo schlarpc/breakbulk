@@ -22,6 +22,8 @@
 #   products.<pkg>.stages.<name>   every stage (`linked` included)
 #   products.<pkg>.stageOrder      stage names after `linked`, in order
 #   products.<pkg>.debug           split debug info, when a stage split it
+#                                  (or install, for `.pdb` and other
+#                                  debuginfo side files of the link units)
 #   products.<pkg>.checks.<name>   checks (`noSourceReferences` by default)
 #   products.<pkg>.roots."<kind>/<target>"   the raw roots (units or stubs)
 #   products.<pkg>.unbuilt         roots Cargo did not build, with reasons
@@ -78,43 +80,85 @@ let
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
-  # The `linked` stage of one package: a directory of symlinks.
+  # A root unit's `debug` output (its debuginfo side files, decision 89), as
+  # a path that may not exist: in dynamic-derivation mode the wrapper links
+  # it as `debug` when the unit has one.
+  debugOf =
+    r:
+    if r.breakbulkRoot.dynamic or false then
+      "${r.breakbulkRoot.wrapper}/debug"
+    else if r ? debug then
+      "${r.debug}"
+    else
+      null;
+
+  # The `linked` stage of one package: a directory of symlinks (`out`), and
+  # the root units' debuginfo side files (`debug`) under the names Cargo
+  # uplifts them to: a bin's `.dwp` renamed as the bin is (`<bin>.dwp`),
+  # `.pdb` and `.dwo` under rustc's names, which the binaries record.
   mkLinked =
     pkgs: pkg: built:
-    pkgs.runCommand "${pkg}-linked" { } (
-      ''
-        mkdir -p $out
-        link() {
-          # A library with two linkable crate types (cdylib and staticlib)
-          # is one unit and several roots: each root names every file.
-          if [ -e "$out/$2" ] && [ "$(readlink -f "$out/$2")" = "$(readlink -f "$1")" ]; then
-            return
-          fi
-          if [ -e "$out/$2" ]; then
-            echo "breakbulk: two roots of ${pkg} produce $2" >&2
-            exit 1
-          fi
-          ln -s "$1" "$out/$2"
-        }
-      ''
-      + concatMapStrings (
-        r:
-        if r.breakbulkRoot.kind == "bin" then
+    pkgs.runCommand "${pkg}-linked"
+      {
+        outputs = [
+          "out"
+          "debug"
+        ];
+      }
+      (
+        ''
+          mkdir -p $out $debug
+          link() {
+            # A library with two linkable crate types (cdylib and staticlib)
+            # is one unit and several roots: each root names every file.
+            local dir=''${3:-$out}
+            if [ -e "$dir/$2" ] && [ "$(readlink -f "$dir/$2")" = "$(readlink -f "$1")" ]; then
+              return
+            fi
+            if [ -e "$dir/$2" ]; then
+              echo "breakbulk: two roots of ${pkg} produce $2" >&2
+              exit 1
+            fi
+            ln -s "$1" "$dir/$2"
+          }
+        ''
+        + concatMapStrings (
+          r:
+          let
+            dbg = debugOf r;
+            bin = r.breakbulkRoot.kind == "bin";
+            target = lib.escapeShellArg r.breakbulkRoot.target;
+          in
+          (
+            if bin then
+              ''
+                for f in ${r}/*; do
+                  b=''${f##*/}
+                  stem=''${b%%.*}
+                  link "$f" ${target}"''${b#"$stem"}"
+                done
+              ''
+            else
+              ''
+                for f in ${r}/*; do
+                  link "$f" "''${f##*/}"
+                done
+              ''
+          )
+          + lib.optionalString (dbg != null) ''
+            if [ -d ${dbg} ]; then
+              for f in ${dbg}/*; do
+                [ -e "$f" ] || continue
+                b=''${f##*/}
+                case "$b" in
+                  ${if bin then "*.dwp) link \"$f\" ${target}.dwp \"$debug\" ;;" else ""}
+                  *) link "$f" "$b" "$debug" ;;
+                esac
+              done
+            fi
           ''
-            for f in ${r}/*; do
-              b=''${f##*/}
-              stem=''${b%%.*}
-              link "$f" ${lib.escapeShellArg r.breakbulkRoot.target}"''${b#"$stem"}"
-            done
-          ''
-        else
-          ''
-            for f in ${r}/*; do
-              link "$f" "''${f##*/}"
-            done
-          ''
-      ) built
-    );
+        ) built
+      );
 
   # The scope of non-test units for a target: debug info keeps real store
   # paths only when the target's products split it off.

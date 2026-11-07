@@ -21,13 +21,18 @@
 #   p.stages.<name>    every stage, `linked` included
 #   p.stageOrder       stage names in order, without `linked`
 #   p.debug            the split debug output, when a stage produced one
+#                      (splitDebug; install, for the link units' `.pdb` and
+#                      other debuginfo side files when nothing split before)
 #   p.checks.<name>    every check, `noSourceReferences` included
 #
 # Stage modules are `{ after ? null; before ? null; run; }`:
 #   - `after`/`before` name a stage, a list of stages, or null. A stage with
 #     neither runs after `linked`.
 #   - `run = { input, product, target, pkgs }: <derivation>`; `input` is the
-#     previous stage's output, `product` is `{ name; sourcePaths; } // info`.
+#     previous stage's output, `product` is `{ name; sourcePaths; } // info`,
+#     plus `linkedDebug` (the `debug` output of `linked`, when it has one:
+#     the link units' debuginfo side files) and `debugSplit` (whether an
+#     earlier stage has a `debug` output).
 #   - A stage set to `null` (e.g. `lib.mkForce null` in the module system)
 #     is removed. Constraints that name a removed stage are dropped.
 #   - `install` (helpers.install) is added unless the set has `install`;
@@ -249,6 +254,9 @@ let
       product = {
         inherit name sourcePaths;
       }
+      # The link units' debuginfo side files (decision 89), for the stage
+      # that writes the product's `debug` output.
+      // lib.optionalAttrs (linked ? debug) { linkedDebug = linked.debug; }
       // info;
 
       caify =
@@ -268,12 +276,17 @@ let
               drv = caify "stage `${s}`" (
                 ordered.live.${s}.run {
                   input = acc.last;
-                  inherit product target pkgs;
+                  # `debugSplit`: an earlier stage has a `debug` output.
+                  product = product // {
+                    debugSplit = acc.split;
+                  };
+                  inherit target pkgs;
                 }
               );
             in
             {
               last = drv;
+              split = acc.split || elem "debug" (drv.outputs or [ ]);
               stages = acc.stages // {
                 ${s} = drv;
               };
@@ -281,6 +294,7 @@ let
           )
           {
             last = linked;
+            split = false;
             stages = {
               inherit linked;
             };

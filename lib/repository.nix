@@ -385,7 +385,9 @@ let
           targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
           targetEnv = envStrings (cEnv // t.env);
         };
-        runner = if runner == null then null else [ "${runner}" ];
+        # A program, or a list: program and arguments (as Cargo's
+        # `target.<triple>.runner` takes a string or an array).
+        runner = if runner == null then null else map (x: "${x}") (lib.toList runner);
         inherit (t) testSystem;
       };
 
@@ -610,9 +612,12 @@ let
   # testRuns.<pkg>.<name>: test runs, named as `tests` names test
   # binaries; `.enabled` holds those whose run is enabled
   # (`test.binaries.<binary>.enable`).
-  namedRuns = inst: namedRuns' inst.testRuns (pkg: k: inst.checks ? "test/${pkg}/${k}");
+  namedRuns = inst: namedRuns' false inst.testRuns (pkg: k: inst.checks ? "test/${pkg}/${k}");
+  # `benchPlan`: the runs are a bench plan's (benchRuns), where a bench is
+  # named as in `benches` (by its name); in a test plan a bench built as a
+  # test (`test = true`) is `bench-<name>`, as in `tests`.
   namedRuns' =
-    allRuns: isEnabled: sel:
+    benchPlan: allRuns: isEnabled: sel:
     let
       split = key: builtins.match "([a-z]+)/(.*)" key;
       short =
@@ -624,8 +629,7 @@ let
           key
         else if lib.head m == "lib" then
           "lib"
-        else if lib.head m == "bench" then
-          # Bench plans (benchRuns): a bench by its name, as in `benches`.
+        else if benchPlan && lib.head m == "bench" then
           lib.last m
         else
           "${lib.head m}-${lib.last m}";
@@ -693,7 +697,7 @@ let
               doctests = selectPkgs sel inst.doctests;
               benches = benchesOf inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
-              namedBenchRuns = namedRuns' inst.benchRuns (_: _: true) sel;
+              namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
             }
             // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
               # Every unit of both plans: for clippy, its lints on every

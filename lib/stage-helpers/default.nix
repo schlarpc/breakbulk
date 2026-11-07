@@ -66,6 +66,42 @@ let
     }
   '';
 
+  # Decision 89: the debuginfo side files of the product's link units
+  # (`.pdb` on msvc, `.dwp`/`.dwo` with `split-debuginfo`), as the `linked`
+  # stage's `debug` output holds them, go into a stage's `debug` output in
+  # the install layout: next to where their binary lands (Windows: bin/;
+  # elsewhere `*.so.dwp` under lib/, the rest under bin/).
+  # `product.linkedDebug` is that output, when the product has one.
+  placeDebugFn = product: target: pkgs: ''
+    placeDebug() {
+      ${
+        if (product.linkedDebug or null) == null then
+          "return 0"
+        else
+          ''
+            local f b d
+            for f in ${product.linkedDebug}/*; do
+              [ -e "$f" ] || continue
+              b=''${f##*/}
+              case "${
+                if lib.hasInfix "windows" (target.triple or pkgs.stdenv.hostPlatform.config) then
+                  "windows"
+                else
+                  "unix"
+              }:$b" in
+                windows:*) d=bin ;;
+                unix:*.so.dwp|unix:*.so.*.dwp) d=lib ;;
+                *) d=bin ;;
+              esac
+              mkdir -p "$1/$d"
+              cp -L "$f" "$1/$d/$b"
+              chmod u+w "$1/$d/$b"
+            done
+          ''
+      }
+    }
+  '';
+
   isElfFn = ''
     isElf() { [ "$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; }
   '';
@@ -84,6 +120,7 @@ let
       input,
       product,
       pkgs,
+      target ? { },
       ...
     }:
     pkgs.runCommand (stageName product "splitDebug")
@@ -98,8 +135,10 @@ let
         set -euo pipefail
         ${copyIn input}
         ${isElfFn}
+        ${placeDebugFn product target pkgs}
         copyIn "$out"
         mkdir -p "$debug"
+        placeDebug "$debug"
         find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
           isElf "$f" || continue
           if ! readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
@@ -406,6 +445,11 @@ let
   #   windows: .exe, .dll, .pdb under bin/ (DLLs next to the executable);
   #            .lib under lib/
   #   others:  executables under bin/; .so*, .a, .rlib under lib/
+  # The link units' debuginfo side files (`product.linkedDebug`: `.pdb`,
+  # `.dwp`, `.dwo`) go to a `debug` output in the same layout, so `.pdb`
+  # sits in `$debug/bin` as the `.exe` does in `$out/bin`; only when no
+  # earlier stage split debug information (`product.debugSplit`), whose
+  # `debug` output holds them instead, and not for wasm.
   # Top-level directories of the input are copied unchanged, so a stage
   # that already produced bin/ or share/ keeps it; other top-level files are
   # copied to the top level unchanged.
@@ -427,40 +471,55 @@ let
           "windows"
         else
           "unix";
+      # The side files go to install's own `debug` output when no earlier
+      # stage split debug information (whose `debug` holds them already).
+      debug = kind != "wasm" && (product.linkedDebug or null) != null && !(product.debugSplit or false);
     in
-    pkgs.runCommand (stageName product "install") { } ''
-      set -euo pipefail
-      ${copyIn input}
-      work=$TMPDIR/in
-      copyIn "$work"
-      mkdir -p "$out"
-      ${
-        if kind == "wasm" then
-          ''
-            mkdir -p "$out/pkg"
-            cp -R "$work"/. "$out/pkg/"
-          ''
-        else
-          ''
-            for f in "$work"/* "$work"/.[!.]*; do
-              [ -e "$f" ] || continue
-              b=$(basename "$f")
-              if [ -d "$f" ]; then
-                mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
-              fi
-              case "${kind}:$b" in
-                windows:*.exe|windows:*.dll|windows:*.pdb) dest=bin ;;
-                windows:*.lib) dest=lib ;;
-                unix:*.so|unix:*.so.*|unix:*.a|unix:*.rlib) dest=lib ;;
-                unix:*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;
-                *) dest=. ;;
-              esac
-              mkdir -p "$out/$dest"
-              cp "$f" "$out/$dest/$b"
-            done
-          ''
-      }
-    ''
+    pkgs.runCommand (stageName product "install")
+      (lib.optionalAttrs debug {
+        outputs = [
+          "out"
+          "debug"
+        ];
+      })
+      ''
+        set -euo pipefail
+        ${copyIn input}
+        ${placeDebugFn product target pkgs}
+        work=$TMPDIR/in
+        copyIn "$work"
+        mkdir -p "$out"
+        ${lib.optionalString debug ''
+          mkdir -p "$debug"
+          placeDebug "$debug"
+        ''}
+        ${
+          if kind == "wasm" then
+            ''
+              mkdir -p "$out/pkg"
+              cp -R "$work"/. "$out/pkg/"
+            ''
+          else
+            ''
+              for f in "$work"/* "$work"/.[!.]*; do
+                [ -e "$f" ] || continue
+                b=$(basename "$f")
+                if [ -d "$f" ]; then
+                  mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
+                fi
+                case "${kind}:$b" in
+                  windows:*.exe|windows:*.dll|windows:*.pdb) dest=bin ;;
+                  windows:*.lib) dest=lib ;;
+                  unix:*.so|unix:*.so.*|unix:*.a|unix:*.rlib) dest=lib ;;
+                  unix:*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;
+                  *) dest=. ;;
+                esac
+                mkdir -p "$out/$dest"
+                cp "$f" "$out/$dest/$b"
+              done
+            ''
+        }
+      ''
   );
 
   # ---------------------------------------------------------------------

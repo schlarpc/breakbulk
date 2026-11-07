@@ -271,6 +271,49 @@ fn outputs_are_moved() {
     assert!(e.0.contains("x-1.d"), "{e}");
 }
 
+#[test]
+fn debug_side_files_go_to_debug() {
+    let t = TempDir::new("debug-side");
+    let from = t.path().join("out");
+    std::fs::create_dir_all(&from).unwrap();
+    for f in [
+        "app.exe",
+        "app.pdb",
+        "app-1.dwp",
+        "app-1.app.0.rcgu.dwo",
+        "app.d",
+        "x.o",
+    ] {
+        std::fs::write(from.join(f), f).unwrap();
+    }
+    let outputs = BTreeMap::from([
+        ("bin".to_owned(), vec!["app.exe".to_owned()]),
+        ("debug".to_owned(), vec![]),
+    ]);
+    let root = t.path().join("drv");
+    let dest = |o: &str| Ok(root.join(o));
+    collect_outputs(&outputs, &from, dest).unwrap();
+    assert!(root.join("out/app.exe").exists());
+    let mut debug: Vec<String> = std::fs::read_dir(root.join("debug"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    debug.sort();
+    assert_eq!(debug, ["app-1.app.0.rcgu.dwo", "app-1.dwp", "app.pdb"]);
+    assert!(
+        from.join("x.o").exists(),
+        "other unlisted files stay behind"
+    );
+
+    // Without a `debug` output, side files are discarded as before.
+    std::fs::write(from.join("lib.pdb"), "").unwrap();
+    let outputs = BTreeMap::from([("bin".to_owned(), vec!["x.o".to_owned()])]);
+    let root = t.path().join("drv2");
+    collect_outputs(&outputs, &from, |o: &str| Ok(root.join(o))).unwrap();
+    assert!(!root.join("debug").exists());
+    assert!(from.join("lib.pdb").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn rustc_failure_names_the_crate() {

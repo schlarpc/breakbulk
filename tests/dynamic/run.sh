@@ -46,7 +46,7 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives embed)
+  fixtures=(walking-skeleton directives embed config-env)
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }
@@ -190,6 +190,7 @@ EOF
 
   # Products: the same bytes.
   for p in "$(real "$dyn")"/products/*/*; do
+    [ -L "$p" ] || continue
     name=${p#"$(real "$dyn")/products/"}
     a=$(real "$(readlink "$p")")
     b=$(real "$(readlink "$(real "$ifd")/products/$name")")

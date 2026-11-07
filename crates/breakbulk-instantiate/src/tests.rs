@@ -513,7 +513,13 @@ fn names_and_outputs() {
     assert_eq!(name(SCRIPT), "smokelib-0.1.0-build-script");
     assert_eq!(name(RUN), "smokelib-0.1.0-build-run");
     let outputs = |id: &str| out.units[id].attrs["outputs"].clone();
-    assert_eq!(outputs(APP), Value::Strings(vec!["out".into()]));
+    // A target bin also gets `debug` (its debuginfo side files), last.
+    assert_eq!(
+        outputs(APP),
+        Value::Strings(vec!["out".into(), "debug".into()])
+    );
+    // A build script (a host unit) does not.
+    assert_eq!(outputs(SCRIPT), Value::Strings(vec!["out".into()]));
     assert_eq!(
         outputs(LIB),
         Value::Strings(vec!["rlib".into(), "rmeta".into()])

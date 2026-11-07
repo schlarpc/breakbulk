@@ -138,42 +138,6 @@ fn append_skips_empty_sides() {
 }
 
 #[test]
-fn random_seed_as_stdenv_computes_it() {
-    let seed = |vars: &[(&str, &str)]| outer(vars).random_seed();
-    assert_eq!(
-        seed(&[(
-            "out",
-            "/nix/store/0123456789abcdefghijklmnopqrstuv-ring-0.17.14-build-run"
-        )])
-        .as_deref(),
-        Some("0123456789")
-    );
-    assert_eq!(
-        seed(&[
-            ("out", "/nix/store/aaaaaaaaaaaaaaaa-x"),
-            (
-                "NIX_OUTPATH_USED_AS_RANDOM_SEED",
-                "/nix/store/bbbbbbbbbbbb-y"
-            ),
-        ])
-        .as_deref(),
-        Some("bbbbbbbbbb")
-    );
-    // A library compile unit: no `out`, first of `outputs`.
-    assert_eq!(
-        seed(&[
-            ("outputs", "rlib rmeta"),
-            ("rlib", "/nix/store/cccccccccccccc-lib-rlib"),
-            ("rmeta", "/nix/store/dddddddddddddd-lib-rmeta"),
-        ])
-        .as_deref(),
-        Some("cccccccccc")
-    );
-    assert_eq!(seed(&[]), None);
-    assert_eq!(seed(&[("out", "")]), None);
-}
-
-#[test]
 fn c_flags_seed_first_prefix_maps_last() {
     let o = outer(&[]);
     let capture = map(&[("NIX_CFLAGS_COMPILE", " -isystem /cap/include")]);

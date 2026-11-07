@@ -29,6 +29,18 @@
 #                harness name the product; the host workspace's
 #                instantiation and `util`'s units do not depend on it; the
 #                embedded bytes are a valid component.
+#   cfg-rustflags  spec rustflags that turn on a `target.'cfg(…)'` key: the
+#                planner asks rustc for the cfg with Cargo's rustflags and
+#                puts the spec's flags under the target key; the product
+#                matches local `cargo run` with the same `--config`.
+#   names        two members with a bin of the same name: each package's
+#                test gets its own as CARGO_BIN_EXE_tool; a bench with
+#                `test = true` is `bench-<name>` in tests, testRuns and
+#                checks alike.
+#   runner-list  `targets.<triple>.runner` as a list (program and arguments):
+#                the test run runs `env BB_RUNNER=1 <binary>`.
+#   test-libs    a test run depends on the sysroot's target shared
+#                libraries (a small copy), not the whole toolchain.
 {
   pkgs ? import (
     let
@@ -349,6 +361,145 @@ let
         cp run.txt $out/
       '';
 
+  # --- cfg-rustflags ----------------------------------------------------------
+
+  # The spec's `--cfg bb_spec` turns on the project's `target.'cfg(bb_spec)'`
+  # key, which replaces `build.rustflags`. The planner asks rustc for the
+  # cfg with the rustflags Cargo would use, so it puts the spec's flags
+  # under the target key; with them under `build`, Cargo drops them and
+  # planning fails. The product prints what local Cargo's does with the
+  # same `--config`.
+  cfgRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/cfg-rustflags";
+    modules = [
+      {
+        workspaces.main = { };
+        targets.${native}.rustflags = [
+          "--cfg"
+          "bb_spec"
+        ];
+      }
+    ];
+  };
+  cfgRustflags =
+    pkgs.runCommandCC "loose-ends-cfg-rustflags"
+      {
+        nativeBuildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+        ];
+        product = cfgRepo.workspaces.main.packages.cfg-rustflags;
+        fixture = fixtures + "/cfg-rustflags";
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode $fixture ws
+        cd ws
+        cargo run -q --offline --frozen --target ${native} \
+          --config 'target.${native}.rustflags=["--cfg","bb_spec"]' > want
+        $product/bin/cfg-rustflags > got
+        cat got
+        diff -u want got
+        [ "$(cat got)" = "spec=true key=true build=false" ]
+        mkdir -p $out
+        cp got $out/
+      '';
+
+  # --- names ------------------------------------------------------------------
+
+  # Two members with a bin `tool` each: each package's integration test
+  # gets its own bin as CARGO_BIN_EXE_tool (Cargo sets it for the test's
+  # own package's bins). A bench with `test = true` is `bench-speed` in
+  # `tests`, in `testRuns` and in `repo.checks` (`test-bench-speed`).
+  namesRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/names";
+    modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
+  };
+  names =
+    let
+      t = namesRepo.workspaces.main.target.${native};
+      runs = t.namedTestRuns.a;
+      check = "main/${native}/a/test-bench-speed";
+    in
+    assert lib.assertMsg (t.tests.a ? bench-speed)
+      "names: tests.a has ${toString (lib.attrNames t.tests.a)}";
+    assert lib.assertMsg (runs ? bench-speed)
+      "names: the named test runs of a are ${toString (lib.attrNames runs)}";
+    assert lib.assertMsg (namesRepo.checks ? ${check})
+      "names: no check ${check} among ${toString (lib.attrNames namesRepo.checks)}";
+    pkgs.runCommand "loose-ends-names"
+      {
+        a = runs.runs_tool;
+        b = t.namedTestRuns.b.runs_tool;
+        bench = runs.bench-speed;
+      }
+      ''
+        grep -q 'test own_tool ... ok' $a/log
+        grep -q 'test own_tool ... ok' $b/log
+        grep -q 'test bench_as_test ... ok' $bench/log
+        touch $out
+      '';
+
+  # --- runner-list ------------------------------------------------------------
+
+  # `targets.<triple>.runner` as a list (program and arguments, as Cargo's
+  # runner array): `env BB_RUNNER=1 <binary> <args…>`.
+  runnerList =
+    let
+      repo = breakbulk.mkRepository {
+        inherit pkgs tools;
+        root = fixtures + "/names";
+        modules = [
+          {
+            workspaces.main.variants.default.profile = "dev";
+            targets.${native}.runner = [
+              "${pkgs.coreutils}/bin/env"
+              "BB_RUNNER=1"
+            ];
+          }
+        ];
+      };
+      t = repo.workspaces.main.target.${native};
+    in
+    assert lib.assertMsg (t.runner == [
+      "${pkgs.coreutils}/bin/env"
+      "BB_RUNNER=1"
+    ]) "runner-list: the runner is ${builtins.toJSON t.runner}";
+    t.namedTestRuns.a.runs_tool;
+
+  # --- test-libs --------------------------------------------------------------
+
+  # Decision 94: a test run depends on the sysroot's target libraries only
+  # (a small copy), not on the whole Rust toolchain.
+  testLibs =
+    let
+      t = namesRepo.workspaces.main.target.${native};
+      run = t.namedTestRuns.a.runs_tool;
+      sysroot = pkgs.rustc.unwrapped or pkgs.rustc;
+      libs = breakbulk.testRuns.testLibs pkgs sysroot native;
+      inputs = lib.attrNames (builtins.getContext (builtins.toJSON run.drvAttrs));
+    in
+    assert lib.assertMsg (!(lib.elem sysroot.drvPath inputs))
+      "test-libs: the test run depends on the whole sysroot ${sysroot.drvPath}";
+    assert lib.assertMsg (lib.elem libs.drvPath inputs)
+      "test-libs: the test run does not depend on ${libs.drvPath}: ${toString inputs}";
+    pkgs.runCommand "loose-ends-test-libs"
+      {
+        inherit run libs;
+        closure = pkgs.closureInfo { rootPaths = [ libs ]; };
+        sysroot = builtins.unsafeDiscardStringContext sysroot.outPath;
+      }
+      ''
+        ls $libs/lib/rustlib/${native}/lib/libstd-*.so
+        if grep -qxF "$sysroot" $closure/store-paths; then
+          echo "the test libraries reference the sysroot" >&2; exit 1
+        fi
+        du -sh $libs
+        touch $out
+      '';
+
   # --- docs/options.md --------------------------------------------------------
 
   # The module options as Markdown (mkRepository's optionsDoc).
@@ -382,10 +533,16 @@ in
   test-scope = testScope;
   inherit devshell;
   wasm-embed = wasmEmbedCheck;
+  cfg-rustflags = cfgRustflags;
+  inherit names;
+  runner-list = runnerList;
+  test-libs = testLibs;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;
     devshell = shellRepo;
     wasm-embed = wasmEmbed;
+    cfg-rustflags = cfgRepo;
+    names = namesRepo;
   };
 }

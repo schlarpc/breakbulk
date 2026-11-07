@@ -525,8 +525,8 @@ impl Resolve for Configured {
     fn remap_name(&self, base: &Reference) -> Result<String, String> {
         Fake.remap_name(base)
     }
-    fn remap_scope(&self, _: &UnitId, unit: &CompileUnit) -> Option<String> {
-        default_remap_scope(unit, true, false)
+    fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {
+        Some("macro,diagnostics".into())
     }
     fn env_capture(&self, id: &UnitId, _: &Unit) -> Result<Option<String>, String> {
         Ok(Some(format!("/nix/store/capture-{id}/env.json")))
@@ -591,26 +591,6 @@ fn render_configuration_hooks() {
     };
     assert!(c.remap.is_empty());
     assert_eq!(c.remap_scope, None);
-}
-
-#[test]
-fn remap_scopes() {
-    let p = example();
-    let Unit::Compile(app) = &p.units["c-app"] else {
-        panic!()
-    };
-    assert_eq!(
-        default_remap_scope(app, true, false).as_deref(),
-        Some("macro,diagnostics")
-    );
-    assert_eq!(
-        default_remap_scope(app, true, true).as_deref(),
-        Some("macro,diagnostics,coverage")
-    );
-    assert_eq!(default_remap_scope(app, false, false), None);
-    let mut test = app.clone();
-    test.args.push(Arg::Literal("--test".into()));
-    assert_eq!(default_remap_scope(&test, true, false), None);
 }
 
 /// A chain lib -> mid -> leaf, plus a proc macro with its own dependency.

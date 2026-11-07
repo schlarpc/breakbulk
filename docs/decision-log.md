@@ -1023,3 +1023,28 @@ The design plans to ask the Rust project for a "physical split" of library
 metadata (what dependents read vs. everything else). The measurements show
 the request should explicitly name the per-file source hashes, which today
 change the interface file on every edit. Nothing will be filed without you.
+
+## 96. FYI: review follow-ups done
+
+- Windows `.pdb` and DWARF `.dwp`/`.dwo` debug files are now kept, in a
+  separate `debug` output (entry 89's default). Windows products have
+  `$debug/bin/app.pdb` next to `$out/bin/app.exe`, and the main output
+  still references no sources.
+- Toolchain flags that turn on a `cfg(...)` config key are now placed the
+  way Cargo would place them.
+- Dynamic-mode test runs get the `[env]` table.
+- Test runs download only the Rust runtime libraries (66 MB) instead of the
+  whole toolchain (entry 94).
+- Smaller fixes: bench naming, `CARGO_BIN_EXE_*` with same-named binaries in
+  two packages, a runner given as a list, overlays kept for test runs on
+  another system. Dead code removed.
+- nextest in dynamic mode still falls back to plain libtest with a warning.
+
+## 97. ASK: every binary build step gets an extra (usually empty) `debug` output
+
+Nix needs a build step's outputs declared up front, so every binary, test
+and C-compatible library step now has a `debug` output, empty unless the
+compiler wrote side files. Downloading a binary never fetches it. Cost:
+one extra small store path per such step. Alternative: declare it only on
+Windows targets or when your profile sets `split-debuginfo`, which saves
+paths but could miss a case.

@@ -322,4 +322,36 @@ runTests "lib-unit" {
       bench = [ "bin:bar:bench" "bin:bin-dirs:bench" "bin:foo:bench" "bench:b:bench" ];
     };
   };
+
+  # Test runs on another system (`testSystem`) import nixpkgs for it with
+  # the user's overlays and config. Only `testPkgs` is forced.
+  testTestPkgsKeepOverlays =
+    let
+      user = pkgs.extend (_: _: { bbMarker = "overlay"; });
+      other =
+        if pkgs.stdenv.buildPlatform.system == "aarch64-linux" then "x86_64-linux" else "aarch64-linux";
+      args = {
+        pkgs = user;
+        inst = throw "unused";
+        plan = throw "unused";
+        sources = throw "unused";
+        tools = { };
+        target = "x";
+        testSystem = other;
+      };
+      of = r: {
+        marker = r.testPkgs.bbMarker or null;
+        system = r.testPkgs.stdenv.hostPlatform.system;
+      };
+    in
+    {
+      expr = [
+        (of (bb.testRuns.mkTestRuns args))
+        (of (bb.dynamic.mkTestRuns args))
+      ];
+      expected = lib.genList (_: {
+        marker = "overlay";
+        system = other;
+      }) 2;
+    };
 }

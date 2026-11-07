@@ -1,0 +1,9 @@
+# The spec adds `--cfg bb_spec`, which turns on the cfg key below. Cargo
+# asks rustc for the cfg with the rustflags it has, so the key applies and
+# replaces build.rustflags; the spec's flags must sit under the target key
+# to arrive.
+[build]
+rustflags = ["--cfg", "bb_build"]
+
+[target.'cfg(bb_spec)']
+rustflags = ["--cfg", "bb_key"]

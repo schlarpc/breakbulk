@@ -9,7 +9,8 @@
 //! 5. Point `--out-dir` at `$TMPDIR/out` and run the program.
 //! 6. Print the `rendered` text of rustc's JSON diagnostics; drop artifact
 //!    notifications.
-//! 7. Move the listed outputs to their derivation outputs; discard the rest
+//! 7. Move the listed outputs to their derivation outputs, and debuginfo
+//!    side files to `debug` when the unit has it; discard the rest
 //!    (dep-info).
 //! 8. For a library, write its own manifest into its `rmeta` output.
 //!
@@ -26,7 +27,7 @@ use crate::diag::{Line, classify};
 use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{RenderedArg, RenderedCompile, SpliceKind, derivation_output};
+use crate::spec::{DEBUG_OUTPUT, RenderedArg, RenderedCompile, SpliceKind, derivation_output};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
 use crate::{Error, io_err, manifest, read_directives};
 
@@ -164,7 +165,7 @@ pub fn invocation(
         .map(|p| read_capture(Path::new(p)))
         .transpose()?;
     let cflags = CFlags {
-        random_seed: c.seed.clone().or_else(|| outer.random_seed()),
+        random_seed: c.seed.clone(),
         prefix_maps: c.remap.clone(),
     };
     Ok(Invocation {
@@ -262,9 +263,16 @@ pub fn run_rustc(inv: &Invocation, crate_name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Debuginfo side files rustc writes next to a linked output but
+/// `--print=file-names` does not name: `.pdb` (msvc), `.dwp`
+/// (`split-debuginfo=packed`), `.dwo` (`unpacked`).
+pub const DEBUG_SIDE_FILES: &[&str] = &[".pdb", ".dwp", ".dwo"];
+
 /// Move each listed output file into its derivation output. Every output
-/// named in `outputs` is created, even if it lists no files. Unlisted files
-/// other than dep-info are reported and left behind.
+/// named in `outputs` is created, even if it lists no files. When the unit
+/// has a `debug` output (it lists no files), unlisted debuginfo side files
+/// ([`DEBUG_SIDE_FILES`]) go there, under rustc's names. Other unlisted
+/// files, dep-info aside, are reported and left behind.
 pub fn collect_outputs(
     outputs: &BTreeMap<String, Vec<String>>,
     from: &Path,
@@ -293,11 +301,27 @@ pub fn collect_outputs(
             listed.insert(f.as_str());
         }
     }
+    let debug = if outputs.contains_key(DEBUG_OUTPUT) {
+        Some(dest(DEBUG_OUTPUT)?)
+    } else {
+        None
+    };
+    let mut names: Vec<String> = Vec::new();
     for e in std::fs::read_dir(from).map_err(|e| io_err("reading", from, e))? {
         let e = e.map_err(|e| io_err("reading", from, e))?;
-        let name = e.file_name().to_string_lossy().into_owned();
-        if !listed.contains(name.as_str()) && !name.ends_with(".d") {
-            eprintln!("warning: discarding unlisted rustc output `{name}`");
+        names.push(e.file_name().to_string_lossy().into_owned());
+    }
+    names.sort();
+    for name in names {
+        if listed.contains(name.as_str()) || name.ends_with(".d") {
+            continue;
+        }
+        let side = DEBUG_SIDE_FILES.iter().any(|x| name.ends_with(x));
+        match &debug {
+            Some(dir) if side && from.join(&name).is_file() => {
+                move_file(&from.join(&name), &dir.join(&name))?;
+            }
+            _ => eprintln!("warning: discarding unlisted rustc output `{name}`"),
         }
     }
     Ok(())

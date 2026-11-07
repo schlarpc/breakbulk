@@ -16,6 +16,8 @@
 //! directory:
 //!
 //! - `root`: a symlink to the root unit's output (or the stub's);
+//! - `debug`: a symlink to the root unit's `debug` output (its debuginfo
+//!   side files), when it has one;
 //! - `breakbulk-root.json`: what the root is ([`RootInfo`]), and for a test
 //!   binary what its test run needs ([`TestSpec`]), with real paths. The
 //!   wrapper has every path in it as an input, so they are in its closure.
@@ -127,6 +129,10 @@ pub struct TestSpec {
     /// The test unit's recorded env that a test process gets at run time:
     /// `CARGO`, `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_PKG_*`.
     pub env: BTreeMap<String, String>,
+    /// The project's `[env]` variables Cargo set on the test unit (the
+    /// plan's `configEnv`), which `cargo test` also sets on the test
+    /// process; not the runtime variables above, not `LD_LIBRARY_PATH`.
+    pub config_env: BTreeMap<String, String>,
     /// `flags` outputs of the runs whose `rustc-env` values the process gets.
     pub env_flags: Vec<String>,
     /// `flags` and `out` of every run of the unit's platform, for the
@@ -165,8 +171,16 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<TestSpec, Error
         return err(format!("the test root unit {unit} is not a compile unit"));
     };
     let mut env = BTreeMap::new();
-    for (k, v) in c.env.iter().filter(|(k, _)| is_runtime_var(k)) {
-        env.insert(
+    let mut config_env = BTreeMap::new();
+    for (k, v) in &c.env {
+        let into = if is_runtime_var(k) {
+            &mut env
+        } else if plan.config_env.contains(k) && k != "LD_LIBRARY_PATH" {
+            &mut config_env
+        } else {
+            continue;
+        };
+        into.insert(
             k.clone(),
             tokens.tokenize_store_paths(unit, &text(v, tokens)?)?,
         );
@@ -184,6 +198,7 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<TestSpec, Error
         .collect();
     Ok(TestSpec {
         env,
+        config_env,
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
         dylib_outs: runs.iter().map(|id| tokens.unit(id, "out")).collect(),
@@ -221,14 +236,22 @@ fn wrapper(
         reason,
         test_spec: spec,
     };
+    // The unit's debuginfo side files (`debug`), for the product's `linked`
+    // stage, when the unit has that output.
+    let debug = match &info.unit {
+        Some(u) if matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output()) => {
+            tokens.unit(u, crate::DEBUG_OUTPUT)
+        }
+        _ => String::new(),
+    };
     let json = to_canonical_json(&info).map_err(|e| Error(e.to_string()))?;
     small_drv(
         inputs,
         &tokens,
         outer,
         output_name,
-        r#"mkdir "$out" && ln -s "$root" "$out/root" && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#,
-        [("root", target), ("rootJson", json)],
+        r#"mkdir "$out" && ln -s "$root" "$out/root" && { [ -z "$debugRoot" ] || ln -s "$debugRoot" "$out/debug"; } && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#,
+        [("root", target), ("debugRoot", debug), ("rootJson", json)],
     )
     .map_err(|e| Error(format!("root {root_name}: {e}")))
 }

@@ -104,8 +104,6 @@ pub struct Target {
     pub src_path: String,
     #[serde(default)]
     pub doctest: bool,
-    #[serde(default)]
-    pub test: bool,
 }
 
 impl Package {

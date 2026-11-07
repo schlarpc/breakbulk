@@ -7,7 +7,8 @@
 #     inst;          # breakbulk.instantiate's result for that plan
 #     sources;       # { workspace; crates; } as given to instantiate
 #     tools;         # tool name -> store path, as given to instantiate
-#                    # (`rustc-sysroot` names the sysroot)
+#                    # (`rustc-sysroot` names the sysroot; runs get only
+#                    # its target libraries, see `testLibs`)
 #     target;        # the target triple
 #     runner = null;      # null (native) or [ program arg … ]
 #     testSystem = null;  # e.g. "aarch64-linux": run tests on that system
@@ -109,6 +110,27 @@ let
 in
 rec {
   inherit binaryKey dylibJq;
+
+  # Decision 94: what test runs read from the Rust toolchain, the shared
+  # libraries of the sysroot's target library directory (`libstd-*.so`, for
+  # binaries linked with `-C prefer-dynamic` and the like), copied into a
+  # small derivation laid out as a sysroot (`lib/rustlib/<target>/lib`).
+  # Depending on the whole sysroot instead (over 1 GB) would make every
+  # test run on a fresh machine fetch the toolchain. `null` without one.
+  testLibs =
+    pkgs: sysroot: target:
+    if sysroot == null then
+      null
+    else
+      pkgs.runCommand "rust-test-libs-${target}" { } ''
+        dir=lib/rustlib/${target}/lib
+        mkdir -p "$out/$dir"
+        for f in ${sysroot}/$dir/*; do
+          case "''${f##*/}" in
+            *.so|*.so.*|*.dylib|*.dll) cp -L "$f" "$out/$dir/" ;;
+          esac
+        done
+      '';
 
   # Resolve plan text (a string, or a list of pieces) to a string with
   # string context: `src`, `crateSrc` and `out` references as instantiation
@@ -560,7 +582,11 @@ rec {
         if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
           pkgs
         else
-          import pkgs.path { system = testSystem; },
+          import pkgs.path {
+            system = testSystem;
+            # The user's overlays and config (allowUnfree, …) carry over.
+            inherit (pkgs) overlays config;
+          },
       packages ? { },
       ca ? null,
       coverage ? false,
@@ -576,7 +602,9 @@ rec {
       useCa = if ca == null then stages.caAuto else ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
-      sysroot = tools.rustc-sysroot or null;
+      # The sysroot's target libraries only (`testLibs`), laid out as a
+      # sysroot.
+      sysroot = testLibs pkgs (tools.rustc-sysroot or null) target;
 
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
