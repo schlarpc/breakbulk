@@ -283,7 +283,7 @@ A root in the plan that was not predicted is an error listing both sets, because
 
 ### Environment contract
 
-A unit's environment is built in layers; later layers win:
+A unit's environment is built in layers; later layers win, except for list-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, `NIX_LDFLAGS`), where later layers append:
 
 1. A fixed base: `HOME=/homeless-shelter`, `TMPDIR`, `NIX_BUILD_CORES`, `LC_ALL=C`, `TZ=UTC`.
 2. The env capture for the unit's package and platform, or the base capture for the platform.
@@ -359,9 +359,14 @@ When Cargo's `trim-paths` is in effect, Cargo's own remaps and scope are used in
 
 Inputs declared on a package become environment through nixpkgs' own setup hooks, not through code in breakbulk.
 
-- For each (package, platform) with `nativeInputs` or `inputs`, a derivation runs `stdenv.mkDerivation` with `nativeBuildInputs = nativeInputs` and `buildInputs = inputs`, and writes the environment its setup hooks produced as `env.json`. Target units use the target's stdenv (`pkgsCross.<target>.stdenv` when cross); host units use the build platform's stdenv, and both input lists count as native there.
+- For each (package, platform) with `nativeInputs` or `inputs`, a derivation runs `stdenv.mkDerivation` with `nativeBuildInputs = nativeInputs` and `buildInputs = inputs`, and writes the environment its setup hooks produced as `env.json`. Target units use the target's stdenv (`pkgsCross.<target>.stdenv` when cross); host units use the build platform's stdenv. Tools stay native inputs there, but libraries must be the build platform's `buildInputs`, or the wrappers add no include or library flags; `inputs` is therefore a function of a package set (`inputs = p: [ p.openssl ]`), called with the package set matching each platform.
 - One **base capture** per platform has no inputs. It gives build scripts the baseline `buildRustPackage` has: coreutils, bash, make, the C compiler on `PATH`, and the standard hardening and wrapper variables.
-- A capture keeps only what setup hooks added relative to a plain shell, minus per-build values: `NIX_BUILD_TOP`, `TMPDIR`, `PWD`, `out`, log descriptors.
+- A capture keeps only what setup hooks added relative to a plain shell, minus per-build values: `NIX_BUILD_TOP`, `TMPDIR`, `PWD`, `out`, log descriptors, `SOURCE_DATE_EPOCH` (set by the base layer instead), and any value naming the capture's own output.
+- The capture derivation sets `strictDeps = true` (otherwise every input's `bin/` reaches `PATH` and flags are doubled) and `NIX_NO_SELF_RPATH = 1` (otherwise every binary gets an rpath to the capture). It strips stdenv's own `-frandom-seed`; each unit adds its own, as stdenv does. `NIX_*` variables are always kept, because some stdenvs (musl) set `NIX_HARDENING_ENABLE` as a derivation attribute.
+- A unit gets exactly one capture. Variables such as `CC`, `PATH` and `NIX_CFLAGS_COMPILE` mean "this stdenv's platform", so host and target captures never merge.
+- C objects carry source paths in their debug info; units add `-ffile-prefix-map` for the source views to the C flags, matching the Rust remaps.
+
+The spike result is in [spikes/C-env-capture.md](spikes/C-env-capture.md).
 - Captures are input-addressed. Their output references the inputs' store paths, so building a unit realises the inputs, and substituting a unit does not.
 
 To verify in a spike: that nixpkgs' compiler and linker wrappers behave the same when their role variables come from a replayed environment, and that no common setup hook relies on anything other than environment variables.
@@ -460,7 +465,7 @@ The planner always passes `--target`, and local Cargo without it behaves differe
 
 - exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
 - exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, `CARGO_TARGET_<TRIPLE>_LINKER`), matching the planner's `--config`;
-- includes the union of the packages' env captures, because one shell cannot scope env per unit;
+- includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 
 Limits, documented: binaries move to `target/<triple>/…`; a missing input declaration can work locally and fail in Nix; and for same-triple presets (static glibc, zig) local Cargo cannot keep target env away from host build scripts.

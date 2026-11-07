@@ -222,3 +222,43 @@ rebuild, and no source or build-script path leaks into the binary. Details:
   variable, because Linux limits one variable to 128 KiB.
 - Proc macros' compiled library is stored in the same output slot as normal
   libraries' `.rlib` (internal detail).
+
+## 19. FYI: environment capture works (spike C: go)
+
+Packages' native dependencies (openssl, a C compiler, libclang for bindgen)
+are turned into environment variables by running a real nixpkgs build
+environment once per package and platform and saving what it set. Replaying
+that saved environment gave byte-identical results to `buildRustPackage` for
+`openssl-sys`, `ring` and a bindgen crate, both natively and when
+cross-compiling to aarch64. Write-up: `docs/spikes/C-env-capture.md`.
+
+## 20. ASK: how you name a package's libraries for build scripts
+
+Build scripts and proc macros run on the build machine, so the libraries
+they link must be the build machine's. Proposed: you write the list once as
+a function, `inputs = p: [ p.openssl ]`, and breakbulk calls it with the
+right package set for each side. The alternative is two lists you fill in
+yourself (`inputs` and `host.inputs = [ buildPackages.openssl ]`), which is
+more explicit but easy to get wrong silently. Default: the function form.
+
+## 21. ASK: build-machine C code is hardened more than in `buildRustPackage`
+
+When cross-compiling, `buildRustPackage` turns off nixpkgs' security
+hardening flags for C code compiled for the build machine (inside build
+scripts). breakbulk keeps them on, because its host environment is a normal
+nixpkgs one. This only matters if some build script's C code fails to compile
+with hardening. Default: keep hardening on; a per-package switch can turn it
+off if needed.
+
+## 22. FYI: build timestamp comes from one place
+
+`SOURCE_DATE_EPOCH` is set in the fixed base of every unit (to nixpkgs'
+default, 1980), not in each captured environment, so a per-package build
+stamp overrides it in exactly one place.
+
+## 23. FYI: C code's debug info will have source paths hidden too
+
+Crates like `ring` compile C with debug info that embeds their source path.
+Rust's path hiding doesn't touch C, so units will add the matching
+`-ffile-prefix-map` flags to C compiler flags. Without it, shipped binaries
+could still reference crate sources.
