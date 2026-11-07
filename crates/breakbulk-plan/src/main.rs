@@ -54,6 +54,7 @@ fn main() -> ExitCode {
         forbidden: Vec::new(),
         spec: None,
         trim_paths_default: false,
+        std_vendor: None,
     };
     let mut out = None;
     let mut cargo_env_out: Option<String> = None;

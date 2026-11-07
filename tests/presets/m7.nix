@@ -18,8 +18,7 @@
 #                     GLIBC symbol version 2.17 (objdump -T); host units
 #                     keep the host linker (asserted on the plan)
 #
-# tests/fixtures/build-std is exploratory and not a check: planning fails
-# (docs/implementation.md "build-std").
+# build-std (tests/fixtures/build-std, build-std-deps) is in ./build-std.nix.
 {
   pkgs,
   breakbulk,

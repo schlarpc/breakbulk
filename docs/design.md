@@ -227,7 +227,7 @@ Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile
 
 ## Targets and toolchains
 
-Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component wasm, and Windows msvc. The later targets (M7) are presets, not a redesign: wasip2, riscv64, windows-gnu and windows-gnullvm, and zig work; build-std and Darwin do not yet (see below).
+Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component wasm, and Windows msvc. The later targets (M7) are presets, not a redesign: wasip2, riscv64, windows-gnu and windows-gnullvm, zig and build-std work; Darwin does not yet (see below).
 
 | Target | Phase | Toolchain | Linker | Runner |
 | --- | --- | --- | --- | --- |
@@ -241,7 +241,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
 | Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
-| x86\_64-unknown-none (build-std) | Later; planning fails today | nightly, user-supplied | lld | none |
+| x86\_64-unknown-none (build-std) | M7 | nightly with `rust-src`, user-supplied | rustc's own (rust-lld) | none |
 | aarch64-apple-darwin | Later; no Mac builders | user's, built on Mac builders | ld64 or lld | native |
 
 ### Bring your own toolchain
@@ -416,7 +416,7 @@ The traced planner comes first, delivered through IFD, because it works on every
 4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations with skip lists and runnable test apps, doctests, bench binaries, clippy and coverage variants.
 5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
 6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default on Cargo 1.101 and later (done), the docs product.
-7. **Later targets.** wasip2, riscv64, windows-gnu, zig (done); build-std targets, Darwin on Mac builders.
+7. **Later targets.** wasip2, riscv64, windows-gnu, zig, build-std targets (done); Darwin on Mac builders.
 
 ### Conformance suite
 

@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-/// A value the linked image must keep (checked in the ELF).
+/// A marker value (the linker drops it: nothing references it).
 #[unsafe(no_mangle)]
 pub static BB_MAGIC: [u8; 8] = *b"bb-bare!";
 

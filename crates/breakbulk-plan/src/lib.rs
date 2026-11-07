@@ -10,6 +10,7 @@
 //! - [`spec`] passes the toolchain spec's rustflags and linkers to Cargo,
 //!   confirms they arrived, and rewrites same-triple host linkers.
 
+pub mod build_std;
 pub mod golden;
 pub mod graph;
 pub mod records;
@@ -53,6 +54,10 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
     let mut traced = opts.clone();
     if let Some(p) = &prepared {
         traced.configs.push(p.config.display().to_string());
+    }
+    if let Some(v) = trace::std_vendor(&traced)? {
+        traced.configs.push(v.config.clone());
+        traced.std_vendor = Some(v);
     }
     let first = trace::run(&traced)?;
     // Cargo's trim-paths ("trim-paths" in docs/implementation.md): when the

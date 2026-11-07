@@ -46,6 +46,10 @@ pub struct Rewriter {
     pub uplifted_bins: BTreeMap<(Platform, String), Vec<(String, OutRef)>>,
     /// The target triple: the first component of target units' paths.
     pub target_triple: String,
+    /// `-Zbuild-std`: crates of the merged crates.io directory that are
+    /// the toolchain's own (`library/vendor`): directory → its store path,
+    /// kept as a literal like every toolchain path.
+    pub literal_dirs: Vec<(String, String)>,
 }
 
 /// Characters that can continue a path name.
@@ -101,10 +105,46 @@ impl Rewriter {
         r
     }
 
+    /// `-Zbuild-std`: the merged crates.io directory `dir`
+    /// ([`crate::build_std`]) and the toolchain's `library`. A crate
+    /// linked from the project's vendor directory is that crate's source; one
+    /// linked from the toolchain's `library/vendor` is a toolchain path and
+    /// stays a literal, like the standard library's own packages.
+    pub fn add_std_vendor(&mut self, dir: &str, library: &str) -> Result<(), Error> {
+        let library = std::fs::canonicalize(library)
+            .map_err(|e| Error(format!("resolving {library}: {e}")))?
+            .to_string_lossy()
+            .into_owned();
+        let rd = std::fs::read_dir(dir).map_err(|e| Error(format!("reading {dir}: {e}")))?;
+        let mut toolchain = Vec::new();
+        for e in rd.flatten() {
+            let from = format!(
+                "{}/{}",
+                dir.trim_end_matches('/'),
+                e.file_name().to_string_lossy()
+            );
+            let c = std::fs::canonicalize(&from)
+                .map_err(|e| Error(format!("resolving {from}: {e}")))?
+                .to_string_lossy()
+                .into_owned();
+            if under(&c, &library).is_some() {
+                toolchain.push(from.clone());
+                self.literal_dirs.push((from, c));
+            }
+        }
+        // The standard library's registry packages from `cargo metadata`
+        // are no fetched crates: neither their directory in the merged one
+        // nor the toolchain path it resolves to is a crate source.
+        self.crate_dirs
+            .retain(|(d, _)| under(d, &library).is_none() && !toolchain.contains(d));
+        Ok(())
+    }
+
     /// The prefixes a path to rewrite starts with.
     fn anchors(&self) -> impl Iterator<Item = &str> {
         [self.scratch.as_str(), self.skeleton.as_str()]
             .into_iter()
+            .chain(self.literal_dirs.iter().map(|(d, _)| d.as_str()))
             .chain(self.crate_dirs.iter().map(|(d, _)| d.as_str()))
             .filter(|a| !a.is_empty())
     }
@@ -150,6 +190,26 @@ impl Rewriter {
         }
         if let Some(o) = self.outputs.get(p) {
             return Ok(vec![Piece::Ref(Reference::Out(o.clone()))]);
+        }
+        for (dir, lit) in &self.literal_dirs {
+            if let Some(rest) = under(p, dir) {
+                let mut s = lit.clone();
+                if !rest.is_empty() {
+                    s.push('/');
+                    s.push_str(rest);
+                }
+                return Ok(vec![Piece::Literal(s)]);
+            }
+        }
+        // Before the scratch directory: with -Zbuild-std, crates of the
+        // merged crates.io directory there.
+        for (dir, id) in &self.crate_dirs {
+            if let Some(rest) = under(p, dir) {
+                return Ok(vec![Piece::Ref(Reference::CrateSrc(CrateSrcRef {
+                    crate_src: id.clone(),
+                    rel: rest.to_owned(),
+                }))]);
+            }
         }
         if let Some(rel) = under(p, &self.scratch) {
             let platform = match rel.split('/').next() {

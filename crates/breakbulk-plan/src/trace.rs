@@ -67,6 +67,9 @@ pub struct Options {
     /// Set by the planner for its second trace, which turns Cargo's
     /// `trim-paths` on ([`crate::plan`]).
     pub trim_paths_default: bool,
+    /// Set by the planner when the project uses `-Zbuild-std`
+    /// ([`crate::build_std`]).
+    pub std_vendor: Option<crate::build_std::StdVendor>,
 }
 
 /// What one trace produced.
@@ -103,6 +106,10 @@ impl Trace {
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
             trim_paths_default: opts.trim_paths_default,
+            std_vendor: opts
+                .std_vendor
+                .as_ref()
+                .map(|v| (v.dir.clone(), v.library.clone())),
         })
     }
 }
@@ -171,6 +178,32 @@ fn rust_src_remap(opts: &Options, rustc_vv: &str) -> Result<Option<(String, Stri
     Ok(src
         .is_dir()
         .then(|| (src.display().to_string(), format!("/rustc/{hash}"))))
+}
+
+/// The toolchain's sysroot (`rustc --print sysroot`).
+fn sysroot(opts: &Options) -> Result<PathBuf, Error> {
+    let s = output(
+        {
+            let mut c = command(opts, &opts.rustc);
+            c.args(["--print", "sysroot"]);
+            c
+        },
+        "rustc --print sysroot",
+    )?;
+    Ok(PathBuf::from(s.trim()))
+}
+
+/// When the project's config turns on `-Zbuild-std`: the merged crates.io
+/// directory with the standard library's vendored dependencies
+/// ([`crate::build_std`]).
+pub fn std_vendor(opts: &Options) -> Result<Option<crate::build_std::StdVendor>, Error> {
+    let project = crate::spec::ProjectConfig::read(&workspace_dir(opts), None)?;
+    if !crate::build_std::uses_build_std(&project.files)? {
+        return Ok(None);
+    }
+    let scratch = PathBuf::from(&opts.scratch);
+    mkdir(&scratch)?;
+    crate::build_std::prepare(&sysroot(opts)?, &opts.configs, &scratch)
 }
 
 fn mkdir(p: &Path) -> Result<(), Error> {
@@ -344,7 +377,39 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     let mut cmd = command(opts, &opts.cargo);
     cmd.args(["metadata", "--format-version", "1"])
         .args(common_args(opts, &config));
-    let meta_text = output(cmd, "cargo metadata")?;
+    let mut meta_text = output(cmd, "cargo metadata")?;
+    // -Zbuild-std: the standard library's packages too, for the stubs
+    // (compiler_builtins has a build script) and the planner.
+    if let Some(v) = &opts.std_vendor {
+        let mut cmd = command(opts, &opts.cargo);
+        // Every optional dependency: Cargo resolves std with
+        // `-Zbuild-std-features`, which may turn any of them on.
+        cmd.args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--all-features",
+            "--manifest-path",
+        ])
+        .arg(Path::new(&v.library).join("Cargo.toml"))
+        .args(common_args(opts, &config));
+        let std_text = output(cmd, "cargo metadata (the standard library's workspace)")?;
+        let mut meta: serde_json::Value =
+            serde_json::from_str(&meta_text).map_err(|e| Error(format!("cargo metadata: {e}")))?;
+        let std_meta: serde_json::Value = serde_json::from_str(&std_text)
+            .map_err(|e| Error(format!("cargo metadata (std): {e}")))?;
+        if let (Some(p), Some(s)) = (
+            meta["packages"].as_array_mut(),
+            std_meta["packages"].as_array(),
+        ) {
+            for pkg in s {
+                if !p.iter().any(|q| q["id"] == pkg["id"]) {
+                    p.push(pkg.clone());
+                }
+            }
+        }
+        meta_text = meta.to_string();
+    }
     let meta_path = scratch.join("metadata.json");
     std::fs::write(&meta_path, &meta_text)
         .map_err(|e| Error(format!("writing {}: {e}", meta_path.display())))?;
@@ -433,21 +498,6 @@ pub fn with_trim_paths(opts: &Options) -> Options {
     o
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn trim_paths_from_cargo_1_101() {
-        assert!(!has_trim_paths("1.99.0 (abc 2026-09-01)"));
-        assert!(!has_trim_paths("1.100.0-nightly (abc 2026-09-01)"));
-        assert!(has_trim_paths("1.101.0-nightly (3c747ea3e 2026-11-03)"));
-        assert!(has_trim_paths("1.101.0"));
-        assert!(has_trim_paths("1.102.1"));
-        assert!(!has_trim_paths(""));
-    }
-}
-
 /// Whether `cargo test --doc` has anything to do: a selected member with a
 /// doctestable library. Cargo fails `--doc` when no library is selected.
 fn has_doctests(opts: &Options, m: &Metadata) -> bool {
@@ -463,4 +513,19 @@ fn has_doctests(opts: &Options, m: &Metadata) -> bool {
                     .iter()
                     .any(|c| matches!(c.as_str(), "lib" | "rlib" | "proc-macro"))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trim_paths_from_cargo_1_101() {
+        assert!(!has_trim_paths("1.99.0 (abc 2026-09-01)"));
+        assert!(!has_trim_paths("1.100.0-nightly (abc 2026-09-01)"));
+        assert!(has_trim_paths("1.101.0-nightly (3c747ea3e 2026-11-03)"));
+        assert!(has_trim_paths("1.101.0"));
+        assert!(has_trim_paths("1.102.1"));
+        assert!(!has_trim_paths(""));
+    }
 }

@@ -285,7 +285,7 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|u| flags(u, r, weak))
                     .collect::<Result<_, _>>()?,
-                cwd: r.reference(&c.cwd)?,
+                cwd: c.cwd.render(r)?,
                 outputs: c
                     .outputs
                     .iter()
@@ -319,7 +319,7 @@ pub fn render_unit_in<R: Resolve>(
                 links: run.links.clone(),
                 script: r.reference(&run.script)?,
                 env,
-                cwd: r.reference(&run.cwd)?,
+                cwd: run.cwd.render(r)?,
                 metadata_from: run
                     .metadata_from
                     .iter()

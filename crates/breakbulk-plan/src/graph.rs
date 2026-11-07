@@ -5,9 +5,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::{
-    Arg, CompileUnit, CrateInfo, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget, Piece,
-    Plan, PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice,
-    Splice, SpliceKind, Text, Unit, UnitId, Variant, VariantMode, contains_sentinel,
+    Arg, CompileUnit, CrateInfo, Cwd, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget,
+    Piece, Plan, PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn,
+    SearchPathsSplice, Splice, SpliceKind, Text, Unit, UnitId, Variant, VariantMode,
+    contains_sentinel,
 };
 
 use crate::records::{Metadata, Package, Record, Target};
@@ -47,6 +48,9 @@ pub struct Context {
     /// not): Cargo's `--remap-path-scope` is dropped, and breakbulk sets the
     /// scope per product kind ([`Plan::trim_paths_default`]).
     pub trim_paths_default: bool,
+    /// `-Zbuild-std`: the merged crates.io directory and the toolchain's
+    /// `library` ([`crate::build_std::StdVendor`]).
+    pub std_vendor: Option<(String, String)>,
 }
 
 /// What Cargo's `trim-paths` remaps its build directory to (cargo
@@ -68,33 +72,6 @@ pub fn trace_trims_paths(records: &[Record]) -> bool {
     records
         .iter()
         .any(|r| r.mode == "compile" && has_cargo_trim_paths(&r.args))
-}
-
-#[cfg(test)]
-mod trim_tests {
-    use super::*;
-
-    #[test]
-    fn cargo_trim_paths_detected() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(has_cargo_trim_paths(&a(&[
-            "--remap-path-scope=all",
-            "--remap-path-prefix=/s/t=/cargo/build-dir"
-        ])));
-        // A user's own remap never targets /cargo/build-dir exactly.
-        assert!(!has_cargo_trim_paths(&a(&["--remap-path-prefix=/s=/x"])));
-        assert!(!has_cargo_trim_paths(&a(&[
-            "--remap-path-prefix=/s=/cargo/build-dirx"
-        ])));
-    }
-
-    #[test]
-    fn whole_paths_only() {
-        assert!(names_path("/t/build/a-1/out", "/t/build/a-1/out"));
-        assert!(names_path("x=/t/build/a-1/out/gen.rs", "/t/build/a-1/out"));
-        assert!(names_path("/t/build/a-1/out:/y", "/t/build/a-1/out"));
-        assert!(!names_path("/t/build/a-1/outer", "/t/build/a-1/out"));
-    }
 }
 
 /// Whether `value` names `dir` or a path below it, as a whole path.
@@ -417,6 +394,9 @@ impl<'a> Builder<'a> {
         }
         for r in &b.runs {
             b.rw.run_dirs.insert(r.out_dir.clone(), r.id.clone());
+        }
+        if let Some((dir, library)) = &ctx.std_vendor {
+            b.rw.add_std_vendor(dir, library)?;
         }
         b.register_uplifted_bins();
         Ok(b)
@@ -1011,6 +991,17 @@ impl<'a> Builder<'a> {
             .collect()
     }
 
+    /// A recorded working directory: one reference, or (the standard
+    /// library's packages under -Zbuild-std) a toolchain store path.
+    fn cwd(&self, dir: &str, owner: Option<&str>) -> Result<Cwd, Error> {
+        match self.rw.text(dir, owner)? {
+            Text::Literal(s) if !self.rw.in_scratch(&s) && s.starts_with('/') => {
+                Ok(Cwd::Literal(s))
+            }
+            _ => Ok(Cwd::Ref(self.rw.reference(dir, owner)?)),
+        }
+    }
+
     /// Convert a recorded env: `rustc-env` sentinels become env splices,
     /// the rest is filtered and rewritten; dynamic-library path sentinels
     /// become dynamic-path splices.
@@ -1072,8 +1063,7 @@ impl<'a> Builder<'a> {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error(format!("unit {id}: program: {}", e.0)))?;
         let cwd = self
-            .rw
-            .reference(&c.rec.cwd, Some(&c.package.id))
+            .cwd(&c.rec.cwd, Some(&c.package.id))
             .map_err(|e| Error(format!("unit {id}: cwd: {}", e.0)))?;
         let edition = arg_value(args, "--edition")
             .first()
@@ -1140,8 +1130,7 @@ impl<'a> Builder<'a> {
         }
         let (env, dylib) = self.rewrite_env(id, &r.package.id, self.filter_env(&env, true))?;
         let cwd = self
-            .rw
-            .reference(&rec.cwd, Some(&r.package.id))
+            .cwd(&rec.cwd, Some(&r.package.id))
             .map_err(|e| Error(format!("run {id}: cwd: {}", e.0)))?;
         Ok(Unit::Run(RunUnit {
             package: r.package.id.clone(),
@@ -1265,8 +1254,7 @@ impl<'a> Builder<'a> {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| Error(format!("{id}: program: {}", e.0)))?;
             let cwd = self
-                .rw
-                .reference(&rec.cwd, Some(&package.id))
+                .cwd(&rec.cwd, Some(&package.id))
                 .map_err(|e| Error(format!("{id}: cwd: {}", e.0)))?;
             let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
                 .into_iter()
@@ -1377,5 +1365,32 @@ pub fn output_name(emit: &str, path: &str, types: &[String]) -> Option<&'static 
         "link" if path.ends_with(".rlib") => Some("rlib"),
         "link" if types.iter().any(|t| t == "proc-macro") => Some("rlib"),
         _ => Some("bin"),
+    }
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_trim_paths_detected() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(has_cargo_trim_paths(&a(&[
+            "--remap-path-scope=all",
+            "--remap-path-prefix=/s/t=/cargo/build-dir"
+        ])));
+        // A user's own remap never targets /cargo/build-dir exactly.
+        assert!(!has_cargo_trim_paths(&a(&["--remap-path-prefix=/s=/x"])));
+        assert!(!has_cargo_trim_paths(&a(&[
+            "--remap-path-prefix=/s=/cargo/build-dirx"
+        ])));
+    }
+
+    #[test]
+    fn whole_paths_only() {
+        assert!(names_path("/t/build/a-1/out", "/t/build/a-1/out"));
+        assert!(names_path("x=/t/build/a-1/out/gen.rs", "/t/build/a-1/out"));
+        assert!(names_path("/t/build/a-1/out:/y", "/t/build/a-1/out"));
+        assert!(!names_path("/t/build/a-1/outer", "/t/build/a-1/out"));
     }
 }
