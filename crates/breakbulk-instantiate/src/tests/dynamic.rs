@@ -257,8 +257,11 @@ fn wrappers() {
     assert_eq!(w.builder, SHELL);
     assert_eq!(w.outputs, ["out"]);
     assert_eq!(w.env["root"], unit_path(APP, "out"));
+    // The bin's debuginfo side files, linked as `debug`.
+    assert_eq!(w.env["debugRoot"], unit_path(APP, "debug"));
     assert_eq!(w.env["PATH"], format!("{COREUTILS}/bin"));
     assert!(w.input_drvs[&drv_of(APP)].contains("out"));
+    assert!(w.input_drvs[&drv_of(APP)].contains("debug"));
     assert!(w.input_drvs[&drv_of("coreutils")].contains("out"));
     let info: serde_json::Value = serde_json::from_str(&w.env["rootJson"]).unwrap();
     assert_eq!(info["unit"], APP);
@@ -271,6 +274,7 @@ fn wrappers() {
         w.env["root"],
         unit_path("stub:smokeapp/bin/admin-cli", "out")
     );
+    assert_eq!(w.env["debugRoot"], "");
     let info: serde_json::Value = serde_json::from_str(&w.env["rootJson"]).unwrap();
     assert!(
         info["reason"]
@@ -298,6 +302,29 @@ fn test_spec_of_a_test_root() {
         "OUT_DIR".into(),
         breakbulk_format::Text::Literal("/compile/time/only".into()),
     );
+    // `[env]` variables Cargo set (the plan's configEnv), one of them a
+    // `relative` path into the package source; and one the plan does not
+    // name (not from `[env]`).
+    let src = c.cwd.clone();
+    c.env.insert(
+        "BB_PLAIN".into(),
+        breakbulk_format::Text::Literal("plain".into()),
+    );
+    c.env.insert(
+        "BB_REL".into(),
+        breakbulk_format::Text::Concat(vec![
+            breakbulk_format::Piece::Ref(src),
+            breakbulk_format::Piece::Literal("/data".into()),
+        ]),
+    );
+    c.env.insert(
+        "NOT_CONFIG".into(),
+        breakbulk_format::Text::Literal("x".into()),
+    );
+    plan.config_env = ["BB_PLAIN", "BB_REL", "CARGO_PKG_NAME"]
+        .into_iter()
+        .map(String::from)
+        .collect();
     for r in &mut plan.roots {
         r.test = true;
     }
@@ -330,6 +357,19 @@ fn test_spec_of_a_test_root() {
     let spec = &info["testSpec"];
     assert_eq!(spec["env"]["CARGO_PKG_NAME"], "smokeapp");
     assert!(spec["env"].get("OUT_DIR").is_none());
+    // The `[env]` variables, as IFD mode's runSpec gives them: runtime
+    // variables stay in `env`, references are real paths.
+    let config_env = spec["configEnv"].as_object().unwrap();
+    assert_eq!(
+        config_env.keys().collect::<Vec<_>>(),
+        ["BB_PLAIN", "BB_REL"]
+    );
+    assert_eq!(config_env["BB_PLAIN"], "plain");
+    let rel = config_env["BB_REL"].as_str().unwrap();
+    assert!(
+        rel.starts_with("/nix/store/") && rel.ends_with("/data"),
+        "{rel}"
+    );
     // Every target-platform run, for the dynamic-library path; the paths
     // are the wrapper's inputs.
     let runs: Vec<&str> = inputs

@@ -37,9 +37,13 @@ pub struct Rewriter {
     pub outputs: BTreeMap<String, OutRef>,
     /// Run `OUT_DIR`s → run unit id.
     pub run_dirs: BTreeMap<String, String>,
-    /// Bin outputs by (platform, target name), for the uplifted copies
-    /// (`<profile dir>/<name>`) that `CARGO_BIN_EXE_<name>` names.
-    pub uplifted_bins: BTreeMap<(Platform, String), OutRef>,
+    /// Bin outputs by (platform, target name), with their package ids, for
+    /// the uplifted copies (`<profile dir>/<name>`) that
+    /// `CARGO_BIN_EXE_<name>` names. Two packages can have a bin of the same
+    /// name (Cargo warns about the collision): then the owner's own bin is
+    /// meant, because Cargo sets `CARGO_BIN_EXE_*` only for the bins of the
+    /// test's own package (`artifact.rs`, `get_env`).
+    pub uplifted_bins: BTreeMap<(Platform, String), Vec<(String, OutRef)>>,
     /// The target triple: the first component of target units' paths.
     pub target_triple: String,
 }
@@ -50,10 +54,11 @@ fn is_path_char(c: u8) -> bool {
 }
 
 /// Where a path token ends: at a delimiter that cannot be part of the paths
-/// breakbulk sees.
+/// breakbulk sees, or a control character (Cargo separates the flags in
+/// `CARGO_ENCODED_RUSTFLAGS` with `\x1f`).
 fn token_end(s: &str, from: usize) -> usize {
     s[from..]
-        .find([':', ' ', '\t', '\n', ',', ';', '"', '\'', '='])
+        .find(|c: char| c.is_ascii_control() || [':', ' ', ',', ';', '"', '\'', '='].contains(&c))
         .map_or(s.len(), |i| from + i)
 }
 
@@ -152,8 +157,20 @@ impl Rewriter {
                 _ => Platform::Host,
             };
             let name = rel.rsplit('/').next().unwrap_or(rel);
-            if let Some(o) = self.uplifted_bins.get(&(platform, name.to_owned())) {
-                return Ok(vec![Piece::Ref(Reference::Out(o.clone()))]);
+            if let Some(bins) = self.uplifted_bins.get(&(platform, name.to_owned())) {
+                let own: Vec<&OutRef> = bins
+                    .iter()
+                    .filter(|(pkg, _)| Some(pkg.as_str()) == owner)
+                    .map(|(_, o)| o)
+                    .collect();
+                let one = match (bins.as_slice(), own.as_slice()) {
+                    ([(_, o)], _) => Some(o),
+                    (_, [o]) => Some(*o),
+                    _ => None,
+                };
+                if let Some(o) = one {
+                    return Ok(vec![Piece::Ref(Reference::Out(o.clone()))]);
+                }
             }
             return Err(Error(format!(
                 "`{p}` is in the planner's build directory but is no unit's output \
@@ -225,5 +242,80 @@ impl Rewriter {
     /// Whether `p` is inside the scratch directory.
     pub fn in_scratch(&self, p: &str) -> bool {
         under(p, &self.scratch).is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encoded_rustflags_separators_end_paths() {
+        let app = "path+file:///build/skeleton/app#0.1.0";
+        let r = Rewriter {
+            scratch: "/build/scratch/target".into(),
+            skeleton: "/build/skeleton".into(),
+            path_packages: vec![("/build/skeleton/app".into(), app.into())],
+            ..Default::default()
+        };
+        let src = |rel: &str| {
+            Piece::Ref(Reference::Src(SrcRef {
+                src: app.into(),
+                rel: rel.into(),
+            }))
+        };
+        let t = r
+            .text(
+                "-L\x1f/build/skeleton/app/a\x1f-L\x1f/build/skeleton/app/b",
+                Some(app),
+            )
+            .unwrap();
+        assert_eq!(
+            t,
+            Text::Concat(vec![
+                Piece::Literal("-L\x1f".into()),
+                src("app/a"),
+                Piece::Literal("\x1f-L\x1f".into()),
+                src("app/b"),
+            ])
+        );
+    }
+
+    #[test]
+    fn uplifted_bin_of_the_owners_package() {
+        let (a, b) = ("path+file:///s/a#0.1.0", "path+file:///s/b#0.1.0");
+        let out = |u: &str| OutRef {
+            out: u.into(),
+            output: "bin".into(),
+            file: Some("tool-1".into()),
+        };
+        let t = "x86_64-unknown-linux-gnu";
+        let mut r = Rewriter {
+            scratch: "/build/scratch/target".into(),
+            skeleton: "/build/skeleton".into(),
+            target_triple: t.into(),
+            ..Default::default()
+        };
+        let key = (Platform::Target, "tool".to_owned());
+        r.uplifted_bins.insert(
+            key.clone(),
+            vec![(a.into(), out("c-a")), (b.into(), out("c-b"))],
+        );
+        let p = format!("/build/scratch/target/{t}/release/tool");
+        // Two packages have a bin `tool`: each package's tests get their own.
+        for (owner, unit) in [(a, "c-a"), (b, "c-b")] {
+            assert_eq!(
+                r.path(&p, Some(owner)).unwrap(),
+                vec![Piece::Ref(Reference::Out(out(unit)))]
+            );
+        }
+        // No owner among them: ambiguous.
+        assert!(r.path(&p, Some("other")).is_err());
+        // One bin of that name: it, whoever refers to it.
+        r.uplifted_bins.insert(key, vec![(a.into(), out("c-a"))]);
+        assert_eq!(
+            r.path(&p, Some(b)).unwrap(),
+            vec![Piece::Ref(Reference::Out(out("c-a")))]
+        );
     }
 }

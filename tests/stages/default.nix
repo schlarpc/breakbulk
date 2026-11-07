@@ -22,6 +22,8 @@
 #   stages-wasm-browser wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
 #                       0.2.130) through bindgen -> wasmOpt -> install, then
 #                       loaded and called from node
+#   stages-linked-crate-types  the `linked` stage of a cdylib+staticlib
+#                       library: two roots over one unit output
 #   stages-wasm-component  a core module through wasmOpt -> componentize
 #                       with metadata; the component imports nothing
 #
@@ -807,6 +809,48 @@ in
         test "$(node run.mjs)" = "hello, nix"
         touch $out
       '';
+
+  # A library with crate-type = ["cdylib", "staticlib"]: one unit output,
+  # two roots. The `linked` stage links each file once.
+  stages-linked-crate-types =
+    let
+      unitOut = pkgs.runCommand "fake-unit" { } ''
+        mkdir $out; echo so > $out/libfoo.so; echo a > $out/libfoo.a
+      '';
+      root =
+        kind:
+        unitOut
+        // {
+          breakbulkRoot = {
+            package = "foo";
+            target = "foo";
+            inherit kind;
+            test = false;
+            unit = "c-1";
+            reason = null;
+          };
+        };
+      linked =
+        (breakbulk.products.mkProducts {
+          inherit pkgs;
+          inst = {
+            roots = {
+              "foo/cdylib/foo" = root "cdylib";
+              "foo/staticlib/foo" = root "staticlib";
+            };
+            sources = {
+              workspace = { };
+              crates = { };
+            };
+          };
+          triple = "x86_64-unknown-linux-gnu";
+          ca = false;
+        }).foo.stages.linked;
+    in
+    pkgs.runCommand "stages-linked-crate-types" { } ''
+      test "$(ls ${linked} | tr '\n' ' ')" = "libfoo.a libfoo.so "
+      touch $out
+    '';
 
   stages-wasm-component =
     pkgs.runCommand "stages-wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; }

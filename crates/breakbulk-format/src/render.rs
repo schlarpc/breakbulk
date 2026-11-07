@@ -34,7 +34,9 @@ pub trait Resolve {
     /// reference (an `OUT_DIR`). See [`remap_bases`].
     fn remap_name(&self, base: &Reference) -> Result<String, Self::Error>;
     /// The `--remap-path-scope` for a compile unit, or `None` for no scope
-    /// flag (every scope). See [`default_remap_scope`].
+    /// flag (every scope); `breakbulk-instantiate` gives shipped units
+    /// `macro,diagnostics` when their product splits debug info ("Source
+    /// paths at run time" in `docs/implementation.md`).
     fn remap_scope(&self, _id: &UnitId, _unit: &CompileUnit) -> Option<String> {
         None
     }
@@ -174,33 +176,6 @@ pub fn remap_bases(plan: &Plan, unit: &Unit) -> BTreeSet<Reference> {
     bases
 }
 
-/// The remap scope the design gives a compile unit ("Source paths at run
-/// time" in `docs/implementation.md`): test binaries remap every scope
-/// (`None`); everything else, when its product gets `splitDebug`, remaps
-/// `macro,diagnostics` (plus `coverage` in coverage variants) and keeps store
-/// paths in debug info; without `splitDebug`, every scope.
-pub fn default_remap_scope(
-    unit: &CompileUnit,
-    split_debug: bool,
-    coverage: bool,
-) -> Option<String> {
-    let is_test = unit
-        .args
-        .iter()
-        .any(|a| matches!(a, Arg::Literal(s) if s == "--test"));
-    if is_test || !split_debug {
-        return None;
-    }
-    Some(
-        if coverage {
-            "macro,diagnostics,coverage"
-        } else {
-            "macro,diagnostics"
-        }
-        .to_owned(),
-    )
-}
-
 /// Render unit `id` of `plan`: every reference becomes a path, every splice
 /// names its run's `flags` directory, and the configuration-dependent parts
 /// (env layers, remapping, dependency files) are filled in. The unit is
@@ -307,6 +282,10 @@ pub fn render_unit_in<R: Resolve>(
                     .outputs
                     .iter()
                     .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+                    .chain(
+                        c.has_debug_output()
+                            .then(|| (breakbulk_unit::spec::DEBUG_OUTPUT.to_owned(), Vec::new())),
+                    )
                     .collect(),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,

@@ -7,7 +7,8 @@
 #     inst;          # breakbulk.instantiate's result for that plan
 #     sources;       # { workspace; crates; } as given to instantiate
 #     tools;         # tool name -> store path, as given to instantiate
-#                    # (`rustc-sysroot` names the sysroot)
+#                    # (`rustc-sysroot` names the sysroot; runs get only
+#                    # its target libraries, see `testLibs`)
 #     target;        # the target triple
 #     runner = null;      # null (native) or [ program arg … ]
 #     testSystem = null;  # e.g. "aarch64-linux": run tests on that system
@@ -59,6 +60,12 @@
 #     created first;
 #   - `$out/log` holds the output; the run fails when the binary does.
 #
+# With `test.runner = "nextest"`, the same environment is set up, then
+# cargo-nextest runs the one binary in its reuse-build mode from
+# synthesized metadata (`nextestSpec`), with the package's
+# `test.nextest.profile` and `configFile`; libtest arguments go after
+# `--`. nextest's store (junit and the like) is copied to `$out/nextest`.
+#
 # Test binaries the plan lacks (required features) are instantiation's
 # stubs, which succeed and log why.
 { lib, stages }:
@@ -108,6 +115,27 @@ let
 in
 rec {
   inherit binaryKey dylibJq;
+
+  # Decision 94: what test runs read from the Rust toolchain, the shared
+  # libraries of the sysroot's target library directory (`libstd-*.so`, for
+  # binaries linked with `-C prefer-dynamic` and the like), copied into a
+  # small derivation laid out as a sysroot (`lib/rustlib/<target>/lib`).
+  # Depending on the whole sysroot instead (over 1 GB) would make every
+  # test run on a fresh machine fetch the toolchain. `null` without one.
+  testLibs =
+    pkgs: sysroot: target:
+    if sysroot == null then
+      null
+    else
+      pkgs.runCommand "rust-test-libs-${target}" { } ''
+        dir=lib/rustlib/${target}/lib
+        mkdir -p "$out/$dir"
+        for f in ${sysroot}/$dir/*; do
+          case "''${f##*/}" in
+            *.so|*.so.*|*.dylib|*.dll) cp -L "$f" "$out/$dir/" ;;
+          esac
+        done
+      '';
 
   # Resolve plan text (a string, or a list of pieces) to a string with
   # string context: `src`, `crateSrc` and `out` references as instantiation
@@ -339,14 +367,209 @@ rec {
   # The package's test configuration, with defaults.
   testConfig =
     packages: pkg:
+    let
+      # Options left `null` take the defaults.
+      t = lib.filterAttrs (_: v: v != null) (packages.${pkg}.test or { });
+    in
     {
       env = { };
       path = [ ];
       args = [ ];
       includeIgnored = false;
       binaries = { };
+      runner = "libtest";
     }
-    // (packages.${pkg}.test or { });
+    // t
+    // {
+      nextest = {
+        profile = "default";
+        configFile = null;
+        package = null;
+      }
+      // lib.filterAttrs (_: v: v != null) (t.nextest or { });
+    };
+
+  # What nextest's reuse-build mode reads, synthesized for one test binary
+  # (docs/spikes/m6-measurements.md, "nextest reuse"). nextest-metadata's
+  # `BinaryListSummary` (`--binaries-metadata`) and a `cargo metadata`
+  # document (`--cargo-metadata`), as nextest 0.9.146 reads them
+  # (nextest-runner/src/list/test_list.rs `from_binary_list`,
+  # src/test_command.rs, src/list/rust_build_meta.rs):
+  #
+  #   - the binary path is absolute and used as is (no remap), so the binary
+  #     stays in its own store path; `@BINARY@` is replaced at build time;
+  #   - the test's cwd and CARGO_MANIFEST_DIR are the package's manifest
+  #     directory in the cargo metadata: the package directory of its source
+  #     view, as for libtest runs. The workspace root is that view's root;
+  #     other path packages of the plan are listed under it too (their
+  #     directories need not exist), so `package()` filtersets match them;
+  #   - nextest sets CARGO_PKG_* from the package entry, so the entry is
+  #     built from the test unit's recorded CARGO_PKG_* values;
+  #   - no base output directories, linked paths, build-script out dirs or
+  #     libdirs: nextest then adds nothing to the dynamic-library path, and
+  #     keeps the environment the run already set (breakbulk's dylib path,
+  #     `rustc-env`, `[env]`), so the process sees what a libtest run sees;
+  #   - dependency edges are not synthesized: `deps()` and `rdeps()`
+  #     filtersets see none.
+  nextestSpec =
+    {
+      plan,
+      resolve,
+      spec,
+      root,
+      sysroot ? null,
+    }:
+    let
+      unit = plan.units.${root.unit};
+      pkgId = unit.package;
+      envOf = u: k: if u.env ? ${k} && isString u.env.${k} then u.env.${k} else "";
+      viewRoot =
+        let
+          rel = resolve.dirOf pkgId;
+          dir = noCtx spec.sourceDir;
+        in
+        if rel == "" then
+          spec.sourceDir
+        else if lib.hasSuffix "/${rel}" dir then
+          lib.removeSuffix "/${rel}" spec.sourceDir
+        else
+          throw "breakbulk: nextest: the source view ${dir} does not end in ${rel}";
+      relSuffix = rel: if rel == "" then "" else "/${rel}";
+      # One unit per path package: the test unit for the tested package,
+      # else any compile unit of that package.
+      pathPkgs = lib.mapAttrs (_: us: lib.head us) (
+        lib.groupBy (u: u.package) (
+          lib.filter (u: u.kind == "compile" && lib.hasPrefix "path+file://" u.package) (
+            lib.attrValues plan.units
+          )
+        )
+      );
+      pkgEntry =
+        id: u:
+        let
+          e = envOf (if id == pkgId then unit else u);
+          name = e "CARGO_PKG_NAME";
+          dir = "${viewRoot}${relSuffix (resolve.dirOf id)}";
+          orNull = v: if v == "" then null else v;
+        in
+        {
+          inherit id name;
+          version = e "CARGO_PKG_VERSION";
+          authors = lib.filter (a: a != "") (lib.splitString ":" (e "CARGO_PKG_AUTHORS"));
+          description = orNull (e "CARGO_PKG_DESCRIPTION");
+          homepage = orNull (e "CARGO_PKG_HOMEPAGE");
+          repository = orNull (e "CARGO_PKG_REPOSITORY");
+          license = orNull (e "CARGO_PKG_LICENSE");
+          license_file = orNull (e "CARGO_PKG_LICENSE_FILE");
+          rust_version = orNull (e "CARGO_PKG_RUST_VERSION");
+          readme = null;
+          documentation = null;
+          source = null;
+          dependencies = [ ];
+          targets = [ ];
+          features = { };
+          manifest_path = "${dir}/Cargo.toml";
+          metadata = null;
+          publish = null;
+          categories = [ ];
+          keywords = [ ];
+          edition = "2021";
+          links = null;
+          default_run = null;
+        };
+      ids = lib.attrNames pathPkgs;
+      nextestKind =
+        {
+          lib = "lib";
+          test = "test";
+          bin = "bin";
+          example = "example";
+          bench = "bench";
+        }
+        .${root.kind} or root.kind;
+      pkgName = envOf unit "CARGO_PKG_NAME";
+      binaryId =
+        if nextestKind == "lib" then
+          pkgName
+        else if nextestKind == "test" then
+          "${pkgName}::${root.target}"
+        else
+          "${pkgName}::${nextestKind}/${root.target}";
+      platform = triple: {
+        inherit triple;
+        target-features = "unknown";
+      };
+      # The sysroot's target library directory, which the run's
+      # dynamic-library path already ends with; without it nextest warns.
+      libdirOf =
+        triple:
+        if sysroot != null && triple == plan.target then
+          {
+            status = "available";
+            path = "${sysroot}/lib/rustlib/${triple}/lib";
+          }
+        else
+          {
+            status = "unavailable";
+            reason = "breakbulk";
+          };
+    in
+    {
+      inherit binaryId;
+      cargoMetadata = toJSON {
+        version = 1;
+        packages = map (id: pkgEntry id pathPkgs.${id}) ids;
+        workspace_members = ids;
+        workspace_default_members = ids;
+        resolve = {
+          nodes = map (id: {
+            inherit id;
+            dependencies = [ ];
+            deps = [ ];
+            features = [ ];
+          }) ids;
+          root = null;
+        };
+        # nextest requires `<workspace root>/Cargo.toml` to exist and writes
+        # its store (`[store] dir`, default `target/nextest`) under it; the
+        # package's source view has neither, so the root is a scratch
+        # directory made at build time (`@WS@`).
+        workspace_root = "@WS@";
+        target_directory = "@TARGET@";
+        metadata = null;
+      };
+      binaries = toJSON {
+        rust-build-meta = {
+          target-directory = "@TARGET@";
+          build-directory = "@TARGET@";
+          base-output-directories = [ ];
+          non-test-binaries = { };
+          build-script-out-dirs = { };
+          build-script-info = { };
+          linked-paths = [ ];
+          platforms = {
+            host = {
+              platform = platform plan.host;
+              libdir = libdirOf plan.host;
+            };
+            targets = lib.optional (plan.target != plan.host) {
+              platform = platform plan.target;
+              libdir = libdirOf plan.target;
+            };
+          };
+          target-platforms = [ (platform plan.target) ];
+          target-platform = null;
+        };
+        rust-binaries.${binaryId} = {
+          binary-id = binaryId;
+          binary-name = root.target;
+          package-id = pkgId;
+          kind = nextestKind;
+          binary-path = "@BINARY@";
+          build-platform = if unit.platform == "host" && plan.target != plan.host then "host" else "target";
+        };
+      };
+    };
 
   binaryConfig =
     cfg: binary:
@@ -375,7 +598,11 @@ rec {
         if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
           pkgs
         else
-          import pkgs.path { system = testSystem; },
+          import pkgs.path {
+            system = testSystem;
+            # The user's overlays and config (allowUnfree, …) carry over.
+            inherit (pkgs) overlays config;
+          },
       packages ? { },
       ca ? null,
       coverage ? false,
@@ -391,7 +618,9 @@ rec {
       useCa = if ca == null then stages.caAuto else ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
-      sysroot = tools.rustc-sysroot or null;
+      # The sysroot's target libraries only (`testLibs`), laid out as a
+      # sysroot.
+      sysroot = testLibs pkgs (tools.rustc-sysroot or null) target;
 
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
@@ -422,6 +651,86 @@ rec {
             cp "''${files[0]}" $out/
           '';
 
+      # A test run through nextest's reuse-build mode: nextest reads the
+      # synthesized metadata (`nextestSpec`) and runs the one binary with
+      # the project's nextest configuration (retries, timeouts, default
+      # filter, test groups). libtest arguments go after `--`, which
+      # nextest emulates (`--skip`, `--exact`, `--include-ignored`, …).
+      nextestRun =
+        r: s: cfg: args: bin:
+        let
+          nx = nextestSpec {
+            plan = planJson;
+            inherit resolve sysroot;
+            spec = s;
+            root = r.breakbulkRoot;
+          };
+          nextest = if cfg.nextest.package != null then cfg.nextest.package else testPkgs.cargo-nextest;
+          runnerVar = "CARGO_TARGET_${
+            lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] target)
+          }_RUNNER";
+        in
+        testPkgs.runCommand "${name}-${s.name}-run"
+          (
+            {
+              passthru = {
+                breakbulkTest = s // {
+                  inherit args;
+                  inherit (nx) binaryId;
+                };
+                binary = bin;
+              };
+              nextestCargoMetadata = nx.cargoMetadata;
+              nextestBinaries = nx.binaries;
+              passAsFile = [
+                "nextestCargoMetadata"
+                "nextestBinaries"
+              ];
+            }
+            // caAttrs
+          )
+          ''
+            ${envScript {
+              spec = s;
+              jq = "${testPkgs.jq}/bin/jq";
+            }}
+            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
+            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
+            export RUST_TEST_THREADS=$NIX_BUILD_CORES
+            ${lib.optionalString (
+              runnerList != [ ]
+            ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
+            ${lib.optionalString coverage ''
+              mkdir -p $out/profraw
+              export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
+            ''}
+            ws=$TMPDIR/nextest-ws
+            mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
+            touch $ws/Cargo.toml
+            files=(${bin}/*)
+            subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" "$1"; }
+            subst "$nextestBinariesPath" > $TMPDIR/binaries-metadata.json
+            subst "$nextestCargoMetadataPath" > $TMPDIR/cargo-metadata.json
+            cd $TMPDIR
+            set +e
+            env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
+              --binaries-metadata $TMPDIR/binaries-metadata.json \
+              --cargo-metadata $TMPDIR/cargo-metadata.json \
+              ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
+              --profile ${lib.escapeShellArg cfg.nextest.profile} \
+              --no-tests=warn --color never \
+              ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee $out/log
+            status=''${PIPESTATUS[0]}
+            set -e
+            if [ -d $ws/target/nextest ]; then
+              cp -r $ws/target/nextest $out/nextest
+            fi
+            if [ "$status" -ne 0 ]; then
+              echo "test binary ${s.package} ${s.binary} failed under nextest (exit status $status)" >&2
+              exit "$status"
+            fi
+          '';
+
       run =
         r:
         let
@@ -437,42 +746,47 @@ rec {
           args = testArgs cfg s.binary;
           bin = binaryOf s;
         in
-        testPkgs.runCommand "${name}-${s.name}-run"
-          (
-            {
-              passthru = {
-                breakbulkTest = s // {
-                  inherit args;
+        if cfg.runner == "nextest" then
+          nextestRun r s cfg args bin
+        else if cfg.runner != "libtest" then
+          throw "breakbulk: packages.${s.package}.test.runner must be \"libtest\" or \"nextest\", not ${toJSON cfg.runner}"
+        else
+          testPkgs.runCommand "${name}-${s.name}-run"
+            (
+              {
+                passthru = {
+                  breakbulkTest = s // {
+                    inherit args;
+                  };
+                  binary = bin;
                 };
-                binary = bin;
-              };
-            }
-            // caAttrs
-          )
-          ''
-            ${envScript {
-              spec = s;
-              jq = "${testPkgs.jq}/bin/jq";
-            }}
-            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
-            export RUST_TEST_THREADS=$NIX_BUILD_CORES
-            ${lib.optionalString coverage ''
-              mkdir -p $out/profraw
-              export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
-            ''}
-            mkdir -p /tmp/breakbulk-target-tmp $out
-            files=(${bin}/*)
-            cd ${lib.escapeShellArg s.sourceDir}
-            set +e
-            env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
-            status=''${PIPESTATUS[0]}
-            set -e
-            if [ "$status" -ne 0 ]; then
-              echo "test binary ${s.package} ${s.binary} failed (exit status $status)" >&2
-              exit "$status"
-            fi
-          '';
+              }
+              // caAttrs
+            )
+            ''
+              ${envScript {
+                spec = s;
+                jq = "${testPkgs.jq}/bin/jq";
+              }}
+              ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
+              ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
+              export RUST_TEST_THREADS=$NIX_BUILD_CORES
+              ${lib.optionalString coverage ''
+                mkdir -p $out/profraw
+                export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
+              ''}
+              mkdir -p /tmp/breakbulk-target-tmp $out
+              files=(${bin}/*)
+              cd ${lib.escapeShellArg s.sourceDir}
+              set +e
+              env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+              status=''${PIPESTATUS[0]}
+              set -e
+              if [ "$status" -ne 0 ]; then
+                echo "test binary ${s.package} ${s.binary} failed (exit status $status)" >&2
+                exit "$status"
+              fi
+            '';
 
       runs = lib.mapAttrs (
         _: rs:

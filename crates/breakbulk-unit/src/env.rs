@@ -178,7 +178,14 @@ impl CFlags {
         }
         let mut value = env.remove("NIX_CFLAGS_COMPILE").unwrap_or_default();
         if let Some(seed) = &self.random_seed {
-            value = format!(" -frandom-seed={seed}{value}");
+            // Setup hooks append with a leading space; a value from a layer
+            // that sets the variable outright may have none.
+            let sep = if value.is_empty() || value.starts_with(' ') {
+                ""
+            } else {
+                " "
+            };
+            value = format!(" -frandom-seed={seed}{sep}{value}");
         }
         for m in maps {
             value = append(' ', &value, &m);
@@ -237,25 +244,6 @@ impl Outer {
             Some(n) if n > 0 => n,
             _ => std::thread::available_parallelism().map_or(1, |n| n.get()),
         }
-    }
-
-    /// The unit's `-frandom-seed`, computed as nixpkgs'
-    /// `setup-hooks/reproducible-builds.sh` does: the first 10 characters of
-    /// the base name of `$NIX_OUTPATH_USED_AS_RANDOM_SEED`, or else of `$out`.
-    /// Library compile units have no `out`; they use their first output
-    /// (`$outputs` lists them), where stdenv would use an empty seed. `None`
-    /// when no output is known.
-    pub fn random_seed(&self) -> Option<String> {
-        let nonempty = |k: &str| self.get(k).filter(|s| !s.is_empty());
-        let path = nonempty("NIX_OUTPATH_USED_AS_RANDOM_SEED")
-            .or_else(|| nonempty("out"))
-            .or_else(|| {
-                self.get("outputs")
-                    .and_then(|o| o.split_whitespace().next())
-                    .and_then(nonempty)
-            })?;
-        let base = path.rsplit('/').next().unwrap_or(path);
-        Some(base.chars().take(10).collect())
     }
 
     /// Layer 1.

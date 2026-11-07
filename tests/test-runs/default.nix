@@ -27,6 +27,13 @@
 #                           binary against a checkout at /build/checkout
 #   runner                  test runs start the binary through the runner;
 #                           doctests pass it as --test-runtool(-arg)
+#   nextest                 `test.runner = "nextest"` over the nextest
+#                           fixture: retries, a per-test slow-timeout that
+#                           terminates a hung attempt, a default filter
+#                           naming another package, junit, package env from
+#                           the synthesized metadata; no config file
+#   nextest-repo            the same through the module options, with the
+#                           workspace's .config/nextest.toml found by default
 #
 # `workspaces` exposes the mkWorkspace results for debugging.
 {
@@ -344,11 +351,100 @@ let
         mkdir -p $result
         cp err $result/
       '';
+  # --- nextest -------------------------------------------------------------
+
+  nxWs = mk "nextest" {
+    packages.nx.test = {
+      runner = "nextest";
+      nextest.profile = "ci";
+      nextest.configFile = fixtures + "/nextest/.config/nextest.toml";
+      env.NX_FROM_TEST_ENV = "yes";
+      env.NX_EXPECT_NIX = "1";
+    };
+    packages.other.test.runner = "nextest";
+  };
+
+  nextest =
+    let
+      r = nxWs.testRuns;
+    in
+    assert lib.assertMsg (
+      lib.attrNames r.nx == [
+        "flaky"
+        "lib/nx"
+      ]
+    ) "nextest: unexpected test binaries ${toString (lib.attrNames r.nx)}";
+    pkgs.runCommand "test-runs-nextest"
+      {
+        flaky = r.nx.flaky;
+        nxLib = r.nx."lib/nx";
+        other = r.other."lib/other";
+      }
+      ''
+        cat $flaky/log
+        # Retries: the flaky test failed once and passed on the second try.
+        grep -E 'TRY 2 PASS .*nx::flaky flaky_once' $flaky/log
+        # slow-timeout terminate-after (a per-test override) killed the hung
+        # first attempt; the retry passed.
+        grep -E 'TRY 1 TMT .*nx::flaky hangs_once' $flaky/log
+        grep -E 'TRY 2 PASS .*nx::flaky hangs_once' $flaky/log
+        # The profile's default filter (naming the other package) left a
+        # test out.
+        grep -q '1 test skipped via profile.ci.default-filter' $flaky/log
+        ! grep -q 'excluded_always_fails' $flaky/log
+        # Package env from the synthesized metadata, test.env, the profile.
+        grep -E 'PASS .*nx::flaky runtime_env' $flaky/log
+        # junit from the profile's config lands in the output.
+        grep -q 'testsuite name="nx::flaky"' $flaky/nextest/ci/junit.xml
+        grep -E 'PASS .*nx unit_ok|PASS .*nx tests::unit_ok' $nxLib/log
+        # No configuration file: nextest's defaults.
+        grep -E 'PASS .*other tests::adds' $other/log
+        mkdir -p $out
+        cp $flaky/log $out/
+      '';
+
+  # The same through the module options: `test.runner` and
+  # `test.nextest.profile`, with the configuration file found at the
+  # workspace's `.config/nextest.toml`.
+  nxRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/nextest";
+    modules = [
+      {
+        workspaces.main.variants.default.profile = "dev";
+        packages.nx.test = {
+          runner = "nextest";
+          nextest.profile = "ci";
+        };
+      }
+    ];
+  };
+  nextestRepo =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      r = nxRepo.workspaces.main.target.${native}.testRuns;
+    in
+    pkgs.runCommand "test-runs-nextest-repo"
+      {
+        flaky = r.nx.flaky;
+        other = r.other."lib/other";
+      }
+      ''
+        grep -q 'nextest profile: ci' $flaky/log
+        grep -q '1 test skipped via profile.ci.default-filter' $flaky/log
+        grep -E 'TRY 2 PASS .*nx::flaky flaky_once' $flaky/log
+        # `other` keeps libtest.
+        grep -q 'test result: ok. 1 passed' $other/log
+        ! grep -q 'Nextest run ID' $other/log
+        mkdir -p $out
+      '';
 in
 {
   workspaces = {
-    inherit doctestsWs ctl;
+    inherit doctestsWs ctl nxWs;
   };
+  inherit nextest;
+  nextest-repo = nextestRepo;
   runner = testRunner;
   inherit doctests;
   test-control = testControl;

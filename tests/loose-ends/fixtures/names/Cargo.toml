@@ -1,0 +1,5 @@
+# Two members with a bin of the same name (`tool`; Cargo warns about the
+# output filename collision), and a bench built as a test (`test = true`).
+[workspace]
+members = ["a", "b"]
+resolver = "2"

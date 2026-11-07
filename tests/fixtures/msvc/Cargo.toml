@@ -13,3 +13,10 @@ bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
 
 # Its own workspace (tests/fixtures/msvc).
 [workspace]
+
+# Release with debug info: the PDB check (tests/presets, msvc-x86_64-pdb).
+# Build scripts and proc macros keep release's build-override settings, so
+# they are shared with the release variant.
+[profile.release-debug]
+inherits = "release"
+debug = true

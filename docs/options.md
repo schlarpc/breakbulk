@@ -677,6 +677,96 @@ false
 
 
 
+## packages\.\<name>\.test\.nextest\.package
+
+
+
+cargo-nextest to run with (` null `: the test platform’s ` cargo-nextest `)\.
+
+
+
+*Type:*
+null or package
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/packages\.nix](../lib/modules/packages.nix)
+
+
+
+## packages\.\<name>\.test\.nextest\.configFile
+
+
+
+nextest configuration file\. ` null `: the repository’s
+` .config/nextest.toml ` when it exists, else nextest’s
+defaults\.
+
+
+
+*Type:*
+null or absolute path
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+./.config/nextest.toml
+```
+
+*Declared by:*
+ - [lib/modules/packages\.nix](../lib/modules/packages.nix)
+
+
+
+## packages\.\<name>\.test\.nextest\.profile
+
+
+
+nextest profile for this package’s test runs (` null `: ` default `)\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+"ci"
+```
+
+*Declared by:*
+ - [lib/modules/packages\.nix](../lib/modules/packages.nix)
+
+
+
 ## packages\.\<name>\.test\.path
 
 
@@ -694,6 +784,43 @@ list of package
 
 ```nix
 [ ]
+```
+
+*Declared by:*
+ - [lib/modules/packages\.nix](../lib/modules/packages.nix)
+
+
+
+## packages\.\<name>\.test\.runner
+
+
+
+How this package’s test binaries run: ` libtest ` (the binary
+itself, as ` cargo test ` runs it) or ` nextest ` (cargo-nextest’s
+reuse-build mode over the one binary, with the project’s
+nextest configuration: retries, timeouts, default filter, test
+groups)\. Each binary is still its own test run\. ` null ` means
+` libtest `\.
+
+
+
+*Type:*
+null or one of “libtest”, “nextest”
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+"nextest"
 ```
 
 *Declared by:*
@@ -1448,7 +1575,8 @@ breakbulk.presets.linuxMusl
 
 The program that runs this target’s test binaries (wine,
 wasmtime, qemu-user, …), invoked as ` <runner> <binary> <args…> `
-like Cargo’s ` target.<triple>.runner `\. ` null `: run directly\.
+like Cargo’s ` target.<triple>.runner `: a program, or a list of
+the program and its first arguments\. ` null `: run directly\.
 May be a function ` { lockfile, workspace }: <runner> ` for runners
 that depend on the workspace (wasm-bindgen-test-runner must
 match the locked wasm-bindgen)\.

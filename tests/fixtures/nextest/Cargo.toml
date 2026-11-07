@@ -1,0 +1,8 @@
+# nextest test runs (`test.runner = "nextest"`): retries, a slow-timeout
+# that terminates a hung attempt, a default filter, a per-test override,
+# and the runtime environment nextest gives a test process. The project's
+# nextest configuration is .config/nextest.toml. Two packages, so the
+# synthesized cargo metadata lists more than the tested one.
+[workspace]
+members = ["nx", "other"]
+resolver = "2"

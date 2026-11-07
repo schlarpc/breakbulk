@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use breakbulk_format::rendered::{derivation_output, package_name_version};
+use breakbulk_format::rendered::{DEBUG_OUTPUT, derivation_output, package_name_version};
 use breakbulk_format::{
     Arg, CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, Unit,
     UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in, to_canonical_json,
@@ -428,14 +428,23 @@ impl Resolve for Tokens<'_> {
     /// so a side with a token is joined by the Nix side ([`Ref::Join`]).
     /// Literal store paths in a side are tokenized first: the join's items
     /// never reach [`Tokens::tokenize_store_paths`] through the unit text.
+    /// For the same reason each item is escaped here as the inside of a JSON
+    /// string, as the unit text around the token is: a join only ever
+    /// stands in an env value of `BREAKBULK_UNIT`. Tokens and JSON-escaped
+    /// inputs pass through unchanged (their characters need no escaping),
+    /// and escaping keeps an item empty exactly when it was.
     fn append_list(&self, sep: char, earlier: &str, later: &str) -> Result<String, Error> {
         if !earlier.contains(self.prefix) && !later.contains(self.prefix) {
             return Ok(breakbulk_format::append_env_list(sep, earlier, later));
         }
         let items = [earlier, later]
             .into_iter()
-            .map(|t| self.tokenize_store_paths("(env layer)", t))
-            .collect::<Result<_, _>>()?;
+            .map(|t| {
+                let t = self.tokenize_store_paths("(env layer)", t)?;
+                let q = serde_json::to_string(&t).map_err(|e| Error(e.to_string()))?;
+                Ok(q[1..q.len() - 1].to_owned())
+            })
+            .collect::<Result<_, Error>>()?;
         Ok(self.token(Ref::Join { sep, items }))
     }
 }
@@ -540,7 +549,8 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
     store_name(&format!("{pkg}-{version}-{kind}"))
 }
 
-/// A unit derivation's outputs.
+/// A unit derivation's outputs: sorted, then `debug` last, so that it is
+/// never the default (first) output.
 pub fn unit_outputs(unit: &Unit) -> Vec<String> {
     match unit {
         Unit::Compile(c) => c
@@ -549,6 +559,7 @@ pub fn unit_outputs(unit: &Unit) -> Vec<String> {
             .map(|o| derivation_output(o).to_owned())
             .collect::<BTreeSet<_>>()
             .into_iter()
+            .chain(c.has_debug_output().then(|| DEBUG_OUTPUT.to_owned()))
             .collect(),
         Unit::Run(_) => vec!["flags".into(), "out".into()],
     }

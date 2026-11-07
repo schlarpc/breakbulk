@@ -138,42 +138,6 @@ fn append_skips_empty_sides() {
 }
 
 #[test]
-fn random_seed_as_stdenv_computes_it() {
-    let seed = |vars: &[(&str, &str)]| outer(vars).random_seed();
-    assert_eq!(
-        seed(&[(
-            "out",
-            "/nix/store/0123456789abcdefghijklmnopqrstuv-ring-0.17.14-build-run"
-        )])
-        .as_deref(),
-        Some("0123456789")
-    );
-    assert_eq!(
-        seed(&[
-            ("out", "/nix/store/aaaaaaaaaaaaaaaa-x"),
-            (
-                "NIX_OUTPATH_USED_AS_RANDOM_SEED",
-                "/nix/store/bbbbbbbbbbbb-y"
-            ),
-        ])
-        .as_deref(),
-        Some("bbbbbbbbbb")
-    );
-    // A library compile unit: no `out`, first of `outputs`.
-    assert_eq!(
-        seed(&[
-            ("outputs", "rlib rmeta"),
-            ("rlib", "/nix/store/cccccccccccccc-lib-rlib"),
-            ("rmeta", "/nix/store/dddddddddddddd-lib-rmeta"),
-        ])
-        .as_deref(),
-        Some("cccccccccc")
-    );
-    assert_eq!(seed(&[]), None);
-    assert_eq!(seed(&[("out", "")]), None);
-}
-
-#[test]
 fn c_flags_seed_first_prefix_maps_last() {
     let o = outer(&[]);
     let capture = map(&[("NIX_CFLAGS_COMPILE", " -isystem /cap/include")]);
@@ -209,6 +173,22 @@ fn c_flags_seed_first_prefix_maps_last() {
     // Nothing to add: the variable is left alone (and not created).
     let env = layered(&o, None, &BTreeMap::new(), &none());
     assert!(!env.contains_key("NIX_CFLAGS_COMPILE"));
+}
+
+#[test]
+fn seed_is_its_own_word_before_a_value_without_leading_space() {
+    // The base capture's empty value, then a package override's flag: the
+    // merged value has no leading space, and the seed must not run into it.
+    let env = layered(
+        &outer(&[]),
+        Some(&map(&[("NIX_CFLAGS_COMPILE", "")])),
+        &map(&[("NIX_CFLAGS_COMPILE", "-DSTAMP=1")]),
+        &CFlags {
+            random_seed: Some("s".into()),
+            prefix_maps: vec![],
+        },
+    );
+    assert_eq!(env["NIX_CFLAGS_COMPILE"], " -frandom-seed=s -DSTAMP=1");
 }
 
 #[test]

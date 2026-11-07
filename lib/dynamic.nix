@@ -292,7 +292,11 @@ let
         if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
           pkgs
         else
-          import pkgs.path { system = testSystem; },
+          import pkgs.path {
+            system = testSystem;
+            # The user's overlays and config (allowUnfree, …) carry over.
+            inherit (pkgs) overlays config;
+          },
       packages ? { },
       ca ? null,
       coverage ? false,
@@ -303,10 +307,16 @@ let
       useCa = if ca == null then stages.caAuto else ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
-      sysroot = tools.rustc-sysroot or null;
+      sysroot = testRuns.testLibs pkgs (tools.rustc-sysroot or null) target;
       jq = "${testPkgs.jq}/bin/jq";
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
-      byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
+      # `test.runner = "nextest"` needs plan data at evaluation time (IFD
+      # mode only, for now): such packages run their binaries with libtest.
+      nextestPkgs = lib.attrNames (lib.filterAttrs (_: p: (p.test.runner or null) == "nextest") packages);
+      byPackage =
+        lib.warnIf (nextestPkgs != [ ])
+          "breakbulk: test.runner = \"nextest\" is not supported in dynamic-derivation mode yet; ${lib.concatStringsSep ", " nextestPkgs} run with libtest"
+          (lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots));
 
       binaryOf =
         r: n:
@@ -369,6 +379,9 @@ let
             done
             export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
             unset __bb_dylib __bb_p
+            # The project's `[env]`, then rustc-env, then the runtime
+            # variables: testRuns.envScript's order.
+            eval "$(${jq} -r '.testSpec.configEnv // {} | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
             for f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
               eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$f/directives.json")"
             done

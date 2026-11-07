@@ -9,7 +9,9 @@
 #   repos.<fixture>          the mkRepository results
 #   build.<fixture>          a derivation linking every product and test
 #                            run of the fixture's default variants
-#                            (products/<ws>/<pkg>, runs/<ws>/<pkg>/<binary>)
+#                            (products/<ws>/<pkg>, runs/<ws>/<pkg>/<binary>;
+#                            in dynamic mode also units-<ws>-<kind>, every
+#                            unit of each plan)
 #   unitDrvs.<fixture>       a JSON file: "<ws>/<kind>" -> unit id -> .drv
 #                            path (IFD mode)
 #   outer.<fixture>."<ws>/<kind>"   the outer derivations (dynamic mode)
@@ -99,6 +101,16 @@ let
         ];
       in
       repo;
+    # The project's `[env]` (tests/loose-ends, config-env): the fixture's
+    # tests assert the values, so its test runs check them in both modes.
+    config-env = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = ../loose-ends/fixtures/config-env;
+      modules = [
+        { inherit mode; }
+        oneWs
+      ];
+    };
   };
 
   # Products differ between the modes (resolved at build time in dynamic
@@ -119,6 +131,13 @@ let
           ''
             mkdir -p $out/products/${wsName} $out/runs/${wsName}
           ''
+          # Dynamic mode: every outer derivation runs (run.sh reads their
+          # logs), also for a plan no product or test run needs.
+          + lib.concatStrings (
+            lib.mapAttrsToList (kind: d: ''
+              ln -s ${d} $out/units-${wsName}-${kind}
+            '') ((inst repo wsName).allUnits or { })
+          )
           + lib.concatStrings (
             lib.mapAttrsToList (p: d: ''
               ln -s ${d} $out/products/${wsName}/${p}

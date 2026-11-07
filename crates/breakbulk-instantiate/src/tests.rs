@@ -449,6 +449,42 @@ fn list_like_variables_append_across_layers() {
 }
 
 #[test]
+fn joined_recorded_values_are_json_escaped() {
+    // A recorded list-like value (from the project's `[env]`) that needs
+    // escaping, joined with a spec value: the join's literal must be escaped
+    // like the rest of BREAKBULK_UNIT.
+    let mut inputs = smoke_inputs();
+    inputs
+        .toolchains
+        .target
+        .env
+        .insert("BINDGEN_EXTRA_CLANG_ARGS".into());
+    let recorded = "-DNAME=\"x\" -IC:\\inc";
+    let lib = match inputs.plan.units.get_mut(LIB).unwrap() {
+        Unit::Compile(c) => c,
+        Unit::Run(_) => panic!(),
+    };
+    lib.env.insert(
+        "BINDGEN_EXTRA_CLANG_ARGS".into(),
+        breakbulk_format::Text::Literal(recorded.into()),
+    );
+    let out = instantiate(&inputs).unwrap();
+    let text = attr(&out.units[LIB], "BREAKBULK_UNIT");
+    let RenderedUnit::Compile(c) = serde_json::from_str(&text).unwrap() else {
+        panic!()
+    };
+    let spec = input_value(&keys::env(Platform::Target, "BINDGEN_EXTRA_CLANG_ARGS"));
+    assert_eq!(
+        c.env["BINDGEN_EXTRA_CLANG_ARGS"],
+        format!("{recorded} {spec}")
+    );
+    let direct =
+        unit_env_value(&render_unit(&inputs.plan, &LIB.to_owned(), &RealPaths(&inputs)).unwrap())
+            .unwrap();
+    assert_eq!(text, direct);
+}
+
+#[test]
 fn versioned_override_wins() {
     let mut inputs = smoke_inputs();
     inputs.overrides.packages.insert(
@@ -477,7 +513,13 @@ fn names_and_outputs() {
     assert_eq!(name(SCRIPT), "smokelib-0.1.0-build-script");
     assert_eq!(name(RUN), "smokelib-0.1.0-build-run");
     let outputs = |id: &str| out.units[id].attrs["outputs"].clone();
-    assert_eq!(outputs(APP), Value::Strings(vec!["out".into()]));
+    // A target bin also gets `debug` (its debuginfo side files), last.
+    assert_eq!(
+        outputs(APP),
+        Value::Strings(vec!["out".into(), "debug".into()])
+    );
+    // A build script (a host unit) does not.
+    assert_eq!(outputs(SCRIPT), Value::Strings(vec!["out".into()]));
     assert_eq!(
         outputs(LIB),
         Value::Strings(vec!["rlib".into(), "rmeta".into()])

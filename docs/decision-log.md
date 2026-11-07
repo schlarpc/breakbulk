@@ -948,3 +948,103 @@ features your system Nix doesn't enable: dynamic mode (`nix run
 .#test-dynamic`) and content-addressed test cutoff (currently
 `tests/test-cutoff/run.sh`). Proposed: give the second a `nix run
 .#test-cutoff` entry too, so all opt-in tests are found the same way.
+
+## 88. FYI: independent code review fixed 5 bugs
+
+A reviewer agent re-read the code and fixed: a missing space that could
+glue the C compiler seed flag to the next flag; unescaped quotes in some
+environment values breaking the unit description; `["cdylib",
+"staticlib"]` libraries failing at the link step; config-file rustflags
+merged differently from Cargo; and a hidden skeleton path that escaped
+validation. Each has a regression test. The unit builder changed, so every
+crate rebuilds once.
+
+## 89. ASK: where Windows `.pdb` and DWARF `.dwp` debug files go
+
+The compiler doesn't announce these files, and the unit builder currently
+deletes them with a warning. So Windows products built with debug info
+have no `.pdb`. Putting them in the main output would make the product
+reference intermediate libraries (and possibly sources). Proposed: a
+separate `debug` output on binary build steps, which products' install
+step copies into their own `debug` output, matching how Linux debug info
+is split. Default: do that.
+
+## 90. ASK: one package opting out of debug splitting
+
+How source paths are hidden is decided per target (entry 76). The review
+confirmed the consequence: a package that removes `splitDebug` keeps real
+source paths in its binary, and its default "no source references" check
+fails; a package that adds `splitDebug` on a target without it gets no
+build ID. Options: (a) keep per-target and document "change stages per
+target, not per package" (default); (b) compile the affected libraries
+twice when packages disagree.
+
+## 91. FYI: M6 measurements: pipelining split and rmeta cutoff are no-go for now
+
+Details in `docs/spikes/m6-measurements.md`.
+- **Pipelining.** Cargo starting dependents early saves 5–39% on real
+  workspaces at 8 cores (ripgrep 39%, rust-analyzer 27%, helix 5%). The
+  cheap ways for breakbulk to recover it compile each library's front end
+  twice, which costs 23–49% more CPU and is slower at 4 cores. Not worth
+  building. The only approach that keeps the gain (pausing and resuming the
+  compiler process, "CRIU") is worth a spike later.
+- **Skipping rebuilds when a library's interface file is unchanged.** It
+  can't work today: rustc writes a hash of every source file into the
+  interface file, so even adding a comment changes it. Replaying 50 real
+  ripgrep commits saved 1% of library compiles. Rust's planned fix
+  (`-Zpublic-api-hash`) isn't in nightly yet.
+- **CA test runs on a fresh machine** download all their inputs first
+  (1.8 GB including the compiler) before Nix can tell the run is cached,
+  versus 440 bytes for an ordinary test run. This confirms the design's
+  choice to keep content-addressing off for caches serving fresh machines.
+
+## 92. FYI: nextest support
+
+`packages.<name>.test.runner = "nextest"` runs that package's test binaries
+through nextest, honoring `.config/nextest.toml` (retries, timeouts, default
+filters, JUnit output, test threads). Each binary is still its own Nix test
+run.
+
+## 93. ASK: make nextest a workspace-wide switch?
+
+nextest's config is workspace-wide, but the switch is per package, so you'd
+repeat it for each package. Proposed: also allow a workspace-level default.
+
+## 94. ASK: test runs depend on the whole Rust toolchain
+
+Test runs need only the Rust standard library's runtime files, but depend on
+the whole toolchain (1.1 GB) to get them. On a fresh machine that's a big
+download for content-addressed runs. Proposed: a small derivation holding
+only those files. Default: do it.
+
+## 95. ASK: what to ask rustc upstream for
+
+The design plans to ask the Rust project for a "physical split" of library
+metadata (what dependents read vs. everything else). The measurements show
+the request should explicitly name the per-file source hashes, which today
+change the interface file on every edit. Nothing will be filed without you.
+
+## 96. FYI: review follow-ups done
+
+- Windows `.pdb` and DWARF `.dwp`/`.dwo` debug files are now kept, in a
+  separate `debug` output (entry 89's default). Windows products have
+  `$debug/bin/app.pdb` next to `$out/bin/app.exe`, and the main output
+  still references no sources.
+- Toolchain flags that turn on a `cfg(...)` config key are now placed the
+  way Cargo would place them.
+- Dynamic-mode test runs get the `[env]` table.
+- Test runs download only the Rust runtime libraries (66 MB) instead of the
+  whole toolchain (entry 94).
+- Smaller fixes: bench naming, `CARGO_BIN_EXE_*` with same-named binaries in
+  two packages, a runner given as a list, overlays kept for test runs on
+  another system. Dead code removed.
+- nextest in dynamic mode still falls back to plain libtest with a warning.
+
+## 97. ASK: every binary build step gets an extra (usually empty) `debug` output
+
+Nix needs a build step's outputs declared up front, so every binary, test
+and C-compatible library step now has a `debug` output, empty unless the
+compiler wrote side files. Downloading a binary never fetches it. Cost:
+one extra small store path per such step. Alternative: declare it only on
+Windows targets or when your profile sets `split-debuginfo`, which saves
+paths but could miss a case.

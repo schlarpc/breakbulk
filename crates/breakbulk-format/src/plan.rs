@@ -269,6 +269,20 @@ pub struct CompileUnit {
     pub outputs: BTreeMap<String, BTreeSet<String>>,
 }
 
+impl CompileUnit {
+    /// Whether the unit gets a `debug` derivation output for the
+    /// debuginfo side files rustc writes next to a linked output (`.pdb`
+    /// on msvc, `.dwp`/`.dwo` with `split-debuginfo`; decision 89): the
+    /// target platform's linking units (bins, tests, examples, benches,
+    /// cdylibs, dylibs, staticlibs). Nix outputs are fixed before the
+    /// build, so the output is declared whether or not rustc writes any;
+    /// host units (build scripts, proc macros) only run during the build,
+    /// so theirs are discarded.
+    pub fn has_debug_output(&self) -> bool {
+        self.platform == Platform::Target && self.outputs.contains_key("bin")
+    }
+}
+
 /// A build-script run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

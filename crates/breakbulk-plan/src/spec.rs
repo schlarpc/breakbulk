@@ -81,6 +81,39 @@ pub struct ProjectConfig {
     pub env: BTreeMap<String, bool>,
     /// The files read, in precedence order (lowest first).
     pub files: Vec<PathBuf>,
+    /// The rustflags keys (`build`, `target.<key>`) whose value so far is a
+    /// string, which a later string replaces instead of extending.
+    string_keys: BTreeSet<String>,
+}
+
+/// Merge a later (higher-precedence) rustflags value into `old`, as Cargo's
+/// `ConfigValue::merge` does (`src/cargo/util/context/config_value.rs`,
+/// `merge_helper`): arrays concatenate, lower precedence first; a string
+/// replaces a string; a string and an array do not merge.
+fn merge_rustflags(
+    old: &mut Option<Vec<String>>,
+    strings: &mut BTreeSet<String>,
+    key: String,
+    (new, new_is_string): (Vec<String>, bool),
+    what: &str,
+) -> Result<(), Error> {
+    match old {
+        None => *old = Some(new),
+        Some(old) => match (strings.contains(&key), new_is_string) {
+            (false, false) => old.extend(new),
+            (true, true) => *old = new,
+            _ => bail!(
+                "{what}: `{key}.rustflags` is a string in one config file and an array in another, \
+                 which Cargo does not merge"
+            ),
+        },
+    }
+    if new_is_string {
+        strings.insert(key);
+    } else {
+        strings.remove(&key);
+    }
+    Ok(())
 }
 
 /// A config string list: a whitespace-separated string or an array of
@@ -174,7 +207,13 @@ impl ProjectConfig {
         }
         if let Some(b) = table.get("build").and_then(|b| b.get("rustflags")) {
             let v = string_list(b, &format!("{what}: build.rustflags"))?;
-            self.build_rustflags.get_or_insert_with(Vec::new).extend(v);
+            merge_rustflags(
+                &mut self.build_rustflags,
+                &mut self.string_keys,
+                "build".into(),
+                (v, b.is_str()),
+                &what,
+            )?;
         }
         match table.get("env") {
             None => {}
@@ -201,36 +240,22 @@ impl ProjectConfig {
             for (key, t) in targets {
                 if let Some(r) = t.get("rustflags") {
                     let v = string_list(r, &format!("{what}: target.{key}.rustflags"))?;
+                    let mut old = self.target_rustflags.remove(key);
+                    merge_rustflags(
+                        &mut old,
+                        &mut self.string_keys,
+                        format!("target.{key}"),
+                        (v, r.is_str()),
+                        &what,
+                    )?;
                     self.target_rustflags
-                        .entry(key.clone())
-                        .or_default()
-                        .extend(v);
+                        .insert(key.clone(), old.unwrap_or_default());
                 }
             }
         }
         self.files.push(path.to_owned());
         seen.pop();
         Ok(())
-    }
-
-    /// The project's target rustflags for `triple`: `target.<triple>` then
-    /// every matching `target.'cfg(…)'` key, as Cargo concatenates them.
-    pub fn target_flags(&self, triple: &str, cfg: &[CfgValue]) -> Result<Vec<String>, Error> {
-        let mut flags = self
-            .target_rustflags
-            .get(triple)
-            .cloned()
-            .unwrap_or_default();
-        for (key, v) in &self.target_rustflags {
-            if let Some(inner) = key.strip_prefix("cfg(").and_then(|k| k.strip_suffix(')')) {
-                let expr = CfgExpr::parse(inner)
-                    .map_err(|e| Error(format!("target.'{key}': cannot parse: {e}")))?;
-                if expr.matches(cfg) {
-                    flags.extend(v.iter().cloned());
-                }
-            }
-        }
-        Ok(flags)
     }
 }
 
@@ -248,22 +273,131 @@ impl ProjectConfig {
     }
 }
 
+/// A function answering `rustc --print cfg --target <triple> <flags>`.
+pub type CfgQuery<'a> = dyn FnMut(&[String]) -> Result<Vec<CfgValue>, Error> + 'a;
+
+/// What Cargo's rustflags for target units come to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Effective {
+    /// The key Cargo took them from (`None`: no rustflags at all).
+    source: Option<RustflagsKey>,
+    /// The project's share of them (the spec's flags left out).
+    project: Vec<String>,
+}
+
+impl ProjectConfig {
+    /// Cargo's rustflags for target units when the spec's flags `spec` are
+    /// added under `key` with `--config`, as `TargetInfo::new` computes
+    /// them (Cargo's `core/compiler/build_context/target_info.rs`): the
+    /// flags without `cfg(…)` keys (`extra_args` with no cfg), then
+    /// `rustc --print=cfg` *with those flags*, then the flags again with
+    /// the matching `cfg(…)` keys; when they changed, one more query with
+    /// the new flags, and Cargo keeps the flags of its last query. So a
+    /// rustflag that changes the cfg (`-C target-feature=+avx2`,
+    /// `--cfg x`) selects the `target.'cfg(…)'` keys it matches.
+    fn effective(
+        &self,
+        spec: &[String],
+        key: RustflagsKey,
+        triple: &str,
+        query: &mut CfgQuery,
+    ) -> Result<Effective, Error> {
+        // `extra_args`: (all flags, the project's share and source).
+        let extra = |cfg: Option<&[CfgValue]>| -> Result<(Vec<String>, Effective), Error> {
+            let mut project = self
+                .target_rustflags
+                .get(triple)
+                .cloned()
+                .unwrap_or_default();
+            let mut all = project.clone();
+            if key == RustflagsKey::Target {
+                all.extend(spec.iter().cloned());
+            }
+            if let Some(cfg) = cfg {
+                let more = self.cfg_flags(cfg)?;
+                project.extend(more.iter().cloned());
+                all.extend(more);
+            }
+            if !all.is_empty() {
+                let source = Some(RustflagsKey::Target);
+                return Ok((all, Effective { source, project }));
+            }
+            if self.build_rustflags.is_some() || (key == RustflagsKey::Build && !spec.is_empty()) {
+                let project = self.build_rustflags.clone().unwrap_or_default();
+                let mut all = project.clone();
+                if key == RustflagsKey::Build {
+                    all.extend(spec.iter().cloned());
+                }
+                let source = Some(RustflagsKey::Build);
+                return Ok((all, Effective { source, project }));
+            }
+            let project = Vec::new();
+            Ok((
+                Vec::new(),
+                Effective {
+                    source: None,
+                    project,
+                },
+            ))
+        };
+        let mut flags = extra(None)?;
+        if !self.target_rustflags.keys().any(|k| k.starts_with("cfg(")) {
+            // No key depends on the cfg; a query would change nothing.
+            return Ok(flags.1);
+        }
+        for turn in 0..2 {
+            let cfg = query(&flags.0)?;
+            let new = extra(Some(&cfg))?;
+            if new.0 == flags.0 {
+                flags = new;
+                break;
+            }
+            // Two turns without a fixed point: Cargo warns and keeps the
+            // flags of its last query.
+            if turn == 0 {
+                flags = new;
+            }
+        }
+        Ok(flags.1)
+    }
+
+    /// The flags of every `target.'cfg(…)'` key matching `cfg`, in key
+    /// order (Cargo's `target_cfgs` is a `BTreeMap`).
+    fn cfg_flags(&self, cfg: &[CfgValue]) -> Result<Vec<String>, Error> {
+        let mut flags = Vec::new();
+        for (key, v) in &self.target_rustflags {
+            if let Some(inner) = key.strip_prefix("cfg(").and_then(|k| k.strip_suffix(')')) {
+                let expr = CfgExpr::parse(inner)
+                    .map_err(|e| Error(format!("target.'{key}': cannot parse: {e}")))?;
+                if expr.matches(cfg) {
+                    flags.extend(v.iter().cloned());
+                }
+            }
+        }
+        Ok(flags)
+    }
+}
+
 impl RustflagsKey {
-    /// Where the spec's flags join the project's, and the project's flags
-    /// Cargo will use (to confirm in the trace).
+    /// Where the spec's flags `spec` join the project's, and the project's
+    /// flags Cargo will use (to confirm in the trace): `build.rustflags`
+    /// when Cargo, given the spec's flags there, still takes its flags from
+    /// `build.rustflags`; `target.<triple>.rustflags` otherwise. `query`
+    /// answers `rustc --print cfg` for a set of flags.
     pub fn choose(
         project: &ProjectConfig,
+        spec: &[String],
         triple: &str,
-        cfg: &[CfgValue],
+        query: &mut CfgQuery,
     ) -> Result<(RustflagsKey, Vec<String>), Error> {
-        let target = project.target_flags(triple, cfg)?;
-        Ok(if !target.is_empty() {
-            (RustflagsKey::Target, target)
-        } else if let Some(b) = &project.build_rustflags {
-            (RustflagsKey::Build, b.clone())
-        } else {
-            (RustflagsKey::Target, Vec::new())
-        })
+        if project.build_rustflags.is_some() {
+            let e = project.effective(spec, RustflagsKey::Build, triple, query)?;
+            if e.source == Some(RustflagsKey::Build) {
+                return Ok((RustflagsKey::Build, e.project));
+            }
+        }
+        let e = project.effective(spec, RustflagsKey::Target, triple, query)?;
+        Ok((RustflagsKey::Target, e.project))
     }
 }
 
@@ -406,23 +540,33 @@ impl CfgValue {
     }
 }
 
-/// `rustc --print cfg --target <triple>`.
-pub fn target_cfg(rustc: &str, triple: &str) -> Result<Vec<CfgValue>, Error> {
+/// `rustc --print cfg --target <triple> <flags>`, started in `cwd`, as
+/// Cargo queries it (with the rustflags, `TargetInfo::new`). Cargo drops
+/// `proc_macro` from the answer (`not_user_specific_cfg`).
+pub fn target_cfg(
+    rustc: &str,
+    triple: &str,
+    flags: &[String],
+    cwd: &Path,
+) -> Result<Vec<CfgValue>, Error> {
     let out = Command::new(rustc)
         .args(["--print", "cfg", "--target", triple])
+        .args(flags)
+        .current_dir(cwd)
         .env_clear()
         .envs(std::env::var_os("PATH").map(|p| ("PATH", p)))
         .output()
         .map_err(|e| Error(format!("running {rustc} --print cfg: {e}")))?;
     if !out.status.success() {
         bail!(
-            "{rustc} --print cfg --target {triple} failed: {}",
+            "{rustc} --print cfg --target {triple} {} failed: {}",
+            flags.join(" "),
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    Ok(CfgValue::parse_print_cfg(&String::from_utf8_lossy(
-        &out.stdout,
-    )))
+    let mut cfg = CfgValue::parse_print_cfg(&String::from_utf8_lossy(&out.stdout));
+    cfg.retain(|c| *c != CfgValue::Name("proc_macro".into()));
+    Ok(cfg)
 }
 
 /// A `cfg(…)` predicate, as in Cargo's `cargo-platform` crate.
@@ -589,16 +733,16 @@ pub fn prepare(
     scratch: &Path,
 ) -> Result<Prepared, Error> {
     let project = ProjectConfig::read(cwd, None)?;
-    let cfg = if project
-        .target_rustflags
-        .keys()
-        .any(|k| k.starts_with("cfg("))
-    {
-        target_cfg(rustc, target)?
-    } else {
-        Vec::new()
+    let mut seen: BTreeMap<Vec<String>, Vec<CfgValue>> = BTreeMap::new();
+    let mut query = |flags: &[String]| -> Result<Vec<CfgValue>, Error> {
+        if let Some(c) = seen.get(flags) {
+            return Ok(c.clone());
+        }
+        let c = target_cfg(rustc, target, flags, cwd)?;
+        seen.insert(flags.to_vec(), c.clone());
+        Ok(c)
     };
-    let (key, project_flags) = RustflagsKey::choose(&project, target, &cfg)?;
+    let (key, project_flags) = RustflagsKey::choose(&project, &spec.rustflags, target, &mut query)?;
     let config = scratch.join("breakbulk-spec.toml");
     std::fs::write(&config, config_text(&spec, key, target, host))
         .map_err(|e| Error(format!("writing {}: {e}", config.display())))?;
@@ -926,14 +1070,101 @@ mod tests {
         );
     }
 
+    fn choose(c: &ProjectConfig, t: &str) -> Result<(RustflagsKey, Vec<String>), Error> {
+        RustflagsKey::choose(c, &[], t, &mut |_| Ok(cfgs()))
+    }
+
+    /// A stand-in for `rustc --print cfg`: `cfgs()` plus what the flags
+    /// add (`--cfg NAME`, `-C target-feature=+F`), recording each query.
+    fn fake_rustc(queries: &mut Vec<Vec<String>>, flags: &[String]) -> Vec<CfgValue> {
+        queries.push(flags.to_vec());
+        let mut c = cfgs();
+        for w in flags.windows(2) {
+            match (w[0].as_str(), w[1].as_str()) {
+                ("--cfg", n) => c.push(CfgValue::Name(n.into())),
+                ("-C", f) => {
+                    if let Some(f) = f.strip_prefix("target-feature=+") {
+                        c.push(CfgValue::KeyPair("target_feature".into(), f.into()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        c
+    }
+
+    #[test]
+    fn cfg_keys_see_the_rustflags() {
+        let t = "x86_64-unknown-linux-gnu";
+        let avx2: Vec<String> = vec!["-C".into(), "target-feature=+avx2".into()];
+        let run = |c: &ProjectConfig, spec: &[String]| {
+            let mut q = Vec::new();
+            let r = RustflagsKey::choose(c, spec, t, &mut |f| Ok(fake_rustc(&mut q, f))).unwrap();
+            (r, q)
+        };
+
+        // The spec's target feature turns on a cfg key: under
+        // build.rustflags, Cargo would query with build + spec, match the
+        // key and drop build (and the spec) for it. So the spec goes under
+        // the target key, and the cfg key's flags are the project's.
+        let d = dir(&[(
+            ".cargo/config.toml",
+            "[build]\nrustflags = [\"--cfg\", \"b\"]\n\
+             [target.'cfg(target_feature = \"avx2\")']\nrustflags = [\"--cfg\", \"has_avx2\"]\n",
+        )]);
+        let c = read(&d, "");
+        let ((key, project), q) = run(&c, &avx2);
+        assert_eq!(key, RustflagsKey::Target);
+        assert_eq!(project, ["--cfg", "has_avx2"]);
+        // Build attempt: build + spec, then the cfg key alone (no fixed
+        // point after two turns). Target attempt: the spec, then the spec
+        // plus the cfg key (fixed point).
+        assert_eq!(
+            q,
+            [
+                vec!["--cfg", "b", "-C", "target-feature=+avx2"],
+                vec!["--cfg", "has_avx2"],
+                vec!["-C", "target-feature=+avx2"],
+                vec!["-C", "target-feature=+avx2", "--cfg", "has_avx2"],
+            ]
+        );
+        // Without the spec, no cfg key matches.
+        assert_eq!(
+            run(&c, &[]).0,
+            (RustflagsKey::Build, vec!["--cfg".into(), "b".into()])
+        );
+
+        // A project `--cfg` in the target key selects a cfg key; the
+        // query that settles it carries both.
+        let d = dir(&[(
+            ".cargo/config.toml",
+            "[target.x86_64-unknown-linux-gnu]\nrustflags = [\"--cfg\", \"special\"]\n\
+             [target.'cfg(special)']\nrustflags = [\"-Cs\"]\n\
+             [target.'cfg(not(special))']\nrustflags = [\"-Cn\"]\n",
+        )]);
+        let ((key, project), q) = run(&read(&d, ""), &avx2);
+        assert_eq!(key, RustflagsKey::Target);
+        assert_eq!(project, ["--cfg", "special", "-Cs"]);
+        assert_eq!(q[0], ["--cfg", "special", "-C", "target-feature=+avx2"]);
+
+        // A cfg key that the spec's flags turn off: under build.rustflags
+        // the query sees the spec's feature, so `not(…)` does not match
+        // and build.rustflags (with the spec) stays in effect.
+        let d = dir(&[(
+            ".cargo/config.toml",
+            "[build]\nrustflags = [\"-Cb\"]\n\
+             [target.'cfg(not(target_feature = \"avx2\"))']\nrustflags = [\"-Cno\"]\n",
+        )]);
+        let ((key, project), _) = run(&read(&d, ""), &avx2);
+        assert_eq!((key, project), (RustflagsKey::Build, vec!["-Cb".into()]));
+    }
+
     #[test]
     fn key_choice() {
         let t = "x86_64-unknown-linux-gnu";
+        // Arrays concatenate, the shallower file's first.
         let d = dir(&[
-            (
-                ".cargo/config.toml",
-                "[build]\nrustflags = \"-C a  -C b\"\n",
-            ),
+            (".cargo/config.toml", "[build]\nrustflags = [\"-Ca\"]\n"),
             (
                 "ws/.cargo/config.toml",
                 "[build]\nrustflags = [\"--cfg\", \"x\"]\n",
@@ -941,19 +1172,38 @@ mod tests {
         ]);
         let c = read(&d, "ws");
         assert_eq!(
-            RustflagsKey::choose(&c, t, &cfgs()).unwrap(),
+            choose(&c, t).unwrap(),
             (
                 RustflagsKey::Build,
-                vec![
-                    "-C".into(),
-                    "a".into(),
-                    "-C".into(),
-                    "b".into(),
-                    "--cfg".into(),
-                    "x".into()
-                ]
+                vec!["-Ca".into(), "--cfg".into(), "x".into()]
             )
         );
+
+        // A deeper string replaces a string (observed with Cargo 1.99).
+        let d = dir(&[
+            (
+                ".cargo/config.toml",
+                "[build]\nrustflags = \"-C a  -C b\"\n[target.x86_64-unknown-linux-gnu]\nrustflags = \"--cfg t1\"\n",
+            ),
+            (
+                "ws/.cargo/config.toml",
+                "[build]\nrustflags = \"--cfg x\"\n[target.x86_64-unknown-linux-gnu]\nrustflags = \"--cfg t2\"\n",
+            ),
+        ]);
+        let c = read(&d, "ws");
+        assert_eq!(c.build_rustflags, Some(vec!["--cfg".into(), "x".into()]));
+        assert_eq!(
+            choose(&c, t).unwrap(),
+            (RustflagsKey::Target, vec!["--cfg".into(), "t2".into()])
+        );
+
+        // A string and an array do not merge; Cargo fails too.
+        let d = dir(&[
+            (".cargo/config.toml", "[build]\nrustflags = \"-Ca\"\n"),
+            ("ws/.cargo/config.toml", "[build]\nrustflags = [\"-Cb\"]\n"),
+        ]);
+        let e = ProjectConfig::read(&d.join("ws"), None).unwrap_err();
+        assert!(e.0.contains("string in one config file"), "{e}");
 
         let d = dir(&[(
             ".cargo/config.toml",
@@ -961,7 +1211,7 @@ mod tests {
         )]);
         let c = read(&d, "");
         assert_eq!(
-            RustflagsKey::choose(&c, t, &cfgs()).unwrap().0,
+            choose(&c, t).unwrap().0,
             RustflagsKey::Build,
             "a cfg key that does not match leaves build.rustflags in effect"
         );
@@ -972,7 +1222,7 @@ mod tests {
         )]);
         let c = read(&d, "");
         assert_eq!(
-            RustflagsKey::choose(&c, t, &cfgs()).unwrap(),
+            choose(&c, t).unwrap(),
             (RustflagsKey::Target, vec!["-Cu".into()])
         );
 
@@ -981,10 +1231,7 @@ mod tests {
             ".cargo/config.toml",
             "[build]\nrustflags = [\"-Cb\"]\n[target.x86_64-unknown-linux-gnu]\nrustflags = []\n",
         )]);
-        assert_eq!(
-            RustflagsKey::choose(&read(&d, ""), t, &cfgs()).unwrap().0,
-            RustflagsKey::Build
-        );
+        assert_eq!(choose(&read(&d, ""), t).unwrap().0, RustflagsKey::Build);
 
         // `.cargo/config` wins over `.cargo/config.toml`; includes load
         // before the including file.
@@ -1000,13 +1247,13 @@ mod tests {
             (".cargo/more.toml", "[build]\nrustflags = [\"-C1\"]\n"),
         ]);
         assert_eq!(
-            RustflagsKey::choose(&read(&d, ""), t, &cfgs()).unwrap(),
+            choose(&read(&d, ""), t).unwrap(),
             (RustflagsKey::Build, vec!["-C1".into(), "-C2".into()])
         );
 
         let d = dir(&[("x/.keep", "")]);
         assert_eq!(
-            RustflagsKey::choose(&read(&d, "x"), t, &cfgs()).unwrap(),
+            choose(&read(&d, "x"), t).unwrap(),
             (RustflagsKey::Target, vec![])
         );
     }

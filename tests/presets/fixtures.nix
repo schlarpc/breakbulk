@@ -280,7 +280,8 @@ let
   #
   # C (clang-cl), bindgen, and a resource linked with rustc-link-arg-bins,
   # through the msvc preset. x86_64 runs (product and tests) under wine;
-  # aarch64 compiles and links.
+  # aarch64 compiles and links. msvc-x86_64-pdb: with debug info, the PDB
+  # is in the product's `debug` output.
 
   msvcTriples = [
     "x86_64-pc-windows-msvc"
@@ -307,6 +308,8 @@ let
         };
         targets = lib.genAttrs msvcTriples (_: { });
         variants.default.profile = "release";
+        # Debug info on (the fixture's `release-debug` profile): a PDB.
+        variants.debuginfo.profile = "release-debug";
       };
       targets = lib.genAttrs msvcTriples (_: {
         preset = presets.msvc {
@@ -330,6 +333,42 @@ let
         grep -qxF ${lib.escapeShellArg expect} $out
       '';
       msvc-x86_64-test = x.testRuns.msvc-smoke."bin/msvc-smoke";
+      # Decision 89: with debug info on, lld-link writes a PDB. It lands in
+      # the product's `debug` output next to where the .exe sits in the
+      # main one (bin/), not in the main output; the main output's closure
+      # has no unit outputs (rlibs) and no sources, and the program runs.
+      msvc-x86_64-pdb =
+        let
+          p = x.variants.debuginfo.packages.msvc-smoke;
+        in
+        assert lib.assertMsg (p ? debug) "msvc-x86_64-pdb: the product has no debug output";
+        pkgs.runCommand "msvc-x86_64-pdb"
+          {
+            closure = pkgs.closureInfo { rootPaths = [ p ]; };
+            debug = p.debug;
+            noSources = p.checks.noSourceReferences;
+          }
+          ''
+            set -euo pipefail
+            ls -la ${p}/bin $debug/bin
+            pdbs=($debug/bin/*.pdb)
+            [ -f "''${pdbs[0]}" ] || { echo "no PDB in the debug output" >&2; exit 1; }
+            # An MSF 7.0 file (the PDB format).
+            head -c 29 "''${pdbs[0]}" | grep -q 'Microsoft C/C++ MSF 7.00' || { echo "not a PDB: ''${pdbs[0]}" >&2; exit 1; }
+            if find ${p}/ -name '*.pdb' | grep .; then
+              echo "a PDB in the main output" >&2; exit 1
+            fi
+            # The .exe names its PDB by file name only (rustc passes
+            # /PDBALTPATH:%_PDB%), the name the debug output uses.
+            grep -qaF "$(basename "''${pdbs[0]}")" ${p}/bin/msvc-smoke.exe
+            if grep -E -- '-(rlib|rmeta|lib-rlib|bin|debug)$' $closure/store-paths; then
+              echo "the main output references unit outputs" >&2; exit 1
+            fi
+            ${lib.escapeShellArgs x.runner} ${p}/bin/msvc-smoke.exe | tr -d '\r' > out.txt
+            grep -qxF ${lib.escapeShellArg expect} out.txt
+            mkdir -p $out
+            basename "''${pdbs[0]}" > $out/pdb
+          '';
       msvc-aarch64-build = pkgs.runCommand "msvc-aarch64-build" { nativeBuildInputs = [ pkgs.file ]; } ''
         file ${a.packages.msvc-smoke}/bin/msvc-smoke.exe | tee $out
         grep -qi 'PE32+ executable.*\(aarch64\|arm64\)' $out
