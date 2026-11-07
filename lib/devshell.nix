@@ -103,7 +103,10 @@ lib.warnIf (conflicts != { })
       breakbulkOwnEnv = lib.concatStringsSep " " (lib.attrNames ownEnv);
       shellHook = ''
         __breakbulk_warn() { echo "breakbulk: $*" >&2; }
-        for __bb_v in $(compgen -e); do
+        for __bb_v in "''${!CARGO_@}" ${lib.concatStringsSep " " watched}; do
+          # Exported variables only (the planner's Cargo would inherit
+          # nothing else either).
+          case "$(declare -p "$__bb_v" 2>/dev/null)" in "declare -x"*) ;; *) continue ;; esac
           case " $breakbulkOwnEnv " in *" $__bb_v "*) continue ;; esac
           case "$__bb_v" in
             ${lib.concatStringsSep " | " harmless}) ;;
