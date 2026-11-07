@@ -67,7 +67,7 @@ All four binaries live in one Cargo workspace. `breakbulk-unit` stays small and 
 # build plan
 cargo build --frozen --offline <selection> \
   --target <triple> --profile <profile> [--features …] \
-  --config '<generated source replacement, one directory per source>' \
+  --config <generated source-replacement file, one directory per source> \
   --config '<spec rustflags and linkers as target.<triple> keys>'
 # test plan: the same, with `cargo test --no-run`, then `cargo test --doc` for doctests
 # bench variant: `cargo bench --no-run` with the bench profile
@@ -186,7 +186,7 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
       "platform": "target",
       "program": ["/nix/store/…-rustc/bin/rustc"],
       "args": ["--crate-name", "ring", [{ "crateSrc": "…ring@0.17.14", "rel": "src/lib.rs" }], "…",
-               ["--extern", "cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
+               "--extern", ["cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
                { "splice": "r-ring-…", "kind": "rustc-cfg" },
                { "splice": "r-ring-…", "kind": "rustc-link-lib" }],
       "env": { "CARGO_PKG_NAME": "ring", "OUT_DIR": [{ "out": "r-ring-…", "output": "out" }] },
@@ -211,7 +211,7 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
-- **`roots`** are the plan's products: bins, cdylibs, staticlibs and examples in a build plan; test and bench binaries in a test plan.
+- **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test, bench and example binaries in a test plan.
 
 ### Invariants
 
@@ -490,7 +490,7 @@ Each workspace gets a vendor directory with one subdirectory per source, followi
 - **Git:** one directory per source id (URL plus `branch`, `tag` or `rev` query, without the locked revision), named by a hash of the id.
 - **Inside each:** `<name>-<version>` symlinks to the fetched crates, for crates in this workspace's lockfile only.
 
-Generated config replaces each source with its directory:
+Generated config, passed as a file (`--config <file>`; an inline `--config` value may hold only one dotted key), replaces each source with its directory:
 
 ```toml
 [source.crates-io]
@@ -518,6 +518,7 @@ A workspace package's source is `lib.fileset.toSource { root = <repository root>
 The plan derivations' source is a skeleton, so they are rebuilt only when the manifests, the lockfile, config or the toolchain change:
 
 - every `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml` and `rust-toolchain.toml`;
+- an empty `README.md`, `README.txt` or `README` wherever one exists, because Cargo sets `CARGO_PKG_README` from its presence;
 - an empty file for every file name in the conventional target directories (`src/lib.rs`, `src/main.rs`, `src/bin`, `examples`, `tests`, `benches`, including `*/main.rs` forms), every explicit `path =` target and every `build.rs`.
 
 The skeleton copies file names only and needs no discovery rules; Cargo performs its own discovery during the trace.
