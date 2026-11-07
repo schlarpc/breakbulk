@@ -32,6 +32,8 @@ pub struct Context {
     pub rustc_version: String,
     /// The real rustdoc: build-script runs get it as `RUSTDOC`.
     pub rustdoc: String,
+    /// The cargo the planner ran, as it was given (a toolchain path).
+    pub cargo: String,
     /// Cargo's `nightly_features_allowed`.
     pub nightly: bool,
     /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
@@ -167,6 +169,14 @@ fn under<'a>(path: &'a str, dir: &str) -> Option<&'a str> {
         Some("")
     } else {
         rest.strip_prefix('/')
+    }
+}
+
+/// Whether two paths name the same file, after resolving symlinks.
+fn same_file(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -523,6 +533,17 @@ impl<'a> Builder<'a> {
                 );
                 continue;
             }
+            // Cargo sets CARGO to its own executable as the OS reports it,
+            // with symlinks resolved (`std::env::current_exe`). In a
+            // toolchain that is a symlink tree (rust-overlay's), that is a
+            // store path of a component, not the toolchain path the
+            // planner was given and instantiation knows. Same file: keep
+            // the given path.
+            let v = if k == "CARGO" && same_file(&v, &self.ctx.cargo) {
+                self.ctx.cargo.clone()
+            } else {
+                v
+            };
             let v = if k == DYLIB_VAR {
                 let (runs, rest) = self.dylib_path(unit, &v)?;
                 dylib = runs;
