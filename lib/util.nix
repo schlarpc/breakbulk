@@ -30,7 +30,7 @@ rec {
   percentDecode =
     let
       codes = {
-        "%20" = " "; "%21" = "!"; "%22" = "\""; "%23" = "#"; "%24" = "$";
+        "%20" = " "; "%25" = "%"; "%21" = "!"; "%22" = "\""; "%23" = "#"; "%24" = "$";
         "%26" = "&"; "%27" = "'"; "%28" = "("; "%29" = ")"; "%2A" = "*";
         "%2B" = "+"; "%2C" = ","; "%2F" = "/"; "%3A" = ":"; "%3B" = ";";
         "%3C" = "<"; "%3D" = "="; "%3E" = ">"; "%3F" = "?"; "%40" = "@";
@@ -41,8 +41,8 @@ rec {
       all = codes // lower;
     in
     s:
-    # `%25` last so that `%2541` decodes to `%41`, not `A`.
-    replaceStrings [ "%25" ] [ "%" ] (
+    # One left-to-right pass, so `%2541` decodes to `%41`, not `A`.
+    (
       replaceStrings ([ "+" ] ++ attrNames all) ([ " " ] ++ map (k: all.${k}) (attrNames all)) s
     );
 

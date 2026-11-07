@@ -196,7 +196,7 @@ rec {
     in
     pkgs.runCommand name
       {
-        emptyFiles = lib.concatStringsSep "\n" d.empty;
+        emptyFiles = lib.concatMapStrings (f: f + "\n") d.empty;
         passAsFile = [ "emptyFiles" ];
         passthru = {
           description = d;

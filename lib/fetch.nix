@@ -29,6 +29,9 @@
   # dependencies (cargo src/sources/git/utils.rs, `GitCheckout::reset` calls
   # `update_submodules`), so this defaults to true.
   gitSubmodules ? { },
+  # gitTrees."<Cargo.lock source string or URL>" = <path>: use this tree
+  # instead of fetching (a local checkout, or a test fixture).
+  gitTrees ? { },
 }:
 let
   inherit (builtins)
@@ -248,7 +251,7 @@ let
   gitCrate =
     e:
     let
-      tree = gitTree e.parsed;
+      tree = gitTrees.${e.parsed.source} or gitTrees.${e.parsed.url} or (gitTree e.parsed);
       hint =
         let
           h = gitSubdirs.${e.parsed.source} or gitSubdirs.${e.parsed.url} or { };
