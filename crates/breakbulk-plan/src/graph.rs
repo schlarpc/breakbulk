@@ -38,6 +38,9 @@ pub struct Context {
     pub nightly: bool,
     /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
     pub keep_workspace_wrapper: bool,
+    /// The variables the project's `[env]` table sets on Cargo's
+    /// processes ([`crate::spec::ProjectConfig::applied_env`]).
+    pub config_env: BTreeSet<String>,
 }
 
 /// Variables never kept in a unit's env: the planner's own, and the ones the
@@ -68,6 +71,11 @@ pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
 /// required features are off): `<this>/<bin>`, which never exists, so a
 /// test that runs it fails as it does under Cargo.
 pub const NOT_BUILT_BIN_DIR: &str = "/breakbulk/not-built";
+
+/// Where `OUT_DIR` points for a package whose build script a `links`
+/// override in config replaces: `<this>/<pkg>-<hash>/out` (the part of
+/// Cargo's path after `build/`), which never exists, as Cargo's does not.
+pub const OVERRIDDEN_OUT_DIR: &str = "/breakbulk/overridden";
 
 fn arg_value<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
@@ -189,6 +197,38 @@ fn file_name(p: &str) -> &str {
 }
 
 /// `cargo metadata`'s description of a package's targets, for run units.
+/// The `-L` pairs of a traced `rustdoc --test` that hold Cargo's
+/// `native_dirs`: the contiguous block of `-L <path>` pairs (not
+/// `-L dependency=`) around the search sentinels, as (index of the first
+/// pair's `-L`, index of the last pair's `-L`). `None` without sentinels:
+/// then every `-L` is a literal Cargo already sorted.
+fn doctest_native_block(args: &[String]) -> Option<(usize, usize)> {
+    let is_l = |i: usize| {
+        args.get(i).is_some_and(|a| a == "-L")
+            && args
+                .get(i + 1)
+                .is_some_and(|n| !n.starts_with("dependency="))
+    };
+    let sentinel = |i: usize| {
+        is_l(i)
+            && matches!(
+                parse_pair("-L", &args[i + 1]),
+                Some(Ok(ArgSentinel::SearchIn(..) | ArgSentinel::SearchOther(_)))
+            )
+    };
+    let first = (0..args.len()).find(|&i| sentinel(i))?;
+    let last = (0..args.len()).rev().find(|&i| sentinel(i))?;
+    let mut from = first;
+    while from >= 2 && is_l(from - 2) {
+        from -= 2;
+    }
+    let mut to = last;
+    while is_l(to + 2) {
+        to += 2;
+    }
+    Some((from, to))
+}
+
 fn package_targets(p: &Package) -> Vec<PackageTarget> {
     let mut v: Vec<PackageTarget> = p
         .targets
@@ -463,7 +503,13 @@ impl<'a> Builder<'a> {
             if run && k == "RUSTC_BOOTSTRAP" {
                 continue;
             }
-            if self.baseline.get(k) == Some(v) && !ALWAYS_KEPT_ENV.contains(&k.as_str()) {
+            // Cargo applies `[env]` to its `rustc -vV` query too
+            // (`apply_env_config` in `Rustc::new`), so the baseline has
+            // those variables; they are still per-process env.
+            if self.baseline.get(k) == Some(v)
+                && !ALWAYS_KEPT_ENV.contains(&k.as_str())
+                && !self.ctx.config_env.contains(k)
+            {
                 continue;
             }
             let v = if run && k == "RUSTDOC" {
@@ -559,6 +605,27 @@ impl<'a> Builder<'a> {
                 );
                 continue;
             }
+            // A `links` override in config replaces the package's build
+            // script: Cargo never runs it and never creates its OUT_DIR
+            // (`custom_build::prepare` skips `build_work`, which creates
+            // it), but still sets OUT_DIR on the package's compiles
+            // (`build_base_args`'s first run dependency). Cargo 0.100.0 at
+            // 5f94df4, `src/compiler/custom_build.rs` and
+            // `src/compiler/mod.rs`. There is no run unit to point at; the
+            // value becomes a path that does not exist, as Cargo's does not.
+            if k == "OUT_DIR"
+                && self
+                    .metadata
+                    .packages
+                    .iter()
+                    .any(|p| p.id == owner && p.links.is_some())
+                && self.rw.in_scratch(&v)
+                && self.rw.text(&v, Some(owner)).is_err()
+                && let Some((_, tail)) = v.rsplit_once("/build/")
+            {
+                out.insert(k, Text::Literal(format!("{OVERRIDDEN_OUT_DIR}/{tail}")));
+                continue;
+            }
             // Cargo sets CARGO to its own executable as the OS reports it,
             // with symlinks resolved (`std::env::current_exe`). In a
             // toolchain that is a symlink tree (rust-overlay's), that is a
@@ -602,7 +669,17 @@ impl<'a> Builder<'a> {
         platform: Option<Platform>,
     ) -> Result<Vec<Arg>, Error> {
         let mut out: Vec<Arg> = Vec::new();
-        let mut search_paths: Option<(usize, Vec<UnitId>)> = None;
+        let mut search_paths: Option<(usize, Vec<UnitId>, Vec<String>)> = None;
+        // In a doctest, Cargo passes one `-L` per entry of `native_dirs`, a
+        // sorted set of every run's search paths and every `links`
+        // override's: the block of `-L` pairs around the sentinels. Its
+        // literals (the overrides') join the searchPathsOf splice, to be
+        // sorted with the runs' values at build time.
+        let native_block = if platform.is_none() {
+            doctest_native_block(args)
+        } else {
+            None
+        };
         // Link-arg splices: the run, and the index in `out` of its splice.
         let mut link_arg_at: BTreeMap<String, usize> = BTreeMap::new();
         let mut last_was_link_arg_of: Option<String> = None;
@@ -655,11 +732,12 @@ impl<'a> Builder<'a> {
                 if platform.is_none()
                     && matches!(s, ArgSentinel::SearchIn(..) | ArgSentinel::SearchOther(_))
                 {
-                    let (_, runs) = search_paths.get_or_insert_with(|| {
+                    let (_, runs, _) = search_paths.get_or_insert_with(|| {
                         out.push(Arg::SearchPaths(SearchPathsSplice {
                             search_paths_of: Vec::new(),
+                            literals: Vec::new(),
                         }));
-                        (out.len() - 1, Vec::new())
+                        (out.len() - 1, Vec::new(), Vec::new())
                     });
                     runs.push(run);
                     last_was_link_arg_of = None;
@@ -719,6 +797,31 @@ impl<'a> Builder<'a> {
                 continue;
             }
             last_was_link_arg_of = None;
+            if let (Some((from, to)), Some(n)) = (native_block, next)
+                && a == "-L"
+                && (from..=to).contains(&i)
+            {
+                let t = self
+                    .rw
+                    .text(n, Some(owner))
+                    .map_err(|e| Error(format!("unit {id}: argument `-L {n}`: {}", e.0)))?;
+                let Text::Literal(l) = t else {
+                    bail!(
+                        "unit {id}: `-L {n}` from a `links` override names a path breakbulk \
+                         rewrites; doctests do not support that yet"
+                    );
+                };
+                let (_, _, lits) = search_paths.get_or_insert_with(|| {
+                    out.push(Arg::SearchPaths(SearchPathsSplice {
+                        search_paths_of: Vec::new(),
+                        literals: Vec::new(),
+                    }));
+                    (out.len() - 1, Vec::new(), Vec::new())
+                });
+                lits.push(l);
+                i += 2;
+                continue;
+            }
             if contains_sentinel(a) {
                 return Err(self.shape_error(id, "unknown", &format!("`{a}`"), args));
             }
@@ -732,11 +835,14 @@ impl<'a> Builder<'a> {
         if args.iter().any(|a| a.contains("=/cargo/build-dir")) {
             bail!("unit {id}: Cargo's trim-paths is in effect; breakbulk does not support it yet");
         }
-        if let Some((at, mut runs)) = search_paths {
+        if let Some((at, mut runs, mut literals)) = search_paths {
             runs.sort();
             runs.dedup();
+            literals.sort();
+            literals.dedup();
             out[at] = Arg::SearchPaths(SearchPathsSplice {
                 search_paths_of: runs,
+                literals,
             });
         }
         Ok(out)
@@ -926,7 +1032,12 @@ impl<'a> Builder<'a> {
                 test,
             };
             let kinds: Vec<RootKind> = match self.ctx.kind {
-                PlanKind::Build if !c.test => {
+                // A workspace member that is also a build dependency is
+                // compiled for the host too, and Cargo marks that unit
+                // primary as well (CARGO_PRIMARY_PACKAGE). Products are the
+                // target's. (Test harnesses stay: a proc macro's is a host
+                // unit, and the only one.)
+                PlanKind::Build if !c.test && c.platform == Platform::Target => {
                     if t.has_kind("bin") {
                         vec![RootKind::Bin]
                     } else if t.is_lib() {
@@ -1059,6 +1170,7 @@ impl<'a> Builder<'a> {
             units,
             roots: self.roots(),
             doctests: self.doctests()?,
+            config_env: self.ctx.config_env.clone(),
         };
         plan.normalize();
         Ok(plan)

@@ -248,6 +248,7 @@ let
         path = a.path ++ b.path;
         args = a.args ++ b.args;
         includeIgnored = a.includeIgnored || b.includeIgnored;
+        sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
         binaries = lib.zipAttrsWith (
           _:
           lib.foldl'
@@ -269,6 +270,7 @@ let
         path = [ ];
         args = [ ];
         includeIgnored = false;
+        sourceScope = [ ];
         binaries = { };
       };
     in
@@ -738,6 +740,30 @@ let
         inherit (ws.devShell) setTarget;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
         targetEnv = envStrings (cfg.targets.${nativeTriple}.env or { });
+        # How the planner passed the native spec to Cargo (IFD: the build
+        # plan of the default variant). The file names tool paths without
+        # their context; the spec's own values carry it.
+        cargoEnv =
+          let
+            inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
+            spec = (specFor wsName nativeTriple).mkWorkspace.spec or null;
+            values = lib.filter builtins.isString (
+              if spec == null then
+                [ ]
+              else
+                [
+                  spec.linker
+                  spec.hostLinker
+                ]
+                ++ spec.rustflags
+            );
+            withContext = builtins.replaceStrings (map builtins.unsafeDiscardStringContext values) values;
+            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/cargo-env.json"));
+          in
+          if inst == null then
+            { }
+          else
+            j // { env = lib.mapAttrs (_: withContext) j.env; };
       };
     };
 
@@ -1074,5 +1100,26 @@ in
       "warnings"
     ];
     warningsAreErrors = false;
+    # Declarations as paths in breakbulk's repository (docs/options.md links
+    # them from docs/), not store paths.
+    transformOptions =
+      opt:
+      opt
+      // {
+        declarations = map (
+          d:
+          let
+            parts = lib.splitString "/lib/" (toString d);
+            rel = "lib/${lib.last parts}";
+          in
+          if lib.length parts > 1 then
+            {
+              name = rel;
+              url = "../${rel}";
+            }
+          else
+            d
+        ) opt.declarations;
+      };
   };
 }

@@ -28,6 +28,7 @@ fn path(value: &str, in_out_dir: bool) -> LibraryPath {
     LibraryPath {
         value: value.into(),
         in_out_dir,
+        in_build_dir: in_out_dir,
     }
 }
 
@@ -336,4 +337,56 @@ fn env_splices() {
     assert!(expand_env(&env, &[bad], |p| d.get(p)).is_err());
     assert!(expand_env(&env, &[s("/a"), s("/a")], |p| d.get(p)).is_err());
     assert!(expand_env(&env, &[s("/x")], |p| d.get(p)).is_err());
+}
+
+#[test]
+fn dylib_paths_append_like_add_plugin_deps() {
+    let mut up = path("native=/out-up/lib", false);
+    up.in_build_dir = true; // inside an upstream run's OUT_DIR
+    let a = BuildOutput {
+        library_paths: vec![
+            path("native=/out-a/lib", true),
+            path("/usr/lib", false),
+            up,
+            path("native=/out-a/lib", true),
+        ],
+        ..BuildOutput::default()
+    };
+    let b = BuildOutput {
+        library_paths: vec![path("/out-b", true)],
+        ..BuildOutput::default()
+    };
+    let d = BTreeMap::from([("/a".to_owned(), a), ("/b".to_owned(), b)]);
+    let runs = ["/a".to_owned(), "/b".to_owned()];
+    let recorded = || BTreeMap::from([(DYLIB_PATH_VAR.to_owned(), "/sysroot/lib".to_owned())]);
+
+    // Compiles and runs: after the recorded value, in run and printed
+    // order, duplicates kept, upstream OUT_DIRs included.
+    let mut env = recorded();
+    expand_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
+    assert_eq!(
+        env[DYLIB_PATH_VAR],
+        "/sysroot/lib:/out-a/lib:/out-up/lib:/out-a/lib:/out-b"
+    );
+    let mut env = BTreeMap::new();
+    expand_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
+    assert_eq!(
+        env[DYLIB_PATH_VAR],
+        "/out-a/lib:/out-up/lib:/out-a/lib:/out-b"
+    );
+
+    // Doctests: sorted by the printed value (`/out-b` before `native=…`),
+    // duplicate values once, before the recorded value.
+    let mut env = recorded();
+    prepend_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
+    assert_eq!(
+        env[DYLIB_PATH_VAR],
+        "/out-b:/out-a/lib:/out-up/lib:/sysroot/lib"
+    );
+
+    // No runs: untouched.
+    let mut env = recorded();
+    expand_dylib_path(&mut env, &[], |p| d.get(p)).unwrap();
+    assert_eq!(env, recorded());
+    assert!(expand_dylib_path(&mut env, &["/x".to_owned()], |p| d.get(p)).is_err());
 }

@@ -33,6 +33,7 @@ fn smoke_inputs() -> Inputs {
         plan: smoke_plan(),
         sources: Sources {
             workspace: ["smokelib".into(), "smokeapp".into()].into(),
+            workspace_test: Default::default(),
             crates: Default::default(),
         },
         toolchains: Toolchains {
@@ -98,6 +99,10 @@ fn input_value(key: &str) -> String {
                 k.replace(':', "-")
             )
         }
+        // Empty values, for list-like variables.
+        k if k.ends_with(":EMPTY") || k.ends_with(":PATH") && k.starts_with("env:") => {
+            String::new()
+        }
         // Env values that need escaping.
         k => format!("value of {k}: \"quoted\" \\ back\nnew line\u{1} é"),
     }
@@ -123,6 +128,12 @@ fn resolve(parts: &[Part]) -> String {
                     v
                 }
             }
+            Part::Join { join, sep } => join
+                .iter()
+                .map(|item| resolve(item))
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<_>>()
+                .join(sep),
         })
         .collect()
 }
@@ -220,9 +231,13 @@ impl Resolve for RealPaths<'_> {
             .map(|v| (v.clone(), input_value(&keys::env(p, v))))
             .collect();
         if let Some((k, o)) = self.ov(u.package()) {
-            for v in &o.platform(p).env {
-                env.insert(v.clone(), input_value(&keys::override_env(&k, p, v)));
-            }
+            let layer = o
+                .platform(p)
+                .env
+                .iter()
+                .map(|v| (v.clone(), input_value(&keys::override_env(&k, p, v))))
+                .collect();
+            breakbulk_format::merge_layer_with(self, &mut env, layer)?;
         }
         Ok(env)
     }
@@ -354,6 +369,85 @@ fn layers_and_overrides() {
     assert_eq!(run.env["RUSTC"], format!("{RUSTC}/bin/rustc"));
 }
 
+/// Layer 5 (the package override) appends to layer 4 (the toolchain spec)
+/// for list-like variables, and both append to Cargo's recorded env (layer
+/// 3), as `breakbulk_unit::env::merge_layer` does with real values. Empty
+/// values leave no separator behind: an empty `PATH` entry would mean the
+/// working directory.
+#[test]
+fn list_like_variables_append_across_layers() {
+    let mut inputs = smoke_inputs();
+    inputs.toolchains.target.env.extend([
+        "PATH".into(),
+        "NIX_CFLAGS_COMPILE".into(),
+        "PKG_CONFIG_PATH".into(),
+    ]);
+    inputs
+        .overrides
+        .packages
+        .get_mut("smokelib")
+        .unwrap()
+        .target
+        .env
+        .extend([
+            "PATH".into(),
+            "NIX_CFLAGS_COMPILE".into(),
+            "PKG_CONFIG_PATH".into(),
+        ]);
+    // The recorded env of the library also has a PATH (layer 3).
+    let lib = match inputs.plan.units.get_mut(LIB).unwrap() {
+        Unit::Compile(c) => c,
+        Unit::Run(_) => panic!(),
+    };
+    lib.env.insert(
+        "PATH".into(),
+        breakbulk_format::Text::Literal(format!("{RUSTC}/bin")),
+    );
+    let out = instantiate(&inputs).unwrap();
+    let RenderedUnit::Compile(c) =
+        serde_json::from_str(&attr(&out.units[LIB], "BREAKBULK_UNIT")).unwrap()
+    else {
+        panic!()
+    };
+    let spec = |v: &str| input_value(&keys::env(Platform::Target, v));
+    let ov = |v: &str| input_value(&keys::override_env("smokelib", Platform::Target, v));
+    assert_eq!(
+        c.env["NIX_CFLAGS_COMPILE"],
+        format!(
+            "{} {}",
+            spec("NIX_CFLAGS_COMPILE"),
+            ov("NIX_CFLAGS_COMPILE")
+        )
+    );
+    assert_eq!(
+        c.env["PKG_CONFIG_PATH"],
+        format!("{}:{}", spec("PKG_CONFIG_PATH"), ov("PKG_CONFIG_PATH"))
+    );
+    // The spec's PATH is empty: no empty entry between the recorded PATH
+    // and the override's.
+    assert_eq!(spec("PATH"), "");
+    assert_eq!(c.env["PATH"], format!("{RUSTC}/bin:{}", ov("PATH")));
+    // Not list-like: the override replaces the spec's value.
+    assert_eq!(c.env["SHARED"], ov("SHARED"));
+    // Identical to rendering with the real values.
+    let direct =
+        unit_env_value(&render_unit(&inputs.plan, &LIB.to_owned(), &RealPaths(&inputs)).unwrap())
+            .unwrap();
+    assert_eq!(attr(&out.units[LIB], "BREAKBULK_UNIT"), direct);
+    // units.json still names no store path: the recorded PATH's store path
+    // became a tool token inside the join.
+    assert!(!to_json(&out).contains("/nix/store"));
+    // A target unit without the override joins only the spec's values; the
+    // empty spec PATH leaves no PATH at all in a unit that records none.
+    let RenderedUnit::Compile(app) =
+        serde_json::from_str(&attr(&out.units[APP], "BREAKBULK_UNIT")).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(app.env["PATH"], "");
+    assert_eq!(app.env["NIX_CFLAGS_COMPILE"], spec("NIX_CFLAGS_COMPILE"));
+}
+
 #[test]
 fn versioned_override_wins() {
     let mut inputs = smoke_inputs();
@@ -413,6 +507,46 @@ fn unit_name_for_other_crates() {
         unit_name(APP, &plan.units[APP]),
         "smokeapp-0.1.0-test-admin_cli"
     );
+}
+
+/// `test.sourceScope`: a package's test units (here smokeapp's bin, made a
+/// test harness) name its test view; its other units, and other packages'
+/// units, keep the normal views.
+#[test]
+fn test_units_use_the_test_view() {
+    let inputs_of = |test_view: bool| {
+        let mut inputs = smoke_inputs();
+        let Unit::Compile(c) = inputs.plan.units.get_mut(APP).unwrap() else {
+            panic!()
+        };
+        c.args.push(breakbulk_format::Arg::Literal("--test".into()));
+        if test_view {
+            inputs.sources.workspace_test = ["smokeapp".into()].into();
+        }
+        inputs
+    };
+    let keys_of = |d: &Drv| -> Vec<String> {
+        let Value::Parts { parts } = &d.attrs["BREAKBULK_UNIT"] else {
+            panic!()
+        };
+        parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Input { input, .. } if input.contains("src:") => Some(input.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let plain = instantiate(&inputs_of(false)).unwrap();
+    let wide = instantiate(&inputs_of(true)).unwrap();
+    let app = keys_of(&wide.units[APP]);
+    assert!(app.contains(&"test-src:smokeapp".to_owned()), "{app:?}");
+    assert!(!app.contains(&"src:smokeapp".to_owned()), "{app:?}");
+    assert!(!keys_of(&plain.units[APP]).contains(&"test-src:smokeapp".to_owned()));
+    // Every other unit is unchanged.
+    for id in [LIB, SCRIPT, RUN] {
+        assert_eq!(plain.units[id], wide.units[id], "{id}");
+    }
 }
 
 #[test]

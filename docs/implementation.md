@@ -218,7 +218,7 @@ Two rewrites go beyond paths:
 
 ### Env filtering
 
-A unit's recorded env is the recorded env minus a baseline: the env of the shim's `rustc -vV` query record, which is Cargo's own process environment. That keeps exactly what Cargo set per process, including the project's `[env]`. The env the planner gave Cargo is not the right baseline: Cargo sets `SSL_CERT_FILE` and `SSL_CERT_DIR` on itself at startup and, from 1.97, `CARGO`; every child inherits them, and they are machine-specific. Then:
+A unit's recorded env is the recorded env minus a baseline: the env of the shim's `rustc -vV` query record, which is Cargo's own process environment. That keeps exactly what Cargo set per process, except the project's `[env]`: Cargo applies `[env]` to the `rustc -vV` query too, so it is in the baseline. The planner therefore reads the `[env]` names and `force` flags from the project's config files, keeps those Cargo applies (forced, or not already in Cargo's environment), takes their values from the records (so `relative` paths come out as Cargo resolved them), and records them as `configEnv` so test runs can export them too. The env the planner gave Cargo is not the right baseline: Cargo sets `SSL_CERT_FILE` and `SSL_CERT_DIR` on itself at startup and, from 1.97, `CARGO`; every child inherits them, and they are machine-specific. Then:
 
 - Drop `RUSTC_WRAPPER`, `CARGO_MAKEFLAGS` and the planner's own variables. Keep `RUSTC_WORKSPACE_WRAPPER` only in the clippy variant.
 - Rewrite `RUSTDOC` to the real rustdoc. Cargo passes `RUSTC_WRAPPER` (when set) and `RUSTDOC` as configured to every build-script run, so the trace shows the shim for both.

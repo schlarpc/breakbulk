@@ -16,7 +16,12 @@
 //!   context;
 //! - `{"input": <key>, "json": true}`: the same, escaped as the inside of a
 //!   JSON string, for values placed into `BREAKBULK_UNIT`. Nix's `toJSON`
-//!   escapes strings exactly as `serde_json` does (tested in this crate).
+//!   escapes strings exactly as `serde_json` does (tested in this crate);
+//! - `{"join": [[<part>, ...], ...], "sep": <sep>}`: each item resolved, the
+//!   empty ones left out, and the rest joined with `sep`: a list-like
+//!   variable (`PATH`, `NIX_CFLAGS_COMPILE`, ...) set by several env layers
+//!   (`breakbulk_unit::env::merge_layer`), whose values only the Nix side
+//!   knows.
 //!
 //! The file therefore contains no store paths: it is a function of the plan
 //! and of the keys of the inputs only, and `builtins.fromJSON` accepts it
@@ -85,6 +90,10 @@ pub enum Part {
         input: String,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         json: bool,
+    },
+    Join {
+        join: Vec<Vec<Part>>,
+        sep: String,
     },
 }
 

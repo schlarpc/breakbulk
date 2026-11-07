@@ -43,6 +43,12 @@ macro_rules! bail {
 
 /// Trace, build the plan, and validate it.
 pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
+    plan_with_cargo_env(opts).map(|(p, _)| p)
+}
+
+/// [`plan`], plus the toolchain spec as Cargo environment configuration for
+/// the dev shell ([`spec::Prepared::cargo_env`]; empty without a spec).
+pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEnv), Error> {
     let prepared = spec::prepare_for(opts)?;
     let mut traced = opts.clone();
     if let Some(p) = &prepared {
@@ -50,12 +56,13 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
     }
     let opts = &traced;
     let t = trace::run(opts)?;
-    let ctx = t.context(opts);
+    let ctx = t.context(opts)?;
     let b = graph::Builder::new(&ctx, &t.metadata, &t.records)?;
     let mut plan = b.plan()?;
     if let Some(p) = &prepared {
         p.apply(&mut plan)?;
     }
+    let cargo_env = prepared.as_ref().map(|p| p.cargo_env()).unwrap_or_default();
     let mut forbidden = opts.forbidden.clone();
     forbidden.push(opts.scratch.clone());
     validate(
@@ -74,5 +81,5 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
                 .join("\n")
         ))
     })?;
-    Ok(plan)
+    Ok((plan, cargo_env))
 }

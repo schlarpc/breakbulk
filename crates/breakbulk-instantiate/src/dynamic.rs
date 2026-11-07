@@ -419,6 +419,86 @@ pub struct Written {
     pub outputs: BTreeMap<String, String>,
 }
 
+/// The string context a substitution collects.
+#[derive(Default)]
+struct Ctx {
+    drvs: BTreeMap<String, BTreeSet<String>>,
+    srcs: BTreeSet<String>,
+}
+
+/// Substitute `parts` as `part` in `lib/instantiate.nix` does. A join's
+/// empty items are left out, with their context, as `filter` drops them.
+fn substitute(
+    parts: &[Part],
+    values: &Values,
+    written: &BTreeMap<String, Written>,
+    ctx: &mut Ctx,
+) -> Result<String, Error> {
+    let mut s = String::new();
+    for p in parts {
+        match p {
+            Part::Literal(l) => s.push_str(l),
+            Part::Unit { unit, output, weak } => {
+                let Some(w) = written.get(unit) else {
+                    return err(format!("{unit} is referenced before it is written"));
+                };
+                let Some(path) = w.outputs.get(output) else {
+                    return err(format!("{unit} has no output {output}"));
+                };
+                s.push_str(path);
+                if !weak {
+                    ctx.drvs
+                        .entry(w.drv_path.clone())
+                        .or_default()
+                        .insert(output.clone());
+                }
+            }
+            Part::Input { input, json } => {
+                let Some(v) = values.get(input) else {
+                    return err(format!(
+                        "units.json names the input `{input}`, which values.json lacks"
+                    ));
+                };
+                if *json {
+                    let q = serde_json::to_string(&v.value).map_err(|e| Error(e.to_string()))?;
+                    s.push_str(&q[1..q.len() - 1]);
+                } else {
+                    s.push_str(&v.value);
+                }
+                for c in &v.context {
+                    match c {
+                        Context::Opaque { path } => {
+                            ctx.srcs.insert(path.clone());
+                        }
+                        Context::Built { drv, outputs } => {
+                            ctx.drvs
+                                .entry(drv.clone())
+                                .or_default()
+                                .extend(outputs.iter().cloned());
+                        }
+                    }
+                }
+            }
+            Part::Join { join, sep } => {
+                let mut items = Vec::new();
+                for item in join {
+                    let mut c = Ctx::default();
+                    let v = substitute(item, values, written, &mut c)?;
+                    if !v.is_empty() {
+                        items.push(v);
+                        ctx.srcs.extend(c.srcs);
+                        for (drv, outs) in c.drvs {
+                            ctx.drvs.entry(drv).or_default().extend(outs);
+                        }
+                    }
+                }
+                s.push_str(&items.join(sep));
+            }
+        }
+    }
+    Ok(s)
+}
+
 /// Resolve one derivation as `derivation (drvAttrs d)` does in
 /// `lib/instantiate.nix`: substitute every part, collect string context
 /// into input derivations and sources, and move `BREAKBULK_UNIT` to
@@ -449,53 +529,11 @@ pub fn resolve(
                 l.join(" ")
             }
             Value::Parts { parts } => {
-                let mut s = String::new();
-                for p in parts {
-                    match p {
-                        Part::Literal(l) => s.push_str(l),
-                        Part::Unit { unit, output, weak } => {
-                            let Some(w) = written.get(unit) else {
-                                return err(format!("{unit} is referenced before it is written"));
-                            };
-                            let Some(path) = w.outputs.get(output) else {
-                                return err(format!("{unit} has no output {output}"));
-                            };
-                            s.push_str(path);
-                            if !weak {
-                                input_drvs
-                                    .entry(w.drv_path.clone())
-                                    .or_default()
-                                    .insert(output.clone());
-                            }
-                        }
-                        Part::Input { input, json } => {
-                            let Some(v) = values.get(input) else {
-                                return err(format!(
-                                    "units.json names the input `{input}`, which values.json lacks"
-                                ));
-                            };
-                            if *json {
-                                let q = serde_json::to_string(&v.value)
-                                    .map_err(|e| Error(e.to_string()))?;
-                                s.push_str(&q[1..q.len() - 1]);
-                            } else {
-                                s.push_str(&v.value);
-                            }
-                            for c in &v.context {
-                                match c {
-                                    Context::Opaque { path } => {
-                                        input_srcs.insert(path.clone());
-                                    }
-                                    Context::Built { drv, outputs } => {
-                                        input_drvs
-                                            .entry(drv.clone())
-                                            .or_default()
-                                            .extend(outputs.iter().cloned());
-                                    }
-                                }
-                            }
-                        }
-                    }
+                let mut ctx = Ctx::default();
+                let s = substitute(parts, values, written, &mut ctx)?;
+                input_srcs.extend(ctx.srcs);
+                for (drv, outs) in ctx.drvs {
+                    input_drvs.entry(drv).or_default().extend(outs);
                 }
                 s
             }

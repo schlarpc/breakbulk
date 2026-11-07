@@ -867,3 +867,63 @@ modified, built in place, or pushed anywhere, and secrets like `.env`
 files are skipped. Only the breakbulk module files (no source) go into
 `tests/field-trials/`, and findings go into `docs/field-trials.md`. If you'd
 rather some repositories stay out of this, say which.
+
+## 80. FYI: loose ends fixed, README and options reference added
+
+- Fixed a real bug: variables from your `.cargo/config.toml` `[env]` table
+  were dropped from every crate, so `env!("X")` on such a variable failed.
+  They now reach compiles, test runs and doctests as under Cargo.
+- Per-package settings now add to toolchain list variables like `PATH`
+  instead of replacing them.
+- `packages.<name>.test.sourceScope` works: tests can see a wider part of
+  the repository without affecting the package's other build steps.
+- The dev shell sets the same linker and compiler flags the planner uses,
+  so `cargo build` in the shell produces the same crate IDs as breakbulk.
+- A native program can embed a wasm component built by another workspace.
+- `README.md` (overview, status, quickstart, limitations) and
+  `docs/options.md` (generated from the module options; a check keeps it
+  in sync) are new.
+
+## 81. ASK: opening the dev shell now runs the planner once
+
+To export exactly the flags the planner uses, evaluating the dev shell now
+builds the native build plan first (import-from-derivation). It reruns only
+when manifests, lockfile or config change, but the first `nix develop` is
+slower. Alternative: compute the flags in Nix without the planner,
+duplicating one small rule. Default: run the planner.
+
+## 82. FYI: breakbulk builds itself, within the speed budget
+
+breakbulk's own workspace now builds through breakbulk (`checks.self-host`),
+and the self-built programs produce byte-identical plans and products. Cold
+build of breakbulk's 39 crates on a busy machine: `cargo build --release`
+18–29 s, nixpkgs `buildRustPackage` 25–49 s, breakbulk 38–50 s, so roughly
+1.4× the crane-style build, inside the "≤ 2× crane" budget (noisy; needs a
+quiet machine to confirm). This partly answers entry 45 for real crates.
+
+## 83. FYI: a randomized test against real Cargo found and fixed 7 bugs
+
+A new check generates random small workspaces (dependency kinds, proc
+macros, `links` chains, build scripts printing shuffled directives in both
+syntaxes, config overrides) and compares every compiler, build-script and
+doctest command and environment with real Cargo's. 32 seeds run in
+`nix flake check`; 130 passed in a longer run. Fixed bugs included wrong
+order of library search paths, missing link arguments for C-compatible
+libraries from dependencies, and two planner crashes (a build script
+replaced by a config override; a workspace member that is also a
+build-time dependency).
+
+## 84. ASK: one rule for "this library path is inside the build"
+
+Cargo adds a build script's library paths to the runtime library path only
+if they lie inside Cargo's build directory. breakbulk has no single build
+directory, so it counts a path as inside when it points into the script's
+own output folder or into the output folder of a `links` dependency it
+received metadata from. A path reaching some other build script's output
+by another route would be missed. This doesn't seem to happen in practice;
+tell me if you know a crate that does it.
+
+## 85. ASK: doctests use the wider test source scope too
+
+`test.sourceScope` (entry 80) also applies to the package's doctests, since
+they are tests. Alternative: only test binaries get the wider view.

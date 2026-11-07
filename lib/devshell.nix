@@ -5,8 +5,12 @@
 #    planner always passes --target, and without it local Cargo applies
 #    rustflags to build scripts, computes different `-C metadata` and puts
 #    outputs elsewhere.
-#  - The toolchain spec as Cargo env config (CARGO_TARGET_<TRIPLE>_LINKER,
-#    rustflags): presets come with M3, so nothing is exported yet.
+#  - The native target's toolchain spec as Cargo env config, as the
+#    planner chose it (`cargo-env.json` next to the build plan of the
+#    default variant): CARGO_TARGET_<TRIPLE>_LINKER, and the spec's
+#    rustflags as CARGO_TARGET_<TRIPLE>_RUSTFLAGS or CARGO_BUILD_RUSTFLAGS,
+#    whichever key the planner's `--config` used. Cargo appends these lists
+#    to the project's own, as it appends `--config` lists.
 #  - The union of the workspace's packages' inputs on the native platform,
 #    through nixpkgs' own setup hooks (what the env captures record per
 #    package). One shell cannot scope env per unit, and a union is only
@@ -36,6 +40,9 @@
   overrides ? [ ],
   # targets.<native>.env, already strings.
   targetEnv ? { },
+  # The planner's `cargo-env.json` for the native target: { env; warnings; }
+  # (crates/breakbulk-plan/src/spec.rs `CargoEnv`).
+  cargoEnv ? { },
 }:
 let
   envString = (import ./modules/types.nix { inherit lib; }).envString;
@@ -56,6 +63,7 @@ let
 
   ownEnv =
     packageEnv
+    // (cargoEnv.env or { })
     // lib.optionalAttrs setTarget {
       CARGO_BUILD_TARGET = nativeTriple;
     };
@@ -90,6 +98,7 @@ let
     toolchain.rustc
   ];
 in
+lib.foldr (w: lib.warn "breakbulk: the dev shell of workspace `${name}`: ${w}") (
 lib.warnIf (conflicts != { })
   "breakbulk: the dev shell of workspace `${name}` merges package env that differs between packages: ${lib.concatStringsSep ", " (lib.attrNames conflicts)}; the shell has the last value"
   (
@@ -124,3 +133,4 @@ lib.warnIf (conflicts != { })
       '';
     }
   )
+) (cargoEnv.warnings or [ ])

@@ -95,7 +95,6 @@ pub struct PackageTargets {
     pub has_test: bool,
     pub has_bench: bool,
     pub has_example: bool,
-    pub has_cdylib: bool,
 }
 
 impl PackageTargets {
@@ -123,7 +122,6 @@ impl PackageTargets {
                     "test" => t.has_test = true,
                     "bench" => t.has_bench = true,
                     "example" => t.has_example = true,
-                    "cdylib" => t.has_cdylib = true,
                     _ => {}
                 }
             }
@@ -204,12 +202,16 @@ pub fn sentinels(
             format!("__bb_{r}_arg_benches"),
         ));
     }
-    if targets.has_cdylib {
-        v.push((
-            "rustc-link-arg-cdylib".into(),
-            format!("__bb_{r}_arg_cdylib"),
-        ));
-    }
+    // Always, also without a cdylib target: Cargo accepts it then (with a
+    // warning) and passes it to the cdylibs of dependent packages
+    // (rust-lang/cargo#9562; `add_native_deps` in `src/compiler/mod.rs`,
+    // Cargo 0.100.0 at 5f94df4). The directive differential test found
+    // such args missing when the sentinel depended on the package's own
+    // targets.
+    v.push((
+        "rustc-link-arg-cdylib".into(),
+        format!("__bb_{r}_arg_cdylib"),
+    ));
     if links {
         v.push(("metadata".into(), format!("__bb={r}")));
     }
@@ -331,6 +333,8 @@ mod tests {
                 "rustc-link-arg-bins",
                 "rustc-link-arg-bin",
                 "rustc-link-arg-tests",
+                // Without a cdylib target too (cargo#9562).
+                "rustc-link-arg-cdylib",
                 "metadata"
             ]
         );

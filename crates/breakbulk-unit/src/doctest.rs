@@ -41,7 +41,7 @@ use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, layered, merge_layer, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedArg, RenderedCompile};
-use crate::splice::{check_arg_splices, expand_args, expand_dylib_path, expand_env};
+use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
 use crate::{Error, io_err, read_directives};
 
 pub const RUNNER_VAR: &str = "BREAKBULK_TEST_RUNNER";
@@ -64,6 +64,10 @@ pub struct RenderedDoctest {
     /// The `flags` outputs of the runs whose search paths form the `-L`
     /// list.
     pub search_paths_of: Vec<String>,
+    /// Search paths that are no run's (`links` overrides), sorted into the
+    /// same list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search_paths_literals: Vec<String>,
     /// Where in `compile.args` the `-L` list goes.
     pub search_paths_at: usize,
 }
@@ -101,14 +105,16 @@ impl TestConfig {
     }
 }
 
-/// Every search path of the given runs, both classes, sorted and without
-/// duplicates as Cargo's `BTreeSet<PathBuf>` holds them: by path component,
-/// with the value as printed (`native=` prefix included).
+/// Every search path of the given runs, both classes, and the `literals`
+/// (search paths of `links` overrides), sorted and without duplicates as
+/// Cargo's `BTreeSet<PathBuf>` holds them: by path component, with the
+/// value as printed (`native=` prefix included).
 pub fn search_paths<'a>(
     runs: &[String],
+    literals: &[String],
     directives: impl Fn(&str) -> Option<&'a BuildOutput>,
 ) -> Result<Vec<String>, Error> {
-    let mut set: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut set: BTreeSet<PathBuf> = literals.iter().map(PathBuf::from).collect();
     for r in runs {
         let d = directives(r)
             .ok_or_else(|| Error(format!("no directives for the search paths of {r}")))?;
@@ -195,7 +201,7 @@ pub fn invocation(
 
     let mut argv = c.program.clone();
     argv.extend(before);
-    for p in search_paths(&d.search_paths_of, lookup)? {
+    for p in search_paths(&d.search_paths_of, &d.search_paths_literals, lookup)? {
         argv.extend(["-L".to_owned(), p]);
     }
     for a in &config.args {
@@ -208,7 +214,7 @@ pub fn invocation(
     ]);
 
     let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
-    expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
+    prepend_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = c
         .env_capture
         .as_deref()
@@ -316,6 +322,7 @@ mod tests {
                 .map(|p| LibraryPath {
                     value: (*p).to_owned(),
                     in_out_dir: false,
+                    in_build_dir: false,
                 })
                 .collect(),
             ..BuildOutput::default()
@@ -350,6 +357,7 @@ mod tests {
                 seed: None,
             },
             search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),
+            search_paths_literals: vec![],
             search_paths_at: at,
         }
     }
@@ -367,9 +375,17 @@ mod tests {
             ),
             ("/f/b".to_owned(), out(&["native=/n/b-c", "/n/a"])),
         ]);
-        let got = search_paths(&["/f/a".into(), "/f/b".into()], |f| d.get(f)).unwrap();
+        let got = search_paths(&["/f/a".into(), "/f/b".into()], &[], |f| d.get(f)).unwrap();
         // Component order puts `b` before `b-c`; byte order would not.
         assert_eq!(got, ["/n/a", "/n/z", "native=/n/b/c", "native=/n/b-c"]);
+        // A `links` override's paths sort into the same list.
+        let got = search_paths(
+            &["/f/b".into()],
+            &["/n/m".into(), "native=/n/a".into(), "/n/a".into()],
+            |f| d.get(f),
+        )
+        .unwrap();
+        assert_eq!(got, ["/n/a", "/n/m", "native=/n/a", "native=/n/b-c"]);
     }
 
     #[test]

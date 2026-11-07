@@ -21,7 +21,7 @@
 //! script with its final `OUT_DIR`, where the rewrite is the identity.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +85,33 @@ pub struct LibraryPath {
     /// lies inside the script's own `OUT_DIR`. Such paths are passed to rustc
     /// before every `External` one.
     pub in_out_dir: bool,
+    /// The path lies inside the script's own `OUT_DIR` or inside the
+    /// `OUT_DIR` of a run whose `DEP_*` metadata the script received
+    /// ([`ParseContext::upstream_out_dirs`]), typically through a
+    /// `DEP_<LINKS>_ROOT`-style value. breakbulk's stand-in for Cargo's
+    /// "inside the target directory", the rule for dynamic-library paths
+    /// (`filter_dynamic_search_path` in `src/compiler/mod.rs`). Absent in
+    /// files written before it existed; read as `in_out_dir` then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_build_dir: bool,
+}
+
+impl LibraryPath {
+    /// Classify a `-L` value printed by a script ([`ParseContext`]).
+    pub fn new(value: String, ctx: &ParseContext<'_>) -> LibraryPath {
+        let in_out_dir = is_inside(&value, ctx.out_dir);
+        let in_build_dir = in_out_dir || ctx.upstream_out_dirs.iter().any(|d| is_inside(&value, d));
+        LibraryPath {
+            value,
+            in_out_dir,
+            in_build_dir,
+        }
+    }
+
+    /// Whether Cargo would put this path on a dynamic-library path.
+    pub fn for_dylib_path(&self) -> bool {
+        self.in_out_dir || self.in_build_dir
+    }
 }
 
 /// One `rustc-link-arg*` value. `kind` is the splice kind that receives it.
@@ -138,6 +165,9 @@ pub struct ParseContext<'a> {
     pub targets: &'a [PackageTarget],
     /// The package's `rust-version`, if it declares one.
     pub rust_version: Option<&'a str>,
+    /// The `OUT_DIR`s of the runs whose `DEP_*` metadata the script
+    /// received, for [`LibraryPath::in_build_dir`].
+    pub upstream_out_dirs: &'a [PathBuf],
 }
 
 /// A directive Cargo would reject. The message follows Cargo's wording.
@@ -306,16 +336,10 @@ pub fn parse(input: &[u8], ctx: &ParseContext<'_>) -> Result<BuildOutput, Direct
                 let (paths, links) = parse_rustc_flags(&value, &whence)?;
                 out.library_links.extend(links);
                 out.library_paths
-                    .extend(paths.into_iter().map(|p| LibraryPath {
-                        in_out_dir: is_inside(&p, ctx.out_dir),
-                        value: p,
-                    }));
+                    .extend(paths.into_iter().map(|p| LibraryPath::new(p, ctx)));
             }
             "rustc-link-lib" => out.library_links.push(value),
-            "rustc-link-search" => out.library_paths.push(LibraryPath {
-                in_out_dir: is_inside(&value, ctx.out_dir),
-                value,
-            }),
+            "rustc-link-search" => out.library_paths.push(LibraryPath::new(value, ctx)),
             "rustc-link-arg-cdylib" | "rustc-cdylib-link-arg" => {
                 if !ctx.targets.iter().any(PackageTarget::is_cdylib) {
                     out.log_messages.push(LogMessage {
@@ -541,6 +565,9 @@ pub fn metadata_env(links: &str, metadata: &[(String, String)]) -> Vec<(String, 
 pub struct MetadataFile {
     pub links: String,
     pub metadata: Vec<(String, String)>,
+    /// The run's `OUT_DIR`, for dependents' [`LibraryPath::in_build_dir`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out: Option<String>,
 }
 
 impl MetadataFile {

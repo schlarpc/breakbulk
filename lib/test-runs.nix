@@ -42,11 +42,15 @@
 #     in the package directory of its source view, with `test.args`,
 #     `test.binaries.<binary>.args` and `--include-ignored` when
 #     `test.includeIgnored`;
-#   - its environment: the dynamic-library path, then the package's build
-#     script `rustc-env` values, then `CARGO`, `CARGO_MANIFEST_DIR`,
+#   - its environment: the dynamic-library path, then the project's
+#     `[env]` config variables (the plan's `configEnv`, with the values
+#     Cargo gave the test unit), then the package's build script
+#     `rustc-env` values, then `CARGO`, `CARGO_MANIFEST_DIR`,
 #     `CARGO_MANIFEST_PATH` and `CARGO_PKG_*` from the test unit's recorded
 #     env, then `test.env`, `test.path` on `PATH`, and
-#     `RUST_TEST_THREADS=$NIX_BUILD_CORES`;
+#     `RUST_TEST_THREADS=$NIX_BUILD_CORES`. Cargo applies `[env]` last but
+#     never over a variable it set itself (`apply_env_config`), so `[env]`
+#     loses to all of Cargo's own;
 #   - the dynamic-library path holds, sorted as Cargo sorts paths, the
 #     search paths printed by any target-platform run that lie inside some
 #     target-platform run's `out` (Cargo: inside the target's output
@@ -178,6 +182,11 @@ rec {
     let
       unit = plan.units.${root.unit};
       env = lib.mapAttrs (_: resolve.text) (lib.filterAttrs (k: _: isRuntimeVar k) unit.env);
+      configEnv = lib.mapAttrs (_: resolve.text) (
+        lib.filterAttrs (
+          k: _: lib.elem k (plan.configEnv or [ ]) && !isRuntimeVar k && k != "LD_LIBRARY_PATH"
+        ) unit.env
+      );
       manifest =
         unit.env.CARGO_MANIFEST_DIR
           or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
@@ -192,7 +201,7 @@ rec {
       name = storeName "${root.package}-${binaryKey root}";
       # The unit's output: a directory holding the one binary.
       unitOut = units.${root.unit}.out;
-      inherit env;
+      inherit env configEnv;
       # The package directory, relative to the repository root.
       packageDir = if manifestRef == null then null else manifestRef.rel;
       sourceDir = env.CARGO_MANIFEST_DIR;
@@ -234,6 +243,9 @@ rec {
       export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
       unset __bb_dylib __bb_p
     ''
+    + lib.concatStrings (
+      lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") (spec.configEnv or { })
+    )
     + lib.concatMapStrings (f: ''
       eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' ${lib.escapeShellArg "${f}/directives.json"})"
     '') spec.envFlags

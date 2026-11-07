@@ -1,0 +1,198 @@
+# breakbulk
+
+breakbulk builds Rust projects with Nix, one derivation per Cargo unit.
+
+A Cargo unit is one rustc call (a library, a binary, a test harness) or one
+build-script run. breakbulk runs your own Cargo once to record what it would
+do. It then turns each recorded step into its own Nix derivation, with
+Cargo's exact command line. So:
+
+- builds behave like `cargo build`, including build scripts, profiles,
+  `.cargo/config.toml`, cross targets, wasm and Windows;
+- each crate is a separate store path, shared across workspaces, projects
+  and machines through an ordinary binary cache;
+- a change rebuilds only the crates it affects and their dependents;
+- nothing generated is checked in.
+
+The name: break-bulk cargo is loaded piece by piece, not in containers.
+
+The design is in [docs/design.md](docs/design.md). How it is built is in
+[docs/implementation.md](docs/implementation.md). Decisions made along the
+way are in [docs/decision-log.md](docs/decision-log.md).
+
+## Status
+
+breakbulk is young. Its first users are the author's own repositories.
+
+| Milestone | What | Status |
+| --- | --- | --- |
+| M0 | Spikes: tracing Cargo, dynamic derivations, env capture | Done |
+| M1 | Traced planner, unit builder, import-from-derivation delivery, native Linux | Done |
+| M2 | Module options, many workspaces, per-package overrides, env capture, dev shell | Done |
+| M3 | Day-one targets: Linux gnu and musl, static glibc, wasm, Windows msvc | Done, except a headless Chromium test runner, cross-language LTO and tests on a real aarch64 builder |
+| M4 | Post-link stages, test runs, doctests, benches, clippy, coverage, products as inputs | Done, except Windows post-link tests and the exit check on a real multi-workspace repository |
+| M5 | Dynamic-derivation delivery (no import-from-derivation) | Works on Nix master. It turns on by itself once a released Nix has the feature. Test: `nix run .#test-dynamic`. Doctests and test apps are not in this mode yet |
+| M6 | Pipelined split, dep-info source narrowing, nextest, docs product, measurements | Not started |
+| M7 | Later targets: wasip2, riscv64, windows-gnu, build-std, Darwin, zig | Not started |
+
+## Quickstart
+
+breakbulk is a flake. Its library is `breakbulk.lib`.
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    breakbulk.url = "<where you keep breakbulk>";
+  };
+
+  outputs = { self, nixpkgs, breakbulk }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+      repo = breakbulk.lib.mkRepository {
+        inherit pkgs;
+        root = ./.;
+        modules = [ ./nix/rust.nix ];
+      };
+    in
+    {
+      packages.${system}.default = repo.workspaces.main.packages.app;
+      checks.${system} = repo.checks;
+      devShells.${system}.default = repo.workspaces.main.devShell;
+    };
+}
+```
+
+A minimal module names the workspace. Everything else has a default.
+
+```nix
+# nix/rust.nix
+{ pkgs, ... }:
+{
+  # The Cargo workspace at the repository root. Its Cargo.lock is used.
+  workspaces.main.path = ".";
+
+  # Optional: a build stamp that reaches only the `app` package's units.
+  packages.app.env.GIT_REV = "dev";
+
+  # Optional: a native library for one -sys crate.
+  packages.openssl-sys = {
+    nativeInputs = p: [ p.pkg-config ];
+    inputs = p: [ p.openssl ];
+  };
+}
+```
+
+Then:
+
+- `nix build` builds the `app` package for the native target. Binaries are
+  in `result/bin`. Debug info is split off into a `debug` output.
+- `nix flake check` builds every product and runs every test binary and
+  doctest of the default variant.
+- `nix develop` gives a shell where plain `cargo` behaves like the planner:
+  it sets `CARGO_BUILD_TARGET` and the toolchain spec (linker, rustflags),
+  and adds the packages' native inputs. Use it for the edit-compile loop.
+
+With flake-parts, import `breakbulk.lib.flakeModule` and set
+`perSystem.breakbulk = { root = ./.; modules = [ ./nix/rust.nix ]; }`. It
+adds packages, checks and dev shells for you.
+
+Other outputs, per workspace:
+
+- `repo.workspaces.<ws>.target.<triple>.packages.<pkg>`: the product for one
+  target. `.stages.<name>` gives each post-link stage.
+- `repo.workspaces.<ws>.target.<triple>.tests.<pkg>.<test>`: test binaries.
+- `repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>`: test runs.
+- `repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<test>`: run one test
+  binary outside the sandbox, for network tests or a debugger.
+- `repo.sources.<crate>`: a fetched crate source.
+- `repo.explainSharing`: why a crate is built twice instead of shared.
+
+## Configuration
+
+All configuration is in NixOS-style modules. The full list of options is in
+[docs/options.md](docs/options.md). The main groups:
+
+- `workspaces.<ws>`: where each Cargo workspace is, its toolchain, its
+  targets and its variants (profiles, features, check, clippy, coverage,
+  benches).
+- `targets.<triple>`: the toolchain spec of a target. Start from a preset
+  (`breakbulk.presets.linuxGnu`, `linuxMusl`, `staticGlibc`, `msvc`,
+  `wasmBrowser`, `wasmComponent`) and override any field: linker, C
+  compiler, rustflags, env, test runner, post-link stages.
+- `packages.<name>`: settings for one package's units only: `env`,
+  `nativeInputs`, `inputs`, `extraSources`, stages, checks, and `test`
+  settings (env, extra `PATH`, libtest arguments, skip lists, a wider
+  source view with `test.sourceScope`).
+- `mode`, `ca`, `strictSources`, `registries`, `gitHashes`: repository-wide
+  settings.
+
+breakbulk reads your project's own `.cargo/config.toml`, so profiles,
+`[env]`, rustflags and feature settings apply as they do locally. It does
+not see `~/.cargo/config.toml`, `CARGO_*` variables in your shell, or flags
+in aliases and scripts. Move such settings into the project's config. The
+dev shell warns when it sees them.
+
+## Supported targets
+
+| Target | Preset | Linker | Test runner |
+| --- | --- | --- | --- |
+| x86\_64 and aarch64 Linux gnu | `linuxGnu` | mold | native, or qemu-user when cross |
+| x86\_64 and aarch64 Linux musl | `linuxMusl` | mold | native, or qemu-user |
+| Host triple, fully static glibc | `staticGlibc` | mold | native |
+| wasm32-unknown-unknown, browser | `wasmBrowser` | lld (wasm) | wasm-bindgen test runner with Node |
+| wasm32-unknown-unknown, component | `wasmComponent` | lld (wasm) | wasmtime |
+| x86\_64 and aarch64 Windows msvc | `msvc` | lld-link | wine (x86\_64) |
+
+The Windows preset needs the Microsoft CRT and Windows SDK, which are
+unfree. breakbulk downloads them with `breakbulk.xwinSdk`. Later targets
+(wasip2, riscv64, windows-gnu, build-std, Darwin) are planned, not built.
+
+## Known limitations
+
+- **Test runs re-run more often than needed on stock Nix.** A test run
+  should not re-run when its test binary's bytes did not change. That needs
+  content-addressed derivations, an experimental Nix feature. breakbulk
+  uses them only when Nix's `dynamic-derivations` feature is on, or when you
+  set `ca = true`. Otherwise a test run re-runs whenever its binary's build
+  step changes.
+- **Import-from-derivation.** The default mode reads the plan at evaluation
+  time. Nix must allow import-from-derivation (the default). Evaluation
+  waits for Cargo planning when manifests, the lockfile or config change.
+  Dynamic-derivation mode removes this, but needs Nix 2.36 or later.
+- **Overhead for tiny crates.** Nix spends about 35 to 50 ms setting up each
+  derivation. For many very small crates, a cold build can be several times
+  slower than `cargo build`. Real crates take much longer to compile, so
+  the share is smaller there.
+- **No headless Chromium test runner yet.** Browser wasm tests run in Node
+  with the wasm-bindgen test runner.
+- **Cold builds lose Cargo's pipelining.** A dependent waits for the whole
+  upstream crate, not only its metadata. Expect 10 to 20% slower clean
+  optimized builds than Cargo.
+
+## Tip: fewer substituters, faster cold builds
+
+Before it builds a derivation, Nix asks every configured binary cache
+whether it has it. breakbulk makes many small derivations, so each extra
+cache adds time: about 7 seconds per 300 crates with four caches. For
+breakbulk builds, keep only the caches you need, for example:
+
+```sh
+nix build --option substituters "https://cache.nixos.org https://your-cache.example"
+```
+
+Setting `substituters` on the command line needs a trusted user, or the
+caches in `trusted-substituters`.
+
+## Development
+
+- `nix develop -c cargo test` runs the Rust tests.
+- `nix flake check` runs every test fixture. Some checks are heavy: they
+  download the Windows SDK, build cross toolchains and run wine.
+- `tests/loose-ends/update-options-doc.sh` regenerates
+  [docs/options.md](docs/options.md); a flake check fails while it is out
+  of date.
+
+breakbulk is MIT-licensed. See [LICENSE](LICENSE).

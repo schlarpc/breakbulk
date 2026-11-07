@@ -141,6 +141,31 @@ let
       env.SMOKE_MARKER = v;
     };
   };
+  # List-like variables: the package override (layer 5) appends to the
+  # toolchain spec (layer 4); empty layers leave no separator.
+  listEnv = breakbulk.instantiate (
+    args
+    // {
+      target = {
+        envCapture = smoke.capture;
+        env = {
+          PATH = "${pkgs.hello}/bin";
+          NIX_CFLAGS_COMPILE = "";
+          PKG_CONFIG_PATH = "/spec";
+          SMOKE_MARKER = "spec";
+        };
+      };
+      overrides.smokelib.target.env = {
+        PATH = "${pkgs.cowsay}/bin";
+        NIX_CFLAGS_COMPILE = "-DFROM_OVERRIDE";
+        PKG_CONFIG_PATH = "";
+        SMOKE_MARKER = "override";
+      };
+    }
+  );
+  listEnvLib = builtins.fromJSON (
+    builtins.unsafeDiscardStringContext (unitText listEnv "c-a0e9aa7440d71279")
+  );
   envA = breakbulk.instantiate (args // withEnv "a");
   envB = breakbulk.instantiate (args // withEnv "b \"quoted\"\n");
   appView = breakbulk.instantiate (
@@ -215,6 +240,16 @@ let
         "r-smokelib-63aa584f9c6a6c6c"
       ]
       && lib.hasInfix ''"SMOKE_MARKER":"b \"quoted\"\n"'' (unitText envB "c-a6654c0a89d81026");
+    list-like-env-appends =
+      listEnvLib.env.PATH == "${pkgs.hello}/bin:${pkgs.cowsay}/bin"
+      && listEnvLib.env.NIX_CFLAGS_COMPILE == "-DFROM_OVERRIDE"
+      && listEnvLib.env.PKG_CONFIG_PATH == "/spec"
+      && listEnvLib.env.SMOKE_MARKER == "override"
+      # The joined values keep their context: both PATH entries are inputs.
+      && lib.all (p: builtins.getContext (unitText listEnv "c-a0e9aa7440d71279") ? ${builtins.unsafeDiscardStringContext p.drvPath}) [
+        pkgs.hello
+        pkgs.cowsay
+      ];
     source-views-do-not-rerun-instantiate =
       appView.unitsJson.drvPath == inst.unitsJson.drvPath && changed inst appView == [ "c-a6654c0a89d81026" ];
     nothing-else-realised = builtins.deepSeq (drvPaths unbuildable) true;
