@@ -424,6 +424,51 @@ in
       cp err $result/
     '';
 
+  # Decision 50: breakbulk's binaries are built from narrow sources, so an
+  # edit to the planner leaves breakbulk-unit (an input of every unit) and
+  # breakbulk-shim alone. Computes the tools' derivations from a copy of
+  # the repository with a line added to breakbulk-plan's main.rs and to
+  # breakbulk-format's lib.rs (IFD: the copy is a derivation), and compares
+  # .drv paths with the real ones.
+  tools-narrow =
+    let
+      repo = lib.fileset.toSource {
+        root = ../..;
+        fileset = lib.fileset.unions [
+          ../../Cargo.toml
+          ../../Cargo.lock
+          ../../crates
+        ];
+      };
+      edited = pkgs.runCommand "breakbulk-edited-repo" { } ''
+        cp -r --no-preserve=mode ${repo} $out
+        echo '// edited' >> $out/crates/breakbulk-plan/src/main.rs
+        echo '// edited' >> $out/crates/breakbulk-format/src/lib.rs
+      '';
+      # Realise the copy (IFD), then use it as a path value.
+      editedRoot = builtins.seq (builtins.readDir edited) (
+        /. + builtins.unsafeDiscardStringContext edited.outPath
+      );
+      real = import ../../lib/tools.nix { inherit lib; } pkgs;
+      other = import ../../lib/tools.nix {
+        inherit lib;
+        root = editedRoot;
+      } pkgs;
+      same = n: real.${n}.drvPath == other.${n}.drvPath;
+      checks = {
+        "breakbulk-unit unchanged" = same "breakbulk-unit";
+        "breakbulk-shim unchanged" = same "breakbulk-shim";
+        "breakbulk-plan changed" = !same "breakbulk-plan";
+        "breakbulk-instantiate changed" = !same "breakbulk-instantiate";
+        "breakbulk-unit's source has only itself" = real.breakbulk-unit.crates == [ "breakbulk-unit" ];
+      };
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
+    in
+    assert lib.assertMsg (failed == [ ]) "tools-narrow: ${lib.concatStringsSep ", " failed}";
+    pkgs.runCommand "tools-narrow-check" { } ''
+      echo ${lib.escapeShellArg (lib.concatStringsSep "\n" (lib.attrNames checks))} > $out
+    '';
+
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =
     pkgs.runCommand "walking-skeleton-test-check"
