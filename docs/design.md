@@ -257,7 +257,7 @@ The linker is chosen automatically as a pure function of target, host and LTO mo
 - Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM).
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
 - **wild** is an opt-in preset, gated by the determinism check.
-- Never rustup's self-contained `rust-lld`, which bypasses the Nix linker wrapper.
+- Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so the mold linker wrapper drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
 
 ### Windows msvc
 
@@ -271,7 +271,7 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 
 ### Static and musl
 
-Musl targets use nixpkgs cross toolchains with `crt-static`. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
+Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust's self-contained crt, `libc.a` and libunwind (nixpkgs' musl has no `libunwind.a`), while C code compiles against nixpkgs' musl headers. Static glibc builds are static-pie by default. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
 
 ### Zig
 
