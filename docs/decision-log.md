@@ -137,3 +137,51 @@ work: Cargo's rule for these variables keeps paths inside the whole build
 directory (any script's `OUT_DIR`), not only inside the printing script's
 own `OUT_DIR`, which is the rule for `-L` ordering. In breakbulk that means
 "inside any run's `out`".
+
+## 13. ASK: git dependencies that inherit settings from their own workspace
+
+Some git dependencies say "my version/edition/dependencies come from my
+workspace" (`version.workspace = true`). Cargo refuses to read such a crate
+from a vendored copy unless it can find that workspace. Choice made: next to
+each vendored git source, breakbulk writes a tiny `Cargo.toml` containing
+only the original `[workspace]` section, and lets Cargo do the merge itself.
+The alternative, rewriting each manifest in Nix, would copy Cargo's merge
+rules, which change between Cargo releases. Limits: a single git repository
+whose crates belong to two different workspaces fails with a clear error.
+Tell me if you have such a dependency.
+
+## 14. ASK: `gitHashes` uses a different hash than crane's `outputHashes`
+
+To let a binary cache serve a git dependency instead of cloning it on each
+fresh machine, you may give its hash. breakbulk passes it to Nix's built-in
+git fetcher (so no import-from-derivation is needed); this is the hash of
+the fetched tree, which is not the same number crane asks for. You get the
+right value from Nix's "hash mismatch" error or `nix flake prefetch`. Keys
+are the full `Cargo.lock` source string including the commit. If you would
+rather copy hashes over from existing crane setups, this would have to
+change to a build-time fetch, which needs import-from-derivation.
+
+## 15. ASK: crate source paths change when nixpkgs changes
+
+Each downloaded `.crate` file is fixed (same hash forever), but unpacking it
+uses tools from the nixpkgs you pass in. So bumping nixpkgs gives every crate
+a new source path, and every crate rebuilds. This usually costs nothing extra,
+because a nixpkgs bump usually changes the compiler too. If you want crate
+sources to survive nixpkgs bumps (for example, when you pin the compiler
+separately from nixpkgs), breakbulk can unpack with its own pinned tools.
+
+## 16. FYI: smaller findings from the Nix library work
+
+- Git dependencies are fetched with submodules, and without honoring
+  `export-ignore`, to match what Cargo sees in a real checkout.
+- An alternative registry needs both its `index` URL and its download
+  (`dl`) URL template in config, since `Cargo.lock` records only the index.
+- `gitTrees.<url> = ./path` points a git dependency at a local checkout.
+- Plain `cargo build` never builds examples; only the test plan
+  (`cargo test --no-run`) does. The docs said build plans include
+  examples; they will be corrected.
+- The planning skeleton must include empty README files, because Cargo sets
+  `CARGO_PKG_README` only when one exists.
+- Cargo reads `.cargo/config.toml` from every parent directory. Inside the
+  Nix sandbox that is harmless, but for local tests in a home directory it
+  picks up `~/.cargo/config.toml`. Tests now guard against this.
