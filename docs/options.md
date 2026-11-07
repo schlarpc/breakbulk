@@ -32,7 +32,7 @@ attribute set of (submodule)
 {
   openssl-sys = { nativeInputs = p: [ p.pkg-config ]; inputs = p: [ p.openssl ]; };
   app.env.GIT_REV = self.rev or "dirty";
-  "aws-lc-sys@>=0.42".env.AWS_LC_SYS_USE_SYSTEM = "1";
+  "libsqlite3-sys".env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";  # opt in to the system SQLite
 }
 
 ```
@@ -739,7 +739,7 @@ null
 
 
 
-nextest profile for this package’s test runs (` null `: ` default `)\.
+nextest profile for this package’s test runs (` null `: the workspace’s ` test.nextest.profile `, else ` default `)\.
 
 
 
@@ -799,8 +799,8 @@ How this package’s test binaries run: ` libtest ` (the binary
 itself, as ` cargo test ` runs it) or ` nextest ` (cargo-nextest’s
 reuse-build mode over the one binary, with the project’s
 nextest configuration: retries, timeouts, default filter, test
-groups)\. Each binary is still its own test run\. ` null ` means
-` libtest `\.
+groups)\. Each binary is still its own test run\. ` null `: the
+workspace’s ` test.runner `, else ` libtest `\.
 
 
 
@@ -1229,9 +1229,10 @@ true
 
 
 Toolchain specs per target triple\. A workspace builds for the triples
-in ` workspaces.<ws>.targets `; their specs come from here\. A triple
-with no entry uses an empty spec (the native toolchain as Cargo
-finds it)\.
+in ` workspaces.<ws>.targets `; their specs come from here\. On a Linux
+(glibc) build machine the native triple always has an entry, with
+` presets.linuxGnu ` by default\. Any other triple with no entry uses an
+empty spec (the toolchain as Cargo finds it)\.
 
 
 
@@ -1542,6 +1543,8 @@ fields below at default priority, so fields set here override
 the preset’s (lists concatenate; use ` lib.mkForce ` to replace
 one)\. Equivalent to defining the target as
 ` breakbulk.presets.<name> { inherit pkgs; triple = …; } `\.
+Set ` null ` to use no preset on the native target (rustc’s own
+linker choice and the C toolchain Cargo finds)\.
 
 
 
@@ -1551,10 +1554,9 @@ null or (function that evaluates to a(n) raw value)
 
 
 *Default:*
-
-```nix
-null
-```
+` breakbulk.presets.linuxGnu ` for the native triple when the build
+machine is Linux with glibc, unless the target is defined directly
+from a preset; ` null ` otherwise
 
 
 
@@ -1969,6 +1971,123 @@ null
 
 
 
+## workspaces\.\<name>\.test\.nextest\.package
+
+
+
+The default cargo-nextest for this workspace’s test runs; a package’s ` test.nextest.package ` wins\.
+
+
+
+*Type:*
+null or package
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.nextest\.configFile
+
+
+
+The default nextest configuration file for this workspace’s
+test runs; a package’s ` test.nextest.configFile ` wins\.
+` null `: the workspace’s ` .config/nextest.toml ` when it
+exists\.
+
+
+
+*Type:*
+null or absolute path
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.nextest\.profile
+
+
+
+The default nextest profile for this workspace’s test runs; a package’s ` test.nextest.profile ` wins (` null `: ` default `)\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+"ci"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.runner
+
+
+
+The default ` packages.<name>.test.runner ` for this
+workspace’s packages: ` libtest ` or ` nextest `\. A package’s own
+setting wins\. ` null ` means ` libtest `\.
+
+
+
+*Type:*
+null or one of “libtest”, “nextest”
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+"nextest"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.toolchain
 
 
@@ -2122,6 +2241,34 @@ boolean
 
 ```nix
 false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.variants\.\<name>\.allTargets
+
+
+
+For ` check ` and ` clippy ` variants: also check every target,
+as ` cargo check --all-targets ` does (tests, examples, benches
+in test mode, through the test plan)\. ` false `: plain ` cargo check ` (libraries and bins, the build plan only), for gates
+that do not check test code\. Only check and clippy variants
+take ` false `\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
 ```
 
 *Declared by:*

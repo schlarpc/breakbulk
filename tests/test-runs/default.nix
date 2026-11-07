@@ -438,6 +438,42 @@ let
         ! grep -q 'Nextest run ID' $other/log
         mkdir -p $out
       '';
+
+  # Decision 93: the same settings as the workspace's default, with one
+  # package overriding it back to libtest.
+  nxWsRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/nextest";
+    modules = [
+      {
+        workspaces.main = {
+          variants.default.profile = "dev";
+          test = {
+            runner = "nextest";
+            nextest.profile = "ci";
+          };
+        };
+        packages.other.test.runner = "libtest";
+      }
+    ];
+  };
+  nextestWorkspaceDefault =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      r = nxWsRepo.workspaces.main.target.${native}.testRuns;
+    in
+    pkgs.runCommand "test-runs-nextest-workspace-default"
+      {
+        flaky = r.nx.flaky;
+        other = r.other."lib/other";
+      }
+      ''
+        grep -q 'nextest profile: ci' $flaky/log
+        grep -E 'TRY 2 PASS .*nx::flaky flaky_once' $flaky/log
+        grep -q 'test result: ok. 1 passed' $other/log
+        ! grep -q 'Nextest run ID' $other/log
+        mkdir -p $out
+      '';
 in
 {
   workspaces = {
@@ -445,6 +481,7 @@ in
   };
   inherit nextest;
   nextest-repo = nextestRepo;
+  nextest-workspace-default = nextestWorkspaceDefault;
   runner = testRunner;
   inherit doctests;
   test-control = testControl;

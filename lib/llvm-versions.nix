@@ -3,9 +3,12 @@
 # 41; "Toolchain presets" in docs/implementation.md).
 #
 # Only nixpkgs' own rustc names its LLVM (`rustc.llvmPackages`); rust-overlay
-# and fenix toolchains do not, and asking rustc at build time would need
-# import-from-derivation. So this table maps the Rust release to the LLVM
-# major its official builds use.
+# and fenix toolchains do not. This table maps the Rust release to the LLVM
+# major its official builds use, and is the fast path (no build at
+# evaluation time). For a rustc outside the table (older than its first
+# release, newer than `verifiedThrough`, or without a `version`), the major
+# is read from `rustc -vV` by a tiny derivation, through
+# import-from-derivation (decision 41), instead of failing.
 #
 # Source: `rustc -vV` ("LLVM version") of every rust-overlay stable
 # toolchain 1.90.0 to 1.99.1 and nightly 1.101.0 (2026-11), at the
@@ -21,6 +24,8 @@
 #   llvm.majorFor "1.97.1"                       # 22
 #   llvm.packagesFor { inherit pkgs rustc; }     # pkgs.llvmPackages_22 (or rustc.llvmPackages)
 #   llvm.packagesFor { inherit pkgs; llvmMajor = 23; }
+#   llvm.lookup "1.102.0"                        # null: not in the table
+#   llvm.probe { inherit pkgs rustc; }           # from `rustc -vV` (IFD)
 { lib }:
 let
   # Ascending by `from` (a major.minor Rust release).
@@ -43,24 +48,69 @@ let
     }
   ];
 
+  # The last Rust release (major.minor) whose LLVM major was checked. A
+  # newer one may use a newer LLVM, so it is probed instead.
+  verifiedThrough = "1.101";
+
   # "1.97.1", "1.101.0-nightly", "1.99.0-beta.3", "1.101.0-nightly-2026-11-01"
   majorMinor = v: lib.versions.majorMinor (lib.head (lib.splitString "-" v));
 
-  majorFor =
+  # The table's LLVM major for a Rust version, or null outside the table.
+  lookup =
     rustVersion:
     let
       mm = majorMinor rustVersion;
       matching = lib.filter (e: lib.versionAtLeast mm e.from) table;
     in
-    if matching == [ ] then
-      throw "breakbulk.llvmVersions: Rust ${rustVersion} is older than the table (${(lib.head table).from}); pass llvmMajor explicitly"
+    if builtins.match "[0-9]+\\.[0-9]+([.-].*)?" rustVersion == null then
+      null
+    else if matching == [ ] || lib.versionOlder verifiedThrough mm then
+      null
     else
       (lib.last matching).llvm;
 
-  versionOf =
-    rustc:
-    rustc.version
-      or (throw "breakbulk.llvmVersions: the rustc derivation `${rustc.name or "?"}` has no `version`; pass llvmMajor or llvmPackages explicitly");
+  majorFor =
+    rustVersion:
+    let
+      m = lookup rustVersion;
+    in
+    if m == null then
+      throw "breakbulk.llvmVersions: Rust ${rustVersion} is outside the table (${(lib.head table).from} to ${verifiedThrough}); use `probe`, or pass llvmMajor explicitly"
+    else
+      m;
+
+  # The LLVM major of `rustc`, from `rustc -vV` ("LLVM version: 23.1.5"),
+  # read at evaluation time (import-from-derivation). The derivation is
+  # tiny and runs on the build machine.
+  probe =
+    { pkgs, rustc }:
+    let
+      out =
+        pkgs.runCommand "rustc-llvm-major"
+          {
+            preferLocalBuild = true;
+            allowSubstitutes = false;
+          }
+          ''
+            ${rustc}/bin/rustc -vV > vv
+            v=$(sed -n 's/^LLVM version: \([0-9][0-9]*\)\..*/\1/p' vv)
+            if [ -z "$v" ]; then
+              echo "breakbulk.llvmVersions: \`${rustc}/bin/rustc -vV\` names no LLVM version:" >&2
+              cat vv >&2
+              exit 1
+            fi
+            printf %s "$v" > $out
+          '';
+    in
+    lib.toInt (builtins.readFile out);
+
+  # The table when it knows the rustc's version, else the probe.
+  majorOf =
+    pkgs: rustc:
+    let
+      m = if rustc ? version then lookup rustc.version else null;
+    in
+    if m != null then m else probe { inherit pkgs rustc; };
 
   packagesFor =
     {
@@ -76,7 +126,7 @@ let
         else if rustc == null then
           throw "breakbulk: this preset needs LLVM tools matching your rustc; pass `rustc` (your toolchain), `llvmMajor` or `llvmPackages` to the preset"
         else
-          majorFor (versionOf rustc);
+          majorOf pkgs rustc;
       attr = "llvmPackages_${toString major}";
     in
     if llvmPackages != null then
@@ -90,7 +140,10 @@ in
 {
   inherit
     table
+    verifiedThrough
+    lookup
     majorFor
+    probe
     packagesFor
     ;
 }

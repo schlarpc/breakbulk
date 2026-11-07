@@ -128,7 +128,7 @@ A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/
 
 ### Per-package overrides
 
-`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `nativeInputs`, `inputs` and `extraSources` for that package's units only. `nativeInputs` are tools that run on the build machine (`pkg-config`, `cmake`, `protoc`); `inputs` are libraries for the platform being built (`openssl`). This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`.
+`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `nativeInputs`, `inputs` and `extraSources` for that package's units only. `nativeInputs` are tools that run on the build machine (`pkg-config`, `cmake`, `protoc`); `inputs` are libraries for the platform being built (`openssl`). This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`. It declares the native inputs only: switches that make a crate use a system library instead of the one it bundles (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so they are left to the project.
 
 Inputs are turned into environment by nixpkgs itself: a small derivation per package and platform runs a real `stdenv` with those inputs and records the environment its setup hooks produce. Packages without inputs share one base capture per platform, which gives build scripts the same baseline tools and hardening flags as `buildRustPackage`.
 
@@ -157,7 +157,7 @@ Profiles, feature sets (including a feature powerset), check modes (clippy, cove
 | Two profiles with the same settings (`release`, `bench`, a custom profile that only inherits `release`) | Everything; a unit's identity contains the profile's settings, not its name | Nothing |
 | Two profiles with different settings (opt-level, debuginfo, …) | Nothing | Everything |
 
-Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
+Check and clippy variants check every target, as `cargo check --all-targets` does, unless the variant turns that off for a gate that runs plain `cargo check`. Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
 
 ## Products and stages
 
@@ -254,8 +254,8 @@ Supported Cargo releases form a rolling window: roughly the last six months of s
 
 The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable.
 
-- Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
-- Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM).
+- Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The native target gets the Linux preset by default, so this holds with no configuration. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
+- Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM; a rustc newer than the table is asked with `rustc -vV` at evaluation time).
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
 - **wild** is an opt-in preset, gated by the determinism check.
 - Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so the mold linker wrapper drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
@@ -319,6 +319,7 @@ Islands only cut off, and products only reproduce, if outputs are byte-stable.
 - Source paths are remapped as described in [Source paths and debug information](#source-paths-and-debug-information).
 - No `-C incremental` inside unit builds. The planner strips it from argv and never sets `CARGO_INCREMENTAL`, because the incremental setting is part of every unit's `-C metadata`.
 - A content-derived `--build-id`.
+- CMake's internal state (`CMakeFiles`, with its configure log) is removed from build-script output after the run; the rest of the build tree is kept.
 - A built-in check rebuilds sampled units and products with `nix build --rebuild` and compares their outputs.
 
 ### The rustc limit, and what is changing

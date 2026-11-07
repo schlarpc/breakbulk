@@ -12,6 +12,8 @@
 //! 6. Check `rerun-if-changed` paths against the sandbox: on failure, hint at
 //!    each missing path and each unset `rerun-if-env-changed` variable; on
 //!    success, warn about missing paths, or fail with `strictSources`.
+//! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
+//!    ([`remove_cmake_state`], decision 65).
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -273,6 +275,51 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Error> {
     Ok(Success { output, warnings })
 }
 
+/// Remove the `CMakeFiles` directory of every CMake build tree under `out`
+/// (a directory holding both `CMakeCache.txt` and `CMakeFiles/`), and
+/// return what was removed.
+///
+/// CMake writes its configure log there (`CMakeConfigureLog.yaml`, or
+/// `CMakeOutput.log` and `CMakeError.log` before CMake 3.26). It names the
+/// randomly named try-compile directories under `CMakeFiles/CMakeScratch`,
+/// so a run that builds with CMake (the `cmake` crate builds in
+/// `$OUT_DIR/build`) is not reproducible: for cm-sys in the sys-native
+/// fixture, `CMakeConfigureLog.yaml` is the only file `nix build --rebuild`
+/// finds different. Nothing reads `CMakeFiles` after the build script: the
+/// `cmake` crate reads `CMakeCache.txt` and `Makefile` back only within the
+/// same run (cmake-rs 0.1.58, `Config::build` and `maybe_clear` in
+/// `src/lib.rs`), and consumers link the installed or built libraries,
+/// which lie outside it (inside are object files and generator
+/// bookkeeping). The rest of the tree (`CMakeCache.txt`, `Makefile`, built
+/// libraries) stays, because crates do link from `$OUT_DIR/build`. Nested
+/// project directories' own `CMakeFiles` (no `CMakeCache.txt` next to
+/// them) hold no configure log and stay too.
+pub fn remove_cmake_state(out: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut removed = Vec::new();
+    let mut stack = vec![out.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let state = dir.join("CMakeFiles");
+        let is_tree = dir.join("CMakeCache.txt").is_file()
+            && state.symlink_metadata().is_ok_and(|m| m.is_dir());
+        if is_tree {
+            std::fs::remove_dir_all(&state).map_err(|e| io_err("removing", &state, e))?;
+            removed.push(state);
+        }
+        let entries = std::fs::read_dir(&dir).map_err(|e| io_err("reading", &dir, e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| io_err("reading", &dir, e))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| io_err("reading", &entry.path(), e))?;
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            }
+        }
+    }
+    removed.sort();
+    Ok(removed)
+}
+
 /// The whole `run` mode.
 pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     let out = outer.output("out")?;
@@ -333,6 +380,12 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     })?;
     for w in &success.warnings {
         eprintln!("{w}");
+    }
+    for removed in remove_cmake_state(&out)? {
+        eprintln!(
+            "     Removed CMake's internal state `{}`",
+            removed.display()
+        );
     }
     write_json(&flags.join(DIRECTIVES_FILE), &success.output)?;
     if let Some(links) = &r.links {

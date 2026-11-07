@@ -6,4 +6,4 @@ publish = false
 
 [dependencies]
 openssl-sys = "0.9"
-zstd-sys = { version = "2", default-features = false }
+zstd-sys = { version = "2", default-features = false, features = ["pkg-config"] }

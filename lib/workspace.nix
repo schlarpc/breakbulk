@@ -25,6 +25,7 @@
 #   ws.tests."<pkg>/<kind>/<target>"   test-plan roots
 #   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target>
 #   ws.plans.{build,test}      the plan derivations ($out/plan.json)
+#   ws.cargoEnv                the dev shell's cargo-env.json (no planning)
 #   ws.units.{build,test}      every unit derivation, by unit id
 #
 # Arguments added for mkRepository (lib/repository.nix), all optional:
@@ -61,6 +62,7 @@
   mkVendor,
   mkTools,
   mkPlan,
+  mkCargoEnv,
   testRuns,
   testApps,
   dynamic,
@@ -383,6 +385,19 @@ in
     overrides
     ;
   skeleton = skel;
+  # The toolchain spec as Cargo env config, for the dev shell; independent
+  # of the plans (decision 81).
+  cargoEnv = mkCargoEnv pkgs {
+    configSkeleton = skeleton.mkConfigSkeleton pkgs { inherit root wsDir; };
+    inherit
+      wsDir
+      tools
+      target
+      spec
+      ;
+    inherit (toolchain) rustc;
+    name = "${name}-cargo-env";
+  };
   sources = { inherit workspace crates; };
   roots = built.roots;
   tests = tested.roots;

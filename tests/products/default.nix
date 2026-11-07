@@ -288,6 +288,12 @@ let
             mode = "coverage";
             profile = "release";
           };
+          # Plain `cargo check` (decision 108).
+          check-lib = {
+            mode = "check";
+            profile = "release";
+            allTargets = false;
+          };
           strict = {
             mode = "clippy";
             profile = "release";
@@ -650,6 +656,34 @@ in
 
         cat $check/units $clippy/units > $out
       '';
+
+  # Decision 108: `allTargets = false` checks the build plan's units only
+  # (`cargo check`); the default also checks the test plan's (`cargo check
+  # --all-targets`). A build variant rejects it.
+  variants-all-targets =
+    let
+      outsOf = us: lib.sort lib.lessThan (map (o: builtins.unsafeDiscardStringContext o) (lib.concatMap (u: map (o: u.${o}) u.outputs) us));
+      lib' = vt.variants.check-lib.check;
+      all = vt.variants.check.check;
+      buildOuts = outsOf (lib.attrValues variantsRepo.workspaces.main.instances.${native}.check.units.build);
+      got = lib.sort lib.lessThan (map builtins.unsafeDiscardStringContext lib'.units);
+      allGot = map builtins.unsafeDiscardStringContext all.units;
+      rejected = mkRepo (fixtures + "/variants") [
+        {
+          workspaces.main = {
+            path = "ws";
+            variants.default.allTargets = false;
+          };
+        }
+      ];
+      rejectedEval = builtins.tryEval (builtins.seq rejected.workspaces.main.target.${native}.packages.app.drvPath true);
+    in
+    assert lib.assertMsg (got == buildOuts) "variants-all-targets: check-lib does not check exactly the build plan";
+    assert lib.assertMsg (lib.length allGot > lib.length got) "variants-all-targets: the default does not check more than the build plan";
+    assert lib.assertMsg (!rejectedEval.success) "variants-all-targets: a build variant accepted allTargets = false";
+    pkgs.runCommand "variants-all-targets" { check = lib'; } ''
+      cp $check/units $out
+    '';
 
   variants-coverage =
     let
