@@ -781,3 +781,55 @@ doing?
 - breakbulk now reads `include` and `cfg(...)` keys in your
   `.cargo/config.toml` when deciding where to add its compiler flags
   (entry 33).
+
+## 72. FYI: milestone M4's products and variants work
+
+Passing: products go through their post-link steps by default (Linux:
+split debug info, then install), with your own steps and checks per target
+and per package; shipped binaries contain no source paths while the
+separate debug output lets gdb show source lines; editing a README doesn't
+change a test binary; one workspace can embed another workspace's product
+without the rest of its build waiting for it; check, clippy, coverage,
+feature-powerset and bench variants share exactly the build steps they
+should. All checks run green on `main`. Not done yet: the wasm version of
+the embed test, Windows post-link tests, separate source scopes for tests
+(`test.sourceScope`), and trying one of your real repositories end to end
+(that is the M4 exit criterion; it needs your input on which repo).
+
+## 73. ASK: coverage builds crash with nixpkgs' Rust 1.99
+
+Coverage-instrumented programs built with nixpkgs' rustc 1.99 crash when
+they exit, inside the coverage runtime. Plain `cargo` with the same compiler
+does the same, so it isn't breakbulk's fault; rust-overlay's 1.99 works,
+and the test uses that. It looks like a nixpkgs bug. Want me to dig in and
+prepare an upstream report (I won't file anything without your OK)?
+
+## 74. ASK: build IDs are turned on for targets that split debug info
+
+Splitting debug info needs a build ID in each binary. breakbulk turns on
+nixpkgs' own linker-wrapper switch for it (`NIX_SET_BUILD_ID=1`) on target
+build steps when the target's steps include splitting debug info. This
+changed every target build step once. Alternative: each preset passes the
+linker flag itself.
+
+## 75. ASK: lint variants and benchmarks
+
+- `check` and `clippy` variants check all targets, like the usual
+  `cargo clippy --all-targets`; they produce no binaries or test runs.
+- A variant opts into benchmarks with `benches = true` (usually with
+  `profile = "bench"`). `benches.<pkg>.<bench>` comes from the default
+  variant if it has benches, else from the one variant that does; if
+  several do, that's an error asking you to pick.
+Do these match how you'd want to configure them?
+
+## 76. FYI: smaller product choices
+
+- How source paths are hidden follows the target's post-link steps, not
+  each package's, because each library is compiled once and shared. A
+  package that removes debug splitting keeps source paths in its binary;
+  the default "no source references" check will catch that.
+- Targets name their default post-link chain with `stagePreset`; every
+  preset sets it.
+- Products keep file extensions (`bin/app.exe` on Windows).
+- `clippyArgs` works like `cargo clippy -- ARGS` and reaches only your own
+  crates, so dependencies stay shared with `check`.
