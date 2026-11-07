@@ -422,9 +422,10 @@ impl<'a> Builder<'a> {
 
     /// Bins are also copied ("uplifted") to `<profile dir>/<target name>`,
     /// which is what `CARGO_BIN_EXE_<name>` names. Map such a path to the
-    /// bin's output when exactly one bin compile of that target exists.
+    /// bin's output: the one bin compile of that name, or the one of the
+    /// referring unit's package (see [`crate::rewrite::Rewriter::uplifted_bins`]).
     fn register_uplifted_bins(&mut self) {
-        let mut by_name: BTreeMap<(Platform, String), Vec<OutRef>> = BTreeMap::new();
+        let mut by_name: BTreeMap<(Platform, String), Vec<(String, OutRef)>> = BTreeMap::new();
         for c in &self.compiles {
             if c.test || !c.types.iter().any(|t| t == "bin") {
                 continue;
@@ -440,15 +441,11 @@ impl<'a> Builder<'a> {
                     by_name
                         .entry((c.platform, t.name.clone()))
                         .or_default()
-                        .push(r.clone());
+                        .push((c.package.id.clone(), r.clone()));
                 }
             }
         }
-        for ((platform, name), refs) in by_name {
-            if let [r] = refs.as_slice() {
-                self.rw.uplifted_bins.insert((platform, name), r.clone());
-            }
-        }
+        self.rw.uplifted_bins = by_name;
         self.rw.target_triple = self.ctx.target.clone();
     }
 

@@ -33,6 +33,10 @@
 #                planner asks rustc for the cfg with Cargo's rustflags and
 #                puts the spec's flags under the target key; the product
 #                matches local `cargo run` with the same `--config`.
+#   names        two members with a bin of the same name: each package's
+#                test gets its own as CARGO_BIN_EXE_tool; a bench with
+#                `test = true` is `bench-<name>` in tests, testRuns and
+#                checks alike.
 {
   pkgs ? import (
     let
@@ -398,6 +402,42 @@ let
         cp got $out/
       '';
 
+  # --- names ------------------------------------------------------------------
+
+  # Two members with a bin `tool` each: each package's integration test
+  # gets its own bin as CARGO_BIN_EXE_tool (Cargo sets it for the test's
+  # own package's bins). A bench with `test = true` is `bench-speed` in
+  # `tests`, in `testRuns` and in `repo.checks` (`test-bench-speed`).
+  namesRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/names";
+    modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
+  };
+  names =
+    let
+      t = namesRepo.workspaces.main.target.${native};
+      runs = t.namedTestRuns.a;
+      check = "main/${native}/a/test-bench-speed";
+    in
+    assert lib.assertMsg (t.tests.a ? bench-speed)
+      "names: tests.a has ${toString (lib.attrNames t.tests.a)}";
+    assert lib.assertMsg (runs ? bench-speed)
+      "names: the named test runs of a are ${toString (lib.attrNames runs)}";
+    assert lib.assertMsg (namesRepo.checks ? ${check})
+      "names: no check ${check} among ${toString (lib.attrNames namesRepo.checks)}";
+    pkgs.runCommand "loose-ends-names"
+      {
+        a = runs.runs_tool;
+        b = t.namedTestRuns.b.runs_tool;
+        bench = runs.bench-speed;
+      }
+      ''
+        grep -q 'test own_tool ... ok' $a/log
+        grep -q 'test own_tool ... ok' $b/log
+        grep -q 'test bench_as_test ... ok' $bench/log
+        touch $out
+      '';
+
   # --- docs/options.md --------------------------------------------------------
 
   # The module options as Markdown (mkRepository's optionsDoc).
@@ -432,11 +472,13 @@ in
   inherit devshell;
   wasm-embed = wasmEmbedCheck;
   cfg-rustflags = cfgRustflags;
+  inherit names;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;
     devshell = shellRepo;
     wasm-embed = wasmEmbed;
     cfg-rustflags = cfgRepo;
+    names = namesRepo;
   };
 }
