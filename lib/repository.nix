@@ -275,14 +275,92 @@ let
       test = lib.foldl' (acc: k: mergeTest acc cfg.packages.${k}.test) empty (memberKeys wsName pkg);
     });
 
-  # The package set of a target's units. Cross package sets come with the
-  # presets (M3).
+  # The package set of a target's units: the target spec's `packageSet`
+  # (set by the presets), else pkgs for the native triple.
   targetPkgs =
     triple:
-    if triple == nativeTriple then
+    let
+      p = cfg.targets.${triple}.packageSet or null;
+    in
+    if p != null then
+      p
+    else if triple == nativeTriple then
       pkgs
     else
-      throw "breakbulk: package inputs on target ${triple} need that target's package set, which comes with the toolchain presets (M3)";
+      throw "breakbulk: package inputs on target ${triple} need that target's nixpkgs package set (`targets.${triple}.packageSet`, which the Linux presets set); this target has none";
+
+  # --- toolchain specs (M3) -------------------------------------------------
+  #
+  # A target's spec as mkWorkspace takes it: the planner's part (rustflags
+  # and linkers, through `--config`), the env of each platform's units, the
+  # store paths the plan will name, the target capture's package set, and
+  # the runner.
+  envName = triple: lib.replaceStrings [ "-" ] [ "_" ] triple;
+  storePathsIn =
+    s:
+    lib.concatMap (
+      p: if builtins.isList p then [ (lib.addContextFrom s (lib.head p)) ] else [ ]
+    ) (builtins.split "(${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[^/ =:;\"]+)" s);
+  specFor =
+    wsName: triple:
+    let
+      t = cfg.targets.${triple} or null;
+      e = envName triple;
+      flags = l: lib.concatStringsSep " " l;
+      cEnv =
+        lib.filterAttrs (_: v: v != null) {
+          "CC_${e}" = t.cc;
+          "CXX_${e}" = t.cxx;
+          "AR_${e}" = t.ar;
+        }
+        // lib.optionalAttrs (t.cflags != [ ]) {
+          "CFLAGS_${e}" = flags t.cflags;
+          "CXXFLAGS_${e}" = flags t.cflags;
+        }
+        // lib.optionalAttrs (t.bindgen.extraClangArgs != [ ]) {
+          "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags t.bindgen.extraClangArgs;
+        };
+      str = v: if v == null then null else "${v}";
+      linker = str t.linker;
+      hostLinker = str t.host.linker;
+      named = prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
+      runner =
+        if t.runner == null then
+          null
+        else if builtins.isFunction t.runner then
+          t.runner {
+            lockfile = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) "Cargo.lock"}";
+            workspace = wsName;
+          }
+        else
+          t.runner;
+    in
+    if t == null then
+      {
+        mkWorkspace = { };
+        runner = null;
+        testSystem = null;
+      }
+    else
+      {
+        mkWorkspace = {
+          spec = {
+            inherit (t) rustflags;
+            inherit linker hostLinker;
+          };
+          specTools =
+            named "spec-linker" (lib.filter (x: x != null) [
+              linker
+              hostLinker
+            ])
+            // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
+          hostEnv = envStrings t.host.env;
+          targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
+          targetEnv = envStrings (cEnv // t.env);
+        };
+        runner = if runner == null then null else [ "${runner}" ];
+        inherit (t) testSystem;
+      };
 
   # instantiate's overrides for one workspace on one target, keyed
   # "<name>@<version>".
@@ -353,9 +431,7 @@ let
 
   checkMode =
     wsName: vName: v:
-    if v.mode == "coverage" then
-      throw "breakbulk: workspaces.${wsName}.variants.${vName}: mode `coverage` needs the toolchain spec's rustflags (M3) and is not implemented yet"
-    else if v.benches && (v.mode == "check" || v.mode == "clippy") then
+    if v.benches && (v.mode == "check" || v.mode == "clippy") then
       throw "breakbulk: workspaces.${wsName}.variants.${vName}: `benches` needs a build variant, not `${v.mode}`"
     else
       v;
@@ -377,8 +453,14 @@ let
       v = checkMode wsName vName ws.variants.${vName};
       entries = locks.${wsName};
       sel = ws.targets.${triple}.packages;
+      s = specFor wsName triple;
+      # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
+      # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
+      # set, as stdenv's separateDebugInfo does. Target units only.
+      buildId = lib.optionalAttrs (shippedRemapScopeOf triple v != null) { NIX_SET_BUILD_ID = "1"; };
     in
-    mkWorkspace pkgs {
+    mkWorkspace pkgs (
+      {
       inherit root tools fetchArgs;
       path = ws.path;
       toolchain = {
@@ -396,12 +478,6 @@ let
       extraSources = extraSourcesOf entries;
       packageOverrides = instOverrides entries triple;
       inherit (cfg) strictSources;
-      # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
-      # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
-      # set, as stdenv's separateDebugInfo does. Target units only.
-      targetEnv =
-        lib.optionalAttrs (shippedRemapScopeOf triple v != null) { NIX_SET_BUILD_ID = "1"; }
-        // envStrings (cfg.targets.${triple}.env or { });
       name = "${wsName}-${triple}-${vName}";
       shippedRemapScope = shippedRemapScopeOf triple v;
       packages = testConfigs wsName;
@@ -409,7 +485,36 @@ let
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
       bench = v.benches;
-    };
+      inherit (s) runner testSystem;
+    }
+    // s.mkWorkspace
+    // {
+      targetEnv = buildId // (s.mkWorkspace.targetEnv or { });
+    }
+    # Coverage: `-C instrument-coverage` on target units, through the
+    # spec's rustflags (so under the key the project uses, decision 33).
+    // lib.optionalAttrs (v.mode == "coverage") {
+      spec =
+        let
+          base =
+            if s.mkWorkspace.spec or null != null then
+              s.mkWorkspace.spec
+            else
+              {
+                rustflags = [ ];
+                linker = null;
+                hostLinker = null;
+              };
+        in
+        base
+        // {
+          rustflags = base.rustflags ++ [
+            "-C"
+            "instrument-coverage"
+          ];
+        };
+    }
+    );
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
@@ -553,11 +658,14 @@ let
             {
               packages = productsOf wsName ws triple inst sel;
               tests = testsOf inst sel;
-              testRuns = namedRuns inst sel;
+              testRuns = selectPkgs sel inst.testRuns;
+              # testRuns named as `tests` names test binaries, for repo.checks.
+              namedTestRuns = namedRuns inst sel;
               testApps = selectPkgs sel inst.testApps;
               doctests = selectPkgs sel inst.doctests;
               benches = benchesOf inst sel;
-              benchRuns = namedRuns' inst.benchRuns (_: _: true) sel;
+              benchRuns = selectPkgs sel inst.benchRuns;
+              namedBenchRuns = namedRuns' inst.benchRuns (_: _: true) sel;
             }
             // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
               # Every unit of both plans: for clippy, its lints on every
@@ -580,6 +688,7 @@ let
               lib.head benchVariants
             else
               null;
+          s = specFor wsName triple;
         in
         {
           inherit variants;
@@ -591,13 +700,18 @@ let
             else
               throw "breakbulk: workspaces.${wsName}: several variants have benches (${lib.concatStringsSep ", " benchVariants}) and the default variant does not; use target.<triple>.variants.<v>.benches";
           benchRuns = if benchVariant != null then variants.${benchVariant}.benchRuns else { };
+          namedBenchRuns = if benchVariant != null then variants.${benchVariant}.namedBenchRuns else { };
           inherit (dflt)
             packages
             tests
             testRuns
+            namedTestRuns
             testApps
             doctests
             ;
+          # The target spec's runner (a list: program and arguments, or
+          # null) and test system, as test runs use them.
+          inherit (s) runner testSystem;
         }
       ) instances;
     in
@@ -638,12 +752,12 @@ let
       ) t.packages
       // lib.concatMapAttrs (
         pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
-      ) t.testRuns
+      ) t.namedTestRuns
       // lib.mapAttrs' (pkg: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/doctest" d) t.doctests
       // lib.optionalAttrs cfg.workspaces.${wsName}.benchSmoke (
         lib.concatMapAttrs (
           pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
-        ) t.benchRuns
+        ) t.namedBenchRuns
       )
       // lib.concatMapAttrs (
         vName: v: lib.optionalAttrs (v ? check) { "${wsName}/${triple}/variant-${vName}/check" = v.check; }

@@ -1,0 +1,3 @@
+# getrandom 0.3 picks its wasm32-unknown-unknown backend from a cfg.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", 'getrandom_backend="wasm_js"']

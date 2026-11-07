@@ -102,6 +102,15 @@ pkgs:
   clippyDriver ? null,
   clippyArgs ? [ ],
   bench ? false,
+  # The target's toolchain spec (M3, from lib/repository.nix):
+  #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)
+  #   specTools.<name> = <store path>  tool paths the spec puts in the plan
+  #   hostEnv = { };                    the host spec's env (host units only)
+  #   targetPackageSet                  the target units' env capture's pkgs
+  spec ? null,
+  specTools ? { },
+  hostEnv ? { },
+  targetPackageSet ? pkgs,
 }:
 let
   wsDir = util.normalizeRel path;
@@ -156,6 +165,7 @@ let
         wsDir
         noDefaultFeatures
         allFeatures
+        spec
         ;
       packages = select;
       inherit (toolchain) cargo rustc;
@@ -170,7 +180,7 @@ let
       platform = "host";
     };
     target = envCapture.base {
-      inherit pkgs;
+      pkgs = targetPackageSet;
       platform = "target";
     };
   };
@@ -200,6 +210,14 @@ let
     breakbulk-unit = "${tools.breakbulk-unit}/bin/breakbulk-unit";
     shell = "${pkgs.bash}/bin/bash";
   }
+  # rust-overlay toolchains are symlinkJoins of components; Cargo records
+  # its own resolved path (`CARGO`), which lies in a component.
+  // lib.listToAttrs (
+    lib.imap0 (i: p: lib.nameValuePair "toolchain-component-${toString i}" p) (
+      lib.unique ((toolchain.rustc.paths or [ ]) ++ (toolchain.cargo.paths or [ ]))
+    )
+  )
+  // specTools
   // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
   inst =
@@ -210,7 +228,10 @@ let
       plan = "${plans.${kind}}/plan.json";
       sources = { inherit workspace crates; };
       tools = unitTools;
-      host.envCapture = captures.host;
+      host = {
+        envCapture = captures.host;
+        env = hostEnv;
+      };
       target = {
         envCapture = captures.target;
         env = targetEnv;
@@ -259,6 +280,7 @@ let
       ;
     plan = plans.test;
     inst = tested;
+    coverage = mode == "coverage";
     sources = { inherit workspace crates; };
     tools = unitTools;
   };

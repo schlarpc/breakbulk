@@ -1,0 +1,6 @@
+[workspace]
+resolver = "3"
+members = ["app", "pm", "shared"]
+# hostdep is only ever a build dependency: never built for the target, so
+# its build script always runs as a host unit.
+exclude = ["hostdep"]

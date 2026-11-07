@@ -265,7 +265,10 @@ let
         app-b.test.sourceScope = [ "docs" ];
       };
       targets.${native} = {
-        rustflags = [ "-Cfoo" ];
+        rustflags = [
+          "--cfg"
+          "bb_target_mark"
+        ];
         env.TARGET_MARK = "t";
       };
     }
@@ -464,7 +467,11 @@ in
     assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package") "overrides: no unmatched warning: ${builtins.toJSON ws}";
     assert lib.assertMsg (has "`packages.itoa` matches no package") "overrides: itoa >=2 should match nothing";
     assert lib.assertMsg (has "packages.app-b.test.sourceScope") "overrides: no warning for test.sourceScope";
-    assert lib.assertMsg (has "targets.${native}.rustflags") "overrides: no warning for rustflags";
+    # targets.<triple>.rustflags (M3) reach target units only.
+    assert lib.assertMsg (
+      lib.hasInfix "bb_target_mark" units."libc-0.2.191-lib".drvAttrs.BREAKBULK_UNIT
+      && !(lib.hasInfix "bb_target_mark" units."libc-0.2.191-build-script".drvAttrs.BREAKBULK_UNIT)
+    ) "overrides: target rustflags placement";
     assert lib.assertMsg (!(has "openssl-sys")) "overrides: a curated default warned";
     evalCheck "overrides" (builtins.toJSON ws);
 

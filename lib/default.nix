@@ -25,6 +25,8 @@
 #   breakbulk.sysDefaults       the curated -sys crate module
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
+# Toolchains (M3): breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
+#   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
 #   breakbulk.testApps.mkTestApps { ... } (runnable apps)
 { lib }:
@@ -52,6 +54,16 @@ let
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;
+  };
+  llvmVersions = import ./llvm-versions.nix { inherit lib; };
+  runners = import ./runners.nix { inherit lib; };
+  presets = import ./presets {
+    inherit
+      lib
+      llvmVersions
+      runners
+      wasmBindgen
+      ;
   };
 
   mkFetch =
@@ -153,6 +165,11 @@ in
     products
     variants
     ;
+
+  # Toolchain presets (M3): breakbulk.presets.{linuxGnu, linuxMusl,
+  # staticGlibc, msvc, wasmBrowser, wasmComponent}; runners; the Rust to
+  # LLVM version table.
+  inherit presets runners llvmVersions;
   inherit (stages) mkProduct;
   stageHelpers = stages.helpers;
 }

@@ -1,0 +1,121 @@
+# Test runners for cross targets ("runner" in the target spec;
+# docs/design.md "Tests as products").
+#
+# A runner is an executable invoked as Cargo invokes `target.<triple>.runner`:
+#
+#   <runner> <program> [args...]
+#
+# with the working directory, environment and TMPDIR of the test-run
+# derivation that calls it. Each runner keeps any state it needs (a wine
+# prefix, a browser profile) under $TMPDIR, so it works inside the Nix
+# sandbox with no display, network or writable home.
+#
+#   runners = breakbulk.runners;
+#   runners.wine { inherit pkgs; }                       x86_64 (and i686) Windows .exe
+#   runners.qemuUser { inherit pkgs; arch = "aarch64"; } Linux ELF for another CPU
+#   runners.wasmtime { inherit pkgs; }                    WASI modules and components
+#   runners.wasmBindgenTest { inherit pkgs; wasmBindgen; browser = "node"; }
+#                                                        wasm-bindgen-test binaries
+{ lib }:
+let
+  script =
+    pkgs: name: text:
+    pkgs.writeShellScript name ''
+      set -euo pipefail
+      ${text}
+    '';
+in
+{
+  # wine with a fresh prefix in $TMPDIR (docs/spikes/msvc.md). `wine64` is
+  # wineWow64Packages.minimal: 64-bit and 32-bit programs, no X11.
+  wine =
+    {
+      pkgs,
+      wine ? pkgs.wineWow64Packages.minimal,
+    }:
+    script pkgs "breakbulk-runner-wine" ''
+      tmp="''${TMPDIR:-/tmp}"
+      export HOME="$tmp/wine-home" WINEPREFIX="$tmp/wine-prefix"
+      export WINEDEBUG="''${WINEDEBUG:--all}" WINEDLLOVERRIDES="''${WINEDLLOVERRIDES:-mscoree,mshtml=}"
+      mkdir -p "$HOME"
+      if [ ! -e "$WINEPREFIX/system.reg" ]; then
+        ${wine}/bin/wineboot --init >/dev/null 2>&1 || true
+      fi
+      exec ${wine}/bin/wine "$@"
+    '';
+
+  # qemu user-mode emulation. Programs built against a nixpkgs cross libc
+  # name their dynamic loader by store path, so no -L sysroot is needed.
+  qemuUser =
+    {
+      pkgs,
+      arch,
+      qemu ? pkgs.qemu-user or pkgs.qemu,
+    }:
+    script pkgs "breakbulk-runner-qemu-${arch}" ''
+      exec ${qemu}/bin/qemu-${arch} "$@"
+    '';
+
+  wasmtime =
+    {
+      pkgs,
+      wasmtime ? pkgs.wasmtime,
+      extraArgs ? [ ],
+    }:
+    script pkgs "breakbulk-runner-wasmtime" ''
+      exec ${wasmtime}/bin/wasmtime run ${lib.escapeShellArgs extraArgs} "$@"
+    '';
+
+  # wasm-bindgen-test-runner, which must be the exact version of the
+  # wasm-bindgen crate the test was built with (breakbulk.wasmBindgen).
+  # browser = "node": tests run in Node.js (wasm-bindgen-test's default for
+  # tests without `run_in_browser`). browser = "chromium": headless
+  # Chromium through chromedriver, with a profile under $TMPDIR; tests
+  # marked `run_in_browser` need it. Not yet working inside the Nix
+  # sandbox: chromedriver starts Chromium, but its renderer dies ("Unable to
+  # receive message from renderer"); Node is the tested default.
+  wasmBindgenTest =
+    {
+      pkgs,
+      wasmBindgen,
+      browser ? "node",
+      nodejs ? pkgs.nodejs,
+      chromium ? pkgs.chromium,
+      chromedriver ? pkgs.chromedriver,
+    }:
+    assert lib.assertOneOf "browser" browser [
+      "node"
+      "chromium"
+    ];
+    script pkgs "breakbulk-runner-wasm-bindgen-${browser}" (
+      ''
+        tmp="''${TMPDIR:-/tmp}"
+        export HOME="$tmp/wbt-home"
+        mkdir -p "$HOME"
+        export PATH="${nodejs}/bin''${PATH:+:$PATH}"
+      ''
+      + lib.optionalString (browser == "chromium") ''
+        export CHROMEDRIVER=${chromedriver}/bin/chromedriver
+        # Run tests in the browser even without `run_in_browser`.
+        export WASM_BINDGEN_USE_BROWSER=1
+        export WASM_BINDGEN_TEST_TIMEOUT="''${WASM_BINDGEN_TEST_TIMEOUT:-120}"
+        # wasm-bindgen-test-runner reads webdriver.json from the working
+        # directory for extra capabilities.
+        work="$tmp/wbt-work"
+        mkdir -p "$work"
+        cat > "$work/webdriver.json" <<EOF
+        {"goog:chromeOptions": {"binary": "${chromium}/bin/chromium",
+          "args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
+                   "--disable-gpu", "--no-zygote", "--disable-crash-reporter",
+                   "--disable-breakpad", "--user-data-dir=$tmp/chromium-profile"]}}
+        EOF
+        prog="$(readlink -f "$1")"; shift
+        cd "$work"
+        exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$prog" "$@"
+      ''
+      + lib.optionalString (browser == "node") ''
+        export WASM_BINDGEN_TEST_ONLY_NODE=1
+        exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$@"
+      ''
+    );
+}
