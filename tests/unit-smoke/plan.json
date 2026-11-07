@@ -81,7 +81,8 @@
         "-C", "debuginfo=2", "--check-cfg", "cfg(docsrs,test)", "--check-cfg", "cfg(feature, values())",
         "-C", "metadata=a0e9aa7440d71279", "-C", "extra-filename=-87e5d8c802f76f4a",
         "--target", "x86_64-unknown-linux-gnu",
-        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search" },
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search", "in": "out" },
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search", "in": "other" },
         { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-lib" },
         { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-cfg" },
         { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-check-cfg" }
@@ -118,7 +119,8 @@
         "-C", "metadata=a6654c0a89d81026", "-C", "extra-filename=-b0ba845afe70cf35",
         "--target", "x86_64-unknown-linux-gnu",
         "--extern", ["smokelib=", { "out": "c-a0e9aa7440d71279", "output": "rlib", "file": "libsmokelib-87e5d8c802f76f4a.rlib" }],
-        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search" }
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search", "in": "out" },
+        { "splice": "r-smokelib-63aa584f9c6a6c6c", "kind": "rustc-link-search", "in": "other" }
       ],
       "env": {
         "CARGO_BIN_NAME": "smokeapp", "CARGO_CRATE_NAME": "smokeapp",

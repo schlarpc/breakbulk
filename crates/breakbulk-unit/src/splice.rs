@@ -1,9 +1,9 @@
 //! The wrapping table and splice expansion.
 //!
-//! A splice point in a compile's arguments stands for one kind of directive
-//! from one build-script run. At build time it expands to that run's values,
-//! wrapped as Cargo wraps them (`add_native_deps` and `add_custom_flags` in
-//! Cargo's `src/compiler/mod.rs`, tag `0.100.0`):
+//! A splice point in a compile's arguments stands for some directives of one
+//! build-script run. At build time it expands to that run's values, wrapped
+//! as Cargo wraps them (`add_native_deps` and `add_custom_flags` in Cargo's
+//! `src/compiler/mod.rs`, tag `0.100.0`):
 //!
 //! | Kind | Arguments per value |
 //! | --- | --- |
@@ -14,30 +14,26 @@
 //! | `rustc-link-arg*` | `-C`, `link-arg=`value |
 //! | `rustc-env` | none: env var on the compile |
 //!
-//! Two kinds cannot expand independently at each splice point, because Cargo
-//! does not emit them run by run, kind by kind:
+//! Each splice expands on its own, in place ("Fields" in
+//! `docs/implementation.md`, from spike A's wrapping table):
 //!
 //! - **`rustc-link-search`.** Cargo collects the `-L` paths of every run the
 //!   unit links, then stable-sorts them so that paths inside the printing
-//!   script's own `OUT_DIR` come before all others. Sentinel paths are all
-//!   inside `OUT_DIR`, so the trace shows one splice per run in `to_link`
-//!   order. Expansion emits each run's inside paths at its splice, and every
-//!   run's outside paths, in splice order, after the last link-search splice.
+//!   script's own `OUT_DIR` come before all others. The stub prints one
+//!   sentinel of each class, so the trace shows one splice per class per run,
+//!   where Cargo put it: `"in": "out"` expands to the run's paths inside its
+//!   `out`, `"in": "other"` to its other paths, each in printed order. A
+//!   literal `-L` from a `links` override stays where Cargo placed it.
 //! - **`rustc-link-arg` and its forms.** Cargo keeps one list of link args per
-//!   run in printed order, and passes those that apply to the unit. The trace
-//!   shows one splice per kind that applies, in the order the stub printed
-//!   them. Expansion emits, at the first of a run's link-arg splices, every
-//!   link arg of that run whose kind has a splice in this unit, in printed
-//!   order; the run's other link-arg splices expand to nothing.
-//!
-//! Both rules need the splices concerned to be adjacent, as Cargo emits them;
-//! expansion fails otherwise.
+//!   run in printed order, and passes those that apply to the unit. One splice
+//!   per run carries the set of kinds that apply (`kinds`), and expands to the
+//!   run's link args of those kinds in printed order.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::directives::BuildOutput;
-use crate::spec::{RenderedArg, Splice, SpliceKind};
+use crate::spec::{RenderedArg, SearchIn, Splice, SpliceKind};
 
 /// The arguments one directive value becomes, or `None` for `rustc-env`,
 /// which becomes an env var. The planner checks sentinel placement against
@@ -74,59 +70,46 @@ macro_rules! bail {
     };
 }
 
-fn describe(s: &Splice<String>) -> String {
-    match &s.bin {
-        Some(bin) => format!("{} (bin `{bin}`) from {}", s.kind, s.splice),
-        None => format!("{} from {}", s.kind, s.splice),
+/// A splice in messages: `rustc-cfg from R`, `rustc-link-search (in out) from
+/// R`, `rustc-link-arg [rustc-link-arg, rustc-link-arg-bins] from R`.
+pub fn describe<S: fmt::Display>(s: &Splice<S>) -> String {
+    match (&s.search, &s.kinds) {
+        (Some(SearchIn::Out), _) => format!("{} (in out) from {}", s.kind, s.splice),
+        (Some(SearchIn::Other), _) => format!("{} (in other) from {}", s.kind, s.splice),
+        (None, Some(kinds)) => format!(
+            "{} [{}] from {}",
+            s.kind,
+            kinds
+                .iter()
+                .map(|k| k.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            s.splice
+        ),
+        (None, None) => format!("{} from {}", s.kind, s.splice),
     }
 }
 
-/// Check the shape rules that expansion relies on. The planner runs the same
-/// check on `plan.json`, with unit ids in place of `flags` paths.
+/// Check the shape rules that expansion relies on: every splice has the
+/// fields its kind needs, `rustc-env` is not among the arguments, and no
+/// splice appears twice. The planner runs the same check on `plan.json`, with
+/// unit ids in place of `flags` paths.
 pub fn check_arg_splices<S: Ord + Clone + fmt::Display>(
     splices: &[(usize, &Splice<S>)],
 ) -> Result<(), SpliceError> {
-    let describe = |s: &Splice<S>| match &s.bin {
-        Some(bin) => format!("{} (bin `{bin}`) from {}", s.kind, s.splice),
-        None => format!("{} from {}", s.kind, s.splice),
-    };
     let mut seen = BTreeSet::new();
     for (_, s) in splices {
+        if let Err(e) = s.check_shape() {
+            bail!("splice {}: {e}", describe(s));
+        }
         if s.kind == SpliceKind::RustcEnv {
             bail!(
                 "splice {} is in the arguments; rustc-env belongs in envSplices",
                 describe(s)
             );
         }
-        if (s.kind == SpliceKind::RustcLinkArgBin) != s.bin.is_some() {
-            bail!(
-                "splice {}: `bin` must be given for rustc-link-arg-bin and only for it",
-                describe(s)
-            );
-        }
-        if !seen.insert((s.splice.clone(), s.kind, s.bin.clone())) {
+        if !seen.insert((s.splice.clone(), s.kind, s.search)) {
             bail!("splice {} appears twice", describe(s));
-        }
-    }
-    // Link-search splices, across all runs, must be adjacent.
-    let search: Vec<usize> = splices
-        .iter()
-        .filter(|(_, s)| s.kind == SpliceKind::RustcLinkSearch)
-        .map(|(i, _)| *i)
-        .collect();
-    if search.windows(2).any(|w| w[1] != w[0] + 1) {
-        bail!("rustc-link-search splices are not adjacent in the arguments");
-    }
-    // Each run's link-arg splices must be adjacent.
-    let mut link_args: BTreeMap<&S, Vec<usize>> = BTreeMap::new();
-    for (i, s) in splices {
-        if s.kind.is_link_arg() {
-            link_args.entry(&s.splice).or_default().push(*i);
-        }
-    }
-    for (run, positions) in link_args {
-        if positions.windows(2).any(|w| w[1] != w[0] + 1) {
-            bail!("rustc-link-arg splices from {run} are not adjacent in the arguments");
         }
     }
     Ok(())
@@ -150,31 +133,11 @@ pub fn expand_args<'a>(
         .collect();
     check_arg_splices(&splices)?;
 
-    let lookup = |s: &Splice<String>| {
-        directives(&s.splice)
-            .ok_or_else(|| SpliceError(format!("no directives for splice {}", describe(s))))
-    };
-    let last_search = splices
-        .iter()
-        .rev()
-        .find(|(_, s)| s.kind == SpliceKind::RustcLinkSearch)
-        .map(|(i, _)| *i);
-    // For each run, the link-arg kinds this unit receives.
-    let mut link_kinds: BTreeMap<&str, BTreeSet<(SpliceKind, Option<&str>)>> = BTreeMap::new();
-    for (_, s) in &splices {
-        if s.kind.is_link_arg() {
-            link_kinds
-                .entry(&s.splice)
-                .or_default()
-                .insert((s.kind, s.bin.as_deref()));
-        }
-    }
-
     let mut out = Vec::new();
     let push = |out: &mut Vec<String>, kind: SpliceKind, value: &str| {
         out.extend(wrap(kind, value).expect("argument kinds always wrap"));
     };
-    for (i, arg) in args.iter().enumerate() {
+    for arg in args {
         let s = match arg {
             RenderedArg::Literal(l) => {
                 out.push(l.clone());
@@ -182,7 +145,8 @@ pub fn expand_args<'a>(
             }
             RenderedArg::Splice(s) => s,
         };
-        let d = lookup(s)?;
+        let d = directives(&s.splice)
+            .ok_or_else(|| SpliceError(format!("no directives for splice {}", describe(s))))?;
         match s.kind {
             SpliceKind::RustcCfg => d.cfgs.iter().for_each(|v| push(&mut out, s.kind, v)),
             SpliceKind::RustcCheckCfg => {
@@ -193,32 +157,23 @@ pub fn expand_args<'a>(
                 .iter()
                 .for_each(|v| push(&mut out, s.kind, v)),
             SpliceKind::RustcLinkSearch => {
-                for p in d.library_paths.iter().filter(|p| p.in_out_dir) {
+                let inside = s.search == Some(SearchIn::Out);
+                for p in d.library_paths.iter().filter(|p| p.in_out_dir == inside) {
                     push(&mut out, s.kind, &p.value);
                 }
-                if Some(i) == last_search {
-                    for (_, t) in splices
-                        .iter()
-                        .filter(|(_, t)| t.kind == SpliceKind::RustcLinkSearch)
-                    {
-                        for p in lookup(t)?.library_paths.iter().filter(|p| !p.in_out_dir) {
-                            push(&mut out, s.kind, &p.value);
-                        }
-                    }
-                }
             }
-            SpliceKind::RustcEnv => unreachable!("rejected by check_arg_splices"),
-            _ => {
-                let Some(kinds) = link_kinds.remove(s.splice.as_str()) else {
-                    // A later splice of a run already expanded.
-                    continue;
-                };
+            SpliceKind::RustcLinkArg => {
+                let kinds = s.kinds.as_deref().unwrap_or_default();
                 for a in &d.linker_args {
-                    if kinds.contains(&(a.kind, a.bin.as_deref())) {
+                    if kinds
+                        .iter()
+                        .any(|k| k.kind == a.kind && k.bin.as_deref() == a.bin.as_deref())
+                    {
                         push(&mut out, a.kind, &a.value);
                     }
                 }
             }
+            _ => unreachable!("rejected by check_arg_splices"),
         }
     }
     Ok(out)
@@ -236,7 +191,7 @@ pub fn expand_env<'a>(
     let mut out = env.clone();
     let mut seen = BTreeSet::new();
     for s in env_splices {
-        if s.kind != SpliceKind::RustcEnv || s.bin.is_some() {
+        if s.kind != SpliceKind::RustcEnv || s.check_shape().is_err() {
             bail!("env splice {} is not rustc-env", describe(s));
         }
         if !seen.insert(&s.splice) {

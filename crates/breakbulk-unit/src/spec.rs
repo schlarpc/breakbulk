@@ -7,10 +7,12 @@
 //! `breakbulk-unit`, an input of every unit, does not depend on the plan format.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// What a splice point expands to: one kind of directive from one run.
+/// A directive kind that reaches compiles: what a splice expands, and the kind
+/// of each parsed link argument.
 ///
 /// The names are the directive keys of the `cargo::` syntax. The two spellings
 /// of the cdylib directive (`rustc-link-arg-cdylib`, `rustc-cdylib-link-arg`)
@@ -25,7 +27,7 @@ pub enum SpliceKind {
     RustcLinkSearch,
     RustcLinkArg,
     RustcLinkArgBins,
-    /// `rustc-link-arg-bin=NAME=ARG`; the splice carries `bin`.
+    /// `rustc-link-arg-bin=NAME=ARG`; a [`LinkArgKind`] carries the bin name.
     RustcLinkArgBin,
     RustcLinkArgTests,
     RustcLinkArgBenches,
@@ -91,15 +93,192 @@ impl std::fmt::Display for SpliceKind {
 /// A splice point: "run `splice`'s directives of `kind` go here".
 ///
 /// `S` names the run: a unit id in `plan.json`, the run's `flags` directory in
-/// `BREAKBULK_UNIT`.
+/// `BREAKBULK_UNIT`. The shapes ("Fields" in `docs/implementation.md`):
+///
+/// - `rustc-cfg`, `rustc-check-cfg`, `rustc-link-lib` (arguments) and
+///   `rustc-env` (`envSplices`): the run's values of that kind.
+/// - `rustc-link-search` with `in`: the run's search paths inside its own
+///   `out` (`"in": "out"`), or all its other search paths (`"other"`).
+/// - `rustc-link-arg` with `kinds`: the run's link arguments whose kind is in
+///   `kinds`, in printed order across kinds.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Splice<S = String> {
     pub splice: S,
     pub kind: SpliceKind,
-    /// The bin target name, for `rustc-link-arg-bin` only.
+    /// Which search paths, for `rustc-link-search` only.
+    #[serde(default, rename = "in", skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchIn>,
+    /// The link-arg kinds that apply to the unit, for `rustc-link-arg` only.
+    /// A set: sorted, no duplicates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kinds: Option<Vec<LinkArgKind>>,
+}
+
+impl<S> Splice<S> {
+    /// A splice of one simple kind (`rustc-cfg`, `rustc-check-cfg`,
+    /// `rustc-link-lib`, `rustc-env`).
+    pub fn new(splice: S, kind: SpliceKind) -> Self {
+        Splice {
+            splice,
+            kind,
+            search: None,
+            kinds: None,
+        }
+    }
+
+    /// A `rustc-link-search` splice.
+    pub fn search(splice: S, search: SearchIn) -> Self {
+        Splice {
+            splice,
+            kind: SpliceKind::RustcLinkSearch,
+            search: Some(search),
+            kinds: None,
+        }
+    }
+
+    /// A `rustc-link-arg` splice for the given kinds (sorted here).
+    pub fn link_args(splice: S, kinds: impl IntoIterator<Item = LinkArgKind>) -> Self {
+        let mut kinds: Vec<LinkArgKind> = kinds.into_iter().collect();
+        kinds.sort();
+        kinds.dedup();
+        Splice {
+            splice,
+            kind: SpliceKind::RustcLinkArg,
+            search: None,
+            kinds: Some(kinds),
+        }
+    }
+
+    /// Change what names the run, keeping the shape.
+    pub fn map<T>(&self, f: impl FnOnce(&S) -> T) -> Splice<T> {
+        Splice {
+            splice: f(&self.splice),
+            kind: self.kind,
+            search: self.search,
+            kinds: self.kinds.clone(),
+        }
+    }
+
+    /// Whether the fields fit the kind. `Err` describes the mismatch.
+    pub fn check_shape(&self) -> Result<(), String> {
+        match self.kind {
+            SpliceKind::RustcCfg
+            | SpliceKind::RustcCheckCfg
+            | SpliceKind::RustcLinkLib
+            | SpliceKind::RustcEnv => {
+                if self.search.is_some() || self.kinds.is_some() {
+                    return Err(format!(
+                        "a {} splice takes neither `in` nor `kinds`",
+                        self.kind
+                    ));
+                }
+            }
+            SpliceKind::RustcLinkSearch => {
+                if self.search.is_none() || self.kinds.is_some() {
+                    return Err("a rustc-link-search splice needs `in` and no `kinds`".into());
+                }
+            }
+            SpliceKind::RustcLinkArg => {
+                let Some(kinds) = &self.kinds else {
+                    return Err("a rustc-link-arg splice needs `kinds`".into());
+                };
+                if self.search.is_some() {
+                    return Err("a rustc-link-arg splice takes no `in`".into());
+                }
+                if kinds.is_empty() {
+                    return Err("a rustc-link-arg splice has empty `kinds`".into());
+                }
+                if kinds.windows(2).any(|w| w[0] >= w[1]) {
+                    return Err("`kinds` must be sorted and without duplicates".into());
+                }
+            }
+            k => {
+                return Err(format!(
+                    "{k} is not a splice kind; link-arg kinds go in the `kinds` of a rustc-link-arg splice"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Which of a run's `rustc-link-search` values a splice stands for. Cargo
+/// puts the paths inside the printing script's own `OUT_DIR`
+/// (`LibraryPath::CargoArtifact`) before all others (`External`), across all
+/// runs a unit links; the stub prints one sentinel of each class, so the
+/// trace shows where each class goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchIn {
+    /// Paths inside the run's `out`.
+    Out,
+    /// Every other path.
+    Other,
+}
+
+/// One link-arg kind in a `rustc-link-arg` splice: `rustc-link-arg`,
+/// `rustc-link-arg-bins`, …, or `rustc-link-arg-bin=NAME` for one bin.
+/// Serialized as that string.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LinkArgKind {
+    pub kind: SpliceKind,
+    /// The bin name, for `rustc-link-arg-bin` only.
     pub bin: Option<String>,
+}
+
+impl LinkArgKind {
+    pub fn new(kind: SpliceKind) -> Self {
+        LinkArgKind { kind, bin: None }
+    }
+    pub fn bin(name: impl Into<String>) -> Self {
+        LinkArgKind {
+            kind: SpliceKind::RustcLinkArgBin,
+            bin: Some(name.into()),
+        }
+    }
+}
+
+impl fmt::Display for LinkArgKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.bin {
+            Some(b) => write!(f, "{}={b}", self.kind),
+            None => write!(f, "{}", self.kind),
+        }
+    }
+}
+
+impl std::str::FromStr for LinkArgKind {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let (k, bin) = match s.split_once('=') {
+            Some((k, b)) => (k, Some(b.to_owned())),
+            None => (s, None),
+        };
+        let kind = SpliceKind::ALL
+            .into_iter()
+            .find(|x| x.as_str() == k && x.is_link_arg())
+            .ok_or_else(|| format!("`{s}` is not a link-arg kind"))?;
+        if (kind == SpliceKind::RustcLinkArgBin) != bin.as_ref().is_some_and(|b| !b.is_empty()) {
+            return Err(format!(
+                "`{s}`: rustc-link-arg-bin needs `=NAME`, and only it takes one"
+            ));
+        }
+        Ok(LinkArgKind { kind, bin })
+    }
+}
+
+impl Serialize for LinkArgKind {
+    fn serialize<Se: serde::Serializer>(&self, s: Se) -> Result<Se::Ok, Se::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for LinkArgKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 /// A target of the package a build script belongs to, as `cargo metadata`
@@ -345,21 +524,56 @@ mod tests {
     fn rendered_args_parse() {
         let args: Vec<RenderedArg> = serde_json::from_str(
             r#"["--cfg", {"splice": "/nix/store/x-flags", "kind": "rustc-cfg"},
-                {"splice": "/f", "kind": "rustc-link-arg-bin", "bin": "app"}]"#,
+                {"splice": "/f", "kind": "rustc-link-arg",
+                 "kinds": ["rustc-link-arg", "rustc-link-arg-bin=app"]},
+                {"splice": "/f", "kind": "rustc-link-search", "in": "other"}]"#,
         )
         .unwrap();
         assert_eq!(args[0], RenderedArg::Literal("--cfg".into()));
         assert_eq!(
             args[2],
-            RenderedArg::Splice(Splice {
-                splice: "/f".into(),
-                kind: SpliceKind::RustcLinkArgBin,
-                bin: Some("app".into())
-            })
+            RenderedArg::Splice(Splice::link_args(
+                "/f".to_owned(),
+                [
+                    LinkArgKind::new(SpliceKind::RustcLinkArg),
+                    LinkArgKind::bin("app")
+                ]
+            ))
+        );
+        assert_eq!(
+            args[3],
+            RenderedArg::Splice(Splice::search("/f".to_owned(), SearchIn::Other))
+        );
+        for a in &args[1..] {
+            let RenderedArg::Splice(s) = a else { panic!() };
+            s.check_shape().unwrap();
+        }
+        assert_eq!(
+            serde_json::to_string(&args[2]).unwrap(),
+            r#"{"splice":"/f","kind":"rustc-link-arg","kinds":["rustc-link-arg","rustc-link-arg-bin=app"]}"#
         );
         assert!(
             serde_json::from_str::<RenderedArg>(r#"{"splice": "/f", "kind": "nope"}"#).is_err()
         );
+        for bad in [
+            r#"{"splice": "/f", "kind": "rustc-link-arg", "kinds": ["rustc-cfg"]}"#,
+            r#"{"splice": "/f", "kind": "rustc-link-arg", "kinds": ["rustc-link-arg-bin"]}"#,
+            r#"{"splice": "/f", "kind": "rustc-link-arg", "kinds": ["rustc-link-arg-bins=x"]}"#,
+            r#"{"splice": "/f", "kind": "rustc-link-search", "in": "elsewhere"}"#,
+        ] {
+            assert!(serde_json::from_str::<RenderedArg>(bad).is_err(), "{bad}");
+        }
+        for bad_shape in [
+            Splice::new("/f", SpliceKind::RustcLinkSearch),
+            Splice::new("/f", SpliceKind::RustcLinkArgBins),
+            Splice::link_args("/f", []),
+            Splice {
+                search: Some(SearchIn::Out),
+                ..Splice::new("/f", SpliceKind::RustcCfg)
+            },
+        ] {
+            assert!(bad_shape.check_shape().is_err(), "{bad_shape:?}");
+        }
         assert!(
             serde_json::from_str::<RenderedArg>(r#"{"splice": "/f", "kind": "rustc-cfg", "x": 1}"#)
                 .is_err()

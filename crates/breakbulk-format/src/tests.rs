@@ -249,11 +249,10 @@ fn schema_is_strict() {
 #[test]
 fn invariant_2_references_name_units() {
     let mut p = example();
-    compile(&mut p, "c-ring").args.push(Arg::Splice(Splice {
-        splice: "r-nope".into(),
-        kind: SpliceKind::RustcCheckCfg,
-        bin: None,
-    }));
+    compile(&mut p, "c-ring").args.push(Arg::Splice(Splice::new(
+        "r-nope".into(),
+        SpliceKind::RustcCheckCfg,
+    )));
     compile(&mut p, "c-ring").env.insert(
         "X".into(),
         Text::Concat(vec![Piece::Ref(Reference::Out(OutRef {
@@ -262,11 +261,9 @@ fn invariant_2_references_name_units() {
             file: None,
         }))]),
     );
-    compile(&mut p, "c-ring").env_splices.push(Splice {
-        splice: "c-cfgif".into(),
-        kind: SpliceKind::RustcEnv,
-        bin: None,
-    });
+    compile(&mut p, "c-ring")
+        .env_splices
+        .push(Splice::new("c-cfgif".into(), SpliceKind::RustcEnv));
     run(&mut p, "r-ring")
         .metadata_from
         .insert("r-missing".into());
@@ -337,21 +334,15 @@ fn run_script_must_be_compile_output() {
 #[test]
 fn splice_shapes() {
     let mut p = example();
-    let sp = |kind, bin: Option<&str>| {
-        Arg::Splice(Splice {
-            splice: "r-ring".into(),
-            kind,
-            bin: bin.map(Into::into),
-        })
-    };
+    let sp = |kind| Arg::Splice(Splice::new("r-ring".into(), kind));
     let c = compile(&mut p, "c-ring");
-    c.args.push(sp(SpliceKind::RustcLinkArgBin, Some("nobin")));
-    c.args.push(sp(SpliceKind::RustcEnv, None));
-    c.env_splices.push(Splice {
-        splice: "r-ring".into(),
-        kind: SpliceKind::RustcCfg,
-        bin: None,
-    });
+    c.args.push(Arg::Splice(Splice::link_args(
+        "r-ring".into(),
+        [breakbulk_unit::spec::LinkArgKind::bin("nobin")],
+    )));
+    c.args.push(sp(SpliceKind::RustcEnv));
+    c.env_splices
+        .push(Splice::new("r-ring".into(), SpliceKind::RustcCfg));
     assert_error(
         &p,
         "names bin `nobin`, which run r-ring has no bin target for",
@@ -363,8 +354,19 @@ fn splice_shapes() {
     let mut p = example();
     compile(&mut p, "c-ring")
         .args
-        .push(sp(SpliceKind::RustcCfg, None));
+        .push(sp(SpliceKind::RustcCfg));
     assert_error(&p, "splice rustc-cfg from r-ring appears twice");
+    // Old one-splice-per-kind shapes are rejected.
+    let mut p = example();
+    compile(&mut p, "c-ring")
+        .args
+        .push(sp(SpliceKind::RustcLinkArgBins));
+    assert_error(&p, "rustc-link-arg-bins is not a splice kind");
+    let mut p = example();
+    compile(&mut p, "c-ring")
+        .args
+        .push(sp(SpliceKind::RustcLinkSearch));
+    assert_error(&p, "needs `in`");
 }
 
 #[test]

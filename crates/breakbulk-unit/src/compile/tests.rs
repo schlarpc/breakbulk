@@ -93,21 +93,16 @@ fn appended_arguments() {
 fn invocation_expands_splices_and_env() {
     let mut u = unit(&["--crate-name", "app"]);
     let flags = "/nix/store/r-flags".to_owned();
-    u.args.push(RenderedArg::Splice(Splice {
-        splice: flags.clone(),
-        kind: SpliceKind::RustcCfg,
-        bin: None,
-    }));
-    u.args.push(RenderedArg::Splice(Splice {
-        splice: flags.clone(),
-        kind: SpliceKind::RustcLinkSearch,
-        bin: None,
-    }));
-    u.env_splices.push(Splice {
-        splice: flags.clone(),
-        kind: SpliceKind::RustcEnv,
-        bin: None,
-    });
+    u.args.push(RenderedArg::Splice(Splice::new(
+        flags.clone(),
+        SpliceKind::RustcCfg,
+    )));
+    u.args.push(RenderedArg::Splice(Splice::search(
+        flags.clone(),
+        crate::spec::SearchIn::Out,
+    )));
+    u.env_splices
+        .push(Splice::new(flags.clone(), SpliceKind::RustcEnv));
     u.env.insert("CARGO_PKG_NAME".into(), "app".into());
     u.env.insert("NUM_JOBS".into(), "64".into());
     let d = BuildOutput {
@@ -179,11 +174,10 @@ fn directives_are_read_from_flags_dirs() {
     };
     crate::write_json(&flags.join(crate::DIRECTIVES_FILE), &d).unwrap();
     let mut u = unit(&[]);
-    u.env_splices.push(Splice {
-        splice: flags.display().to_string(),
-        kind: SpliceKind::RustcEnv,
-        bin: None,
-    });
+    u.env_splices.push(Splice::new(
+        flags.display().to_string(),
+        SpliceKind::RustcEnv,
+    ));
     let loaded = load_directives(&u).unwrap();
     assert_eq!(loaded[&flags.display().to_string()], d);
     u.env_splices[0].splice = t.path().join("nope").display().to_string();

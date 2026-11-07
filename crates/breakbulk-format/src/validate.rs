@@ -174,7 +174,7 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
                 }
                 let mut seen = BTreeSet::new();
                 for s in &c.env_splices {
-                    if s.kind != SpliceKind::RustcEnv || s.bin.is_some() {
+                    if s.kind != SpliceKind::RustcEnv || s.check_shape().is_err() {
                         err(
                             id_,
                             format!("envSplices entry from {} has kind {}", s.splice, s.kind),
@@ -297,13 +297,13 @@ fn check_reference(plan: &Plan, r: &Reference) -> Result<(), String> {
 fn check_splice_target(plan: &Plan, s: &Splice) -> Result<(), String> {
     match plan.units.get(&s.splice) {
         Some(Unit::Run(r)) => {
-            if let Some(bin) = &s.bin
-                && !r.targets.iter().any(|t| t.is_bin() && &t.name == bin)
-            {
-                return Err(format!(
-                    "splice {} names bin `{bin}`, which run {} has no bin target for",
-                    s.kind, s.splice
-                ));
+            for bin in s.kinds.iter().flatten().filter_map(|k| k.bin.as_ref()) {
+                if !r.targets.iter().any(|t| t.is_bin() && &t.name == bin) {
+                    return Err(format!(
+                        "splice {} names bin `{bin}`, which run {} has no bin target for",
+                        s.kind, s.splice
+                    ));
+                }
             }
             Ok(())
         }

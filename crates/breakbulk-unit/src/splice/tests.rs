@@ -2,25 +2,26 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::directives::{LibraryPath, LinkArg};
+use crate::spec::LinkArgKind;
 
 fn lit(s: &str) -> RenderedArg {
     RenderedArg::Literal(s.into())
 }
 
 fn sp(run: &str, kind: SpliceKind) -> RenderedArg {
-    RenderedArg::Splice(Splice {
-        splice: run.into(),
-        kind,
-        bin: None,
-    })
+    RenderedArg::Splice(Splice::new(run.into(), kind))
 }
 
-fn sp_bin(run: &str, bin: &str) -> RenderedArg {
-    RenderedArg::Splice(Splice {
-        splice: run.into(),
-        kind: SpliceKind::RustcLinkArgBin,
-        bin: Some(bin.into()),
-    })
+fn search(run: &str, search: SearchIn) -> RenderedArg {
+    RenderedArg::Splice(Splice::search(run.into(), search))
+}
+
+fn link_args(run: &str, kinds: &[LinkArgKind]) -> RenderedArg {
+    RenderedArg::Splice(Splice::link_args(run.into(), kinds.iter().cloned()))
+}
+
+fn k(kind: SpliceKind) -> LinkArgKind {
+    LinkArgKind::new(kind)
 }
 
 fn path(value: &str, in_out_dir: bool) -> LibraryPath {
@@ -143,14 +144,18 @@ fn simple_kinds_expand_in_place() {
 }
 
 #[test]
-fn link_search_sorts_inside_before_outside() {
-    // Cargo: all paths of all runs, stable-sorted CargoArtifact first.
+fn link_search_expands_each_class_where_cargo_put_it() {
+    // As Cargo emits them: every run's inside paths, then every run's
+    // outside paths, with a `links` override's `-L` among the outside ones
+    // in dependency order.
     let got = expand(&[
         lit("before"),
-        sp("/a", SpliceKind::RustcLinkSearch),
-        sp("/b", SpliceKind::RustcLinkSearch),
+        search("/a", SearchIn::Out),
+        search("/b", SearchIn::Out),
+        search("/a", SearchIn::Other),
         lit("-L"),
         lit("/override"),
+        search("/b", SearchIn::Other),
     ])
     .unwrap();
     assert_eq!(
@@ -168,33 +173,35 @@ fn link_search_sorts_inside_before_outside() {
             "-L",
             "/opt/lib",
             "-L",
-            "/b-ext",
+            "/override",
             "-L",
-            "/override"
+            "/b-ext",
         ]
     );
-}
-
-#[test]
-fn link_search_must_be_adjacent() {
-    let e = expand(&[
-        sp("/a", SpliceKind::RustcLinkSearch),
+    // Each splice stands alone: no adjacency rule.
+    let got = expand(&[
+        search("/b", SearchIn::Other),
         lit("x"),
-        sp("/b", SpliceKind::RustcLinkSearch),
+        search("/b", SearchIn::Out),
     ])
-    .unwrap_err();
-    assert!(e.0.contains("not adjacent"), "{e}");
+    .unwrap();
+    assert_eq!(got, ["-L", "/b-ext", "x", "-L", "/out-b"]);
 }
 
 #[test]
 fn link_args_keep_printed_order_across_kinds() {
-    // A bin unit: the stub printed arg, then arg-bins, then arg-bin=app, so
-    // the trace has them in that order; the script printed bins first.
+    // A bin unit receives arg, arg-bins and arg-bin=app; the script printed
+    // bins first.
     let got = expand(&[
         sp("/a", SpliceKind::RustcLinkLib),
-        sp("/a", SpliceKind::RustcLinkArg),
-        sp("/a", SpliceKind::RustcLinkArgBins),
-        sp_bin("/a", "app"),
+        link_args(
+            "/a",
+            &[
+                k(SpliceKind::RustcLinkArg),
+                k(SpliceKind::RustcLinkArgBins),
+                LinkArgKind::bin("app"),
+            ],
+        ),
         lit("end"),
     ])
     .unwrap();
@@ -217,10 +224,13 @@ fn link_args_keep_printed_order_across_kinds() {
         ]
     );
     // A test unit gets `rustc-link-arg` and `-tests` only.
-    let got = expand(&[
-        sp("/a", SpliceKind::RustcLinkArgTests),
-        sp("/a", SpliceKind::RustcLinkArg),
-    ])
+    let got = expand(&[link_args(
+        "/a",
+        &[
+            k(SpliceKind::RustcLinkArgTests),
+            k(SpliceKind::RustcLinkArg),
+        ],
+    )])
     .unwrap();
     assert_eq!(
         got,
@@ -233,26 +243,6 @@ fn link_args_keep_printed_order_across_kinds() {
             "link-arg=all2"
         ]
     );
-}
-
-#[test]
-fn link_args_must_be_adjacent_per_run() {
-    let e = expand(&[
-        sp("/a", SpliceKind::RustcLinkArg),
-        sp("/a", SpliceKind::RustcLinkLib),
-        sp("/a", SpliceKind::RustcLinkArgBins),
-    ])
-    .unwrap_err();
-    assert!(
-        e.0.contains("rustc-link-arg splices from /a are not adjacent"),
-        "{e}"
-    );
-    // Different runs may follow each other.
-    expand(&[
-        sp("/a", SpliceKind::RustcLinkArg),
-        sp("/b", SpliceKind::RustcLinkArg),
-    ])
-    .unwrap();
 }
 
 #[test]
@@ -273,17 +263,26 @@ fn shape_errors() {
         .contains("twice")
     );
     assert!(
-        expand(&[sp("/a", SpliceKind::RustcLinkArgBin)])
+        expand(&[
+            link_args("/a", &[k(SpliceKind::RustcLinkArg)]),
+            link_args("/a", &[k(SpliceKind::RustcLinkArgBins)]),
+        ])
+        .unwrap_err()
+        .0
+        .contains("twice")
+    );
+    // One splice per sentinel kind and class.
+    expand(&[search("/a", SearchIn::Out), search("/a", SearchIn::Other)]).unwrap();
+    assert!(
+        expand(&[search("/a", SearchIn::Out), search("/a", SearchIn::Out)])
             .unwrap_err()
             .0
-            .contains("`bin`")
+            .contains("twice")
     );
-    let bad_bin = RenderedArg::Splice(Splice {
-        splice: "/a".into(),
-        kind: SpliceKind::RustcCfg,
-        bin: Some("x".into()),
-    });
-    assert!(expand(&[bad_bin]).is_err());
+    // Old shapes: a link-arg kind as the splice kind, a search without `in`.
+    assert!(expand(&[sp("/a", SpliceKind::RustcLinkArgBins)]).is_err());
+    assert!(expand(&[sp("/a", SpliceKind::RustcLinkSearch)]).is_err());
+    assert!(expand(&[link_args("/a", &[])]).is_err());
     assert!(
         expand(&[sp("/missing", SpliceKind::RustcCfg)])
             .unwrap_err()
@@ -299,8 +298,9 @@ fn empty_runs_expand_to_nothing() {
         &[
             lit("a"),
             sp("/e", SpliceKind::RustcCfg),
-            sp("/e", SpliceKind::RustcLinkSearch),
-            sp("/e", SpliceKind::RustcLinkArg),
+            search("/e", SearchIn::Out),
+            search("/e", SearchIn::Other),
+            link_args("/e", &[k(SpliceKind::RustcLinkArg)]),
             lit("b"),
         ],
         |_| Some(&empty),
@@ -316,11 +316,7 @@ fn env_splices() {
         ("CARGO_PKG_NAME".to_owned(), "ring".to_owned()),
         ("OUT_DIR".to_owned(), "/out-a".to_owned()),
     ]);
-    let s = |run: &str| Splice {
-        splice: run.to_owned(),
-        kind: SpliceKind::RustcEnv,
-        bin: None,
-    };
+    let s = |run: &str| Splice::new(run.to_owned(), SpliceKind::RustcEnv);
     let got = expand_env(&env, &[s("/a"), s("/b")], |p| d.get(p)).unwrap();
     assert_eq!(
         got,

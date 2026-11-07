@@ -78,11 +78,8 @@ fn env<R: Resolve>(
 }
 
 fn splice<R: Resolve>(s: &Splice, r: &R) -> Result<breakbulk_unit::spec::Splice<String>, R::Error> {
-    Ok(breakbulk_unit::spec::Splice {
-        splice: r.flags(&s.splice)?,
-        kind: s.kind,
-        bin: s.bin.clone(),
-    })
+    let flags = r.flags(&s.splice)?;
+    Ok(s.map(|_| flags))
 }
 
 /// Whether a compile unit links: its own output needs the `rlib`s of its
