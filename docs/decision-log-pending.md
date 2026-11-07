@@ -41,3 +41,12 @@ and so on) are built against a new glibc, which defeats the purpose. The
 preset is meant for projects whose C code is bundled. Should breakbulk warn
 when a package on a zig target declares native inputs? Default: document
 only.
+
+## 103. ASK: zig tests don't prove the program runs on old glibc
+
+zig-built programs ask for the standard Linux loader path, which the Nix
+sandbox doesn't have, so tests run them through the build machine's newer
+glibc. That works (glibc is backward compatible) but doesn't prove the
+program runs on glibc 2.17; only a symbol-version check does that today.
+Option: run tests in a container or VM with an old glibc (heavy).
+Default: symbol-version check only.
