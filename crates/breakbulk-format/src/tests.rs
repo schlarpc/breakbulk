@@ -167,7 +167,6 @@ fn canonical_json_is_sorted_compact_and_stable() {
     assert_eq!(a, b);
     // Building the same plan in another order gives the same bytes.
     let mut q = example();
-    q.roots.push(q.roots[0].clone());
     let units: Vec<_> = std::mem::take(&mut q.units).into_iter().rev().collect();
     q.units.extend(units);
     run(&mut q, "r-ring").targets.insert(
@@ -178,6 +177,30 @@ fn canonical_json_is_sorted_compact_and_stable() {
         },
     );
     assert_eq!(q.to_canonical_json(), a);
+}
+
+/// `roots` is a set (decision 9): read in any order and with repeats, it
+/// is written sorted and once each, the same bytes as before it was typed
+/// as a set.
+#[test]
+fn roots_are_a_set() {
+    let a = example().to_canonical_json();
+    let mut v: serde_json::Value = serde_json::from_str(&a).unwrap();
+    let roots = v["roots"].as_array_mut().unwrap();
+    let app = roots[0].clone();
+    let mut other = app.clone();
+    other["target"] = "aaa".into();
+    *roots = vec![app.clone(), other, app];
+    let p = Plan::from_json(&v.to_string()).unwrap();
+    assert_eq!(p.roots.len(), 2);
+    let c = p.to_canonical_json();
+    let first = c.find(r#""target":"aaa""#).unwrap();
+    let second = c.find(r#""target":"app""#).unwrap();
+    assert!(first < second, "{c}");
+    // One root again: the original bytes.
+    let mut p = p;
+    p.roots.retain(|r| r.target == "app");
+    assert_eq!(p.to_canonical_json(), a);
 }
 
 #[test]
@@ -267,7 +290,13 @@ fn invariant_2_references_name_units() {
     run(&mut p, "r-ring")
         .metadata_from
         .insert("r-missing".into());
-    p.roots[0].unit = "r-ring".into();
+    p.roots = std::mem::take(&mut p.roots)
+        .into_iter()
+        .map(|mut r| {
+            r.unit = "r-ring".into();
+            r
+        })
+        .collect();
     assert_error(&p, "splice rustc-check-cfg names unknown unit r-nope");
     assert_error(&p, "env `X`: reference to unknown unit c-nope");
     assert_error(&p, "splice rustc-env names compile unit c-cfgif");

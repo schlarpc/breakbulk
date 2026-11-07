@@ -1153,8 +1153,8 @@ impl<'a> Builder<'a> {
     /// (with or without the libtest harness) and the lib and bin harnesses
     /// in bench mode. Check and clippy variants link nothing and have no
     /// roots.
-    fn roots(&self) -> Vec<Root> {
-        let mut roots = Vec::new();
+    fn roots(&self) -> BTreeSet<Root> {
+        let mut roots = BTreeSet::new();
         if matches!(
             self.ctx.variant.mode,
             VariantMode::Check | VariantMode::Clippy

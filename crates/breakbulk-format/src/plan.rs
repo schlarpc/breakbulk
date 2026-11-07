@@ -44,8 +44,8 @@ pub struct Plan {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trim_paths_default: bool,
     pub units: BTreeMap<UnitId, Unit>,
-    /// The plan's products. Sorted.
-    pub roots: Vec<Root>,
+    /// The plan's products: a set, serialized as a sorted array.
+    pub roots: BTreeSet<Root>,
     /// Test plans: one traced `rustdoc --test` per library, keyed
     /// `d-<package name>`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

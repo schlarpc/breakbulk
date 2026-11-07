@@ -350,9 +350,13 @@ fn test_spec_of_a_test_root() {
         .into_iter()
         .map(String::from)
         .collect();
-    for r in &mut plan.roots {
-        r.test = true;
-    }
+    plan.roots = std::mem::take(&mut plan.roots)
+        .into_iter()
+        .map(|mut r| {
+            r.test = true;
+            r
+        })
+        .collect();
     inputs.plan = plan;
     inputs.roots = predicted(vec![proot("smokeapp", RootKind::Bin, true, None)]);
     let units = instantiate(&inputs).unwrap();

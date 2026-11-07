@@ -3,8 +3,10 @@
 //! - In a concatenation, adjacent literals are merged and empty literals
 //!   dropped; a concatenation of literals only becomes a plain literal. A
 //!   concatenation with a reference stays an array.
-//! - Arrays that are sets are sorted and deduplicated: `roots`, a run's
-//!   `targets` (and each target's kinds), a crate's `types`. Arrays whose
+//! - Arrays that are sets are sorted and deduplicated: a run's `targets`
+//!   (and each target's kinds), a crate's `types`. Sets typed as
+//!   `BTreeSet` (`roots`, `features`, `metadataFrom`, an output's files)
+//!   are kept sorted and deduplicated by their type. Arrays whose
 //!   order matters (`args`, `program`, `envSplices`) keep their order.
 
 use crate::plan::{Arg, Piece, Plan, Text, Unit};
@@ -103,6 +105,5 @@ impl Plan {
             }
             sort_dedup(&mut d.krate.types);
         }
-        sort_dedup(&mut self.roots);
     }
 }
