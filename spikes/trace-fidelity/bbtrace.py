@@ -24,7 +24,7 @@ HOST = "x86_64-unknown-linux-gnu"
 SCRATCH = Path(os.environ.get("BB_SCRATCH", "/tmp/claude-1000/-home-schlarpc-breakbulk/spike-a/runs"))
 
 
-def stage(fixture: Path) -> Path:
+def stage(fixture: Path, name=None) -> Path:
     """Copies a fixture to a fixed path outside $HOME.
 
     Cargo reads `.cargo/config.toml` from every ancestor of the working
@@ -32,7 +32,7 @@ def stage(fixture: Path) -> Path:
     ~/.cargo/config.toml (here: a `build.build-dir` override) even with a
     scratch CARGO_HOME.
     """
-    dest = SCRATCH / "fixtures" / fixture.name
+    dest = SCRATCH / "fixtures" / (name or fixture.name)
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(fixture, dest, symlinks=True)
@@ -83,7 +83,7 @@ class Run:
         return out
 
 
-def cargo(name, mode, tc_name, fixture, args, *, cwd=None, extra_env=None, keep=False, runner=False):
+def cargo(name, mode, tc_name, fixture, args, *, cwd=None, extra_env=None, keep=False, runner=False, stage_as=None):
     """Runs `cargo ARGS` in `fixture` (or `cwd`) with the given toolchain.
 
     mode: "real" (plain cargo) or "trace" (breakbulk-shim as RUSTC_WRAPPER and RUSTDOC).
@@ -124,7 +124,7 @@ def cargo(name, mode, tc_name, fixture, args, *, cwd=None, extra_env=None, keep=
         env[f"CARGO_TARGET_{HOST.upper().replace('-', '_')}_RUNNER"] = str(rbin)
     if extra_env:
         env.update(extra_env)
-    fixture = stage(Path(fixture))
+    fixture = stage(Path(fixture), stage_as)
     wd = fixture / cwd if cwd else fixture
     if mode == "trace":
         meta = subprocess.run(
@@ -132,10 +132,12 @@ def cargo(name, mode, tc_name, fixture, args, *, cwd=None, extra_env=None, keep=
             cwd=wd, env={k: v for k, v in env.items() if k != "RUSTC_WRAPPER"},
             capture_output=True, text=True,
         )
-        if meta.returncode != 0:
-            raise SystemExit(f"cargo metadata failed:\n{meta.stderr}")
-        (record / "metadata.json").write_text(meta.stdout)
     run = Run(name, mode, tc_name, fixture, wd, args, env, scratch, target, record)
+    if mode == "trace":
+        if meta.returncode != 0:
+            run.returncode, run.stderr = meta.returncode, "cargo metadata failed:\n" + meta.stderr
+            return run
+        (record / "metadata.json").write_text(meta.stdout)
     p = subprocess.run(["cargo", *args], cwd=wd, env=env, capture_output=True, text=True)
     run.returncode, run.stdout, run.stderr = p.returncode, p.stdout, p.stderr
     (scratch / "stdout.txt").write_text(p.stdout)
