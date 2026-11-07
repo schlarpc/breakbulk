@@ -9,6 +9,7 @@
 #   breakbulk.mkVendor pkgs { fetch; entries; ... }
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
 #   breakbulk.xwinSdk { pkgs; crt; sdk; arches; hash; }   (unfree; FOD)
+#   breakbulk.wasmBindgen.forLockfile { pkgs; lockfile; }
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
 # breakbulk.predictedRoots { ... }.
 { lib }:
@@ -69,4 +70,6 @@ in
   mkSkeleton = skeleton.mkSkeleton;
 
   xwinSdk = import ./xwin-sdk.nix { inherit lib; };
+
+  wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
 }
