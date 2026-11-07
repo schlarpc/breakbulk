@@ -248,7 +248,8 @@ impl ProjectConfig {
                         (v, r.is_str()),
                         &what,
                     )?;
-                    self.target_rustflags.insert(key.clone(), old.unwrap_or_default());
+                    self.target_rustflags
+                        .insert(key.clone(), old.unwrap_or_default());
                 }
             }
         }

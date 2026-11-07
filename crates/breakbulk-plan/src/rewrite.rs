@@ -50,10 +50,11 @@ fn is_path_char(c: u8) -> bool {
 }
 
 /// Where a path token ends: at a delimiter that cannot be part of the paths
-/// breakbulk sees.
+/// breakbulk sees, or a control character (Cargo separates the flags in
+/// `CARGO_ENCODED_RUSTFLAGS` with `\x1f`).
 fn token_end(s: &str, from: usize) -> usize {
     s[from..]
-        .find([':', ' ', '\t', '\n', ',', ';', '"', '\'', '='])
+        .find(|c: char| c.is_ascii_control() || [':', ' ', ',', ';', '"', '\'', '='].contains(&c))
         .map_or(s.len(), |i| from + i)
 }
 
@@ -225,5 +226,42 @@ impl Rewriter {
     /// Whether `p` is inside the scratch directory.
     pub fn in_scratch(&self, p: &str) -> bool {
         under(p, &self.scratch).is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encoded_rustflags_separators_end_paths() {
+        let app = "path+file:///build/skeleton/app#0.1.0";
+        let r = Rewriter {
+            scratch: "/build/scratch/target".into(),
+            skeleton: "/build/skeleton".into(),
+            path_packages: vec![("/build/skeleton/app".into(), app.into())],
+            ..Default::default()
+        };
+        let src = |rel: &str| {
+            Piece::Ref(Reference::Src(SrcRef {
+                src: app.into(),
+                rel: rel.into(),
+            }))
+        };
+        let t = r
+            .text(
+                "-L\x1f/build/skeleton/app/a\x1f-L\x1f/build/skeleton/app/b",
+                Some(app),
+            )
+            .unwrap();
+        assert_eq!(
+            t,
+            Text::Concat(vec![
+                Piece::Literal("-L\x1f".into()),
+                src("app/a"),
+                Piece::Literal("\x1f-L\x1f".into()),
+                src("app/b"),
+            ])
+        );
     }
 }
