@@ -44,13 +44,18 @@ let
       ws,
       command ? "build",
       install,
+      # Native inputs the fixture's build scripts need.
+      nativeBuildInputs ? [ ],
+      buildInputs ? [ ],
     }:
     pkgs.runCommandCC "${fixture}-cargo-${command}"
       {
         nativeBuildInputs = [
           pkgs.cargo
           pkgs.rustc
-        ];
+        ]
+        ++ nativeBuildInputs;
+        inherit buildInputs;
       }
       ''
         export CARGO_HOME=$TMPDIR/cargo-home
@@ -74,13 +79,17 @@ let
       kind ? "build",
       cargoArgs ? [ "--workspace" ],
       toolchain ? { inherit (pkgs) cargo rustc; },
+      nativeBuildInputs ? [ ],
+      buildInputs ? [ ],
     }:
     pkgs.runCommandCC "${fixture}-golden-${kind}"
       {
         nativeBuildInputs = [
           toolchain.cargo
           toolchain.rustc
-        ];
+        ]
+        ++ nativeBuildInputs;
+        inherit buildInputs;
       }
       ''
         export CARGO_HOME=$TMPDIR/cargo-home
@@ -101,6 +110,28 @@ let
 
   walking-skeleton = mk "walking-skeleton" { };
   build-dep-leak-ws = mk "build-dep-leak" { };
+
+  # What sys-native's build scripts need, for breakbulk (per package) and
+  # for the plain cargo references (all at once).
+  sysNativeInputs = {
+    nativeBuildInputs = [
+      pkgs.pkg-config
+      pkgs.cmake
+      pkgs.rustPlatform.bindgenHook
+    ];
+    buildInputs = [ pkgs.openssl ];
+  };
+  sysNative = mk "sys-native" {
+    packages = {
+      openssl-sys = {
+        nativeInputs = p: [ p.pkg-config ];
+        inputs = p: [ p.openssl ];
+        env.BB_MARKER = "ssl";
+      };
+      cm-sys.nativeInputs = p: [ p.cmake ];
+      bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
+    };
+  };
 
   # Older stable releases for the golden test, from rust-overlay when the
   # package set has it (the flake's does). nixpkgs' own cargo is the third.
@@ -468,6 +499,134 @@ in
     pkgs.runCommand "tools-narrow-check" { } ''
       echo ${lib.escapeShellArg (lib.concatStringsSep "\n" (lib.attrNames checks))} > $out
     '';
+
+  # `-sys` crates with native inputs declared per package: pkg-config
+  # (openssl-sys), cmake (cm-sys), bindgen and cc (bg-sys). Each package's
+  # env capture and env reach only that package's units (read from every
+  # unit derivation of both plans); `plain`'s build script sees none of
+  # their variables; the product runs as plain cargo's does.
+  sys-native =
+    let
+      ws = sysNative;
+      captureOf = n: ws.overrides.${n}.target.envCapture;
+      expect = {
+        openssl-sys = {
+          capture = captureOf "openssl-sys";
+          marker = "ssl";
+        };
+        cm-sys = {
+          capture = captureOf "cm-sys";
+          marker = null;
+        };
+        bg-sys = {
+          capture = captureOf "bg-sys";
+          marker = null;
+        };
+      };
+      base = {
+        capture = ws.captures.target;
+        marker = null;
+      };
+      # The package a unit derivation belongs to, from its name
+      # (`<package>-<version>-<kind>`).
+      pkgOf =
+        d:
+        lib.findFirst (n: builtins.match "${n}-[0-9].*" d.name != null) null (lib.attrNames expect);
+      unitOf = d: builtins.fromJSON (builtins.unsafeDiscardStringContext d.drvAttrs.BREAKBULK_UNIT);
+      wrong = lib.concatLists (
+        lib.mapAttrsToList (
+          kind: units:
+          lib.concatMap (
+            d:
+            let
+              u = unitOf d;
+              p = pkgOf d;
+              want = if p == null then base else expect.${p};
+              capture = builtins.unsafeDiscardStringContext "${want.capture}";
+            in
+            lib.optional (u.envCapture or null != capture || u.env.BB_MARKER or null != want.marker) "${kind}: ${d.name} (capture ${u.envCapture or "none"}, BB_MARKER ${toString (u.env.BB_MARKER or null)})"
+          ) (lib.attrValues units)
+        ) ws.units
+      );
+      captures = lib.mapAttrs (_: e: e.capture) expect;
+      ref = cargoBuild (
+        {
+          fixture = "sys-native";
+          inherit ws;
+          install = "install -D $t/app $out/bin/app";
+        }
+        // sysNativeInputs
+      );
+    in
+    assert lib.assertMsg (wrong == [ ]) "sys-native: units with the wrong capture or env:\n${lib.concatStringsSep "\n" wrong}";
+    assert lib.assertMsg (
+      lib.length (lib.unique (lib.attrValues captures ++ [ base.capture ])) == 4
+    ) "sys-native: the captures are not distinct";
+    pkgs.runCommand "sys-native-check"
+      {
+        app = ws.packages.app;
+        inherit ref;
+        golden = golden (
+          {
+            fixture = "sys-native";
+            inherit ws;
+          }
+          // sysNativeInputs
+        );
+      }
+      ''
+        got=$($app/bin/app); want=$($ref/bin/app)
+        echo "breakbulk '$got', cargo '$want'"
+        [ "$got" = "openssl=3+ cm=42 bg=7 plain-saw=none" ]
+        [ "''${want% plain-saw=*}" = "''${got% plain-saw=*}" ]
+        mkdir -p $out
+        cp $golden/report $out/
+      '';
+
+  # C objects with debug info record the compiler's switches, including
+  # `-frandom-seed`. The seed is the unit's plan key, so a unit whose
+  # derivation changes without its content changing (here: one extra
+  # attribute, standing in for a new breakbulk-unit or env capture) builds
+  # byte-identical C archives. cm-sys builds with cmake, bg-sys with cc.
+  c-seed =
+    let
+      runOf =
+        p:
+        lib.findFirst (d: d.name == "${p}-0.1.0-build-run") (throw "no run unit for ${p}") (
+          lib.attrValues sysNative.units.build
+        );
+      salted = d: derivation (d.drvAttrs // { breakbulkSalt = "c-seed"; });
+      pair = p: {
+        a = runOf p;
+        b = salted (runOf p);
+      };
+      cm = pair "cm-sys";
+      bg = pair "bg-sys";
+    in
+    pkgs.runCommand "c-seed-check"
+      {
+        nativeBuildInputs = [ pkgs.binutils ];
+        cmA = cm.a.out;
+        cmB = cm.b.out;
+        bgA = bg.a.out;
+        bgB = bg.b.out;
+      }
+      ''
+        [ "$cmA" != "$cmB" ] && [ "$bgA" != "$bgB" ]
+        check() {
+          a=$1; b=$2
+          echo "comparing $a with $b"
+          cmp "$a" "$b"
+          # Not vacuous: the objects record a seed (in DW_AT_producer, in
+          # compressed debug sections), and it is the plan key.
+          rm -rf x && mkdir x && (cd x && ar x "$a")
+          readelf --debug-dump=info x/*.o | grep -o -- '-frandom-seed=[^ ]*' | sort -u | tee seeds
+          grep -q -- '-frandom-seed=r-' seeds
+        }
+        check $cmA/lib/libcm.a $cmB/lib/libcm.a
+        check $bgA/libbg.a $bgB/libbg.a
+        mkdir -p $out
+      '';
 
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =

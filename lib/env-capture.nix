@@ -64,9 +64,10 @@
 # "-rpath <capture>/lib", and every binary a unit links gets it).
 #
 # What units add themselves (breakbulk-unit, env.rs): their own
-# "-frandom-seed=<first 10 chars of the unit's $out basename>" at the start of
-# NIX_CFLAGS_COMPILE, as reproducible-builds.sh does, and -ffile-prefix-map
-# for the source paths they remap.
+# "-frandom-seed=<the unit's plan key>" at the start of NIX_CFLAGS_COMPILE,
+# where reproducible-builds.sh puts the seed (which stdenv derives from $out;
+# the plan key does not change when only the unit's inputs do), and
+# -ffile-prefix-map for the source paths they remap.
 #
 # debug = true also writes $out/debug/: the environment before and after
 # setup (NUL-separated), the shell variables setup left unexported, and the

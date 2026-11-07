@@ -10,6 +10,13 @@
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
 #     features = [ ];
+#     # Per-package overrides (a minimal stand-in for M2's `packages.<name>`):
+#     # they reach only that package's units, on both platforms.
+#     packages.openssl-sys = {
+#       nativeInputs = p: [ p.pkg-config ];   # or a plain list
+#       inputs = p: [ p.openssl ];
+#       env.OPENSSL_NO_VENDOR = "1";
+#     };
 #   };
 #
 #   ws.packages.<bin>          the bin, installed as $out/bin/<bin>
@@ -46,6 +53,8 @@ pkgs:
   configs ? [ ],
   # extraSources.<package name> = [ "<path from the repository root>" ]
   extraSources ? { },
+  # packages.<name> = { nativeInputs; inputs; env; }: see above.
+  packages ? { },
   tools ? mkTools pkgs,
   name ? "breakbulk",
 }:
@@ -99,6 +108,21 @@ let
 
   wsRoots = roots.workspaceRoots { inherit root wsDir; };
 
+  # Each package's own env capture per platform (envCapture.forPackage
+  # gives the base capture when it declares no inputs), and its env.
+  overrides = lib.mapAttrs (
+    n: o:
+    lib.genAttrs [ "host" "target" ] (platform: {
+      env = o.env or { };
+      envCapture = envCapture.forPackage {
+        inherit pkgs platform;
+        name = n;
+        nativeInputs = o.nativeInputs or [ ];
+        inputs = o.inputs or [ ];
+      };
+    })
+  ) packages;
+
   inst =
     kind:
     instantiate {
@@ -116,6 +140,7 @@ let
       };
       host.envCapture = captures.host;
       target.envCapture = captures.target;
+      inherit overrides;
       roots = predictedRoots {
         workspaceRoots = wsRoots;
         planKind = kind;
@@ -147,6 +172,7 @@ in
     vendor
     tools
     captures
+    overrides
     ;
   skeleton = skel;
   sources = { inherit workspace crates; };
