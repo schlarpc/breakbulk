@@ -486,6 +486,23 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
+        # `crtStatic = true` adds the flag (the option once shadowed the
+        # flag list, and the preset failed with "expected a list but found
+        # a Boolean"; found in the field trials).
+        msvcCrtStatic =
+          let
+            p = presets.msvc {
+              inherit pkgs;
+              arch = "x86_64";
+              llvmMajor = 22;
+              crtStatic = true;
+              sdk = {
+                includeDirs = [ "/inc" ];
+                libDirs.x86_64 = [ "/lib" ];
+              };
+            };
+          in
+          lib.elem "target-feature=+crt-static" p.rustflags;
       };
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in

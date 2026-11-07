@@ -255,7 +255,7 @@ let
       stagePreset = mkDefault (extra.stagePreset or "linuxGnu");
     };
 
-  crtStatic = [
+  crtStaticFlags = [
     "-C"
     "target-feature=+crt-static"
   ];
@@ -289,7 +289,7 @@ in
   # (`-C link-self-contained=no` fails: nixpkgs' musl toolchain has no
   # libunwind.a). C code compiles against nixpkgs' musl headers.
   linuxMusl = mkPreset (linuxGnuWith {
-    rustflags = crtStatic;
+    rustflags = crtStaticFlags;
     stagePreset = "linuxMusl";
   });
 
@@ -326,7 +326,7 @@ in
       cxx = mkDefault "${cc}/bin/c++";
       ar = mkDefault "${cc.bintools}/bin/ar";
       rustflags =
-        crtStatic
+        crtStaticFlags
         ++ lib.optionals (relocationModel != null) [
           "-C"
           "relocation-model=${relocationModel}"
@@ -410,7 +410,7 @@ in
         "-isystem"
         d
       ]) incdirs;
-      rustflags = map (d: "-Lnative=${d}") libdirs ++ lib.optionals crtStatic crtStatic;
+      rustflags = map (d: "-Lnative=${d}") libdirs ++ lib.optionals crtStatic crtStaticFlags;
       env = defaultEnv {
         LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
         RC = "${tools}/llvm-rc";
