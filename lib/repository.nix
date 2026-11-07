@@ -247,6 +247,7 @@ let
         path = a.path ++ b.path;
         args = a.args ++ b.args;
         includeIgnored = a.includeIgnored || b.includeIgnored;
+        sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
         binaries = lib.zipAttrsWith (
           _:
           lib.foldl'
@@ -268,6 +269,7 @@ let
         path = [ ];
         args = [ ];
         includeIgnored = false;
+        sourceScope = [ ];
         binaries = { };
       };
     in

@@ -94,6 +94,10 @@ pub mod keys {
     pub fn src(dir: &str) -> String {
         format!("src:{dir}")
     }
+    /// The wider source view of a workspace package's test units.
+    pub fn test_src(dir: &str) -> String {
+        format!("test-src:{dir}")
+    }
     /// A fetched crate's source, by package id.
     pub fn crate_src(id: &str) -> String {
         format!("crate:{id}")
@@ -123,6 +127,9 @@ pub mod keys {
 struct Tokens<'a> {
     inputs: &'a Inputs,
     prefix: &'a str,
+    /// For a test unit (a `--test` compile or a doctest): its package,
+    /// whose source view is the test view when there is one.
+    test_package: Option<String>,
     refs: RefCell<Vec<Ref>>,
     index: RefCell<HashMap<Ref, usize>>,
 }
@@ -132,6 +139,7 @@ impl<'a> Tokens<'a> {
         Tokens {
             inputs,
             prefix,
+            test_package: None,
             refs: RefCell::default(),
             index: RefCell::default(),
         }
@@ -297,7 +305,14 @@ impl Resolve for Tokens<'_> {
                         s.src
                     ));
                 }
-                (self.input(keys::src(dir)), s.rel.as_str())
+                let key = if self.test_package.as_deref() == Some(s.src.as_str())
+                    && self.inputs.sources.workspace_test.contains(dir)
+                {
+                    keys::test_src(dir)
+                } else {
+                    keys::src(dir)
+                };
+                (self.input(key), s.rel.as_str())
             }
             Reference::CrateSrc(s) => {
                 if !self.inputs.sources.crates.contains(&s.crate_src) {
@@ -545,7 +560,12 @@ fn instantiate_unit(
     id: &UnitId,
 ) -> Result<Drv, Error> {
     let unit = &inputs.plan.units[id];
-    let tokens = Tokens::new(inputs, prefix);
+    let mut tokens = Tokens::new(inputs, prefix);
+    if let Unit::Compile(c) = unit
+        && is_test_compile(c)
+    {
+        tokens.test_package = Some(c.package.clone());
+    }
     let rendered =
         render_unit_in(graph, id, &tokens).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = unit_env_value(&rendered).map_err(|e| Error(format!("unit {id}: {e}")))?;
@@ -579,7 +599,8 @@ fn instantiate_unit(
 /// (the log).
 fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, Error> {
     let d = &inputs.plan.doctests[id];
-    let tokens = Tokens::new(inputs, prefix);
+    let mut tokens = Tokens::new(inputs, prefix);
+    tokens.test_package = Some(d.package.clone());
     let rendered = render_doctest(&inputs.plan, id, &tokens)
         .map_err(|e| Error(format!("doctest {id}: {e}")))?;
     let text = to_canonical_json(&rendered).map_err(|e| Error(format!("doctest {id}: {e}")))?;

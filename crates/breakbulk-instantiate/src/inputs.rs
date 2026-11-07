@@ -16,13 +16,17 @@ use serde::Deserialize;
 
 /// `sources.json`: which sources exist.
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Sources {
     /// Workspace packages (and path packages), by their directory relative
     /// to the repository root (`""` for the root). Their source views are
     /// rooted at the repository root, like the planning skeleton.
     #[serde(default)]
     pub workspace: BTreeSet<String>,
+    /// Workspace packages whose test units (test harnesses and doctests)
+    /// get a wider source view (`test.sourceScope`), by directory.
+    #[serde(default)]
+    pub workspace_test: BTreeSet<String>,
     /// Fetched crate sources, by Cargo package id.
     #[serde(default)]
     pub crates: BTreeSet<String>,

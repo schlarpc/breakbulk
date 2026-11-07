@@ -144,6 +144,27 @@ let
     }
   );
   workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views // outsideViews;
+  # Members with `test.sourceScope`: a wider view for their test units, by
+  # directory (instantiate's `sources.workspaceTest`).
+  workspaceTest = lib.listToAttrs (
+    lib.concatLists (
+      lib.mapAttrsToList (
+        pkgName: v:
+        let
+          scope = packages.${pkgName}.test.sourceScope or [ ];
+        in
+        lib.optional (scope != [ ]) (
+          lib.nameValuePair v.dir (
+            sourceViews.sourceView {
+              inherit root memberDirs;
+              pkgDir = v.dir;
+              extraSources = (extraSources.${pkgName} or [ ]) ++ scope;
+            }
+          )
+        )
+      ) views
+    )
+  );
 
   # Check and clippy variants link nothing: no roots, no test runs.
   checking = mode == "check" || mode == "clippy";
@@ -226,7 +247,10 @@ let
       breakbulkInstantiate = tools.breakbulk-instantiate;
       inherit system;
       plan = "${plans.${kind}}/plan.json";
-      sources = { inherit workspace crates; };
+      sources = {
+        inherit workspace crates;
+      }
+      // lib.optionalAttrs (kind == "test") { inherit workspaceTest; };
       tools = unitTools;
       host = {
         envCapture = captures.host;
@@ -281,7 +305,11 @@ let
     plan = plans.test;
     inst = tested;
     coverage = mode == "coverage";
-    sources = { inherit workspace crates; };
+    # Test runs resolve only test units' env: their package's test view.
+    sources = {
+      workspace = workspace // workspaceTest;
+      inherit crates;
+    };
     tools = unitTools;
   };
 

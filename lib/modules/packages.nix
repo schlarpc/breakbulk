@@ -4,7 +4,6 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
-  M4 = bt.notImplemented "M4";
 
   targetOverride =
     { ... }:
@@ -125,11 +124,19 @@ let
             default = [ ];
             description = "Packages added to `PATH` in this package's test runs.";
           };
-          sourceScope = M4 (mkOption {
+          sourceScope = mkOption {
             type = types.listOf (types.either types.path types.str);
             default = [ ];
-            description = "Extra repository paths in the source view of this package's test units, for tests that read repository files.";
-          });
+            example = [ "testdata" ];
+            description = ''
+              Extra repository paths (paths, or strings relative to the
+              repository root) in the source view of this package's test
+              units: its test harnesses (`--test` compiles), doctests and
+              test runs, whose working directory is the package directory
+              of that view. Other units keep the package's normal view, so
+              editing these paths re-runs only this package's tests.
+            '';
+          };
           args = mkOption {
             type = types.listOf types.str;
             default = [ ];
@@ -168,12 +175,6 @@ let
 
       config.warnings =
         bt.unimplementedWarnings "packages.${lib.strings.escapeNixIdentifier name}" options {
-          M4 = [
-            [
-              "test"
-              "sourceScope"
-            ]
-          ];
           M6 = [ [ "pipelining" ] ];
         };
     };

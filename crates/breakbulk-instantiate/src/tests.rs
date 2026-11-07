@@ -33,6 +33,7 @@ fn smoke_inputs() -> Inputs {
         plan: smoke_plan(),
         sources: Sources {
             workspace: ["smokelib".into(), "smokeapp".into()].into(),
+            workspace_test: Default::default(),
             crates: Default::default(),
         },
         toolchains: Toolchains {
@@ -506,6 +507,46 @@ fn unit_name_for_other_crates() {
         unit_name(APP, &plan.units[APP]),
         "smokeapp-0.1.0-test-admin_cli"
     );
+}
+
+/// `test.sourceScope`: a package's test units (here smokeapp's bin, made a
+/// test harness) name its test view; its other units, and other packages'
+/// units, keep the normal views.
+#[test]
+fn test_units_use_the_test_view() {
+    let inputs_of = |test_view: bool| {
+        let mut inputs = smoke_inputs();
+        let Unit::Compile(c) = inputs.plan.units.get_mut(APP).unwrap() else {
+            panic!()
+        };
+        c.args.push(breakbulk_format::Arg::Literal("--test".into()));
+        if test_view {
+            inputs.sources.workspace_test = ["smokeapp".into()].into();
+        }
+        inputs
+    };
+    let keys_of = |d: &Drv| -> Vec<String> {
+        let Value::Parts { parts } = &d.attrs["BREAKBULK_UNIT"] else {
+            panic!()
+        };
+        parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Input { input, .. } if input.contains("src:") => Some(input.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let plain = instantiate(&inputs_of(false)).unwrap();
+    let wide = instantiate(&inputs_of(true)).unwrap();
+    let app = keys_of(&wide.units[APP]);
+    assert!(app.contains(&"test-src:smokeapp".to_owned()), "{app:?}");
+    assert!(!app.contains(&"src:smokeapp".to_owned()), "{app:?}");
+    assert!(!keys_of(&plain.units[APP]).contains(&"test-src:smokeapp".to_owned()));
+    // Every other unit is unchanged.
+    for id in [LIB, SCRIPT, RUN] {
+        assert_eq!(plain.units[id], wide.units[id], "{id}");
+    }
 }
 
 #[test]

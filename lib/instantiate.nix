@@ -62,6 +62,8 @@ rec {
       # plan.json: a path, or a string such as "${planDrv}/plan.json".
       plan,
       # sources.workspace."<dir relative to the repository root>" = source view
+      # sources.workspaceTest."<dir>" = the wider view of that package's test
+      #   units (`test.sourceScope`): its `--test` compiles and doctests
       # sources.crates."<Cargo package id>" = fetched crate source
       sources ? { },
       # Tool name to a store path or a path inside one. Must include
@@ -93,6 +95,7 @@ rec {
     }:
     let
       workspace = sources.workspace or { };
+      workspaceTest = sources.workspaceTest or { };
       crates = sources.crates or { };
       spec = p: { env = { }; envCapture = null; } // p;
       platformSpec = { inherit host target; };
@@ -105,10 +108,13 @@ rec {
         env = lib.attrNames (spec s).env;
         envCapture = (spec s).envCapture != null;
       };
-      sourcesFile = toFile "sources.json" (toJSON {
-        workspace = lib.attrNames workspace;
-        crates = lib.attrNames crates;
-      });
+      sourcesFile = toFile "sources.json" (toJSON (
+        {
+          workspace = lib.attrNames workspace;
+          crates = lib.attrNames crates;
+        }
+        // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
+      ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir;
         tools = lib.mapAttrs (_: noCtx) tools;
@@ -155,6 +161,7 @@ rec {
       # Every key units.json may name, with its value (and context).
       inputs =
         lib.mapAttrs' (d: v: lib.nameValuePair "src:${d}" (str v)) workspace
+        // lib.mapAttrs' (d: v: lib.nameValuePair "test-src:${d}" (str v)) workspaceTest
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
         // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
         // lib.concatMapAttrs (

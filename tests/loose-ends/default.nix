@@ -9,6 +9,11 @@
 #                PATH that Cargo leaves alone without `force`. The fixture's
 #                tests assert the values; the same tests pass under plain
 #                `cargo test` (the set of `test … ok` lines is compared).
+#   test-scope   `packages.a.test.sourceScope = [ "testdata" ]`: a's
+#                integration test reads ../testdata from its working
+#                directory and passes; widening the scope changes exactly
+#                a's test harnesses and doctest (no build-plan unit, no unit
+#                or test run of b); the option gives no warning.
 {
   pkgs ? import (
     let
@@ -96,10 +101,81 @@ let
         mkdir -p $out
         cp got $out/
       '';
+
+  # --- test-scope -----------------------------------------------------------
+
+  native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  mkRepo =
+    modules:
+    breakbulk.mkRepository {
+      inherit pkgs tools modules;
+      root = fixtures + "/test-scope";
+    };
+  scopeBase = {
+    workspaces.main.variants.default.profile = "dev";
+  };
+  noScope = mkRepo [ scopeBase ];
+  withScope = mkRepo [
+    scopeBase
+    { packages.a.test.sourceScope = [ "testdata" ]; }
+  ];
+  instOf = repo: repo.workspaces.main.instances.${native}.default;
+
+  # Unit .drv path -> derivation name, for both plan kinds, plus doctests.
+  drvNames =
+    repo:
+    let
+      i = instOf repo;
+    in
+    lib.listToAttrs (
+      map (u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) (
+        lib.attrValues i.units.build ++ lib.attrValues i.units.test ++ lib.attrValues i.doctests
+      )
+    );
+  changed =
+    before: after:
+    let
+      b = drvNames before;
+    in
+    lib.sort lib.lessThan (
+      lib.unique (lib.attrValues (lib.filterAttrs (d: _: !(b ? ${d})) (drvNames after)))
+    );
+
+  testScope =
+    let
+      got = changed noScope withScope;
+      want = [
+        "a-0.1.0-doctest"
+        "a-0.1.0-test"
+        "a-0.1.0-test-data"
+      ];
+      runs = (instOf withScope).testRuns;
+      warnings = lib.filter (w: lib.hasInfix "sourceScope" w) withScope.warnings;
+    in
+    assert lib.assertMsg (got == want)
+      "test-scope: widening a's test scope changed ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg (warnings == [ ]) "test-scope: ${toString warnings}";
+    # b's test run is the same derivation with or without a's scope.
+    assert lib.assertMsg (
+      runs.b."lib/b".drvPath == (instOf noScope).testRuns.b."lib/b".drvPath
+    ) "test-scope: b's test run changed";
+    pkgs.runCommand "loose-ends-test-scope"
+      {
+        data = runs.a.data;
+        doctest = (instOf withScope).doctests.a;
+      }
+      ''
+        grep -q 'test reads_testdata ... ok' $data/log
+        grep -q 'shout (line 3) ... ok' $doctest/log
+        mkdir -p $out
+        echo ${lib.escapeShellArg (builtins.toJSON got)} > $out/changed
+      '';
 in
 {
   config-env = configEnv;
+  test-scope = testScope;
   workspaces = {
     config-env = configEnvWs;
+    test-scope = withScope;
   };
 }
