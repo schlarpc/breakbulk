@@ -191,6 +191,9 @@ in
   });
 
   targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = rust; };
+  # Without a preset the native target links with rustc's own rust-lld,
+  # which bypasses nixpkgs' linker wrapper (no rpath for libmagic.so).
+  targets.${native}.preset = breakbulk.presets.linuxGnu;
 
   packages = lib.mkMerge [
     {
@@ -198,9 +201,29 @@ in
       # symlinks inside it) at compile time.
       datboi-guest-transform.extraSources = [ "wit" ];
       datboi-guest-extractor.extraSources = [ "wit" ];
+      # The host side of the same worlds (wasmtime's bindgen!).
+      datboi-runtime.extraSources = [ "wit" ];
+      # Tests that include_bytes! fixtures of sibling crates.
+      datboi-runtime.test.sourceScope = [
+        "crates/datboi-ingest/tests/fixtures"
+        "crates/datboi-xf-xgd1-prng/data"
+      ];
+      datboi-exec.test.sourceScope = [ "crates/datboi-runtime/tests/fixtures" ];
 
-      # The `magic` crate links libmagic.
-      magic-sys.inputs = p: [ p.file ];
+      # The `magic` crate links libmagic. magic-sys's build script prints
+      # only `rustc-link-lib=dylib=magic` unless MAGIC_DIR is set, and the
+      # final link happens in the binaries' units, which do not get
+      # magic-sys's inputs; MAGIC_DIR makes it print the search path too.
+      magic-sys.env.MAGIC_DIR = "${lib.getLib pkgs.file}/lib";
+
+      # The curated default sets LIBSQLITE3_SYS_USE_PKG_CONFIG=1, which
+      # replaces rusqlite's `bundled` SQLite (what the crane build ships)
+      # with nixpkgs' sqlite.
+      libsqlite3-sys = {
+        env = lib.mkForce { };
+        nativeInputs = lib.mkForce [ ];
+        inputs = lib.mkForce [ ];
+      };
 
       # Embeds (build-script env, re-exported with rustc-env).
       datboi-runtime.env.DATBOI_COMPONENTS_DIR = "${transforms}/lib";
