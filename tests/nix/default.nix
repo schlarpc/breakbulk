@@ -312,7 +312,8 @@ let
     pkgs.runCommand "source-views" { } ''
       v=${views.virtual-sub.src}
       test -f $v/virtual-sub/src/main.rs
-      test ! -e $v/virtual-sub/nested            # nested package excluded
+      test -f $v/virtual-sub/nested/Cargo.toml    # non-member package dir kept
+      test ! -e $v/virtual-sub/inner              # nested member excluded
       test ! -e $v/crates                         # other packages excluded
       b=${views.bin-dirs.src}
       test -f $b/crates/bin-dirs/src/bin/notes.txt
@@ -387,6 +388,9 @@ in
   vendor-collision = vendorBuild {
     name = "vendor-collision";
     src = fixtures + "/vendor-collision";
+    # One git source pinned by NAR hash (substitutable), one without.
+    fetchArgs.gitHashes."git+https://github.com/dtolnay/itoa?tag=1.0.11#8f392032fadf15b5e6b9b7b6add21875575d67af" =
+      "sha256-5mLf4B3zTZwv3wKgdixL/QJuTuouPlpm01rMFAZ8D6Y=";
     expectOutput = "ok 42";
     expectedMetadata = fixtures + "/vendor-collision/expected-metadata.txt";
   };

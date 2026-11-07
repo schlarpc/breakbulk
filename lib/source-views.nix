@@ -2,9 +2,10 @@
 # repository root, so relative paths that leave the crate directory
 # (`../../wit`, `../shared/assets`) resolve unchanged.
 #
-# Default fileset: the package directory, minus `target/`, `.git`, `result*`
-# at its top level, and minus the directories of other packages nested inside
-# it (other workspace members, or any directory with its own Cargo.toml).
+# Default fileset: the package directory, minus `target/`, `.git` and
+# `result*` at its top level, and minus the directories of other workspace
+# members nested inside it. Other nested Cargo.toml files (test fixtures,
+# examples of generated projects) stay, because the package may read them.
 # Plus `extraSources` at their original relative paths.
 {
   lib,
@@ -17,48 +18,25 @@ let
     filter
     isPath
     isString
-    pathExists
     readDir
     ;
   fs = lib.fileset;
 in
 rec {
-  # Directories below `pkgDir` that hold another package. Walks the package
-  # directory, skipping `target` and dot directories, and stops descending at
-  # the first nested Cargo.toml.
-  nestedPackageDirs =
-    root: pkgDir:
-    let
-      go =
-        rel:
-        let
-          entries = readDir (manifest.at root rel);
-          dirs = filter (n: entries.${n} == "directory" && n != "target" && !(lib.hasPrefix "." n)) (attrNames entries);
-        in
-        lib.concatMap (
-          n:
-          let
-            sub = util.joinRel rel n;
-          in
-          if manifest.hasManifest root sub then [ sub ] else go sub
-        ) dirs;
-    in
-    go pkgDir;
-
-  # The fileset of one package.
+  # The fileset of one package. `memberDirs`: directories of the other
+  # workspace members (relative to root); those below `pkgDir` are removed.
   packageFileset =
     {
       root,
       pkgDir,
       extraSources ? [ ],
-      excludeDirs ? null,
+      memberDirs ? [ ],
     }:
     let
       at = manifest.at root;
       top = readDir (at pkgDir);
-      junk =
-        filter (n: n == "target" || n == ".git" || lib.hasPrefix "result" n) (attrNames top);
-      nested = if excludeDirs == null then nestedPackageDirs root pkgDir else excludeDirs;
+      junk = filter (n: n == "target" || n == ".git" || lib.hasPrefix "result" n) (attrNames top);
+      nested = filter (d: d != pkgDir && util.isUnder pkgDir d) memberDirs;
       toFs =
         x:
         if isPath x then
@@ -67,9 +45,7 @@ rec {
           at (util.normalizeRel x)
         else
           throw "breakbulk: extraSources entries must be paths or strings relative to the repository root";
-      base = fs.difference (at pkgDir) (
-        fs.unions (map (n: at (util.joinRel pkgDir n)) junk ++ map at nested)
-      );
+      base = fs.difference (at pkgDir) (fs.unions (map (n: at (util.joinRel pkgDir n)) junk ++ map at nested));
     in
     fs.unions ([ base ] ++ map toFs extraSources);
 
@@ -80,11 +56,18 @@ rec {
       root,
       pkgDir,
       extraSources ? [ ],
-      excludeDirs ? null,
+      memberDirs ? [ ],
     }:
     fs.toSource {
       inherit root;
-      fileset = packageFileset { inherit root pkgDir extraSources excludeDirs; };
+      fileset = packageFileset {
+        inherit
+          root
+          pkgDir
+          extraSources
+          memberDirs
+          ;
+      };
     };
 
   # Views for every member of a workspace, keyed by package name.
@@ -112,6 +95,7 @@ rec {
           src = sourceView {
             inherit root;
             pkgDir = dir;
+            memberDirs = ws.members;
             extraSources = extraSources.${info.name} or [ ];
           };
         }

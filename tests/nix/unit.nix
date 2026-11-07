@@ -293,6 +293,7 @@ runTests "lib-unit" {
       "crates/proc"
       "shared/util"
       "virtual-sub"
+      "virtual-sub/inner"
     ];
   };
 
