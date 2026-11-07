@@ -948,3 +948,33 @@ features your system Nix doesn't enable: dynamic mode (`nix run
 .#test-dynamic`) and content-addressed test cutoff (currently
 `tests/test-cutoff/run.sh`). Proposed: give the second a `nix run
 .#test-cutoff` entry too, so all opt-in tests are found the same way.
+
+## 88. FYI: independent code review fixed 5 bugs
+
+A reviewer agent re-read the code and fixed: a missing space that could
+glue the C compiler seed flag to the next flag; unescaped quotes in some
+environment values breaking the unit description; `["cdylib",
+"staticlib"]` libraries failing at the link step; config-file rustflags
+merged differently from Cargo; and a hidden skeleton path that escaped
+validation. Each has a regression test. The unit builder changed, so every
+crate rebuilds once.
+
+## 89. ASK: where Windows `.pdb` and DWARF `.dwp` debug files go
+
+The compiler doesn't announce these files, and the unit builder currently
+deletes them with a warning. So Windows products built with debug info
+have no `.pdb`. Putting them in the main output would make the product
+reference intermediate libraries (and possibly sources). Proposed: a
+separate `debug` output on binary build steps, which products' install
+step copies into their own `debug` output, matching how Linux debug info
+is split. Default: do that.
+
+## 90. ASK: one package opting out of debug splitting
+
+How source paths are hidden is decided per target (entry 76). The review
+confirmed the consequence: a package that removes `splitDebug` keeps real
+source paths in its binary, and its default "no source references" check
+fails; a package that adds `splitDebug` on a target without it gets no
+build ID. Options: (a) keep per-target and document "change stages per
+target, not per package" (default); (b) compile the affected libraries
+twice when packages disagree.

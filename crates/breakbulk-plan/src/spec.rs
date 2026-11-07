@@ -81,6 +81,39 @@ pub struct ProjectConfig {
     pub env: BTreeMap<String, bool>,
     /// The files read, in precedence order (lowest first).
     pub files: Vec<PathBuf>,
+    /// The rustflags keys (`build`, `target.<key>`) whose value so far is a
+    /// string, which a later string replaces instead of extending.
+    string_keys: BTreeSet<String>,
+}
+
+/// Merge a later (higher-precedence) rustflags value into `old`, as Cargo's
+/// `ConfigValue::merge` does (`src/cargo/util/context/config_value.rs`,
+/// `merge_helper`): arrays concatenate, lower precedence first; a string
+/// replaces a string; a string and an array do not merge.
+fn merge_rustflags(
+    old: &mut Option<Vec<String>>,
+    strings: &mut BTreeSet<String>,
+    key: String,
+    (new, new_is_string): (Vec<String>, bool),
+    what: &str,
+) -> Result<(), Error> {
+    match old {
+        None => *old = Some(new),
+        Some(old) => match (strings.contains(&key), new_is_string) {
+            (false, false) => old.extend(new),
+            (true, true) => *old = new,
+            _ => bail!(
+                "{what}: `{key}.rustflags` is a string in one config file and an array in another, \
+                 which Cargo does not merge"
+            ),
+        },
+    }
+    if new_is_string {
+        strings.insert(key);
+    } else {
+        strings.remove(&key);
+    }
+    Ok(())
 }
 
 /// A config string list: a whitespace-separated string or an array of
@@ -174,7 +207,13 @@ impl ProjectConfig {
         }
         if let Some(b) = table.get("build").and_then(|b| b.get("rustflags")) {
             let v = string_list(b, &format!("{what}: build.rustflags"))?;
-            self.build_rustflags.get_or_insert_with(Vec::new).extend(v);
+            merge_rustflags(
+                &mut self.build_rustflags,
+                &mut self.string_keys,
+                "build".into(),
+                (v, b.is_str()),
+                &what,
+            )?;
         }
         match table.get("env") {
             None => {}
@@ -201,10 +240,16 @@ impl ProjectConfig {
             for (key, t) in targets {
                 if let Some(r) = t.get("rustflags") {
                     let v = string_list(r, &format!("{what}: target.{key}.rustflags"))?;
+                    let mut old = self.target_rustflags.remove(key);
+                    merge_rustflags(
+                        &mut old,
+                        &mut self.string_keys,
+                        format!("target.{key}"),
+                        (v, r.is_str()),
+                        &what,
+                    )?;
                     self.target_rustflags
-                        .entry(key.clone())
-                        .or_default()
-                        .extend(v);
+                        .insert(key.clone(), old.unwrap_or_default());
                 }
             }
         }
@@ -929,11 +974,9 @@ mod tests {
     #[test]
     fn key_choice() {
         let t = "x86_64-unknown-linux-gnu";
+        // Arrays concatenate, the shallower file's first.
         let d = dir(&[
-            (
-                ".cargo/config.toml",
-                "[build]\nrustflags = \"-C a  -C b\"\n",
-            ),
+            (".cargo/config.toml", "[build]\nrustflags = [\"-Ca\"]\n"),
             (
                 "ws/.cargo/config.toml",
                 "[build]\nrustflags = [\"--cfg\", \"x\"]\n",
@@ -944,16 +987,35 @@ mod tests {
             RustflagsKey::choose(&c, t, &cfgs()).unwrap(),
             (
                 RustflagsKey::Build,
-                vec![
-                    "-C".into(),
-                    "a".into(),
-                    "-C".into(),
-                    "b".into(),
-                    "--cfg".into(),
-                    "x".into()
-                ]
+                vec!["-Ca".into(), "--cfg".into(), "x".into()]
             )
         );
+
+        // A deeper string replaces a string (observed with Cargo 1.99).
+        let d = dir(&[
+            (
+                ".cargo/config.toml",
+                "[build]\nrustflags = \"-C a  -C b\"\n[target.x86_64-unknown-linux-gnu]\nrustflags = \"--cfg t1\"\n",
+            ),
+            (
+                "ws/.cargo/config.toml",
+                "[build]\nrustflags = \"--cfg x\"\n[target.x86_64-unknown-linux-gnu]\nrustflags = \"--cfg t2\"\n",
+            ),
+        ]);
+        let c = read(&d, "ws");
+        assert_eq!(c.build_rustflags, Some(vec!["--cfg".into(), "x".into()]));
+        assert_eq!(
+            RustflagsKey::choose(&c, t, &cfgs()).unwrap(),
+            (RustflagsKey::Target, vec!["--cfg".into(), "t2".into()])
+        );
+
+        // A string and an array do not merge; Cargo fails too.
+        let d = dir(&[
+            (".cargo/config.toml", "[build]\nrustflags = \"-Ca\"\n"),
+            ("ws/.cargo/config.toml", "[build]\nrustflags = [\"-Cb\"]\n"),
+        ]);
+        let e = ProjectConfig::read(&d.join("ws"), None).unwrap_err();
+        assert!(e.0.contains("string in one config file"), "{e}");
 
         let d = dir(&[(
             ".cargo/config.toml",
