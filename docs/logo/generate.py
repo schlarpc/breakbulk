@@ -6,8 +6,20 @@ tip on a cable swung 30° off vertical, all knocked out of a solid hexagon.
 
 Run from anywhere: `python3 docs/logo/generate.py`. It rewrites
 breakbulk.svg and breakbulk-dark.svg next to itself.
+
+With `--font PATH` it also writes the wordmark lockups,
+breakbulk-lockup.svg and breakbulk-lockup-dark.svg. PATH is Big Shoulders
+Display (SIL OFL 1.1), the variable font from google/fonts at
+ofl/bigshouldersdisplay/BigShouldersDisplay[wght].ttf. The text is converted
+to outlines, so the SVGs don't need the font. This step needs fontTools and
+uharfbuzz, for example:
+
+    nix shell --impure --expr 'with import (builtins.getFlake "nixpkgs") {};
+      python3.withPackages (p: [ p.fonttools p.uharfbuzz ])' \
+      --command python3 docs/logo/generate.py --font BigShouldersDisplay[wght].ttf
 """
 
+import argparse
 import math
 from pathlib import Path
 
@@ -34,10 +46,16 @@ CRATE = 11.5  # crate side
 NUDGE = (0.6, 0.4)  # cable anchor, tucked just inside the tip
 HEX_RADIUS = 30
 
-PALETTES = {
-    "breakbulk.svg": {"hex": "#1f2a36", "lambda": "#ffffff", "crate": "#c2511f"},
-    "breakbulk-dark.svg": {"hex": "#d9e1e8", "lambda": "#141a20", "crate": "#e2733f"},
-}
+LIGHT = {"hex": "#1f2a36", "lambda": "#ffffff", "crate": "#c2511f", "text": "#1f2a36"}
+DARK = {"hex": "#d9e1e8", "lambda": "#141a20", "crate": "#e2733f", "text": "#d9e1e8"}
+
+# Wordmark: "break" in the text colour, "bulk" in the crate colour.
+WORD = (("break", "text"), ("bulk", "crate"))
+WEIGHT = 800
+GAP = 9  # between badge and wordmark
+# Ascender top and baseline line up with the ends of the hexagon's flat sides.
+ASCENDER_TOP = 32 - HEX_RADIUS / 2
+BASELINE = 32 + HEX_RADIUS / 2
 
 
 def fmt(x):
@@ -130,7 +148,7 @@ def crate_path(x, y, w):
     return d
 
 
-def badge(colors):
+def badge_shapes(colors):
     hexagon = [
         (32 + HEX_RADIUS * math.cos(math.radians(60 * i + 30)), 32 + HEX_RADIUS * math.sin(math.radians(60 * i + 30)))
         for i in range(6)
@@ -138,22 +156,99 @@ def badge(colors):
     tx, ty = layout()
     lam = place_lambda(tx, ty)
     (ax, ay), (ex, ey), _ = hang(lam)
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">breakbulk</title>
-  <!-- λ from the NixOS snowflake by Simon Frankau and Tim Cuthbertson, CC-BY 4.0
+    return f"""  <!-- λ from the NixOS snowflake by Simon Frankau and Tim Cuthbertson, CC-BY 4.0
        (github.com/NixOS/nixos-artwork, logo/). Modified: single λ, scaled, crate and hexagon added. -->
   <polygon fill="{colors['hex']}" points="{points(hexagon)}"/>
   <polygon fill="{colors['lambda']}" points="{points(lam)}"/>
   <line stroke="{colors['lambda']}" stroke-width="1.6" x1="{fmt(ax)}" y1="{fmt(ay)}" x2="{fmt(ex)}" y2="{fmt(ey)}"/>
   <path fill="{colors['crate']}" fill-rule="evenodd" transform="rotate({SWING} {fmt(ex)} {fmt(ey)})" d="{crate_path(ex - CRATE / 2, ey, CRATE)}"/>
-</svg>
 """
 
 
+def svg(width, body):
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {fmt(width)} 64" role="img" aria-labelledby="title">
+  <title id="title">breakbulk</title>
+{body}</svg>
+"""
+
+
+def badge(colors):
+    return svg(64, badge_shapes(colors))
+
+
+def wordmark(font_path):
+    """Outline the wordmark: one SVG path per run, already kerned.
+
+    Returns [(colour key, path data)] in view-box units and the right edge.
+    """
+    import uharfbuzz as hb
+    from fontTools.pens.boundsPen import BoundsPen
+    from fontTools.pens.svgPathPen import SVGPathPen
+    from fontTools.pens.transformPen import TransformPen
+    from fontTools.ttLib import TTFont
+    from fontTools.varLib.instancer import instantiateVariableFont
+
+    font = instantiateVariableFont(TTFont(font_path), {"wght": WEIGHT})
+    glyphs = font.getGlyphSet()
+    order = font.getGlyphOrder()
+
+    blob = hb.Blob.from_file_path(font_path)
+    hbfont = hb.Font(hb.Face(blob))
+    hbfont.set_variations({"wght": WEIGHT})
+
+    text = "".join(run for run, _ in WORD)
+    buf = hb.Buffer()
+    buf.add_str(text)
+    buf.guess_segment_properties()
+    hb.shape(hbfont, buf, {"kern": True, "liga": False})
+
+    # Scale so the "b" ascender spans ASCENDER_TOP..BASELINE.
+    bp = BoundsPen(glyphs)
+    glyphs["b"].draw(bp)
+    scale = (BASELINE - ASCENDER_TOP) / bp.bounds[3]
+
+    # Left side bearing of the first glyph shouldn't add to the gap.
+    first = BoundsPen(glyphs)
+    glyphs[order[buf.glyph_infos[0].codepoint]].draw(first)
+    x = 64 + GAP - first.bounds[0] * scale
+
+    runs = []
+    pos = 0
+    right = x
+    for run, colour in WORD:
+        pen = SVGPathPen(glyphs, ntos=fmt)
+        for info, gp in zip(buf.glyph_infos[pos : pos + len(run)], buf.glyph_positions[pos : pos + len(run)]):
+            name = order[info.codepoint]
+            # Font units are y-up; flip onto the baseline.
+            t = TransformPen(pen, (scale, 0, 0, -scale, x + gp.x_offset * scale, BASELINE - gp.y_offset * scale))
+            glyphs[name].draw(t)
+            gb = BoundsPen(glyphs)
+            glyphs[name].draw(gb)
+            if gb.bounds:
+                right = max(right, x + gb.bounds[2] * scale)
+            x += gp.x_advance * scale
+        runs.append((colour, pen.getCommands()))
+        pos += len(run)
+    return runs, right
+
+
+def lockup(colors, runs, right):
+    text = "".join(f'  <path fill="{colors[c]}" d="{d}"/>\n' for c, d in runs)
+    return svg(math.ceil(right + 1), badge_shapes(colors) + text)
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--font", help="Big Shoulders Display variable font; also writes the lockups")
+    args = parser.parse_args()
+
     here = Path(__file__).resolve().parent
-    for name, colors in PALETTES.items():
-        (here / name).write_text(badge(colors))
+    (here / "breakbulk.svg").write_text(badge(LIGHT))
+    (here / "breakbulk-dark.svg").write_text(badge(DARK))
+    if args.font:
+        runs, right = wordmark(args.font)
+        (here / "breakbulk-lockup.svg").write_text(lockup(LIGHT, runs, right))
+        (here / "breakbulk-lockup-dark.svg").write_text(lockup(DARK, runs, right))
 
 
 if __name__ == "__main__":

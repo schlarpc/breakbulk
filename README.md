@@ -1,9 +1,9 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/breakbulk-dark.svg">
-  <img src="docs/logo/breakbulk.svg" alt="" width="96" align="right">
-</picture>
-
-# breakbulk
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/breakbulk-lockup-dark.svg">
+    <img src="docs/logo/breakbulk-lockup.svg" alt="breakbulk" width="260">
+  </picture>
+</h1>
 
 breakbulk builds Rust projects with Nix, one derivation per Cargo unit.
 
