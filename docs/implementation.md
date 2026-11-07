@@ -491,6 +491,8 @@ repo = breakbulk.lib.mkRepository {
                                       # check/clippy: allTargets = true (--all-targets; false: plain `cargo check`)
     roots = null;                     # override predicted root names
     devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
+    test.runner = null;               # default test runner of its packages: libtest | nextest
+    test.nextest = { profile = null; configFile = null; package = null; };  # defaults; packages override
     benchSmoke = false;               # run each bench once in test mode, as a check
     docs.noDeps = true;               # cargo doc --no-deps (later)
   };
@@ -517,6 +519,7 @@ repo = breakbulk.lib.mkRepository {
       env = { }; path = [ ]; sourceScope = [ ];
       args = [ ];                     # libtest flags for every test binary, e.g. [ "--skip" "net::" ]
       includeIgnored = false;         # also run #[ignore] tests
+      runner = null;                  # libtest | nextest (null: the workspace's test.runner, else libtest)
       binaries.<binary> = { args = [ ]; enable = true; };  # enable = false: built, not run in checks
     };
     strictSources = null;             # per-package override
@@ -738,7 +741,7 @@ Debuginfo side files (decision 89): the `linked` stage has a second output, `deb
 - **Skipped tests:** a predicted test the plan lacks gets a test-run stub that succeeds and logs the reason.
 - **Test arguments:** `test.args` and `test.binaries.<binary>.args` are passed to the binary; `includeIgnored` adds `--include-ignored`. They are part of the test-run derivation, so changing them re-runs only the affected runs. `enable = false` leaves a binary's run out of `repo.checks`. Every test run sets `RUST_TEST_THREADS=$NIX_BUILD_CORES`.
 - **Test apps:** each test binary also gets a runnable app with the test run's working directory, environment and runner, run on the user's machine. It is the escape hatch for tests that need network, and the way to rerun one binary under a debugger or with a filter. Network access inside `nix flake check` (through a fixed-output test run) is a possible later addition; impure derivations are not used.
-- **nextest.** The first milestones run libtest binaries directly. nextest support comes later, by synthesizing the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts, test groups and default filters from the nextest config apply.
+- **nextest.** Test binaries run directly (libtest) by default. With `test.runner = "nextest"`, each test run synthesizes the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts, test groups and default filters from the nextest config apply; each binary is still its own test run. The setting is per package (`packages.<name>.test.runner`, `.nextest.{profile,configFile,package}`), with a workspace-wide default (`workspaces.<ws>.test.runner` and `.test.nextest.*`, decision 93) that a package's own non-null setting overrides.
 - **Doctests:** one derivation per library crate, from the test plan's traced `rustdoc --test` command. Inputs are the crate's `rlib`, its dependencies with test-plan features, and the source view. Cargo gives `rustdoc --test` an `-L native=` for every run in the invocation, sorted by value, so the derivation also depends on the `flags` output of every run the `searchPathsOf` splice lists, and rebuilds that list at build time. Its dynamic-library path holds every host run's in-`out` search paths. It gets no `-l`. It runs with the target's runner and records the log; it appears in `repo.checks`. There is no cutoff, because compiling and running happen in one rustdoc process. If the toolchain cannot run doctests for a cross target, the derivation is a stub that logs why.
 - **Benches:** `cargo test --no-run` builds no benches, so the test plan has none. Bench binaries come only from the bench variant (`cargo bench --no-run`, bench profile), exposed for running outside Nix. With `benchSmoke`, each bench binary also runs once with `--test` as a check. Timed runs never happen inside Nix.
 

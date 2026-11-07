@@ -170,8 +170,8 @@ let
               itself, as `cargo test` runs it) or `nextest` (cargo-nextest's
               reuse-build mode over the one binary, with the project's
               nextest configuration: retries, timeouts, default filter, test
-              groups). Each binary is still its own test run. `null` means
-              `libtest`.
+              groups). Each binary is still its own test run. `null`: the
+              workspace's `test.runner`, else `libtest`.
             '';
           };
           nextest = {
@@ -179,7 +179,7 @@ let
               type = types.nullOr types.str;
               default = null;
               example = "ci";
-              description = "nextest profile for this package's test runs (`null`: `default`).";
+              description = "nextest profile for this package's test runs (`null`: the workspace's `test.nextest.profile`, else `default`).";
             };
             configFile = mkOption {
               type = types.nullOr types.path;

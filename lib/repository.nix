@@ -276,12 +276,8 @@ let
         includeIgnored = false;
         sourceScope = [ ];
         binaries = { };
-        runner = null;
-        nextest = {
-          profile = null;
-          configFile = null;
-          package = null;
-        };
+        # The workspace's defaults (decision 93); package settings win.
+        inherit (cfg.workspaces.${wsName}.test) runner nextest;
       };
       # nextest reads `.config/nextest.toml` under the Cargo workspace root.
       nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";

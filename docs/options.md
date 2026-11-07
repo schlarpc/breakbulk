@@ -739,7 +739,7 @@ null
 
 
 
-nextest profile for this package’s test runs (` null `: ` default `)\.
+nextest profile for this package’s test runs (` null `: the workspace’s ` test.nextest.profile `, else ` default `)\.
 
 
 
@@ -799,8 +799,8 @@ How this package’s test binaries run: ` libtest ` (the binary
 itself, as ` cargo test ` runs it) or ` nextest ` (cargo-nextest’s
 reuse-build mode over the one binary, with the project’s
 nextest configuration: retries, timeouts, default filter, test
-groups)\. Each binary is still its own test run\. ` null ` means
-` libtest `\.
+groups)\. Each binary is still its own test run\. ` null `: the
+workspace’s ` test.runner `, else ` libtest `\.
 
 
 
@@ -1964,6 +1964,123 @@ null or (list of string)
 
 ```nix
 null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.nextest\.package
+
+
+
+The default cargo-nextest for this workspace’s test runs; a package’s ` test.nextest.package ` wins\.
+
+
+
+*Type:*
+null or package
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.nextest\.configFile
+
+
+
+The default nextest configuration file for this workspace’s
+test runs; a package’s ` test.nextest.configFile ` wins\.
+` null `: the workspace’s ` .config/nextest.toml ` when it
+exists\.
+
+
+
+*Type:*
+null or absolute path
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.nextest\.profile
+
+
+
+The default nextest profile for this workspace’s test runs; a package’s ` test.nextest.profile ` wins (` null `: ` default `)\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+"ci"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.runner
+
+
+
+The default ` packages.<name>.test.runner ` for this
+workspace’s packages: ` libtest ` or ` nextest `\. A package’s own
+setting wins\. ` null ` means ` libtest `\.
+
+
+
+*Type:*
+null or one of “libtest”, “nextest”
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+"nextest"
 ```
 
 *Declared by:*

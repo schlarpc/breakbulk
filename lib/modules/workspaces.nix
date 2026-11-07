@@ -216,6 +216,47 @@ let
           '';
         };
 
+        test = {
+          runner = mkOption {
+            type = types.nullOr (
+              types.enum [
+                "libtest"
+                "nextest"
+              ]
+            );
+            default = null;
+            example = "nextest";
+            description = ''
+              The default `packages.<name>.test.runner` for this
+              workspace's packages: `libtest` or `nextest`. A package's own
+              setting wins. `null` means `libtest`.
+            '';
+          };
+          nextest = {
+            profile = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "ci";
+              description = "The default nextest profile for this workspace's test runs; a package's `test.nextest.profile` wins (`null`: `default`).";
+            };
+            configFile = mkOption {
+              type = types.nullOr types.path;
+              default = null;
+              description = ''
+                The default nextest configuration file for this workspace's
+                test runs; a package's `test.nextest.configFile` wins.
+                `null`: the workspace's `.config/nextest.toml` when it
+                exists.
+              '';
+            };
+            package = mkOption {
+              type = types.nullOr types.package;
+              default = null;
+              description = "The default cargo-nextest for this workspace's test runs; a package's `test.nextest.package` wins.";
+            };
+          };
+        };
+
         benchSmoke = mkOption {
           type = types.bool;
           default = false;
