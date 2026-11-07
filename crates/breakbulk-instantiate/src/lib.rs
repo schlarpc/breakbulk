@@ -18,8 +18,8 @@ use std::fmt;
 
 use breakbulk_format::rendered::{derivation_output, package_name_version};
 use breakbulk_format::{
-    Arg, CompileUnit, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, Unit, UnitId,
-    ValidationOptions, render_unit, to_canonical_json, unit_env_value, validate,
+    Arg, CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, Unit,
+    UnitId, ValidationOptions, render_unit_in, to_canonical_json, unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -59,8 +59,17 @@ pub struct Inputs {
 /// A reference a token stands for.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Ref {
-    Unit { unit: String, output: String },
-    Input { key: String, json: bool },
+    /// `weak`: the path without its string context, for an output the unit
+    /// reaches through its dependencies' manifests.
+    Unit {
+        unit: String,
+        output: String,
+        weak: bool,
+    },
+    Input {
+        key: String,
+        json: bool,
+    },
 }
 
 /// Input keys, shared with `lib/instantiate.nix`.
@@ -142,6 +151,7 @@ impl<'a> Tokens<'a> {
         self.token(Ref::Unit {
             unit: unit.to_owned(),
             output: output.to_owned(),
+            weak: false,
         })
     }
 
@@ -171,9 +181,10 @@ impl<'a> Tokens<'a> {
                 .parse()
                 .map_err(|_| Error(format!("malformed token in {text}")))?;
             parts.push(match refs.get(n) {
-                Some(Ref::Unit { unit, output }) => Part::Unit {
+                Some(Ref::Unit { unit, output, weak }) => Part::Unit {
                     unit: unit.clone(),
                     output: output.clone(),
+                    weak: *weak,
                 },
                 Some(Ref::Input { key, json }) => Part::Input {
                     input: key.clone(),
@@ -304,6 +315,14 @@ impl Resolve for Tokens<'_> {
 
     fn flags(&self, run: &UnitId) -> Result<String, Error> {
         Ok(self.unit(run, "flags"))
+    }
+
+    fn weak_flags(&self, run: &UnitId) -> Result<String, Error> {
+        Ok(self.token(Ref::Unit {
+            unit: run.clone(),
+            output: "flags".into(),
+            weak: true,
+        }))
     }
 
     fn remap_name(&self, base: &Reference) -> Result<String, Error> {
@@ -460,11 +479,16 @@ pub fn unit_outputs(unit: &Unit) -> Vec<String> {
     }
 }
 
-fn instantiate_unit(inputs: &Inputs, prefix: &str, id: &UnitId) -> Result<Drv, Error> {
+fn instantiate_unit(
+    inputs: &Inputs,
+    graph: &Graph,
+    prefix: &str,
+    id: &UnitId,
+) -> Result<Drv, Error> {
     let unit = &inputs.plan.units[id];
     let tokens = Tokens::new(inputs, prefix);
     let rendered =
-        render_unit(&inputs.plan, id, &tokens).map_err(|e| Error(format!("unit {id}: {e}")))?;
+        render_unit_in(graph, id, &tokens).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = unit_env_value(&rendered).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = tokens.tokenize_store_paths(id, &text)?;
     let builder = tokens.input(keys::tool(TOOL_UNIT));
@@ -682,10 +706,11 @@ fn check(inputs: &Inputs) -> Result<(), Error> {
 pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
     check(inputs)?;
     let prefix = token_prefix(inputs);
+    let graph = Graph::new(&inputs.plan);
     let mut units = BTreeMap::new();
     let mut errors = Vec::new();
     for id in inputs.plan.units.keys() {
-        match instantiate_unit(inputs, &prefix, id) {
+        match instantiate_unit(inputs, &graph, &prefix, id) {
             Ok(d) => {
                 units.insert(id.clone(), d);
             }

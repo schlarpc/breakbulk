@@ -374,10 +374,29 @@ pub struct RenderedCompile {
     /// for it. `bin` files go to the derivation output `out`; every other
     /// name is its own derivation output.
     pub outputs: BTreeMap<String, Vec<String>>,
-    /// The crate files of every transitive dependency (`.rmeta`, `.rlib` or
-    /// a proc macro's shared library). `breakbulk-unit` symlinks them into
-    /// one directory and passes it as the only `-L dependency=`.
+    /// Crate files (`.rmeta`, `.rlib` or a proc macro's shared library)
+    /// that `breakbulk-unit` symlinks into one directory, passed as the only
+    /// `-L dependency=`: the files the arguments name, and for a unit that
+    /// links, every crate file below it.
     pub deps: Vec<String>,
+    /// The `rmeta` output directories of the direct library dependencies.
+    /// Each holds a [`crate::manifest::Manifest`]; together, walked down,
+    /// they name every crate file and build-script `flags` directory below
+    /// this unit, and Nix's reference scanning has put all of them in the
+    /// sandbox without the derivation naming them as inputs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dep_manifests: Vec<String>,
+    /// Whether the crate files the manifests name go into the dependency
+    /// directory too: for units that do not link (which `deps` lists only
+    /// the direct dependencies of). A linking unit reads the manifests only
+    /// to write its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub link_manifest_crates: bool,
+    /// For a unit with an `rmeta` output, which gets a manifest: the crate
+    /// files below it that no dependency's manifest names (proc macros it
+    /// names directly).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub manifest_crates: Vec<String>,
     /// `--remap-path-prefix` pairs (from, to) that `breakbulk-unit` adds.
     /// Empty when Cargo's own `trim-paths` remaps are in the arguments.
     /// The same pairs become `-ffile-prefix-map` in `NIX_CFLAGS_COMPILE`.

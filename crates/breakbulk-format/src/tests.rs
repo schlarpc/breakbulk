@@ -705,6 +705,225 @@ fn transitive_crate_deps() {
     assert_eq!(c.deps.len(), 4);
 }
 
+/// A resolver that marks weak references.
+struct Weak;
+
+impl Resolve for Weak {
+    type Error = String;
+    fn reference(&self, r: &Reference) -> Result<String, String> {
+        Fake.reference(r)
+    }
+    fn flags(&self, run: &UnitId) -> Result<String, String> {
+        Fake.flags(run)
+    }
+    fn weak_flags(&self, run: &UnitId) -> Result<String, String> {
+        Ok(format!("weak:{}", Fake.flags(run)?))
+    }
+    fn remap_name(&self, base: &Reference) -> Result<String, String> {
+        Fake.remap_name(base)
+    }
+}
+
+/// Every compile unit's dependency directory, built the way
+/// `breakbulk-unit` builds it from the rendered units and the manifests their
+/// `rmeta` outputs would hold, equals [`crate_deps`]; and every run a unit
+/// reaches only weakly is named by a manifest below it. Returns the number
+/// of weak references.
+pub(crate) fn check_manifests(p: &Plan) -> Result<usize, String> {
+    use breakbulk_unit::manifest::{Below, Manifest};
+    use breakbulk_unit::spec::SpliceKind;
+    let graph = Graph::new(p);
+    let rendered: BTreeMap<&UnitId, _> = p
+        .units
+        .iter()
+        .filter(|(_, u)| matches!(u, Unit::Compile(_)))
+        .map(|(id, _)| match render_unit_in(&graph, id, &Weak).unwrap() {
+            RenderedUnit::Compile(c) => (id, c),
+            RenderedUnit::Run(_) => unreachable!(),
+        })
+        .collect();
+    let strip = |s: &str| s.strip_prefix("weak:").unwrap_or(s).to_owned();
+    // The manifest each rmeta output would hold, by rmeta directory.
+    let mut manifests: BTreeMap<String, (Manifest, Below)> = BTreeMap::new();
+    let walk = |dirs: &[String], manifests: &BTreeMap<String, (Manifest, Below)>| {
+        let mut b = Below::default();
+        for d in dirs {
+            let (m, below) = &manifests[d];
+            b.crates.extend(m.crates.iter().cloned());
+            b.crates.extend(below.crates.iter().cloned());
+            b.flags.extend(m.flags.iter().cloned());
+            b.flags.extend(below.flags.iter().cloned());
+        }
+        b
+    };
+    // Units in dependency order: a unit's manifests are those of units
+    // whose manifests exist already.
+    let mut done: BTreeSet<&UnitId> = BTreeSet::new();
+    let mut weak = 0;
+    while done.len() < rendered.len() {
+        let before = done.len();
+        for (id, c) in &rendered {
+            if done.contains(id) || !c.dep_manifests.iter().all(|d| manifests.contains_key(d)) {
+                continue;
+            }
+            done.insert(id);
+            let below = walk(&c.dep_manifests, &manifests);
+            let mut have: BTreeSet<String> = c.deps.iter().cloned().collect();
+            if c.link_manifest_crates {
+                have.extend(below.crates.iter().cloned());
+            }
+            let want: BTreeSet<String> = crate_deps(p, id)
+                .into_iter()
+                .map(|o| Fake.reference(&Reference::Out(o)).unwrap())
+                .collect();
+            if have != want {
+                return Err(format!("{id}: deps {have:?}, expected {want:?}"));
+            }
+            let mut flags: Vec<&str> = c
+                .args
+                .iter()
+                .filter_map(|a| match a {
+                    RenderedArg::Splice(s) => Some(s.splice.as_str()),
+                    RenderedArg::Literal(_) => None,
+                })
+                .collect();
+            flags.extend(c.env_splices.iter().map(|s| s.splice.as_str()));
+            flags.extend(c.dylib_path_from.iter().map(String::as_str));
+            for f in flags {
+                if let Some(path) = f.strip_prefix("weak:") {
+                    weak += 1;
+                    if !below.flags.contains(path) {
+                        return Err(format!("{id}: weak {path} is in no manifest below"));
+                    }
+                }
+            }
+            if let Some(files) = c.outputs.get("rmeta") {
+                let dir = Fake
+                    .reference(&Reference::Out(OutRef {
+                        out: (*id).clone(),
+                        output: "rmeta".into(),
+                        file: None,
+                    }))
+                    .unwrap();
+                let mut m = Manifest {
+                    crates: files.iter().map(|f| format!("{dir}/{f}")).collect(),
+                    flags: BTreeSet::new(),
+                    deps: c.dep_manifests.iter().cloned().collect(),
+                };
+                m.crates.extend(c.manifest_crates.iter().cloned());
+                for a in &c.args {
+                    if let RenderedArg::Splice(s) = a
+                        && s.kind == SpliceKind::RustcLinkSearch
+                        && !below.flags.contains(&strip(&s.splice))
+                    {
+                        m.flags.insert(strip(&s.splice));
+                    }
+                }
+                manifests.insert(dir, (m, below));
+            }
+        }
+        if done.len() == before {
+            return Err("a unit names a manifest that no unit writes".into());
+        }
+    }
+    Ok(weak)
+}
+
+#[test]
+fn manifests_reach_what_crate_deps_lists() {
+    let mut p = dep_graph();
+    // mid has a build script whose search paths reach top and bin; leaf
+    // has one too.
+    for (pkg, rid) in [("c-mid", "r-mid"), ("c-leaf", "r-leaf")] {
+        let mut r = run(&mut example(), "r-ring").clone();
+        r.package = format!("pkg-{pkg}");
+        p.units.insert(rid.into(), Unit::Run(r));
+        compile(&mut p, pkg)
+            .args
+            .push(Arg::Splice(Splice::search(rid.into(), SearchIn::Out)));
+    }
+    for id in ["c-mid", "c-top", "c-bin"] {
+        compile(&mut p, id).args.push(Arg::Splice(Splice::search(
+            "r-leaf".into(),
+            SearchIn::Other,
+        )));
+    }
+    for id in ["c-top", "c-bin"] {
+        compile(&mut p, id)
+            .args
+            .push(Arg::Splice(Splice::search("r-mid".into(), SearchIn::Out)));
+    }
+    // Weak: r-leaf in mid (leaf's manifest names it), r-leaf and r-mid in
+    // top (mid's manifest and the one below it). bin links and has no
+    // rmeta output, so it reads no manifests and names everything.
+    compile(&mut p, "c-bin").outputs =
+        BTreeMap::from([("bin".into(), BTreeSet::from(["bin-1".to_owned()]))]);
+    assert_eq!(check_manifests(&p), Ok(3));
+    // A linking library with an rmeta output (a cdylib that is also an
+    // rlib) reads its dependencies' manifests to write its own.
+    let mut q = p.clone();
+    compile(&mut q, "c-bin").outputs = BTreeMap::from([
+        ("bin".into(), BTreeSet::from(["libbin.so".to_owned()])),
+        (
+            "rmeta".into(),
+            BTreeSet::from(["libbin-1.rmeta".to_owned()]),
+        ),
+        ("rlib".into(), BTreeSet::from(["libbin-1.rlib".to_owned()])),
+    ]);
+    assert_eq!(check_manifests(&q), Ok(5));
+    let RenderedUnit::Compile(top) = render_unit(&p, &"c-top".into(), &Weak).unwrap() else {
+        panic!()
+    };
+    assert_eq!(top.deps, ["/nix/store/c-mid-rmeta/libmid-1.rmeta"]);
+    assert_eq!(top.dep_manifests, ["/nix/store/c-mid-rmeta"]);
+    assert!(top.link_manifest_crates);
+    let splices: Vec<&str> = top
+        .args
+        .iter()
+        .filter_map(|a| match a {
+            RenderedArg::Splice(s) => Some(s.splice.as_str()),
+            RenderedArg::Literal(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        splices,
+        [
+            "weak:/nix/store/r-leaf-flags",
+            "weak:/nix/store/r-mid-flags"
+        ]
+    );
+    // mid names the proc macro directly, so its manifest lists it.
+    let RenderedUnit::Compile(mid) = render_unit(&p, &"c-mid".into(), &Weak).unwrap() else {
+        panic!()
+    };
+    assert_eq!(mid.manifest_crates, ["/nix/store/c-pm-rlib/libpm-1.so"]);
+    // The bin links: every rlib, no manifests, nothing weak.
+    let RenderedUnit::Compile(bin) = render_unit(&p, &"c-bin".into(), &Weak).unwrap() else {
+        panic!()
+    };
+    assert_eq!(bin.deps.len(), 4);
+    assert!(bin.dep_manifests.is_empty() && !bin.link_manifest_crates);
+    assert!(
+        !unit_env_value(&RenderedUnit::Compile(bin))
+            .unwrap()
+            .contains("weak:")
+    );
+}
+
+/// [`check_manifests`] over real plans: `BREAKBULK_CHECK_PLANS` is a
+/// `:`-separated list of `plan.json` files.
+#[test]
+fn manifests_on_plans_from_env() {
+    let Some(list) = std::env::var_os("BREAKBULK_CHECK_PLANS") else {
+        return;
+    };
+    for path in std::env::split_paths(&list) {
+        let p = Plan::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let weak = check_manifests(&p).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        eprintln!("{}: ok, {weak} weak references", path.display());
+    }
+}
+
 #[test]
 fn render_and_expand() {
     let p = example();

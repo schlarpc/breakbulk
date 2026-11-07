@@ -1,10 +1,11 @@
 //! Rendering a plan unit into the `BREAKBULK_UNIT` value.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::merge_layer;
 use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUnit};
 
+use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
     Arg, CompileUnit, CrateSrcRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, Text, Unit,
@@ -20,6 +21,13 @@ pub trait Resolve {
     fn reference(&self, r: &Reference) -> Result<String, Self::Error>;
     /// The `flags` output directory of a run unit.
     fn flags(&self, run: &UnitId) -> Result<String, Self::Error>;
+    /// The same path, for a run the unit reaches only through its
+    /// dependencies' manifests ([`crate::deps`]): the unit's derivation
+    /// names it, but need not have it as an input. The default is
+    /// [`Resolve::flags`].
+    fn weak_flags(&self, run: &UnitId) -> Result<String, Self::Error> {
+        self.flags(run)
+    }
     /// The stable name a source base is remapped to with
     /// `--remap-path-prefix`. `base` is a `src` or `crateSrc` reference with
     /// an empty `rel` (a source view or crate source), or a run's `out`
@@ -77,9 +85,21 @@ fn env<R: Resolve>(
         .collect()
 }
 
-fn splice<R: Resolve>(s: &Splice, r: &R) -> Result<breakbulk_unit::spec::Splice<String>, R::Error> {
-    let flags = r.flags(&s.splice)?;
+fn splice<R: Resolve>(
+    s: &Splice,
+    r: &R,
+    weak: &BTreeSet<UnitId>,
+) -> Result<breakbulk_unit::spec::Splice<String>, R::Error> {
+    let flags = flags(&s.splice, r, weak)?;
     Ok(s.map(|_| flags))
+}
+
+fn flags<R: Resolve>(run: &UnitId, r: &R, weak: &BTreeSet<UnitId>) -> Result<String, R::Error> {
+    if weak.contains(run) {
+        r.weak_flags(run)
+    } else {
+        r.flags(run)
+    }
 }
 
 /// Whether a compile unit links: its own output needs the `rlib`s of its
@@ -94,85 +114,6 @@ pub fn is_linking(c: &CompileUnit) -> bool {
         .args
         .iter()
         .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
-}
-
-fn is_proc_macro(c: &CompileUnit) -> bool {
-    c.krate.types.iter().any(|t| t == "proc-macro")
-}
-
-/// The crate files a compile unit names directly in its arguments: `out`
-/// references to another compile unit's outputs other than `bin`.
-fn direct_crate_refs<'a>(plan: &'a Plan, c: &'a CompileUnit) -> impl Iterator<Item = &'a OutRef> {
-    c.args.iter().flat_map(move |a| {
-        let pieces: &[Piece] = match a {
-            Arg::Concat(p) => p,
-            _ => &[],
-        };
-        pieces.iter().filter_map(move |p| match p {
-            Piece::Ref(Reference::Out(o))
-                if o.output != "bin"
-                    && matches!(plan.units.get(&o.out), Some(Unit::Compile(_))) =>
-            {
-                Some(o)
-            }
-            _ => None,
-        })
-    })
-}
-
-/// Every crate file rustc may need to load for unit `id`: the files its
-/// arguments name, plus, for each of those crates, the crates it depends on,
-/// transitively. This replaces Cargo's shared `deps` directory.
-///
-/// Transitive crates are taken as `rlib` when the unit links (see [`is_linking`])
-/// and as `rmeta` otherwise, falling back to whatever the dependency's own
-/// arguments named when that output does not exist. A proc macro's
-/// dependencies are not followed: they are linked into the proc macro, and
-/// rustc does not load them.
-///
-/// # Panics
-///
-/// If `id` is not a compile unit of `plan`.
-pub fn crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
-    let Some(Unit::Compile(c)) = plan.units.get(id) else {
-        panic!("{id} is not a compile unit of the plan");
-    };
-    let want = if is_linking(c) { "rlib" } else { "rmeta" };
-    let mut out: BTreeSet<OutRef> = BTreeSet::new();
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
-    let mut queue: VecDeque<&str> = VecDeque::new();
-    for o in direct_crate_refs(plan, c) {
-        out.insert(o.clone());
-        if seen.insert(&o.out) {
-            queue.push_back(&o.out);
-        }
-    }
-    while let Some(dep) = queue.pop_front() {
-        let Some(Unit::Compile(d)) = plan.units.get(dep) else {
-            continue;
-        };
-        if is_proc_macro(d) {
-            continue;
-        }
-        for o in direct_crate_refs(plan, d) {
-            let Some(Unit::Compile(e)) = plan.units.get(&o.out) else {
-                continue;
-            };
-            let chosen = match e.outputs.get(want) {
-                Some(files) if files.len() == 1 && !is_proc_macro(e) => OutRef {
-                    out: o.out.clone(),
-                    output: want.to_owned(),
-                    file: files.iter().next().cloned(),
-                },
-                _ => o.clone(),
-            };
-            out.insert(chosen);
-            if seen.insert(&o.out) {
-                queue.push_back(&o.out);
-            }
-        }
-    }
-    out
 }
 
 /// The bases a compile unit's paths are remapped from: the source view or
@@ -240,6 +181,21 @@ pub fn default_remap_scope(
 ///
 /// If `id` is not a unit of `plan`.
 pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<RenderedUnit, R::Error> {
+    render_unit_in(&Graph::new(plan), id, r)
+}
+
+/// [`render_unit`] with a [`Graph`] shared across the units of one plan,
+/// which memoizes their dependency sets.
+///
+/// # Panics
+///
+/// If `id` is not a unit of the graph's plan.
+pub fn render_unit_in<R: Resolve>(
+    graph: &Graph,
+    id: &UnitId,
+    r: &R,
+) -> Result<RenderedUnit, R::Error> {
+    let plan = graph.plan;
     let mut unit = plan
         .units
         .get(id)
@@ -250,6 +206,16 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
     let env_capture = r.env_capture(id, &unit)?;
     Ok(match &unit {
         Unit::Compile(c) => {
+            let deps = graph.unit_deps(id);
+            let weak = &*deps.reachable_runs;
+            let out = |o: OutRef| r.reference(&Reference::Out(o));
+            let rmeta_dir = |u: &UnitId| {
+                out(OutRef {
+                    out: u.clone(),
+                    output: "rmeta".into(),
+                    file: None,
+                })
+            };
             let mut env = env(&c.env, r)?;
             merge_layer(&mut env, overlay);
             let (remap, remap_scope) = if plan.trim_paths {
@@ -288,7 +254,7 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                             Arg::Concat(p) => {
                                 RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?)
                             }
-                            Arg::Splice(s) => RenderedArg::Splice(splice(s, r)?),
+                            Arg::Splice(s) => RenderedArg::Splice(splice(s, r, weak)?),
                             Arg::SearchPaths(_) => {
                                 panic!("searchPathsOf splices appear only in doctests (validated)")
                             }
@@ -299,12 +265,12 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                 env_splices: c
                     .env_splices
                     .iter()
-                    .map(|s| splice(s, r))
+                    .map(|s| splice(s, r, weak))
                     .collect::<Result<_, _>>()?,
                 dylib_path_from: c
                     .dylib_path_from
                     .iter()
-                    .map(|u| r.flags(u))
+                    .map(|u| flags(u, r, weak))
                     .collect::<Result<_, _>>()?,
                 cwd: r.reference(&c.cwd)?,
                 outputs: c
@@ -312,10 +278,10 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                     .iter()
                     .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                     .collect(),
-                deps: crate_deps(plan, id)
-                    .into_iter()
-                    .map(|o| r.reference(&Reference::Out(o)))
-                    .collect::<Result<_, _>>()?,
+                deps: sorted(deps.deps.iter().cloned().map(out))?,
+                dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,
+                link_manifest_crates: deps.link_manifest_crates,
+                manifest_crates: sorted(deps.manifest_crates.iter().cloned().map(out))?,
                 remap,
                 remap_scope,
                 env_capture,
@@ -364,6 +330,14 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
             })
         }
     })
+}
+
+/// Collect rendered paths, sorted and without duplicates.
+fn sorted<E>(paths: impl Iterator<Item = Result<String, E>>) -> Result<Vec<String>, E> {
+    Ok(paths
+        .collect::<Result<BTreeSet<String>, E>>()?
+        .into_iter()
+        .collect())
 }
 
 /// A run's remap pairs: as a compile unit's, from [`remap_bases`], without

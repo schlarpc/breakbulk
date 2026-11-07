@@ -7,6 +7,7 @@ pub mod compile;
 pub mod diag;
 pub mod directives;
 pub mod env;
+pub mod manifest;
 pub mod process;
 pub mod run;
 pub mod spec;
