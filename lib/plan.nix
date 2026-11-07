@@ -41,6 +41,10 @@
       noDefaultFeatures ? false,
       packages ? [ ],
       configs ? [ ],
+      # The toolchain spec for the planner (crates/breakbulk-plan/src/spec.rs):
+      # { rustflags; linker; hostLinker; }, or null. Passed without string
+      # context: planning never runs the tools it names.
+      spec ? null,
       name ? "breakbulk-plan",
     }:
     let
@@ -81,7 +85,11 @@
       ++ lib.concatMap (c: [
         "--config"
         "${c}"
-      ]) configs;
+      ]) configs
+      ++ lib.optionals (spec != null) [
+        "--spec"
+        (builtins.toFile "breakbulk-spec.json" (builtins.unsafeDiscardStringContext (builtins.toJSON spec)))
+      ];
     in
     pkgs.runCommand "${name}-${kind}"
       {

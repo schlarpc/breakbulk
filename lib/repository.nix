@@ -196,14 +196,92 @@ let
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
-  # The package set of a target's units. Cross package sets come with the
-  # presets (M3).
+  # The package set of a target's units: the target spec's `packageSet`
+  # (set by the presets), else pkgs for the native triple.
   targetPkgs =
     triple:
-    if triple == nativeTriple then
+    let
+      p = cfg.targets.${triple}.packageSet or null;
+    in
+    if p != null then
+      p
+    else if triple == nativeTriple then
       pkgs
     else
-      throw "breakbulk: package inputs on target ${triple} need that target's package set, which comes with the toolchain presets (M3)";
+      throw "breakbulk: package inputs on target ${triple} need that target's nixpkgs package set (`targets.${triple}.packageSet`, which the Linux presets set); this target has none";
+
+  # --- toolchain specs (M3) -------------------------------------------------
+  #
+  # A target's spec as mkWorkspace takes it: the planner's part (rustflags
+  # and linkers, through `--config`), the env of each platform's units, the
+  # store paths the plan will name, the target capture's package set, and
+  # the runner.
+  envName = triple: lib.replaceStrings [ "-" ] [ "_" ] triple;
+  storePathsIn =
+    s:
+    lib.concatMap (
+      p: if builtins.isList p then [ (lib.addContextFrom s (lib.head p)) ] else [ ]
+    ) (builtins.split "(${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[^/ =:;\"]+)" s);
+  specFor =
+    wsName: triple:
+    let
+      t = cfg.targets.${triple} or null;
+      e = envName triple;
+      flags = l: lib.concatStringsSep " " l;
+      cEnv =
+        lib.filterAttrs (_: v: v != null) {
+          "CC_${e}" = t.cc;
+          "CXX_${e}" = t.cxx;
+          "AR_${e}" = t.ar;
+        }
+        // lib.optionalAttrs (t.cflags != [ ]) {
+          "CFLAGS_${e}" = flags t.cflags;
+          "CXXFLAGS_${e}" = flags t.cflags;
+        }
+        // lib.optionalAttrs (t.bindgen.extraClangArgs != [ ]) {
+          "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags t.bindgen.extraClangArgs;
+        };
+      str = v: if v == null then null else "${v}";
+      linker = str t.linker;
+      hostLinker = str t.host.linker;
+      named = prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
+      runner =
+        if t.runner == null then
+          null
+        else if builtins.isFunction t.runner then
+          t.runner {
+            lockfile = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) "Cargo.lock"}";
+            workspace = wsName;
+          }
+        else
+          t.runner;
+    in
+    if t == null then
+      {
+        mkWorkspace = { };
+        runner = null;
+        testSystem = null;
+      }
+    else
+      {
+        mkWorkspace = {
+          spec = {
+            inherit (t) rustflags;
+            inherit linker hostLinker;
+          };
+          specTools =
+            named "spec-linker" (lib.filter (x: x != null) [
+              linker
+              hostLinker
+            ])
+            // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
+          hostEnv = envStrings t.host.env;
+          targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
+          targetEnv = envStrings (cEnv // t.env);
+        };
+        runner = if runner == null then null else [ "${runner}" ];
+        inherit (t) testSystem;
+      };
 
   # instantiate's overrides for one workspace on one target, keyed
   # "<name>@<version>".
@@ -286,7 +364,8 @@ let
       entries = locks.${wsName};
       sel = ws.targets.${triple}.packages;
     in
-    mkWorkspace pkgs {
+    mkWorkspace pkgs (
+      {
       inherit root tools fetchArgs;
       path = ws.path;
       toolchain = {
@@ -306,7 +385,10 @@ let
       inherit (cfg) strictSources;
       targetEnv = envStrings (cfg.targets.${triple}.env or { });
       name = "${wsName}-${triple}-${vName}";
-    };
+      inherit (specFor wsName triple) runner testSystem;
+    }
+    // (specFor wsName triple).mkWorkspace
+    );
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
@@ -415,10 +497,18 @@ let
           dflt =
             variants.${ws.defaultVariant}
               or (throw "breakbulk: workspaces.${wsName}.defaultVariant `${ws.defaultVariant}` is not one of its variants (${lib.concatStringsSep ", " (lib.attrNames ws.variants)})");
+          dfltInst = vs.${ws.defaultVariant} or null;
+          s = specFor wsName triple;
         in
         {
           inherit variants;
           inherit (dflt) packages tests;
+          # The target spec's runner (a list: program and arguments, or
+          # null) and test system, as test runs use them.
+          inherit (s) runner testSystem;
+        }
+        // lib.optionalAttrs (dfltInst != null) {
+          inherit (dfltInst) testRuns doctests;
         }
       ) instances;
     in

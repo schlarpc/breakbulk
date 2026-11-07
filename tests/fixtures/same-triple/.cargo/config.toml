@@ -1,0 +1,4 @@
+# The project's own rustflags under [build]: the target spec's rustflags
+# must join these (decision 33), and neither may reach host units.
+[build]
+rustflags = ["--cfg", "project_flag"]
