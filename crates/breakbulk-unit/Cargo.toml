@@ -17,3 +17,8 @@ doc = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+# Only for the smoke test, which renders a plan. Dev-dependencies are not
+# inputs of the unit builder.
+breakbulk-format = { path = "../breakbulk-format" }

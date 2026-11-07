@@ -224,17 +224,28 @@ pub fn package_name_version(id: &str) -> Option<(&str, &str)> {
 
 /// Cargo's description of a package in messages (`PackageId`'s `Display`):
 /// `name vX.Y.Z`, followed by the source for packages not from crates.io.
+/// Path sources are left out: in a plan they name the planner's skeleton,
+/// which means nothing to the reader.
 pub fn package_descr(id: &str) -> String {
     match package_name_version(id) {
         Some((name, version)) => {
             let source = id.rsplit_once('#').map_or(id, |(u, _)| u);
-            if source == "registry+https://github.com/rust-lang/crates.io-index" {
+            if source == "registry+https://github.com/rust-lang/crates.io-index"
+                || source.starts_with("path+")
+            {
                 format!("{name} v{version}")
             } else {
-                let source = source.strip_prefix("path+file://").unwrap_or(source);
                 format!("{name} v{version} ({source})")
             }
         }
+        None => id.to_owned(),
+    }
+}
+
+/// How Cargo names a package in build-script warnings: `name@version`.
+pub fn package_spec(id: &str) -> String {
+    match package_name_version(id) {
+        Some((name, version)) => format!("{name}@{version}"),
         None => id.to_owned(),
     }
 }
@@ -297,7 +308,12 @@ mod tests {
         assert_eq!(package_descr(ring), "ring v0.17.14");
         let app = "path+file:///build/skeleton/app#0.1.0";
         assert_eq!(package_name_version(app), Some(("app", "0.1.0")));
-        assert_eq!(package_descr(app), "app v0.1.0 (/build/skeleton/app)");
+        assert_eq!(package_descr(app), "app v0.1.0");
+        assert_eq!(package_spec(app), "app@0.1.0");
+        assert_eq!(
+            package_descr("git+https://e.com/r?rev=1#x@0.2.0"),
+            "x v0.2.0 (git+https://e.com/r?rev=1)"
+        );
         assert_eq!(
             package_name_version("path+file:///w/crates/x#other@1.0.0"),
             Some(("other", "1.0.0"))

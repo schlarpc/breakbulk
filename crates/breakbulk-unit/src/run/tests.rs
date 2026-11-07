@@ -53,7 +53,7 @@ fn success_parses_directives() {
     .unwrap();
     assert_eq!(s.output.cfgs, ["a"]);
     assert_eq!(s.output.metadata, [("include".into(), "/o/inc".into())]);
-    assert_eq!(s.warnings, ["warning: foo-sys v1.2.3: careful"]);
+    assert_eq!(s.warnings, ["warning: foo-sys@1.2.3: careful"]);
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn error_directives_follow_cargo() {
     // Leading whitespace: printed, but Cargo does not fail the run
     // (decision log #8).
     let s = judge_with(&r, 0, "  cargo::error=soft\n").unwrap();
-    assert_eq!(s.warnings, ["error: foo-sys v1.2.3: soft"]);
+    assert_eq!(s.warnings, ["error: foo-sys@1.2.3: soft"]);
     // A directive Cargo rejects fails the run.
     let e = judge_with(&r, 0, "cargo::rustc-link-arg-bins=x\n").unwrap_err();
     assert!(e.0.contains("does not have a bin target"), "{e}");

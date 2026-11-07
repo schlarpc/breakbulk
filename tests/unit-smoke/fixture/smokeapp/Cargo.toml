@@ -1,0 +1,7 @@
+[package]
+name = "smokeapp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+smokelib = { path = "../smokelib" }

@@ -24,7 +24,7 @@ use crate::directives::{
 };
 use crate::env::{Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{RenderedRun, package_descr, package_name_version};
+use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
 use crate::{DIRECTIVES_FILE, Error, METADATA_FILE, io_err, read_metadata, write_json};
 
 /// The build script to execute: `script` itself, or the one file in it when
@@ -240,15 +240,17 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Error> {
         );
         return Err(failure(f, reason, Some(&output)));
     }
+    // Cargo's prefix for build-script messages is `name@version`.
+    let spec = package_spec(&f.run.package);
     let mut warnings: Vec<String> = output
         .log_messages
         .iter()
         .map(|LogMessage { severity, message }| match severity {
-            Severity::Warning => format!("warning: {descr}: {message}"),
-            Severity::Error => format!("error: {descr}: {message}"),
+            Severity::Warning => format!("warning: {spec}: {message}"),
+            Severity::Error => format!("error: {spec}: {message}"),
         })
         .collect();
-    warnings.extend(hints.into_iter().map(|h| format!("warning: {descr}: {h}")));
+    warnings.extend(hints.into_iter().map(|h| format!("warning: {spec}: {h}")));
     Ok(Success { output, warnings })
 }
 

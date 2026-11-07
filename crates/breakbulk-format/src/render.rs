@@ -315,10 +315,12 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
             })
         }
         Unit::Run(run) => {
-            let mut env = env(&run.env, r)?;
             // breakbulk-unit sets OUT_DIR to the run's own `out`, which a
-            // derivation cannot name in its own attributes.
-            env.remove("OUT_DIR");
+            // derivation cannot name in its own attributes. Dropped before
+            // resolving, so the resolver never sees the self-reference.
+            let mut recorded = run.env.clone();
+            recorded.remove("OUT_DIR");
+            let mut env = env(&recorded, r)?;
             env.extend(overlay);
             RenderedUnit::Run(RenderedRun {
                 package: run.package.clone(),
