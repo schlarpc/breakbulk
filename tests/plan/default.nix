@@ -675,27 +675,41 @@ in
         // {
           paths = [ pkgs.cargo ];
         };
-      ws = mk "walking-skeleton" {
-        toolchain = {
-          inherit cargo;
-          inherit (pkgs) rustc;
-        };
+      toolchain = {
+        inherit cargo;
+        inherit (pkgs) rustc;
       };
-      plan = readPlan ws "build";
-      dylibs = lib.concatMap (u: lib.optional (u ? env.LD_LIBRARY_PATH) u.env.LD_LIBRARY_PATH) (
-        lib.attrValues plan.units
-      );
+      ws = mk "walking-skeleton" { inherit toolchain; };
+      # Compiles with host plugin dependencies (proc macros, build
+      # dependencies with build scripts) get those runs' paths after the
+      # inherited value.
+      dir = mk "directives" {
+        inherit toolchain;
+        extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+      };
+      units = lib.concatMap (p: lib.attrValues p.units) [
+        (readPlan ws "build")
+        (readPlan dir "build")
+        (readPlan dir "test")
+      ];
+      dylibs = lib.concatMap (u: lib.optional (u ? env.LD_LIBRARY_PATH) u.env.LD_LIBRARY_PATH) units;
       leaked = lib.filter (
         v: lib.hasInfix (builtins.unsafeDiscardStringContext "${marker}") (builtins.toJSON v)
       ) dylibs;
     in
     assert lib.assertMsg (dylibs != [ ]) "inherited-dylib-path: no unit has LD_LIBRARY_PATH";
     assert lib.assertMsg (leaked == [ ]) "inherited-dylib-path: ${builtins.toJSON leaked}";
-    pkgs.runCommand "inherited-dylib-path-check" { bb = ws.packages.walking-skeleton; } ''
-      $bb/bin/walking-skeleton | grep -q '^walking-skeleton 42 '
-      mkdir -p $out
-      echo ${lib.escapeShellArg (builtins.toJSON dylibs)} > $out/report
-    '';
+    pkgs.runCommand "inherited-dylib-path-check"
+      {
+        bb = ws.packages.walking-skeleton;
+        app = dir.packages.app;
+      }
+      ''
+        $bb/bin/walking-skeleton | grep -q '^walking-skeleton 42 '
+        [ "$($app/bin/app)" = "a_sys 42 2" ]
+        mkdir -p $out
+        echo ${lib.escapeShellArg (builtins.toJSON dylibs)} > $out/report
+      '';
 
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =
