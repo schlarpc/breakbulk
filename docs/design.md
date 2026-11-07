@@ -13,35 +13,37 @@ Neither handles the patterns real repositories rely on. Examples: many workspace
 
 **Goal.** One derivation per Cargo unit, with command lines that are exactly Cargo's, so that:
 
-- the result matches `cargo build` under the same config, across native, cross, wasm and Windows targets;
+- each plan matches a named Cargo command under the same project config (for example `cargo build --workspace --target T --profile P`), across native, cross, wasm and Windows targets;
 - outputs are shared across machines, workspaces and projects through an ordinary binary cache;
-- nothing generated is checked in, and there is no IFD where dynamic derivations are available;
+- nothing generated is checked in, and there is no IFD where the Nix installation supports dynamic derivations;
 - a change rebuilds only the affected crates and their dependents, and re-runs only the test binaries whose bytes changed.
 
 **Non-goals.**
 
 - Beating Cargo's incremental edit loop on the crate being edited. That stays in plain `cargo` in the dev shell.
+- Beating Cargo on a cold build of a single workspace. breakbulk optimizes for cache hits and narrow rebuilds; a cold build is expected to be somewhat slower than crane (see [Pipelining](#pipelining)).
 - Mutable caches inside the sandbox (rustc incremental state, shared compiler caches). They trade reproducibility for speed in a way the design refuses.
 
 ## Principles
 
-1. **Cargo plans, Nix executes.** The tool never reconstructs a rustc command line. It records Cargo's own, so every Cargo semantic (env vars, profile flags, config, `--cap-lints`, `-C metadata`) is correct by construction.
-2. **The unit graph is static; build-script output binds late.** A build script can change flags, env and link arguments, but never which units exist. The whole graph is planned before any build script runs, and each script's output is applied at build time through argument files.
-3. **Toolchains are data.** Linker, C compiler, archiver, SDKs, rustflags and test runner come from a per-platform spec. The planner never hardcodes a tool, and host and target specs never leak into each other.
+1. **Cargo plans, Nix executes.** The tool implements Cargo's public, documented formats (manifests, lockfiles, build-script instructions, target auto-discovery) and observes everything else from Cargo. It never encodes Cargo's behavior: resolution, unit selection, flag scoping or propagation. Every rustc command line is Cargo's own.
+2. **The unit graph is static; build-script output binds late.** A build script can change flags, env and link arguments, but never which units exist. The whole graph is planned before any build script runs. Where each script's output goes is observed from Cargo during planning; the values are spliced in at build time.
+3. **Toolchains are data.** Linker, C compiler, archiver, SDKs, rustflags and test runner come from a per-platform spec. The planner never hardcodes a tool, and host and target specs never leak into each other. The environment that native inputs need (`PATH`, `PKG_CONFIG_PATH`, wrapper flags) is captured from nixpkgs' own setup hooks, not recomputed.
 4. **Configuration is scoped to the units that need it.** Env vars, inputs and extra sources attach to named packages and reach only those units, so a build stamp or a large SDK never invalidates unrelated crates.
-5. **Content addressing is a bonus, not load-bearing.** The design is correct with input-addressed units. Content addressing (CA) adds early cutoff wherever outputs are byte-stable.
+5. **Input addressing by default; content addressing where it pays.** Units are input-addressed, so a cache hit downloads only what was asked for, on any cache server. Content addressing (CA) is used at the edges of the graph (test runs, post-link stages, embedded products), where early cutoff pays off and the cost of resolution is small. Full CA for units is a future mode, gated on Nix (see [Content addressing](#content-addressing-and-early-cutoff)).
 6. **Sugar over addressable layers.** The default package output is the sensible thing for its target. Every layer underneath (units, link outputs, post-link stages) stays addressable and overridable, so a default never becomes a trap.
-7. **Stable toolchains by default.** Nothing in the default path needs nightly Rust. Nightly is something users bring, not something the tool requires.
+7. **Stable toolchains by default.** Nothing in the default path needs nightly Rust. Nightly is something users bring, not something the tool requires. Optional optimizations may use unstable rustc flags only behind a fallback, and never in a way that reaches build scripts.
+8. **Inherit what changes the build; delegate what breakbulk must decide anyway.** Cargo settings that change what gets built (feature unification, profiles, `[env]`) are inherited from project config and never turned on behind the user's back. Settings that only change something breakbulk has to decide regardless, such as how paths are spelled in outputs, are delegated to Cargo when Cargo can do it.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-  fetch["1 · Fetch, at evaluation time<br/>One fixed-output derivation per Cargo.lock entry<br/>A repository-root source view per workspace package"]
-  plan["2 · Plan: trace Cargo<br/>Real cargo over a skeleton: manifests, lockfile, config<br/>Writes plan.json; reruns only when those files change"]
-  inst["3 · Instantiate: dynamic derivation<br/>plan.json + source map → one .drv per unit<br/>Pure templating, so rerunning it on every edit is cheap"]
-  units["4 · Units: one CA derivation per Cargo unit<br/>Outputs: rmeta, rlib, bin, OUT_DIR + build-script flags<br/>Shared across workspaces, variants and machines"]
-  products["5 · Products: named post-link stages<br/>Packages per target, test runs, side-branch checks<br/>Products can feed units of another target"]
+  fetch["1 · Fetch<br/>Fetch derivations created from each Cargo.lock at evaluation time<br/>A repository-root source view per workspace package"]
+  plan["2 · Plan: trace Cargo<br/>Real cargo over a skeleton: manifests, lockfile, config<br/>A build plan and a test plan per target and variant<br/>Reruns only when those files change"]
+  inst["3 · Instantiate<br/>plan.json + source map → one .drv per unit<br/>Pure templating in Rust, delivered by IFD or a dynamic derivation"]
+  units["4 · Units: one input-addressed derivation per Cargo unit<br/>Outputs: rmeta, rlib, bin, OUT_DIR + build-script directives<br/>Shared across workspaces, variants and machines"]
+  products["5 · Products: named post-link stages<br/>Packages per target, test runs, side-branch checks<br/>Content-addressed at the edges; can feed units of another target"]
   config["Configuration (modules)<br/>Toolchain presets per target<br/>Per-package env and inputs<br/>Variants: profiles, features<br/>Repository of workspaces"]
   fetch --> plan --> inst --> units --> products
   config --> plan
@@ -50,45 +52,56 @@ flowchart TD
 
 Cargo is consulted only when manifests, the lockfile or config change. A source edit reruns only the cheap instantiate step and the units whose inputs changed.
 
-### 1. Fetch, at evaluation time
+### 1. Fetch
 
-Registry crates are fixed-output derivations keyed by the lockfile's checksums. Workspace packages get filtered views of the repository root. The planner never serializes sources itself.
+Fetch derivations are created from every lockfile at evaluation time. Registry crates are fixed-output derivations keyed by the lockfile's checksums and download at build time, only when a unit actually builds. Git sources are fetched during evaluation, because locating a crate inside a repository needs its tree. Workspace packages get filtered views of the repository root. The planner never serializes sources itself.
 
 ### 2. Plan by tracing Cargo
 
-The planner runs the user's own `cargo build` for one target and variant over a skeleton: manifests, lockfile, `.cargo/config.toml` and empty target files. A `RUSTC_WRAPPER` does the following:
+The planner runs the user's own Cargo for one workspace, target and variant over a skeleton: manifests, lockfile, `.cargo/config.toml` and empty target files. Each (workspace, target, variant) gets two plans with named reference commands:
+
+- **Build plan:** `cargo build --workspace --target T --profile P [--features …]`. Products come from this plan.
+- **Test plan:** `cargo test --no-run --workspace --target T --profile P [--features …]`. Test binaries come from this plan.
+
+They are separate because Cargo turns on dev-dependency features only when test targets are built. Tracing products with `--all-targets` would ship binaries with features that plain `cargo build` would not enable. Units whose features are the same in both plans are identical derivations and are shared. A target can narrow the selection from `--workspace` to a package list (`-p ui`), for example a wasm target that builds only the UI crate.
+
+A `RUSTC_WRAPPER` does the following:
 
 - Forwards information queries (`-vV`, `--print cfg`, file-name queries) to the real rustc.
 - For each compile invocation, records argv, env and working directory, writes placeholder outputs, and emits the artifact notification Cargo waits for when pipelining.
-- For each build-script compile, writes a stub executable. When Cargo runs it, the stub records the exact environment Cargo gives build scripts and prints no directives.
+- For each build-script compile, writes a stub executable. When Cargo runs it, the stub records the exact environment Cargo gives build scripts and prints one tagged **sentinel** directive of each applicable kind.
 
-The recorded invocations alone give the graph: `--extern` and `-L` paths name the producing unit, `OUT_DIR` ties a compile to its build-script run, and the stub path ties a run to its compile. The unstable `--unit-graph` is not needed. Paths are then rewritten:
+Cargo places each sentinel exactly where it would place real output from that script: which units get it, at which position, and which dependent build scripts receive `DEP_*` metadata. The planner records those positions as splice points. Placement is therefore observed from Cargo; only the values are filled in at build time.
 
-- Target-directory paths become placeholders for the producing unit's outputs.
-- Source paths become store paths of the source views, and `--remap-path-prefix` keeps them out of the outputs.
+The recorded invocations give the graph: `--extern` and `-L` paths name the producing unit, `OUT_DIR` ties a compile to its build-script run, the stub path ties a run to its compile, and sentinels give directive scoping and `DEP_*` edges. The unstable `--unit-graph` is not needed. Paths are then rewritten:
+
+- Target-directory paths become placeholders for the producing unit's outputs. Whether a unit is a host unit (build script, proc macro) or a target unit is read from where Cargo put its output.
+- Source paths become store paths of the source views.
 - Tool paths must already be store paths, or planning fails with the tool's name.
 - Recorded env is kept only where Cargo set it or the configuration declared it; the planner's own sandbox env is dropped.
 
-The plan is traced once per target. Host units (build scripts, proc macros) come out as identical derivations for every target and are shared. A multi-target Cargo invocation is avoided because its feature resolution can differ from building each target alone.
+Each target is traced on its own. Host units come out identical for every target and are shared. A multi-target Cargo invocation is avoided because its feature resolution can differ from building each target alone.
 
 ### 3. Instantiate
 
-A dynamic derivation turns the plan and the source map into one derivation per unit. It is pure templating, so rerunning it on every edit is cheap, and unchanged units come out byte-identical.
+`breakbulk-instantiate` turns the plan and the source map into one derivation per unit. It is pure templating, so rerunning it on every edit is cheap, and unchanged units come out byte-identical. The same Rust code serves both delivery modes:
+
+- **IFD mode:** it writes each unit's derivation attributes as JSON, which Nix imports and passes to `derivation`.
+- **Dynamic-derivation mode:** it writes the same derivations into the store through Nix's `builder-rpc-v0` interface and submits each root.
+
+Both modes produce identical unit derivation paths. The default, `mode = "auto"`, picks dynamic-derivation mode when the evaluator has the `dynamic-derivations` feature and a Nix version with `builder-rpc-v0`, and IFD otherwise.
 
 ### 4. Units
 
+- Units are input-addressed. A cache hit is an ordinary narinfo lookup and downloads only the requested output.
 - Library units have separate `rmeta` and `rlib` outputs; compile units depend on transitive `rmeta`, link units on `rlib`.
 - A build script is two units: its compile, and its run, with outputs `out` (`OUT_DIR`) and `flags`.
-- Build-script directives are applied with Cargo's scoping: link libraries and link args reach the package's own targets, `rustc-cfg` and `rustc-env` stay local, and `DEP_*` metadata reaches only direct dependents that declare `links`.
-- A unit sees exactly the environment Cargo recorded plus what configuration declares for its package. Anything that makes build scripts probe for nightly features, such as `RUSTC_BOOTSTRAP`, never reaches a unit.
+- Build-script output is spliced in at the positions Cargo chose for the sentinels.
+- A unit's environment is a fixed, layered contract: a fixed base, the captured nixpkgs environment for its package's inputs, Cargo's recorded env, the toolchain spec for the unit's platform, and the package's overrides.
 
 ### 5. Products
 
 Link outputs flow through named stages into packages, test runs and checks, described below.
-
-### Delivery
-
-With dynamic derivations, steps 2–5 run without IFD. Where they are unavailable, the same planner emits `plan.json` for import-from-derivation, with input-addressed units.
 
 ## Configuration model
 
@@ -96,32 +109,53 @@ All user-facing configuration lives in the NixOS module system; the unit graph d
 
 ### Repository, workspaces, targets
 
-A **repository** object holds any number of **workspaces**, each with its own lockfile and toolchain. Units with the same identity (package, version, features, profile, target, toolchain) are the same derivation in every workspace, so registry dependencies and shared path crates deduplicate automatically across all of them. Each workspace is built for a set of **targets**, and each target names a toolchain preset.
+A **repository** object holds any number of **workspaces**, each with its own lockfile and toolchain. Each workspace is built for a set of **targets**; each target names a toolchain preset and, optionally, the packages to select for it.
+
+Units are shared across workspaces when Cargo produces identical commands for them. For registry crates that means the same version, features, profile, toolchain and resolved dependencies. Path crates additionally depend on where they sit relative to each workspace root: Cargo hashes a crate inside the workspace root by its relative path and a crate outside it by its absolute path, and passes source paths the same way. A shared path crate therefore deduplicates when it lies **outside every workspace root that uses it**, or when every workspace is the same workspace. A crate that is a selected member in one workspace and a plain dependency in another also differs, through `CARGO_PRIMARY_PACKAGE`. A diagnostic explains why two units expected to be shared are not.
+
+### What is inherited from the project
+
+The planner runs the user's Cargo over the project's own `.cargo/config.toml`, so every setting there applies as it does locally, including nightly-only settings such as `resolver.feature-unification` when the user's toolchain is nightly. Settings outside the project are not visible to the planner: `~/.cargo/config.toml`, `CARGO_*` variables exported in the user's shell, and flags in aliases or scripts. They must be moved into project config to take effect. The dev shell warns when it sees `CARGO_*` variables that the planner will not.
 
 ### Toolchain presets
 
 A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/`cflags`, bindgen settings, SDK store paths, extra rustflags, `env`, and `runner`. The planner resolves every tool to a store path; a non-store tool path is a hard error naming the tool.
 
 - Spec rustflags reach Cargo through `--config`, never the `RUSTFLAGS` env var. Cargo concatenates config arrays across sources, so the spec adds to `.cargo/config.toml` instead of silently replacing it.
-- Host and target specs are separate. A target's `crt-static`, static archives or cross C compiler never reach host build scripts or proc macros.
+- Host and target specs are separate, and the separation is enforced per unit, not per triple. Spec env never goes through Cargo's `[env]` table, which reaches every process Cargo starts; it is added to each unit according to the unit's platform. This matters most when host and target share a triple (static glibc, zig), where triple-keyed variables such as `CC_<triple>` or `CFLAGS_<triple>` cannot tell host from target.
+- Linkers: when host and target triples differ, Cargo applies each `target.<triple>.linker` correctly. When they are the same triple, Cargo applies the target linker to host units too; if the host spec's linker differs, the planner rewrites the linker value in host units after checking it is exactly the one configured.
 
 ### Per-package overrides
 
-`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `inputs` and `extraSources` for that package's units only. This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`.
+`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `nativeInputs`, `inputs` and `extraSources` for that package's units only. `nativeInputs` are tools that run on the build machine (`pkg-config`, `cmake`, `protoc`); `inputs` are libraries for the platform being built (`openssl`). This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`.
+
+Inputs are turned into environment by nixpkgs itself: a small derivation per package and platform runs a real `stdenv` with those inputs and records the environment its setup hooks produce. Packages without inputs share one base capture per platform, which gives build scripts the same baseline tools and hardening flags as `buildRustPackage`.
 
 ### Source views
 
 A package's source is a filtered view of the **repository root**, not its crate directory: the crate directory plus declared extras, at their original relative layout. Paths such as `../../wit`, `../shared/assets` or `../../../patches` therefore resolve unchanged, and editing an unrelated file changes no source path. Test units can declare a wider scope for tests that read repository files.
 
-Registry crates are fetched at evaluation time, one fixed-output derivation per `Cargo.lock` entry using the lockfile's checksums. Their store paths are exposed as `sources.<crate>`, so steps that need files from inside a dependency (a bundled SDK, JS glue shipped in a crate) are attribute lookups.
+When a build script fails, or succeeds while declaring a `rerun-if-changed` path that is missing from its sandbox, the error or warning names the path and the option to add it to. Missing paths on success are warnings by default; `strictSources = true` turns them into errors.
+
+Registry crates are fetched as one fixed-output derivation per `Cargo.lock` entry using the lockfile's checksums. Their store paths are exposed as `sources.<crate>`, so steps that need files from inside a dependency (a bundled SDK, JS glue shipped in a crate) are attribute lookups.
 
 ### Products as inputs
 
-An override's env or inputs may reference any product, including one built for another target, for example a wasm UI bundle or a set of components embedded by a host crate. With content addressing, a byte-identical product does not rebuild the units that embed it.
+An override's env or inputs may reference any product, including one built for another target, for example a wasm UI bundle or a set of components embedded by a host crate. Products reach the instantiate step as references, not as dependencies, so only the embedding unit and its dependents wait for the product; the rest of the host build starts immediately.
 
 ### Variants
 
-Profiles, feature sets (including a feature powerset), check modes (clippy, coverage instrumentation) and toolchains are plan parameters. Each variant is a separate plan, and units that come out identical across variants are shared rather than rebuilt.
+Profiles, feature sets (including a feature powerset), check modes (clippy, coverage instrumentation) and toolchains are plan parameters. Each variant is a separate plan, and units that come out identical are shared. What is identical follows from Cargo:
+
+| Between | Shared | Not shared |
+| --- | --- | --- |
+| Build and check or clippy | Build scripts, proc macros and their dependencies | Regular library dependencies, which Cargo compiles in check mode |
+| Check and clippy | All dependencies | Workspace members |
+| Build and coverage | Host units | Target units, whose commands carry the instrumentation flag |
+| Build and test plans | Units whose features are unaffected by dev-dependencies | Units whose features dev-dependencies change |
+| Any two profiles | Nothing | Everything; the profile is part of every unit's identity |
+
+Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
 
 ## Products and stages
 
@@ -130,7 +164,7 @@ Profiles, feature sets (including a feature powerset), check modes (clippy, cove
 ### Three layers
 
 1. **Units.** One derivation per Cargo unit. Internal, but inspectable.
-2. **Stage pipelines.** A product is the raw link output passed through ordered, named stages. Each stage is its own derivation, so every intermediate is addressable (`.stages.linked`) and content-addressed cutoff applies between stages.
+2. **Stage pipelines.** A product is the raw link output passed through ordered, named stages. Each stage is its own content-addressed derivation, so every intermediate is addressable (`.stages.linked`) and cutoff applies between stages.
 3. **Sugar.** `ws.packages.<name>` and `ws.target.<triple>.packages.<name>` are the raw output, run through the target preset's default stages, installed in the usual layout (`bin/`, `lib/`, `.exe` with DLLs, `pkg/` for wasm).
 
 ### Default stages per preset
@@ -161,16 +195,25 @@ packages.app.target."x86_64-pc-windows-msvc".stages = {
 
 The tool provides stage helpers: `splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt`, `componentize`, `adhocSign`, `deterministicZip`. User stages are ordinary derivations: container images, initramfs and boot images, distribution packages, catalog generation and signing, metadata stamping.
 
-### Debug information
+### Source paths and debug information
 
-Shipped binaries and cdylibs get a separate `debug` output: DWARF moved to `$debug/lib/debug/.build-id/…`, found by gdb and debuginfod. This shrinks runtime closures and removes stray store references. Test binaries keep their debug info, because symbolized backtraces in test-run logs matter more than the small cutoff gain from stripping them. Panic locations already embed line numbers, so line-only edits usually change the stripped bytes anyway.
+Source paths must not end up in shipped outputs. Every crate's source is a store path, so an embedded source path is a real store reference: Nix would treat the sources as a runtime dependency, and any edit to a package would change the bytes of every binary that embeds its paths, defeating cutoff.
+
+Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
+
+- **Shipped binaries and cdylibs** remap panic locations, `file!()` and diagnostics, but keep real store paths in debug info. `splitDebug` moves DWARF to a separate `debug` output (`$debug/lib/debug/.build-id/…`, found by gdb and debuginfod). The main output has no source references; the `debug` output references exactly the sources a debugger needs, so installing it gives source-level debugging with no setup.
+- **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change.
+- With rustc older than 1.95, every scope is remapped.
+
+Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Once it is available, breakbulk sets it by default when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above.
 
 ### Tests as products
 
 - Every test, bench and example binary is an attribute, so VM tests and system tests can consume it.
-- Each test binary gets a test-run derivation that uses the target's `runner` and any declared env and `PATH` additions (a software GPU driver, external tools). Under CA, a byte-identical test binary is not re-run.
+- Each test binary gets a test-run derivation that uses the target's `runner` and any declared env and `PATH` additions (a software GPU driver, external tools). The test run consumes a content-addressed copy of the test binary, so a byte-identical test binary is not re-run.
 - `CARGO_BIN_EXE_*` is wired to the right product, and nextest configuration is respected.
 - Test-run derivations for another architecture set `system` to that architecture, so Nix sends them to native builders. Emulation through the runner is the fallback.
+- Targets that Cargo skips because their `required-features` are not enabled still have attributes. Building such a product fails with the reason; such a test run succeeds and logs that it was skipped, as `cargo test` does.
 
 ## Targets and toolchains
 
@@ -198,7 +241,7 @@ Any rustc/cargo pair works: nixpkgs `rustPlatform`, rust-overlay or fenix, inclu
 
 The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable.
 
-- Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools so rpaths, `NIX_LDFLAGS` and hardening flags still apply.
+- Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
 - Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from `rustc.llvmPackages`, so the LLVM version matches rustc.
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
 - **wild** is an opt-in preset, gated by the determinism check.
@@ -216,58 +259,87 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 
 ### Static and musl
 
-Musl targets use nixpkgs cross toolchains with `crt-static`. A static build on the host triple passes the host triple explicitly as the target, so only target units link statically while build scripts and proc macros stay dynamic. Static archives are target inputs only; on the host they make build scripts link `libc.a` and crash.
+Musl targets use nixpkgs cross toolchains with `crt-static`. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
 
 ### Zig
 
-A zig preset exists for targeting an old glibc version. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache and copies it into each unit's sandbox.
+A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache and copies it into each unit's sandbox.
 
 ## Content addressing and early cutoff
 
-Units are content-addressed whenever dynamic derivations are in use. That mode already requires the `ca-derivations` feature, placeholders keep the generated derivations simple, and cutoff pays off where outputs are byte-stable. The IFD fallback uses input-addressed units. The choice is per mode, never per unit: an input-addressed derivation that depends on a CA output is deferred and resolved like CA anyway.
+### Why units are input-addressed
+
+Nix (2.35 and current master) stores CA realisations in binary caches only for *resolved* derivations, and resolving a derivation realises the contents of all its inputs first. A fresh machine pulling a fully cached graph of CA units therefore downloads every intermediate rlib and every input, not just the requested binary. The fix is tracked as NixOS/nix#11928, with an open implementation in #14833. Caches that do not store realisations at all (Attic, FlakeHub Cache, which pushes store paths only) cannot serve CA outputs, so CA units there are always rebuilt.
+
+Input-addressed units avoid all of this: a cache hit is a narinfo lookup, substitution never touches inputs, and every cache server works. Rust also gains less from unit-level cutoff than it seems, because most upstream edits change rustc's crate hash and cascade to dependents anyway.
+
+### Content-addressed islands
+
+Content addressing is used where cutoff pays off and a CA node's direct inputs are input-addressed, so resolving it downloads only those inputs:
+
+- **Test runs** consume a CA copy of the test binary. Identical bytes, no re-run.
+- **Post-link stages** are CA. Identical input, no re-run of later stages.
+- **Embedded products.** In dynamic-derivation mode, products are always resolved at build time, because their first stage depends on a unit derivation that exists only after instantiation. A unit that embeds a product is therefore resolved too, and an identical product does not rebuild it. In IFD mode, products are input-addressed unless CA embedding is turned on.
+
+Rule: no input-addressed derivation sits downstream of a CA node, except the embedding chain, whose cost is documented. On caches without realisations, islands degrade gracefully: stages and test runs re-run; units are still substituted. The embedding chain in dynamic-derivation mode is the exception: it is recompiled. Repositories with embeds on such caches should use IFD mode or a cache that stores realisations.
+
+**Full-CA units** remain a mode switch for when Nix resolves derivations from realisations without fetching input contents. Instantiation is templating, so it can emit either form.
 
 ### Where cutoff fires
 
-| Change | Cutoff today |
+| Change | Cutoff |
 | --- | --- |
-| Recompiled build script with identical `OUT_DIR` and flags | Yes |
-| Toolchain or wrapper bump that leaves rlib bytes unchanged | Yes |
+| rustc version bump | No: rustc writes its version into every crate's metadata, and Cargo hashes it into `-C metadata` |
+| `breakbulk-unit` or wrapper change | No for units (input-addressed); possible with full-CA units |
+| Recompiled build script with identical output | No for units (input-addressed); possible with full-CA units |
 | Byte-identical test binary | Yes: the test run is skipped |
-| Byte-identical product embedded by another unit | Yes |
 | Post-link stage given identical input | Yes |
+| Byte-identical embedded product | Yes in dynamic-derivation mode; opt-in in IFD mode |
 | Function-body edit in an upstream library | No: rustc's crate hash cascades to dependents |
 | Interface change | No, correctly |
 
 ### Determinism requirements
 
-Cutoff only works if outputs are reproducible.
+Islands only cut off, and products only reproduce, if outputs are byte-stable.
 
-- `-C metadata` comes from Cargo's stable unit identity, never from derivation paths or absolute paths.
-- Store paths are remapped with `--remap-path-prefix`, so source paths do not appear in outputs or runtime closures.
+- `-C metadata` comes from Cargo's stable unit identity, never from derivation paths or absolute paths. The planner's skeleton sits at one fixed absolute path, because Cargo hashes the absolute path of path crates outside the workspace root (until `trim-paths`).
+- Source paths are remapped as described in [Source paths and debug information](#source-paths-and-debug-information).
 - No `-C incremental` inside unit builds.
 - A content-derived `--build-id`.
-- A built-in check rebuilds sampled units and products with `nix build --rebuild`. Under CA, non-determinism fails silently: it disables cutoff and produces different realisations on different machines.
+- A built-in check rebuilds sampled units and products with `nix build --rebuild` and compares their outputs.
 
 ### The rustc limit, and what is changing
 
 Today a dependent rebuilds after almost any upstream edit, because rustc's crate hash (SVH) covers bodies and source positions and dependents record it. Cargo behaves the same way.
 
-- [rust-lang/rust#154724](https://github.com/rust-lang/rust/pull/154724), merged 2026-09-26, computes the crate hash from the encoded metadata bytes. On nightly, rmeta byte-equality and crate-hash equality are now the same thing.
+- [rust-lang/rust#154724](https://github.com/rust-lang/rust/pull/154724), merged 2026-09-26 and shipping in 1.100, computes the crate hash from the encoded metadata bytes. rmeta byte-equality and crate-hash equality become the same thing. It also makes any byte-level nondeterminism in metadata a link error between separately built rmeta and rlib.
 - [Relink, Don't Rebuild](https://github.com/rust-lang/rust/issues/158844) (`-Z public-api-hash`) is not landed. Its main implementation, [#156940](https://github.com/rust-lang/rust/pull/156940), is a draft under review. The [2026 goal](https://goals.rust-lang.org/2026/roadmap-fast-builds.html) is listed as unfunded.
 - A published third-party measurement on an async-heavy codebase found the public hash unchanged for 2% of non-test edits. Every `async fn` body edit changed it, because coroutine MIR is encoded in metadata.
 - A public-hash design lets Cargo skip direct dependents, but a pure build system still rebuilds them, because their input bytes changed. Full cutoff at the first dependent needs a physical split: data that dependents read in one file, and spans and private data in another. That is the request to take upstream.
 
 ### Seams below the crate
 
-- **rmeta and rlib as separate CA outputs.** Compile units depend only on transitive `rmeta`; link units consume `rlib`. Cheap now, and ready for stable rmeta when rustc delivers it.
+- **rmeta and rlib as separate outputs.** Compile units depend only on transitive `rmeta`; link units consume `rlib`. A machine building one crate on cached dependencies downloads only their `rmeta`; check and clippy variants consume only `rmeta`; full-CA units would cut off on `rmeta` bytes.
 - **Source narrowing from dep-info.** An optional stage derives each crate's exact file set, so edits to files outside its module tree change nothing. The cost is re-running macro expansion. File reads by proc macros are not tracked and must be declared.
 - **Separate link derivations** need nightly `-Zno-link`/`-Zlink-only`, so linking stays inside bin and test units for now.
 - **Rejected: impure caches.** Rustc incremental state or a shared compiler cache mounted into the sandbox would give reuse within a crate, but outputs would depend on build history and could not be cached or shared. That reuse belongs to local `cargo`.
 
+### Pipelining
+
+Cargo starts a dependent as soon as an upstream library's `rmeta` is written, while the upstream codegen continues. Nix publishes a derivation's outputs only when it finishes, so one derivation per library cannot pipeline. Cargo's own measurements put pipelining at 10–20% on clean optimized builds (up to 26%), less on debug builds, and close to nothing on few cores. That is the cost breakbulk accepts by default.
+
+An optional **pipelined split** makes a library two derivations: one producing `rmeta`, one producing `rlib`. On stable rustc both must run the identical command, because the emit kinds are part of the crate hash; the first stops at rustc's metadata notification. Backends:
+
+1. **Rerun and stop:** the rules\_rust approach. Stable, but runs the frontend twice.
+2. **Checkpoint and restore:** the `rmeta` derivation checkpoints the rustc process with CRIU at the metadata notification; the `rlib` derivation restores it and lets codegen finish. One frontend, and both files come from one process. Linux only, needs namespace privileges inside the sandbox, and needs a compatible CPU and kernel at restore.
+3. **`-Zno-codegen`:** the Buck2 approach. Needs `RUSTC_BOOTSTRAP` on the split crate's compile units only, never on build-script runs, together with an empty `-Zallow-features=` so stable-only code stays stable-only.
+
+Every backend falls back to an unsplit compile, checks that the `rlib`'s crate hash matches the `rmeta` its dependents used, and has a per-package opt-out for crates that do not build reproducibly. Which crates are split is deterministic configuration, never a machine-local heuristic. Rejected: a metadata-only `--emit=metadata` action (no optimized MIR for dependents' codegen, and a different crate hash), and `-Zalways-encode-mir` (still a different crate hash).
+
 ### Operational notes
 
-- Each unit has its own realisation, so a cache hit is one signed realisation lookup per unit, chained behind the planner. Measure this early.
-- Binary caches must store signed realisations; check cache server support before committing.
+- Push with `nix copy --to <cache> .#…` or `nix copy "$DRV_PATH^*"` in a `post-build-hook`; plain `nix copy` of store paths uploads no realisations.
+- CA islands need a cache that stores realisations (a `nix copy` S3 or HTTP cache does). Units do not.
 
 ## Patterns the design must support
 
@@ -278,13 +350,15 @@ These patterns come from a survey of working Rust-in-Nix repositories. Each is e
 | Copied cross-toolchain plumbing (msvc via xwin: linker, cc, ar, cflags, bindgen args, SDK paths) | The same 30–60 lines copied between repositories, drifting apart | One toolchain preset |
 | Build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings) | Set only on the final build, by hand, to avoid rebuilding all dependencies on every commit | Per-package env reaches only that package's units |
 | Build scripts reading external SDKs or vendored sources through env vars | The whole env reaches every unit, so any change rebuilds everything | Per-package `inputs` and `env` |
-| Host binary embedding another target's build (wasm UI, components, a web bundle) | Embed silently falls back to a placeholder when the input is missing | Products as inputs, across targets |
+| Native inputs missing in the sandbox | Works locally, fails in Nix with an unrelated-looking error | Captured nixpkgs environment per package; failure hints from `rerun-if-*` declarations |
+| Host binary embedding another target's build (wasm UI, components, a web bundle) | Embed silently falls back to a placeholder when the input is missing | Products as inputs, across targets, passed by reference |
 | Reads outside the crate directory (`include_str!`, schema or interface files, sibling assets, patches) | Source filters drop the file, or the whole tree becomes the input | Repository-root source views plus declared extras |
-| Many workspaces with their own lockfiles, path-depending on shared crates | Dependencies rebuilt once per workspace | Repository object; identical units shared |
-| Check variants (clippy, nextest, coverage, feature powerset) | A full dependency build per variant, exhausting CI disk | Variants as plan parameters; shared units |
-| Host-vs-target leakage (`crt-static`, static archives, the wrong C compiler) | Wrapper scripts strip flags; build scripts segfault; host objects end up in wasm | Separate host and target specs per unit |
+| Many workspaces with their own lockfiles, path-depending on shared crates | Dependencies rebuilt once per workspace | Repository object; identical units shared; a diagnostic when they are not |
+| Check variants (clippy, nextest, coverage, feature powerset) | A full dependency build per variant, exhausting CI disk | Variants as plan parameters; host units and check-mode dependencies shared |
+| Dev-dependency features leaking into shipped binaries | Binaries built with features plain `cargo build` would not enable | Separate build and test plans |
+| Host-vs-target leakage (`crt-static`, static archives, the wrong C compiler) | Wrapper scripts strip flags; build scripts segfault; host objects end up in wasm | Spec env and linkers scoped by unit platform |
 | Rustflags from env replacing `.cargo/config.toml` rustflags | Flags duplicated in two places | Spec rustflags passed with `--config`, concatenated |
-| Build-script link directives (`rustc-link-arg-bins`, delay-load, resource files, kernel link args) | Dropped or applied to the wrong targets | Cargo's own scoping, from the traced plan |
+| Build-script link directives (`rustc-link-arg-bins`, delay-load, resource files, kernel link args) | Dropped or applied to the wrong targets | Placement observed from Cargo through sentinels |
 | Post-link steps that care about order (sign without stripping, check before stripping) | Fights with the implicit fixup phase | Named stages, no implicit fixup, side-branch checks |
 | Runtime-loaded libraries (GPU, windowing, audio) | Rpaths removed by rpath shrinking | `patchelfRpath` stage after fixup |
 | Test binaries consumed elsewhere (VM tests, `CARGO_BIN_EXE_*`) | Tests built as packages by hand, or skipped | Test binaries and test runs as products |
@@ -298,34 +372,34 @@ These patterns come from a survey of working Rust-in-Nix repositories. Each is e
 
 | Source | Take | Leave |
 | --- | --- | --- |
-| cargo-dyndrv (Obsidian Systems) | Planning at build time via dynamic derivations; build-script output applied late through argument files; build-script compile and run as separate units; `OUT_DIR` as a CA output | Rebuilding rustc flags from `--unit-graph`; `-C metadata` hashed from derivation paths and absolute paths; serializing every source inside the planner; overrides keyed by full package ID; link flags propagating through build-dependency edges |
-| crane | Real-Cargo fidelity; per-crate fetching from `Cargo.lock` with no IFD; a skeleton source for planning; source cleaning; checks as first-class outputs | The coarse dependencies-blob target directory |
+| cargo-dyndrv (Obsidian Systems) | Planning at build time via dynamic derivations; build-script output applied late through argument files; build-script compile and run as separate units; `OUT_DIR` as its own output | Rebuilding rustc flags from `--unit-graph`; `-C metadata` hashed from derivation paths and absolute paths; serializing every source inside the planner; overrides keyed by full package ID; link flags propagating through build-dependency edges |
+| crane | Real-Cargo fidelity; per-crate fetching from `Cargo.lock` with no IFD; vendoring one directory per source with generated source replacement; optional `outputHashes` for git sources; a skeleton source for planning; source cleaning; checks as first-class outputs | The coarse dependencies-blob target directory |
 | crate2nix, `buildRustCrate` | Per-crate sharing across projects; the curated `defaultCrateOverrides` for `-sys` crates; cross builds through nixpkgs splicing | Feature resolution in Nix; checked-in generated Nix; reimplementing Cargo |
-| Bazel `rules_rust`, Buck2 | Pipelined metadata actions; platforms and toolchains as data; a content-hashed action cache | Their own reimplementation of Cargo semantics |
+| Bazel `rules_rust`, Buck2 | Pipelined metadata actions with identical commands; platforms and toolchains as data; a content-hashed action cache | Their own reimplementation of Cargo semantics |
 
 ### Issues found in cargo-dyndrv that this design avoids
 
-- `-C metadata` is a hash of upstream derivation paths, unit-graph indices and absolute source paths. It defeats CA cutoff, changes when unrelated crates join the graph, and differs between sandbox and local builds.
+- `-C metadata` is a hash of upstream derivation paths, unit-graph indices and absolute source paths. It defeats cutoff, changes when unrelated crates join the graph, and differs between sandbox and local builds.
 - Link flags from build dependencies' build scripts reach target links, which breaks cross builds or adds host libraries to target binaries.
 - `rustc-link-lib` and `rustc-link-arg` apply to every downstream compile instead of only the package's own targets.
 - Most Cargo env vars and profile settings are missing (`panic`, `overflow-checks`, LTO, `codegen-units`), and some are misparsed.
 - A build script killed by a signal counts as success, and a `rustc-flags` directive corrupts the next argument.
 - Multiple crate types per unit (`["cdylib", "rlib"]`) are rejected.
 
-The traced planner removes most of these by construction, because the command lines come from Cargo.
+The traced planner removes most of these by construction, because the command lines and directive placement come from Cargo.
 
 ## Roadmap, risks and open questions
 
-The traced planner comes first, because it fixes most of the audit findings and every later phase builds on it.
+The traced planner comes first, delivered through IFD, because it works on every released Nix and every later phase builds on it.
 
 ### Roadmap
 
-1. **Traced planner and evaluation-time fetching.** Cargo parity on native Linux; per-crate sources; repository-root source views; `--remap-path-prefix`; Cargo's own `-C metadata`.
-2. **Configuration model.** Module-system options, toolchain presets, per-package overrides, products as inputs, a repository holding many workspaces.
+1. **Traced planner and IFD delivery.** Cargo parity on native Linux; sentinel placement of build-script output; input-addressed units; per-crate sources; repository-root source views; path remapping; Cargo's own `-C metadata`.
+2. **Configuration model.** Module-system options, toolchain presets, per-package overrides and environment capture, products as inputs, a repository holding many workspaces, the dev shell.
 3. **Day-one targets.** Linux gnu and musl on x86\_64 and aarch64, static glibc, wasm (browser and components), Windows msvc. Runners and native builders for tests.
-4. **Products.** Stage pipelines, side-branch checks, the debug output, test-run derivations, clippy and coverage variants.
-5. **Below-crate seams.** rmeta and rlib as separate outputs, dep-info source narrowing, the history-replay measurement harness.
-6. **Delivery through IFD** for Nix without dynamic derivations.
+4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations, clippy and coverage variants.
+5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
+6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default once stable.
 7. **Later targets.** wasip2, riscv64, windows-gnu, build-std targets, Darwin on Mac builders.
 
 ### Conformance suite
@@ -334,16 +408,20 @@ A set of fixture workspaces covering every pattern in the catalogue. Each phase 
 
 ### Risks
 
-- **Tracing Cargo depends on Cargo internals:** the artifact-notification protocol, how build scripts are invoked, the target-directory layout. Mitigation: a conformance suite that diffs traced command lines against `cargo build -v` across several stable Cargo releases.
-- **Experimental Nix features.** Dynamic derivations need Nix 2.36 or later, and `ca-derivations` is still experimental. Remote builders must advertise the builder feature. The IFD fallback limits exposure.
-- **Realisation lookups at scale.** Hundreds of units mean hundreds of signed lookups per cache hit.
+- **Tracing Cargo depends on Cargo internals:** the artifact-notification protocol, how build scripts are invoked, the target-directory layout, where sentinel directives land. Mitigation: golden tests that diff traced command lines against `cargo build -v`, and differential tests of directive placement, across several stable Cargo releases.
+- **Unreleased Nix features.** `builder-rpc-v0` is on Nix master only; Determinate Nix is based on 2.35 and lacks it. `recursive-nix`, the older route, has an open removal proposal. Mitigation: IFD is the default delivery on released Nix.
+- **CA support in Nix and caches.** Resolution fetches input contents, and several cache servers store no realisations. Mitigation: input-addressed units; CA only at the edges.
 - **Derivation overhead for tiny crates.** Per-sandbox setup can dominate small units, and the input edges grow quadratically with graph depth.
 - **Module-system cost and errors** if configuration grows large.
 
 ### Open questions
 
-- Does faking rustc's outputs hold up across Cargo releases, especially for pipelined builds and `links` metadata?
-- Which binary cache servers store and serve signed realisations well enough?
-- Does zig accept a pre-warmed cache that is read-only or only partly populated?
+- Does faking rustc's outputs and emitting sentinel directives hold up across Cargo releases, especially for pipelined builds and `links` metadata?
+- How much of the pipelining gap appears on real repositories, and does it justify the pipelined split?
+- Does env capture from nixpkgs' setup hooks replay faithfully outside a live stdenv shell?
 - Is `remap-path-prefix` enough for every embedded path, or are some crates' `env!("CARGO_MANIFEST_DIR")` uses still observable?
 - How far will rustc go toward a physical split between interface metadata and private data?
+- Who is the first user, and which of its targets set the day-one list?
+- Which binary cache server will be used, and does it store realisations?
+- What is the oldest Cargo release to support?
+- Will the project be public, and under what license?
