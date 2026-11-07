@@ -1,8 +1,10 @@
 [package]
 name = "breakbulk-shim"
+description = "rustc wrapper, rustdoc wrapper and build-script stub used by the breakbulk trace planner"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde_json = "1"
