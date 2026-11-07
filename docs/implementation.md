@@ -599,6 +599,8 @@ replace-with = "breakbulk-<hash2>"
 
 The planner sees exactly the crates in the lockfile, the lockfile's checksums are verified, and two sources providing the same name and version never collide.
 
+Git crates that use workspace inheritance get the original `[workspace]` table as a stub `Cargo.toml` one level above them, so Cargo's own `find_workspace_root` does the merge. When one git source supplies inheriting crates from several workspaces (Sui's root and `external-crates/move` workspaces, for example), each workspace's table goes in its own hidden folder, `<hash>/.breakbulk-workspace-<hash>/Cargo.toml`, and each such crate's vendored manifest gets a `package.workspace` pointer to it; Cargo reads inheritable fields from a pointed-to workspace without checking membership. Directory sources only read immediate subfolders and the workspace search does not resolve symlinks, so neither nesting nor symlinks work. See [spikes/git-multi-workspace.md](spikes/git-multi-workspace.md).
+
 ### Source views
 
 A workspace package's source is `lib.fileset.toSource { root = <repository root>; fileset = …; }`. Because the root is the repository root, relative paths outside the crate resolve unchanged.
