@@ -251,6 +251,8 @@ let
       runner = mkDefault r.runner;
       testSystem = mkDefault r.testSystem;
       host = hostSpec pkgs;
+      # The products' default stages (lib/stages.nix defaultStageNames).
+      stagePreset = mkDefault (extra.stagePreset or "linuxGnu");
     };
 
   crtStatic = [
@@ -288,6 +290,7 @@ in
   # libunwind.a). C code compiles against nixpkgs' musl headers.
   linuxMusl = mkPreset (linuxGnuWith {
     rustflags = crtStatic;
+    stagePreset = "linuxMusl";
   });
 
   # A fully static glibc binary (static-pie by default; see relocationModel)
@@ -339,6 +342,7 @@ in
       runner = mkDefault null;
       testSystem = mkDefault null;
       host = hostSpec pkgs;
+      stagePreset = mkDefault "staticGlibc";
     }
   );
 
@@ -433,6 +437,7 @@ in
       );
       testSystem = mkDefault null;
       host = hostSpec pkgs;
+      stagePreset = mkDefault "msvc";
     }
   );
 
@@ -454,6 +459,7 @@ in
     }@args:
     wasmCommon args
     // {
+      stagePreset = mkDefault "wasmBrowser";
       runner = mkDefault (
         { lockfile, ... }:
         runners.wasmBindgenTest {
@@ -501,6 +507,7 @@ in
       ];
     }
     // {
+      stagePreset = mkDefault "wasmComponent";
       runner = mkDefault (runners.wasmtime { pkgs = pkgs.buildPackages; });
     }
   );
