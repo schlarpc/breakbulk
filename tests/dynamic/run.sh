@@ -190,6 +190,7 @@ EOF
 
   # Products: the same bytes.
   for p in "$(real "$dyn")"/products/*/*; do
+    [ -L "$p" ] || continue
     name=${p#"$(real "$dyn")/products/"}
     a=$(real "$(readlink "$p")")
     b=$(real "$(readlink "$(real "$ifd")/products/$name")")
