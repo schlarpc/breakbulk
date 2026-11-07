@@ -1,0 +1,15 @@
+# Benches: `libtest` uses the default libtest harness (on stable it holds
+# tests only; `#[bench]` needs nightly), `crit` is a Criterion bench
+# (`harness = false`). `cargo test --no-run` builds neither; only the bench
+# variant (`cargo bench --no-run`, bench profile) does.
+[package]
+name = "bencher"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "crit"
+harness = false

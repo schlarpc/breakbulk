@@ -26,6 +26,10 @@
 #                    and clippy variants' unit checks build
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
+#   benches          a libtest-harness bench and a Criterion bench come
+#                    from the bench variant only (`cargo bench --no-run`,
+#                    bench profile, opt-level 3); the test plan has none;
+#                    benchSmoke runs each once with `--test` as a check
 #
 # `repos` exposes each repository for debugging.
 {
@@ -263,6 +267,24 @@ let
     }
   ];
   vt = variantsRepo.workspaces.main.target.${native};
+
+  # --- benches -------------------------------------------------------------------
+
+  benchesRepo = mkRepo (fixtures + "/benches") [
+    {
+      workspaces.main = {
+        path = ".";
+        benchSmoke = true;
+        variants = {
+          default.profile = "dev";
+          bench = {
+            profile = "bench";
+            benches = true;
+          };
+        };
+      };
+    }
+  ];
 in
 {
   repos = {
@@ -271,8 +293,57 @@ in
       sourcePaths
       sourcePathsReadme
       variantsRepo
+      benchesRepo
       ;
   };
+
+  benches =
+    let
+      w = benchesRepo.workspaces.main;
+      t = w.target.${native};
+      readPlan = drv: builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${drv}/plan.json"));
+      benchPlan = readPlan w.plans.${native}.bench.bench;
+      testPlans = map (v: readPlan w.plans.${native}.${v}.test) [
+        "default"
+        "bench"
+      ];
+      kinds = plan: map (r: r.kind) plan.roots;
+      critUnit = (unitsOf benchesRepo "bench" "bench")."bencher-0.1.0-bin-crit" or null;
+      critArgs = lib.filter builtins.isString (
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext critUnit.drvAttrs.BREAKBULK_UNIT)).args
+      );
+      smoke = lib.filterAttrs (n: _: lib.hasInfix "/bench-" n) benchesRepo.checks;
+    in
+    assert lib.assertMsg (lib.attrNames t.benches.bencher == [
+      "crit"
+      "lib"
+      "libtest"
+    ]) "benches: ${builtins.toJSON (lib.attrNames t.benches.bencher)}";
+    assert lib.assertMsg (lib.all (p: !(lib.elem "bench" (kinds p))) testPlans) "benches: a test plan has bench roots";
+    assert lib.assertMsg (benchPlan.kind == "bench" && benchPlan.variant.profile == "bench") "benches: bench plan header ${builtins.toJSON benchPlan.variant}";
+    assert lib.assertMsg (lib.sort lib.lessThan (kinds benchPlan) == [
+      "bench"
+      "bench"
+      "lib"
+    ]) "benches: bench plan roots ${builtins.toJSON benchPlan.roots}";
+    assert lib.assertMsg (critUnit != null && lib.elem "opt-level=3" critArgs) "benches: crit unit args ${builtins.toJSON critArgs}";
+    assert lib.assertMsg (lib.length (lib.attrNames smoke) == 3) "benches: smoke checks ${builtins.toJSON (lib.attrNames smoke)}";
+    pkgs.runCommand "benches"
+      (
+        {
+          crit = t.benches.bencher.crit;
+          libtest = t.benches.bencher.libtest;
+        }
+        // lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) smoke
+      )
+      ''
+        set -euo pipefail
+        [ -x $crit/bin/crit ]
+        [ -x $libtest/bin/libtest ]
+        cat ${lib.concatMapStringsSep " " (d: "${d}/log") (lib.attrValues smoke)}
+        grep -q Success ${smoke."main/${native}/bencher/bench-crit"}/log
+        touch $out
+      '';
 
   variants =
     let

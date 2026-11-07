@@ -491,6 +491,9 @@ let
           key
         else if lib.head m == "lib" then
           "lib"
+        else if lib.head m == "bench" then
+          # Bench plans (benchRuns): a bench by its name, as in `benches`.
+          lib.last m
         else
           "${lib.head m}-${lib.last m}";
       long = key: if split key == null then "test/${key}" else key;
