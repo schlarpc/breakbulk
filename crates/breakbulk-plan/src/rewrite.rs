@@ -129,7 +129,7 @@ impl Rewriter {
     }
 
     /// The references one absolute path becomes.
-    pub fn path(&self, p: &str) -> Result<Vec<Piece>, Error> {
+    pub fn path(&self, p: &str, owner: Option<&str>) -> Result<Vec<Piece>, Error> {
         for (dir, run) in &self.run_dirs {
             if let Some(rest) = under(p, dir) {
                 let mut v = vec![Piece::Ref(Reference::Out(OutRef {
@@ -161,10 +161,17 @@ impl Rewriter {
             )));
         }
         if under(p, &self.skeleton).is_some() {
-            let Some((_, id)) = self
+            // A path inside a package belongs to that package's source view.
+            // Any other skeleton path (the workspace root, Cargo's working
+            // directory for members) is resolved in the owning unit's own
+            // view, which is rooted at the repository root too.
+            let owned = owner.filter(|o| self.path_packages.iter().any(|(_, id)| id == o));
+            let Some(id) = self
                 .path_packages
                 .iter()
                 .find(|(d, _)| under(p, d).is_some())
+                .map(|(_, id)| id.as_str())
+                .or(owned)
             else {
                 return Err(Error(format!(
                     "`{p}` is in the skeleton but in no package's directory"
@@ -172,7 +179,7 @@ impl Rewriter {
             };
             let rel = under(p, &self.skeleton).expect("checked above").to_owned();
             return Ok(vec![Piece::Ref(Reference::Src(SrcRef {
-                src: id.clone(),
+                src: id.to_owned(),
                 rel,
             }))]);
         }
@@ -188,14 +195,14 @@ impl Rewriter {
     }
 
     /// Split a recorded value into literals and references.
-    pub fn text(&self, s: &str) -> Result<Text, Error> {
+    pub fn text(&self, s: &str, owner: Option<&str>) -> Result<Text, Error> {
         let mut pieces = Vec::new();
         let mut at = 0;
         while let Some((i, end)) = self.next_path(s, at) {
             if i > at {
                 pieces.push(Piece::Literal(s[at..i].to_owned()));
             }
-            pieces.extend(self.path(&s[i..end])?);
+            pieces.extend(self.path(&s[i..end], owner)?);
             at = end;
         }
         if at < s.len() {
@@ -205,8 +212,8 @@ impl Rewriter {
     }
 
     /// A value that must be exactly one reference (a working directory).
-    pub fn reference(&self, s: &str) -> Result<Reference, Error> {
-        match self.text(s)? {
+    pub fn reference(&self, s: &str, owner: Option<&str>) -> Result<Reference, Error> {
+        match self.text(s, owner)? {
             Text::Concat(p) => match p.as_slice() {
                 [Piece::Ref(r)] => Ok(r.clone()),
                 _ => Err(Error(format!("`{s}` is not one source or output path"))),

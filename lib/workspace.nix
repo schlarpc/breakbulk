@@ -43,6 +43,8 @@ pkgs:
   features ? [ ],
   fetchArgs ? { },
   configs ? [ ],
+  # extraSources.<package name> = [ "<path from the repository root>" ]
+  extraSources ? { },
   tools ? mkTools pkgs,
   name ? "breakbulk",
 }:
@@ -61,7 +63,7 @@ let
   crates = lib.listToAttrs (
     map (e: lib.nameValuePair (crateId e) (fetch.crateSource e).path) (lockfile.remoteEntries entries)
   );
-  views = sourceViews.workspaceViews { inherit root wsDir; };
+  views = sourceViews.workspaceViews { inherit root wsDir extraSources; };
   workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views;
 
   plans = lib.genAttrs [ "build" "test" ] (

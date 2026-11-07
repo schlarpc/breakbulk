@@ -56,6 +56,12 @@ const ALWAYS_KEPT_ENV: &[&str] = &["CARGO"];
 /// The dynamic-library path variable on the planning host.
 const DYLIB_VAR: &str = "LD_LIBRARY_PATH";
 
+/// What `CARGO_TARGET_TMPDIR` (compile-time env of integration tests and
+/// benches) becomes: a fixed path that the test-run derivation creates
+/// before running the test ("Tests" in `docs/implementation.md`). Cargo's
+/// value names its target directory, which breakbulk does not have.
+pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
+
 fn arg_value<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -478,11 +484,16 @@ impl<'a> Builder<'a> {
     fn rewrite_env(
         &self,
         unit: &str,
+        owner: &str,
         env: BTreeMap<String, String>,
     ) -> Result<(BTreeMap<String, Text>, Vec<UnitId>), Error> {
         let mut out = BTreeMap::new();
         let mut dylib = Vec::new();
         for (k, v) in env {
+            if k == "CARGO_TARGET_TMPDIR" {
+                out.insert(k, Text::Literal(TARGET_TMPDIR.into()));
+                continue;
+            }
             let v = if k == DYLIB_VAR {
                 let (runs, rest) = self.dylib_path(unit, &v)?;
                 dylib = runs;
@@ -495,7 +506,7 @@ impl<'a> Builder<'a> {
             };
             let t = self
                 .rw
-                .text(&v)
+                .text(&v, Some(owner))
                 .map_err(|e| Error(format!("unit {unit}: env `{k}`: {}", e.0)))?;
             out.insert(k, t);
         }
@@ -614,7 +625,7 @@ impl<'a> Builder<'a> {
             }
             let t = self
                 .rw
-                .text(a)
+                .text(a, Some(&c.package.id))
                 .map_err(|e| Error(format!("unit {id}: argument `{a}`: {}", e.0)))?;
             out.push(t.into());
             i += 1;
@@ -639,7 +650,7 @@ impl<'a> Builder<'a> {
             }
         }
         env_splices.sort();
-        let (env, dylib) = self.rewrite_env(id, self.filter_env(&env, false))?;
+        let (env, dylib) = self.rewrite_env(id, &c.package.id, self.filter_env(&env, false))?;
         for (k, v) in &env {
             if contains_sentinel(k) {
                 return Err(self.shape_error(id, "env", &format!("`{k}={v:?}`"), args));
@@ -650,12 +661,12 @@ impl<'a> Builder<'a> {
             .rec
             .program
             .iter()
-            .map(|p| self.rw.text(p))
+            .map(|p| self.rw.text(p, None))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error(format!("unit {id}: program: {}", e.0)))?;
         let cwd = self
             .rw
-            .reference(&c.rec.cwd)
+            .reference(&c.rec.cwd, Some(&c.package.id))
             .map_err(|e| Error(format!("unit {id}: cwd: {}", e.0)))?;
         let edition = arg_value(args, "--edition")
             .first()
@@ -717,10 +728,10 @@ impl<'a> Builder<'a> {
             }
             env.insert(k.clone(), v.clone());
         }
-        let (env, dylib) = self.rewrite_env(id, self.filter_env(&env, true))?;
+        let (env, dylib) = self.rewrite_env(id, &r.package.id, self.filter_env(&env, true))?;
         let cwd = self
             .rw
-            .reference(&rec.cwd)
+            .reference(&rec.cwd, Some(&r.package.id))
             .map_err(|e| Error(format!("run {id}: cwd: {}", e.0)))?;
         Ok(Unit::Run(RunUnit {
             package: r.package.id.clone(),

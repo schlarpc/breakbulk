@@ -1,0 +1,15 @@
+# Every build-script directive kind, `links` chains and `DEP_*` metadata
+# (from spike A's fixture). a-sys <- b-sys <- c (rlib + cdylib, with an
+# integration test, an example and a bench, and libc from crates.io, whose
+# own build script runs too); pm (proc macro with a build script); hostdep
+# (`links`, a build-dependency of app); oldsyn (`rust-version = "1.70"`, so
+# the `cargo:` syntax); app (two bins). Every build script prints several
+# values of every kind that applies, in a mixed order, plus search paths
+# inside and outside its OUT_DIR (common/build_common.rs).
+[workspace]
+resolver = "2"
+members = ["a-sys", "b-sys", "c", "pm", "hostdep", "app", "oldsyn"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

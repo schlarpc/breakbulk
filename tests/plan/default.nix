@@ -99,6 +99,20 @@ let
       '';
 
   walking-skeleton = mk "walking-skeleton" { };
+
+  directivesPackages = [
+    "a-sys"
+    "b-sys"
+    "c"
+    "pm"
+    "hostdep"
+    "app"
+    "oldsyn"
+  ];
+  directives = mk "directives" {
+    # Every build script includes ../common/build_common.rs.
+    extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+  };
   walking-skeleton-cargo = cargoBuild {
     fixture = "walking-skeleton";
     ws = walking-skeleton;
@@ -107,7 +121,7 @@ let
 in
 {
   workspaces = {
-    inherit walking-skeleton;
+    inherit walking-skeleton directives;
   };
 
   # One bin, one registry dependency (itoa) and one build script (cfg, env,
@@ -139,6 +153,54 @@ in
     ws = walking-skeleton;
     kind = "test";
   };
+
+  # Placement of every directive kind equals Cargo's, for every unit of the
+  # build and test plans (the golden comparison expands each splice with
+  # the real build scripts' output).
+  directives-golden = golden {
+    fixture = "directives";
+    ws = directives;
+  };
+  directives-golden-test = golden {
+    fixture = "directives";
+    ws = directives;
+    kind = "test";
+  };
+
+  # The products run as plain cargo's do: links chains, DEP_* metadata, a
+  # proc macro and a build-dependency with build scripts, `cargo:` syntax.
+  directives =
+    let
+      ref = cargoBuild {
+        fixture = "directives";
+        ws = directives;
+        install = ''
+          install -D $t/app $out/bin/app
+          install -D $t/app-tool $out/bin/app-tool
+        '';
+      };
+    in
+    pkgs.runCommand "directives-check"
+      {
+        app = directives.packages.app;
+        tool = directives.packages.app-tool;
+        it = directives.testBins."c/test/it";
+        ex = directives.testBins."c/example/ex";
+        inherit ref;
+      }
+      ''
+        for b in app app-tool; do
+          d=$app; [ $b = app ] || d=$tool
+          got=$($d/bin/$b); want=$($ref/bin/$b)
+          echo "$b: breakbulk '$got', cargo '$want'"
+          [ "$got" = "$want" ]
+        done
+        [ "$($app/bin/app)" = "a_sys 42 2" ]
+        $it/bin/it | tee it.log
+        grep -q 'test result: ok. 1 passed' it.log
+        [ "$($ex/bin/ex)" = "a_sys" ]
+        mkdir -p $out
+      '';
 
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =

@@ -1,0 +1,6 @@
+[package]
+name = "oldsyn"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.70"
+links = "old"
