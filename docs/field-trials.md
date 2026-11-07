@@ -13,8 +13,10 @@ repository's own `rust-toolchain.toml` (rust-overlay, 1.96.1).
 **Result: go for M4.** datboi2, a repository with eleven workspaces, a
 nightly-only workspace with git dependencies, eight wasm components and four
 embedded products, builds end to end, and the checks its CI runs pass from
-`repo.checks` (with the project settings listed below). Seven breakbulk bugs
-were found and fixed, each with a regression check. The gaps that remain are
+`repo.checks` (with the project settings listed below). Eight breakbulk bugs
+were found and fixed, each with a regression check. kmsrsos (musl, two msvc
+architectures, stamps, feature variants) builds and passes its CI checks;
+mtgac builds except its wasm `check` gate. The gaps that remain are
 listed at the end, by priority.
 
 ## Choosing the repositories
@@ -199,7 +201,48 @@ them in the repository; `cargo fuzz` adds sanitizer flags itself).
 
 ## mtgac
 
-MTGAC
+### What the module does
+
+`tests/field-trials/mtgac/nix/rust.nix` (about 100 lines): one workspace
+(16 crates and xtask, 414 packages in the lockfile) on three targets:
+native (`presets.linuxGnu`), wasm32 (`presets.wasmBrowser`, restricted to
+every member but mtgac and xtask, as the project's `cargo check-wasm`
+alias), and x86_64 msvc (mtgac only). Variants `check` and `clippy`
+(`--deny warnings`, dev profile as the flake's).
+
+### What worked
+
+- The mtgac binary, its Windows `.exe`, clippy over the workspace, and the
+  Leptos UI as a wasm32 product through `bindgen` (wasm-bindgen 0.2.128,
+  matched from the lockfile) and `wasmOpt` (after fix 8). ring's C code
+  compiles for wasm32 with the preset's unwrapped clang, which the flake
+  wires by hand (`CC_wasm32_unknown_unknown`).
+- First evaluation (plans of three targets × three variants): about 5
+  minutes, mostly unpacking crates (gap 8).
+
+### What did not
+
+- **The wasm gate.** breakbulk's `check` variant traces `cargo check` and
+  `cargo check --all-targets` (decision 75). The flake's gate is plain
+  `cargo check --target wasm32-unknown-unknown`. With `--all-targets`, the
+  members' tests and dev-dependencies are checked for wasm32 too: tokio's
+  `net` feature pulls in mio, which refuses wasm32 (`compile_error!`), and
+  mtgac-catalog's `python_conformance` test uses a native-only function.
+  These are real failures of `cargo check --all-targets --target wasm32`,
+  but not what the project gates on (gap 4b).
+- **The UI is not embedded.** See gap 6: rust-embed's literal `folder`
+  path. mtgac's own flake ships the placeholder page too.
+- Not run for lack of time: the native test runs (they are in
+  `repo.checks`), trunk's HTML processing (hashed file names, the
+  `index.html` rewrite), the asset pipeline (fixed-output downloads of the
+  game client), cargo-deny, coverage.
+
+### Project settings the module supplies
+
+- `libsqlite3-sys` defaults removed (rusqlite `bundled`; gap 2).
+- The member list for the wasm target, read from `crates/*` (the alias's
+  `--exclude` has no breakbulk spelling; `targets.<t>.packages` takes an
+  inclusion list).
 
 ## Fixes made in breakbulk
 
@@ -252,7 +295,15 @@ Each is a breakbulk bug found by the trials, fixed with a regression check.
 7. **Test runs failed for bins with a hyphen** (5cf007b), right after fix 6:
    `export CARGO_BIN_EXE_datboi-crash-child=…` is not valid shell. Names
    the shell cannot export now go through `env`. Check:
-   `test-runs-test-control` (a `ctl-extra` bin).
+   `test-runs-test-control` (a `ctl-extra` bin). nextest runs get the same
+   treatment after the merge with main.
+8. **`wasmOpt` rejected every Rust wasm module** that uses `memory.copy`
+   (mtgac's UI): rustc enables bulk memory and five other features on
+   wasm32-unknown-unknown by default (its `CARGO_CFG_TARGET_FEATURE`, seen
+   in the plans), while wasm-opt validates against the MVP unless told
+   otherwise. The helper now passes `--enable-<f>` for that set
+   (`features`, overridable). Check: `stages-wasm-opt-features`. trunk
+   passes the same flags in mtgac's `index.html`.
 
 ## Gaps, by priority
 
@@ -294,6 +345,12 @@ ASK marks a choice for the author.
    targets too. The trial filters `repo.checks` by name. Proposal:
    `workspaces.<ws>.targets.<triple>.{variants, tests}` to narrow per
    target.
+
+   4b. **Check variants always include `--all-targets` (ASK).** mtgac's
+   wasm gate is `cargo check` without it, and `--all-targets` fails there
+   for reasons the project does not gate on (see mtgac). Proposal: a
+   variant option `allTargets = true` (the default, decision 75) that a
+   gate like this sets to false.
 5. **Only the default variant's tests are in `repo.checks`.** kmsrsos's
    `policy-features` check (tests under two features) needs
    `target.<t>.variants.policy.namedTestRuns` wired by hand. Proposal: a
