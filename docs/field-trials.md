@@ -145,7 +145,57 @@ for path crates). Across all 38 plans there are 4101 unit entries.
 
 ## kmsrsos
 
-KMSRSOS
+### What the module does
+
+`tests/field-trials/kmsrsos/nix/rust.nix` (about 130 lines; the flake's
+Rust wiring is about 300 of its 2748): one workspace, release, on four
+targets: native (the whole workspace), `x86_64-unknown-linux-musl`
+(`presets.linuxMusl`; server, client, os), and x86_64 and aarch64
+`pc-windows-msvc` (`presets.msvc` with `crtStatic`; server and client).
+Variants `clippy` (`--deny warnings`) and `policy` (the two
+`kmsrs-policy/…` features). The build stamp (`KMSRSOS_GIT_COMMIT`,
+`SOURCE_DATE_EPOCH`) is env on kmsrs-server only.
+
+### What worked
+
+- All four targets' products build: 348 s from cold for all of them
+  (`--max-jobs 4 --cores 1`, load 25–29). The static server is static-pie
+  with no references; the native one references glibc and gcc's libs only;
+  the x86_64 `.exe` imports only system DLLs (`+crt-static`, no
+  `VCRUNTIME140.dll`, which the project checks for) and carries the message
+  table resource its build script passes with `rustc-link-arg-bins`; the
+  aarch64 `.exe`s are ARM64 PE files.
+- The project's own `[target.x86_64-pc-windows-msvc] rustflags =
+  ["+crt-static"]` and the preset's flags both arrive (decision 33): the
+  planner put the preset's under the same key.
+- `ci` (build, clippy, every native test binary, the policy-feature tests):
+  green, after the settings below. The flake's comment that crane needs the
+  `+crt-static` flag twice because env rustflags replace the config's does
+  not apply: breakbulk concatenates them.
+
+### Project settings the module supplies
+
+- `test.sourceScope` for kmsrs-server (its workspace, packaging, docs and
+  kernel-config invariant tests read `.github/`, `Cargo.lock`, `flake.nix`,
+  `flake.lock`, `docs/`, `os/`, `ci/`, `deploy/`, `harness/`, `fuzz/` and
+  other crates), kmsrs-db (`crates/kmsrs-dbgen`) and kmsrs-vectors
+  (`fuzz`). The first run failed with the test's own "cannot read …" message
+  naming each path, which made this a mechanical fix.
+- `noSourceReferences = null` for kmsrs-dbgen, a generator that finds its
+  data through `CARGO_MANIFEST_DIR` (the check is right that it does).
+- The xwin SDK through `breakbulk.xwinSdk` with the same pins as the flake's
+  FOD (CRT 14.44.17.14, SDK 10.0.26100, both architectures). The hash is
+  the same as the flake's, so the download was shared.
+
+### Not covered
+
+The coverage gate (`cargo llvm-cov` with a 90% threshold on three
+packages: breakbulk's coverage variant produces the profiles, but no
+report or threshold), the per-package feature powerset (gap 10), the
+container image, OS images and boot checks (non-Rust derivations over
+these products, which would consume `packages.*` unchanged), and the
+nightly `fuzz` and `panic-audit` workspaces (no toolchain is pinned for
+them in the repository; `cargo fuzz` adds sanitizer flags itself).
 
 ## mtgac
 

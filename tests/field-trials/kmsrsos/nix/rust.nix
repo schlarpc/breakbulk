@@ -108,4 +108,28 @@ in
     KMSRSOS_GIT_COMMIT = "unknown";
     SOURCE_DATE_EPOCH = "0";
   };
+
+  # Tests that read the repository (workspace and packaging invariants, the
+  # docs they keep in sync, the kernel configs, the CI scripts): the
+  # flake's source filter keeps these files for them.
+  packages.kmsrs-server.test.sourceScope = [
+    ".github"
+    "Cargo.toml"
+    "Cargo.lock"
+    "rust-toolchain.toml"
+    "flake.nix"
+    "flake.lock"
+    "harness"
+    "crates"
+    "ci"
+    "deploy"
+    "docs"
+    "os"
+    "fuzz"
+  ];
+  packages.kmsrs-db.test.sourceScope = [ "crates/kmsrs-dbgen" ];
+  packages.kmsrs-vectors.test.sourceScope = [ "fuzz" ];
+  # kmsrs-dbgen is the generator of kmsrs-db's tables; it finds its data
+  # through CARGO_MANIFEST_DIR on purpose, which the default check flags.
+  packages.kmsrs-dbgen.checks.noSourceReferences = null;
 }
