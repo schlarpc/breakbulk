@@ -416,3 +416,53 @@ Default: hide everywhere.
   use compilers without that wrapper and will need to add it themselves.
 - A captured environment for host tools is the same derivation whether the
   build is native or cross, so it's built once and shared.
+
+## 38. FYI: Windows (msvc) and wasm groundwork works
+
+- breakbulk can download Microsoft's C runtime and Windows SDK (via the
+  `xwin` tool) as a pinned, reproducible Nix download, marked unfree. A test
+  program with C code, generated bindings, a Windows resource and Windows API
+  calls cross-compiles from Linux and runs under wine; the ARM64 Windows
+  build compiles and links. Write-up: `docs/spikes/msvc.md`.
+- The `wasm-bindgen` command-line tool is picked to match the exact version
+  in your `Cargo.lock`, from nixpkgs when it has it, else built from a
+  table of known hashes (seeded with 0.2.123 and 0.2.125–0.2.130).
+  Unknown versions fail with a message naming the version.
+- Unfree permission is granted only to the SDK package. Note: your personal
+  `~/.config/nixpkgs/config.nix` allows all unfree packages, which hides
+  this in impure evaluations; flake checks are unaffected.
+
+## 39. ASK: Windows builds need a small linker fix to be reproducible
+
+Windows `.exe` files came out different on every rebuild: the linker writes
+the path of a randomly named temporary folder into the debug-symbol file,
+and that file's hash goes into the `.exe`. Microsoft's own "reproducible"
+switch doesn't fix it. A small wrapper around the linker that copies the
+inputs to a fixed path first makes rebuilds identical. Question: keep it as
+part of the Windows preset (default; only Windows pays for it), or move it
+into breakbulk's unit builder for all targets?
+
+## 40. ASK: how strictly to pin the Windows SDK download
+
+By default the SDK download reads Microsoft's live catalogue. The C runtime
+version is exact, but files within SDK 10.0.26100 can be updated by
+Microsoft; if that happens, a fresh machine's build fails with a hash
+mismatch (it never silently changes). You can additionally pin the
+catalogue file itself (`channelManifest`), which removes that risk unless
+Microsoft deletes old catalogue URLs. Default: optional. Make it required?
+
+## 41. ASK: choosing the LLVM tools that match your Rust compiler
+
+Windows and wasm builds use LLVM tools (linker, C compiler) that should match
+the LLVM version inside rustc. Only nixpkgs' own rustc says which LLVM it
+uses; toolchains from rust-overlay or fenix don't. Proposed: a small table
+mapping Rust version to LLVM major version, shipped with breakbulk, with an
+option to override. Alternative: ask rustc at build time, which would need
+import-from-derivation to pick the tool package.
+
+## 42. ASK: should slow tests run in plain `nix flake check`?
+
+Windows SDK download (252 MB), wine runs and cross toolchains make
+`nix flake check` slow. They currently run there (marked HEAVY in
+`flake.nix`). Alternative: a separate `heavyChecks` output that CI runs
+explicitly. Default: keep them in `checks`.
