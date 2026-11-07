@@ -41,6 +41,8 @@ pub struct Context {
     /// The variables the project's `[env]` table sets on Cargo's
     /// processes ([`crate::spec::ProjectConfig::applied_env`]).
     pub config_env: BTreeSet<String>,
+    /// [`breakbulk_format::plan::Plan::rust_src_remap`].
+    pub rust_src_remap: Option<(String, String)>,
 }
 
 /// Variables never kept in a unit's env: the planner's own, and the ones the
@@ -1171,6 +1173,7 @@ impl<'a> Builder<'a> {
             roots: self.roots(),
             doctests: self.doctests()?,
             config_env: self.ctx.config_env.clone(),
+            rust_src_remap: self.ctx.rust_src_remap.clone(),
         };
         plan.normalize();
         Ok(plan)
