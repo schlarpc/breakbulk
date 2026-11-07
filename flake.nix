@@ -133,6 +133,14 @@
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "repository-${n}" v) (
             builtins.removeAttrs r [ "repos" ]
           )
+          # A git source locked at two revisions by different workspaces;
+          # git package ids against real Cargo's (a local repository).
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-revisions-${n}" v) (
+            builtins.removeAttrs (import ./tests/git-revisions {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repos" "repo" "lockfiles" ]
+          )
           # Test runs, doctests and test apps over the doctests and
           # test-control fixtures (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-runs-${n}" v) (

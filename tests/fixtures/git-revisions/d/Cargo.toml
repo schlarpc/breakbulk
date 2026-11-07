@@ -1,0 +1,10 @@
+[package]
+name = "app-d"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+common = { path = "../common" }
+gitdep = { git = "file:///build/gitdep", rev = "86f6ab89dd0b476b6dc623b87344bbb04dee8b78" }

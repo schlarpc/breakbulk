@@ -1,0 +1,10 @@
+[package]
+name = "app-c"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+common = { path = "../common" }
+gitdep = { git = "file:///build/gitdep", branch = "main" }
