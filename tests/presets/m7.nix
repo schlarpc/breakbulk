@@ -154,24 +154,32 @@ let
 
   # --- windows-gnu ---------------------------------------------------------------
 
-  wgnu = "x86_64-pc-windows-gnu";
-  wgnuRust = rustWith [ wgnu ];
+  wgnuTriples = [
+    "x86_64-pc-windows-gnu"
+    "x86_64-pc-windows-gnullvm"
+  ];
+  wgnuRust = rustWith wgnuTriples;
   windowsGnuRepo = mkRepo (fixtures + "/windows-gnu") [
     {
-      workspaces.main = wsWith wgnuRust [ wgnu ];
-      targets.${wgnu}.preset = presets.windowsGnu;
+      workspaces.main = wsWith wgnuRust wgnuTriples;
+      targets = lib.genAttrs wgnuTriples (_: {
+        preset = presets.windowsGnu;
+      });
     }
   ];
-  windowsGnuChecks =
+  # gnu: mingw-w64 gcc, msvcrt. gnullvm: LLVM mingw-w64 (clang, ucrt,
+  # libunwind).
+  windowsGnuChecksFor =
+    name: triple:
     let
-      t = windowsGnuRepo.workspaces.main.target.${wgnu};
+      t = windowsGnuRepo.workspaces.main.target.${triple};
       exe = "${t.packages.gnu-smoke}/bin/gnu-smoke.exe";
     in
     {
       # A PE32+ linked by lld (no time stamp), importing only system DLLs,
       # running under wine.
-      windows-gnu-run =
-        pkgs.runCommand "windows-gnu-run"
+      "${name}-run" =
+        pkgs.runCommand "${name}-run"
           {
             nativeBuildInputs = [
               pkgs.file
@@ -193,8 +201,11 @@ let
             mkdir -p $out
             cp file.txt dlls.txt out2.txt $out/
           '';
-      windows-gnu-test = t.testRuns.gnu-smoke."bin/gnu-smoke";
+      "${name}-test" = t.testRuns.gnu-smoke."bin/gnu-smoke";
     };
+  windowsGnuChecks =
+    windowsGnuChecksFor "windows-gnu" "x86_64-pc-windows-gnu"
+    // windowsGnuChecksFor "windows-gnullvm" "x86_64-pc-windows-gnullvm";
 in
 {
   repos = {
