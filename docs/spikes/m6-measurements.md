@@ -5,7 +5,7 @@ Nov 7, 2026 · measurements for M6 (below-crate seams)
 | Question | Verdict |
 | --- | --- |
 | Is the pipelined split worth building? | **Not now.** The gap is real (measured 5–39% on a cold `-j8` release build, simulated up to 67% on a deep chain), but the stable backends (rerun and stop, `-Zno-codegen`) run the frontend twice and are *slower* than no split at 4 cores on every mid-size workspace, and break even at 8. Only the CRIU backend keeps the gain. Next step: the CRIU spike, then an opt-in per package. |
-| Does early cutoff on rmeta bytes save rebuilds? | **No, on stable and on today's nightly.** rmeta embeds the MD5 of every source file, so any edit changes the edited crate's rmeta, and every dependent's rmeta embeds that crate's hash. `-Zpublic-api-hash` is not in nightly 2026-11-06. **HISTORY_SUMMARY** |
+| Does early cutoff on rmeta bytes save rebuilds? | **No, on stable and on today's nightly.** rmeta embeds the MD5 of every source file, so any edit changes the edited crate's rmeta, and every dependent's rmeta embeds that crate's hash. `-Zpublic-api-hash` is not in nightly 2026-11-06. Replaying 31 breakbulk and 50 ripgrep commits: cutoff on rmeta would have skipped 4% and 1% of library compiles, identically on stable, nightly, and nightly with the old crate hash. |
 | Can synthesized `binaries-metadata` drive nextest over store paths? | **Go, and done.** `packages.<name>.test.runner = "nextest"` runs each test binary through nextest's reuse-build mode with the project's nextest configuration. Fixture and checks pass. |
 | What does a CA test run cost on a cold machine? | **A lot.** Substituting one CA test run downloaded 58 paths, 1.83 GB (rustc and LLVM among them) in 37 s from a local file cache; the input-addressed run downloaded 1 path, 440 bytes, in 0.28 s. Keep CA islands off by default for caches used by fresh machines (decision 52 already does), and drop the sysroot from test runs' inputs. |
 
@@ -190,7 +190,36 @@ nondeterminism or a freshness bug. Usage is in the script's header.
 
 ### Results
 
-HISTORY_RESULTS
+Two repositories, three toolchains each: stable 1.99, nightly 2026-11-06
+(crate hash from metadata, the nightly default), and that nightly with
+`-Zmetadata-crate-hash=no` (crate hash from HIR, as on stable). Release
+profile. Full tables in
+[`spikes/m6/results/history-replay/`](../../spikes/m6/results/history-replay/)
+(`*.txt`; the `*.json.gz` files hold every snapshot, for
+`replay.py --reanalyze`).
+
+| Repository | Commits built | Edited libraries | …with rmeta unchanged | Library compiles, input-addressed → rmeta cutoff | Link units, input-addressed → rlib cutoff |
+| --- | ---: | ---: | ---: | --- | --- |
+| breakbulk `crates/` (every non-merge commit touching `crates/` or the workspace manifests, up to `5da6701`) | 31 of 41 | 58 | 4 | 78 → 75 (4%) | 167 → 159 (5%) |
+| ripgrep (`91f5d22~50..91f5d22`) | 50 of 50 | 68 | 26 | 98 → 97 (1%) | 239 → 239 (0%) |
+
+The three toolchains give identical numbers, row for row. The controls
+(a clean rebuild of the last commit) matched every replayed hash. Ten
+early breakbulk commits did not build (no library yet, or a stale
+`Cargo.lock` on a feature branch) and are skipped.
+
+Where the rmeta stayed the same although the package changed:
+
+- an edit to tests only (`breakbulk-format/src/tests.rs`: 3 → 1 library
+  compiles, 9 → 1 link units: the only commit where cutoff saved much);
+- benches, a README, a CI file inside the package directory;
+- manifest-only edits (`rust-version`, `homepage` on every ripgrep crate).
+  The libraries' rmeta did not change, but every library was itself
+  edited, so nothing was saved;
+- version bumps of registry dependencies whose bytes stayed the same.
+
+Every edit to a library's own source changed its rmeta, as the micro-check
+predicts, and every dependent's rmeta with it.
 
 ### Recommendation
 
@@ -332,7 +361,7 @@ nix develop -c spikes/m6/pipelining/run-all.sh $M [name|name-profile ...]
 NOPIPE=1 nix develop -c spikes/m6/pipelining/run-all.sh $M rust-analyzer-release
 python3 spikes/m6/pipelining/analyze.py [--overhead 0.4] [--explain] spikes/m6/results/pipelining/<ws>-<profile>
 # 2. history replay
-nix develop -c python3 tools/history-replay/replay.py --repo . --work $M/hr-bb --range main \
+nix develop -c python3 tools/history-replay/replay.py --repo . --work $M/hr-bb --range 5da6701 \
   --range-path crates Cargo.toml Cargo.lock --toolchain stable= \
   --toolchain nightly=$NIGHTLY/bin --toolchain nightly-hirsvh=$NIGHTLY/bin,-Zmetadata-crate-hash=no \
   --out $M/hr-breakbulk.json
