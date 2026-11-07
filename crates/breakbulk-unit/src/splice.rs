@@ -193,7 +193,8 @@ pub const DYLIB_PATH_VAR: &str = if cfg!(windows) {
 /// their `native=`-style kind, in run order and printed order, duplicates
 /// kept. Cargo keeps only paths inside its target directory
 /// (`filter_dynamic_search_path`); breakbulk keeps those inside the printing
-/// run's `out` or an upstream run's ([`LibraryPath::for_dylib_path`]).
+/// run's `out` or an upstream run's ([`LibraryPath::for_dylib_path`]), the
+/// rule test runs use too (`dylibJq` in `lib/test-runs.nix`).
 ///
 /// [`LibraryPath::for_dylib_path`]: crate::directives::LibraryPath::for_dylib_path
 fn dylib_paths<'a>(

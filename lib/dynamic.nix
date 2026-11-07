@@ -370,7 +370,7 @@ let
             mapfile -t dylibFlags < <(${jq} -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
             __bb_dylib=
             if [ ''${#dylibFlags[@]} -gt 0 ]; then
-              __bb_dylib=$(${jq} -rn --argjson outs "$(${jq} -c '.testSpec.dylibOuts' "$info")" ${lib.escapeShellArg testRuns.dylibJq} "''${dylibFlags[@]}")
+              __bb_dylib=$(${jq} -rn ${lib.escapeShellArg testRuns.dylibJq} "''${dylibFlags[@]}")
             fi
             for __bb_p in ${
               lib.escapeShellArgs (lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib")
