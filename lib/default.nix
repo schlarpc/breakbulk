@@ -48,6 +48,7 @@ let
   stages = import ./stages.nix { inherit lib wasmBindgen; };
   testRuns = import ./test-runs.nix { inherit lib stages; };
   products = import ./products.nix { inherit lib stages; };
+  variants = import ./variants.nix { inherit lib; };
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;
@@ -112,6 +113,7 @@ let
       mkWorkspace
       products
       ;
+    variantsLib = variants;
   };
 in
 {
@@ -149,6 +151,7 @@ in
     testRuns
     testApps
     products
+    variants
     ;
   inherit (stages) mkProduct;
   stageHelpers = stages.helpers;

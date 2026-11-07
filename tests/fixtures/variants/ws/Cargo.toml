@@ -1,0 +1,15 @@
+# Variants: build, check, clippy, a custom profile that only inherits
+# `release`, and a feature powerset over `lib-a`'s features. `pm` (a proc
+# macro) and `hostdep` (a library with a build script) are path
+# dependencies outside the workspace root, so they are not members:
+# clippy-driver does not compile them.
+[workspace]
+resolver = "2"
+members = ["app", "lib-a"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[profile.release-custom]
+inherits = "release"

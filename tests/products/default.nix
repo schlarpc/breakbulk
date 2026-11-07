@@ -16,6 +16,16 @@
 #                    harnesses every scope; dep's tests pass
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
+#   variants         build, check, clippy (with and without clippy
+#                    arguments), a custom profile inheriting release and a
+#                    feature powerset: host units shared between build and
+#                    clippy at the same profile; every dependency unit
+#                    shared between check and clippy, members not; every
+#                    unit shared between release and the custom profile;
+#                    the powerset's products have their features; the check
+#                    and clippy variants' unit checks build
+#   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
+#                    fails the member's clippy unit naming the lint
 #
 # `repos` exposes each repository for debugging.
 {
@@ -81,6 +91,65 @@ let
         lib.nameValuePair u.name (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT))
       ) (lib.attrValues (inst repo).units.${kind})
     );
+
+  expectFailure =
+    name: unit: patterns:
+    let
+      a = unit.drvAttrs;
+    in
+    derivation (
+      a
+      // {
+        name = "${name}-expect-failure";
+        builder = "${pkgs.bash}/bin/bash";
+        args = [
+          "-c"
+          ''
+            set -u
+            result=$out
+            for o in $unitOutputs; do
+              d=$NIX_BUILD_TOP/unit-out-$o
+              export "$o=$d"
+            done
+            unitArgs=()
+            for ((i = 0; i < unitArgc; i++)); do
+              v=unitArg$i
+              unitArgs+=("''${!v}")
+            done
+            rc=0
+            "$unitBuilder" "''${unitArgs[@]}" > $NIX_BUILD_TOP/log 2>&1 || rc=$?
+            ${pkgs.coreutils}/bin/cat $NIX_BUILD_TOP/log
+            if [ $rc -eq 0 ]; then
+              echo "expected the unit to fail, but it succeeded" >&2
+              exit 1
+            fi
+            ${lib.concatMapStrings (p: ''
+              ${pkgs.gnugrep}/bin/grep -qF -- ${lib.escapeShellArg p} $NIX_BUILD_TOP/log || {
+                echo "the failure does not mention: "${lib.escapeShellArg p} >&2
+                exit 1
+              }
+            '') patterns}
+            ${pkgs.coreutils}/bin/mkdir -p $result
+            ${pkgs.coreutils}/bin/cp $NIX_BUILD_TOP/log $result/log
+          ''
+        ];
+        outputs = [ "out" ];
+        unitOutputs = a.outputs or [ "out" ];
+        unitBuilder = a.builder;
+        unitArgc = toString (lib.length (a.args or [ ]));
+      }
+      // lib.listToAttrs (lib.imap0 (i: v: lib.nameValuePair "unitArg${toString i}" v) (a.args or [ ]))
+    );
+
+  # Unit derivations of one plan kind of a variant, by derivation name.
+  unitsOf =
+    repo: vName: kind:
+    lib.listToAttrs (
+      map (u: lib.nameValuePair u.name u) (
+        lib.attrValues repo.workspaces.main.instances.${native}.${vName}.units.${kind}
+      )
+    );
+  drvsOf = repo: vName: kind: lib.mapAttrs (_: u: u.drvPath) (unitsOf repo vName kind);
 
   # --- post-link ---------------------------------------------------------------
 
@@ -155,11 +224,131 @@ let
   sourcePaths = mkRepo (fixtures + "/source-paths") spModules;
   sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
   spApp = sourcePaths.workspaces.main.packages.app;
+
+  # --- variants ------------------------------------------------------------------
+
+  variantsRepo = mkRepo (fixtures + "/variants") [
+    {
+      workspaces.main = {
+        path = "ws";
+        variants = {
+          default.profile = "release";
+          custom.profile = "release-custom";
+          check = {
+            mode = "check";
+            profile = "release";
+          };
+          clippy = {
+            mode = "clippy";
+            profile = "release";
+          };
+          strict = {
+            mode = "clippy";
+            profile = "release";
+            clippyArgs = [
+              "-D"
+              "clippy::len_zero"
+            ];
+          };
+        }
+        // breakbulk.variants.featurePowerset {
+          features = [
+            "lib-a/x"
+            "lib-a/y"
+          ];
+          profile = "release";
+          prefix = "fp";
+        };
+      };
+    }
+  ];
+  vt = variantsRepo.workspaces.main.target.${native};
 in
 {
   repos = {
-    inherit postLink sourcePaths sourcePathsReadme;
+    inherit
+      postLink
+      sourcePaths
+      sourcePathsReadme
+      variantsRepo
+      ;
   };
+
+  variants =
+    let
+      d = drvsOf variantsRepo;
+      same = a: b: names: lib.filter (n: (a.${n} or "missing-a") != (b.${n} or "missing-b")) names;
+      hostUnits = [
+        "pm-0.1.0-lib"
+        "hostdep-0.1.0-build-script"
+        "hostdep-0.1.0-build-run"
+      ];
+      depNames = plan: lib.filter (n: lib.hasPrefix "pm-" n || lib.hasPrefix "hostdep-" n) (lib.attrNames plan);
+      memberNames = plan: lib.filter (n: lib.hasPrefix "app-" n || lib.hasPrefix "lib-a-" n) (lib.attrNames plan);
+      buildVsClippy = same (d "default" "build") (d "clippy" "build") hostUnits;
+      checkVsClippy = lib.concatMap (
+        k: same (d "check" k) (d "clippy" k) (depNames (d "check" k))
+      ) [ "build" "test" ];
+      membersDiffer = lib.filter (n: (d "check" "build").${n} == (d "clippy" "build").${n}) (
+        memberNames (d "check" "build")
+      );
+      customVsRelease = lib.concatMap (
+        k:
+        let
+          a = d "default" k;
+          b = d "custom" k;
+        in
+        lib.optional (lib.sort lib.lessThan (lib.attrValues a) != lib.sort lib.lessThan (lib.attrValues b)) k
+      ) [ "build" "test" ];
+      # The lib target unit of the check variant is metadata only, so it
+      # differs from the build variant's (sanity check for the comparison).
+      libDiffers = (d "default" "build")."hostdep-0.1.0-lib" != (d "check" "build")."hostdep-0.1.0-lib";
+      fpNames = lib.attrNames (lib.filterAttrs (n: _: lib.hasPrefix "fp-" n) vt.variants);
+    in
+    assert lib.assertMsg (buildVsClippy == [ ]) "variants: host units differ between build and clippy: ${builtins.toJSON buildVsClippy}";
+    assert lib.assertMsg (checkVsClippy == [ ]) "variants: dependency units differ between check and clippy: ${builtins.toJSON checkVsClippy}";
+    assert lib.assertMsg (membersDiffer == [ ]) "variants: member units shared between check and clippy: ${builtins.toJSON membersDiffer}";
+    assert lib.assertMsg (customVsRelease == [ ]) "variants: release and release-custom differ in plans ${builtins.toJSON customVsRelease}";
+    assert lib.assertMsg libDiffers "variants: hostdep's lib is shared between build and check";
+    assert lib.assertMsg (fpNames == [
+      "fp-lib-a_x"
+      "fp-lib-a_x+lib-a_y"
+      "fp-lib-a_y"
+      "fp-none"
+    ]) "variants: powerset ${builtins.toJSON fpNames}";
+    assert lib.assertMsg (variantsRepo.checks ? "main/${native}/variant-clippy/check") "variants: no clippy check in repo.checks";
+    pkgs.runCommand "variants"
+      {
+        app = vt.packages.app;
+        custom = vt.variants.custom.packages.app;
+        none = vt.variants.fp-none.packages.app;
+        both = vt.variants."fp-lib-a_x+lib-a_y".packages.app;
+        check = vt.variants.check.check;
+        clippy = vt.variants.clippy.check;
+      }
+      ''
+        set -euo pipefail
+        [ "$($app/bin/app)" = "app 42 x=true y=false host=7" ]
+        [ "$($custom/bin/app)" = "app 42 x=true y=false host=7" ]
+        [ "$($none/bin/app)" = "app 42 x=false y=false host=7" ]
+        [ "$($both/bin/app)" = "app 42 x=true y=true host=7" ]
+        cat $check/units $clippy/units > $out
+      '';
+
+  variants-clippy-strict =
+    let
+      unit = (unitsOf variantsRepo "strict" "build")."lib-a-0.1.0-lib";
+    in
+    pkgs.runCommand "variants-clippy-strict"
+      {
+        failure = expectFailure "lib-a-clippy" unit [ "#len_zero" "-D clippy::len-zero" ];
+        # The default clippy variant lints the same code and succeeds.
+        lenient = (unitsOf variantsRepo "clippy" "build")."lib-a-0.1.0-lib";
+      }
+      ''
+        cat $failure/log
+        touch $out
+      '';
 
   source-paths =
     let

@@ -56,6 +56,7 @@
   mkTools,
   mkWorkspace,
   products,
+  variantsLib,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -352,8 +353,10 @@ let
 
   checkMode =
     wsName: vName: v:
-    if v.mode != "build" then
-      throw "breakbulk: workspaces.${wsName}.variants.${vName}: mode `${v.mode}` is not implemented yet (M4)"
+    if v.mode == "coverage" then
+      throw "breakbulk: workspaces.${wsName}.variants.${vName}: mode `coverage` needs the toolchain spec's rustflags (M3) and is not implemented yet"
+    else if v.benches && (v.mode == "check" || v.mode == "clippy") then
+      throw "breakbulk: workspaces.${wsName}.variants.${vName}: `benches` needs a build variant, not `${v.mode}`"
     else
       v;
 
@@ -403,6 +406,9 @@ let
       shippedRemapScope = shippedRemapScopeOf triple v;
       packages = testConfigs wsName;
       inherit (cfg) ca;
+      inherit (v) mode clippyArgs;
+      clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
+      bench = v.benches;
     };
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
@@ -436,11 +442,44 @@ let
 
   selectPkgs = sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
 
+  # benches.<pkg>.<name>: bench-plan roots installed as $out/bin/<target>
+  # (stubs as they are): a bench by its name, the lib harness in bench
+  # mode as `lib`, a bin's as `bin-<name>`.
+  benchesOf =
+    inst: sel:
+    let
+      byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.benches);
+      nameOf =
+        r:
+        let
+          b = r.breakbulkRoot;
+        in
+        if b.kind == "bench" then
+          b.target
+        else if b.kind == "lib" then
+          "lib"
+        else
+          "${b.kind}-${b.target}";
+      install =
+        r:
+        if r.breakbulkRoot.unit == null then
+          r
+        else
+          pkgs.runCommand r.breakbulkRoot.target { } ''
+            files=(${r}/*)
+            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}
+          '';
+    in
+    lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (
+      selectPkgs sel byPkg
+    );
+
   # testRuns.<pkg>.<name>: test runs, named as `tests` names test
   # binaries; `.enabled` holds those whose run is enabled
   # (`test.binaries.<binary>.enable`).
-  namedRuns =
-    inst: sel:
+  namedRuns = inst: namedRuns' inst.testRuns (pkg: k: inst.checks ? "test/${pkg}/${k}");
+  namedRuns' =
+    allRuns: isEnabled: sel:
     let
       split = key: builtins.match "([a-z]+)/(.*)" key;
       short =
@@ -466,9 +505,9 @@ let
       in
       pick keys
       // {
-        enabled = pick (lib.filter (k: inst.checks ? "test/${pkg}/${k}") keys);
+        enabled = pick (lib.filter (isEnabled pkg) keys);
       }
-    ) (selectPkgs sel inst.testRuns);
+    ) (selectPkgs sel allRuns);
 
   # tests.<pkg>.<name>: test-plan roots installed as $out/bin/<target>
   # (stubs as they are).
@@ -503,19 +542,52 @@ let
         triple: vs:
         let
           sel = ws.targets.${triple}.packages;
-          variants = lib.mapAttrs (_: inst: {
-            packages = productsOf wsName ws triple inst sel;
-            tests = testsOf inst sel;
-            testRuns = namedRuns inst sel;
-            testApps = selectPkgs sel inst.testApps;
-            doctests = selectPkgs sel inst.doctests;
-          }) vs;
+          variants = lib.mapAttrs (
+            vName: inst:
+            let
+              v = ws.variants.${vName};
+            in
+            {
+              packages = productsOf wsName ws triple inst sel;
+              tests = testsOf inst sel;
+              testRuns = namedRuns inst sel;
+              testApps = selectPkgs sel inst.testApps;
+              doctests = selectPkgs sel inst.doctests;
+              benches = benchesOf inst sel;
+              benchRuns = namedRuns' inst.benchRuns (_: _: true) sel;
+            }
+            // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
+              # Every unit of both plans: for clippy, its lints on every
+              # workspace member.
+              check = variantsLib.unitsCheck {
+                inherit pkgs;
+                name = "${wsName}-${triple}-${vName}-${v.mode}";
+                units = lib.attrValues inst.units.build ++ lib.attrValues inst.units.test;
+              };
+            }
+          ) vs;
           dflt =
             variants.${ws.defaultVariant}
               or (throw "breakbulk: workspaces.${wsName}.defaultVariant `${ws.defaultVariant}` is not one of its variants (${lib.concatStringsSep ", " (lib.attrNames ws.variants)})");
+          benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) ws.variants);
+          benchVariant =
+            if ws.variants.${ws.defaultVariant}.benches or false then
+              ws.defaultVariant
+            else if lib.length benchVariants == 1 then
+              lib.head benchVariants
+            else
+              null;
         in
         {
           inherit variants;
+          benches =
+            if benchVariant != null then
+              variants.${benchVariant}.benches
+            else if benchVariants == [ ] then
+              { }
+            else
+              throw "breakbulk: workspaces.${wsName}: several variants have benches (${lib.concatStringsSep ", " benchVariants}) and the default variant does not; use target.<triple>.variants.<v>.benches";
+          benchRuns = if benchVariant != null then variants.${benchVariant}.benchRuns else { };
           inherit (dflt)
             packages
             tests
@@ -565,6 +637,14 @@ let
         pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
       ) t.testRuns
       // lib.mapAttrs' (pkg: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/doctest" d) t.doctests
+      // lib.optionalAttrs cfg.workspaces.${wsName}.benchSmoke (
+        lib.concatMapAttrs (
+          pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
+        ) t.benchRuns
+      )
+      // lib.concatMapAttrs (
+        vName: v: lib.optionalAttrs (v ? check) { "${wsName}/${triple}/variant-${vName}/check" = v.check; }
+      ) t.variants
     ) w.target
   ) workspaces;
 

@@ -1,0 +1,12 @@
+[package]
+name = "lib-a"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["x"]
+x = []
+y = []
+
+[dependencies]
+hostdep = { path = "../../deps/hostdep" }

@@ -42,6 +42,10 @@ pub struct Options {
     /// store path). Cargo then starts `shim clippy-driver rustc …` for
     /// workspace members only.
     pub clippy_driver: Option<String>,
+    /// Clippy's own arguments (`-D warnings`, `-W clippy::pedantic`), as
+    /// `cargo clippy -- ARGS` passes them: `CLIPPY_ARGS`, each argument
+    /// followed by `__CLIPPY_HACKERY__`. Kept only on clippy-driver units.
+    pub clippy_args: Vec<String>,
     pub target: String,
     pub profile: String,
     pub features: Vec<String>,
@@ -312,6 +316,14 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
             && opts.mode == VariantMode::Clippy
         {
             cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
+            if !opts.clippy_args.is_empty() {
+                let joined: String = opts
+                    .clippy_args
+                    .iter()
+                    .map(|a| format!("{a}__CLIPPY_HACKERY__"))
+                    .collect();
+                cmd.env("CLIPPY_ARGS", joined);
+            }
         }
         output(cmd, &format!("cargo {}", sub.join(" ")))?;
         records.extend(read_records(&record)?);
