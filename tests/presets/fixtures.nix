@@ -43,6 +43,7 @@ let
     '';
 
   discard = builtins.unsafeDiscardStringContext;
+  fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
   planOf =
     inst: kind: builtins.fromJSON (discard (builtins.readFile "${inst.plans.${kind}}/plan.json"));
   unitText = drv: discard (drv.drvAttrs.BREAKBULK_UNIT or "");
@@ -572,6 +573,25 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
+        # The linker choice (lib/presets/linker.nix), one rule per kind.
+        linkerKinds =
+          let
+            k = triple: args: presets.linkerKind ({ inherit triple; } // args);
+          in
+          k native { } == "mold"
+          && k "aarch64-unknown-linux-musl" { } == "mold"
+          && k "riscv64gc-unknown-linux-gnu" { } == "mold"
+          && k native { lto = true; } == "clang-lld"
+          && k native { flavor = "zig"; } == "zig"
+          && k "x86_64-pc-windows-msvc" { } == "lld-link"
+          && k "aarch64-pc-windows-msvc" { lto = true; } == "lld-link"
+          && k "x86_64-pc-windows-gnu" { } == "mingw-lld"
+          && k "x86_64-pc-windows-gnullvm" { } == "mingw-lld"
+          && k "wasm32-unknown-unknown" { } == "wasm-ld"
+          && k "wasm32-wasip1" { } == "wasm-ld"
+          && k "wasm32-wasip2" { } == "wasm-component-ld"
+          && fails (k "aarch64-apple-darwin" { })
+          && fails (k native { flavor = "gold"; });
         # `crtStatic = true` adds the flag (the option once shadowed the
         # flag list, and the preset failed with "expected a list but found
         # a Boolean"; found in the field trials).

@@ -58,67 +58,23 @@ in
 let
   inherit (lib) mkDefault;
   bp = pkgs.buildPackages;
-  common = wasmCommon args;
-  # wasmCommon's linker is the plain wasm-ld; the component linker drives it.
-  wasmLd = common.linker.content;
   libDir = "${wasilibc}/lib/wasm32-wasip2";
   inc = "-isystem ${lib.getDev wasilibc}/include/wasm32-wasip2";
-
-  # Named wasm-component-ld so rustc keeps the target's wasm-lld flavor.
-  # rustc puts its own lib/rustlib/<host>/bin first on the linker's PATH
-  # (rustc_codegen_ssa back/linker.rs, get_linker), so the real
-  # wasm-component-ld is found there whatever toolchain is in use.
-  linker = "${bp.writeShellScriptBin "wasm-component-ld" ''
-    self=$(readlink -f "$0")
-    real=
-    IFS=: read -ra dirs <<< "''${PATH:-}"
-    for d in "''${dirs[@]}"; do
-      if [[ -x $d/wasm-component-ld && $(readlink -f "$d/wasm-component-ld") != "$self" ]]; then
-        real=$d/wasm-component-ld
-        break
-      fi
-    done
-    if [[ -z $real ]]; then
-      echo "breakbulk wasip2 preset: no wasm-component-ld on PATH; the Rust toolchain ships it in lib/rustlib/<host>/bin (rustup's and rust-overlay's do)" >&2
-      exit 1
-    fi
-    ${
-      if withC then
-        ''
-          swap() {
-            case "$1" in
-            */lib/rustlib/wasm32-wasip2/lib/self-contained/crt1-command.o) printf '%s\n' ${libDir}/crt1-command.o ;;
-            */lib/rustlib/wasm32-wasip2/lib/self-contained/crt1-reactor.o) printf '%s\n' ${libDir}/crt1-reactor.o ;;
-            *) printf '%s\n' "$1" ;;
-            esac
-          }
-          args=()
-          for a in "$@"; do
-            if [[ $a == @* && -f ''${a#@} ]]; then
-              rsp="''${TMPDIR:-/tmp}/wasm-component-ld-$$-''${#args[@]}.rsp"
-              while IFS= read -r line || [[ -n $line ]]; do
-                swap "$line"
-              done < "''${a#@}" > "$rsp"
-              args+=("@$rsp")
-            else
-              args+=("$(swap "$a")")
-            fi
-          done
-          set -- "''${args[@]}"
-        ''
-      else
-        ""
+  # The linker (./linker.nix, kind wasm-component-ld): rustc's
+  # wasm-component-ld over the version-matched wasm-ld.
+  common = wasmCommon (
+    args
+    // {
+      inherit triple;
+      linkerArgs = lib.optionalAttrs withC { wasip2CrtDir = libDir; };
     }
-    # Last: rustc's `-flavor wasm` must stay the first arguments.
-    exec "$real" "$@" --wasm-ld-path ${wasmLd}
-  ''}/bin/wasm-component-ld";
+  );
 in
 assert lib.assertMsg (
   triple == "wasm32-wasip2"
 ) "breakbulk.presets.wasip2: ${triple} is not wasm32-wasip2";
 common
 // {
-  linker = mkDefault linker;
   stagePreset = mkDefault null;
   runner = mkDefault (
     runners.wasmtime {

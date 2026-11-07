@@ -20,7 +20,7 @@
 {
   lib,
   hostSpec,
-  driverWrapper,
+  chooseLinker,
 }:
 {
   pkgs,
@@ -94,9 +94,16 @@ let
 in
 {
   packageSet = mkDefault pkgs;
-  # driverWrapper drops the `-fuse-ld=lld -B…/gcc-ld` rustc adds on
-  # x86_64 (rustc's self-contained rust-lld); zig links with its own lld.
-  linker = mkDefault (driverWrapper pkgs "zig-cc-link-${zigTarget}" zigCc "");
+  # ./linker.nix, kind zig: zig cc, minus the `-fuse-ld=lld -B…/gcc-ld`
+  # rustc adds on x86_64; zig links with its own lld.
+  linker = mkDefault (chooseLinker {
+    inherit pkgs triple;
+    flavor = "zig";
+    zig = {
+      cc = zigCc;
+      target = zigTarget;
+    };
+  });
   cc = mkDefault zigCc;
   cxx = mkDefault zigCxx;
   ar = mkDefault zigAr;
