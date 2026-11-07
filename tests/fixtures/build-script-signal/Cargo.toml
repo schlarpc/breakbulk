@@ -1,0 +1,8 @@
+# A build script that dies by a signal (SIGABRT). Cargo fails the build;
+# so must breakbulk's run unit, naming the signal.
+[package]
+name = "build-script-signal"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]

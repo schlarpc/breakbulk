@@ -202,6 +202,29 @@ in
         mkdir -p $out
       '';
 
+  # A build script killed by a signal fails its run unit, naming the
+  # signal. The run unit's BREAKBULK_UNIT is executed by hand, so the check
+  # can expect the failure.
+  build-script-signal =
+    let
+      ws = mk "build-script-signal" { };
+      runs = lib.filter (u: lib.hasSuffix "-build-run" u.name) (lib.attrValues ws.units.build);
+      run = assert lib.length runs == 1; lib.head runs;
+    in
+    pkgs.runCommand "build-script-signal-check" { unit = run.drvAttrs.BREAKBULK_UNIT; } ''
+      result=$out
+      if BREAKBULK_UNIT="$unit" out=$TMPDIR/o flags=$TMPDIR/f \
+          ${tools.breakbulk-unit}/bin/breakbulk-unit unit 2> err; then
+        echo "the run unit succeeded; it must fail" >&2
+        exit 1
+      fi
+      cat err
+      grep -q 'failed to run custom build command for `build-script-signal v0.1.0`' err
+      grep -q 'signal: 6, SIGABRT' err
+      mkdir -p $result
+      cp err $result/
+    '';
+
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =
     pkgs.runCommand "walking-skeleton-test-check"
