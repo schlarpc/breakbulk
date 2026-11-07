@@ -151,10 +151,54 @@ let
           '';
       riscv64-test-lib = t.testRuns.app."lib/app";
     };
+
+  # --- windows-gnu ---------------------------------------------------------------
+
+  wgnu = "x86_64-pc-windows-gnu";
+  wgnuRust = rustWith [ wgnu ];
+  windowsGnuRepo = mkRepo (fixtures + "/windows-gnu") [
+    {
+      workspaces.main = wsWith wgnuRust [ wgnu ];
+      targets.${wgnu}.preset = presets.windowsGnu;
+    }
+  ];
+  windowsGnuChecks =
+    let
+      t = windowsGnuRepo.workspaces.main.target.${wgnu};
+      exe = "${t.packages.gnu-smoke}/bin/gnu-smoke.exe";
+    in
+    {
+      # A PE32+ linked by lld (no time stamp), importing only system DLLs,
+      # running under wine.
+      windows-gnu-run =
+        pkgs.runCommand "windows-gnu-run"
+          {
+            nativeBuildInputs = [
+              pkgs.file
+              pkgs.buildPackages.binutils
+            ];
+          }
+          ''
+            file ${exe} | tee file.txt
+            grep -q 'PE32+ executable.*x86-64' file.txt
+            objdump -p ${exe} > pe.txt
+            grep -i 'DLL Name' pe.txt | tee dlls.txt
+            if grep -viE 'kernel32|msvcrt|api-ms-win|ntdll|user32|ws2_32|bcrypt|advapi32|userenv' dlls.txt; then
+              echo "imports a non-system DLL"; exit 1
+            fi
+            grep -q 'Time/Date.*00:00:00 1970' pe.txt || { grep Time/Date pe.txt; echo "PE time stamp is not 0"; exit 1; }
+            ${lib.escapeShellArgs t.runner} ${exe} > out.txt
+            tr -d '\r' < out.txt | tee out2.txt
+            grep -qx "gnu-smoke: c_add=42 pid_match=true unwind=true" out2.txt
+            mkdir -p $out
+            cp file.txt dlls.txt out2.txt $out/
+          '';
+      windows-gnu-test = t.testRuns.gnu-smoke."bin/gnu-smoke";
+    };
 in
 {
   repos = {
-    inherit wasip2Repo riscv64Repo;
+    inherit wasip2Repo riscv64Repo windowsGnuRepo;
   };
-  checks = wasip2Checks // riscv64Checks;
+  checks = wasip2Checks // riscv64Checks // windowsGnuChecks;
 }

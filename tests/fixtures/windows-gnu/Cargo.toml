@@ -1,0 +1,15 @@
+# windows-gnu (M7): x86_64-pc-windows-gnu through nixpkgs' mingw-w64 cross
+# toolchain (msvcrt, like Rust's own windows-gnu builds), linked by lld
+# through the mingw gcc driver. C code (cc with the mingw gcc) calls the
+# CRT and kernel32; a test unwinds through a panic (libgcc_eh). The
+# product and tests run under wine; the .exe must rebuild byte-identically.
+[package]
+name = "gnu-smoke"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+cc = "1"
+
+[workspace]

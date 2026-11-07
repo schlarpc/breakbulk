@@ -476,6 +476,16 @@ in
 
   # Later targets (M7), one file each.
   wasip2 = mkPreset (import ./wasip2.nix { inherit lib wasmCommon runners; });
+  windowsGnu = mkPreset (
+    import ./windows-gnu.nix {
+      inherit
+        lib
+        driverWrapper
+        hostSpec
+        runners
+        ;
+    }
+  );
 
   # wasm32-unknown-unknown core modules, componentized by the product's
   # stages. withC = true: C code compiles against nixpkgs' wasilibc
