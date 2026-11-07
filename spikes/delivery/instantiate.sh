@@ -2,10 +2,10 @@
 # breakbulk-instantiate). Runs with requiredSystemFeatures = builder-rpc-v0.
 #
 # For each unit, in topological order: render references, build the JSON
-# derivation (format version 4) with *deferred* input-addressed outputs, add it
-# with `nix derivation add` (Nix fills in the output paths), and read the
-# output paths back from the written .drv. Finally submit each root .drv as the
-# outer derivation's output "<root>.drv".
+# derivation (format version 4) with deferred input-addressed outputs, add it
+# (see add_drv for the mechanisms), and remember its output paths (or
+# placeholders, for units downstream of an embedded product) for later units.
+# Finally wrap each root and submit the wrapper as output "<root>.drv".
 set -euo pipefail
 export NIX_CONFIG='extra-experimental-features = nix-command ca-derivations dynamic-derivations'
 
@@ -25,7 +25,7 @@ render() {
   n=$(jq 'length' <<<"$segs")
   for ((i = 0; i < n; i++)); do
     seg=$(jq -c ".[$i]" <<<"$segs")
-    case $(jq -r 'if type == "string" then "lit" elif has("unit") then "unit" elif has("tool") then "tool" else "src" end' <<<"$seg") in
+    case $(jq -r 'if type == "string" then "lit" elif has("unit") then "unit" elif has("tool") then "tool" elif has("product") then "product" else "src" end' <<<"$seg") in
       lit) s+=$(jq -r . <<<"$seg") ;;
       unit)
         local u o f
@@ -36,6 +36,13 @@ render() {
       tool)
         s+="$TOOLCHAIN_OUT"
         drvdeps=$(jq -c --arg d "$(base "$TOOLCHAIN_DRV")" '.[$d] = {outputs: ["out"], dynamicOutputs: {}}' <<<"$drvdeps") ;;
+      product)
+        # A CA stage of another plan: its output placeholder, and a static
+        # input on its .drv. The unit becomes deferred (resolved at build time).
+        local p pv pd
+        p=$(jq -r .product <<<"$seg"); pv="PRODUCT_$p"; pd="PRODUCT_${p}_DRV"
+        s+="${!pv}"
+        drvdeps=$(jq -c --arg d "$(base "${!pd}")" '.[$d] = {outputs: ["out"], dynamicOutputs: {}}' <<<"$drvdeps") ;;
       src)
         s+="$SRC_a"
         srcs=$(jq -c --arg p "$(base "$SRC_a")" '. + [$p] | unique' <<<"$srcs") ;;

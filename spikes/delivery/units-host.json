@@ -1,0 +1,21 @@
+{
+  "comment": "A second plan whose unit f embeds the product `tool` of the first plan (a {product} segment), and g depends on f. In dynamic-derivation mode the product exists only after the first plan's instantiation, so f and everything downstream of it are deferred and resolved at build time.",
+  "units": {
+    "f": {
+      "name": "embedder-0.1.0-lib",
+      "outputs": ["rmeta", "rlib"],
+      "env": {
+        "BREAKBULK_UNIT": ["{\"crate\":\"embedder\",\"env\":{\"TOOL\":\"", {"product": "tool"}, "\"},\"rustc\":\"", {"tool": "toolchain"}, "/bin/rustc\"}"]
+      }
+    },
+    "g": {
+      "name": "host-0.1.0-bin",
+      "outputs": ["out"],
+      "env": {
+        "BREAKBULK_UNIT": ["{\"crate\":\"host\",\"extern\":[\"", {"unit": "f", "output": "rlib", "file": "/libembedder.rlib"}, "\"],\"rustc\":\"", {"tool": "toolchain"}, "/bin/rustc\"}"]
+      }
+    }
+  },
+  "order": ["f", "g"],
+  "roots": {"host": "g"}
+}

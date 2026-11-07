@@ -21,6 +21,7 @@ use harmonia_store_aterm::{parse_derivation_aterm, print_derivation_aterm};
 use harmonia_store_content_address::ContentAddressMethodAlgorithm;
 use harmonia_store_derivation::derivation::{Derivation, DerivationOutput};
 use harmonia_store_derivation::derived_path::{OutputName, SingleDerivedPath};
+use harmonia_store_derivation::placeholder::Placeholder;
 use harmonia_store_path::{StoreDir, StorePath, StorePathName};
 use harmonia_store_remote::DaemonClientBuilder;
 
@@ -68,18 +69,25 @@ async fn add(json: &str, cache: &Path) -> Res<()> {
     let drv: Derivation = serde_json::from_str(&text).map_err(|e| format!("{json}: {e}"))?;
 
     let mut memo = HashMap::new();
-    let filled = fill_deferred_outputs(&sd, drv.map_outputs(|_| UnfilledOutput), |q| {
+    let filled = fill_deferred_outputs(&sd, drv.clone().map_outputs(|_| UnfilledOutput), |q| {
         modulo(&sd, cache, &mut memo, q)
     })
-    .map_err(|e| format!("{e}"))?
-    .ok_or("an input is deferred; output paths not computable")?;
+    .map_err(|e| format!("{e}"))?;
 
-    let outputs: serde_json::Map<String, serde_json::Value> = filled
-        .outputs
-        .iter()
-        .map(|(o, p)| (o.to_string(), sd.display(p).to_string().into()))
-        .collect();
-    let full = filled.map_outputs(DerivationOutput::InputAddressed).into_full();
+    // Some(paths): input-addressed. None: an input is itself deferred or a
+    // dynamic output (an embedded product), so this derivation stays
+    // deferred, and dependents must reference its outputs by placeholder.
+    let (full, mut outputs) = match filled {
+        Some(filled) => {
+            let outputs: serde_json::Map<String, serde_json::Value> = filled
+                .outputs
+                .iter()
+                .map(|(o, p)| (o.to_string(), sd.display(p).to_string().into()))
+                .collect();
+            (filled.map_outputs(DerivationOutput::InputAddressed).into_full(), Some(outputs))
+        }
+        None => (drv.map_outputs(|_| DerivationOutput::Deferred).into_full(), None),
+    };
     let aterm = print_derivation_aterm(&sd, &full);
 
     // References of a .drv: its input sources and input derivations, as
@@ -102,6 +110,15 @@ async fn add(json: &str, cache: &Path) -> Res<()> {
         .await
         .map_err(|e| format!("AddToStore: {e}"))?;
     std::fs::write(cache.join(info.path.to_string()), &aterm).map_err(|e| format!("{e}"))?;
+    let outputs = outputs.get_or_insert_with(|| {
+        full.outputs
+            .keys()
+            .map(|o| {
+                let ph = Placeholder::ca_output(&info.path, o).render();
+                (o.to_string(), ph.to_string_lossy().into_owned().into())
+            })
+            .collect()
+    });
     println!(
         "{}",
         serde_json::json!({ "drvPath": sd.display(&info.path).to_string(), "outputs": outputs })
