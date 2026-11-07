@@ -178,7 +178,14 @@ impl CFlags {
         }
         let mut value = env.remove("NIX_CFLAGS_COMPILE").unwrap_or_default();
         if let Some(seed) = &self.random_seed {
-            value = format!(" -frandom-seed={seed}{value}");
+            // Setup hooks append with a leading space; a value from a layer
+            // that sets the variable outright may have none.
+            let sep = if value.is_empty() || value.starts_with(' ') {
+                ""
+            } else {
+                " "
+            };
+            value = format!(" -frandom-seed={seed}{sep}{value}");
         }
         for m in maps {
             value = append(' ', &value, &m);

@@ -212,6 +212,22 @@ fn c_flags_seed_first_prefix_maps_last() {
 }
 
 #[test]
+fn seed_is_its_own_word_before_a_value_without_leading_space() {
+    // The base capture's empty value, then a package override's flag: the
+    // merged value has no leading space, and the seed must not run into it.
+    let env = layered(
+        &outer(&[]),
+        Some(&map(&[("NIX_CFLAGS_COMPILE", "")])),
+        &map(&[("NIX_CFLAGS_COMPILE", "-DSTAMP=1")]),
+        &CFlags {
+            random_seed: Some("s".into()),
+            prefix_maps: vec![],
+        },
+    );
+    assert_eq!(env["NIX_CFLAGS_COMPILE"], " -frandom-seed=s -DSTAMP=1");
+}
+
+#[test]
 fn prefix_maps_that_cannot_be_words_are_skipped() {
     let c = CFlags {
         random_seed: None,
