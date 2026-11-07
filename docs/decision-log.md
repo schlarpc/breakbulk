@@ -1403,3 +1403,24 @@ product in checks and accept that failure. Default: the lighter check.
 It's a debugging tool, not part of a build, so it reads the build steps the
 default way. For crates downstream of an embedded product it describes the
 default mode's version of them.
+
+## 114. FYI: your config answers are implemented
+
+105 (Linux preset by default), 106 (no system-library switches in the `-sys`
+defaults), 108 (`allTargets` on variants), 93 (workspace-wide nextest
+default), 65 (CMake's scratch files removed after build scripts; rebuilds
+now reproducible), 41 (LLVM table with a `rustc -vV` fallback), 55/59
+(flake systems from a nix-systems input), 81 (the dev shell works with a
+broken `Cargo.toml`). Each has a test.
+
+## 115. ASK: musl build machines
+
+The Linux preset default (105) applies when the build machine is Linux with
+glibc. On a musl build machine (Alpine-style), the native target gets no
+preset. Should it get `linuxMusl`?
+
+## 116. ASK: `nix-systems/default-linux` instead of `default`
+
+You said `nix-systems/default`; the flake uses `default-linux` because
+`default` also lists the two macOS systems, which breakbulk doesn't support
+yet. It's a one-line switch once Darwin works.
