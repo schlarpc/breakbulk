@@ -128,8 +128,38 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
     let mut forbidden: Vec<&str> = opts.forbidden_paths.iter().map(String::as_str).collect();
     forbidden.push(&plan.skeleton_root);
 
-    for (id, unit) in &plan.units {
+    // Doctests are checked as compile units without outputs; their
+    // searchPathsOf splices are checked below.
+    let doctests: Vec<(&String, Unit)> = plan
+        .doctests
+        .iter()
+        .map(|(id, d)| (id, Unit::Compile(d.as_compile())))
+        .collect();
+    for (id, d) in &plan.doctests {
+        for a in &d.args {
+            if let Arg::SearchPaths(s) = a {
+                for r in &s.search_paths_of {
+                    if !matches!(plan.units.get(r), Some(Unit::Run(_))) {
+                        err(
+                            Some(id),
+                            format!("searchPathsOf names {r}, which is not a run unit"),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let units = plan
+        .units
+        .iter()
+        .chain(doctests.iter().map(|(id, u)| (*id, u)));
+    for (id, unit) in units {
         let id_ = Some(id.as_str());
+        if let Unit::Compile(c) = unit
+            && c.args.iter().any(|a| matches!(a, Arg::SearchPaths(_)))
+        {
+            err(id_, "a searchPathsOf splice outside a doctest".into());
+        }
 
         // Invariant 3: literals.
         for_each_literal(unit, &mut |s, what| {

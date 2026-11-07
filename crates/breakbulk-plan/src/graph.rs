@@ -5,9 +5,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::{
-    Arg, CompileUnit, CrateInfo, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget, Plan, PlanKind,
-    Platform, Reference, Root, RootKind, RunUnit, SearchIn, Splice, SpliceKind, Text, Unit, UnitId,
-    Variant, contains_sentinel,
+    Arg, CompileUnit, CrateInfo, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget, Plan,
+    PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice,
+    SpliceKind, Text, Unit, UnitId, Variant, contains_sentinel,
 };
 
 use crate::records::{Metadata, Package, Record, Target};
@@ -213,6 +213,8 @@ pub struct Builder<'a> {
     compiles: Vec<CompileRec<'a>>,
     runs: Vec<RunRec<'a>>,
     run_by_tag: BTreeMap<String, usize>,
+    /// `rustdoc` records (from `cargo test --doc`).
+    rustdocs: Vec<&'a Record>,
     rw: Rewriter,
 }
 
@@ -236,6 +238,7 @@ impl<'a> Builder<'a> {
             compiles: Vec::new(),
             runs: Vec::new(),
             run_by_tag: BTreeMap::new(),
+            rustdocs: Vec::new(),
             rw: Rewriter::new(&ctx.scratch, &ctx.skeleton, metadata),
         };
         let mut seen = BTreeSet::new();
@@ -261,7 +264,8 @@ impl<'a> Builder<'a> {
                         .insert(rec.tag.clone().expect("checked in run_rec"), b.runs.len());
                     b.runs.push(r);
                 }
-                "query" | "rustdoc" => {}
+                "rustdoc" => b.rustdocs.push(rec),
+                "query" => {}
                 m => bail!("{}: unknown record mode `{m}`", rec.file),
             }
         }
@@ -517,10 +521,20 @@ impl<'a> Builder<'a> {
         Ok((out, dylib))
     }
 
-    fn compile_unit(&self, c: &CompileRec<'a>) -> Result<Unit, Error> {
-        let id = &c.id;
-        let args = &c.rec.args;
+    /// Convert recorded arguments: drop what breakbulk replaces, turn
+    /// sentinels into splices (checking their shapes), rewrite paths.
+    /// `platform` is the unit's: every splice must name a run of that
+    /// platform. Doctests (`None`) get Cargo's search paths of every run in
+    /// the invocation, which become one `searchPathsOf` splice.
+    fn convert_args(
+        &self,
+        id: &str,
+        args: &[String],
+        owner: &str,
+        platform: Option<Platform>,
+    ) -> Result<Vec<Arg>, Error> {
         let mut out: Vec<Arg> = Vec::new();
+        let mut search_paths: Option<(usize, Vec<UnitId>)> = None;
         // Link-arg splices: the run, and the index in `out` of its splice.
         let mut link_arg_at: BTreeMap<String, usize> = BTreeMap::new();
         let mut last_was_link_arg_of: Option<String> = None;
@@ -558,19 +572,32 @@ impl<'a> Builder<'a> {
             {
                 let s = s.map_err(|seen| self.shape_error(id, a, &seen, args))?;
                 let r = self.run_id(s.tag(), &|| format!("unit {id}"))?;
-                if r.platform != c.platform {
+                if let Some(p) = platform
+                    && r.platform != p
+                {
                     return Err(self.shape_error(
                         id,
                         a,
-                        &format!(
-                            "`{a} {n}` from a {:?} run on a {:?} unit",
-                            r.platform, c.platform
-                        ),
+                        &format!("`{a} {n}` from a {:?} run on a {p:?} unit", r.platform),
                         args,
                     ));
                 }
                 let run = r.id.clone();
                 let is_link_arg = matches!(s, ArgSentinel::LinkArg(..));
+                if platform.is_none()
+                    && matches!(s, ArgSentinel::SearchIn(..) | ArgSentinel::SearchOther(_))
+                {
+                    let (_, runs) = search_paths.get_or_insert_with(|| {
+                        out.push(Arg::SearchPaths(SearchPathsSplice {
+                            search_paths_of: Vec::new(),
+                        }));
+                        (out.len() - 1, Vec::new())
+                    });
+                    runs.push(run);
+                    last_was_link_arg_of = None;
+                    i += 2;
+                    continue;
+                }
                 match s {
                     ArgSentinel::Cfg(_) => {
                         out.push(Arg::Splice(Splice::new(run.clone(), SpliceKind::RustcCfg)))
@@ -629,7 +656,7 @@ impl<'a> Builder<'a> {
             }
             let t = self
                 .rw
-                .text(a, Some(&c.package.id))
+                .text(a, Some(owner))
                 .map_err(|e| Error(format!("unit {id}: argument `{a}`: {}", e.0)))?;
             out.push(t.into());
             i += 1;
@@ -637,11 +664,30 @@ impl<'a> Builder<'a> {
         if args.iter().any(|a| a.contains("=/cargo/build-dir")) {
             bail!("unit {id}: Cargo's trim-paths is in effect; breakbulk does not support it yet");
         }
+        if let Some((at, mut runs)) = search_paths {
+            runs.sort();
+            runs.dedup();
+            out[at] = Arg::SearchPaths(SearchPathsSplice {
+                search_paths_of: runs,
+            });
+        }
+        Ok(out)
+    }
 
-        // Env: sentinels first, then filtering and rewriting.
+    /// Convert a recorded env: `rustc-env` sentinels become env splices,
+    /// the rest is filtered and rewritten; dynamic-library path sentinels
+    /// become dynamic-path splices.
+    #[allow(clippy::type_complexity)]
+    fn convert_env(
+        &self,
+        id: &str,
+        rec_env: &BTreeMap<String, String>,
+        owner: &str,
+        args: &[String],
+    ) -> Result<(BTreeMap<String, Text>, Vec<Splice>, Vec<UnitId>), Error> {
         let mut env = BTreeMap::new();
         let mut env_splices = Vec::new();
-        for (k, v) in &c.rec.env {
+        for (k, v) in rec_env {
             match env_sentinel(k, v) {
                 Some(Ok(tag)) => {
                     let r = self.run_id(&tag, &|| format!("unit {id}"))?;
@@ -654,12 +700,20 @@ impl<'a> Builder<'a> {
             }
         }
         env_splices.sort();
-        let (env, dylib) = self.rewrite_env(id, &c.package.id, self.filter_env(&env, false))?;
+        let (env, dylib) = self.rewrite_env(id, owner, self.filter_env(&env, false))?;
         for (k, v) in &env {
             if contains_sentinel(k) {
                 return Err(self.shape_error(id, "env", &format!("`{k}={v:?}`"), args));
             }
         }
+        Ok((env, env_splices, dylib))
+    }
+
+    fn compile_unit(&self, c: &CompileRec<'a>) -> Result<Unit, Error> {
+        let id = &c.id;
+        let args = &c.rec.args;
+        let out = self.convert_args(id, args, &c.package.id, Some(c.platform))?;
+        let (env, env_splices, dylib) = self.convert_env(id, &c.rec.env, &c.package.id, args)?;
 
         let program = c
             .rec
@@ -809,6 +863,62 @@ impl<'a> Builder<'a> {
         roots
     }
 
+    /// The traced `rustdoc --test` commands, one per library, keyed
+    /// `d-<package name>`.
+    fn doctests(&self) -> Result<BTreeMap<String, Doctest>, Error> {
+        let mut out = BTreeMap::new();
+        for rec in &self.rustdocs {
+            if !rec.args.iter().any(|a| a == "--test") {
+                continue;
+            }
+            let package = self.package_of(rec)?;
+            let id = format!("d-{}", package.name);
+            let args = self.convert_args(&id, &rec.args, &package.id, None)?;
+            let (env, env_splices, dylib) =
+                self.convert_env(&id, &rec.env, &package.id, &rec.args)?;
+            let program = rec
+                .program
+                .iter()
+                .map(|p| self.rw.text(p, None))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| Error(format!("{id}: program: {}", e.0)))?;
+            let cwd = self
+                .rw
+                .reference(&rec.cwd, Some(&package.id))
+                .map_err(|e| Error(format!("{id}: cwd: {}", e.0)))?;
+            let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            if types.is_empty() {
+                types.push("lib".into());
+            }
+            let doctest = Doctest {
+                package: package.id.clone(),
+                krate: CrateInfo {
+                    name: arg_value(&rec.args, "--crate-name")
+                        .first()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default(),
+                    types,
+                    edition: arg_value(&rec.args, "--edition")
+                        .first()
+                        .map_or("2015".to_owned(), |e| e.to_string()),
+                },
+                program,
+                args,
+                env,
+                env_splices,
+                dylib_path_from: dylib,
+                cwd,
+            };
+            if out.insert(id.clone(), doctest).is_some() {
+                bail!("{id}: two `rustdoc --test` commands for one package");
+            }
+        }
+        Ok(out)
+    }
+
     pub fn plan(&self) -> Result<Plan, Error> {
         let mut units = BTreeMap::new();
         let mut errors = Vec::new();
@@ -843,6 +953,7 @@ impl<'a> Builder<'a> {
             trim_paths: false,
             units,
             roots: self.roots(),
+            doctests: self.doctests()?,
         };
         plan.normalize();
         Ok(plan)

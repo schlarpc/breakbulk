@@ -289,6 +289,9 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                                 RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?)
                             }
                             Arg::Splice(s) => RenderedArg::Splice(splice(s, r)?),
+                            Arg::SearchPaths(_) => {
+                                panic!("searchPathsOf splices appear only in doctests (validated)")
+                            }
                         })
                     })
                     .collect::<Result<_, _>>()?,

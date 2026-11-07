@@ -82,6 +82,26 @@ impl Plan {
         for u in self.units.values_mut() {
             normalize_unit(u);
         }
+        for d in self.doctests.values_mut() {
+            d.program = std::mem::take(&mut d.program)
+                .into_iter()
+                .map(normalize_text)
+                .collect();
+            d.args = std::mem::take(&mut d.args)
+                .into_iter()
+                .map(|a| match normalize_arg(a) {
+                    Arg::SearchPaths(mut s) => {
+                        sort_dedup(&mut s.search_paths_of);
+                        Arg::SearchPaths(s)
+                    }
+                    a => a,
+                })
+                .collect();
+            for v in d.env.values_mut() {
+                *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
+            }
+            sort_dedup(&mut d.krate.types);
+        }
         sort_dedup(&mut self.roots);
     }
 }

@@ -179,6 +179,15 @@ in
   # proc macro and a build-dependency with build scripts, `cargo:` syntax.
   directives =
     let
+      testPlan = readPlan directives "test";
+      # One traced `rustdoc --test` per library (proc macro included), with
+      # the search paths of every run as one searchPathsOf splice.
+      doctestsOk =
+        lib.attrNames testPlan.doctests == map (p: "d-${p}") (lib.sort lib.lessThan directivesLibs)
+        && lib.all (
+          d: lib.length (lib.filter (a: builtins.isAttrs a && a ? searchPathsOf) d.args) == 1
+        ) (lib.attrValues testPlan.doctests);
+      directivesLibs = lib.remove "app" directivesPackages;
       ref = cargoBuild {
         fixture = "directives";
         ws = directives;
@@ -188,6 +197,7 @@ in
         '';
       };
     in
+    assert lib.assertMsg doctestsOk "directives: the test plan's doctests are not one per library";
     pkgs.runCommand "directives-check"
       {
         app = directives.packages.app;

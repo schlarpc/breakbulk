@@ -39,6 +39,10 @@ pub struct Plan {
     pub units: BTreeMap<UnitId, Unit>,
     /// The plan's products. Sorted.
     pub roots: Vec<Root>,
+    /// Test plans: one traced `rustdoc --test` per library, keyed
+    /// `d-<package name>`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub doctests: BTreeMap<String, Doctest>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -133,6 +137,62 @@ pub enum Arg {
     Literal(String),
     Concat(Vec<Piece>),
     Splice(Splice),
+    /// Only in doctests.
+    SearchPaths(SearchPathsSplice),
+}
+
+/// `{ "searchPathsOf": [R, …] }`: the search paths of every listed run, both
+/// classes, deduplicated and sorted by value at build time. Cargo gives
+/// `rustdoc --test` an `-L` for every run in the invocation this way
+/// (`run_doc_tests`, from `Compilation::native_dirs`, a `BTreeSet`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SearchPathsSplice {
+    /// Sorted, no duplicates.
+    pub search_paths_of: Vec<UnitId>,
+}
+
+/// A traced `rustdoc --test` of one library, from `cargo test --doc`. Run
+/// by the doctest derivation (M4), which compiles and runs the examples in
+/// one process. Its shape is a compile unit's, without outputs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Doctest {
+    pub package: String,
+    #[serde(rename = "crate")]
+    pub krate: CrateInfo,
+    pub program: Vec<Text>,
+    pub args: Vec<Arg>,
+    pub env: BTreeMap<String, Text>,
+    pub env_splices: Vec<Splice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<UnitId>,
+    pub cwd: Reference,
+}
+
+impl Doctest {
+    /// The doctest as a compile unit with no outputs, for the checks and
+    /// normalization compile units share. `searchPathsOf` splices are left
+    /// out.
+    pub fn as_compile(&self) -> CompileUnit {
+        CompileUnit {
+            package: self.package.clone(),
+            krate: self.krate.clone(),
+            platform: Platform::Target,
+            program: self.program.clone(),
+            args: self
+                .args
+                .iter()
+                .filter(|a| !matches!(a, Arg::SearchPaths(_)))
+                .cloned()
+                .collect(),
+            env: self.env.clone(),
+            env_splices: self.env_splices.clone(),
+            dylib_path_from: self.dylib_path_from.clone(),
+            cwd: self.cwd.clone(),
+            outputs: BTreeMap::new(),
+        }
+    }
 }
 
 impl From<Text> for Arg {
@@ -279,7 +339,7 @@ pub(crate) fn for_each_literal(unit: &Unit, f: &mut dyn FnMut(&str, &dyn Fn() ->
                 match a {
                     Arg::Literal(s) => f(s, &|| format!("args[{i}]")),
                     Arg::Concat(p) => text(&Text::Concat(p.clone()), &|| format!("args[{i}]"), f),
-                    Arg::Splice(_) => {}
+                    Arg::Splice(_) | Arg::SearchPaths(_) => {}
                 }
             }
             env(&c.env, f);

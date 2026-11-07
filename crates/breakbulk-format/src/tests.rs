@@ -763,3 +763,47 @@ fn rendered_unit_rejects_unknown_fields() {
     let bad = json.replacen('{', r#"{"bogus":1,"#, 1);
     assert!(serde_json::from_str::<RenderedUnit>(&bad).is_err());
 }
+
+#[test]
+fn doctests_validate_like_compiles() {
+    let mut p = example();
+    let mut d = Doctest {
+        package: compile(&mut p, "c-ring").package.clone(),
+        krate: compile(&mut p, "c-ring").krate.clone(),
+        program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
+        args: vec![
+            Arg::Literal("--test".into()),
+            Arg::SearchPaths(SearchPathsSplice {
+                search_paths_of: vec!["r-ring".into()],
+            }),
+            Arg::Splice(Splice::new("r-ring".into(), SpliceKind::RustcCfg)),
+        ],
+        env: BTreeMap::new(),
+        env_splices: vec![],
+        dylib_path_from: vec!["r-ring".into()],
+        cwd: compile(&mut p, "c-ring").cwd.clone(),
+    };
+    p.doctests.insert("d-ring".into(), d.clone());
+    assert_eq!(errors(&p), Vec::<String>::new());
+    let back = Plan::from_json(&p.to_canonical_json()).unwrap();
+    let mut normal = p.clone();
+    normal.normalize();
+    assert_eq!(back, normal);
+
+    d.args.push(Arg::SearchPaths(SearchPathsSplice {
+        search_paths_of: vec!["c-cfgif".into()],
+    }));
+    d.args
+        .push(Arg::Literal("--test-run-directory=/build/x".into()));
+    p.doctests.insert("d-ring".into(), d);
+    assert_error(&p, "searchPathsOf names c-cfgif, which is not a run unit");
+    assert_error(&p, "forbidden path `/build`");
+
+    let mut p = example();
+    compile(&mut p, "c-ring")
+        .args
+        .push(Arg::SearchPaths(SearchPathsSplice {
+            search_paths_of: vec!["r-ring".into()],
+        }));
+    assert_error(&p, "a searchPathsOf splice outside a doctest");
+}
