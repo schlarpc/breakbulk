@@ -823,4 +823,26 @@ in
         grep -q 'breakbulk.*0.0.0' meta.txt
         touch $out
       '';
+
+  # wasmOpt accepts what rustc emits for wasm32 by default: a module using
+  # memory.copy (bulk memory), which wasm-opt rejects without
+  # --enable-bulk-memory (field trials: mtgac's Leptos UI).
+  stages-wasm-opt-features =
+    let
+      module = pkgs.runCommand "bulk-memory-wasm" { nativeBuildInputs = [ pkgs.wasm-tools ]; } ''
+        mkdir $out
+        cat > m.wat <<'EOF'
+        (module
+          (memory (export "memory") 1)
+          (func (export "copy") (param i32 i32 i32)
+            (memory.copy (local.get 0) (local.get 1) (local.get 2))))
+        EOF
+        wasm-tools parse m.wat -o $out/m.wasm
+      '';
+      opt = H.wasmOpt (stageArgs module);
+    in
+    pkgs.runCommand "stages-wasm-opt-features" { nativeBuildInputs = [ pkgs.wasm-tools ]; } ''
+      wasm-tools print ${opt}/m.wasm | grep -q memory.copy
+      touch $out
+    '';
 }
