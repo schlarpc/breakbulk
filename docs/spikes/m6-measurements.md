@@ -97,10 +97,12 @@ What this says:
   (172 s) → hir → ide-db → ide-assists → ide → rust-analyzer`, every link
   waiting for full codegen when unsplit (`analyze.py --explain`). The
   simulation runs each unit on one core with the durations measured in a
-  busy pipelined build. Run alone, a crate's codegen uses several threads
-  (rustc's codegen units share Cargo's jobserver), so the real unsplit
-  build is faster than simulated: measured 27%, simulated 66%. The
-  simulation is an upper bound for codegen-heavy chains.
+  busy pipelined build. In the real unsplit build the same units took 33%
+  less time in total (1,937 s against 2,878 s): with fewer units running
+  at once, each unit's codegen gets more threads (rustc's codegen units
+  draw on Cargo's jobserver; not verified in rustc's source here). So the
+  real gap is smaller: measured 27%, simulated 66%. The simulation is an
+  upper bound for codegen-heavy chains.
 - **The rerun backends lose where it matters.** Running the frontend twice
   adds 23–49% CPU (frontend time of every split library). At 4 cores that
   makes helix, nushell and ripgrep dev slower than not splitting at all
