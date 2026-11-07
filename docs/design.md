@@ -21,8 +21,9 @@ Neither handles the patterns real repositories rely on. Examples: many workspace
 **Non-goals.**
 
 - Beating Cargo's incremental edit loop on the crate being edited. That stays in plain `cargo` in the dev shell.
-- Beating Cargo on a cold build of a single workspace. breakbulk optimizes for cache hits and narrow rebuilds; a cold build is expected to be somewhat slower than crane (see [Pipelining](#pipelining)).
+- Beating Cargo on a cold build of a single workspace. breakbulk optimizes for cache hits and narrow rebuilds; a cold build is expected to be somewhat slower than crane (see [Pipelining](#pipelining)). A cold build worse than about twice crane's time is a bug to investigate.
 - Mutable caches inside the sandbox (rustc incremental state, shared compiler caches). They trade reproducibility for speed in a way the design refuses.
+- Timed benchmark runs inside Nix. Sandbox timings on shared builders are noise, and a cached timing never re-measures. Bench binaries are built; they are run where timing means something.
 
 ## Principles
 
@@ -61,7 +62,7 @@ Fetch derivations are created from every lockfile at evaluation time. Registry c
 The planner runs the user's own Cargo for one workspace, target and variant over a skeleton: manifests, lockfile, `.cargo/config.toml` and empty target files. Each (workspace, target, variant) gets two plans with named reference commands:
 
 - **Build plan:** `cargo build --workspace --target T --profile P [--features …]`. Products come from this plan.
-- **Test plan:** `cargo test --no-run --workspace --target T --profile P [--features …]`. Test binaries come from this plan.
+- **Test plan:** `cargo test --no-run --workspace --target T --profile P [--features …]`. Test binaries come from this plan. `--no-run` skips doctests, so the test plan also traces `cargo test --doc` with a `RUSTDOC` wrapper that records each `rustdoc --test` command without running it.
 
 They are separate because Cargo turns on dev-dependency features only when test targets are built. Tracing products with `--all-targets` would ship binaries with features that plain `cargo build` would not enable. Units whose features are the same in both plans are identical derivations and are shared. A target can narrow the selection from `--workspace` to a package list (`-p ui`), for example a wasm target that builds only the UI crate.
 
@@ -89,7 +90,7 @@ Each target is traced on its own. Host units come out identical for every target
 - **IFD mode:** it writes each unit's derivation attributes as JSON, which Nix imports and passes to `derivation`.
 - **Dynamic-derivation mode:** it writes the same derivations into the store through Nix's `builder-rpc-v0` interface and submits each root.
 
-Both modes produce identical unit derivation paths. The default, `mode = "auto"`, picks dynamic-derivation mode when the evaluator has the `dynamic-derivations` feature and a Nix version with `builder-rpc-v0`, and IFD otherwise.
+Both modes produce identical unit derivation paths. The default, `mode = "auto"`, picks dynamic-derivation mode when the evaluator has the `dynamic-derivations` feature and a Nix version with `builder-rpc-v0`, and IFD otherwise. Nix implementations without dynamic derivations, such as Lix, therefore use IFD mode with no configuration. Upstream Nix and Determinate Nix are tested; others are expected to work in IFD mode but are not tested.
 
 ### 4. Units
 
@@ -214,6 +215,14 @@ Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile
 - `CARGO_BIN_EXE_*` is wired to the right product, and nextest configuration is respected.
 - Test-run derivations for another architecture set `system` to that architecture, so Nix sends them to native builders. Emulation through the runner is the fallback.
 - Targets that Cargo skips because their `required-features` are not enabled still have attributes. Building such a product fails with the reason; such a test run succeeds and logs that it was skipped, as `cargo test` does.
+- Tests that cannot run in the sandbox (network, a writable home, devices) are skipped with libtest's own filters, per package or per test binary. Changing a skip list re-runs only the affected test runs.
+- Every test binary also has a runnable app that sets up the same working directory, environment and runner as its test run, but runs on the user's machine: the escape hatch for network tests, debuggers and single-test reruns.
+- **Doctests** get one derivation per library crate, which runs `rustdoc --test` against the crate and its dependencies. Compiling and running happen in one rustdoc process, so doctests have no cutoff and re-run whenever the crate or anything below it changes.
+- **Benches** are compiled by the test plan, like Cargo does. A bench variant (`cargo bench --no-run`, bench profile) provides optimized bench binaries to run outside Nix. Optional smoke checks run each bench once in test mode.
+
+### Documentation
+
+`cargo doc` writes every crate into one shared directory and updates cross-crate indexes in place, which does not split into per-crate derivations on stable rustdoc. The docs product is therefore one derivation per workspace and target that replays the traced `rustdoc` commands in Cargo's order, against the check-mode `rmeta` units it shares with check and clippy variants. Per-crate documentation waits for rustdoc's mergeable cross-crate info to stabilize.
 
 ## Targets and toolchains
 
@@ -236,6 +245,8 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 ### Bring your own toolchain
 
 Any rustc/cargo pair works: nixpkgs `rustPlatform`, rust-overlay or fenix, including `fromRustupToolchainFile`. The planner runs the user's own cargo, so resolver and lockfile behavior match local builds. Nightly and build-std work when the user brings a nightly; the tool's defaults never need one.
+
+Supported Cargo releases form a rolling window: roughly the last six months of stable, plus current nightly. Features newer than the floor (`--remap-path-scope`, `trim-paths`) have fallbacks. Repositories pinned to older toolchains, MSRV variants and vendor-forked toolchains may work but are not tested.
 
 ### Linker selection
 
@@ -340,6 +351,8 @@ Every backend falls back to an unsplit compile, checks that the `rlib`'s crate h
 
 - Push with `nix copy --to <cache> .#…` or `nix copy "$DRV_PATH^*"` in a `post-build-hook`; plain `nix copy` of store paths uploads no realisations.
 - CA islands need a cache that stores realisations (a `nix copy` S3 or HTTP cache does). Units do not.
+- With no remote cache, the local store serves every role, including CA islands and embed cutoff.
+- On FlakeHub Cache, units substitute and islands re-run. Repositories that embed products should pin `mode = "ifd"` there, because the embedding chain recompiles in dynamic-derivation mode. First-class support for FlakeHub Cache and harmonia is low priority.
 
 ## Patterns the design must support
 
@@ -397,9 +410,9 @@ The traced planner comes first, delivered through IFD, because it works on every
 1. **Traced planner and IFD delivery.** Cargo parity on native Linux; sentinel placement of build-script output; input-addressed units; per-crate sources; repository-root source views; path remapping; Cargo's own `-C metadata`.
 2. **Configuration model.** Module-system options, toolchain presets, per-package overrides and environment capture, products as inputs, a repository holding many workspaces, the dev shell.
 3. **Day-one targets.** Linux gnu and musl on x86\_64 and aarch64, static glibc, wasm (browser and components), Windows msvc. Runners and native builders for tests.
-4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations, clippy and coverage variants.
+4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations with skip lists and runnable test apps, doctests, bench binaries, clippy and coverage variants.
 5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
-6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default once stable.
+6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default once stable, the docs product.
 7. **Later targets.** wasip2, riscv64, windows-gnu, build-std targets, Darwin on Mac builders.
 
 ### Conformance suite
@@ -421,7 +434,7 @@ A set of fixture workspaces covering every pattern in the catalogue. Each phase 
 - Does env capture from nixpkgs' setup hooks replay faithfully outside a live stdenv shell?
 - Is `remap-path-prefix` enough for every embedded path, or are some crates' `env!("CARGO_MANIFEST_DIR")` uses still observable?
 - How far will rustc go toward a physical split between interface metadata and private data?
-- Who is the first user, and which of its targets set the day-one list?
-- Which binary cache server will be used, and does it store realisations?
-- What is the oldest Cargo release to support?
-- Will the project be public, and under what license?
+
+### Context
+
+The author's own repositories are the first users; every pattern in the catalogue except riscv comes from repositories started in the past year, which is why the day-one target list is broad. Remote caching is used rarely (sometimes FlakeHub Cache), so the local store is the primary cache. The project is private and MIT-licensed.

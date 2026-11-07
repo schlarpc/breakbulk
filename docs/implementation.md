@@ -69,8 +69,9 @@ cargo build --frozen --offline <selection> \
   --target <triple> --profile <profile> [--features …] \
   --config '<generated source replacement, one directory per source>' \
   --config '<spec rustflags and linkers as target.<triple> keys>'
-# test plan: the same, with `cargo test --no-run`
-# env: RUSTC_WRAPPER=breakbulk-shim  CARGO_TARGET_DIR=<scratch>  BREAKBULK_RECORD=<record dir>
+# test plan: the same, with `cargo test --no-run`, then `cargo test --doc` for doctests
+# bench variant: `cargo bench --no-run` with the bench profile
+# env: RUSTC_WRAPPER=breakbulk-shim  RUSTDOC=breakbulk-shim  CARGO_TARGET_DIR=<scratch>  BREAKBULK_RECORD=<record dir>
 ```
 
 - `<selection>` is `--workspace`, or `-p` for each package in the target's `packages` list.
@@ -78,7 +79,8 @@ cargo build --frozen --offline <selection> \
 - Spec env is **not** passed to Cargo. Cargo's `[env]` reaches every process, including host build scripts; spec env is added per unit by platform at instantiation.
 - The user's own `.cargo/config.toml` is in the skeleton and applies as it does locally. Nothing from the user's home directory or shell is visible.
 - The clippy variant adds `RUSTC_WORKSPACE_WRAPPER=clippy-driver`. Cargo then calls `breakbulk-shim clippy-driver rustc …` for workspace members only.
-- Doctests (`rustdoc --test`) are traced later through a `RUSTDOC` shim; they are not in the first milestone.
+- Doctests: `cargo test --no-run` skips them, because rustdoc compiles doctests at run time. After the faked build, the test plan runs `cargo test --doc`; the shim, acting as `RUSTDOC`, records each `rustdoc --test` command and exits successfully. Cargo runs nothing else in that mode.
+- Documentation (later): `cargo doc` is traced the same way, with the shim recording each `rustdoc` command.
 
 ### Fixed skeleton location
 
@@ -92,6 +94,7 @@ The shim decides its mode from its arguments and how it was started.
 | --- | --- | --- |
 | Query | `-vV`, any `--print`, or `-` as the input file | `exec` the real rustc unchanged |
 | Compile | `--crate-name` plus an input file | Record, then fake the outputs |
+| Rustdoc | Started as `RUSTDOC` | Record; for queries, `exec` the real rustdoc; otherwise exit 0 without output |
 | Build-script stub | Started as a copied stub binary, with a marker file beside it | Record the env, print sentinel directives, exit 0 |
 
 ### Faking a compile
@@ -393,6 +396,8 @@ repo = breakbulk.lib.mkRepository {
     variants.<v> = { profile = "release"; features = [ ]; mode = "build"; };  # build | check | clippy | coverage
     roots = null;                     # override predicted root names
     devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
+    benchSmoke = false;               # run each bench once in test mode, as a check
+    docs.noDeps = true;               # cargo doc --no-deps (later)
   };
 
   targets.<triple> = {
@@ -412,7 +417,12 @@ repo = breakbulk.lib.mkRepository {
     host = { env = { }; nativeInputs = [ ]; inputs = [ ]; };   # only for host units of this package
     target.<triple> = { env = { }; inputs = [ ]; stages = { }; checks = { }; };
     stages = { }; checks = { };
-    test = { env = { }; path = [ ]; sourceScope = [ ]; };
+    test = {
+      env = { }; path = [ ]; sourceScope = [ ];
+      args = [ ];                     # libtest flags for every test binary, e.g. [ "--skip" "net::" ]
+      includeIgnored = false;         # also run #[ignore] tests
+      binaries.<binary> = { args = [ ]; enable = true; };  # enable = false: built, not run in checks
+    };
     strictSources = null;             # per-package override
     pipelining = null;                # opt in or out of the pipelined split (later)
   };
@@ -434,6 +444,10 @@ repo = breakbulk.lib.mkRepository {
 | `repo.workspaces.<ws>.packages.<pkg>` | The same, for the native target |
 | `repo.workspaces.<ws>.target.<triple>.tests.<pkg>.<test>` | Test binaries, for VM and system tests |
 | `repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>` | Test-run derivations |
+| `repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<test>` | Runnable apps: the test binary with its test-run environment, run outside the sandbox |
+| `repo.workspaces.<ws>.target.<triple>.doctests.<pkg>` | Doctest derivations |
+| `repo.workspaces.<ws>.target.<triple>.benches.<pkg>.<bench>` | Bench binaries from the bench variant |
+| `repo.workspaces.<ws>.target.<triple>.docs` | The documentation product (later) |
 | `repo.checks` | All checks and test runs flattened, ready for `checks.<system>` |
 | `repo.sources.<crate>` | Fetched crate sources by name (and `<name>@<version>`) |
 | `repo.workspaces.<ws>.devShell` | A shell matching the planner's Cargo invocation (see below) |
@@ -596,8 +610,15 @@ Each check becomes `repo.checks."<ws>/<triple>/<pkg>/<name>"`. Every product get
 - **`CARGO_TARGET_TMPDIR`** is also compile-time env, but must be writable when the test runs. It is rewritten to a fixed path under the build directory, and the test-run derivation creates that path before running (see spikes).
 - **Test runs** are one derivation per test binary. A small CA derivation copies the test binary, and the test run consumes that copy, so a byte-identical binary does not re-run. The run uses the target's `runner`, with the package source view as the working directory (as Cargo does), plus Cargo's runtime env (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`), the package's `test.env`, and `test.path` on `PATH`. Its `system` is the target's `testSystem` when set. It succeeds on exit 0, and its output records the log.
 - **Skipped tests:** a predicted test the plan lacks gets a test-run stub that succeeds and logs the reason.
-- **nextest.** The first milestones run libtest binaries directly. nextest support comes later, by synthesizing the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts and test groups from the nextest config apply.
-- **Doctests** come later, through a `RUSTDOC` shim during planning.
+- **Test arguments:** `test.args` and `test.binaries.<binary>.args` are passed to the binary; `includeIgnored` adds `--include-ignored`. They are part of the test-run derivation, so changing them re-runs only the affected runs. `enable = false` leaves a binary's run out of `repo.checks`. Every test run sets `RUST_TEST_THREADS=$NIX_BUILD_CORES`.
+- **Test apps:** each test binary also gets a runnable app with the test run's working directory, environment and runner, run on the user's machine. It is the escape hatch for tests that need network, and the way to rerun one binary under a debugger or with a filter. Network access inside `nix flake check` (through a fixed-output test run) is a possible later addition; impure derivations are not used.
+- **nextest.** The first milestones run libtest binaries directly. nextest support comes later, by synthesizing the `binaries-metadata` file that nextest's reuse-build mode reads, so per-test retries, timeouts, test groups and default filters from the nextest config apply.
+- **Doctests:** one derivation per library crate, from the test plan's traced `rustdoc --test` command. Inputs are the crate's `rlib`, its dependencies with test-plan features, and the source view. It runs with the target's runner and records the log; it appears in `repo.checks`. There is no cutoff, because compiling and running happen in one rustdoc process. If the toolchain cannot run doctests for a cross target, the derivation is a stub that logs why.
+- **Benches:** the test plan compiles bench targets as Cargo does. The bench variant builds optimized bench binaries, exposed for running outside Nix. With `benchSmoke`, each bench binary also runs once with `--test` as a check. Timed runs never happen inside Nix.
+
+### Documentation (later)
+
+One derivation per workspace and target replays the traced `rustdoc` commands in Cargo's order into a single output directory, because rustdoc updates cross-crate indexes in place. Its inputs are the check-mode `rmeta` units shared with check and clippy variants. Per-crate derivations with a final merge wait for rustdoc's mergeable cross-crate info to become stable.
 
 ## Pipelined split (later)
 
@@ -614,7 +635,7 @@ An optional per-package split of a library into an `rmeta` derivation and an `rl
 Trace golden tests and directive differential tests guard against Cargo changes; invalidation and sharing tests guard the main promise, that an edit rebuilds only what it should.
 
 1. **Rust unit tests** for the directive parser (both syntaxes, every directive, malformed input), path rewriting, env filtering, splice expansion, plan canonicalization and unit ordering.
-2. **Trace golden tests.** For each fixture, run real `cargo build -v` and the traced planner on the same skeleton, render the plan back to concrete argv with the same scratch layout, and diff per unit after normalizing paths. This runs against the last three stable Cargo releases plus the oldest supported one.
+2. **Trace golden tests.** For each fixture, run real `cargo build -v` and the traced planner on the same skeleton, render the plan back to concrete argv with the same scratch layout, and diff per unit after normalizing paths. This runs against the oldest release in the supported window (about six months of stable), the latest stable and the latest nightly.
 3. **Directive differential tests.** Generate dependency graphs and build-script outputs (several values per kind, duplicates, paths inside and outside the build directory, mixed order). Let stubs replay them so Cargo applies them, and separately expand the sentinel plan with `breakbulk-unit`'s splicing. The two argv and env sets must be identical. The same harness checks that sentinels do not change any unit's `-C metadata`.
 4. **Root prediction tests.** Compare the Nix prediction with `cargo metadata` targets over a corpus of real workspaces. The target sets must be identical, with `required-features` as the only allowed difference in what is built.
 5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical.
@@ -649,6 +670,9 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `post-link` | Custom stages, `mkForce null` on `strip`, a check on `linked` | linux-gnu, msvc | Stage order; check sees unstripped bytes |
 | `source-paths` | Panics in dependencies, `splitDebug`, test binaries | linux-gnu | No source references in main outputs; `debug` references sources; editing a README in a package does not change its test binary |
 | `trim-paths` | `trim-paths = "all"` in the profile | linux-gnu, Cargo ≥ 1.101 | Cargo's remaps used, none added; path crates outside the root hashed without absolute paths |
+| `doctests` | Doctests using a dev-dependency, one `should_panic`, an edition-2024 crate | linux-gnu, aarch64 | Doctests run; cross doctests run under the runner or skip with a reason |
+| `test-control` | Tests that need network, `#[ignore]` tests, a skip list per binary | linux-gnu | Skipped tests do not run; changing a skip list re-runs only that test run; the test app runs the network test outside the sandbox |
+| `benches` | A libtest bench and a Criterion bench | linux-gnu | Bench binaries built with the bench profile; smoke checks pass with `--test` |
 
 ### Determinism and dogfooding
 
@@ -675,11 +699,11 @@ Each milestone ends with fixtures passing in CI, so progress is measured by patt
    - **Exit:** `outside-reads`, `multi-ws`, `vendor-collision`, `required-features`, `missing-input` and `stamps` pass, including their invalidation and sharing tests. Root prediction tests pass on the corpus. The tool builds itself.
 4. **M3: Day-one targets.** The `linuxGnu`, `linuxMusl`, `staticGlibc`, `msvc`, `wasmBrowser` and `wasmComponent` presets; mold and lld selection; platform-scoped env and the linker rewrite; runners; `testSystem`.
    - **Exit:** `msvc`, `wasm-browser`, `wasm-component`, `static`, `same-triple` and cross `sys-native` pass, with tests running under their runners.
-5. **M4: Products and variants.** Stage pipelines, CA islands, checks, helpers, `splitDebug` with scoped remapping, test-run derivations, products as inputs, clippy, coverage and feature variants.
-   - **Exit:** `post-link`, `embed`, `variants` and `source-paths` pass. One real multi-workspace repository builds end to end, with its CI using `repo.checks`.
+5. **M4: Products and variants.** Stage pipelines, CA islands, checks, helpers, `splitDebug` with scoped remapping, test-run derivations with test arguments, test apps, doctests, bench binaries and smoke checks, products as inputs, clippy, coverage and feature variants.
+   - **Exit:** `post-link`, `embed`, `variants`, `source-paths`, `doctests`, `test-control` and `benches` pass. One of the author's multi-workspace repositories with an embedded product builds end to end, with its CI using `repo.checks`.
 6. **M5: Dynamic-derivation delivery.** The outer derivation on `builder-rpc-v0`, root submission, `mode = "auto"` detection. Developed against Nix master; becomes the automatic choice once a release ships the feature.
    - **Exit:** every fixture passes in both modes with identical unit derivation paths and identical product bytes.
-7. **M6: Below-crate seams and measurement.** The pipelined split with its backends, the history-replay harness reporting rmeta stability per edit, optional dep-info source narrowing, nextest integration, `trim-paths` by default once Cargo 1.101 is stable, and full-CA units once Nix resolves derivations without fetching input contents.
+7. **M6: Below-crate seams and measurement.** The pipelined split with its backends, the history-replay harness reporting rmeta stability per edit, optional dep-info source narrowing, nextest integration, the documentation product, `trim-paths` by default once Cargo 1.101 is stable, and full-CA units once Nix resolves derivations without fetching input contents.
    - **Exit:** a published measurement on stable and on nightly with relink-don't-rebuild flags, and a go or no-go on each pipelining backend.
 8. **M7: Later targets.** wasip2, riscv64, windows-gnu, build-std targets, Darwin on Mac builders, zig.
 
@@ -689,7 +713,7 @@ Spikes A, B and C gate M1 and M2. The rest are measurements to take as soon as t
 
 | Spike | Question | Method | Feeds |
 | --- | --- | --- | --- |
-| A. Trace fidelity | Does Cargo accept empty outputs, synthetic dep-info and artifact notifications across releases, including pipelining and `links` overrides? Where do sentinels land, in what shapes, and do they leave `-C metadata` unchanged? Does `--target <host>` keep rustflags off host units while applying the linker? Does a path crate hash differently from two workspaces? How should breakbulk tell whether the project set `trim-paths`? | Shim prototype on the M1 fixtures and three Cargo releases | M1 go or no-go; the wrapping table |
+| A. Trace fidelity | Does Cargo accept empty outputs, synthetic dep-info and artifact notifications across releases, including pipelining and `links` overrides? Where do sentinels land, in what shapes, and do they leave `-C metadata` unchanged? Does `--target <host>` keep rustflags off host units while applying the linker? Does a path crate hash differently from two workspaces? How should breakbulk tell whether the project set `trim-paths`? Does `cargo test --doc` with a `RUSTDOC` shim record doctests without running anything? Which targets does `cargo test --no-run` build by default, and is the profile name part of a unit's identity (bench versus release)? | Shim prototype on the M1 fixtures across the supported Cargo window | M1 go or no-go; the wrapping table |
 | B. Delivery mechanics | Can a `builder-rpc-v0` derivation add input-addressed unit derivations whose paths equal those Nix computes in IFD mode? How does Nix treat a stage that depends on `outputOf`? What does `post-build-hook` with `"$DRV_PATH^*"` upload? | Prototype on Nix master | M5 design; the instantiation backend |
 | C. Env capture | Do replayed captures make nixpkgs' compiler and linker wrappers behave as in a live stdenv? Does any common setup hook rely on more than environment variables? | Capture and replay for `openssl-sys`, `ring` and a bindgen crate | Env capture design |
 | Pipelining gap | How much of Cargo's pipelining gain applies to real repositories? | `cargo build --timings` on several workspaces; compute the critical path with and without starting dependents at rmeta | Whether M6's pipelined split is worth building |
