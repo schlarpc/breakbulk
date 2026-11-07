@@ -1,0 +1,3 @@
+// One RCDATA resource; the program reads it back at run time.
+#include <windows.h>
+SMOKE RCDATA { "resource-ok\0" }

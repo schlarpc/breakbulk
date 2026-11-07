@@ -1,0 +1,15 @@
+[package]
+name = "msvc-smoke"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
+
+[build-dependencies]
+cc = "1"
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+
+# Its own workspace (tests/fixtures/msvc).
+[workspace]
