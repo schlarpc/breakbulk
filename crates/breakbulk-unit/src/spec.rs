@@ -365,6 +365,10 @@ pub struct RenderedCompile {
     pub args: Vec<RenderedArg>,
     pub env: BTreeMap<String, String>,
     pub env_splices: Vec<Splice<String>>,
+    /// The `flags` directories of the runs whose search paths inside their
+    /// `out` go on the dynamic-library path, in order (dynamic-path splices).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<String>,
     pub cwd: String,
     /// Output name (`rmeta`, `rlib`, `bin`) to the file names rustc writes
     /// for it. `bin` files go to the derivation output `out`; every other
@@ -456,6 +460,9 @@ pub struct RenderedRun {
     /// The `flags` directories of the upstream runs whose `metadata.json`
     /// becomes `DEP_<LINKS>_<KEY>` in this run's env.
     pub metadata_from: Vec<String>,
+    /// Dynamic-path splices, as for compiles.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<String>,
     /// The package's `rust-version`, for Cargo's `cargo::` syntax check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rust_version: Option<String>,

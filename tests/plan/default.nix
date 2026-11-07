@@ -64,6 +64,40 @@ let
         ${install}
       '';
 
+  # The trace golden test: real `cargo build -v` (or `cargo test --no-run
+  # -v`) over the real sources at the plan's skeleton location, compared
+  # unit by unit with the traced plan rendered into the same layout.
+  golden =
+    {
+      fixture,
+      ws,
+      kind ? "build",
+      cargoArgs ? [ "--workspace" ],
+    }:
+    pkgs.runCommandCC "${fixture}-golden-${kind}"
+      {
+        nativeBuildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+        ];
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode ${fixtures + "/${fixture}"} "$NIX_BUILD_TOP/skeleton"
+        cd "$NIX_BUILD_TOP/skeleton"
+        common=(--frozen --offline --config ${ws.vendor.configFile})
+        cargo metadata --format-version 1 "''${common[@]}" > $TMPDIR/metadata.json
+        cargo ${if kind == "build" then "build" else "test --no-run"} -v \
+          ${lib.escapeShellArgs cargoArgs} "''${common[@]}" \
+          --target ${target} --profile dev \
+          --config "build.target-dir=\"$TMPDIR/target\"" 2> build.log || { cat build.log; exit 1; }
+        mkdir -p $out
+        cp build.log $out/
+        ${tools.breakbulk-plan}/bin/breakbulk-plan-golden \
+          --plan ${ws.plans.${kind}}/plan.json --log build.log \
+          --target-dir $TMPDIR/target --metadata $TMPDIR/metadata.json | tee $out/report
+      '';
+
   walking-skeleton = mk "walking-skeleton" { };
   walking-skeleton-cargo = cargoBuild {
     fixture = "walking-skeleton";
@@ -95,6 +129,16 @@ in
         mkdir -p $out
         echo "$got" > $out/output
       '';
+
+  walking-skeleton-golden = golden {
+    fixture = "walking-skeleton";
+    ws = walking-skeleton;
+  };
+  walking-skeleton-golden-test = golden {
+    fixture = "walking-skeleton";
+    ws = walking-skeleton;
+    kind = "test";
+  };
 
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =

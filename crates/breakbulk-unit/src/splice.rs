@@ -179,6 +179,56 @@ pub fn expand_args<'a>(
     Ok(out)
 }
 
+/// The dynamic-library path variable of the platform `breakbulk-unit` runs
+/// on: Cargo's `dylib_path_envvar` (`cargo-util`, `paths.rs`).
+pub const DYLIB_PATH_VAR: &str = if cfg!(windows) {
+    "PATH"
+} else if cfg!(target_os = "macos") {
+    "DYLD_FALLBACK_LIBRARY_PATH"
+} else {
+    "LD_LIBRARY_PATH"
+};
+
+/// Expand dynamic-path splices into `env`: each run's search paths that lie
+/// inside its own `out` (without their `native=`-style kind), in order, go
+/// before the variable's recorded value. Cargo keeps only paths inside its
+/// target directory (`filter_dynamic_search_path`); breakbulk keeps those
+/// inside the printing run's `out`.
+pub fn expand_dylib_path<'a>(
+    env: &mut BTreeMap<String, String>,
+    runs: &[String],
+    directives: impl Fn(&str) -> Option<&'a BuildOutput>,
+) -> Result<(), SpliceError> {
+    if runs.is_empty() {
+        return Ok(());
+    }
+    let mut paths: Vec<String> = Vec::new();
+    for r in runs {
+        let d = directives(r).ok_or_else(|| {
+            SpliceError(format!(
+                "no directives for the dynamic-path splice from {r}"
+            ))
+        })?;
+        for p in d.library_paths.iter().filter(|p| p.in_out_dir) {
+            let path = match p.value.split_once('=') {
+                Some(("native" | "crate" | "dependency" | "framework" | "all", rest)) => rest,
+                _ => p.value.as_str(),
+            };
+            if !paths.iter().any(|x| x == path) {
+                paths.push(path.to_owned());
+            }
+        }
+    }
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    if let Some(old) = env.get(DYLIB_PATH_VAR).filter(|v| !v.is_empty()) {
+        paths.push(old.clone());
+    }
+    if !paths.is_empty() {
+        env.insert(DYLIB_PATH_VAR.into(), paths.join(sep));
+    }
+    Ok(())
+}
+
 /// Expand a compile's env: the recorded env, then each `rustc-env` splice in
 /// order. Like Cargo's `add_custom_flags`, which runs after Cargo has set
 /// every other variable, a script's value replaces a recorded one, and a later

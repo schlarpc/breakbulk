@@ -8,6 +8,7 @@
 //! - [`rewrite`] turns recorded paths into references.
 //! - [`sentinel`] parses sentinel shapes.
 
+pub mod golden;
 pub mod graph;
 pub mod records;
 pub mod rewrite;

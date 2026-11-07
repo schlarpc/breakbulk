@@ -21,6 +21,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
             .collect(),
         env: BTreeMap::new(),
         env_splices: vec![],
+        dylib_path_from: vec![],
         cwd: "/nix/store/x-src".into(),
         outputs: BTreeMap::from([("bin".into(), vec!["app-1".into()])]),
         deps: vec![],

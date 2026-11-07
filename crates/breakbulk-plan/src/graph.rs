@@ -640,12 +640,6 @@ impl<'a> Builder<'a> {
         }
         env_splices.sort();
         let (env, dylib) = self.rewrite_env(id, self.filter_env(&env, false))?;
-        if !dylib.is_empty() {
-            bail!(
-                "unit {id}: build-script search paths in {DYLIB_VAR} (from {}) are not supported yet",
-                dylib.join(", ")
-            );
-        }
         for (k, v) in &env {
             if contains_sentinel(k) {
                 return Err(self.shape_error(id, "env", &format!("`{k}={v:?}`"), args));
@@ -682,6 +676,7 @@ impl<'a> Builder<'a> {
             args: out,
             env,
             env_splices,
+            dylib_path_from: dylib,
             cwd,
             outputs: c.outputs.clone(),
         }))
@@ -723,12 +718,6 @@ impl<'a> Builder<'a> {
             env.insert(k.clone(), v.clone());
         }
         let (env, dylib) = self.rewrite_env(id, self.filter_env(&env, true))?;
-        if !dylib.is_empty() {
-            bail!(
-                "run {id}: build-script search paths in {DYLIB_VAR} (from {}) are not supported yet",
-                dylib.join(", ")
-            );
-        }
         let cwd = self
             .rw
             .reference(&rec.cwd)
@@ -741,6 +730,7 @@ impl<'a> Builder<'a> {
             env,
             cwd,
             metadata_from,
+            dylib_path_from: dylib,
             rust_version: r.package.rust_version.clone(),
             targets: package_targets(r.package),
             nightly_features_allowed: self.ctx.nightly,

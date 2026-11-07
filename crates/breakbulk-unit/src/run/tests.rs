@@ -17,6 +17,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         env: BTreeMap::from([("TARGET".into(), "x86_64-unknown-linux-gnu".into())]),
         cwd: cwd.display().to_string(),
         metadata_from: vec![],
+        dylib_path_from: vec![],
         rust_version: None,
         targets: vec![PackageTarget {
             name: "foo_sys".into(),

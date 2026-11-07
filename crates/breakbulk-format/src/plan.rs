@@ -175,6 +175,12 @@ pub struct CompileUnit {
     /// Runs whose `rustc-env` values are added to `env`, in order; a later
     /// run's value wins.
     pub env_splices: Vec<Splice>,
+    /// Dynamic-path splices: runs whose search paths inside their own `out`
+    /// go on the process's dynamic-library path (`LD_LIBRARY_PATH`), in this
+    /// order, before the recorded value. Cargo adds them for host plugin
+    /// dependencies (proc macros, build dependencies with build scripts).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<UnitId>,
     pub cwd: Reference,
     /// Output name to file names.
     pub outputs: BTreeMap<String, BTreeSet<String>>,
@@ -195,6 +201,10 @@ pub struct RunUnit {
     pub cwd: Reference,
     /// Upstream runs whose `DEP_<links>_*` metadata this run receives.
     pub metadata_from: BTreeSet<UnitId>,
+    /// Dynamic-path splices, as for compile units: the runs of packages the
+    /// build script depends on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<UnitId>,
     /// The package's `rust-version`, for Cargo's `cargo::` syntax check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rust_version: Option<String>,

@@ -298,6 +298,11 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                     .iter()
                     .map(|s| splice(s, r))
                     .collect::<Result<_, _>>()?,
+                dylib_path_from: c
+                    .dylib_path_from
+                    .iter()
+                    .map(|u| r.flags(u))
+                    .collect::<Result<_, _>>()?,
                 cwd: r.reference(&c.cwd)?,
                 outputs: c
                     .outputs
@@ -330,6 +335,11 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                 cwd: r.reference(&run.cwd)?,
                 metadata_from: run
                     .metadata_from
+                    .iter()
+                    .map(|u| r.flags(u))
+                    .collect::<Result<_, _>>()?,
+                dylib_path_from: run
+                    .dylib_path_from
                     .iter()
                     .map(|u| r.flags(u))
                     .collect::<Result<_, _>>()?,

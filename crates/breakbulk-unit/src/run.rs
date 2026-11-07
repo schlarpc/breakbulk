@@ -25,7 +25,10 @@ use crate::directives::{
 use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
-use crate::{DIRECTIVES_FILE, Error, METADATA_FILE, io_err, read_metadata, write_json};
+use crate::splice::expand_dylib_path;
+use crate::{
+    DIRECTIVES_FILE, Error, METADATA_FILE, io_err, read_directives, read_metadata, write_json,
+};
 
 /// The build script to execute: `script` itself, or the one file in it when
 /// it names its compile unit's `bin` output directory.
@@ -284,10 +287,17 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .as_deref()
         .map(|p| read_capture(Path::new(p)))
         .transpose()?;
+    let dylib_dirs = r
+        .dylib_path_from
+        .iter()
+        .map(|f| Ok((f.clone(), read_directives(Path::new(f))?)))
+        .collect::<Result<BTreeMap<String, BuildOutput>, Error>>()?;
+    let mut unit_env = run_env(r, &out, &metadata);
+    expand_dylib_path(&mut unit_env, &r.dylib_path_from, |f| dylib_dirs.get(f))?;
     let env = layered(
         outer,
         capture.as_ref(),
-        &run_env(r, &out, &metadata),
+        &unit_env,
         &run_cflags(r, outer, &out),
     );
     let argv = vec![script_path(Path::new(&r.script))?.display().to_string()];

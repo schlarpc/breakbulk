@@ -187,6 +187,7 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
                         err(id_, m);
                     }
                 }
+                check_dylib_path(plan, &c.dylib_path_from, &mut |m| err(id_, m));
                 for (output, files) in &c.outputs {
                     for f in files {
                         if f.is_empty() || f.contains('/') {
@@ -207,6 +208,7 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
                         format!("script is not an output of a compile unit: {other:?}"),
                     ),
                 }
+                check_dylib_path(plan, &r.dylib_path_from, &mut |m| err(id_, m));
                 for up in &r.metadata_from {
                     match plan.units.get(up) {
                         _ if up == id => err(id_, "metadataFrom names the run itself".into()),
@@ -292,6 +294,19 @@ fn check_reference(plan: &Plan, r: &Reference) -> Result<(), String> {
         return Err(format!("`rel` must be relative: `{rel}`"));
     }
     Ok(())
+}
+
+/// Dynamic-path splices name run units, each once.
+fn check_dylib_path(plan: &Plan, runs: &[String], err: &mut dyn FnMut(String)) {
+    let mut seen = BTreeSet::new();
+    for r in runs {
+        if !seen.insert(r) {
+            err(format!("dylibPathFrom names {r} twice"));
+        }
+        if !matches!(plan.units.get(r), Some(Unit::Run(_))) {
+            err(format!("dylibPathFrom names {r}, which is not a run unit"));
+        }
+    }
 }
 
 fn check_splice_target(plan: &Plan, s: &Splice) -> Result<(), String> {

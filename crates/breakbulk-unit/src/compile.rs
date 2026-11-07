@@ -25,7 +25,7 @@ use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedArg, RenderedCompile, derivation_output};
-use crate::splice::{expand_args, expand_env};
+use crate::splice::{expand_args, expand_dylib_path, expand_env};
 use crate::{Error, io_err, read_directives};
 
 /// The directories a compile works in, under `$TMPDIR`.
@@ -131,6 +131,7 @@ pub fn load_directives(c: &RenderedCompile) -> Result<BTreeMap<String, BuildOutp
             RenderedArg::Literal(_) => None,
         })
         .chain(c.env_splices.iter().map(|s| s.splice.as_str()))
+        .chain(c.dylib_path_from.iter().map(String::as_str))
         .collect();
     flags
         .into_iter()
@@ -153,7 +154,8 @@ pub fn invocation(
     let mut argv = c.program.clone();
     argv.extend(expand_args(&c.args, lookup)?);
     argv.extend(added_args(c, dirs));
-    let unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
+    let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
+    expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = c
         .env_capture
         .as_deref()
