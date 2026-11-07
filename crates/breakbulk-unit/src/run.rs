@@ -68,7 +68,7 @@ pub fn run_cflags(r: &RenderedRun, outer: &Outer, out: &Path) -> CFlags {
         prefix_maps.push((out.display().to_string(), name.clone()));
     }
     CFlags {
-        random_seed: outer.random_seed(),
+        random_seed: r.seed.clone().or_else(|| outer.random_seed()),
         prefix_maps,
     }
 }

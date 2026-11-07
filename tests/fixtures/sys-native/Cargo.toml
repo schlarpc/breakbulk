@@ -1,0 +1,17 @@
+# sys-native ("sys-native" in docs/implementation.md): `-sys` crates that
+# need native inputs, each declared on its own package only.
+#
+#  - openssl-sys (crates.io) finds OpenSSL with pkg-config:
+#    nativeInputs = [ pkg-config ], inputs = [ openssl ].
+#  - cm-sys builds C with the `cmake` crate: nativeInputs = [ cmake ].
+#  - bg-sys generates bindings with `bindgen` and compiles C with `cc`:
+#    nativeInputs = [ rustPlatform.bindgenHook ] (libclang).
+#  - plain declares nothing; its build script records which of those
+#    variables it sees, and the app prints that.
+[workspace]
+resolver = "2"
+members = ["app", "cm-sys", "bg-sys", "plain"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

@@ -28,6 +28,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         remap: vec![],
         remap_scope: None,
         env_capture: None,
+        seed: None,
     }
 }
 

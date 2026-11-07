@@ -1,0 +1,10 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+openssl-sys = "0.9"
+cm-sys = { path = "../cm-sys" }
+bg-sys = { path = "../bg-sys" }
+plain = { path = "../plain" }

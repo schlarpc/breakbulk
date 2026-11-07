@@ -390,6 +390,15 @@ pub struct RenderedCompile {
     /// JSON object of strings) or the capture's output directory holding it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_capture: Option<String>,
+    /// The value of `-frandom-seed` for C code: the unit's key in the plan
+    /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
+    /// run). Unlike stdenv's seed from the output path, it does not change
+    /// when an input changes without changing the unit (a new
+    /// `breakbulk-unit`, a new env capture), so C objects with debug info,
+    /// which record the flag, keep their bytes. `None`: the seed comes from
+    /// the output path, as stdenv computes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
 }
 
 /// The name and version in a Cargo package id spec, as `cargo metadata`
@@ -487,6 +496,15 @@ pub struct RenderedRun {
     /// Fail a successful run whose `rerun-if-changed` paths are missing
     /// from the sandbox, instead of only warning.
     pub strict_sources: bool,
+    /// The value of `-frandom-seed` for C code: the unit's key in the plan
+    /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
+    /// run). Unlike stdenv's seed from the output path, it does not change
+    /// when an input changes without changing the unit (a new
+    /// `breakbulk-unit`, a new env capture), so C objects with debug info,
+    /// which record the flag, keep their bytes. `None`: the seed comes from
+    /// the output path, as stdenv computes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
 }
 
 #[cfg(test)]

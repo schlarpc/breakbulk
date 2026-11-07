@@ -319,6 +319,7 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                 remap,
                 remap_scope,
                 env_capture,
+                seed: Some(id.to_string()),
             })
         }
         Unit::Run(run) => {
@@ -359,6 +360,7 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                     file: None,
                 }))?),
                 strict_sources: r.strict_sources(id, run),
+                seed: Some(id.to_string()),
             })
         }
     })
