@@ -797,8 +797,14 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let env = |v: &Path| BTreeMap::from([("CARGO".to_owned(), v.display().to_string())]);
         let t = Path::new("/nonexistent-target");
-        assert_eq!(normal_env(&env(&real), t, &[]), normal_env(&env(&link), t, &[]));
-        assert_ne!(normal_env(&env(&real), t, &[]), normal_env(&env(&other), t, &[]));
+        assert_eq!(
+            normal_env(&env(&real), t, &[]),
+            normal_env(&env(&link), t, &[])
+        );
+        assert_ne!(
+            normal_env(&env(&real), t, &[]),
+            normal_env(&env(&other), t, &[])
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
