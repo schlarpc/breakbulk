@@ -46,6 +46,14 @@ pub struct Toolchains {
     pub host: PlatformSpec,
     #[serde(default)]
     pub target: PlatformSpec,
+    /// The `--remap-path-scope` of compile units that end up in shipped
+    /// products whose debug information is split off (`splitDebug`), e.g.
+    /// `macro,diagnostics`: debug info keeps real store paths. `None`: every
+    /// scope is remapped. Test harnesses (`--test`) always remap every scope,
+    /// and so does every unit when rustc is older than 1.95 ("Source paths
+    /// at run time" in `docs/implementation.md`).
+    #[serde(default)]
+    pub shipped_remap_scope: Option<String>,
 }
 
 fn default_store_dir() -> String {

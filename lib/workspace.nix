@@ -83,6 +83,9 @@ pkgs:
   packages ? { },
   ca ? null,
   checkout ? null,
+  # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
+  # `shippedRemapScope`); null remaps every scope.
+  shippedRemapScope ? null,
 }:
 let
   wsDir = util.normalizeRel path;
@@ -175,7 +178,7 @@ let
         env = targetEnv;
       };
       overrides = packageOverrides;
-      inherit strictSources;
+      inherit strictSources shippedRemapScope;
       roots = predictedRoots {
         workspaceRoots = wsRoots;
         planKind = kind;

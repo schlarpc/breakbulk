@@ -319,6 +319,14 @@ impl Resolve for Tokens<'_> {
         })
     }
 
+    fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
+        // Test harnesses remap every scope; so does everything without a
+        // shipped scope (no `splitDebug`) or on rustc before 1.95.
+        let scope = self.inputs.toolchains.shipped_remap_scope.as_deref()?;
+        (has_remap_scope(&self.inputs.plan.rustc) && !is_test_compile(unit))
+            .then(|| scope.to_owned())
+    }
+
     fn env_capture(&self, _id: &UnitId, unit: &Unit) -> Result<Option<String>, Error> {
         let p = platform(unit);
         if let Some((key, o)) = self.package_override(unit.package())
@@ -356,6 +364,19 @@ impl Resolve for Tokens<'_> {
         self.package_override(&run.package)
             .and_then(|(_, o)| o.strict_sources)
             .unwrap_or(self.inputs.overrides.strict_sources)
+    }
+}
+
+/// Whether rustc takes `--remap-path-scope`: stable since 1.95. `rustc` is
+/// the plan's `rustc -vV` release line (`1.99.0 (… )`, `1.101.0-nightly …`).
+pub fn has_remap_scope(rustc: &str) -> bool {
+    let mut parts = rustc
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u64>().unwrap_or(0));
+    match (parts.next(), parts.next()) {
+        (Some(major), Some(minor)) => (major, minor) >= (1, 95),
+        _ => false,
     }
 }
 

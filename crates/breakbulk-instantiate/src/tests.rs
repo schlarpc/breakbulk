@@ -51,6 +51,7 @@ fn smoke_inputs() -> Inputs {
                 env: ["CFLAGS".into(), "SHARED".into()].into(),
                 env_capture: true,
             },
+            shipped_remap_scope: None,
         },
         overrides: Overrides {
             strict_sources: false,
@@ -182,8 +183,13 @@ impl Resolve for RealPaths<'_> {
             Reference::Out(o) => format!("/breakbulk/build/{}", o.out),
         })
     }
-    fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {
-        None
+    fn remap_scope(&self, _: &UnitId, c: &CompileUnit) -> Option<String> {
+        let scope = self.0.toolchains.shipped_remap_scope.as_ref()?;
+        let test = c
+            .args
+            .iter()
+            .any(|a| matches!(a, breakbulk_format::Arg::Literal(s) if s == "--test"));
+        (!test && has_remap_scope(&self.0.plan.rustc)).then(|| scope.clone())
     }
     fn env_capture(&self, _: &UnitId, u: &Unit) -> Result<Option<String>, String> {
         let p = platform(u);
@@ -236,6 +242,42 @@ fn substituted_units_equal_direct_rendering() {
         assert_eq!(d.attrs["args"], Value::Strings(vec!["unit".into()]));
         assert_eq!(attr(d, "system"), "x86_64-linux");
     }
+}
+
+#[test]
+fn shipped_remap_scope() {
+    let scope_of = |inputs: &Inputs| -> BTreeMap<String, Option<String>> {
+        let out = instantiate(inputs).unwrap();
+        out.units
+            .iter()
+            .map(|(id, d)| {
+                let u: serde_json::Value =
+                    serde_json::from_str(&attr(d, "BREAKBULK_UNIT")).unwrap();
+                let direct = unit_env_value(
+                    &render_unit(&inputs.plan, id, &RealPaths(inputs)).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(attr(d, "BREAKBULK_UNIT"), direct, "unit {id}");
+                let scope = u["remapScope"].as_str().map(str::to_owned);
+                (id.clone(), scope)
+            })
+            .collect()
+    };
+    let mut inputs = smoke_inputs();
+    assert!(scope_of(&inputs).values().all(Option::is_none));
+    inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics".into());
+    let scopes = scope_of(&inputs);
+    for id in [APP, LIB, SCRIPT] {
+        assert_eq!(scopes[id].as_deref(), Some("macro,diagnostics"), "{id}");
+    }
+    assert_eq!(scopes[RUN], None);
+    // rustc before 1.95 has no --remap-path-scope.
+    inputs.plan.rustc = "1.94.1 (e408947bf 2026-01-01)".into();
+    assert!(scope_of(&inputs).values().all(Option::is_none));
+    assert!(has_remap_scope("1.95.0 (abc 2026-01-01)"));
+    assert!(has_remap_scope("1.101.0-nightly (abc 2026-10-01)"));
+    assert!(!has_remap_scope("1.94.0"));
+    assert!(!has_remap_scope(""));
 }
 
 #[test]
