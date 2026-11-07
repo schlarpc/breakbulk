@@ -13,9 +13,10 @@
 #   };
 #
 #   ws.packages.<bin>          the bin, installed as $out/bin/<bin>
-#   ws.libs.<pkg>.<kind>       a library's cdylib/staticlib/dylib output
-#   ws.roots."<pkg>/<kind>/<target>"   build-plan roots (unit outputs or stubs)
+#   ws.roots."<pkg>/<kind>/<target>"   build-plan roots (unit outputs or stubs),
+#                              e.g. "c/cdylib/c" for a library's cdylib
 #   ws.tests."<pkg>/<kind>/<target>"   test-plan roots
+#   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target>
 #   ws.plans.{build,test}      the plan derivations ($out/plan.json)
 #   ws.units.{build,test}      every unit derivation, by unit id
 {
