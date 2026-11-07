@@ -148,7 +148,9 @@ let
     }:
     let
       preset = if stagePreset == null then stagePresetFor triple else stagePreset;
-      byPkg = groupBy (r: r.breakbulkRoot.package) (filter (r: !r.breakbulkRoot.test) (attrValues inst.roots));
+      byPkg = groupBy (r: r.breakbulkRoot.package) (
+        filter (r: !r.breakbulkRoot.test) (attrValues inst.roots)
+      );
       selected = if select == null then byPkg else filterAttrs (n: _: elem n select) byPkg;
 
       product =
@@ -158,10 +160,13 @@ let
           unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           confs = packageConfig pkg;
-          stageSet = stages.merge ([
-            (presetStages preset)
-            targetStages
-          ] ++ map (c: c.stages or { }) confs);
+          stageSet = stages.merge (
+            [
+              (presetStages preset)
+              targetStages
+            ]
+            ++ map (c: c.stages or { }) confs
+          );
           checkSet = stages.merge ([ targetChecks ] ++ map (c: c.checks or { }) confs);
           p = stages.mkProduct {
             name = pkg;

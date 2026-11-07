@@ -28,12 +28,7 @@
 let
   # All subsets of a list, in order, smallest first; each subset keeps the
   # list's order.
-  subsets =
-    l:
-    lib.foldr (
-      x: acc:
-      acc ++ map (s: [ x ] ++ s) acc
-    ) [ [ ] ] l;
+  subsets = l: lib.foldr (x: acc: acc ++ map (s: [ x ] ++ s) acc) [ [ ] ] l;
 
   # A store-name-safe spelling of a feature (`pkg/feat` → `pkg_feat`).
   safe = lib.replaceStrings [ "/" ":" " " ] [ "_" "_" "_" ];

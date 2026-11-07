@@ -114,7 +114,9 @@ let
     lib.listToAttrs (
       map (
         u:
-        lib.nameValuePair u.name (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT))
+        lib.nameValuePair u.name (
+          builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)
+        )
       ) (lib.attrValues (inst repo).units.${kind})
     );
 
@@ -175,7 +177,9 @@ let
         lib.attrValues repo.workspaces.main.instances.${native}.${vName}.units.${kind}
       )
     );
-  drvsOf = repo: vName: kind: lib.mapAttrs (_: u: u.drvPath) (unitsOf repo vName kind);
+  drvsOf =
+    repo: vName: kind:
+    lib.mapAttrs (_: u: u.drvPath) (unitsOf repo vName kind);
 
   # --- post-link ---------------------------------------------------------------
 
@@ -183,7 +187,12 @@ let
   # stages seen so far (each stage appends its name).
   marker =
     stage:
-    { input, product, pkgs, ... }:
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
     pkgs.runCommand "${product.name}-${stage}" { } ''
       cp -RL --no-preserve=mode,ownership ${input} $out
       chmod -R u+w $out
@@ -194,14 +203,21 @@ let
   # A check that fails unless every ELF file in its input still has debug
   # info: on `linked` it sees the bytes before splitDebug and strip.
   hasDebugInfo =
-    { input, product, pkgs, ... }:
-    pkgs.runCommand "${product.name}-has-debug-info" { nativeBuildInputs = [ pkgs.binutils-unwrapped ]; } ''
-      for f in ${input}/*; do
-        readelf -S -W "$f" > sections
-        grep -q ' \.debug_info ' sections || { echo "$f: no debug info" >&2; exit 1; }
-      done
-      touch $out
-    '';
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    pkgs.runCommand "${product.name}-has-debug-info"
+      { nativeBuildInputs = [ pkgs.binutils-unwrapped ]; }
+      ''
+        for f in ${input}/*; do
+          readelf -S -W "$f" > sections
+          grep -q ' \.debug_info ' sections || { echo "$f: no debug info" >&2; exit 1; }
+        done
+        touch $out
+      '';
 
   postLink = mkRepo (fixtures + "/post-link") [
     (oneWs "." "dev")
@@ -391,10 +407,12 @@ in
       namingNames = lib.sort lib.lessThan (lib.unique (map (u: u.name) naming));
       other = lib.filter (u: lib.hasPrefix "other-" u.name) units;
     in
-    assert lib.assertMsg (namingNames == [
-      "embedder-0.1.0-lib"
-      "embedder-0.1.0-test"
-    ]) "embed: units naming the product: ${builtins.toJSON namingNames}";
+    assert lib.assertMsg (
+      namingNames == [
+        "embedder-0.1.0-lib"
+        "embedder-0.1.0-test"
+      ]
+    ) "embed: units naming the product: ${builtins.toJSON namingNames}";
     pkgs.runCommand "embed"
       {
         host = embed.workspaces.host.packages.host;
@@ -408,7 +426,12 @@ in
           "instTest"
           (drvOnly i.unitsJson.test)
         ]
-        ++ lib.concatLists (lib.imap0 (n: u: [ "other${toString n}" (drvOnly u) ]) other)
+        ++ lib.concatLists (
+          lib.imap0 (n: u: [
+            "other${toString n}"
+            (drvOnly u)
+          ]) other
+        )
         # Positive control: the embedding chain does depend on it.
         ++ [
           "chainEmbedder"
@@ -438,21 +461,26 @@ in
     let
       b = hostDrvs embed;
       a = hostDrvs embedEdited;
-      changed = lib.sort lib.lessThan (lib.unique (lib.attrValues (lib.filterAttrs (d: _: !(b ? ${d})) a)));
+      changed = lib.sort lib.lessThan (
+        lib.unique (lib.attrValues (lib.filterAttrs (d: _: !(b ? ${d})) a))
+      );
     in
-    assert lib.assertMsg (changed == [
-      "embedder-0.1.0-lib"
-      "embedder-0.1.0-test"
-      "host-0.1.0-bin"
-      "host-0.1.0-test"
-    ]) "embed-invalidation: changed units ${builtins.toJSON changed}";
+    assert lib.assertMsg (
+      changed == [
+        "embedder-0.1.0-lib"
+        "embedder-0.1.0-test"
+        "host-0.1.0-bin"
+        "host-0.1.0-test"
+      ]
+    ) "embed-invalidation: changed units ${builtins.toJSON changed}";
     evalCheck "embed-invalidation" (builtins.toJSON changed);
 
   benches =
     let
       w = benchesRepo.workspaces.main;
       t = w.target.${native};
-      readPlan = drv: builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${drv}/plan.json"));
+      readPlan =
+        drv: builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${drv}/plan.json"));
       benchPlan = readPlan w.plans.${native}.bench.bench;
       testPlans = map (v: readPlan w.plans.${native}.${v}.test) [
         "default"
@@ -465,20 +493,32 @@ in
       );
       smoke = lib.filterAttrs (n: _: lib.hasInfix "/bench-" n) benchesRepo.checks;
     in
-    assert lib.assertMsg (lib.attrNames t.benches.bencher == [
-      "crit"
-      "lib"
-      "libtest"
-    ]) "benches: ${builtins.toJSON (lib.attrNames t.benches.bencher)}";
-    assert lib.assertMsg (lib.all (p: !(lib.elem "bench" (kinds p))) testPlans) "benches: a test plan has bench roots";
-    assert lib.assertMsg (benchPlan.kind == "bench" && benchPlan.variant.profile == "bench") "benches: bench plan header ${builtins.toJSON benchPlan.variant}";
-    assert lib.assertMsg (lib.sort lib.lessThan (kinds benchPlan) == [
-      "bench"
-      "bench"
-      "lib"
-    ]) "benches: bench plan roots ${builtins.toJSON benchPlan.roots}";
-    assert lib.assertMsg (critUnit != null && lib.elem "opt-level=3" critArgs) "benches: crit unit args ${builtins.toJSON critArgs}";
-    assert lib.assertMsg (lib.length (lib.attrNames smoke) == 3) "benches: smoke checks ${builtins.toJSON (lib.attrNames smoke)}";
+    assert lib.assertMsg (
+      lib.attrNames t.benches.bencher == [
+        "crit"
+        "lib"
+        "libtest"
+      ]
+    ) "benches: ${builtins.toJSON (lib.attrNames t.benches.bencher)}";
+    assert lib.assertMsg (lib.all (
+      p: !(lib.elem "bench" (kinds p))
+    ) testPlans) "benches: a test plan has bench roots";
+    assert lib.assertMsg (
+      benchPlan.kind == "bench" && benchPlan.variant.profile == "bench"
+    ) "benches: bench plan header ${builtins.toJSON benchPlan.variant}";
+    assert lib.assertMsg (
+      lib.sort lib.lessThan (kinds benchPlan) == [
+        "bench"
+        "bench"
+        "lib"
+      ]
+    ) "benches: bench plan roots ${builtins.toJSON benchPlan.roots}";
+    assert lib.assertMsg (
+      critUnit != null && lib.elem "opt-level=3" critArgs
+    ) "benches: crit unit args ${builtins.toJSON critArgs}";
+    assert lib.assertMsg (
+      lib.length (lib.attrNames smoke) == 3
+    ) "benches: smoke checks ${builtins.toJSON (lib.attrNames smoke)}";
     pkgs.runCommand "benches"
       (
         {
@@ -499,62 +539,99 @@ in
   variants =
     let
       d = drvsOf variantsRepo;
-      same = a: b: names: lib.filter (n: (a.${n} or "missing-a") != (b.${n} or "missing-b")) names;
+      same =
+        a: b: names:
+        lib.filter (n: (a.${n} or "missing-a") != (b.${n} or "missing-b")) names;
       hostUnits = [
         "pm-0.1.0-lib"
         "hostdep-0.1.0-build-script"
         "hostdep-0.1.0-build-run"
       ];
-      depNames = plan: lib.filter (n: lib.hasPrefix "pm-" n || lib.hasPrefix "hostdep-" n) (lib.attrNames plan);
-      memberNames = plan: lib.filter (n: lib.hasPrefix "app-" n || lib.hasPrefix "lib-a-" n) (lib.attrNames plan);
+      depNames =
+        plan: lib.filter (n: lib.hasPrefix "pm-" n || lib.hasPrefix "hostdep-" n) (lib.attrNames plan);
+      memberNames =
+        plan: lib.filter (n: lib.hasPrefix "app-" n || lib.hasPrefix "lib-a-" n) (lib.attrNames plan);
       buildVsClippy = same (d "default" "build") (d "clippy" "build") hostUnits;
-      checkVsClippy = lib.concatMap (
-        k: same (d "check" k) (d "clippy" k) (depNames (d "check" k))
-      ) [ "build" "test" ];
+      checkVsClippy = lib.concatMap (k: same (d "check" k) (d "clippy" k) (depNames (d "check" k))) [
+        "build"
+        "test"
+      ];
       membersDiffer = lib.filter (n: (d "check" "build").${n} == (d "clippy" "build").${n}) (
         memberNames (d "check" "build")
       );
-      customVsRelease = lib.concatMap (
-        k:
-        let
-          a = d "default" k;
-          b = d "custom" k;
-        in
-        lib.optional (lib.sort lib.lessThan (lib.attrValues a) != lib.sort lib.lessThan (lib.attrValues b)) k
-      ) [ "build" "test" ];
+      customVsRelease =
+        lib.concatMap
+          (
+            k:
+            let
+              a = d "default" k;
+              b = d "custom" k;
+            in
+            lib.optional (
+              lib.sort lib.lessThan (lib.attrValues a) != lib.sort lib.lessThan (lib.attrValues b)
+            ) k
+          )
+          [
+            "build"
+            "test"
+          ];
       # The lib target unit of the check variant is metadata only, so it
       # differs from the build variant's (sanity check for the comparison).
       libDiffers = (d "default" "build")."hostdep-0.1.0-lib" != (d "check" "build")."hostdep-0.1.0-lib";
       fpNames = lib.attrNames (lib.filterAttrs (n: _: lib.hasPrefix "fp-" n) vt.variants);
       # Build vs coverage, both plans: units by platform, compared by
       # derivation path.
-      platformOf = u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
+      platformOf =
+        u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
       unitsBy =
         vName: platform:
-        lib.concatMap (
-          k: lib.filter (u: platformOf u == platform) (lib.attrValues (unitsOf variantsRepo vName k))
-        ) [ "build" "test" ];
+        lib.concatMap
+          (k: lib.filter (u: platformOf u == platform) (lib.attrValues (unitsOf variantsRepo vName k)))
+          [
+            "build"
+            "test"
+          ];
       drvSet = us: lib.genAttrs (map (u: builtins.unsafeDiscardStringContext u.drvPath) us) (_: true);
-      sharedTarget = lib.filter (u: (drvSet (unitsBy "coverage" "target")) ? ${builtins.unsafeDiscardStringContext u.drvPath}) (
-        unitsBy "default" "target"
-      );
+      sharedTarget = lib.filter (
+        u: (drvSet (unitsBy "coverage" "target")) ? ${builtins.unsafeDiscardStringContext u.drvPath}
+      ) (unitsBy "default" "target");
       hostCov = drvSet (unitsBy "coverage" "host");
-      unsharedHost = lib.filter (u: !(hostCov ? ${builtins.unsafeDiscardStringContext u.drvPath})) (unitsBy "default" "host");
+      unsharedHost = lib.filter (u: !(hostCov ? ${builtins.unsafeDiscardStringContext u.drvPath})) (
+        unitsBy "default" "host"
+      );
     in
-    assert lib.assertMsg (sharedTarget == [ ]) "variants: target units shared between build and coverage: ${builtins.toJSON (map (u: u.name) sharedTarget)}";
-    assert lib.assertMsg (unsharedHost == [ ] && unitsBy "default" "host" != [ ]) "variants: host units not shared between build and coverage: ${builtins.toJSON (map (u: u.name) unsharedHost)}";
-    assert lib.assertMsg (buildVsClippy == [ ]) "variants: host units differ between build and clippy: ${builtins.toJSON buildVsClippy}";
-    assert lib.assertMsg (checkVsClippy == [ ]) "variants: dependency units differ between check and clippy: ${builtins.toJSON checkVsClippy}";
-    assert lib.assertMsg (membersDiffer == [ ]) "variants: member units shared between check and clippy: ${builtins.toJSON membersDiffer}";
-    assert lib.assertMsg (customVsRelease == [ ]) "variants: release and release-custom differ in plans ${builtins.toJSON customVsRelease}";
+    assert lib.assertMsg (sharedTarget == [ ])
+      "variants: target units shared between build and coverage: ${
+        builtins.toJSON (map (u: u.name) sharedTarget)
+      }";
+    assert lib.assertMsg (unsharedHost == [ ] && unitsBy "default" "host" != [ ])
+      "variants: host units not shared between build and coverage: ${
+        builtins.toJSON (map (u: u.name) unsharedHost)
+      }";
+    assert lib.assertMsg (
+      buildVsClippy == [ ]
+    ) "variants: host units differ between build and clippy: ${builtins.toJSON buildVsClippy}";
+    assert lib.assertMsg (
+      checkVsClippy == [ ]
+    ) "variants: dependency units differ between check and clippy: ${builtins.toJSON checkVsClippy}";
+    assert lib.assertMsg (
+      membersDiffer == [ ]
+    ) "variants: member units shared between check and clippy: ${builtins.toJSON membersDiffer}";
+    assert lib.assertMsg (
+      customVsRelease == [ ]
+    ) "variants: release and release-custom differ in plans ${builtins.toJSON customVsRelease}";
     assert lib.assertMsg libDiffers "variants: hostdep's lib is shared between build and check";
-    assert lib.assertMsg (fpNames == [
-      "fp-lib-a_x"
-      "fp-lib-a_x+lib-a_y"
-      "fp-lib-a_y"
-      "fp-none"
-    ]) "variants: powerset ${builtins.toJSON fpNames}";
-    assert lib.assertMsg (variantsRepo.checks ? "main/${native}/variant-clippy/check") "variants: no clippy check in repo.checks";
+    assert lib.assertMsg (
+      fpNames == [
+        "fp-lib-a_x"
+        "fp-lib-a_x+lib-a_y"
+        "fp-lib-a_y"
+        "fp-none"
+      ]
+    ) "variants: powerset ${builtins.toJSON fpNames}";
+    assert lib.assertMsg (
+      variantsRepo.checks ? "main/${native}/variant-clippy/check"
+    ) "variants: no clippy check in repo.checks";
     pkgs.runCommand "variants"
       {
         app = vt.packages.app;
@@ -598,7 +675,10 @@ in
     in
     pkgs.runCommand "variants-clippy-strict"
       {
-        failure = expectFailure "lib-a-clippy" unit [ "#len_zero" "-D clippy::len-zero" ];
+        failure = expectFailure "lib-a-clippy" unit [
+          "#len_zero"
+          "-D clippy::len-zero"
+        ];
         # The default clippy variant lints the same code and succeeds.
         lenient = (unitsOf variantsRepo "clippy" "build")."lib-a-0.1.0-lib";
       }
@@ -611,10 +691,14 @@ in
     let
       i = inst sourcePaths;
       depView = i.sources.workspace.dep;
-      itoaSrc = lib.head (lib.attrValues (lib.filterAttrs (id: _: lib.hasSuffix "#itoa@1.0.11" id) i.sources.crates));
+      itoaSrc = lib.head (
+        lib.attrValues (lib.filterAttrs (id: _: lib.hasSuffix "#itoa@1.0.11" id) i.sources.crates)
+      );
       build = renderedUnits sourcePaths "build";
       test = renderedUnits sourcePaths "test";
-      scopes = lib.mapAttrs (_: u: u.remapScope or null) (lib.filterAttrs (_: u: u.kind == "compile") (build // test));
+      scopes = lib.mapAttrs (_: u: u.remapScope or null) (
+        lib.filterAttrs (_: u: u.kind == "compile") (build // test)
+      );
       want = {
         "app-0.1.0-bin" = "macro,diagnostics";
         "dep-0.1.0-lib" = "macro,diagnostics";
@@ -625,10 +709,12 @@ in
       bad = lib.filterAttrs (n: s: (scopes.${n} or "missing") != s) want;
     in
     assert lib.assertMsg (bad == { }) "source-paths: remap scopes ${builtins.toJSON scopes}";
-    assert lib.assertMsg (spApp.stageOrder == [
-      "splitDebug"
-      "install"
-    ]) "source-paths: stages ${builtins.toJSON spApp.stageOrder}";
+    assert lib.assertMsg (
+      spApp.stageOrder == [
+        "splitDebug"
+        "install"
+      ]
+    ) "source-paths: stages ${builtins.toJSON spApp.stageOrder}";
     pkgs.runCommand "source-paths"
       {
         nativeBuildInputs = [ pkgs.gdb ];
@@ -669,7 +755,9 @@ in
       before = sourcePaths.workspaces.main.tests.dep.lib;
       after = sourcePathsReadme.workspaces.main.tests.dep.lib;
     in
-    assert lib.assertMsg (before.drvPath != after.drvPath) "source-paths-readme: the README edit changed no derivation";
+    assert lib.assertMsg (
+      before.drvPath != after.drvPath
+    ) "source-paths-readme: the README edit changed no derivation";
     pkgs.runCommand "source-paths-readme" { inherit before after; } ''
       cmp $before/bin/dep $after/bin/dep
       touch $out
@@ -687,18 +775,24 @@ in
         "tool/unstripped"
       ];
     in
-    assert lib.assertMsg (plServer.stageOrder == [
-      "splitDebug"
-      "stamp"
-      "sign"
-      "install"
-    ]) "post-link: server stages ${builtins.toJSON plServer.stageOrder}";
-    assert lib.assertMsg (plTool.stageOrder == [
-      "splitDebug"
-      "strip"
-      "install"
-    ]) "post-link: tool stages ${builtins.toJSON plTool.stageOrder}";
-    assert lib.assertMsg (lib.all (n: lib.elem n checkNames) want) "post-link: checks ${builtins.toJSON checkNames}";
+    assert lib.assertMsg (
+      plServer.stageOrder == [
+        "splitDebug"
+        "stamp"
+        "sign"
+        "install"
+      ]
+    ) "post-link: server stages ${builtins.toJSON plServer.stageOrder}";
+    assert lib.assertMsg (
+      plTool.stageOrder == [
+        "splitDebug"
+        "strip"
+        "install"
+      ]
+    ) "post-link: tool stages ${builtins.toJSON plTool.stageOrder}";
+    assert lib.assertMsg (lib.all (
+      n: lib.elem n checkNames
+    ) want) "post-link: checks ${builtins.toJSON checkNames}";
     pkgs.runCommand "post-link"
       {
         nativeBuildInputs = [ pkgs.binutils-unwrapped ];
