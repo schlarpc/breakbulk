@@ -927,3 +927,24 @@ tell me if you know a crate that does it.
 
 `test.sourceScope` (entry 80) also applies to the package's doctests, since
 they are tests. Alternative: only test binaries get the wider view.
+
+## 86. FYI: hardening across Cargo versions, test cutoff, git dependencies
+
+- The randomized comparison against real Cargo and the exact-command tests
+  now run on Cargo 1.95, 1.97, 1.99 and nightly. No differences in Cargo's
+  behavior were found; three test-tool bugs were fixed.
+- With content-addressing enabled, editing a package that has a build
+  script no longer re-runs other packages' tests whose binaries didn't
+  change (fixes the second half of 61). Verified in a private store.
+- Git dependencies were broken: breakbulk named git crates differently
+  from Cargo, so any git dependency failed. Fixed (found independently by
+  two agents) and tested with a local repository locked at two revisions
+  by different workspaces.
+
+## 87. ASK: opt-in heavy tests as `nix run` commands
+
+Two tests can't run under plain `nix flake check` because they need Nix
+features your system Nix doesn't enable: dynamic mode (`nix run
+.#test-dynamic`) and content-addressed test cutoff (currently
+`tests/test-cutoff/run.sh`). Proposed: give the second a `nix run
+.#test-cutoff` entry too, so all opt-in tests are found the same way.
