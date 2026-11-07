@@ -43,6 +43,14 @@ pub fn has_manifest(c: &CompileUnit) -> bool {
     !is_proc_macro(c) && c.outputs.get("rmeta").is_some_and(|f| f.len() == 1)
 }
 
+/// Whether a library was compiled with `-Zembed-metadata=no` (nightly Cargo
+/// and rustc): its `rlib` has no metadata, which is only in its `rmeta`.
+pub fn embeds_no_metadata(c: &CompileUnit) -> bool {
+    c.args.iter().any(
+        |a| matches!(a, Arg::Literal(s) if s == "embed-metadata=no" || s == "-Zembed-metadata=no"),
+    )
+}
+
 /// The crate files a compile unit names directly in its arguments: `out`
 /// references to another compile unit's outputs other than `bin`.
 pub(crate) fn direct_crate_refs<'a>(
@@ -80,7 +88,8 @@ pub struct UnitDeps {
     /// output, which needs none.
     pub manifests: BTreeSet<UnitId>,
     /// Whether the crates the manifests name go into the dependency
-    /// directory: units that do not link.
+    /// directory: units that do not link, and linking units whose
+    /// libraries' rlibs carry no metadata ([`embeds_no_metadata`]).
     pub link_manifest_crates: bool,
     /// For the unit's own manifest (units with an `rmeta` output): the crate
     /// files below it that no manifest names, the direct dependencies
@@ -230,7 +239,14 @@ impl<'p> Graph<'p> {
             .unwrap_or_else(|| panic!("{id} is not a compile unit of the plan"));
         let linking = is_linking(c);
         let writes_manifest = c.outputs.contains_key("rmeta");
-        let manifests = if linking && !writes_manifest {
+        // With nightly's `-Zembed-metadata=no` on its libraries, a linking
+        // unit's rlibs carry no metadata, so rustc needs every rmeta below
+        // too: from the manifests, as for units that do not link.
+        let no_embed = linking
+            && direct_crate_refs(self.plan, c)
+                .any(|o| self.compile(&o.out).is_some_and(embeds_no_metadata));
+        let link_manifests = !linking || no_embed;
+        let manifests = if !link_manifests && !writes_manifest {
             BTreeSet::new()
         } else {
             self.manifest_deps(c)
@@ -267,7 +283,7 @@ impl<'p> Graph<'p> {
         }
         UnitDeps {
             deps,
-            link_manifest_crates: !linking && !manifests.is_empty(),
+            link_manifest_crates: link_manifests && !manifests.is_empty(),
             manifests,
             manifest_crates,
             reachable_runs: Rc::new(reachable),

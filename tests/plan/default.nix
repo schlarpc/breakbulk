@@ -664,3 +664,62 @@ in
 }
 // goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); }
 // goldenOn "dev-dep-features" { }
+# Nightly Cargo and rustc (rust-overlay's latest): the new build-directory
+# layout and `-Zembed-metadata=no`. The golden tests of the walking skeleton
+# and the directives fixture, and their products, which link against rlibs
+# that carry no metadata.
+// lib.optionalAttrs (pkgs ? rust-bin) (
+  let
+    tc = pkgs.rust-bin.nightly.latest.minimal;
+    toolchain = {
+      cargo = tc;
+      rustc = tc;
+    };
+    ws = mk "walking-skeleton" { inherit toolchain; };
+    dir = mk "directives" {
+      inherit toolchain;
+      extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+    };
+    goldens =
+      fixture: w:
+      lib.genAttrs [ "build" "test" ] (
+        kind:
+        golden {
+          inherit fixture toolchain kind;
+          ws = w;
+        }
+      );
+    wsG = goldens "walking-skeleton" ws;
+    dirG = goldens "directives" dir;
+  in
+  {
+    walking-skeleton-nightly =
+      pkgs.runCommand "walking-skeleton-nightly-check"
+        {
+          bb = ws.packages.walking-skeleton;
+          t = ws.testBins."walking-skeleton/bin-test/walking-skeleton";
+          g = wsG.build;
+          gt = wsG.test;
+        }
+        ''
+          [ "$($bb/bin/walking-skeleton)" = "walking-skeleton 42 cfg-on hello-from-build-script debug" ]
+          $t/bin/walking-skeleton | grep -q 'test result: ok. 1 passed'
+          mkdir -p $out
+          cat $g/report $gt/report > $out/report
+        '';
+    directives-nightly =
+      pkgs.runCommand "directives-nightly-check"
+        {
+          app = dir.packages.app;
+          it = dir.testBins."c/test/it";
+          g = dirG.build;
+          gt = dirG.test;
+        }
+        ''
+          [ "$($app/bin/app)" = "a_sys 42 2" ]
+          $it/bin/it | grep -q 'test result: ok. 1 passed'
+          mkdir -p $out
+          cat $g/report $gt/report > $out/report
+        '';
+  }
+)

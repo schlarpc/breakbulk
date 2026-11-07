@@ -726,12 +726,12 @@ impl Resolve for Weak {
 
 /// The breadth-first search `crate_deps` was before it was memoized, as a
 /// reference.
-fn naive_crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
+fn naive_crate_deps(plan: &Plan, id: &UnitId, want: Option<&str>) -> BTreeSet<OutRef> {
     use crate::deps::{direct_crate_refs, is_proc_macro};
     let Some(Unit::Compile(c)) = plan.units.get(id) else {
         panic!("{id} is not a compile unit of the plan");
     };
-    let want = if is_linking(c) { "rlib" } else { "rmeta" };
+    let want = want.unwrap_or(if is_linking(c) { "rlib" } else { "rmeta" });
     let mut out: BTreeSet<OutRef> = BTreeSet::new();
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut queue: std::collections::VecDeque<&str> = Default::default();
@@ -767,6 +767,13 @@ fn naive_crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
         }
     }
     out
+}
+
+fn compile_unit<'a>(p: &'a Plan, id: &str) -> &'a CompileUnit {
+    match &p.units[id] {
+        Unit::Compile(c) => c,
+        Unit::Run(_) => panic!("{id} is a run"),
+    }
 }
 
 /// Every compile unit's dependency directory, built the way
@@ -817,9 +824,14 @@ pub(crate) fn check_manifests(p: &Plan) -> Result<usize, String> {
             if c.link_manifest_crates {
                 have.extend(below.crates.iter().cloned());
             }
-            let reference = naive_crate_deps(p, id);
+            let mut reference = naive_crate_deps(p, id, None);
             if graph.crate_deps(id) != reference {
                 return Err(format!("{id}: memoized crate_deps differs from the search"));
+            }
+            // A linking unit over rlibs without metadata also needs every
+            // rmeta below.
+            if c.link_manifest_crates && is_linking(compile_unit(p, id)) {
+                reference.extend(naive_crate_deps(p, id, Some("rmeta")));
             }
             let want: BTreeSet<String> = reference
                 .into_iter()
@@ -920,6 +932,29 @@ fn manifests_reach_what_crate_deps_lists() {
         ("rlib".into(), BTreeSet::from(["libbin-1.rlib".to_owned()])),
     ]);
     assert_eq!(check_manifests(&q), Ok(5));
+    // Nightly's -Zembed-metadata=no on the libraries: the bin reads the
+    // manifests and links every rmeta too.
+    let mut n = p.clone();
+    for id in ["c-leaf", "c-mid", "c-top"] {
+        let c = compile(&mut n, id);
+        c.args.push(Arg::Literal("-Z".into()));
+        c.args.push(Arg::Literal("embed-metadata=no".into()));
+    }
+    // Cargo then passes each direct dependency's rmeta as well as its rlib.
+    compile(&mut n, "c-bin").args.push(Arg::Concat(vec![
+        Piece::Literal("top=".into()),
+        Piece::Ref(Reference::Out(OutRef {
+            out: "c-top".into(),
+            output: "rmeta".into(),
+            file: Some("libtop-1.rmeta".into()),
+        })),
+    ]));
+    let RenderedUnit::Compile(bin) = render_unit(&n, &"c-bin".into(), &Weak).unwrap() else {
+        panic!()
+    };
+    assert!(bin.link_manifest_crates);
+    assert_eq!(bin.dep_manifests, ["/nix/store/c-top-rmeta"]);
+    assert_eq!(check_manifests(&n), Ok(5));
     let RenderedUnit::Compile(top) = render_unit(&p, &"c-top".into(), &Weak).unwrap() else {
         panic!()
     };
