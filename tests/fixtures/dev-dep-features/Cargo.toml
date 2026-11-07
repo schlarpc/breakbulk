@@ -1,0 +1,11 @@
+# A dev-dependency enabling a feature on a normal dependency
+# ("dev-dep-features" in docs/implementation.md). Plain `cargo build` builds
+# feat without `extra`; `cargo test` builds it with `extra`. The build
+# plan's product must lack the feature, the test plan's binaries have it.
+[workspace]
+resolver = "2"
+members = ["feat", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

@@ -314,6 +314,50 @@ in
         cp $golden/report $out/
       '';
 
+  # The build plan's product lacks the dev-dependency's feature; the test
+  # plan's binaries (bin harness, integration test, and the bin built for
+  # CARGO_BIN_EXE_app) have it.
+  dev-dep-features =
+    let
+      ws = mk "dev-dep-features" { };
+      featFlags =
+        kind:
+        lib.any (
+          u:
+          u.kind == "compile"
+          && u.crate.name == "feat"
+          && lib.elem "feature=\"extra\"" (lib.filter builtins.isString u.args)
+        ) (lib.attrValues (readPlan ws kind).units);
+    in
+    assert lib.assertMsg (!featFlags "build") "dev-dep-features: the build plan enables `extra`";
+    assert lib.assertMsg (featFlags "test") "dev-dep-features: the test plan lacks `extra`";
+    pkgs.runCommand "dev-dep-features-check"
+      {
+        app = ws.packages.app;
+        harness = ws.testBins."app/bin-test/app";
+        it = ws.testBins."app/test/it";
+        featTest = ws.testBins."feat/lib-test/feat";
+        golden = golden {
+          fixture = "dev-dep-features";
+          inherit ws;
+        };
+        goldenTest = golden {
+          fixture = "dev-dep-features";
+          inherit ws;
+          kind = "test";
+        };
+      }
+      ''
+        [ "$($app/bin/app)" = "extra=false" ]
+        $harness/bin/app | tee log
+        grep -q 'dev_dependency_feature_is_on_in_tests ... ok' log
+        $it/bin/it | tee log
+        grep -q 'test result: ok. 2 passed' log
+        $featTest/bin/feat
+        mkdir -p $out
+        cat $golden/report $goldenTest/report > $out/report
+      '';
+
   # A build script killed by a signal fails its run unit, naming the
   # signal. The run unit's BREAKBULK_UNIT is executed by hand, so the check
   # can expect the failure.

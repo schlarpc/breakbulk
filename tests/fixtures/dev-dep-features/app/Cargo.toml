@@ -1,0 +1,10 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+feat = { path = "../feat" }
+
+[dev-dependencies]
+feat = { path = "../feat", features = ["extra"] }
