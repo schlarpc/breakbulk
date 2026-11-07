@@ -263,7 +263,10 @@ fn cmake_state_is_removed_from_build_trees_only() {
     };
     // The cmake crate's tree, with the installed library beside it.
     mk("build/CMakeCache.txt", "cache");
-    mk("build/CMakeFiles/CMakeConfigureLog.yaml", "TryCompile-abcdef");
+    mk(
+        "build/CMakeFiles/CMakeConfigureLog.yaml",
+        "TryCompile-abcdef",
+    );
     mk(
         "build/CMakeFiles/CMakeScratch/TryCompile-abcdef/CMakeCache.txt",
         "",
