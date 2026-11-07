@@ -51,11 +51,12 @@ The skeleton and toolchain spec feed planning; the source map, toolchains and en
 | --- | --- |
 | `breakbulk-shim` | Rust binary: rustc wrapper and build-script stub |
 | `breakbulk-plan` | Rust binary: drives cargo and writes `plan.json` |
-| `breakbulk-instantiate` | Rust binary: templates unit derivations, as JSON for IFD or into the store for dynamic derivations |
+| `breakbulk-instantiate` | Rust binary: templates unit derivations as JSON for IFD; also the library that `breakbulk-drv` uses |
+| `breakbulk-drv` | Rust binary: the dynamic-derivation-mode outer builder; writes the same derivations into the store through `builder-rpc-v0` with harmonia |
 | `breakbulk-unit` | Rust binary: the builder of every unit |
 | `lib/` (Nix) | `mkRepository`, modules, presets, fetchers, env capture, stage helpers |
 
-All four binaries live in one Cargo workspace. `breakbulk-unit` stays small and nearly dependency-free, because it is an input of every unit and any change to it rebuilds everything. `breakbulk-shim` and `breakbulk-plan` only affect the plan derivations.
+The first four binaries live in one Cargo workspace. `breakbulk-drv` has its own workspace and lockfile (`breakbulk-drv/`), so that its dependencies (harmonia, tokio) never change the other binaries' inputs. `breakbulk-unit` stays small and nearly dependency-free, because it is an input of every unit and any change to it rebuilds everything. `breakbulk-shim` and `breakbulk-plan` only affect the plan derivations.
 
 ## Trace planner
 
@@ -294,7 +295,7 @@ A unit's recorded env is the recorded env minus a baseline: the env of the shim'
 - `toolchains.json`: the host and target specs. Tool store paths are passed as plain strings, so that literal store paths in the plan (rustc in `program`) can be matched to a tool by prefix.
 - `overrides.json`: per-package env and env-capture names, keyed `name@version` or `name`.
 
-In IFD mode, nothing with string context reaches instantiation. `units.json` names every path it needs (`{"unit": id, "output": o}`, `{"input": key}`) and the Nix side fills in the values with their context. This has two consequences: the output must contain zero store references, because `builtins.fromJSON` refuses strings with context; and a source edit or an override change does not rerun instantiation at all, only a plan change or an added or removed input does. Dynamic-derivation mode renders real paths with the same code; a test checks that both give identical text.
+In IFD mode, nothing with string context reaches instantiation. `units.json` names every path it needs (`{"unit": id, "output": o}`, `{"input": key}`) and the Nix side fills in the values with their context. This has two consequences: the output must contain zero store references, because `builtins.fromJSON` refuses strings with context; and a source edit or an override change does not rerun instantiation at all, only a plan change or an added or removed input does. Dynamic-derivation mode runs the same instantiation, then does the Nix side's substitution itself (see [Dynamic-derivation mode](#dynamic-derivation-mode)). Unit tests check that both substitutions give identical text and inputs; `nix run .#test-dynamic` checks identical `.drv` paths on Nix master.
 - The predicted root list.
 
 Instantiation therefore realises nothing except the plan and the source views. Neither the toolchain, nor crate sources, nor embedded products are built before units are known.
@@ -310,7 +311,7 @@ Instantiation therefore realises nothing except the plan and the source views. N
 | `inputs` | `Built{drv, output}` for each referenced unit output, crate source, toolchain component and env capture; `Opaque` for each source view |
 | `system` | The builder platform: the planner's system for compile units |
 
-Referenced outputs are input-addressed or fixed-output, so their paths are known and rendered literally. The one exception is a product referenced through a package override in dynamic-derivation mode: products are resolved at build time there, so the reference is a placeholder and the referencing unit is resolved at build time too.
+Referenced outputs are input-addressed or fixed-output, so their paths are known and rendered literally. The one exception is a product referenced through a package override in dynamic-derivation mode: products are resolved at build time there, so the reference is a placeholder and the referencing unit is resolved at build time too. So is every unit downstream of it, and each such reference is a placeholder as well (spike B).
 
 ### IFD mode
 
@@ -318,17 +319,32 @@ The instantiate derivation runs `breakbulk-instantiate --emit json` and writes `
 
 ### Dynamic-derivation mode
 
-The instantiate derivation is content-addressed with a text-hashed output and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. Its name is `<ws>-<triple>-<variant>`, because submitted outputs must be named `<outer name>-<root>.drv` and that name appears in product paths.
+One outer derivation per plan (`lib/dynamic.nix`) is content-addressed with text-hashed outputs and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. It is named `<ws>-<triple>-<variant>` for the build plan and `<ws>-<triple>-<variant>-test` for the test plan, because submitted outputs must be named `<outer name>-<output>` and that name appears in store paths. It has one output per predicted root, `<package>.<kind>.<target>.drv` (the root name with `/` as `.`), plus `units.drv` (below). The bench plan, when there is one, is `<ws>-<triple>-<variant>-bench`.
 
-- Units are written in topological order with harmonia's derivation hashing and store protocol over the restricted daemon socket. `nix derivation add` cannot be used: paths added during the build are not visible inside its sandbox, and it reads its inputs. Spike B confirmed `.drv` and output paths equal IFD mode's. Every output variable must be present (as an empty string) before hashing.
-- Each root gets a tiny wrapper derivation that symlinks the root unit's output, written as `<outer name>-<root>.drv` and handed back with `nix store submit-output`. Units downstream of an embedded product are deferred and refer to it by placeholder.
+Its builder is `breakbulk-drv`, a separate binary with its own Cargo workspace and lockfile (`breakbulk-drv/`), so that harmonia and tokio reach neither the main `Cargo.lock`, from which every breakbulk binary is built (a harmonia update must not change `breakbulk-unit` and so every unit), nor `breakbulk-instantiate`, which IFD mode builds before evaluation can continue. It uses `breakbulk-instantiate` as a library:
+
+1. It runs the same instantiation as IFD mode over the same `sources.json`, `toolchains.json`, `overrides.json` and `roots.json`, giving the same `units.json` structure in memory.
+2. It substitutes every reference as `lib/instantiate.nix` does, from `values.json`: every input key's value without context, plus its string context as `builtins.getContext` gives it. From those contexts and the unit references it computes each derivation's input derivations and input sources exactly as `derivation` would (a plain path becomes an input source, an output an input derivation; `drvPath` strings with "all outputs" context are rejected). `BREAKBULK_UNIT` moves to `passAsFile` above the same length as in IFD mode.
+3. It writes units, root stubs and wrappers in topological order with harmonia (pinned git commit) over the restricted daemon socket in `$NIX_REMOTE`, one connection for the whole build: output paths from harmonia's `hashDerivationModulo` (input `.drv` files it wrote are kept in memory, because the builder cannot read back what it added; the others are read from the store), the ATerm added as a text-hashed object whose references are its input sources and input derivations. `nix derivation add` cannot be used: paths added during the build are not visible inside its sandbox, and it reads its inputs. Every output variable must be present (as an empty string) before hashing. A derivation with a content-addressed or deferred input stays deferred, and its dependents reference its outputs by placeholder.
+4. Each root gets a wrapper derivation named `<outer name>-<package>.<kind>.<target>`, submitted with `SubmitOutput` as that root's output. Its output is a directory: `root`, a symlink to the root unit's output (or to the root stub's), and `breakbulk-root.json`, which says whether the plan has the root (or why not) and, for a test binary, what its test run needs from the plan (runtime `CARGO_*` env, the `flags` of its `rustc-env` runs, and the `flags` and `out` of every run of its platform for the dynamic-library path), with real paths that are all inputs of the wrapper.
+
+The outer derivation's inputs are the plan, `breakbulk-drv`, the files above, and every `.drv` that a value's context names, as a plain path: the builder needs those `.drv` files to hash the units, but nothing is built before it runs except the plan. It prints one `breakbulk-drv: wrote <unit> <.drv path>` line per derivation; the dynamic-mode test compares them with IFD mode's.
+
+On the evaluation side, each root is a small derivation that symlinks `builtins.outputOf <outer>."<output>".outPath "out"` + `/root`, and carries `breakbulkRoot` as in IFD mode, with `dynamic = true`, `unit = "<dynamic>"` and `wrapper` (the wrapper's output placeholder). Downstream code that needs only the root's output works unchanged.
+
+What is not known at evaluation time in this mode, and what that changes:
+
+- **Unit derivations** (`ws.units`) are not available; reading them is an error. `explainSharing` needs IFD mode. Instead, the outer derivation has one more output, `units.drv`, a derivation that depends on every output of every unit of the plan (`ws.allUnits.<kind>`). Check and clippy variants, which have no roots, build their plans through it.
+- **Roots Cargo did not build** (required features) cannot be told apart from built ones at evaluation time. Their wrappers depend on the root stub, so building such a product root fails with the reason, and so does a product containing it; in IFD mode the product leaves it out. A test-run stub succeeds and logs that it was skipped, as in IFD mode.
+- **Test runs** read what they need from the wrapper's `breakbulk-root.json` at build time (`dynamic.mkTestRuns`), with the same environment, working directory, runner and arguments as IFD mode.
+- **Doctests and test apps** are not available yet: the doctest derivations are templated from the plan and would have to be written by the outer derivation with the test configuration passed in, and test apps need the plan at evaluation time.
 
 The spike result is in [spikes/B-delivery.md](spikes/B-delivery.md).
 - `recursive-nix` is not used. It has an open removal proposal, and `builder-rpc-v0` replaces it for this purpose.
 
 ### Mode selection
 
-`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`). Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it. `mode = "ifd"` and `mode = "dynamic"` override the choice. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
+`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`). Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it. `mode = "ifd"` and `mode = "dynamic"` override the choice; `mode = "dynamic"` on an evaluator without `builtins.outputOf` is an evaluation error. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`. The daemon needs `dynamic-derivations` too: a daemon without it refuses to store the outer derivation ("text-hashed derivation output") even when the evaluator has it. mkRepository resolves the mode once and passes it to each workspace instance as `delivery`.
 
 Unit derivations are identical in both modes. Products are not (resolved at build time in dynamic-derivation mode, input-addressed in IFD mode), so teams that mix Nix versions should pin the mode to share product cache entries.
 
@@ -652,7 +668,7 @@ Every product starts at a fixed stage named `linked` and passes through an order
 
 ### The `linked` stage
 
-`linked` is a small derivation that symlinks the root unit's output. In IFD mode it depends on the root unit like any derivation. In dynamic-derivation mode it depends on `builtins.outputOf <instantiate drv>."<root>.drv" "out"`, so Nix resolves it at build time. Either way, later stages get an ordinary derivation to depend on.
+`linked` is a small derivation that symlinks the root unit's output. In IFD mode it depends on the root unit like any derivation. In dynamic-derivation mode it depends on the root derivation of `lib/dynamic.nix`, which depends on `builtins.outputOf <outer drv>."<root>.drv" "out"` (the wrapper), so Nix resolves both at build time; the path goes through three symlinks (root, wrapper's `root`, unit output), which is harmless. Either way, later stages get an ordinary derivation to depend on.
 
 ### Stage ordering
 
@@ -724,7 +740,7 @@ Trace golden tests and directive differential tests guard against Cargo changes;
 2. **Trace golden tests.** For each fixture, run real `cargo build -vv` and the traced planner on the same skeleton, render the plan back to concrete argv and env with the same scratch layout, and diff per unit after normalizing paths. Both sides run at the same verbosity, because verbosity changes argv (`--cap-lints`) and only `-vv` prints per-process env. The comparison also diffs target-directory file listings, which differ only in debuginfo side files. A negative control (one splice per kind, no search-path ordering) must produce diffs, so the comparison is not vacuous. Fixtures are copied outside `$HOME` before each run, because Cargo reads `.cargo/config.toml` from every ancestor directory. This runs against the oldest release in the supported window (about six months of stable), the latest stable and the latest nightly. The spike A driver (`spikes/trace-fidelity/`) is the first version.
 3. **Directive differential tests.** Generate dependency graphs and build-script outputs (several values per kind, duplicates, paths inside and outside the build directory, mixed order). Let stubs replay them so Cargo applies them, and separately expand the sentinel plan with `breakbulk-unit`'s splicing. The two argv and env sets must be identical. The same harness checks that sentinels do not change any unit's `-C metadata`.
 4. **Root prediction tests.** Compare the Nix prediction with `cargo metadata` targets over a corpus of real workspaces. The target sets must be identical, with `required-features` as the only allowed difference in what is built.
-5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical.
+5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical. `nix run .#test-dynamic` (`tests/dynamic/run.sh`) does this on Nix master in a private chroot store: the system Nix builds each fixture in IFD mode, everything upstream of the units is copied into the private store, and Nix master builds the fixture in dynamic-derivation mode (so the outer derivations write and build every unit) and then in IFD mode, and compares every unit `.drv` path of both plans, the product bytes and the test runs. It is opt-in, because `nix flake check` on a released Nix cannot run it.
 6. **Invalidation tests.** Instantiate a fixture, apply a scripted edit, instantiate again, and compare the sets of unit `.drv` paths. Each test states which units may change. For example: changing a build stamp on the top package changes only that package's units.
 7. **Sharing tests.** For fixtures with several workspaces or variants, assert the exact set of shared unit derivations, using the same comparison as `explainSharing`.
 

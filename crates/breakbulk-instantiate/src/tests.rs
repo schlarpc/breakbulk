@@ -748,3 +748,5 @@ fn escaping_matches_nix_to_json() {
     let nix = "\"a\\\"b\\\\c\\n\\t\\r\\u0001\\b\\f\\u001f\u{7f}\u{2028}é€😀/\"";
     assert_eq!(serde_json::to_string(s).unwrap(), nix);
 }
+
+mod dynamic;

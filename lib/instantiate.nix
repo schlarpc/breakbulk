@@ -238,6 +238,19 @@ rec {
     in
     {
       inherit units unitsJson;
+      # For dynamic-derivation mode (lib/dynamic.nix), which runs the same
+      # instantiation inside its outer derivation: the files given to
+      # breakbulk-instantiate, and every input key's value with its context.
+      # Neither forces units.json.
+      files = {
+        inherit
+          sourcesFile
+          toolchainsFile
+          overridesFile
+          rootsFile
+          ;
+      };
+      inherit inputs;
       roots = rootsOut;
       # Test plans: package name to the attributes of its doctest derivation
       # (`breakbulk-unit doctest`), for lib/test-runs.nix to add the test

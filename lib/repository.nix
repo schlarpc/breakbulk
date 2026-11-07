@@ -55,6 +55,7 @@
   mkFetch,
   mkTools,
   mkWorkspace,
+  dynamic,
   products,
   variantsLib,
 }:
@@ -481,6 +482,7 @@ let
       packageOverrides = instOverrides entries triple;
       inherit (cfg) strictSources;
       name = "${wsName}-${triple}-${vName}";
+      inherit delivery;
       shippedRemapScope = shippedRemapScopeOf triple v;
       packages = testConfigs wsName;
       inherit (cfg) ca;
@@ -675,7 +677,14 @@ let
               check = variantsLib.unitsCheck {
                 inherit pkgs;
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
-                units = lib.attrValues inst.units.build ++ lib.attrValues inst.units.test;
+                units =
+                  if inst.delivery == "dynamic" then
+                    [
+                      inst.allUnits.build
+                      inst.allUnits.test
+                    ]
+                  else
+                    lib.attrValues inst.units.build ++ lib.attrValues inst.units.test;
               };
             }
           ) vs;
@@ -771,13 +780,10 @@ let
 
   warnings = cfg.warnings ++ unmatchedWarnings;
   warned = x: lib.foldr (w: acc: lib.warn w acc) x warnings;
-  checkedMode =
-    x:
-    if cfg.mode == "dynamic" then
-      throw "breakbulk: mode = \"dynamic\" is not implemented yet (M5); use \"ifd\" or \"auto\""
-    else
-      x;
-  guard = x: checkedMode (warned x);
+  # `mode = "auto"`: dynamic-derivation mode when the evaluator has
+  # `builtins.outputOf` and is Nix 2.36 or later (lib/dynamic.nix).
+  delivery = dynamic.resolveMode cfg.mode;
+  guard = warned;
 
   # --- explainSharing --------------------------------------------------------
   #

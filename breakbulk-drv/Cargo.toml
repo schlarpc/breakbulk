@@ -1,0 +1,31 @@
+# The store-writing half of dynamic-derivation mode: the builder of the
+# outer derivation. Its own workspace (and lockfile), so that harmonia and
+# tokio stay out of the main workspace's Cargo.lock, which every breakbulk
+# binary is built from, breakbulk-unit included (lib/tools.nix): a harmonia
+# update must not change breakbulk-unit and so every unit. It also keeps
+# them out of breakbulk-instantiate, which IFD mode builds before Nix can
+# import units.json.
+[package]
+name = "breakbulk-drv"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.95"
+publish = false
+
+[workspace]
+
+[dependencies]
+breakbulk-instantiate = { path = "../crates/breakbulk-instantiate" }
+breakbulk-format = { path = "../crates/breakbulk-format" }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util"] }
+# harmonia is pre-release (0.0.0-alpha.0); pinned to the commit spike B
+# tested (decision 25).
+harmonia-store-aterm = { git = "https://github.com/nix-community/harmonia", rev = "637dd7e14bf837f8408d0994059f4a7477232cca" }
+harmonia-store-derivation = { git = "https://github.com/nix-community/harmonia", rev = "637dd7e14bf837f8408d0994059f4a7477232cca" }
+harmonia-store-path = { git = "https://github.com/nix-community/harmonia", rev = "637dd7e14bf837f8408d0994059f4a7477232cca" }
+harmonia-store-content-address = { git = "https://github.com/nix-community/harmonia", rev = "637dd7e14bf837f8408d0994059f4a7477232cca" }
+harmonia-protocol = { git = "https://github.com/nix-community/harmonia", rev = "637dd7e14bf837f8408d0994059f4a7477232cca" }
+harmonia-store-remote = { git = "https://github.com/nix-community/harmonia", rev = "637dd7e14bf837f8408d0994059f4a7477232cca" }
