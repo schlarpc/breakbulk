@@ -22,11 +22,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use breakbulk_format::{CompileUnit, Plan, Reference, Resolve, Unit, UnitId, render_unit};
+use breakbulk_format::{
+    CompileUnit, Plan, Reference, Resolve, Unit, UnitId, render_doctest, render_unit,
+};
 use breakbulk_unit::directives::{BuildOutput, MetadataFile, ParseContext, parse};
+use breakbulk_unit::doctest;
 use breakbulk_unit::run::run_env;
 use breakbulk_unit::spec::RenderedUnit;
-use breakbulk_unit::splice::{DYLIB_PATH_VAR, expand_args, expand_dylib_path, expand_env};
+use breakbulk_unit::splice::{
+    DYLIB_PATH_VAR, expand_args, expand_dylib_path, expand_env, prepend_dylib_path,
+};
 
 use crate::graph::OVERRIDDEN_OUT_DIR;
 use crate::records::Metadata;
@@ -141,10 +146,11 @@ pub struct RealCompile {
 
 /// The rustc commands of a `cargo … -v` log, keyed `c-<-C metadata>`.
 ///
-/// `-L dependency=<dir>` is dropped when `<dir>` is a `deps` directory or
-/// some compile's `--out-dir` (in the new layout, a dependency's own
-/// directory): breakbulk passes its own instead. A build script's
-/// `rustc-link-search=dependency=…` is kept.
+/// `-L dependency=<dir>` is dropped when `<dir>` is a `deps` directory, some
+/// compile's `--out-dir`, or another unit directory of the new layout
+/// (`…/build/<pkg>/<hash>/out`): breakbulk passes its own instead. A build
+/// script's `rustc-link-search=dependency=…` is kept, unless it names an
+/// `OUT_DIR` itself.
 pub fn real_compiles(log: &str) -> BTreeMap<UnitId, RealCompile> {
     let mut out = BTreeMap::new();
     let compiles: Vec<RealProcess> = real_processes(log)
@@ -177,9 +183,11 @@ pub fn real_compiles(log: &str) -> BTreeMap<UnitId, RealCompile> {
                     i += 2;
                     continue;
                 }
-                "-L" if next
-                    .strip_prefix("dependency=")
-                    .is_some_and(|d| d.ends_with("/deps") || out_dirs.contains(d)) =>
+                "-L" if next.strip_prefix("dependency=").is_some_and(|d| {
+                    d.ends_with("/deps")
+                        || out_dirs.contains(d)
+                        || (d.ends_with("/out") && d.contains("/build/"))
+                }) =>
                 {
                     i += 2;
                     continue;
@@ -312,13 +320,18 @@ pub struct CompareOptions {
     /// splices expanded) and every build-script run's (with `DEP_*`
     /// metadata and dynamic-path splices). Needs a `-vv` log.
     pub env: bool,
+    /// The negative control ("Testing and conformance", item 2): expand with
+    /// a deliberately naive rule, every search path treated as inside its
+    /// run's `OUT_DIR` (no ordering by class), so a comparison that finds no
+    /// difference on inputs that exercise the rule is vacuous.
+    pub negative_control: bool,
 }
 
 /// Compare `plan` with the real build whose `-v` stderr is `log`, whose
 /// target directory is `target`, whose sources sit at the plan's
 /// `skeletonRoot`, and whose `cargo metadata` is `metadata`.
 pub fn compare(plan: &Plan, log: &str, target: &Path, metadata: &Metadata) -> Report {
-    compare_with(plan, log, target, metadata, CompareOptions::default())
+    compare_with(plan, log, target, metadata, CompareOptions::default(), None)
 }
 
 /// The env comparison's normal form, applied to both sides. What it removes
@@ -393,6 +406,7 @@ pub fn compare_with(
     target: &Path,
     metadata: &Metadata,
     opts: CompareOptions,
+    doc_log: Option<&str>,
 ) -> Report {
     let mut report = Report::default();
     let real = real_compiles(log);
@@ -475,6 +489,13 @@ pub fn compare_with(
                 outputs.insert((*id).clone(), o);
             }
             Err(e) => report.problems.push(format!("{id}: {}", e.0)),
+        }
+    }
+    if opts.negative_control {
+        for o in outputs.values_mut() {
+            for p in &mut o.library_paths {
+                p.in_out_dir = true;
+            }
         }
     }
     let run_dirs: Vec<&str> = resolver.run_dirs.values().map(String::as_str).collect();
@@ -584,7 +605,137 @@ pub fn compare_with(
             }
         }
     }
+
+    if let Some(doc_log) = doc_log {
+        compare_doctests(
+            plan,
+            doc_log,
+            target,
+            opts,
+            &resolver,
+            &outputs,
+            &run_dirs,
+            &mut report,
+        );
+    }
     report
+}
+
+/// The doctest half of [`compare_with`]: each traced `rustdoc --test` against
+/// the one a real `cargo test --doc -vv` ran (`doc_log`), keyed by
+/// `CARGO_PKG_NAME`. The `-L` list of every run's search paths is rebuilt
+/// with `breakbulk-unit`'s own [`doctest::search_paths`] and the env with its
+/// dynamic-library path rule.
+#[allow(clippy::too_many_arguments)]
+fn compare_doctests(
+    plan: &Plan,
+    doc_log: &str,
+    target: &Path,
+    opts: CompareOptions,
+    resolver: &Real<'_>,
+    outputs: &BTreeMap<String, BuildOutput>,
+    run_dirs: &[&str],
+    report: &mut Report,
+) {
+    let mut real: BTreeMap<String, RealProcess> = BTreeMap::new();
+    for p in real_processes(doc_log) {
+        if !p.program.ends_with("rustdoc") || !p.args.iter().any(|a| a == "--test") {
+            continue;
+        }
+        let Some(name) = p.env.get("CARGO_PKG_NAME") else {
+            report
+                .problems
+                .push("the doctest log has no env (not -vv?)".to_owned());
+            return;
+        };
+        real.insert(format!("d-{name}"), p);
+    }
+    let planned: BTreeSet<&String> = plan.doctests.keys().collect();
+    let real_ids: BTreeSet<&String> = real.keys().collect();
+    for id in planned.difference(&real_ids) {
+        report.problems.push(format!(
+            "{id}: in the plan, not in the real `cargo test --doc`"
+        ));
+    }
+    for id in real_ids.difference(&planned) {
+        report.problems.push(format!(
+            "{id}: in the real `cargo test --doc`, not in the plan"
+        ));
+    }
+    let lookup = |f: &str| outputs.get(f);
+    for id in planned.intersection(&real_ids) {
+        let d = match render_doctest(plan, id, resolver) {
+            Ok(d) => d,
+            Err(e) => {
+                report.problems.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
+        let (before, after) = d.compile.args.split_at(d.search_paths_at);
+        let got = (|| -> Result<Vec<String>, String> {
+            let mut a = expand_args(before, lookup).map_err(|e| e.0)?;
+            for p in doctest::search_paths(&d.search_paths_of, &d.search_paths_literals, lookup)
+                .map_err(|e| e.0)?
+            {
+                a.extend(["-L".to_owned(), p]);
+            }
+            a.extend(expand_args(after, lookup).map_err(|e| e.0)?);
+            Ok(a)
+        })();
+        let got = match got {
+            Ok(a) => a,
+            Err(e) => {
+                report.problems.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
+        report.compared += 1;
+        // Cargo's own `-L dependency=` directories: breakbulk passes its own.
+        let r = &real[*id];
+        let mut want = Vec::new();
+        let mut i = 0;
+        while i < r.args.len() {
+            if r.args[i] == "-L"
+                && r.args
+                    .get(i + 1)
+                    .and_then(|v| v.strip_prefix("dependency="))
+                    .is_some_and(|v| v.ends_with("/deps"))
+            {
+                i += 2;
+                continue;
+            }
+            want.push(r.args[i].clone());
+            i += 1;
+        }
+        if got != want {
+            report.problems.push(format!(
+                "{id}: argv differs\n    real:   {}\n    traced: {}",
+                want.join(" "),
+                got.join(" ")
+            ));
+        }
+        if opts.env {
+            let env =
+                expand_env(&d.compile.env, &d.compile.env_splices, lookup).and_then(|mut e| {
+                    prepend_dylib_path(&mut e, &d.compile.dylib_path_from, lookup)?;
+                    Ok(e)
+                });
+            match env {
+                Ok(e) => {
+                    let diff = env_diff(
+                        &normal_env(&r.env, target, run_dirs),
+                        &normal_env(&e, target, run_dirs),
+                    );
+                    if !diff.is_empty() {
+                        report
+                            .problems
+                            .push(format!("{id}: env differs\n{}", diff.join("\n")));
+                    }
+                }
+                Err(e) => report.problems.push(format!("{id}: {}", e.0)),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

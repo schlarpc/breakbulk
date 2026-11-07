@@ -11,13 +11,18 @@
 #
 #   1. breakbulk-plan traces the build plan and the test plan, its stubs
 #      printing sentinels where the real scripts print values;
-#   2. real `cargo build -vv` and `cargo test --no-run -vv` build the same
-#      sources at the same location (/build/skeleton), running the real
-#      build scripts;
+#   2. real `cargo build -vv`, `cargo test --no-run -vv` and
+#      `cargo test --doc -vv` build the same sources at the same location
+#      (/build/skeleton), running the real build scripts;
 #   3. breakbulk-plan-golden --env renders each plan into the real build's
 #      layout, expands every splice with breakbulk-unit's own code (argv,
-#      rustc-env, DEP_* metadata, dynamic-library paths) from the real
-#      scripts' output, and compares argv and env unit by unit.
+#      rustc-env, DEP_* metadata, dynamic-library paths, the doctests' -L
+#      list) from the real scripts' output, and compares argv and env unit
+#      by unit, doctests included.
+#
+# The negative control expands with search paths not ordered by class; the
+# aggregate check requires it to find differences in at least half of the
+# seeds, so the comparison is not vacuous.
 #
 # Units are matched by `-C metadata` (compiles) and by OUT_DIR hash (runs),
 # so equal unit sets also show that sentinels change no unit's identity.
@@ -85,14 +90,30 @@ let
           > $out/build.stdout 2> $out/build.log || { cat $out/build.log; exit 1; }
         cargo test --no-run "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-test\"" \
           > $out/test.stdout 2> $out/test.log || { cat $out/test.log; exit 1; }
+        # Doctests, over the test build: compiles and runs every
+        # `rustdoc --test` (the test plan traced them without running).
+        cargo test --doc "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-test\"" \
+          > $out/doc.stdout 2> $out/doc.log || { cat $out/doc.stdout $out/doc.log; exit 1; }
+        docs_build=()
+        docs_test=(--doc-log $out/doc.log)
 
         ok=1
         for kind in build test; do
-          ${tools.breakbulk-plan}/bin/breakbulk-plan-golden --env \
+          docs=docs_$kind[@]
+          ${tools.breakbulk-plan}/bin/breakbulk-plan-golden --env "''${!docs}" \
             --plan $out/plan-$kind.json --log $out/$kind.log \
             --target-dir $TMPDIR/t-$kind --metadata $TMPDIR/metadata.json \
             > $out/report-$kind || ok=0
           echo "seed ${toString seed} $kind: $(head -1 $out/report-$kind)"
+          # The negative control: with search paths not ordered by class,
+          # the comparison must find differences (when the seed has both
+          # classes); counted by the aggregate check.
+          if ! ${tools.breakbulk-plan}/bin/breakbulk-plan-golden --env --negative-control "''${!docs}" \
+            --plan $out/plan-$kind.json --log $out/$kind.log \
+            --target-dir $TMPDIR/t-$kind --metadata $TMPDIR/metadata.json \
+            > $out/negative-$kind; then
+            echo "$kind" >> $out/negative-detected
+          fi
         done
         if [ $ok = 0 ]; then
           cat $out/summary $out/report-build $out/report-test
@@ -107,10 +128,16 @@ in
   inherit seeds one;
   differential = pkgs.runCommand "differential-check" { reports = lib.attrValues seeds; } ''
     mkdir -p $out
+    n=0; detected=0
     for r in $reports; do
       cat $r/summary >> $out/summary
       head -1 $r/report-build $r/report-test >> $out/reports
+      n=$((n + 1))
+      if [ -e $r/negative-detected ]; then detected=$((detected + 1)); fi
     done
     cat $out/reports
+    echo "negative control: differences found in $detected of $n seeds" | tee $out/negative
+    # Not vacuous: most seeds print search paths of both classes.
+    [ $((detected * 2)) -ge $n ]
   '';
 }

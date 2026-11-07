@@ -194,6 +194,38 @@ fn file_name(p: &str) -> &str {
 }
 
 /// `cargo metadata`'s description of a package's targets, for run units.
+/// The `-L` pairs of a traced `rustdoc --test` that hold Cargo's
+/// `native_dirs`: the contiguous block of `-L <path>` pairs (not
+/// `-L dependency=`) around the search sentinels, as (index of the first
+/// pair's `-L`, index of the last pair's `-L`). `None` without sentinels:
+/// then every `-L` is a literal Cargo already sorted.
+fn doctest_native_block(args: &[String]) -> Option<(usize, usize)> {
+    let is_l = |i: usize| {
+        args.get(i).is_some_and(|a| a == "-L")
+            && args
+                .get(i + 1)
+                .is_some_and(|n| !n.starts_with("dependency="))
+    };
+    let sentinel = |i: usize| {
+        is_l(i)
+            && matches!(
+                parse_pair("-L", &args[i + 1]),
+                Some(Ok(ArgSentinel::SearchIn(..) | ArgSentinel::SearchOther(_)))
+            )
+    };
+    let first = (0..args.len()).find(|&i| sentinel(i))?;
+    let last = (0..args.len()).rev().find(|&i| sentinel(i))?;
+    let mut from = first;
+    while from >= 2 && is_l(from - 2) {
+        from -= 2;
+    }
+    let mut to = last;
+    while is_l(to + 2) {
+        to += 2;
+    }
+    Some((from, to))
+}
+
 fn package_targets(p: &Package) -> Vec<PackageTarget> {
     let mut v: Vec<PackageTarget> = p
         .targets
@@ -602,7 +634,17 @@ impl<'a> Builder<'a> {
         platform: Option<Platform>,
     ) -> Result<Vec<Arg>, Error> {
         let mut out: Vec<Arg> = Vec::new();
-        let mut search_paths: Option<(usize, Vec<UnitId>)> = None;
+        let mut search_paths: Option<(usize, Vec<UnitId>, Vec<String>)> = None;
+        // In a doctest, Cargo passes one `-L` per entry of `native_dirs`, a
+        // sorted set of every run's search paths and every `links`
+        // override's: the block of `-L` pairs around the sentinels. Its
+        // literals (the overrides') join the searchPathsOf splice, to be
+        // sorted with the runs' values at build time.
+        let native_block = if platform.is_none() {
+            doctest_native_block(args)
+        } else {
+            None
+        };
         // Link-arg splices: the run, and the index in `out` of its splice.
         let mut link_arg_at: BTreeMap<String, usize> = BTreeMap::new();
         let mut last_was_link_arg_of: Option<String> = None;
@@ -655,11 +697,12 @@ impl<'a> Builder<'a> {
                 if platform.is_none()
                     && matches!(s, ArgSentinel::SearchIn(..) | ArgSentinel::SearchOther(_))
                 {
-                    let (_, runs) = search_paths.get_or_insert_with(|| {
+                    let (_, runs, _) = search_paths.get_or_insert_with(|| {
                         out.push(Arg::SearchPaths(SearchPathsSplice {
                             search_paths_of: Vec::new(),
+                            literals: Vec::new(),
                         }));
-                        (out.len() - 1, Vec::new())
+                        (out.len() - 1, Vec::new(), Vec::new())
                     });
                     runs.push(run);
                     last_was_link_arg_of = None;
@@ -719,6 +762,31 @@ impl<'a> Builder<'a> {
                 continue;
             }
             last_was_link_arg_of = None;
+            if let (Some((from, to)), Some(n)) = (native_block, next)
+                && a == "-L"
+                && (from..=to).contains(&i)
+            {
+                let t = self
+                    .rw
+                    .text(n, Some(owner))
+                    .map_err(|e| Error(format!("unit {id}: argument `-L {n}`: {}", e.0)))?;
+                let Text::Literal(l) = t else {
+                    bail!(
+                        "unit {id}: `-L {n}` from a `links` override names a path breakbulk \
+                         rewrites; doctests do not support that yet"
+                    );
+                };
+                let (_, _, lits) = search_paths.get_or_insert_with(|| {
+                    out.push(Arg::SearchPaths(SearchPathsSplice {
+                        search_paths_of: Vec::new(),
+                        literals: Vec::new(),
+                    }));
+                    (out.len() - 1, Vec::new(), Vec::new())
+                });
+                lits.push(l);
+                i += 2;
+                continue;
+            }
             if contains_sentinel(a) {
                 return Err(self.shape_error(id, "unknown", &format!("`{a}`"), args));
             }
@@ -732,11 +800,14 @@ impl<'a> Builder<'a> {
         if args.iter().any(|a| a.contains("=/cargo/build-dir")) {
             bail!("unit {id}: Cargo's trim-paths is in effect; breakbulk does not support it yet");
         }
-        if let Some((at, mut runs)) = search_paths {
+        if let Some((at, mut runs, mut literals)) = search_paths {
             runs.sort();
             runs.dedup();
+            literals.sort();
+            literals.dedup();
             out[at] = Arg::SearchPaths(SearchPathsSplice {
                 search_paths_of: runs,
+                literals,
             });
         }
         Ok(out)

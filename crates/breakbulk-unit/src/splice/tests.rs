@@ -375,12 +375,13 @@ fn dylib_paths_append_like_add_plugin_deps() {
         "/out-a/lib:/out-up/lib:/out-a/lib:/out-b"
     );
 
-    // Doctests: first occurrences, before the recorded value.
+    // Doctests: sorted by the printed value (`/out-b` before `native=…`),
+    // duplicate values once, before the recorded value.
     let mut env = recorded();
     prepend_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
     assert_eq!(
         env[DYLIB_PATH_VAR],
-        "/out-a/lib:/out-up/lib:/out-b:/sysroot/lib"
+        "/out-b:/out-a/lib:/out-up/lib:/sysroot/lib"
     );
 
     // No runs: untouched.

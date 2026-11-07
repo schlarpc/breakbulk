@@ -257,10 +257,9 @@ fn shipped_remap_scope() {
             .map(|(id, d)| {
                 let u: serde_json::Value =
                     serde_json::from_str(&attr(d, "BREAKBULK_UNIT")).unwrap();
-                let direct = unit_env_value(
-                    &render_unit(&inputs.plan, id, &RealPaths(inputs)).unwrap(),
-                )
-                .unwrap();
+                let direct =
+                    unit_env_value(&render_unit(&inputs.plan, id, &RealPaths(inputs)).unwrap())
+                        .unwrap();
                 assert_eq!(attr(d, "BREAKBULK_UNIT"), direct, "unit {id}");
                 let scope = u["remapScope"].as_str().map(str::to_owned);
                 (id.clone(), scope)

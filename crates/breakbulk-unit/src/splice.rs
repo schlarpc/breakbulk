@@ -241,10 +241,13 @@ pub fn expand_dylib_path<'a>(
     Ok(())
 }
 
-/// Expand the dynamic-path splices of a `rustdoc --test` into `env`: the
-/// runs' paths ([`dylib_paths`]), first occurrences only, go before the
-/// variable's recorded value. Cargo's `fill_env` for rustdoc puts the
-/// native directories of every run before its other entries.
+/// Expand the dynamic-path splices of a `rustdoc --test` into `env`, as
+/// Cargo's `fill_env` does for rustdoc (`src/compiler/compilation.rs`, Cargo
+/// 0.100.0 at 5f94df4): it filters `native_dirs`, a `BTreeSet<PathBuf>` of
+/// every run's search paths as printed, so the paths come sorted by the
+/// printed value (path components, `native=` prefix included) and without
+/// duplicate values, then lose their prefix, and go before the variable's
+/// recorded value.
 pub fn prepend_dylib_path<'a>(
     env: &mut BTreeMap<String, String>,
     runs: &[String],
@@ -253,12 +256,21 @@ pub fn prepend_dylib_path<'a>(
     if runs.is_empty() {
         return Ok(());
     }
-    let mut paths: Vec<String> = Vec::new();
-    for p in dylib_paths(runs, directives)? {
-        if !paths.contains(&p) {
-            paths.push(p);
+    let mut set: BTreeMap<std::path::PathBuf, &str> = BTreeMap::new();
+    for r in runs {
+        let d = directives(r).ok_or_else(|| {
+            SpliceError(format!(
+                "no directives for the dynamic-path splice from {r}"
+            ))
+        })?;
+        for p in d.library_paths.iter().filter(|p| p.for_dylib_path()) {
+            set.insert(p.value.clone().into(), &p.value);
         }
     }
+    let mut paths: Vec<String> = set
+        .into_values()
+        .map(|v| search_path_without_kind(v).to_owned())
+        .collect();
     if let Some(old) = env.get(DYLIB_PATH_VAR).filter(|v| !v.is_empty()) {
         paths.push(old.clone());
     }

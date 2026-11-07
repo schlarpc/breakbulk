@@ -1079,6 +1079,7 @@ fn doctests_validate_like_compiles() {
             Arg::Literal("--test".into()),
             Arg::SearchPaths(SearchPathsSplice {
                 search_paths_of: vec!["r-ring".into()],
+                literals: vec!["/ovr/lib".into()],
             }),
             Arg::Splice(Splice::new("r-ring".into(), SpliceKind::RustcCfg)),
         ],
@@ -1096,18 +1097,24 @@ fn doctests_validate_like_compiles() {
 
     d.args.push(Arg::SearchPaths(SearchPathsSplice {
         search_paths_of: vec!["c-cfgif".into()],
+        literals: vec!["native=/build/lib".into()],
     }));
     d.args
         .push(Arg::Literal("--test-run-directory=/build/x".into()));
     p.doctests.insert("d-ring".into(), d);
     assert_error(&p, "searchPathsOf names c-cfgif, which is not a run unit");
     assert_error(&p, "forbidden path `/build`");
+    assert_error(
+        &p,
+        "searchPathsOf literal contains the forbidden path `/build`",
+    );
 
     let mut p = example();
     compile(&mut p, "c-ring")
         .args
         .push(Arg::SearchPaths(SearchPathsSplice {
             search_paths_of: vec!["r-ring".into()],
+            literals: vec![],
         }));
     assert_error(&p, "a searchPathsOf splice outside a doctest");
 }

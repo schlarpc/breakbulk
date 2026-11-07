@@ -146,6 +146,25 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
                         );
                     }
                 }
+                // Invariant 3 for its literals (`as_compile` drops them).
+                for l in &s.literals {
+                    for p in &forbidden {
+                        if contains_path(l, p) {
+                            err(
+                                Some(id),
+                                format!(
+                                    "searchPathsOf literal contains the forbidden path `{p}`: `{l}`"
+                                ),
+                            );
+                        }
+                    }
+                    if contains_sentinel(l) {
+                        err(
+                            Some(id),
+                            format!("searchPathsOf literal contains a sentinel token: `{l}`"),
+                        );
+                    }
+                }
             }
         }
     }

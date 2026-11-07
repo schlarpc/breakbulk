@@ -4,11 +4,15 @@
 //!
 //! ```text
 //! breakbulk-plan-golden --plan plan.json --log build.log \
-//!   --target-dir DIR --metadata metadata.json [--env]
+//!   --target-dir DIR --metadata metadata.json [--doc-log doc.log] \
+//!   [--env] [--negative-control]
 //! ```
 //!
 //! With `--env` (and a `-vv` log), env is compared too: every compile's and
-//! every build-script run's.
+//! every build-script run's. `--negative-control` expands with a naive rule
+//! (no search-path ordering) and should exit non-zero on inputs that
+//! exercise it. `--doc-log` (a `cargo test --doc -v` log, with a test plan)
+//! also compares every traced `rustdoc --test`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -20,10 +24,15 @@ use breakbulk_plan::records::Metadata;
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let (mut plan, mut log, mut target, mut metadata) = (None, None, None, None);
+    let mut doc_log = None;
     let mut opts = CompareOptions::default();
     while let Some(a) = args.next() {
         if a == "--env" {
             opts.env = true;
+            continue;
+        }
+        if a == "--negative-control" {
+            opts.negative_control = true;
             continue;
         }
         let v = args.next();
@@ -32,13 +41,14 @@ fn main() -> ExitCode {
             "--log" => log = v,
             "--target-dir" => target = v,
             "--metadata" => metadata = v,
+            "--doc-log" => doc_log = v,
             _ => v.map_or((), |_| ()),
         }
     }
     let (Some(plan), Some(log), Some(target), Some(metadata)) = (plan, log, target, metadata)
     else {
         eprintln!(
-            "usage: breakbulk-plan-golden --plan FILE --log FILE --target-dir DIR --metadata FILE [--env]"
+            "usage: breakbulk-plan-golden --plan FILE --log FILE --target-dir DIR --metadata FILE [--doc-log FILE] [--env] [--negative-control]"
         );
         return ExitCode::from(2);
     };
@@ -46,7 +56,15 @@ fn main() -> ExitCode {
     let plan = Plan::from_json(&read(&plan)).unwrap_or_else(|e| panic!("{e}"));
     let metadata =
         Metadata::read(PathBuf::from(&metadata).as_path()).unwrap_or_else(|e| panic!("{e}"));
-    let report = compare_with(&plan, &read(&log), &PathBuf::from(target), &metadata, opts);
+    let doc_log = doc_log.map(|p| read(&p));
+    let report = compare_with(
+        &plan,
+        &read(&log),
+        &PathBuf::from(target),
+        &metadata,
+        opts,
+        doc_log.as_deref(),
+    );
     println!(
         "compared {} units{} (Cargo {})",
         report.compared,

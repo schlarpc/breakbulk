@@ -60,6 +60,17 @@ pub fn render_doctest<R: Resolve>(
         .collect();
     runs.sort();
     runs.dedup();
+    let mut literals: Vec<String> = d
+        .args
+        .iter()
+        .filter_map(|a| match a {
+            Arg::SearchPaths(s) => Some(s.literals.iter().cloned()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    literals.sort();
+    literals.dedup();
 
     let c = d.as_compile();
     let id = id.to_owned();
@@ -121,6 +132,7 @@ pub fn render_doctest<R: Resolve>(
         kind: DoctestKind::Doctest,
         compile,
         search_paths_of: runs.iter().map(|u| r.flags(u)).collect::<Result<_, _>>()?,
+        search_paths_literals: literals,
         search_paths_at: at,
     })
 }

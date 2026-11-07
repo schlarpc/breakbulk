@@ -92,6 +92,7 @@ impl Plan {
                 .map(|a| match normalize_arg(a) {
                     Arg::SearchPaths(mut s) => {
                         sort_dedup(&mut s.search_paths_of);
+                        sort_dedup(&mut s.literals);
                         Arg::SearchPaths(s)
                     }
                     a => a,
