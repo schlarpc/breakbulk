@@ -4,6 +4,7 @@
 #   SPIKE_DIR   scratch directory (store root, config, caches)
 #   NIX_MASTER  a Nix master build; default: the $SPIKE_DIR/nix-master link
 #               that setup.sh creates
+#   SPIKE_NIX_CONF  extra nix.conf lines (substituters, post-build-hook, ...)
 
 : "${SPIKE_DIR:=/tmp/claude-1000/-home-schlarpc-breakbulk/spike-b/w}"
 : "${NIX_MASTER:=$(readlink -f "$SPIKE_DIR/nix-master")}"
@@ -17,6 +18,7 @@ substituters =
 build-users-group =
 max-jobs = 2
 cores = 4
+${SPIKE_NIX_CONF:-}
 EOF
 : > "$SPIKE_DIR/etc/empty.conf"
 
