@@ -95,6 +95,13 @@ Then:
   it sets `CARGO_BUILD_TARGET` and the toolchain spec (linker, rustflags),
   and adds the packages' native inputs. Use it for the edit-compile loop.
 
+breakbulk's own flake outputs (its packages, checks and dev shell) are
+defined for the systems in its `systems` input, a
+[nix-systems](https://github.com/nix-systems/nix-systems) flake
+(`x86_64-linux` and `aarch64-linux`). To change the list, point it at
+another: `inputs.breakbulk.inputs.systems.follows = "systems";`. The
+library itself (`breakbulk.lib`) takes `pkgs` and works for any system.
+
 With flake-parts, import `breakbulk.lib.flakeModule` and set
 `perSystem.breakbulk = { root = ./.; modules = [ ./nix/rust.nix ]; }`. It
 adds packages, checks and dev shells for you.
