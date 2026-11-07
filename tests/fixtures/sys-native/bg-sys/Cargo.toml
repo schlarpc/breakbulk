@@ -1,0 +1,9 @@
+[package]
+name = "bg-sys"
+version.workspace = true
+edition.workspace = true
+links = "bg"
+
+[build-dependencies]
+bindgen = "0.72"
+cc = "1"

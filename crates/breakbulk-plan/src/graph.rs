@@ -32,6 +32,8 @@ pub struct Context {
     pub rustc_version: String,
     /// The real rustdoc: build-script runs get it as `RUSTDOC`.
     pub rustdoc: String,
+    /// The cargo the planner ran, as it was given (a toolchain path).
+    pub cargo: String,
     /// Cargo's `nightly_features_allowed`.
     pub nightly: bool,
     /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
@@ -61,6 +63,11 @@ const DYLIB_VAR: &str = "LD_LIBRARY_PATH";
 /// before running the test ("Tests" in `docs/implementation.md`). Cargo's
 /// value names its target directory, which breakbulk does not have.
 pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
+
+/// Where `CARGO_BIN_EXE_<bin>` points for a bin Cargo did not build (its
+/// required features are off): `<this>/<bin>`, which never exists, so a
+/// test that runs it fails as it does under Cargo.
+pub const NOT_BUILT_BIN_DIR: &str = "/breakbulk/not-built";
 
 fn arg_value<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
@@ -162,6 +169,14 @@ fn under<'a>(path: &'a str, dir: &str) -> Option<&'a str> {
         Some("")
     } else {
         rest.strip_prefix('/')
+    }
+}
+
+/// Whether two paths name the same file, after resolving symlinks.
+fn same_file(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -502,6 +517,33 @@ impl<'a> Builder<'a> {
                 out.insert(k, Text::Literal(TARGET_TMPDIR.into()));
                 continue;
             }
+            // Cargo sets CARGO_BIN_EXE_<bin> on integration tests for every
+            // bin of the package, also bins it does not build because their
+            // required features are off (Cargo 0.100.0 at 5f94df4,
+            // `src/compiler/artifact.rs`, `get_env`: it filters targets on
+            // `is_bin()` only). Such a path names no unit's output; it
+            // becomes a path that does not exist, as Cargo's does not.
+            if let Some(bin) = k.strip_prefix("CARGO_BIN_EXE_")
+                && self.rw.in_scratch(&v)
+                && self.rw.text(&v, Some(owner)).is_err()
+            {
+                out.insert(
+                    k.clone(),
+                    Text::Literal(format!("{NOT_BUILT_BIN_DIR}/{bin}")),
+                );
+                continue;
+            }
+            // Cargo sets CARGO to its own executable as the OS reports it,
+            // with symlinks resolved (`std::env::current_exe`). In a
+            // toolchain that is a symlink tree (rust-overlay's), that is a
+            // store path of a component, not the toolchain path the
+            // planner was given and instantiation knows. Same file: keep
+            // the given path.
+            let v = if k == "CARGO" && same_file(&v, &self.ctx.cargo) {
+                self.ctx.cargo.clone()
+            } else {
+                v
+            };
             let v = if k == DYLIB_VAR {
                 let (runs, rest) = self.dylib_path(unit, &v)?;
                 dylib = runs;

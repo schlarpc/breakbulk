@@ -44,13 +44,18 @@ let
       ws,
       command ? "build",
       install,
+      # Native inputs the fixture's build scripts need.
+      nativeBuildInputs ? [ ],
+      buildInputs ? [ ],
     }:
     pkgs.runCommandCC "${fixture}-cargo-${command}"
       {
         nativeBuildInputs = [
           pkgs.cargo
           pkgs.rustc
-        ];
+        ]
+        ++ nativeBuildInputs;
+        inherit buildInputs;
       }
       ''
         export CARGO_HOME=$TMPDIR/cargo-home
@@ -74,13 +79,17 @@ let
       kind ? "build",
       cargoArgs ? [ "--workspace" ],
       toolchain ? { inherit (pkgs) cargo rustc; },
+      nativeBuildInputs ? [ ],
+      buildInputs ? [ ],
     }:
     pkgs.runCommandCC "${fixture}-golden-${kind}"
       {
         nativeBuildInputs = [
           toolchain.cargo
           toolchain.rustc
-        ];
+        ]
+        ++ nativeBuildInputs;
+        inherit buildInputs;
       }
       ''
         export CARGO_HOME=$TMPDIR/cargo-home
@@ -101,6 +110,28 @@ let
 
   walking-skeleton = mk "walking-skeleton" { };
   build-dep-leak-ws = mk "build-dep-leak" { };
+
+  # What sys-native's build scripts need, for breakbulk (per package) and
+  # for the plain cargo references (all at once).
+  sysNativeInputs = {
+    nativeBuildInputs = [
+      pkgs.pkg-config
+      pkgs.cmake
+      pkgs.rustPlatform.bindgenHook
+    ];
+    buildInputs = [ pkgs.openssl ];
+  };
+  sysNative = mk "sys-native" {
+    packages = {
+      openssl-sys = {
+        nativeInputs = p: [ p.pkg-config ];
+        inputs = p: [ p.openssl ];
+        env.BB_MARKER = "ssl";
+      };
+      cm-sys.nativeInputs = p: [ p.cmake ];
+      bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
+    };
+  };
 
   # Older stable releases for the golden test, from rust-overlay when the
   # package set has it (the flake's does). nixpkgs' own cargo is the third.
@@ -424,6 +455,201 @@ in
       cp err $result/
     '';
 
+  # Decision 50: breakbulk's binaries are built from narrow sources, so an
+  # edit to the planner leaves breakbulk-unit (an input of every unit) and
+  # breakbulk-shim alone. Computes the tools' derivations from a copy of
+  # the repository with a line added to breakbulk-plan's main.rs and to
+  # breakbulk-format's lib.rs (IFD: the copy is a derivation), and compares
+  # .drv paths with the real ones.
+  tools-narrow =
+    let
+      repo = lib.fileset.toSource {
+        root = ../..;
+        fileset = lib.fileset.unions [
+          ../../Cargo.toml
+          ../../Cargo.lock
+          ../../crates
+        ];
+      };
+      edited = pkgs.runCommand "breakbulk-edited-repo" { } ''
+        cp -r --no-preserve=mode ${repo} $out
+        echo '// edited' >> $out/crates/breakbulk-plan/src/main.rs
+        echo '// edited' >> $out/crates/breakbulk-format/src/lib.rs
+      '';
+      # Realise the copy (IFD), then use it as a path value.
+      editedRoot = builtins.seq (builtins.readDir edited) (
+        /. + builtins.unsafeDiscardStringContext edited.outPath
+      );
+      real = import ../../lib/tools.nix { inherit lib; } pkgs;
+      other = import ../../lib/tools.nix {
+        inherit lib;
+        root = editedRoot;
+      } pkgs;
+      same = n: real.${n}.drvPath == other.${n}.drvPath;
+      checks = {
+        "breakbulk-unit unchanged" = same "breakbulk-unit";
+        "breakbulk-shim unchanged" = same "breakbulk-shim";
+        "breakbulk-plan changed" = !same "breakbulk-plan";
+        "breakbulk-instantiate changed" = !same "breakbulk-instantiate";
+        "breakbulk-unit's source has only itself" = real.breakbulk-unit.crates == [ "breakbulk-unit" ];
+      };
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
+    in
+    assert lib.assertMsg (failed == [ ]) "tools-narrow: ${lib.concatStringsSep ", " failed}";
+    pkgs.runCommand "tools-narrow-check" { } ''
+      echo ${lib.escapeShellArg (lib.concatStringsSep "\n" (lib.attrNames checks))} > $out
+    '';
+
+  # `-sys` crates with native inputs declared per package: pkg-config
+  # (openssl-sys), cmake (cm-sys), bindgen and cc (bg-sys). Each package's
+  # env capture and env reach only that package's units (read from every
+  # unit derivation of both plans); `plain`'s build script sees none of
+  # their variables; the product runs as plain cargo's does.
+  sys-native =
+    let
+      ws = sysNative;
+      captureOf = n: ws.overrides.${n}.target.envCapture;
+      expect = {
+        openssl-sys = {
+          capture = captureOf "openssl-sys";
+          marker = "ssl";
+        };
+        cm-sys = {
+          capture = captureOf "cm-sys";
+          marker = null;
+        };
+        bg-sys = {
+          capture = captureOf "bg-sys";
+          marker = null;
+        };
+      };
+      base = {
+        capture = ws.captures.target;
+        marker = null;
+      };
+      # The package a unit derivation belongs to, from its name
+      # (`<package>-<version>-<kind>`).
+      pkgOf =
+        d:
+        lib.findFirst (n: builtins.match "${n}-[0-9].*" d.name != null) null (lib.attrNames expect);
+      unitOf = d: builtins.fromJSON (builtins.unsafeDiscardStringContext d.drvAttrs.BREAKBULK_UNIT);
+      wrong = lib.concatLists (
+        lib.mapAttrsToList (
+          kind: units:
+          lib.concatMap (
+            d:
+            let
+              u = unitOf d;
+              p = pkgOf d;
+              want = if p == null then base else expect.${p};
+              capture = builtins.unsafeDiscardStringContext "${want.capture}";
+            in
+            lib.optional (u.envCapture or null != capture || u.env.BB_MARKER or null != want.marker) "${kind}: ${d.name} (capture ${u.envCapture or "none"}, BB_MARKER ${toString (u.env.BB_MARKER or null)})"
+          ) (lib.attrValues units)
+        ) ws.units
+      );
+      captures = lib.mapAttrs (_: e: e.capture) expect;
+      ref = cargoBuild (
+        {
+          fixture = "sys-native";
+          inherit ws;
+          install = "install -D $t/app $out/bin/app";
+        }
+        // sysNativeInputs
+      );
+    in
+    assert lib.assertMsg (wrong == [ ]) "sys-native: units with the wrong capture or env:\n${lib.concatStringsSep "\n" wrong}";
+    assert lib.assertMsg (
+      lib.length (lib.unique (lib.attrValues captures ++ [ base.capture ])) == 4
+    ) "sys-native: the captures are not distinct";
+    pkgs.runCommand "sys-native-check"
+      {
+        app = ws.packages.app;
+        inherit ref;
+        golden = golden (
+          {
+            fixture = "sys-native";
+            inherit ws;
+          }
+          // sysNativeInputs
+        );
+      }
+      ''
+        got=$($app/bin/app); want=$($ref/bin/app)
+        echo "breakbulk '$got', cargo '$want'"
+        [ "$got" = "openssl=3+ cm=42 bg=7 plain-saw=none" ]
+        [ "''${want% plain-saw=*}" = "''${got% plain-saw=*}" ]
+        mkdir -p $out
+        cp $golden/report $out/
+      '';
+
+  # C objects with debug info record the compiler's switches, including
+  # `-frandom-seed`. The seed is the unit's plan key, so a unit whose
+  # derivation changes without its content changing (here: one extra
+  # attribute, standing in for a new breakbulk-unit or env capture) builds
+  # byte-identical C archives. cm-sys builds with cmake, bg-sys with cc.
+  c-seed =
+    let
+      runOf =
+        p:
+        lib.findFirst (d: d.name == "${p}-0.1.0-build-run") (throw "no run unit for ${p}") (
+          lib.attrValues sysNative.units.build
+        );
+      salted = d: derivation (d.drvAttrs // { breakbulkSalt = "c-seed"; });
+      pair = p: {
+        a = runOf p;
+        b = salted (runOf p);
+      };
+      cm = pair "cm-sys";
+      bg = pair "bg-sys";
+    in
+    pkgs.runCommand "c-seed-check"
+      {
+        nativeBuildInputs = [ pkgs.binutils ];
+        cmA = cm.a.out;
+        cmB = cm.b.out;
+        bgA = bg.a.out;
+        bgB = bg.b.out;
+      }
+      ''
+        [ "$cmA" != "$cmB" ] && [ "$bgA" != "$bgB" ]
+        check() {
+          a=$1; b=$2
+          echo "comparing $a with $b"
+          cmp "$a" "$b"
+          # Not vacuous: the objects record a seed (in DW_AT_producer, in
+          # compressed debug sections), and it is the plan key.
+          rm -rf x && mkdir x && (cd x && ar x "$a")
+          readelf --debug-dump=info x/*.o | grep -o -- '-frandom-seed=[^ ]*' | sort -u | tee seeds
+          grep -q -- '-frandom-seed=r-' seeds
+        }
+        check $cmA/lib/libcm.a $cmB/lib/libcm.a
+        check $bgA/libbg.a $bgB/libbg.a
+        mkdir -p $out
+      '';
+
+  # Cargo gives an integration test CARGO_BIN_EXE_<bin> for every bin of
+  # its package, also one it does not build because a required feature is
+  # off. The plan points it at a path that does not exist (as Cargo's does
+  # not), and the test, which runs the built bin and checks the other is
+  # absent, passes.
+  bin-exe-not-built =
+    let
+      ws = mk "bin-exe-not-built" { };
+      plan = readPlan ws "test";
+      envs = lib.concatMap (u: lib.optional (u ? env.CARGO_BIN_EXE_extra) u.env.CARGO_BIN_EXE_extra) (
+        lib.attrValues plan.units
+      );
+    in
+    assert lib.assertMsg (envs == [ "/breakbulk/not-built/extra" ])
+      "bin-exe-not-built: CARGO_BIN_EXE_extra is ${builtins.toJSON envs}";
+    pkgs.runCommand "bin-exe-not-built-check" { t = ws.testBins."tool/test/run"; } ''
+      $t/bin/run | tee log
+      grep -q 'test result: ok. 2 passed' log
+      mkdir -p $out
+      cp log $out/
+    '';
+
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =
     pkgs.runCommand "walking-skeleton-test-check"
@@ -438,3 +664,62 @@ in
 }
 // goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); }
 // goldenOn "dev-dep-features" { }
+# Nightly Cargo and rustc (rust-overlay's latest): the new build-directory
+# layout and `-Zembed-metadata=no`. The golden tests of the walking skeleton
+# and the directives fixture, and their products, which link against rlibs
+# that carry no metadata.
+// lib.optionalAttrs (pkgs ? rust-bin) (
+  let
+    tc = pkgs.rust-bin.nightly.latest.minimal;
+    toolchain = {
+      cargo = tc;
+      rustc = tc;
+    };
+    ws = mk "walking-skeleton" { inherit toolchain; };
+    dir = mk "directives" {
+      inherit toolchain;
+      extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+    };
+    goldens =
+      fixture: w:
+      lib.genAttrs [ "build" "test" ] (
+        kind:
+        golden {
+          inherit fixture toolchain kind;
+          ws = w;
+        }
+      );
+    wsG = goldens "walking-skeleton" ws;
+    dirG = goldens "directives" dir;
+  in
+  {
+    walking-skeleton-nightly =
+      pkgs.runCommand "walking-skeleton-nightly-check"
+        {
+          bb = ws.packages.walking-skeleton;
+          t = ws.testBins."walking-skeleton/bin-test/walking-skeleton";
+          g = wsG.build;
+          gt = wsG.test;
+        }
+        ''
+          [ "$($bb/bin/walking-skeleton)" = "walking-skeleton 42 cfg-on hello-from-build-script debug" ]
+          $t/bin/walking-skeleton | grep -q 'test result: ok. 1 passed'
+          mkdir -p $out
+          cat $g/report $gt/report > $out/report
+        '';
+    directives-nightly =
+      pkgs.runCommand "directives-nightly-check"
+        {
+          app = dir.packages.app;
+          it = dir.testBins."c/test/it";
+          g = dirG.build;
+          gt = dirG.test;
+        }
+        ''
+          [ "$($app/bin/app)" = "a_sys 42 2" ]
+          $it/bin/it | grep -q 'test result: ok. 1 passed'
+          mkdir -p $out
+          cat $g/report $gt/report > $out/report
+        '';
+  }
+)

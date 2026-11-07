@@ -3,7 +3,7 @@
 //! Cargo runs rustc with `--error-format=json --json=…artifacts,…`, so
 //! rustc's stderr is one JSON object per line. `breakbulk-unit` prints the
 //! `rendered` text of each diagnostic, as Cargo does, and drops artifact
-//! notifications. Lines that are not rustc JSON (a linker's output, an ICE
+//! notifications and unused-extern reports. Lines that are not rustc JSON (a linker's output, an ICE
 //! backtrace, a wrapper's own messages) pass through unchanged.
 
 use serde::Deserialize;
@@ -38,7 +38,10 @@ pub fn classify(line: &str) -> Line {
         return raw();
     };
     match m.message_type.as_deref() {
-        Some("artifact") => Line::Drop,
+        // `unused_extern`: nightly Cargo asks for these
+        // (`--json=unused-externs-silent`) for its own unused-dependency
+        // lint, which is Cargo's to report, not a diagnostic.
+        Some("artifact" | "unused_extern") => Line::Drop,
         Some("diagnostic") => match m.rendered {
             Some(r) if r.ends_with('\n') => Line::Print(r),
             Some(r) => Line::Print(format!("{r}\n")),
@@ -60,6 +63,12 @@ mod tests {
         assert_eq!(
             classify(
                 r#"{"$message_type":"artifact","artifact":"/build/out/libx.rmeta","emit":"metadata"}"#
+            ),
+            Line::Drop
+        );
+        assert_eq!(
+            classify(
+                r#"{"$message_type":"unused_extern","lint_level":"force-warn","unused_extern_names":[]}"#
             ),
             Line::Drop
         );

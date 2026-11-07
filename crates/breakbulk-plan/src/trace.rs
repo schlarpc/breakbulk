@@ -76,6 +76,7 @@ impl Trace {
             cargo_version: self.cargo_version.clone(),
             rustc_version: self.rustc_version.clone(),
             rustdoc: opts.rustdoc.clone(),
+            cargo: opts.cargo.clone(),
             nightly: self.cargo_version.contains("-nightly") || self.cargo_version.contains("-dev"),
             keep_workspace_wrapper: false,
         }

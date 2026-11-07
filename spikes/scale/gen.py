@@ -36,9 +36,10 @@ the graph (verified against Cargo 0.100, src/compiler/custom_build.rs
   - one `--extern name=<rmeta>` per direct dependency (`rlib` for the bin);
   - one `-L` per library path printed by the build script of the unit's
     own package or of any transitive (linkable) dependency, in Cargo's
-    `to_link` order. A traced plan carries a `rustc-link-search` splice for
-    each of those build scripts, because the planner's stubs always print a
-    link-search sentinel;
+    `to_link` order. A traced plan carries two `rustc-link-search` splices
+    for each of those build scripts (`"in": "out"`, then, after all of
+    those, `"in": "other"`), because the planner's stubs always print one
+    link-search sentinel inside OUT_DIR and one outside;
   - its own build script's cfg, check-cfg and env splices, and OUT_DIR.
 
 The transitive rmeta/rlib list (`deps` in BREAKBULK_UNIT) is computed by
@@ -180,6 +181,14 @@ def graph_stats(deps):
 # --- plan ----------------------------------------------------------------------
 
 
+def search_splices(runs, run_id):
+    """The rustc-link-search splices for `runs` in Cargo's to_link order: as
+    in a traced plan, each stub prints one search path inside its OUT_DIR
+    and one outside, and Cargo puts every inside path first."""
+    return [{"splice": run_id[k], "kind": "rustc-link-search", "in": where}
+            for where in ("out", "other") for k in runs]
+
+
 def h16(*parts):
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()[:16]
 
@@ -264,8 +273,7 @@ def make_plan(deps, names, has_script, app_deps):
         for j in sorted(deps[i], key=lambda j: names[j]):
             args += ["--extern", [f"{names[j]}=", {"out": lib_id[j], "output": "rmeta", "file": lib_file(j, "rmeta")}]]
         args += ["--cap-lints", "allow"]
-        for k in to_link[i]:
-            args.append({"splice": run_id[k], "kind": "rustc-link-search"})
+        args += search_splices(to_link[i], run_id)
         env = pkg_env(name, src(i, ""), src(i, "Cargo.toml"))
         env["CARGO_CRATE_NAME"] = name
         env_splices = []
@@ -349,8 +357,7 @@ def make_plan(deps, names, has_script, app_deps):
             if k not in seen:
                 seen.add(k)
                 app_link.append(k)
-    for k in app_link:
-        args.append({"splice": run_id[k], "kind": "rustc-link-search"})
+    args += search_splices(app_link, run_id)
     env = pkg_env("app", app_src("app"), app_src("app/Cargo.toml"))
     env.update({"CARGO_BIN_NAME": "app", "CARGO_CRATE_NAME": "app", "CARGO_PRIMARY_PACKAGE": "1"})
     units[app_id] = {

@@ -687,3 +687,39 @@ more on the command line.
   came from it). To fix.
 - Test runs get a plain shell environment without a C compiler; tests that
   compile C need it added via `test.path`.
+
+## 64. FYI: the graph-size fix landed, with measured results
+
+Library build steps now list only their direct dependencies (entry 44).
+Compiler commands are identical before and after (checked on 234 build
+steps), and rebuilds are bit-identical. At ~3,700 crates: input links
+758k → 32k, build-step files 166 MB → 40 MB, first evaluation 85 s → 10 s.
+Other M1 items also done:
+- breakbulk's own programs build from narrow sources, so changing the
+  planner no longer rebuilds every crate (entry 50);
+- the `sys-native` test (openssl via pkg-config, a cmake crate, a bindgen
+  crate) passes, and each package's native dependencies reach only that
+  package;
+- nightly Cargo (with its new build-directory layout) works;
+- C compiler seeds now come from Cargo's unit ID (entry 54);
+- test binaries for packages with feature-gated binaries now plan
+  correctly.
+
+## 65. ASK: CMake leaves non-reproducible files in build-script output
+
+Build scripts that use CMake (through the `cmake` crate) leave CMake's
+build tree in their output folder, including randomly named scratch
+folders. So `nix build --rebuild` flags them as non-reproducible, even
+though the library they produce is fine. Real crates like `libz-ng-sys`
+hit this. Options: (a) automatically delete `build/CMakeFiles` from
+build-script output after the script runs (default proposal: it is never
+read by later steps); (b) accept it and exempt such steps from the
+reproducibility check; (c) leave as is.
+
+## 66. FYI: a test that runs a feature-gated binary Cargo didn't build
+
+If a binary is skipped because its required features are off, Cargo still
+tells integration tests where it would be. breakbulk points that at a
+path that never exists, so a test that runs it fails, as under Cargo.
+Alternative: point it at a stub that fails with "not built because
+features X are off", which gives a clearer message but differs from Cargo.
