@@ -279,7 +279,10 @@ in
   linuxGnu = mkPreset (linuxGnuWith { });
 
   # Linux musl: as linuxGnu with nixpkgs' musl cross toolchain, and
-  # `+crt-static`.
+  # `+crt-static`. rustc's default for musl targets stays: crt objects,
+  # libc.a and libunwind.a from the Rust target's self-contained directory
+  # (`-C link-self-contained=no` fails: nixpkgs' musl toolchain has no
+  # libunwind.a). C code compiles against nixpkgs' musl headers.
   linuxMusl = mkPreset (linuxGnuWith { rustflags = crtStatic; });
 
   # A fully static glibc binary (static-pie by default; see relocationModel)

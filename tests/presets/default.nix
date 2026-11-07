@@ -18,6 +18,8 @@
 #                         and run under wine
 #   msvc-aarch64          HEAVY: spikes/msvc built for aarch64-pc-windows-msvc
 #                         (compile and link only)
+#
+# The M3 fixtures (presets through mkRepository) are in ./fixtures.nix.
 {
   pkgs,
   breakbulk,
@@ -223,3 +225,8 @@ in
   '';
 }
 // lib.optionalAttrs (xwinPkgs != null && pkgs.stdenv.buildPlatform.system == "x86_64-linux") msvc
+# M3 fixtures through mkRepository (./fixtures.nix): IFD, rust-overlay
+# toolchains with cross targets, nixpkgs cross toolchains (cached).
+// lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
+  (import ./fixtures.nix { inherit pkgs breakbulk xwinPkgs; }).checks
+)
