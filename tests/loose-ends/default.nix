@@ -21,6 +21,14 @@
 #                home directory, gives exactly the plan's `-C metadata`
 #                values, and every target unit gets the spec's linker and
 #                rustflags.
+#   wasm-embed   the flagship pattern: a native host bin embeds (with
+#                include_bytes!) the wasm component that another
+#                workspace builds for wasm32 with the wasmComponent preset
+#                (wasmOpt, componentize, install), through
+#                `packages.host.env`. Only the host's bin and its test
+#                harness name the product; the host workspace's
+#                instantiation and `util`'s units do not depend on it; the
+#                embedded bytes are a valid component.
 {
   pkgs ? import (
     let
@@ -246,14 +254,110 @@ let
         cp local $out/
       '';
     });
+
+  # --- wasm-embed -------------------------------------------------------------
+
+  wasm = "wasm32-unknown-unknown";
+  wasmRust = pkgs.rust-bin.stable."1.99.0".minimal.override { targets = [ wasm ]; };
+  # The `ui` workspace builds only for wasm32 with the wasmComponent preset;
+  # the `host` workspace (native) embeds its product through
+  # `packages.host.env`, a reference to another workspace's product.
+  wasmEmbed =
+    let
+      repo = breakbulk.mkRepository {
+        inherit pkgs tools;
+        root = fixtures + "/wasm-embed";
+        modules = [
+          {
+            workspaces = {
+              ui = {
+                path = "ui";
+                toolchain = {
+                  rustc = wasmRust;
+                  cargo = wasmRust;
+                };
+                targets = lib.mkForce { ${wasm} = { }; };
+                variants.default.profile = "release";
+              };
+              host = {
+                path = "host";
+                variants.default.profile = "dev";
+              };
+            };
+            targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = wasmRust; };
+            packages.host.env.UI_WASM = "${repo.workspaces.ui.target.${wasm}.packages.ui}/pkg/ui.wasm";
+          }
+        ];
+      };
+    in
+    repo;
+
+  wasmEmbedCheck =
+    let
+      i = wasmEmbed.workspaces.host.instances.${native}.default;
+      ui = wasmEmbed.workspaces.ui.target.${wasm}.packages.ui;
+      uiOut = builtins.unsafeDiscardStringContext ui.outPath;
+      units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
+      naming = lib.sort lib.lessThan (
+        lib.unique (map (u: u.name) (lib.filter (u: lib.hasInfix uiOut (u.drvAttrs.BREAKBULK_UNIT or "")) units))
+      );
+      drvOnly = d: builtins.unsafeDiscardOutputDependency d.drvPath;
+      util = lib.filter (u: lib.hasPrefix "util-" u.name) units;
+    in
+    assert lib.assertMsg (
+      naming == [
+        "host-0.1.0-bin"
+        "host-0.1.0-test"
+      ]
+    ) "wasm-embed: units naming the product: ${builtins.toJSON naming}";
+    pkgs.runCommand "loose-ends-wasm-embed"
+      {
+        nativeBuildInputs = [ pkgs.wasm-tools ];
+        host = wasmEmbed.workspaces.host.packages.host;
+        uiDrv = builtins.unsafeDiscardStringContext ui.drvPath;
+        # Neither the host workspace's instantiation nor `util`'s units may
+        # depend on the wasm product; the host bin must.
+        exportReferencesGraph = [
+          "instBuild"
+          (drvOnly i.unitsJson.build)
+          "instTest"
+          (drvOnly i.unitsJson.test)
+          "chainHost"
+          (drvOnly (lib.findFirst (u: u.name == "host-0.1.0-bin") null units))
+        ]
+        ++ lib.concatLists (
+          lib.imap0 (n: u: [
+            "util${toString n}"
+            (drvOnly u)
+          ]) util
+        );
+      }
+      ''
+        set -euo pipefail
+        for g in instBuild instTest util*; do
+          if grep -qxF "$uiDrv" "$g"; then
+            echo "$g depends on the wasm product $uiDrv" >&2
+            exit 1
+          fi
+        done
+        grep -qxF "$uiDrv" chainHost
+        $host/bin/host $TMPDIR/ui.wasm | tee run.txt
+        grep -q '^host embeds a component of [0-9]* bytes$' run.txt
+        wasm-tools validate --features component-model $TMPDIR/ui.wasm
+        wasm-tools component wit $TMPDIR/ui.wasm
+        mkdir -p $out
+        cp run.txt $out/
+      '';
 in
 {
   config-env = configEnv;
   test-scope = testScope;
   inherit devshell;
+  wasm-embed = wasmEmbedCheck;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;
     devshell = shellRepo;
+    wasm-embed = wasmEmbed;
   };
 }

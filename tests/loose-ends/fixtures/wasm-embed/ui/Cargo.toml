@@ -1,0 +1,12 @@
+# A wasm32 core module, componentized by the wasmComponent preset's stages
+# and embedded by the host workspace.
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]
