@@ -43,29 +43,32 @@ let
     '';
 
   discard = builtins.unsafeDiscardStringContext;
-  planOf = inst: kind: builtins.fromJSON (discard (builtins.readFile "${inst.plans.${kind}}/plan.json"));
+  planOf =
+    inst: kind: builtins.fromJSON (discard (builtins.readFile "${inst.plans.${kind}}/plan.json"));
   unitText = drv: discard (drv.drvAttrs.BREAKBULK_UNIT or "");
 
   # Units of both plans of an instance with their plan entry and rendered
   # text: [ { id; kind; platform; name; text; } ].
   unitsOf =
     inst:
-    lib.concatMap (
-      kind:
-      let
-        plan = planOf inst kind;
-      in
-      lib.mapAttrsToList (id: u: {
-        inherit id kind;
-        inherit (u) platform;
-        unitKind = u.kind;
-        name = inst.units.${kind}.${id}.name;
-        text = unitText inst.units.${kind}.${id};
-      }) plan.units
-    ) [
-      "build"
-      "test"
-    ];
+    lib.concatMap
+      (
+        kind:
+        let
+          plan = planOf inst kind;
+        in
+        lib.mapAttrsToList (id: u: {
+          inherit id kind;
+          inherit (u) platform;
+          unitKind = u.kind;
+          name = inst.units.${kind}.${id}.name;
+          text = unitText inst.units.${kind}.${id};
+        }) plan.units
+      )
+      [
+        "build"
+        "test"
+      ];
 
   # ELF checks on one file: `expect` is "static" (no PT_INTERP, no
   # DT_NEEDED) or "dynamic" (a PT_INTERP). Every ELF the Linux presets link,
@@ -132,22 +135,32 @@ let
         "bb_marker_flag"
         "project_flag"
       ];
-      leaks = lib.concatMap (u: map (m: "${u.name}: ${m}") (lib.filter (m: lib.hasInfix m u.text) markers)) host;
+      leaks = lib.concatMap (
+        u: map (m: "${u.name}: ${m}") (lib.filter (m: lib.hasInfix m u.text) markers)
+      ) host;
       targetCompiles = lib.filter (u: u.unitKind == "compile") target;
       missing = lib.concatMap (
         u: map (m: "${u.name}: ${m}") (lib.filter (m: !(lib.hasInfix m u.text)) markers)
       ) targetCompiles;
       hostCompiles = lib.filter (u: u.unitKind == "compile") host;
-      noHostLinker = map (u: u.name) (lib.filter (u: !(lib.hasInfix "linker=${stHostLinker}" u.text)) hostCompiles);
+      noHostLinker = map (u: u.name) (
+        lib.filter (u: !(lib.hasInfix "linker=${stHostLinker}" u.text)) hostCompiles
+      );
       hostRuns = lib.filter (u: u.unitKind == "run") host;
       runsWithoutHostLinker = map (u: u.name) (
         lib.filter (u: !(lib.hasInfix "\"RUSTC_LINKER\":\"${stHostLinker}\"" u.text)) hostRuns
       );
     in
-    assert lib.assertMsg (host != [ ] && hostRuns != [ ]) "same-triple: expected host compiles and runs";
+    assert lib.assertMsg (
+      host != [ ] && hostRuns != [ ]
+    ) "same-triple: expected host compiles and runs";
     assert lib.assertMsg (leaks == [ ]) "same-triple: target markers in host units: ${toString leaks}";
-    assert lib.assertMsg (missing == [ ]) "same-triple: markers missing from target compiles: ${toString missing}";
-    assert lib.assertMsg (noHostLinker == [ ]) "same-triple: host compiles without the host linker: ${toString noHostLinker}";
+    assert lib.assertMsg (
+      missing == [ ]
+    ) "same-triple: markers missing from target compiles: ${toString missing}";
+    assert lib.assertMsg (
+      noHostLinker == [ ]
+    ) "same-triple: host compiles without the host linker: ${toString noHostLinker}";
     assert lib.assertMsg (
       runsWithoutHostLinker == [ ]
     ) "same-triple: host runs without RUSTC_LINKER=<host linker>: ${toString runsWithoutHostLinker}";
@@ -191,7 +204,9 @@ let
     let
       plan = planOf inst "build";
       ids = lib.attrNames (
-        lib.filterAttrs (_: u: u.kind == "compile" && u.crate.name == "build_script_build" && lib.hasInfix "app" u.package) plan.units
+        lib.filterAttrs (
+          _: u: u.kind == "compile" && u.crate.name == "build_script_build" && lib.hasInfix "app" u.package
+        ) plan.units
       );
     in
     assert lib.length ids == 1;
@@ -205,7 +220,9 @@ let
     in
     {
       "${prefix}-product" = elfCheck "${prefix}-product" "static" "${t.packages.app}/bin/app";
-      "${prefix}-build-script" = elfCheck "${prefix}-build-script" "dynamic" (oneFile (buildScriptOf inst));
+      "${prefix}-build-script" = elfCheck "${prefix}-build-script" "dynamic" (
+        oneFile (buildScriptOf inst)
+      );
       "${prefix}-test" = t.testRuns.app."bin/app";
     }
     // lib.optionalAttrs (t.runner == null) {
@@ -250,11 +267,13 @@ let
       t = sysNativeCross.workspaces.main.target.${a64};
     in
     {
-      sys-native-aarch64 = pkgs.runCommand "sys-native-aarch64" { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; } ''
-        readelf -hW ${t.packages.app}/bin/app | grep -q 'Machine:.*AArch64'
-        ${lib.escapeShellArgs t.runner} ${t.packages.app}/bin/app | tee $out
-        grep -qx "openssl=3+ cm=42 bg=7 plain-saw=none" $out
-      '';
+      sys-native-aarch64 =
+        pkgs.runCommand "sys-native-aarch64" { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; }
+          ''
+            readelf -hW ${t.packages.app}/bin/app | grep -q 'Machine:.*AArch64'
+            ${lib.escapeShellArgs t.runner} ${t.packages.app}/bin/app | tee $out
+            grep -qx "openssl=3+ cm=42 bg=7 plain-saw=none" $out
+          '';
     };
 
   # --- msvc ---------------------------------------------------------------------
@@ -456,7 +475,11 @@ let
           && llvm.majorFor "1.99.0" == 23
           && llvm.majorFor "1.101.0-nightly" == 23
           && llvm.majorFor "1.90.0" == 20;
-        nixpkgsRustcLlvm = (llvm.packagesFor { inherit pkgs; rustc = pkgs.rustc; }) == pkgs.rustc.llvmPackages;
+        nixpkgsRustcLlvm =
+          (llvm.packagesFor {
+            inherit pkgs;
+            rustc = pkgs.rustc;
+          }) == pkgs.rustc.llvmPackages;
         overlayRustcLlvm =
           (llvm.packagesFor {
             inherit pkgs;
@@ -484,21 +507,21 @@ in
       ;
   };
   checks = {
-  presets-eval = presetsEval;
+    presets-eval = presetsEval;
 
-  same-triple-eval = sameTripleEval;
-  same-triple-build = pkgs.runCommand "same-triple-run" { } ''
-    ${sameTriple.workspaces.main.packages.app}/bin/app | tee $out
-    grep -qx "marker=target-only shared=target shared-in-build-script=host" $out
-  '';
-  same-triple-test = sameTriple.workspaces.main.target.${native}.testRuns.app."bin/app";
-  # The marker linker execs plain cc, so only the host side is mold.
-  same-triple-build-script = elfCheck "same-triple-build-script" "dynamic" (
-    oneFile (buildScriptOf stInst)
-  );
+    same-triple-eval = sameTripleEval;
+    same-triple-build = pkgs.runCommand "same-triple-run" { } ''
+      ${sameTriple.workspaces.main.packages.app}/bin/app | tee $out
+      grep -qx "marker=target-only shared=target shared-in-build-script=host" $out
+    '';
+    same-triple-test = sameTriple.workspaces.main.target.${native}.testRuns.app."bin/app";
+    # The marker linker execs plain cc, so only the host side is mold.
+    same-triple-build-script = elfCheck "same-triple-build-script" "dynamic" (
+      oneFile (buildScriptOf stInst)
+    );
   }
   // staticChecks "static-glibc" glibcStatic native
-// staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl"
+  // staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl"
   // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
   // sysNativeCrossChecks
   // msvcChecks

@@ -84,7 +84,8 @@ let
     else if llvmMajor == null && rustc != null && rustc ? llvmPackages then
       rustc.llvmPackages
     else
-      pkgs.${attr} or (throw "breakbulk: nixpkgs has no `${attr}` for the LLVM inside rustc; pass `llvmPackages` to the preset");
+      pkgs.${attr}
+        or (throw "breakbulk: nixpkgs has no `${attr}` for the LLVM inside rustc; pass `llvmPackages` to the preset");
 in
 {
   inherit

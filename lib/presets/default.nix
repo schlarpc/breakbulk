@@ -40,14 +40,18 @@ let
   mkPreset =
     f:
     let
-      go = bound: args: let a = bound // args; in if a ? pkgs then f a else go a;
+      go =
+        bound: args:
+        let
+          a = bound // args;
+        in
+        if a ? pkgs then f a else go a;
     in
     go { };
 
   envName = triple: lib.replaceStrings [ "-" ] [ "_" ] triple;
 
   nativeTriple = pkgs: pkgs.stdenv.hostPlatform.rust.rustcTarget;
-  buildTriple = pkgs: pkgs.stdenv.buildPlatform.rust.rustcTarget;
 
   # nixpkgs' name for a Rust target's cross package set, where it differs
   # from importing nixpkgs with `crossSystem.config = <triple>`; the
@@ -92,29 +96,27 @@ let
   # units alike.
   driverWrapper =
     p: name: exe: flag:
-    "${
-      p.buildPackages.writeShellScriptBin name ''
-        drop() {
-          case "$1" in
-          -fuse-ld=lld | -B*/lib/rustlib/*/bin/gcc-ld) return 0 ;;
-          esac
-          return 1
-        }
-        args=()
-        for a in "$@"; do
-          if [[ $a == @* && -f ''${a#@} ]]; then
-            rsp="''${TMPDIR:-/tmp}/${name}-$$-''${#args[@]}.rsp"
-            while IFS= read -r line || [[ -n $line ]]; do
-              drop "$line" || printf '%s\n' "$line"
-            done < "''${a#@}" > "$rsp"
-            args+=("@$rsp")
-          elif ! drop "$a"; then
-            args+=("$a")
-          fi
-        done
-        exec ${exe} ${flag} "''${args[@]}"
-      ''
-    }/bin/${name}";
+    "${p.buildPackages.writeShellScriptBin name ''
+      drop() {
+        case "$1" in
+        -fuse-ld=lld | -B*/lib/rustlib/*/bin/gcc-ld) return 0 ;;
+        esac
+        return 1
+      }
+      args=()
+      for a in "$@"; do
+        if [[ $a == @* && -f ''${a#@} ]]; then
+          rsp="''${TMPDIR:-/tmp}/${name}-$$-''${#args[@]}.rsp"
+          while IFS= read -r line || [[ -n $line ]]; do
+            drop "$line" || printf '%s\n' "$line"
+          done < "''${a#@}" > "$rsp"
+          args+=("@$rsp")
+        elif ! drop "$a"; then
+          args+=("$a")
+        fi
+      done
+      exec ${exe} ${flag} "''${args[@]}"
+    ''}/bin/${name}";
 
   moldLinker =
     p:
@@ -239,11 +241,12 @@ let
       cc = mkDefault "${cc}/bin/${prefix}cc";
       cxx = mkDefault "${cc}/bin/${prefix}c++";
       ar = mkDefault "${cc.bintools}/bin/${prefix}ar";
-      rustflags = lib.optionals crossLanguageLto [
-        "-C"
-        "linker-plugin-lto"
-      ]
-      ++ extra.rustflags or [ ];
+      rustflags =
+        lib.optionals crossLanguageLto [
+          "-C"
+          "linker-plugin-lto"
+        ]
+        ++ extra.rustflags or [ ];
       env = defaultEnv (extra.env or { });
       runner = mkDefault r.runner;
       testSystem = mkDefault r.testSystem;
@@ -283,7 +286,9 @@ in
   # libc.a and libunwind.a from the Rust target's self-contained directory
   # (`-C link-self-contained=no` fails: nixpkgs' musl toolchain has no
   # libunwind.a). C code compiles against nixpkgs' musl headers.
-  linuxMusl = mkPreset (linuxGnuWith { rustflags = crtStatic; });
+  linuxMusl = mkPreset (linuxGnuWith {
+    rustflags = crtStatic;
+  });
 
   # A fully static glibc binary (static-pie by default; see relocationModel)
   # on the host triple. Host and target share
@@ -308,8 +313,9 @@ in
     let
       cc = pkgs.stdenv.cc;
     in
-    assert lib.assertMsg (triple == nativeTriple pkgs)
-      "breakbulk.presets.staticGlibc: ${triple} is not the host triple ${nativeTriple pkgs}";
+    assert lib.assertMsg (
+      triple == nativeTriple pkgs
+    ) "breakbulk.presets.staticGlibc: ${triple} is not the host triple ${nativeTriple pkgs}";
     {
       packageSet = mkDefault pkgs;
       linker = mkDefault (moldLinker pkgs);
@@ -375,9 +381,17 @@ in
           + builtins.readFile ./lld-link-stable.sh
         )
       }/bin/lld-link-stable";
-      cflags = [ "--target=${triple}" ] ++ lib.concatMap (d: [ "-imsvc" d ]) incdirs;
+      cflags = [
+        "--target=${triple}"
+      ]
+      ++ lib.concatMap (d: [
+        "-imsvc"
+        d
+      ]) incdirs;
     in
-    assert lib.assertMsg (triple == "${arch}-pc-windows-msvc") "breakbulk.presets.msvc: triple ${triple} does not match arch ${arch}";
+    assert lib.assertMsg (
+      triple == "${arch}-pc-windows-msvc"
+    ) "breakbulk.presets.msvc: triple ${triple} does not match arch ${arch}";
     {
       packageSet = mkDefault null;
       linker = mkDefault linker;
@@ -385,7 +399,13 @@ in
       cxx = mkDefault "${clang}/bin/clang-cl";
       ar = mkDefault "${tools}/llvm-lib";
       inherit cflags;
-      bindgen.extraClangArgs = [ "--target=${triple}" ] ++ lib.concatMap (d: [ "-isystem" d ]) incdirs;
+      bindgen.extraClangArgs = [
+        "--target=${triple}"
+      ]
+      ++ lib.concatMap (d: [
+        "-isystem"
+        d
+      ]) incdirs;
       rustflags = map (d: "-Lnative=${d}") libdirs ++ lib.optionals crtStatic crtStatic;
       env = defaultEnv {
         LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";

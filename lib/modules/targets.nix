@@ -79,7 +79,9 @@ let
           };
       fromPreset =
         path:
-        lib.mkIf (config.preset != null && lib.hasAttrByPath path applied) (lib.getAttrFromPath path applied);
+        lib.mkIf (config.preset != null && lib.hasAttrByPath path applied) (
+          lib.getAttrFromPath path applied
+        );
     in
     {
       options = {
@@ -205,14 +207,13 @@ let
         warnings = bt.warningsOption;
       };
 
-      config = lib.foldl' lib.recursiveUpdate { } (
-        map (p: lib.setAttrByPath p (fromPreset p)) presetFields
-      )
-      // {
-        warnings = bt.unimplementedWarnings "targets.${name}" options {
-          M4 = [ [ "stages" ] ];
+      config =
+        lib.foldl' lib.recursiveUpdate { } (map (p: lib.setAttrByPath p (fromPreset p)) presetFields)
+        // {
+          warnings = bt.unimplementedWarnings "targets.${name}" options {
+            M4 = [ [ "stages" ] ];
+          };
         };
-      };
     };
 in
 {
