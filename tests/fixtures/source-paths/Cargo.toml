@@ -1,0 +1,13 @@
+# Source paths and debug information ("Source paths and debug information"
+# in docs/design.md): `app` ships a binary whose dependency `dep` panics
+# and reports `file!()`, and which formats numbers with the registry crate
+# `itoa`. The product's main output must not reference any source; its
+# `debug` output references the sources a debugger needs. `dep` has unit
+# tests and a README: editing the README must not change its test binary.
+[workspace]
+resolver = "2"
+members = ["app", "dep"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

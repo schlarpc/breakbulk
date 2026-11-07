@@ -1,0 +1,12 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pm = { path = "../pm" }
+shared = { path = "../shared" }
+
+[build-dependencies]
+hostdep = { path = "../hostdep" }
+shared = { path = "../shared" }

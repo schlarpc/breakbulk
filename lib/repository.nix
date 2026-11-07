@@ -25,12 +25,22 @@
 #   repo.config, repo.options                             the evaluated modules
 #   repo.optionsDoc                                       nixosOptionsDoc of them
 #
-# A product (`packages.<pkg>`) is the package's build-plan roots (bins in
-# bin/, cdylibs, dylibs and staticlibs in lib/), copied into one output.
-# Roots Cargo did not build (required features) are left out and listed in
-# `.unbuilt`; when no root was built, the product is the first stub, which
-# fails with the reason. Every root is also under `.roots."<kind>/<target>"`.
-# Stages, debug outputs and test runs come with M4.
+#   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
+#   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  runnable apps
+#   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
+#
+# A product (`packages.<pkg>`) is the package's build-plan roots (bins,
+# cdylibs, dylibs and staticlibs) passed through the target's post-link
+# stages and installed (bins in bin/, libraries in lib/): see
+# lib/products.nix. `.stages.<name>` gives every stage, `.debug` the split
+# debug info, `.checks.<name>` the checks. Roots Cargo did not build
+# (required features) are left out and listed in `.unbuilt`; when no root
+# was built, the product is the first stub, which fails with the reason.
+# Every root is also under `.roots."<kind>/<target>"`.
+#
+# repo.checks (default variant): `<ws>/<triple>/<pkg>/build` (the
+# product), `…/<pkg>/<check>` (its checks), `…/<pkg>/test-<name>` (enabled
+# test runs) and `…/<pkg>/doctest`.
 #
 # Test names (`tests.<pkg>.<name>`): an integration test by its name, the
 # library's unit tests as `lib`, a bin's unit tests as `bin-<name>`, an
@@ -45,6 +55,8 @@
   mkFetch,
   mkTools,
   mkWorkspace,
+  products,
+  variantsLib,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -196,14 +208,159 @@ let
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
-  # The package set of a target's units. Cross package sets come with the
-  # presets (M3).
+  # The `packages.<name>` keys matching a workspace's path package `pkg`
+  # (unversioned keys first).
+  memberKeys =
+    wsName: pkg:
+    let
+      es = lib.filter (e: e.name == pkg && e.source or null == null) locks.${wsName};
+    in
+    lib.filter (k: lib.any (overrideMatches k) es) orderedKeys;
+
+  # Product settings for mkProducts: each key's stages and checks, then its
+  # target.<triple> stages and checks.
+  productConfig =
+    wsName: triple: pkg:
+    lib.concatMap (
+      k:
+      let
+        o = cfg.packages.${k};
+        t = o.target.${triple} or { };
+      in
+      [
+        { inherit (o) stages checks; }
+        {
+          stages = t.stages or { };
+          checks = t.checks or { };
+        }
+      ]
+    ) (memberKeys wsName pkg);
+
+  # packages.<name>.test merged over matching keys, for mkTestRuns:
+  # `{ <pkg> = { test = …; }; }` for the workspace's path packages.
+  testConfigs =
+    wsName:
+    let
+      members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
+      mergeTest = a: b: {
+        env = a.env // envStrings b.env;
+        path = a.path ++ b.path;
+        args = a.args ++ b.args;
+        includeIgnored = a.includeIgnored || b.includeIgnored;
+        binaries = lib.zipAttrsWith (
+          _:
+          lib.foldl'
+            (x: y: {
+              args = x.args ++ y.args;
+              enable = x.enable && y.enable;
+            })
+            {
+              args = [ ];
+              enable = true;
+            }
+        ) [
+          a.binaries
+          b.binaries
+        ];
+      };
+      empty = {
+        env = { };
+        path = [ ];
+        args = [ ];
+        includeIgnored = false;
+        binaries = { };
+      };
+    in
+    lib.genAttrs members (pkg: {
+      test = lib.foldl' (acc: k: mergeTest acc cfg.packages.${k}.test) empty (memberKeys wsName pkg);
+    });
+
+  # The package set of a target's units: the target spec's `packageSet`
+  # (set by the presets), else pkgs for the native triple.
   targetPkgs =
     triple:
-    if triple == nativeTriple then
+    let
+      p = cfg.targets.${triple}.packageSet or null;
+    in
+    if p != null then
+      p
+    else if triple == nativeTriple then
       pkgs
     else
-      throw "breakbulk: package inputs on target ${triple} need that target's package set, which comes with the toolchain presets (M3)";
+      throw "breakbulk: package inputs on target ${triple} need that target's nixpkgs package set (`targets.${triple}.packageSet`, which the Linux presets set); this target has none";
+
+  # --- toolchain specs (M3) -------------------------------------------------
+  #
+  # A target's spec as mkWorkspace takes it: the planner's part (rustflags
+  # and linkers, through `--config`), the env of each platform's units, the
+  # store paths the plan will name, the target capture's package set, and
+  # the runner.
+  envName = triple: lib.replaceStrings [ "-" ] [ "_" ] triple;
+  storePathsIn =
+    s:
+    lib.concatMap (
+      p: if builtins.isList p then [ (lib.addContextFrom s (lib.head p)) ] else [ ]
+    ) (builtins.split "(${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[^/ =:;\"]+)" s);
+  specFor =
+    wsName: triple:
+    let
+      t = cfg.targets.${triple} or null;
+      e = envName triple;
+      flags = l: lib.concatStringsSep " " l;
+      cEnv =
+        lib.filterAttrs (_: v: v != null) {
+          "CC_${e}" = t.cc;
+          "CXX_${e}" = t.cxx;
+          "AR_${e}" = t.ar;
+        }
+        // lib.optionalAttrs (t.cflags != [ ]) {
+          "CFLAGS_${e}" = flags t.cflags;
+          "CXXFLAGS_${e}" = flags t.cflags;
+        }
+        // lib.optionalAttrs (t.bindgen.extraClangArgs != [ ]) {
+          "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags t.bindgen.extraClangArgs;
+        };
+      str = v: if v == null then null else "${v}";
+      linker = str t.linker;
+      hostLinker = str t.host.linker;
+      named = prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
+      runner =
+        if t.runner == null then
+          null
+        else if builtins.isFunction t.runner then
+          t.runner {
+            lockfile = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) "Cargo.lock"}";
+            workspace = wsName;
+          }
+        else
+          t.runner;
+    in
+    if t == null then
+      {
+        mkWorkspace = { };
+        runner = null;
+        testSystem = null;
+      }
+    else
+      {
+        mkWorkspace = {
+          spec = {
+            inherit (t) rustflags;
+            inherit linker hostLinker;
+          };
+          specTools =
+            named "spec-linker" (lib.filter (x: x != null) [
+              linker
+              hostLinker
+            ])
+            // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
+          hostEnv = envStrings t.host.env;
+          targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
+          targetEnv = envStrings (cEnv // t.env);
+        };
+        runner = if runner == null then null else [ "${runner}" ];
+        inherit (t) testSystem;
+      };
 
   # instantiate's overrides for one workspace on one target, keyed
   # "<name>@<version>".
@@ -274,10 +431,21 @@ let
 
   checkMode =
     wsName: vName: v:
-    if v.mode != "build" then
-      throw "breakbulk: workspaces.${wsName}.variants.${vName}: mode `${v.mode}` is not implemented yet (M4)"
+    if v.benches && (v.mode == "check" || v.mode == "clippy") then
+      throw "breakbulk: workspaces.${wsName}.variants.${vName}: `benches` needs a build variant, not `${v.mode}`"
     else
       v;
+
+  targetCfg = triple: cfg.targets.${triple} or { };
+
+  shippedRemapScopeOf =
+    triple: v:
+    products.shippedRemapScope {
+      inherit triple;
+      stagePreset = (targetCfg triple).stagePreset or null;
+      targetStages = (targetCfg triple).stages or { };
+      coverage = v.mode == "coverage";
+    };
 
   instance =
     wsName: ws: triple: vName:
@@ -285,8 +453,14 @@ let
       v = checkMode wsName vName ws.variants.${vName};
       entries = locks.${wsName};
       sel = ws.targets.${triple}.packages;
+      s = specFor wsName triple;
+      # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
+      # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
+      # set, as stdenv's separateDebugInfo does. Target units only.
+      buildId = lib.optionalAttrs (shippedRemapScopeOf triple v != null) { NIX_SET_BUILD_ID = "1"; };
     in
-    mkWorkspace pkgs {
+    mkWorkspace pkgs (
+      {
       inherit root tools fetchArgs;
       path = ws.path;
       toolchain = {
@@ -304,64 +478,60 @@ let
       extraSources = extraSourcesOf entries;
       packageOverrides = instOverrides entries triple;
       inherit (cfg) strictSources;
-      targetEnv = envStrings (cfg.targets.${triple}.env or { });
       name = "${wsName}-${triple}-${vName}";
-    };
+      shippedRemapScope = shippedRemapScopeOf triple v;
+      packages = testConfigs wsName;
+      inherit (cfg) ca;
+      inherit (v) mode clippyArgs;
+      clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
+      bench = v.benches;
+      inherit (s) runner testSystem;
+    }
+    // s.mkWorkspace
+    // {
+      targetEnv = buildId // (s.mkWorkspace.targetEnv or { });
+    }
+    # Coverage: `-C instrument-coverage` on target units, through the
+    # spec's rustflags (so under the key the project uses, decision 33).
+    // lib.optionalAttrs (v.mode == "coverage") {
+      spec =
+        let
+          base =
+            if s.mkWorkspace.spec or null != null then
+              s.mkWorkspace.spec
+            else
+              {
+                rustflags = [ ];
+                linker = null;
+                hostLinker = null;
+              };
+        in
+        base
+        // {
+          rustflags = base.rustflags ++ [
+            "-C"
+            "instrument-coverage"
+          ];
+        };
+    }
+    );
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
-  # One product per package from its build-plan roots.
-  products =
-    inst: sel:
-    let
-      byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.roots);
-      selected = if sel == null then byPkg else lib.filterAttrs (n: _: lib.elem n sel) byPkg;
-      product =
-        pkg: rs:
-        let
-          built = lib.filter (r: r.breakbulkRoot.unit != null) rs;
-          unbuilt = lib.filter (r: r.breakbulkRoot.unit == null) rs;
-          roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) r) rs);
-          dirOf = r: if r.breakbulkRoot.kind == "bin" then "bin" else "lib";
-          drv =
-            if built == [ ] then
-              lib.head rs
-            else
-              pkgs.runCommand pkg { } (
-                ''
-                  mkdir -p $out
-                ''
-                + lib.concatMapStrings (
-                  r:
-                  if r.breakbulkRoot.kind == "bin" then
-                    # Cargo's own copy is named after the target, without
-                    # the -C extra-filename hash.
-                    ''
-                      files=(${r}/*)
-                      if [ ''${#files[@]} -ne 1 ]; then
-                        echo "expected one file in ${r}, found: ''${files[*]}" >&2
-                        exit 1
-                      fi
-                      install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}
-                    ''
-                  else
-                    ''
-                      mkdir -p $out/${dirOf r}
-                      cp -L --no-preserve=mode ${r}/* $out/${dirOf r}/
-                    ''
-                ) built
-              );
-        in
-        drv
-        // {
-          inherit roots;
-          unbuilt = map (r: {
-            root = rootName r;
-            inherit (r.breakbulkRoot) reason;
-          }) unbuilt;
-        };
-    in
-    lib.mapAttrs product selected;
+  # One product per package: its build-plan roots through the target's
+  # stages (lib/products.nix).
+  productsOf =
+    wsName: ws: triple: inst: sel:
+    products.mkProducts {
+      inherit pkgs inst triple;
+      select = sel;
+      stagePreset = (targetCfg triple).stagePreset or null;
+      targetStages = (targetCfg triple).stages or { };
+      targetChecks = (targetCfg triple).checks or { };
+      packageConfig = productConfig wsName triple;
+      inherit (cfg) ca;
+      lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
+    };
 
   testName =
     r:
@@ -374,6 +544,78 @@ let
       "lib"
     else
       "${b.kind}-${b.target}";
+
+  selectPkgs = sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
+
+  # benches.<pkg>.<name>: bench-plan roots installed as $out/bin/<target>
+  # (stubs as they are): a bench by its name, the lib harness in bench
+  # mode as `lib`, a bin's as `bin-<name>`.
+  benchesOf =
+    inst: sel:
+    let
+      byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.benches);
+      nameOf =
+        r:
+        let
+          b = r.breakbulkRoot;
+        in
+        if b.kind == "bench" then
+          b.target
+        else if b.kind == "lib" then
+          "lib"
+        else
+          "${b.kind}-${b.target}";
+      install =
+        r:
+        if r.breakbulkRoot.unit == null then
+          r
+        else
+          pkgs.runCommand r.breakbulkRoot.target { } ''
+            files=(${r}/*)
+            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}
+          '';
+    in
+    lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (
+      selectPkgs sel byPkg
+    );
+
+  # testRuns.<pkg>.<name>: test runs, named as `tests` names test
+  # binaries; `.enabled` holds those whose run is enabled
+  # (`test.binaries.<binary>.enable`).
+  namedRuns = inst: namedRuns' inst.testRuns (pkg: k: inst.checks ? "test/${pkg}/${k}");
+  namedRuns' =
+    allRuns: isEnabled: sel:
+    let
+      split = key: builtins.match "([a-z]+)/(.*)" key;
+      short =
+        key:
+        let
+          m = split key;
+        in
+        if m == null then
+          key
+        else if lib.head m == "lib" then
+          "lib"
+        else if lib.head m == "bench" then
+          # Bench plans (benchRuns): a bench by its name, as in `benches`.
+          lib.last m
+        else
+          "${lib.head m}-${lib.last m}";
+      long = key: if split key == null then "test/${key}" else key;
+    in
+    lib.mapAttrs (
+      pkg: runs:
+      let
+        keys = lib.attrNames runs;
+        counts = lib.groupBy short keys;
+        nameOf = k: if lib.length counts.${short k} > 1 then long k else short k;
+        pick = ks: lib.listToAttrs (map (k: lib.nameValuePair (nameOf k) runs.${k}) ks);
+      in
+      pick keys
+      // {
+        enabled = pick (lib.filter (isEnabled pkg) keys);
+      }
+    ) (selectPkgs sel allRuns);
 
   # tests.<pkg>.<name>: test-plan roots installed as $out/bin/<target>
   # (stubs as they are).
@@ -408,17 +650,68 @@ let
         triple: vs:
         let
           sel = ws.targets.${triple}.packages;
-          variants = lib.mapAttrs (_: inst: {
-            packages = products inst sel;
-            tests = testsOf inst sel;
-          }) vs;
+          variants = lib.mapAttrs (
+            vName: inst:
+            let
+              v = ws.variants.${vName};
+            in
+            {
+              packages = productsOf wsName ws triple inst sel;
+              tests = testsOf inst sel;
+              testRuns = selectPkgs sel inst.testRuns;
+              # testRuns named as `tests` names test binaries, for repo.checks.
+              namedTestRuns = namedRuns inst sel;
+              testApps = selectPkgs sel inst.testApps;
+              doctests = selectPkgs sel inst.doctests;
+              benches = benchesOf inst sel;
+              benchRuns = selectPkgs sel inst.benchRuns;
+              namedBenchRuns = namedRuns' inst.benchRuns (_: _: true) sel;
+            }
+            // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
+              # Every unit of both plans: for clippy, its lints on every
+              # workspace member.
+              check = variantsLib.unitsCheck {
+                inherit pkgs;
+                name = "${wsName}-${triple}-${vName}-${v.mode}";
+                units = lib.attrValues inst.units.build ++ lib.attrValues inst.units.test;
+              };
+            }
+          ) vs;
           dflt =
             variants.${ws.defaultVariant}
               or (throw "breakbulk: workspaces.${wsName}.defaultVariant `${ws.defaultVariant}` is not one of its variants (${lib.concatStringsSep ", " (lib.attrNames ws.variants)})");
+          benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) ws.variants);
+          benchVariant =
+            if ws.variants.${ws.defaultVariant}.benches or false then
+              ws.defaultVariant
+            else if lib.length benchVariants == 1 then
+              lib.head benchVariants
+            else
+              null;
+          s = specFor wsName triple;
         in
         {
           inherit variants;
-          inherit (dflt) packages tests;
+          benches =
+            if benchVariant != null then
+              variants.${benchVariant}.benches
+            else if benchVariants == [ ] then
+              { }
+            else
+              throw "breakbulk: workspaces.${wsName}: several variants have benches (${lib.concatStringsSep ", " benchVariants}) and the default variant does not; use target.<triple>.variants.<v>.benches";
+          benchRuns = if benchVariant != null then variants.${benchVariant}.benchRuns else { };
+          namedBenchRuns = if benchVariant != null then variants.${benchVariant}.namedBenchRuns else { };
+          inherit (dflt)
+            packages
+            tests
+            testRuns
+            namedTestRuns
+            testApps
+            doctests
+            ;
+          # The target spec's runner (a list: program and arguments, or
+          # null) and test system, as test runs use them.
+          inherit (s) runner testSystem;
         }
       ) instances;
     in
@@ -427,6 +720,7 @@ let
       target = perTarget;
       packages = perTarget.${nativeTriple}.packages or { };
       tests = perTarget.${nativeTriple}.tests or { };
+      testRuns = perTarget.${nativeTriple}.testRuns or { };
       plans = lib.mapAttrs (_: lib.mapAttrs (_: inst: inst.plans)) instances;
       devShell = mkDevShell {
         inherit pkgs nativeTriple;
@@ -440,21 +734,34 @@ let
 
   workspaces = lib.mapAttrs workspaceOut cfg.workspaces;
 
-  # repo.checks: every product that built something, and every test
-  # binary (test runs come with M4).
+  # repo.checks, for the default variant of every workspace and target:
+  # every product that built something (`build`) and its checks; every
+  # enabled test run (`test-<name>`, named as in `tests`) and doctest.
   checks = lib.concatMapAttrs (
     wsName: w:
     lib.concatMapAttrs (
       triple: t:
       lib.concatMapAttrs (
         pkg: p:
-        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) {
-          "${wsName}/${triple}/${pkg}/build" = p;
-        }
+        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+          {
+            "${wsName}/${triple}/${pkg}/build" = p;
+          }
+          // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
+        )
       ) t.packages
       // lib.concatMapAttrs (
-        pkg: ts: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) ts
-      ) t.tests
+        pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
+      ) t.namedTestRuns
+      // lib.mapAttrs' (pkg: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/doctest" d) t.doctests
+      // lib.optionalAttrs cfg.workspaces.${wsName}.benchSmoke (
+        lib.concatMapAttrs (
+          pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
+        ) t.namedBenchRuns
+      )
+      // lib.concatMapAttrs (
+        vName: v: lib.optionalAttrs (v ? check) { "${wsName}/${triple}/variant-${vName}/check" = v.check; }
+      ) t.variants
     ) w.target
   ) workspaces;
 

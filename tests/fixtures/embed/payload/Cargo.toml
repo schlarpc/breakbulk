@@ -1,0 +1,7 @@
+# The embedded product: its own workspace (and lockfile). The `host`
+# workspace's `embedder` crate embeds this binary through an env var that
+# names the product (`packages.embedder.env.PAYLOAD_BIN`).
+[package]
+name = "payload"
+version = "0.1.0"
+edition = "2021"

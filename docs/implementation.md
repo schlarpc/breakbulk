@@ -611,7 +611,7 @@ A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple
 | --- | --- | --- | --- | --- | --- |
 | `linuxGnu` | mold via wrapped bintools (`-fuse-ld=mold`); lld when cross-language LTO is on | `pkgsCross.<x>.stdenv.cc` | `CC_<triple>`, `AR_<triple>` | native; `qemu-user` when cross without a builder | `splitDebug` |
 | `linuxMusl` | as `linuxGnu` | `pkgsCross.<x>-musl.stdenv.cc` | `+crt-static` | as `linuxGnu` | `splitDebug` |
-| `staticGlibc` | mold, same as host | host `cc` | `+crt-static`, `-C relocation-model=static`, `-L native=` for `glibc.static` and the declared static archives; static `pkg-config` mode | native | `splitDebug` |
+| `staticGlibc` | mold, same as host | host `cc` | `+crt-static`, static-pie (mold links non-PIE static glibc Rust programs that crash at startup; `relocationModel = "static"` restores non-PIE), `-L native=` for `glibc.static` and the declared static archives; static `pkg-config` mode | native | `splitDebug` |
 | `msvc { arch; sdk }` | `lld-link` | `clang-cl`, `llvm-lib` from the LLVM matching rustc | `-Lnative=` for CRT, `um` and `ucrt` libs; `CFLAGS_<triple>` with `-imsvc`; `BINDGEN_EXTRA_CLANG_ARGS_<triple>` with `-isystem`; `RC`, `RCFLAGS`, `LIB`; optional `+crt-static` | `wine` with a `WINEPREFIX` in `$TMPDIR` | none |
 | `wasmBrowser` | lld from rustc's target spec, version-matched | unwrapped clang targeting wasm32 | none by default | `wasm-bindgen-test-runner` + headless Chromium, or Node | `bindgen` → `wasmOpt` |
 | `wasmComponent` | as `wasmBrowser` | clang + `wasilibc` when C is present | `-C link-self-contained=no` + `-L` to `wasilibc` when C is present | `wasmtime` | `wasmOpt` (optional) → `componentize` |
@@ -751,7 +751,7 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `wasm-browser` | wasm-bindgen, `ring`, getrandom backend cfg from config | wasm | Bindgen version matched; browser tests pass |
 | `wasm-component` | C via `wasilibc`, componentize, metadata stamp | wasm | Component has no imports |
 | `static` | musl and static-glibc products | musl x2, host | No `INTERP` or `NEEDED`; build scripts dynamic |
-| `same-triple` | Target spec with a marker linker and marker env on the host triple | host | No build-script or proc-macro unit sees either marker |
+| `same-triple` | Target spec with a marker linker and marker env on the host triple | host | No host unit (build-script compile, proc macro, host run) sees either marker; target-platform build-script runs do see spec env |
 | `variants` | Feature powerset, clippy, coverage, a custom profile that only inherits `release` | linux-gnu | Host units shared between build and clippy at the same profile; dependencies shared between check and clippy; no target units shared between build and coverage; all units shared between `release` and the custom profile |
 | `post-link` | Custom stages, `mkForce null` on `strip`, a check on `linked` | linux-gnu, msvc | Stage order; check sees unstripped bytes |
 | `source-paths` | Panics in dependencies, `splitDebug`, test binaries | linux-gnu | No source references in main outputs; `debug` references sources; editing a README in a package does not change its test binary |

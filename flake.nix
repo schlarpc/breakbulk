@@ -122,6 +122,14 @@
               breakbulk = self.lib;
             }) [ "workspaces" ]
           )
+          # Products through stages, source paths, products as inputs and
+          # variants through mkRepository (IFD).
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "products-${n}" v) (
+            builtins.removeAttrs (import ./tests/products {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repos" ]
+          )
         ));
     };
 }

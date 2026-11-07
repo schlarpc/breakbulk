@@ -1,0 +1,7 @@
+# wasm-component ("wasm-component" in docs/implementation.md): a
+# wasm32-unknown-unknown core module with C compiled against nixpkgs'
+# wasilibc, componentized by the product's stages. The component must have
+# no imports.
+[workspace]
+resolver = "3"
+members = ["comp"]

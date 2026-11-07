@@ -91,6 +91,26 @@ pkgs:
   testSystem ? null,
   ca ? null,
   checkout ? null,
+  # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
+  # `shippedRemapScope`); null remaps every scope.
+  shippedRemapScope ? null,
+  # Variants (lib/variants.nix): `mode` is build, check, clippy or
+  # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
+  # matching rustc). `bench` adds a bench plan (`cargo bench --no-run`):
+  # ws.benches, ws.plans.bench, ws.units.bench.
+  mode ? "build",
+  clippyDriver ? null,
+  clippyArgs ? [ ],
+  bench ? false,
+  # The target's toolchain spec (M3, from lib/repository.nix):
+  #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)
+  #   specTools.<name> = <store path>  tool paths the spec puts in the plan
+  #   hostEnv = { };                    the host spec's env (host units only)
+  #   targetPackageSet                  the target units' env capture's pkgs
+  spec ? null,
+  specTools ? { },
+  hostEnv ? { },
+  targetPackageSet ? pkgs,
 }:
 let
   wsDir = util.normalizeRel path;
@@ -125,10 +145,16 @@ let
   );
   workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views // outsideViews;
 
-  plans = lib.genAttrs [ "build" "test" ] (
+  # Check and clippy variants link nothing: no roots, no test runs.
+  checking = mode == "check" || mode == "clippy";
+
+  plans = lib.genAttrs ([ "build" "test" ] ++ lib.optional bench "bench") (
     kind:
     mkPlan pkgs {
       inherit
+        mode
+        clippyDriver
+        clippyArgs
         vendor
         tools
         kind
@@ -139,6 +165,7 @@ let
         wsDir
         noDefaultFeatures
         allFeatures
+        spec
         ;
       packages = select;
       inherit (toolchain) cargo rustc;
@@ -153,7 +180,7 @@ let
       platform = "host";
     };
     target = envCapture.base {
-      inherit pkgs;
+      pkgs = targetPackageSet;
       platform = "target";
     };
   };
@@ -182,7 +209,16 @@ let
     cargo = toolchain.cargo;
     breakbulk-unit = "${tools.breakbulk-unit}/bin/breakbulk-unit";
     shell = "${pkgs.bash}/bin/bash";
-  };
+  }
+  # rust-overlay toolchains are symlinkJoins of components; Cargo records
+  # its own resolved path (`CARGO`), which lies in a component.
+  // lib.listToAttrs (
+    lib.imap0 (i: p: lib.nameValuePair "toolchain-component-${toString i}" p) (
+      lib.unique ((toolchain.rustc.paths or [ ]) ++ (toolchain.cargo.paths or [ ]))
+    )
+  )
+  // specTools
+  // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
   inst =
     kind:
@@ -192,7 +228,10 @@ let
       plan = "${plans.${kind}}/plan.json";
       sources = { inherit workspace crates; };
       tools = unitTools;
-      host.envCapture = captures.host;
+      host = {
+        envCapture = captures.host;
+        env = hostEnv;
+      };
       target = {
         envCapture = captures.target;
         env = targetEnv;
@@ -200,16 +239,21 @@ let
       # `packages` (by name) and mkRepository's `packageOverrides` (by name
       # or name@version, already in instantiate's shape); the latter win.
       overrides = overrides // packageOverrides;
-      inherit strictSources;
-      roots = predictedRoots {
-        workspaceRoots = wsRoots;
-        planKind = kind;
-        inherit variant;
-      };
+      inherit strictSources shippedRemapScope;
+      roots =
+        if checking then
+          null
+        else
+          predictedRoots {
+            workspaceRoots = wsRoots;
+            planKind = kind;
+            inherit variant;
+          };
       name = "${name}-${kind}-units";
     };
   built = inst "build";
   tested = inst "test";
+  benched = inst "bench";
 
   # Put a root unit's single linked file at $out/<dir>/<name>. Products and
   # their stages come in M4; this is only enough to run things.
@@ -236,6 +280,7 @@ let
       ;
     plan = plans.test;
     inst = tested;
+    coverage = mode == "coverage";
     sources = { inherit workspace crates; };
     tools = unitTools;
   };
@@ -257,11 +302,45 @@ in
   units = {
     build = built.units;
     test = tested.units;
-  };
+  }
+  // lib.optionalAttrs bench { bench = benched.units; };
   unitsJson = {
     build = built.unitsJson;
     test = tested.unitsJson;
-  };
+  }
+  // lib.optionalAttrs bench { bench = benched.unitsJson; };
+  # Bench-plan roots (benches and harnesses in bench mode), by root name.
+  benches = if bench then benched.roots else { };
+  # Smoke runs of the bench plan's binaries: each once with `--test`, in
+  # its test-run environment (`test.env`, `test.path`; no test arguments).
+  # By package, then binary key as in testRuns.
+  benchRuns =
+    if !bench then
+      { }
+    else
+      (testRuns.mkTestRuns {
+        inherit
+          pkgs
+          target
+          runner
+          testSystem
+          ca
+          ;
+        name = "${name}-bench";
+        packages = lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots))) (
+          pkg: {
+            test = (packages.${pkg}.test or { }) // {
+              args = [ "--test" ];
+              includeIgnored = false;
+              binaries = { };
+            };
+          }
+        );
+        plan = plans.bench;
+        inst = benched;
+        sources = { inherit workspace crates; };
+        tools = unitTools;
+      }).runs;
   packages = lib.mapAttrs' (
     _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" r.breakbulkRoot.target r)
   ) bins;

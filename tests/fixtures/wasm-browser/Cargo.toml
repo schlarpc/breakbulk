@@ -1,0 +1,7 @@
+# wasm-browser ("wasm-browser" in docs/implementation.md): a wasm-bindgen
+# library for wasm32-unknown-unknown with `ring` (C compiled by clang for
+# wasm32) and getrandom, whose JS backend is chosen by a cfg in the
+# project's own .cargo/config.toml. Tests run under wasm-bindgen-test-runner.
+[workspace]
+resolver = "3"
+members = ["ui"]

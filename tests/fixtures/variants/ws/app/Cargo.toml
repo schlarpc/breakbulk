@@ -1,0 +1,8 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+lib-a = { path = "../lib-a", default-features = false }
+pm = { path = "../../deps/pm" }

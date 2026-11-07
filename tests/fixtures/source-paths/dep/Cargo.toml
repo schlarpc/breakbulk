@@ -1,0 +1,8 @@
+[package]
+name = "dep"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"
+
+[dependencies]
+itoa = "1.0.11"

@@ -723,3 +723,113 @@ tells integration tests where it would be. breakbulk points that at a
 path that never exists, so a test that runs it fails, as under Cargo.
 Alternative: point it at a stub that fails with "not built because
 features X are off", which gives a clearer message but differs from Cargo.
+
+## 67. FYI: milestone M3's day-one targets work
+
+All six toolchain presets work and every M3 test passes in the Nix sandbox:
+- static musl binaries (x86_64 and aarch64, tests run under qemu) and fully
+  static glibc binaries, with no dynamic loader or shared libraries, while
+  build scripts stay dynamic;
+- a target spec on the host's own triple doesn't leak into build scripts;
+- cross-compiled `-sys` crates (openssl, cmake, bindgen) for aarch64;
+- Windows: C code, a resource file, bindgen; tests run under wine;
+  ARM64 links; `.exe` rebuilds are byte-identical;
+- wasm for browsers (tests run in Node with the lockfile-matched runner)
+  and wasm components (C code via wasi-libc, no imports).
+Not working yet: headless Chromium as a test runner (crashes in the
+sandbox; Node works), cross-language LTO, and testing on a real aarch64
+build machine.
+
+## 68. ASK: breakbulk overrides rustc's built-in linker on Linux
+
+Since about Rust 1.90, rustc links Linux x86_64 programs with its own bundled
+linker by default, which skips nixpkgs' linker wrapper (and its rpath and
+hardening handling). The official opt-out is a compiler flag, and compiler
+flags can't reach build scripts. So breakbulk's linker wrapper quietly
+removes rustc's "use the bundled linker" arguments and links with mold.
+Alternative: use the official flag for your own code only and let build
+scripts keep rustc's bundled linker.
+
+## 69. ASK: fully static glibc builds are position-independent
+
+The docs said static glibc builds use `relocation-model=static`. With the
+mold linker, such Rust programs link but crash at startup (bfd and lld are
+fine). Default now: static position-independent executables (static-pie),
+which work with mold. `relocationModel = "static"` brings back the old
+setting. Alternative: keep non-PIE and use the slower bfd linker for this
+preset.
+
+## 70. ASK: Windows and wasm presets need your compiler passed in
+
+These presets need to know your rustc's LLVM version (to pick matching
+`lld-link`, `clang-cl`, etc.), but targets are configured repository-wide
+while compilers are chosen per workspace. So you write
+`presets.msvc { inherit sdk rustc; }`, or give `llvmMajor` directly. A
+cleaner design would let a preset read the workspace's compiler itself;
+that needs targets to become per-workspace, which is a bigger change. Worth
+doing?
+
+## 71. FYI: smaller preset choices
+
+- musl builds link with Rust's own bundled C runtime pieces (nixpkgs' musl
+  lacks one library Rust needs); C code still uses nixpkgs' musl headers.
+- The host-side linker is also mold, so build scripts are shared between
+  all targets on the same machine.
+- Windows-specific environment (`RC`, `LIB`, ...) also reaches build
+  scripts that belong to the Windows build, since they need it; only
+  build-machine-side steps stay clean.
+- breakbulk now reads `include` and `cfg(...)` keys in your
+  `.cargo/config.toml` when deciding where to add its compiler flags
+  (entry 33).
+
+## 72. FYI: milestone M4's products and variants work
+
+Passing: products go through their post-link steps by default (Linux:
+split debug info, then install), with your own steps and checks per target
+and per package; shipped binaries contain no source paths while the
+separate debug output lets gdb show source lines; editing a README doesn't
+change a test binary; one workspace can embed another workspace's product
+without the rest of its build waiting for it; check, clippy, coverage,
+feature-powerset and bench variants share exactly the build steps they
+should. All checks run green on `main`. Not done yet: the wasm version of
+the embed test, Windows post-link tests, separate source scopes for tests
+(`test.sourceScope`), and trying one of your real repositories end to end
+(that is the M4 exit criterion; it needs your input on which repo).
+
+## 73. ASK: coverage builds crash with nixpkgs' Rust 1.99
+
+Coverage-instrumented programs built with nixpkgs' rustc 1.99 crash when
+they exit, inside the coverage runtime. Plain `cargo` with the same compiler
+does the same, so it isn't breakbulk's fault; rust-overlay's 1.99 works,
+and the test uses that. It looks like a nixpkgs bug. Want me to dig in and
+prepare an upstream report (I won't file anything without your OK)?
+
+## 74. ASK: build IDs are turned on for targets that split debug info
+
+Splitting debug info needs a build ID in each binary. breakbulk turns on
+nixpkgs' own linker-wrapper switch for it (`NIX_SET_BUILD_ID=1`) on target
+build steps when the target's steps include splitting debug info. This
+changed every target build step once. Alternative: each preset passes the
+linker flag itself.
+
+## 75. ASK: lint variants and benchmarks
+
+- `check` and `clippy` variants check all targets, like the usual
+  `cargo clippy --all-targets`; they produce no binaries or test runs.
+- A variant opts into benchmarks with `benches = true` (usually with
+  `profile = "bench"`). `benches.<pkg>.<bench>` comes from the default
+  variant if it has benches, else from the one variant that does; if
+  several do, that's an error asking you to pick.
+Do these match how you'd want to configure them?
+
+## 76. FYI: smaller product choices
+
+- How source paths are hidden follows the target's post-link steps, not
+  each package's, because each library is compiled once and shared. A
+  package that removes debug splitting keeps source paths in its binary;
+  the default "no source references" check will catch that.
+- Targets name their default post-link chain with `stagePreset`; every
+  preset sets it.
+- Products keep file extensions (`bin/app.exe` on Windows).
+- `clippyArgs` works like `cargo clippy -- ARGS` and reaches only your own
+  crates, so dependencies stay shared with `check`.
