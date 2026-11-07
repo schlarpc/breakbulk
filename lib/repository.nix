@@ -249,6 +249,8 @@ let
         args = a.args ++ b.args;
         includeIgnored = a.includeIgnored || b.includeIgnored;
         sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
+        runner = if b.runner != null then b.runner else a.runner;
+        nextest = lib.mapAttrs (k: v: if b.nextest.${k} != null then b.nextest.${k} else v) a.nextest;
         binaries = lib.zipAttrsWith (
           _:
           lib.foldl'
@@ -272,10 +274,32 @@ let
         includeIgnored = false;
         sourceScope = [ ];
         binaries = { };
+        runner = null;
+        nextest = {
+          profile = null;
+          configFile = null;
+          package = null;
+        };
       };
+      # nextest reads `.config/nextest.toml` under the Cargo workspace root.
+      nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";
+      withDefaults =
+        t:
+        t
+        // {
+          nextest = t.nextest // {
+            configFile =
+              if t.nextest.configFile == null && builtins.pathExists nextestConfig then
+                nextestConfig
+              else
+                t.nextest.configFile;
+          };
+        };
     in
     lib.genAttrs members (pkg: {
-      test = lib.foldl' (acc: k: mergeTest acc cfg.packages.${k}.test) empty (memberKeys wsName pkg);
+      test = withDefaults (
+        lib.foldl' (acc: k: mergeTest acc cfg.packages.${k}.test) empty (memberKeys wsName pkg)
+      );
     });
 
   # The package set of a target's units: the target spec's `packageSet`

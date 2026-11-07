@@ -156,6 +156,47 @@ let
             default = { };
             description = "Per test binary settings.";
           };
+          runner = mkOption {
+            type = types.nullOr (
+              types.enum [
+                "libtest"
+                "nextest"
+              ]
+            );
+            default = null;
+            example = "nextest";
+            description = ''
+              How this package's test binaries run: `libtest` (the binary
+              itself, as `cargo test` runs it) or `nextest` (cargo-nextest's
+              reuse-build mode over the one binary, with the project's
+              nextest configuration: retries, timeouts, default filter, test
+              groups). Each binary is still its own test run. `null` means
+              `libtest`.
+            '';
+          };
+          nextest = {
+            profile = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "ci";
+              description = "nextest profile for this package's test runs (`null`: `default`).";
+            };
+            configFile = mkOption {
+              type = types.nullOr types.path;
+              default = null;
+              example = lib.literalExpression "./.config/nextest.toml";
+              description = ''
+                nextest configuration file. `null`: the repository's
+                `.config/nextest.toml` when it exists, else nextest's
+                defaults.
+              '';
+            };
+            package = mkOption {
+              type = types.nullOr types.package;
+              default = null;
+              description = "cargo-nextest to run with (`null`: the test platform's `cargo-nextest`).";
+            };
+          };
         };
 
         strictSources = mkOption {
