@@ -1380,3 +1380,26 @@ let a package place a product at a path inside its source view (only that
 package's build steps would change). Default: not implemented yet.
 
 >this is similar to other forms of input like env vars right?
+
+## 111. FYI: dynamic mode now matches the default mode (resolves 78)
+
+Doctests, test apps, nextest, `explainSharing` and products with
+feature-gated binaries all work in dynamic mode, with identical build-step
+IDs, product bytes and test outcomes on eight fixtures (Nix master, private
+store). Nothing changed for the default mode.
+
+## 112. ASK: dynamic-mode checks for products whose binaries all need features
+
+In dynamic mode, Nix can't know at evaluation time whether Cargo built any
+of a product's binaries. For a product where every binary needs a feature,
+`repo.checks` therefore uses a lighter check: it builds the binaries Cargo
+did build and logs the skipped ones, instead of the full product with its
+post-link steps and "no source references" check (which would fail
+`nix flake check` when everything is skipped). Alternative: keep the full
+product in checks and accept that failure. Default: the lighter check.
+
+## 113. FYI: `explainSharing` uses import-from-derivation even in dynamic mode
+
+It's a debugging tool, not part of a build, so it reads the build steps the
+default way. For crates downstream of an embedded product it describes the
+default mode's version of them.
