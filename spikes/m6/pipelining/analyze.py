@@ -184,6 +184,29 @@ def critical_path(jobs):
     return end
 
 
+def critical_chain(jobs):
+    """The jobs on one longest path, with their start times and the mark
+    each waited for."""
+    start = [0.0] * len(jobs)
+    via = [None] * len(jobs)
+    for k in topo(jobs):
+        best = (0.0, None)
+        for (src, mark) in jobs[k]["deps"]:
+            t = start[src] + jobs[src]["marks"][mark]
+            if t > best[0]:
+                best = (t, (src, mark))
+        start[k], via[k] = best
+    k = max(range(len(jobs)), key=lambda k: start[k] + jobs[k]["dur"])
+    chain = []
+    mark = "done"
+    while k is not None:
+        chain.append((start[k], jobs[k]["dur"], mark, jobs[k]["name"]))
+        if via[k] is None:
+            break
+        k, mark = via[k]
+    return list(reversed(chain))
+
+
 def simulate(jobs, cores, bl):
     """Event-driven list scheduling; returns makespan."""
     waiting = [len(j["deps"]) for j in jobs]
@@ -248,8 +271,17 @@ def main():
     ap.add_argument("--overhead", type=float, default=0.0)
     ap.add_argument("--cores", default="4,8,16")
     ap.add_argument("--json")
+    ap.add_argument("--explain", action="store_true", help="print each critical path")
     ap.add_argument("dirs", nargs="+")
     a = ap.parse_args()
+    if a.explain:
+        for d in a.dirs:
+            units, timing, _ = load(d)
+            for mode in ("unsplit", "pipelined"):
+                print(f"\n{os.path.basename(d.rstrip('/'))} {mode} critical path:")
+                for (s, dur, mark, name) in critical_chain(build_jobs(units, timing, mode, a.overhead)):
+                    print(f"  start {s:7.1f}  dur {dur:6.1f}  (dependent waited for {mark:5})  {name}")
+        return
     cores = [int(c) for c in a.cores.split(",")]
     rows = [analyze(d, a.overhead, cores) for d in a.dirs]
     cols = ["cp"] + [f"j{c}" for c in cores]
