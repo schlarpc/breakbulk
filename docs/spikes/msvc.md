@@ -68,7 +68,7 @@ xwin reads `https://aka.ms/vs/<v>/release/channel`, which moves with Visual Stud
 
 xwin checks every payload against the sha256 in the package manifest, but it does not check the package manifest itself. Its source says that hash is never correct. If Microsoft updates the 26100 SDK, or drops CRT 14.44 from the VS 17 channel, a fresh build fails with a hash mismatch or a missing version. It does not drift silently. A substituted or cached SDK is unaffected.
 
-For a stronger pin, `channelManifest` takes a fetched copy of the `.chman` file that `aka.ms` redirects to (here `https://download.visualstudio.microsoft.com/download/pr/6bd63d7f-…/VisualStudio.17.Release.chman`). It is passed as `--manifest`, which fixes the package manifest URL as well. This is not exercised by the checks.
+For a stronger pin, `channelManifest` takes a fetched copy of the `.chman` file that `aka.ms` redirects to (here `https://download.visualstudio.microsoft.com/download/pr/6bd63d7f-…/VisualStudio.17.Release.chman`). It is passed as `--manifest`, which fixes the package manifest URL as well. Checked once by hand: with `channelManifest = fetchurl { url = <that .chman>; sha256 = "1mhy7c9fr9x9g2fmxd64s96f4mikzqlh7fy3c54bcmi0dfpva05k"; }`, `nix build --rebuild` gives the same output hash as the live channel. The flake checks do not exercise it. How long Microsoft keeps old `.chman` and `.vsman` URLs is not known.
 
 ## The env that works
 
