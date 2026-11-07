@@ -1,0 +1,16 @@
+[package]
+name = "vendor-collision"
+version = "0.1.0"
+edition = "2021"
+
+# itoa 1.0.11 twice: from crates.io and from its git repository at the same
+# version. time-macros comes from a git workspace that uses workspace
+# inheritance for dependencies and lints, and pulls time-core (git) and
+# num-conv (crates.io).
+[workspace]
+
+[dependencies]
+itoa = "=1.0.11"
+itoa_git = { package = "itoa", git = "https://github.com/dtolnay/itoa", tag = "1.0.11" }
+cfg-if = "1"
+time-macros = { git = "https://github.com/time-rs/time", tag = "v0.3.41" }

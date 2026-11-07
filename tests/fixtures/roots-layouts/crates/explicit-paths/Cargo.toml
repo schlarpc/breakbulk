@@ -1,0 +1,32 @@
+[package]
+name = "explicit-paths"
+version = "0.1.0"
+edition = "2021"
+build = "tools/build.rs"
+autotests = false
+
+[lib]
+path = "lib/mod.rs"
+crate-type = ["cdylib", "rlib"]
+test = false
+
+[[test]]
+name = "custom"
+path = "checks/custom.rs"
+harness = false
+
+[[bench]]
+name = "bb"
+harness = false
+required-features = ["nightly"]
+
+[[example]]
+name = "ex"
+crate-type = ["staticlib"]
+
+[[bin]]
+name = "outside-dir"
+path = "../../shared/bin/main.rs"
+
+[features]
+nightly = []

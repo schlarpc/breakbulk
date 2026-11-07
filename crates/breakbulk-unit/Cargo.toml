@@ -5,4 +5,20 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "breakbulk-unit"
+path = "src/main.rs"
+# The library has the same name; documenting both would collide.
+doc = false
+
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# Only for the smoke test, which renders a plan. Dev-dependencies are not
+# inputs of the unit builder.
+breakbulk-format = { path = "../breakbulk-format" }

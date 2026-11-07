@@ -1,0 +1,15 @@
+[package]
+name = "bin-dirs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared-util.workspace = true
+
+[[example]]
+name = "ex1"
+test = true
+
+[[bin]]
+name = "bar"
+test = false

@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "virtual-sub"]
+exclude = ["crates/excluded"]
+
+[workspace.package]
+version = "1.2.3"
+edition = "2021"
+
+[workspace.dependencies]
+shared-util = { path = "shared/util" }

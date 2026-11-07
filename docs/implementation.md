@@ -67,7 +67,7 @@ All four binaries live in one Cargo workspace. `breakbulk-unit` stays small and 
 # build plan
 cargo build --frozen --offline <selection> \
   --target <triple> --profile <profile> [--features …] \
-  --config '<generated source replacement, one directory per source>' \
+  --config <generated source-replacement file, one directory per source> \
   --config '<spec rustflags and linkers as target.<triple> keys>'
 # test plan: the same, with `cargo test --no-run`, then `cargo test --doc` for doctests
 # bench variant: `cargo bench --no-run` with the bench profile
@@ -186,7 +186,7 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
       "platform": "target",
       "program": ["/nix/store/…-rustc/bin/rustc"],
       "args": ["--crate-name", "ring", [{ "crateSrc": "…ring@0.17.14", "rel": "src/lib.rs" }], "…",
-               ["--extern", "cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
+               "--extern", ["cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
                { "splice": "r-ring-…", "kind": "rustc-cfg" },
                { "splice": "r-ring-…", "kind": "rustc-link-lib" }],
       "env": { "CARGO_PKG_NAME": "ring", "OUT_DIR": [{ "out": "r-ring-…", "output": "out" }] },
@@ -211,7 +211,7 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
-- **`roots`** are the plan's products: bins, cdylibs, staticlibs and examples in a build plan; test and bench binaries in a test plan.
+- **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test, bench and example binaries in a test plan.
 
 ### Invariants
 
@@ -227,9 +227,11 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
 ### Inputs
 
 - `plan.json`: the output of a plan derivation.
-- `sources.json`: built at evaluation time. Workspace packages map to their source-view store paths, which evaluation has already copied to the store. Crate sources map to their fetch derivations, passed with drv-only context, so instantiation can name them without building them.
-- `toolchains.json`: the host and target specs, with tools passed as drv-only references, including the `breakbulk-unit` builder.
-- `overrides.json`: per-package env, inputs and env-capture references. Derivations here, including products of other workspaces, are passed with drv-only context.
+- `sources.json`: the names of workspace source views (keyed by directory relative to the repository root) and crate sources (keyed by package id).
+- `toolchains.json`: the host and target specs. Tool store paths are passed as plain strings, so that literal store paths in the plan (rustc in `program`) can be matched to a tool by prefix.
+- `overrides.json`: per-package env and env-capture names, keyed `name@version` or `name`.
+
+In IFD mode, nothing with string context reaches instantiation. `units.json` names every path it needs (`{"unit": id, "output": o}`, `{"input": key}`) and the Nix side fills in the values with their context. This has two consequences: the output must contain zero store references, because `builtins.fromJSON` refuses strings with context; and a source edit or an override change does not rerun instantiation at all, only a plan change or an added or removed input does. Dynamic-derivation mode renders real paths with the same code; a test checks that both give identical text.
 - The predicted root list.
 
 Instantiation therefore realises nothing except the plan and the source views. Neither the toolchain, nor crate sources, nor embedded products are built before units are known.
@@ -253,15 +255,17 @@ The instantiate derivation runs `breakbulk-instantiate --emit json` and writes `
 
 ### Dynamic-derivation mode
 
-The instantiate derivation is content-addressed with a text-hashed output and requires the system feature `builder-rpc-v0`. Its name, `breakbulk-instantiate-requires-builder-rpc-v0`, makes Nix's error self-explanatory when no builder supports the feature.
+The instantiate derivation is content-addressed with a text-hashed output and requires the system feature `builder-rpc-v0`, which Nix advertises automatically when `dynamic-derivations` is enabled (Nix master since 2026-07-21; first release 2.36). Nix's own error names the missing feature. Its name is `<ws>-<triple>-<variant>`, because submitted outputs must be named `<outer name>-<root>.drv` and that name appears in product paths.
 
-- Units are added in topological order with `nix derivation add`, or with harmonia's derivation types if they fit; spike B decides. Either way the input-addressed output paths must equal the ones Nix computes in IFD mode.
-- Each root is handed back with `nix store submit-output`, as an output named `<root>.drv`.
+- Units are written in topological order with harmonia's derivation hashing and store protocol over the restricted daemon socket. `nix derivation add` cannot be used: paths added during the build are not visible inside its sandbox, and it reads its inputs. Spike B confirmed `.drv` and output paths equal IFD mode's. Every output variable must be present (as an empty string) before hashing.
+- Each root gets a tiny wrapper derivation that symlinks the root unit's output, written as `<outer name>-<root>.drv` and handed back with `nix store submit-output`. Units downstream of an embedded product are deferred and refer to it by placeholder.
+
+The spike result is in [spikes/B-delivery.md](spikes/B-delivery.md).
 - `recursive-nix` is not used. It has an open removal proposal, and `builder-rpc-v0` replaces it for this purpose.
 
 ### Mode selection
 
-`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.nixVersion` is at least the first release that ships `builder-rpc-v0`. Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it. `mode = "ifd"` and `mode = "dynamic"` override the choice. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
+`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`). Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it. `mode = "ifd"` and `mode = "dynamic"` override the choice. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
 
 Unit derivations are identical in both modes. Products are not (resolved at build time in dynamic-derivation mode, input-addressed in IFD mode), so teams that mix Nix versions should pin the mode to share product cache entries.
 
@@ -283,7 +287,7 @@ A root in the plan that was not predicted is an error listing both sets, because
 
 ### Environment contract
 
-A unit's environment is built in layers; later layers win:
+A unit's environment is built in layers; later layers win, except for list-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, `NIX_LDFLAGS`), where later layers append:
 
 1. A fixed base: `HOME=/homeless-shelter`, `TMPDIR`, `NIX_BUILD_CORES`, `LC_ALL=C`, `TZ=UTC`.
 2. The env capture for the unit's package and platform, or the base capture for the platform.
@@ -359,9 +363,14 @@ When Cargo's `trim-paths` is in effect, Cargo's own remaps and scope are used in
 
 Inputs declared on a package become environment through nixpkgs' own setup hooks, not through code in breakbulk.
 
-- For each (package, platform) with `nativeInputs` or `inputs`, a derivation runs `stdenv.mkDerivation` with `nativeBuildInputs = nativeInputs` and `buildInputs = inputs`, and writes the environment its setup hooks produced as `env.json`. Target units use the target's stdenv (`pkgsCross.<target>.stdenv` when cross); host units use the build platform's stdenv, and both input lists count as native there.
+- For each (package, platform) with `nativeInputs` or `inputs`, a derivation runs `stdenv.mkDerivation` with `nativeBuildInputs = nativeInputs` and `buildInputs = inputs`, and writes the environment its setup hooks produced as `env.json`. Target units use the target's stdenv (`pkgsCross.<target>.stdenv` when cross); host units use the build platform's stdenv. Tools stay native inputs there, but libraries must be the build platform's `buildInputs`, or the wrappers add no include or library flags; `inputs` is therefore a function of a package set (`inputs = p: [ p.openssl ]`), called with the package set matching each platform.
 - One **base capture** per platform has no inputs. It gives build scripts the baseline `buildRustPackage` has: coreutils, bash, make, the C compiler on `PATH`, and the standard hardening and wrapper variables.
-- A capture keeps only what setup hooks added relative to a plain shell, minus per-build values: `NIX_BUILD_TOP`, `TMPDIR`, `PWD`, `out`, log descriptors.
+- A capture keeps only what setup hooks added relative to a plain shell, minus per-build values: `NIX_BUILD_TOP`, `TMPDIR`, `PWD`, `out`, log descriptors, `SOURCE_DATE_EPOCH` (set by the base layer instead), and any value naming the capture's own output.
+- The capture derivation sets `strictDeps = true` (otherwise every input's `bin/` reaches `PATH` and flags are doubled) and `NIX_NO_SELF_RPATH = 1` (otherwise every binary gets an rpath to the capture). It strips stdenv's own `-frandom-seed`; each unit adds its own, as stdenv does. `NIX_*` variables are always kept, because some stdenvs (musl) set `NIX_HARDENING_ENABLE` as a derivation attribute.
+- A unit gets exactly one capture. Variables such as `CC`, `PATH` and `NIX_CFLAGS_COMPILE` mean "this stdenv's platform", so host and target captures never merge.
+- C objects carry source paths in their debug info; units add `-ffile-prefix-map` for the source views to the C flags, matching the Rust remaps.
+
+The spike result is in [spikes/C-env-capture.md](spikes/C-env-capture.md).
 - Captures are input-addressed. Their output references the inputs' store paths, so building a unit realises the inputs, and substituting a unit does not.
 
 To verify in a spike: that nixpkgs' compiler and linker wrappers behave the same when their role variables come from a replayed environment, and that no common setup hook relies on anything other than environment variables.
@@ -460,7 +469,7 @@ The planner always passes `--target`, and local Cargo without it behaves differe
 
 - exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
 - exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, `CARGO_TARGET_<TRIPLE>_LINKER`), matching the planner's `--config`;
-- includes the union of the packages' env captures, because one shell cannot scope env per unit;
+- includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 
 Limits, documented: binaries move to `target/<triple>/…`; a missing input declaration can work locally and fail in Nix; and for same-triple presets (static glibc, zig) local Cargo cannot keep target env away from host build scripts.
@@ -490,7 +499,7 @@ Each workspace gets a vendor directory with one subdirectory per source, followi
 - **Git:** one directory per source id (URL plus `branch`, `tag` or `rev` query, without the locked revision), named by a hash of the id.
 - **Inside each:** `<name>-<version>` symlinks to the fetched crates, for crates in this workspace's lockfile only.
 
-Generated config replaces each source with its directory:
+Generated config, passed as a file (`--config <file>`; an inline `--config` value may hold only one dotted key), replaces each source with its directory:
 
 ```toml
 [source.crates-io]
@@ -518,6 +527,7 @@ A workspace package's source is `lib.fileset.toSource { root = <repository root>
 The plan derivations' source is a skeleton, so they are rebuilt only when the manifests, the lockfile, config or the toolchain change:
 
 - every `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml` and `rust-toolchain.toml`;
+- an empty `README.md`, `README.txt` or `README` wherever one exists, because Cargo sets `CARGO_PKG_README` from its presence;
 - an empty file for every file name in the conventional target directories (`src/lib.rs`, `src/main.rs`, `src/bin`, `examples`, `tests`, `benches`, including `*/main.rs` forms), every explicit `path =` target and every `build.rs`.
 
 The skeleton copies file names only and needs no discovery rules; Cargo performs its own discovery during the trace.

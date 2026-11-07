@@ -1,0 +1,9 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+a = { git = "https://example.invalid/repo", branch = "main" }
