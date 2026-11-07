@@ -33,6 +33,19 @@ rec {
       inputs = with pkgs; [ openssl zstd sqlite glib dbus ];
     };
 
+    # A library given as a *native* input. With strictDeps, cc-wrapper and
+    # pkg-config env hooks only see deps at host offset 0 (buildInputs), so
+    # this gets no -isystem/-L/PKG_CONFIG_PATH for openssl.
+    opensslAsNative = captureEnv {
+      stdenv = pkgs.stdenv; name = "openssl-as-native";
+      nativeInputs = [ pkgs.pkg-config pkgs.openssl ];
+    };
+    # The same without strictDeps (the stdenv default for native builds).
+    opensslNoStrict = captureEnv {
+      stdenv = pkgs.stdenv; name = "openssl-nostrict"; strictDeps = false;
+      nativeInputs = [ pkgs.pkg-config ]; inputs = [ pkgs.openssl ];
+    };
+
     # Cross: target units of an aarch64 build use the cross stdenv.
     crossBase = crossCapture { stdenv = cross.stdenv; name = "cross-base"; survey = true; };
     crossOpenssl = crossCapture {
@@ -59,6 +72,7 @@ rec {
         name = "probe-live-${capture.name}";
         nativeBuildInputs = nativeInputs;
         buildInputs = inputs;
+        strictDeps = true;
         buildCommand = ''bash -eu ${./probe.sh} > $out 2>&1 || { cat $out; exit 1; }'';
       });
       replay = derivation (common // {
@@ -167,6 +181,22 @@ rec {
   e2e = {
     native = mkE2E pkgs;
     cross = mkE2E cross;
+  };
+
+  # What the build platform's cc does inside a live *cross* stdenv (as
+  # buildRustPackage's HOST_CC / host linker does): no role variable is set
+  # for its suffix salt, so it applies no NIX_* flags and no hardening.
+  hostCcInCrossLive = cross.stdenv.mkDerivation {
+    name = "host-cc-in-cross-live";
+    nativeBuildInputs = [ cross.buildPackages.pkg-config ];
+    buildInputs = [ cross.openssl ];
+    buildCommand = ''
+      {
+        env | grep -E '^NIX_(CC|BINTOOLS)_WRAPPER_TARGET' | sort
+        echo 'int main(void){return 0;}' > t.c
+        NIX_DEBUG=1 ${pkgs.stdenv.cc}/bin/cc -O2 -c t.c -o t.o 2>&1 | grep -E 'HARDENING|^extra flags|^  -f' || echo "(no hardening output)"
+      } > $out
+    '';
   };
 
   probes = {

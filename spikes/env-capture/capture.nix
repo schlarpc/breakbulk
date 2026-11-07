@@ -12,11 +12,17 @@
 , nativeInputs ? [ ]
 , inputs ? [ ]
 , survey ? false
+, strictDeps ? true
 }:
 stdenv.mkDerivation {
   name = "breakbulk-env-${name}";
   nativeBuildInputs = nativeInputs;
   buildInputs = inputs;
+  # As buildRustPackage does, and as cross stdenvs default to. Without it,
+  # setup.sh puts every input's bin/ on PATH and runs every env hook for
+  # every dependency offset (setup.sh: activatePackage, _addToEnv), so a
+  # library's tools leak onto PATH and flags are added twice.
+  inherit strictDeps;
   # setup.sh would otherwise add "-rpath $out/lib" (of this capture) to
   # NIX_LDFLAGS (setup.sh: _addRpathPrefix).
   NIX_NO_SELF_RPATH = 1;

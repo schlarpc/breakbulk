@@ -46,6 +46,36 @@ for f in "$live"/archives/*; do
   cmp -s "$f" "$replay/archives/$n" && echo "identical: $n" || echo "DIFFERENT: $n"
 done
 
+echo; echo "## environment of a build script with no inputs (base capture vs buildRustPackage)"
+keys() { cut -d= -f1 "$1" | sort -u; }
+echo "only in live (buildRustPackage):"; comm -23 <(keys "$live/build-script-env.txt") <(keys "$replay/build-script-env.txt") | sed 's/^/  /'
+echo "only in replay:"; comm -13 <(keys "$live/build-script-env.txt") <(keys "$replay/build-script-env.txt") | sed 's/^/  /'
+echo "in both, different value (store hashes normalised):"
+python3 - "$live/build-script-env.txt" "$replay/build-script-env.txt" <<'PY'
+import re, sys
+def load(p):
+    d = {}
+    for line in open(p):
+        k, _, v = line.rstrip("\n").partition("=")
+        d[k] = re.sub(r"/nix/store/[a-z0-9]{32}-", "/nix/store/HASH-", v)
+    return d
+a, b = load(sys.argv[1]), load(sys.argv[2])
+for k in sorted(set(a) & set(b)):
+    if a[k] != b[k]:
+        print(f"  {k}\n    live:   {a[k][:300]}\n    replay: {b[k][:300]}")
+PY
+
+echo; echo "## build-script executables (host units)"
+for f in "$live"/build-scripts/*; do
+  n=$(basename "$f")
+  if cmp -s "$f" "$replay/build-scripts/$n"; then echo "identical: $n"; continue; fi
+  echo "DIFFERENT: $n"
+  for x in "$f" "$replay/build-scripts/$n"; do
+    printf '  %-6s %s\n' "$( [ "$x" = "$f" ] && echo live || echo replay)" \
+      "$(readelf -hW "$x" | awk '/Type:/ {print $2}') $(readelf -dW "$x" | grep -oE 'FLAGS_1\).*' | tr -s ' ') relro=$(readelf -lW "$x" | grep -c GNU_RELRO) runpath=$(readelf -dW "$x" | grep -o 'runpath: .*' | tr ':' '\n' | grep -c nix/store)"
+  done
+done
+
 echo; echo "## final binary"
 r=$(nix-build -A pkgs.llvm --no-out-link 2>/dev/null)  # multi-target readelf/objcopy
 for b in "$live/env-capture-fixture" "$replay/env-capture-fixture"; do
@@ -59,7 +89,7 @@ cmp -s "$live/env-capture-fixture" "$replay/env-capture-fixture" && echo "binari
 echo; echo "## control: live build with NIX_NO_SELF_RPATH=1"
 ctl=$(nix-build -A "e2e.$which.liveNoSelfRpath" --no-out-link --max-jobs 2 --cores 4 2>/dev/null)
 echo "control: $ctl"
-for f in env-capture-fixture archives/* bindings/*; do
+for f in env-capture-fixture archives/* bindings/* build-scripts/*; do
   for g in "$ctl"/$f; do
     rel="${g#"$ctl"/}"
     cmp -s "$g" "$replay/$rel" && echo "byte-identical: $rel" || echo "DIFFERENT: $rel"

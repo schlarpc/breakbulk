@@ -17,4 +17,19 @@ for d in "$t"/build/*/ target/release/build/*/; do
   done
 done
 cp "$t/env-capture-fixture" "$out/"
+cp "$t"/build/env-capture-fixture-*/out/build-script-env.txt "$out/"
+# Build-script executables (host units). The replay driver moved the real
+# binary to *.real and put a wrapper script in its place.
+mkdir -p "$out/build-scripts"
+for b in target/release/build/*/build_script_*-*; do
+  case "$b" in *.d) continue ;; esac
+  [ -f "$b.real" ] && continue
+  name=$(basename "$(dirname "$b")"); name="${name%-*}"
+  cp "$b" "$out/build-scripts/$name"
+done
+for b in target/release/build/*/build_script_*.real; do
+  [ -f "$b" ] || continue
+  name=$(basename "$(dirname "$b")"); name="${name%-*}"
+  cp "$b" "$out/build-scripts/$name"
+done
 true
