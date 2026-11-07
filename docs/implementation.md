@@ -227,9 +227,11 @@ A unit's recorded env is the recorded env minus the baseline env the planner gav
 ### Inputs
 
 - `plan.json`: the output of a plan derivation.
-- `sources.json`: built at evaluation time. Workspace packages map to their source-view store paths, which evaluation has already copied to the store. Crate sources map to their fetch derivations, passed with drv-only context, so instantiation can name them without building them.
-- `toolchains.json`: the host and target specs, with tools passed as drv-only references, including the `breakbulk-unit` builder.
-- `overrides.json`: per-package env, inputs and env-capture references. Derivations here, including products of other workspaces, are passed with drv-only context.
+- `sources.json`: the names of workspace source views (keyed by directory relative to the repository root) and crate sources (keyed by package id).
+- `toolchains.json`: the host and target specs. Tool store paths are passed as plain strings, so that literal store paths in the plan (rustc in `program`) can be matched to a tool by prefix.
+- `overrides.json`: per-package env and env-capture names, keyed `name@version` or `name`.
+
+In IFD mode, nothing with string context reaches instantiation. `units.json` names every path it needs (`{"unit": id, "output": o}`, `{"input": key}`) and the Nix side fills in the values with their context. This has two consequences: the output must contain zero store references, because `builtins.fromJSON` refuses strings with context; and a source edit or an override change does not rerun instantiation at all, only a plan change or an added or removed input does. Dynamic-derivation mode renders real paths with the same code; a test checks that both give identical text.
 - The predicted root list.
 
 Instantiation therefore realises nothing except the plan and the source views. Neither the toolchain, nor crate sources, nor embedded products are built before units are known.

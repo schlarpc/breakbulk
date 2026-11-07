@@ -51,7 +51,7 @@ flowchart TD
   config --> inst
 ```
 
-Cargo is consulted only when manifests, the lockfile or config change. A source edit reruns only the cheap instantiate step and the units whose inputs changed.
+Cargo is consulted only when manifests, the lockfile or config change. A source edit reruns only the units whose inputs changed; in IFD mode the instantiate step does not rerun either.
 
 ### 1. Fetch
 

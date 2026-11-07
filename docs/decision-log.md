@@ -309,3 +309,32 @@ step rather than a content-addressed one; both work. Plain is chosen because
 caches that don't store the extra records content-addressing needs (FlakeHub
 Cache) can still serve it. The later stages (strip, sign, ...) stay
 content-addressed so an unchanged input doesn't re-run them.
+
+## 29. ASK: the generated per-crate build file contains names, not paths
+
+In the default (import-from-derivation) mode, breakbulk's Rust code
+generates a JSON file describing every per-crate build step, which Nix then
+reads. The docs planned to write real store paths into it. Instead it writes
+named placeholders ("the source of package X", "output rlib of unit Y") and
+Nix fills in the real paths when it reads the file. Benefits: editing a
+source file or changing a per-package setting no longer reruns that
+generation step at all, and nothing (no crate download, no toolchain) has to
+be built before Nix can read the file. Cost: Nix does a bit more string work
+per unit at evaluation time. This needs measuring on a graph with ~1,000
+units; if it is too slow, the fallback is the original design.
+
+## 30. ASK: names of outputs inside a workspace
+
+Each predicted output is named `<package>/<kind>/<target>`, for example
+`app/bin/app` or `app/test/integration`. A binary target that is also built
+as a test (unit tests inside `src/main.rs`) gets `bin-test`:
+`app/bin-test/app`. These are internal names; the user-facing attribute
+names (`packages.app`, `tests.app.integration`) are built from them later.
+Tell me if you want a different internal scheme before it spreads.
+
+## 31. FYI: a library's own unit tests aren't predicted yet
+
+`cargo test` also builds each library's `#[cfg(test)]` unit tests as a test
+binary. The output-name prediction doesn't list those yet. This will be
+fixed when the planner lands. Benchmarks that Cargo didn't select count as
+"skipped" (succeed with a message) rather than failing.
