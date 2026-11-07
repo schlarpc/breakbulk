@@ -39,6 +39,8 @@
 #                checks alike.
 #   runner-list  `targets.<triple>.runner` as a list (program and arguments):
 #                the test run runs `env BB_RUNNER=1 <binary>`.
+#   test-libs    a test run depends on the sysroot's target shared
+#                libraries (a small copy), not the whole toolchain.
 {
   pkgs ? import (
     let
@@ -467,6 +469,37 @@ let
     ]) "runner-list: the runner is ${builtins.toJSON t.runner}";
     t.namedTestRuns.a.runs_tool;
 
+  # --- test-libs --------------------------------------------------------------
+
+  # Decision 94: a test run depends on the sysroot's target libraries only
+  # (a small copy), not on the whole Rust toolchain.
+  testLibs =
+    let
+      t = namesRepo.workspaces.main.target.${native};
+      run = t.namedTestRuns.a.runs_tool;
+      sysroot = pkgs.rustc.unwrapped or pkgs.rustc;
+      libs = breakbulk.testRuns.testLibs pkgs sysroot native;
+      inputs = lib.attrNames (builtins.getContext (builtins.toJSON run.drvAttrs));
+    in
+    assert lib.assertMsg (!(lib.elem sysroot.drvPath inputs))
+      "test-libs: the test run depends on the whole sysroot ${sysroot.drvPath}";
+    assert lib.assertMsg (lib.elem libs.drvPath inputs)
+      "test-libs: the test run does not depend on ${libs.drvPath}: ${toString inputs}";
+    pkgs.runCommand "loose-ends-test-libs"
+      {
+        inherit run libs;
+        closure = pkgs.closureInfo { rootPaths = [ libs ]; };
+        sysroot = builtins.unsafeDiscardStringContext sysroot.outPath;
+      }
+      ''
+        ls $libs/lib/rustlib/${native}/lib/libstd-*.so
+        if grep -qxF "$sysroot" $closure/store-paths; then
+          echo "the test libraries reference the sysroot" >&2; exit 1
+        fi
+        du -sh $libs
+        touch $out
+      '';
+
   # --- docs/options.md --------------------------------------------------------
 
   # The module options as Markdown (mkRepository's optionsDoc).
@@ -503,6 +536,7 @@ in
   cfg-rustflags = cfgRustflags;
   inherit names;
   runner-list = runnerList;
+  test-libs = testLibs;
   workspaces = {
     config-env = configEnvWs;
     test-scope = withScope;

@@ -307,7 +307,7 @@ let
       useCa = if ca == null then stages.caAuto else ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
-      sysroot = tools.rustc-sysroot or null;
+      sysroot = testRuns.testLibs pkgs (tools.rustc-sysroot or null) target;
       jq = "${testPkgs.jq}/bin/jq";
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       # `test.runner = "nextest"` needs plan data at evaluation time (IFD
