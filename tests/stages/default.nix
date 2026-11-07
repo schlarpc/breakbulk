@@ -22,6 +22,8 @@
 #   stages-wasm-browser wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
 #                       0.2.130) through bindgen -> wasmOpt -> install, then
 #                       loaded and called from node
+#   stages-linked-crate-types  the `linked` stage of a cdylib+staticlib
+#                       library: two roots over one unit output
 #   stages-wasm-component  a core module through wasmOpt -> componentize
 #                       with metadata; the component imports nothing
 #
