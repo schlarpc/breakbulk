@@ -176,7 +176,7 @@ Check and clippy variants should use the same profile as the main build variant 
 | Linux gnu / musl | `splitDebug` |
 | Windows msvc | none (PDBs are already separate) |
 | wasm, browser | `bindgen` → `wasmOpt` |
-| wasm, component | `componentize` |
+| wasm, component | `wasmOpt` → `componentize` |
 | Darwin (later) | `dsymutil` → `strip` → `adhocSign` |
 
 The tool never applies an implicit fixup phase. Stripping breaks some signing schemes, and some checks must see unstripped bytes, so any default stage can be removed or reordered.
