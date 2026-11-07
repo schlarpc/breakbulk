@@ -61,6 +61,8 @@ All four binaries live in one Cargo workspace. `breakbulk-unit` stays small and 
 
 `breakbulk-plan` runs the user's real cargo once per (workspace, target, variant, plan kind), with a rustc wrapper that records instead of compiling. It combines the records with `cargo metadata`, which is stable, to produce `plan.json`.
 
+Spike A tested this design on Cargo 1.95, 1.97, 1.99 and nightly 1.101. The result, with source citations and the experiments, is in [spikes/A-trace-fidelity.md](spikes/A-trace-fidelity.md).
+
 ### Invocation
 
 ```sh
@@ -68,19 +70,46 @@ All four binaries live in one Cargo workspace. `breakbulk-unit` stays small and 
 cargo build --frozen --offline <selection> \
   --target <triple> --profile <profile> [--features …] \
   --config <generated source-replacement file, one directory per source> \
-  --config '<spec rustflags and linkers as target.<triple> keys>'
+  --config '<spec rustflags and linkers, see below>'
 # test plan: the same, with `cargo test --no-run`, then `cargo test --doc` for doctests
 # bench variant: `cargo bench --no-run` with the bench profile
-# env: RUSTC_WRAPPER=breakbulk-shim  RUSTDOC=breakbulk-shim  CARGO_TARGET_DIR=<scratch>  BREAKBULK_RECORD=<record dir>
+# env: RUSTC_WRAPPER=breakbulk-shim  RUSTDOC=<dir>/rustdoc (a symlink to breakbulk-shim)
+#      BREAKBULK_RUSTDOC=<real rustdoc>  CARGO_TARGET_DIR=<scratch>  BREAKBULK_RECORD=<record dir>
 ```
 
 - `<selection>` is `--workspace`, or `-p` for each package in the target's `packages` list.
 - The vendor configuration is described under [Vendoring for planning](#vendoring-for-planning).
+- Before tracing, the planner writes the `cargo metadata` JSON to `$BREAKBULK_RECORD/metadata.json`. Stubs read it to learn their package's targets.
+- **Spec rustflags.** Cargo takes rustflags from exactly one source: the first of `CARGO_ENCODED_RUSTFLAGS`, `RUSTFLAGS`, `target.<triple>` together with `target.<cfg>`, and `build.rustflags`. Arrays concatenate only within one key. The planner therefore reads the project's `.cargo/config.toml` files (a documented format). If the project sets `build.rustflags` and no per-target rustflags, spec rustflags go under `build.rustflags`; otherwise under `target.<triple>.rustflags`. The planner then checks in the trace that every target unit carries both the project's and the spec's flags.
+- **Linkers** go under `target.<triple>.linker`. Cargo passes `-C linker` to every unit, including rlibs that never link, so a linker change changes every unit's derivation. The planner keeps Cargo's argv as it is.
 - Spec env is **not** passed to Cargo. Cargo's `[env]` reaches every process, including host build scripts; spec env is added per unit by platform at instantiation.
-- The user's own `.cargo/config.toml` is in the skeleton and applies as it does locally. Nothing from the user's home directory or shell is visible.
-- The clippy variant adds `RUSTC_WORKSPACE_WRAPPER=clippy-driver`. Cargo then calls `breakbulk-shim clippy-driver rustc …` for workspace members only.
-- Doctests: `cargo test --no-run` skips them, because rustdoc compiles doctests at run time. After the faked build, the test plan runs `cargo test --doc`; the shim, acting as `RUSTDOC`, records each `rustdoc --test` command and exits successfully. Cargo runs nothing else in that mode.
+- The user's own `.cargo/config.toml` is in the skeleton and applies as it does locally. Nothing from the user's home directory or shell is visible. Cargo reads `.cargo/config.toml` from every ancestor of its working directory, whatever `CARGO_HOME` says. In the Nix sandbox no ancestor has one; local planner runs and tests must stage the project outside `$HOME` (see [Testing and conformance](#testing-and-conformance)).
+- The planner never sets `CARGO_INCREMENTAL` and never passes it through from its own environment, because the incremental setting is part of every unit's `-C metadata`. The `-C incremental=…` argument is stripped from argv instead (see [Env filtering](#env-filtering)).
+- The planner runs Cargo without `-v`. Verbosity changes argv: with `-vv`, non-local crates get `--cap-lints warn` instead of `--cap-lints allow`.
+- No runner is configured while tracing. With a runner, Cargo adds `--test-runtool` to `rustdoc --test`.
+- The clippy variant adds `RUSTC_WORKSPACE_WRAPPER=clippy-driver`. Cargo then calls `breakbulk-shim clippy-driver rustc …` for workspace members only. This chain is parsed but not yet tested.
+- Doctests: `cargo test --no-run` skips them, because rustdoc compiles doctests at run time. After the faked build, the test plan runs `cargo test --doc`; the shim, acting as `RUSTDOC`, records one `rustdoc --test` command per library (proc macros included) and exits successfully. Cargo runs nothing else in that mode.
 - Documentation (later): `cargo doc` is traced the same way, with the shim recording each `rustdoc` command.
+
+### Which targets each command builds
+
+Observed on every supported Cargo release:
+
+| Command | Builds |
+| --- | --- |
+| `cargo build` | Libraries and bins. Never examples. |
+| `cargo test --no-run` | Libraries, lib and bin test harnesses, integration tests, and examples (as plain bins). Bins only when the package has integration tests. **No benches.** |
+| `cargo bench --no-run` | Lib and bin harnesses in bench mode, and benches. No examples or integration tests. |
+
+Benches therefore come only from the bench variant.
+
+### trim-paths
+
+Cargo's `trim-paths` profile setting is stable from Cargo 1.101. On earlier releases any `trim-paths` setting is a hard error, so it is always off there. Its default is `none` for every profile, `release` included.
+
+- **Detection.** A unit is under Cargo's trim-paths when its argv has `--remap-path-scope=…` followed by `--remap-path-prefix` pairs ending in `…=/cargo/build-dir` and `…=/rustc/<commit>`. User rustflags never produce the `/cargo/build-dir` pair. The plan header's `trimPaths` records the result.
+- **Default.** A profile setting from `--config` overrides the manifest's, so passing it blindly would replace the project's own choice. The planner traces once. Only when the trace shows trim-paths off and Cargo is 1.101 or later does it trace again with `--config profile.<profile>.trim-paths=…`. Reading the profiles from the manifests instead would mean encoding Cargo's profile merging.
+- With trim-paths on, path crates outside the workspace root hash without their absolute path, and build-script runs get `CARGO_TRIM_PATHS_SCOPE`.
 
 ### Fixed skeleton location
 
@@ -88,14 +117,18 @@ Cargo hashes the absolute path of a path crate that lies outside the workspace r
 
 ### `breakbulk-shim` modes
 
-The shim decides its mode from its arguments and how it was started.
+The shim decides its mode from how it was started and from its arguments, checked in this order:
 
 | Mode | Detected by | Action |
 | --- | --- | --- |
-| Query | `-vV`, any `--print`, or `-` as the input file | `exec` the real rustc unchanged |
+| Build-script stub | `breakbulk-stub.json` in the directory of the running executable | Record argv, cwd and the full env; print sentinel directives; exit 0 |
+| Rustdoc | The executable's file name contains `rustdoc`. The planner sets `RUSTDOC` to a `rustdoc` symlink to the shim, because Cargo starts `RUSTDOC` with the same env it gives `RUSTC_WRAPPER`. | For queries, `exec` `$BREAKBULK_RUSTDOC`; otherwise record and exit 0 without output |
+| Query | `-vV`, `-V`, `--version`, any `--print`, or `-` as the input; or no `--crate-name` or no input file | Record, then `exec` the real rustc unchanged |
 | Compile | `--crate-name` plus an input file | Record, then fake the outputs |
-| Rustdoc | Started as `RUSTDOC` | Record; for queries, `exec` the real rustdoc; otherwise exit 0 without output |
-| Build-script stub | Started as a copied stub binary, with a marker file beside it | Record the env, print sentinel directives, exit 0 |
+
+As `RUSTC_WRAPPER` the shim is started as `breakbulk-shim [workspace-wrapper] rustc ARGS`. The program chain is every leading argument that is not an option; Cargo always starts rustc's arguments with an option.
+
+The record of the `rustc -vV` query carries Cargo's own process environment. It is the baseline for [Env filtering](#env-filtering).
 
 ### Faking a compile
 

@@ -390,3 +390,29 @@ path hiding (works on all versions). Only relevant from Cargo 1.101.
   needs both files of each dependency.
 - The design's "rustflags are concatenated with project config" was only
   true when both use the same config key (see 33).
+
+## 36. ASK: C code's debug info names sources by short names
+
+To keep crate source paths out of shipped binaries, C code compiled by build
+scripts now has its source paths replaced with short names (like
+`ring-0.17.14/crypto/...`) everywhere, including debug info. For Rust code,
+the design keeps real paths in debug info (moved to a separate `debug`
+output) so a debugger finds sources automatically. For C, that isn't
+possible with this approach, because a build script doesn't know which final
+product its C code ends up in. Effect: when debugging into C code from a
+`-sys` crate, you'd point the debugger at the source by hand. Alternative:
+leave C debug info alone and only hide `__FILE__`, at the risk of shipped
+binaries keeping a reference to crate sources if debug info isn't split off.
+Default: hide everywhere.
+
+## 37. FYI: environment capture is in production code
+
+- Variables that hold lists (`PATH`, `PKG_CONFIG_PATH`, C/linker flag
+  variables, and ~15 similar) are appended across layers instead of
+  replaced. The list is built into the unit builder, so extending it later
+  rebuilds everything once.
+- C compiler path hiding goes through nixpkgs' compiler wrapper, so it
+  reaches cc-rs, cmake, make, C++ and assembly. The wasm and Windows presets
+  use compilers without that wrapper and will need to add it themselves.
+- A captured environment for host tools is the same derivation whether the
+  build is native or cross, so it's built once and shared.
