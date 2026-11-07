@@ -31,12 +31,11 @@ pts = []
 for b in builds:
     name = re.sub(r"^[a-z0-9]{32}-", "", os.path.basename(b["drv"]))
     if name in inputs:
-        kind = name.rsplit("-", 1)[-1].removesuffix(".drv")
         pts.append((inputs[name], b["stop"] - b["start"], name))
 xs = [p[0] for p in pts]
 ys = [p[1] for p in pts]
 mx, my = statistics.mean(xs), statistics.mean(ys)
-b = sum((x - mx) * (y - my) for x, y in pts and zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
 a = my - b * mx
 print(f"units {len(pts)}  fit: seconds = {a:.3f} + {b * 1000:.3f} ms * inputDrvs")
 buckets = [(0, 5), (5, 10), (10, 25), (25, 100), (100, 400), (400, 10**9)]
