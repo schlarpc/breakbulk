@@ -628,6 +628,28 @@ in
         mkdir -p $out
       '';
 
+  # Cargo gives an integration test CARGO_BIN_EXE_<bin> for every bin of
+  # its package, also one it does not build because a required feature is
+  # off. The plan points it at a path that does not exist (as Cargo's does
+  # not), and the test, which runs the built bin and checks the other is
+  # absent, passes.
+  bin-exe-not-built =
+    let
+      ws = mk "bin-exe-not-built" { };
+      plan = readPlan ws "test";
+      envs = lib.concatMap (u: lib.optional (u ? env.CARGO_BIN_EXE_extra) u.env.CARGO_BIN_EXE_extra) (
+        lib.attrValues plan.units
+      );
+    in
+    assert lib.assertMsg (envs == [ "/breakbulk/not-built/extra" ])
+      "bin-exe-not-built: CARGO_BIN_EXE_extra is ${builtins.toJSON envs}";
+    pkgs.runCommand "bin-exe-not-built-check" { t = ws.testBins."tool/test/run"; } ''
+      $t/bin/run | tee log
+      grep -q 'test result: ok. 2 passed' log
+      mkdir -p $out
+      cp log $out/
+    '';
+
   # The test plan: the bin's test harness, built from `cargo test --no-run`.
   walking-skeleton-test =
     pkgs.runCommand "walking-skeleton-test-check"

@@ -62,6 +62,11 @@ const DYLIB_VAR: &str = "LD_LIBRARY_PATH";
 /// value names its target directory, which breakbulk does not have.
 pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
 
+/// Where `CARGO_BIN_EXE_<bin>` points for a bin Cargo did not build (its
+/// required features are off): `<this>/<bin>`, which never exists, so a
+/// test that runs it fails as it does under Cargo.
+pub const NOT_BUILT_BIN_DIR: &str = "/breakbulk/not-built";
+
 fn arg_value<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -500,6 +505,22 @@ impl<'a> Builder<'a> {
         for (k, v) in env {
             if k == "CARGO_TARGET_TMPDIR" {
                 out.insert(k, Text::Literal(TARGET_TMPDIR.into()));
+                continue;
+            }
+            // Cargo sets CARGO_BIN_EXE_<bin> on integration tests for every
+            // bin of the package, also bins it does not build because their
+            // required features are off (Cargo 0.100.0 at 5f94df4,
+            // `src/compiler/artifact.rs`, `get_env`: it filters targets on
+            // `is_bin()` only). Such a path names no unit's output; it
+            // becomes a path that does not exist, as Cargo's does not.
+            if let Some(bin) = k.strip_prefix("CARGO_BIN_EXE_")
+                && self.rw.in_scratch(&v)
+                && self.rw.text(&v, Some(owner)).is_err()
+            {
+                out.insert(
+                    k.clone(),
+                    Text::Literal(format!("{NOT_BUILT_BIN_DIR}/{bin}")),
+                );
                 continue;
             }
             let v = if k == DYLIB_VAR {
