@@ -280,6 +280,40 @@ in
         cp $golden/report $out/
       '';
 
+  # Every crate type's outputs are present and usable: the cdylib and the
+  # staticlib from C, the rlib and the proc macro from the bin.
+  crate-types =
+    let
+      ws = mk "crate-types" { };
+      ref = cargoBuild {
+        fixture = "crate-types";
+        inherit ws;
+        install = "install -D $t/app $out/bin/app";
+      };
+    in
+    pkgs.runCommandCC "crate-types-check"
+      {
+        app = ws.packages.app;
+        cdylib = ws.roots."both/cdylib/both";
+        staticlib = ws.roots."stat/staticlib/stat";
+        golden = golden {
+          fixture = "crate-types";
+          inherit ws;
+        };
+        inherit ref;
+      }
+      ''
+        got=$($app/bin/app); want=$($ref/bin/app)
+        echo "breakbulk '$got', cargo '$want'"
+        [ "$got" = "$want" ] && [ "$got" = "app 42 from-proc-macro" ]
+        ls -l $cdylib $staticlib
+        cc ${fixtures + "/crate-types/cuser/main.c"} $cdylib/libboth.so $staticlib/libstat*.a \
+          -lpthread -ldl -lm -o cuser
+        [ "$(LD_LIBRARY_PATH=$cdylib ./cuser)" = "c 42 7" ]
+        mkdir -p $out
+        cp $golden/report $out/
+      '';
+
   # A build script killed by a signal fails its run unit, naming the
   # signal. The run unit's BREAKBULK_UNIT is executed by hand, so the check
   # can expect the failure.

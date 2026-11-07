@@ -1,0 +1,11 @@
+# Crate types ("crate-types" in docs/implementation.md): a library that is
+# both a cdylib and an rlib, a staticlib, a proc macro, and a bin using the
+# rlib and the proc macro. cuser/main.c links the cdylib and the staticlib
+# from C, to prove the outputs are usable.
+[workspace]
+resolver = "2"
+members = ["both", "stat", "pmac", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
