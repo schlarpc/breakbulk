@@ -449,6 +449,10 @@ impl<'a> Builder<'a> {
             }
             let v = if run && k == "RUSTDOC" {
                 self.ctx.rustdoc.clone()
+            } else if k == "NUM_JOBS" {
+                // breakbulk-unit replaces it with $NIX_BUILD_CORES; the
+                // planning machine's job count must not reach the plan.
+                "1".to_owned()
             } else {
                 v.clone()
             };

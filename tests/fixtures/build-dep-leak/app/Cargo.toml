@@ -1,0 +1,11 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { path = "../shared" }
+
+[build-dependencies]
+helper = { path = "../helper" }
+shared = { path = "../shared" }

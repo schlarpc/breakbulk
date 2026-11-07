@@ -1,0 +1,15 @@
+# Build dependencies emitting link directives must not leak into target
+# links ("build-dep-leak" in docs/implementation.md; native only for now).
+#
+# - helper: a build-dependency of app only. Its build script links a static
+#   library (`helper_host_marker`); only host units may see it.
+# - shared: both a normal and a build-dependency of app, so Cargo builds it
+#   twice (host and target), each with its own build-script run.
+# - app: its build script uses helper and shared; its bin uses shared.
+[workspace]
+resolver = "2"
+members = ["app", "helper", "shared"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

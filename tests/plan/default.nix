@@ -99,6 +99,14 @@ let
       '';
 
   walking-skeleton = mk "walking-skeleton" { };
+  build-dep-leak-ws = mk "build-dep-leak" { };
+
+  # A plan, read at evaluation time (IFD).
+  readPlan =
+    ws: kind:
+    builtins.fromJSON (
+      builtins.unsafeDiscardStringContext (builtins.readFile "${ws.plans.${kind}}/plan.json")
+    );
 
   directivesPackages = [
     "a-sys"
@@ -200,6 +208,76 @@ in
         grep -q 'test result: ok. 1 passed' it.log
         [ "$($ex/bin/ex)" = "a_sys" ]
         mkdir -p $out
+      '';
+
+  # Build-dependency link directives stay on the host: every splice of a
+  # target unit names a target run; helper's run is host-only; shared runs
+  # once per platform. The product runs as cargo's does; golden passes.
+  build-dep-leak =
+    let
+      plan = readPlan build-dep-leak-ws "build";
+      inherit (plan) units;
+      pkgOf = id: lib.head (lib.splitString "#" (lib.last (lib.splitString "/" units.${id}.package)));
+      runsOf = name: lib.filter (id: units.${id}.kind == "run" && pkgOf id == name) (lib.attrNames units);
+      spliceRuns =
+        u:
+        map (a: a.splice) (lib.filter (a: builtins.isAttrs a && a ? splice) u.args)
+        ++ map (s: s.splice) u.envSplices
+        ++ (u.dylibPathFrom or [ ]);
+      compiles = lib.filterAttrs (_: u: u.kind == "compile") units;
+      leaks = lib.filterAttrs (
+        _: u: u.platform == "target" && lib.any (r: units.${r}.platform != "target") (spliceRuns u)
+      ) compiles;
+      platforms = ids: lib.sort lib.lessThan (map (id: units.${id}.platform) ids);
+      hostRuns = name: lib.filter (id: units.${id}.platform == "host") (runsOf name);
+      appBin = units.${(lib.findFirst (r: r.target == "app") null plan.roots).unit};
+      checks = {
+        "no target unit splices a host run" = leaks == { };
+        # Both run once per platform: helper is a workspace member too, so
+        # `--workspace` also builds it for the target.
+        "helper and shared run once per platform" = lib.all (
+          n:
+          platforms (runsOf n) == [
+            "host"
+            "target"
+          ]
+        ) [ "helper" "shared" ];
+        "the host runs reach host units only" = lib.all (u: u.platform == "host") (
+          lib.attrValues (
+            lib.filterAttrs (
+              _: u: lib.any (r: lib.elem r (hostRuns "helper" ++ hostRuns "shared")) (spliceRuns u)
+            ) compiles
+          )
+        );
+        "the app links nothing of helper" = !lib.any (r: lib.elem r (runsOf "helper")) (spliceRuns appBin);
+        "app's build script finds the host runs' libraries" =
+          lib.sort lib.lessThan (units.${lib.head (runsOf "app")}.dylibPathFrom or [ ])
+          == lib.sort lib.lessThan (hostRuns "helper" ++ hostRuns "shared");
+      };
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
+      ref = cargoBuild {
+        fixture = "build-dep-leak";
+        ws = build-dep-leak-ws;
+        install = "install -D $t/app $out/bin/app";
+      };
+    in
+    pkgs.runCommand "build-dep-leak-check"
+      {
+        app = build-dep-leak-ws.packages.app;
+        inherit ref;
+        golden = golden {
+          fixture = "build-dep-leak";
+          ws = build-dep-leak-ws;
+        };
+        failed = lib.concatStringsSep "\n" failed;
+      }
+      ''
+        if [ -n "$failed" ]; then echo "failed: $failed"; exit 1; fi
+        got=$($app/bin/app); want=$($ref/bin/app)
+        echo "breakbulk '$got', cargo '$want'"
+        [ "$got" = "$want" ] && [ "$got" = "app 42 35" ]
+        mkdir -p $out
+        cp $golden/report $out/
       '';
 
   # A build script killed by a signal fails its run unit, naming the
