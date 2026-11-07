@@ -184,4 +184,5 @@ separately from nixpkgs), breakbulk can unpack with its own pinned tools.
   `CARGO_PKG_README` only when one exists.
 - Cargo reads `.cargo/config.toml` from every parent directory. Inside the
   Nix sandbox that is harmless, but for local tests in a home directory it
-  picks up `~/.cargo/config.toml`. Tests now guard against this.
+  picks up `~/.cargo/config.toml`, so local trace tests must run outside
+  the home directory.
