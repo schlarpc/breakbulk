@@ -23,6 +23,11 @@ dependencies = [
 [[package]]
 name = "breakbulk-plan"
 version = "0.1.0"
+dependencies = [
+ "breakbulk-format",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "breakbulk-shim"

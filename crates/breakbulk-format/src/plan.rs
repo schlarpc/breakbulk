@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-pub use breakbulk_unit::spec::{CrateInfo, PackageTarget, Platform, SpliceKind};
+pub use breakbulk_unit::spec::{
+    CrateInfo, LinkArgKind, PackageTarget, Platform, SearchIn, SpliceKind,
+};
 
 /// The only plan format version this crate reads and writes.
 pub const PLAN_VERSION: u32 = 1;
@@ -218,6 +220,8 @@ pub struct Root {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RootKind {
+    /// A library's own test harness (`--test` on the lib target).
+    Lib,
     Bin,
     Cdylib,
     Dylib,

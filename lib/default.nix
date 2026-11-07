@@ -10,6 +10,10 @@
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
 # breakbulk.predictedRoots { ... }.
+# Planning and the M1 end-to-end entry:
+#   breakbulk.mkTools pkgs                breakbulk's own binaries
+#   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
+#   breakbulk.mkWorkspace pkgs { root; path; toolchain; ... }  (lib/workspace.nix)
 { lib }:
 let
   util = import ./util.nix { inherit lib; };
@@ -27,19 +31,6 @@ let
       ;
   };
   inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
-in
-{
-  inherit
-    instantiate
-    predictedRoots
-    util
-    lockfile
-    manifest
-    roots
-    sourceViews
-    skeleton
-    envCapture
-    ;
 
   mkFetch =
     pkgs:
@@ -64,6 +55,45 @@ in
         manifest
         ;
     }).mkVendor;
+
+  mkTools = import ./tools.nix { inherit lib; };
+  inherit (import ./plan.nix { inherit lib; }) mkPlan;
+
+  mkWorkspace = import ./workspace.nix {
+    inherit
+      lib
+      util
+      lockfile
+      roots
+      sourceViews
+      envCapture
+      skeleton
+      instantiate
+      predictedRoots
+      mkFetch
+      mkVendor
+      mkTools
+      mkPlan
+      ;
+  };
+in
+{
+  inherit
+    instantiate
+    predictedRoots
+    util
+    lockfile
+    manifest
+    roots
+    sourceViews
+    skeleton
+    envCapture
+    mkFetch
+    mkVendor
+    mkTools
+    mkPlan
+    mkWorkspace
+    ;
 
   mkSkeleton = skeleton.mkSkeleton;
 }

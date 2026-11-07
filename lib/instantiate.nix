@@ -223,8 +223,8 @@ rec {
   # shape `instantiate` takes, from roots.workspaceRoots.
   #
   # A library is a root of a build plan once per linkable crate type
-  # (cdylib, dylib, staticlib). A library's own unit-test binary in the test
-  # and bench plans is left out: plan.json has no root kind for it yet.
+  # (cdylib, dylib, staticlib). In the test and bench plans its own unit-test
+  # binary is a root of kind `lib` (`<pkg>/lib-test/<target>`).
   predictedRoots =
     {
       workspaceRoots,
@@ -252,7 +252,8 @@ rec {
               ]
             )
           else
-            [ ]
+            # The library's own test harness (`--test` on the lib target).
+            [ (base // { kind = "lib"; }) ]
         else
           [ (base // { inherit (r) kind; }) ];
     in

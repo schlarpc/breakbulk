@@ -1,8 +1,21 @@
 [package]
 name = "breakbulk-plan"
+description = "Traces the user's cargo with breakbulk-shim and writes plan.json"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "breakbulk-plan"
+path = "src/main.rs"
+# The library has the same name; documenting both would collide.
+doc = false
+
 [dependencies]
+breakbulk-format = { path = "../breakbulk-format" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

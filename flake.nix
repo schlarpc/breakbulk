@@ -46,11 +46,19 @@
               inherit pkgs;
               breakbulk = self.lib;
             };
+            p = import ./tests/plan {
+              inherit pkgs;
+              breakbulk = self.lib;
+            };
           in
           {
             instantiate = t.check;
             instantiate-eval = t.eval-checks;
           }
+          # End-to-end fixtures through the traced planner (IFD).
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
+            builtins.removeAttrs p [ "workspaces" ]
+          )
         ));
     };
 }

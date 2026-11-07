@@ -1,0 +1,10 @@
+[package]
+name = "walking-skeleton"
+version = "0.1.0"
+edition = "2024"
+
+# Its own workspace, not a member of breakbulk's.
+[workspace]
+
+[dependencies]
+itoa = "=1.0.11"
