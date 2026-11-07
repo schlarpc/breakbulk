@@ -1,0 +1,4 @@
+[package]
+name = "embedder"
+version.workspace = true
+edition.workspace = true

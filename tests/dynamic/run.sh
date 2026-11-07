@@ -46,7 +46,7 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives)
+  fixtures=(walking-skeleton directives embed)
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }
@@ -150,31 +150,47 @@ for f in "${fixtures[@]}"; do
   say "$f: IFD mode (Nix master)"
   ifd=$(mbuild --arg mode '"ifd"' "build.$f")
 
+
   # Unit .drv paths: IFD mode's from units.json, dynamic mode's from the
-  # outer derivations' build logs.
+  # outer derivations' build logs, per workspace and plan kind. Units whose
+  # names match mayDiffer (downstream of an embedded product) may differ.
   ifdUnits=$(real "$(mbuild --arg mode '"ifd"' "unitDrvs.$f")")
-  for kind in build test; do
-    outer=$(nixm path-info --derivation -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "outer.$f.$kind")
-    nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\) \(.*\)$/\1 \2/p' | sort >"$WORK/$f-$kind.dynamic"
-    python3 -c '
-import json, sys
-units = json.load(open(sys.argv[1]))[sys.argv[2]]
-for k in sorted(units): print(k, units[k])
-' "$ifdUnits" "$kind" | sort >"$WORK/$f-$kind.ifd"
-    n=$(wc -l <"$WORK/$f-$kind.ifd")
-    if [ "$n" -eq 0 ]; then
-      fail "$f/$kind: IFD mode has no units"
-    elif diff -u "$WORK/$f-$kind.ifd" "$WORK/$f-$kind.dynamic"; then
-      echo "$f/$kind: $n unit .drv paths identical in both modes" >&2
-    else
-      echo "FAIL: $f/$kind: unit .drv paths differ (- IFD, + dynamic)" >&2
+  mayDiffer=$(nix-instantiate --eval --raw "$REPO/tests/dynamic" --arg mode '"ifd"' -A "mayDiffer.$f" 2>/dev/null || true)
+  mapfile -t keys < <(python3 -c 'import json, sys; print("\n".join(sorted(json.load(open(sys.argv[1])))))' "$ifdUnits")
+  for key in "${keys[@]}"; do
+    outer=$(nixm path-info --derivation -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "outer.$f.\"$key\"")
+    nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\) \(.*\)$/\1 \2/p' >"$WORK/units.dynamic"
+    if ! python3 - "$ifdUnits" "$key" "$WORK/units.dynamic" "$mayDiffer" <<'EOF'; then
+import json, re, sys
+ifd = json.load(open(sys.argv[1]))[sys.argv[2]]
+dyn = dict(l.split(" ", 1) for l in open(sys.argv[3]).read().splitlines())
+may = re.compile(sys.argv[4]) if sys.argv[4] else None
+def name(p):
+    return p.rsplit("/", 1)[-1].split("-", 1)[1]
+same, allowed, bad = 0, [], []
+for k in sorted(set(ifd) | set(dyn)):
+    a, b = ifd.get(k), dyn.get(k)
+    if a == b:
+        same += 1
+    elif a and b and may and may.search(name(a)) and may.search(name(b)):
+        allowed.append(name(a))
+    else:
+        bad.append(f"  {k}: IFD {a}\n  {' ' * len(k)}  dynamic {b}")
+label = f"{sys.argv[2]}: {same} unit .drv paths identical in both modes"
+if allowed:
+    label += f"; {len(allowed)} downstream of an embedded product differ, as expected ({', '.join(allowed)})"
+print(label, file=sys.stderr)
+if same == 0 or bad:
+    print("FAIL: unit .drv paths differ:\n" + "\n".join(bad), file=sys.stderr)
+    sys.exit(1)
+EOF
       status=1
     fi
   done
 
   # Products: the same bytes.
-  for p in "$(real "$dyn")"/products/*; do
-    name=$(basename "$p")
+  for p in "$(real "$dyn")"/products/*/*; do
+    name=${p#"$(real "$dyn")/products/"}
     a=$(real "$(readlink "$p")")
     b=$(real "$(readlink "$(real "$ifd")/products/$name")")
     ha=$(nix hash path "$a")
@@ -197,5 +213,19 @@ for k in sorted(units): print(k, units[k])
     status=1
   fi
 done
+
+# A check variant (no roots) builds every unit through `units.drv`.
+case " ${fixtures[*]} " in
+  *" walking-skeleton "*)
+    say "check variant (dynamic-derivation mode)"
+    if c=$(mbuild --arg mode '"dynamic"' checkVariant); then
+      echo "check variant: $(cat "$(real "$c")"/* 2>/dev/null | wc -l) entries" >&2
+    else
+      echo "FAIL: the check variant did not build" >&2
+      status=1
+    fi
+    ;;
+esac
+
 [ $status -eq 0 ] && say "all fixtures: OK"
 exit $status

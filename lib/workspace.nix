@@ -96,6 +96,17 @@ pkgs:
   # "dynamic" (an outer derivation writes them through builder-rpc-v0;
   # lib/dynamic.nix). mkRepository resolves `mode = "auto"`.
   delivery ? "ifd",
+  # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
+  # `shippedRemapScope`); null remaps every scope.
+  shippedRemapScope ? null,
+  # Variants (lib/variants.nix): `mode` is build, check, clippy or
+  # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
+  # matching rustc). `bench` adds a bench plan (`cargo bench --no-run`):
+  # ws.benches, ws.plans.bench, ws.units.bench.
+  mode ? "build",
+  clippyDriver ? null,
+  clippyArgs ? [ ],
+  bench ? false,
   # The target's toolchain spec (M3, from lib/repository.nix):
   #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)
   #   specTools.<name> = <store path>  tool paths the spec puts in the plan
@@ -139,10 +150,16 @@ let
   );
   workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views // outsideViews;
 
-  plans = lib.genAttrs [ "build" "test" ] (
+  # Check and clippy variants link nothing: no roots, no test runs.
+  checking = mode == "check" || mode == "clippy";
+
+  plans = lib.genAttrs ([ "build" "test" ] ++ lib.optional bench "bench") (
     kind:
     mkPlan pkgs {
       inherit
+        mode
+        clippyDriver
+        clippyArgs
         vendor
         tools
         kind
@@ -205,7 +222,8 @@ let
       lib.unique ((toolchain.rustc.paths or [ ]) ++ (toolchain.cargo.paths or [ ]))
     )
   )
-  // specTools;
+  // specTools
+  // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
   isDynamic = delivery == "dynamic";
   breakbulkDrv = tools.breakbulk-drv or (dynamic.mkBreakbulkDrv pkgs);
@@ -245,16 +263,21 @@ let
       # `packages` (by name) and mkRepository's `packageOverrides` (by name
       # or name@version, already in instantiate's shape); the latter win.
       overrides = overrides // packageOverrides;
-      inherit strictSources;
-      roots = predictedRoots {
-        workspaceRoots = wsRoots;
-        planKind = kind;
-        inherit variant;
-      };
+      inherit strictSources shippedRemapScope;
+      roots =
+        if checking then
+          null
+        else
+          predictedRoots {
+            workspaceRoots = wsRoots;
+            planKind = kind;
+            inherit variant;
+          };
       name = "${name}-${kind}-units";
     };
   built = inst "build";
   tested = inst "test";
+  benched = inst "bench";
 
   # Put a root unit's single linked file at $out/<dir>/<name>. Products and
   # their stages come in M4; this is only enough to run things.
@@ -281,6 +304,7 @@ let
       ;
     plan = plans.test;
     inst = tested;
+    coverage = mode == "coverage";
     sources = { inherit workspace crates; };
     tools = unitTools;
   };
@@ -302,17 +326,60 @@ in
   units = {
     build = built.units;
     test = tested.units;
-  };
+  }
+  // lib.optionalAttrs bench { bench = benched.units; };
   unitsJson = {
     build = built.unitsJson;
     test = tested.unitsJson;
-  };
+  }
+  // lib.optionalAttrs bench { bench = benched.unitsJson; };
   inherit delivery;
   # Dynamic-derivation mode: the outer derivations, by plan kind.
   outer = lib.optionalAttrs isDynamic {
     build = built.outer;
     test = tested.outer;
   };
+  # Dynamic-derivation mode: a derivation per plan kind that builds every
+  # unit (ws.units is not known at evaluation time).
+  allUnits = lib.optionalAttrs isDynamic (
+    {
+      build = built.allUnits;
+      test = tested.allUnits;
+    }
+    // lib.optionalAttrs bench { bench = benched.allUnits; }
+  );
+  # Bench-plan roots (benches and harnesses in bench mode), by root name.
+  benches = if bench then benched.roots else { };
+  # Smoke runs of the bench plan's binaries: each once with `--test`, in
+  # its test-run environment (`test.env`, `test.path`; no test arguments).
+  # By package, then binary key as in testRuns.
+  benchRuns =
+    if !bench then
+      { }
+    else
+      ((if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
+        inherit
+          pkgs
+          target
+          runner
+          testSystem
+          ca
+          ;
+        name = "${name}-bench";
+        packages = lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots))) (
+          pkg: {
+            test = (packages.${pkg}.test or { }) // {
+              args = [ "--test" ];
+              includeIgnored = false;
+              binaries = { };
+            };
+          }
+        );
+        plan = plans.bench;
+        inst = benched;
+        sources = { inherit workspace crates; };
+        tools = unitTools;
+      }).runs;
   packages = lib.mapAttrs' (
     _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" r.breakbulkRoot.target r)
   ) bins;

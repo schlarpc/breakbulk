@@ -180,7 +180,8 @@ async fn run() -> Res<()> {
         sources: parse(&need("sources")?)?,
         toolchains: parse(&need("toolchains")?)?,
         overrides: parse(&need("overrides")?)?,
-        roots: Some(parse(&need("roots")?)?),
+        // `null` for plans without predicted roots (check and clippy).
+        roots: parse(&need("roots")?)?,
     };
     let values: Values = parse(&need("values")?)?;
     let outer: Outer = parse(&need("outer")?)?;

@@ -8,17 +8,20 @@
 # Attributes:
 #   repos.<fixture>          the mkRepository results
 #   build.<fixture>          a derivation linking every product and test
-#                            run of the fixture's default variant (the
-#                            products under products/<pkg>, test runs under
-#                            runs/<pkg>/<binary>)
-#   unitDrvs.<fixture>       (IFD mode) a JSON file: plan kind -> unit id
-#                            -> .drv path
-#   outer.<fixture>.{build,test}   (dynamic mode) the outer derivations
-#   prereqs                  (IFD mode) every fixture's unit inputs, plans,
-#                            breakbulk tools and the tools products and
-#                            test runs use: what run.sh copies into the
-#                            private store so that only breakbulk's own
-#                            derivations are built there
+#                            run of the fixture's default variants
+#                            (products/<ws>/<pkg>, runs/<ws>/<pkg>/<binary>)
+#   unitDrvs.<fixture>       a JSON file: "<ws>/<kind>" -> unit id -> .drv
+#                            path (IFD mode)
+#   outer.<fixture>."<ws>/<kind>"   the outer derivations (dynamic mode)
+#   mayDiffer.<fixture>      a regex of unit derivation names that may
+#                            differ between the modes (embedding chains)
+#   checkVariant             (dynamic mode) a check variant's check of the
+#                            walking skeleton: every unit of both plans,
+#                            through the outer derivations' `units.drv`
+#   prereqs                  the plans and breakbulk's tools: with the
+#                            outputs upstream of the units, what run.sh
+#                            copies into the private store, so that only
+#                            breakbulk's own derivations are built there
 {
   pkgs ? import (
     let
@@ -45,17 +48,14 @@ let
     breakbulk.mkRepository {
       inherit pkgs tools;
       root = fixtures + "/${fixture}";
-      modules = [
-        {
-          inherit mode;
-          workspaces.main = {
-            path = ".";
-            variants.default.profile = "dev";
-          };
-        }
-      ]
-      ++ modules;
+      modules = [ { inherit mode; } ] ++ modules;
     };
+  oneWs = {
+    workspaces.main = {
+      path = ".";
+      variants.default.profile = "dev";
+    };
+  };
 
   directivesPackages = [
     "a-sys"
@@ -68,40 +68,70 @@ let
   ];
 
   repos = {
-    walking-skeleton = mkRepo "walking-skeleton" [ ];
+    walking-skeleton = mkRepo "walking-skeleton" [ oneWs ];
     # Every build script includes ../common/build_common.rs.
     directives = mkRepo "directives" [
+      oneWs
       { packages = lib.genAttrs directivesPackages (_: { extraSources = [ "common" ]; }); }
     ];
+    # The `host` workspace embeds the `payload` workspace's product, as in
+    # tests/products (embed).
+    embed =
+      let
+        repo = mkRepo "embed" [
+          {
+            workspaces = {
+              payload = {
+                path = "payload";
+                variants.default.profile = "dev";
+              };
+              host = {
+                path = "host";
+                variants.default.profile = "dev";
+              };
+            };
+            packages.embedder.env.PAYLOAD_BIN = "${repo.workspaces.payload.packages.payload}/bin/payload";
+          }
+        ];
+      in
+      repo;
   };
 
-  inst = repo: repo.workspaces.main.instances.${native}.default;
+  # Products differ between the modes (resolved at build time in dynamic
+  # mode), so the units downstream of an embedded product do too: the
+  # embedder and, through it, the host. Every other unit is identical.
+  mayDiffer = {
+    embed = "^(embedder|host)-";
+  };
+
+  inst = repo: wsName: repo.workspaces.${wsName}.instances.${native}.default;
 
   build =
     name: repo:
-    let
-      i = inst repo;
-      products = repo.workspaces.main.packages;
-    in
     pkgs.runCommand "${name}-${mode}" { } (
-      ''
-        mkdir -p $out/products $out/runs
-      ''
-      + lib.concatStrings (
-        lib.mapAttrsToList (p: d: ''
-          ln -s ${d} $out/products/${p}
-        '') products
-      )
-      + lib.concatStrings (
-        lib.concatLists (
-          lib.mapAttrsToList (
-            p: bs:
-            lib.mapAttrsToList (b: d: ''
-              mkdir -p "$(dirname "$out/runs/${p}/${b}")"
-              ln -s ${d} "$out/runs/${p}/${b}"
-            '') bs
-          ) i.testRuns
-        )
+      lib.concatStrings (
+        lib.mapAttrsToList (
+          wsName: w:
+          ''
+            mkdir -p $out/products/${wsName} $out/runs/${wsName}
+          ''
+          + lib.concatStrings (
+            lib.mapAttrsToList (p: d: ''
+              ln -s ${d} $out/products/${wsName}/${p}
+            '') w.packages
+          )
+          + lib.concatStrings (
+            lib.concatLists (
+              lib.mapAttrsToList (
+                p: bs:
+                lib.mapAttrsToList (b: d: ''
+                  mkdir -p "$(dirname "$out/runs/${wsName}/${p}/${b}")"
+                  ln -s ${d} "$out/runs/${wsName}/${p}/${b}"
+                '') bs
+              ) (inst repo wsName).testRuns
+            )
+          )
+        ) repo.workspaces
       )
     );
 
@@ -109,16 +139,28 @@ let
 
   unitDrvs =
     repo:
-    let
-      i = inst repo;
-    in
     pkgs.writeText "unit-drvs.json" (
       builtins.toJSON (
-        lib.mapAttrs (_: us: lib.mapAttrs (_: u: discard u.drvPath) us) {
-          inherit (i.units) build test;
-        }
+        lib.concatMapAttrs (
+          wsName: _:
+          lib.mapAttrs' (kind: us: lib.nameValuePair "${wsName}/${kind}" (lib.mapAttrs (_: u: discard u.drvPath) us)) {
+            inherit ((inst repo wsName).units) build test;
+          }
+        ) repo.workspaces
       )
     );
+
+  # A check variant next to the default one: `variants.lint.check` builds
+  # every unit of both plans; in dynamic mode through `units.drv`.
+  lintRepo = mkRepo "walking-skeleton" [
+    oneWs
+    {
+      workspaces.main.variants.lint = {
+        profile = "dev";
+        mode = "check";
+      };
+    }
+  ];
 
   # What instantiation needs that no unit or product depends on: the
   # plans (read at evaluation time in IFD mode, an input of the outer
@@ -128,10 +170,12 @@ let
     lib.concatStringsSep "\n" (
       lib.concatMap (
         repo:
-        map toString (
-          lib.attrValues (inst repo).plans
+        lib.concatLists (
+          lib.mapAttrsToList (wsName: _: map toString (lib.attrValues (inst repo wsName).plans)) repo.workspaces
         )
       ) (lib.attrValues repos)
+      ++ map toString (lib.attrValues (inst lintRepo "main").plans)
+      ++ map toString (lib.attrValues lintRepo.workspaces.main.instances.${native}.lint.plans)
       ++ map toString (
         lib.attrValues tools
         ++ [
@@ -144,8 +188,14 @@ let
   );
 in
 {
-  inherit repos prereqs;
+  inherit repos prereqs mayDiffer;
   build = lib.mapAttrs build repos;
   unitDrvs = lib.mapAttrs (_: unitDrvs) repos;
-  outer = lib.mapAttrs (_: repo: (inst repo).outer) repos;
+  outer = lib.mapAttrs (
+    _: repo:
+    lib.concatMapAttrs (
+      wsName: _: lib.mapAttrs' (kind: o: lib.nameValuePair "${wsName}/${kind}" o) (inst repo wsName).outer
+    ) repo.workspaces
+  ) repos;
+  checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
 }

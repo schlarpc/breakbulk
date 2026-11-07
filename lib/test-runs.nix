@@ -14,6 +14,8 @@
 #     testPkgs = <pkgs for testSystem>;
 #     packages = { };     # packages.<name>.test, as in the module options
 #     ca = null;          # null: automatic (stages.caAuto); true; false
+#     coverage = false;   # coverage variants: LLVM_PROFILE_FILE points into
+#                         # $out/profraw, so each run keeps its profiles
 #     name = "breakbulk";
 #   };
 #
@@ -279,6 +281,7 @@ rec {
           import pkgs.path { system = testSystem; },
       packages ? { },
       ca ? null,
+      coverage ? false,
       name ? "breakbulk",
     }:
     let
@@ -350,6 +353,10 @@ rec {
             ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
             ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
             export RUST_TEST_THREADS=$NIX_BUILD_CORES
+            ${lib.optionalString coverage ''
+              mkdir -p $out/profraw
+              export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
+            ''}
             mkdir -p /tmp/breakbulk-target-tmp $out
             files=(${bin}/*)
             cd ${lib.escapeShellArg s.sourceDir}

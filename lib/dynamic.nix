@@ -19,6 +19,9 @@
 #                                `breakbulkRoot` as in IFD mode, with
 #                                `dynamic = true`, `unit = "<dynamic>"` and
 #                                `wrapper` (the root wrapper's output)
+#   i.allUnits                   a derivation that depends on every output
+#                                of every unit of the plan (the outer
+#                                derivation's `units.drv` output)
 #   i.units                      an error: units are not known at
 #                                evaluation time
 #   d.mkTestRuns { … }           test runs over i, as testRuns.mkTestRuns
@@ -154,11 +157,9 @@ let
           "outerName"
         ]
       );
-      predicted =
-        if roots == null then
-          throw "breakbulk: dynamic-derivation mode needs the predicted roots (the outer derivation's outputs are fixed at evaluation time)"
-        else
-          roots.roots;
+      # Without predicted roots (check and clippy plans) the outer
+      # derivation has only its `units.drv` output.
+      predicted = if roots == null then [ ] else roots.roots;
 
       values = base.inputs // {
         "dynamic:coreutils" = "${coreutils}";
@@ -176,6 +177,9 @@ let
       outputs = lib.genAttrs names outputName;
       outputList = lib.attrValues outputs;
       dupes = lib.filter (o: lib.count (x: x == o) outputList > 1) outputList;
+      # A derivation on every output of every unit; root outputs always have
+      # a `.` before `.drv`, so they cannot be named like it.
+      unitsOutput = "units.drv";
 
       outer = derivation {
         name = outerName;
@@ -198,15 +202,14 @@ let
           (toFile "outer.json" (toJSON {
             name = outerName;
             inherit outputs;
+            units = unitsOutput;
           }))
         ];
         outputs =
           if dupes != [ ] then
             throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
-          else if outputList == [ ] then
-            throw "breakbulk: dynamic-derivation mode needs at least one root; ${outerName} predicts none"
           else
-            outputList;
+            outputList ++ [ unitsOutput ];
         BREAKBULK_INPUTS = context;
         __contentAddressed = true;
         outputHashMode = "text";
@@ -215,6 +218,19 @@ let
       };
 
       wrapperOf = n: builtins.outputOf outer.${outputs.${n}}.outPath "out";
+
+      # Building it builds every unit of the plan (`$out/units` lists their
+      # outputs): what check and clippy variants build.
+      allUnits = derivation {
+        name = "${outerName}-units";
+        inherit system;
+        units = builtins.outputOf outer.${unitsOutput}.outPath "out";
+        builder = tools.shell;
+        args = [
+          "-c"
+          ''${coreutils}/bin/ln -s "$units" "$out"''
+        ];
+      };
 
       mkRoot =
         r:
@@ -247,7 +263,7 @@ let
         };
     in
     {
-      inherit outer;
+      inherit outer allUnits;
       inherit (base) files inputs;
       delivery = "dynamic";
       roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) predicted);

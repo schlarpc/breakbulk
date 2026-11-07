@@ -51,6 +51,8 @@ let
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix { inherit lib wasmBindgen; };
   testRuns = import ./test-runs.nix { inherit lib stages; };
+  products = import ./products.nix { inherit lib stages; };
+  variants = import ./variants.nix { inherit lib; };
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;
@@ -133,7 +135,9 @@ let
       mkTools
       mkWorkspace
       dynamic
+      products
       ;
+    variantsLib = variants;
   };
 in
 {
@@ -166,7 +170,14 @@ in
 
   xwinSdk = import ./xwin-sdk.nix { inherit lib; };
 
-  inherit wasmBindgen stages testRuns testApps;
+  inherit
+    wasmBindgen
+    stages
+    testRuns
+    testApps
+    products
+    variants
+    ;
 
   # Toolchain presets (M3): breakbulk.presets.{linuxGnu, linuxMusl,
   # staticGlibc, msvc, wasmBrowser, wasmComponent}; runners; the Rust to

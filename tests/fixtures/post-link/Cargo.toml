@@ -1,0 +1,10 @@
+# Post-link stages: `server` and `tool` are plain bins built with debug
+# info. The tests (tests/products) add stages and checks through the module
+# options and inspect the stage chain and its bytes.
+[workspace]
+resolver = "2"
+members = ["server", "tool"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

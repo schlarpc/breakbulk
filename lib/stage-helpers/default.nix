@@ -102,7 +102,7 @@ let
         mkdir -p "$debug"
         find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
           isElf "$f" || continue
-          if ! readelf -S -W "$f" | grep -q ' \.debug_info '; then
+          if ! readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
             echo "splitDebug: ''${f#$out/}: no debug info, left unchanged"
             continue
           fi

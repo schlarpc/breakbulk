@@ -4,20 +4,23 @@
 //! ```text
 //! breakbulk-plan --cargo C --rustc R --rustdoc D --shim S \
 //!   --skeleton DIR [--workspace REL] [--canonical-root /build/skeleton] \
-//!   --kind build|test --target TRIPLE --profile P [--features F]… \
+//!   --kind build|test|bench [--mode build|check|clippy|coverage] \
+//!   [--clippy-driver PATH] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--spec FILE] --scratch DIR [--forbid PATH]… --out plan.json
 //! ```
 
 use std::process::ExitCode;
 
-use breakbulk_format::PlanKind;
+use breakbulk_format::{PlanKind, VariantMode};
 use breakbulk_plan::trace::Options;
 
 fn usage() -> ! {
     eprintln!(
         "usage: breakbulk-plan --cargo C --rustc R --rustdoc D --shim S --skeleton DIR \
-         [--workspace REL] [--canonical-root DIR] --kind build|test --target TRIPLE \
+         [--workspace REL] [--canonical-root DIR] --kind build|test|bench \
+         [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-arg A]... \
+         --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
          [--config X]... [--spec FILE] --scratch DIR [--forbid PATH]... --out FILE"
     );
@@ -35,6 +38,9 @@ fn main() -> ExitCode {
         workspace: String::new(),
         canonical_root: None,
         kind: PlanKind::Build,
+        mode: VariantMode::Build,
+        clippy_driver: None,
+        clippy_args: Vec::new(),
         target: String::new(),
         profile: "dev".into(),
         features: Vec::new(),
@@ -61,9 +67,21 @@ fn main() -> ExitCode {
                 opts.kind = match val().as_str() {
                     "build" => PlanKind::Build,
                     "test" => PlanKind::Test,
+                    "bench" => PlanKind::Bench,
                     _ => usage(),
                 }
             }
+            "--mode" => {
+                opts.mode = match val().as_str() {
+                    "build" => VariantMode::Build,
+                    "check" => VariantMode::Check,
+                    "clippy" => VariantMode::Clippy,
+                    "coverage" => VariantMode::Coverage,
+                    _ => usage(),
+                }
+            }
+            "--clippy-driver" => opts.clippy_driver = Some(val()),
+            "--clippy-arg" => opts.clippy_args.push(val()),
             "--target" => opts.target = val(),
             "--profile" => opts.profile = val(),
             "--features" => opts.features.extend(

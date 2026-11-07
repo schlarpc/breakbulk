@@ -84,6 +84,10 @@ rec {
       # requiredFeatures; } ]; } (see predictedRoots), or null to take the
       # plan's roots as they are.
       roots ? null,
+      # The `--remap-path-scope` of non-test compile units, for targets
+      # whose products split debug info off (`"macro,diagnostics"`), or
+      # null for every scope. See inputs.rs `shipped_remap_scope`.
+      shippedRemapScope ? null,
       name ? "breakbulk-units",
       storeDir ? builtins.storeDir,
     }:
@@ -105,12 +109,13 @@ rec {
         workspace = lib.attrNames workspace;
         crates = lib.attrNames crates;
       });
-      toolchainsFile = toFile "toolchains.json" (toJSON {
+      toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir;
         tools = lib.mapAttrs (_: noCtx) tools;
         host = platformJson host;
         target = platformJson target;
-      });
+      }
+      // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }));
       overridesFile = toFile "overrides.json" (toJSON {
         inherit strictSources;
         packages = lib.mapAttrs (

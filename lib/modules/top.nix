@@ -30,6 +30,18 @@ in
       '';
     };
 
+    ca = mkOption {
+      type = types.nullOr types.bool;
+      default = null;
+      description = ''
+        Content-address post-link stages, checks and test runs, so that an
+        unchanged input does not re-run them. Needs Nix's `ca-derivations`
+        experimental feature in the evaluator and the daemon. `null` turns
+        it on exactly when the evaluator has `dynamic-derivations` (which
+        needs `ca-derivations` too), and off otherwise (decision 52).
+      '';
+    };
+
     strictSources = mkOption {
       type = types.bool;
       default = false;

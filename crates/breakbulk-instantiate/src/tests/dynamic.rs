@@ -86,6 +86,7 @@ fn outer(names: &[&str]) -> Outer {
             .iter()
             .map(|n| (n.to_string(), format!("{}.drv", n.replace('/', "."))))
             .collect(),
+        units: Some("units.drv".into()),
     }
 }
 
@@ -215,9 +216,30 @@ fn nodes_are_in_dependency_order() {
             ),
             ("wrapper:smokeapp/bin/smokeapp", "smokeapp.bin.smokeapp.drv"),
             ("wrapper:smokeapp/test/it", "smokeapp.test.it.drv"),
+            ("wrapper:*units", "units.drv"),
         ]
     );
     assert!(pos.contains_key("stub:smokeapp/test/it"));
+    assert_eq!(plan.nodes.last().unwrap().key, "wrapper:*units");
+}
+
+#[test]
+fn units_output_depends_on_every_unit_output() {
+    let inputs = dyn_inputs();
+    let (resolved, _) = write_all(&inputs);
+    let (_, u) = resolved
+        .iter()
+        .find(|(k, _)| k == "wrapper:*units")
+        .unwrap();
+    assert_eq!(u.name, "ws-x86_64-unknown-linux-gnu-dev-units");
+    for (id, unit) in &inputs.plan.units {
+        for o in unit_outputs(unit) {
+            assert!(u.input_drvs[&drv_of(id)].contains(&o), "{id} {o}");
+            assert!(u.env["units"].contains(&unit_path(id, &o)));
+        }
+    }
+    // No stub: a check variant has no roots.
+    assert!(!u.input_drvs.keys().any(|d| d.contains("stub")));
 }
 
 #[test]
@@ -299,7 +321,7 @@ fn test_spec_of_a_test_root() {
                     .collect(),
             },
         );
-        if n.submit_as.is_some() {
+        if n.key == "wrapper:smokeapp/bin-test/smokeapp" {
             wrapper = Some(r);
         }
     }

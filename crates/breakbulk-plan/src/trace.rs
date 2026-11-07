@@ -32,6 +32,20 @@ pub struct Options {
     /// root, planning fails: Cargo would hash its absolute path.
     pub canonical_root: Option<String>,
     pub kind: PlanKind,
+    /// What the variant compiles: `build` and `coverage` trace `cargo
+    /// build` / `cargo test --no-run` / `cargo bench --no-run`; `check` and
+    /// `clippy` trace `cargo check` (build plan) and `cargo check
+    /// --all-targets` (test plan). Coverage's `-C instrument-coverage`
+    /// comes in through `configs` like any spec rustflag.
+    pub mode: VariantMode,
+    /// The clippy variant's `RUSTC_WORKSPACE_WRAPPER` (a clippy-driver
+    /// store path). Cargo then starts `shim clippy-driver rustc …` for
+    /// workspace members only.
+    pub clippy_driver: Option<String>,
+    /// Clippy's own arguments (`-D warnings`, `-W clippy::pedantic`), as
+    /// `cargo clippy -- ARGS` passes them: `CLIPPY_ARGS`, each argument
+    /// followed by `__CLIPPY_HACKERY__`. Kept only on clippy-driver units.
+    pub clippy_args: Vec<String>,
     pub target: String,
     pub profile: String,
     pub features: Vec<String>,
@@ -71,14 +85,14 @@ impl Trace {
             variant: Variant {
                 profile: opts.profile.clone(),
                 features: opts.features.iter().cloned().collect(),
-                mode: VariantMode::Build,
+                mode: opts.mode,
             },
             cargo_version: self.cargo_version.clone(),
             rustc_version: self.rustc_version.clone(),
             rustdoc: opts.rustdoc.clone(),
             cargo: opts.cargo.clone(),
             nightly: self.cargo_version.contains("-nightly") || self.cargo_version.contains("-dev"),
-            keep_workspace_wrapper: false,
+            keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
         }
     }
 }
@@ -271,7 +285,16 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     let metadata = Metadata::read(&meta_path)?;
     check_location(opts, &metadata)?;
 
+    let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
+    if opts.mode == VariantMode::Clippy && opts.clippy_driver.is_none() {
+        bail!("the clippy variant needs --clippy-driver");
+    }
     let invocations: Vec<Vec<&str>> = match opts.kind {
+        PlanKind::Build if checking => vec![vec!["check"]],
+        PlanKind::Test if checking => vec![vec!["check", "--all-targets"]],
+        PlanKind::Bench if checking => {
+            bail!("a bench plan needs a build or coverage variant, not check or clippy")
+        }
         PlanKind::Build => vec![vec!["build"]],
         PlanKind::Test => {
             let mut v = vec![vec!["test", "--no-run"]];
@@ -280,6 +303,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
             }
             v
         }
+        PlanKind::Bench => vec![vec!["bench", "--no-run"]],
     };
     let mut records = Vec::new();
     for (n, sub) in invocations.iter().enumerate() {
@@ -290,6 +314,19 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
             .args(common_args(opts, &config))
             .args(selection_args(opts))
             .env("BREAKBULK_RECORD", &record);
+        if let Some(driver) = &opts.clippy_driver
+            && opts.mode == VariantMode::Clippy
+        {
+            cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
+            if !opts.clippy_args.is_empty() {
+                let joined: String = opts
+                    .clippy_args
+                    .iter()
+                    .map(|a| format!("{a}__CLIPPY_HACKERY__"))
+                    .collect();
+                cmd.env("CLIPPY_ARGS", joined);
+            }
+        }
         output(cmd, &format!("cargo {}", sub.join(" ")))?;
         records.extend(read_records(&record)?);
     }

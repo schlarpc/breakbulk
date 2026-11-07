@@ -47,9 +47,42 @@ let
           ];
           default = "build";
           description = ''
-            What the variant compiles. Only `build` is implemented; `check`,
-            `clippy` and `coverage` come with M4, and using such a variant's
-            outputs is an error until then.
+            What the variant compiles. `build`: products and test binaries
+            (`cargo build`, `cargo test --no-run`). `check`: `cargo check`
+            and `cargo check --all-targets`, metadata only, no products or
+            test runs; `target.<triple>.variants.<v>.check` builds every
+            unit and is in `repo.checks`. `clippy`: as `check`, with
+            clippy-driver as `RUSTC_WORKSPACE_WRAPPER` (workspace members
+            only, so dependencies are shared with `check`). `coverage`:
+            `build` with `-C instrument-coverage` on target units.
+            Use the same profile as the build variant to share host units;
+            Cargo's own `clippy` uses the dev profile.
+          '';
+        };
+        clippyArgs = mkOption {
+          type = types.listOf types.str;
+          default = [ ];
+          example = [
+            "-D"
+            "warnings"
+          ];
+          description = ''
+            Clippy's own arguments, as in `cargo clippy -- ARGS`
+            (`CLIPPY_ARGS`), for a `clippy` variant. They reach only the
+            units clippy-driver compiles (workspace members).
+          '';
+        };
+        benches = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Also trace `cargo bench --no-run` with this variant's settings
+            (use `profile = "bench"`): bench binaries, and lib and bin
+            harnesses in bench mode, at
+            `target.<triple>.variants.<v>.benches.<pkg>.<bench>`.
+            `target.<triple>.benches` is the default variant's when it has
+            benches, else the one variant with `benches = true`. The test
+            plan builds no benches (`cargo test --no-run` does not).
           '';
         };
       };
@@ -82,6 +115,15 @@ let
                 default = pkgs.cargo;
                 defaultText = lib.literalExpression "pkgs.cargo";
                 description = "cargo (with `bin/cargo`).";
+              };
+              clippy = mkOption {
+                type = types.package;
+                default = pkgs.clippy;
+                defaultText = lib.literalExpression "pkgs.clippy";
+                description = ''
+                  clippy (with `bin/clippy-driver`), for `clippy` variants.
+                  It must be built for the same rustc.
+                '';
               };
             };
           };
@@ -162,11 +204,15 @@ let
           '';
         };
 
-        benchSmoke = bt.notImplemented "M4" (mkOption {
+        benchSmoke = mkOption {
           type = types.bool;
           default = false;
-          description = "Run each bench binary once in test mode (`--test`), as a check.";
-        });
+          description = ''
+            Run each bench binary of `target.<triple>.benches` once in test
+            mode (`--test`) as a check (`<ws>/<triple>/<pkg>/bench-<name>`
+            in `repo.checks`). Timed runs never happen inside Nix.
+          '';
+        };
 
         docs.noDeps = bt.notImplemented "M6" (mkOption {
           type = types.bool;
@@ -179,7 +225,6 @@ let
 
       config.warnings = bt.unimplementedWarnings "workspaces.${name}" options {
         "M2, later" = [ [ "roots" ] ];
-        M4 = [ [ "benchSmoke" ] ];
         M6 = [
           [
             "docs"

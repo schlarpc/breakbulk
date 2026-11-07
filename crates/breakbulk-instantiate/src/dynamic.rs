@@ -26,7 +26,7 @@ use breakbulk_format::{Piece, Plan, Text, Unit, to_canonical_json};
 use serde::{Deserialize, Serialize};
 
 use crate::output::{Drv, Part, RootOut, RootWhat, UnitsJson, Value};
-use crate::{Error, Inputs, TOOL_SHELL, Tokens, err, keys, token_prefix};
+use crate::{Error, Inputs, TOOL_SHELL, Tokens, err, keys, token_prefix, unit_outputs};
 
 /// The key of the coreutils store path the wrappers use (`values.json`
 /// only; IFD mode has no wrappers).
@@ -41,6 +41,11 @@ pub struct Outer {
     /// Root name (`<package>/<kind>/<target>`) to its output name
     /// (`<…>.drv`). Must cover every root of the instantiation.
     pub outputs: BTreeMap<String, String>,
+    /// The output for a derivation that depends on every output of every
+    /// unit (`units.drv`): building it builds the whole plan, as check and
+    /// clippy variants need (they have no roots). None: no such output.
+    #[serde(default)]
+    pub units: Option<String>,
 }
 
 /// `values.json`: every input key's value, without string context, and the
@@ -217,56 +222,87 @@ fn wrapper(
         test_spec: spec,
     };
     let json = to_canonical_json(&info).map_err(|e| Error(e.to_string()))?;
+    small_drv(
+        inputs,
+        &tokens,
+        outer,
+        output_name,
+        r#"mkdir "$out" && ln -s "$root" "$out/root" && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#,
+        [("root", target), ("rootJson", json)],
+    )
+    .map_err(|e| Error(format!("root {root_name}: {e}")))
+}
+
+/// A derivation the outer derivation submits: named
+/// `<outer name>-<output name without .drv>`, as Nix requires; bash with
+/// coreutils on `PATH` runs `script`; `attrs` are tokenized text.
+fn small_drv<const N: usize>(
+    inputs: &Inputs,
+    tokens: &Tokens,
+    outer: &Outer,
+    output_name: &str,
+    script: &str,
+    attrs: [(&str, String); N],
+) -> Result<Drv, Error> {
     let base = output_name.strip_suffix(".drv").ok_or_else(|| {
         Error(format!(
-            "the output name {output_name} of root {root_name} does not end in .drv"
+            "the output name {output_name} does not end in .drv"
         ))
     })?;
     let path = format!("{}/bin", tokens.input(COREUTILS_KEY.into()));
     let builder = tokens.input(keys::tool(TOOL_SHELL));
-    let mut attrs = BTreeMap::new();
-    attrs.insert(
+    let mut out = BTreeMap::new();
+    out.insert(
         "name".into(),
         Value::String(format!("{}-{base}", outer.name)),
     );
-    attrs.insert(
-        "builder".into(),
-        Value::Parts {
-            parts: tokens.split(&builder)?,
-        },
-    );
-    attrs.insert(
+    out.insert(
         "args".into(),
-        Value::Strings(vec![
-            "-c".into(),
-            r#"mkdir "$out" && ln -s "$root" "$out/root" && printf '%s' "$rootJson" > "$out/breakbulk-root.json""#
-                .into(),
-        ]),
+        Value::Strings(vec!["-c".into(), script.into()]),
     );
-    attrs.insert(
+    out.insert(
         "system".into(),
         Value::String(inputs.toolchains.system.clone()),
     );
-    attrs.insert("outputs".into(), Value::Strings(vec!["out".into()]));
-    attrs.insert(
-        "PATH".into(),
-        Value::Parts {
-            parts: tokens.split(&path)?,
-        },
-    );
-    attrs.insert(
-        "root".into(),
-        Value::Parts {
-            parts: tokens.split(&target)?,
-        },
-    );
-    attrs.insert(
-        "rootJson".into(),
-        Value::Parts {
-            parts: tokens.split(&json)?,
-        },
-    );
-    Ok(Drv { attrs })
+    out.insert("outputs".into(), Value::Strings(vec!["out".into()]));
+    for (k, v) in [("builder", builder), ("PATH", path)]
+        .into_iter()
+        .chain(attrs)
+    {
+        out.insert(
+            k.into(),
+            Value::Parts {
+                parts: tokens.split(&v)?,
+            },
+        );
+    }
+    Ok(Drv { attrs: out })
+}
+
+/// The derivation that depends on every output of every unit of the plan;
+/// `$out/units` lists them.
+fn all_units(
+    inputs: &Inputs,
+    prefix: &str,
+    outer: &Outer,
+    output_name: &str,
+) -> Result<Drv, Error> {
+    let tokens = Tokens::new(inputs, prefix);
+    let mut list = String::new();
+    for (id, unit) in &inputs.plan.units {
+        for o in unit_outputs(unit) {
+            list.push_str(&tokens.unit(id, &o));
+            list.push('\n');
+        }
+    }
+    small_drv(
+        inputs,
+        &tokens,
+        outer,
+        output_name,
+        r#"mkdir "$out" && printf '%s' "$units" > "$out/units""#,
+        [("units", list)],
+    )
 }
 
 /// The derivations to write, units first in dependency order, then each
@@ -317,6 +353,16 @@ pub fn dynamic_plan(
             submit_as: None,
         })
         .collect();
+    if let Some(output) = &outer.units {
+        if taken.contains_key(output) {
+            return err(format!("the units output {output} is also a root's output"));
+        }
+        wrappers.push((
+            "wrapper:*units".into(),
+            all_units(inputs, &prefix, outer, output)?,
+            output.clone(),
+        ));
+    }
     for (key, drv, output) in wrappers {
         nodes.push(Node {
             key,

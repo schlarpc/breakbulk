@@ -262,7 +262,7 @@ let
         "libc@=0.2.191".env.LIBC = "exact";
         not-in-any-lockfile.env.X = "1";
         shared.nativeInputs = p: [ p.pkg-config ];
-        app-b.test.args = [ "--skip" "slow" ];
+        app-b.test.sourceScope = [ "docs" ];
       };
       targets.${native} = {
         rustflags = [
@@ -466,7 +466,7 @@ in
       "overrides: target env placement";
     assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package") "overrides: no unmatched warning: ${builtins.toJSON ws}";
     assert lib.assertMsg (has "`packages.itoa` matches no package") "overrides: itoa >=2 should match nothing";
-    assert lib.assertMsg (has "packages.app-b.test.args") "overrides: no warning for test.args";
+    assert lib.assertMsg (has "packages.app-b.test.sourceScope") "overrides: no warning for test.sourceScope";
     # targets.<triple>.rustflags (M3) reach target units only.
     assert lib.assertMsg (
       lib.hasInfix "bb_target_mark" units."libc-0.2.191-lib".drvAttrs.BREAKBULK_UNIT

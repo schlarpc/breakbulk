@@ -1,0 +1,10 @@
+# The embedding workspace: `embedder` embeds another workspace's product
+# with `include_bytes!(env!("PAYLOAD_BIN"))`; `host` depends on it; `other`
+# does not, so it must not wait for (or reference) the product.
+[workspace]
+resolver = "2"
+members = ["host", "embedder", "other"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
