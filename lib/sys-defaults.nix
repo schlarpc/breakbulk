@@ -31,6 +31,18 @@
 #    The entries for opentelemetry-proto, prost-wkt-types and
 #    tonic-reflection are kept as nixpkgs has them (their own build
 #    scripts compile protos).
+#  - Switches that make a crate use a system library instead of the one it
+#    bundles (decision 106). They change what gets built behind the
+#    project's back (for example rusqlite's `bundled` feature would be
+#    ignored), so the library inputs are kept and the choice is left to
+#    the crate's own features and the project. Removed from nixpkgs'
+#    entries: `AWS_LC_SYS_USE_SYSTEM` (aws-lc-sys >= 0.42),
+#    `LIBGIT2_SYS_USE_PKG_CONFIG` (libgit2-sys),
+#    `LIBSQLITE3_SYS_USE_PKG_CONFIG` (libsqlite3-sys) and
+#    `ZSTD_SYS_USE_PKG_CONFIG` (zstd-sys). Set them per package to opt
+#    in, e.g. `packages.libsqlite3-sys.env.LIBSQLITE3_SYS_USE_PKG_CONFIG
+#    = "1";`. `AWS_LC_SYS_CMAKE_BUILDER` (aws-lc-sys < 0.42) is kept: it
+#    picks how the bundled library is built, not which library.
 { config, lib, ... }:
 let
   pc = p: [ p.pkg-config ];
@@ -47,7 +59,6 @@ in
       "aws-lc-sys@>=0.42.0" = {
         nativeInputs = pc;
         inputs = p: [ p.aws-lc ];
-        env.AWS_LC_SYS_USE_SYSTEM = "1";
       };
       "aws-lc-sys@<0.42.0" = {
         # nixpkgs: force the cmake backend.
@@ -140,7 +151,6 @@ in
         inputs = p: [ p.gtk4 ];
       };
       libgit2-sys = {
-        env.LIBGIT2_SYS_USE_PKG_CONFIG = "1";
         nativeInputs = pc;
         inputs = p: [
           p.openssl
@@ -153,7 +163,6 @@ in
         inputs = p: [ p.seatd ];
       };
       libsqlite3-sys = {
-        env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
         nativeInputs = pc;
         inputs = p: [ p.sqlite ];
       };
@@ -262,7 +271,6 @@ in
       };
       xcb.inputs = p: [ p.python3 ];
       zstd-sys = {
-        env.ZSTD_SYS_USE_PKG_CONFIG = "1";
         nativeInputs = pc;
         inputs = p: [ p.zstd ];
       };

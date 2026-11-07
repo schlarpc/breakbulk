@@ -572,6 +572,19 @@ in
     assert lib.assertMsg (bad == [ ]) "native-preset: failed ${toString bad}";
     evalCheck "native-preset" (builtins.toJSON checks);
 
+  # Decision 106: the curated -sys defaults set no switch that swaps a
+  # bundled C library for a system one; their library inputs stay.
+  sys-defaults-no-switches =
+    let
+      pkgsCfg = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).config.packages;
+      envNames = lib.concatMap (p: lib.attrNames (p.env or { })) (lib.attrValues pkgsCfg);
+      switches = lib.filter (n: builtins.match ".*_(USE_PKG_CONFIG|USE_SYSTEM|NO_VENDOR|SYSTEM)" n != null) envNames;
+      sqliteInputs = map lib.getName (pkgsCfg.libsqlite3-sys.inputs pkgs);
+    in
+    assert lib.assertMsg (switches == [ ]) "sys-defaults: system-library switches ${toString switches}";
+    assert lib.assertMsg (sqliteInputs == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs ${toString sqliteInputs}";
+    evalCheck "sys-defaults-no-switches" (toString envNames);
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }

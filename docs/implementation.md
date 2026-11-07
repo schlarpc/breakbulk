@@ -528,7 +528,7 @@ repo = breakbulk.lib.mkRepository {
 ```
 
 - `env` values may reference any derivation, including another workspace's products: `env.UI_DIST = repo.workspaces.ui.target.wasm32-unknown-unknown.packages.ui;`. They are passed to instantiation by reference.
-- A curated module of defaults for common `-sys` crates ships with the library. User values merge over it with ordinary module priorities.
+- A curated module of defaults for common `-sys` crates ships with the library: native inputs only, never a switch that swaps a bundled C library for a system one (decision 106; the removed ones are listed in `lib/sys-defaults.nix`). User values merge over it with ordinary module priorities.
 - An override whose `version` or name matches nothing in any lockfile is an evaluation warning, not silence.
 
 ### Outputs

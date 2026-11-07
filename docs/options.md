@@ -32,7 +32,7 @@ attribute set of (submodule)
 {
   openssl-sys = { nativeInputs = p: [ p.pkg-config ]; inputs = p: [ p.openssl ]; };
   app.env.GIT_REV = self.rev or "dirty";
-  "aws-lc-sys@>=0.42".env.AWS_LC_SYS_USE_SYSTEM = "1";
+  "libsqlite3-sys".env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";  # opt in to the system SQLite
 }
 
 ```

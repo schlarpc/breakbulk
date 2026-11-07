@@ -77,14 +77,6 @@ in
     };
   };
 
-  # rusqlite's `bundled` SQLite, as the crane build ships it: the curated
-  # default's LIBSQLITE3_SYS_USE_PKG_CONFIG=1 would link nixpkgs' sqlite.
-  packages.libsqlite3-sys = {
-    env = lib.mkForce { };
-    nativeInputs = lib.mkForce [ ];
-    inputs = lib.mkForce [ ];
-  };
-
   targets = {
     ${native}.preset = breakbulk.presets.linuxGnu;
     ${wasm}.preset = breakbulk.presets.wasmBrowser { rustc = rust; };
