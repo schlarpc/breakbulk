@@ -7,13 +7,15 @@
 
 mod canonical;
 pub mod deps;
+mod doctest;
 mod normalize;
 mod plan;
 mod render;
 mod validate;
 
 pub use canonical::{CanonicalError, to_canonical_json};
-pub use deps::{Graph, crate_deps};
+pub use deps::{Graph, crate_deps, crate_deps_of};
+pub use doctest::render_doctest;
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;
 pub use render::{

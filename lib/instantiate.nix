@@ -9,6 +9,8 @@
 #                               (`.breakbulkRoot` says which)
 #   inst.unitsJson              the instantiate derivation (its output is
 #                               units.json)
+#   inst.doctestAttrs.<package> the attributes of a library's doctest
+#                               derivation (test plans), before `derivation`
 #
 # The instantiate derivation sees only names and tool paths, never a value
 # with string context: units.json names every input by key, and this file
@@ -188,13 +190,14 @@ rec {
 
       value = v: if isAttrs v then lib.concatMapStrings part v.parts else v;
 
-      mkDrv =
+      drvAttrs =
         d:
         let
           attrs = lib.mapAttrs (_: value) d.attrs;
           big = attrs ? BREAKBULK_UNIT && stringLength attrs.BREAKBULK_UNIT > json.passAsFileAbove;
         in
-        derivation (attrs // lib.optionalAttrs big { passAsFile = [ "BREAKBULK_UNIT" ]; });
+        attrs // lib.optionalAttrs big { passAsFile = [ "BREAKBULK_UNIT" ]; };
+      mkDrv = d: derivation (drvAttrs d);
 
       units =
         assert lib.assertMsg (json.version == 2) "breakbulk: units.json version ${toString json.version} is not supported";
@@ -220,6 +223,12 @@ rec {
     {
       inherit units unitsJson;
       roots = rootsOut;
+      # Test plans: package name to the attributes of its doctest derivation
+      # (`breakbulk-unit doctest`), for lib/test-runs.nix to add the test
+      # configuration to before calling `derivation`.
+      doctestAttrs = lib.mapAttrs' (
+        id: d: lib.nameValuePair (lib.removePrefix "d-" id) (drvAttrs d)
+      ) (json.doctests or { });
     };
 
   # The predicted roots of one plan kind ("build", "test" or "bench"), in the

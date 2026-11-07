@@ -1,0 +1,4 @@
+[package]
+name = "e2024"
+version.workspace = true
+edition = "2024"

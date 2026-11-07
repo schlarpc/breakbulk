@@ -185,6 +185,12 @@ impl<'p> Graph<'p> {
         let c = self
             .compile(id)
             .unwrap_or_else(|| panic!("{id} is not a compile unit of the plan"));
+        self.crate_deps_of(c)
+    }
+
+    /// [`Graph::crate_deps`] of a compile unit that need not be one of the
+    /// plan's units (a doctest's [`crate::Doctest::as_compile`]).
+    pub fn crate_deps_of(&self, c: &CompileUnit) -> BTreeSet<OutRef> {
         let want = if is_linking(c) { "rlib" } else { "rmeta" };
         let mut out = BTreeSet::new();
         for o in direct_crate_refs(self.plan, c) {
@@ -294,4 +300,28 @@ impl<'p> Graph<'p> {
 /// [`Graph::crate_deps`] for one unit.
 pub fn crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
     Graph::new(plan).crate_deps(id)
+}
+
+/// [`Graph::crate_deps_of`] for one compile unit.
+pub fn crate_deps_of(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
+    Graph::new(plan).crate_deps_of(c)
+}
+
+/// What a doctest (rustdoc compiling and linking the crate's examples)
+/// puts in its dependency directory: every crate file below it, as for a
+/// linking unit, plus every `rmeta` below it when its libraries' rlibs carry
+/// no metadata (nightly's `-Zembed-metadata=no`). Doctests name everything
+/// as inputs: they read no manifests.
+pub fn doctest_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
+    let g = Graph::new(plan);
+    let mut deps = g.crate_deps_of(c);
+    let no_embed =
+        direct_crate_refs(plan, c).any(|o| g.compile(&o.out).is_some_and(embeds_no_metadata));
+    if no_embed {
+        for o in direct_crate_refs(plan, c) {
+            deps.insert(g.chosen(o, "rmeta"));
+            deps.extend(g.below(&o.out, "rmeta").iter().cloned());
+        }
+    }
+    deps
 }

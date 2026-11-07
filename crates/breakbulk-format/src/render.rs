@@ -60,7 +60,7 @@ pub trait Resolve {
     }
 }
 
-fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
+pub(crate) fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
     match t {
         Text::Literal(s) => Ok(s.clone()),
         Text::Concat(pieces) => {
@@ -76,7 +76,7 @@ fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
     }
 }
 
-fn env<R: Resolve>(
+pub(crate) fn env<R: Resolve>(
     e: &BTreeMap<String, Text>,
     r: &R,
 ) -> Result<BTreeMap<String, String>, R::Error> {
@@ -85,7 +85,7 @@ fn env<R: Resolve>(
         .collect()
 }
 
-fn splice<R: Resolve>(
+pub(crate) fn splice<R: Resolve>(
     s: &Splice,
     r: &R,
     weak: &BTreeSet<UnitId>,
@@ -94,7 +94,11 @@ fn splice<R: Resolve>(
     Ok(s.map(|_| flags))
 }
 
-fn flags<R: Resolve>(run: &UnitId, r: &R, weak: &BTreeSet<UnitId>) -> Result<String, R::Error> {
+pub(crate) fn flags<R: Resolve>(
+    run: &UnitId,
+    r: &R,
+    weak: &BTreeSet<UnitId>,
+) -> Result<String, R::Error> {
     if weak.contains(run) {
         r.weak_flags(run)
     } else {
