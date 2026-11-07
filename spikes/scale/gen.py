@@ -19,13 +19,15 @@ DIR gets:
     app/, crates/    the sources: tiny crates, one function each.
     stats.json       graph statistics.
 
-The graph model (--model random) is fitted to zed's Cargo.lock (1,655
-crates once Windows and wasm-only crates are dropped): out-degrees are
-drawn from zed's empirical out-degree histogram (mean 5.7), and each edge
-goes either to one of the last `window` crates (probability `local`, which
-builds depth) or to an earlier crate chosen with probability proportional
-to its fan-in plus one (linear preferential attachment, which gives the
-heavy-tailed fan-in of libc, cfg-if, serde and friends).
+The random model is fitted to zed's Cargo.lock (1,655 crates once Windows
+and wasm-only crates are dropped): out-degrees are drawn from zed's
+empirical out-degree histogram and sorted along the build order with noise
+(`--noise`), so low-degree crates sit low in the graph; each edge goes either
+to one of the last `--window` crates (probability `--local`, which builds
+depth) or to an earlier crate chosen by linear preferential attachment
+(weight `--pa` times fan-in, plus one), which gives the heavy-tailed fan-in
+of libc, cfg-if, serde and friends. The defaults reproduce zed's
+sum-of-closures / N^2 (about 0.08).
 
 What a compile unit gets is what Cargo passes, for the parts that grow with
 the graph (verified against Cargo 0.100, src/compiler/custom_build.rs
