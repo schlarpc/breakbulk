@@ -5,6 +5,7 @@
 #   NIX_MASTER  a Nix master build; default: the $SPIKE_DIR/nix-master link
 #               that setup.sh creates
 #   SPIKE_NIX_CONF  extra nix.conf lines (substituters, post-build-hook, ...)
+#   SPIKE_STORE_PARAMS  extra store URL parameters, e.g. "&system-features=x"
 
 : "${SPIKE_DIR:=/tmp/claude-1000/-home-schlarpc-breakbulk/spike-b/w}"
 : "${NIX_MASTER:=$(readlink -f "$SPIKE_DIR/nix-master")}"
@@ -25,7 +26,7 @@ EOF
 export NIX_CONF_DIR="$SPIKE_DIR/etc"
 export NIX_USER_CONF_FILES="$SPIKE_DIR/etc/empty.conf"
 export XDG_CACHE_HOME="$SPIKE_DIR/cache"
-export STORE="local?root=$SPIKE_DIR/store"
+export STORE="local?root=$SPIKE_DIR/store${SPIKE_STORE_PARAMS:-}"
 unset NIX_REMOTE NIX_PATH
 
 # nixm: Nix master on the private store.

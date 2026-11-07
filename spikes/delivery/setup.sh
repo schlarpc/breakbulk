@@ -13,6 +13,7 @@ source "$here/env.sh"
 mapfile -t paths < <(nix build --no-link --print-out-paths \
   "nixpkgs#bash^out" "nixpkgs#coreutils^out" "nixpkgs#jq^bin" "nixpkgs#gnused^out" "nixpkgs#python3Minimal^out")
 paths+=("$NIX_MASTER")
+paths+=("$(nix build --impure --no-link --print-out-paths -f "$here/bb-drv/default.nix")")
 
 "$NIX_MASTER/bin/nix" copy --no-check-sigs --to "$STORE" "${paths[@]}"
 
@@ -24,6 +25,7 @@ cat > "$SPIKE_DIR/tools.nix" <<EOF
   sed = builtins.storePath "${paths[3]}";
   python = builtins.storePath "${paths[4]}";
   nix = builtins.storePath "${paths[5]}";
+  bbdrv = builtins.storePath "${paths[6]}";
 }
 EOF
 echo "wrote $SPIKE_DIR/tools.nix"

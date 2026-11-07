@@ -44,6 +44,44 @@ render() {
   rendered=$s
 }
 
+# add_drv <json> <name>: add one derivation; sets $drv and $paths ({output: path}).
+# ADD_METHOD selects the mechanism:
+#   harmonia (default)  bb-drv: harmonia hash modulo + AddToStore with explicit
+#                       references over the builder-rpc-v0 socket
+#   compute             drvhash.py + `nix store add --mode text --scan`
+#   derivation-add      `nix derivation add`; fails for any derivation whose
+#                       inputs were added earlier in this build
+add_drv() {
+  local json=$1 name=$2
+  printf '%s' "$json" > "$TMPDIR/unit.json"
+  case ${ADD_METHOD:-harmonia} in
+    harmonia)
+      local r
+      r=$(bb-drv add "$TMPDIR/unit.json" "$TMPDIR/drvs")
+      drv=$(jq -r .drvPath <<<"$r"); paths=$(jq -c .outputs <<<"$r") ;;
+    compute)
+      paths=$(python3 "$DRVHASH" "$TMPDIR/unit.json" "$TMPDIR/unit.drv" "$TMPDIR/drvs")
+      drv=$(nix store add --mode text --scan --name "$name.drv" "$TMPDIR/unit.drv")
+      cp "$TMPDIR/unit.drv" "$TMPDIR/drvs/$(base "$drv")" ;;
+    derivation-add)
+      drv=$(nix derivation add <<<"$json")
+      local aterm o
+      aterm=$(cat "$drv")   # fails: added paths are not mounted into the sandbox
+      paths='{}'
+      for o in $(jq -r '.outputs | keys[]' <<<"$json"); do
+        [[ $aterm =~ \(\"$o\",\"($NIX_STORE/[^\"]*)\" ]]
+        paths=$(jq -c --arg o "$o" --arg p "${BASH_REMATCH[1]}" '.[$o] = $p' <<<"$paths")
+      done ;;
+  esac
+}
+
+submit() {
+  case ${ADD_METHOD:-harmonia} in
+    harmonia) bb-drv submit "$1" "$2" ;;
+    *) nix store submit-output "$1" "$2" ;;
+  esac
+}
+
 for id in $(jq -r '.order[]' "$UNITS"); do
   unit=$(jq -c --arg id "$id" '.units[$id]' "$UNITS")
   name=$(jq -r .name <<<"$unit")
@@ -70,26 +108,8 @@ for id in $(jq -r '.order[]' "$UNITS"); do
       inputs: {drvs: $drvs, srcs: $srcs},
       outputs: ($outs | map({key: ., value: {}}) | from_entries)
     }')
-  case ${ADD_METHOD:-compute} in
-    derivation-add)
-      # `nix derivation add` with deferred outputs; Nix fills in the paths.
-      # Works only for units with no unit inputs (see the spike notes).
-      drv=$(nix derivation add <<<"$json")
-      aterm=$(cat "$drv")   # fails: added paths are not mounted into the sandbox
-      for o in $outputs; do
-        [[ $aterm =~ \(\"$o\",\"($NIX_STORE/[^\"]*)\" ]]
-        outpath[$id/$o]=${BASH_REMATCH[1]}
-      done ;;
-    compute)
-      # Compute the input-addressed output paths and the ATerm ourselves,
-      # then add the .drv as a text-hashed store object (references found by
-      # scanning: the input .drv files and sources).
-      printf '%s' "$json" > "$TMPDIR/unit.json"
-      paths=$(python3 "$DRVHASH" "$TMPDIR/unit.json" "$TMPDIR/unit.drv" "$TMPDIR/drvs")
-      drv=$(nix store add --mode text --scan --name "$name.drv" "$TMPDIR/unit.drv")
-      cp "$TMPDIR/unit.drv" "$TMPDIR/drvs/$(base "$drv")"
-      for o in $outputs; do outpath[$id/$o]=$(jq -r --arg o "$o" '.[$o]' <<<"$paths"); done ;;
-  esac
+  add_drv "$json" "$name"
+  for o in $outputs; do outpath[$id/$o]=$(jq -r --arg o "$o" '.[$o]' <<<"$paths"); done
   drvof[$id]=$drv
   echo "added $id -> $drv"
   for o in $outputs; do echo "  $o -> ${outpath[$id/$o]}"; done
@@ -103,7 +123,7 @@ done
 for root in $(jq -r '.roots | keys[]' "$UNITS"); do
   id=$(jq -r --arg r "$root" '.roots[$r]' "$UNITS")
   if [[ ${SUBMIT_UNWRAPPED:-} ]]; then
-    nix store submit-output "${drvof[$id]}" "$root.drv"
+    submit "${drvof[$id]}" "$root.drv"
     continue
   fi
   wname="$OUTER_NAME-$root"
@@ -118,9 +138,7 @@ for root in $(jq -r '.roots | keys[]' "$UNITS"); do
                srcs: ([$bash, $cub] | unique)},
       outputs: {out: {}}
     }')
-  printf '%s' "$json" > "$TMPDIR/unit.json"
-  python3 "$DRVHASH" "$TMPDIR/unit.json" "$TMPDIR/unit.drv" "$TMPDIR/drvs" >/dev/null
-  wdrv=$(nix store add --mode text --scan --name "$wname.drv" "$TMPDIR/unit.drv")
-  nix store submit-output "$wdrv" "$root.drv"
+  add_drv "$json" "$wname"; wdrv=$drv
+  submit "$wdrv" "$root.drv"
   echo "submitted $wdrv (wrapping ${drvof[$id]}) as $root.drv"
 done

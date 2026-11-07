@@ -24,7 +24,7 @@ let
     requiredSystemFeatures = [ "builder-rpc-v0" ];
 
     ADD_METHOD = builtins.getEnv "ADD_METHOD";
-    PATH = builtins.concatStringsSep ":" (map (p: "${p}/bin") [ tools.coreutils tools.jq tools.sed tools.python tools.nix ]);
+    PATH = builtins.concatStringsSep ":" (map (p: "${p}/bin") [ tools.coreutils tools.jq tools.sed tools.python tools.nix tools.bbdrv ]);
     UNITS = common.unitsJson;
     DRVHASH = ./drvhash.py;
     UNIT_SYSTEM = system;
