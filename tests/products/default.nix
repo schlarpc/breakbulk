@@ -11,9 +11,17 @@
 #                    (noSourceReferences passes); panics and file!() in a
 #                    dependency print remapped paths; the debug output
 #                    references the dependency's source view and the
-#                    registry crate's source; gdb lists source lines from
-#                    it; non-test units remap macro,diagnostics, test
-#                    harnesses every scope; dep's tests pass
+#                    registry crate's source; gdb, given only the debug
+#                    output's lib/debug as its debug-file-directory, runs
+#                    the product to a breakpoint in the dependency `dep`
+#                    and prints a backtrace with dep's and app's source
+#                    files and lines, and the source line itself; non-test
+#                    units remap macro,diagnostics, test harnesses every
+#                    scope; dep's tests pass
+#   source-paths-dwp the same with split-debuginfo = "packed" (a `packed`
+#                    profile): the DWARF is in app.dwp, which splitDebug
+#                    puts next to the separate debug file, where gdb finds
+#                    it; gdb's backtrace and source lines as above
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
 #   variants         build, check, clippy (with and without clippy
@@ -276,7 +284,10 @@ let
 
   # --- source-paths ------------------------------------------------------------
 
-  spModules = [ (oneWs "." "dev") ];
+  spModules = [
+    (oneWs "." "dev")
+    { workspaces.main.variants.packed.profile = "packed"; }
+  ];
   sourcePaths = mkRepo (fixtures + "/source-paths") spModules;
   sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
   spApp = sourcePaths.workspaces.main.packages.app;
@@ -296,6 +307,29 @@ let
       });
     }
   ];
+
+  # gdb on $app/bin/app with only $debug/lib/debug as its debug-file-directory
+  # (what installing the debug output gives): a breakpoint in the
+  # dependency `dep`, a backtrace through it into `app`, with the source
+  # files and lines from the debug info (store paths of the source views,
+  # which the debug output references), and the source line itself. Inside
+  # the sandbox; ASLR stays on (no personality change). Needs $app, $debug
+  # and $depView.
+  gdbCheck = ''
+    gdb -batch -nx -iex "set debug-file-directory $debug/lib/debug" \
+      -ex 'break dep::boom' -ex run -ex bt -ex 'frame 0' -ex 'info source' -ex list \
+      $app/bin/app > gdb.txt 2>&1 || true
+    cat gdb.txt
+    # Frame 0 in dep with its file and line; app's frames below it. The
+    # debug info names files relative to the compilation directory, the
+    # source view (rustc's working directory).
+    grep -E '^#0 +dep::boom .* at dep/src/lib.rs:1[0-9]$' gdb.txt
+    grep -E '^#[1-9] .*app::main.* at app/src/main.rs:[0-9]+$' gdb.txt
+    # gdb read the file from the dependency's source view, which the debug
+    # output references.
+    grep -qxF "Located in $depView/dep/src/lib.rs" gdb.txt
+    grep -qF 'panic!("boom {n}");' gdb.txt
+  '';
 
   # --- variants ------------------------------------------------------------------
 
@@ -772,13 +806,46 @@ in
         grep -qxF "$depView" $debugClosure/store-paths
         grep -qxF "$itoaSrc" $debugClosure/store-paths
         grep -qxF "$depView" $linkedClosure/store-paths
-        # gdb finds the split debug info by build ID and lists the source.
-        gdb -batch -nx -iex "set debug-file-directory $debug/lib/debug" \
-          -ex 'list dep::boom' $app/bin/app > gdb.txt 2>&1 || true
-        cat gdb.txt
-        grep -qF 'panic!("boom {n}");' gdb.txt
+        # gdb finds the split debug info by build ID: it runs the product
+        # to a breakpoint in the dependency, prints the backtrace through
+        # it with source files and lines, and lists the source.
+        ${gdbCheck}
         cat $depTests/log
         touch $out
+      '';
+
+  source-paths-dwp =
+    let
+      p = sourcePaths.workspaces.main.target.${native}.variants.packed.packages.app;
+    in
+    pkgs.runCommand "source-paths-dwp"
+      {
+        nativeBuildInputs = [
+          pkgs.gdb
+          pkgs.binutils-unwrapped
+        ];
+        app = p;
+        debug = p.debug;
+        linkedDebug = p.stages.linked.debug;
+        noSrc = p.checks.noSourceReferences;
+        depView = builtins.unsafeDiscardStringContext "${(inst sourcePaths).sources.workspace.dep}";
+      }
+      ''
+        set -euo pipefail
+        $app/bin/app > run.txt
+        grep -qxF 'formatted 42' run.txt
+        # rustc wrote a .dwp (packed) and the link unit kept it.
+        test -f $linkedDebug/app.dwp
+        readelf -S -W $linkedDebug/app.dwp | grep -q '\.debug_info\.dwo'
+        # splitDebug put it next to the separate debug file, under the
+        # binary's name; the install-layout path is a link to it.
+        id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
+        test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
+        test -L $debug/bin/app.dwp
+        test -f $debug/bin/app.dwp
+        ${gdbCheck}
+        mkdir -p $out
+        cp gdb.txt $out/
       '';
 
   trim-paths =

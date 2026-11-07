@@ -337,6 +337,11 @@ let
       # the product's `debug` output next to where the .exe sits in the
       # main one (bin/), not in the main output; the main output's closure
       # has no unit outputs (rlibs) and no sources, and the program runs.
+      # The PDB works: with the .exe and the debug output's PDB side by
+      # side (as a debugger sees them), llvm-symbolizer resolves the
+      # address of `msvc_smoke::main` (from the PDB's public symbols) to
+      # the function, with inlined frames, and to src/main.rs and a line
+      # in the source view, which the debug output references.
       msvc-x86_64-pdb =
         let
           p = x.variants.debuginfo.packages.msvc-smoke;
@@ -344,6 +349,7 @@ let
         assert lib.assertMsg (p ? debug) "msvc-x86_64-pdb: the product has no debug output";
         pkgs.runCommand "msvc-x86_64-pdb"
           {
+            nativeBuildInputs = [ pkgs.llvmPackages.llvm ];
             closure = pkgs.closureInfo { rootPaths = [ p ]; };
             debug = p.debug;
             noSources = p.checks.noSourceReferences;
@@ -366,8 +372,29 @@ let
             fi
             ${lib.escapeShellArgs x.runner} ${p}/bin/msvc-smoke.exe | tr -d '\r' > out.txt
             grep -qxF ${lib.escapeShellArg expect} out.txt
+            # Symbolize: main's section:offset from the PDB's publics, the
+            # section's RVA and the image base from the .exe.
+            mkdir dbg
+            cp ${p}/bin/msvc-smoke.exe "''${pdbs[0]}" dbg/
+            llvm-pdbutil dump --publics "''${pdbs[0]}" > publics.txt
+            read -r sec off < <(grep -A1 'msvc_smoke4main`' publics.txt \
+              | sed -n 's/.*addr = \([0-9]*\):\([0-9]*\).*/\1 \2/p' | head -n1)
+            llvm-readobj --file-headers --sections dbg/msvc-smoke.exe > headers.txt
+            base=$(sed -n 's/^ *ImageBase: \(0x[0-9A-Fa-f]*\)$/\1/p' headers.txt)
+            rva=$(sed -n 's/^ *VirtualAddress: \(0x[0-9A-Fa-f]*\)$/\1/p' headers.txt | sed -n "$((10#$sec))p")
+            addr=$(printf '0x%x' $((base + rva + 0x$off)))
+            llvm-symbolizer --obj=dbg/msvc-smoke.exe "$addr" | tee sym.txt
+            grep -qx 'msvc_smoke::main' sym.txt
+            grep -E '^/nix/store/[^/]*-source/src/main.rs:[0-9]+:[0-9]+$' sym.txt > lines.txt
+            # The source file the PDB names is there (the debug output
+            # references it) and its line is main's.
+            src=$(head -n1 lines.txt | cut -d: -f1)
+            line=$(head -n1 lines.txt | cut -d: -f2)
+            sed -n "''${line}p" "$src" | tee line.txt
+            grep -q 'fn main\|c_add\|pids' line.txt
             mkdir -p $out
             basename "''${pdbs[0]}" > $out/pdb
+            cp sym.txt $out/
           '';
       msvc-aarch64-build = pkgs.runCommand "msvc-aarch64-build" { nativeBuildInputs = [ pkgs.file ]; } ''
         file ${a.packages.msvc-smoke}/bin/msvc-smoke.exe | tee $out

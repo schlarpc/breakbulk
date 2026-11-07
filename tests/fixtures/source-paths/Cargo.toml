@@ -11,3 +11,9 @@ members = ["app", "dep"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+
+# split-debuginfo = "packed": DWARF in `app.dwp` next to the binary, which
+# gdb must still find in the product's debug output (products-source-paths-dwp).
+[profile.packed]
+inherits = "dev"
+split-debuginfo = "packed"
