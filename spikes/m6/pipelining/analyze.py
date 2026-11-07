@@ -44,9 +44,13 @@ LIB_TYPES = {"lib", "rlib"}
 
 
 def load(resdir):
-    html = open(os.path.join(resdir, "cargo-timing.html")).read()
-    m = re.search(r"const UNIT_DATA = (\[.*?\]);\n", html, re.S)
-    timing = {u["i"]: u for u in json.loads(m.group(1))}
+    saved = os.path.join(resdir, "unit-data.json")  # save.py's compact form
+    if os.path.exists(saved):
+        data = open(saved).read()
+    else:
+        html = open(os.path.join(resdir, "cargo-timing.html")).read()
+        data = re.search(r"const UNIT_DATA = (\[.*?\]);\n", html, re.S).group(1)
+    timing = {u["i"]: u for u in json.loads(data)}
     graph = json.load(open(os.path.join(resdir, "unit-graph.json")))
     meta = {}
     p = os.path.join(resdir, "meta.json")

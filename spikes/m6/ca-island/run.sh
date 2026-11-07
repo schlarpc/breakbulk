@@ -46,6 +46,10 @@ A="local?root=$WORK/a"
 say "2. copy into store A"
 # shellcheck disable=SC2046
 nix copy --no-check-sigs --to "$A" $(nix-store -qR --include-outputs "${ia_drvs[@]}") "$ifd_out"
+# The runtime closure of every output too (e.g. gcc's lib output, which a
+# test binary references but whose deriver differs).
+# shellcheck disable=SC2046
+nix copy --no-check-sigs --to "$A" $(nix-store -qR $(nix-store -qR --include-outputs "${ia_drvs[@]}" | grep -v '\.drv$'))
 # The nixpkgs the expression imports.
 nixpkgs=$(nix-instantiate --eval --raw -E "
   let n = (builtins.fromJSON (builtins.readFile $here/../../../flake.lock)).nodes.nixpkgs.locked;
@@ -58,8 +62,43 @@ mapfile -t ca_drvs < <(nix --store "$A" eval --raw -f "$here" "${pkgsArg[@]}" --
   --apply 'rs: builtins.concatStringsSep "\n" (map (r: r.drvPath) (builtins.attrValues rs))')
 nix --store "$A" build --no-link "${ca_drvs[@]/%/^*}" 2>&1 | tail -3
 CACHE="file://$WORK/cache"
-rm -rf "$WORK/cache"
+# Nix caches narinfo lookups per cache URL: drop that too, or a path
+# uploaded by an earlier run (since deleted) counts as present.
+rm -rf "$WORK/cache" "$WORK/xdg"
 say "3. push both kinds to $CACHE"
+# Output closures first: copying "$drv^*" of a CA derivation alone fails
+# with "reference … is not valid" (the binary cache gets the CA bin copy
+# before the gcc lib it references; observed with Determinate Nix 3.22).
+# (`path-info "$drv^*"` does not resolve CA derivations; `build` does.)
+# The CA runs' input CA derivations (the binary copies) too: `nix copy`
+# uploads their realisations as dependencies but not their closures.
+mapfile -t ca_inputs < <(nix --store "$A" derivation show "${ca_drvs[@]}" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+d = d.get("derivations", d)
+for v in d.values():
+    i = v.get("inputs", {}).get("drvs") or v.get("inputDrvs", {})
+    for p in i:
+        if p.endswith("-bin.drv"):
+            print(p if p.startswith("/") else "/nix/store/" + p)
+' | sort -u)
+# Resolving a CA derivation realises every direct input first (bash, jq,
+# the stdenv, the units, the run units' flags…), so a cache that is to serve
+# CA runs on a cold machine needs those too, as a CI cache that pushed
+# everything (and cache.nixos.org for the stdenv) would have them. Without
+# them the cold build fails trying to build bash.
+mapfile -t direct < <(nix --store "$A" derivation show "${ca_drvs[@]}" "${ca_inputs[@]}" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+d = d.get("derivations", d)
+for v in d.values():
+    i = v.get("inputs", {}).get("drvs") or v.get("inputDrvs", {})
+    for p in i:
+        print(p if p.startswith("/") else "/nix/store/" + p)
+' | sort -u)
+mapfile -t outs < <(nix --store "$A" build --no-link --print-out-paths "${ia_drvs[@]/%/^*}" "${ca_drvs[@]/%/^*}" "${ca_inputs[@]/%/^*}" "${direct[@]/%/^*}")
+# shellcheck disable=SC2046
+nix --store "$A" copy --to "$CACHE" $(nix --store "$A" path-info -r "${outs[@]}")
 nix --store "$A" copy --to "$CACHE" "${ia_drvs[@]/%/^*}" "${ca_drvs[@]/%/^*}"
 du -sh "$WORK/cache" >&2
 ls "$WORK/cache" >&2
