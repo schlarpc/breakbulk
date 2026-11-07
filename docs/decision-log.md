@@ -548,3 +548,45 @@ Right now all four breakbulk programs are built from the same source tree,
 so any planner change would also rebuild the unit builder and therefore
 every crate of every project. The unit builder will be built from only its
 own files, so only changes to it cause a full rebuild.
+
+## 51. FYI: post-link stages work
+
+Products can now pass through named steps after linking (split debug info,
+strip, wasm-bindgen, wasm-opt, make a wasm component, deterministic zip,
+install layout), each its own Nix build step and each removable or
+reorderable. Checks can look at any intermediate step (for example the
+unstripped binary). Every product gets a default check that fails if the
+shipped output still references source code. Debuggers find symbols in the
+split-off debug output. Zips are byte-identical across rebuilds.
+
+## 52. ASK: content-addressed steps only when Nix supports them
+
+The design uses content-addressing for post-link steps and test runs, so an
+unchanged input doesn't re-run them. Stock Nix refuses such steps at
+evaluation time (an experimental feature, `ca-derivations`), and the error
+can't be caught or tested for in Nix code. Default: turn content-addressing
+on only when Nix's dynamic-derivations feature is on (detectable, and it
+requires `ca-derivations` anyway); otherwise steps are ordinary and simply
+re-run when their input's build step changes. You can force it either way
+with `ca = true/false`. Effect for you today: on your current Nix setup
+(no experimental features), test runs and post-link steps re-run whenever
+their binary's build step changes, even if the bytes are identical.
+
+## 53. ASK: three rules for ordering post-link steps
+
+- If two steps' order isn't determined by their `after`/`before`
+  settings, evaluation fails rather than picking one silently.
+- A step with no `after`/`before` runs right after linking. (The docs said
+  "after the previous step in the preset's list", which needs to know
+  where a step came from; the preset's own steps do set `after`.)
+- When you remove a step (`= null`), steps that said "after it" move up
+  to its place instead of failing. A reference to a step name that never
+  existed is still an error.
+
+## 54. FYI: C debug info would have defeated "same bytes, skip re-run"
+
+nixpkgs (and breakbulk's unit builder, copying it) seeds the C compiler with
+the build step's output path, and GCC writes that into debug info. So any
+change to a crate's build step, even one that doesn't change the code,
+changed the binary's bytes. The seed will instead come from Cargo's own ID
+for the unit, which only changes when the crate actually changes.
