@@ -1,0 +1,558 @@
+use breakbulk_unit::directives::{BuildOutput, LibraryPath};
+use breakbulk_unit::spec::{RenderedArg, RenderedUnit};
+
+use super::*;
+
+const RING: &str = "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14";
+const APP: &str = "path+file:///build/skeleton/app#0.1.0";
+
+/// The example from "Plan format", filled in.
+fn example_json() -> String {
+    format!(
+        r#"{{
+  "version": 1,
+  "kind": "build",
+  "cargo": "1.96.1", "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
+  "target": "wasm32-unknown-unknown",
+  "variant": {{ "profile": "release", "features": ["b", "a"], "mode": "build" }},
+  "skeletonRoot": "/build/skeleton", "trimPaths": false,
+  "units": {{
+    "c-ring": {{
+      "kind": "compile",
+      "package": "{RING}",
+      "crate": {{ "name": "ring", "types": ["lib"], "edition": "2021" }},
+      "platform": "target",
+      "program": ["/nix/store/00000000000000000000000000000000-rustc/bin/rustc"],
+      "args": ["--crate-name", "ring", [{{ "crateSrc": "{RING}", "rel": "src/lib.rs" }}],
+               ["--extern", "cfg_if=", {{ "out": "c-cfgif", "output": "rmeta", "file": "libcfg_if-1.rmeta" }}],
+               {{ "splice": "r-ring", "kind": "rustc-cfg" }},
+               {{ "splice": "r-ring", "kind": "rustc-link-lib" }}],
+      "env": {{ "CARGO_PKG_NAME": "ring", "OUT_DIR": [{{ "out": "r-ring", "output": "out" }}] }},
+      "envSplices": [{{ "splice": "r-ring", "kind": "rustc-env" }}],
+      "cwd": {{ "crateSrc": "{RING}", "rel": "" }},
+      "outputs": {{ "rmeta": ["libring-1.rmeta"], "rlib": ["libring-1.rlib"] }}
+    }},
+    "c-cfgif": {{
+      "kind": "compile",
+      "package": "cfg-if",
+      "crate": {{ "name": "cfg_if", "types": ["lib"], "edition": "2018" }},
+      "platform": "target",
+      "program": ["rustc"],
+      "args": [],
+      "env": {{}},
+      "envSplices": [],
+      "cwd": {{ "crateSrc": "cfg-if", "rel": "" }},
+      "outputs": {{ "rmeta": ["libcfg_if-1.rmeta"], "rlib": ["libcfg_if-1.rlib"] }}
+    }},
+    "c-ring-build": {{
+      "kind": "compile",
+      "package": "{RING}",
+      "crate": {{ "name": "build_script_build", "types": ["bin"], "edition": "2021" }},
+      "platform": "host",
+      "program": ["rustc"],
+      "args": [],
+      "env": {{}},
+      "envSplices": [],
+      "cwd": {{ "crateSrc": "{RING}", "rel": "" }},
+      "outputs": {{ "bin": ["build_script_build-1"] }}
+    }},
+    "r-ring": {{
+      "kind": "run", "package": "{RING}", "platform": "target", "links": "ring_core_0_17_14_",
+      "script": {{ "out": "c-ring-build", "output": "bin" }},
+      "env": {{ "TARGET": "wasm32-unknown-unknown" }},
+      "cwd": {{ "crateSrc": "{RING}", "rel": "" }},
+      "metadataFrom": [],
+      "rustVersion": "1.66",
+      "targets": [{{ "name": "ring", "kind": ["lib"] }}],
+      "nightlyFeaturesAllowed": false
+    }},
+    "c-app": {{
+      "kind": "compile",
+      "package": "{APP}",
+      "crate": {{ "name": "app", "types": ["bin"], "edition": "2024" }},
+      "platform": "target",
+      "program": ["rustc"],
+      "args": [[{{ "src": "{APP}", "rel": "src/main.rs" }}]],
+      "env": {{}},
+      "envSplices": [],
+      "cwd": {{ "src": "{APP}", "rel": "" }},
+      "outputs": {{ "bin": ["app-1"] }}
+    }}
+  }},
+  "roots": [{{ "package": "{APP}", "target": "app", "kind": "bin", "unit": "c-app", "test": false }}]
+}}"#
+    )
+}
+
+fn example() -> Plan {
+    Plan::from_json(&example_json()).unwrap()
+}
+
+fn compile<'a>(p: &'a mut Plan, id: &str) -> &'a mut CompileUnit {
+    match p.units.get_mut(id) {
+        Some(Unit::Compile(c)) => c,
+        _ => panic!("{id} is not a compile unit"),
+    }
+}
+
+fn run<'a>(p: &'a mut Plan, id: &str) -> &'a mut RunUnit {
+    match p.units.get_mut(id) {
+        Some(Unit::Run(r)) => r,
+        _ => panic!("{id} is not a run unit"),
+    }
+}
+
+fn opts() -> ValidationOptions {
+    ValidationOptions {
+        forbidden_paths: vec![
+            "/build".into(),
+            "/tmp/scratch".into(),
+            "/homeless-shelter".into(),
+        ],
+    }
+}
+
+fn errors(p: &Plan) -> Vec<String> {
+    match validate(p, &opts()) {
+        Ok(()) => vec![],
+        Err(e) => e.iter().map(ToString::to_string).collect(),
+    }
+}
+
+fn assert_error(p: &Plan, needle: &str) {
+    let e = errors(p);
+    assert!(
+        e.iter().any(|m| m.contains(needle)),
+        "expected `{needle}` in {e:#?}"
+    );
+}
+
+#[test]
+fn example_parses_and_validates() {
+    let p = example();
+    assert_eq!(p.kind, PlanKind::Build);
+    assert_eq!(p.variant.features.iter().collect::<Vec<_>>(), ["a", "b"]);
+    let ring = match &p.units["c-ring"] {
+        Unit::Compile(c) => c,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        ring.args[3],
+        Arg::Concat(vec![
+            Piece::Literal("--extern".into()),
+            Piece::Literal("cfg_if=".into()),
+            Piece::Ref(Reference::Out(OutRef {
+                out: "c-cfgif".into(),
+                output: "rmeta".into(),
+                file: Some("libcfg_if-1.rmeta".into())
+            }))
+        ])
+    );
+    assert_eq!(errors(&p), Vec::<String>::new());
+}
+
+#[test]
+fn canonical_json_is_sorted_compact_and_stable() {
+    let p = example();
+    let a = p.to_canonical_json();
+    assert!(!a.contains('\n') && !a.contains(": "));
+    assert!(a.starts_with(r#"{"cargo":"1.96.1","host":"#), "{a}");
+    // Concatenated literals are merged in normal form. (The doc's example
+    // array concatenates `--extern` and `cfg_if=` into one argument.)
+    assert!(a.contains(r#"["--externcfg_if=",{"file":"#), "{a}");
+    // Round trip is a fixed point.
+    let b = Plan::from_json(&a).unwrap().to_canonical_json();
+    assert_eq!(a, b);
+    // Building the same plan in another order gives the same bytes.
+    let mut q = example();
+    q.roots.push(q.roots[0].clone());
+    let units: Vec<_> = std::mem::take(&mut q.units).into_iter().rev().collect();
+    q.units.extend(units);
+    run(&mut q, "r-ring").targets.insert(
+        0,
+        PackageTarget {
+            name: "ring".into(),
+            kind: vec!["lib".into()],
+        },
+    );
+    assert_eq!(q.to_canonical_json(), a);
+}
+
+#[test]
+fn normal_form_of_concatenations() {
+    let r = Piece::Ref(Reference::Src(SrcRef {
+        src: "p".into(),
+        rel: "x".into(),
+    }));
+    let l = |s: &str| Piece::Literal(s.into());
+    assert_eq!(
+        normalize_arg(Arg::Concat(vec![l("a"), l(""), l("b")])),
+        Arg::Literal("ab".into())
+    );
+    assert_eq!(
+        normalize_arg(Arg::Concat(vec![])),
+        Arg::Literal(String::new())
+    );
+    assert_eq!(
+        normalize_arg(Arg::Concat(vec![
+            l("-L"),
+            l(""),
+            r.clone(),
+            l("/"),
+            l("lib")
+        ])),
+        Arg::Concat(vec![l("-L"), r.clone(), l("/lib")])
+    );
+    assert_eq!(
+        normalize_text(Text::Concat(vec![r.clone()])),
+        Text::Concat(vec![r])
+    );
+}
+
+#[test]
+fn schema_is_strict() {
+    let bad = [
+        // A bare reference is not an argument.
+        (r#"{"crateSrc": "x", "rel": ""}"#, "args"),
+        // Unknown fields in references and splices.
+        (
+            r#"[{"out": "c-cfgif", "output": "rmeta", "extra": 1}]"#,
+            "args",
+        ),
+        (
+            r#"{"splice": "r-ring", "kind": "rustc-cfg", "x": 1}"#,
+            "args",
+        ),
+        (r#"{"splice": "r-ring", "kind": "rustc-bogus"}"#, "args"),
+        (r#"1"#, "args"),
+    ];
+    for (arg, _) in bad {
+        let json = example_json().replacen(
+            r#""args": ["--crate-name""#,
+            &format!(r#""args": [{arg}, "--crate-name""#),
+            1,
+        );
+        assert!(Plan::from_json(&json).is_err(), "accepted {arg}");
+    }
+    let json = example_json().replacen(
+        r#""trimPaths": false"#,
+        r#""trimPaths": false, "extra": 1"#,
+        1,
+    );
+    assert!(Plan::from_json(&json).is_err());
+    let json = example_json().replacen(r#""version": 1"#, r#""version": 2"#, 1);
+    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(2))));
+}
+
+#[test]
+fn invariant_2_references_name_units() {
+    let mut p = example();
+    compile(&mut p, "c-ring").args.push(Arg::Splice(Splice {
+        splice: "r-nope".into(),
+        kind: SpliceKind::RustcCheckCfg,
+        bin: None,
+    }));
+    compile(&mut p, "c-ring").env.insert(
+        "X".into(),
+        Text::Concat(vec![Piece::Ref(Reference::Out(OutRef {
+            out: "c-nope".into(),
+            output: "rlib".into(),
+            file: None,
+        }))]),
+    );
+    compile(&mut p, "c-ring").env_splices.push(Splice {
+        splice: "c-cfgif".into(),
+        kind: SpliceKind::RustcEnv,
+        bin: None,
+    });
+    run(&mut p, "r-ring")
+        .metadata_from
+        .insert("r-missing".into());
+    p.roots[0].unit = "r-ring".into();
+    assert_error(&p, "splice rustc-check-cfg names unknown unit r-nope");
+    assert_error(&p, "env `X`: reference to unknown unit c-nope");
+    assert_error(&p, "splice rustc-env names compile unit c-cfgif");
+    assert_error(&p, "metadataFrom names unknown unit r-missing");
+    assert_error(&p, "names unit r-ring, which is not a compile unit");
+}
+
+#[test]
+fn reference_outputs_and_files() {
+    let mut p = example();
+    let c = compile(&mut p, "c-ring");
+    let out = |out: &str, output: &str, file: Option<&str>| {
+        Arg::Concat(vec![Piece::Ref(Reference::Out(OutRef {
+            out: out.into(),
+            output: output.into(),
+            file: file.map(Into::into),
+        }))])
+    };
+    c.args.push(out("c-cfgif", "bin", None));
+    c.args.push(out("c-cfgif", "rlib", Some("libother.rlib")));
+    c.args.push(out("r-ring", "flags", None));
+    c.args
+        .push(out("c-cfgif", "rlib", Some("libcfg_if-1.rlib")));
+    c.args
+        .push(Arg::Concat(vec![Piece::Ref(Reference::Src(SrcRef {
+            src: APP.into(),
+            rel: "/abs".into(),
+        }))]));
+    let e = errors(&p);
+    assert_eq!(e.len(), 4, "{e:#?}");
+    assert_error(&p, "unit c-cfgif has no output `bin`");
+    assert_error(&p, "output `rlib` has no file `libother.rlib`");
+    assert_error(&p, "reference to run unit r-ring must be output `out`");
+    assert_error(&p, "`rel` must be relative");
+}
+
+#[test]
+fn metadata_from_requires_links() {
+    let mut p = example();
+    let mut other = run(&mut p, "r-ring").clone();
+    other.links = None;
+    other.metadata_from.insert("r-ring".into());
+    p.units.insert("r-other".into(), Unit::Run(other.clone()));
+    assert_eq!(errors(&p), Vec::<String>::new());
+    run(&mut p, "r-ring").metadata_from.insert("r-other".into());
+    assert_error(
+        &p,
+        "metadataFrom names r-other, whose package declares no `links`",
+    );
+    run(&mut p, "r-ring").metadata_from = ["r-ring".to_owned()].into();
+    assert_error(&p, "metadataFrom names the run itself");
+}
+
+#[test]
+fn run_script_must_be_compile_output() {
+    let mut p = example();
+    run(&mut p, "r-ring").script = Reference::CrateSrc(CrateSrcRef {
+        crate_src: RING.into(),
+        rel: "build.rs".into(),
+    });
+    assert_error(&p, "script is not an output of a compile unit");
+}
+
+#[test]
+fn splice_shapes() {
+    let mut p = example();
+    let sp = |kind, bin: Option<&str>| {
+        Arg::Splice(Splice {
+            splice: "r-ring".into(),
+            kind,
+            bin: bin.map(Into::into),
+        })
+    };
+    let c = compile(&mut p, "c-ring");
+    c.args.push(sp(SpliceKind::RustcLinkArgBin, Some("nobin")));
+    c.args.push(sp(SpliceKind::RustcEnv, None));
+    c.env_splices.push(Splice {
+        splice: "r-ring".into(),
+        kind: SpliceKind::RustcCfg,
+        bin: None,
+    });
+    assert_error(
+        &p,
+        "names bin `nobin`, which run r-ring has no bin target for",
+    );
+    assert_error(&p, "envSplices entry from r-ring has kind rustc-cfg");
+    assert_error(&p, "envSplices names r-ring twice");
+    // check_arg_splices reports the first shape problem it finds.
+    assert_error(&p, "rustc-env belongs in envSplices");
+    let mut p = example();
+    compile(&mut p, "c-ring")
+        .args
+        .push(sp(SpliceKind::RustcCfg, None));
+    assert_error(&p, "splice rustc-cfg from r-ring appears twice");
+}
+
+#[test]
+fn invariant_3_forbidden_literals() {
+    let mut p = example();
+    let c = compile(&mut p, "c-ring");
+    c.args.push(Arg::Literal("--out-dir".into()));
+    c.args
+        .push(Arg::Literal("/tmp/scratch/wasm32/release/deps".into()));
+    c.args.push(Arg::Literal("-Cincremental=/build/x".into()));
+    c.args.push(Arg::Literal("--cfg".into()));
+    c.args.push(Arg::Literal("__bb_r1_cfg".into()));
+    c.env
+        .insert("DEP_RING___BB".into(), Text::Literal("r1".into()));
+    c.env
+        .insert("HOME".into(), Text::Literal("/homeless-shelter".into()));
+    c.program.push(Text::Literal("/build/skeleton/tool".into()));
+    let e = errors(&p);
+    assert_error(&p, "args[");
+    assert!(
+        e.iter()
+            .any(|m| m.contains("forbidden path `/tmp/scratch`")),
+        "{e:#?}"
+    );
+    assert!(
+        e.iter()
+            .any(|m| m.contains("forbidden path `/build`: `-Cincremental=/build/x`")),
+        "{e:#?}"
+    );
+    assert!(
+        e.iter()
+            .any(|m| m.contains("sentinel token: `__bb_r1_cfg`")),
+        "{e:#?}"
+    );
+    assert!(
+        e.iter()
+            .any(|m| m.contains("env name `DEP_RING___BB` contains a sentinel")),
+        "{e:#?}"
+    );
+    assert!(
+        e.iter()
+            .any(|m| m.contains("env `HOME` contains the forbidden path `/homeless-shelter`")),
+        "{e:#?}"
+    );
+    // The skeleton root is always forbidden, even without options.
+    assert!(
+        e.iter()
+            .any(|m| m.contains("program[1] contains the forbidden path `/build/skeleton`")),
+        "{e:#?}"
+    );
+}
+
+#[test]
+fn path_matching() {
+    for (lit, yes) in [
+        ("/build", true),
+        ("/build/", true),
+        ("/build/x", true),
+        ("dependency=/build/x", true),
+        ("--remap-path-prefix=/a=/build", true),
+        ("-L/build/x", true),
+        ("@/build/args", true),
+        ("a:/build:b", true),
+        ("/build.rs", false),
+        ("/buildx", false),
+        ("/nix/store/aaa-src/build/x.c", false),
+        ("x/build", false),
+        ("--L/build", false),
+    ] {
+        assert_eq!(contains_path(lit, "/build"), yes, "{lit}");
+    }
+    assert!(!contains_path("é/tmp/s", "/tmp/s"));
+    assert!(contains_path("é=/tmp/s", "/tmp/s/"));
+    assert!(!contains_path("anything", ""));
+}
+
+#[test]
+fn sentinel_matching() {
+    for (s, yes) in [
+        ("__bb_r1_cfg", true),
+        ("cfg(__bb_r1_ccfg)", true),
+        ("__BB_R1_ENV=1", true),
+        ("__bb=r1", true),
+        ("DEP_X___BB", true),
+        ("native=/o/__bb_r_search", true),
+        ("__bbq", false),
+        ("_bb_", false),
+        ("bb", false),
+    ] {
+        assert_eq!(contains_sentinel(s), yes, "{s}");
+    }
+}
+
+#[test]
+fn store_paths_in_literals() {
+    let p = example();
+    let paths = literal_store_paths(&p, "/nix/store");
+    assert_eq!(
+        paths.into_iter().collect::<Vec<_>>(),
+        ["/nix/store/00000000000000000000000000000000-rustc"]
+    );
+    let mut p = example();
+    compile(&mut p, "c-app").args.push(Arg::Literal(
+        "-Clinker=/nix/store/abc-cc/bin/cc,x=/nix/store/def-y".into(),
+    ));
+    let paths = literal_store_paths(&p, "/nix/store/");
+    assert!(paths.contains("/nix/store/abc-cc"), "{paths:?}");
+    assert!(paths.contains("/nix/store/def-y"), "{paths:?}");
+}
+
+struct Fake;
+
+impl Resolve for Fake {
+    type Error = String;
+    fn reference(&self, r: &Reference) -> Result<String, String> {
+        Ok(match r {
+            Reference::Src(s) => format!("/nix/store/src-app/{}", s.rel),
+            Reference::CrateSrc(s) => {
+                format!(
+                    "/nix/store/crate-{}/{}",
+                    s.crate_src.rsplit('#').next().unwrap(),
+                    s.rel
+                )
+            }
+            Reference::Out(o) => match &o.file {
+                Some(f) => format!("/nix/store/{}-{}/{f}", o.out, o.output),
+                None => format!("/nix/store/{}-{}", o.out, o.output),
+            },
+        })
+    }
+    fn flags(&self, run: &UnitId) -> Result<String, String> {
+        Ok(format!("/nix/store/{run}-flags"))
+    }
+}
+
+#[test]
+fn render_and_expand() {
+    let p = example();
+    let unit = render_unit(&p.units["c-ring"], &Fake).unwrap();
+    let json = unit_env_value(&unit).unwrap();
+    assert!(json.starts_with(r#"{"args":["--crate-name","ring","/nix/store/crate-ring@0.17.14/src/lib.rs","--externcfg_if=/nix/store/c-cfgif-rmeta/libcfg_if-1.rmeta",{"kind":"rustc-cfg","splice":"/nix/store/r-ring-flags"}"#), "{json}");
+    // breakbulk-unit reads it back.
+    let back: RenderedUnit = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, unit);
+    let RenderedUnit::Compile(c) = back else {
+        panic!()
+    };
+    assert_eq!(c.cwd, "/nix/store/crate-ring@0.17.14/");
+    assert_eq!(c.env["OUT_DIR"], "/nix/store/r-ring-out");
+
+    // Expand with a run's directives.
+    let d = BuildOutput {
+        cfgs: vec!["x".into()],
+        library_links: vec!["static=ring_core".into()],
+        library_paths: vec![LibraryPath {
+            value: "native=/nix/store/r-ring-out".into(),
+            in_out_dir: true,
+        }],
+        env: vec![("RING_CORE_PREFIX".into(), "ring_core_".into())],
+        ..Default::default()
+    };
+    let lookup = |f: &str| (f == "/nix/store/r-ring-flags").then_some(&d);
+    let argv = breakbulk_unit::splice::expand_args(&c.args, lookup).unwrap();
+    assert_eq!(&argv[4..], ["--cfg", "x", "-l", "static=ring_core"]);
+    let env = breakbulk_unit::splice::expand_env(&c.env, &c.env_splices, lookup).unwrap();
+    assert_eq!(env["RING_CORE_PREFIX"], "ring_core_");
+    assert!(matches!(c.args[4], RenderedArg::Splice(_)));
+
+    // Run units render their targets and metadata sources.
+    let mut p = example();
+    run(&mut p, "r-ring").metadata_from.insert("r-up".into());
+    let RenderedUnit::Run(r) = render_unit(&p.units["r-ring"], &Fake).unwrap() else {
+        panic!()
+    };
+    assert_eq!(r.metadata_from, ["/nix/store/r-up-flags"]);
+    assert_eq!(r.script, "/nix/store/c-ring-build-bin");
+    assert_eq!(r.rust_version.as_deref(), Some("1.66"));
+    let json = unit_env_value(&RenderedUnit::Run(r.clone())).unwrap();
+    assert!(json.starts_with(r#"{"cwd":"#), "{json}");
+    assert!(json.contains(r#""kind":"run""#), "{json}");
+    assert_eq!(
+        serde_json::from_str::<RenderedUnit>(&json).unwrap(),
+        RenderedUnit::Run(r)
+    );
+}
+
+#[test]
+fn rendered_unit_rejects_unknown_fields() {
+    let p = example();
+    let json = unit_env_value(&render_unit(&p.units["c-cfgif"], &Fake).unwrap()).unwrap();
+    let bad = json.replacen('{', r#"{"bogus":1,"#, 1);
+    assert!(serde_json::from_str::<RenderedUnit>(&bad).is_err());
+}
