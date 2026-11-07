@@ -325,13 +325,13 @@ let
     in
     lib.optionalAttrs (xwinPkgs != null) {
       msvc-x86_64-run = pkgs.runCommand "msvc-x86_64-run" { } ''
-        ${lib.escapeShellArgs x.runner} ${x.packages.msvc-smoke}/bin/msvc-smoke > out.txt
+        ${lib.escapeShellArgs x.runner} ${x.packages.msvc-smoke}/bin/msvc-smoke.exe > out.txt
         tr -d '\r' < out.txt | tee $out
         grep -qxF ${lib.escapeShellArg expect} $out
       '';
       msvc-x86_64-test = x.testRuns.msvc-smoke."bin/msvc-smoke";
       msvc-aarch64-build = pkgs.runCommand "msvc-aarch64-build" { nativeBuildInputs = [ pkgs.file ]; } ''
-        file ${a.packages.msvc-smoke}/bin/msvc-smoke | tee $out
+        file ${a.packages.msvc-smoke}/bin/msvc-smoke.exe | tee $out
         grep -qi 'PE32+ executable.*\(aarch64\|arm64\)' $out
       '';
     };
