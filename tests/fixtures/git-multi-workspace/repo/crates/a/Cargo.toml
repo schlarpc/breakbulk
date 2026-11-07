@@ -1,0 +1,12 @@
+[package]
+name = "a"
+version.workspace = true
+edition.workspace = true
+readme.workspace = true
+license-file.workspace = true
+
+[dependencies]
+b = { workspace = true, features = ["extra"] }
+
+[lints]
+workspace = true

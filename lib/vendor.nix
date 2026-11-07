@@ -9,6 +9,10 @@
 #   <vendor>/<hash of git source id>/Cargo.toml         -> the crate's
 #                                                          [workspace] table,
 #                                                          when it inherits
+#   <vendor>/<hash of git source id>/.breakbulk-workspace-<hash>/Cargo.toml
+#                                  -> instead, one per workspace, when the
+#                                     source's crates inherit from several
+#                                     (see `pointerLayout`)
 #
 # Source replacement is matched on SourceId: kind (including the git
 # reference: branch, tag, rev or default) and canonical URL, never on the
@@ -20,8 +24,9 @@
 #
 # Workspace inheritance in git crates is left to Cargo: the crate's manifest
 # is kept byte-identical and the stub `Cargo.toml` one level up gives Cargo's
-# `find_workspace_root` the [workspace] table it would find in a checkout.
-# Only `readme`/`license-file` inherited from the workspace are rewritten,
+# `find_workspace_root` the [workspace] table it would find in a checkout
+# (or, with several workspaces in one source, `package.workspace` names the
+# crate's stub: docs/spikes/git-multi-workspace.md). Only `readme`/`license-file` inherited from the workspace are rewritten,
 # because Cargo resolves them relative to the workspace root and the vendor
 # layout has a different depth (CARGO_PKG_README would differ otherwise).
 {
@@ -36,7 +41,6 @@ let
     attrNames
     attrValues
     concatStringsSep
-    filter
     head
     isAttrs
     length
@@ -136,14 +140,21 @@ in
             lib.optionalAttrs (inheritsKey "readme") { readme = wsReadme; }
             // lib.optionalAttrs (inheritsKey "license-file") { license-file = rel wsPkg.license-file; };
           dropPointer = inherits && pkg ? workspace;
+          # The manifest to vendor, or null to keep the crate's own. With
+          # `pointer`, `package.workspace` names the crate's stub (see
+          # `pointerLayout`).
           rewritten =
-            if rewrites == { } && !dropPointer then
+            pointer:
+            if rewrites == { } && !dropPointer && pointer == null then
               null
             else
               util.toTOML (
                 m
                 // {
-                  package = (builtins.removeAttrs pkg (lib.optional dropPointer "workspace")) // rewrites;
+                  package =
+                    (builtins.removeAttrs pkg (lib.optional dropPointer "workspace"))
+                    // rewrites
+                    // lib.optionalAttrs (pointer != null) { workspace = pointer; };
                 }
               );
           stub =
@@ -161,14 +172,42 @@ in
 
       # --- the directory ----------------------------------------------------
 
+      # Each source's entries, with what gitCrate found for git crates.
+      analysed = lib.mapAttrs (
+        _:
+        map (e: {
+          inherit e;
+          g = if e.parsed.kind == "git" then gitCrate e else null;
+        })
+      ) groups;
+
+      # The distinct stubs of each git source's inheriting crates.
+      stubsBySource = lib.mapAttrs (
+        _: cs: lib.unique (lib.concatMap (c: lib.optional (c.g != null && c.g.stub != null) c.g.stub) cs)
+      ) analysed;
+
+      # A git source whose inheriting crates come from more than one
+      # workspace (one repository, several workspaces: e.g. Sui's root
+      # workspace and its external-crates/move workspace) cannot share the
+      # one stub that `find_workspace_root` would find. Instead each stub
+      # goes to a dot directory, which a directory source does not read as a
+      # package (cargo src/sources/directory.rs, `DirectorySource::update`,
+      # skips names starting with '.'), and each inheriting crate's
+      # `package.workspace` names its stub. Cargo then loads the stub's
+      # [workspace] table itself (cargo src/workspace/parser/mod.rs,
+      # `load_inheritable_fields`, `WorkspaceConfig::Member { root: Some }`).
+      # Sources with one workspace keep the stub one level up, unchanged.
+      pointerLayout = h: length stubsBySource.${h} > 1;
+      stubDirName = s: ".breakbulk-workspace-${util.shortHash s}";
+
       crateEntries = lib.concatLists (
         lib.mapAttrsToList (
-          h: es:
+          h: cs:
           map (
-            e:
+            { e, g }:
             let
               src = fetch.crateSource e;
-              g = if e.parsed.kind == "git" then gitCrate e else null;
+              pointer = if g != null && g.stub != null && pointerLayout h then "../${stubDirName g.stub}" else null;
             in
             {
               inherit e;
@@ -176,27 +215,19 @@ in
               sourceDir = h;
               path = toString src.path;
               kind = e.parsed.kind;
-              stub = if g == null then null else g.stub;
-              rewritten = if g == null then null else g.rewritten;
+              rewritten = if g == null then null else g.rewritten pointer;
             }
-          ) es
-        ) groups
+          ) cs
+        ) analysed
       );
 
-      stubs =
-        let
-          bySource = lib.groupBy (c: c.sourceDir) (filter (c: c.stub != null) crateEntries);
-        in
-        lib.mapAttrs (
-          h: cs:
-          let
-            distinct = lib.unique (map (c: c.stub) cs);
-          in
-          if length distinct == 1 then
-            head distinct
-          else
-            throw "breakbulk: git source ${(head cs).e.parsed.id} has crates from several workspaces that use workspace inheritance; this vendor layout cannot serve both"
-        ) bySource;
+      # Stubs one level above the crates: source directory -> contents.
+      stubs = lib.mapAttrs (_: head) (lib.filterAttrs (h: ss: ss != [ ] && !(pointerLayout h)) stubsBySource);
+      # Stubs named by `package.workspace`: vendor-relative directory ->
+      # contents.
+      pointerStubs = lib.concatMapAttrs (
+        h: ss: lib.optionalAttrs (pointerLayout h) (lib.listToAttrs (map (s: lib.nameValuePair "${h}/${stubDirName s}" s) ss))
+      ) stubsBySource;
 
       # Shell script that builds the directory. Paths are store paths with
       # context, so the derivation depends on every crate source.
@@ -204,6 +235,9 @@ in
         [ "mkdir -p $out" ]
         ++ map (h: "mkdir -p $out/${h}") (attrNames groups)
         ++ lib.mapAttrsToList (h: s: "cp ${pkgs.writeText "Cargo.toml" s} $out/${h}/Cargo.toml") stubs
+        ++ lib.mapAttrsToList (
+          d: s: "mkdir -p $out/${d}\ncp ${pkgs.writeText "Cargo.toml" s} $out/${d}/Cargo.toml"
+        ) pointerStubs
         ++ map (
           c:
           if c.kind == "registry" then
