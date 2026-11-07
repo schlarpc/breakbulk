@@ -11,8 +11,8 @@ use breakbulk_unit::Error;
 use breakbulk_unit::env::Outer;
 use breakbulk_unit::spec::RenderedUnit;
 
-const USAGE: &str = "usage: breakbulk-unit unit\n\n\
-    Builds the unit described by $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath).";
+const USAGE: &str = "usage: breakbulk-unit unit|doctest\n\n\
+    Builds the unit (or runs the doctests) described by $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath).";
 
 fn read_unit(outer: &Outer) -> Result<RenderedUnit, Error> {
     let (text, whence) = if let Some(path) = outer.get("BREAKBULK_UNITPath") {
@@ -31,6 +31,9 @@ fn read_unit(outer: &Outer) -> Result<RenderedUnit, Error> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args == ["doctest"] {
+        return breakbulk_unit::doctest::main();
+    }
     if args != ["unit"] {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
