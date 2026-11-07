@@ -163,6 +163,8 @@ pub struct Finished<'a> {
     pub argv: &'a [String],
     pub env: &'a BTreeMap<String, String>,
     pub out: &'a Path,
+    /// The `OUT_DIR`s of the runs in `metadata_from`.
+    pub upstream_out_dirs: &'a [PathBuf],
     pub status: std::process::ExitStatus,
     pub stdout: &'a [u8],
 }
@@ -194,7 +196,7 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
     let parsed = match parsed {
         Some(p) => Some(p),
         None => {
-            reparsed = parse(f.stdout, &context(f.run, f.out)).ok();
+            reparsed = parse(f.stdout, &context(f)).ok();
             reparsed.as_ref()
         }
     };
@@ -212,13 +214,14 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
     Error(msg)
 }
 
-fn context<'a>(r: &'a RenderedRun, out: &'a Path) -> ParseContext<'a> {
+fn context<'a>(f: &'a Finished<'a>) -> ParseContext<'a> {
     ParseContext {
-        pkg_descr: &r.package,
-        out_dir: out,
-        nightly_features_allowed: r.nightly_features_allowed,
-        targets: &r.targets,
-        rust_version: r.rust_version.as_deref(),
+        pkg_descr: &f.run.package,
+        out_dir: f.out,
+        nightly_features_allowed: f.run.nightly_features_allowed,
+        targets: &f.run.targets,
+        rust_version: f.run.rust_version.as_deref(),
+        upstream_out_dirs: f.upstream_out_dirs,
     }
 }
 
@@ -233,7 +236,7 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Error> {
         return Err(failure(f, reason, None));
     }
     let descr = package_descr(&f.run.package);
-    let mut ctx = context(f.run, f.out);
+    let mut ctx = context(f);
     ctx.pkg_descr = &descr;
     let output = parse(f.stdout, &ctx).map_err(|e| failure(f, e.0, None))?;
     if streamed_log_messages(f.stdout)
@@ -320,11 +323,16 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .wait()
         .map_err(|e| Error(format!("waiting for the build script: {e}")))?;
 
+    let upstream_out_dirs: Vec<PathBuf> = metadata
+        .iter()
+        .filter_map(|m| m.out.as_deref().map(PathBuf::from))
+        .collect();
     let success = judge(&Finished {
         run: r,
         argv: &argv,
         env: &env,
         out: &out,
+        upstream_out_dirs: &upstream_out_dirs,
         status,
         stdout: &stdout,
     })?;
@@ -338,6 +346,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
             &MetadataFile {
                 links: links.clone(),
                 metadata: success.output.metadata.clone(),
+                out: Some(out.display().to_string()),
             },
         )?;
     }
