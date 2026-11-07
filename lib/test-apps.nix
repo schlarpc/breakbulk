@@ -51,7 +51,9 @@
             else if spec.packageDir == null then
               throw "breakbulk: cannot place ${spec.package} in the checkout: its CARGO_MANIFEST_DIR is not a source view path"
             else
-              "${lib.removeSuffix "/" (toString checkout)}${lib.optionalString (spec.packageDir != "") "/${spec.packageDir}"}";
+              "${lib.removeSuffix "/" (toString checkout)}${
+                lib.optionalString (spec.packageDir != "") "/${spec.packageDir}"
+              }";
           vars = lib.optionalAttrs (checkout != null) {
             CARGO_MANIFEST_DIR = dir;
             CARGO_MANIFEST_PATH = "${dir}/Cargo.toml";

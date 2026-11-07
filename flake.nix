@@ -79,6 +79,14 @@
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
             builtins.removeAttrs p [ "workspaces" ]
           )
+          # Test runs, doctests and test apps over the doctests and
+          # test-control fixtures (IFD).
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-runs-${n}" v) (
+            builtins.removeAttrs (import ./tests/test-runs {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "workspaces" ]
+          )
         ));
     };
 }

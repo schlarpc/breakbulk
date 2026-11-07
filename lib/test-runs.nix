@@ -75,7 +75,12 @@ let
   # Values of the recorded env that a test process gets at run time
   # (`fill_env`). The others (`CARGO_CRATE_NAME`, `CARGO_BIN_EXE_*`,
   # `OUT_DIR`, `CARGO_TARGET_TMPDIR`, …) are compile-time only.
-  isRuntimeVar = k: k == "CARGO" || k == "CARGO_MANIFEST_DIR" || k == "CARGO_MANIFEST_PATH" || lib.hasPrefix "CARGO_PKG_" k;
+  isRuntimeVar =
+    k:
+    k == "CARGO"
+    || k == "CARGO_MANIFEST_DIR"
+    || k == "CARGO_MANIFEST_PATH"
+    || lib.hasPrefix "CARGO_PKG_" k;
 
   # The dynamic-library path, computed at run time from the runs' `flags`
   # outputs: every search path value (sorted by path component, as Cargo's
@@ -143,7 +148,13 @@ rec {
         else
           let
             u = plan.units.${p.out};
-            output = if u.kind == "run" then "out" else if p.output == "bin" then "out" else p.output;
+            output =
+              if u.kind == "run" then
+                "out"
+              else if p.output == "bin" then
+                "out"
+              else
+                p.output;
           in
           "${units.${p.out}.${output}}${if p ? file then "/${p.file}" else ""}";
       text = t: if isString t then literal t else lib.concatMapStrings piece t;
@@ -165,7 +176,9 @@ rec {
     let
       unit = plan.units.${root.unit};
       env = lib.mapAttrs (_: resolve.text) (lib.filterAttrs (k: _: isRuntimeVar k) unit.env);
-      manifest = unit.env.CARGO_MANIFEST_DIR or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
+      manifest =
+        unit.env.CARGO_MANIFEST_DIR
+          or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
       manifestRef = lib.findFirst (p: !isString p && p ? src) null (
         if isString manifest then [ ] else manifest
       );
@@ -201,7 +214,9 @@ rec {
     }:
     let
       outs = toJSON (map toString spec.dylib.outs);
-      dylibs = lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.dylib.flags;
+      dylibs = lib.concatMapStringsSep " " (
+        f: lib.escapeShellArg "${f}/directives.json"
+      ) spec.dylib.flags;
       env = spec.env // vars;
     in
     ''
