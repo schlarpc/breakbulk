@@ -756,7 +756,8 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `missing-input` | A `-sys` crate with an undeclared input | linux-gnu | Failure names the variable or path and the option to set |
 | `crate-types` | `["cdylib", "rlib"]`, `staticlib`, proc macro | linux-gnu, wasm | All outputs present |
 | `outside-reads` | `include_str!` of `../`, a proc macro reading a sibling directory | linux-gnu | Builds; editing an unrelated sibling changes nothing |
-| `multi-ws` | Three workspaces sharing a path crate and registry crates; one workspace contains the path crate; one git source locked at two revisions | linux-gnu | Registry units shared; path crate shared only outside every root; `explainSharing` names the reason otherwise |
+| `multi-ws` | Three workspaces sharing a path crate and registry crates; one workspace contains the path crate | linux-gnu | Registry units shared; path crate shared only outside every root; `explainSharing` names the reason otherwise |
+| `git-revisions` | Four workspaces depending on one local git repository: the same branch locked at two commits, the same commit by `branch` and by `rev` | linux-gnu | Each workspace gets its own revision; git units shared only between workspaces locking the same source at the same commit; package ids equal real Cargo's |
 | `vendor-collision` | A crates.io crate and a git fork with the same name and version | linux-gnu | Each consumer gets its own source |
 | `dev-dep-features` | A dev-dependency enabling extra features on a normal dependency | linux-gnu | The build plan's product lacks the feature; the test plan's binaries have it |
 | `required-features` | Bins and tests with `required-features` | linux-gnu | Stubs fail or skip with the reason; enabled variants build them |

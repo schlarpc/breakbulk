@@ -126,9 +126,23 @@ let
   vendor = mkVendor pkgs { inherit fetch entries; };
   skel = skeleton.mkSkeleton pkgs { inherit root wsDir; };
 
-  # Cargo's package id for a lockfile entry: the source without the
-  # locked revision, then `#name@version`.
-  crateId = e: "${if e.parsed.kind == "git" then e.parsed.id else e.source}#${e.name}@${e.version}";
+  # Cargo's package id for a lockfile entry: the source (for git, with its
+  # `git+` protocol and reference query, without the locked revision), then
+  # `#name@version`, or `#version` alone when the name equals the URL's last
+  # path segment (cargo-util-schemas 0.11.0, `core/package_id_spec.rs`,
+  # `impl Display for PackageIdSpec`), as for a git dependency on
+  # github.com/<owner>/<crate>.
+  crateId =
+    e:
+    let
+      url = lib.head (lib.splitString "?" (lib.removePrefix "sparse+" e.parsed.url));
+      parts = lib.splitString "/" url;
+      # scheme:, "", host, path segments…; a URL without a path has the
+      # single empty segment.
+      last = if lib.length parts > 3 then lib.last parts else "";
+      base = if e.parsed.kind == "git" then "git+${e.parsed.id}" else e.source;
+    in
+    if last == e.name then "${base}#${e.version}" else "${base}#${e.name}@${e.version}";
   crates = lib.listToAttrs (
     map (e: lib.nameValuePair (crateId e) (fetch.crateSource e).path) (lockfile.remoteEntries entries)
   );

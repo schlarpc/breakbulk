@@ -29,6 +29,16 @@
 #
 #   nix build -f tests/differential                 # the default seeds
 #   nix build -f tests/differential seeds.s17       # one seed
+#
+# The same check runs on the other Cargo releases of the supported window
+# (rust-overlay's 1.95, 1.97 and latest nightly; nixpkgs' cargo is the
+# 1.99 suite above) with fewer seeds each, to keep the cost bounded:
+#
+#   versions.<label>                 the aggregate check, e.g. versions.nightly
+#   versionSeeds.<label>.s3          one seed on one release
+#
+# `versions` is empty when the package set has no rust-overlay (`nix build
+# -f` uses plain nixpkgs; the flake's package set has it).
 #   python3 tests/differential/gen.py --seed 17 --out /tmp/ws   # look at one
 {
   pkgs ? import (
@@ -45,15 +55,25 @@
   toolchain ? { inherit (pkgs) cargo rustc; },
   # How many seeds the aggregate check runs: 1 .. count.
   count ? 32,
+  # How many seeds each other release runs.
+  versionCount ? 6,
 }:
 let
   inherit (pkgs) lib;
   target = pkgs.stdenv.hostPlatform.rust.rustcTarget;
-  inherit (toolchain) cargo rustc;
 
-  one =
+  one = oneWith { inherit toolchain; };
+
+  oneWith =
+    {
+      toolchain,
+      label ? null,
+    }:
     seed:
-    pkgs.runCommandCC "differential-${toString seed}"
+    let
+      inherit (toolchain) cargo rustc;
+    in
+    pkgs.runCommandCC "differential-${lib.optionalString (label != null) "${label}-"}${toString seed}"
       {
         nativeBuildInputs = [
           cargo
@@ -122,11 +142,33 @@ let
         fi
       '';
 
-  seeds = lib.listToAttrs (map (s: lib.nameValuePair "s${toString s}" (one s)) (lib.range 1 count));
-in
-{
-  inherit seeds one;
-  differential = pkgs.runCommand "differential-check" { reports = lib.attrValues seeds; } ''
+  seedsOf = f: n: lib.listToAttrs (map (s: lib.nameValuePair "s${toString s}" (f s)) (lib.range 1 n));
+  seeds = seedsOf one count;
+
+  # rust-overlay's releases of the supported window, when the package set
+  # has rust-overlay. The labels are attribute-safe.
+  versionToolchains = lib.optionalAttrs (pkgs ? rust-bin) (
+    lib.mapAttrs'
+      (
+        v: tc:
+        lib.nameValuePair (lib.replaceStrings [ "." ] [ "_" ] v) {
+          cargo = tc;
+          rustc = tc;
+        }
+      )
+      {
+        "1.95" = pkgs.rust-bin.stable."1.95.0".minimal;
+        "1.97" = pkgs.rust-bin.stable."1.97.0".minimal;
+        nightly = pkgs.rust-bin.nightly.latest.minimal;
+      }
+  );
+  versionSeeds = lib.mapAttrs (
+    label: toolchain: seedsOf (oneWith { inherit toolchain label; }) versionCount
+  ) versionToolchains;
+
+  aggregate =
+    name: seeds:
+    pkgs.runCommand name { reports = lib.attrValues seeds; } ''
     mkdir -p $out
     n=0; detected=0
     for r in $reports; do
@@ -140,4 +182,9 @@ in
     # Not vacuous: most seeds print search paths of both classes.
     [ $((detected * 2)) -ge $n ]
   '';
+in
+{
+  inherit seeds one versionSeeds;
+  differential = aggregate "differential-check" seeds;
+  versions = lib.mapAttrs (label: aggregate "differential-${label}-check") versionSeeds;
 }

@@ -243,7 +243,14 @@ rec {
         else
           "$(${jq} -rn --argjson outs ${lib.escapeShellArg outs} ${lib.escapeShellArg dylibJq} ${dylibs})"
       }
-      for __bb_p in ${lib.escapeShellArgs spec.dylib.extra}; do
+      ${
+        # Empty when off, so test runs without stable inputs are unchanged.
+        lib.optionalString (spec.dylib.stable or null != null) ''
+          for __bb_p in ${spec.dylib.stable}/dylib/*; do
+            __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
+          done
+        ''
+      }for __bb_p in ${lib.escapeShellArgs spec.dylib.extra}; do
         __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
       done
       export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
@@ -256,6 +263,68 @@ rec {
       eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' ${lib.escapeShellArg "${f}/directives.json"})"
     '') spec.envFlags
     + lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") env);
+
+  # Decision 61: stable inputs for content-addressed test runs. A run spec
+  # names the `flags` and `out` of every build-script run of its platform
+  # (the dynamic-library path, as Cargo builds it) and the `flags` of its
+  # package's build script (`rustc-env`). Those are input-addressed, so an
+  # edit to any package with a build script gives them new paths and
+  # re-runs every test, even when nothing they hold changed. This returns
+  # the spec with both replaced by small content-addressed copies:
+  #
+  #   - `<name>-test-dylibs`: `dylib/<NNNN>/` per dynamic-library path entry,
+  #     in order, holding the entry's files (not its subdirectories, which
+  #     the dynamic loader never searches), symlinks resolved;
+  #     `spec.dylib.stable` (envScript puts each on the path);
+  #   - `<name>-<package>-rustc-env`: `directives.json` with only the
+  #     `rustc-env` values, in order (`spec.envFlags`).
+  #
+  # Identical contents give identical paths, so the test run (also
+  # content-addressed) is not re-run. Only used when `ca` is on.
+  stableSpec =
+    {
+      pkgs,
+      spec,
+      caAttrs,
+      name,
+    }:
+    let
+      outs = toJSON (map toString spec.dylib.outs);
+      dylibs = pkgs.runCommand "${name}-test-dylibs" (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }) ''
+        mkdir -p $out/dylib
+        shopt -s nullglob
+        paths=$(jq -rn --argjson outs ${lib.escapeShellArg outs} ${lib.escapeShellArg dylibJq} ${
+          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.dylib.flags
+        })
+        IFS=: read -ra ps <<< "$paths"
+        i=0
+        for p in "''${ps[@]}"; do
+          d=$out/dylib/$(printf %04d $i)
+          mkdir -p "$d"
+          for f in "$p"/*; do
+            if [ -e "$f" ] && [ ! -d "$f" ]; then cp -L "$f" "$d/"; fi
+          done
+          i=$((i + 1))
+        done
+      '';
+      env = pkgs.runCommand "${name}-${storeName spec.package}-rustc-env" (
+        caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }
+      ) ''
+        mkdir -p $out
+        jq -s '{env: (map(.env) | add)}' ${
+          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.envFlags
+        } > $out/directives.json
+      '';
+    in
+    spec
+    // {
+      dylib = spec.dylib // {
+        flags = [ ];
+        outs = [ ];
+        stable = if spec.dylib.flags == [ ] then null else dylibs;
+      };
+      envFlags = lib.optional (spec.envFlags != [ ]) env;
+    };
 
   # The package's test configuration, with defaults.
   testConfig =
@@ -621,7 +690,14 @@ rec {
       run =
         r:
         let
-          s = spec r;
+          s =
+            if useCa then
+              stableSpec {
+                inherit pkgs caAttrs name;
+                spec = spec r;
+              }
+            else
+              spec r;
           cfg = testConfig packages s.package;
           args = testArgs cfg s.binary;
           bin = binaryOf s;
