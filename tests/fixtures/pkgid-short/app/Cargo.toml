@@ -1,0 +1,8 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gitdep = { git = "https://example.invalid/me/gitdep" }
+helper = { git = "https://example.invalid/me/tools", rev = "0123456789abcdef0123456789abcdef01234567" }
