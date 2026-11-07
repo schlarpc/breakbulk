@@ -187,7 +187,64 @@ pub struct RenderedCompile {
     pub env: BTreeMap<String, String>,
     pub env_splices: Vec<Splice<String>>,
     pub cwd: String,
+    /// Output name (`rmeta`, `rlib`, `bin`) to the file names rustc writes
+    /// for it. `bin` files go to the derivation output `out`; every other
+    /// name is its own derivation output.
     pub outputs: BTreeMap<String, Vec<String>>,
+    /// The crate files of every transitive dependency (`.rmeta`, `.rlib` or
+    /// a proc macro's shared library). `breakbulk-unit` symlinks them into
+    /// one directory and passes it as the only `-L dependency=`.
+    pub deps: Vec<String>,
+    /// `--remap-path-prefix` pairs (from, to) that `breakbulk-unit` adds.
+    /// Empty when Cargo's own `trim-paths` remaps are in the arguments.
+    pub remap: Vec<(String, String)>,
+    /// The `--remap-path-scope` value to add with `remap`; `None` adds no
+    /// scope flag, which means every scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remap_scope: Option<String>,
+    /// Layer 2 of the environment contract: an `env.json` file (a JSON object
+    /// of strings) captured from nixpkgs' setup hooks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_capture: Option<String>,
+}
+
+/// The name and version in a Cargo package id spec, as `cargo metadata`
+/// writes them: `registry+https://…#ring@0.17.14`, or `path+file:///…/app#0.1.0`
+/// where the name is the URL's last path segment. Returns `None` for other
+/// shapes.
+pub fn package_name_version(id: &str) -> Option<(&str, &str)> {
+    let (url, frag) = id.rsplit_once('#')?;
+    if let Some((name, version)) = frag.split_once('@') {
+        return Some((name, version));
+    }
+    let path = url.split(['?', '#']).next()?;
+    let name = path.trim_end_matches('/').rsplit('/').next()?;
+    (!name.is_empty() && !frag.is_empty()).then_some((name, frag))
+}
+
+/// Cargo's description of a package in messages (`PackageId`'s `Display`):
+/// `name vX.Y.Z`, followed by the source for packages not from crates.io.
+pub fn package_descr(id: &str) -> String {
+    match package_name_version(id) {
+        Some((name, version)) => {
+            let source = id.rsplit_once('#').map_or(id, |(u, _)| u);
+            if source == "registry+https://github.com/rust-lang/crates.io-index" {
+                format!("{name} v{version}")
+            } else {
+                let source = source.strip_prefix("path+file://").unwrap_or(source);
+                format!("{name} v{version} ({source})")
+            }
+        }
+        None => id.to_owned(),
+    }
+}
+
+/// The derivation output a compile output name goes to: `bin` → `out`.
+pub fn derivation_output(output: &str) -> &str {
+    match output {
+        "bin" => "out",
+        o => o,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +269,12 @@ pub struct RenderedRun {
     /// Cargo's `nightly_features_allowed` for the planning toolchain: decides
     /// whether `rustc-env=RUSTC_BOOTSTRAP=…` is an error or a warning.
     pub nightly_features_allowed: bool,
+    /// Layer 2 of the environment contract, as for compile units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_capture: Option<String>,
+    /// Fail a successful run whose `rerun-if-changed` paths are missing
+    /// from the sandbox, instead of only warning.
+    pub strict_sources: bool,
 }
 
 #[cfg(test)]
@@ -225,6 +288,26 @@ mod tests {
             assert_eq!(json, format!("\"{}\"", k.as_str()));
             assert_eq!(serde_json::from_str::<SpliceKind>(&json).unwrap(), k);
         }
+    }
+
+    #[test]
+    fn package_ids() {
+        let ring = "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14";
+        assert_eq!(package_name_version(ring), Some(("ring", "0.17.14")));
+        assert_eq!(package_descr(ring), "ring v0.17.14");
+        let app = "path+file:///build/skeleton/app#0.1.0";
+        assert_eq!(package_name_version(app), Some(("app", "0.1.0")));
+        assert_eq!(package_descr(app), "app v0.1.0 (/build/skeleton/app)");
+        assert_eq!(
+            package_name_version("path+file:///w/crates/x#other@1.0.0"),
+            Some(("other", "1.0.0"))
+        );
+        assert_eq!(
+            package_name_version("git+https://example.com/r/foo?rev=abc#0.2.0"),
+            Some(("foo", "0.2.0"))
+        );
+        assert_eq!(package_name_version("cfg-if"), None);
+        assert_eq!(package_descr("cfg-if"), "cfg-if");
     }
 
     #[test]

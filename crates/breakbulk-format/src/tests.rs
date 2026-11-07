@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use breakbulk_unit::directives::{BuildOutput, LibraryPath};
 use breakbulk_unit::spec::{RenderedArg, RenderedUnit};
 
@@ -496,12 +498,215 @@ impl Resolve for Fake {
     fn flags(&self, run: &UnitId) -> Result<String, String> {
         Ok(format!("/nix/store/{run}-flags"))
     }
+    fn remap_name(&self, base: &Reference) -> Result<String, String> {
+        Ok(match base {
+            Reference::Src(s) => format!("/src/{}", s.src.rsplit('/').next().unwrap()),
+            Reference::CrateSrc(s) => {
+                format!("/crates/{}", s.crate_src.rsplit('#').next().unwrap())
+            }
+            Reference::Out(o) => format!("/out/{}", o.out),
+        })
+    }
+}
+
+/// A resolver with every configuration hook set.
+struct Configured;
+
+impl Resolve for Configured {
+    type Error = String;
+    fn reference(&self, r: &Reference) -> Result<String, String> {
+        Fake.reference(r)
+    }
+    fn flags(&self, run: &UnitId) -> Result<String, String> {
+        Fake.flags(run)
+    }
+    fn remap_name(&self, base: &Reference) -> Result<String, String> {
+        Fake.remap_name(base)
+    }
+    fn remap_scope(&self, _: &UnitId, unit: &CompileUnit) -> Option<String> {
+        default_remap_scope(unit, true, false)
+    }
+    fn env_capture(&self, id: &UnitId, _: &Unit) -> Result<Option<String>, String> {
+        Ok(Some(format!("/nix/store/capture-{id}/env.json")))
+    }
+    fn env_overlay(&self, _: &UnitId, unit: &Unit) -> Result<BTreeMap<String, String>, String> {
+        let mut m = BTreeMap::from([("SPEC".to_owned(), "1".to_owned())]);
+        if let Unit::Compile(_) = unit {
+            m.insert("CARGO_PKG_NAME".into(), "overridden".into());
+        }
+        Ok(m)
+    }
+    fn strict_sources(&self, _: &UnitId, _: &RunUnit) -> bool {
+        true
+    }
+}
+
+#[test]
+fn render_configuration_hooks() {
+    let mut p = example();
+    // The run's own OUT_DIR is dropped: breakbulk-unit sets it.
+    run(&mut p, "r-ring").env.insert(
+        "OUT_DIR".into(),
+        Text::Concat(vec![Piece::Ref(Reference::Out(OutRef {
+            out: "r-ring".into(),
+            output: "out".into(),
+            file: None,
+        }))]),
+    );
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
+        panic!()
+    };
+    assert_eq!(c.env["CARGO_PKG_NAME"], "overridden");
+    assert_eq!(c.env["SPEC"], "1");
+    assert_eq!(
+        c.env_capture.as_deref(),
+        Some("/nix/store/capture-c-ring/env.json")
+    );
+    assert_eq!(c.remap_scope.as_deref(), Some("macro,diagnostics"));
+    assert_eq!(
+        c.remap,
+        [
+            (
+                "/nix/store/crate-ring@0.17.14".to_owned(),
+                "/crates/ring@0.17.14".to_owned()
+            ),
+            ("/nix/store/r-ring-out".to_owned(), "/out/r-ring".to_owned()),
+        ]
+    );
+    assert_eq!(c.deps, ["/nix/store/c-cfgif-rmeta/libcfg_if-1.rmeta"]);
+
+    let RenderedUnit::Run(r) = render_unit(&p, &"r-ring".into(), &Configured).unwrap() else {
+        panic!()
+    };
+    assert!(r.strict_sources);
+    assert!(!r.env.contains_key("OUT_DIR"));
+    assert_eq!(r.env["SPEC"], "1");
+
+    // With Cargo's trim-paths, breakbulk adds no remaps.
+    p.trim_paths = true;
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
+        panic!()
+    };
+    assert!(c.remap.is_empty());
+    assert_eq!(c.remap_scope, None);
+}
+
+#[test]
+fn remap_scopes() {
+    let p = example();
+    let Unit::Compile(app) = &p.units["c-app"] else {
+        panic!()
+    };
+    assert_eq!(
+        default_remap_scope(app, true, false).as_deref(),
+        Some("macro,diagnostics")
+    );
+    assert_eq!(
+        default_remap_scope(app, true, true).as_deref(),
+        Some("macro,diagnostics,coverage")
+    );
+    assert_eq!(default_remap_scope(app, false, false), None);
+    let mut test = app.clone();
+    test.args.push(Arg::Literal("--test".into()));
+    assert_eq!(default_remap_scope(&test, true, false), None);
+}
+
+/// A chain lib -> mid -> leaf, plus a proc macro with its own dependency.
+fn dep_graph() -> Plan {
+    let mut p = example();
+    let lib = |name: &str, deps: &[(&str, &str)], types: &[&str]| {
+        let mut c = match &p.units["c-cfgif"] {
+            Unit::Compile(c) => c.clone(),
+            _ => unreachable!(),
+        };
+        c.krate.name = name.into();
+        c.krate.types = types.iter().map(|t| t.to_string()).collect();
+        c.outputs = if types == ["proc-macro"] {
+            BTreeMap::from([("rlib".into(), BTreeSet::from([format!("lib{name}-1.so")]))])
+        } else {
+            BTreeMap::from([
+                (
+                    "rmeta".into(),
+                    BTreeSet::from([format!("lib{name}-1.rmeta")]),
+                ),
+                ("rlib".into(), BTreeSet::from([format!("lib{name}-1.rlib")])),
+            ])
+        };
+        c.args = deps
+            .iter()
+            .map(|(d, output)| {
+                let ext = if *output == "rlib" && d.starts_with("pm") {
+                    "so"
+                } else {
+                    output
+                };
+                Arg::Concat(vec![
+                    Piece::Literal(format!("{d}=")),
+                    Piece::Ref(Reference::Out(OutRef {
+                        out: format!("c-{d}"),
+                        output: (*output).into(),
+                        file: Some(format!("lib{d}-1.{ext}")),
+                    })),
+                ])
+            })
+            .collect();
+        Unit::Compile(c)
+    };
+    let units = [
+        ("c-leaf", lib("leaf", &[], &["lib"])),
+        ("c-pmdep", lib("pmdep", &[], &["lib"])),
+        ("c-pm", lib("pm", &[("pmdep", "rlib")], &["proc-macro"])),
+        (
+            "c-mid",
+            lib("mid", &[("leaf", "rmeta"), ("pm", "rlib")], &["lib"]),
+        ),
+        ("c-top", lib("top", &[("mid", "rmeta")], &["lib"])),
+        ("c-bin", lib("bin", &[("top", "rlib")], &["bin"])),
+    ];
+    for (id, u) in units {
+        p.units.insert(id.into(), u);
+    }
+    p
+}
+
+#[test]
+fn transitive_crate_deps() {
+    let p = dep_graph();
+    let files = |id: &str| -> Vec<String> {
+        crate_deps(&p, &id.into())
+            .into_iter()
+            .map(|o| o.file.unwrap())
+            .collect()
+    };
+    // A library compile needs metadata only; the proc macro's own
+    // dependency is not followed.
+    assert_eq!(
+        files("c-top"),
+        ["libleaf-1.rmeta", "libmid-1.rmeta", "libpm-1.so"]
+    );
+    // A link needs every rlib.
+    assert_eq!(
+        files("c-bin"),
+        [
+            "libleaf-1.rlib",
+            "libmid-1.rlib",
+            "libpm-1.so",
+            "libtop-1.rlib"
+        ]
+    );
+    assert!(files("c-leaf").is_empty());
+    // The rendered unit carries them as paths.
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-bin".into(), &Fake).unwrap() else {
+        panic!()
+    };
+    assert_eq!(c.deps[0], "/nix/store/c-leaf-rlib/libleaf-1.rlib");
+    assert_eq!(c.deps.len(), 4);
 }
 
 #[test]
 fn render_and_expand() {
     let p = example();
-    let unit = render_unit(&p.units["c-ring"], &Fake).unwrap();
+    let unit = render_unit(&p, &"c-ring".into(), &Fake).unwrap();
     let json = unit_env_value(&unit).unwrap();
     assert!(json.starts_with(r#"{"args":["--crate-name","ring","/nix/store/crate-ring@0.17.14/src/lib.rs","--externcfg_if=/nix/store/c-cfgif-rmeta/libcfg_if-1.rmeta",{"kind":"rustc-cfg","splice":"/nix/store/r-ring-flags"}"#), "{json}");
     // breakbulk-unit reads it back.
@@ -534,7 +739,7 @@ fn render_and_expand() {
     // Run units render their targets and metadata sources.
     let mut p = example();
     run(&mut p, "r-ring").metadata_from.insert("r-up".into());
-    let RenderedUnit::Run(r) = render_unit(&p.units["r-ring"], &Fake).unwrap() else {
+    let RenderedUnit::Run(r) = render_unit(&p, &"r-ring".into(), &Fake).unwrap() else {
         panic!()
     };
     assert_eq!(r.metadata_from, ["/nix/store/r-up-flags"]);
@@ -552,7 +757,7 @@ fn render_and_expand() {
 #[test]
 fn rendered_unit_rejects_unknown_fields() {
     let p = example();
-    let json = unit_env_value(&render_unit(&p.units["c-cfgif"], &Fake).unwrap()).unwrap();
+    let json = unit_env_value(&render_unit(&p, &"c-cfgif".into(), &Fake).unwrap()).unwrap();
     let bad = json.replacen('{', r#"{"bogus":1,"#, 1);
     assert!(serde_json::from_str::<RenderedUnit>(&bad).is_err());
 }

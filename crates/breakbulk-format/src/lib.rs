@@ -14,7 +14,9 @@ mod validate;
 pub use canonical::{CanonicalError, to_canonical_json};
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;
-pub use render::{Resolve, render_unit, unit_env_value};
+pub use render::{
+    Resolve, crate_deps, default_remap_scope, is_linking, remap_bases, render_unit, unit_env_value,
+};
 pub use validate::{
     ValidationError, ValidationOptions, contains_path, contains_sentinel, literal_store_paths,
     validate,
