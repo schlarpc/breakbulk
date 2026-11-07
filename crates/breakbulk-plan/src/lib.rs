@@ -7,12 +7,15 @@
 //! - [`graph`] turns records into units: identity, edges, sentinels, env.
 //! - [`rewrite`] turns recorded paths into references.
 //! - [`sentinel`] parses sentinel shapes.
+//! - [`spec`] passes the toolchain spec's rustflags and linkers to Cargo,
+//!   confirms they arrived, and rewrites same-triple host linkers.
 
 pub mod golden;
 pub mod graph;
 pub mod records;
 pub mod rewrite;
 pub mod sentinel;
+pub mod spec;
 pub mod trace;
 
 use std::fmt;
@@ -40,10 +43,19 @@ macro_rules! bail {
 
 /// Trace, build the plan, and validate it.
 pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
+    let prepared = spec::prepare_for(opts)?;
+    let mut traced = opts.clone();
+    if let Some(p) = &prepared {
+        traced.configs.push(p.config.display().to_string());
+    }
+    let opts = &traced;
     let t = trace::run(opts)?;
     let ctx = t.context(opts);
     let b = graph::Builder::new(&ctx, &t.metadata, &t.records)?;
-    let plan = b.plan()?;
+    let mut plan = b.plan()?;
+    if let Some(p) = &prepared {
+        p.apply(&mut plan)?;
+    }
     let mut forbidden = opts.forbidden.clone();
     forbidden.push(opts.scratch.clone());
     validate(

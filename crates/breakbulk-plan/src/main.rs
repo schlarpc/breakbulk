@@ -6,7 +6,7 @@
 //!   --skeleton DIR [--workspace REL] [--canonical-root /build/skeleton] \
 //!   --kind build|test --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
-//!   [--config FILE-OR-VALUE]… --scratch DIR [--forbid PATH]… --out plan.json
+//!   [--config FILE-OR-VALUE]… [--spec FILE] --scratch DIR [--forbid PATH]… --out plan.json
 //! ```
 
 use std::process::ExitCode;
@@ -19,7 +19,7 @@ fn usage() -> ! {
         "usage: breakbulk-plan --cargo C --rustc R --rustdoc D --shim S --skeleton DIR \
          [--workspace REL] [--canonical-root DIR] --kind build|test --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
-         [--config X]... --scratch DIR [--forbid PATH]... --out FILE"
+         [--config X]... [--spec FILE] --scratch DIR [--forbid PATH]... --out FILE"
     );
     std::process::exit(2)
 }
@@ -44,6 +44,7 @@ fn main() -> ExitCode {
         configs: Vec::new(),
         scratch: String::new(),
         forbidden: Vec::new(),
+        spec: None,
     };
     let mut out = None;
     while let Some(a) = args.next() {
@@ -77,6 +78,7 @@ fn main() -> ExitCode {
             "--config" => opts.configs.push(val()),
             "--scratch" => opts.scratch = val(),
             "--forbid" => opts.forbidden.push(val()),
+            "--spec" => opts.spec = Some(val()),
             "--out" => out = Some(val()),
             _ => usage(),
         }

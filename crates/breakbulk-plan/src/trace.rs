@@ -47,6 +47,8 @@ pub struct Options {
     /// Paths no literal in the plan may contain (besides the scratch
     /// directory and the skeleton).
     pub forbidden: Vec<String>,
+    /// The toolchain spec file (`--spec`, see [`crate::spec`]).
+    pub spec: Option<String>,
 }
 
 /// What one trace produced.
