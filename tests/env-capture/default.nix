@@ -202,4 +202,6 @@ in
       throw "env-capture-eval: failed: ${toString (lib.attrNames failedEval)}";
 
   env-capture-vars = checkVars;
+
+  unit-smoke = (import ../unit-smoke { inherit pkgs; }).check;
 }

@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use breakbulk_unit::env::merge_layer;
 use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUnit};
 
 use crate::normalize::normalize_unit;
@@ -34,9 +35,10 @@ pub trait Resolve {
     fn env_capture(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<String>, Self::Error> {
         Ok(None)
     }
-    /// Layers 4 and 5 of the environment contract, merged: the toolchain
-    /// spec's env for the unit's platform, then the package override's.
-    /// Applied over Cargo's recorded env.
+    /// Layers 4 and 5 of the environment contract, merged with
+    /// [`merge_layer`] (list-like variables such as `PATH` append): the
+    /// toolchain spec's env for the unit's platform, then the package
+    /// override's. Applied over Cargo's recorded env the same way.
     fn env_overlay(
         &self,
         _id: &UnitId,
@@ -252,7 +254,7 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
     Ok(match &unit {
         Unit::Compile(c) => {
             let mut env = env(&c.env, r)?;
-            env.extend(overlay);
+            merge_layer(&mut env, overlay);
             let (remap, remap_scope) = if plan.trim_paths {
                 (Vec::new(), None)
             } else {
@@ -321,7 +323,7 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
             let mut recorded = run.env.clone();
             recorded.remove("OUT_DIR");
             let mut env = env(&recorded, r)?;
-            env.extend(overlay);
+            merge_layer(&mut env, overlay);
             RenderedUnit::Run(RenderedRun {
                 package: run.package.clone(),
                 platform: run.platform,
@@ -338,10 +340,43 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
                 targets: run.targets.clone(),
                 nightly_features_allowed: run.nightly_features_allowed,
                 env_capture,
+                // Prefix maps for C code the script compiles. Not tied to
+                // `trimPaths`: Cargo's own remaps never reach C compilers.
+                remap: run_remap(plan, id, &unit, r)?,
+                out_dir_remap: Some(r.remap_name(&Reference::Out(OutRef {
+                    out: id.clone(),
+                    output: "out".into(),
+                    file: None,
+                }))?),
                 strict_sources: r.strict_sources(id, run),
             })
         }
     })
+}
+
+/// A run's remap pairs: as a compile unit's, from [`remap_bases`], without
+/// its own `OUT_DIR` (`out_dir_remap`), which it cannot name.
+fn run_remap<R: Resolve>(
+    plan: &Plan,
+    id: &UnitId,
+    unit: &Unit,
+    r: &R,
+) -> Result<Vec<(String, String)>, R::Error> {
+    let mut remap = remap_bases(plan, unit)
+        .iter()
+        .filter(|b| !matches!(b, Reference::Out(o) if &o.out == id))
+        .map(|b| {
+            let from = r.reference(b)?;
+            let from = match from.trim_end_matches('/') {
+                "" => from,
+                f => f.to_owned(),
+            };
+            Ok((from, r.remap_name(b)?))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    remap.sort();
+    remap.dedup();
+    Ok(remap)
 }
 
 /// The `BREAKBULK_UNIT` value: canonical JSON of a rendered unit.

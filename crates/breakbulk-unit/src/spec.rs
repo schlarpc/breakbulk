@@ -197,13 +197,14 @@ pub struct RenderedCompile {
     pub deps: Vec<String>,
     /// `--remap-path-prefix` pairs (from, to) that `breakbulk-unit` adds.
     /// Empty when Cargo's own `trim-paths` remaps are in the arguments.
+    /// The same pairs become `-ffile-prefix-map` in `NIX_CFLAGS_COMPILE`.
     pub remap: Vec<(String, String)>,
     /// The `--remap-path-scope` value to add with `remap`; `None` adds no
     /// scope flag, which means every scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remap_scope: Option<String>,
-    /// Layer 2 of the environment contract: an `env.json` file (a JSON object
-    /// of strings) captured from nixpkgs' setup hooks.
+    /// Layer 2 of the environment contract: an env capture's `env.json` (a
+    /// JSON object of strings) or the capture's output directory holding it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_capture: Option<String>,
 }
@@ -287,6 +288,16 @@ pub struct RenderedRun {
     /// Layer 2 of the environment contract, as for compile units.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_capture: Option<String>,
+    /// Source paths (from, to) that C code compiled by the script must not
+    /// embed: the package's source view or crate source, and any `OUT_DIR`
+    /// the run names, with the names Rust remaps them to. They become
+    /// `-ffile-prefix-map` in `NIX_CFLAGS_COMPILE`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remap: Vec<(String, String)>,
+    /// The name the run's own `OUT_DIR` (`$out`, which the unit cannot name
+    /// in its attributes) is remapped to, as with `remap`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_dir_remap: Option<String>,
     /// Fail a successful run whose `rerun-if-changed` paths are missing
     /// from the sandbox, instead of only warning.
     pub strict_sources: bool,

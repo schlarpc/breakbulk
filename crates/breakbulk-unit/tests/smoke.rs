@@ -1,9 +1,9 @@
 //! End-to-end smoke test of `breakbulk-unit` outside Nix.
 //!
 //! `tests/unit-smoke/plan.json` is a hand-written plan for the fixture in
-//! `tests/unit-smoke/fixture`: a library whose build script emits
-//! `rustc-cfg`, `rustc-check-cfg`, `rustc-env` and `rustc-link-search`, and a
-//! binary depending on it. Its arguments are those of `cargo build -vv
+//! `tests/unit-smoke/fixture`: a library whose build script compiles a C
+//! file with `$CC` and emits `rustc-cfg`, `rustc-check-cfg`, `rustc-env`,
+//! `rustc-link-search` and `rustc-link-lib`, and a binary depending on it. Its arguments are those of `cargo build -vv
 //! --target x86_64-unknown-linux-gnu` (Cargo 1.99) with the target-directory
 //! arguments removed, as the planner would write them.
 //!
@@ -15,6 +15,12 @@
 //! replaces the tokens with directories in a temporary "store", runs
 //! `breakbulk-unit unit` for each unit in dependency order with a cleared
 //! environment, as Nix would, and runs the resulting binary.
+//!
+//! The env capture here is the test's own `PATH`, `CC`, `AR` and nixpkgs'
+//! compiler-wrapper role variables. In a `nix develop` shell those make `cc`
+//! the nixpkgs wrapper, which applies the unit's `NIX_CFLAGS_COMPILE`, so the
+//! test also checks that C objects carry no source path. Elsewhere that part
+//! is skipped with a note.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -257,11 +263,16 @@ fn smoke() {
     let src = store.join("source");
     copy_dir(&dir.join("fixture"), &src);
     let capture = store.join("capture-env.json");
-    std::fs::write(
-        &capture,
-        serde_json::to_string(&BTreeMap::from([("PATH", std::env::var("PATH").unwrap())])).unwrap(),
-    )
-    .unwrap();
+    let capture_env: BTreeMap<String, String> = std::env::vars()
+        .filter(|(k, _)| {
+            matches!(k.as_str(), "PATH" | "CC" | "AR")
+                || (k.starts_with("NIX_") && k.contains("_WRAPPER_TARGET_HOST_"))
+        })
+        .collect();
+    let wrapped = capture_env
+        .keys()
+        .any(|k| k.starts_with("NIX_CC_WRAPPER_TARGET_HOST_"));
+    std::fs::write(&capture, serde_json::to_string(&capture_env).unwrap()).unwrap();
     let rustc = which("rustc");
     let out_path = |unit: &str, output: &str| store.join(format!("{unit}-{output}"));
 
@@ -318,15 +329,60 @@ fn smoke() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "smoke ok: hello-from-build 42\n"
+        "smoke ok: hello-from-build 42 c=6\n"
     );
 
-    // Remapping kept the source and OUT_DIR paths out of the library and the
-    // binary (every scope is remapped here).
-    for f in [
-        app.clone(),
-        out_path("c-a0e9aa7440d71279", "rlib").join("libsmokelib-87e5d8c802f76f4a.rlib"),
+    // The build script's C compiler got the unit's seed (from its `out`, as
+    // stdenv computes it) and a prefix map for the source and OUT_DIR.
+    let run_out = out_path(run, "out");
+    let cflags = std::fs::read_to_string(run_out.join("nix-cflags-compile.txt")).unwrap();
+    let seed: String = run_out
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .chars()
+        .take(10)
+        .collect();
+    assert!(
+        cflags.starts_with(&format!(" -frandom-seed={seed}")),
+        "{cflags}"
+    );
+    for map in [
+        format!("-ffile-prefix-map={}=.", src.display()),
+        format!(
+            "-ffile-prefix-map={}=/breakbulk/build/{run}",
+            run_out.display()
+        ),
     ] {
+        assert!(cflags.contains(&map), "{map} not in {cflags}");
+    }
+
+    // Remapping kept the source and OUT_DIR paths out of the library and the
+    // binary (every scope is remapped here). The rlib bundles the C archive,
+    // and the binary links it: their C debug info is remapped only through
+    // the nixpkgs compiler wrapper.
+    let archive = run_out.join("native/libsmokec.a");
+    let mut checked =
+        vec![out_path("c-a0e9aa7440d71279", "rmeta").join("libsmokelib-87e5d8c802f76f4a.rmeta")];
+    if wrapped {
+        checked.extend([
+            app.clone(),
+            out_path("c-a0e9aa7440d71279", "rlib").join("libsmokelib-87e5d8c802f76f4a.rlib"),
+            archive.clone(),
+        ]);
+        // The C debug info names the source by its remapped path.
+        let bytes = std::fs::read(&archive).unwrap();
+        assert!(
+            contains(&bytes, "./smokelib/csrc/smoke.c"),
+            "{} has no remapped source name",
+            archive.display()
+        );
+    } else {
+        eprintln!(
+            "note: `cc` is not the nixpkgs compiler wrapper here; not checking C objects for source paths"
+        );
+    }
+    for f in checked {
         let bytes = std::fs::read(&f).unwrap();
         for p in [&src, &out_path(run, "out")] {
             assert!(
