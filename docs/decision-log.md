@@ -186,3 +186,39 @@ separately from nixpkgs), breakbulk can unpack with its own pinned tools.
   Nix sandbox that is harmless, but for local tests in a home directory it
   picks up `~/.cargo/config.toml`, so local trace tests must run outside
   the home directory.
+
+## 17. ASK: one library, two path-hiding settings (shipped code vs tests)
+
+Background: the design hides source paths differently for shipped binaries
+(debug info keeps real paths so a debugger can find sources) and for test
+binaries (hide everything, so a test binary's bytes don't change when an
+unrelated file in its package changes). The setting is a compiler flag on
+each crate, including libraries. A library used by both a shipped binary and
+a test binary can only have one setting, unless it is compiled twice.
+
+Current default: libraries use the shipped-binary setting; only the test
+crate itself hides everything. Effect: tests share compiled libraries with
+the normal build (good for cache and build time), but a test binary's debug
+info still mentions the source paths of the workspace libraries it uses, so
+editing an unrelated file in such a library (a README, say) changes the test
+binary's bytes and re-runs its tests. The alternative is compiling workspace
+libraries twice (once per setting), which doubles their build cost in
+exchange for fewer test re-runs. Third option: strip debug info from the test
+binary copy that the test run uses, keeping a debug copy aside.
+
+## 18. FYI: the unit builder works end to end
+
+`breakbulk-unit` (the program that builds every unit) now compiles crates and
+runs build scripts. A hand-written two-crate example with a build script
+builds as real Nix derivations, the binary runs, outputs are bit-identical on
+rebuild, and no source or build-script path leaks into the binary. Details:
+
+- Each unit starts from an empty environment plus a fixed base; only
+  `TMPDIR` and `NIX_BUILD_CORES` come from outside.
+- Build scripts killed by a signal fail with the signal named.
+- When a build script declares it reads a file that isn't in its sandbox, the
+  message names the option to add (`packages.<name>.extraSources`, etc.).
+- Large unit descriptions can come in a file instead of an environment
+  variable, because Linux limits one variable to 128 KiB.
+- Proc macros' compiled library is stored in the same output slot as normal
+  libraries' `.rlib` (internal detail).
