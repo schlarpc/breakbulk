@@ -10,6 +10,9 @@
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
 #   breakbulk.xwinSdk { pkgs; crt; sdk; arches; hash; }   (unfree; FOD)
 #   breakbulk.wasmBindgen.forLockfile { pkgs; lockfile; }
+#   breakbulk.mkProduct { name; linked; stages; checks; target; pkgs; … }
+#     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers;
+#     preset stage sets in breakbulk.stages.defaultStages)
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
 # breakbulk.predictedRoots { ... }.
 { lib }:
@@ -29,6 +32,8 @@ let
       ;
   };
   inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
+  wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
+  stages = import ./stages.nix { inherit lib wasmBindgen; };
 in
 {
   inherit
@@ -71,5 +76,7 @@ in
 
   xwinSdk = import ./xwin-sdk.nix { inherit lib; };
 
-  wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
+  inherit wasmBindgen stages;
+  inherit (stages) mkProduct;
+  stageHelpers = stages.helpers;
 }
