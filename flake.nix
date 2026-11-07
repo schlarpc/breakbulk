@@ -54,6 +54,12 @@
             config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "xwin-sdk";
           };
         }
+        # Post-link stages and helpers (stages-*). stages-wasm-browser
+        # downloads a rust-overlay toolchain with the wasm32 target.
+        // import ./tests/stages {
+          inherit pkgs;
+          breakbulk = self.lib;
+        }
         // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") (
           let
             t = import ./tests/instantiate {
