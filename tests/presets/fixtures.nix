@@ -389,7 +389,8 @@ let
   # C (clang-cl), bindgen, and a resource linked with rustc-link-arg-bins,
   # through the msvc preset. x86_64 runs (product and tests) under wine;
   # aarch64 compiles and links. msvc-x86_64-pdb: with debug info, the PDB
-  # is in the product's `debug` output.
+  # is in the product's `debug` output. msvc-x86_64-relink: the link is
+  # reproducible (#35).
 
   msvcTriples = [
     "x86_64-pc-windows-msvc"
@@ -501,6 +502,63 @@ let
             mkdir -p $out
             basename "''${pdbs[0]}" > $out/pdb
             cp sym.txt $out/
+          '';
+      # #35 (assumption X4): the lld-link wrapper keeps msvc links
+      # reproducible by copying inputs out of rustc's random
+      # `rustcXXXXXX` link directory. The bin unit (debug info on, so a
+      # PDB) is linked by hand twice with the same output paths: the .exe
+      # and .pdb are byte-identical, and the wrapper copied at least one
+      # input (a rename of rustc's directory would leave none). Negative
+      # control: with plain lld-link in the wrapper's place, the two links
+      # differ, so the comparison can see the random directory.
+      msvc-x86_64-relink =
+        let
+          unit =
+            (lib.findFirst (u: u.name == "msvc-smoke-0.1.0-bin") (throw "msvc-x86_64-relink: no bin unit") (
+              lib.attrValues msvc.workspaces.main.instances.x86_64-pc-windows-msvc.debuginfo.units.build
+            )).drvAttrs.BREAKBULK_UNIT;
+        in
+        pkgs.runCommand "msvc-x86_64-relink"
+          {
+            inherit unit;
+            passAsFile = [ "unit" ];
+          }
+          ''
+            set -euo pipefail
+            result=$out
+            wrapper=$(grep -o '/nix/store/[^" ]*/bin/lld-link-stable' "$unitPath" | head -n1)
+            [ -n "$wrapper" ] || { echo "the unit does not link with lld-link-stable" >&2; exit 1; }
+            link() {
+              rm -rf "$TMPDIR/unit-out" "$TMPDIR/unit-debug" "$TMPDIR/breakbulk-lld-link" /tmp/breakbulk-lld-link
+              BREAKBULK_UNIT="$(cat "$2")" out=$TMPDIR/unit-out debug=$TMPDIR/unit-debug \
+                ${tools.breakbulk-unit}/bin/breakbulk-unit unit 2> "$1.log" || { cat "$1.log"; exit 1; }
+              mkdir "$1"
+              cp -r "$TMPDIR/unit-out" "$1/out"
+              cp -r "$TMPDIR/unit-debug" "$1/debug"
+              find "$TMPDIR/breakbulk-lld-link" /tmp/breakbulk-lld-link -type f 2> /dev/null > "$1.copied" || true
+            }
+            link run1 "$unitPath"
+            link run2 "$unitPath"
+            ls -lR run1
+            ls run1/debug | grep -q '\.pdb$' || { echo "no PDB" >&2; exit 1; }
+            cat run1.copied
+            [ -s run1.copied ] || { echo "the wrapper copied no rustcXXXXXX input" >&2; exit 1; }
+            diff -r run1 run2
+
+            # Negative control: plain lld-link, two links differ.
+            mkdir -p raw/bin
+            printf '#!%s\nexec %s "$@"\n' ${pkgs.runtimeShell} \
+              "$(sed -n 's/^LLD_LINK=//p' "$wrapper")" > raw/bin/lld-link-stable
+            chmod +x raw/bin/lld-link-stable
+            sed "s|$wrapper|$PWD/raw/bin/lld-link-stable|g" "$unitPath" > raw.json
+            link raw1 raw.json
+            link raw2 raw.json
+            if diff -rq raw1 raw2; then
+              echo "plain lld-link links reproducibly too; the check cannot see the random directory" >&2
+              exit 1
+            fi
+            mkdir -p $result
+            cp run1.copied $result/
           '';
       msvc-aarch64-build = pkgs.runCommand "msvc-aarch64-build" { nativeBuildInputs = [ pkgs.file ]; } ''
         file ${a.packages.msvc-smoke}/bin/msvc-smoke.exe | tee $out

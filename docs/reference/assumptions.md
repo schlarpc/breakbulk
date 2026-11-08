@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: 75 pinned, 3 with no pinning test (S10, X4, L5). Each of the three has an issue; see [Gaps](#gaps).
+Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of the two has an issue; see [Gaps](#gaps).
 
 ## Summary
 
@@ -72,7 +72,7 @@ Status of the 78 entries: 75 pinned, 3 with no pinning test (S10, X4, L5). Each 
 | [X1](#x1-rustcs-json-diagnostics) | rustc's JSON diagnostics | yes |
 | [X2](#x2-which-debuginfo-side-files-a-link-writes) | Which debuginfo side files a link writes | yes |
 | [X3](#x3-names-of-uplifted-side-files) | Names of uplifted side files | yes |
-| [X4](#x4-rustcs-link-temp-directory) | rustc's link temp directory | **no** (#35) |
+| [X4](#x4-rustcs-link-temp-directory) | rustc's link temp directory | yes |
 | [X5](#x5-sysroot-layout) | Sysroot layout | yes |
 | [R1](#r1-test-process-environment) | Test-process environment | yes |
 | [R2](#r2-cargo_bin_exe_-for-bins-cargo-did-not-build) | `CARGO_BIN_EXE_*` for bins Cargo did not build | yes |
@@ -576,9 +576,9 @@ Status of the 78 entries: 75 pinned, 3 with no pinning test (S10, X4, L5). Each 
 - **Assumption.** rustc links from a randomly named directory `<out-dir>/rustcXXXXXX` next to the output and passes files in it (`symbols.o`, extracted objects) by absolute path; a response file holds one argument per line, quoted when needed.
 - **Where.** `lib/presets/lld-link-stable.sh` (copies those inputs to a fixed path so the PDB, and so the `.exe`, are reproducible); `lib/presets/linker.nix`: `lldLinkLinker`.
 - **Upstream.** rustc 1.99.1 `compiler/rustc_codegen_ssa/src/back/link.rs` (`TempDirBuilder::new().prefix("rustc")`); [spikes/msvc.md](../spikes/msvc.md), "Determinism".
-- **Holds for.** 1.99.1, checked by hand with `nix build --rebuild`.
-- **Pinned by.** **Nothing.** No flake check rebuilds an msvc link. Issue **#35** (related: #2).
-- **If it changes.** msvc `.exe` and `.pdb` are no longer reproducible; nothing fails.
+- **Holds for.** 1.99 (rust-overlay), the msvc fixture's toolchain.
+- **Pinned by.** `msvc-x86_64-relink` (HEAVY: the Windows SDK): the msvc fixture's bin unit, with debug info, linked by hand twice with the same output paths gives byte-identical `.exe` and `.pdb`, and the wrapper copied at least one `rustcXXXXXX` input (`symbols.o`); with plain lld-link in the wrapper's place, the two links differ (negative control).
+- **If it changes.** msvc `.exe` and `.pdb` are no longer reproducible; `msvc-x86_64-relink` fails (a renamed directory leaves the wrapper nothing to copy).
 
 ### X5. Sysroot layout
 
@@ -829,7 +829,6 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 | Entry | Gap | Issue |
 | --- | --- | --- |
 | [S10](#s10-directive-errors-and-warnings) | Directive error and warning paths are checked only against breakbulk's copy of Cargo's code | #33 |
-| [X4](#x4-rustcs-link-temp-directory) | No check rebuilds an msvc link to compare bytes | #35 |
 | [L5](#l5-cross-language-lto) | Cross-language LTO has never built | #10 (existing) |
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), `include` and `config`-over-`config.toml` (T6, guarded at plan time), and the non-Linux rows of G3.
