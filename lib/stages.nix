@@ -431,7 +431,17 @@ let
                 concatMapStringsSep "" (s: ", " + s) ordered.order
               })";
         in
-        caify "check `${c}`" (guard pkgs input (m.run { inherit input product pkgs; }))
+        caify "check `${c}`" (
+          guard pkgs input (
+            m.run {
+              inherit input pkgs;
+              # The stage names after `linked`, in order, for messages.
+              product = product // {
+                stageOrder = ordered.order;
+              };
+            }
+          )
+        )
       ) (filterAttrs (_: v: v != null) allChecks);
     in
     lib.extendDerivation true (

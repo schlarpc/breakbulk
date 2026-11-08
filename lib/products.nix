@@ -28,7 +28,10 @@
 #   products.<pkg>.debug           split debug info, when a stage split it
 #                                  (or install, for `.pdb` and other
 #                                  debuginfo side files of the link units)
-#   products.<pkg>.checks.<name>   checks (`noSourceReferences` by default)
+#   products.<pkg>.checks.<name>   checks (`noSourceReferences` by default,
+#                                  and `buildScriptFiles` when a build
+#                                  script of the target can place files
+#                                  next to the binaries, #23)
 #   products.<pkg>.roots."<kind>/<target>"   the raw roots (units or stubs)
 #   products.<pkg>.unbuilt         roots Cargo did not build, with reasons
 #
@@ -345,6 +348,23 @@ let
           targetStages
           ;
       };
+      # The `flags` outputs of the build plan's target-platform runs, whose
+      # `directives.json` names the files their scripts placed next to the
+      # binaries (`targetDirs`, #23), for `stageHelpers.buildScriptFiles`
+      # and the `buildScriptFiles` check. null in dynamic-derivation mode,
+      # where the runs are not known at evaluation time.
+      buildScriptFlags =
+        if (inst.delivery or "ifd") != "ifd" || !(inst ? plans.build) then
+          null
+        else
+          let
+            plan = builtins.fromJSON (
+              builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
+            );
+          in
+          lib.mapAttrsToList (id: _: inst.units.build.${id}.flags) (
+            filterAttrs (_: u: u.kind == "run" && u.platform == "target") plan.units
+          );
       targetSet = targetStageSet setArgs;
       effectiveDebugInfo = debugInfoOf setArgs;
       byPkg = groupBy (r: r.breakbulkRoot.package) (
@@ -370,7 +390,15 @@ let
               } (c.stages or { })
             ) confs
           );
-          checkSet = stages.merge ([ targetChecks ] ++ map (c: c.checks or { }) confs);
+          checkSet = stages.merge (
+            [
+              (lib.optionalAttrs (buildScriptFlags != null && buildScriptFlags != [ ]) {
+                buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
+              })
+              targetChecks
+            ]
+            ++ map (c: c.checks or { }) confs
+          );
           p = stages.mkProduct {
             name = pkg;
             linked = mkLinked pkgs pkg built;
@@ -384,7 +412,9 @@ let
               toolchainPaths
               defaultChecks
               ;
-            info = lib.optionalAttrs (lockfile != null) { inherit lockfile; };
+            info = lib.optionalAttrs (lockfile != null) { inherit lockfile; } // {
+              inherit buildScriptFlags;
+            };
           };
           extra = {
             inherit roots;

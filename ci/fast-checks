@@ -25,6 +25,7 @@ plan-directives
 plan-build-script-signal
 plan-forced-target
 plan-out-dir-walk
+repository-build-script-files
 plan-tools-narrow
 repository-cargo-config-include
 repository-default-variant

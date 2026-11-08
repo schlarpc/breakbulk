@@ -546,6 +546,49 @@ in
       echo "$linker" > $out
     '';
 
+  # #23: a build script that places a file next to the binaries (Cargo's
+  # `target/<profile>`) gets the default `buildScriptFiles` check, which
+  # fails naming the file and the two ways out; with the
+  # `buildScriptFiles` stage the product holds the file and the check
+  # passes.
+  build-script-files =
+    let
+      wsOf =
+        extra:
+        (mkRepo (fixtures + "/out-dir-walk") [
+          (oneWs ".")
+          extra
+        ]).workspaces.main;
+      plain = (wsOf { }).packages.out-dir-walk;
+      staged = (wsOf {
+        packages.out-dir-walk.stages.buildScriptFiles = {
+          after = "splitDebug";
+          before = "install";
+          run = breakbulk.stages.helpers.buildScriptFiles { };
+        };
+      }).packages.out-dir-walk;
+      off = (wsOf { packages.out-dir-walk.checks.buildScriptFiles = null; }).packages.out-dir-walk;
+    in
+    assert lib.assertMsg (!(off.checks ? buildScriptFiles)) "build-script-files: the check is not removable";
+    pkgs.runCommand "build-script-files"
+      {
+        failure = pkgs.testers.testBuildFailure plain.checks.buildScriptFiles;
+        inherit staged;
+        stagedCheck = staged.checks.buildScriptFiles;
+      }
+      ''
+        log=$failure/testBuildFailure.log
+        cat $log
+        grep -qF 'but out-dir-walk does not include them' $log
+        grep -qF 'walked.txt (from ' $log
+        # The message's stanza is the one used above.
+        grep -qF 'packages.out-dir-walk.stages.buildScriptFiles = { after = "splitDebug"; before = "install"; run = breakbulk.stageHelpers.buildScriptFiles { }; };' $log
+        grep -qF 'packages.out-dir-walk.checks.buildScriptFiles = null' $log
+        [ "$(cat $staged/walked.txt)" = profile ]
+        [ -x $staged/bin/out-dir-walk ]
+        touch $out
+      '';
+
   # Cargo config `include` (stable since Cargo 1.93): the files a
   # `.cargo/config.toml` includes, transitively, are in the planning and
   # config skeletons. Planning sees the included `build.rustflags` (`app`

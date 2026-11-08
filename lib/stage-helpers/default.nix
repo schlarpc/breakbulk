@@ -585,6 +585,65 @@ let
       ''
   );
 
+  # Shell lines defining `placedFiles`, which prints, one per line, the
+  # files the target's build scripts placed next to the binaries: the
+  # regular files and symlinks directly in each `<profile>` copy a run's
+  # `directives.json` names (`targetDirs`, the entries not ending in
+  # `/deps`; #23). Cargo's `target/<profile>` holds them beside the bins,
+  # where `cargo run` and a Windows loader find them.
+  placedFilesFn =
+    helperName: product: pkgs:
+    let
+      flags =
+        product.buildScriptFlags or null;
+    in
+    if flags == null then
+      throw "breakbulk stage helper `${helperName}`: the files build scripts place next to the binaries are known only in IFD mode (not with `mode = \"dynamic\"` yet, #23)"
+    else
+      ''
+        placedFiles() {
+          local f d
+          for f in ${lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") flags}; do
+            ${pkgs.buildPackages.jq}/bin/jq -r '(.targetDirs // [])[] | select(endswith("/deps") | not)' "$f"
+          done | while IFS= read -r d; do
+            find "$d" -mindepth 1 -maxdepth 1 \( -type f -o -type l \)
+          done | sort -u
+        }
+      '';
+
+  # Decision #23: copy the files the target's build scripts placed next to
+  # the binaries (as in Cargo's `target/<profile>`: shared libraries that
+  # sdl2-sys `bundled` or ort-sys `copy-dylibs` copy there, Tauri's
+  # external binaries and resources) into the product, beside its own
+  # files, so `install` lays them out with them (a DLL next to the .exe in
+  # bin/, a `.so` in lib/; on Linux the binary then needs a runpath to
+  # find it, e.g. `patchelfRpath`). Symlinks are resolved. A name the
+  # product already has is an error. IFD mode only.
+  buildScriptFiles = mkHelper "buildScriptFiles" { } (
+    _cfg:
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    pkgs.runCommand (stageName product "buildScriptFiles") { } ''
+      set -euo pipefail
+      ${copyIn input}
+      ${placedFilesFn "buildScriptFiles" product pkgs}
+      copyIn "$out"
+      placedFiles | while IFS= read -r f; do
+        b=''${f##*/}
+        if [ -e "$out/$b" ]; then
+          echo "buildScriptFiles: ${product.name} already has $b; a build script also placed $f" >&2
+          exit 1
+        fi
+        cp -L "$f" "$out/$b"
+        echo "buildScriptFiles: ${product.name}: $b (from $f)"
+      done
+    ''
+  );
+
   # ---------------------------------------------------------------------
   # Checks
 
@@ -607,6 +666,53 @@ let
   # no such library, never are. (A rust-overlay toolchain's joined sysroot
   # brings its rustc and cargo components along, so such a binary still
   # fails there.) Only toolchain paths found in the closure cost a scan.
+  # The default `buildScriptFiles` check (#23), on products of targets
+  # whose build plan has build-script runs: fails when a build script
+  # placed files next to the binaries (Cargo's `target/<profile>`, where
+  # `cargo run` and a Windows loader find them) and the product holds no
+  # file of that name, naming the files and the two ways out.
+  buildScriptFilesIncluded = mkHelper "buildScriptFilesIncluded" { } (
+    _cfg:
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    let
+      # Where the stage goes in this product: after its last stage before
+      # `install`, before `install` (when it has one).
+      order = product.stageOrder or [ "install" ];
+      before = lib.filter (s: s != "install") order;
+      position =
+        lib.optionalString (before != [ ]) "after = \"${lib.last before}\"; "
+        + lib.optionalString (lib.elem "install" order) "before = \"install\"; ";
+      stanza = "packages.${product.name}.stages.buildScriptFiles = { ${position}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
+    in
+    pkgs.runCommand "${product.name}-build-script-files" { inherit stanza; } ''
+      set -euo pipefail
+      ${placedFilesFn "buildScriptFilesIncluded" product pkgs}
+      missing=()
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        b=''${f##*/}
+        if [ -z "$(find ${input}/ -name "$b" -print -quit)" ]; then
+          missing+=("$b (from $f)")
+        fi
+      done < <(placedFiles)
+      if [ ''${#missing[@]} -gt 0 ]; then
+        {
+          echo "buildScriptFiles: build scripts placed files next to the binaries, where cargo run finds them, but ${product.name} does not include them:"
+          printf '  %s\n' "''${missing[@]}"
+          echo "Include them: $stanza"
+          echo "or, when ${product.name} does not need them at run time: packages.${product.name}.checks.buildScriptFiles = null;"
+        } >&2
+        exit 1
+      fi
+      touch $out
+    ''
+  );
+
   noSourceReferences = mkHelper "noSourceReferences" { sources = null; toolchain = null; } (
     cfg:
     {
@@ -856,6 +962,8 @@ in
     componentize
     deterministicZip
     install
+    buildScriptFiles
+    buildScriptFilesIncluded
     noSourceReferences
     neededLibraries
     glibcLibraries

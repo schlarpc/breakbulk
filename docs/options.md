@@ -1477,7 +1477,13 @@ list of string
 
 Checks on this target’s products: ` { on ? <the product>; run = { input, product, pkgs }: <derivation>; } `, where ` on ` names a
 stage (` linked ` for the raw link output)\. Every product also
-gets ` noSourceReferences `; ` null ` removes a check\. Checks appear
+gets ` noSourceReferences `, and, on a target whose build plan has
+build scripts, ` buildScriptFiles `: it fails when a build script
+placed files next to the binaries (Cargo’s ` target/<profile> `,
+where ` cargo run ` finds them; libraries sdl2-sys ` bundled ` copies,
+Tauri’s resources) and the product does not include them, which
+the ` stageHelpers.buildScriptFiles ` stage does (IFD mode; \#23)\.
+` null ` removes a check\. Checks appear
 in ` repo.checks ` as ` <ws>/<triple>/<pkg>/<name> `\.
 
 
