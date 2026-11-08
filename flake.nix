@@ -58,6 +58,27 @@
             exec ${pkgs.bash}/bin/bash "$REPO/tests/dynamic/run.sh" "$@"
           '');
         };
+        # Content-addressed test cutoff (decisions 61, 17): private store
+        # with ca-derivations on the command line only.
+        #   nix run .#test-cutoff
+        test-cutoff = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "test-cutoff" ''
+            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.gnugrep ]}
+            export REPO=''${REPO:-${self}}
+            exec ${pkgs.bash}/bin/bash "$REPO/tests/test-cutoff/run.sh" "$@"
+          '');
+        };
+        # stripForRun and runFiles under content addressing (decisions 17, 61).
+        #   nix run .#test-options
+        test-options = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "test-options" ''
+            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.gnugrep ]}
+            export REPO=''${REPO:-${self}}
+            exec ${pkgs.bash}/bin/bash "$REPO/tests/test-options/run.sh" "$@"
+          '');
+        };
       });
 
       # Library tests. `roots-metadata-crates-io` uses import-from-derivation
