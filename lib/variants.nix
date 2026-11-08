@@ -15,7 +15,9 @@
 #
 # gives one variant per subset of `features`, each with
 # `noDefaultFeatures = true` (as `cargo hack --feature-powerset` does) and
-# `features` set to the subset. Units identical between variants are
+# `features` set to the subset, and `checks = false` (pass `checks = true`
+# to put their test runs and doctests in repo.checks; decision 133). Units
+# identical between variants are
 # shared, so the cost is the crates whose features differ. That is a
 # workspace-wide matrix; cargo-hack's own is per package:
 #
@@ -48,7 +50,9 @@
 # and no optional dependencies gets one plain run. Optional dependencies
 # are not features in the sets (cargo-hack's default without
 # --optional-deps). Names: `<prefix>-<pkg>`, `<prefix>-<pkg>.all-features`,
-# `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`.
+# `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. As
+# with featurePowerset, each has `checks = false` unless the arguments say
+# otherwise.
 #
 #   breakbulk.variants.unitsCheck { pkgs; name; units = [ … ]; }
 #
@@ -97,6 +101,9 @@ let
         lib.nameValuePair (nameOf s) (
           {
             noDefaultFeatures = true;
+            # Generated variants' test runs stay out of repo.checks unless
+            # asked for (decision 133).
+            checks = false;
           }
           // settings
           // {
@@ -242,7 +249,10 @@ let
             (
               r:
               lib.nameValuePair "${prefix}-${p.name}${r.suffix}" (
-                settings
+                {
+                  checks = false;
+                }
+                // settings
                 // r.settings
                 // {
                   packages = [ p.name ];

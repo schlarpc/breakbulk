@@ -503,6 +503,36 @@ runTests "lib-unit" {
       };
     };
 
+  # Generated variants keep their test runs out of repo.checks unless the
+  # arguments opt in (decision 133); hand-written variants default to in.
+  testGeneratedVariantChecks =
+    let
+      ws = {
+        root = ../fixtures/variants;
+        path = "ws";
+      };
+      checksOf = vs: lib.unique (lib.mapAttrsToList (_: v: v.checks) vs);
+    in
+    {
+      expr = {
+        package = checksOf (bb.variants.packageFeaturePowerset ws);
+        packageOptIn = checksOf (bb.variants.packageFeaturePowerset (ws // { checks = true; }));
+        workspace = checksOf (bb.variants.featurePowerset { features = [ "a" "b" ]; });
+        workspaceOptIn = checksOf (
+          bb.variants.featurePowerset {
+            features = [ "a" ];
+            checks = true;
+          }
+        );
+      };
+      expected = {
+        package = [ false ];
+        packageOptIn = [ true ];
+        workspace = [ false ];
+        workspaceOptIn = [ true ];
+      };
+    };
+
   # Per-target variable names (breakbulk-plan's spec.rs `target_env_var`
   # gives the same for these).
   testTargetEnvNames = {

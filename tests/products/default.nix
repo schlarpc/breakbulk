@@ -35,7 +35,9 @@
 #                    members not; no target unit shared between build and
 #                    coverage, every host unit shared; every unit shared
 #                    between release and the custom profile;
-#                    the powerset's products have their features; the check
+#                    the powerset's products have their features, and its
+#                    variants' test runs are not in repo.checks (the
+#                    coverage variant's are; decision 133); the check
 #                    and clippy variants' unit checks build
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
 #                    and `targets.<t>.tests` narrow plans and outputs per
@@ -711,6 +713,14 @@ in
     assert lib.assertMsg (
       variantsRepo.checks ? "main/${native}/variant-clippy/check"
     ) "variants: no clippy check in repo.checks";
+    # Decision 133: the powerset's variants keep their test runs out of
+    # repo.checks; the hand-written coverage variant's are in.
+    assert lib.assertMsg (
+      lib.filter (lib.hasInfix "/variant-fp-") (lib.attrNames variantsRepo.checks) == [ ]
+    ) "variants: powerset variants in repo.checks";
+    assert lib.assertMsg (
+      lib.any (lib.hasPrefix "main/${native}/variant-coverage/") (lib.attrNames variantsRepo.checks)
+    ) "variants: the coverage variant's test runs are not in repo.checks";
     pkgs.runCommand "variants"
       {
         app = vt.packages.app;

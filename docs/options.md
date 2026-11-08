@@ -2653,6 +2653,9 @@ other build or coverage variant’s as
 ` <ws>/<triple>/variant-<v>/<pkg>/test-<name> ` and
 ` …/variant-<v>/<pkg>/doctest `\. Check and clippy variants have
 no test runs; their ` check ` is in ` repo.checks ` regardless\.
+Variants made by ` breakbulk.variants.featurePowerset ` and
+` packageFeaturePowerset ` set this to ` false ` unless their
+arguments set it (decision 133)\.
 
 
 
