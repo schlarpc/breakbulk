@@ -1932,3 +1932,27 @@ The portable allow-list is glibc's own libraries and its loaders. Python's
 manylinux rules also allow `libgcc_s.so.1` and `libstdc++.so.6`, which
 nearly every Linux system has. Today a C++ dependency must add them via
 `systemLibraries`. Allow them by default?
+
+## 146. FYI: trim-paths options, dev shell, variant defaults, stage guard (resolves 112, 121, 133, 135)
+
+- `cargoTrimPaths` (`null` | `true` | `false`) and `sourcePaths`
+  (`"hide"` | `"keep"`) at workspace and variant level. By default, Cargo's
+  trim-paths is turned on when the toolchain supports it, unless the
+  project mentions `trim-paths` in any profile; planning now traces once.
+- Under Cargo's trim-paths, C code compiled by build scripts uses Cargo's
+  path names, so cc-rs (which reads Cargo's trim-paths variables) and
+  breakbulk agree; verified with cc-rs 1.11.1: no store path in C objects.
+- The dev shell decides trim-paths from the files alone, so it opens with a
+  broken `Cargo.toml` on every Cargo version.
+- Generated feature-powerset variants default to `checks = false`.
+- Every post-link step and check skips cleanly on a product with no
+  binaries, so dynamic mode uses full products in `repo.checks`.
+
+## 147. ASK: user stages written as a plain `derivation` aren't guarded
+
+The "skip if no binaries" guard wraps stages and checks through
+`overrideAttrs`. A user stage made with a bare `derivation` call can't be
+wrapped, so it would run on an empty product in dynamic mode (and likely
+fail). Options: make such stages an evaluation error with a hint to use
+`stdenv.mkDerivation`/`runCommand`, or wrap them a different way (a small
+gate derivation in front). Default: leave as is (rare).
