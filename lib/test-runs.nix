@@ -80,6 +80,7 @@
   lib,
   stages,
   targetTraits,
+  runners,
 }:
 let
   inherit (builtins)
@@ -761,15 +762,7 @@ rec {
       testSystem ? null,
       traits ? targetTraits.resolve { triple = target; },
       dylibPath ? dylibPathOf { inherit traits runner; },
-      testPkgs ?
-        if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
-          pkgs
-        else
-          import pkgs.path {
-            system = testSystem;
-            # The user's overlays and config (allowUnfree, …) carry over.
-            inherit (pkgs) overlays config;
-          },
+      testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
       packages ? { },
       # runFilesDirs.<package> = the package directory of its `test.runFiles`
       # view, for packages that set it (lib/workspace.nix).

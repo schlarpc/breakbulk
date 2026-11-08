@@ -21,6 +21,7 @@
   lib,
   hostSpec,
   chooseLinker,
+  chooseRunner,
 }:
 {
   pkgs,
@@ -212,18 +213,16 @@ in
   # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a
   # program for other distributions should; the Nix sandbox has none, so
   # tests run through the build machine's glibc loader, which also finds
-  # its own libc.so.6 (newer than `glibc`, as on a real target system).
-  runner = mkDefault (
-    if
+  # its own libc.so.6 (newer than `glibc`, as on a real target system):
+  # ./runner.nix, kind ld-so, when the build machine runs the target.
+  runner = mkDefault (chooseRunner {
+    inherit pkgs;
+    traits = null;
+    flavor = "zig";
+    canExecute =
       pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform
-      && triple == pkgs.stdenv.hostPlatform.rust.rustcTarget
-    then
-      bp.writeShellScript "breakbulk-runner-ld-so" ''
-        exec ${pkgs.stdenv.cc.bintools.dynamicLinker} "$@"
-      ''
-    else
-      null
-  );
+      && triple == pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  }).runner;
   testSystem = mkDefault null;
   host = hostSpec pkgs;
   stagePreset = mkDefault "linuxGnu";

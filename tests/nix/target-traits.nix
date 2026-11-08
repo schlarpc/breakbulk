@@ -283,6 +283,71 @@ in
         "mingw-lld"
       ];
     };
+    # The test runner kinds (lib/presets/runner.nix), from traits alone.
+    testRunnerKinds = {
+      expr = map (c: bb.presets.runnerKind ({ traits = r c.t; } // removeAttrs c [ "t" ])) [
+        {
+          t = "x86_64-unknown-linux-gnu";
+          canExecute = true;
+        }
+        {
+          t = "aarch64-unknown-linux-gnu";
+          canExecute = false;
+        }
+        {
+          t = "aarch64-unknown-linux-gnu";
+          canExecute = false;
+          nativeBuilder = true;
+        }
+        {
+          t = "x86_64-pc-windows-msvc";
+          canExecute = false;
+        }
+        {
+          t = "aarch64-pc-windows-msvc";
+          canExecute = false;
+        }
+        {
+          t = "i686-pc-windows-gnu";
+          canExecute = false;
+        }
+        {
+          t = "wasm32-wasip2";
+          canExecute = false;
+        }
+        {
+          t = "wasm32-unknown-unknown";
+          canExecute = false;
+        }
+        {
+          t = "wasm32-unknown-unknown";
+          canExecute = false;
+          flavor = "wasm-bindgen";
+        }
+        {
+          t = "x86_64-unknown-linux-gnu";
+          canExecute = true;
+          flavor = "zig";
+        }
+        {
+          t = "x86_64-unknown-none";
+          canExecute = false;
+        }
+      ];
+      expected = [
+        "native"
+        "qemu-user"
+        "native-builder"
+        "wine"
+        "none"
+        "wine"
+        "wasmtime"
+        "none"
+        "wasm-bindgen"
+        "ld-so"
+        "none"
+      ];
+    };
     # Unknown names: no built-in traits, and every field fails only when
     # read.
     testUnknownParse = {

@@ -20,7 +20,7 @@
   lib,
   wasmCommon,
   wasiSdkLib,
-  runners,
+  chooseRunner,
 }:
 {
   pkgs,
@@ -51,12 +51,12 @@ assert lib.assertMsg (
 common
 // {
   stagePreset = mkDefault null;
-  runner = mkDefault (
-    runners.wasmtime {
-      pkgs = bp;
-      inherit wasmtime;
-    }
-  );
+  runner = mkDefault (chooseRunner {
+    inherit pkgs wasmtime;
+    traits = args.traits or null;
+    canExecute = false;
+    flavor = "wasmtime";
+  }).runner;
 }
 // lib.optionalAttrs withC {
   cflags = [ inc ];

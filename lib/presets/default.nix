@@ -116,6 +116,10 @@ let
   linkers = import ./linker.nix { inherit lib targetTraits; };
   inherit (linkers) chooseLinker;
 
+  # The test runner choice (./runner.nix): one function for every preset.
+  runnerChoice = import ./runner.nix { inherit lib runners wasmBindgen; };
+  inherit (runnerChoice) chooseRunner;
+
   # The host spec every preset sets: the build machine's linker. On a
   # native build host and target linkers are the same derivation, so host
   # units are identical whatever the target.
@@ -166,37 +170,6 @@ let
       host = hostSpec pkgs;
     };
 
-  # Whether `p`'s machine can run programs built for `triple`'s target
-  # directly, and otherwise how: a runner, or a test system.
-  linuxRunner =
-    {
-      pkgs,
-      tp,
-      nativeBuilder,
-    }:
-    let
-      build = pkgs.stdenv.buildPlatform;
-      host = tp.stdenv.hostPlatform;
-    in
-    if build.canExecute host then
-      {
-        runner = null;
-        testSystem = null;
-      }
-    else if nativeBuilder then
-      {
-        runner = null;
-        testSystem = host.system;
-      }
-    else
-      {
-        runner = runners.qemuUser {
-          pkgs = pkgs.buildPackages;
-          arch = host.qemuArch;
-        };
-        testSystem = null;
-      };
-
   linuxGnuWith =
     extra:
     {
@@ -223,7 +196,14 @@ let
           }
         else
           null;
-      r = linuxRunner { inherit pkgs tp nativeBuilder; };
+      # Natively when the build machine runs the target's programs; else
+      # on a native builder when nativeBuilder (testSystem), else under
+      # qemu-user.
+      r = chooseRunner {
+        inherit pkgs traits nativeBuilder;
+        hostPlatform = tp.stdenv.hostPlatform;
+        canExecute = pkgs.stdenv.buildPlatform.canExecute tp.stdenv.hostPlatform;
+      };
       st = staticLinking {
         inherit traits;
         crtStatic = extra.crtStatic or false;
@@ -304,6 +284,7 @@ in
   inherit
     targetPkgsFor
     chooseLinker
+    chooseRunner
     hostSpec
     mkPreset
     staticLinking
@@ -313,6 +294,7 @@ in
     moldLinker
     lldLinker
     ;
+  inherit (runnerChoice) runnerKind;
 
   # Linux glibc, native or cross (nixpkgs cross toolchains). Linker: mold
   # through the wrapped cc; with crossLanguageLto, clang + lld from the LLVM
@@ -462,20 +444,10 @@ in
         # findClang); PATH is appended to the capture's.
         PATH = "${clang}/bin:${tools}:${llvm.lld}/bin";
       };
-      runner = mkDefault (
-        if
-          lib.elem arch [
-            "x86_64"
-            "i686"
-          ]
-        then
-          runners.wine {
-            pkgs = bp;
-            inherit wine;
-          }
-        else
-          null
-      );
+      runner = mkDefault (chooseRunner {
+        inherit pkgs traits wine;
+        canExecute = false;
+      }).runner;
       testSystem = mkDefault null;
       host = hostSpec pkgs;
       stagePreset = mkDefault "msvc";
@@ -501,24 +473,19 @@ in
     wasmCommon (args // { inherit triple; })
     // {
       stagePreset = mkDefault "wasmBrowser";
-      runner = mkDefault (
-        { lockfile, ... }:
-        runners.wasmBindgenTest {
-          pkgs = pkgs.buildPackages;
-          inherit browser;
-          wasmBindgen = wasmBindgen.forLockfile {
-            pkgs = pkgs.buildPackages;
-            inherit lockfile;
-          };
-        }
-      );
+      runner = mkDefault (chooseRunner {
+        inherit pkgs browser;
+        traits = args.traits or (targetTraits.resolve { inherit triple; });
+        canExecute = false;
+        flavor = "wasm-bindgen";
+      }).runner;
     }
   );
 
   # Later targets (M7), one file each.
   wasip2 = mkPreset (
     import ./wasip2.nix {
-      inherit lib wasmCommon runners;
+      inherit lib wasmCommon chooseRunner;
       wasiSdkLib = wasiSdk;
     }
   );
@@ -527,6 +494,7 @@ in
       inherit
         lib
         chooseLinker
+        chooseRunner
         hostSpec
         ;
     }
@@ -537,8 +505,8 @@ in
         lib
         targetTraits
         chooseLinker
+        chooseRunner
         hostSpec
-        runners
         staticLinking
         ;
     }
@@ -578,7 +546,12 @@ in
     }
     // {
       stagePreset = mkDefault "wasmComponent";
-      runner = mkDefault (runners.wasmtime { pkgs = pkgs.buildPackages; });
+      runner = mkDefault (chooseRunner {
+        inherit pkgs;
+        traits = args.traits or (targetTraits.resolve { inherit triple; });
+        canExecute = false;
+        flavor = "wasmtime";
+      }).runner;
     }
   );
 }

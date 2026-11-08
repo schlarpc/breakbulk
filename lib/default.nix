@@ -52,7 +52,14 @@ let
   inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix { inherit lib wasmBindgen targetTraits; };
-  testRuns = import ./test-runs.nix { inherit lib stages targetTraits; };
+  testRuns = import ./test-runs.nix {
+    inherit
+      lib
+      stages
+      targetTraits
+      runners
+      ;
+  };
   products = import ./products.nix { inherit lib stages targetTraits; };
   variants = import ./variants.nix { inherit lib util manifest; };
   testApps = import ./test-apps.nix {
@@ -65,6 +72,7 @@ let
       instantiate
       testRuns
       stages
+      runners
       ;
     breakbulkTraits = targetTraits;
   };

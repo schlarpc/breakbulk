@@ -63,6 +63,7 @@
   testRuns,
   stages,
   breakbulkTraits,
+  runners,
 }:
 let
   inherit (builtins)
@@ -411,15 +412,7 @@ let
         traits = if traits != null then traits else breakbulkTraits.resolve { triple = target; };
         inherit runner;
       },
-      testPkgs ?
-        if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
-          pkgs
-        else
-          import pkgs.path {
-            system = testSystem;
-            # The user's overlays and config (allowUnfree, …) carry over.
-            inherit (pkgs) overlays config;
-          },
+      testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
       packages ? { },
       # As testRuns.mkTestRuns's: the package directories of `test.runFiles`
       # views.

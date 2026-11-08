@@ -26,6 +26,23 @@ let
     '';
 in
 {
+  # The package set test runs build with: `pkgs` itself, or, for a target
+  # whose tests run on another system (`testSystem`, a native builder),
+  # nixpkgs for that system with the user's overlays and config (allowUnfree,
+  # …).
+  testPkgsFor =
+    {
+      pkgs,
+      testSystem ? null,
+    }:
+    if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
+      pkgs
+    else
+      import pkgs.path {
+        system = testSystem;
+        inherit (pkgs) overlays config;
+      };
+
   # wine with a fresh prefix in $TMPDIR (docs/spikes/msvc.md). `wine64` is
   # wineWow64Packages.minimal: 64-bit and 32-bit programs, no X11.
   #

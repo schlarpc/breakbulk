@@ -17,8 +17,8 @@
   lib,
   targetTraits,
   chooseLinker,
+  chooseRunner,
   hostSpec,
-  runners,
   staticLinking,
 }:
 let
@@ -53,7 +53,6 @@ let
   tp = packageSet;
   cc = tp.stdenv.cc;
   prefix = cc.targetPrefix;
-  arch = lib.head (lib.splitString "-" triple);
   # The linker (./linker.nix, kind mingw-lld): the C driver with lld.
   linker = chooseLinker {
     inherit
@@ -80,20 +79,11 @@ in
       "native=${tp.windows.pthreads}/lib"
     ];
   env = { };
-  runner = mkDefault (
-    if
-      lib.elem arch [
-        "x86_64"
-        "i686"
-      ]
-    then
-      runners.wine {
-        pkgs = pkgs.buildPackages;
-        inherit wine;
-      }
-    else
-      null
-  );
+  # wine for x86_64 and i686 (./runner.nix).
+  runner = mkDefault (chooseRunner {
+    inherit pkgs traits wine;
+    canExecute = false;
+  }).runner;
   testSystem = mkDefault null;
   host = hostSpec pkgs;
   stagePreset = mkDefault null;
