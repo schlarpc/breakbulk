@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: 72 pinned, 2 pinned for some rows only (L3, L4), 4 with no pinning test (S10, X1, X4, L5). Each of the six has an issue; see [Gaps](#gaps).
+Status of the 78 entries: 73 pinned, 2 pinned for some rows only (L3, L4), 3 with no pinning test (S10, X4, L5). Each of the five has an issue; see [Gaps](#gaps).
 
 ## Summary
 
@@ -69,7 +69,7 @@ Status of the 78 entries: 72 pinned, 2 pinned for some rows only (L3, L4), 4 wit
 | [P5](#p5-trim-paths-reaches-build-scripts-and-cc-rs) | trim-paths reaches build scripts and cc-rs | yes |
 | [P6](#p6---remap-path-scope) | `--remap-path-scope` | yes |
 | [P7](#p7-rustc-maps-standard-library-paths-to-rust-src) | rustc maps standard-library paths to rust-src | yes |
-| [X1](#x1-rustcs-json-diagnostics) | rustc's JSON diagnostics | **no** (#34) |
+| [X1](#x1-rustcs-json-diagnostics) | rustc's JSON diagnostics | yes |
 | [X2](#x2-which-debuginfo-side-files-a-link-writes) | Which debuginfo side files a link writes | yes |
 | [X3](#x3-names-of-uplifted-side-files) | Names of uplifted side files | yes |
 | [X4](#x4-rustcs-link-temp-directory) | rustc's link temp directory | **no** (#35) |
@@ -549,9 +549,9 @@ Status of the 78 entries: 72 pinned, 2 pinned for some rows only (L3, L4), 4 wit
 - **Assumption.** With `--error-format=json`, rustc writes one JSON object per stderr line, diagnostics carry their text in `rendered`, artifact notifications have `"$message_type":"artifact"`, and future-incompatibility reports have `future_incompat_report`.
 - **Where.** `crates/breakbulk-unit/src/diag.rs`: `classify`.
 - **Upstream.** rustc's JSON output format (rustc book, "JSON Output"); Cargo renders the same fields.
-- **Holds for.** 1.99 by reading build logs.
-- **Pinned by.** **Nothing.** Rust: `diag::tests::*` check hand-written lines only. Issue **#34**.
-- **If it changes.** Build logs are raw JSON again; nothing fails.
+- **Holds for.** 1.99 (nixpkgs' rustc).
+- **Pinned by.** `plan-diagnostics`: two compile units of the `diagnostics` fixture, run by hand with real rustc, log rustc's rendered warning (`unused variable`) and error (`E0308`) and no `{"$message_type"` line. Rust: `diag::tests::*` check hand-written lines.
+- **If it changes.** Build logs are raw JSON again; `plan-diagnostics` fails.
 
 ### X2. Which debuginfo side files a link writes
 
@@ -829,7 +829,6 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 | Entry | Gap | Issue |
 | --- | --- | --- |
 | [S10](#s10-directive-errors-and-warnings) | Directive error and warning paths are checked only against breakbulk's copy of Cargo's code | #33 |
-| [X1](#x1-rustcs-json-diagnostics) | No check reads a real rustc diagnostic out of a unit's log | #34 |
 | [X4](#x4-rustcs-link-temp-directory) | No check rebuilds an msvc link to compare bytes | #35 |
 | [L3](#l3-the-rust-to-wasi-sdk-table) | Only the 1.99 row is compared with a toolchain's `libc.a` | #36 |
 | [L4](#l4-the-rust-to-llvm-table-and-rustc--vv) | Only the 1.97 row is compared with `rustc -vV` | #37 |

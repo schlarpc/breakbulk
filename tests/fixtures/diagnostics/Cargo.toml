@@ -1,0 +1,6 @@
+# rustc diagnostics in unit logs (#34): `warns` compiles with an
+# unused-variable warning, `broken` fails with a type error. Their compile
+# units, run by hand, must print rustc's rendered text, not its JSON.
+[workspace]
+resolver = "2"
+members = ["warns", "broken"]
