@@ -244,6 +244,8 @@ rec {
             reason = r.reason or null;
             # Test roots: nextest's metadata (lib/test-runs.nix nextestSpec).
             nextest = r.nextest or null;
+            # Product roots: the target-platform runs below the unit (#23).
+            buildScriptRuns = r.buildScriptRuns or [ ];
           };
         }
       ) json.roots;

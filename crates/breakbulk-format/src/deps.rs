@@ -325,3 +325,60 @@ pub fn doctest_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
     }
     deps
 }
+
+/// Every unit `id` depends on, transitively, by any route: references
+/// (`out` of compiles and runs, a run's script), splices, search-path
+/// splices, `envSplices`, `dylibPathFrom` and `metadataFrom`. Ids that are
+/// not units of the plan (doctests, stubs) are left out. Without `id`.
+pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
+    fn direct(unit: &Unit) -> Vec<UnitId> {
+        let mut out = Vec::new();
+        crate::plan::for_each_reference(unit, &mut |r, _| {
+            if let Reference::Out(o) = r {
+                out.push(o.out.clone());
+            }
+        });
+        match unit {
+            Unit::Compile(c) => {
+                for a in &c.args {
+                    match a {
+                        Arg::Splice(s) => out.push(s.splice.clone()),
+                        Arg::SearchPaths(s) => out.extend(s.search_paths_of.iter().cloned()),
+                        _ => {}
+                    }
+                }
+                out.extend(c.env_splices.iter().map(|s| s.splice.clone()));
+                out.extend(c.dylib_path_from.iter().cloned());
+            }
+            Unit::Run(r) => {
+                out.extend(r.metadata_from.iter().cloned());
+                out.extend(r.dylib_path_from.iter().cloned());
+            }
+        }
+        out
+    }
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![id.clone()];
+    while let Some(u) = stack.pop() {
+        let Some(unit) = plan.units.get(&u) else {
+            continue;
+        };
+        for d in direct(unit) {
+            if plan.units.contains_key(&d) && seen.insert(d.clone()) {
+                stack.push(d);
+            }
+        }
+    }
+    seen.remove(id);
+    seen
+}
+
+/// The target-platform runs among [`units_below`] `id`: the build scripts
+/// whose copies of Cargo's `<profile>` directory sit next to `id`'s output
+/// (#23).
+pub fn target_runs_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
+    units_below(plan, id)
+        .into_iter()
+        .filter(|u| matches!(plan.units.get(u), Some(Unit::Run(r)) if r.platform == crate::Platform::Target))
+        .collect()
+}

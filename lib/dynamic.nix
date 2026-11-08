@@ -218,9 +218,7 @@ let
       # A derivation on every output of every unit; root outputs always have
       # a `.` before `.drv`, so they cannot be named like it.
       unitsOutput = "units.drv";
-      # A derivation listing the target-platform runs' `flags` (#23), for
-      # products' `buildScriptFiles` stage and check.
-      buildScriptFlagsOutput = "build-script-flags.drv";
+
 
       outer = derivation {
         name = outerName;
@@ -244,7 +242,6 @@ let
             name = outerName;
             inherit outputs;
             units = unitsOutput;
-            buildScriptFlags = buildScriptFlagsOutput;
             doctests = doctestOutputs;
           }))
         ];
@@ -252,12 +249,7 @@ let
           if dupes != [ ] then
             throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
           else
-            outputList
-            ++ lib.attrValues doctestOutputs
-            ++ [
-              unitsOutput
-              buildScriptFlagsOutput
-            ];
+            outputList ++ lib.attrValues doctestOutputs ++ [ unitsOutput ];
         BREAKBULK_INPUTS = context;
         __contentAddressed = true;
         outputHashMode = "text";
@@ -359,9 +351,6 @@ let
       inherit outer allUnits;
       inherit (base) files inputs;
       delivery = "dynamic";
-      # `$out/flags`: the target-platform runs' `flags` outputs, one per
-      # line, known at build time (lib/products.nix).
-      buildScriptFlags = builtins.outputOf outer.${buildScriptFlagsOutput}.outPath "out";
       roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) predicted);
       doctests = lib.mapAttrs (pkg: _: mkDoctest pkg) doctests;
       units = throw "breakbulk: unit derivations are not known at evaluation time in dynamic-derivation mode (repo.explainSharing reads them through IFD mode)";

@@ -113,6 +113,12 @@ pub struct RootOut {
     /// mode's `TestSpec`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nextest: Option<RootNextest>,
+    /// For a product root the plan has: the target-platform runs it depends
+    /// on (`deps::target_runs_below`), whose copies of Cargo's `<profile>`
+    /// may hold files their scripts placed next to the binaries, for the
+    /// product's `buildScriptFiles` stage and check (#23). Sorted.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub build_script_runs: Vec<String>,
 }
 
 /// [`crate::dynamic::Nextest`] as compact JSON text with placeholders the

@@ -550,7 +550,9 @@ in
   # `target/<profile>`) gets the default `buildScriptFiles` check, which
   # fails naming the file and the two ways out; with the
   # `buildScriptFiles` stage the product holds the file and the check
-  # passes.
+  # passes. Only products that depend on the build script are asked for
+  # its files: in a workspace with an unrelated member, that member's
+  # check passes.
   build-script-files =
     let
       wsOf =
@@ -568,6 +570,18 @@ in
         };
       }).packages.out-dir-walk;
       off = (wsOf { packages.out-dir-walk.checks.buildScriptFiles = null; }).packages.out-dir-walk;
+      # The fixture as one member of a workspace with `other`, which does not
+      # depend on it: only out-dir-walk's check names walked.txt.
+      twoMembers = edited "out-dir-walk" ''
+        mkdir walk other other/src
+        mv build.rs src tests walk/
+        sed -e '/^\[workspace\]/d' -e '/^#/d' Cargo.toml > walk/Cargo.toml
+        printf '[workspace]\nresolver = "2"\nmembers = ["walk", "other"]\n' > Cargo.toml
+        printf '[package]\nname = "other"\nversion = "0.1.0"\nedition = "2021"\n' > other/Cargo.toml
+        echo 'fn main() {}' > other/src/main.rs
+        printf '\n[[package]]\nname = "other"\nversion = "0.1.0"\n' >> Cargo.lock
+      '';
+      twoWs = (mkRepo twoMembers [ (oneWs ".") ]).workspaces.main.packages;
     in
     assert lib.assertMsg (!(off.checks ? buildScriptFiles)) "build-script-files: the check is not removable";
     pkgs.runCommand "build-script-files"
@@ -575,6 +589,8 @@ in
         failure = pkgs.testers.testBuildFailure plain.checks.buildScriptFiles;
         inherit staged;
         stagedCheck = staged.checks.buildScriptFiles;
+        otherCheck = twoWs.other.checks.buildScriptFiles;
+        walkFailure = pkgs.testers.testBuildFailure twoWs.out-dir-walk.checks.buildScriptFiles;
       }
       ''
         log=$failure/testBuildFailure.log
@@ -585,6 +601,7 @@ in
         grep -qF 'packages.out-dir-walk.stages.buildScriptFiles = { after = "splitDebug"; before = "install"; run = breakbulk.stageHelpers.buildScriptFiles { }; };' $log
         grep -qF 'packages.out-dir-walk.checks.buildScriptFiles = null' $log
         [ "$(cat $staged/walked.txt)" = profile ]
+        grep -qF 'walked.txt (from ' $walkFailure/testBuildFailure.log
         [ -x $staged/bin/out-dir-walk ]
         touch $out
       '';

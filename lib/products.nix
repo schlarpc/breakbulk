@@ -348,27 +348,6 @@ let
           targetStages
           ;
       };
-      # The `flags` outputs of the build plan's target-platform runs, whose
-      # `directives.json` names the files their scripts placed next to the
-      # binaries (`targetDirs`, #23), for `stageHelpers.buildScriptFiles`
-      # and the `buildScriptFiles` check: a list in IFD mode; in
-      # dynamic-derivation mode, where the runs are not known at evaluation
-      # time, `{ file; }`, a file listing them, read at build time.
-      dynamic = (inst.delivery or "ifd") == "dynamic";
-      buildScriptFlags =
-        if dynamic then
-          if inst.buildScriptFlags or null == null then null else { file = "${inst.buildScriptFlags}/flags"; }
-        else if !(inst ? plans.build) then
-          null
-        else
-          let
-            plan = builtins.fromJSON (
-              builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
-            );
-          in
-          lib.mapAttrsToList (id: _: inst.units.build.${id}.flags) (
-            filterAttrs (_: u: u.kind == "run" && u.platform == "target") plan.units
-          );
       targetSet = targetStageSet setArgs;
       effectiveDebugInfo = debugInfoOf setArgs;
       byPkg = groupBy (r: r.breakbulkRoot.package) (
@@ -380,6 +359,21 @@ let
         pkg: rs:
         let
           built = filter (r: r.breakbulkRoot.unit != null) rs;
+          # The `flags` outputs of the target-platform runs the product's
+          # roots depend on, whose `directives.json` names the files their
+          # scripts placed next to the binaries (`targetDirs`, #23), for the
+          # `buildScriptFiles` stage and check: a list in IFD mode (each
+          # root's `buildScriptRuns` from units.json); in dynamic-derivation
+          # mode `{ rootInfo; }`, the roots' `breakbulk-root.json` files,
+          # which list them (`buildScriptFlags`) at build time.
+          dynamicRoots = filter (r: r.breakbulkRoot.dynamic or false) built;
+          buildScriptFlags =
+            if dynamicRoots != [ ] then
+              { rootInfo = map (r: "${r.breakbulkRoot.wrapper}/breakbulk-root.json") dynamicRoots; }
+            else
+              lib.unique (
+                lib.concatMap (r: map (id: inst.units.build.${id}.flags) (r.breakbulkRoot.buildScriptRuns or [ ])) built
+              );
           unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           confs = packageConfig pkg;
@@ -399,9 +393,9 @@ let
               # On every product (passing when no build script placed
               # files): in dynamic mode whether there are runs is known only
               # at build time, and both modes have the same checks.
-              (lib.optionalAttrs (buildScriptFlags != null) {
+              {
                 buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
-              })
+              }
               targetChecks
             ]
             ++ map (c: c.checks or { }) confs

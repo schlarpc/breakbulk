@@ -771,6 +771,7 @@ fn stub(inputs: &Inputs, prefix: &str, p: &PredictedRoot, variant: &str) -> Resu
             stub: Drv { attrs },
         },
         nextest: None,
+        build_script_runs: Vec::new(),
     })
 }
 
@@ -807,6 +808,13 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
                 output: root_output(plan, r, &inputs.toolchains.target_traits)?,
             },
             nextest,
+            build_script_runs: if key.3 {
+                Vec::new()
+            } else {
+                breakbulk_format::deps::target_runs_below(plan, &r.unit)
+                    .into_iter()
+                    .collect()
+            },
         })
     };
     let mut out = BTreeMap::new();

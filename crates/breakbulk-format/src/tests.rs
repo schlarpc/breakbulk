@@ -1394,3 +1394,21 @@ fn debug_output_only_where_side_files() {
     let c = compile(&mut p, "c-cfgif");
     assert!(!c.has_debug_output(msvc));
 }
+
+#[test]
+fn units_below_follow_every_route() {
+    let p = example();
+    // ring's lib reaches cfg-if by `--extern`, its run by splices and
+    // `OUT_DIR`, and the build script through the run's `script`.
+    assert_eq!(
+        crate::deps::units_below(&p, &"c-ring".into()),
+        BTreeSet::from(["c-cfgif", "c-ring-build", "r-ring"].map(String::from))
+    );
+    // Of those, the target-platform runs only.
+    assert_eq!(
+        crate::deps::target_runs_below(&p, &"c-ring".into()),
+        BTreeSet::from(["r-ring".to_owned()])
+    );
+    // Nothing is below the app, which depends on nothing here.
+    assert!(crate::deps::units_below(&p, &"c-app".into()).is_empty());
+}

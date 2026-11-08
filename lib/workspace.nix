@@ -542,9 +542,6 @@ in
     }
     // lib.optionalAttrs bench { bench = benched.ifdUnits; }
   );
-  # Dynamic-derivation mode: the build plan's derivation listing its
-  # target-platform runs' `flags` (`$out/flags`, #23), for products.
-  buildScriptFlags = if isDynamic then built.buildScriptFlags else null;
   # Dynamic-derivation mode: a derivation per plan kind that builds every
   # unit (ws.units is not known at evaluation time).
   allUnits = lib.optionalAttrs isDynamic (

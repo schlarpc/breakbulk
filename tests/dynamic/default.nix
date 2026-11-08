@@ -90,7 +90,7 @@ let
     walking-skeleton = mkRepo "walking-skeleton" [ oneWs ];
     # #23: a build script writes next to the binaries. The product takes
     # the file with the `buildScriptFiles` stage (read in dynamic mode from
-    # the outer derivation's `build-script-flags.drv`), its check passes,
+    # the root's `breakbulk-root.json`), its check passes,
     # and the test run finds `<profile>` and `deps` on its library path.
     out-dir-walk = mkRepo "out-dir-walk" [
       oneWs

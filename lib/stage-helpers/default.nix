@@ -595,13 +595,14 @@ let
     helperName: product: pkgs:
     let
       flags = product.buildScriptFlags or null;
-      # A list of `flags` outputs (IFD mode), or `{ file; }` listing them,
-      # one per line (dynamic-derivation mode, known at build time).
+      # A list of `flags` outputs (IFD mode), or `{ rootInfo; }`, the
+      # roots' `breakbulk-root.json` files that list them
+      # (`buildScriptFlags`; dynamic-derivation mode, known at build time).
       flagsList =
         if builtins.isList flags then
           lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}") flags
         else
-          "$(cat ${lib.escapeShellArg flags.file})";
+          "$(${pkgs.buildPackages.jq}/bin/jq -r '(.buildScriptFlags // [])[]' ${lib.escapeShellArgs flags.rootInfo} | sort -u)";
     in
     if flags == null then
       throw "breakbulk stage helper `${helperName}`: this product does not know its target's build-script runs (`product.buildScriptFlags`; #23)"
