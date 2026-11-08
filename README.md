@@ -23,7 +23,9 @@ The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is l
 
 The design is in [docs/design.md](docs/design.md). How it is built is in
 [docs/implementation.md](docs/implementation.md). Decisions made along the
-way are in [docs/decision-log.md](docs/decision-log.md).
+way are in [docs/decision-log.md](docs/decision-log.md). What breakbulk
+assumes about Cargo and rustc, and which test pins each assumption, is in
+[docs/reference/assumptions.md](docs/reference/assumptions.md).
 
 ## Status
 
