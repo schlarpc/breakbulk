@@ -19,7 +19,7 @@ Cargo's exact command line. So:
 - a change rebuilds only the crates it affects and their dependents;
 - nothing generated is checked in.
 
-The name: break-bulk cargo is loaded piece by piece, not in containers.
+The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is loaded piece by piece, not in containers.
 
 The design is in [docs/design.md](docs/design.md). How it is built is in
 [docs/implementation.md](docs/implementation.md). Decisions made along the
@@ -49,7 +49,7 @@ breakbulk is a flake. Its library is `breakbulk.lib`.
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    breakbulk.url = "<where you keep breakbulk>";
+    breakbulk.url = "github:schlarpc/breakbulk";
   };
 
   outputs = { self, nixpkgs, breakbulk }:
