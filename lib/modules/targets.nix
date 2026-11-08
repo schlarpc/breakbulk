@@ -31,8 +31,9 @@
 }:
 let
   inherit (lib) types mkOption;
-  nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
-  nativeDefault = pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isGnu;
+  targetTraits = import ../target-traits.nix { inherit lib; };
+  nativeTriple = targetTraits.nativeTriple pkgs;
+  nativeDefault = targetTraits.nativeDefaultPreset pkgs != null;
 in
 {
   options.targets = mkOption {
@@ -43,9 +44,10 @@ in
       the triple (`workspaces.<ws>.targets`). Each workspace's spec is
       these definitions together with its own
       `workspaces.<ws>.targets.<triple>`, evaluated with that workspace's
-      toolchain, so a preset uses each workspace's rustc. On a Linux
-      (glibc) build machine the native triple always has an entry, with
-      `presets.linuxGnu` by default. Any other triple with no entry here or
+      toolchain, so a preset uses each workspace's rustc. When the `pkgs`
+      given to mkRepository is Linux, the native triple always has an
+      entry, with `presets.linuxGnu` (glibc) or `presets.linuxMusl` (musl)
+      by default. Any other triple with no entry here or
       in the workspace uses an empty spec (the toolchain as Cargo finds
       it).
     '';

@@ -436,6 +436,25 @@ let
   # The Rust target of the machine `pkgs` builds for (the native triple of
   # a native package set).
   nativeTriple = pkgs: pkgs.stdenv.hostPlatform.rust.rustcTarget;
+
+  # The name of the preset (`breakbulk.presets.<name>`) the native target
+  # gets when it sets none (decisions 105, 115), or null. It follows the
+  # `pkgs` given to mkRepository, not the machine evaluating: a glibc
+  # Linux package set gets "linuxGnu", a musl one (`pkgs.pkgsMusl`, or
+  # nixpkgs on a musl system) "linuxMusl".
+  nativeDefaultPreset =
+    pkgs:
+    let
+      h = pkgs.stdenv.hostPlatform;
+    in
+    if !h.isLinux then
+      null
+    else if h.isMusl then
+      "linuxMusl"
+    else if h.isGnu then
+      "linuxGnu"
+    else
+      null;
 in
 {
   inherit
@@ -443,6 +462,7 @@ in
     derive
     resolve
     nativeTriple
+    nativeDefaultPreset
     fieldNames
     ;
 

@@ -591,6 +591,38 @@ in
     assert lib.assertMsg (bad == [ ]) "native-preset: failed ${toString bad}";
     evalCheck "native-preset" (builtins.toJSON checks);
 
+  # Decision 115: the native default follows the `pkgs` given to
+  # mkRepository, not the evaluating machine. With `pkgs.pkgsMusl` the
+  # native triple is the musl one and its default preset linuxMusl
+  # (+crt-static, PKG_CONFIG_ALL_STATIC, the musl stdenv's cc). Evaluation
+  # only: nothing here builds a musl-hosted toolchain or plans (the
+  # rust-overlay toolchain is never forced).
+  native-preset-musl =
+    let
+      mp = pkgs.pkgsMusl;
+      mNative = mp.stdenv.hostPlatform.rust.rustcTarget;
+      repo = breakbulk.mkRepository {
+        pkgs = mp;
+        root = fixtures + "/multi-ws";
+        tools = breakbulk.mkTools mp;
+        modules = [ (oneWs "a") ];
+      };
+      spec = repo.workspaces.main.target.${mNative}.spec;
+      ccOf = x: builtins.unsafeDiscardStringContext (toString x.cc);
+      checks = {
+        nativeIsMusl = mNative == "${mp.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-musl";
+        targetsHasNative = repo.config.targets ? ${mNative};
+        defaultIsLinuxMusl = spec.stagePreset == "linuxMusl";
+        crtStatic = lib.elem "target-feature=+crt-static" spec.rustflags;
+        pkgConfigStatic = (spec.env.PKG_CONFIG_ALL_STATIC or null) == "1";
+        muslCc = lib.hasPrefix (builtins.unsafeDiscardStringContext (toString mp.stdenv.cc)) (ccOf spec);
+        glibcStillGnu = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).workspaces.main.target.${native}.spec.stagePreset == "linuxGnu";
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "native-preset-musl: failed ${toString bad}";
+    evalCheck "native-preset-musl" (builtins.toJSON checks);
+
   # Decision 106: the curated -sys defaults set no switch that swaps a
   # bundled C library for a system one; their library inputs stay.
   sys-defaults-no-switches =

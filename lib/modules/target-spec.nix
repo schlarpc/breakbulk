@@ -18,14 +18,15 @@
 let
   inherit (lib) types mkOption;
 
-  # Decision 105: on a Linux (glibc) build machine the native target gets
-  # `presets.linuxGnu` unless another preset is set, so the native linker is
-  # nixpkgs' wrapped cc with mold, as on every other target, instead of
-  # rustc's bundled rust-lld. A target defined directly from a preset
-  # (`targets.<t> = breakbulk.presets.zig { … }`) counts as having one.
+  # Decisions 105, 115: on Linux the native target gets `presets.linuxGnu`
+  # (glibc `pkgs`) or `presets.linuxMusl` (musl `pkgs`) unless another
+  # preset is set, so the native linker is nixpkgs' wrapped cc with mold,
+  # as on every other target, instead of rustc's bundled rust-lld. A target
+  # defined directly from a preset (`targets.<t> = breakbulk.presets.zig
+  # { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
   nativeTriple = targetTraits.nativeTriple pkgs;
-  nativeDefault = pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isGnu;
+  nativePreset = targetTraits.nativeDefaultPreset pkgs;
   bt = import ./types.nix { inherit lib; };
   tool = types.nullOr (
     types.oneOf [
@@ -108,14 +109,15 @@ in
     preset = mkOption {
       type = types.nullOr presetType;
       default =
-        if name == nativeTriple && nativeDefault && !config.presetDirect then
-          breakbulkPresets.linuxGnu
+        if name == nativeTriple && nativePreset != null && !config.presetDirect then
+          breakbulkPresets.${nativePreset}
         else
           null;
       defaultText = lib.literalMD ''
-        `breakbulk.presets.linuxGnu` for the native triple when the build
-        machine is Linux with glibc, unless the target is defined directly
-        from a preset; `null` otherwise
+        for the native triple, unless the target is defined directly from
+        a preset: `breakbulk.presets.linuxGnu` when the `pkgs` given to
+        mkRepository is Linux with glibc, `breakbulk.presets.linuxMusl`
+        when it is Linux with musl (`pkgs.pkgsMusl`); `null` otherwise
       '';
       example = lib.literalExpression "breakbulk.presets.linuxMusl";
       description = ''

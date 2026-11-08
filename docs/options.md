@@ -1312,9 +1312,10 @@ Toolchain specs per target triple, for every workspace that builds
 the triple (` workspaces.<ws>.targets `)\. Each workspace’s spec is
 these definitions together with its own
 ` workspaces.<ws>.targets.<triple> `, evaluated with that workspace’s
-toolchain, so a preset uses each workspace’s rustc\. On a Linux
-(glibc) build machine the native triple always has an entry, with
-` presets.linuxGnu ` by default\. Any other triple with no entry here or
+toolchain, so a preset uses each workspace’s rustc\. When the ` pkgs `
+given to mkRepository is Linux, the native triple always has an
+entry, with ` presets.linuxGnu ` (glibc) or ` presets.linuxMusl ` (musl)
+by default\. Any other triple with no entry here or
 in the workspace uses an empty spec (the toolchain as Cargo finds
 it)\.
 
@@ -1678,9 +1679,10 @@ null or breakbulk preset (function)
 
 
 *Default:*
-` breakbulk.presets.linuxGnu ` for the native triple when the build
-machine is Linux with glibc, unless the target is defined directly
-from a preset; ` null ` otherwise
+for the native triple, unless the target is defined directly from
+a preset: ` breakbulk.presets.linuxGnu ` when the ` pkgs ` given to
+mkRepository is Linux with glibc, ` breakbulk.presets.linuxMusl `
+when it is Linux with musl (` pkgs.pkgsMusl `); ` null ` otherwise
 
 
 
