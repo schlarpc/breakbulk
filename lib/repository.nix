@@ -681,6 +681,7 @@ let
       name = "${wsName}-${triple}-${vName}";
       inherit delivery;
       shippedRemapScope = shippedRemapScopeOf wsName triple v;
+      inherit (v) cargoTrimPaths sourcePaths;
       traits = traitsOf wsName triple;
       packages = testConfigs wsName;
       inherit (cfg) ca;
@@ -723,11 +724,13 @@ let
   # One product per package: its build-plan roots through the target's
   # stages (lib/products.nix).
   productsOf =
-    wsName: ws: triple: inst: sel:
+    wsName: ws: triple: v: inst: sel:
     products.mkProducts (
       stageSetArgs wsName triple
       // {
       inherit pkgs inst;
+      # `sourcePaths = "keep"`: no default noSourceReferences check.
+      defaultChecks = v.sourcePaths == "hide";
       select = sel;
       targetChecks = targetField wsName triple "checks" { };
       packageConfig = productConfig wsName triple;
@@ -868,7 +871,7 @@ let
               ifTests = attrs: if testsOn then attrs else { };
             in
             {
-              packages = productsOf wsName ws triple inst sel;
+              packages = productsOf wsName ws triple v inst sel;
               tests = ifTests (testsOf inst tSel);
               testRuns = ifTests (selectPkgs tSel inst.testRuns);
               # testRuns named as `tests` names test binaries, for repo.checks.

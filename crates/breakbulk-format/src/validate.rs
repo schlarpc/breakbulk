@@ -258,6 +258,11 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
                     ),
                 }
                 check_dylib_path(plan, &r.dylib_path_from, &mut |m| err(id_, m));
+                for up in r.build_dir_remap.keys() {
+                    if !matches!(plan.units.get(up), Some(Unit::Run(_))) {
+                        err(id_, format!("buildDirRemap names {up}, which is not a run"));
+                    }
+                }
                 for up in &r.metadata_from {
                     match plan.units.get(up) {
                         _ if up == id => err(id_, "metadataFrom names the run itself".into()),

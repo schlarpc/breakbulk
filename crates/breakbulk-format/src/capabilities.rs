@@ -19,8 +19,8 @@ pub struct Capabilities {
     /// every unit remaps every scope ("Source paths at run time").
     pub remap_path_scope: bool,
     /// Cargo has the `trim-paths` profile setting (stable from Cargo 1.101,
-    /// nightly 1.101 included). The planner then traces again with it on
-    /// when the project has not turned it on ("trim-paths").
+    /// nightly 1.101 included). The planner then turns it on unless the
+    /// project declares it or `cargoTrimPaths` says otherwise ("trim-paths").
     pub trim_paths: bool,
     /// Cargo allows unstable features (a nightly or development build):
     /// recorded in the plan for build-script directives that differ there.

@@ -17,6 +17,7 @@
 #     packages = [ ];        # -p selection; [ ] means --workspace
 #     configs = [ ];         # extra --config files or values (toolchain spec)
 #     capabilities = null;   # the toolchain's capabilities (null: toolchainFacts')
+#     trimPaths = "auto";    # Cargo's trim-paths: "auto", "on" or "off"
 #   };
 #   "${plan}/plan.json"
 #
@@ -56,6 +57,9 @@
       # The toolchain's capabilities (lib/toolchain-facts.nix), or null for
       # toolchainFacts' own for this rustc and cargo.
       capabilities ? null,
+      # Cargo's trim-paths (decision 121): "auto" (on when the toolchain
+      # has it, unless the project declares it), "on" or "off".
+      trimPaths ? "auto",
     }:
     let
       caps =
@@ -92,6 +96,10 @@
       ++ lib.optionals (mode != "build") [
         "--mode"
         mode
+      ]
+      ++ lib.optionals (trimPaths != "auto") [
+        "--trim-paths"
+        trimPaths
       ]
       ++ lib.optionals (clippyDriver != null) [
         "--clippy-driver"

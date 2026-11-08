@@ -1,0 +1,9 @@
+# Decision 121: a build script compiles C with cc-rs 1.11 under Cargo's
+# trim-paths, which breakbulk turns on (the project declares none). cc-rs
+# reads CARGO_TRIM_PATHS_SCOPE and CARGO_TRIM_PATHS_REMAP and adds
+# -fmacro-prefix-map / -fdebug-prefix-map; breakbulk's own C prefix maps use
+# Cargo's names too, so `__FILE__` and the C object's debug info read as
+# under Cargo (`./cfile/c/where.c`), with no store path.
+[workspace]
+resolver = "2"
+members = ["cfile"]

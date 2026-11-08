@@ -90,6 +90,8 @@ rec {
       # whose products split debug info off (`"macro,diagnostics"`), or
       # null for every scope. See inputs.rs `shipped_remap_scope`.
       shippedRemapScope ? null,
+      # `sourcePaths = "keep"` (decision 121): no remaps of breakbulk's own.
+      keepSourcePaths ? false,
       # The target's traits as breakbulk-instantiate reads them
       # (`breakbulk.targetTraits.forRust`, lib/target-traits.nix).
       targetTraits,
@@ -128,7 +130,8 @@ rec {
         host = platformJson host;
         target = platformJson target;
       }
-      // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }));
+      // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
+      // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }));
       overridesFile = toFile "overrides.json" (toJSON {
         inherit strictSources;
         packages = lib.mapAttrs (

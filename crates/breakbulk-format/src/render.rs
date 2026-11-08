@@ -44,6 +44,13 @@ pub trait Resolve {
     fn remap_scope(&self, _id: &UnitId, _unit: &CompileUnit) -> Option<String> {
         None
     }
+    /// `sourcePaths = "keep"` (decision 121): breakbulk adds no remaps of
+    /// its own, neither Rust (`--remap-path-prefix`, `--remap-path-scope`)
+    /// nor C (`-ffile-prefix-map`). Cargo's own trim-paths remaps, when the
+    /// project turned them on, stay in the arguments as traced.
+    fn keep_source_paths(&self) -> bool {
+        false
+    }
     /// The env capture (`env.json`) for the unit's package and platform:
     /// layer 2 of the environment contract.
     fn env_capture(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<String>, Self::Error> {
@@ -271,7 +278,9 @@ pub fn render_unit_in<R: Resolve>(
             } else {
                 Vec::new()
             };
-            let (remap, remap_scope) = if plan.trim_paths {
+            let (remap, remap_scope) = if r.keep_source_paths() {
+                (Vec::new(), None)
+            } else if plan.trim_paths {
                 // Cargo's remaps are in the arguments. With the project's
                 // own setting its scope is too; when breakbulk set it,
                 // the scope is breakbulk's, per product kind.
@@ -363,6 +372,20 @@ pub fn render_unit_in<R: Resolve>(
             recorded.remove("OUT_DIR");
             let mut env = env(&recorded, r)?;
             merge_layer_with(r, &mut env, overlay)?;
+            let (remap, out_dir_remap) = if r.keep_source_paths() {
+                (Vec::new(), None)
+            } else if plan.trim_paths {
+                cargo_run_remap(id, run, r)?
+            } else {
+                (
+                    run_remap(plan, id, &unit, r)?,
+                    Some(r.remap_name(&Reference::Out(OutRef {
+                        out: id.clone(),
+                        output: "out".into(),
+                        file: None,
+                    }))?),
+                )
+            };
             RenderedUnit::Run(RenderedRun {
                 package: run.package.clone(),
                 platform: run.platform,
@@ -384,14 +407,10 @@ pub fn render_unit_in<R: Resolve>(
                 targets: run.targets.clone(),
                 nightly_features_allowed: run.nightly_features_allowed,
                 env_capture,
-                // Prefix maps for C code the script compiles. Not tied to
-                // `trimPaths`: Cargo's own remaps never reach C compilers.
-                remap: run_remap(plan, id, &unit, r)?,
-                out_dir_remap: Some(r.remap_name(&Reference::Out(OutRef {
-                    out: id.clone(),
-                    output: "out".into(),
-                    file: None,
-                }))?),
+                // Prefix maps for C code the script compiles: breakbulk's
+                // names, or Cargo's under trim-paths (`cargo_run_remap`).
+                remap,
+                out_dir_remap,
                 strict_sources: r.strict_sources(id, run),
                 seed: Some(id.to_string()),
             })
@@ -430,6 +449,46 @@ fn run_remap<R: Resolve>(
     remap.sort();
     remap.dedup();
     Ok(remap)
+}
+
+/// A run's C prefix maps and its own `OUT_DIR`'s name.
+type RunRemap = (Vec<(String, String)>, Option<String>);
+
+/// A run's C prefix maps under Cargo's trim-paths (decision 121): the
+/// pairs of its `CARGO_TRIM_PATHS_REMAP` (the package and the sysroot,
+/// which cc-rs turns into `-f*-prefix-map` flags itself) and Cargo's
+/// build-directory pair expanded per `OUT_DIR` (`buildDirRemap`, which
+/// the planner leaves out of the variable, because a run cannot name its
+/// own `out`). So `__FILE__` and C debug info read as under Cargo and
+/// breakbulk's maps agree with cc-rs's. Returns the pairs and the run's own
+/// `OUT_DIR` name.
+fn cargo_run_remap<R: Resolve>(id: &UnitId, run: &RunUnit, r: &R) -> Result<RunRemap, R::Error> {
+    let mut remap = Vec::new();
+    if let Some(v) = run.env.get("CARGO_TRIM_PATHS_REMAP") {
+        for pair in text(v, r)?.split(':') {
+            if let Some((from, to)) = pair.rsplit_once('=')
+                && !from.is_empty()
+            {
+                remap.push((from.to_owned(), to.to_owned()));
+            }
+        }
+    }
+    let mut own = None;
+    for (run_id, to) in &run.build_dir_remap {
+        if run_id == id {
+            own = Some(to.clone());
+        } else {
+            let from = r.reference(&Reference::Out(OutRef {
+                out: run_id.clone(),
+                output: "out".into(),
+                file: None,
+            }))?;
+            remap.push((from, to.clone()));
+        }
+    }
+    remap.sort();
+    remap.dedup();
+    Ok((remap, own))
 }
 
 /// The `BREAKBULK_UNIT` value: canonical JSON of a rendered unit.

@@ -18,6 +18,7 @@ pub mod rewrite;
 pub mod sentinel;
 pub mod spec;
 pub mod trace;
+pub mod trim_paths;
 
 use std::fmt;
 
@@ -70,28 +71,40 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
         traced.configs.push(v.config.clone());
         traced.std_vendor = Some(v);
     }
+    // Cargo's trim-paths ("trim-paths" in docs/implementation.md, decision
+    // 121): turned on with `--config` unless the project's files declare it
+    // (or `--trim-paths` says otherwise), when the toolchain has it (its
+    // capabilities). One trace either way.
     let capabilities = trace::capabilities(opts)?;
-    let first = trace::run(&traced)?;
-    // Cargo's trim-paths ("trim-paths" in docs/implementation.md): when the
-    // project has not turned it on and Cargo has it (the toolchain's
-    // capabilities), trace again with it on.
-    let (traced, t) = if !graph::trace_trims_paths(&first.records) && capabilities.trim_paths {
+    let declared = trim_paths::declared(&trace::workspace_dir(&traced));
+    for w in &declared.warnings {
+        eprintln!("breakbulk-plan: warning: {w}");
+    }
+    let on = trim_paths::decide(opts.trim_paths, capabilities.trim_paths, &declared)?;
+    if opts.trim_paths == trim_paths::Mode::Auto && !declared.places.is_empty() {
+        eprintln!(
+            "breakbulk-plan: the project declares trim-paths ({}); leaving it to the project",
+            declared.places.join(", ")
+        );
+    }
+    let (traced, t) = if on {
         let o = trace::with_trim_paths(&traced);
         match trace::run(&o) {
             Ok(t) => (o, t),
             // A nightly from before the setting was stable.
-            Err(e) if e.0.contains("trim-paths") => {
+            Err(e) if e.0.contains("trim-paths") && opts.trim_paths == trim_paths::Mode::Auto => {
                 eprintln!(
-                    "breakbulk-plan: warning: Cargo {} rejected trim-paths; using breakbulk's own \
-                     path remapping:\n{e}",
-                    first.cargo_version
+                    "breakbulk-plan: warning: Cargo rejected trim-paths; using breakbulk's own \
+                     path remapping:\n{e}"
                 );
-                (traced, first)
+                let t = trace::run(&traced)?;
+                (traced, t)
             }
             Err(e) => return Err(e),
         }
     } else {
-        (traced, first)
+        let t = trace::run(&traced)?;
+        (traced, t)
     };
     let opts = &traced;
     if !graph::trace_trims_paths(&t.records) {

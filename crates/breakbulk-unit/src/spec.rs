@@ -517,7 +517,10 @@ pub struct RenderedRun {
     pub env_capture: Option<String>,
     /// Source paths (from, to) that C code compiled by the script must not
     /// embed: the package's source view or crate source, and any `OUT_DIR`
-    /// the run names, with the names Rust remaps them to. They become
+    /// the run names, with the names Rust remaps them to; under Cargo's
+    /// trim-paths, Cargo's names (the pairs of `CARGO_TRIM_PATHS_REMAP`
+    /// and the expanded build-directory pair), so they agree with the maps
+    /// cc-rs derives from that variable (decision 121). They become
     /// `-ffile-prefix-map` in `NIX_CFLAGS_COMPILE`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remap: Vec<(String, String)>,

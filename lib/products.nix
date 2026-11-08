@@ -18,6 +18,7 @@
 #                           # its target.<triple> settings applied after it
 #     ca = null;            # null: automatic (stages.caAuto)
 #     lockfile = null;      # the workspace's Cargo.lock (bindgen stage)
+#     defaultChecks = true; # false: no noSourceReferences (sourcePaths = "keep")
 #   };
 #
 #   products.<pkg>                 the product: linked -> stages -> install
@@ -283,6 +284,8 @@ let
       packageConfig ? _: [ ],
       ca ? null,
       lockfile ? null,
+      # false: no default noSourceReferences check (`sourcePaths = "keep"`).
+      defaultChecks ? true,
       sourcePaths ? attrValues inst.sources.workspace ++ attrValues inst.sources.crates,
       # The toolchain's store paths: noSourceReferences fails when a
       # product's closure has one (field-trial gap 9).
@@ -327,6 +330,7 @@ let
               ca
               sourcePaths
               toolchainPaths
+              defaultChecks
               ;
             info = lib.optionalAttrs (lockfile != null) { inherit lockfile; };
           };

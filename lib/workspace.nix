@@ -110,6 +110,12 @@ pkgs:
   # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
+  # Decision 121: whether the planner turns Cargo's trim-paths on (null:
+  # unless the project declares it; true; false), and whether source paths
+  # are hidden at all ("hide") or left as they are ("keep": no trim-paths
+  # from breakbulk and no remaps of its own).
+  cargoTrimPaths ? null,
+  sourcePaths ? "hide",
   # The target's traits (lib/target-traits.nix `resolve`); mkRepository
   # passes them with the user's `targets.<triple>.traits` merged in.
   traits ? targetTraitsLib.resolve { triple = target; },
@@ -243,6 +249,17 @@ let
   # Check and clippy variants link nothing: no roots, no test runs.
   checking = mode == "check" || mode == "clippy";
 
+  # breakbulk-plan's `--trim-paths` (decision 121).
+  trimPaths =
+    if sourcePaths == "keep" then
+      "off"
+    else if cargoTrimPaths == null then
+      "auto"
+    else if cargoTrimPaths then
+      "on"
+    else
+      "off";
+
   plans = lib.genAttrs ([ "build" "test" ] ++ lib.optional bench "bench") (
     kind:
     mkPlan pkgs {
@@ -261,6 +278,7 @@ let
         noDefaultFeatures
         allFeatures
         spec
+        trimPaths
         ;
       packages = if kind == "test" then testSelect else select;
       inherit (toolchain) cargo rustc;
@@ -396,6 +414,7 @@ let
       # or name@version, already in instantiate's shape); the latter win.
       overrides = overrides // packageOverrides;
       inherit strictSources shippedRemapScope;
+      keepSourcePaths = sourcePaths == "keep";
       targetTraits = targetTraitsLib.forRust traits;
       inherit capabilities;
       roots =

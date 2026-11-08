@@ -965,20 +965,10 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        // Values with sentinels (dynamic-library paths of host plugin
-        // dependencies) name search paths, not code.
-        for v in env.values().filter(|v| !contains_sentinel(v)) {
-            for (dir, run) in &self.rw.run_dirs {
-                if names_path(v, dir) {
-                    runs.insert(run.clone());
-                }
-            }
-        }
-        let scratch = self.ctx.scratch.trim_end_matches('/');
+        runs.extend(self.runs_named_in_env(env));
         runs.into_iter()
             .filter_map(|run| {
-                let r = self.runs.iter().find(|r| r.id == run)?;
-                let rel = under(&r.out_dir, scratch)?.to_owned();
+                let to = self.build_dir_name(&run)?;
                 Some(Arg::Concat(vec![
                     Piece::Literal("--remap-path-prefix=".into()),
                     Piece::Ref(Reference::Out(OutRef {
@@ -986,10 +976,35 @@ impl<'a> Builder<'a> {
                         output: "out".into(),
                         file: None,
                     })),
-                    Piece::Literal(format!("={CARGO_BUILD_DIR_REMAP}/{rel}")),
+                    Piece::Literal(format!("={to}")),
                 ]))
             })
             .collect()
+    }
+
+    /// The runs whose `OUT_DIR` a recorded env names. Values with
+    /// sentinels (dynamic-library paths of host plugin dependencies) name
+    /// search paths, not code.
+    fn runs_named_in_env(&self, env: &BTreeMap<String, String>) -> BTreeSet<UnitId> {
+        let mut runs = BTreeSet::new();
+        for v in env.values().filter(|v| !contains_sentinel(v)) {
+            for (dir, run) in &self.rw.run_dirs {
+                if names_path(v, dir) {
+                    runs.insert(run.clone());
+                }
+            }
+        }
+        runs
+    }
+
+    /// What Cargo's trim-paths build-directory remap makes of a run's
+    /// `OUT_DIR`: `/cargo/build-dir/<OUT_DIR relative to the build
+    /// directory>`.
+    fn build_dir_name(&self, run: &UnitId) -> Option<String> {
+        let scratch = self.ctx.scratch.trim_end_matches('/');
+        let r = self.runs.iter().find(|r| &r.id == run)?;
+        let rel = under(&r.out_dir, scratch)?;
+        Some(format!("{CARGO_BUILD_DIR_REMAP}/{rel}"))
     }
 
     /// A recorded working directory: one reference, or (the standard
@@ -1126,6 +1141,18 @@ impl<'a> Builder<'a> {
             }
             env.insert(k.clone(), v.clone());
         }
+        // Under trim-paths, the C prefix maps' names for the OUT_DIRs this
+        // run names, its own included (decision 121): Cargo's one
+        // build-directory pair, expanded as for compile units.
+        let build_dir_remap = if env.get(TRIM_PATHS_REMAP_VAR).is_some_and(|v| !v.is_empty()) {
+            let mut runs = self.runs_named_in_env(&env);
+            runs.insert(id.clone());
+            runs.into_iter()
+                .filter_map(|run| Some((run.clone(), self.build_dir_name(&run)?)))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
         if let Some(v) = env.get_mut(TRIM_PATHS_REMAP_VAR) {
             *v = self.without_build_dir_remap(v);
         }
@@ -1145,6 +1172,7 @@ impl<'a> Builder<'a> {
             rust_version: r.package.rust_version.clone(),
             targets: package_targets(r.package),
             nightly_features_allowed: self.ctx.nightly,
+            build_dir_remap,
         }))
     }
 
@@ -1300,16 +1328,25 @@ impl<'a> Builder<'a> {
             .compiles
             .iter()
             .partition(|c| has_cargo_trim_paths(&c.rec.args));
-        match (with.first(), without.first()) {
-            (Some(a), Some(b)) => bail!(
-                "Cargo's trim-paths is on for some units and off for others (unit {} has it, \
-                 unit {} does not), for example through a per-package profile override; \
-                 breakbulk supports it for all units or none",
-                a.id,
-                b.id
-            ),
-            (with, _) => Ok(with.is_some()),
+        let names = |cs: &[&CompileRec]| {
+            cs.iter()
+                .map(|c| format!("{} {}", c.package.name, c.package.version))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if !with.is_empty() && !without.is_empty() {
+            bail!(
+                "Cargo's trim-paths is on for some packages and off for others (on: {}; off: \
+                 {}), for example through a per-package profile override; breakbulk supports \
+                 it for all packages or none: set `trim-paths` for the whole profile, or for \
+                 none",
+                names(&with),
+                names(&without)
+            );
         }
+        Ok(!with.is_empty())
     }
 
     pub fn plan(&self) -> Result<Plan, Error> {

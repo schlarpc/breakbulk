@@ -366,6 +366,10 @@ impl Resolve for Tokens<'_> {
         })
     }
 
+    fn keep_source_paths(&self) -> bool {
+        self.inputs.toolchains.keep_source_paths
+    }
+
     fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
         // Test harnesses remap every scope; so does everything without a
         // shipped scope (no `splitDebug`) or with a rustc that has no

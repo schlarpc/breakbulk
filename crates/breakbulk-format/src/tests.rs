@@ -637,6 +637,117 @@ fn render_configuration_hooks() {
     assert_eq!(c.remap_scope.as_deref(), Some("macro,diagnostics"));
 }
 
+/// Decision 121: a run's C prefix maps under Cargo's trim-paths use Cargo's
+/// names (`CARGO_TRIM_PATHS_REMAP`'s pairs and the expanded build-directory
+/// pair), so they agree with cc-rs's; without trim-paths, breakbulk's own.
+#[test]
+fn run_prefix_maps_follow_cargo_under_trim_paths() {
+    let mut p = example();
+    let own = |p: &Plan| {
+        let RenderedUnit::Run(r) = render_unit(p, &"r-ring".into(), &Fake).unwrap() else {
+            panic!()
+        };
+        (r.remap, r.out_dir_remap)
+    };
+    let (remap, out) = own(&p);
+    assert_eq!(out.as_deref(), Some("/out/r-ring"));
+    assert!(
+        remap.iter().all(|(_, to)| !to.starts_with("/cargo/")),
+        "{remap:?}"
+    );
+
+    p.trim_paths = true;
+    let up = "r-up".to_owned();
+    p.units.insert(up.clone(), p.units["r-ring"].clone());
+    let r = run(&mut p, "r-ring");
+    r.env.insert(
+        "CARGO_TRIM_PATHS_REMAP".into(),
+        Text::Concat(vec![
+            Piece::Ref(Reference::CrateSrc(CrateSrcRef {
+                crate_src: RING.into(),
+                rel: String::new(),
+            })),
+            Piece::Literal(
+                "=/cargo/deps/ring-0.17.14:/nix/store/rust/lib/rustlib/src/rust=/rustc/abc".into(),
+            ),
+        ]),
+    );
+    r.build_dir_remap = BTreeMap::from([
+        (
+            "r-ring".into(),
+            "/cargo/build-dir/t/debug/build/ring-1/out".into(),
+        ),
+        (up, "/cargo/build-dir/t/debug/build/up-2/out".into()),
+    ]);
+    let (remap, out) = own(&p);
+    assert_eq!(
+        out.as_deref(),
+        Some("/cargo/build-dir/t/debug/build/ring-1/out")
+    );
+    assert_eq!(
+        remap,
+        [
+            (
+                "/nix/store/crate-ring@0.17.14/".to_owned(),
+                "/cargo/deps/ring-0.17.14".to_owned()
+            ),
+            (
+                "/nix/store/r-up-out".to_owned(),
+                "/cargo/build-dir/t/debug/build/up-2/out".to_owned()
+            ),
+            (
+                "/nix/store/rust/lib/rustlib/src/rust".to_owned(),
+                "/rustc/abc".to_owned()
+            ),
+        ]
+    );
+}
+
+/// A resolver keeping source paths (`sourcePaths = "keep"`).
+struct Keep;
+
+impl Resolve for Keep {
+    type Error = String;
+    fn target_traits(&self) -> TargetTraits {
+        TargetTraits::default()
+    }
+    fn reference(&self, r: &Reference) -> Result<String, String> {
+        Fake.reference(r)
+    }
+    fn flags(&self, run: &UnitId) -> Result<String, String> {
+        Fake.flags(run)
+    }
+    fn remap_name(&self, base: &Reference) -> Result<String, String> {
+        Fake.remap_name(base)
+    }
+    fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {
+        Some("macro,diagnostics".into())
+    }
+    fn keep_source_paths(&self) -> bool {
+        true
+    }
+}
+
+/// `sourcePaths = "keep"`: no remap, scope or C prefix map from breakbulk,
+/// with or without trim-paths.
+#[test]
+fn keep_source_paths_adds_no_remaps() {
+    let mut p = example();
+    for trim in [false, true] {
+        p.trim_paths = trim;
+        let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Keep).unwrap() else {
+            panic!()
+        };
+        assert!(c.remap.is_empty());
+        assert_eq!(c.remap_scope, None);
+        let RenderedUnit::Run(r) = render_unit(&p, &"r-ring".into(), &Keep).unwrap() else {
+            panic!()
+        };
+        assert!(r.remap.is_empty());
+        assert_eq!(r.out_dir_remap, None);
+    }
+}
+
 /// A chain lib -> mid -> leaf, plus a proc macro with its own dependency.
 fn dep_graph() -> Plan {
     let mut p = example();

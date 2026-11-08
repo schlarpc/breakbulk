@@ -64,8 +64,11 @@ pub struct Options {
     pub forbidden: Vec<String>,
     /// The toolchain spec file (`--spec`, see [`crate::spec`]).
     pub spec: Option<String>,
-    /// Set by the planner for its second trace, which turns Cargo's
-    /// `trim-paths` on ([`crate::plan`]).
+    /// `--trim-paths auto|on|off` (`cargoTrimPaths`, decision 121): whether
+    /// the planner may turn Cargo's `trim-paths` on ([`crate::trim_paths`]).
+    pub trim_paths: crate::trim_paths::Mode,
+    /// Set by the planner when it turned Cargo's `trim-paths` on
+    /// ([`crate::plan`], [`with_trim_paths`]).
     pub trim_paths_default: bool,
     /// Set by the planner when the project uses `-Zbuild-std`
     /// ([`crate::build_std`]).
@@ -149,7 +152,7 @@ fn target_dir(opts: &Options) -> String {
     format!("{}/target", opts.scratch.trim_end_matches('/'))
 }
 
-fn workspace_dir(opts: &Options) -> PathBuf {
+pub fn workspace_dir(opts: &Options) -> PathBuf {
     let root = Path::new(&opts.skeleton);
     if opts.workspace.is_empty() {
         root.to_owned()
@@ -485,11 +488,11 @@ pub fn capabilities(opts: &Options) -> Result<breakbulk_format::Capabilities, Er
     })
 }
 
-/// The options of the planner's second trace, which turns on Cargo's
-/// `trim-paths` for the profile: `--config` overrides the manifests'
-/// setting, which is why it is only passed when the first trace showed it
-/// off. Its own scratch directory, so the first trace's records and
-/// target directory stay apart.
+/// The options of a trace with Cargo's `trim-paths` on for the profile:
+/// `--config` overrides the project's setting, which is why it is passed
+/// only by [`crate::trim_paths::decide`]'s rule. Its own scratch directory,
+/// so a retrace without it (a nightly from before the setting was stable)
+/// starts clean.
 pub fn with_trim_paths(opts: &Options) -> Options {
     let mut o = opts.clone();
     o.scratch = format!("{}/trim-paths", opts.scratch.trim_end_matches('/'));

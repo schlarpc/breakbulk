@@ -53,6 +53,7 @@ fn smoke_inputs() -> Inputs {
                 env_capture: true,
             },
             shipped_remap_scope: None,
+            keep_source_paths: false,
             target_traits: Default::default(),
             capabilities: breakbulk_format::Capabilities {
                 remap_path_scope: true,
@@ -203,6 +204,9 @@ impl Resolve for RealPaths<'_> {
             Reference::Out(o) => format!("/breakbulk/build/{}", o.out),
         })
     }
+    fn keep_source_paths(&self) -> bool {
+        self.0.toolchains.keep_source_paths
+    }
     fn remap_scope(&self, _: &UnitId, c: &CompileUnit) -> Option<String> {
         let scope = self.0.toolchains.shipped_remap_scope.as_ref()?;
         let test = c
@@ -338,6 +342,33 @@ fn shipped_remap_scope() {
         scope_of(&inputs)[APP].as_deref(),
         Some("macro,diagnostics,coverage")
     );
+}
+
+/// `sourcePaths = "keep"` (decision 121): no unit gets a remap, a scope or
+/// a C prefix map from breakbulk.
+#[test]
+fn keep_source_paths() {
+    let fields = |inputs: &Inputs| -> Vec<(String, bool)> {
+        let out = instantiate(inputs).unwrap();
+        out.units
+            .iter()
+            .map(|(id, d)| {
+                let u: serde_json::Value =
+                    serde_json::from_str(&attr(d, "BREAKBULK_UNIT")).unwrap();
+                let any = ["remap", "remapScope", "outDirRemap"].iter().any(|k| {
+                    u.get(*k)
+                        .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
+                });
+                (id.clone(), any)
+            })
+            .collect()
+    };
+    let mut inputs = smoke_inputs();
+    inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics".into());
+    assert!(fields(&inputs).iter().any(|(_, any)| *any));
+    inputs.toolchains.keep_source_paths = true;
+    let kept = fields(&inputs);
+    assert!(kept.iter().all(|(_, any)| !any), "{kept:?}");
 }
 
 #[test]

@@ -58,7 +58,9 @@ let
     };
   };
 
+  # `ws`: the workspace's config, for defaults a variant inherits.
   variant =
+    ws:
     { name, ... }:
     {
       options = {
@@ -175,6 +177,21 @@ let
             arguments set it (decision 133).
           '';
         };
+        cargoTrimPaths = mkOption {
+          type = types.nullOr types.bool;
+          default = ws.cargoTrimPaths;
+          defaultText = lib.literalExpression "workspaces.<ws>.cargoTrimPaths";
+          description = "This variant's `workspaces.<ws>.cargoTrimPaths`.";
+        };
+        sourcePaths = mkOption {
+          type = types.enum [
+            "hide"
+            "keep"
+          ];
+          default = ws.sourcePaths;
+          defaultText = lib.literalExpression "workspaces.<ws>.sourcePaths";
+          description = "This variant's `workspaces.<ws>.sourcePaths`.";
+        };
         benches = mkOption {
           type = types.bool;
           default = false;
@@ -192,7 +209,12 @@ let
     };
 
   workspace =
-    { name, options, ... }:
+    {
+      name,
+      options,
+      config,
+      ...
+    }:
     {
       options = {
         path = mkOption {
@@ -304,7 +326,7 @@ let
         };
 
         variants = mkOption {
-          type = types.attrsOf (types.submodule variant);
+          type = types.attrsOf (types.submodule (variant config));
           default = {
             default = { };
           };
@@ -332,6 +354,46 @@ let
             breakbulk's target auto-discovery.
           '';
         });
+
+        cargoTrimPaths = mkOption {
+          type = types.nullOr types.bool;
+          default = null;
+          description = ''
+            Who hides source paths in Rust code when Cargo has
+            `trim-paths` (1.101 and later: the toolchain's `trimPaths`
+            capability; decision 121). `null`: breakbulk turns it on
+            (`--config profile.<p>.trim-paths="all"`) unless the project
+            declares `trim-paths` in any profile of the workspace root's
+            `Cargo.toml` or of its `.cargo/config.toml` files (any profile,
+            package override or value counts; the files are read, not
+            merged as Cargo would), and leaves it to the project then.
+            `true`: always on, replacing the project's own setting (an
+            error without the capability). `false`: never turned on by
+            breakbulk, which then hides paths with its own remaps; a
+            project that sets it itself still gets Cargo's. Under Cargo's
+            trim-paths, breakbulk's own C prefix maps use Cargo's names, as
+            cc-rs does. A variant's own setting wins.
+          '';
+        };
+
+        sourcePaths = mkOption {
+          type = types.enum [
+            "hide"
+            "keep"
+          ];
+          default = "hide";
+          description = ''
+            Whether source paths are hidden in what this workspace builds
+            (decision 121). `hide`: as `cargoTrimPaths` says, through
+            Cargo's trim-paths or breakbulk's own remaps, and every product
+            gets the `noSourceReferences` check. `keep`: breakbulk neither
+            turns Cargo's trim-paths on nor adds remaps of its own (Rust or
+            C), and products get no default `noSourceReferences` check;
+            binaries then reference their sources' store paths. A project
+            that sets `trim-paths` itself still gets Cargo's remaps. A
+            variant's own setting wins.
+          '';
+        };
 
         devShell.setTarget = mkOption {
           type = types.bool;

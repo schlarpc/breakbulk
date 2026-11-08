@@ -66,9 +66,10 @@
 #                    chain's units (embedder and host), not `other`'s
 #   trim-paths       Cargo's trim-paths, with rust-overlay's nightly (Cargo
 #                    1.101): workspace `set` sets it in its dev profile, so
-#                    its plan keeps Cargo's remaps and scope and is traced
-#                    once; workspace `default` does not, so the planner
-#                    traces again with it on and drops Cargo's scope. Both:
+#                    its plan keeps Cargo's remaps and scope (the planner
+#                    reads the manifest and leaves it to the project);
+#                    workspace `default` does not, so the planner turns it on
+#                    and drops Cargo's scope. Both:
 #                    breakbulk adds no remaps of its own; the shared path
 #                    crate outside both roots gets one `-C metadata` in both,
 #                    and the same when planned at two other skeleton
@@ -78,6 +79,17 @@
 #                    references; `default`'s debug info keeps store paths
 #                    (gdb lists the shared crate's source), `set`'s does
 #                    not (scope `all`); `default`'s tests pass
+#   trim-paths-cc    decision 121, nightly Cargo 1.101: a build script
+#                    compiling C with cc-rs 1.11.1 under the trim-paths the
+#                    planner turned on: the C object's `__FILE__` and debug
+#                    info name only Cargo's form (`./cfile/c/where.c`), never
+#                    the source view; breakbulk's C prefix maps for the run
+#                    use Cargo's names (the run's OUT_DIR as
+#                    `/cargo/build-dir/…`). `cargoTrimPaths = false`: no
+#                    trim-paths, breakbulk's own names; `sourcePaths =
+#                    "keep"`: no remaps at all and no noSourceReferences
+#                    check; trim-paths set for one package only (a profile
+#                    override) fails planning naming the packages on and off
 #   benches          a libtest-harness bench and a Criterion bench come
 #                    from the bench variant only (`cargo bench --no-run`,
 #                    bench profile, opt-level 3); the test plan has none;
@@ -344,6 +356,22 @@ let
     grep -qxF "Located in $depView/dep/src/lib.rs" gdb.txt
     grep -qF 'panic!("boom {n}");' gdb.txt
   '';
+
+  # Decision 121: cc-rs 1.11.1 compiling C under Cargo's trim-paths.
+  trimCcRepo =
+    extra:
+    mkRepo (fixtures + "/trim-paths-cc") [
+      (oneWs "." "dev")
+      {
+        workspaces.main = {
+          toolchain = {
+            rustc = trimRust;
+            cargo = trimRust;
+          };
+        }
+        // extra;
+      }
+    ];
 
   # --- variants ------------------------------------------------------------------
 
@@ -1124,7 +1152,7 @@ in
     assert lib.assertMsg (
       plans.default.build.trimPaths && plans.default.build.trimPathsDefault
       && plans.default.test.trimPathsDefault
-    ) "trim-paths: default's plan was not traced again with trim-paths on";
+    ) "trim-paths: the planner did not turn trim-paths on for default's plans";
     assert lib.assertMsg (
       setNoScope == { }
     ) "trim-paths: set's units without Cargo's scope: ${toString (lib.attrNames setNoScope)}";
@@ -1190,6 +1218,82 @@ in
         grep -q 'shared 0.1.0' $stableAt/log
         test ! -e $stableAt/plan.json
         cat $tests/log
+        touch $out
+      '';
+
+  trim-paths-cc =
+    let
+      repo = trimCcRepo { };
+      off = trimCcRepo { cargoTrimPaths = false; };
+      keep = trimCcRepo { sourcePaths = "keep"; };
+      planOf =
+        r:
+        builtins.fromJSON (
+          builtins.unsafeDiscardStringContext (builtins.readFile "${(inst r).plans.build}/plan.json")
+        );
+      runOf =
+        r:
+        lib.head (lib.attrValues (lib.filterAttrs (n: _: lib.hasPrefix "r-cfile-" n) (inst r).units.build));
+      renderedRun = r: builtins.fromJSON (builtins.unsafeDiscardStringContext (runOf r).drvAttrs.BREAKBULK_UNIT);
+      run = renderedRun repo;
+      cargoNamed = to: to == "." || lib.hasPrefix "/cargo/" to || lib.hasPrefix "/rustc/" to;
+      offRun = renderedRun off;
+      keepUnits = map (u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)) (
+        lib.attrValues (inst keep).units.build
+      );
+      keepRemaps = lib.filter (u: (u.remap or [ ]) != [ ] || (u.remapScope or null) != null || (u.outDirRemap or null) != null) keepUnits;
+      # trim-paths for one package only: planning fails naming both sides.
+      mixed = pkgs.testers.testBuildFailure (inst (
+        mkRepo (edited "trim-paths-cc" "printf '\\n[profile.dev.package.cc]\\ntrim-paths = \"all\"\\n' >> Cargo.toml") [
+          (oneWs "." "dev")
+          {
+            workspaces.main.toolchain = {
+              rustc = trimRust;
+              cargo = trimRust;
+            };
+          }
+        ]
+      )).plans.build;
+      view = builtins.unsafeDiscardStringContext "${(inst repo).sources.workspace.cfile}";
+      product = repo.workspaces.main.packages.cfile;
+    in
+    assert lib.assertMsg ((planOf repo).trimPaths && (planOf repo).trimPathsDefault) "trim-paths-cc: trim-paths is not on";
+    assert lib.assertMsg (
+      lib.all (p: cargoNamed (lib.elemAt p 1)) run.remap && run.remap != [ ]
+    ) "trim-paths-cc: the run's C prefix maps: ${builtins.toJSON run.remap}";
+    assert lib.assertMsg (lib.hasPrefix "/cargo/build-dir/" (run.outDirRemap or "")) "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
+    assert lib.assertMsg (
+      !(planOf off).trimPaths && lib.hasPrefix "/breakbulk/build/" (offRun.outDirRemap or "")
+    ) "trim-paths-cc: cargoTrimPaths = false: ${builtins.toJSON offRun.outDirRemap}";
+    assert lib.assertMsg (!(planOf keep).trimPaths && keepRemaps == [ ]) "trim-paths-cc: sourcePaths = keep added remaps";
+    assert lib.assertMsg (
+      !(keep.workspaces.main.packages.cfile.checks ? noSourceReferences)
+    ) "trim-paths-cc: sourcePaths = keep still has noSourceReferences";
+    pkgs.runCommand "trim-paths-cc"
+      {
+        nativeBuildInputs = [ pkgs.binutils ];
+        inherit product mixed view;
+        runOut = (runOf repo).out;
+        noSrc = product.checks.noSourceReferences;
+      }
+      ''
+        set -euo pipefail
+        $product/bin/cfile | tee run.txt
+        grep -qxF 'c is ./cfile/c/where.c' run.txt
+        a=$(find $runOut -name 'libwhere.a')
+        strings -a $a | grep -qxF './cfile/c/where.c'
+        if strings -a $a | grep -F "$view"; then
+          echo "the C object names the source view" >&2; exit 1
+        fi
+        readelf --debug-dump=info $a > info.txt
+        grep -E 'DW_AT_(name|comp_dir)' info.txt
+        grep -qE 'DW_AT_name.*: \./cfile/c/where\.c' info.txt
+        grep -qE 'DW_AT_comp_dir.*: \./cfile$' info.txt
+        if grep -E 'DW_AT_(name|comp_dir)' info.txt | grep -q /nix/store; then
+          echo "the C object's debug info names a store path" >&2; exit 1
+        fi
+        grep -q 'on: cc 1.11.1; off: ' $mixed/testBuildFailure.log
+        grep -q 'cfile 0.1.0' $mixed/testBuildFailure.log
         touch $out
       '';
 

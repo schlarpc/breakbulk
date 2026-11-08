@@ -60,6 +60,10 @@ pub struct Toolchains {
     /// run time" in `docs/implementation.md`).
     #[serde(default)]
     pub shipped_remap_scope: Option<String>,
+    /// `sourcePaths = "keep"` (decision 121): add no remaps of breakbulk's
+    /// own, Rust or C ([`breakbulk_format::Resolve::keep_source_paths`]).
+    #[serde(default)]
+    pub keep_source_paths: bool,
     /// The target platform's traits that instantiation needs (the Nix
     /// library's `targetTraits.forRust`): whether link units get a `debug`
     /// output for side files the linker always writes. Required, so a

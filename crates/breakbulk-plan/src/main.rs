@@ -8,7 +8,8 @@
 //!   [--clippy-driver PATH] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--spec FILE] --capabilities FILE \
-//!   --scratch DIR [--forbid PATH]… --out plan.json [--cargo-env cargo-env.json]
+//!   [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]… --out plan.json \
+//!   [--cargo-env cargo-env.json]
 //!
 //! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
 //!   --target TRIPLE [--spec FILE] --scratch DIR --cargo-env cargo-env.json
@@ -33,9 +34,8 @@ fn usage() -> ! {
          [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-arg A]... \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
-         [--config X]... [--spec FILE] --capabilities FILE --scratch DIR [--forbid PATH]... \
-         --out FILE \
-         [--cargo-env FILE]\n       \
+         [--config X]... [--spec FILE] --capabilities FILE [--trim-paths auto|on|off] \
+         --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
          --target TRIPLE [--spec FILE] --scratch DIR --cargo-env FILE"
     );
@@ -66,6 +66,7 @@ fn main() -> ExitCode {
         scratch: String::new(),
         forbidden: Vec::new(),
         spec: None,
+        trim_paths: Default::default(),
         trim_paths_default: false,
         std_vendor: None,
         capabilities: None,
@@ -117,6 +118,10 @@ fn main() -> ExitCode {
             "--scratch" => opts.scratch = val(),
             "--forbid" => opts.forbidden.push(val()),
             "--spec" => opts.spec = Some(val()),
+            "--trim-paths" => {
+                opts.trim_paths =
+                    breakbulk_plan::trim_paths::Mode::parse(&val()).unwrap_or_else(|| usage())
+            }
             "--capabilities" => match breakbulk_format::Capabilities::read(&val()) {
                 Ok(c) => opts.capabilities = Some(c),
                 Err(e) => {

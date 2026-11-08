@@ -428,6 +428,14 @@ pub struct RunUnit {
     pub targets: Vec<PackageTarget>,
     /// Cargo's `nightly_features_allowed` for the planning toolchain.
     pub nightly_features_allowed: bool,
+    /// With Cargo's `trim-paths` ([`Plan::trim_paths`]): the name Cargo's
+    /// build-directory remap gives the `OUT_DIR` of each run this run names
+    /// (`/cargo/build-dir/<OUT_DIR relative to the build directory>`), its
+    /// own included. Its C prefix maps use them with the pairs of
+    /// `CARGO_TRIM_PATHS_REMAP`, so they agree with cc-rs's (decision
+    /// 121). Empty without trim-paths.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub build_dir_remap: BTreeMap<UnitId, String>,
 }
 
 /// A product of the plan.
