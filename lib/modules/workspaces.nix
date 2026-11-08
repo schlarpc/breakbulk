@@ -10,6 +10,24 @@ let
   bt = import ./types.nix { inherit lib; };
   nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
 
+  # `workspaces.<ws>.toolchain.capabilities.<name>` (lib/toolchain-facts.nix).
+  capabilityDocs = {
+    remapPathScope = ''
+      rustc takes `--remap-path-scope` (default: rustc 1.95 or later).
+      Without it, every unit remaps every path scope, so debug info names
+      no real source paths even where it is split off.
+    '';
+    trimPaths = ''
+      Cargo has the `trim-paths` profile setting (default: Cargo 1.101 or
+      later, nightly 1.101 included). The planner then turns it on when the
+      project has not.
+    '';
+    nightly = ''
+      Cargo allows unstable features (default: a `-nightly` or `-dev`
+      Cargo release).
+    '';
+  };
+
   # The workspace-only option of `workspaces.<ws>.targets.<triple>`; the
   # rest is ./target-spec.nix, merged with `targets.<triple>` per workspace
   # by lib/repository.nix. Keyed, so the module system imports it once.
@@ -208,6 +226,38 @@ let
                 description = ''
                   clippy (with `bin/clippy-driver`), for `clippy` variants.
                   It must be built for the same rustc.
+                '';
+              };
+              capabilities = mkOption {
+                type = types.submodule {
+                  options =
+                    lib.genAttrs
+                      [
+                        "remapPathScope"
+                        "trimPaths"
+                        "nightly"
+                      ]
+                      (
+                        n:
+                        mkOption {
+                          type = types.nullOr types.bool;
+                          default = null;
+                          description = capabilityDocs.${n};
+                        }
+                      );
+                };
+                default = { };
+                example = lib.literalExpression "{ remapPathScope = false; }";
+                description = ''
+                  What this toolchain can do, where breakbulk would otherwise
+                  decide it from the rustc and cargo versions (or, for a
+                  toolchain without a `version` attribute, by asking them
+                  through import-from-derivation). Set one only for a
+                  forked or patched toolchain whose version says otherwise;
+                  `null` keeps breakbulk's own answer. The planner and the
+                  instantiator read nothing else
+                  (`breakbulk.toolchainFacts.of`, "Toolchain capabilities"
+                  in docs/implementation.md).
                 '';
               };
             };

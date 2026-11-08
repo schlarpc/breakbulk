@@ -54,6 +54,11 @@ fn smoke_inputs() -> Inputs {
             },
             shipped_remap_scope: None,
             target_traits: Default::default(),
+            capabilities: breakbulk_format::Capabilities {
+                remap_path_scope: true,
+                trim_paths: false,
+                nightly: false,
+            },
         },
         overrides: Overrides {
             strict_sources: false,
@@ -208,7 +213,7 @@ impl Resolve for RealPaths<'_> {
             breakbulk_format::Platform::Target => scope.clone(),
             breakbulk_format::Platform::Host => scope.replace(",coverage", ""),
         };
-        (!test && has_remap_scope(&self.0.plan.rustc)).then_some(scope)
+        (!test && self.0.toolchains.capabilities.remap_path_scope).then_some(scope)
     }
     fn env_capture(&self, _: &UnitId, u: &Unit) -> Result<Option<String>, String> {
         let p = platform(u);
@@ -322,13 +327,17 @@ fn shipped_remap_scope() {
         );
     }
     assert_eq!(scopes[SCRIPT].as_deref(), Some("macro,diagnostics"));
-    // rustc before 1.95 has no --remap-path-scope.
-    inputs.plan.rustc = "1.94.1 (e408947bf 2026-01-01)".into();
+    // A rustc without --remap-path-scope (before 1.95, or as the toolchain's
+    // capabilities say): every unit remaps every scope. The plan's rustc
+    // release is not read.
+    inputs.toolchains.capabilities.remap_path_scope = false;
     assert!(scope_of(&inputs).values().all(Option::is_none));
-    assert!(has_remap_scope("1.95.0 (abc 2026-01-01)"));
-    assert!(has_remap_scope("1.101.0-nightly (abc 2026-10-01)"));
-    assert!(!has_remap_scope("1.94.0"));
-    assert!(!has_remap_scope(""));
+    inputs.toolchains.capabilities.remap_path_scope = true;
+    inputs.plan.rustc = "1.94.1 (e408947bf 2026-01-01)".into();
+    assert_eq!(
+        scope_of(&inputs)[APP].as_deref(),
+        Some("macro,diagnostics,coverage")
+    );
 }
 
 #[test]

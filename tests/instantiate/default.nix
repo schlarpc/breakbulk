@@ -116,6 +116,11 @@ let
     targetTraits = breakbulk.targetTraits.forRust (
       breakbulk.targetTraits.resolve { triple = "x86_64-unknown-linux-gnu"; }
     );
+    capabilities =
+      (breakbulk.toolchainFacts.of {
+        inherit pkgs;
+        inherit (pkgs) rustc cargo;
+      }).capabilities;
   };
 
   inst = breakbulk.instantiate args;

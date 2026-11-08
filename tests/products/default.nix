@@ -27,6 +27,11 @@
 #                    it; gdb's backtrace and source lines as above
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
+#   prefer-dynamic   -C prefer-dynamic: noSourceReferences allows the
+#                    sysroot that holds the libstd-*.so the binary loads
+#                    (nixpkgs' rustc), and fails on rust-overlay's rustc and
+#                    cargo components the joined sysroot brings along
+#                    (decision 134)
 #   variants         build, check, clippy (with and without clippy
 #                    arguments), coverage, a custom profile inheriting
 #                    release and a feature powerset: host units shared
@@ -1093,7 +1098,14 @@ in
           mkdir -p "$(dirname ${dir})"
           cp -r --no-preserve=mode ${i.skeleton} ${dir}
           mkdir -p $out
-          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --target ${native} --profile dev             --config ${i.vendor.configFile}             --scratch $NIX_BUILD_TOP/scratch --forbid $NIX_BUILD_TOP --forbid $HOME             --out $out/plan.json 2> $out/log || true
+          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --target ${native} --profile dev             --config ${i.vendor.configFile}             --capabilities ${
+            breakbulk.toolchainFacts.capabilitiesFile
+              (breakbulk.toolchainFacts.of {
+                inherit pkgs;
+                rustc = rust;
+                cargo = rust;
+              }).capabilities
+          }             --scratch $NIX_BUILD_TOP/scratch --forbid $NIX_BUILD_TOP --forbid $HOME             --out $out/plan.json 2> $out/log || true
           cat $out/log
         '';
       readPlanAt =
@@ -1263,6 +1275,59 @@ in
       ''
         cat $failure/testBuildFailure.log
         grep -qF 'references the Rust toolchain ${builtins.unsafeDiscardStringContext "${sysroot}"}' $failure/testBuildFailure.log
+        touch $out
+      '';
+
+  # Decision 134: a product linked with `-C prefer-dynamic` loads
+  # libstd-*.so from the sysroot, which its RUNPATH names. With nixpkgs'
+  # rustc the sysroot (rustc.unwrapped) is the only toolchain path in its
+  # closure, and its NEEDED libstd is there: the check passes. With
+  # rust-overlay's toolchain the RUNPATH names the joined toolchain, whose
+  # closure has the rustc and cargo components, which hold no library the
+  # product loads: the check fails naming cargo, and allows the joined
+  # sysroot and rust-std.
+  prefer-dynamic =
+    let
+      repo =
+        toolchain:
+        mkRepo (fixtures + "/stamps") [
+          (oneWs "." "dev")
+          {
+            workspaces.main = { inherit toolchain; };
+            targets.${native}.rustflags = [
+              "-C"
+              "prefer-dynamic"
+            ];
+          }
+        ];
+      nixpkgsTool = (repo { inherit (pkgs) rustc cargo; }).workspaces.main.packages.tool;
+      tc = pkgs.rust-bin.stable."1.99.0".minimal;
+      overlayTool =
+        (repo {
+          rustc = tc;
+          cargo = tc;
+        }).workspaces.main.packages.tool;
+      cargoComponent = lib.findFirst (p: builtins.match "[a-z0-9]{32}-cargo-.*" (baseNameOf "${p}") != null) null tc.paths;
+    in
+    assert lib.assertMsg (cargoComponent != null) "prefer-dynamic: no cargo component in ${tc}";
+    pkgs.runCommand "prefer-dynamic"
+      {
+        tool = nixpkgsTool;
+        refs = pkgs.writeClosure [ nixpkgsTool ];
+        clean = nixpkgsTool.checks.noSourceReferences;
+        failure = pkgs.testers.testBuildFailure overlayTool.checks.noSourceReferences;
+      }
+      ''
+        $tool/bin/tool | grep -q 'tool rev='
+        ${pkgs.buildPackages.binutils-unwrapped}/bin/readelf -d $tool/bin/tool | grep -q 'NEEDED.*libstd-'
+        grep -qxF ${builtins.unsafeDiscardStringContext "${pkgs.rustc.unwrapped}"} $refs
+        cat $failure/testBuildFailure.log
+        grep -qF 'references the Rust toolchain ${builtins.unsafeDiscardStringContext "${cargoComponent}"}' $failure/testBuildFailure.log
+        grep -q 'loads libstd-.*: allowed' $failure/testBuildFailure.log
+        if grep -qF 'references the Rust toolchain ${builtins.unsafeDiscardStringContext "${tc}"}' $failure/testBuildFailure.log; then
+          echo "the joined sysroot, which holds libstd, was not allowed" >&2
+          exit 1
+        fi
         touch $out
       '';
 

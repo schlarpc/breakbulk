@@ -663,7 +663,7 @@ let
       inherit root tools fetchArgs;
       path = ws.path;
       toolchain = {
-        inherit (ws.toolchain) rustc cargo;
+        inherit (ws.toolchain) rustc cargo capabilities;
       };
       target = triple;
       inherit (v)
@@ -966,14 +966,14 @@ let
         inherit (ws) toolchain;
         inherit (ws.devShell) setTarget;
         # Decision 123: the profile the planner turned trim-paths on for,
-        # from the build plan's header. Only Cargo 1.101 and later has
-        # trim-paths, so earlier Cargo never reads the plan (decision 81:
-        # the shell opens while a manifest is broken).
+        # from the build plan's header. Only a Cargo with trim-paths (the
+        # toolchain's `trimPaths` capability) may have it, so other Cargo
+        # never reads the plan (decision 81: the shell opens while a
+        # manifest is broken).
         trimPathsProfile =
           let
             inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
-            v = ws.toolchain.cargo.version or null;
-            mayTrim = v == null || util.rustVersion.atLeast util.rustVersion.gates.trimPaths v;
+            mayTrim = inst.capabilities.trimPaths;
             plan = builtins.fromJSON (
               builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
             );

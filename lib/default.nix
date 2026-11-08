@@ -125,7 +125,7 @@ let
     }).mkVendor;
 
   mkTools = import ./tools.nix { inherit lib; };
-  inherit (import ./plan.nix { inherit lib; }) mkPlan mkCargoEnv;
+  inherit (import ./plan.nix { inherit lib toolchainFacts; }) mkPlan mkCargoEnv;
 
   mkWorkspace = import ./workspace.nix {
     inherit
@@ -146,6 +146,7 @@ let
       testRuns
       testApps
       dynamic
+      toolchainFacts
       ;
     targetTraitsLib = targetTraits;
   };

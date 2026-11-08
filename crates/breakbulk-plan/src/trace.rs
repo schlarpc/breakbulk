@@ -70,6 +70,10 @@ pub struct Options {
     /// Set by the planner when the project uses `-Zbuild-std`
     /// ([`crate::build_std`]).
     pub std_vendor: Option<crate::build_std::StdVendor>,
+    /// What the toolchain can do (`--capabilities`, from the Nix library's
+    /// `toolchainFacts`). Planning needs it; the dev shell's
+    /// `--cargo-env-only` does not.
+    pub capabilities: Option<breakbulk_format::Capabilities>,
 }
 
 /// What one trace produced.
@@ -101,7 +105,7 @@ impl Trace {
             rustc_version: self.rustc_version.clone(),
             rustdoc: opts.rustdoc.clone(),
             cargo: opts.cargo.clone(),
-            nightly: breakbulk_format::version::is_nightly(&self.cargo_version),
+            nightly: capabilities(opts)?.nightly,
             keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
@@ -470,10 +474,15 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     })
 }
 
-/// Whether Cargo's `trim-paths` profile setting exists (breakbulk-format's
-/// `version::TRIM_PATHS`). `version` is `cargo -V` without `cargo `.
-pub fn has_trim_paths(version: &str) -> bool {
-    breakbulk_format::version::TRIM_PATHS.reached_by(version)
+/// The toolchain's capabilities, which planning needs.
+pub fn capabilities(opts: &Options) -> Result<breakbulk_format::Capabilities, Error> {
+    opts.capabilities.ok_or_else(|| {
+        Error(
+            "planning needs the toolchain's capabilities (--capabilities FILE, from the Nix \
+             library's toolchainFacts)"
+                .into(),
+        )
+    })
 }
 
 /// The options of the planner's second trace, which turns on Cargo's
@@ -505,19 +514,4 @@ fn has_doctests(opts: &Options, m: &Metadata) -> bool {
                     .iter()
                     .any(|c| matches!(c.as_str(), "lib" | "rlib" | "proc-macro"))
         })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn trim_paths_from_cargo_1_101() {
-        assert!(!has_trim_paths("1.99.0 (abc 2026-09-01)"));
-        assert!(!has_trim_paths("1.100.0-nightly (abc 2026-09-01)"));
-        assert!(has_trim_paths("1.101.0-nightly (3c747ea3e 2026-11-03)"));
-        assert!(has_trim_paths("1.101.0"));
-        assert!(has_trim_paths("1.102.1"));
-        assert!(!has_trim_paths(""));
-    }
 }
