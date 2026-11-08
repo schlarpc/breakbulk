@@ -59,15 +59,16 @@ let
   has = lib.hasInfix;
 
   evalTests = {
-    testPresetLinux = {
-      expr = orderOf S.defaultStages.linuxGnu;
+    # The stage `debugInfo = "split"` inserts (lib/products.nix).
+    testDebugSplitChain = {
+      expr = orderOf (S.chain [ "splitDebug" ]);
       expected = [
         "splitDebug"
         "install"
       ];
     };
-    testPresetMsvc = {
-      expr = orderOf S.defaultStages.msvc;
+    testNoStages = {
+      expr = orderOf { };
       expected = [ "install" ];
     };
     testPresetBrowser = {
@@ -89,10 +90,6 @@ let
     testPresetData = {
       expr = S.defaultStageNames;
       expected = {
-        linuxGnu = [ "splitDebug" ];
-        linuxMusl = [ "splitDebug" ];
-        staticGlibc = [ "splitDebug" ];
-        msvc = [ ];
         wasmBrowser = [
           "bindgen"
           "wasmOpt"
@@ -106,7 +103,7 @@ let
     testUserAfter = {
       expr = orderOf (
         S.merge [
-          S.defaultStages.linuxGnu
+          (S.chain [ "splitDebug" ])
           {
             sign = {
               after = "splitDebug";
@@ -124,7 +121,7 @@ let
     testUserBefore = {
       expr = orderOf (
         S.merge [
-          S.defaultStages.linuxGnu
+          (S.chain [ "splitDebug" ])
           {
             isaFix = {
               before = "splitDebug";
@@ -163,7 +160,7 @@ let
     testDesignExample = {
       expr = orderOf (
         S.merge [
-          S.defaultStages.msvc
+          { }
           {
             stageDlls = {
               after = "linked";
@@ -206,7 +203,7 @@ let
       };
     };
     testRemoveInstall = {
-      expr = orderOf (S.defaultStages.linuxGnu // { install = null; });
+      expr = orderOf ((S.chain [ "splitDebug" ]) // { install = null; });
       expected = [ "splitDebug" ];
     };
     testNothing = {
@@ -216,7 +213,7 @@ let
     # A replaced install still runs last.
     testCustomInstall = {
       expr = orderOf (
-        S.defaultStages.linuxGnu
+        (S.chain [ "splitDebug" ])
         // {
           install.run = dummy;
         }
@@ -343,7 +340,7 @@ let
           p = S.mkProduct {
             name = "ca";
             linked = helloLinked;
-            stages = S.defaultStages.linuxGnu;
+            stages = S.chain [ "splitDebug" ];
             inherit pkgs;
             ca = true;
           };
@@ -449,7 +446,7 @@ let
   hello = S.mkProduct {
     name = "hello";
     linked = helloLinked;
-    stages = S.defaultStages.linuxGnu;
+    stages = S.chain [ "splitDebug" ];
     target.triple = "x86_64-unknown-linux-gnu";
     sourcePaths = [ helloSrc ];
     inherit pkgs;

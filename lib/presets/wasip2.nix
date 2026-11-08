@@ -50,7 +50,6 @@ assert lib.assertMsg (
 ) "breakbulk.presets.wasip2: ${triple} is not wasm32-wasip2";
 common
 // {
-  stagePreset = mkDefault null;
   runner = mkDefault (chooseRunner {
     inherit pkgs wasmtime;
     traits = args.traits or null;

@@ -61,6 +61,7 @@ let
       "env"
     ]
     [ "stagePreset" ]
+    [ "debugInfo" ]
   ];
 
   # This target's traits: the built-in ones of the triple with `traits`
@@ -150,7 +151,7 @@ in
         built-in ones breakbulk reads from the triple
         (`breakbulk.targetTraits.resolve`, "Target traits" in
         docs/implementation.md). Every platform-dependent decision reads
-        the resulting traits: the linker kind, the default stage chain,
+        the resulting traits: the linker kind, the default debug handling,
         the install layout and file names, debuginfo side files, the
         dynamic-library path of test processes, static linking. Base
         fields (`arch`, `vendor`, `os`, `env`, `abi`, `families`, as
@@ -297,16 +298,18 @@ in
       default = { };
       example = lib.literalExpression ''
         {
-          strip = { after = "splitDebug"; run = breakbulk.stageHelpers.strip; };
-          splitDebug = lib.mkForce null;   # remove a default stage
+          # Strip the symbol tables too, after debug info is split off.
+          stripAll = { after = "splitDebug"; run = breakbulk.stageHelpers.strip { all = true; }; };
         }
       '';
       description = ''
         Post-link stages for this target's products, merged over the
-        stage preset's defaults (`stagePreset`). A stage is
-        `{ after ? null; before ? null; run = { input, product, target,
-        pkgs }: <derivation>; }`; `null` removes one. Package settings
-        (`packages.<name>.stages`) merge over these.
+        stage `debugInfo` inserts and the stage preset's defaults
+        (`stagePreset`). A stage is `{ after ? null; before ? null; run
+        = { input, product, target, pkgs }: <derivation>; }`; `null`
+        removes one. Package settings (`packages.<name>.stages`) merge
+        over these. Neither may remove the stage `debugInfo` inserts or
+        add `splitDebug` where it inserts none; set `debugInfo` instead.
       '';
     };
     checks = mkOption {
@@ -320,20 +323,46 @@ in
         in `repo.checks` as `<ws>/<triple>/<pkg>/<name>`.
       '';
     };
+    debugInfo = mkOption {
+      type = types.nullOr (
+        types.enum [
+          "split"
+          "keep"
+          "strip"
+        ]
+      );
+      default = null;
+      example = "keep";
+      description = ''
+        What this target's products do with debug info (decision 137),
+        for every package of the target, because the units are shared:
+
+        - `"split"`: the `splitDebug` stage, first after `linked`, moves
+          it to a `debug` output (`$debug/lib/debug/.build-id/…`); the
+          target's links get a GNU build ID, and shipped units remap
+          source paths only in panic messages, `file!()` and diagnostics,
+          so the debug info names the real sources. ELF only.
+        - `"keep"`: no stage; every source path is remapped, so the debug
+          info stays in the file without naming store paths. msvc's
+          `.pdb` is a separate file already and goes to the `debug`
+          output.
+        - `"strip"`: the `strip` stage (`strip --strip-debug`), first
+          after `linked`; every source path is remapped. ELF only.
+
+        `null`: the target's traits' `debugInfo`: `"split"` on Linux
+        ELF targets, `"keep"` elsewhere.
+      '';
+    };
     stagePreset = mkOption {
       type = types.nullOr types.str;
       default = null;
       example = "wasmBrowser";
       description = ''
         Which default stage chain this target's products get
-        (`breakbulk.stages.defaultStageNames`: `linuxGnu`,
-        `linuxMusl`, `staticGlibc` split debug info; `msvc` none;
-        `wasmBrowser` bindgen and wasmOpt; `wasmComponent` wasmOpt and
-        componentize). Presets set it; `null` picks by triple: Linux
-        targets split debug info, others get none. Whether the chain
-        contains `splitDebug` also decides how source paths are
-        remapped (debug info keeps real paths only when it is split
-        off).
+        (`breakbulk.stages.defaultStageNames`: `wasmBrowser` bindgen and
+        wasmOpt; `wasmComponent` wasmOpt and componentize). Presets set
+        it; `null`: none. Debug info is handled by `debugInfo`, not by
+        the chain.
       '';
     };
   };

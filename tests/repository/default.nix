@@ -578,12 +578,14 @@ in
       direct = t [ { targets.${native} = static; } ];
       viaOption = t [ { targets.${native}.preset = breakbulk.presets.staticGlibc; } ];
       linkerOf = x: builtins.unsafeDiscardStringContext (toString x.linker);
+      isStatic = x: lib.elem "target-feature=+crt-static" x.rustflags;
       unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (mwInst "a").units.build);
       checks = {
-        defaultIsLinuxGnu = lib.hasSuffix "cc-mold" (linkerOf dflt) && dflt.stagePreset == "linuxGnu";
-        offIsEmpty = off.linker == null && off.stagePreset == null;
-        directKeepsOwn = direct.stagePreset == "staticGlibc" && direct.rustflags == static.rustflags;
-        optionKeepsOwn = viaOption.stagePreset == "staticGlibc" && viaOption.rustflags == static.rustflags;
+        # linuxGnu: mold, and no static-linking rustflags.
+        defaultIsLinuxGnu = lib.hasSuffix "cc-mold" (linkerOf dflt) && dflt.rustflags == [ ];
+        offIsEmpty = off.linker == null && off.rustflags == [ ] && off.packageSet == null;
+        directKeepsOwn = isStatic direct && direct.rustflags == static.rustflags;
+        optionKeepsOwn = isStatic viaOption && viaOption.rustflags == static.rustflags;
         planUsesMold = lib.hasInfix "cc-mold" unitText;
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
@@ -612,11 +614,11 @@ in
       checks = {
         nativeIsMusl = mNative == "${mp.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-musl";
         targetsHasNative = repo.config.targets ? ${mNative};
-        defaultIsLinuxMusl = spec.stagePreset == "linuxMusl";
+        defaultIsLinuxMusl = lib.hasSuffix "cc-mold" (builtins.unsafeDiscardStringContext (toString spec.linker));
         crtStatic = lib.elem "target-feature=+crt-static" spec.rustflags;
         pkgConfigStatic = (spec.env.PKG_CONFIG_ALL_STATIC or null) == "1";
         muslCc = lib.hasPrefix (builtins.unsafeDiscardStringContext (toString mp.stdenv.cc)) (ccOf spec);
-        glibcStillGnu = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).workspaces.main.target.${native}.spec.stagePreset == "linuxGnu";
+        glibcStillGnu = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).workspaces.main.target.${native}.spec.rustflags == [ ];
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
     in

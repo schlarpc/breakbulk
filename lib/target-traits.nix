@@ -78,10 +78,11 @@
 #                          bare metal. A runner may deliver it under
 #                          another name (wine: WINEPATH), see
 #                          `dylibPathOf` in lib/test-runs.nix
-#   stagePreset            the default post-link stage chain for a target
-#                          with no `stagePreset` (lib/stages.nix):
-#                          "linuxGnu" (split debug info) on Linux, "msvc"
-#                          (none) on msvc, null otherwise
+#   debugInfo              the default of `targets.<t>.debugInfo` (decision
+#                          137): "split" (into a `debug` output) on a Linux
+#                          ELF target, "keep" elsewhere (msvc's `.pdb` is
+#                          separate already; wasm and others have no
+#                          splitting stage)
 { lib }:
 let
   inherit (lib)
@@ -467,13 +468,12 @@ let
         else
           "LD_LIBRARY_PATH";
       dylibPathSep = if isWindows then ";" else ":";
-      stagePreset =
-        if isLinux then
-          "linuxGnu"
-        else if isMsvc then
-          "msvc"
-        else
-          null;
+      # Decision 137: what a target's products do with debug info by
+      # default (`targets.<t>.debugInfo` overrides it): split it off into
+      # a `debug` output on a Linux ELF target; elsewhere keep it in the
+      # file (msvc's PDB is separate already; wasm and other targets have
+      # no splitting stage).
+      debugInfo = if isLinux && objectFormat == "elf" then "split" else "keep";
     };
 
   fieldNames = lib.attrNames (derive {

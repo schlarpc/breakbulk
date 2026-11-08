@@ -5,7 +5,7 @@
 #     name = "server";
 #     linked = <derivation: the raw link output, a directory holding the
 #               binary, cdylib or .wasm>;
-#     stages = breakbulk.stages.defaultStages.linuxGnu // {
+#     stages = breakbulk.stages.chain [ "splitDebug" ] // {
 #       sign = { after = "splitDebug"; run = mySigner; };
 #     };
 #     checks.isa = { on = "linked"; run = isaCheck; };
@@ -87,12 +87,11 @@ let
 
   caAuto = builtins ? outputOf;
 
-  # Default stage chains per preset, as data.
+  # Default stage chains per preset (`stagePreset`), as data. Debug
+  # handling is not among them: mkRepository puts the stage of the
+  # target's `debugInfo` (`splitDebug`, `strip`) first (lib/products.nix,
+  # decision 137).
   defaultStageNames = {
-    linuxGnu = [ "splitDebug" ];
-    linuxMusl = [ "splitDebug" ];
-    staticGlibc = [ "splitDebug" ];
-    msvc = [ ];
     wasmBrowser = [
       "bindgen"
       "wasmOpt"

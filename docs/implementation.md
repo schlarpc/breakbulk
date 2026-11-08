@@ -444,11 +444,11 @@ Path remapping uses rustc's `--remap-path-scope` (stable since 1.95):
 
 | Unit | Scope |
 | --- | --- |
-| Non-test units of a target whose stage set has `splitDebug` | `macro,diagnostics` (plus `coverage` in coverage variants); debug info keeps store paths |
-| Test binaries, and every unit of a target without `splitDebug` | All scopes |
+| Non-test units of a target with `debugInfo = "split"` | `macro,diagnostics` (plus `coverage` in coverage variants); debug info keeps store paths |
+| Test binaries, and every unit of a target with `debugInfo = "keep"` or `"strip"` | All scopes |
 | Any unit, with rustc older than 1.95 | All scopes (no scope flag) |
 
-Whether debug info is split off is decided once per target (decision 90), by the target's stage set (`products.targetStageSet`: the stage preset's defaults, or the traits' default chain, with `targets.<triple>.stages` over them). Three things follow from that one value: the products' stages (each package's stage set merges over the target's), the scope above, and `NIX_SET_BUILD_ID` on target units (the GNU build ID splitDebug needs). Units are shared by every package of the target, so a package's own stages cannot change the other two: a package whose stages add or remove `splitDebug` gets an evaluation warning naming `targets.<triple>.stages.splitDebug` (also in `products.<pkg>.warnings`). Removing it leaves real source paths in that product (its `noSourceReferences` check fails); adding it on a target without it finds no build ID.
+What happens to debug info is one property of the target (decision 137): `targets.<triple>.debugInfo`, `"split"`, `"keep"` or `"strip"`, by default the traits' `debugInfo` (`"split"` on Linux ELF targets, `"keep"` elsewhere: msvc's `.pdb` is a separate file already, and wasm has no splitting stage). Three things follow from it (`products.debugInfoOf`): the stage it puts first after `linked` in every product of the target (`splitDebug` for `"split"`, `strip`, that is `strip --strip-debug`, for `"strip"`, none for `"keep"`), the scope above, and `NIX_SET_BUILD_ID` on target units (the GNU build ID splitDebug needs, only for `"split"`). `"split"` and `"strip"` need an ELF target, or evaluation fails. Units are shared by every package of the target, so no `stages` setting, the target's or a package's, may remove the inserted stage (that would leave real source paths in the product) or add `splitDebug` where the target does not split (its links have no build ID and remap every path): either is an evaluation error naming `debugInfo`. Overriding the inserted stage's attributes (its `run`, `after`) is allowed, and a stage of another name (an extra `strip { all = true; }` after `splitDebug`) is an ordinary stage. Decision 90 had made a package's mismatch a warning.
 
 When Cargo's `trim-paths` is in effect, Cargo's own remaps are used instead, and breakbulk adds none of its own, because rustc picks one remap when several match. The scope is Cargo's when the project set trim-paths, and the table's when the planner did (`trimPathsDefault`).
 
@@ -529,6 +529,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
     stdenv = null;                    # the env captures' stdenv (null: the package set's), e.g. pkgs.clangStdenv
     host.stdenv = null;               # the same for host units (null: the build machine's)
     stages = { };                     # default post-link stages for this target
+    debugInfo = null;                 # "split" | "keep" | "strip"; null: the traits' (split on Linux ELF)
   };
 
   packages.<name> = {

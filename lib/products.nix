@@ -10,7 +10,8 @@
 #     traits = <built-in>;  # its traits (lib/target-traits.nix), with the
 #                           # user's targets.<triple>.traits merged in
 #     stagePreset = null;   # a name in stages.defaultStageNames, or null
-#                           # for the target's default (traits.stagePreset)
+#     debugInfo = null;     # "split" | "keep" | "strip", or null for the
+#                           # traits' default (decision 137)
 #     targetStages = { };   # targets.<triple>.stages
 #     targetChecks = { };   # targets.<triple>.checks
 #     packageConfig = pkg: [ { stages; checks; } … ];  # matching package
@@ -32,13 +33,14 @@
 #
 # The stage set of a product is, merged in this order (later wins per
 # attribute; `null` removes a stage): the target's stage set
-# (`targetStageSet`: the preset's default stages, then the target's
-# `stages`), and for each matching `packages.<name>` (unversioned keys
-# first) its `stages` then its `target.<triple>.stages`. Checks merge the
-# same way over the default `noSourceReferences`. Whether debug info is
-# split off is the target's decision (decision 90); a package whose stages
-# add or remove `splitDebug` gets an evaluation warning
-# (`products.<pkg>.warnings`).
+# (`targetStageSet`: the stage `debugInfo` inserts, the preset's default
+# stages, then the target's `stages`), and for each matching
+# `packages.<name>` (unversioned keys first) its `stages` then its
+# `target.<triple>.stages`. Checks merge the same way over the default
+# `noSourceReferences`. What happens to debug info is the target's
+# decision (`debugInfo`, decision 137): a stage set that removes the stage
+# it inserts, or adds `splitDebug` where it inserts none, is an
+# evaluation error.
 #
 # `linked` is one directory holding every built root's files, as
 # symlinks: a bin under its target name (Cargo's uplifted name, the
@@ -75,13 +77,9 @@ let
     nameValuePair
     ;
 
-  # The default stage chain for a target when no preset names one: its
-  # traits' `stagePreset` (lib/target-traits.nix). Linux ELF targets split
-  # debug info; Windows msvc keeps PDBs as they are; others (wasm without
-  # a preset, unknown targets) get no stages, because the browser and
-  # component chains need to know which one the user wants.
-  stagePresetFor = triple: (targetTraits.resolve { inherit triple; }).stagePreset;
-
+  # A stage preset's chain (`stagePreset`): none by default, because the
+  # browser and component chains need to know which one the user wants;
+  # debug handling is `debugInfo`'s.
   presetStages =
     name:
     if name == null then
@@ -232,37 +230,101 @@ let
         done | tee $out/log
       '';
 
-  # Decision 90: whether debug info is split off is decided per target,
-  # from one stage set, and three things follow from it: the products'
-  # stages (each package's set merges over this one), the remap scope of
-  # the target's units (`shippedRemapScope`: debug info keeps real store
-  # paths only when it is split off) and the GNU build ID of its links
-  # (`NIX_SET_BUILD_ID`, which splitDebug needs). The units are shared by
-  # every package of the target, so a package cannot change this alone:
-  # mkProducts warns when a package's own stages add or remove
-  # `splitDebug` (`splitDebugWarning`).
+  # Decision 137: what happens to a target's debug info is one property of
+  # the target, `targets.<triple>.debugInfo` (default: the traits'
+  # `debugInfo`), and three things follow from it: the stage it puts first
+  # in every product's chain (`splitDebug` for "split", `strip` for
+  # "strip", none for "keep"), the remap scope of the target's units
+  # (`shippedRemapScope`: debug info keeps real store paths only when it is
+  # split off) and the GNU build ID of its links (`NIX_SET_BUILD_ID`, which
+  # splitDebug needs). The units are shared by every package of the target,
+  # so neither the target's nor a package's `stages` may remove that stage,
+  # or add `splitDebug` where the target does not split: either is an
+  # evaluation error naming `debugInfo` (decision 90 made it a warning).
+  # Overriding the inserted stage's attributes (`run`, `after`) is allowed.
   #
-  # The target's stage set: the stage preset's defaults (`stagePreset`, or
-  # the traits' default chain) with `targets.<triple>.stages` over them.
-  targetStageSet =
+  # `targetStageSet`'s arguments: { triple; traits; stagePreset; debugInfo;
+  # targetStages; }.
+  debugInfoOf =
     {
       triple,
       traits ? targetTraits.resolve { inherit triple; },
+      debugInfo ? null,
+      ...
+    }:
+    let
+      v = if debugInfo == null then traits.debugInfo else debugInfo;
+    in
+    if
+      !(elem v [
+        "split"
+        "keep"
+        "strip"
+      ])
+    then
+      throw "breakbulk: targets.\"${triple}\".debugInfo: `${toString v}` is not one of split, keep, strip"
+    else if v != "keep" && traits.objectFormat != "elf" then
+      throw "breakbulk: targets.\"${triple}\".debugInfo = \"${v}\" needs an ELF target (the splitDebug and strip stages work on ELF files), and ${triple} is ${traits.objectFormat}; use \"keep\""
+    else
+      v;
+
+  # The stage `debugInfo` puts in every product's chain, by name, or null.
+  debugStageName = v: { split = "splitDebug"; strip = "strip"; keep = null; }.${v};
+
+  # The stage itself: first after `linked`.
+  debugStages =
+    v:
+    let
+      n = debugStageName v;
+    in
+    if n == null then { } else stages.chain [ n ];
+
+  # A stage set (`where` names it in messages) may not remove the target's
+  # debug stage or add `splitDebug` where the target does not split.
+  checkDebugStages =
+    {
+      triple,
+      debugInfo,
+      where,
+    }:
+    set:
+    let
+      auto = debugStageName debugInfo;
+      fix = "debug splitting is decided per target, for every package of it (decision 137): set `targets.\"${triple}\".debugInfo` (\"split\", \"keep\" or \"strip\")";
+    in
+    if auto != null && set ? ${auto} && set.${auto} == null then
+      throw "breakbulk: ${where} removes the `${auto}` stage on ${triple}, which `debugInfo = \"${debugInfo}\"` inserts; ${fix}"
+    else if auto != "splitDebug" && (set.splitDebug or null) != null then
+      throw "breakbulk: ${where} adds a `splitDebug` stage on ${triple}, whose `debugInfo` is \"${debugInfo}\": the target's units remap every source path and their links get no GNU build ID; ${fix}"
+    else
+      set;
+
+  # The target's stage set: the debug stage, the stage preset's defaults
+  # (`stagePreset`, a chain such as `wasmBrowser`; none by default), then
+  # `targets.<triple>.stages` over them.
+  targetStageSet =
+    {
+      triple,
       stagePreset ? null,
       targetStages ? { },
       ...
-    }:
+    }@args:
+    let
+      v = debugInfoOf args;
+    in
     stages.merge [
-      (presetStages (if stagePreset == null then traits.stagePreset else stagePreset))
-      targetStages
+      (debugStages v)
+      (presetStages stagePreset)
+      (checkDebugStages {
+        inherit triple;
+        debugInfo = v;
+        where = "targets.\"${triple}\".stages";
+      } targetStages)
     ];
 
-  # Whether a stage set splits debug info off.
-  splitsDebug = stageSet: (stageSet.splitDebug or null) != null;
-
-  # Whether the target's products split debug info off (targetStageSet's
+  # Whether the target's debug info is split off (targetStageSet's
   # arguments).
-  targetSplitsDebug = args: splitsDebug (targetStageSet args);
+  targetSplitsDebug = args: debugInfoOf args == "split";
 
   # The scope of non-test units for a target (targetStageSet's arguments
   # and `coverage`).
@@ -273,25 +335,6 @@ let
     }@args:
     if targetSplitsDebug args then "macro,diagnostics${lib.optionalString coverage ",coverage"}" else null;
 
-  # The warning for a package whose stages disagree with its target's on
-  # `splitDebug`, or null.
-  splitDebugWarning =
-    {
-      pkg,
-      triple,
-      target,
-      package,
-    }:
-    let
-      fix = "set it for the target instead (`targets.\"${triple}\".stages.splitDebug`), or build this package for a target of its own";
-    in
-    if target == package then
-      null
-    else if target then
-      "breakbulk: packages.${pkg} removes `splitDebug` on ${triple}, but debug splitting is decided per target (decision 90): the units it links still keep real source paths in their debug info, so its product references its sources (its noSourceReferences check fails), with no `debug` output to hold them; ${fix}"
-    else
-      "breakbulk: packages.${pkg} adds `splitDebug` on ${triple}, but debug splitting is decided per target (decision 90): the units it links remap every source path, so its `debug` output names no sources, and its links get no GNU build ID, which splitDebug needs for a binary with debug info; ${fix}";
-
   mkProducts =
     {
       pkgs,
@@ -300,6 +343,7 @@ let
       triple,
       traits ? targetTraits.resolve { inherit triple; },
       stagePreset ? null,
+      debugInfo ? null,
       targetStages ? { },
       targetChecks ? { },
       packageConfig ? _: [ ],
@@ -311,14 +355,17 @@ let
       toolchainPaths ? inst.toolchainPaths or [ ],
     }:
     let
-      targetSet = targetStageSet {
+      setArgs = {
         inherit
           triple
           traits
           stagePreset
+          debugInfo
           targetStages
           ;
       };
+      targetSet = targetStageSet setArgs;
+      effectiveDebugInfo = debugInfoOf setArgs;
       byPkg = groupBy (r: r.breakbulkRoot.package) (
         filter (r: !r.breakbulkRoot.test) (attrValues inst.roots)
       );
@@ -331,12 +378,17 @@ let
           unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           confs = packageConfig pkg;
-          stageSet = stages.merge ([ targetSet ] ++ map (c: c.stages or { }) confs);
-          warning = splitDebugWarning {
-            inherit pkg triple;
-            target = splitsDebug targetSet;
-            package = splitsDebug stageSet;
-          };
+          stageSet = stages.merge (
+            [ targetSet ]
+            ++ map (
+              c:
+              checkDebugStages {
+                inherit triple;
+                debugInfo = effectiveDebugInfo;
+                where = "packages.${pkg}.stages";
+              } (c.stages or { })
+            ) confs
+          );
           checkSet = stages.merge ([ targetChecks ] ++ map (c: c.checks or { }) confs);
           p = stages.mkProduct {
             name = pkg;
@@ -359,8 +411,6 @@ let
           ) rs;
           extra = {
             inherit roots uncertain;
-            # Evaluation warnings about this product (also printed).
-            warnings = lib.optional (warning != null) warning;
             unbuilt = map (r: {
               root = rootName r;
               inherit (r.breakbulkRoot) reason;
@@ -368,16 +418,15 @@ let
           }
           // lib.optionalAttrs uncertain { buildCheck = mkBuildCheck pkgs pkg rs; };
         in
-        (if warning == null then lib.id else lib.warn warning) ((if built == [ ] then head rs else p) // extra);
+        (if built == [ ] then head rs else p) // extra;
     in
     mapAttrs product selected;
 in
 {
   inherit
     mkProducts
-    stagePresetFor
     targetStageSet
-    splitsDebug
+    debugInfoOf
     targetSplitsDebug
     shippedRemapScope
     presetStages

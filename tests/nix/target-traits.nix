@@ -5,7 +5,7 @@
 #                        targets breakbulk has presets for, a user's
 #                        traits merged over them (and for a target with no
 #                        built-in ones) reaching the linker choice, the
-#                        stage chain and the resolved repository target,
+#                        debug handling and the resolved repository target,
 #                        and an unknown target failing only when a trait
 #                        is read
 #   target-traits-rustc  `parse` against `rustc --print cfg --target <t>`
@@ -161,7 +161,7 @@ in
         "objectFormat"
         "executableSuffix"
         "dylibPathVar"
-        "stagePreset"
+        "debugInfo"
         "kernel"
         "debugArtifacts"
       ] (r "x86_64-unknown-linux-gnu");
@@ -174,7 +174,7 @@ in
         objectFormat = "elf";
         executableSuffix = "";
         dylibPathVar = "LD_LIBRARY_PATH";
-        stagePreset = "linuxGnu";
+        debugInfo = "split";
         kernel = "linux";
         debugArtifacts = [
           {
@@ -204,7 +204,7 @@ in
         "kernel"
         "dylibPathVar"
         "dylibPathSep"
-        "stagePreset"
+        "debugInfo"
       ] (r "aarch64-pc-windows-msvc");
       expected = {
         isWindows = true;
@@ -225,11 +225,11 @@ in
         kernel = "windows";
         dylibPathVar = "PATH";
         dylibPathSep = ";";
-        stagePreset = "msvc";
+        debugInfo = "keep";
       };
     };
     testMingw = {
-      expr = map (t: pick [ "isMingw" "abi" "staticLibrarySuffix" "stagePreset" ] (r t)) [
+      expr = map (t: pick [ "isMingw" "abi" "staticLibrarySuffix" "debugInfo" ] (r t)) [
         "x86_64-pc-windows-gnu"
         "x86_64-pc-windows-gnullvm"
       ];
@@ -238,13 +238,13 @@ in
           isMingw = true;
           abi = "";
           staticLibrarySuffix = ".a";
-          stagePreset = null;
+          debugInfo = "keep";
         }
         {
           isMingw = true;
           abi = "llvm";
           staticLibrarySuffix = ".a";
-          stagePreset = null;
+          debugInfo = "keep";
         }
       ];
     };
@@ -289,7 +289,7 @@ in
       ];
     };
     testOthers = {
-      expr = map (t: pick [ "os" "env" "abi" "objectFormat" "isLinux" "kernel" "stagePreset" ] (r t)) [
+      expr = map (t: pick [ "os" "env" "abi" "objectFormat" "isLinux" "kernel" "debugInfo" ] (r t)) [
         "aarch64-unknown-linux-musl"
         "riscv64gc-unknown-linux-gnu"
         "x86_64-unknown-none"
@@ -305,7 +305,7 @@ in
           objectFormat = "elf";
           isLinux = true;
           kernel = "linux";
-          stagePreset = "linuxGnu";
+          debugInfo = "split";
         }
         {
           os = "linux";
@@ -314,7 +314,7 @@ in
           objectFormat = "elf";
           isLinux = true;
           kernel = "linux";
-          stagePreset = "linuxGnu";
+          debugInfo = "split";
         }
         {
           os = "none";
@@ -323,7 +323,7 @@ in
           objectFormat = "elf";
           isLinux = false;
           kernel = null;
-          stagePreset = null;
+          debugInfo = "keep";
         }
         {
           os = "none";
@@ -332,7 +332,7 @@ in
           objectFormat = "elf";
           isLinux = false;
           kernel = null;
-          stagePreset = null;
+          debugInfo = "keep";
         }
         {
           os = "android";
@@ -341,7 +341,7 @@ in
           objectFormat = "elf";
           isLinux = false;
           kernel = "linux";
-          stagePreset = null;
+          debugInfo = "keep";
         }
         {
           os = "macos";
@@ -350,7 +350,7 @@ in
           objectFormat = "macho";
           isLinux = false;
           kernel = "darwin";
-          stagePreset = null;
+          debugInfo = "keep";
         }
       ];
     };
@@ -559,7 +559,7 @@ in
             "objectFormat"
             "executableSuffix"
             "dylibPathVar"
-            "stagePreset"
+            "debugInfo"
           ]
           (
             tt.resolve {
@@ -580,14 +580,14 @@ in
         objectFormat = "elf";
         executableSuffix = ".elf";
         dylibPathVar = "LD_LIBRARY_PATH";
-        stagePreset = "linuxGnu";
+        debugInfo = "split";
       };
     };
     # Through mkRepository: `targets.<t>.traits` reaches the resolved
     # target, and decisions made from it.
     testRepositoryTraits = {
       expr = {
-        board = pick [ "os" "env" "executableSuffix" "isLinux" "stagePreset" ] board;
+        board = pick [ "os" "env" "executableSuffix" "isLinux" "debugInfo" ] board;
         linker = bb.presets.linkerKind {
           triple = "my-board";
           traits = board;
@@ -605,7 +605,7 @@ in
           env = "musl";
           executableSuffix = ".elf";
           isLinux = true;
-          stagePreset = "linuxGnu";
+          debugInfo = "split";
         };
         linker = "mold";
         scope = "macro,diagnostics";

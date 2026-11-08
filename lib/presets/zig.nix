@@ -226,5 +226,4 @@ in
   }).runner;
   testSystem = mkDefault null;
   host = hostSpec pkgs;
-  stagePreset = mkDefault "linuxGnu";
 }

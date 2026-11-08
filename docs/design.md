@@ -173,13 +173,15 @@ Check and clippy variants check every target, as `cargo check --all-targets` doe
 
 ### Default stages per preset
 
-| Preset | Default stages |
-| --- | --- |
-| Linux gnu / musl | `splitDebug` |
-| Windows msvc | none (PDBs are already separate; `install` puts them in the `debug` output) |
-| wasm, browser | `bindgen` → `wasmOpt` |
-| wasm, component | `wasmOpt` → `componentize` |
-| Darwin (later) | `dsymutil` → `strip` → `adhocSign` |
+What happens to debug info is a property of the target, not of a stage list: `targets.<t>.debugInfo` is `"split"`, `"keep"` or `"strip"`, and puts the matching stage first. The units are shared by every package of the target and their remap scope and build ID depend on it, so no package can add or remove that stage.
+
+| Preset | debugInfo (default) | Default stages |
+| --- | --- | --- |
+| Linux gnu / musl | split | `splitDebug` |
+| Windows msvc | keep | none (PDBs are already separate; `install` puts them in the `debug` output) |
+| wasm, browser | keep | `bindgen` → `wasmOpt` |
+| wasm, component | keep | `wasmOpt` → `componentize` |
+| Darwin (later) | to decide (`.dSYM` via `dsymutil`) | `dsymutil` → `strip` → `adhocSign` |
 
 The tool never applies an implicit fixup phase. Stripping breaks some signing schemes, and some checks must see unstripped bytes, so any default stage can be removed or reordered.
 
@@ -205,8 +207,9 @@ Source paths must not end up in shipped outputs. Every crate's source is a store
 
 Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
 
-- **Shipped binaries and cdylibs** remap panic locations, `file!()` and diagnostics, but keep real store paths in debug info. `splitDebug` moves DWARF to a separate `debug` output (`$debug/lib/debug/.build-id/…`, found by gdb and debuginfod). The main output has no source references; the `debug` output references exactly the sources a debugger needs, so installing it gives source-level debugging with no setup.
+- **Shipped binaries and cdylibs** of a target that splits debug info (`debugInfo = "split"`, the default on Linux) remap panic locations, `file!()` and diagnostics, but keep real store paths in debug info. `splitDebug` moves DWARF to a separate `debug` output (`$debug/lib/debug/.build-id/…`, found by gdb and debuginfod). The main output has no source references; the `debug` output references exactly the sources a debugger needs, so installing it gives source-level debugging with no setup.
 - **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change. The workspace libraries they link are compiled once, with the shipped scope, so their debug info still names their source views: an edit to any file of such a library (a README) changes the bytes of every test binary linking it. `test.stripForRun` (off by default) has the test run consume a debug-stripped copy instead, which does not change; the unstripped binary stays available for debugging.
+- On a target that keeps or strips debug info, every scope is remapped.
 - With rustc older than 1.95, every scope is remapped.
 
 Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. On Cargo 1.101 and later, breakbulk sets it when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later. When the project set it, its own scope is kept.
