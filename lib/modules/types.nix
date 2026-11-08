@@ -2,8 +2,16 @@
 { lib }:
 let
   inherit (lib) types mkOption;
+  req = import ./version-req.nix { inherit lib; };
 in
 rec {
+  # A Cargo version requirement (`^1.2`, `>=0.42, <0.50`), checked when
+  # the option is read, so that a bad one is an error on its option.
+  versionReq = types.addCheck types.str req.isReq // {
+    name = "versionReq";
+    description = "Cargo version requirement";
+  };
+
   # A list of packages, or a function from a package set to one. The
   # function form (`p: [ p.openssl ]`) is called with the package set that
   # matches each platform (decision 20); a plain list is used as given.
@@ -88,6 +96,33 @@ rec {
     visible = false;
     description = "Warnings from this part of the configuration.";
   };
+
+  # An internal option collecting cross-option checks from a submodule, as
+  # NixOS's `assertions`: mkRepository fails with every false one's message
+  # before it returns anything.
+  assertionsOption = mkOption {
+    type = types.listOf (
+      types.submodule {
+        options = {
+          assertion = mkOption { type = types.bool; };
+          message = mkOption { type = types.str; };
+        };
+      }
+    );
+    default = [ ];
+    internal = true;
+    visible = false;
+    description = "Checks from this part of the configuration.";
+  };
+
+  # " (set in `a.nix')" for an option, for messages that name where a value
+  # came from; empty when only anonymous modules set it.
+  setIn =
+    opt:
+    let
+      files = lib.filter (f: f != "<unknown-file>") opt.files;
+    in
+    lib.optionalString (files != [ ]) " (set in ${lib.concatMapStringsSep " and " (f: "`${toString f}'") files})";
 
   # Warnings for options of a submodule that are set but not implemented:
   # `prefix` names the submodule instance (e.g. `targets.wasm32-unknown-unknown`).

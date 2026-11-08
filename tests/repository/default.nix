@@ -505,8 +505,22 @@ in
         [ "<=1.2" "1.2.9" true ]
       ];
       bad = lib.filter (c: m (lib.elemAt c 0) (lib.elemAt c 1) != lib.elemAt c 2) cases;
+      # `isReq` (the `versionReq` option type): every requirement above, and
+      # none of these.
+      notReqs = [
+        ""
+        " , "
+        "1.2.3.4"
+        ">=nope"
+        "1.2, foo"
+        "=>1"
+      ];
+      badReqs =
+        lib.filter (c: !breakbulk.versionReq.isReq (lib.head c)) cases
+        ++ lib.filter breakbulk.versionReq.isReq notReqs;
     in
     assert lib.assertMsg (bad == [ ]) "version-req: wrong results for ${builtins.toJSON bad}";
+    assert lib.assertMsg (badReqs == [ ]) "version-req: isReq wrong for ${builtins.toJSON badReqs}";
     evalCheck "version-req" "ok";
 
   # The dev shell: CARGO_BUILD_TARGET, inputs of the packages present, and
@@ -997,6 +1011,83 @@ in
       lib.attrNames renamed == [ "release" ]
     ) "default-variant: renamed: ${toString (lib.attrNames renamed)}";
     evalCheck "default-variant" "ok";
+
+  # Option checks are the modules' `assertions` (#28): each failing one's
+  # message names the option and the file that set it, and reading the
+  # repository fails with all of them. A bad `packages.<name>.version` is
+  # a type error on that option.
+  option-assertions =
+    let
+      file = "/checks/flake.nix";
+      repoOf =
+        m:
+        mkRepo (fixtures + "/walking-skeleton") [
+          {
+            _file = file;
+            workspaces.main = m;
+          }
+        ];
+      failed = r: map (a: a.message) (lib.filter (a: !a.assertion) r.config.assertions);
+      at = "(set in `${file}')";
+      ws = "breakbulk: workspaces.main";
+      cases = {
+        ok = {
+          m = { };
+          want = [ ];
+        };
+        defaultVariant = {
+          m.defaultVariant = "relase";
+          want = [ "${ws}.defaultVariant `relase` ${at} is not one of its variants (it has none)" ];
+        };
+        defaultTarget = {
+          m.defaultTarget = "foo";
+          want = [ "${ws}.defaultTarget `foo` ${at} is not one of its targets (${native})" ];
+        };
+        shellTarget = {
+          m.devShell.target = "foo";
+          want = [ "${ws}.devShell.target `foo` ${at} is not one of its targets (${native})" ];
+        };
+        setTarget = {
+          m.devShell.setTarget = true;
+          want = [ "${ws}.devShell.setTarget ${at} was removed; use devShell.target: a triple, or null for none" ];
+        };
+        benches = {
+          m.variants.c = {
+            mode = "check";
+            benches = true;
+          };
+          want = [ "${ws}.variants.c ${at}: `benches` needs a build variant, not `check`" ];
+        };
+        allTargets = {
+          m.variants.default.allTargets = false;
+          want = [ "${ws}.variants.default ${at}: `allTargets = false` needs a check or clippy variant, not `build`" ];
+        };
+        variantTargets = {
+          m.variants.default.targets = [ "riscv64gc-unknown-linux-gnu" ];
+          want = [
+            "${ws}.variants.default.targets ${at}: riscv64gc-unknown-linux-gnu not among the workspace's targets (${native})"
+          ];
+        };
+      };
+      got = lib.mapAttrs (_: c: failed (repoOf c.m)) cases;
+      bad = lib.attrNames (lib.filterAttrs (n: c: got.${n} != c.want) cases);
+      badKey = mkRepo (fixtures + "/walking-skeleton") [
+        {
+          _file = "/checks/key.nix";
+          packages."foo@>=nope" = { };
+        }
+      ];
+      badVersion = mkRepo (fixtures + "/walking-skeleton") [ { packages.foo.version = "not a req"; } ];
+      fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
+    in
+    assert lib.assertMsg (bad == [ ]) "option-assertions: ${builtins.toJSON (lib.getAttrs bad got)}";
+    assert lib.assertMsg (
+      failed badKey == [ "breakbulk: packages.\"foo@>=nope\" (set in `/checks/key.nix'): `>=nope` is not a Cargo version requirement" ]
+    ) "option-assertions: key: ${builtins.toJSON (failed badKey)}";
+    assert lib.assertMsg (fails (repoOf { defaultVariant = "x"; }).workspaces) "option-assertions: workspaces read despite a failed assertion";
+    assert lib.assertMsg (fails badVersion.config.packages.foo.version) "option-assertions: a bad version requirement was accepted";
+    assert lib.assertMsg (!(fails badVersion.config.packages.foo.env)) "option-assertions: the version's type error reached another option";
+    evalCheck "option-assertions" (builtins.toJSON got);
 
   # Decision 19's question: `targets.<t>.stdenv` replaces the target
   # captures' stdenv (base and per-package), `host.stdenv` the host

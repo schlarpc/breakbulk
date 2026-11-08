@@ -214,6 +214,15 @@ rec {
 
   parse = req: map parseComparator (filter (s: lib.trim s != "") (lib.splitString "," req));
 
+  # Is `req` a version requirement `parse` takes? (`types.nix`'s
+  # `versionReq` type.)
+  isReq =
+    req:
+    let
+      cs = filter (s: lib.trim s != "") (lib.splitString "," req);
+    in
+    cs != [ ] && lib.all (s: (builtins.tryEval (parseComparator s)).success) cs;
+
   # Does the locked `version` satisfy the requirement string `req`?
   matches =
     req: version:

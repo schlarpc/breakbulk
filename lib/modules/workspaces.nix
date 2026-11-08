@@ -60,12 +60,39 @@ let
     };
   };
 
-  # `ws`: the workspace's config, for defaults a variant inherits.
+  # `ws`: the workspace's config, for defaults a variant inherits;
+  # `wsName`, its name, for messages.
   variant =
-    ws:
-    { name, ... }:
+    wsName: ws:
     {
+      name,
+      options,
+      config,
+      ...
+    }:
+    let
+      at = "workspaces.${wsName}.variants.${name}";
+      checkMode = config.mode == "check" || config.mode == "clippy";
+      unknownTargets = lib.filter (t: !(ws.targets ? ${t})) (if config.targets == null then [ ] else config.targets);
+    in
+    {
+      config.assertions = [
+        {
+          assertion = !(config.benches && checkMode);
+          message = "breakbulk: ${at}${bt.setIn options.benches}: `benches` needs a build variant, not `${config.mode}`";
+        }
+        {
+          assertion = config.allTargets || checkMode;
+          message = "breakbulk: ${at}${bt.setIn options.allTargets}: `allTargets = false` needs a check or clippy variant, not `${config.mode}`";
+        }
+        {
+          assertion = unknownTargets == [ ];
+          message = "breakbulk: ${at}.targets${bt.setIn options.targets}: ${lib.concatStringsSep ", " unknownTargets} not among the workspace's targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
+        }
+      ];
+
       options = {
+        assertions = bt.assertionsOption;
         profile = mkOption {
           type = types.str;
           default = "release";
@@ -353,7 +380,7 @@ let
         };
 
         variants = mkOption {
-          type = types.attrsOf (types.submodule (variant config));
+          type = types.attrsOf (types.submodule (variant name config));
           defaultText = lib.literalExpression "{ default = { }; }";
           description = ''
             Plan parameters. Each variant is a separate pair of plans (build
@@ -581,14 +608,45 @@ let
         });
 
         warnings = bt.warningsOption;
+        assertions = bt.assertionsOption;
       };
 
-      # Removed (#32); there is no `assertions` option to report through
-      # (lib.mkRemovedOptionModule's way), so reading the shell's target
-      # fails instead.
-      config.devShell.target = lib.mkIf options.devShell.setTarget.isDefined (
-        throw "breakbulk: workspaces.${name}.devShell.setTarget was removed; use devShell.target: a triple, or null for none"
-      );
+      config.assertions =
+        let
+          targets = lib.concatStringsSep ", " (lib.attrNames config.targets);
+          # A target option (`defaultTarget`, `devShell.target`): one of
+          # the workspace's targets, or null.
+          targetOption =
+            path:
+            let
+              t = lib.getAttrFromPath path config;
+            in
+            {
+              assertion = t == null || config.targets ? ${t};
+              message = "breakbulk: workspaces.${name}.${lib.concatStringsSep "." path} `${t}`${bt.setIn (lib.getAttrFromPath path options)} is not one of its targets (${targets})";
+            };
+        in
+        [
+          # Removed (#32).
+          {
+            assertion = !options.devShell.setTarget.isDefined;
+            message = "breakbulk: workspaces.${name}.devShell.setTarget${bt.setIn options.devShell.setTarget} was removed; use devShell.target: a triple, or null for none";
+          }
+          {
+            assertion = config.variants ? ${config.defaultVariant};
+            message = "breakbulk: workspaces.${name}.defaultVariant `${config.defaultVariant}`${bt.setIn options.defaultVariant} is not one of its variants (${
+              if config.variants == { } then "it has none" else lib.concatStringsSep ", " (lib.attrNames config.variants)
+            })";
+          }
+          (targetOption [ "defaultTarget" ])
+        ]
+        # `devShell.target` defaults to `defaultTarget`: one message for an
+        # invalid `defaultTarget`, naming it.
+        ++ lib.optional (config.devShell.target != config.defaultTarget) (targetOption [
+          "devShell"
+          "target"
+        ])
+        ++ lib.concatMap (v: v.assertions) (lib.attrValues config.variants);
 
       # A definition, not the option's default, so that a user's variants
       # merge with it instead of replacing it.
@@ -627,4 +685,5 @@ in
   };
 
   config.warnings = lib.concatMap (w: w.warnings) (lib.attrValues config.workspaces);
+  config.assertions = lib.concatMap (w: w.assertions) (lib.attrValues config.workspaces);
 }

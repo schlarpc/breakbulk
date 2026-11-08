@@ -960,7 +960,7 @@ version\. The attribute name may also carry the requirement:
 
 
 *Type:*
-null or string
+null or Cargo version requirement
 
 
 

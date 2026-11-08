@@ -615,15 +615,6 @@ let
 
   # --- workspaces --------------------------------------------------------------
 
-  checkMode =
-    wsName: vName: v:
-    if v.benches && (v.mode == "check" || v.mode == "clippy") then
-      throw "breakbulk: workspaces.${wsName}.variants.${vName}: `benches` needs a build variant, not `${v.mode}`"
-    else if !v.allTargets && !(v.mode == "check" || v.mode == "clippy") then
-      throw "breakbulk: workspaces.${wsName}.variants.${vName}: `allTargets = false` needs a check or clippy variant, not `${v.mode}`"
-    else
-      v;
-
   # The packages a variant plans on a target (null: the whole workspace):
   # the variant's own selection, else the target's.
   selOf = wsName: triple: v: if v.packages != null then v.packages else selectionOf wsName triple;
@@ -638,19 +629,7 @@ let
 
   # The variants planned for a target (`variants.<v>.targets`).
   variantsFor =
-    wsName: ws: triple:
-    lib.filterAttrs (
-      vName: v:
-      let
-        unknown = lib.filter (t: !(ws.targets ? ${t})) v.targets;
-      in
-      if v.targets == null then
-        true
-      else if unknown != [ ] then
-        throw "breakbulk: workspaces.${wsName}.variants.${vName}.targets: ${lib.concatStringsSep ", " unknown} not among the workspace's targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})"
-      else
-        lib.elem triple v.targets
-    ) ws.variants;
+    ws: triple: lib.filterAttrs (_: v: v.targets == null || lib.elem triple v.targets) ws.variants;
 
   # The target's stage set's inputs (lib/products.nix targetStageSet): one
   # decision, per target, of what happens to debug info (`debugInfo`,
@@ -670,7 +649,7 @@ let
   instance =
     wsName: ws: triple: vName:
     let
-      v = checkMode wsName vName ws.variants.${vName};
+      v = ws.variants.${vName};
       entries = locks.${wsName};
       sel = selOf wsName triple v;
       tsel = testSelOf wsName triple v;
@@ -879,20 +858,8 @@ let
     wsName: ws:
     let
       instances = lib.mapAttrs (
-        triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor wsName ws triple)
+        triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor ws triple)
       ) ws.targets;
-      # A target option (`defaultTarget`, `devShell.target`): one of the
-      # workspace's targets, or null.
-      targetOption =
-        opt: t:
-        if t == null || ws.targets ? ${t} then
-          t
-        else
-          throw "breakbulk: workspaces.${wsName}.${opt} `${t}` is not one of its targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
-      defaultTriple = targetOption "defaultTarget" ws.defaultTarget;
-      # Checked first, so that an invalid `defaultTarget` is named as such
-      # rather than as the `devShell.target` it defaults.
-      shellTriple = builtins.seq defaultTriple (targetOption "devShell.target" ws.devShell.target);
       perTarget = lib.mapAttrs (
         triple: vs:
         let
@@ -929,7 +896,7 @@ let
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
                 units =
                   let
-                    kinds = [ "build" ] ++ lib.optional (checkMode wsName vName v).allTargets "test";
+                    kinds = [ "build" ] ++ lib.optional v.allTargets "test";
                   in
                   if inst.delivery == "dynamic" then
                     map (k: inst.allUnits.${k}) kinds
@@ -941,17 +908,14 @@ let
           # The default variant's outputs; empty when it is not planned for
           # this target (`variants.<v>.targets`).
           dflt =
-            if !(ws.variants ? ${ws.defaultVariant}) then
-              throw "breakbulk: workspaces.${wsName}.defaultVariant `${ws.defaultVariant}` is not one of its variants (${lib.concatStringsSep ", " (lib.attrNames ws.variants)})"
-            else
-              variants.${ws.defaultVariant} or {
-                packages = { };
-                tests = { };
-                testRuns = { };
-                namedTestRuns = { };
-                testApps = { };
-                doctests = { };
-              };
+            variants.${ws.defaultVariant} or {
+              packages = { };
+              tests = { };
+              testRuns = { };
+              namedTestRuns = { };
+              testApps = { };
+              doctests = { };
+            };
           benchVariants = lib.attrNames (lib.filterAttrs (n: v: v.benches && vs ? ${n}) ws.variants);
           benchVariant =
             if (ws.variants.${ws.defaultVariant}.benches or false) && vs ? ${ws.defaultVariant} then
@@ -999,17 +963,17 @@ let
       # the same programs elsewhere (treefmt's rustfmt).
       inherit (ws) toolchain;
       target = perTarget;
-      packages = if defaultTriple == null then { } else perTarget.${defaultTriple}.packages;
-      tests = if defaultTriple == null then { } else perTarget.${defaultTriple}.tests;
-      testRuns = if defaultTriple == null then { } else perTarget.${defaultTriple}.testRuns;
+      packages = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.packages;
+      tests = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.tests;
+      testRuns = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.testRuns;
       plans = lib.mapAttrs (_: lib.mapAttrs (_: inst: inst.plans)) instances;
       devShell = mkDevShell {
         inherit pkgs nativeTriple;
         name = wsName;
         inherit (ws) toolchain;
-        target = shellTriple;
+        target = ws.devShell.target;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
-        targetEnv = lib.optionalAttrs (shellTriple != null) (envStrings (targetField wsName shellTriple "env" { }));
+        targetEnv = lib.optionalAttrs (ws.devShell.target != null) (envStrings (targetField wsName ws.devShell.target "env" { }));
         # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default
         # variant's profile (IFD: a small derivation that reads the
@@ -1019,8 +983,8 @@ let
         # their context; the spec's own values carry it.
         cargoEnv =
           let
-            inst = if shellTriple == null then null else instances.${shellTriple}.${ws.defaultVariant} or null;
-            spec = if shellTriple == null then null else (specFor wsName shellTriple).mkWorkspace.spec or null;
+            inst = if ws.devShell.target == null then null else instances.${ws.devShell.target}.${ws.defaultVariant} or null;
+            spec = if ws.devShell.target == null then null else (specFor wsName ws.devShell.target).mkWorkspace.spec or null;
             values = lib.filter builtins.isString (
               if spec == null then
                 [ ]
@@ -1166,10 +1130,14 @@ let
 
   warnings = cfg.warnings ++ unmatchedWarnings;
   warned = x: lib.foldr (w: acc: lib.warn w acc) x warnings;
+  # The modules' `assertions` (lib/modules/types.nix): any false one fails
+  # whatever the repository is read for, with every such message.
+  failedAssertions = map (a: a.message) (lib.filter (a: !a.assertion) cfg.assertions);
   # `mode = "auto"`: dynamic-derivation mode when the evaluator has
   # `builtins.outputOf` and is Nix 2.36 or later (lib/dynamic.nix).
   delivery = dynamic.resolveMode cfg.mode;
-  guard = warned;
+  guard =
+    x: if failedAssertions == [ ] then warned x else throw (lib.concatStringsSep "\n" failedAssertions);
 
   # --- explainSharing --------------------------------------------------------
   #

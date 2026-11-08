@@ -154,5 +154,6 @@ in
     };
 
     warnings = bt.warningsOption;
+    assertions = bt.assertionsOption;
   };
 }

@@ -1,9 +1,15 @@
 # packages.<name>: per-package overrides. They reach only that package's
 # units, so a build stamp or a large SDK never changes another unit.
-{ lib, config, ... }:
+{
+  lib,
+  config,
+  options,
+  ...
+}:
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
+  versionReq = import ./version-req.nix { inherit lib; };
 
   targetOverride =
     { ... }:
@@ -50,7 +56,7 @@ let
     {
       options = {
         version = mkOption {
-          type = types.nullOr types.str;
+          type = types.nullOr bt.versionReq;
           default = null;
           example = ">=0.42, <0.50";
           description = ''
@@ -277,4 +283,19 @@ in
   };
 
   config.warnings = lib.concatMap (p: p.warnings) (lib.attrValues config.packages);
+
+  # The requirement in a `name@<requirement>` key, which no option type sees.
+  config.assertions = lib.concatMap (
+    k:
+    let
+      m = builtins.match "([^@]+)@(.+)" k;
+      req = builtins.elemAt m 1;
+      # The files that define this key.
+      files = map (d: d.file) (lib.filter (d: d.value ? ${k}) options.packages.definitionsWithLocations);
+    in
+    lib.optional (m != null) {
+      assertion = versionReq.isReq req;
+      message = "breakbulk: packages.${lib.strings.escapeNixIdentifier k}${bt.setIn { inherit files; }}: `${req}` is not a Cargo version requirement";
+    }
+  ) (lib.attrNames config.packages);
 }
