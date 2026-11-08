@@ -112,8 +112,8 @@ another: `inputs.breakbulk.inputs.systems.follows = "systems";`. The
 library itself (`breakbulk.lib`) takes `pkgs` and works for any system.
 
 With flake-parts, import `breakbulk.lib.flakeModule` and set
-`perSystem.breakbulk = { root = self; modules = [ ./nix/rust.nix ]; }`. It
-adds packages, checks and dev shells for you.
+`perSystem.breakbulk.modules = [ ./nix/rust.nix ];`. `root` defaults to
+the flake's `self`. It adds packages, checks and dev shells for you.
 
 Other outputs, per workspace:
 

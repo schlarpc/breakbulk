@@ -2,15 +2,17 @@
 #
 #   inputs.breakbulk.url = "…";
 #   outputs = inputs: inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-#     imports = [ inputs.breakbulk.flakeModule ];
+#     imports = [ inputs.breakbulk.lib.flakeModule ];
 #     systems = [ "x86_64-linux" ];
 #     perSystem = { ... }: {
-#       breakbulk = {
-#         root = ./.;
-#         modules = [ ./nix/rust.nix ];     # breakbulk modules (workspaces, packages, …)
-#       };
+#       breakbulk.modules = [ ./nix/rust.nix ];  # breakbulk modules (workspaces, packages, …)
 #     };
 #   };
+#
+# `root` defaults to the flake's `self`: flake-parts passes it to every
+# top-level module as a special argument (flake-parts lib.nix,
+# `evalFlakeModule`: `specialArgs = { inherit self flake-parts-lib
+# moduleLocation; inputs = …; }`), so this module reads it there.
 #
 # Per system it sets `breakbulk.repo` (the mkRepository result) and, unless
 # turned off, adds:
@@ -20,7 +22,12 @@
 #  - devShells."<ws>" for each workspace, and devShells.default when there
 #    is exactly one.
 breakbulkLib:
-{ lib, flake-parts-lib, ... }:
+{
+  lib,
+  flake-parts-lib,
+  self,
+  ...
+}:
 let
   inherit (lib) types mkOption;
 in
@@ -39,10 +46,11 @@ in
       options.breakbulk = {
         root = mkOption {
           type = types.nullOr types.path;
-          default = null;
+          default = self;
+          defaultText = lib.literalExpression "self";
           description = ''
-            The repository root given to mkRepository: a path (`./.`) or
-            the flake's `self`. breakbulk does nothing while it is null.
+            The repository root given to mkRepository: the flake's `self`
+            (the default) or a path (`./.`). `null` turns breakbulk off.
           '';
         };
         modules = mkOption {

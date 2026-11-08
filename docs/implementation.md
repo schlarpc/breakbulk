@@ -474,7 +474,7 @@ To verify in a spike: that nixpkgs' compiler and linker wrappers behave the same
 
 ## Nix library
 
-The library is one `lib.evalModules` call over user modules, plus functions that turn the evaluated config into derivations. A flake-parts module wraps it for flake users.
+The library is one `lib.evalModules` call over user modules, plus functions that turn the evaluated config into derivations. A flake-parts module wraps it for flake users; its `root` defaults to the flake's `self`, which flake-parts passes to every top-level module as a special argument (`tests/flake-self/run.sh` checks it gives the same derivations as `root = ./.`).
 
 ### Entry point
 

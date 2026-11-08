@@ -11,7 +11,11 @@
 #     view store path is the same for `root = self`, `root = self.outPath`
 #     and `root = ./.`;
 #   - a root that is neither a path nor a flake's self fails with an error
-#     that names what `root` accepts.
+#     that names what `root` accepts;
+#   - breakbulk's flake-parts module with no `root` (flake-parts/flake.nix,
+#     in a second copy of the fixture) gives the same derivations: `root`
+#     defaults to the flake's `self`; its `packages` output lists the
+#     products. This fetches flake-parts from GitHub (pinned revision).
 #
 # Planning runs through IFD, so the first run builds the fixture's plans.
 # Not a flake check: it evaluates a flake.
@@ -21,10 +25,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 work=${WORK:-${TMPDIR:-/tmp}/breakbulk-flake-self}
 rm -rf "$work"
-mkdir -p "$work/flake"
+mkdir -p "$work/flake" "$work/fp"
 cp -r "$repo/tests/fixtures/outside-reads/." "$work/flake/"
 sed "s|@BREAKBULK@|path:$repo|" "$here/flake.nix" > "$work/flake/flake.nix"
-chmod -R u+w "$work/flake"
+cp -r "$repo/tests/fixtures/outside-reads/." "$work/fp/"
+sed "s|@BREAKBULK@|path:$repo|" "$here/flake-parts/flake.nix" > "$work/fp/flake.nix"
+chmod -R u+w "$work/flake" "$work/fp"
 
 nix=(nix --extra-experimental-features 'nix-command flakes')
 
@@ -48,6 +54,19 @@ for lazy in true false; do
     fi
   done
   echo "  $units unit derivations and $views source views identical" >&2
+
+  "${nix[@]}" eval "${opts[@]}" --json "path:$work/fp#described" > "$work/fp.json"
+  if ! cmp -s "$work/path.json" "$work/fp.json"; then
+    echo "flake-self (lazy-trees $lazy): the flake-parts module's default root differs from root = ./." >&2
+    diff <(jq -S . "$work/path.json") <(jq -S . "$work/fp.json") >&2 || true
+    exit 1
+  fi
+  fpPkgs=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/fp#packages.x86_64-linux" --apply builtins.attrNames)
+  jq -e 'index("app")' <<< "$fpPkgs" > /dev/null || {
+    echo "flake-self: flake-parts packages: $fpPkgs" >&2
+    exit 1
+  }
+  echo "  flake-parts module, default root: identical; packages $fpPkgs" >&2
 
   if "${nix[@]}" eval "${opts[@]}" "path:$work/flake#wrong" 2> "$work/wrong.log"; then
     echo "flake-self: a wrong root was accepted" >&2
