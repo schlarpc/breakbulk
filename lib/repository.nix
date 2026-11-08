@@ -875,6 +875,25 @@ let
         name = wsName;
         inherit (ws) toolchain;
         inherit (ws.devShell) setTarget;
+        # Decision 123: the profile the planner turned trim-paths on for,
+        # from the build plan's header. Only Cargo 1.101 and later has
+        # trim-paths, so earlier Cargo never reads the plan (decision 81:
+        # the shell opens while a manifest is broken).
+        trimPathsProfile =
+          let
+            inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
+            v = ws.toolchain.cargo.version or null;
+            mayTrim = v == null || lib.versionAtLeast (lib.versions.majorMinor v) "1.101";
+            plan = builtins.fromJSON (
+              builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
+            );
+          in
+          if inst == null || !mayTrim then
+            null
+          else if plan.trimPathsDefault or false then
+            plan.variant.profile
+          else
+            null;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
         targetEnv = envStrings (cfg.targets.${nativeTriple}.env or { });
         # How the planner passes the native spec to Cargo (IFD: a small

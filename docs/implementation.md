@@ -579,6 +579,7 @@ The planner always passes `--target`, and local Cargo without it behaves differe
 
 - exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
 - exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`. A small derivation (`breakbulk-plan --cargo-env-only`) computes it by the planner's own rule from the project's Cargo config files and `rustc --print cfg`, without running Cargo, so the shell still opens when planning fails, for example on a broken `Cargo.toml` (decision 81). It is read by import-from-derivation;
+- exports `CARGO_PROFILE_<P>_TRIM_PATHS=all` when the planner turned trim-paths on itself for the default variant's profile `P` (the build plan's `trimPathsDefault`, see [trim-paths](#trim-paths)): trim-paths is part of the profile Cargo hashes into `-C metadata`. Only with Cargo 1.101 or later is the build plan read for this (by import-from-derivation), so on those versions the shell needs the manifests to plan; earlier Cargo never reads it;
 - includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 

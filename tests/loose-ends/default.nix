@@ -21,6 +21,11 @@
 #                home directory, gives exactly the plan's `-C metadata`
 #                values, and every target unit gets the spec's linker and
 #                rustflags.
+#   devshell-trim-paths   the same with Cargo 1.101 (nightly): the planner
+#                turns trim-paths on itself, the shell exports
+#                CARGO_PROFILE_RELEASE_TRIM_PATHS=all, and local `-C
+#                metadata` values again equal the plan's; the Cargo 1.99
+#                shell does not export it.
 #   wasm-embed   the flagship pattern: a native host bin embeds (with
 #                include_bytes!) the wasm component that another
 #                workspace builds for wasm32 with the wasmComponent preset
@@ -262,6 +267,64 @@ let
           case "$l" in *"-C linker=''$${envVar}_LINKER"*) ;; *) echo "no spec linker: $l" >&2; exit 1 ;; esac
           case "$l" in *"--cfg bb_devshell"*) ;; *) echo "no spec rustflags: $l" >&2; exit 1 ;; esac
         done < target-lines
+        mkdir -p $out
+        cp local $out/
+      '';
+    });
+
+  # Decision 123: with Cargo 1.101 (rust-overlay's nightly) the planner
+  # turns trim-paths on for the release profile itself (`trimPathsDefault`),
+  # and the dev shell sets CARGO_PROFILE_RELEASE_TRIM_PATHS=all, so a local
+  # `cargo build -v --release` again gives exactly the plan's `-C metadata`
+  # values (trim-paths is part of the profile Cargo hashes into them). The
+  # stable shell above (Cargo 1.99) does not set it.
+  trimShellRust = pkgs.rust-bin.nightly.latest.minimal;
+  trimShellRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = ../fixtures/walking-skeleton;
+    modules = [
+      {
+        workspaces.main.toolchain = {
+          rustc = trimShellRust;
+          cargo = trimShellRust;
+        };
+      }
+    ];
+  };
+  trimShellInst = trimShellRepo.workspaces.main.instances.${native}.default;
+  devshellTrimPaths =
+    let
+      shell = trimShellRepo.workspaces.main.devShell;
+      plan = builtins.fromJSON (
+        builtins.unsafeDiscardStringContext (builtins.readFile "${trimShellInst.plans.build}/plan.json")
+      );
+    in
+    assert lib.assertMsg (plan.trimPathsDefault or false) "devshell-trim-paths: the plan has no trimPathsDefault";
+    assert lib.assertMsg (
+      shell.drvAttrs.CARGO_PROFILE_RELEASE_TRIM_PATHS or null == "all"
+    ) "devshell-trim-paths: CARGO_PROFILE_RELEASE_TRIM_PATHS is not set";
+    assert lib.assertMsg (
+      !(devShell.drvAttrs ? CARGO_PROFILE_RELEASE_TRIM_PATHS)
+    ) "devshell-trim-paths: the Cargo 1.99 shell sets CARGO_PROFILE_RELEASE_TRIM_PATHS";
+    shell.overrideAttrs (_: {
+      name = "loose-ends-devshell-trim-paths";
+      phases = [ "buildPhase" ];
+      plan = "${trimShellInst.plans.build}/plan.json";
+      vendorConfig = trimShellInst.vendor.configFile;
+      fixture = ../fixtures/walking-skeleton;
+      jq = "${pkgs.jq}/bin/jq";
+      buildPhase = ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode $fixture $TMPDIR/ws
+        cd $TMPDIR/ws
+        cargo -V
+        echo "CARGO_PROFILE_RELEASE_TRIM_PATHS=$CARGO_PROFILE_RELEASE_TRIM_PATHS"
+        cargo build -v --release --offline --frozen --config "$vendorConfig" 2>&1 | tee $TMPDIR/log
+        grep -q -- '--remap-path-scope=all' $TMPDIR/log
+        grep -o -- '-C metadata=[0-9a-f]*' $TMPDIR/log | sed 's/.*=/c-/' | sort -u > local
+        $jq -r '.units | keys[] | select(startswith("c-"))' $plan | sort -u > planned
+        echo "planned:"; cat planned
+        diff -u planned local
         mkdir -p $out
         cp local $out/
       '';
@@ -532,6 +595,7 @@ in
   config-env = configEnv;
   test-scope = testScope;
   inherit devshell;
+  devshell-trim-paths = devshellTrimPaths;
   wasm-embed = wasmEmbedCheck;
   cfg-rustflags = cfgRustflags;
   inherit names;
