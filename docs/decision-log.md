@@ -1872,6 +1872,8 @@ renamed to neutral names (`executableSuffix`, `sharedLibrary*`,
 `staticLibrary*`, matching rustc's target-spec fields) and the debug side
 files became a declarative list. Being implemented.
 
+>ack
+
 ## 140. FYI: toolchain capabilities replace version numbers
 
 What breakbulk needs from a compiler (`--remap-path-scope`, `trim-paths`,
@@ -1880,6 +1882,8 @@ table or a cheap probe, overridable for forked compilers, with one source
 of truth passed to the Rust side. An inventory of every Cargo/rustc
 assumption breakbulk makes, each with the test that pins it, follows.
 Being implemented.
+
+>ack
 
 ## 141. ASK: a rust-overlay `prefer-dynamic` binary still fails the toolchain check
 
@@ -1893,6 +1897,8 @@ reachable from the allowed folder. A third option: breakbulk points such
 binaries at the toolchain's `rust-std` component directly instead of the
 joined toolchain.
 
+>agree
+
 ## 142. ASK: toolchains without a version cost one small evaluation-time build
 
 Capabilities come from the version table when the toolchain says its
@@ -1900,6 +1906,8 @@ version. For one that doesn't (likely fenix; not checked), a tiny rustc
 probe runs at evaluation time, in dynamic mode too. Alternative: have the
 Rust side probe at build time when a capability is unknown, which brings
 back a second place where the decision is made. Default: the probe.
+
+>check fenix, agree.
 
 ## 143. FYI: presets renamed, traits redesigned, `debugInfo` setting (resolves 122c, 137, 138, 139)
 
@@ -1917,6 +1925,8 @@ back a second place where the decision is made. Default: the probe.
   glibc's libraries and declared `systemLibraries` are dynamic.
 Nothing else changed: about 4,080 derivations compared before and after.
 
+>ack
+
 ## 144. ASK: a "portable" binary can still contain a store path
 
 A static OpenSSL build records its config folder (`OPENSSLDIR`) as a Nix
@@ -1926,12 +1936,16 @@ its config there. The new check only reads the needed-library list, so it
 doesn't catch this. Should `linuxPortable` products also fail on any store
 path they contain (with an allow-list)?
 
+>yes, and as always this should be a composed bit of logic (one of the step hook things?)
+
 ## 145. ASK: allow `libgcc_s` and `libstdc++` by default for portable binaries?
 
 The portable allow-list is glibc's own libraries and its loaders. Python's
 manylinux rules also allow `libgcc_s.so.1` and `libstdc++.so.6`, which
 nearly every Linux system has. Today a C++ dependency must add them via
 `systemLibraries`. Allow them by default?
+
+>yes
 
 ## 146. FYI: trim-paths options, dev shell, variant defaults, stage guard (resolves 112, 121, 133, 135)
 
@@ -1947,6 +1961,8 @@ nearly every Linux system has. Today a C++ dependency must add them via
 - Generated feature-powerset variants default to `checks = false`.
 - Every post-link step and check skips cleanly on a product with no
   binaries, so dynamic mode uses full products in `repo.checks`.
+  
+>ack
 
 ## 147. ASK: user stages written as a plain `derivation` aren't guarded
 
@@ -1957,6 +1973,8 @@ fail). Options: make such stages an evaluation error with a hint to use
 `stdenv.mkDerivation`/`runCommand`, or wrap them a different way (a small
 gate derivation in front). Default: leave as is (rare).
 
+>discuss
+
 ## 148. FYI: inventory of what breakbulk assumes about Cargo and rustc
 
 `docs/reference/assumptions.md` lists 78 assumptions in 11 groups, each with
@@ -1965,6 +1983,8 @@ the check that pins it, and what breaks if it changes. 72 are pinned by
 flake checks that run real Cargo or rustc; 2 are partly pinned (the LLVM
 and wasi-sdk version tables, #36 and #37); 4 have no pinning test (#33,
 #34, #35, and #10 for cross-language LTO).
+
+>ack
 
 ## 149. ASK: stop relying on Cargo's rustc-info cache being empty
 
@@ -1975,3 +1995,5 @@ If a future Cargo wrote that cache earlier (say, during `cargo metadata`),
 every plan would fail loudly. Setting `CARGO_CACHE_RUSTC_INFO=0` on the
 traced Cargo removes the dependency; it's a one-line planner change that
 doesn't affect units. Default proposal: do it.
+
+>agree
