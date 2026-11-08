@@ -2009,6 +2009,8 @@ gate derivation in front). Default: leave as is (rare).
 
 >discuss
 
+> Resolved: option 4: wrap any derivation (raw `derivation` included) by rebuilding it from its attributes with the guard as builder.
+
 ## 148. FYI: inventory of what breakbulk assumes about Cargo and rustc
 
 `docs/reference/assumptions.md` lists 78 assumptions in 11 groups, each with
