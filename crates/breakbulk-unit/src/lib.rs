@@ -26,6 +26,11 @@ pub const DIRECTIVES_FILE: &str = "directives.json";
 /// `links`.
 pub const METADATA_FILE: &str = "metadata.json";
 
+/// In a run's `flags`, when its script wrote files outside `OUT_DIR` (into
+/// the copy of Cargo's target directory around it, #23): their paths
+/// relative to the run's `out`, sorted.
+pub const TARGET_FILES_FILE: &str = "target-files.json";
+
 /// A unit failure: the message is printed as `error: …` and the build fails.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error(pub String);

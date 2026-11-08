@@ -35,8 +35,10 @@ pub struct Rewriter {
     pub crate_dirs: Vec<(String, String)>,
     /// Compile outputs by path.
     pub outputs: BTreeMap<String, OutRef>,
-    /// Run `OUT_DIR`s → run unit id.
-    pub run_dirs: BTreeMap<String, String>,
+    /// Run `OUT_DIR`s → run unit id and the `OUT_DIR` relative to Cargo's
+    /// target directory, which is where it sits inside the run's `out`
+    /// (#23).
+    pub run_dirs: BTreeMap<String, (String, String)>,
     /// Bin outputs by (platform, target name), with their package ids, for
     /// the uplifted copies (`<profile dir>/<name>`) that
     /// `CARGO_BIN_EXE_<name>` names. Two packages can have a bin of the same
@@ -175,15 +177,20 @@ impl Rewriter {
 
     /// The references one absolute path becomes.
     pub fn path(&self, p: &str, owner: Option<&str>) -> Result<Vec<Piece>, Error> {
-        for (dir, run) in &self.run_dirs {
+        for (dir, (run, rel)) in &self.run_dirs {
             if let Some(rest) = under(p, dir) {
                 let mut v = vec![Piece::Ref(Reference::Out(OutRef {
                     out: run.clone(),
                     output: "out".into(),
                     file: None,
                 }))];
-                if !rest.is_empty() {
-                    v.push(Piece::Literal(format!("/{rest}")));
+                let inside = [rel.as_str(), rest]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if !inside.is_empty() {
+                    v.push(Piece::Literal(format!("/{inside}")));
                 }
                 return Ok(v);
             }

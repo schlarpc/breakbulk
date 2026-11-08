@@ -392,6 +392,7 @@ pub fn render_unit_in<R: Resolve>(
                 links: run.links.clone(),
                 script: r.reference(&run.script)?,
                 env,
+                out_dir: run.out_dir.clone(),
                 cwd: run.cwd.render(r)?,
                 metadata_from: run
                     .metadata_from

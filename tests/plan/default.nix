@@ -36,6 +36,11 @@ let
       // args
     );
 
+  # A run unit's OUT_DIR: inside its `out`, at `outDir` (#23).
+  outDirOf =
+    run:
+    "${run.out}/${(builtins.fromJSON (builtins.unsafeDiscardStringContext run.drvAttrs.BREAKBULK_UNIT)).outDir or ""}";
+
   # Plain cargo over the same sources, offline against the same vendor
   # directory: the reference products. Run outside $HOME (the sandbox).
   cargoBuild =
@@ -469,6 +474,32 @@ in
       cp err $result/
     '';
 
+  # #23: the run's OUT_DIR is inside its `out`, at the traced Cargo's path
+  # (classic layout with nixpkgs' Cargo 1.99), with `<profile>/deps`
+  # beside it. A build script that walks up to `<target>/<profile>` writes
+  # there and into `deps/`; the bin includes a file from OUT_DIR; the files
+  # outside OUT_DIR are listed in the run's `flags/target-files.json`.
+  out-dir-walk =
+    let
+      ws = mk "out-dir-walk" { };
+      run = lib.findFirst (u: u.name == "out-dir-walk-0.1.0-build-run") (throw "out-dir-walk: no run") (
+        lib.attrValues ws.units.build
+      );
+    in
+    pkgs.runCommand "out-dir-walk-check"
+      {
+        bin = ws.packages.out-dir-walk;
+        runOut = run.out;
+        runFlags = run.flags;
+      }
+      ''
+        [ "$($bin/bin/out-dir-walk)" = walked=true ]
+        cat $runFlags/target-files.json
+        [ "$(cat $runFlags/target-files.json)" = '["${target}/debug/deps/walked.txt","${target}/debug/walked.txt"]' ]
+        [ -f $runOut/${target}/debug/build/out-dir-walk-*/out/generated.rs ]
+        touch $out
+      '';
+
   # #34: breakbulk-unit turns rustc's JSON diagnostics into its rendered
   # text. With a real rustc, a warning and an error in two compile units
   # (run by hand, as above) appear as rustc renders them, and no raw JSON
@@ -663,10 +694,10 @@ in
     pkgs.runCommand "c-seed-check"
       {
         nativeBuildInputs = [ pkgs.binutils ];
-        cmA = cm.a.out;
-        cmB = cm.b.out;
-        bgA = bg.a.out;
-        bgB = bg.b.out;
+        cmA = outDirOf cm.a;
+        cmB = outDirOf cm.b;
+        bgA = outDirOf bg.a;
+        bgB = outDirOf bg.b;
       }
       ''
         [ "$cmA" != "$cmB" ] && [ "$bgA" != "$bgB" ]
@@ -702,10 +733,12 @@ in
       {
         a = run.out;
         b = salted.out;
+        outDir = lib.removePrefix "${run.out}/" (outDirOf run);
       }
       ''
-        [ -f $a/build/CMakeCache.txt ] && [ -f $a/build/libcm.a ] && [ -f $a/lib/libcm.a ]
-        [ ! -e $a/build/CMakeFiles ]
+        o=$a/$outDir
+        [ -f $o/build/CMakeCache.txt ] && [ -f $o/build/libcm.a ] && [ -f $o/lib/libcm.a ]
+        [ ! -e $o/build/CMakeFiles ]
         norm() {
           cp -r --no-preserve=mode "$1" "$2"
           grep -rlF "$1" "$2" | while read -r f; do

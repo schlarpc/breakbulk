@@ -15,6 +15,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         links: Some("foo".into()),
         script: "/nix/store/c-build/build_script_build-1".into(),
         env: BTreeMap::from([("TARGET".into(), "x86_64-unknown-linux-gnu".into())]),
+        out_dir: String::new(),
         cwd: cwd.display().to_string(),
         metadata_from: vec![],
         dylib_path_from: vec![],
@@ -337,4 +338,46 @@ fn cmake_state_is_removed_from_build_trees_only() {
         assert!(out.join(kept).exists(), "{kept} was removed");
     }
     assert_eq!(remove_cmake_state(out).unwrap(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn out_dir_inside_a_copy_of_cargos_layout() {
+    let t = TempDir::new("layout");
+    let out = t.path().join("out");
+    // Classic layout: Cargo creates `deps` and `examples` beside `build`.
+    let d = prepare_out_dir(
+        &out,
+        "x86_64-unknown-linux-gnu/debug/build/sdl2-sys-1a2b/out",
+    )
+    .unwrap();
+    assert_eq!(
+        d,
+        out.join("x86_64-unknown-linux-gnu/debug/build/sdl2-sys-1a2b/out")
+    );
+    assert!(out.join("x86_64-unknown-linux-gnu/debug/deps").is_dir());
+    assert!(out.join("x86_64-unknown-linux-gnu/debug/examples").is_dir());
+    // The new layout creates neither.
+    let out2 = t.path().join("out2");
+    prepare_out_dir(&out2, "debug/build/build/1a2b/out").unwrap();
+    assert!(out2.join("debug/build/build/1a2b/out").is_dir());
+    assert!(!out2.join("debug/deps").exists());
+    assert!(!out2.join("debug/build/deps").exists());
+    // No relative path: the `out` itself.
+    assert_eq!(prepare_out_dir(&out2, "").unwrap(), out2);
+
+    std::fs::write(d.join("inside.txt"), "").unwrap();
+    std::fs::write(out.join("x86_64-unknown-linux-gnu/debug/libSDL2.so"), "").unwrap();
+    std::os::unix::fs::symlink(
+        "/x",
+        out.join("x86_64-unknown-linux-gnu/debug/deps/libSDL2.so"),
+    )
+    .unwrap();
+    assert_eq!(
+        files_outside(&out, &d).unwrap(),
+        [
+            "x86_64-unknown-linux-gnu/debug/deps/libSDL2.so",
+            "x86_64-unknown-linux-gnu/debug/libSDL2.so"
+        ]
+    );
+    assert!(files_outside(&d, &d).unwrap().is_empty());
 }

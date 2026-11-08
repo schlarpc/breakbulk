@@ -24,6 +24,7 @@ plan-crate-types
 plan-directives
 plan-build-script-signal
 plan-forced-target
+plan-out-dir-walk
 plan-tools-narrow
 repository-cargo-config-include
 repository-default-variant

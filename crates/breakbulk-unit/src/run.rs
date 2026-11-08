@@ -31,7 +31,8 @@ use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
 use crate::splice::expand_dylib_path;
 use crate::{
-    DIRECTIVES_FILE, Error, METADATA_FILE, io_err, read_directives, read_metadata, write_json,
+    DIRECTIVES_FILE, Error, METADATA_FILE, TARGET_FILES_FILE, io_err, read_directives,
+    read_metadata, write_json,
 };
 
 /// The build script to execute: `script` itself, or the one file in it when
@@ -361,6 +362,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     let flags = outer.output("flags")?;
     fresh_dir(&out)?;
     fresh_dir(&flags)?;
+    let out_dir = prepare_out_dir(&out, &r.out_dir)?;
 
     let metadata = r
         .metadata_from
@@ -377,7 +379,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .iter()
         .map(|f| Ok((f.clone(), read_directives(Path::new(f))?)))
         .collect::<Result<BTreeMap<String, BuildOutput>, Error>>()?;
-    let mut unit_env = run_env(r, &out, &metadata);
+    let mut unit_env = run_env(r, &out_dir, &metadata);
     expand_dylib_path(&mut unit_env, &r.dylib_path_from, |f| dylib_dirs.get(f))?;
     let env = layered(outer, capture.as_ref(), &unit_env, &run_cflags(r, &out));
     let argv = vec![script_path(Path::new(&r.script))?.display().to_string()];
@@ -413,7 +415,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         run: r,
         argv: &argv,
         env: &env,
-        out: &out,
+        out: &out_dir,
         upstream_out_dirs: &upstream_out_dirs,
         status,
         stdout: &stdout,
@@ -429,17 +431,79 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         );
     }
     write_json(&flags.join(DIRECTIVES_FILE), &success.output)?;
+    let outside = files_outside(&out, &out_dir)?;
+    if !outside.is_empty() {
+        write_json(&flags.join(TARGET_FILES_FILE), &outside)?;
+    }
     if let Some(links) = &r.links {
         write_json(
             &flags.join(METADATA_FILE),
             &MetadataFile {
                 links: links.clone(),
                 metadata: success.output.metadata.clone(),
-                out: Some(out.display().to_string()),
+                out: Some(out_dir.display().to_string()),
             },
         )?;
     }
     Ok(())
+}
+
+/// Create the run's `OUT_DIR` at `rel` inside `out` (#23), with what Cargo
+/// creates around it before running build scripts, so a script that walks
+/// up from `OUT_DIR` to the target directory finds what it finds under
+/// Cargo: in the classic layout (`<profile>/build/<pkg>-<hash>/out`),
+/// `<profile>/deps` and `<profile>/examples` (cargo `layout.rs`,
+/// `BuildDirLayout::prepare`); the new layout
+/// (`<profile>/build/<pkg>/<hash>/out`, Cargo 1.100) creates neither.
+/// Returns the `OUT_DIR`.
+pub fn prepare_out_dir(out: &Path, rel: &str) -> Result<PathBuf, Error> {
+    if rel.is_empty() {
+        return Ok(out.to_owned());
+    }
+    let out_dir = out.join(rel);
+    let mut dirs = vec![out_dir.clone()];
+    // Classic: `…/<profile>/build/<pkg>-<hash>/out`; new: the unit
+    // directory is the bare hash, `…/build/<pkg>/<hash>/out`.
+    let parts: Vec<&str> = rel.split('/').collect();
+    if let [profile @ .., "build", unit, "out"] = parts.as_slice()
+        && unit.contains('-')
+    {
+        let profile = out.join(profile.join("/"));
+        dirs.push(profile.join("deps"));
+        dirs.push(profile.join("examples"));
+    }
+    for d in dirs {
+        std::fs::create_dir_all(&d).map_err(|e| io_err("creating", &d, e))?;
+    }
+    Ok(out_dir)
+}
+
+/// Files (and symlinks) under `out` but not under `out_dir`, relative to
+/// `out`, sorted: what the script wrote outside its `OUT_DIR`.
+pub fn files_outside(out: &Path, out_dir: &Path) -> Result<Vec<String>, Error> {
+    fn walk(dir: &Path, skip: &Path, root: &Path, found: &mut Vec<String>) -> Result<(), Error> {
+        if dir == skip {
+            return Ok(());
+        }
+        let entries = std::fs::read_dir(dir).map_err(|e| io_err("reading", dir, e))?;
+        for e in entries {
+            let e = e.map_err(|e| io_err("reading", dir, e))?;
+            let p = e.path();
+            let t = e.file_type().map_err(|e| io_err("reading", &p, e))?;
+            if t.is_dir() {
+                walk(&p, skip, root, found)?;
+            } else if let Ok(rel) = p.strip_prefix(root) {
+                found.push(rel.display().to_string());
+            }
+        }
+        Ok(())
+    }
+    let mut found = Vec::new();
+    if out_dir != out {
+        walk(out, out_dir, out, &mut found)?;
+    }
+    found.sort();
+    Ok(found)
 }
 
 /// Copy the script's stderr to ours as it comes, and keep its last 64 KiB

@@ -290,11 +290,23 @@ impl Resolve for Real<'_> {
                 .get(&s.crate_src)
                 .map(|d| join(d, &s.rel))
                 .ok_or_else(|| format!("no crate directory for {}", s.crate_src)),
+            // A run's `out` holds its `OUT_DIR` at `RunUnit::out_dir`, Cargo's
+            // path below the target directory (with the profile directory
+            // named after `PROFILE`), so the `out` stands for that target
+            // directory: the real OUT_DIR with as many components dropped.
             Reference::Out(o) => match self.plan.units.get(&o.out) {
-                Some(Unit::Run(_)) => self
+                Some(Unit::Run(run)) => self
                     .run_dirs
                     .get(&o.out)
-                    .cloned()
+                    .map(|d| {
+                        let mut p = Path::new(d);
+                        if !run.out_dir.is_empty() {
+                            for _ in run.out_dir.split('/') {
+                                p = p.parent().unwrap_or(p);
+                            }
+                        }
+                        p.display().to_string()
+                    })
                     .ok_or_else(|| format!("the real build did not run {}", o.out)),
                 _ => self
                     .out_dirs
@@ -408,10 +420,11 @@ fn normal_env(
 }
 
 /// Cargo's trim-paths arguments in their comparable form. Cargo remaps its
-/// one build directory (`--remap-path-prefix=<target>=/cargo/build-dir`);
-/// the plan has one remap per `OUT_DIR` the unit names
-/// (`…=/cargo/build-dir/<rel>`), each checked here to be `<target>/<rel>`
-/// in the real build, then both forms are dropped. When the planner turned
+/// one build directory (`--remap-path-prefix=<target>=/cargo/build-dir`)
+/// for every unit; the plan has the same pair once per run whose `out` the
+/// unit names (each `out` copies the target directory around its
+/// `OUT_DIR`, so it resolves to `<target>` here). Both are checked to name
+/// `<target>` and dropped. When the planner turned
 /// trim-paths on itself, it dropped Cargo's `--remap-path-scope` (breakbulk
 /// sets the scope), so the real side's is dropped too.
 ///
@@ -459,11 +472,11 @@ fn trim_paths_normal(
                 ));
                 continue;
             }
-            if traced && let Some(rel) = to.strip_prefix(&format!("{CARGO_BUILD_DIR_REMAP}/")) {
-                if Path::new(from) != target.join(rel) {
+            if traced && to == CARGO_BUILD_DIR_REMAP {
+                if Path::new(from) != target {
                     return Err(format!(
                         "the build-directory remap `{a}` does not name `{}`",
-                        target.join(rel).display()
+                        target.display()
                     ));
                 }
                 continue;
@@ -945,7 +958,8 @@ mod tests {
         ]);
         let traced = a(&[
             "--remap-path-prefix=/s/ws=.",
-            "--remap-path-prefix=/tmp/t/debug/build/a/1/out=/cargo/build-dir/debug/build/a/1/out",
+            "--remap-path-prefix=/tmp/t=/cargo/build-dir",
+            "--remap-path-prefix=/tmp/t=/cargo/build-dir",
             "-C",
             "x",
         ]);
@@ -958,8 +972,8 @@ mod tests {
             trim_paths_normal(&traced, t, &plan, true, None).unwrap(),
             want
         );
-        // A remap that names another directory than <target>/<rel>.
-        let wrong = a(&["--remap-path-prefix=/x/out=/cargo/build-dir/debug/build/a/1/out"]);
+        // A remap that names another directory than <target>.
+        let wrong = a(&["--remap-path-prefix=/x=/cargo/build-dir"]);
         assert!(trim_paths_normal(&wrong, t, &plan, true, None).is_err());
         // A git package read from $CARGO_HOME by the real build: Cargo
         // remaps the checkout root; the vendored plan remaps the package

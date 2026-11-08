@@ -494,8 +494,12 @@ pub struct RenderedRun {
     /// directory holding exactly one file.
     pub script: String,
     /// Layers 3 to 5 of the environment contract, merged. Has no `OUT_DIR`:
-    /// `breakbulk-unit` sets it to the run's own `out`.
+    /// `breakbulk-unit` sets it inside the run's own `out` (`out_dir`).
     pub env: BTreeMap<String, String>,
+    /// Where `OUT_DIR` is inside the run's `out`, as Cargo laid out its
+    /// target directory (`RunUnit::out_dir`, #23). Empty: the `out` itself.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub out_dir: String,
     /// The package directory; the script runs here.
     pub cwd: String,
     /// The `flags` directories of the upstream runs whose `metadata.json`

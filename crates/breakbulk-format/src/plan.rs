@@ -478,6 +478,13 @@ pub struct RunUnit {
     /// 121). Empty without trim-paths.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub build_dir_remap: BTreeMap<UnitId, String>,
+    /// Where `OUT_DIR` is inside the run's `out`: the traced `OUT_DIR`
+    /// relative to Cargo's target directory (`<triple>/<profile>/build/
+    /// <pkg>-<hash>/out`). A script that walks up from `OUT_DIR` to Cargo's
+    /// target directory then finds the `out` itself, as under Cargo (#23).
+    /// Empty: `OUT_DIR` is the `out`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub out_dir: String,
 }
 
 /// A product of the plan.

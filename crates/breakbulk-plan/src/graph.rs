@@ -394,7 +394,8 @@ impl<'a> Builder<'a> {
             }
         }
         for r in &b.runs {
-            b.rw.run_dirs.insert(r.out_dir.clone(), r.id.clone());
+            let rel = b.out_dir_rel(r)?;
+            b.rw.run_dirs.insert(r.out_dir.clone(), (r.id.clone(), rel));
         }
         if let Some((dir, library)) = &ctx.std_vendor {
             b.rw.add_std_vendor(dir, library)?;
@@ -1021,7 +1022,7 @@ impl<'a> Builder<'a> {
     fn runs_named_in_env(&self, env: &BTreeMap<String, String>) -> BTreeSet<UnitId> {
         let mut runs = BTreeSet::new();
         for v in env.values().filter(|v| !contains_sentinel(v)) {
-            for (dir, run) in &self.rw.run_dirs {
+            for (dir, (run, _)) in &self.rw.run_dirs {
                 if names_path(v, dir) {
                     runs.insert(run.clone());
                 }
@@ -1031,13 +1032,42 @@ impl<'a> Builder<'a> {
     }
 
     /// What Cargo's trim-paths build-directory remap makes of a run's
-    /// `OUT_DIR`: `/cargo/build-dir/<OUT_DIR relative to the build
-    /// directory>`.
+    /// `out`: `/cargo/build-dir`. The `out` holds the `OUT_DIR` at its path
+    /// relative to Cargo's build directory (`RunUnit::out_dir`), so paths
+    /// below it read as under Cargo.
     fn build_dir_name(&self, run: &UnitId) -> Option<String> {
-        let scratch = self.ctx.scratch.trim_end_matches('/');
-        let r = self.runs.iter().find(|r| &r.id == run)?;
-        let rel = under(&r.out_dir, scratch)?;
-        Some(format!("{CARGO_BUILD_DIR_REMAP}/{rel}"))
+        self.runs
+            .iter()
+            .any(|r| &r.id == run)
+            .then(|| CARGO_BUILD_DIR_REMAP.to_owned())
+    }
+
+    /// A run's `OUT_DIR` relative to Cargo's target (and build) directory,
+    /// as the traced Cargo laid it out (`<triple>/<profile>/build/<pkg>-<hash>/out`,
+    /// or `…/build/<pkg>/<hash>/out` in the new layout), with one change:
+    /// the profile directory is named after the run's `PROFILE` (`debug` or
+    /// `release`, what the profile inherits from) rather than the profile, so
+    /// a custom profile equal to `release` still shares its units with
+    /// `release`. Cargo names that directory after the profile only for
+    /// custom ones; for `dev`, `test`, `release` and `bench` the two agree.
+    fn out_dir_rel(&self, r: &RunRec<'_>) -> Result<String, Error> {
+        let rel = match under(&r.out_dir, &self.ctx.scratch) {
+            Some(rel) if !rel.is_empty() => rel,
+            _ => bail!(
+                "run {}: OUT_DIR {} is not inside Cargo's target directory {}",
+                r.id,
+                r.out_dir,
+                self.ctx.scratch
+            ),
+        };
+        let mut parts: Vec<&str> = rel.split('/').collect();
+        let profile = r.rec.env.get("PROFILE").map(String::as_str);
+        if let (Some(b), Some(profile)) = (parts.iter().rposition(|p| *p == "build"), profile)
+            && b > 0
+        {
+            parts[b - 1] = profile;
+        }
+        Ok(parts.join("/"))
     }
 
     /// A recorded working directory: one reference, or (the standard
@@ -1206,6 +1236,7 @@ impl<'a> Builder<'a> {
             targets: package_targets(r.package),
             nightly_features_allowed: self.ctx.nightly,
             build_dir_remap,
+            out_dir: self.out_dir_rel(r)?,
         }))
     }
 

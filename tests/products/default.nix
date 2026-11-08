@@ -1148,7 +1148,8 @@ in
       defaultScope = lib.filterAttrs (
         _: u: hasArg (lib.hasPrefix "--remap-path-scope") u
       ) (allCompiles "default");
-      # A build-directory remap per OUT_DIR, as the shared crate's lib has.
+      # A build-directory remap per run named (`<run out>=/cargo/build-dir`:
+      # the out copies Cargo's build directory), as the shared crate's lib has.
       sharedLib = lib.head (
         lib.attrValues (
           lib.filterAttrs (
@@ -1157,7 +1158,7 @@ in
         )
       );
       buildDirRemaps = lib.filter (
-        a: builtins.isList a && builtins.isString (lib.last a) && lib.hasPrefix "=/cargo/build-dir/" (lib.last a)
+        a: builtins.isList a && builtins.isString (lib.last a) && lib.last a == "=/cargo/build-dir"
       ) sharedLib.args;
       app = w: (wsOf w).packages.app;
       # The planner run directly on the `default` workspace's skeleton at
@@ -1307,7 +1308,7 @@ in
     assert lib.assertMsg (
       lib.all (p: cargoNamed (lib.elemAt p 1)) run.remap && run.remap != [ ]
     ) "trim-paths-cc: the run's C prefix maps: ${builtins.toJSON run.remap}";
-    assert lib.assertMsg (lib.hasPrefix "/cargo/build-dir/" (run.outDirRemap or "")) "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
+    assert lib.assertMsg ((run.outDirRemap or "") == "/cargo/build-dir") "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
     assert lib.assertMsg (
       !(planOf off).trimPaths && lib.hasPrefix "/breakbulk/build/" (offRun.outDirRemap or "")
     ) "trim-paths-cc: cargoTrimPaths = false: ${builtins.toJSON offRun.outDirRemap}";

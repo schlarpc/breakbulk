@@ -1,0 +1,11 @@
+# A build script that walks up from OUT_DIR to Cargo's target directory and
+# writes there, as tauri-build, sdl2-sys (`bundled`) and ort-sys
+# (`copy-dylibs`) do (#23). breakbulk gives the run an OUT_DIR inside its
+# `out` that copies the traced Cargo's layout, so the walk ends inside the
+# `out` and the files are recorded in the run's `target-files.json`.
+[package]
+name = "out-dir-walk"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
