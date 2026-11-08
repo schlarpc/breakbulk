@@ -220,4 +220,24 @@ rec {
       throw "${what}; got an attribute set without `outPath` (attributes: ${concatStringsSep ", " (attrNames root)})"
     else
       throw "${what}; got a value of type ${builtins.typeOf root}";
+
+  # Rust and Cargo releases, and the features breakbulk gates on them: one
+  # parse and one table of named gates (breakbulk-format's
+  # `version` module is the Rust programs' counterpart).
+  #
+  #   rustVersion.majorMinor "1.101.0-nightly (…)"   -> "1.101"
+  #   rustVersion.atLeast rustVersion.gates.trimPaths v  -> bool
+  rustVersion = rec {
+    # "<major>.<minor>" of a version (`rustc.version`, `1.99.0`,
+    # `1.101.0-nightly`); the channel suffix is ignored.
+    majorMinor = v: lib.versions.majorMinor (lib.head (lib.splitString "-" v));
+    # Whether release `v` is `gate` ("<major>.<minor>") or later.
+    atLeast = gate: v: lib.versionAtLeast (majorMinor v) gate;
+    gates = {
+      # rustc's `--remap-path-scope`.
+      remapPathScope = "1.95";
+      # Cargo's `trim-paths` profile setting.
+      trimPaths = "1.101";
+    };
+  };
 }

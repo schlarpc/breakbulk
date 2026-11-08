@@ -101,7 +101,7 @@ impl Trace {
             rustc_version: self.rustc_version.clone(),
             rustdoc: opts.rustdoc.clone(),
             cargo: opts.cargo.clone(),
-            nightly: self.cargo_version.contains("-nightly") || self.cargo_version.contains("-dev"),
+            nightly: breakbulk_format::version::is_nightly(&self.cargo_version),
             keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
@@ -470,18 +470,10 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     })
 }
 
-/// Whether Cargo's `trim-paths` profile setting exists: stable from Cargo
-/// 1.101 (nightly 1.101 included); a hard error before. `version` is
-/// `cargo -V` without `cargo `.
+/// Whether Cargo's `trim-paths` profile setting exists (breakbulk-format's
+/// `version::TRIM_PATHS`). `version` is `cargo -V` without `cargo `.
 pub fn has_trim_paths(version: &str) -> bool {
-    let mut parts = version
-        .split(|c: char| !c.is_ascii_digit())
-        .filter(|p| !p.is_empty())
-        .map(|p| p.parse::<u64>().unwrap_or(0));
-    match (parts.next(), parts.next()) {
-        (Some(major), Some(minor)) => (major, minor) >= (1, 101),
-        _ => false,
-    }
+    breakbulk_format::version::TRIM_PATHS.reached_by(version)
 }
 
 /// The options of the planner's second trace, which turns on Cargo's

@@ -26,7 +26,7 @@
 #   llvm.packagesFor { inherit pkgs; llvmMajor = 23; }
 #   llvm.lookup "1.102.0"                        # null: not in the table
 #   llvm.probe { inherit pkgs rustc; }           # from `rustc -vV` (IFD)
-{ lib }:
+{ lib, util }:
 let
   # Ascending by `from` (a major.minor Rust release).
   table = [
@@ -53,7 +53,7 @@ let
   verifiedThrough = "1.101";
 
   # "1.97.1", "1.101.0-nightly", "1.99.0-beta.3", "1.101.0-nightly-2026-11-01"
-  majorMinor = v: lib.versions.majorMinor (lib.head (lib.splitString "-" v));
+  inherit (util.rustVersion) majorMinor;
 
   # The table's LLVM major for a Rust version, or null outside the table.
   lookup =

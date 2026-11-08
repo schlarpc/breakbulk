@@ -12,6 +12,7 @@ mod normalize;
 mod plan;
 mod render;
 mod validate;
+pub mod version;
 
 pub use canonical::{CanonicalError, to_canonical_json};
 pub use deps::{Graph, crate_deps, crate_deps_of};

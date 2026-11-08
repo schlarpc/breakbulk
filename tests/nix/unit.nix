@@ -502,4 +502,29 @@ runTests "lib-unit" {
         unknown = false;
       };
     };
+
+  # util.rustVersion: one parse and named gates (breakbulk-format's
+  # `version` module mirrors it).
+  testRustVersion = {
+    expr =
+      let
+        rv = util.rustVersion;
+      in
+      [
+        (rv.majorMinor "1.101.0-nightly")
+        (rv.majorMinor "1.99.0")
+        (rv.atLeast rv.gates.trimPaths "1.101.0-nightly")
+        (rv.atLeast rv.gates.trimPaths "1.100.0")
+        (rv.atLeast rv.gates.remapPathScope "1.95.0")
+        (rv.atLeast rv.gates.remapPathScope "1.94.1")
+      ];
+    expected = [
+      "1.101"
+      "1.99"
+      true
+      false
+      true
+      false
+    ];
+  };
 }

@@ -476,17 +476,11 @@ impl Resolve for Tokens<'_> {
     }
 }
 
-/// Whether rustc takes `--remap-path-scope`: stable since 1.95. `rustc` is
-/// the plan's `rustc -vV` release line (`1.99.0 (… )`, `1.101.0-nightly …`).
+/// Whether rustc takes `--remap-path-scope` (breakbulk-format's
+/// `version::REMAP_PATH_SCOPE`). `rustc` is the plan's `rustc -vV` release
+/// line (`1.99.0 (… )`, `1.101.0-nightly …`).
 pub fn has_remap_scope(rustc: &str) -> bool {
-    let mut parts = rustc
-        .split(|c: char| !c.is_ascii_digit())
-        .filter(|p| !p.is_empty())
-        .map(|p| p.parse::<u64>().unwrap_or(0));
-    match (parts.next(), parts.next()) {
-        (Some(major), Some(minor)) => (major, minor) >= (1, 95),
-        _ => false,
-    }
+    breakbulk_format::version::REMAP_PATH_SCOPE.reached_by(rustc)
 }
 
 fn platform(unit: &Unit) -> Platform {

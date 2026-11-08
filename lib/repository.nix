@@ -972,7 +972,7 @@ let
           let
             inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
             v = ws.toolchain.cargo.version or null;
-            mayTrim = v == null || lib.versionAtLeast (lib.versions.majorMinor v) "1.101";
+            mayTrim = v == null || util.rustVersion.atLeast util.rustVersion.gates.trimPaths v;
             plan = builtins.fromJSON (
               builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
             );

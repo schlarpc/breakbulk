@@ -68,8 +68,8 @@ let
       ;
     breakbulkTraits = targetTraits;
   };
-  llvmVersions = import ./llvm-versions.nix { inherit lib; };
-  wasiSdk = import ./wasi-sdk.nix { inherit lib; };
+  llvmVersions = import ./llvm-versions.nix { inherit lib util; };
+  wasiSdk = import ./wasi-sdk.nix { inherit lib util; };
   runners = import ./runners.nix { inherit lib; };
   presets = import ./presets {
     inherit

@@ -25,7 +25,7 @@
 #   wasiSdk.versionFor "1.99.0"                  # "33"
 #   wasiSdk.sysrootFor { inherit pkgs rustc; }   # the wasi-sysroot-33.0 tree
 #   wasiSdk.sysrootFor { inherit pkgs; version = "34"; }
-{ lib }:
+{ lib, util }:
 let
   # Rust release (major.minor) to wasi-sdk release.
   table = {
@@ -57,7 +57,7 @@ let
   };
 
   # "1.97.1", "1.101.0-nightly", "1.100.0-beta.10-2026-11-05"
-  majorMinor = v: lib.versions.majorMinor (lib.head (lib.splitString "-" v));
+  inherit (util.rustVersion) majorMinor;
 
   versionFor =
     rustVersion:
