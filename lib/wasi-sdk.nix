@@ -25,7 +25,12 @@
 #   wasiSdk.versionFor "1.99.0"                  # "33"
 #   wasiSdk.sysrootFor { inherit pkgs rustc; }   # the wasi-sysroot-33.0 tree
 #   wasiSdk.sysrootFor { inherit pkgs; version = "34"; }
-{ lib, util }:
+{
+  lib,
+  util,
+  # lib/toolchain-facts.nix (lazily: it reads `versionFor` back).
+  toolchainFacts,
+}:
 let
   # Rust release (major.minor) to wasi-sdk release.
   table = {
@@ -72,10 +77,10 @@ let
       pkgs,
       rustc ? null,
       version ?
-        if rustc != null && rustc ? version then
-          versionFor rustc.version
+        if rustc != null then
+          (toolchainFacts.of { inherit pkgs rustc; }).wasiSdkVersion
         else
-          throw "breakbulk.wasiSdk: give `rustc` (with a version) or the wasi-sdk `version`",
+          throw "breakbulk.wasiSdk: give `rustc` or the wasi-sdk `version`",
     }:
     let
       r =

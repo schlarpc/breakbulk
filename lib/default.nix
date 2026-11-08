@@ -78,8 +78,16 @@ let
       ;
     breakbulkTraits = targetTraits;
   };
-  llvmVersions = import ./llvm-versions.nix { inherit lib util; };
-  wasiSdk = import ./wasi-sdk.nix { inherit lib util; };
+  llvmVersions = import ./llvm-versions.nix { inherit lib util toolchainFacts; };
+  wasiSdk = import ./wasi-sdk.nix { inherit lib util toolchainFacts; };
+  toolchainFacts = import ./toolchain-facts.nix {
+    inherit
+      lib
+      util
+      llvmVersions
+      wasiSdk
+      ;
+  };
   runners = import ./runners.nix { inherit lib; };
   presets = import ./presets {
     inherit
@@ -212,6 +220,7 @@ let
       runners
       llvmVersions
       wasiSdk
+      toolchainFacts
       ;
     inherit (stages) mkProduct;
     stageHelpers = stages.helpers;

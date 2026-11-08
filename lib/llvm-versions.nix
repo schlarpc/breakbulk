@@ -26,7 +26,12 @@
 #   llvm.packagesFor { inherit pkgs; llvmMajor = 23; }
 #   llvm.lookup "1.102.0"                        # null: not in the table
 #   llvm.probe { inherit pkgs rustc; }           # from `rustc -vV` (IFD)
-{ lib, util }:
+{
+  lib,
+  util,
+  # lib/toolchain-facts.nix (lazily: it reads `lookup` back).
+  toolchainFacts,
+}:
 let
   # Ascending by `from` (a major.minor Rust release).
   table = [
@@ -82,35 +87,9 @@ let
   # The LLVM major of `rustc`, from `rustc -vV` ("LLVM version: 23.1.5"),
   # read at evaluation time (import-from-derivation). The derivation is
   # tiny and runs on the build machine.
-  probe =
-    { pkgs, rustc }:
-    let
-      out =
-        pkgs.runCommand "rustc-llvm-major"
-          {
-            preferLocalBuild = true;
-            allowSubstitutes = false;
-          }
-          ''
-            ${rustc}/bin/rustc -vV > vv
-            v=$(sed -n 's/^LLVM version: \([0-9][0-9]*\)\..*/\1/p' vv)
-            if [ -z "$v" ]; then
-              echo "breakbulk.llvmVersions: \`${rustc}/bin/rustc -vV\` names no LLVM version:" >&2
-              cat vv >&2
-              exit 1
-            fi
-            printf %s "$v" > $out
-          '';
-    in
-    lib.toInt (builtins.readFile out);
-
-  # The table when it knows the rustc's version, else the probe.
-  majorOf =
-    pkgs: rustc:
-    let
-      m = if rustc ? version then lookup rustc.version else null;
-    in
-    if m != null then m else probe { inherit pkgs rustc; };
+  # The LLVM major of a rustc, from `rustc -vV` (IFD;
+  # toolchainFacts.probe).
+  probe = args: (toolchainFacts.probe args).llvmMajor;
 
   packagesFor =
     {
@@ -126,7 +105,7 @@ let
         else if rustc == null then
           throw "breakbulk: this preset needs LLVM tools matching your rustc; pass `rustc` (your toolchain), `llvmMajor` or `llvmPackages` to the preset"
         else
-          majorOf pkgs rustc;
+          (toolchainFacts.of { inherit pkgs rustc; }).llvmMajor;
       attr = "llvmPackages_${toString major}";
     in
     if llvmPackages != null then

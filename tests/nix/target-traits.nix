@@ -367,6 +367,35 @@ in
         lib.systems.examples.mingw-ucrt-x86_64-llvm.config
       ];
     };
+    # Toolchain facts (lib/toolchain-facts.nix): from attributes and tables,
+    # and from `rustc -vV` (IFD) for a rustc without a version.
+    testToolchainFacts = {
+      expr =
+        let
+          rust = pkgs.rust-bin.stable."1.97.0".minimal;
+          f = r: removeAttrs (bb.toolchainFacts.of { inherit pkgs; rustc = r; }) [ ];
+        in
+        [
+          (f rust)
+          (f (removeAttrs rust [ "version" ]))
+          (f pkgs.rustc).llvmMajor
+        ];
+      expected = [
+        {
+          version = "1.97.0";
+          majorMinor = "1.97";
+          llvmMajor = 22;
+          wasiSdkVersion = "33";
+        }
+        {
+          version = "1.97.0";
+          majorMinor = "1.97";
+          llvmMajor = 22;
+          wasiSdkVersion = "33";
+        }
+        (lib.toInt (lib.versions.major pkgs.rustc.llvmPackages.llvm.version))
+      ];
+    };
     # Unknown names: no built-in traits, and every field fails only when
     # read.
     testUnknownParse = {
