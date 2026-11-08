@@ -22,10 +22,11 @@
   hostSpec,
   chooseLinker,
   chooseRunner,
+  nativeTriple,
 }:
 {
   pkgs,
-  triple ? pkgs.stdenv.hostPlatform.rust.rustcTarget,
+  triple ? nativeTriple pkgs,
   glibc ? "2.17",
   zig ? pkgs.buildPackages.zig,
   # Extra `zig cc` invocations' flags to warm the cache with, e.g.
@@ -177,8 +178,8 @@ let
     "stdenvNoCC"
   ];
   packageSet =
-    if rebuildInputs != [ ] && triple != pkgs.stdenv.hostPlatform.rust.rustcTarget then
-      throw "breakbulk.presets.zig: rebuildInputs needs the native triple (${pkgs.stdenv.hostPlatform.rust.rustcTarget}), not ${triple}"
+    if rebuildInputs != [ ] && triple != nativeTriple pkgs then
+      throw "breakbulk.presets.zig: rebuildInputs needs the native triple (${nativeTriple pkgs}), not ${triple}"
     else
       builtins.mapAttrs (
         n: v:
@@ -221,7 +222,7 @@ in
     flavor = "zig";
     canExecute =
       pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform
-      && triple == pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      && triple == nativeTriple pkgs;
   }).runner;
   testSystem = mkDefault null;
   host = hostSpec pkgs;

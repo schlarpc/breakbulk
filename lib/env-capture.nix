@@ -272,5 +272,6 @@ in
     capture
     base
     forPackage
+    sets
     ;
 }

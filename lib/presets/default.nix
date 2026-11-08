@@ -84,10 +84,10 @@ let
 
   inherit (targetTraits) nativeTriple;
 
-  # nixpkgs' name for a Rust target's cross package set, where it differs
-  # from importing nixpkgs with `crossSystem.config = <triple>`; the
-  # pkgsCross attributes are the ones Hydra builds (and caches).
-  pkgsCrossNames = {
+  # nixpkgs' cross package set for a Rust target, where it differs from
+  # importing nixpkgs with `crossSystem.config = <triple>`: a pkgsCross
+  # attribute (the ones Hydra builds, and caches), or a crossSystem.
+  crossSets = {
     "aarch64-unknown-linux-gnu" = "aarch64-multiplatform";
     "aarch64-unknown-linux-musl" = "aarch64-multiplatform-musl";
     "x86_64-unknown-linux-gnu" = "gnu64";
@@ -95,20 +95,29 @@ let
     "riscv64gc-unknown-linux-gnu" = "riscv64";
     "armv7-unknown-linux-gnueabihf" = "armv7l-hf-multiplatform";
     "wasm32-wasip1" = "wasi32";
+    # mingw-w64 with gcc and msvcrt (Rust's own windows-gnu CRT).
+    "x86_64-pc-windows-gnu" = "mingwW64";
+    "i686-pc-windows-gnu" = "mingw32";
+    # LLVM mingw-w64 with ucrt.
+    "aarch64-pc-windows-gnullvm" = "ucrtAarch64";
+    "x86_64-pc-windows-gnullvm" = lib.systems.examples.mingw-ucrt-x86_64-llvm;
   };
 
-  # The package set whose libraries `triple` links: pkgs itself for the
-  # native triple, else a cross set.
+  # The package set whose libraries `triple` links, one table for every
+  # preset: pkgs itself for the native triple, else a cross set.
   targetPkgsFor =
     pkgs: triple:
+    let
+      cross = crossSets.${triple} or { config = triple; };
+    in
     if triple == nativeTriple pkgs then
       pkgs
-    else if pkgsCrossNames ? ${triple} then
-      pkgs.pkgsCross.${pkgsCrossNames.${triple}}
+    else if builtins.isString cross then
+      pkgs.pkgsCross.${cross}
     else
       import pkgs.path {
         localSystem = pkgs.stdenv.buildPlatform;
-        crossSystem.config = triple;
+        crossSystem = cross;
         inherit (pkgs) overlays config;
       };
 
@@ -496,6 +505,7 @@ in
         chooseLinker
         chooseRunner
         hostSpec
+        nativeTriple
         ;
     }
   );
@@ -504,6 +514,7 @@ in
       inherit
         lib
         targetTraits
+        targetPkgsFor
         chooseLinker
         chooseRunner
         hostSpec

@@ -16,33 +16,21 @@
 {
   lib,
   targetTraits,
+  targetPkgsFor,
   chooseLinker,
   chooseRunner,
   hostSpec,
   staticLinking,
 }:
-let
-  # nixpkgs' cross package set for each Rust triple.
-  packageSetFor =
-    pkgs: triple:
-    {
-      "x86_64-pc-windows-gnu" = pkgs.pkgsCross.mingwW64;
-      "i686-pc-windows-gnu" = pkgs.pkgsCross.mingw32;
-      "aarch64-pc-windows-gnullvm" = pkgs.pkgsCross.ucrtAarch64;
-      "x86_64-pc-windows-gnullvm" = import pkgs.path {
-        localSystem = pkgs.stdenv.buildPlatform;
-        crossSystem = lib.systems.examples.mingw-ucrt-x86_64-llvm;
-        inherit (pkgs) overlays config;
-      };
-    }
-    .${triple}
-      or (throw "breakbulk.presets.windowsGnu: `${triple}` is not a windows-gnu or windows-gnullvm triple");
-in
 {
   pkgs,
   triple ? "x86_64-pc-windows-gnu",
   traits ? targetTraits.resolve { inherit triple; },
-  packageSet ? packageSetFor pkgs triple,
+  packageSet ?
+    if traits.isMingw then
+      targetPkgsFor pkgs triple
+    else
+      throw "breakbulk.presets.windowsGnu: `${triple}` is not a windows-gnu or windows-gnullvm triple",
   crtStatic ? true,
   lld ? pkgs.buildPackages.lld,
   wine ? pkgs.wineWow64Packages.minimal,

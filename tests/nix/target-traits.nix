@@ -348,6 +348,25 @@ in
         "none"
       ];
     };
+    # One table of cross package sets (presets.targetPkgsFor), for the
+    # Linux and the MinGW presets alike.
+    testPackageSets = {
+      expr =
+        map
+          (t: (bb.presets.targetPkgsFor pkgs t).stdenv.hostPlatform.config)
+          [
+            "x86_64-unknown-linux-gnu"
+            "aarch64-unknown-linux-musl"
+            "x86_64-pc-windows-gnu"
+            "x86_64-pc-windows-gnullvm"
+          ];
+      expected = [
+        pkgs.stdenv.hostPlatform.config
+        pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.hostPlatform.config
+        pkgs.pkgsCross.mingwW64.stdenv.hostPlatform.config
+        lib.systems.examples.mingw-ucrt-x86_64-llvm.config
+      ];
+    };
     # Unknown names: no built-in traits, and every field fails only when
     # read.
     testUnknownParse = {

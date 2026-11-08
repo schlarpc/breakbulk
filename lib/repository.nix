@@ -398,9 +398,12 @@ let
       inherit (targetSpecs.${wsName}.${triple}.config) traits;
     };
 
-  # The package set of a target's units: the target spec's `packageSet`
-  # (set by the presets), else pkgs for the native triple.
-  targetPkgs =
+  # The nixpkgs package set of a target's units, one rule for every use:
+  # the target spec's `packageSet` (set by the presets,
+  # `presets.targetPkgsFor`), else pkgs for the native triple, else null:
+  # the target has none (msvc, wasm32-unknown-unknown), so its packages
+  # cannot have library inputs.
+  packageSetOf =
     wsName: triple:
     let
       p = targetField wsName triple "packageSet" null;
@@ -410,7 +413,17 @@ let
     else if triple == nativeTriple then
       pkgs
     else
-      throw "breakbulk: package inputs on target ${triple} need that target's nixpkgs package set (`targets.${triple}.packageSet`, which the Linux presets set); this target has none";
+      null;
+  # The package set a platform's env captures come from (envCapture.sets
+  # derives the host and build sets from it): the target's; a target
+  # without one has the build machine's, for its host units and its base
+  # capture (the build machine's tools, no libraries).
+  captureSetOf =
+    wsName: triple:
+    let
+      p = packageSetOf wsName triple;
+    in
+    if p == null then pkgs else p;
 
   # --- toolchain specs (M3) -------------------------------------------------
   #
@@ -478,7 +491,7 @@ let
             ])
             // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
           hostEnv = envStrings t.host.env;
-          targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
+          targetPackageSet = captureSetOf wsName triple;
           targetStdenv = t.stdenv;
           hostStdenv = t.host.stdenv;
           targetEnv = envStrings (cEnv // t.env);
@@ -510,19 +523,8 @@ let
             let
               # A target without a package set (msvc, wasm32-unknown-unknown)
               # still has the build machine's for its host units.
-              hasSet = targetField wsName triple "packageSet" null != null || triple == nativeTriple;
-              p = if hasSet || platform == "host" then (if hasSet then targetPkgs wsName triple else pkgs) else null;
-              sets =
-                if platform == "target" then
-                  {
-                    host = p;
-                    build = p.buildPackages;
-                  }
-                else
-                  {
-                    host = p.buildPackages;
-                    build = p.buildPackages.buildPackages;
-                  };
+              p = if platform == "host" then captureSetOf wsName triple else packageSetOf wsName triple;
+              sets = envCapture.sets p platform;
               # Target units of such a target cannot have library inputs.
               # The error belongs to the units that would use them, so a
               # package that never builds for this target (a curated
