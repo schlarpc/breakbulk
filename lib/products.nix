@@ -31,10 +31,14 @@
 #   products.<pkg>.unbuilt         roots Cargo did not build, with reasons
 #
 # The stage set of a product is, merged in this order (later wins per
-# attribute; `null` removes a stage): the preset's default stages, the
-# target's `stages`, and for each matching `packages.<name>` (unversioned
-# keys first) its `stages` then its `target.<triple>.stages`. Checks merge
-# the same way over the default `noSourceReferences`.
+# attribute; `null` removes a stage): the target's stage set
+# (`targetStageSet`: the preset's default stages, then the target's
+# `stages`), and for each matching `packages.<name>` (unversioned keys
+# first) its `stages` then its `target.<triple>.stages`. Checks merge the
+# same way over the default `noSourceReferences`. Whether debug info is
+# split off is the target's decision (decision 90); a package whose stages
+# add or remove `splitDebug` gets an evaluation warning
+# (`products.<pkg>.warnings`).
 #
 # `linked` is one directory holding every built root's files, as
 # symlinks: a bin under its target name (Cargo's uplifted name, the
@@ -228,27 +232,65 @@ let
         done | tee $out/log
       '';
 
-  # The scope of non-test units for a target: debug info keeps real store
-  # paths only when the target's products split it off.
-  shippedRemapScope =
+  # Decision 90: whether debug info is split off is decided per target,
+  # from one stage set, and three things follow from it: the products'
+  # stages (each package's set merges over this one), the remap scope of
+  # the target's units (`shippedRemapScope`: debug info keeps real store
+  # paths only when it is split off) and the GNU build ID of its links
+  # (`NIX_SET_BUILD_ID`, which splitDebug needs). The units are shared by
+  # every package of the target, so a package cannot change this alone:
+  # mkProducts warns when a package's own stages add or remove
+  # `splitDebug` (`splitDebugWarning`).
+  #
+  # The target's stage set: the stage preset's defaults (`stagePreset`, or
+  # the traits' default chain) with `targets.<triple>.stages` over them.
+  targetStageSet =
     {
-      stagePreset ? null,
       triple,
       traits ? targetTraits.resolve { inherit triple; },
+      stagePreset ? null,
       targetStages ? { },
+      ...
+    }:
+    stages.merge [
+      (presetStages (if stagePreset == null then traits.stagePreset else stagePreset))
+      targetStages
+    ];
+
+  # Whether a stage set splits debug info off.
+  splitsDebug = stageSet: (stageSet.splitDebug or null) != null;
+
+  # Whether the target's products split debug info off (targetStageSet's
+  # arguments).
+  targetSplitsDebug = args: splitsDebug (targetStageSet args);
+
+  # The scope of non-test units for a target (targetStageSet's arguments
+  # and `coverage`).
+  shippedRemapScope =
+    {
       coverage ? false,
+      ...
+    }@args:
+    if targetSplitsDebug args then "macro,diagnostics${lib.optionalString coverage ",coverage"}" else null;
+
+  # The warning for a package whose stages disagree with its target's on
+  # `splitDebug`, or null.
+  splitDebugWarning =
+    {
+      pkg,
+      triple,
+      target,
+      package,
     }:
     let
-      preset = if stagePreset == null then traits.stagePreset else stagePreset;
-      merged = stages.merge [
-        (presetStages preset)
-        targetStages
-      ];
+      fix = "set it for the target instead (`targets.\"${triple}\".stages.splitDebug`), or build this package for a target of its own";
     in
-    if (merged.splitDebug or null) != null then
-      "macro,diagnostics${lib.optionalString coverage ",coverage"}"
+    if target == package then
+      null
+    else if target then
+      "breakbulk: packages.${pkg} removes `splitDebug` on ${triple}, but debug splitting is decided per target (decision 90): the units it links still keep real source paths in their debug info, so its product references its sources (its noSourceReferences check fails), with no `debug` output to hold them; ${fix}"
     else
-      null;
+      "breakbulk: packages.${pkg} adds `splitDebug` on ${triple}, but debug splitting is decided per target (decision 90): the units it links remap every source path, so its `debug` output names no sources, and its links get no GNU build ID, which splitDebug needs for a binary with debug info; ${fix}";
 
   mkProducts =
     {
@@ -269,7 +311,14 @@ let
       toolchainPaths ? inst.toolchainPaths or [ ],
     }:
     let
-      preset = if stagePreset == null then traits.stagePreset else stagePreset;
+      targetSet = targetStageSet {
+        inherit
+          triple
+          traits
+          stagePreset
+          targetStages
+          ;
+      };
       byPkg = groupBy (r: r.breakbulkRoot.package) (
         filter (r: !r.breakbulkRoot.test) (attrValues inst.roots)
       );
@@ -282,13 +331,12 @@ let
           unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           confs = packageConfig pkg;
-          stageSet = stages.merge (
-            [
-              (presetStages preset)
-              targetStages
-            ]
-            ++ map (c: c.stages or { }) confs
-          );
+          stageSet = stages.merge ([ targetSet ] ++ map (c: c.stages or { }) confs);
+          warning = splitDebugWarning {
+            inherit pkg triple;
+            target = splitsDebug targetSet;
+            package = splitsDebug stageSet;
+          };
           checkSet = stages.merge ([ targetChecks ] ++ map (c: c.checks or { }) confs);
           p = stages.mkProduct {
             name = pkg;
@@ -311,6 +359,8 @@ let
           ) rs;
           extra = {
             inherit roots uncertain;
+            # Evaluation warnings about this product (also printed).
+            warnings = lib.optional (warning != null) warning;
             unbuilt = map (r: {
               root = rootName r;
               inherit (r.breakbulkRoot) reason;
@@ -318,7 +368,7 @@ let
           }
           // lib.optionalAttrs uncertain { buildCheck = mkBuildCheck pkgs pkg rs; };
         in
-        (if built == [ ] then head rs else p) // extra;
+        (if warning == null then lib.id else lib.warn warning) ((if built == [ ] then head rs else p) // extra);
     in
     mapAttrs product selected;
 in
@@ -326,6 +376,9 @@ in
   inherit
     mkProducts
     stagePresetFor
+    targetStageSet
+    splitsDebug
+    targetSplitsDebug
     shippedRemapScope
     presetStages
     ;

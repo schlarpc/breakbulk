@@ -622,15 +622,18 @@ let
         lib.elem triple v.targets
     ) ws.variants;
 
+  # The target's stage set's inputs (lib/products.nix targetStageSet): one
+  # decision, per target, of whether debug info is split off (decision
+  # 90), read by the products, the remap scope and the build ID alike.
+  stageSetArgs = wsName: triple: {
+    inherit triple;
+    traits = traitsOf wsName triple;
+    stagePreset = targetField wsName triple "stagePreset" null;
+    targetStages = targetField wsName triple "stages" { };
+  };
   shippedRemapScopeOf =
     wsName: triple: v:
-    products.shippedRemapScope {
-      inherit triple;
-      traits = traitsOf wsName triple;
-      stagePreset = targetField wsName triple "stagePreset" null;
-      targetStages = targetField wsName triple "stages" { };
-      coverage = v.mode == "coverage";
-    };
+    products.shippedRemapScope (stageSetArgs wsName triple // { coverage = v.mode == "coverage"; });
 
   instance =
     wsName: ws: triple: vName:
@@ -643,7 +646,9 @@ let
       # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
       # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
       # set, as stdenv's separateDebugInfo does. Target units only.
-      buildId = lib.optionalAttrs (shippedRemapScopeOf wsName triple v != null) { NIX_SET_BUILD_ID = "1"; };
+      buildId = lib.optionalAttrs (products.targetSplitsDebug (stageSetArgs wsName triple)) {
+        NIX_SET_BUILD_ID = "1";
+      };
     in
     mkWorkspace pkgs (
       {
@@ -711,17 +716,17 @@ let
   # stages (lib/products.nix).
   productsOf =
     wsName: ws: triple: inst: sel:
-    products.mkProducts {
-      inherit pkgs inst triple;
-      traits = traitsOf wsName triple;
+    products.mkProducts (
+      stageSetArgs wsName triple
+      // {
+      inherit pkgs inst;
       select = sel;
-      stagePreset = targetField wsName triple "stagePreset" null;
-      targetStages = targetField wsName triple "stages" { };
       targetChecks = targetField wsName triple "checks" { };
       packageConfig = productConfig wsName triple;
       inherit (cfg) ca;
       lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
-    };
+      }
+    );
 
   testName =
     r:

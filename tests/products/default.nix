@@ -4,6 +4,9 @@
 #
 #   nix build -f tests/products post-link
 #
+#   split-debug-per-package   a package removing or adding `splitDebug`
+#                    against its target gets a warning; its units keep the
+#                    target's remap scope and build ID (decision 90)
 #   post-link        stage order from target and package stages; a stage
 #                    removed with mkForce null; a check on `linked` sees
 #                    unstripped bytes; checks in repo.checks
@@ -1252,6 +1255,66 @@ in
         grep -qF 'references the Rust toolchain ${builtins.unsafeDiscardStringContext "${sysroot}"}' $failure/testBuildFailure.log
         touch $out
       '';
+
+  # Decision 90: debug splitting is per target. A package that removes
+  # `splitDebug` (tool) or adds it on a target without it (server) gets a
+  # warning naming the target option; its units, shared with the other
+  # packages, keep the target's remap scope and build ID (their .drv paths
+  # are those of the repository where the package agrees with its target).
+  split-debug-per-package =
+    let
+      base = mkRepo (fixtures + "/post-link") [ (oneWs "." "dev") ];
+      removed = mkRepo (fixtures + "/post-link") [
+        (oneWs "." "dev")
+        { packages.tool.stages.splitDebug = lib.mkForce null; }
+      ];
+      noSplit = [
+        (oneWs "." "dev")
+        { targets.${native}.stages.splitDebug = lib.mkForce null; }
+      ];
+      noSplitBase = mkRepo (fixtures + "/post-link") noSplit;
+      added = mkRepo (fixtures + "/post-link") (
+        noSplit
+        ++ [
+          {
+            packages.server.stages.splitDebug = {
+              after = "linked";
+              run = helpers.splitDebug;
+            };
+          }
+        ]
+      );
+      pk = r: r.workspaces.main.packages;
+      unitOf = r: p: (pk r).${p}.roots."bin/${p}".drvPath;
+      w = r: p: (pk r).${p}.warnings;
+      report = {
+        removedWarning = w removed "tool";
+        addedWarning = w added "server";
+        quiet = map (r: w r "server" ++ w r "tool") [
+          base
+          noSplitBase
+        ];
+        otherQuiet = w removed "server" ++ w added "tool";
+      };
+      ok =
+        lib.length report.removedWarning == 1
+        && lib.hasInfix "removes `splitDebug`" (lib.head report.removedWarning)
+        && lib.hasInfix "targets.\"${native}\".stages.splitDebug" (lib.head report.removedWarning)
+        && lib.length report.addedWarning == 1
+        && lib.hasInfix "adds `splitDebug`" (lib.head report.addedWarning)
+        && report.quiet == [
+          [ ]
+          [ ]
+        ]
+        && report.otherQuiet == [ ]
+        # The package's own stages changed nothing below its products.
+        && unitOf removed "tool" == unitOf base "tool"
+        && unitOf added "server" == unitOf noSplitBase "server"
+        && unitOf base "tool" != unitOf noSplitBase "tool"
+        && (pk removed).tool.stageOrder == [ "install" ];
+    in
+    assert lib.assertMsg ok "split-debug-per-package: ${builtins.toJSON report}";
+    evalCheck "split-debug-per-package" (builtins.toJSON report);
 
   post-link =
     let
