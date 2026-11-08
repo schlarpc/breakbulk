@@ -203,6 +203,14 @@
               breakbulk = self.lib;
             }) [ "workspaces" ]
           )
+          # Native libraries at the link steps of the packages that link a
+          # `-sys` crate (decision 107).
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "native-link-${n}" v) (
+            builtins.removeAttrs (import ./tests/native-link {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repo" ]
+          )
           # Dynamic-derivation mode's outer-derivation builder compiles (its
           # behaviour needs Nix master: `nix run .#test-dynamic`).
           // { breakbulk-drv = self.lib.dynamic.mkBreakbulkDrv pkgs; }

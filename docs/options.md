@@ -226,7 +226,12 @@ p: [ p.openssl ]
 Libraries for the platform being built (` openssl `)\. A function of
 a package set (` p: [ p.openssl ] `), called with the build
 machine’s set for host units and with the target’s set for
-target units; or a list used as given\.
+target units; or a list used as given\. Their library search
+paths (` NIX_LDFLAGS `, not compiler flags or ` PATH `) also reach
+the link steps of the packages that link this one (bins, tests,
+cdylibs, doctests of dependents), on the same platform, so a
+` -sys ` crate may print ` rustc-link-lib ` without a search path;
+binaries get an rpath to the library\.
 
 
 

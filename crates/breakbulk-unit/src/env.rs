@@ -280,6 +280,40 @@ pub fn read_capture(path: &Path) -> Result<BTreeMap<String, String>, Error> {
     })
 }
 
+/// The variables of another package's env capture that a linking unit takes
+/// (decision 107): the library search flags nixpkgs' bintools-wrapper setup
+/// hook writes for every library input (`bintoolsWrapper_addLDVars` appends
+/// `-L<input>/lib` to `NIX_LDFLAGS${role_post}`). A capture's `inputs` are
+/// `buildInputs` of its stdenv, whose role suffix is empty; the
+/// `_FOR_BUILD` form holds the library directories of its `nativeInputs`
+/// (tools such as cmake or libclang), which are not what dependents link,
+/// so it is left out. The linker wrapper turns the flags into `-L`, and
+/// adds an rpath for each of those directories that holds a shared library
+/// a `-l` names (`ld-wrapper.sh`). Compiler flags, `PATH` and
+/// `PKG_CONFIG_PATH` stay with the package's own units.
+pub const LINK_VARS: [&str; 1] = ["NIX_LDFLAGS"];
+
+/// Layer 2 of a linking unit: its own capture, then the [`LINK_VARS`] of
+/// each of `link_captures`, appended in order. `None` when there is
+/// neither.
+pub fn capture_layer(
+    capture: Option<&str>,
+    link_captures: &[String],
+) -> Result<Option<BTreeMap<String, String>>, Error> {
+    let mut env = capture.map(|p| read_capture(Path::new(p))).transpose()?;
+    for p in link_captures {
+        let other = read_capture(Path::new(p))?;
+        let env = env.get_or_insert_with(BTreeMap::new);
+        merge_layer(
+            env,
+            other
+                .into_iter()
+                .filter(|(k, v)| LINK_VARS.contains(&k.as_str()) && !v.trim().is_empty()),
+        );
+    }
+    Ok(env)
+}
+
 /// Build a child's environment from the layers. `unit_env` is layers 3–5,
 /// already merged.
 pub fn layered(

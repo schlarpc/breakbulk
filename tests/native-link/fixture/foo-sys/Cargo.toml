@@ -1,0 +1,5 @@
+[package]
+name = "foo-sys"
+version.workspace = true
+edition.workspace = true
+links = "foo"

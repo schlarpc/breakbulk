@@ -371,7 +371,7 @@ A root in the plan that was not predicted is an error listing both sets, because
 A unit's environment is built in layers; later layers win, except for list-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, `NIX_LDFLAGS`), where later layers append:
 
 1. A fixed base: `HOME=/homeless-shelter`, `TMPDIR`, `NIX_BUILD_CORES`, `LC_ALL=C`, `TZ=UTC`.
-2. The env capture for the unit's package and platform, or the base capture for the platform.
+2. The env capture for the unit's package and platform, or the base capture for the platform; for a unit that links, followed by the library search flags of the captures of the other packages it links (see [Environment capture](#environment-capture)).
 3. Cargo's recorded env, after filtering.
 4. The toolchain spec's env for the unit's platform.
 5. The package override's env for the unit's platform.
@@ -456,6 +456,7 @@ Inputs declared on a package become environment through nixpkgs' own setup hooks
 - A capture keeps only what setup hooks added relative to a plain shell, minus per-build values: `NIX_BUILD_TOP`, `TMPDIR`, `PWD`, `out`, log descriptors, `SOURCE_DATE_EPOCH` (set by the base layer instead), and any value naming the capture's own output.
 - The capture derivation sets `strictDeps = true` (otherwise every input's `bin/` reaches `PATH` and flags are doubled) and `NIX_NO_SELF_RPATH = 1` (otherwise every binary gets an rpath to the capture). It strips stdenv's own `-frandom-seed`; each unit adds its own, as stdenv does, but derived from the unit's plan key (Cargo's `-C metadata` hash for a compile, the `OUT_DIR` hash for a run) instead of its output path. GCC records its switches in debug info, so a seed from the output path would change C objects whenever a unit's inputs change without its content changing (a new `breakbulk-unit`, a new env capture). `NIX_*` variables are always kept, because some stdenvs (musl) set `NIX_HARDENING_ENABLE` as a derivation attribute.
 - A unit gets exactly one capture. Variables such as `CC`, `PATH` and `NIX_CFLAGS_COMPILE` mean "this stdenv's platform", so host and target captures never merge.
+- Linking units also take part of other captures (decision 107). A `-sys` crate that prints `rustc-link-lib=magic` and no search path relies on the linker finding the library; Cargo applies the `-l` where the final binary links, in another package whose capture does not name the library. Every unit that links (`is_linking`: bins, tests, cdylibs, dylibs, staticlibs, proc macros, build-script compiles; and doctests) lists in `linkCaptures` the captures of the other packages in its link closure (`Graph::crate_deps`, on the unit's own platform, not through proc macros) that have inputs of their own. `breakbulk-unit` appends their `NIX_LDFLAGS` to layer 2 with the list rules, and nothing else from them: nixpkgs' bintools-wrapper setup hook writes `-L<input>/lib` there for each library input (`bintoolsWrapper_addLDVars`), and its `ld-wrapper.sh` adds an rpath for each `-L` directory that holds a shared library a `-l` names. `NIX_LDFLAGS_FOR_BUILD`, which holds the library directories of `nativeInputs` (cmake, libclang), is left out. Host and target captures stay apart, because a target unit's link closure holds only target units. A change to such a package's inputs changes its dependents' units anyway (they take its outputs as inputs), so this adds no invalidation. Tested by `tests/native-link`.
 - C objects carry source paths in their debug info; units add `-ffile-prefix-map` for the source views to the C flags, matching the Rust remaps.
 
 The spike result is in [spikes/C-env-capture.md](spikes/C-env-capture.md).
@@ -785,6 +786,7 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `directives` | Every build-script directive, `links` chains, `DEP_*` | linux-gnu | Placement matches Cargo; signal death fails |
 | `build-dep-leak` | A build dependency emitting `rustc-link-lib` | linux-gnu → aarch64 | Target link args contain no host libs |
 | `sys-native` | pkg-config, cmake and bindgen `-sys` crates with `nativeInputs` and `inputs` | linux-gnu, aarch64 | Builds; captured env reaches only that package |
+| `native-link` (`tests/native-link`) | A `-sys` crate printing only `rustc-link-lib=foo`, against a C shared library from `inputs`; a bin, tests and a doctest in other packages | linux-gnu | The bin links and runs with an empty environment (rpath); only linking units get the library search flags; a change to the input touches no unrelated package |
 | `missing-input` | A `-sys` crate with an undeclared input | linux-gnu | Failure names the variable or path and the option to set |
 | `crate-types` | `["cdylib", "rlib"]`, `staticlib`, proc macro | linux-gnu, wasm | All outputs present |
 | `outside-reads` | `include_str!` of `../`, a proc macro reading a sibling directory | linux-gnu | Builds; editing an unrelated sibling changes nothing |

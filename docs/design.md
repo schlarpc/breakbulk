@@ -132,6 +132,8 @@ A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/
 
 Inputs are turned into environment by nixpkgs itself: a small derivation per package and platform runs a real `stdenv` with those inputs and records the environment its setup hooks produce. Packages without inputs share one base capture per platform, which gives build scripts the same baseline tools and hardening flags as `buildRustPackage`.
 
+One exception follows from how native libraries are linked: a `-sys` crate's `rustc-link-lib` is applied where the final binary links, which is a unit of another package. Every unit that links (bins, tests, cdylibs, dylibs, staticlibs, proc macros, build-script compiles, doctests) therefore also gets the library search flags (`NIX_LDFLAGS`, nothing else) of every package it links that has inputs, on its own platform only. The linker wrapper turns them into `-L` and records an rpath to each directory it links a shared library from, as `cargo build` finds the library on a system where it is installed.
+
 ### Source views
 
 A package's source is a filtered view of the **repository root**, not its crate directory: the crate directory plus declared extras, at their original relative layout. Paths such as `../../wit`, `../shared/assets` or `../../../patches` therefore resolve unchanged, and editing an unrelated file changes no source path. Test units can declare a wider scope for tests that read repository files.

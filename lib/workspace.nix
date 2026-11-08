@@ -231,17 +231,26 @@ let
 
   # Each package's own env capture per platform (envCapture.forPackage
   # gives the base capture when it declares no inputs), and its env.
+  # A package without inputs has no capture of its own (null), as in
+  # mkRepository: its units get the platform's base capture, and linking
+  # units of its dependents add nothing for it (decision 107).
   overrides = lib.mapAttrs (
     n: o:
-    lib.genAttrs [ "host" "target" ] (platform: {
-      env = o.env or { };
-      envCapture = envCapture.forPackage {
-        inherit pkgs platform;
-        name = n;
-        nativeInputs = o.nativeInputs or [ ];
-        inputs = o.inputs or [ ];
-      };
-    })
+    lib.genAttrs [ "host" "target" ] (
+      platform:
+      let
+        c = envCapture.forPackage {
+          inherit pkgs platform;
+          name = n;
+          nativeInputs = o.nativeInputs or [ ];
+          inputs = o.inputs or [ ];
+        };
+      in
+      {
+        env = o.env or { };
+        envCapture = if c.drvPath == (envCapture.base { inherit pkgs platform; }).drvPath then null else c;
+      }
+    )
   ) (lib.filterAttrs (_: o: o ? nativeInputs || o ? inputs || o ? env) packages);
 
   unitTools = {

@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compile::{Invocation, check_args, fresh_dir, link_deps};
 use crate::directives::BuildOutput;
-use crate::env::{CFlags, Outer, layered, merge_layer, read_capture};
+use crate::env::{CFlags, Outer, capture_layer, layered, merge_layer};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedArg, RenderedCompile};
 use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
@@ -215,11 +215,7 @@ pub fn invocation(
 
     let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
     prepend_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
-    let capture = c
-        .env_capture
-        .as_deref()
-        .map(|p| read_capture(Path::new(p)))
-        .transpose()?;
+    let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     let mut env = layered(outer, capture.as_ref(), &unit_env, &CFlags::default());
     env.insert("RUST_TEST_THREADS".into(), outer.jobs().to_string());
     merge_layer(&mut env, config.env.clone());
@@ -354,6 +350,7 @@ mod tests {
                 remap: vec![],
                 remap_scope: None,
                 env_capture: None,
+                link_captures: Vec::new(),
                 seed: None,
             },
             search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),
