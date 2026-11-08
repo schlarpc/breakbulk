@@ -290,6 +290,9 @@ let
             cat out.txt
             [ "$status" = 53 ] || { echo "expected a missing-DLL failure (53), got $status"; exit 1; }
             grep -q 'test result: ok' ${run}/log
+            # The test binary attribute is named as Cargo names it, with the
+            # target's executable suffix (traits.exeSuffix).
+            test -x ${t.tests.windows-dll.lib}/bin/windows_dll.exe
             mkdir -p $out
             cp dlls.txt $out/
           '';

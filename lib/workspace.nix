@@ -19,11 +19,11 @@
 #     };
 #   };
 #
-#   ws.packages.<bin>          the bin, installed as $out/bin/<bin>
+#   ws.packages.<bin>          the bin, installed as $out/bin/<bin><exe suffix>
 #   ws.roots."<pkg>/<kind>/<target>"   build-plan roots (unit outputs or stubs),
 #                              e.g. "c/cdylib/c" for a library's cdylib
 #   ws.tests."<pkg>/<kind>/<target>"   test-plan roots
-#   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target>
+#   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target><exe suffix>
 #   ws.plans.{build,test}      the plan derivations ($out/plan.json)
 #   ws.cargoEnv                the dev shell's cargo-env.json (no planning)
 #   ws.units.{build,test}      every unit derivation, by unit id
@@ -398,6 +398,11 @@ let
 
   # Put a root unit's single linked file at $out/<dir>/<name>. Products and
   # their stages come in M4; this is only enough to run things.
+  # A root's executable name: its target name with the target's executable
+  # suffix (traits.exeSuffix: `.exe` on Windows, `.wasm` for wasm), as
+  # Cargo uplifts it.
+  exeName = r: "${r.breakbulkRoot.target}${traits.exeSuffix}";
+
   install =
     dir: fileName: r:
     pkgs.runCommand fileName { } ''
@@ -540,7 +545,7 @@ in
         tools = unitTools;
       }).runs;
   packages = lib.mapAttrs' (
-    _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" r.breakbulkRoot.target r)
+    _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" (exeName r) r)
   ) bins;
   testRuns = tr.runs;
   testApps = (if isDynamic then dynamic.mkTestApps else testApps.mkTestApps) {
@@ -555,6 +560,6 @@ in
   inherit (tr) doctests checks;
   # Test binaries by root name, installed as $out/bin/<target>.
   testBins = lib.mapAttrs (
-    _: r: if r.breakbulkRoot.unit == null then r else install "bin" r.breakbulkRoot.target r
+    _: r: if r.breakbulkRoot.unit == null then r else install "bin" (exeName r) r
   ) tested.roots;
 }

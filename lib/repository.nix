@@ -750,11 +750,11 @@ let
 
   selectPkgs = sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
 
-  # benches.<pkg>.<name>: bench-plan roots installed as $out/bin/<target>
-  # (stubs as they are): a bench by its name, the lib harness in bench
-  # mode as `lib`, a bin's as `bin-<name>`.
+  # benches.<pkg>.<name>: bench-plan roots installed as
+  # $out/bin/<target><exe suffix> (stubs as they are): a bench by its name,
+  # the lib harness in bench mode as `lib`, a bin's as `bin-<name>`.
   benchesOf =
-    inst: sel:
+    traits: inst: sel:
     let
       byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.benches);
       nameOf =
@@ -775,7 +775,7 @@ let
         else
           pkgs.runCommand r.breakbulkRoot.target { } ''
             files=(${r}/*)
-            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}
+            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}${traits.exeSuffix}
           '';
     in
     lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (
@@ -822,8 +822,8 @@ let
       }
     ) (selectPkgs sel allRuns);
 
-  # tests.<pkg>.<name>: test-plan roots installed as $out/bin/<target>
-  # (stubs as they are).
+  # tests.<pkg>.<name>: test-plan roots installed as
+  # $out/bin/<target><exe suffix> (stubs as they are).
   testsOf =
     inst: sel:
     let
@@ -875,7 +875,7 @@ let
               namedTestRuns = ifTests (namedRuns inst tSel);
               testApps = ifTests (selectPkgs tSel inst.testApps);
               doctests = ifTests (selectPkgs tSel inst.doctests);
-              benches = benchesOf inst sel;
+              benches = benchesOf (traitsOf wsName triple) inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
             }
