@@ -1588,6 +1588,42 @@ null
 
 
 
+## targets\.\<name>\.host\.stdenv
+
+
+
+The stdenv of the host units’ environment capture (build
+scripts, proc macros and their dependencies) of this
+target’s plans\. ` null `: the build machine’s
+(` buildPackages.stdenv ` of the target’s package set)\. It must
+build for the build machine\.
+
+
+
+*Type:*
+null or raw value
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+pkgs.clangStdenv
+```
+
+*Declared by:*
+ - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+
+
+
 ## targets\.\<name>\.linker
 
 
@@ -1780,6 +1816,43 @@ attribute set of (null or raw value)
   splitDebug = lib.mkForce null;   # remove a default stage
 }
 
+```
+
+*Declared by:*
+ - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+
+
+
+## targets\.\<name>\.stdenv
+
+
+
+The stdenv whose setup hooks the target units’ environment
+capture records (its C compiler, wrapper flags, hardening),
+for the base capture and every package’s own\. ` null `: the
+package set’s stdenv (` packageSet.stdenv `, or the build
+machine’s for a target without a package set)\. It must build
+for this target\.
+
+
+
+*Type:*
+null or raw value
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+pkgs.clangStdenv
 ```
 
 *Declared by:*
