@@ -58,6 +58,8 @@ The skeleton and toolchain spec feed planning; the source map, toolchains and en
 
 The first four binaries live in one Cargo workspace. `breakbulk-drv` has its own workspace and lockfile (`breakbulk-drv/`), so that its dependencies (harmonia, tokio) never change the other binaries' inputs. `breakbulk-unit` stays small and nearly dependency-free, because it is an input of every unit and any change to it rebuilds everything. `breakbulk-shim` and `breakbulk-plan` only affect the plan derivations.
 
+`mkRepository` builds these binaries with breakbulk's own flake-locked nixpkgs for the build platform (`defaultTools` in `lib/default.nix`; decision 154), not with the project's `pkgs`, so they are the same store paths in every project at a given breakbulk version. To build them with the project's nixpkgs instead, set `inputs.breakbulk.inputs.nixpkgs.follows = "nixpkgs"` or pass `tools = breakbulk.mkTools pkgs`. `import ./lib` without the flake has no locked nixpkgs and uses `mkTools pkgs`.
+
 ## Trace planner
 
 `breakbulk-plan` runs the user's real cargo once per (workspace, target, variant, plan kind), with a rustc wrapper that records instead of compiling. It combines the records with `cargo metadata`, which is stable, to produce `plan.json`.

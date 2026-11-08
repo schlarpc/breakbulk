@@ -19,6 +19,8 @@
 # (lib/dynamic.nix).
 # Planning and the M1 end-to-end entry:
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
+#   breakbulk.defaultTools pkgs           the ones mkRepository uses without
+#                                         `tools` (see `defaultTools` below)
 #   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
 #   breakbulk.mkCargoEnv pkgs { ... }     the dev shell's cargo-env.json (lib/plan.nix)
 #   breakbulk.mkBuildTarget pkgs { ... }  the project's build.target (lib/plan.nix)
@@ -33,7 +35,12 @@
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
 #   breakbulk.testApps.mkTestApps { ... } (runnable apps)
-{ lib }:
+{
+  lib,
+  # breakbulk's own locked nixpkgs (the flake's `nixpkgs` input), or null
+  # (`import ./lib` without a flake).
+  nixpkgs ? null,
+}:
 let
   util = import ./util.nix { inherit lib; };
   targetTraits = import ./target-traits.nix { inherit lib; };
@@ -127,6 +134,26 @@ let
     }).mkVendor;
 
   mkTools = import ./tools.nix { inherit lib; };
+
+  # The tools mkRepository and mkWorkspace use unless given `tools` (#41):
+  # built with breakbulk's own locked nixpkgs for the build platform, so
+  # they are the same store paths in every project at a given breakbulk
+  # version, whatever nixpkgs the project uses (and a binary cache of them
+  # works for everyone). `legacyPackages` is evaluated once per system and
+  # shared by every repository in the evaluation. Without a locked
+  # nixpkgs (`import ./lib`), or for a system it has no packages for, the
+  # tools are built with `pkgs`, as `mkTools pkgs`. A flake consumer who
+  # wants their own nixpkgs sets `inputs.breakbulk.inputs.nixpkgs.follows`,
+  # or passes `tools = breakbulk.mkTools pkgs`.
+  defaultTools =
+    pkgs:
+    let
+      system = pkgs.stdenv.buildPlatform.system;
+    in
+    if nixpkgs != null && nixpkgs ? legacyPackages.${system} then
+      mkTools nixpkgs.legacyPackages.${system}
+    else
+      mkTools pkgs;
   inherit (import ./plan.nix { inherit lib toolchainFacts; }) mkPlan mkCargoEnv mkBuildTarget;
 
   mkWorkspace = import ./workspace.nix {
@@ -142,7 +169,7 @@ let
       predictedRoots
       mkFetch
       mkVendor
-      mkTools
+      defaultTools
       mkPlan
       mkCargoEnv
       testRuns
@@ -161,7 +188,7 @@ let
       manifest
       envCapture
       mkFetch
-      mkTools
+      defaultTools
       mkWorkspace
       dynamic
       products
@@ -186,6 +213,7 @@ let
       mkFetch
       mkVendor
       mkTools
+      defaultTools
       mkPlan
       mkCargoEnv
       mkBuildTarget

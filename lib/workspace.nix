@@ -65,7 +65,7 @@
   predictedRoots,
   mkFetch,
   mkVendor,
-  mkTools,
+  defaultTools,
   mkPlan,
   mkCargoEnv,
   testRuns,
@@ -88,7 +88,7 @@ pkgs:
   extraSources ? { },
   # packages.<name> = { nativeInputs; inputs; env; test; }: see above.
   packages ? { },
-  tools ? mkTools pkgs,
+  tools ? defaultTools pkgs,
   name ? "breakbulk",
   select ? [ ],
   # The test plan's selection, when it differs (`targets.<t>.tests`).

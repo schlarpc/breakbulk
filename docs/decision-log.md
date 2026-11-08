@@ -2092,3 +2092,23 @@ be hand-written and can drift. Options:
    compare its attribute names with the real `result` to catch drift.
 
 Default proposal: 3.
+
+## 154. FYI: breakbulk's tools come from its own locked nixpkgs (#41)
+
+Without `tools`, `mkRepository` and `mkWorkspace` now build `breakbulk-unit`,
+`-shim`, `-plan` and `-instantiate` with the flake's own nixpkgs
+(`nixpkgs.legacyPackages.<build system>`), not the project's. Every project
+at a given breakbulk version gets the same tool store paths, so a binary
+cache of them (#1) helps everyone; before, each (breakbulk version × nixpkgs
+pin) built them (~24 s wall clock on a cold start).
+
+Cost, measured on walking-skeleton with a project `pkgs` that is not
+breakbulk's `legacyPackages` (2026-11-08): evaluation CPU 0.55 s → 0.84 s,
+heap 98 → 169 MB, once per evaluation (the instance is shared by every
+repository). None when the project's `pkgs` is that same instance.
+
+Overrides: `inputs.breakbulk.inputs.nixpkgs.follows = "nixpkgs"` (the tools
+follow the project's nixpkgs again), or `tools = breakbulk.mkTools pkgs` per
+repository. `import ./lib` without the flake keeps `mkTools pkgs`. Units
+still depend on `breakbulk-unit` (decision 50) and on the project's stdenv
+and rustc, so unit sharing is unchanged. Check: `default-tools`.

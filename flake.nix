@@ -22,7 +22,11 @@
     in
     {
       # The evaluation-time library (see lib/default.nix).
-      lib = import ./lib { inherit (nixpkgs) lib; };
+      # Its default tools are built with this flake's nixpkgs (#41).
+      lib = import ./lib {
+        inherit (nixpkgs) lib;
+        inherit nixpkgs;
+      };
 
       # breakbulk built by breakbulk (./breakbulk.nix, tests/self-host):
       # breakbulk-bb-<package>, each with bin/<program>. The binaries plans
@@ -140,6 +144,48 @@
               "flake-systems: outputs do not follow the systems input: ${builtins.toJSON names}";
             assert builtins.attrNames self.checks == import inputs.systems;
             pkgs.runCommand "flake-systems" { } "touch $out";
+
+          # #41: without `tools`, a repository's tools come from this flake's
+          # nixpkgs, so a consumer whose nixpkgs builds them differently
+          # (here: another rustPlatform) gets the same tools, and its units
+          # use them. `mkTools` with each consumer's nixpkgs gives different
+          # tools (the check is not vacuous). Whole units still differ here:
+          # nixpkgs builds mold with rustPlatform, and units link with it.
+          default-tools =
+            let
+              inherit (nixpkgs) lib;
+              other = import nixpkgs {
+                inherit (pkgs.stdenv.hostPlatform) system;
+                overlays = [
+                  rust-overlay.overlays.default
+                  (f: p: {
+                    rustPlatform = p.makeRustPlatform {
+                      rustc = p.rust-bin.stable."1.95.0".minimal;
+                      cargo = p.rust-bin.stable."1.95.0".minimal;
+                    };
+                  })
+                ];
+              };
+              paths = ts: lib.mapAttrs (_: d: d.outPath) (lib.filterAttrs (_: lib.isDerivation) ts);
+              native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+              units =
+                extra:
+                lib.mapAttrs (_: u: u.drvPath)
+                  (self.lib.mkRepository ({
+                    pkgs = other;
+                    root = ./tests/fixtures/walking-skeleton;
+                    modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
+                  } // extra)).workspaces.main.instances.${native}.default.units.build;
+            in
+            assert lib.assertMsg (paths (self.lib.defaultTools pkgs) == paths (self.lib.defaultTools other))
+              "default-tools: the default tools depend on the consumer's nixpkgs";
+            assert lib.assertMsg (paths (self.lib.mkTools pkgs) != paths (self.lib.mkTools other))
+              "default-tools: both nixpkgs build the same tools; the check proves nothing";
+            assert lib.assertMsg (units { } == units { tools = self.lib.defaultTools pkgs; })
+              "default-tools: the units do not use the default tools";
+            assert lib.assertMsg (units { } != units { tools = self.lib.mkTools other; })
+              "default-tools: the units do not depend on the tools; the check proves nothing";
+            pkgs.runCommand "default-tools" { } "touch $out";
         }
         // import ./tests/env-capture {
           inherit pkgs;

@@ -59,7 +59,7 @@
   manifest,
   envCapture,
   mkFetch,
-  mkTools,
+  defaultTools,
   mkWorkspace,
   dynamic,
   products,
@@ -81,7 +81,7 @@ in
   root,
   modules ? [ ],
   specialArgs ? { },
-  tools ? mkTools pkgs,
+  tools ? defaultTools pkgs,
 }@args:
 let
   userModules = args.modules or [ ];
