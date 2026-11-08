@@ -194,12 +194,12 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### T11. `RUSTDOC` and `cargo test --doc`
 
-- **Assumption.** Cargo starts `RUSTDOC` with the environment it gives `RUSTC_WRAPPER`; under `cargo test --doc` it asks rustdoc for one `rustdoc --test` per doctestable library (proc macros included) and runs nothing else when that rustdoc exits 0 without output; it fails `--doc` when no library is selected; with a runner configured it adds `--test-runtool`, so the planner configures none.
-- **Where.** `crates/breakbulk-shim/src/main.rs`: `is_rustdoc_invocation`, `rustdoc_mode`; `crates/breakbulk-plan/src/trace.rs`: `run`, `has_doctests`.
-- **Upstream.** Spike A (doctest row; surprise S8).
-- **Holds for.** The window.
-- **Pinned by.** `test-runs-doctests` (test lines equal plain `cargo test --doc`'s); `differential*` (each doctest's argv and env against `cargo test --doc -vv`).
-- **If it changes.** Doctests go missing from the plan or tracing fails.
+- **Assumption.** Cargo starts `RUSTDOC` with the environment it gives `RUSTC_WRAPPER`; under `cargo test --doc` it asks rustdoc for one `rustdoc --test` per doctestable library (proc macros included) and runs nothing else when that rustdoc exits 0 without output; it fails `--doc` when a group of root units has no library: the whole selection, except under nightly `resolver.feature-unification = "package"`, where each selected package is its own group (with its own feature resolution), so a bin-only member fails `--doc --workspace` (`no library targets found in package`) and `-p` for each package with doctests gives the same groups; with a runner configured it adds `--test-runtool`, so the planner configures none.
+- **Where.** `crates/breakbulk-shim/src/main.rs`: `is_rustdoc_invocation`, `rustdoc_mode`; `crates/breakbulk-plan/src/trace.rs`: `run` (the retry on that error), `doctest_packages`.
+- **Upstream.** Spike A (doctest row; surprise S8). Package mode, checked for this page: cargo `src/ops/resolve.rs`, `resolve_ws_with_opts` (`FeatureUnification::Package`: one `SpecsAndResolvedFeatures` per package); `src/ops/cargo_compile/mod.rs`, `create_bcx` (one `UnitGenerator` per entry); `src/ops/cargo_compile/unit_generator.rs`, `create_proposals` (the bail), at `3c747ea3e`.
+- **Holds for.** The window; package mode on nightly 1.101 (still behind `-Zfeature-unification`, which the project's `[unstable]` table can turn on).
+- **Pinned by.** `test-runs-doctests` (test lines equal plain `cargo test --doc`'s); `differential*` (each doctest's argv and env against `cargo test --doc -vv`); `plan-feature-unification` (package mode with bin-only members: `shared`'s doctest is planned and passes, golden on both plans).
+- **If it changes.** Doctests go missing from the plan or tracing fails. If Cargo's message changes, package-mode workspaces with bin-only members fail tracing with Cargo's error.
 
 ### T12. Verbosity changes argv
 

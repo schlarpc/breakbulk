@@ -875,7 +875,7 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 | `vendor-collision` | A crates.io crate and a git fork with the same name and version | linux-gnu | Each consumer gets its own source |
 | `dev-dep-features` | A dev-dependency enabling extra features on a normal dependency | linux-gnu | The build plan's product lacks the feature; the test plan's binaries have it |
 | `required-features` | Bins and tests with `required-features` | linux-gnu | Stubs fail or skip with the reason; enabled variants build them |
-| `feature-unification` | `resolver.feature-unification = "package"` in project config | linux-gnu, nightly | The plan contains one unit per feature set of a shared dependency |
+| `feature-unification` | `resolver.feature-unification = "package"` (and `[unstable] feature-unification`) in project config; two bins enabling different features of a shared member, which has a doctest | linux-gnu, nightly | The plan contains one unit per feature set of the shared dependency (one per package, as Cargo builds them); golden on both plans; each bin sees its own set; the shared member's doctest is traced although the bins have no library (`plan-feature-unification`) |
 | `embed` | A host crate embedding a wasm product via env | linux-gnu + wasm | Host instantiation does not depend on the product; only the embedding chain references it; identical wasm bytes do not rebuild the host (dynamic-derivation mode) |
 | `stamps` | Git revision and `SOURCE_DATE_EPOCH` per package | linux-gnu | Only the stamped package's units change |
 | `msvc` | C code, a resource via `rustc-link-arg-bins`, bindgen | x86\_64 msvc, aarch64 msvc | Builds; tests pass under wine |

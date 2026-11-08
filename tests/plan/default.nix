@@ -884,8 +884,60 @@ in
       );
     wsG = goldens "walking-skeleton" ws;
     dirG = goldens "directives" dir;
+    fu = mk "feature-unification" { inherit toolchain; };
+    fuG = goldens "feature-unification" fu;
+    # The feature sets `shared`'s library is compiled with in a plan, one
+    # entry per compile unit, sorted.
+    sharedFeatures =
+      kind:
+      lib.sort lib.lessThan (
+        map (
+          u:
+          lib.concatStringsSep "+" (
+            lib.sort lib.lessThan (
+              map (a: lib.removeSuffix "\"" (lib.removePrefix "feature=\"" a)) (
+                lib.filter (a: builtins.isString a && lib.hasPrefix "feature=\"" a) u.args
+              )
+            )
+          )
+        ) (
+          lib.filter (u: u.kind == "compile" && u.crate.name == "shared" && u.platform == "target") (
+            lib.attrValues (readPlan fu kind).units
+          )
+        )
+      );
   in
   {
+    # #3: nightly `resolver.feature-unification = "package"` in the
+    # project's config. Cargo builds `shared` once per selected package's
+    # feature set (a: fa, b: fb, shared itself: none) instead of once with
+    # fa+fb; the plan has the same units (golden, both plans), and each
+    # product sees its own set. `cargo test --doc --workspace` fails on
+    # the bin-only members in this mode; the planner then traces the
+    # doctests of `shared` alone, as `cargo test` runs them.
+    feature-unification =
+      let
+        build = sharedFeatures "build";
+        doctests = lib.attrNames (readPlan fu "test").doctests;
+      in
+      assert lib.assertMsg (build == [ "" "fa" "fb" ]) "feature-unification: build plan's shared units have ${builtins.toJSON build}";
+      assert lib.assertMsg (doctests == [ "d-shared" ]) "feature-unification: doctests ${builtins.toJSON doctests}";
+      pkgs.runCommand "feature-unification-check"
+        {
+          a = fu.packages.a;
+          b = fu.packages.b;
+          t = fu.testBins."shared/lib-test/shared";
+          doctest = fu.doctests.shared;
+          g = fuG.build;
+          gt = fuG.test;
+        }
+        ''
+          [ "$($a/bin/a)" = "a fa 2" ]
+          [ "$($b/bin/b)" = "b fb 2" ]
+          $t/bin/shared | grep -q 'test result: ok. 1 passed'
+          mkdir -p $out
+          cat $g/report $gt/report > $out/report
+        '';
     # #39: a package with nightly `package.forced-target` would build for
     # another target inside this target's plan; planning fails naming it.
     forced-target =

@@ -328,6 +328,13 @@ fn selection_args(opts: &Options) -> Vec<String> {
             a.push(p.clone());
         }
     }
+    a.extend(build_args(opts));
+    a
+}
+
+/// The target, profile and feature arguments of [`selection_args`].
+fn build_args(opts: &Options) -> Vec<String> {
+    let mut a = Vec::new();
     a.extend(["--target".into(), opts.target.clone()]);
     a.extend(["--profile".into(), opts.profile.clone()]);
     if !opts.features.is_empty() {
@@ -490,7 +497,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         PlanKind::Build => vec![vec!["build"]],
         PlanKind::Test => {
             let mut v = vec![vec!["test", "--no-run"]];
-            if has_doctests(opts, &metadata) {
+            if !doctest_packages(opts, &metadata).is_empty() {
                 v.push(vec!["test", "--doc"]);
             }
             v
@@ -500,26 +507,56 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     let mut records = Vec::new();
     for (n, sub) in invocations.iter().enumerate() {
         let record = scratch.join(format!("record-{n}"));
-        mkdir(&record)?;
-        let mut cmd = command(opts, &opts.cargo);
-        cmd.args(sub)
-            .args(common_args(opts, &config))
-            .args(selection_args(opts))
-            .env("BREAKBULK_RECORD", &record);
-        if let Some(driver) = &opts.clippy_driver
-            && opts.mode == VariantMode::Clippy
-        {
-            cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
-            if !opts.clippy_args.is_empty() {
-                let joined: String = opts
-                    .clippy_args
-                    .iter()
-                    .map(|a| format!("{a}__CLIPPY_HACKERY__"))
-                    .collect();
-                cmd.env("CLIPPY_ARGS", joined);
+        let run = |selection: Vec<String>| -> Result<(), Error> {
+            if record.exists() {
+                std::fs::remove_dir_all(&record)
+                    .map_err(|e| Error(format!("removing {}: {e}", record.display())))?;
             }
+            mkdir(&record)?;
+            let mut cmd = command(opts, &opts.cargo);
+            cmd.args(sub)
+                .args(common_args(opts, &config))
+                .args(selection)
+                .env("BREAKBULK_RECORD", &record);
+            if let Some(driver) = &opts.clippy_driver
+                && opts.mode == VariantMode::Clippy
+            {
+                cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
+                if !opts.clippy_args.is_empty() {
+                    let joined: String = opts
+                        .clippy_args
+                        .iter()
+                        .map(|a| format!("{a}__CLIPPY_HACKERY__"))
+                        .collect();
+                    cmd.env("CLIPPY_ARGS", joined);
+                }
+            }
+            output(cmd, &format!("cargo {}", sub.join(" "))).map(|_| ())
+        };
+        match run(selection_args(opts)) {
+            // Nightly `resolver.feature-unification = "package"` makes each
+            // selected package its own group of root units (cargo
+            // `src/ops/resolve.rs`, `FeatureUnification::Package`), and
+            // `--doc` fails a group without a library
+            // (`cargo_compile/unit_generator.rs`): a workspace with a
+            // bin-only member fails here, although `cargo test` runs its
+            // doctests. In the other modes the selection is one group,
+            // which has a library (`doctest_packages`), so this error means
+            // package mode; there, selecting only the packages with
+            // doctests gives the same groups.
+            Err(e)
+                if sub.as_slice() == ["test", "--doc"]
+                    && e.0.contains("no library targets found in package") =>
+            {
+                let mut selection: Vec<String> = doctest_packages(opts, &metadata)
+                    .into_iter()
+                    .flat_map(|p| ["-p".to_owned(), p.to_owned()])
+                    .collect();
+                selection.extend(build_args(opts));
+                run(selection)?
+            }
+            r => r?,
         }
-        output(cmd, &format!("cargo {}", sub.join(" ")))?;
         let recs = read_records(&record)?;
         // With the rustc-info cache off, every invocation asks; one that
         // did not means Cargo ignored `CARGO_CACHE_RUSTC_INFO=0`
@@ -568,19 +605,23 @@ pub fn with_trim_paths(opts: &Options) -> Options {
     o
 }
 
-/// Whether `cargo test --doc` has anything to do: a selected member with a
-/// doctestable library. Cargo fails `--doc` when no library is selected.
-fn has_doctests(opts: &Options, m: &Metadata) -> bool {
+/// The selected members with a doctestable library. `cargo test --doc` has
+/// nothing to do without one (Cargo fails `--doc` when no library is
+/// selected).
+fn doctest_packages<'a>(opts: &Options, m: &'a Metadata) -> Vec<&'a str> {
     m.packages
         .iter()
         .filter(|p| m.workspace_members.contains(&p.id))
         .filter(|p| opts.packages.is_empty() || opts.packages.contains(&p.name))
-        .flat_map(|p| &p.targets)
-        .any(|t| {
-            t.is_lib()
-                && t.doctest
-                && t.crate_types
-                    .iter()
-                    .any(|c| matches!(c.as_str(), "lib" | "rlib" | "proc-macro"))
+        .filter(|p| {
+            p.targets.iter().any(|t| {
+                t.is_lib()
+                    && t.doctest
+                    && t.crate_types
+                        .iter()
+                        .any(|c| matches!(c.as_str(), "lib" | "rlib" | "proc-macro"))
+            })
         })
+        .map(|p| p.name.as_str())
+        .collect()
 }

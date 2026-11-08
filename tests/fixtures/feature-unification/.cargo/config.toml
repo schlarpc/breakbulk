@@ -1,0 +1,9 @@
+# Nightly: each selected package gets its own feature set of its
+# dependencies, so `shared` is built once per package that uses it. Still
+# unstable on nightly 1.101 (Cargo ignores the setting, with a warning,
+# without `-Zfeature-unification`).
+[unstable]
+feature-unification = true
+
+[resolver]
+feature-unification = "package"
