@@ -8,7 +8,9 @@
 //! 5. Fail on a non-zero exit, on death by signal (naming the signal), on a
 //!    directive Cargo rejects, and on an `error` directive by Cargo's rule
 //!    (only lines starting exactly with `cargo::error=`; decision log #8).
-//!    Print warnings.
+//!    Print warnings. A failure ends with the last lines of the script's
+//!    stderr, which is streamed as the script runs, so a panic is not buried
+//!    under stdout and hints.
 //! 6. Check `rerun-if-changed` paths against the sandbox: on failure, hint at
 //!    each missing path and each unset `rerun-if-env-changed` variable; on
 //!    success, warn about missing paths, or fail with `strictSources`.
@@ -100,8 +102,10 @@ pub struct MissingPath {
 /// The `rerun-if-changed` paths missing from the sandbox. Relative paths are
 /// relative to the package directory, as in Cargo.
 pub fn missing_paths(out: &BuildOutput, cwd: &Path) -> Vec<MissingPath> {
+    let mut seen = std::collections::BTreeSet::new();
     out.rerun_if_changed
         .iter()
+        .filter(|p| seen.insert(p.as_str()))
         .map(|p| MissingPath {
             declared: p.clone(),
             path: cwd.join(p),
@@ -111,11 +115,14 @@ pub fn missing_paths(out: &BuildOutput, cwd: &Path) -> Vec<MissingPath> {
 }
 
 /// The `rerun-if-env-changed` variables not set in the run's env.
+/// Each once, in the order printed: a script may print the same one many
+/// times.
 pub fn unset_vars<'a>(out: &'a BuildOutput, env: &BTreeMap<String, String>) -> Vec<&'a str> {
+    let mut seen = std::collections::BTreeSet::new();
     out.rerun_if_env_changed
         .iter()
         .map(String::as_str)
-        .filter(|v| !env.contains_key(*v))
+        .filter(|v| !env.contains_key(*v) && seen.insert(*v))
         .collect()
 }
 
@@ -169,6 +176,19 @@ pub struct Finished<'a> {
     pub upstream_out_dirs: &'a [PathBuf],
     pub status: std::process::ExitStatus,
     pub stdout: &'a [u8],
+    /// The end of the script's stderr, which was also streamed to ours.
+    pub stderr_tail: &'a [u8],
+}
+
+/// How many lines of the script's stderr a failure repeats at its end.
+const STDERR_TAIL_LINES: usize = 20;
+
+/// The last `STDERR_TAIL_LINES` lines of `bytes`.
+fn tail_lines(bytes: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(STDERR_TAIL_LINES);
+    lines[start..].iter().map(|l| (*l).to_owned()).collect()
 }
 
 /// What a finished run produced, when it succeeded.
@@ -211,6 +231,21 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
         for h in hints {
             msg.push_str("\nhint: ");
             msg.push_str(&h);
+        }
+    }
+    // Cargo prints the script's stderr after its stdout. breakbulk streamed
+    // it as the script ran, so stdout and the hints would bury a panic;
+    // repeat its end last, where the build log's tail shows it.
+    let tail = tail_lines(f.stderr_tail);
+    if !tail.is_empty() {
+        msg.push_str(&format!(
+            "\n  --- stderr (last {} lines; all of it is above)\n",
+            tail.len()
+        ));
+        for l in tail {
+            msg.push_str("  ");
+            msg.push_str(&l);
+            msg.push('\n');
         }
     }
     Error(msg)
@@ -352,8 +387,10 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     let mut child = command(&argv, &env, &cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| Error(format!("could not start build script `{}`: {e}", argv[0])))?;
+    let stderr_tail = tee_stderr(child.stderr.take().expect("stderr is piped"));
     let mut stdout = Vec::new();
     child
         .stdout
@@ -364,6 +401,9 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     let status = child
         .wait()
         .map_err(|e| Error(format!("waiting for the build script: {e}")))?;
+    let stderr_tail = stderr_tail
+        .join()
+        .map_err(|_| Error("copying the build script's stderr failed".into()))?;
 
     let upstream_out_dirs: Vec<PathBuf> = metadata
         .iter()
@@ -377,6 +417,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         upstream_out_dirs: &upstream_out_dirs,
         status,
         stdout: &stdout,
+        stderr_tail: &stderr_tail,
     })?;
     for w in &success.warnings {
         eprintln!("{w}");
@@ -399,6 +440,34 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         )?;
     }
     Ok(())
+}
+
+/// Copy the script's stderr to ours as it comes, and keep its last 64 KiB
+/// for the failure message.
+fn tee_stderr(mut from: std::process::ChildStderr) -> std::thread::JoinHandle<Vec<u8>> {
+    use std::io::Write;
+    const KEEP: usize = 64 * 1024;
+    std::thread::spawn(move || {
+        let mut kept = Vec::new();
+        let mut buf = [0u8; 8192];
+        let mut err = std::io::stderr();
+        loop {
+            match from.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let _ = err.write_all(&buf[..n]);
+                    kept.extend_from_slice(&buf[..n]);
+                    if kept.len() > 2 * KEEP {
+                        kept.drain(..kept.len() - KEEP);
+                    }
+                }
+            }
+        }
+        if kept.len() > KEEP {
+            kept.drain(..kept.len() - KEEP);
+        }
+        kept
+    })
 }
 
 #[cfg(test)]

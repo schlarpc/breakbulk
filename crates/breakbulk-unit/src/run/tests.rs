@@ -33,6 +33,15 @@ fn unit(cwd: &Path) -> RenderedRun {
 }
 
 fn judge_with(r: &RenderedRun, status: i32, stdout: &str) -> Result<Success, Error> {
+    judge_with_stderr(r, status, stdout, "")
+}
+
+fn judge_with_stderr(
+    r: &RenderedRun,
+    status: i32,
+    stdout: &str,
+    stderr: &str,
+) -> Result<Success, Error> {
     let env = BTreeMap::from([("SET".to_owned(), "1".to_owned())]);
     judge(&Finished {
         run: r,
@@ -42,6 +51,7 @@ fn judge_with(r: &RenderedRun, status: i32, stdout: &str) -> Result<Success, Err
         upstream_out_dirs: &[],
         status: ExitStatus::from_raw(status),
         stdout: stdout.as_bytes(),
+        stderr_tail: stderr.as_bytes(),
     })
 }
 
@@ -90,6 +100,43 @@ fn non_zero_exit_fails_with_stdout_and_hints() {
     assert!(e.0.contains("reads `FOO_DIR`"), "{e}");
     assert!(e.0.contains("`packages.foo-sys.env.FOO_DIR`"), "{e}");
     assert!(!e.0.contains("reads `SET`"), "{e}");
+}
+
+#[test]
+fn failure_ends_with_stderr_and_deduplicates_hints() {
+    let t = TempDir::new("tail");
+    let r = unit(t.path());
+    let stderr: String = (0..30)
+        .map(|i| format!("cmake line {i}\n"))
+        .collect::<String>()
+        + "thread 'main' panicked at build.rs:440:13:\nFailed to copy\n";
+    let e = judge_with_stderr(
+        &r,
+        101 << 8,
+        "cargo::rerun-if-env-changed=FOO_DIR\ncargo::rerun-if-env-changed=FOO_DIR\n\
+         cargo::rerun-if-changed=vendor/foo.c\ncargo::rerun-if-changed=vendor/foo.c\n",
+        &stderr,
+    )
+    .unwrap_err();
+    assert_eq!(e.0.matches("reads `FOO_DIR`").count(), 1, "{e}");
+    assert_eq!(
+        e.0.matches("rerun-if-changed=vendor/foo.c`, but").count(),
+        1,
+        "{e}"
+    );
+    let tail =
+        e.0.split("--- stderr (last 20 lines; all of it is above)\n")
+            .nth(1)
+            .expect("a stderr section");
+    assert!(tail.trim_end().ends_with("Failed to copy"), "{e}");
+    assert!(tail.contains("panicked at build.rs:440:13"), "{e}");
+    assert!(!tail.contains("cmake line 11\n"), "{e}");
+    assert!(tail.contains("cmake line 12\n"), "{e}");
+    // Hints come before the stderr section.
+    assert!(
+        e.0.find("hint:").unwrap() < e.0.find("--- stderr").unwrap(),
+        "{e}"
+    );
 }
 
 #[test]
