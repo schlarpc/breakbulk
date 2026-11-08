@@ -45,6 +45,19 @@ pub trait Resolve {
     fn env_capture(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<String>, Self::Error> {
         Ok(None)
     }
+    /// For a unit that links: the env captures of `packages` (the other
+    /// packages of its link closure on its platform, [`link_packages`])
+    /// that have inputs of their own, whose library search variables reach
+    /// its linker (decision 107). Packages without a capture of their own
+    /// are left out.
+    fn link_captures(
+        &self,
+        _id: &UnitId,
+        _unit: &CompileUnit,
+        _packages: &BTreeSet<String>,
+    ) -> Result<Vec<String>, Self::Error> {
+        Ok(Vec::new())
+    }
     /// Layers 4 and 5 of the environment contract, merged with
     /// [`merge_layer`] (list-like variables such as `PATH` append): the
     /// toolchain spec's env for the unit's platform, then the package
@@ -147,6 +160,32 @@ pub fn is_linking(c: &CompileUnit) -> bool {
         .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
 }
 
+/// The packages a linking unit links, other than its own (decision 107):
+/// the packages of the crates in `crates` (its [`Graph::crate_deps`]) that
+/// are on the unit's platform and are not proc macros. A target unit's
+/// closure never reaches a host unit, and a proc macro's dependencies are
+/// not followed ([`Graph::crate_deps`]), so host libraries never reach a
+/// target link and the reverse.
+pub fn link_packages<'a>(
+    plan: &Plan,
+    unit: &CompileUnit,
+    crates: impl IntoIterator<Item = &'a OutRef>,
+) -> BTreeSet<String> {
+    crates
+        .into_iter()
+        .filter_map(|o| match plan.units.get(&o.out) {
+            Some(Unit::Compile(d))
+                if d.platform == unit.platform
+                    && !crate::deps::is_proc_macro(d)
+                    && d.package != unit.package =>
+            {
+                Some(d.package.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The bases a compile unit's paths are remapped from: the source view or
 /// crate source of every `src` and `crateSrc` reference (with `rel` empty),
 /// and every run `out` reference (an `OUT_DIR`).
@@ -222,6 +261,12 @@ pub fn render_unit_in<R: Resolve>(
             };
             let mut env = env(&c.env, r)?;
             merge_layer_with(r, &mut env, overlay)?;
+            let link_captures = if is_linking(c) {
+                let packages = link_packages(plan, c, &graph.crate_deps(id));
+                r.link_captures(id, c, &packages)?
+            } else {
+                Vec::new()
+            };
             let (remap, remap_scope) = if plan.trim_paths {
                 // Cargo's remaps are in the arguments. With the project's
                 // own setting its scope is too; when breakbulk set it,
@@ -302,6 +347,7 @@ pub fn render_unit_in<R: Resolve>(
                 remap,
                 remap_scope,
                 env_capture,
+                link_captures,
                 seed: Some(id.to_string()),
             })
         }

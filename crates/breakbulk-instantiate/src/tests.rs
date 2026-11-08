@@ -220,6 +220,24 @@ impl Resolve for RealPaths<'_> {
             .env_capture
             .then(|| input_value(&keys::capture(p))))
     }
+    fn link_captures(
+        &self,
+        _: &UnitId,
+        c: &CompileUnit,
+        packages: &std::collections::BTreeSet<String>,
+    ) -> Result<Vec<String>, String> {
+        let own = self.ov(&c.package).map(|(k, _)| k);
+        let keys: std::collections::BTreeSet<String> = packages
+            .iter()
+            .filter_map(|id| self.ov(id))
+            .filter(|(k, o)| o.platform(c.platform).env_capture && Some(k) != own.as_ref())
+            .map(|(k, _)| k)
+            .collect();
+        Ok(keys
+            .iter()
+            .map(|k| input_value(&keys::override_capture(k, c.platform)))
+            .collect())
+    }
     fn env_overlay(&self, _: &UnitId, u: &Unit) -> Result<BTreeMap<String, String>, String> {
         let p = platform(u);
         let mut env: BTreeMap<String, String> = self
@@ -362,6 +380,16 @@ fn layers_and_overrides() {
         app.env_capture.as_deref(),
         Some(input_value("capture:target").as_str())
     );
+    // Decision 107: the bin links smokelib, whose target override has a
+    // capture of its own, so its linker gets that capture's library search
+    // flags. The library itself links nothing; the build script is a host
+    // unit, and smokelib has no host capture.
+    assert_eq!(
+        app.link_captures,
+        vec![input_value("override:smokelib:capture:target")]
+    );
+    assert!(lib.link_captures.is_empty());
+    assert!(script.link_captures.is_empty());
     let RenderedUnit::Run(run) = unit(RUN) else {
         panic!()
     };

@@ -1,0 +1,12 @@
+# Native libraries at the link of another package (decision 107):
+# `foo-sys` names the C shared library `libfoo` with `rustc-link-lib=foo`
+# alone (no search path); its native input comes from
+# `packages.foo-sys.inputs`. `mid` is a library on top of it, and `app`'s
+# bin and test link both from another package. `other` is unrelated.
+[workspace]
+resolver = "2"
+members = ["foo-sys", "mid", "app", "other"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

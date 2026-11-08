@@ -51,7 +51,7 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives embed config-env doctests test-control required-features nextest)
+  fixtures=(walking-skeleton directives embed config-env doctests test-control test-options required-features nextest)
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }

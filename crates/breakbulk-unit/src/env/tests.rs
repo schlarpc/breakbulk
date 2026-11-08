@@ -251,3 +251,45 @@ fn captures_are_read_from_the_file_or_the_output() {
             .contains("not a JSON object of strings")
     );
 }
+
+#[test]
+fn link_captures_add_only_library_search_flags() {
+    let t = crate::test_util::TempDir::new("link-capture");
+    let own = t.path().join("own.json");
+    let sys = t.path().join("sys.json");
+    let other = t.path().join("other.json");
+    std::fs::write(
+        &own,
+        r#"{"NIX_LDFLAGS":" -L/own/lib","PATH":"/own/bin","NIX_CFLAGS_COMPILE":" -isystem /own/include"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &sys,
+        r#"{"NIX_LDFLAGS":" -L/magic/lib","PATH":"/sys/bin","NIX_CFLAGS_COMPILE":" -isystem /magic/include","PKG_CONFIG_PATH":"/magic/lib/pkgconfig","CC":"sys-cc"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &other,
+        r#"{"NIX_LDFLAGS_FOR_BUILD":" -L/b/lib","NIX_LDFLAGS":" "}"#,
+    )
+    .unwrap();
+    let links = [
+        sys.to_str().unwrap().to_owned(),
+        other.to_str().unwrap().to_owned(),
+    ];
+    let env = capture_layer(Some(own.to_str().unwrap()), &links)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        env,
+        map(&[
+            ("NIX_CFLAGS_COMPILE", " -isystem /own/include"),
+            ("NIX_LDFLAGS", " -L/own/lib  -L/magic/lib"),
+            ("PATH", "/own/bin"),
+        ])
+    );
+    // Without a capture of its own, the link captures alone.
+    let env = capture_layer(None, &links[..1]).unwrap().unwrap();
+    assert_eq!(env, map(&[("NIX_LDFLAGS", " -L/magic/lib")]));
+    assert_eq!(capture_layer(None, &[]).unwrap(), None);
+}

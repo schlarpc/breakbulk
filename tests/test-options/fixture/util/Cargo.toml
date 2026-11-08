@@ -1,0 +1,5 @@
+[package]
+name = "util"
+version.workspace = true
+edition.workspace = true
+readme = "README.md"

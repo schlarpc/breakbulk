@@ -26,7 +26,14 @@ fn dylib_path_has_only_out_dir_search_paths() {
     let ld = std::env::var("LD_LIBRARY_PATH").unwrap();
     let parts: Vec<&str> = ld.split(':').collect();
     let want = concat!(env!("OUT_DIR"), "/libs");
-    assert!(parts.contains(&want), "{ld}");
+    // The build script's directory itself, or (content-addressed test runs
+    // in breakbulk, lib/test-runs.nix stableSpec) a stable copy of its
+    // files, recognised by the marker file the build script wrote.
+    let is_copy = |p: &str| {
+        std::fs::read_to_string(Path::new(p).join("ctl-libs-marker"))
+            .is_ok_and(|s| s == "ctl-libs\n")
+    };
+    assert!(parts.iter().any(|p| *p == want || is_copy(p)), "{ld}");
     assert!(!parts.contains(&"/tmp/ctl-outside-out"), "{ld}");
 }
 

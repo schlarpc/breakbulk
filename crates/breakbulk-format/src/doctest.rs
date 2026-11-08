@@ -9,7 +9,7 @@ use crate::plan::{Arg, Plan, Reference, Text, Unit};
 use std::collections::BTreeSet;
 
 use crate::deps::doctest_deps;
-use crate::render::{Resolve, env, flags, splice, text};
+use crate::render::{Resolve, env, flags, link_packages, splice, text};
 
 /// Render doctest `id` (`d-<package>`) of `plan`. The doctest is rendered as
 /// a linking compile unit with no outputs and no remapping (rustdoc keeps
@@ -76,6 +76,8 @@ pub fn render_doctest<R: Resolve>(
     let unit = Unit::Compile(c.clone());
     let overlay = r.env_overlay(&id, &unit)?;
     let env_capture = r.env_capture(&id, &unit)?;
+    let deps = doctest_deps(plan, &c);
+    let link_captures = r.link_captures(&id, &c, &link_packages(plan, &c, &deps))?;
     let mut env = env(&c.env, r)?;
     crate::render::merge_layer_with(r, &mut env, overlay)?;
     // A doctest reads no manifests: every run it splices is an input.
@@ -114,7 +116,7 @@ pub fn render_doctest<R: Resolve>(
             .collect::<Result<_, _>>()?,
         cwd: c.cwd.render(r)?,
         outputs: Default::default(),
-        deps: doctest_deps(plan, &c)
+        deps: deps
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))
             .collect::<Result<_, _>>()?,
@@ -124,6 +126,7 @@ pub fn render_doctest<R: Resolve>(
         remap: Vec::new(),
         remap_scope: None,
         env_capture,
+        link_captures,
         // rustdoc compiles no C; the doctest adds no C flags.
         seed: None,
     };

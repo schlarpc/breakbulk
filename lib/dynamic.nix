@@ -408,6 +408,9 @@ let
             inherit (pkgs) overlays config;
           },
       packages ? { },
+      # As testRuns.mkTestRuns's: the package directories of `test.runFiles`
+      # views.
+      runFilesDirs ? { },
       ca ? null,
       coverage ? false,
       name ? "breakbulk",
@@ -423,21 +426,44 @@ let
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
 
+      # As in IFD mode: a content-addressed copy when `ca`, a debug-stripped
+      # one with `test.stripForRun`; empty for a binary Cargo did not build.
       binaryOf =
-        r: n:
-        if !useCa then
+        r: n: cfg:
+        if !useCa && !cfg.stripForRun then
           r
         else
-          pkgs.runCommand "${n}-bin" (caAttrs // { inherit (r.breakbulkRoot) wrapper; }) ''
-            if [ "$(${jq} -r '.reason // ""' "$wrapper/breakbulk-root.json")" ]; then
-              mkdir -p $out
-              exit 0
-            fi
-            files=("$wrapper"/root/*)
-            [ ''${#files[@]} -eq 1 ] || { echo "expected one file in $wrapper/root" >&2; exit 1; }
-            mkdir -p $out
-            cp "''${files[0]}" $out/
-          '';
+          testRuns.binaryCopy {
+            inherit pkgs caAttrs;
+            name = n;
+            strip = cfg.stripForRun;
+            src = "\"$wrapper\"/root/*";
+            attrs = { inherit (r.breakbulkRoot) wrapper; };
+            prelude = ''
+              if [ "$(${jq} -r '.reason // ""' "$wrapper/breakbulk-root.json")" ]; then
+                mkdir -p $out
+                exit 0
+              fi
+            '';
+          };
+
+      # `test.runFiles`: the run's working directory and runtime
+      # CARGO_MANIFEST_DIR are the package directory of the narrowed view,
+      # set after the wrapper's environment.
+      narrowScript =
+        pkg: cfg:
+        lib.optionalString (cfg.runFiles != null) (
+          let
+            dir =
+              runFilesDirs.${pkg}
+                or (throw "breakbulk: packages.${pkg}.test.runFiles is set, but the package has no source view");
+          in
+          ''
+            __bb_orig_manifest_dir=$CARGO_MANIFEST_DIR
+            export CARGO_MANIFEST_DIR=${lib.escapeShellArg dir}
+            export CARGO_MANIFEST_PATH=${lib.escapeShellArg "${dir}/Cargo.toml"}
+          ''
+        );
 
       # What both runners share: the skip check, the environment, the test
       # configuration's env and PATH.
@@ -495,7 +521,10 @@ let
           libdir=${lib.escapeShellArg libdir}
           subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" -e "s|\"@LIBDIR@\"|$libdir|g"; }
           ${jq} -c '.testSpec.nextest.binaries' "$info" | subst > $TMPDIR/binaries-metadata.json
-          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst > $TMPDIR/cargo-metadata.json
+          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst \
+            | ${jq} -c --arg from "''${__bb_orig_manifest_dir:-}/Cargo.toml" --arg to "$CARGO_MANIFEST_DIR/Cargo.toml" \
+              '.packages |= map(if .manifest_path == $from then .manifest_path = $to else . end)' \
+            > $TMPDIR/cargo-metadata.json
           cd $TMPDIR
           set +e
           env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
@@ -538,8 +567,8 @@ let
           n = storeName "${b.package}-${key}";
           cfg = testRuns.testConfig packages b.package;
           args = testRuns.testArgs cfg key;
-          bin = binaryOf r n;
-          binGlob = if useCa then "${bin}/*" else "\"$wrapper\"/root/*";
+          bin = binaryOf r n cfg;
+          binGlob = if useCa || cfg.stripForRun then "${bin}/*" else "\"$wrapper\"/root/*";
         in
         testPkgs.runCommand "${name}-${n}-run"
           (
@@ -558,6 +587,7 @@ let
           )
           (
             prelude cfg
+            + narrowScript b.package cfg
             + (
               if cfg.runner == "nextest" then
                 nextestScript b cfg args binGlob

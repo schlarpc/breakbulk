@@ -410,6 +410,14 @@ pub struct RenderedCompile {
     /// JSON object of strings) or the capture's output directory holding it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_capture: Option<String>,
+    /// For a unit that links: the env captures (as `env_capture`) of the
+    /// other packages in its link closure, on its platform, that have their
+    /// own inputs (decision 107). Only their library search variables
+    /// ([`crate::env::LINK_VARS`]) are used, appended to layer 2, so the
+    /// linker wrapper finds (and records an rpath to) the native libraries
+    /// a `-sys` crate below names with `rustc-link-lib` alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_captures: Vec<String>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change
