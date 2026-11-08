@@ -54,9 +54,10 @@ pub struct Toolchains {
     /// products whose debug information is split off (`splitDebug`), e.g.
     /// `macro,diagnostics`: debug info keeps real store paths (plus
     /// `coverage` in coverage variants, which host units leave out: they are
-    /// not instrumented). `None`: every scope is remapped. Test harnesses (`--test`) always remap every scope,
-    /// and so does every unit when rustc is older than 1.95 ("Source paths
-    /// at run time" in `docs/implementation.md`).
+    /// not instrumented). `None`: every scope is remapped. Test harnesses
+    /// (`--test`) always remap every scope, and so does every unit when
+    /// rustc has no `--remap-path-scope` (`capabilities`; "Source paths at
+    /// run time" in `docs/implementation.md`).
     #[serde(default)]
     pub shipped_remap_scope: Option<String>,
     /// The target platform's traits that instantiation needs (the Nix
@@ -64,6 +65,10 @@ pub struct Toolchains {
     /// output for side files the linker always writes. Required, so a
     /// caller cannot silently get another platform's behaviour.
     pub target_traits: breakbulk_format::TargetTraits,
+    /// What the toolchain can do (the Nix library's `toolchainFacts`):
+    /// whether rustc takes `--remap-path-scope`. Required, like
+    /// `target_traits`.
+    pub capabilities: breakbulk_format::Capabilities,
 }
 
 fn default_store_dir() -> String {

@@ -1088,7 +1088,14 @@ in
           mkdir -p "$(dirname ${dir})"
           cp -r --no-preserve=mode ${i.skeleton} ${dir}
           mkdir -p $out
-          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --target ${native} --profile dev             --config ${i.vendor.configFile}             --scratch $NIX_BUILD_TOP/scratch --forbid $NIX_BUILD_TOP --forbid $HOME             --out $out/plan.json 2> $out/log || true
+          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --target ${native} --profile dev             --config ${i.vendor.configFile}             --capabilities ${
+            breakbulk.toolchainFacts.capabilitiesFile
+              (breakbulk.toolchainFacts.of {
+                inherit pkgs;
+                rustc = rust;
+                cargo = rust;
+              }).capabilities
+          }             --scratch $NIX_BUILD_TOP/scratch --forbid $NIX_BUILD_TOP --forbid $HOME             --out $out/plan.json 2> $out/log || true
           cat $out/log
         '';
       readPlanAt =

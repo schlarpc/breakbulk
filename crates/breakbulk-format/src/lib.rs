@@ -6,15 +6,16 @@
 //! depend on this crate.
 
 mod canonical;
+pub mod capabilities;
 pub mod deps;
 mod doctest;
 mod normalize;
 mod plan;
 mod render;
 mod validate;
-pub mod version;
 
 pub use canonical::{CanonicalError, to_canonical_json};
+pub use capabilities::Capabilities;
 pub use deps::{Graph, crate_deps, crate_deps_of};
 pub use doctest::render_doctest;
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};

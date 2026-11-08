@@ -16,6 +16,7 @@
 #     features = [ ]; allFeatures = false; noDefaultFeatures = false;
 #     packages = [ ];        # -p selection; [ ] means --workspace
 #     configs = [ ];         # extra --config files or values (toolchain spec)
+#     capabilities = null;   # the toolchain's capabilities (null: toolchainFacts')
 #   };
 #   "${plan}/plan.json"
 #
@@ -25,7 +26,7 @@
 # breakbulk-plan fails when the skeleton is elsewhere and a path crate lies
 # outside the workspace root, because Cargo would then hash its absolute
 # path into `-C metadata`.
-{ lib }:
+{ lib, toolchainFacts }:
 {
   mkPlan =
     pkgs:
@@ -52,8 +53,16 @@
       mode ? "build",
       clippyDriver ? null,
       clippyArgs ? [ ],
+      # The toolchain's capabilities (lib/toolchain-facts.nix), or null for
+      # toolchainFacts' own for this rustc and cargo.
+      capabilities ? null,
     }:
     let
+      caps =
+        if capabilities != null then
+          capabilities
+        else
+          (toolchainFacts.of { inherit pkgs rustc cargo; }).capabilities;
       args = [
         "--cargo"
         "${cargo}/bin/cargo"
@@ -77,6 +86,8 @@
         "${vendor.configFile}"
         "--forbid"
         "${vendor.dir}"
+        "--capabilities"
+        (toolchainFacts.capabilitiesFile caps)
       ]
       ++ lib.optionals (mode != "build") [
         "--mode"

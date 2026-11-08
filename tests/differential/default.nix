@@ -98,6 +98,10 @@ let
             --skeleton $sk --canonical-root /build/skeleton \
             --kind $kind --target ${target} --profile dev \
             --scratch $NIX_BUILD_TOP/scratch-$kind \
+            --capabilities ${
+              breakbulk.toolchainFacts.capabilitiesFile
+                (breakbulk.toolchainFacts.of { inherit pkgs rustc cargo; }).capabilities
+            } \
             --forbid $NIX_BUILD_TOP --forbid $HOME \
             --out $out/plan-$kind.json
         done

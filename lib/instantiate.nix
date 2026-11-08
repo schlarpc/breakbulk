@@ -93,6 +93,9 @@ rec {
       # The target's traits as breakbulk-instantiate reads them
       # (`breakbulk.targetTraits.forRust`, lib/target-traits.nix).
       targetTraits,
+      # The toolchain's capabilities (`breakbulk.toolchainFacts.of`'s
+      # `capabilities`): whether rustc takes `--remap-path-scope`.
+      capabilities,
       name ? "breakbulk-units",
       storeDir ? builtins.storeDir,
     }:
@@ -120,6 +123,7 @@ rec {
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir targetTraits;
+        inherit capabilities;
         tools = lib.mapAttrs (_: noCtx) tools;
         host = platformJson host;
         target = platformJson target;
