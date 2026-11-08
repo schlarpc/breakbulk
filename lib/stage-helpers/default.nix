@@ -552,10 +552,13 @@ let
 
   # Fails when the closure of the checked output (by default the product's
   # main output) contains any of `sources` (store paths; default: the
-  # product's `sourcePaths`). Only `${input}` is checked, so a separate
-  # `debug` output is exempt. Sources are compared as strings, so they are
-  # not realised for the check.
-  noSourceReferences = mkHelper "noSourceReferences" { sources = null; } (
+  # product's `sourcePaths`) or of `toolchain` (default: the product's
+  # `toolchainPaths`: rustc, its sysroot, cargo, rust-src; a std panic
+  # location that names rust-src, or an embedded `CARGO`, makes the whole
+  # toolchain a runtime dependency). Only `${input}` is checked, so a
+  # separate `debug` output is exempt. Paths are compared as strings, so
+  # they are not realised for the check.
+  noSourceReferences = mkHelper "noSourceReferences" { sources = null; toolchain = null; } (
     cfg:
     {
       input,
@@ -565,12 +568,15 @@ let
     }:
     let
       sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
-      strs = map (s: builtins.unsafeDiscardStringContext "${s}") sources;
+      toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
+      strs = l: lib.unique (map (s: builtins.unsafeDiscardStringContext "${s}") l);
+      listFile = name: l: builtins.toFile name (concatStringsSep "\n" (strs l) + "\n");
     in
     pkgs.runCommand "${product.name}-no-source-references"
       {
         closure = pkgs.closureInfo { rootPaths = [ input ]; };
-        sourcesList = builtins.toFile "sources" (concatStringsSep "\n" strs + "\n");
+        sourcesList = listFile "sources" sources;
+        toolchainList = listFile "toolchain" toolchain;
       }
       ''
         set -euo pipefail
@@ -582,8 +588,16 @@ let
             bad=1
           fi
         done < "$sourcesList"
+        while IFS= read -r s; do
+          [ -n "$s" ] || continue
+          if grep -qxF "$s" "$closure/store-paths"; then
+            echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references the Rust toolchain $s" >&2
+            bad=1
+          fi
+        done < "$toolchainList"
         if [ "$bad" = 1 ]; then
-          echo "Source paths must not reach shipped outputs; see \"Source paths and debug information\" in breakbulk's design." >&2
+          echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in breakbulk's design." >&2
+          echo "(A binary that links std dynamically, -C prefer-dynamic, needs the toolchain at run time: turn this check off for it.)" >&2
           exit 1
         fi
         touch "$out"

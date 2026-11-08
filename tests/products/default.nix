@@ -1220,6 +1220,39 @@ in
         touch $out
       '';
 
+  # Field-trial gap 9: noSourceReferences also fails on the toolchain's
+  # store paths. `app` compiles its GIT_REV in, set here to rustc's sysroot,
+  # so the product references the toolchain; `tool` does not.
+  no-toolchain-references =
+    let
+      sysroot = pkgs.rustc.unwrapped;
+      repo = mkRepo (fixtures + "/stamps") [
+        (oneWs "." "dev")
+        { packages.app.env.GIT_REV = "${sysroot}"; }
+      ];
+      ps = repo.workspaces.main.packages;
+      listed = lib.splitString "\n" (
+        builtins.readFile ps.app.checks.noSourceReferences.drvAttrs.toolchainList
+      );
+      want = map (p: builtins.unsafeDiscardStringContext "${p}") [
+        pkgs.rustc
+        sysroot
+        pkgs.cargo
+      ];
+      missing = lib.filter (p: !(lib.elem p listed)) want;
+    in
+    assert lib.assertMsg (missing == [ ]) "no-toolchain-references: not looked for: ${toString missing}";
+    pkgs.runCommand "no-toolchain-references"
+      {
+        failure = pkgs.testers.testBuildFailure ps.app.checks.noSourceReferences;
+        clean = ps.tool.checks.noSourceReferences;
+      }
+      ''
+        cat $failure/testBuildFailure.log
+        grep -qF 'references the Rust toolchain ${builtins.unsafeDiscardStringContext "${sysroot}"}' $failure/testBuildFailure.log
+        touch $out
+      '';
+
   post-link =
     let
       checkNames = lib.attrNames postLink.checks;

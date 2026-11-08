@@ -265,6 +265,19 @@ let
   // specTools
   // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
+  # The Rust toolchain's own store paths (rustc, its sysroot, cargo, and a
+  # rust-overlay toolchain's components, rust-src among them), which no
+  # product should reference: products' noSourceReferences looks for them.
+  toolchainPaths = lib.unique (
+    [
+      toolchain.rustc
+      (toolchain.rustc.unwrapped or toolchain.rustc)
+      toolchain.cargo
+    ]
+    ++ (toolchain.rustc.paths or [ ])
+    ++ (toolchain.cargo.paths or [ ])
+  );
+
   isDynamic = delivery == "dynamic";
   breakbulkDrv = tools.breakbulk-drv or (dynamic.mkBreakbulkDrv pkgs);
   # Dynamic-derivation mode: the outer derivation is named
@@ -386,6 +399,7 @@ in
     tools
     captures
     overrides
+    toolchainPaths
     ;
   skeleton = skel;
   # The toolchain spec as Cargo env config, for the dev shell; independent

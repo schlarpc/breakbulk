@@ -13,6 +13,7 @@
 #     inherit pkgs;
 #     # optional:
 #     sourcePaths = [ … ];   # source-view and crate-source store paths
+#     toolchainPaths = [ … ];   # rustc, its sysroot, cargo, toolchain components
 #     info = { lockfile = ./Cargo.lock; };  # extra `product` attributes
 #     ca = null;             # null: automatic (see `caAuto`); true; false
 #   };
@@ -29,7 +30,7 @@
 #   - `after`/`before` name a stage, a list of stages, or null. A stage with
 #     neither runs after `linked`.
 #   - `run = { input, product, target, pkgs }: <derivation>`; `input` is the
-#     previous stage's output, `product` is `{ name; sourcePaths; } // info`,
+#     previous stage's output, `product` is `{ name; sourcePaths; toolchainPaths; } // info`,
 #     plus `linkedDebug` (the `debug` output of `linked`, when it has one:
 #     the link units' debuginfo side files) and `debugSplit` (whether an
 #     earlier stage has a `debug` output).
@@ -245,6 +246,7 @@ let
       pkgs,
       info ? { },
       sourcePaths ? [ ],
+      toolchainPaths ? [ ],
       ca ? null,
       defaultChecks ? true,
     }:
@@ -252,7 +254,7 @@ let
       useCa = if ca == null then caAuto else ca;
       ordered = order { inherit name stages; };
       product = {
-        inherit name sourcePaths;
+        inherit name sourcePaths toolchainPaths;
       }
       # The link units' debuginfo side files (decision 89), for the stage
       # that writes the product's `debug` output.

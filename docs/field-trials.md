@@ -391,9 +391,10 @@ ASK marks a choice for the author.
    mtgac, and over 10 for datboi2's 76 plans with checks. Later evaluations
    are seconds. Unpacking with a batch derivation per lockfile would cut
    it.
-9. **`noSourceReferences` does not look for toolchain paths.** Fix 5 was
-   found by hand. The check could also fail on the toolchain's store
-   paths.
+9. **`noSourceReferences` does not look for toolchain paths.** Done: it
+   also fails on rustc, its sysroot, cargo and the toolchain's components
+   (check: `products-no-toolchain-references`). Before: fix 5 was found by
+   hand.
 10. **No per-package feature powerset.** Done:
     `breakbulk.variants.packageFeaturePowerset` gives cargo-hack's runs
     (`--feature-powerset` or `--each-feature`, `depth`, feature and

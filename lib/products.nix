@@ -263,6 +263,9 @@ let
       ca ? null,
       lockfile ? null,
       sourcePaths ? attrValues inst.sources.workspace ++ attrValues inst.sources.crates,
+      # The toolchain's store paths: noSourceReferences fails when a
+      # product's closure has one (field-trial gap 9).
+      toolchainPaths ? inst.toolchainPaths or [ ],
     }:
     let
       preset = if stagePreset == null then stagePresetFor triple else stagePreset;
@@ -292,7 +295,12 @@ let
             stages = stageSet;
             checks = checkSet;
             target = { inherit triple; };
-            inherit pkgs ca sourcePaths;
+            inherit
+              pkgs
+              ca
+              sourcePaths
+              toolchainPaths
+              ;
             info = lib.optionalAttrs (lockfile != null) { inherit lockfile; };
           };
           # Dynamic-derivation mode: every root may be skipped when each
