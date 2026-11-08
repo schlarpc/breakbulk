@@ -4,7 +4,7 @@
 # version-matched nixpkgs `wasm-ld` underneath instead of rustup's rust-lld
 # (./linker.nix, kind wasm-component-ld). Tests run under wasmtime.
 #
-#   targets.wasm32-wasip2.preset = breakbulk.presets.wasip2 { inherit rustc; withC = true; };
+#   targets.wasm32-wasip2.preset = breakbulk.presets.wasip2 { withC = true; };
 #
 # withC = true: C code compiles against the headers of the wasi-sdk
 # release whose wasi-libc the Rust toolchain bundles (decision 99): one

@@ -12,10 +12,16 @@
 #     breakbulk.presets.linuxMusl { inherit pkgs; triple = "x86_64-unknown-linux-musl"; };
 #   # or, letting the target fill in pkgs and the triple:
 #   targets.x86_64-unknown-linux-musl.preset = breakbulk.presets.linuxMusl;
-#   targets.x86_64-pc-windows-msvc.preset = breakbulk.presets.msvc { inherit sdk rustc; };
+#   targets.x86_64-pc-windows-msvc.preset = breakbulk.presets.msvc { inherit sdk; };
 #
 # A preset called without `pkgs` returns the same preset with those options
 # bound, so `presets.msvc { sdk = …; }` is itself a preset.
+#
+# Through `preset`, a target's preset is applied once per workspace and
+# given that workspace's toolchain (`toolchain`, see mkPreset), so presets
+# that need rustc's LLVM or wasi-sdk version follow each workspace's rustc
+# (decision 70). Calling a preset directly (`presets.msvc { inherit pkgs
+# sdk; … }`) has no workspace: pass `rustc` there.
 #
 # Every preset sets the host spec (`host.linker`, `host.env`) from
 # `pkgs.buildPackages`, so host units (build scripts, proc macros and their
@@ -24,9 +30,10 @@
 # instantiation, never through Cargo's `[env]`.
 #
 # Presets that use LLVM tools (msvc, wasm, linuxGnu with crossLanguageLto)
-# need the LLVM matching rustc: pass `rustc` (your toolchain; its version is
-# looked up in breakbulk.llvmVersions, read from `rustc -vV` (IFD) when
-# the table does not cover it, or nixpkgs' rustc.llvmPackages is used), `llvmMajor`, or `llvmPackages`.
+# need the LLVM matching rustc: the workspace's `rustc` by default, or one
+# passed as `rustc` (its version is looked up in breakbulk.llvmVersions,
+# read from `rustc -vV` (IFD) when the table does not cover it, or nixpkgs'
+# rustc.llvmPackages is used), `llvmMajor`, or `llvmPackages`.
 {
   lib,
   llvmVersions,
@@ -38,15 +45,32 @@ let
   inherit (lib) mkDefault;
 
   # Bind options until `pkgs` is given.
+  #
+  # `toolchain` is the workspace's toolchain (`workspaces.<ws>.toolchain`),
+  # which a target passes when it applies the preset for one workspace
+  # (lib/modules/target-spec.nix): its `rustc` becomes the preset's `rustc`
+  # unless one was given, so LLVM tools and the wasi-sdk follow each
+  # workspace's compiler (decision 70). Every stage advertises `toolchain`
+  # in its function arguments; a preset that does not (a plain user
+  # function) is called without it.
   mkPreset =
     f:
     let
       go =
-        bound: args:
-        let
-          a = bound // args;
-        in
-        if a ? pkgs then f a // { presetDirect = true; } else go a;
+        bound:
+        lib.setFunctionArgs (
+          args:
+          let
+            a = bound // args;
+            tc = a.toolchain or null;
+            withRustc =
+              removeAttrs a [ "toolchain" ]
+              // lib.optionalAttrs (!(a ? rustc) && tc != null && tc.rustc or null != null) {
+                inherit (tc) rustc;
+              };
+          in
+          if a ? pkgs then f withRustc // { presetDirect = true; } else go a
+        ) { toolchain = true; };
     in
     go { };
 

@@ -134,7 +134,11 @@ All configuration is in NixOS-style modules. The full list of options is in
   (`breakbulk.presets.linuxGnu`, `linuxMusl`, `staticGlibc`, `msvc`,
   `wasmBrowser`, `wasmComponent`, `wasip2`, `windowsGnu`, `zig`) and override any field: linker, C
   compiler, rustflags, env, test runner, post-link stages. On Linux the
-  native target uses `linuxGnu` unless you set another preset.
+  native target uses `linuxGnu` unless you set another preset. A preset
+  follows each workspace's compiler: two workspaces on different Rust
+  releases get matching LLVM tools and wasi-sdk headers without passing
+  `rustc`. `workspaces.<ws>.targets.<triple>` takes the same options for
+  one workspace.
 - `packages.<name>`: settings for one package's units only: `env`,
   `nativeInputs`, `inputs`, `extraSources`, stages, checks, and `test`
   settings (env, extra `PATH`, libtest arguments, skip lists, a wider

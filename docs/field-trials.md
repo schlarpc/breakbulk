@@ -391,6 +391,10 @@ ASK marks a choice for the author.
     and the flake's wasm-tools. breakbulk's are reproducible; re-pinning is
     a one-time step, after which the pins guard breakbulk's bytes.
 12. **One preset compiler per target, toolchains per workspace** (decision
-    70). datboi2's wasm32 preset is configured with 1.96.1 while emu-ds uses
-    nightly-2025-12; it worked because both use LLVM 21/22-compatible
-    `wasm-ld`, but the preset cannot follow each workspace's compiler.
+    70). datboi2's wasm32 preset was configured with 1.96.1 while emu-ds
+    uses nightly-2025-12 (LLVM 21.1.8, per its `rustc -vV`), so emu-ds
+    linked with LLVM 22's `wasm-ld`; it worked, but the preset could not
+    follow each workspace's compiler. Fixed: target specs are now resolved
+    per workspace and a preset gets the workspace's rustc. The module no
+    longer passes `rustc`; evaluating it gives the components clang and
+    `wasm-ld` 22.1.8 and emu-ds 21.1.8.

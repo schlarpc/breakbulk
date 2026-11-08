@@ -110,7 +110,7 @@ All user-facing configuration lives in the NixOS module system; the unit graph d
 
 ### Repository, workspaces, targets
 
-A **repository** object holds any number of **workspaces**, each with its own lockfile and toolchain. Each workspace is built for a set of **targets**; each target names a toolchain preset and, optionally, the packages to select for it.
+A **repository** object holds any number of **workspaces**, each with its own lockfile and toolchain. Each workspace is built for a set of **targets**; each target names a toolchain preset and, optionally, the packages to select for it. Target specs are set repository-wide and may be refined per workspace, and each workspace's spec is resolved with its own toolchain, so a preset picks tools matching that workspace's rustc.
 
 Units are shared across workspaces when Cargo produces identical commands for them. For registry crates that means the same version, features, profile, toolchain and resolved dependencies. Path crates additionally depend on where they sit relative to each workspace root: Cargo hashes a crate inside the workspace root by its relative path and a crate outside it by its absolute path, and passes source paths the same way. A shared path crate therefore deduplicates when it lies **outside every workspace root that uses it**, or when every workspace is the same workspace. A crate that is a selected member in one workspace and a plain dependency in another also differs, through `CARGO_PRIMARY_PACKAGE`. A diagnostic explains why two units expected to be shared are not. It compares the units' commands and env, not Cargo's hashes: `-C metadata` leaves out rustflags, so two units can share it and still differ.
 
