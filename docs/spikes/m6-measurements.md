@@ -2,6 +2,8 @@
 
 Nov 7, 2026 · measurements for M6 (below-crate seams)
 
+The spike's code is on the [`spikes-archive`](https://github.com/schlarpc/breakbulk/tree/spikes-archive) tag; paths below are relative to it.
+
 | Question | Verdict |
 | --- | --- |
 | Is the pipelined split worth building? | **Not now.** The gap is real (measured 5–39% on a cold `-j8` release build, simulated up to 67% on a deep chain), but the stable backends (rerun and stop, `-Zno-codegen`) run the frontend twice and are *slower* than no split at 4 cores on the wide workspaces (helix, nushell), and break even or lose at 8. Only the CRIU backend keeps the gain. Next step: the CRIU spike, then an opt-in per package. |
@@ -17,8 +19,8 @@ The machine was shared with other agents throughout: load average 15–60 on
 
 ### Method
 
-Everything is in [`spikes/m6/pipelining/`](../../spikes/m6/pipelining/);
-saved data in [`spikes/m6/results/pipelining/`](../../spikes/m6/results/pipelining/).
+Everything is in [`spikes/m6/pipelining/`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/m6/pipelining/);
+the saved data (`spikes/m6/results/`) was never committed: the repository's `result*` ignore pattern also matched `results/`.
 
 - Four workspaces at pinned revisions, exported with `git archive` into a
   scratch directory outside `$HOME`, with a scratch `CARGO_HOME`, Cargo and
@@ -166,7 +168,7 @@ of the library's own source files do: a test, an example, a README, a
 
 ### The harness
 
-[`tools/history-replay/replay.py`](../../tools/history-replay/replay.py).
+[`tools/history-replay/replay.py`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/tools/history-replay/replay.py).
 For each commit in a range (`git rev-list --no-merges`, optionally limited
 to paths), it builds the commit and its first parent with a real Cargo and
 rustc (`cargo build --workspace --lib`, the release profile,
@@ -196,10 +198,8 @@ nondeterminism or a freshness bug. Usage is in the script's header.
 Two repositories, three toolchains each: stable 1.99, nightly 2026-11-06
 (crate hash from metadata, the nightly default), and that nightly with
 `-Zmetadata-crate-hash=no` (crate hash from HIR, as on stable). Release
-profile. Full tables in
-[`spikes/m6/results/history-replay/`](../../spikes/m6/results/history-replay/)
-(`*.txt`; the `*.json.gz` files hold every snapshot, for
-`replay.py --reanalyze`).
+profile. The full tables (`spikes/m6/results/history-replay/`) were
+not committed; see above.
 
 | Repository | Commits built | Edited libraries | …with rmeta unchanged | Library compiles, input-addressed → rmeta cutoff | Link units, input-addressed → rlib cutoff |
 | --- | ---: | ---: | ---: | --- | --- |
@@ -311,7 +311,7 @@ Limits:
 **Result: a CA test run on a cold machine downloads its inputs' closures,
 including the Rust toolchain.**
 
-[`spikes/m6/ca-island/run.sh`](../../spikes/m6/ca-island/run.sh): the
+[`spikes/m6/ca-island/run.sh`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/m6/ca-island/run.sh): the
 `test-control` fixture's six test runs, input-addressed and
 content-addressed (`ca = true`), built in a private store
 (`local?root=`, own `nix.conf` with `ca-derivations`; the system daemon is

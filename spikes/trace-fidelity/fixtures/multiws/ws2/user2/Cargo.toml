@@ -1,8 +1,0 @@
-[package]
-name = "user2"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-shared = { path = "../../ws1/shared" }
-common = { path = "../../common" }

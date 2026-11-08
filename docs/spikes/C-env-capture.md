@@ -2,6 +2,8 @@
 
 Nov 7, 2026
 
+The spike's code is on the [`spikes-archive`](https://github.com/schlarpc/breakbulk/tree/spikes-archive) tag; paths below are relative to it.
+
 ## Result
 
 **Go.** A small derivation can run a real nixpkgs stdenv with a package's inputs and record what its setup hooks produce as `env.json`. A plain builder that replays that file gets the same behavior from nixpkgs' cc-wrapper, bintools-wrapper and pkg-config wrapper as a live stdenv shell.
@@ -31,7 +33,7 @@ bash compare-e2e.sh native               # end to end, x86_64
 bash compare-e2e.sh cross                # end to end, aarch64-unknown-linux-gnu
 ```
 
-Saved output: [`spikes/env-capture/results/`](../../spikes/env-capture/results/).
+The saved output (`spikes/env-capture/results/`, cited below) was never committed: the repository's `result*` ignore pattern also matched `results/`.
 
 | File | What it is |
 | --- | --- |
@@ -90,7 +92,7 @@ Only exported variables can reach a build script, in a live stdenv as much as in
 - **Phase overrides:** `configurePhase=cmakeConfigurePhase`, `buildPhase=ninjaBuildPhase`, and so on.
 - **Unexported shell variables:** `role_post`, `prefix`, `outputDev`, and so on.
 
-None of these is visible to a process cargo starts. Results that hooks compute from that state at `postHook` time *are* captured, because `postHook` runs inside setup.sh (`setup.sh:1825`). Examples: `BINDGEN_EXTRA_CLANG_ARGS` (`rust/hooks/rust-bindgen-hook.sh`) and `CMAKE_INCLUDE_PATH`/`CMAKE_LIBRARY_PATH` (`cmake/setup-hook.sh`, `makeCmakeFindLibs`). Full list of kept names: [`results/broad-env.json`](../../spikes/env-capture/results/broad-env.json). Unexported state: [`results/broad-unexported-vars.txt`](../../spikes/env-capture/results/broad-unexported-vars.txt).
+None of these is visible to a process cargo starts. Results that hooks compute from that state at `postHook` time *are* captured, because `postHook` runs inside setup.sh (`setup.sh:1825`). Examples: `BINDGEN_EXTRA_CLANG_ARGS` (`rust/hooks/rust-bindgen-hook.sh`) and `CMAKE_INCLUDE_PATH`/`CMAKE_LIBRARY_PATH` (`cmake/setup-hook.sh`, `makeCmakeFindLibs`). Full list of kept names: `results/broad-env.json`. Unexported state: `results/broad-unexported-vars.txt`.
 
 `appendToVar`/`prependToVar` (`setup.sh:360-420`) do not export a new variable. No hook in the survey used them for an environment variable that a child process needs.
 
@@ -110,7 +112,7 @@ None of these is visible to a process cargo starts. Results that hooks compute f
 
 `probe.sh` runs as a child process in both settings. It prints the tools, the role variables and `pkg-config --cflags --libs`. It compiles and links a C program with `NIX_DEBUG=1`, so cc-wrapper and ld-wrapper print every flag they add. It also prints the binary's `NEEDED`, `RUNPATH`, `RELRO`, `BIND_NOW` and PIE status. The cases are base, openssl, bindgen + zstd, cross base and cross openssl.
 
-After normalising gcc's random temp file names, the **only** difference in every case is the live shell's `-rpath <live $out>/lib`. It appears in `NIX_LDFLAGS`, in the wrapper's extra flags and in `RUNPATH`. Hardening flags, include and library flags, dynamic linker, pkg-config output and role variables are identical. See [`results/probes-live-vs-replay.txt`](../../spikes/env-capture/results/probes-live-vs-replay.txt).
+After normalising gcc's random temp file names, the **only** difference in every case is the live shell's `-rpath <live $out>/lib`. It appears in `NIX_LDFLAGS`, in the wrapper's extra flags and in `RUNPATH`. Hardening flags, include and library flags, dynamic linker, pkg-config output and role variables are identical. See `results/probes-live-vs-replay.txt`.
 
 ## 3. End to end: openssl-sys, ring, zstd-sys with bindgen
 
@@ -152,7 +154,7 @@ The target capture (`openssl-sys`) contains only target-role values:
 
 The cross bindgen capture has `--target=aarch64-unknown-linux-gnu` and the aarch64 glibc headers in `BINDGEN_EXTRA_CLANG_ARGS`.
 
-In the cross run, every host unit got the host base capture and every target unit got its target capture. See [`results/cross-captures-applied.txt`](../../spikes/env-capture/results/cross-captures-applied.txt). For example, `run openssl-sys TARGET=aarch64…` got the target openssl capture, and `run proc-macro2 TARGET=x86_64…` got the host base. The bytes matched, as shown above.
+In the cross run, every host unit got the host base capture and every target unit got its target capture. See `results/cross-captures-applied.txt`. For example, `run openssl-sys TARGET=aarch64…` got the target openssl capture, and `run proc-macro2 TARGET=x86_64…` got the host base. The bytes matched, as shown above.
 
 Findings:
 
@@ -177,7 +179,7 @@ PATH=patchelf, gcc-wrapper, gcc, glibc-bin, coreutils, binutils-wrapper, binutil
 XDG_DATA_DIRS=<patchelf>/share
 ```
 
-The fixture package declares no inputs. Its build script dumps its environment, once under `buildRustPackage` and once under the base capture. The results are in [`results/e2e-native.txt`](../../spikes/env-capture/results/e2e-native.txt), section "environment of a build script with no inputs".
+The fixture package declares no inputs. Its build script dumps its environment, once under `buildRustPackage` and once under the base capture. The results are in `results/e2e-native.txt`, section "environment of a build script with no inputs".
 
 - **Present in both:** the same compiler, binutils, coreutils, make and bash on `PATH`; the same `CC`/`AR`/… names; the same hardening, purity and certificate variables; `TZ`; Cargo's own variables.
 - **Only in `buildRustPackage`:** the package's whole input set (`PKG_CONFIG*`, `LIBCLANG_PATH`, `BINDGEN_EXTRA_CLANG_ARGS`, `NIX_LDFLAGS`, the include flags in `NIX_CFLAGS_COMPILE`). These leak to every build script there. In breakbulk only the declaring package gets them, which is the point of per-package captures. Also only in `buildRustPackage`: the `setEnv` toolchain variables, `PKG_CONFIG_ALLOW_CROSS`, `RUST_LOG`, `GZIP_NO_TIMESTAMPS`, and derivation attributes (`cargoDeps`, `stdenv`, `pname`, ...).

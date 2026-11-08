@@ -2,6 +2,8 @@
 
 Nov 7, 2026
 
+The spike's code is on the [`spikes-archive`](https://github.com/schlarpc/breakbulk/tree/spikes-archive) tag; paths below are relative to it.
+
 ## Result
 
 **Go.** A pinned xwin CRT and SDK as a fixed-output derivation, plus `lld-link`, `clang-cl`, `llvm-lib` and `llvm-rc` from the `llvmPackages` that matches rustc's LLVM, is enough for plain cargo to cross-build Rust with C code, bindgen and a Windows resource to `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc` in the Nix sandbox. The x86\_64 program runs under wine in the sandbox and prints the expected output. The aarch64 program compiles and links (`PE32+ … ARM64`). No breakbulk code is involved.
@@ -18,6 +20,8 @@ Pins: nixpkgs `1d060086d60cb76a40cf37109f979d88a5bd6396` and rust-overlay `74ceb
 
 ## How to reproduce
 
+At the `spikes-archive` tag. On main the spike's checks are gone; the same crate is `tests/fixtures/msvc`, built through breakbulk by `msvc-x86_64-run` and `msvc-aarch64-build`.
+
 ```sh
 nix build .#checks.x86_64-linux.msvc-sdk       # the SDK (network, unfree) and its layout
 nix build .#checks.x86_64-linux.msvc-x86_64    # build spikes/msvc, run under wine
@@ -28,9 +32,9 @@ nix build --rebuild .#checks.x86_64-linux.msvc-sdk   # the SDK is deterministic
 | File | What it is |
 | --- | --- |
 | [`lib/xwin-sdk.nix`](../../lib/xwin-sdk.nix) | `breakbulk.xwinSdk`: the fixed-output SDK derivation |
-| [`spikes/msvc/`](../../spikes/msvc/) | The test crate (`build.rs`, `src/main.rs`, `csrc/`) and `default.nix`, which builds it with plain cargo |
-| [`spikes/msvc/env.sh`](../../spikes/msvc/env.sh) | The full env, as a shell script |
-| [`spikes/msvc/lld-link-stable-tmp.sh`](../../spikes/msvc/lld-link-stable-tmp.sh) | The determinism wrapper |
+| [`spikes/msvc/`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/msvc/) | The test crate (`build.rs`, `src/main.rs`, `csrc/`) and `default.nix`, which builds it with plain cargo |
+| [`spikes/msvc/env.sh`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/msvc/env.sh) | The full env, as a shell script |
+| [`spikes/msvc/lld-link-stable-tmp.sh`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/msvc/lld-link-stable-tmp.sh) | The determinism wrapper |
 | [`tests/presets/default.nix`](../../tests/presets/default.nix) | The flake checks |
 
 The crate links C code compiled by `clang-cl` through the `cc` crate (`csrc/smoke.c` includes `<windows.h>` and calls the CRT). It generates bindings with bindgen 0.72 for its own header and for `GetCurrentProcessId` from `<windows.h>`. It compiles `csrc/smoke.rc`, an RCDATA resource that includes `<windows.h>`, with `$RC`, and links the `.res` with `cargo:rustc-link-arg-bins`. It calls `windows-sys` 0.61 (`GetCurrentProcessId`, `FindResourceW`, `LoadResource`). At run time it checks that the C, bindgen and `windows-sys` results agree, and that the resource is present:
@@ -124,7 +128,7 @@ The cause:
 - lld-link records every input path in the PDB's module list. Comparing the strings of the two PDBs shows only `…/deps/rustcLqWGdY/symbols.o` against `…/deps/rustcFPckMB/symbols.o`.
 - When it writes a PDB, lld-link sets the build ID hash to the PDB's content hash (`COFF/Driver.cpp`: `config->buildIDHash = BuildIDHash::PDB` whenever `shouldCreatePDB`). `/Brepro` and `/build-id` do not change this. `writeBuildId` in `COFF/Writer.cpp` writes the hash into the PE's PDB GUID.
 
-The fix in the spike is [`lld-link-stable-tmp.sh`](../../spikes/msvc/lld-link-stable-tmp.sh), set as `CARGO_TARGET_<T>_LINKER`. It copies any `…/rustcXXXXXX/<file>` input to `<output>.rustc-tmp/<file>` and passes the copy. With it, both the `.exe` and the `.pdb` are identical across `--rebuild`, on x86\_64 and aarch64. Limitation: it does not rewrite arguments inside an `@response` file, which rustc uses only when the command line is too long. ELF links are probably not affected, because ELF has no equivalent of the PDB module list and `symbols.o` carries no debug info. That was not tested here.
+The fix in the spike is [`lld-link-stable-tmp.sh`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/msvc/lld-link-stable-tmp.sh), set as `CARGO_TARGET_<T>_LINKER`. It copies any `…/rustcXXXXXX/<file>` input to `<output>.rustc-tmp/<file>` and passes the copy. With it, both the `.exe` and the `.pdb` are identical across `--rebuild`, on x86\_64 and aarch64. Limitation: it does not rewrite arguments inside an `@response` file, which rustc uses only when the command line is too long. ELF links are probably not affected, because ELF has no equivalent of the PDB module list and `symbols.o` carries no debug info. That was not tested here.
 
 Other options were checked and rejected:
 

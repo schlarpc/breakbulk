@@ -14,10 +14,6 @@
 # flake.nix) and on x86_64-linux:
 #   msvc-sdk              HEAVY, network, unfree: the xwin CRT + SDK splat
 #                         (~250 MB) and its layout and case symlinks
-#   msvc-x86_64           HEAVY: spikes/msvc built for x86_64-pc-windows-msvc
-#                         and run under wine
-#   msvc-aarch64          HEAVY: spikes/msvc built for aarch64-pc-windows-msvc
-#                         (compile and link only)
 #
 # The M3 fixtures (presets through mkRepository) are in ./fixtures.nix.
 {
@@ -173,7 +169,6 @@ let
         ];
         hash = "sha256-22dqk0tKSbC4bnfsnhhsG0aEJfUHb3JJNL3TnZGFVa0=";
       };
-      spike = arch: import ../../spikes/msvc { inherit pkgs sdk arch; };
     in
     {
       msvc-sdk = pkgs.runCommand "msvc-sdk-layout" { } ''
@@ -191,8 +186,6 @@ let
         if find ${sdk} -xtype l | grep -q .; then find ${sdk} -xtype l | head; exit 1; fi
         touch $out
       '';
-      msvc-x86_64 = (spike "x86_64").run;
-      msvc-aarch64 = (spike "aarch64").exe;
     };
 in
 {

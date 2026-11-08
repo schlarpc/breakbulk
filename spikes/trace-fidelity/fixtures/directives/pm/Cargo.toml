@@ -1,7 +1,0 @@
-[package]
-name = "pm"
-version.workspace = true
-edition.workspace = true
-
-[lib]
-proc-macro = true

@@ -2,6 +2,8 @@
 
 Nov 7, 2026
 
+The spike's code is on the [`spikes-archive`](https://github.com/schlarpc/breakbulk/tree/spikes-archive) tag; paths below are relative to it.
+
 This spike answers two rows of "Spikes and open questions" in the implementation doc, "Per-unit overhead" and "Graph size", and the worry in decision log #29: in IFD mode the Nix side substitutes named placeholders into every unit's attributes at evaluation time. Is that fast enough at about 1,000 units?
 
 ## Result
@@ -40,7 +42,7 @@ Confidence: high for the shape of the results (what grows with what, and which s
 
 ## Setup
 
-Everything is in [`spikes/scale/`](../../spikes/scale/); saved numbers are in [`spikes/scale/results/`](../../spikes/scale/results/).
+Everything is in [`spikes/scale/`](https://github.com/schlarpc/breakbulk/tree/spikes-archive/spikes/scale/); the saved numbers (`spikes/scale/results/`, cited below) were never committed: the repository's `result*` ignore pattern also matched `results/`.
 
 | File | What it does |
 | --- | --- |

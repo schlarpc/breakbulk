@@ -1,5 +1,0 @@
-[package]
-name = "hostdep"
-version.workspace = true
-edition.workspace = true
-links = "hostdep"

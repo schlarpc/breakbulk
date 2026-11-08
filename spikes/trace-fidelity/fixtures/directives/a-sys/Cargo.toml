@@ -1,6 +1,0 @@
-[package]
-name = "a-sys"
-version.workspace = true
-edition.workspace = true
-links = "a"
-build = "build.rs"

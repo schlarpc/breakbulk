@@ -2,6 +2,8 @@
 
 Nov 7, 2026 · spike for M5 (dynamic-derivation delivery)
 
+The spike's code is on the [`spikes-archive`](https://github.com/schlarpc/breakbulk/tree/spikes-archive) tag; paths below are relative to it.
+
 **Verdict: go, with design changes.** A `builder-rpc-v0` derivation can write
 input-addressed unit derivations whose paths equal the IFD-mode paths
 byte for byte. It cannot do it with `nix derivation add`; it needs its own

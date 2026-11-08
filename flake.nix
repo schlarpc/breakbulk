@@ -192,9 +192,8 @@
           breakbulk = self.lib;
         }
         # Toolchain-preset building blocks. HEAVY: msvc-sdk downloads the
-        # MSVC CRT and Windows SDK (unfree, ~250 MB); msvc-x86_64 and
-        # msvc-aarch64 cross-build a Rust+C program against it (x86_64 runs
-        # under wine); wasm-bindgen-build compiles a wasm-bindgen-cli.
+        # MSVC CRT and Windows SDK (unfree, ~250 MB); wasm-bindgen-build
+        # compiles a wasm-bindgen-cli.
         # allowUnfree is scoped: only this package set, used only for the
         # SDK, admits unfree packages, and only the one named xwin-sdk.
         // import ./tests/presets {

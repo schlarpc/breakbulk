@@ -2,6 +2,8 @@
 
 Nov 7, 2026 · spike for M1 (traced planner)
 
+The spike's code is on the [`spikes-archive`](https://github.com/schlarpc/breakbulk/tree/spikes-archive) tag; paths below are relative to it.
+
 **Verdict: go.** On Cargo 1.95, 1.97, 1.99 and current nightly (1.101), Cargo
 accepts empty outputs, one-line dep-info and synthetic artifact
 notifications, with pipelining on and with `links` overrides in config. The

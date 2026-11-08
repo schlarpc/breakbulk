@@ -1,3 +1,4 @@
 /target
-result*
+/result*
 /breakbulk-drv/target
+__pycache__/
