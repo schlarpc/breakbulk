@@ -2109,26 +2109,38 @@ string
 
 
 
-## workspaces\.\<name>\.devShell\.setTarget
+## workspaces\.\<name>\.devShell\.target
 
 
 
-Export ` CARGO_BUILD_TARGET=<native triple> ` in the dev shell, so
-local Cargo behaves as the planner’s (which always passes
-` --target `): rustflags stay off build scripts, and ` -C metadata `
-matches\. Binaries then go to ` target/<triple>/… `\.
+The target the dev shell is set up for, one of ` targets `\. The
+shell exports ` CARGO_BUILD_TARGET=<target> `, so local Cargo
+behaves as the planner’s (which always passes ` --target `):
+rustflags stay off build scripts, and ` -C metadata ` matches\.
+Binaries then go to ` target/<triple>/… `\. It also gets that
+target’s linker and rustflags as the planner passes them, and
+its ` env `\. ` null `: none of these, so the project’s own
+` build.target ` (or Cargo’s host default) applies\. Set it for a
+workspace that does not target the native triple and has
+several targets\.
 
 
 
 *Type:*
-boolean
+null or string
 
 
 
 *Default:*
+the native triple when it is one of ` targets `, else the only
+target, else ` null `
+
+
+
+*Example:*
 
 ```nix
-true
+"x86_64-unknown-uefi"
 ```
 
 *Declared by:*

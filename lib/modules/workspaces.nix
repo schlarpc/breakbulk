@@ -410,13 +410,39 @@ let
         };
 
         devShell.setTarget = mkOption {
-          type = types.bool;
-          default = true;
+          type = types.raw;
+          visible = false;
+          description = "Removed: use `devShell.target`.";
+        };
+
+        devShell.target = mkOption {
+          type = types.nullOr types.str;
+          default =
+            let
+              ts = lib.attrNames config.targets;
+            in
+            if lib.elem nativeTriple ts then
+              nativeTriple
+            else if lib.length ts == 1 then
+              lib.head ts
+            else
+              null;
+          defaultText = lib.literalMD ''
+            the native triple when it is one of `targets`, else the only
+            target, else `null`
+          '';
+          example = "x86_64-unknown-uefi";
           description = ''
-            Export `CARGO_BUILD_TARGET=<native triple>` in the dev shell, so
-            local Cargo behaves as the planner's (which always passes
-            `--target`): rustflags stay off build scripts, and `-C metadata`
-            matches. Binaries then go to `target/<triple>/…`.
+            The target the dev shell is set up for, one of `targets`. The
+            shell exports `CARGO_BUILD_TARGET=<target>`, so local Cargo
+            behaves as the planner's (which always passes `--target`):
+            rustflags stay off build scripts, and `-C metadata` matches.
+            Binaries then go to `target/<triple>/…`. It also gets that
+            target's linker and rustflags as the planner passes them, and
+            its `env`. `null`: none of these, so the project's own
+            `build.target` (or Cargo's host default) applies. Set it for a
+            workspace that does not target the native triple and has
+            several targets.
           '';
         };
 
@@ -488,6 +514,13 @@ let
 
         warnings = bt.warningsOption;
       };
+
+      # Removed (#32); there is no `assertions` option to report through
+      # (lib.mkRemovedOptionModule's way), so reading the shell's target
+      # fails instead.
+      config.devShell.target = lib.mkIf options.devShell.setTarget.isDefined (
+        throw "breakbulk: workspaces.${name}.devShell.setTarget was removed; use devShell.target: a triple, or null for none"
+      );
 
       # A definition, not the option's default, so that a user's variants
       # merge with it instead of replacing it.

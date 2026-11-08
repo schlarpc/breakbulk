@@ -527,7 +527,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
                                       # packages = null (or a -p list in place of the target's)
                                       # checks = true: its test runs and doctests in repo.checks
     roots = null;                     # override predicted root names
-    devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
+    devShell.target = <native>;       # the triple the dev shell is set up for, or null
     test.runner = null;               # default test runner of its packages: libtest | nextest
     test.stripForRun = false;         # default packages.<name>.test.stripForRun
     test.nextest = { profile = null; configFile = null; package = null; };  # defaults; packages override
@@ -601,10 +601,11 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
 
 The planner always passes `--target`, and local Cargo without it behaves differently: rustflags reach build scripts, every unit's `-C metadata` changes, and outputs move. The dev shell therefore:
 
-- exports `CARGO_BUILD_TARGET=<native triple>`, unless `devShell.setTarget = false`;
-- exports the toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`. A small derivation (`breakbulk-plan --cargo-env-only`) computes it by the planner's own rule from the project's Cargo config files and `rustc --print cfg`, without running Cargo, so the shell still opens when planning fails, for example on a broken `Cargo.toml` (decision 81). It is read by import-from-derivation;
+- is set up for one target, `devShell.target`: by default the native triple when the workspace targets it, else its only target, else none (a cross-only workspace with several targets, #32). A triple that is not one of the workspace's targets is an evaluation error. With none, the shell exports no target and no spec, so the project's own `build.target` (or Cargo's host default) applies; reading `build.target` to choose the default would mean reproducing Cargo's config resolution (every `.cargo/config.toml` upward, `$CARGO_HOME`, the environment, list and `.json` values), so it is not read;
+- exports `CARGO_BUILD_TARGET=<target>`;
+- exports that target's toolchain spec as Cargo env config (`CARGO_TARGET_<TRIPLE>_LINKER`, and `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or `CARGO_BUILD_RUSTFLAGS`, whichever key the planner chose), matching the planner's `--config`. A small derivation (`breakbulk-plan --cargo-env-only`) computes it by the planner's own rule from the project's Cargo config files and `rustc --print cfg`, without running Cargo, so the shell still opens when planning fails, for example on a broken `Cargo.toml` (decision 81). It is read by import-from-derivation;
 - exports `CARGO_PROFILE_<P>_TRIM_PATHS=all` when the planner turns trim-paths on for the default variant's profile `P` (see [trim-paths](#trim-paths)): trim-paths is part of the profile Cargo hashes into `-C metadata`. The same `--cargo-env-only` derivation decides it, by the planner's own rule from the workspace root's `Cargo.toml` and the config files read as TOML and the toolchain's `trimPaths` capability, without a plan (decision 135), so the shell opens with a broken manifest on every Cargo version; a file that does not parse is a warning and counts as not setting trim-paths;
-- includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform);
+- includes the union of the packages' native env captures, because one shell cannot scope env per unit (a union is only valid within one platform, so a cross target's own `inputs`, libraries for that platform, are left out; its `nativeInputs` and `env` are included);
 - warns about `CARGO_*` variables in the user's environment that the planner will not see.
 
 Limits, documented: binaries move to `target/<triple>/…`; a missing input declaration can work locally and fail in Nix; and for same-triple presets (static glibc, zig) local Cargo cannot keep target env away from host build scripts.

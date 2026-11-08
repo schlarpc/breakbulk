@@ -1,11 +1,13 @@
 # The dev shell of one workspace ("Dev shell" in docs/implementation.md):
 # local Cargo set up as the planner runs it.
 #
-#  - CARGO_BUILD_TARGET=<native triple> (unless setTarget = false): the
+#  - CARGO_BUILD_TARGET=<target> (`devShell.target`: by default the native
+#    triple when the workspace targets it, else its only target; null
+#    exports none, so the project's own `build.target` applies): the
 #    planner always passes --target, and without it local Cargo applies
 #    rustflags to build scripts, computes different `-C metadata` and puts
 #    outputs elsewhere.
-#  - The native target's toolchain spec as Cargo env config, as the
+#  - That target's toolchain spec as Cargo env config, as the
 #    planner chooses it (`cargo-env.json` from lib/plan.nix mkCargoEnv,
 #    which reads only Cargo config files and rustc, so the shell opens
 #    while a manifest is broken): CARGO_TARGET_<TRIPLE>_LINKER, and the spec's
@@ -22,8 +24,10 @@
 #  - The union of the workspace's packages' inputs on the native platform,
 #    through nixpkgs' own setup hooks (what the env captures record per
 #    package). One shell cannot scope env per unit, and a union is only
-#    valid within one platform; package env is merged the same way, and a
-#    variable two packages set differently is a warning.
+#    valid within one platform: a cross target's own `inputs` (libraries
+#    for that platform) are left out, its `nativeInputs` and `env` are
+#    not. Package env is merged the same way, and a variable two packages
+#    set differently is a warning.
 #  - A warning, when the shell starts, for each variable in the user's
 #    environment that changes what Cargo builds but that the planner never
 #    sees: CARGO_* (except those that only affect output location, the
@@ -42,13 +46,14 @@
   name,
   nativeTriple,
   toolchain,
-  setTarget ? true,
+  # The triple the shell is set up for (`devShell.target`), or null.
+  target ? nativeTriple,
   # Merged per-package overrides (repository.nix's `overrideFor`) of the
   # workspace's packages.
   overrides ? [ ],
-  # targets.<native>.env, already strings.
+  # targets.<target>.env, already strings.
   targetEnv ? { },
-  # The planner's `cargo-env.json` for the native target: { env; warnings; }
+  # The planner's `cargo-env.json` for `target`: { env; warnings; }
   # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), the trim-paths
   # variable included.
   cargoEnv ? { },
@@ -57,15 +62,19 @@ let
   envString = (import ./modules/types.nix { inherit lib; }).envString;
 
   # Everything the native build needs: host-side and target-side inputs
-  # are the same package sets on a native build.
+  # are the same package sets on a native build. A cross target's own
+  # inputs are libraries for another platform, so they are left out.
+  forTarget = o: if target == null then { } else o.target.${target} or { };
   nativeInputs = lib.unique (
-    lib.concatMap (o: o.nativeInputs pkgs.buildPackages ++ o.host.nativeInputs pkgs.buildPackages ++ (o.target.${nativeTriple}.nativeInputs or (_: [ ])) pkgs.buildPackages) overrides
+    lib.concatMap (o: o.nativeInputs pkgs.buildPackages ++ o.host.nativeInputs pkgs.buildPackages ++ ((forTarget o).nativeInputs or (_: [ ])) pkgs.buildPackages) overrides
   );
   inputs = lib.unique (
-    lib.concatMap (o: o.inputs pkgs ++ o.host.inputs pkgs ++ (o.target.${nativeTriple}.inputs or (_: [ ])) pkgs) overrides
+    lib.concatMap (
+      o: o.inputs pkgs ++ o.host.inputs pkgs ++ (if target == nativeTriple then (forTarget o).inputs or (_: [ ]) else _: [ ]) pkgs
+    ) overrides
   );
 
-  envOf = o: lib.mapAttrs (_: envString) (o.env // o.host.env // (o.target.${nativeTriple}.env or { }));
+  envOf = o: lib.mapAttrs (_: envString) (o.env // o.host.env // ((forTarget o).env or { }));
   envs = map envOf overrides ++ [ targetEnv ];
   conflicts = lib.filterAttrs (_: vs: lib.length (lib.unique vs) > 1) (lib.zipAttrs envs);
   packageEnv = lib.foldl' (a: b: a // b) { } envs;
@@ -73,8 +82,8 @@ let
   ownEnv =
     packageEnv
     // (cargoEnv.env or { })
-    // lib.optionalAttrs setTarget {
-      CARGO_BUILD_TARGET = nativeTriple;
+    // lib.optionalAttrs (target != null) {
+      CARGO_BUILD_TARGET = target;
     };
 
   # Variables that change what Cargo builds but never reach the planner.

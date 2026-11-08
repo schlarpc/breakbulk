@@ -272,6 +272,54 @@ let
       '';
     });
 
+  # `devShell.target` (#32): the native triple when the workspace targets
+  # it, else its only target, else none (no CARGO_BUILD_TARGET, so the
+  # project's `build.target` applies); a triple that is not one of the
+  # targets, and the removed `setTarget`, fail.
+  devshell-target =
+    let
+      shellOf =
+        ws:
+        (breakbulk.mkRepository {
+          inherit pkgs tools;
+          root = ../fixtures/walking-skeleton;
+          modules = [ { workspaces.main = ws; } ];
+        }).workspaces.main.devShell;
+      uefi = {
+        x86_64-unknown-uefi = { };
+        aarch64-unknown-uefi = { };
+      };
+      targetOf = ws: (shellOf ws).drvAttrs.CARGO_BUILD_TARGET or null;
+      fails = ws: !(builtins.tryEval (shellOf ws).drvPath).success;
+      got = {
+        native = targetOf { };
+        withNative = targetOf { targets = uefi // { ${native} = { }; }; };
+        only = targetOf { targets.x86_64-unknown-uefi = { }; };
+        several = targetOf { targets = uefi; };
+        chosen = targetOf {
+          targets = uefi;
+          devShell.target = "aarch64-unknown-uefi";
+        };
+        notATarget = fails {
+          targets = uefi;
+          devShell.target = native;
+        };
+        removed = fails { devShell.setTarget = false; };
+      };
+    in
+    assert lib.assertMsg (
+      got == {
+        inherit native;
+        withNative = native;
+        only = "x86_64-unknown-uefi";
+        several = null;
+        chosen = "aarch64-unknown-uefi";
+        notATarget = true;
+        removed = true;
+      }
+    ) "devshell-target: ${builtins.toJSON got}";
+    pkgs.runCommand "devshell-target" { } "touch $out";
+
   # Decision 123: with Cargo 1.101 (rust-overlay's nightly) the planner
   # turns trim-paths on for the release profile itself (`trimPathsDefault`),
   # and the dev shell sets CARGO_PROFILE_RELEASE_TRIM_PATHS=all, so a local
@@ -596,6 +644,7 @@ in
   test-scope = testScope;
   inherit devshell;
   devshell-trim-paths = devshellTrimPaths;
+  inherit devshell-target;
   wasm-embed = wasmEmbedCheck;
   cfg-rustflags = cfgRustflags;
   inherit names;

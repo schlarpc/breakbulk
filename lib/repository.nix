@@ -859,6 +859,14 @@ let
       instances = lib.mapAttrs (
         triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor wsName ws triple)
       ) ws.targets;
+      shellTriple =
+        let
+          t = ws.devShell.target;
+        in
+        if t == null || ws.targets ? ${t} then
+          t
+        else
+          throw "breakbulk: workspaces.${wsName}.devShell.target `${t}` is not one of its targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
       perTarget = lib.mapAttrs (
         triple: vs:
         let
@@ -970,10 +978,10 @@ let
         inherit pkgs nativeTriple;
         name = wsName;
         inherit (ws) toolchain;
-        inherit (ws.devShell) setTarget;
+        target = shellTriple;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
-        targetEnv = envStrings (targetField wsName nativeTriple "env" { });
-        # How the planner passes the native spec to Cargo, and the
+        targetEnv = lib.optionalAttrs (shellTriple != null) (envStrings (targetField wsName shellTriple "env" { }));
+        # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default
         # variant's profile (IFD: a small derivation that reads the
         # project's Cargo config and root manifest as files and asks rustc,
@@ -982,8 +990,8 @@ let
         # their context; the spec's own values carry it.
         cargoEnv =
           let
-            inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
-            spec = (specFor wsName nativeTriple).mkWorkspace.spec or null;
+            inst = if shellTriple == null then null else instances.${shellTriple}.${ws.defaultVariant} or null;
+            spec = if shellTriple == null then null else (specFor wsName shellTriple).mkWorkspace.spec or null;
             values = lib.filter builtins.isString (
               if spec == null then
                 [ ]
