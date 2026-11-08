@@ -2222,6 +2222,34 @@ true
 
 
 
+## workspaces\.\<name>\.fmt\.enable
+
+
+
+Add a check, ` repo.checks."<ws>/fmt" `, that runs ` cargo fmt --check ` with ` toolchain.rustfmt ` on every member of the
+workspace (` -p `, so path dependencies outside it are left to
+their own workspace)\. It reads the workspace directory and any
+` rustfmt.toml ` or ` .rustfmt.toml ` above it up to the repository
+root, and needs no plan\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.path
 
 
@@ -2795,6 +2823,36 @@ pkgs.rustc
 
 
 
+## workspaces\.\<name>\.toolchain\.rustfmt
+
+
+
+rustfmt (with ` bin/rustfmt ` and ` bin/cargo-fmt `), for the
+` fmt ` check\. Formatting differs between rustfmt releases,
+and ` rustfmt.toml ` options can need a nightly one, so it
+defaults to the workspace’s own toolchain as ` clippy ` does:
+nixpkgs’ rustfmt with nixpkgs’ rustc, and ` rustc ` itself
+otherwise (a rustup-style toolchain with the rustfmt
+component has both programs)\.
+
+
+
+*Type:*
+package
+
+
+
+*Default:*
+
+```nix
+if rustc == pkgs.rustc then pkgs.rustfmt else rustc
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.variants
 
 
@@ -3003,8 +3061,6 @@ true
 
 ## workspaces\.\<name>\.variants\.\<name>\.clippyArgs
 
-
-
 Clippy’s own arguments, as in ` cargo clippy -- ARGS `
 (` CLIPPY_ARGS `), for a ` clippy ` variant\. They reach only the
 units clippy-driver compiles (workspace members)\.
@@ -3063,6 +3119,8 @@ list of string
 
 
 ## workspaces\.\<name>\.variants\.\<name>\.mode
+
+
 
 What the variant compiles\. ` build `: products and test binaries
 (` cargo build `, ` cargo test --no-run `)\. ` check `: ` cargo check `

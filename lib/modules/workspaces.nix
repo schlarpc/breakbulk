@@ -262,6 +262,20 @@ let
                   `toolchain`) has `bin/clippy-driver`.
                 '';
               };
+              rustfmt = mkOption {
+                type = types.package;
+                default = if tc.config.rustc == pkgs.rustc then pkgs.rustfmt else tc.config.rustc;
+                defaultText = lib.literalExpression "if rustc == pkgs.rustc then pkgs.rustfmt else rustc";
+                description = ''
+                  rustfmt (with `bin/rustfmt` and `bin/cargo-fmt`), for the
+                  `fmt` check. Formatting differs between rustfmt releases,
+                  and `rustfmt.toml` options can need a nightly one, so it
+                  defaults to the workspace's own toolchain as `clippy` does:
+                  nixpkgs' rustfmt with nixpkgs' rustc, and `rustc` itself
+                  otherwise (a rustup-style toolchain with the rustfmt
+                  component has both programs).
+                '';
+              };
               capabilities = mkOption {
                 type = types.submodule {
                   options =
@@ -407,6 +421,19 @@ let
             binaries then reference their sources' store paths. A project
             that sets `trim-paths` itself still gets Cargo's remaps. A
             variant's own setting wins.
+          '';
+        };
+
+        fmt.enable = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Add a check, `repo.checks."<ws>/fmt"`, that runs `cargo fmt
+            --check` with `toolchain.rustfmt` on every member of the
+            workspace (`-p`, so path dependencies outside it are left to
+            their own workspace). It reads the workspace directory and any
+            `rustfmt.toml` or `.rustfmt.toml` above it up to the repository
+            root, and needs no plan.
           '';
         };
 

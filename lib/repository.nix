@@ -1090,7 +1090,73 @@ let
         vName: v: lib.optionalAttrs (v ? check) { "${wsName}/${triple}/variant-${vName}/check" = v.check; }
       ) t.variants
     ) w.target
-  ) workspaces;
+  ) workspaces
+  // lib.concatMapAttrs (
+    wsName: ws: lib.optionalAttrs ws.fmt.enable { "${wsName}/fmt" = fmtCheck wsName ws; }
+  ) cfg.workspaces;
+
+  # `workspaces.<ws>.fmt`: `cargo fmt --check -p <member>…` over the
+  # workspace directory (minus `target/`, `.git` and `result*` at its top)
+  # and the rustfmt config files above it, with toolchain.rustfmt. Cargo
+  # reads only the members' manifests (`cargo metadata --no-deps`), so no
+  # plan, lockfile or vendored source is needed.
+  fmtCheck =
+    wsName: ws:
+    let
+      wsDir = wsDirOf ws;
+      at = manifest.at root;
+      described = manifest.workspace { inherit root wsDir; };
+      names = map (
+        dir:
+        (manifest.packageInfo {
+          inherit root dir;
+          wsManifest = described.manifest;
+        }).name
+      ) described.members;
+      above =
+        rel:
+        if rel == "" then
+          [ ]
+        else
+          let
+            up = util.normalizeRel "${rel}/..";
+          in
+          [ up ] ++ above up;
+      configs = lib.filter (f: builtins.pathExists (at f)) (
+        lib.concatMap (d: [
+          (util.joinRel d "rustfmt.toml")
+          (util.joinRel d ".rustfmt.toml")
+        ]) (above wsDir)
+      );
+      top = builtins.readDir (at wsDir);
+      junk = lib.filter (n: n == "target" || n == ".git" || lib.hasPrefix "result" n) (lib.attrNames top);
+      src = lib.fileset.toSource {
+        inherit root;
+        fileset = lib.fileset.unions (
+          [ (lib.fileset.difference (at wsDir) (lib.fileset.unions (map (n: at (util.joinRel wsDir n)) junk))) ]
+          ++ map at configs
+        );
+      };
+      tc = ws.toolchain;
+    in
+    pkgs.runCommand "${wsName}-fmt"
+      {
+        nativeBuildInputs = [
+          tc.cargo
+          tc.rustfmt
+        ];
+      }
+      ''
+        if ! command -v cargo-fmt >/dev/null || ! command -v rustfmt >/dev/null; then
+          echo "breakbulk: the fmt check needs bin/cargo-fmt and bin/rustfmt in ${tc.rustfmt}; set workspaces.${wsName}.toolchain.rustfmt to the rustfmt of this toolchain" >&2
+          exit 1
+        fi
+        cp -r --no-preserve=mode ${src} "$NIX_BUILD_TOP/src"
+        cd "$NIX_BUILD_TOP/src"/${lib.escapeShellArg wsDir}
+        export HOME=$NIX_BUILD_TOP/home CARGO_HOME=$NIX_BUILD_TOP/cargo-home CARGO_NET_OFFLINE=true
+        cargo fmt --check ${lib.concatMapStringsSep " " (n: "-p ${lib.escapeShellArg n}") names}
+        touch $out
+      '';
 
   # --- warnings and mode -----------------------------------------------------
 

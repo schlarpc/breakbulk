@@ -800,6 +800,55 @@ in
       echo ${lib.escapeShellArg (builtins.toJSON whole)} > $out
     '';
 
+  # `workspaces.<ws>.fmt` (#32): `cargo fmt --check` over the members. The
+  # (rustfmt-clean) walking skeleton passes; a misformatted file fails
+  # naming it; a `rustfmt.toml` above a workspace in a subdirectory
+  # applies; a toolchain without cargo-fmt fails naming the option.
+  fmt =
+    let
+      checkOf =
+        root: ws:
+        (mkRepo root [
+          {
+            workspaces.main = {
+              path = ".";
+              fmt.enable = true;
+            }
+            // ws;
+          }
+        ]).checks."main/fmt";
+      clean = checkOf (fixtures + "/walking-skeleton") { };
+      messy = checkOf (edited "walking-skeleton" "echo 'fn  unused( ){}' >> src/main.rs") { };
+      nested = checkOf (edited "walking-skeleton" ''
+        mkdir ws
+        mv Cargo.toml Cargo.lock build.rs src ws/
+        echo 'hard_tabs = true' > rustfmt.toml
+      '') { path = "ws"; };
+      minimal = pkgs.rust-bin.stable."1.99.0".minimal;
+      noCargoFmt = checkOf (fixtures + "/walking-skeleton") {
+        toolchain = {
+          rustc = minimal;
+          cargo = minimal;
+        };
+      };
+      off = (mkRepo (fixtures + "/walking-skeleton") [ (oneWs ".") ]).checks;
+    in
+    assert lib.assertMsg (!(off ? "main/fmt")) "fmt: a check without fmt.enable";
+    pkgs.runCommand "fmt"
+      {
+        inherit clean;
+        messy = pkgs.testers.testBuildFailure messy;
+        nested = pkgs.testers.testBuildFailure nested;
+        noCargoFmt = pkgs.testers.testBuildFailure noCargoFmt;
+      }
+      ''
+        grep -q 'Diff in .*src/main.rs' $messy/testBuildFailure.log
+        # hard_tabs from the repository root's rustfmt.toml.
+        grep -q 'Diff in .*ws/src/main.rs' $nested/testBuildFailure.log
+        grep -q 'set workspaces.main.toolchain.rustfmt' $noCargoFmt/testBuildFailure.log
+        touch $out
+      '';
+
   # `variants.default` is a definition merged with the user's while
   # `defaultVariant` is "default" (#32): adding a clippy variant keeps it,
   # `variants.default.profile` changes it, and a renamed default variant
