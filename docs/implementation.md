@@ -475,7 +475,7 @@ The library is one `lib.evalModules` call over user modules, plus functions that
 ```nix
 repo = breakbulk.lib.mkRepository {
   inherit pkgs;
-  root = ./.;
+  root = ./.;                 # or a flake's self (turned into a path: lib.fileset takes only paths)
   modules = [ ./nix/rust.nix ];
 };
 ```
