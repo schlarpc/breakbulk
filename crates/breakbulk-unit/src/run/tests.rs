@@ -381,3 +381,35 @@ fn out_dir_inside_a_copy_of_cargos_layout() {
     );
     assert!(files_outside(&d, &d).unwrap().is_empty());
 }
+
+#[test]
+fn trim_paths_remap_gets_the_build_directory_pairs() {
+    let mut r = unit(Path::new("/src"));
+    r.out_dir = "t/debug/build/foo-sys-1/out".into();
+    r.out_dir_remap = Some("/cargo/build-dir".into());
+    r.remap = vec![
+        ("/nix/store/up".into(), "/cargo/build-dir".into()),
+        ("/nix/store/src".into(), "/cargo/deps/foo-sys-1.2.3".into()),
+    ];
+    r.env.insert(
+        "CARGO_TRIM_PATHS_REMAP".into(),
+        "/nix/store/src=/cargo/deps/foo-sys-1.2.3:/sysroot/lib/rustlib/src/rust=/rustc/abc".into(),
+    );
+    let env = run_env(
+        &r,
+        Path::new("/nix/store/o/t/debug/build/foo-sys-1/out"),
+        &[],
+    );
+    assert_eq!(env["OUT_DIR"], "/nix/store/o/t/debug/build/foo-sys-1/out");
+    assert_eq!(
+        env["CARGO_TRIM_PATHS_REMAP"],
+        "/nix/store/src=/cargo/deps/foo-sys-1.2.3:/nix/store/up=/cargo/build-dir:\
+         /nix/store/o=/cargo/build-dir:/sysroot/lib/rustlib/src/rust=/rustc/abc"
+    );
+    // Without trim-paths Cargo sets the variable empty, and it stays so.
+    r.env.insert("CARGO_TRIM_PATHS_REMAP".into(), String::new());
+    assert_eq!(
+        run_env(&r, Path::new("/x"), &[])["CARGO_TRIM_PATHS_REMAP"],
+        ""
+    );
+}

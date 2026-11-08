@@ -399,14 +399,6 @@ fn normal_env(
             // Classic layout: Cargo's OUT_DIR does not exist. New layout
             // (nightly 1.101): it exists, empty.
             "(a directory that does not exist)".to_owned()
-        } else if k == "CARGO_TRIM_PATHS_REMAP" {
-            // The plan leaves out the build-directory pair (the run's own
-            // OUT_DIR is its `out`, which it cannot name).
-            let build_dir = format!("{}={CARGO_BUILD_DIR_REMAP}", target.display());
-            v.split(':')
-                .filter(|p| *p != build_dir)
-                .collect::<Vec<_>>()
-                .join(":")
         } else if k == "CARGO_TARGET_TMPDIR" || k.starts_with("CARGO_BIN_EXE_") {
             "(a path)".to_owned()
         } else if k == "CARGO" {

@@ -54,15 +54,69 @@ pub fn script_path(script: &Path) -> Result<PathBuf, Error> {
     }
 }
 
-/// The env a run adds to its rendered env: `DEP_*` from upstream runs, then
-/// `OUT_DIR`.
-pub fn run_env(r: &RenderedRun, out: &Path, metadata: &[MetadataFile]) -> BTreeMap<String, String> {
+/// The env a run adds to its rendered env: `DEP_*` from upstream runs,
+/// `OUT_DIR` (`out_dir`, inside the run's `out`), and under Cargo's
+/// trim-paths the build-directory pairs of `CARGO_TRIM_PATHS_REMAP`.
+pub fn run_env(
+    r: &RenderedRun,
+    out_dir: &Path,
+    metadata: &[MetadataFile],
+) -> BTreeMap<String, String> {
     let mut env = r.env.clone();
     for m in metadata {
         env.extend(m.env());
     }
-    env.insert("OUT_DIR".into(), out.display().to_string());
+    env.insert("OUT_DIR".into(), out_dir.display().to_string());
+    if let Some(v) = env.get_mut(TRIM_PATHS_REMAP) {
+        *v = with_build_dir_pairs(v, r, &out_of(out_dir, &r.out_dir));
+    }
     env
+}
+
+const TRIM_PATHS_REMAP: &str = "CARGO_TRIM_PATHS_REMAP";
+
+/// The run's `out`: `out_dir` without the `rel` components it was created
+/// at ([`prepare_out_dir`]).
+fn out_of(out_dir: &Path, rel: &str) -> PathBuf {
+    let mut p = out_dir;
+    if !rel.is_empty() {
+        for _ in rel.split('/') {
+            p = p.parent().unwrap_or(p);
+        }
+    }
+    p.to_owned()
+}
+
+/// Cargo's `CARGO_TRIM_PATHS_REMAP` is the package pair, the build
+/// directory's pair and the sysroot's, in that order (cargo
+/// `trim_paths.rs`, `trim_paths_remap`). The plan leaves out the build
+/// directory's, because the run cannot name its own `out` in its
+/// attributes; each run's `out` copies Cargo's build directory, so it comes
+/// back here as `<out>=<name>`, with the same pair for every other run's
+/// `out` the script names (`remap` entries with that name), before the
+/// sysroot's. cc-rs turns the pairs into prefix maps for C code.
+fn with_build_dir_pairs(value: &str, r: &RenderedRun, out: &Path) -> String {
+    let Some(name) = r.out_dir_remap.as_deref() else {
+        return value.to_owned();
+    };
+    if value.is_empty() {
+        return String::new();
+    }
+    let mut pairs: Vec<String> = value.split(':').map(str::to_owned).collect();
+    let mut add: Vec<String> = r
+        .remap
+        .iter()
+        .filter(|(_, to)| to == name)
+        .map(|(from, to)| format!("{from}={to}"))
+        .collect();
+    add.push(format!("{}={name}", out.display()));
+    let at = pairs.len().saturating_sub(1);
+    for p in add.into_iter().rev() {
+        if !pairs.contains(&p) {
+            pairs.insert(at, p);
+        }
+    }
+    pairs.join(":")
 }
 
 /// What the run adds to C flags: its own random seed, and a prefix map for
