@@ -546,6 +546,62 @@ in
       echo "$linker" > $out
     '';
 
+  # Cargo config `include` (stable since Cargo 1.93): the files a
+  # `.cargo/config.toml` includes, transitively, are in the planning and
+  # config skeletons. Planning sees the included `build.rustflags` (`app`
+  # fails to compile without them), the dev shell's `cargo-env.json` builds,
+  # and `defaultTarget` reads an included `build.target`. A missing
+  # optional include is skipped.
+  cargo-config-include =
+    let
+      root = edited "stamps" ''
+        mkdir -p .cargo
+        cat > .cargo/config.toml <<'TOML'
+        include = ["shared.toml", { path = "absent.toml", optional = true }]
+        TOML
+        cat > .cargo/shared.toml <<'TOML'
+        include = ["../more.toml"]
+        [build]
+        rustflags = ["--cfg", "included_flag", "--check-cfg", "cfg(included_flag)"]
+        TOML
+        cat > more.toml <<'TOML'
+        [build]
+        target = "aarch64-unknown-uefi"
+        TOML
+        printf '#[cfg(not(included_flag))]\ncompile_error!("the included rustflags are missing");\n' >> app/src/main.rs
+      '';
+      ws = (mkRepo root [ (oneWs ".") ]).workspaces.main;
+      uefi = (mkRepo root [
+        (oneWs ".")
+        {
+          workspaces.main.targets = {
+            x86_64-unknown-uefi = { };
+            aarch64-unknown-uefi = { };
+          };
+        }
+      ]).workspaces.main;
+      got = {
+        configFiles = breakbulk.skeleton.configFiles { inherit root; };
+        defaultTarget = uefi.devShell.drvAttrs.CARGO_BUILD_TARGET or null;
+        cargoEnvWarnings =
+          (builtins.fromJSON (
+            builtins.unsafeDiscardStringContext (
+              builtins.readFile "${ws.instances.${native}.default.cargoEnv}/cargo-env.json"
+            )
+          )).warnings;
+      };
+      want = {
+        configFiles = [ ".cargo/config.toml" ".cargo/shared.toml" "more.toml" ];
+        defaultTarget = "aarch64-unknown-uefi";
+        cargoEnvWarnings = [ ];
+      };
+    in
+    assert lib.assertMsg (got == want) "cargo-config-include: ${builtins.toJSON got}";
+    pkgs.runCommand "cargo-config-include" { app = ws.packages.app; } ''
+      [ -x $app/bin/app ]
+      touch $out
+    '';
+
   # Decision 135: on Cargo 1.101 (rust-overlay's nightly) the dev shell
   # decides CARGO_PROFILE_DEV_TRIM_PATHS by the planner's file-reading
   # rule, without a plan: with the workspace root's Cargo.toml broken, the

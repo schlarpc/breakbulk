@@ -8,7 +8,8 @@
 #     workspace root), and the workspace root manifest of each such package;
 #   - the workspace's Cargo.lock;
 #   - .cargo/config.toml and .cargo/config in the workspace directory and
-#     every ancestor up to the repository root (Cargo's config discovery);
+#     every ancestor up to the repository root (Cargo's config discovery),
+#     and every file their `include`s reach (`withIncludes`);
 #   - rust-toolchain.toml / rust-toolchain in the same directories.
 # Empty files (names only):
 #   - src/lib.rs, src/main.rs, build.rs where they exist;
@@ -61,6 +62,40 @@ let
         t: concatLists (lib.mapAttrsToList (_: d: if isAttrs d && d ? path then [ (util.joinRel wsDir d.path) ] else [ ]) t)
       ) tables
     );
+
+  # Config files plus every file their `include`s reach, transitively.
+  # Cargo (stable since 1.93; GlobalContext::include_paths and
+  # ConfigInclude::resolve_path) takes a list of strings or `{ path,
+  # optional }` tables, each relative to the including file's directory;
+  # a bare string is the pre-1.93 nightly shorthand. Absolute paths and
+  # paths outside the repository root cannot be copied and are left out,
+  # and so are missing files: Cargo reports those itself, or skips them
+  # when optional.
+  withIncludes =
+    root: files:
+    let
+      includesOf =
+        rel:
+        let
+          inc = (builtins.fromTOML (builtins.readFile (manifest.at root rel))).include or [ ];
+          entries = if builtins.isList inc then inc else [ inc ];
+          pathOf = e: if builtins.isString e then e else if isAttrs e && e ? path then e.path else null;
+          paths = filter (p: builtins.isString p && !(lib.hasPrefix "/" p)) (map pathOf entries);
+        in
+        filter (p: p != ".." && !(lib.hasPrefix "../" p) && existsFile root p) (
+          map (p: util.joinRel (dirOf rel) p) paths
+        );
+      walk =
+        seen: queue:
+        if queue == [ ] then
+          seen
+        else
+          let
+            f = builtins.head queue;
+          in
+          if lib.elem f seen then walk seen (builtins.tail queue) else walk (seen ++ [ f ]) (builtins.tail queue ++ includesOf f);
+    in
+    walk [ ] files;
 in
 rec {
   # Every package directory Cargo may load for this workspace.
@@ -157,22 +192,22 @@ rec {
       c = packageClosure { inherit root wsDir; };
       manifests = map (d: util.joinRel d "Cargo.toml") (lib.unique (c.packages ++ c.workspaceRoots));
       configDirs = ancestors wsDir;
-      configFiles = filter (existsFile root) (
-        concatLists (
-          map (d: [
-            (util.joinRel d ".cargo/config.toml")
-            (util.joinRel d ".cargo/config")
-            (util.joinRel d "rust-toolchain.toml")
-            (util.joinRel d "rust-toolchain")
-          ]) configDirs
-        )
-      );
+      projectFiles =
+        configFiles { inherit root wsDir; }
+        ++ filter (existsFile root) (
+          concatLists (
+            map (d: [
+              (util.joinRel d "rust-toolchain.toml")
+              (util.joinRel d "rust-toolchain")
+            ]) configDirs
+          )
+        );
       lock = filter (existsFile root) [ (util.joinRel wsDir "Cargo.lock") ];
       readmes = concatLists (
         map (d: filter (existsFile root) (map (f: util.joinRel d f) [ "README.md" "README.txt" "README" ])) c.workspaceRoots
       );
       empty = lib.unique (concatLists (map (targetFiles root) c.packages) ++ readmes);
-      real = lib.unique (manifests ++ configFiles ++ lock);
+      real = lib.unique (manifests ++ projectFiles ++ lock);
     in
     {
       inherit real;
@@ -182,16 +217,19 @@ rec {
 
   # The project's Cargo config files for a workspace (`.cargo/config.toml`
   # or `.cargo/config` in the workspace directory and every ancestor up to
-  # the repository root), as relative paths. Unlike `describe`, it reads
-  # no manifest, so it works while a manifest is broken.
+  # the repository root) and the files their `include`s reach, as relative
+  # paths. Unlike `describe`, it reads no manifest, so it works while a
+  # manifest is broken.
   configFiles =
     { root, wsDir ? "" }:
-    filter (existsFile root) (
-      concatLists (
-        map (d: [
-          (util.joinRel d ".cargo/config.toml")
-          (util.joinRel d ".cargo/config")
-        ]) (ancestors wsDir)
+    withIncludes root (
+      filter (existsFile root) (
+        concatLists (
+          map (d: [
+            (util.joinRel d ".cargo/config.toml")
+            (util.joinRel d ".cargo/config")
+          ]) (ancestors wsDir)
+        )
       )
     );
 
