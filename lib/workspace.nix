@@ -117,10 +117,13 @@ pkgs:
   #   specTools.<name> = <store path>  tool paths the spec puts in the plan
   #   hostEnv = { };                    the host spec's env (host units only)
   #   targetPackageSet                  the target units' env capture's pkgs
+  #   targetStdenv, hostStdenv          the captures' stdenvs (null: the sets')
   spec ? null,
   specTools ? { },
   hostEnv ? { },
   targetPackageSet ? pkgs,
+  targetStdenv ? null,
+  hostStdenv ? null,
 }:
 let
   wsDir = util.normalizeRel path;
@@ -223,10 +226,12 @@ let
     host = envCapture.base {
       inherit pkgs;
       platform = "host";
+      stdenv = hostStdenv;
     };
     target = envCapture.base {
       pkgs = targetPackageSet;
       platform = "target";
+      stdenv = targetStdenv;
     };
   };
 
@@ -243,6 +248,7 @@ let
         name = n;
         nativeInputs = o.nativeInputs or [ ];
         inputs = o.inputs or [ ];
+        stdenv = if platform == "host" then hostStdenv else targetStdenv;
       };
     })
   ) (lib.filterAttrs (_: o: o ? nativeInputs || o ? inputs || o ? env) packages);

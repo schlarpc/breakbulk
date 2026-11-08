@@ -399,6 +399,8 @@ let
             // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
           hostEnv = envStrings t.host.env;
           targetPackageSet = if t.packageSet != null then t.packageSet else pkgs;
+          targetStdenv = t.stdenv;
+          hostStdenv = t.host.stdenv;
           targetEnv = envStrings (cEnv // t.env);
         };
         # A program, or a list: program and arguments (as Cargo's
@@ -463,6 +465,12 @@ let
                 pkgs = p;
                 inherit platform nativeInputs inputs;
                 name = e.name;
+                # targets.<t>.stdenv / host.stdenv (null: the set's).
+                stdenv =
+                  let
+                    t = cfg.targets.${triple} or null;
+                  in
+                  if t == null then null else if platform == "target" then t.stdenv else t.host.stdenv;
               };
         in
         lib.optional (o != null) (

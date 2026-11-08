@@ -455,6 +455,7 @@ When Cargo's `trim-paths` is in effect, Cargo's own remaps are used instead, and
 Inputs declared on a package become environment through nixpkgs' own setup hooks, not through code in breakbulk.
 
 - For each (package, platform) with `nativeInputs` or `inputs`, a derivation runs `stdenv.mkDerivation` with `nativeBuildInputs = nativeInputs` and `buildInputs = inputs`, and writes the environment its setup hooks produced as `env.json`. Target units use the target's stdenv (`pkgsCross.<target>.stdenv` when cross); host units use the build platform's stdenv. Tools stay native inputs there, but libraries must be the build platform's `buildInputs`, or the wrappers add no include or library flags; `inputs` is therefore a function of a package set (`inputs = p: [ p.openssl ]`), called with the package set matching each platform.
+- The stdenv can be replaced per target: `targets.<t>.stdenv` for target units and `targets.<t>.host.stdenv` for host units (for example `pkgs.clangStdenv`, or a stdenv adapter's result). Unset, each is the package set's own. The replacement applies to the base capture and every package's capture of that platform; it must build for the same platform.
 - One **base capture** per platform has no inputs. It gives build scripts the baseline `buildRustPackage` has: coreutils, bash, make, the C compiler on `PATH`, and the standard hardening and wrapper variables.
 - A capture keeps only what setup hooks added relative to a plain shell, minus per-build values: `NIX_BUILD_TOP`, `TMPDIR`, `PWD`, `out`, log descriptors, `SOURCE_DATE_EPOCH` (set by the base layer instead), and any value naming the capture's own output.
 - The capture derivation sets `strictDeps = true` (otherwise every input's `bin/` reaches `PATH` and flags are doubled) and `NIX_NO_SELF_RPATH = 1` (otherwise every binary gets an rpath to the capture). It strips stdenv's own `-frandom-seed`; each unit adds its own, as stdenv does, but derived from the unit's plan key (Cargo's `-C metadata` hash for a compile, the `OUT_DIR` hash for a run) instead of its output path. GCC records its switches in debug info, so a seed from the output path would change C objects whenever a unit's inputs change without its content changing (a new `breakbulk-unit`, a new env capture). `NIX_*` variables are always kept, because some stdenvs (musl) set `NIX_HARDENING_ENABLE` as a derivation attribute.
@@ -518,6 +519,8 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
     env = { };                        # added to this platform's units only
     runner = null;                    # wine, wasmtime, qemu-user, …
     testSystem = null;                # e.g. "aarch64-linux" to run tests on native builders
+    stdenv = null;                    # the env captures' stdenv (null: the package set's), e.g. pkgs.clangStdenv
+    host.stdenv = null;               # the same for host units (null: the build machine's)
     stages = { };                     # default post-link stages for this target
   };
 

@@ -33,6 +33,11 @@
 #    only add flags for dependencies at host offset 0 (their env hooks are
 #    registered with `addEnvHooks "$targetOffset"`), so a library passed as a
 #    native input would contribute no -isystem, -L or PKG_CONFIG_PATH.
+# `stdenv` (optional, on capture, base and forPackage) replaces the
+# platform's stdenv (pkgs.stdenv or pkgs.buildPackages.stdenv), for example
+# with pkgs.clangStdenv or a stdenv adapter's result; it must build for the
+# same platform. mkRepository passes `targets.<t>.stdenv` and
+# `targets.<t>.host.stdenv`.
 # `inputs` and `nativeInputs` are functions of a package set, so one
 # declaration serves both platforms. A plain list is accepted and used as
 # given; it is then the caller's job to pick packages of the right platform.
@@ -179,12 +184,13 @@ let
       nativeInputs ? [ ],
       inputs ? [ ],
       debug ? false,
+      stdenv ? null,
     }:
     let
       s = sets pkgs platform;
-      inherit (s.host) stdenv;
+      env = if stdenv != null then stdenv else s.host.stdenv;
     in
-    stdenv.mkDerivation {
+    env.mkDerivation {
       name = "breakbulk-env-${name}";
       nativeBuildInputs = pick s.build nativeInputs;
       buildInputs = pick s.host inputs;
@@ -210,8 +216,16 @@ let
       pkgs,
       platform ? "target",
       debug ? false,
+      stdenv ? null,
     }:
-    capture { inherit pkgs platform debug; };
+    capture {
+      inherit
+        pkgs
+        platform
+        debug
+        stdenv
+        ;
+    };
 
   # The capture for one (package, platform): its own when it declares
   # inputs, the platform's base capture otherwise.
@@ -223,6 +237,7 @@ let
       nativeInputs ? [ ],
       inputs ? [ ],
       debug ? false,
+      stdenv ? null,
     }:
     let
       s = sets pkgs platform;
@@ -230,7 +245,14 @@ let
       emptyInputs = pick s.host inputs == [ ];
     in
     if empty nativeInputs && emptyInputs then
-      base { inherit pkgs platform debug; }
+      base {
+        inherit
+          pkgs
+          platform
+          debug
+          stdenv
+          ;
+      }
     else
       capture {
         inherit
@@ -240,6 +262,7 @@ let
           nativeInputs
           inputs
           debug
+          stdenv
           ;
       };
 in

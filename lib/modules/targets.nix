@@ -16,7 +16,9 @@
 #  - `env` is added to target units only; `host.env` to host units only.
 #    Neither goes through Cargo's `[env]`.
 #  - `packageSet` gives the target's env capture and the package set that
-#    `packages.<name>.inputs` functions are called with.
+#    `packages.<name>.inputs` functions are called with; `stdenv` and
+#    `host.stdenv` replace the stdenv the captures run (default: the
+#    package set's).
 {
   lib,
   config,
@@ -209,7 +211,32 @@ let
           example = "aarch64-linux";
           description = "The Nix system that runs this target's test runs, so Nix sends them to native builders. `null`: the build machine's.";
         };
+        stdenv = mkOption {
+          type = types.nullOr types.raw;
+          default = null;
+          example = lib.literalExpression "pkgs.clangStdenv";
+          description = ''
+            The stdenv whose setup hooks the target units' environment
+            capture records (its C compiler, wrapper flags, hardening),
+            for the base capture and every package's own. `null`: the
+            package set's stdenv (`packageSet.stdenv`, or the build
+            machine's for a target without a package set). It must build
+            for this target.
+          '';
+        };
         host = {
+          stdenv = mkOption {
+            type = types.nullOr types.raw;
+            default = null;
+            example = lib.literalExpression "pkgs.clangStdenv";
+            description = ''
+              The stdenv of the host units' environment capture (build
+              scripts, proc macros and their dependencies) of this
+              target's plans. `null`: the build machine's
+              (`buildPackages.stdenv` of the target's package set). It must
+              build for the build machine.
+            '';
+          };
           linker = mkOption {
             type = tool;
             default = null;

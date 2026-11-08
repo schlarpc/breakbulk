@@ -648,6 +648,70 @@ in
     assert lib.assertMsg (overridden == "mine") "module-args: caller specialArgs lost";
     evalCheck "module-args" (builtins.toJSON env);
 
+  # Decision 19's question: `targets.<t>.stdenv` replaces the target
+  # captures' stdenv (base and per-package), `host.stdenv` the host
+  # captures'; unset, both are the package set's. The capture then records
+  # clang's wrapper as `cc`, and the product still builds.
+  stdenv-override =
+    let
+      withInput = {
+        packages.app-a.inputs = p: [ p.zlib ];
+      };
+      dflt = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "a")
+        withInput
+      ];
+      clang = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "a")
+        withInput
+        { targets.${native}.stdenv = pkgs.clangStdenv; }
+      ];
+      hostClang = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "a")
+        { targets.${native}.host.stdenv = pkgs.clangStdenv; }
+      ];
+      i = r: r.workspaces.main.instances.${native}.default;
+      stdenvOf = d: builtins.unsafeDiscardStringContext d.drvAttrs.stdenv.outPath;
+      drv = d: builtins.unsafeDiscardStringContext d.drvPath;
+      out = d: builtins.unsafeDiscardStringContext d.outPath;
+      # app-a's own capture (it has inputs), as its units name it.
+      pkgCapture =
+        stdenv:
+        out (
+          breakbulk.envCapture.forPackage {
+            inherit pkgs stdenv;
+            platform = "target";
+            name = "app-a";
+            inputs = p: [ p.zlib ];
+          }
+        );
+      units = r: lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (i r).units.build);
+      checks = {
+        defaultIsSets = stdenvOf (i dflt).captures.target == out pkgs.stdenv;
+        targetClang = stdenvOf (i clang).captures.target == out pkgs.clangStdenv;
+        hostKept = drv (i clang).captures.host == drv (i dflt).captures.host;
+        hostClang = stdenvOf (i hostClang).captures.host == out pkgs.clangStdenv;
+        targetKeptByHost = drv (i hostClang).captures.target == drv (i dflt).captures.target;
+        pkgCaptureClang =
+          lib.hasInfix (pkgCapture pkgs.clangStdenv) (units clang)
+          && lib.hasInfix (pkgCapture null) (units dflt)
+          && pkgCapture null != pkgCapture pkgs.clangStdenv;
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "stdenv-override: failed ${toString bad}";
+    pkgs.runCommand "stdenv-override"
+      {
+        capture = (i clang).captures.target;
+        app = clang.workspaces.main.packages.app-a;
+        nativeBuildInputs = [ pkgs.jq ];
+      }
+      ''
+        jq -r .PATH $capture/env.json | tr : '\n' | grep -q clang-wrapper
+        $app/bin/app-a
+        touch $out
+      '';
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }
