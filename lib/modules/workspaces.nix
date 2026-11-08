@@ -3,6 +3,7 @@
   lib,
   config,
   pkgs,
+  root,
   ...
 }:
 let
@@ -489,8 +490,22 @@ in
 {
   options.workspaces = mkOption {
     type = types.attrsOf (types.submodule workspace);
-    default = { };
-    description = "The Cargo workspaces of the repository, by a name of your choice.";
+    # Zero configuration: a repository whose root is a Cargo workspace (or
+    # package) is one workspace, `default`. Any definition replaces the
+    # whole default, as for every option default.
+    default = lib.optionalAttrs (builtins.pathExists (root + "/Cargo.toml")) {
+      default.path = ".";
+    };
+    defaultText = lib.literalMD ''
+      `{ default.path = "."; }` when the repository root has a `Cargo.toml`,
+      else `{ }`
+    '';
+    description = ''
+      The Cargo workspaces of the repository, by a name of your choice.
+      Without any definition, a repository whose root has a `Cargo.toml`
+      gets one workspace, `default`, at the root, so `mkRepository` needs
+      no modules; declaring any workspace turns that default off.
+    '';
   };
 
   config.warnings = lib.concatMap (w: w.warnings) (lib.attrValues config.workspaces);

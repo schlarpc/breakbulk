@@ -502,6 +502,8 @@ repo = breakbulk.lib.mkRepository {
 };
 ```
 
+`modules` may be left out: with no `workspaces` declared, a root that has a `Cargo.toml` is one workspace, `default`, at `"."` (`repo.workspaces.default.packages.<pkg>`); declaring any workspace turns that default off. The flake-parts module needs no `modules` either, so importing it is the whole configuration of a single-workspace repository.
+
 Modules receive `pkgs`, `root` (the repository root as a path, for reading project files), `repo` (the result itself, for another workspace's product used as an input; laziness makes the cycle harmless) and `breakbulk` (the library: presets, stage helpers, `xwinSdk`). `specialArgs` passed to `mkRepository` add to these and win.
 
 ### Options

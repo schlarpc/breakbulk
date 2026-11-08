@@ -739,6 +739,31 @@ in
     assert lib.assertMsg (overridden == "mine") "module-args: caller specialArgs lost";
     evalCheck "module-args" (builtins.toJSON env);
 
+  # Zero configuration: `mkRepository { pkgs; root; }` with no modules is
+  # one workspace, `default`, at the root, when the root has a
+  # `Cargo.toml`; declaring any workspace turns it off, and a root without
+  # one has no workspaces.
+  zero-config =
+    let
+      zero = breakbulk.mkRepository {
+        inherit pkgs tools;
+        root = fixtures + "/walking-skeleton";
+      };
+      declared = mkRepo (fixtures + "/walking-skeleton") [ (oneWs ".") ];
+      noManifest = mkRepo (fixtures + "/multi-ws") [ ];
+    in
+    assert lib.assertMsg (
+      lib.attrNames zero.workspaces == [ "default" ]
+    ) "zero-config: ${toString (lib.attrNames zero.workspaces)}";
+    assert lib.assertMsg (lib.attrNames declared.workspaces == [ "main" ]) "zero-config: declared";
+    assert lib.assertMsg (noManifest.workspaces == { }) "zero-config: no Cargo.toml";
+    pkgs.runCommand "zero-config" { bb = zero.workspaces.default.packages.walking-skeleton; } ''
+      got=$($bb/bin/walking-skeleton)
+      echo "$got"
+      [ "$got" = "walking-skeleton 42 cfg-on hello-from-build-script release" ]
+      touch $out
+    '';
+
   # Decision 19's question: `targets.<t>.stdenv` replaces the target
   # captures' stdenv (base and per-package), `host.stdenv` the host
   # captures'; unset, both are the package set's. The capture then records
