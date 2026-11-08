@@ -77,6 +77,13 @@ in
 let
   userModules = args.modules or [ ];
 
+  # `root` as a path value: `./.`, or a flake's `self` (or any string-like
+  # value naming a store path, such as `self.outPath`). lib.fileset takes
+  # only paths, so a store path string becomes the path of the same
+  # location. That reads the tree in place: source views copy only their
+  # filtered subsets, as from `./.`.
+  root = util.rootPath args.root;
+
   eval = lib.evalModules {
     modules = bbModules ++ [ sysDefaults ] ++ userModules;
     specialArgs = {

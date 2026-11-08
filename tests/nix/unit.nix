@@ -354,4 +354,40 @@ runTests "lib-unit" {
         system = other;
       }) 2;
     };
+
+  # mkRepository's `root`: a path stays a path; a flake's `self` (or its
+  # outPath) becomes the path of the same store location, without context;
+  # anything else fails (tests/flake-self/run.sh checks real flakes).
+  testRootPath =
+    let
+      store = builtins.path {
+        path = ../fixtures/outside-reads/assets;
+        name = "root-path-probe";
+      };
+      self = {
+        outPath = store;
+        sourceInfo = { };
+      };
+      fails = v: !(builtins.tryEval (bb.util.rootPath v)).success;
+    in
+    {
+      expr = {
+        path = bb.util.rootPath ./. == ./.;
+        self = builtins.isPath (bb.util.rootPath self) && toString (bb.util.rootPath self) == store;
+        outPath = bb.util.rootPath "${store}" == bb.util.rootPath self;
+        readable = builtins.pathExists (bb.util.rootPath self + "/data.txt");
+        notStore = fails "/home/someone/project";
+        attrs = fails { foo = 1; };
+        int = fails 3;
+      };
+      expected = {
+        path = true;
+        self = true;
+        outPath = true;
+        readable = true;
+        notStore = true;
+        attrs = true;
+        int = true;
+      };
+    };
 }

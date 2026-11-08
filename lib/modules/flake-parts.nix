@@ -40,7 +40,10 @@ in
         root = mkOption {
           type = types.nullOr types.path;
           default = null;
-          description = "The repository root given to mkRepository. breakbulk does nothing while it is null.";
+          description = ''
+            The repository root given to mkRepository: a path (`./.`) or
+            the flake's `self`. breakbulk does nothing while it is null.
+          '';
         };
         modules = mkOption {
           type = types.listOf types.deferredModule;

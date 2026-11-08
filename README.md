@@ -58,7 +58,7 @@ breakbulk is a flake. Its library is `breakbulk.lib`.
       pkgs = nixpkgs.legacyPackages.${system};
       repo = breakbulk.lib.mkRepository {
         inherit pkgs;
-        root = ./.;
+        root = ./.;            # or `root = self;`
         modules = [ ./nix/rust.nix ];
       };
     in
@@ -69,6 +69,10 @@ breakbulk is a flake. Its library is `breakbulk.lib`.
     };
 }
 ```
+
+`root` is the repository root: a path (`./.`) or the flake's `self`. Both
+give the same derivations. Any other value, such as a string outside the
+Nix store, is an error.
 
 A minimal module names the workspace. Everything else has a default.
 
@@ -108,7 +112,8 @@ another: `inputs.breakbulk.inputs.systems.follows = "systems";`. The
 library itself (`breakbulk.lib`) takes `pkgs` and works for any system.
 
 With flake-parts, import `breakbulk.lib.flakeModule` and set
-`perSystem.breakbulk = { root = ./.; modules = [ ./nix/rust.nix ]; }`. It
+`perSystem.breakbulk = { root = ./.; modules = [ ./nix/rust.nix ]; }`
+(`root = self;` works too). It
 adds packages, checks and dev shells for you.
 
 Other outputs, per workspace:

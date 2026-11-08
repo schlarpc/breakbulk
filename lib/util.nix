@@ -193,4 +193,31 @@ rec {
 
   # A short, stable identifier for a string, for directory and source names.
   shortHash = s: substring 0 16 (sha256 s);
+
+  # mkRepository's `root` as a path value. A path is kept. A flake's `self`
+  # (an attribute set with `outPath`), or a string naming a store path
+  # (`self.outPath`, `"${self}"`), becomes the path of that store
+  # location: lib.fileset rejects string-like roots, and the path reads
+  # the same tree in place (no extra copy; source views copy only their
+  # filtered subsets). Anything else is an error.
+  rootPath =
+    root:
+    let
+      what = "breakbulk: mkRepository: `root` must be a path (`root = ./.;`) or a flake's `self`";
+      s = if isAttrs root && root ? outPath then root.outPath else root;
+      str = builtins.unsafeDiscardStringContext s;
+      inStore = lib.hasPrefix "${builtins.storeDir}/" str;
+    in
+    if builtins.isPath root then
+      root
+    else if builtins.isPath s then
+      s
+    else if isString s && inStore then
+      /. + str
+    else if isString s then
+      throw "${what}; got the string \"${str}\", which is not in ${builtins.storeDir}. Use a path value instead (`./.`, or `/. + \"/abs/dir\"` outside pure evaluation)."
+    else if isAttrs root then
+      throw "${what}; got an attribute set without `outPath` (attributes: ${concatStringsSep ", " (attrNames root)})"
+    else
+      throw "${what}; got a value of type ${builtins.typeOf root}";
 }
