@@ -2072,3 +2072,23 @@ for your targets (CentOS 7 is RHEL-family)?
 The store-path check also flags `/nix/store/eeee…` paths (references
 scrubbed by `remove-references-to`), because the program would still look
 there at run time.
+
+## 153. ASK: generate the outputs reference from option declarations?
+
+The options reference is generated (`repo.optionsDoc`), but the outputs
+(`workspaces.<ws>.target.<triple>.{packages,tests,testRuns,testApps}`,
+`.stages.<name>`, `sources`, `explainSharing`) are plain attributes that
+`mkRepository` builds outside the module system, so their docs (#25) would
+be hand-written and can drift. Options:
+
+1. Hand-write the outputs reference.
+2. Make the outputs `readOnly` options set by the module system, as NixOS
+   does with `system.build.*` and flake-parts with its outputs. One source
+   for values and docs, but the outputs move into module evaluation (a
+   larger change; error messages and evaluation cost change).
+3. A documentation-only module: declare the outputs as options with
+   descriptions and types, never evaluate values from it, and feed it to
+   `nixosOptionsDoc` with the real options. Small change, and a check can
+   compare its attribute names with the real `result` to catch drift.
+
+Default proposal: 3.
