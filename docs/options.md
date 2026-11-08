@@ -2756,6 +2756,8 @@ attribute set of (submodule)
 
 ## workspaces\.\<name>\.variants\.\<name>\.packages
 
+
+
 The packages this variant plans, each traced with ` -p `, in
 place of the target’s ` packages ` (` workspaces.<ws>.targets.<triple>.packages `)\.
 ` null `: the target’s selection\. Features then name the
@@ -3025,8 +3027,6 @@ one of “build”, “check”, “clippy”, “coverage”
 
 ## workspaces\.\<name>\.variants\.\<name>\.noDefaultFeatures
 
-
-
 Pass ` --no-default-features `\.
 
 
@@ -3098,6 +3098,8 @@ workspaces.<ws>.sourcePaths
 
 
 ## workspaces\.\<name>\.variants\.\<name>\.targets
+
+
 
 The workspace’s targets (` workspaces.<ws>.targets `) this
 variant is planned for\. ` null `: every target\. A target left
