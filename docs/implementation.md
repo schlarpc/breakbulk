@@ -877,3 +877,9 @@ Spikes A, B and C gate M1 and M2. The rest are measurements to take as soon as t
 | CRIU in a sandbox | Can a builder checkpoint and restore rustc inside a nested namespace in the Nix sandbox, and is the rlib byte-identical to a normal compile? | Prototype outside Nix, then inside | The CRIU pipelining backend |
 | nextest reuse | Can a synthesized `binaries-metadata` file drive nextest over binaries that live in separate store paths? | Prototype with one fixture | M6 nextest integration |
 | Zig cache | Does zig accept a pre-warmed global cache that is read-only or only partly populated? | Try both on one target | The zig preset. Done: read-only fails; a writable copy at another path is a full hit (see "Zig") |
+
+## Known gaps (TODO)
+
+Accepted gaps with an agreed fix, not yet scheduled:
+
+- **Dynamic-mode test-run cutoff** (decision 128). In dynamic mode a test run reads its settings from a generated wrapper file that names the package's source view and build-script outputs, so any edit there re-runs it, even with `ca`, `test.stripForRun` and `test.runFiles`. Fix: content-addressed copies of the wrapper's inputs, as IFD mode's `stableSpec` does.
