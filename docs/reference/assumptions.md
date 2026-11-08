@@ -703,11 +703,11 @@ Status of the 78 entries: 72 pinned, 2 pinned for some rows only (L3, L4), 4 wit
 
 ### L10. Toolchain capabilities from versions and probes
 
-- **Assumption.** A Cargo release allows unstable features exactly when its version string contains `-nightly` or `-dev` (the planner clears `RUSTC_BOOTSTRAP`); `remapPathScope` (P6) and `trimPaths` (P1) follow the versions given there.
-- **Where.** `lib/toolchain-facts.nix`: `isNightly`, `capabilitySince`, `of`; `crates/breakbulk-format/src/capabilities.rs`.
+- **Assumption.** A Cargo release allows unstable features exactly when its version string contains `-nightly` or `-dev` (the planner clears `RUSTC_BOOTSTRAP`); `remapPathScope` (P6) and `trimPaths` (P1) follow the versions given there. A package's `version` is read as the release only when it looks like one (`<major>.<minor>.<patch>[-…]`); otherwise the toolchain is probed. fenix's component packages carry the channel manifest's date as `version` (fenix `5161c3b`, `lib/mk-toolchain.nix`), and its combined toolchains carry none.
+- **Where.** `lib/toolchain-facts.nix`: `isNightly`, `releaseOf`, `capabilitySince`, `of`; `crates/breakbulk-format/src/capabilities.rs`.
 - **Upstream.** cargo `src/version.rs` and `channel()` (release channel, `RUSTC_BOOTSTRAP=1` as `dev`).
 - **Holds for.** The window.
-- **Pinned by.** `target-traits` (`testToolchainCapabilities`: rust-overlay 1.94, 1.95, 1.97, 1.99 and nightly, nixpkgs 1.99, with and without versions); `differential-nightly`, `plan-directives-nightly`. Rust: `capabilities::tests::json_shape`.
+- **Pinned by.** `target-traits` (`testToolchainCapabilities`: rust-overlay 1.94, 1.95, 1.97, 1.99 and nightly, nixpkgs 1.99, with and without versions, and with a fenix-style date for a version); `differential-nightly`, `plan-directives-nightly`. Rust: `capabilities::tests::json_shape`.
 - **If it changes.** A feature is turned on for a toolchain that rejects it, or left off; planning or units fail.
 
 ### G1. Target-trait base fields are rustc's cfg

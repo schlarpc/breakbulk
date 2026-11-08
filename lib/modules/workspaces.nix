@@ -274,7 +274,8 @@ let
                 description = ''
                   What this toolchain can do, where breakbulk would otherwise
                   decide it from the rustc and cargo versions (or, for a
-                  toolchain without a `version` attribute, by asking them
+                  toolchain whose `version` attribute is missing or not a
+                  Rust release, such as fenix's, by asking them
                   through import-from-derivation). Set one only for a
                   forked or patched toolchain whose version says otherwise;
                   `null` keeps breakbulk's own answer. The planner and the

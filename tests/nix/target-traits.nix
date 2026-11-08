@@ -455,7 +455,8 @@ in
       ];
     };
     # Toolchain facts (lib/toolchain-facts.nix): from attributes and tables,
-    # and from `rustc -vV` (IFD) for a rustc without a version.
+    # and from `rustc -vV` (IFD) for a rustc without a version or with one
+    # that is not a release (fenix's manifest dates).
     testToolchainFacts = {
       expr =
         let
@@ -470,9 +471,16 @@ in
         [
           (f rust)
           (f (removeAttrs rust [ "version" ]))
+          (f (rust // { version = "2026-10-15"; }))
           (f pkgs.rustc).llvmMajor
         ];
       expected = [
+        {
+          version = "1.97.0";
+          majorMinor = "1.97";
+          llvmMajor = 22;
+          wasiSdkVersion = "33";
+        }
         {
           version = "1.97.0";
           majorMinor = "1.97";
@@ -490,7 +498,8 @@ in
     };
     # Toolchain capabilities (lib/toolchain-facts.nix): from the rustc and
     # cargo versions across the supported window; from the toolchain itself
-    # (IFD: `rustc --remap-path-scope`, `cargo -V`) without a version, which
+    # (IFD: `rustc --remap-path-scope`, `cargo -V`) without a version or
+    # with a date for one (fenix's components), which
     # agrees with the table on both sides of 1.95; overrides win, null ones
     # are ignored; an unknown name fails.
     testToolchainCapabilities = {
@@ -505,6 +514,9 @@ in
               capabilities = overrides;
             }).capabilities;
           noVersion = tc: removeAttrs tc [ "version" ];
+          # fenix's component packages: `version` is the channel
+          # manifest's date, not a release (decision 142).
+          dateVersion = tc: tc // { version = "2026-10-15"; };
           r = v: pkgs.rust-bin.stable.${v}.minimal;
           nightly = pkgs.rust-bin.nightly.latest.minimal;
         in
@@ -518,6 +530,9 @@ in
           (caps (noVersion (r "1.94.0")) { })
           (caps (noVersion (r "1.95.0")) { })
           (caps (noVersion nightly) { })
+          (caps (dateVersion (r "1.94.0")) { })
+          (caps (dateVersion (r "1.99.0")) { })
+          (caps (dateVersion nightly) { })
           (caps (r "1.99.0") {
             remapPathScope = false;
             trimPaths = true;
@@ -536,6 +551,9 @@ in
           (c true false false)
           (c true true true)
           (c true false false)
+          (c false false false)
+          (c true false false)
+          (c true true true)
           (c false false false)
           (c true false false)
           (c true true true)
