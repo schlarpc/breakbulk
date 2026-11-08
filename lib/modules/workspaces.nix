@@ -8,7 +8,7 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
-  nativeTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
 
   # The workspace-only option of `workspaces.<ws>.targets.<triple>`; the
   # rest is ./target-spec.nix, merged with `targets.<triple>` per workspace

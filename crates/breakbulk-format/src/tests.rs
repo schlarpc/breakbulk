@@ -510,6 +510,9 @@ struct Fake;
 
 impl Resolve for Fake {
     type Error = String;
+    fn target_traits(&self) -> TargetTraits {
+        TargetTraits::default()
+    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Ok(match r {
             Reference::Src(s) => format!("/nix/store/src-app/{}", s.rel),
@@ -545,6 +548,9 @@ struct Configured;
 
 impl Resolve for Configured {
     type Error = String;
+    fn target_traits(&self) -> TargetTraits {
+        TargetTraits::default()
+    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
     }
@@ -728,6 +734,9 @@ struct Weak;
 
 impl Resolve for Weak {
     type Error = String;
+    fn target_traits(&self) -> TargetTraits {
+        TargetTraits::default()
+    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
     }
@@ -1142,21 +1151,25 @@ fn debuginfo_side_files() {
     let bin = ["bin".to_owned()];
     let lib = ["lib".to_owned()];
     let staticlib = ["staticlib".to_owned()];
-    let w = |args: &[&str], types: &[String]| {
-        writes_debuginfo_side_files(args.iter().map(|a| Some(*a)), types)
+    let msvc = TargetTraits {
+        linker_writes_debug_file: true,
     };
-    let msvc = ["--target", "x86_64-pc-windows-msvc"];
-    // msvc: a PDB for every linked crate, debuginfo or not.
-    assert!(w(&msvc, &bin));
-    assert!(w(&[&msvc[..], &["-C", "strip=debuginfo"]].concat(), &bin));
-    assert!(w(
-        &["--target=aarch64-pc-windows-msvc"],
-        &["cdylib".to_owned()]
-    ));
-    assert!(w(&[&msvc[..], &["--test"]].concat(), &lib));
-    assert!(!w(&msvc, &staticlib));
-    assert!(!w(&msvc, &lib));
-    // Linux: only split debuginfo, with debuginfo on.
+    let other = TargetTraits::default();
+    let wt = |args: &[&str], types: &[String], t: TargetTraits| {
+        writes_debuginfo_side_files(args.iter().map(|a| Some(*a)), types, t)
+    };
+    let w = |args: &[&str], types: &[String]| wt(args, types, other);
+    // msvc (the linker always writes a PDB): one for every linked crate,
+    // debuginfo or not. The traits decide, not the `--target` spelling.
+    let target = ["--target", "x86_64-pc-windows-msvc"];
+    assert!(wt(&[], &bin, msvc));
+    assert!(wt(&["-C", "strip=debuginfo"], &bin, msvc));
+    assert!(wt(&[], &["cdylib".to_owned()], msvc));
+    assert!(wt(&["--test"], &lib, msvc));
+    assert!(!wt(&[], &staticlib, msvc));
+    assert!(!wt(&[], &lib, msvc));
+    assert!(!w(&target, &bin));
+    // Elsewhere: only split debuginfo, with debuginfo on.
     let gnu = ["--target", "x86_64-unknown-linux-gnu"];
     assert!(!w(&gnu, &bin));
     assert!(!w(&[&gnu[..], &["-C", "debuginfo=2"]].concat(), &bin));
@@ -1211,7 +1224,7 @@ fn debuginfo_side_files() {
         Some("-C"),
         Some("split-debuginfo=packed"),
     ];
-    assert!(writes_debuginfo_side_files(args, &bin));
+    assert!(writes_debuginfo_side_files(args, &bin, other));
 }
 
 #[test]
@@ -1223,20 +1236,22 @@ fn debug_output_only_where_side_files() {
     };
     let mut p = example();
     // c-app: a target bin with no debuginfo flags.
-    assert!(!compile(&mut p, "c-app").has_debug_output());
+    assert!(!compile(&mut p, "c-app").has_debug_output(TargetTraits::default()));
     compile(&mut p, "c-app").args.extend(lit(&[
         "-C",
         "debuginfo=2",
         "-C",
         "split-debuginfo=unpacked",
     ]));
-    assert!(compile(&mut p, "c-app").has_debug_output());
+    assert!(compile(&mut p, "c-app").has_debug_output(TargetTraits::default()));
     // Host units never: their side files are discarded.
+    let msvc = TargetTraits {
+        linker_writes_debug_file: true,
+    };
+    assert!(compile(&mut p, "c-app").has_debug_output(msvc));
     let c = compile(&mut p, "c-ring-build");
-    c.args.extend(lit(&["--target", "x86_64-pc-windows-msvc"]));
-    assert!(!c.has_debug_output());
+    assert!(!c.has_debug_output(msvc));
     // Libraries never.
     let c = compile(&mut p, "c-cfgif");
-    c.args.extend(lit(&["--target", "x86_64-pc-windows-msvc"]));
-    assert!(!c.has_debug_output());
+    assert!(!c.has_debug_output(msvc));
 }

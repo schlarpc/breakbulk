@@ -60,7 +60,11 @@
 # (its instantiate derivation has a floating CA output), so this is on
 # exactly when `mode = "auto"` picks dynamic-derivation mode, and off on a
 # stock Nix.
-{ lib, wasmBindgen }:
+{
+  lib,
+  wasmBindgen,
+  targetTraits,
+}:
 let
   inherit (lib)
     attrNames
@@ -73,7 +77,7 @@ let
     mapAttrs
     ;
 
-  helpers = import ./stage-helpers { inherit lib wasmBindgen; };
+  helpers = import ./stage-helpers { inherit lib wasmBindgen targetTraits; };
 
   caAttrs = {
     __contentAddressed = true;

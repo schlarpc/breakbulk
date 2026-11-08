@@ -21,7 +21,11 @@
 #   rpath shrinking happens anywhere.
 # - Tools default to nixpkgs packages from the stage's `pkgs`; each helper
 #   that uses one takes an option to replace it.
-{ lib, wasmBindgen }:
+{
+  lib,
+  wasmBindgen,
+  targetTraits,
+}:
 let
   inherit (lib)
     attrNames
@@ -53,6 +57,26 @@ let
     in
     make defaults;
 
+  # The traits of a stage's target (lib/target-traits.nix): `target.traits`
+  # when the product has them (mkRepository passes them, with the user's
+  # `targets.<triple>.traits`), else the built-in ones of `target.triple`,
+  # else of the platform the stage's `pkgs` build for.
+  traitsOf =
+    target: pkgs:
+    target.traits or (targetTraits.resolve {
+      triple = target.triple or (targetTraits.nativeTriple pkgs);
+    });
+
+  # How `install` and `placeDebug` lay files out for a platform.
+  layoutOf =
+    t:
+    if t.isWasm then
+      "wasm"
+    else if t.isWindows then
+      "windows"
+    else
+      "unix";
+
   # Copy the input into "$1" (created), following symlinks, writable.
   copyIn = input: ''
     copyIn() {
@@ -83,12 +107,7 @@ let
             for f in ${product.linkedDebug}/*; do
               [ -e "$f" ] || continue
               b=''${f##*/}
-              case "${
-                if lib.hasInfix "windows" (target.triple or pkgs.stdenv.hostPlatform.config) then
-                  "windows"
-                else
-                  "unix"
-              }:$b" in
+              case "${if (traitsOf target pkgs).isWindows then "windows" else "unix"}:$b" in
                 windows:*) d=bin ;;
                 unix:*.so.dwp|unix:*.so.*.dwp) d=lib ;;
                 *) d=bin ;;
@@ -464,8 +483,7 @@ let
           ''
       );
 
-  # Final layout. The platform comes from `target.triple` (or the stage
-  # pkgs' host platform):
+  # Final layout, by the target's traits (`traitsOf`):
   #   wasm:    everything under pkg/
   #   windows: .exe, .dll, .pdb under bin/ (DLLs next to the executable);
   #            .lib under lib/
@@ -488,14 +506,7 @@ let
       ...
     }:
     let
-      triple = target.triple or pkgs.stdenv.hostPlatform.config;
-      kind =
-        if lib.hasPrefix "wasm" triple then
-          "wasm"
-        else if lib.hasInfix "windows" triple then
-          "windows"
-        else
-          "unix";
+      kind = layoutOf (traitsOf target pkgs);
       # The side files go to install's own `debug` output when no earlier
       # stage split debug information (whose `debug` holds them already).
       debug = kind != "wasm" && (product.linkedDebug or null) != null && !(product.debugSplit or false);

@@ -36,6 +36,7 @@
 # rustc.llvmPackages is used), `llvmMajor`, or `llvmPackages`.
 {
   lib,
+  targetTraits,
   llvmVersions,
   runners,
   wasmBindgen,
@@ -45,6 +46,10 @@ let
   inherit (lib) mkDefault;
 
   # Bind options until `pkgs` is given.
+  #
+  # `traits` are the target's traits (lib/target-traits.nix), which a
+  # target passes with the user's `targets.<triple>.traits` merged in; a
+  # preset called without them uses the built-in traits of its triple.
   #
   # `toolchain` is the workspace's toolchain (`workspaces.<ws>.toolchain`),
   # which a target passes when it applies the preset for one workspace
@@ -70,13 +75,14 @@ let
               };
           in
           if a ? pkgs then f withRustc // { presetDirect = true; } else go a
-        ) { toolchain = true; };
+        ) {
+          toolchain = true;
+          traits = true;
+        };
     in
     go { };
 
-  envName = triple: lib.replaceStrings [ "-" ] [ "_" ] triple;
-
-  nativeTriple = pkgs: pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  inherit (targetTraits) nativeTriple;
 
   # nixpkgs' name for a Rust target's cross package set, where it differs
   # from importing nixpkgs with `crossSystem.config = <triple>`; the
@@ -107,7 +113,7 @@ let
       };
 
   # The linker choice (./linker.nix): one function for every preset.
-  linkers = import ./linker.nix { inherit lib; };
+  linkers = import ./linker.nix { inherit lib targetTraits; };
   inherit (linkers) chooseLinker;
 
   # The host spec every preset sets: the build machine's linker. On a
@@ -128,6 +134,7 @@ let
     {
       pkgs,
       triple,
+      traits ? targetTraits.resolve { inherit triple; },
       rustc ? null,
       llvmMajor ? null,
       llvmPackages ? null,
@@ -143,7 +150,14 @@ let
     in
     {
       packageSet = mkDefault null;
-      linker = mkDefault (chooseLinker { inherit pkgs triple llvm; });
+      linker = mkDefault (chooseLinker {
+        inherit
+          pkgs
+          triple
+          traits
+          llvm
+          ;
+      });
       # Unwrapped: a wrapped compiler can silently emit host objects.
       cc = mkDefault "${clang}/bin/clang";
       cxx = mkDefault "${clang}/bin/clang++";
@@ -188,6 +202,7 @@ let
     {
       pkgs,
       triple ? throw "breakbulk.presets: give the target `triple`",
+      traits ? targetTraits.resolve { inherit triple; },
       packageSet ? targetPkgsFor pkgs triple,
       crossLanguageLto ? false,
       nativeBuilder ? false,
@@ -213,7 +228,12 @@ let
     {
       packageSet = mkDefault tp;
       linker = mkDefault (chooseLinker {
-        inherit pkgs triple llvm;
+        inherit
+          pkgs
+          triple
+          traits
+          llvm
+          ;
         lto = crossLanguageLto;
         packageSet = tp;
       });
@@ -287,6 +307,7 @@ in
     {
       pkgs,
       triple ? nativeTriple pkgs,
+      traits ? targetTraits.resolve { inherit triple; },
       staticLibDirs ? [ ],
       # null: rustc's default (pic), which with +crt-static gives a
       # static-pie executable. "static" gives a non-PIE static executable,
@@ -304,7 +325,7 @@ in
     ) "breakbulk.presets.staticGlibc: ${triple} is not the host triple ${nativeTriple pkgs}";
     {
       packageSet = mkDefault pkgs;
-      linker = mkDefault (chooseLinker { inherit pkgs triple; });
+      linker = mkDefault (chooseLinker { inherit pkgs triple traits; });
       cc = mkDefault "${cc}/bin/cc";
       cxx = mkDefault "${cc}/bin/c++";
       ar = mkDefault "${cc.bintools}/bin/ar";
@@ -341,6 +362,7 @@ in
       pkgs,
       arch ? windowsArch triple,
       triple ? "${arch}-pc-windows-msvc",
+      traits ? targetTraits.resolve { inherit triple; },
       sdk,
       crtStatic ? false,
       extraSdks ? [ ],
@@ -373,7 +395,14 @@ in
     ) "breakbulk.presets.msvc: triple ${triple} does not match arch ${arch}";
     {
       packageSet = mkDefault null;
-      linker = mkDefault (chooseLinker { inherit pkgs triple llvm; });
+      linker = mkDefault (chooseLinker {
+        inherit
+          pkgs
+          triple
+          traits
+          llvm
+          ;
+      });
       cc = mkDefault "${clang}/bin/clang-cl";
       cxx = mkDefault "${clang}/bin/clang-cl";
       ar = mkDefault "${tools}/llvm-lib";

@@ -113,6 +113,9 @@ let
     host.envCapture = smoke.capture;
     target.envCapture = smoke.capture;
     roots = predicted;
+    targetTraits = breakbulk.targetTraits.forRust (
+      breakbulk.targetTraits.resolve { triple = "x86_64-unknown-linux-gnu"; }
+    );
   };
 
   inst = breakbulk.instantiate args;

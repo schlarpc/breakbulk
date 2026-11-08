@@ -35,6 +35,7 @@
 { lib }:
 let
   util = import ./util.nix { inherit lib; };
+  targetTraits = import ./target-traits.nix { inherit lib; };
   lockfile = import ./lockfile.nix { inherit lib util; };
   manifest = import ./manifest.nix { inherit lib util; };
   roots = import ./roots.nix { inherit lib util manifest; };
@@ -50,9 +51,9 @@ let
   };
   inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
-  stages = import ./stages.nix { inherit lib wasmBindgen; };
+  stages = import ./stages.nix { inherit lib wasmBindgen targetTraits; };
   testRuns = import ./test-runs.nix { inherit lib stages; };
-  products = import ./products.nix { inherit lib stages; };
+  products = import ./products.nix { inherit lib stages targetTraits; };
   variants = import ./variants.nix { inherit lib util manifest; };
   testApps = import ./test-apps.nix {
     inherit lib;
@@ -72,6 +73,7 @@ let
   presets = import ./presets {
     inherit
       lib
+      targetTraits
       llvmVersions
       runners
       wasmBindgen
@@ -126,6 +128,7 @@ let
       testApps
       dynamic
       ;
+    targetTraitsLib = targetTraits;
   };
 
   mkRepository = import ./repository.nix {
@@ -141,6 +144,7 @@ let
       dynamic
       products
       presets
+      targetTraits
       ;
     variantsLib = variants;
     breakbulkLib = self;
@@ -189,7 +193,10 @@ let
     # staticGlibc, msvc, wasmBrowser, wasmComponent} and (M7) {wasip2,
     # windowsGnu, zig}; runners; the Rust to
     # LLVM version table; the Rust to wasi-sdk table (lib/wasi-sdk.nix).
+    # Target traits (lib/target-traits.nix): `resolve { triple; traits; }`,
+    # `parse`, `nativeTriple`.
     inherit
+      targetTraits
       presets
       runners
       llvmVersions

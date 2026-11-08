@@ -472,7 +472,7 @@ fn wrapper(
     // The unit's debuginfo side files (`debug`), for the product's `linked`
     // stage, when the unit has that output.
     let debug = match &info.unit {
-        Some(u) if matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output()) => {
+        Some(u) if matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(inputs.toolchains.target_traits)) => {
             tokens.unit(u, crate::DEBUG_OUTPUT)
         }
         _ => String::new(),
@@ -615,7 +615,7 @@ fn all_units(
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
-        for o in unit_outputs(unit) {
+        for o in unit_outputs(unit, inputs.toolchains.target_traits) {
             list.push_str(&tokens.unit(id, &o));
             list.push('\n');
         }

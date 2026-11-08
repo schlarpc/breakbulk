@@ -7,8 +7,10 @@
 #     inst;                 # a mkWorkspace result (roots, sources)
 #     select = null;        # the target's package selection, or a list
 #     triple;               # the target triple
+#     traits = <built-in>;  # its traits (lib/target-traits.nix), with the
+#                           # user's targets.<triple>.traits merged in
 #     stagePreset = null;   # a name in stages.defaultStageNames, or null
-#                           # for the triple's default (stagePresetFor)
+#                           # for the target's default (traits.stagePreset)
 #     targetStages = { };   # targets.<triple>.stages
 #     targetChecks = { };   # targets.<triple>.checks
 #     packageConfig = pkg: [ { stages; checks; } … ];  # matching package
@@ -50,7 +52,11 @@
 # and repo.checks uses `.buildCheck` for it instead of the product and its
 # checks: a derivation that builds every built root's unit and logs the
 # skipped ones, which succeeds in both cases.
-{ lib, stages }:
+{
+  lib,
+  stages,
+  targetTraits,
+}:
 let
   inherit (lib)
     attrValues
@@ -65,19 +71,12 @@ let
     nameValuePair
     ;
 
-  # The default stage chain for a triple when no preset names one: Linux
-  # ELF targets split debug info; Windows msvc keeps PDBs as they are;
-  # others (wasm without a preset, unknown targets) get no stages, because
-  # the browser and component chains need to know which one the user
-  # wants.
-  stagePresetFor =
-    triple:
-    if lib.hasInfix "-linux-" triple || lib.hasSuffix "-linux" triple then
-      "linuxGnu"
-    else if lib.hasInfix "-windows-msvc" triple then
-      "msvc"
-    else
-      null;
+  # The default stage chain for a target when no preset names one: its
+  # traits' `stagePreset` (lib/target-traits.nix). Linux ELF targets split
+  # debug info; Windows msvc keeps PDBs as they are; others (wasm without
+  # a preset, unknown targets) get no stages, because the browser and
+  # component chains need to know which one the user wants.
+  stagePresetFor = triple: (targetTraits.resolve { inherit triple; }).stagePreset;
 
   presetStages =
     name:
@@ -235,11 +234,12 @@ let
     {
       stagePreset ? null,
       triple,
+      traits ? targetTraits.resolve { inherit triple; },
       targetStages ? { },
       coverage ? false,
     }:
     let
-      preset = if stagePreset == null then stagePresetFor triple else stagePreset;
+      preset = if stagePreset == null then traits.stagePreset else stagePreset;
       merged = stages.merge [
         (presetStages preset)
         targetStages
@@ -256,6 +256,7 @@ let
       inst,
       select ? null,
       triple,
+      traits ? targetTraits.resolve { inherit triple; },
       stagePreset ? null,
       targetStages ? { },
       targetChecks ? { },
@@ -268,7 +269,7 @@ let
       toolchainPaths ? inst.toolchainPaths or [ ],
     }:
     let
-      preset = if stagePreset == null then stagePresetFor triple else stagePreset;
+      preset = if stagePreset == null then traits.stagePreset else stagePreset;
       byPkg = groupBy (r: r.breakbulkRoot.package) (
         filter (r: !r.breakbulkRoot.test) (attrValues inst.roots)
       );
@@ -294,7 +295,7 @@ let
             linked = mkLinked pkgs pkg built;
             stages = stageSet;
             checks = checkSet;
-            target = { inherit triple; };
+            target = { inherit triple traits; };
             inherit
               pkgs
               ca

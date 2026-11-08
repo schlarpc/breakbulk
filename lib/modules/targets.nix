@@ -31,7 +31,7 @@
 }:
 let
   inherit (lib) types mkOption;
-  nativeTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
   nativeDefault = pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isGnu;
 in
 {

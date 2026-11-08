@@ -67,13 +67,14 @@
   testRuns,
   testApps,
   dynamic,
+  targetTraitsLib,
 }:
 pkgs:
 {
   root,
   path ? ".",
   toolchain ? { inherit (pkgs) rustc cargo; },
-  target ? pkgs.stdenv.hostPlatform.rust.rustcTarget,
+  target ? targetTraitsLib.nativeTriple pkgs,
   profile ? "dev",
   features ? [ ],
   fetchArgs ? { },
@@ -104,6 +105,9 @@ pkgs:
   # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
+  # The target's traits (lib/target-traits.nix `resolve`); mkRepository
+  # passes them with the user's `targets.<triple>.traits` merged in.
+  traits ? targetTraitsLib.resolve { triple = target; },
   # Variants (lib/variants.nix): `mode` is build, check, clippy or
   # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
   # matching rustc). `bench` adds a bench plan (`cargo bench --no-run`):
@@ -373,6 +377,7 @@ let
       # or name@version, already in instantiate's shape); the latter win.
       overrides = overrides // packageOverrides;
       inherit strictSources shippedRemapScope;
+      targetTraits = targetTraitsLib.forRust traits;
       roots =
         if checking then
           null

@@ -29,6 +29,7 @@
 #   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  runnable apps
 #   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
 #   repo.workspaces.<ws>.target.<triple>.spec          the resolved target spec
+#   repo.workspaces.<ws>.target.<triple>.traits        the target's traits
 #
 # A product (`packages.<pkg>`) is the package's build-plan roots (bins,
 # cdylibs, dylibs and staticlibs) passed through the target's post-link
@@ -63,6 +64,7 @@
   products,
   variantsLib,
   presets,
+  targetTraits,
   # The whole library (lib/default.nix), for modules' `breakbulk` argument.
   breakbulkLib,
 }:
@@ -106,7 +108,7 @@ let
   };
   cfg = eval.config;
 
-  nativeTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  nativeTriple = targetTraits.nativeTriple pkgs;
 
   fetchArgs = {
     inherit (cfg)
@@ -386,6 +388,15 @@ let
     in
     if t == null then default else t.${field};
   selectionOf = wsName: triple: targetSpecs.${wsName}.${triple}.packages;
+  # The target's traits (lib/target-traits.nix): the triple's built-in ones
+  # with `targets.<triple>.traits` (repository-wide and the workspace's)
+  # merged over them. Every platform-dependent decision below reads these.
+  traitsOf =
+    wsName: triple:
+    targetTraits.resolve {
+      inherit triple;
+      inherit (targetSpecs.${wsName}.${triple}.config) traits;
+    };
 
   # The package set of a target's units: the target spec's `packageSet`
   # (set by the presets), else pkgs for the native triple.
@@ -615,6 +626,7 @@ let
     wsName: triple: v:
     products.shippedRemapScope {
       inherit triple;
+      traits = traitsOf wsName triple;
       stagePreset = targetField wsName triple "stagePreset" null;
       targetStages = targetField wsName triple "stages" { };
       coverage = v.mode == "coverage";
@@ -656,6 +668,7 @@ let
       name = "${wsName}-${triple}-${vName}";
       inherit delivery;
       shippedRemapScope = shippedRemapScopeOf wsName triple v;
+      traits = traitsOf wsName triple;
       packages = testConfigs wsName;
       inherit (cfg) ca;
       inherit (v) mode clippyArgs;
@@ -700,6 +713,7 @@ let
     wsName: ws: triple: inst: sel:
     products.mkProducts {
       inherit pkgs inst triple;
+      traits = traitsOf wsName triple;
       select = sel;
       stagePreset = targetField wsName triple "stagePreset" null;
       targetStages = targetField wsName triple "stages" { };
@@ -920,6 +934,9 @@ let
           # The resolved target spec of this workspace (the evaluated
           # `targets.<triple>` options), or null when it has none.
           spec = targetCfgOf wsName triple;
+          # The target's traits (lib/target-traits.nix), as every decision
+          # for it reads them.
+          traits = traitsOf wsName triple;
         }
       ) instances;
     in

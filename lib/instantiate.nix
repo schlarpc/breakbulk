@@ -90,6 +90,9 @@ rec {
       # whose products split debug info off (`"macro,diagnostics"`), or
       # null for every scope. See inputs.rs `shipped_remap_scope`.
       shippedRemapScope ? null,
+      # The target's traits as breakbulk-instantiate reads them
+      # (`breakbulk.targetTraits.forRust`, lib/target-traits.nix).
+      targetTraits,
       name ? "breakbulk-units",
       storeDir ? builtins.storeDir,
     }:
@@ -116,7 +119,7 @@ rec {
         // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
-        inherit system storeDir;
+        inherit system storeDir targetTraits;
         tools = lib.mapAttrs (_: noCtx) tools;
         host = platformJson host;
         target = platformJson target;

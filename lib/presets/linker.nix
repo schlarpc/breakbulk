@@ -3,19 +3,22 @@
 # LTO mode and the preset's flavor to a linker. `targets.<t>.linker` (or
 # `host.linker`) overrides it like any preset field.
 #
-#   linkerKind { triple; lto ? false; flavor ? null; }   -> a kind name
-#   chooseLinker { pkgs; triple; lto; flavor; … }        -> a linker path
+#   linkerKind { triple; traits ? <built-in>; lto ? false; flavor ? null; }
+#                                                        -> a kind name
+#   chooseLinker { pkgs; triple; traits; lto; flavor; … } -> a linker path
 #
-# `linkerKind` is the decision, a pure function of strings:
+# `linkerKind` is the decision, a pure function of the target's traits
+# (lib/target-traits.nix; a user's `targets.<triple>.traits` included),
+# the LTO mode and the flavor:
 #
-#   kind                 when                            linker
+#   kind                 when (traits)                   linker
 #   zig                  flavor = "zig"                  `zig cc -target <arch>-linux-gnu.<glibc>`
-#   lld-link             *-pc-windows-msvc               lld-link (wrapped: reproducible PDBs)
-#   wasm-component-ld    wasm32-wasip2                   rustc's wasm-component-ld over wasm-ld
-#   wasm-ld              other wasm32/wasm64             wasm-ld
-#   mingw-lld            *-windows-gnu, *-windows-gnullvm the MinGW C driver with -fuse-ld=lld
-#   clang-lld            ELF (Linux) with lto            clang with -fuse-ld=lld
-#   mold                 ELF (Linux)                     the wrapped cc with -fuse-ld=mold
+#   lld-link             isMsvc                          lld-link (wrapped: reproducible PDBs)
+#   wasm-component-ld    isWasm, os wasi, env p2         rustc's wasm-component-ld over wasm-ld
+#   wasm-ld              other isWasm                    wasm-ld
+#   mingw-lld            isMingw (windows-gnu, -gnullvm) the MinGW C driver with -fuse-ld=lld
+#   clang-lld            isLinux with lto                clang with -fuse-ld=lld
+#   mold                 isLinux                         the wrapped cc with -fuse-ld=mold
 #
 # Every LLVM tool (lld, wasm-ld, lld-link, clang) comes from the LLVM
 # release matching rustc's (`llvm`, chosen by the preset through
@@ -33,7 +36,7 @@
 # linker here (mold, clang-lld, mingw-lld, zig) drops those two arguments
 # instead (also inside an `@file` response file), for host and target
 # units alike.
-{ lib }:
+{ lib, targetTraits }:
 let
   # A C compiler driver wrapper that drops rustc's self-contained-lld
   # arguments and adds `flag`. Runs on `p`'s build platform.
@@ -160,25 +163,26 @@ let
   linkerKind =
     {
       triple,
+      traits ? targetTraits.resolve { inherit triple; },
       lto ? false,
       flavor ? null,
     }:
     let
-      has = re: builtins.match re triple != null;
+      t = traits;
     in
     if flavor == "zig" then
       "zig"
     else if flavor != null then
       throw "breakbulk.presets.chooseLinker: unknown linker flavor `${flavor}`"
-    else if has ".*-pc-windows-msvc" then
+    else if t.isMsvc then
       "lld-link"
-    else if triple == "wasm32-wasip2" then
+    else if t.isWasm && t.isWasi && t.env == "p2" then
       "wasm-component-ld"
-    else if has "wasm(32|64)-.*" then
+    else if t.isWasm then
       "wasm-ld"
-    else if has ".*-windows-gnu(llvm)?" then
+    else if t.isMingw then
       "mingw-lld"
-    else if has ".*-linux-.*" then
+    else if t.isLinux then
       (if lto then "clang-lld" else "mold")
     else
       throw "breakbulk.presets.chooseLinker: no linker rule for `${triple}`; set `targets.${triple}.linker`";
@@ -195,8 +199,10 @@ let
       # The preset's package set; its buildPackages run the wrappers.
       pkgs,
       triple,
+      # The target's traits (lib/target-traits.nix); default: built-in.
+      traits ? targetTraits.resolve { inherit triple; },
       lto ? false,
-      # null (from the triple) or "zig".
+      # null (from the traits) or "zig".
       flavor ? null,
       # The package set whose C toolchain drives the link (mold, clang-lld,
       # mingw-lld); default: pkgs.
@@ -210,7 +216,14 @@ let
       zig ? null,
     }:
     let
-      kind = linkerKind { inherit triple lto flavor; };
+      kind = linkerKind {
+        inherit
+          triple
+          traits
+          lto
+          flavor
+          ;
+      };
       bp = pkgs.buildPackages;
     in
     {

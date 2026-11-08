@@ -23,7 +23,8 @@ let
   # nixpkgs' wrapped cc with mold, as on every other target, instead of
   # rustc's bundled rust-lld. A target defined directly from a preset
   # (`targets.<t> = breakbulk.presets.zig { … }`) counts as having one.
-  nativeTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  targetTraits = import ../target-traits.nix { inherit lib; };
+  nativeTriple = targetTraits.nativeTriple pkgs;
   nativeDefault = pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isGnu;
   bt = import ./types.nix { inherit lib; };
   tool = types.nullOr (
@@ -61,9 +62,17 @@ let
     [ "stagePreset" ]
   ];
 
+  # This target's traits: the built-in ones of the triple with `traits`
+  # merged over them (lib/target-traits.nix).
+  traits = targetTraits.resolve {
+    triple = name;
+    inherit (config) traits;
+  };
+
   # A preset that takes `toolchain` (every `breakbulk.presets.*` does)
   # gets this workspace's, so it picks LLVM tools and the wasi-sdk for the
-  # workspace's rustc unless the preset was given `rustc` itself.
+  # workspace's rustc unless the preset was given `rustc` itself; one that
+  # takes `traits` (every `breakbulk.presets.*` does) gets the target's.
   applied =
     if config.preset == null then
       { }
@@ -76,6 +85,7 @@ let
         // lib.optionalAttrs (breakbulkToolchain != null && lib.functionArgs config.preset ? toolchain) {
           toolchain = breakbulkToolchain;
         }
+        // lib.optionalAttrs (lib.functionArgs config.preset ? traits) { inherit traits; }
       );
 
   # One definition: a function, or a preset with options bound (a functor,
@@ -123,6 +133,31 @@ in
         toolchain (pass `rustc` there). Set `null` to use no preset on
         the native target (rustc's own linker choice and the C toolchain
         Cargo finds).
+      '';
+    };
+    traits = mkOption {
+      type = types.attrsOf types.anything;
+      default = { };
+      example = lib.literalExpression ''
+        # A board breakbulk has no built-in traits for (a custom target
+        # spec): an ELF bare-metal target.
+        { os = "none"; env = ""; abi = "eabihf"; }
+      '';
+      description = ''
+        Facts about this target platform that override or extend the
+        built-in ones breakbulk reads from the triple
+        (`breakbulk.targetTraits.resolve`, "Target traits" in
+        docs/implementation.md). Every platform-dependent decision reads
+        the resulting traits: the linker kind, the default stage chain,
+        the install layout and file names, debuginfo side files, the
+        dynamic-library path of test processes, static linking. Base
+        fields (`arch`, `vendor`, `os`, `env`, `abi`, `families`, as
+        rustc's `target_*` cfg values) recompute the derived ones
+        (`isLinux`, `objectFormat`, `exeSuffix`, `dylibPathVar`, …);
+        derived fields set here win over the computed ones. A triple with
+        no built-in traits (a custom target, a `.json` target spec, an
+        uncommon OS) needs at least the base fields here; reading any
+        trait of it otherwise fails with a message naming this option.
       '';
     };
     presetDirect = mkOption {

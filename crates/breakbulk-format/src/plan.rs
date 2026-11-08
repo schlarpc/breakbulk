@@ -308,11 +308,12 @@ impl CompileUnit {
     /// debuginfo side files rustc writes next to a linked output (decision
     /// 89): a target-platform unit with a `bin` output (bins, tests,
     /// examples, benches, cdylibs, dylibs, staticlibs) whose traced command
-    /// makes rustc write side files, by [`writes_debuginfo_side_files`].
+    /// makes rustc write side files on a target with these `traits`, by
+    /// [`writes_debuginfo_side_files`].
     /// Nix outputs are fixed before the build, so this is decided from the
     /// command line; host units (build scripts, proc macros) only run
     /// during the build, so theirs are discarded.
-    pub fn has_debug_output(&self) -> bool {
+    pub fn has_debug_output(&self, traits: TargetTraits) -> bool {
         self.platform == Platform::Target
             && self.outputs.contains_key("bin")
             && writes_debuginfo_side_files(
@@ -321,21 +322,39 @@ impl CompileUnit {
                     _ => None,
                 }),
                 &self.krate.types,
+                traits,
             )
     }
 }
 
+/// What breakbulk's Rust programs need to know about the target platform.
+/// The Nix library decides it from its target traits (`lib/target-traits.nix`,
+/// `forRust`; "Target traits" in `docs/implementation.md`) and passes it in
+/// `toolchains.json` as `targetTraits`, so no program re-derives a platform
+/// fact from the spelling of a triple, and a target the user declared
+/// traits for behaves as declared.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct TargetTraits {
+    /// The target's linker writes a debuginfo side file for every crate it
+    /// links, whatever `-C debuginfo` and `-C strip` say: on
+    /// `*-windows-msvc`, rustc passes `/DEBUG` to the MSVC-style linker
+    /// unconditionally (rustc_codegen_ssa back/linker.rs,
+    /// `MsvcLinker::debuginfo` ignores its `strip` argument; 1.95 through
+    /// master, and an msvc release build with `-C strip=debuginfo` was seen
+    /// to write a 1.2 MB PDB).
+    pub linker_writes_debug_file: bool,
+}
+
 /// Whether rustc, given these command-line arguments (`None` for an
 /// argument that is not a literal: a build script's splices cannot set
-/// codegen options) for a crate of these types, writes debuginfo side files next to its linked output:
+/// codegen options) for a crate of these types, writes debuginfo side files
+/// next to its linked output, on a target with these traits:
 ///
-/// - `.pdb` on `*-windows-msvc` targets, for every crate type the linker
-///   produces (`bin`, `cdylib`, `dylib`, and `--test`): rustc passes
-///   `/DEBUG` to the MSVC-style linker unconditionally, whatever
-///   `-C debuginfo` and `-C strip` say (rustc_codegen_ssa back/linker.rs,
-///   `MsvcLinker::debuginfo` ignores its `strip` argument; 1.95 through
-///   master, and an msvc release build with `-C strip=debuginfo` was seen
-///   to write a 1.2 MB PDB). A staticlib is archived, not linked.
+/// - the linker's side file (`.pdb` on msvc) when
+///   [`TargetTraits::linker_writes_debug_file`], for every crate type the
+///   linker produces (`bin`, `cdylib`, `dylib`, and `--test`). A staticlib
+///   is archived, not linked.
 /// - `.dwp` (`packed`) or `.dwo` (`unpacked`) when the effective
 ///   `-C split-debuginfo` is one of those and debuginfo is on. Cargo passes
 ///   `-C split-debuginfo` only together with `-C debuginfo` (cargo
@@ -343,14 +362,11 @@ impl CompileUnit {
 ///   either. As in rustc (rustc_session config.rs `select_debuginfo`), a
 ///   `-g` after the last `-C debuginfo` means full debuginfo, and the last
 ///   `-C` of an option wins.
-///
-/// The target is the `--target` argument (Cargo passes one to every target
-/// unit when the planner gives `--target`).
 pub fn writes_debuginfo_side_files<'a>(
     args: impl IntoIterator<Item = Option<&'a str>>,
     crate_types: &[String],
+    traits: TargetTraits,
 ) -> bool {
-    let mut target = None;
     let mut debuginfo_on = false;
     let mut split = None;
     let mut test = false;
@@ -367,19 +383,9 @@ pub fn writes_debuginfo_side_files<'a>(
                 test = true;
                 None
             }
-            "--target" => {
-                target = it.next().flatten();
-                None
-            }
             _ => a
                 .strip_prefix("--codegen=")
-                .or_else(|| a.strip_prefix("-C"))
-                .or_else(|| {
-                    if let Some(t) = a.strip_prefix("--target=") {
-                        target = Some(t);
-                    }
-                    None
-                }),
+                .or_else(|| a.strip_prefix("-C")),
         };
         match codegen.and_then(|c| c.split_once('=')) {
             Some(("debuginfo", v)) => debuginfo_on = !matches!(v, "0" | "none"),
@@ -387,12 +393,12 @@ pub fn writes_debuginfo_side_files<'a>(
             _ => {}
         }
     }
-    let msvc = target.is_some_and(|t| t.contains("-windows-msvc"));
     let links = test
         || crate_types
             .iter()
             .any(|t| matches!(t.as_str(), "bin" | "cdylib" | "dylib"));
-    (msvc && links) || (debuginfo_on && matches!(split, Some("packed" | "unpacked")))
+    (traits.linker_writes_debug_file && links)
+        || (debuginfo_on && matches!(split, Some("packed" | "unpacked")))
 }
 
 /// A build-script run.

@@ -8,8 +8,8 @@ use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUn
 use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
-    Arg, CompileUnit, CrateSrcRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, Text, Unit,
-    UnitId, for_each_reference,
+    Arg, CompileUnit, CrateSrcRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, TargetTraits,
+    Text, Unit, UnitId, for_each_reference,
 };
 use crate::{CanonicalError, Splice, to_canonical_json};
 
@@ -17,6 +17,10 @@ use crate::{CanonicalError, Splice, to_canonical_json};
 /// that come from configuration rather than from the plan.
 pub trait Resolve {
     type Error;
+    /// The traits of the plan's target platform (`toolchains.json`'s
+    /// `targetTraits`), which decide platform-dependent parts of a unit
+    /// (its `debug` output).
+    fn target_traits(&self) -> TargetTraits;
     /// The literal path a reference stands for.
     fn reference(&self, r: &Reference) -> Result<String, Self::Error>;
     /// The `flags` output directory of a run unit.
@@ -336,7 +340,7 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                     .chain(
-                        c.has_debug_output()
+                        c.has_debug_output(r.target_traits())
                             .then(|| (breakbulk_unit::spec::DEBUG_OUTPUT.to_owned(), Vec::new())),
                     )
                     .collect(),

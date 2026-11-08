@@ -4,6 +4,8 @@
 #   lib-unit                 pure evaluation assertions (lockfile parsing,
 #                            path helpers, globbing, TOML writer, URLs,
 #                            vendor config)
+#   target-traits, target-traits-rustc   lib/target-traits.nix (see
+#                            ./target-traits.nix)
 #   roots-metadata-fixtures  predicted targets == `cargo metadata` for fixtures
 #   roots-metadata-crates-io the same for real crates.io crates (IFD)
 #   roots-plans              predicted build/test/bench roots == what real
@@ -365,6 +367,8 @@ let
 in
 {
   lib-unit = import ./unit.nix { inherit pkgs bb runTests; };
+
+  inherit (import ./target-traits.nix { inherit pkgs bb runTests; }) target-traits target-traits-rustc;
 
   roots-metadata-fixtures = compareMetadata "roots-metadata-fixtures" [
     (metadataCase {

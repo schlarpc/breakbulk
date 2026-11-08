@@ -39,6 +39,7 @@ in
 {
   pkgs,
   triple ? "x86_64-pc-windows-gnu",
+  traits ? null,
   packageSet ? packageSetFor pkgs triple,
   crtStatic ? true,
   lld ? pkgs.buildPackages.lld,
@@ -52,10 +53,13 @@ let
   prefix = cc.targetPrefix;
   arch = lib.head (lib.splitString "-" triple);
   # The linker (./linker.nix, kind mingw-lld): the C driver with lld.
-  linker = chooseLinker {
-    inherit pkgs triple lld;
-    packageSet = tp;
-  };
+  linker = chooseLinker (
+    {
+      inherit pkgs triple lld;
+      packageSet = tp;
+    }
+    // lib.optionalAttrs (traits != null) { inherit traits; }
+  );
 in
 {
   packageSet = mkDefault tp;

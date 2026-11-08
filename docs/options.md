@@ -1899,6 +1899,54 @@ null
 
 
 
+## targets\.\<name>\.traits
+
+
+
+Facts about this target platform that override or extend the
+built-in ones breakbulk reads from the triple
+(` breakbulk.targetTraits.resolve `, “Target traits” in
+docs/implementation\.md)\. Every platform-dependent decision reads
+the resulting traits: the linker kind, the default stage chain,
+the install layout and file names, debuginfo side files, the
+dynamic-library path of test processes, static linking\. Base
+fields (` arch `, ` vendor `, ` os `, ` env `, ` abi `, ` families `, as
+rustc’s ` target_* ` cfg values) recompute the derived ones
+(` isLinux `, ` objectFormat `, ` exeSuffix `, ` dylibPathVar `, …);
+derived fields set here win over the computed ones\. A triple with
+no built-in traits (a custom target, a ` .json ` target spec, an
+uncommon OS) needs at least the base fields here; reading any
+trait of it otherwise fails with a message naming this option\.
+
+
+
+*Type:*
+attribute set of anything
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+# A board breakbulk has no built-in traits for (a custom target
+# spec): an ELF bare-metal target.
+{ os = "none"; env = ""; abi = "eabihf"; }
+
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
+
+
+
 ## workspaces
 
 

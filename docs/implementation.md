@@ -295,7 +295,7 @@ A unit's recorded env is the recorded env minus a baseline: the env of the shim'
 
 - `plan.json`: the output of a plan derivation.
 - `sources.json`: the names of workspace source views (keyed by directory relative to the repository root) and crate sources (keyed by package id).
-- `toolchains.json`: the host and target specs. Tool store paths are passed as plain strings, so that literal store paths in the plan (rustc in `program`) can be matched to a tool by prefix.
+- `toolchains.json`: the host and target specs, and the target's traits (`targetTraits`, see [Target traits](#target-traits)). Tool store paths are passed as plain strings, so that literal store paths in the plan (rustc in `program`) can be matched to a tool by prefix.
 - `overrides.json`: per-package env and env-capture names, keyed `name@version` or `name`.
 
 In IFD mode, nothing with string context reaches instantiation. `units.json` names every path it needs (`{"unit": id, "output": o}`, `{"input": key}`) and the Nix side fills in the values with their context. This has two consequences: the output must contain zero store references, because `builtins.fromJSON` refuses strings with context; and a source edit or an override change does not rerun instantiation at all, only a plan change or an added or removed input does. Dynamic-derivation mode runs the same instantiation, then does the Nix side's substitution itself (see [Dynamic-derivation mode](#dynamic-derivation-mode)). Unit tests check that both substitutions give identical text and inputs; `nix run .#test-dynamic` checks identical `.drv` paths on Nix master.
@@ -310,7 +310,7 @@ Instantiation therefore realises nothing except the plan and the source views. N
 | `name` | `<crate>-<version>-<kind>`, for example `ring-0.17.14-lib` or `ring-0.17.14-build-run` |
 | `builder` / `args` | `breakbulk-unit`, `["unit"]` |
 | `env.BREAKBULK_UNIT` | Canonical JSON of the unit with every reference rendered |
-| `outputs` | Library: `rmeta`, `rlib`. Bin or test: `out`. Build-script run: `out`, `flags`. Target-platform linking units (bins, tests, examples, cdylibs, dylibs, staticlibs) also `debug`, last, for their debuginfo side files, when the traced command makes rustc write them (decision 97). Nix outputs are fixed before the build, so one function decides it from the argv and the `--target` (breakbulk-format `writes_debuginfo_side_files`, used by instantiation in both modes): on `*-windows-msvc`, every crate the linker produces (`bin`, `cdylib`, `dylib`, `--test`), because rustc passes `/DEBUG` to the MSVC-style linker whatever `-C debuginfo` and `-C strip` say (rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo`); elsewhere, when the effective `-C split-debuginfo` is `packed` or `unpacked` and debuginfo is on (the last `-C debuginfo` or `-g` wins, as in rustc's `select_debuginfo`). Input-addressed |
+| `outputs` | Library: `rmeta`, `rlib`. Bin or test: `out`. Build-script run: `out`, `flags`. Target-platform linking units (bins, tests, examples, cdylibs, dylibs, staticlibs) also `debug`, last, for their debuginfo side files, when the traced command makes rustc write them (decision 97). Nix outputs are fixed before the build, so one function decides it from the argv and the target's traits (breakbulk-format `writes_debuginfo_side_files`, used by instantiation in both modes; the traits arrive as `toolchains.json`'s `targetTraits`, see [Target traits](#target-traits)): when the traits say `linkerWritesDebugFile` (msvc), every crate the linker produces (`bin`, `cdylib`, `dylib`, `--test`), because rustc passes `/DEBUG` to the MSVC-style linker whatever `-C debuginfo` and `-C strip` say (rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo`); elsewhere, when the effective `-C split-debuginfo` is `packed` or `unpacked` and debuginfo is on (the last `-C debuginfo` or `-g` wins, as in rustc's `select_debuginfo`). Input-addressed |
 | `inputs` | `Built{drv, output}` for each referenced unit output, crate source, toolchain component and env capture; `Opaque` for each source view |
 | `system` | The builder platform: the planner's system for compile units |
 
@@ -646,6 +646,24 @@ The plan derivations' source is a skeleton, so they are rebuilt only when the ma
 - an empty file for every file name in the conventional target directories (`src/lib.rs`, `src/main.rs`, `src/bin`, `examples`, `tests`, `benches`, including `*/main.rs` forms), every explicit `path =` target and every `build.rs`.
 
 The skeleton copies file names only and needs no discovery rules; Cargo performs its own discovery during the trace.
+
+## Target traits
+
+Every decision that depends on the target platform reads one record, the target's **traits**, made by one function (`breakbulk.targetTraits.resolve`, `lib/target-traits.nix`). No other code inspects how a triple is spelled. This follows the linker choice (`lib/presets/linker.nix`): a decision is a function of facts, and the facts have one home.
+
+- **Base fields** are what rustc's own cfg says about the target: `vendor`, `os`, `env`, `abi` and `families` (`target_vendor`, `target_os`, `target_env`, `target_abi`, `target_family`), plus `arch`, the triple's first component as spelled (`i686`, `armv7`, `riscv64gc`; tool and SDK names use that spelling, not `target_arch`). `parse` reads them from a built-in target name. The check `target-traits-rustc` compares it with `rustc --print cfg --target <t>` for every built-in target of nixpkgs' rustc: 248 of 321 are known, all agreeing (the abi only where the name spells one; rustc infers powerpc64's `elfv1`/`elfv2`). The rest (RTOSes such as nuttx, vxworks, qnx; `.json` target specs) return null.
+- **Derived fields** follow from the base fields: `isLinux` (Linux kernel: `linux` or `android`), `isWindows`, `isMsvc`, `isMingw` (Windows with env `gnu`, so `-gnullvm` too), `isApple`, `isWasm`, `isWasi`, `isBareMetal`, `isUefi`; `objectFormat` (`elf`, `pe`, `macho`, `wasm`); `exeSuffix`, `dylibPrefix`/`dylibSuffix`, `staticlibPrefix`/`staticlibSuffix` (rustc's file names for the target); `debugSideFile` (`pdb`, `dwp`, `dSYM` or null) and `linkerWritesDebugFile` (the linker writes it for every linked crate whatever `-C debuginfo` says: msvc, decision 97); `dylibPathVar` and `dylibPathSep` (Cargo's `dylib_path_envvar` for a process running natively on the target: `PATH` on Windows, `DYLD_FALLBACK_LIBRARY_PATH` on Apple, `LD_LIBRARY_PATH` elsewhere, null for wasm and bare metal); `stagePreset` (the default stage chain when the target spec names none: `linuxGnu` on Linux, `msvc` on msvc, else none).
+- **Who reads them:** the linker kind (`linkerKind`), the default stage chain and so the debug split and remap scope (`lib/products.nix`), the install layout (`install`, `splitDebug`'s placement of side files), and instantiation's `debug` output rule. The Rust programs never parse a triple: `breakbulk-instantiate` receives the part it needs in `toolchains.json` (`targetTraits`, from `targetTraits.forRust`; breakbulk-format `TargetTraits`), so plans and `units.json` are unchanged.
+- **Bring your own target.** `targets.<triple>.traits` (and `workspaces.<ws>.targets.<triple>.traits`) is an attribute set merged over the built-in traits: base fields recompute the derived ones, and derived fields set there win. A triple with no built-in traits (a custom target, a `.json` spec) needs at least the base fields:
+
+  ```nix
+  targets."thumbv7em-myboard-none" = {
+    traits = { os = "none"; abi = "eabihf"; };
+    linker = "${myToolchain}/bin/arm-none-eabi-gcc";
+  };
+  ```
+
+  Without them, reading any trait of that target fails with a message naming `targets."<triple>".traits`. The failure is lazy: a target whose traits nothing reads (one with an explicit linker and no default stages) still works. The resolved record is `repo.workspaces.<ws>.target.<triple>.traits`; presets receive it as `traits` (every `breakbulk.presets.*` takes it, as it takes `toolchain`), and a preset called directly uses the triple's built-in traits.
 
 ## Toolchain presets
 
