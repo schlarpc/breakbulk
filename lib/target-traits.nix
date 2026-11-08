@@ -530,8 +530,8 @@ let
   # The name of the preset (`breakbulk.presets.<name>`) the native target
   # gets when it sets none (decisions 105, 115), or null. It follows the
   # `pkgs` given to mkRepository, not the machine evaluating: a glibc
-  # Linux package set gets "linuxGnu", a musl one (`pkgs.pkgsMusl`, or
-  # nixpkgs on a musl system) "linuxMusl".
+  # Linux package set gets "linux", a musl one (`pkgs.pkgsMusl`, or
+  # nixpkgs on a musl system) "linuxStatic".
   nativeDefaultPreset =
     pkgs:
     let
@@ -540,9 +540,9 @@ let
     if !h.isLinux then
       null
     else if h.isMusl then
-      "linuxMusl"
+      "linuxStatic"
     else if h.isGnu then
-      "linuxGnu"
+      "linux"
     else
       null;
 in

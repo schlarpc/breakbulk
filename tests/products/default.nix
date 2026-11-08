@@ -1200,7 +1200,7 @@ in
             rustc = tc;
             cargo = tc;
           };
-          targets.${native}.preset = breakbulk.presets.linuxGnu;
+          targets.${native}.preset = breakbulk.presets.linux;
         }
       ];
       plan = builtins.fromJSON (

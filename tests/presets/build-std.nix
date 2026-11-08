@@ -69,7 +69,7 @@ let
   bareCrates = cratesOf barePlan;
 
   hosted = mkRepo (fixtures + "/build-std-deps") native [
-    { targets.${native}.preset = breakbulk.presets.linuxGnu; }
+    { targets.${native}.preset = breakbulk.presets.linux; }
   ];
   hostedPlan = planOf hosted native;
   hostedCrates = cratesOf hostedPlan;

@@ -9,7 +9,7 @@
 #                       ambiguous references, CA attributes, helper options
 #   stages-chain        three logging stages run in the computed order;
 #                       every intermediate is addressable
-#   stages-split-debug  linuxGnu product of a C program (the `post-link` and
+#   stages-split-debug  Linux product of a C program (the `post-link` and
 #                       `source-paths` fixture intents): gdb resolves source
 #                       lines only with the debug output; a check on
 #                       `linked` sees the unstripped bytes; the main output
@@ -19,7 +19,7 @@
 #   stages-install      install layouts for unix, windows and wasm inputs
 #   stages-zip          deterministicZip: same bytes from inputs that differ
 #                       in mtimes, modes and creation order
-#   stages-wasm-browser wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
+#   stages-wasm-web wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
 #                       0.2.130) through bindgen -> wasmOpt -> install, then
 #                       loaded and called from node
 #   stages-linked-crate-types  the `linked` stage of a cdylib+staticlib
@@ -72,7 +72,7 @@ let
       expected = [ "install" ];
     };
     testPresetBrowser = {
-      expr = orderOf S.defaultStages.wasmBrowser;
+      expr = orderOf S.defaultStages.wasmWeb;
       expected = [
         "bindgen"
         "wasmOpt"
@@ -90,7 +90,7 @@ let
     testPresetData = {
       expr = S.defaultStageNames;
       expected = {
-        wasmBrowser = [
+        wasmWeb = [
           "bindgen"
           "wasmOpt"
         ];
@@ -186,7 +186,7 @@ let
         let
           r = S.explainOrder {
             stages = S.merge [
-              S.defaultStages.wasmBrowser
+              S.defaultStages.wasmWeb
               { bindgen = null; }
             ];
           };
@@ -541,7 +541,7 @@ let
   wasmBrowser = S.mkProduct {
     name = "wasm-hello";
     linked = wasmLinked;
-    stages = S.defaultStages.wasmBrowser;
+    stages = S.defaultStages.wasmWeb;
     target.triple = "wasm32-unknown-unknown";
     info.lockfile = wasmLock;
     inherit pkgs;
@@ -777,8 +777,8 @@ in
         touch $out
       '';
 
-  stages-wasm-browser =
-    pkgs.runCommand "stages-wasm-browser"
+  stages-wasm-web =
+    pkgs.runCommand "stages-wasm-web"
       {
         nativeBuildInputs = [
           pkgs.nodejs

@@ -92,7 +92,7 @@ let
   # target's `debugInfo` (`splitDebug`, `strip`) first (lib/products.nix,
   # decision 137).
   defaultStageNames = {
-    wasmBrowser = [
+    wasmWeb = [
       "bindgen"
       "wasmOpt"
     ];

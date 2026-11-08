@@ -1314,7 +1314,7 @@ these definitions together with its own
 ` workspaces.<ws>.targets.<triple> `, evaluated with that workspace’s
 toolchain, so a preset uses each workspace’s rustc\. When the ` pkgs `
 given to mkRepository is Linux, the native triple always has an
-entry, with ` presets.linuxGnu ` (glibc) or ` presets.linuxMusl ` (musl)
+entry, with ` presets.linux ` (glibc) or ` presets.linuxStatic ` (musl)
 by default\. Any other triple with no entry here or
 in the workspace uses an empty spec (the toolchain as Cargo finds
 it)\.
@@ -1705,10 +1705,10 @@ null
 
 
 A toolchain preset (` breakbulk.presets.* `, or a preset with its
-options bound, such as ` breakbulk.presets.msvc { inherit sdk; } `)\.
+options bound, such as ` breakbulk.presets.windows { inherit sdk; } `)\.
 It is called once per workspace that builds this triple, with
 ` pkgs `, the triple and the workspace’s ` toolchain `, whose rustc
-it uses unless it was given ` rustc ` itself: msvc and wasm presets
+it uses unless it was given ` rustc ` itself: the windows (msvc) and wasm presets
 pick the LLVM tools and the wasi-sdk matching each workspace’s
 compiler\. It sets the fields below at default priority, so
 fields set here override the preset’s (lists concatenate; use
@@ -1728,8 +1728,8 @@ null or breakbulk preset (function)
 
 *Default:*
 for the native triple, unless the target is defined directly from
-a preset: ` breakbulk.presets.linuxGnu ` when the ` pkgs ` given to
-mkRepository is Linux with glibc, ` breakbulk.presets.linuxMusl `
+a preset: ` breakbulk.presets.linux ` when the ` pkgs ` given to
+mkRepository is Linux with glibc, ` breakbulk.presets.linuxStatic `
 when it is Linux with musl (` pkgs.pkgsMusl `); ` null ` otherwise
 
 
@@ -1737,7 +1737,7 @@ when it is Linux with musl (` pkgs.pkgsMusl `); ` null ` otherwise
 *Example:*
 
 ```nix
-breakbulk.presets.linuxMusl
+breakbulk.presets.linuxStatic
 ```
 
 *Declared by:*
@@ -1807,7 +1807,7 @@ list of string
 
 
 Which default stage chain this target’s products get
-(` breakbulk.stages.defaultStageNames `: ` wasmBrowser ` bindgen and
+(` breakbulk.stages.defaultStageNames `: ` wasmWeb ` bindgen and
 wasmOpt; ` wasmComponent ` wasmOpt and componentize)\. Presets set
 it; ` null `: none\. Debug info is handled by ` debugInfo `, not by
 the chain\.
@@ -1830,7 +1830,7 @@ null
 *Example:*
 
 ```nix
-"wasmBrowser"
+"wasmWeb"
 ```
 
 *Declared by:*

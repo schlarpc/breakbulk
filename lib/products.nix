@@ -300,7 +300,7 @@ let
       set;
 
   # The target's stage set: the debug stage, the stage preset's defaults
-  # (`stagePreset`, a chain such as `wasmBrowser`; none by default), then
+  # (`stagePreset`, a chain such as `wasmWeb`; none by default), then
   # `targets.<triple>.stages` over them.
   targetStageSet =
     {

@@ -14,7 +14,7 @@
 #                directory and passes; widening the scope changes exactly
 #                a's test harnesses and doctest (no build-plan unit, no unit
 #                or test run of b); the option gives no warning.
-#   devshell     the walking skeleton with the linuxGnu preset and extra
+#   devshell     the walking skeleton with the linux preset and extra
 #                rustflags: the dev shell exports CARGO_BUILD_TARGET and the
 #                spec as CARGO_TARGET_<TRIPLE>_{LINKER,RUSTFLAGS}; a local
 #                `cargo build -v --release` in that environment, outside any
@@ -205,7 +205,7 @@ let
 
   # --- devshell ---------------------------------------------------------------
 
-  # The walking skeleton with the linuxGnu preset (a mold linker wrapper)
+  # The walking skeleton with the linux preset (a mold linker wrapper)
   # and extra spec rustflags; the default variant (release).
   shellRepo = breakbulk.mkRepository {
     inherit pkgs tools;
@@ -214,7 +214,7 @@ let
       {
         workspaces.main = { };
         targets.${native} = {
-          preset = breakbulk.presets.linuxGnu;
+          preset = breakbulk.presets.linux;
           rustflags = [
             "--cfg"
             "bb_devshell"

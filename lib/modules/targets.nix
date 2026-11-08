@@ -46,7 +46,7 @@ in
       `workspaces.<ws>.targets.<triple>`, evaluated with that workspace's
       toolchain, so a preset uses each workspace's rustc. When the `pkgs`
       given to mkRepository is Linux, the native triple always has an
-      entry, with `presets.linuxGnu` (glibc) or `presets.linuxMusl` (musl)
+      entry, with `presets.linux` (glibc) or `presets.linuxStatic` (musl)
       by default. Any other triple with no entry here or
       in the workspace uses an empty spec (the toolchain as Cargo finds
       it).

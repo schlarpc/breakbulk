@@ -18,12 +18,12 @@
 let
   inherit (lib) types mkOption;
 
-  # Decisions 105, 115: on Linux the native target gets `presets.linuxGnu`
-  # (glibc `pkgs`) or `presets.linuxMusl` (musl `pkgs`) unless another
+  # Decisions 105, 115: on Linux the native target gets `presets.linux`
+  # (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`) unless another
   # preset is set, so the native linker is nixpkgs' wrapped cc with mold,
   # as on every other target, instead of rustc's bundled rust-lld. A target
-  # defined directly from a preset (`targets.<t> = breakbulk.presets.zig
-  # { … }`) counts as having one.
+  # defined directly from a preset (`targets.<t> =
+  # breakbulk.presets.linuxPortable { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
   nativeTriple = targetTraits.nativeTriple pkgs;
   nativePreset = targetTraits.nativeDefaultPreset pkgs;
@@ -116,17 +116,17 @@ in
           null;
       defaultText = lib.literalMD ''
         for the native triple, unless the target is defined directly from
-        a preset: `breakbulk.presets.linuxGnu` when the `pkgs` given to
-        mkRepository is Linux with glibc, `breakbulk.presets.linuxMusl`
+        a preset: `breakbulk.presets.linux` when the `pkgs` given to
+        mkRepository is Linux with glibc, `breakbulk.presets.linuxStatic`
         when it is Linux with musl (`pkgs.pkgsMusl`); `null` otherwise
       '';
-      example = lib.literalExpression "breakbulk.presets.linuxMusl";
+      example = lib.literalExpression "breakbulk.presets.linuxStatic";
       description = ''
         A toolchain preset (`breakbulk.presets.*`, or a preset with its
-        options bound, such as `breakbulk.presets.msvc { inherit sdk; }`).
+        options bound, such as `breakbulk.presets.windows { inherit sdk; }`).
         It is called once per workspace that builds this triple, with
         `pkgs`, the triple and the workspace's `toolchain`, whose rustc
-        it uses unless it was given `rustc` itself: msvc and wasm presets
+        it uses unless it was given `rustc` itself: the windows (msvc) and wasm presets
         pick the LLVM tools and the wasi-sdk matching each workspace's
         compiler. It sets the fields below at default priority, so
         fields set here override the preset's (lists concatenate; use
@@ -356,10 +356,10 @@ in
     stagePreset = mkOption {
       type = types.nullOr types.str;
       default = null;
-      example = "wasmBrowser";
+      example = "wasmWeb";
       description = ''
         Which default stage chain this target's products get
-        (`breakbulk.stages.defaultStageNames`: `wasmBrowser` bindgen and
+        (`breakbulk.stages.defaultStageNames`: `wasmWeb` bindgen and
         wasmOpt; `wasmComponent` wasmOpt and componentize). Presets set
         it; `null`: none. Debug info is handled by `debugInfo`, not by
         the chain.

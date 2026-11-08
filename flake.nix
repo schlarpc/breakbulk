@@ -80,11 +80,11 @@
           '');
         };
       } // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
-        # zig binaries in a real glibc 2.17 userland (decision 122): pulls
+        # linuxPortable (zig) binaries in a real glibc 2.17 userland (decision 122): pulls
         # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
         # cc, so it is not a flake check. Arguments go to nix-store.
-        #   nix run .#test-zig-container [-- --max-jobs 2 --cores 4]
-        test-zig-container =
+        #   nix run .#test-linux-portable-container [-- --max-jobs 2 --cores 4]
+        test-linux-portable-container =
           let
             checks = (import ./tests/presets/m7.nix {
               inherit pkgs;
@@ -96,7 +96,7 @@
           in
           {
             type = "app";
-            program = toString (pkgs.writeShellScript "test-zig-container" ''
+            program = toString (pkgs.writeShellScript "test-linux-portable-container" ''
               set -euo pipefail
               status=0
               for nd in ${nixpkgs.lib.escapeShellArgs drvs}; do
@@ -159,7 +159,7 @@
             config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "xwin-sdk";
           };
         }
-        # Post-link stages and helpers (stages-*). stages-wasm-browser
+        # Post-link stages and helpers (stages-*). stages-wasm-web
         # downloads a rust-overlay toolchain with the wasm32 target.
         // import ./tests/stages {
           inherit pkgs;

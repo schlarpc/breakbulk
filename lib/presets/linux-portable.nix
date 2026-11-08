@@ -1,8 +1,10 @@
-# zig (M7): Linux gnu programs linked against an old glibc (default 2.17,
-# the oldest Rust's std supports on x86_64) with `zig cc -target
-# <arch>-linux-gnu.<glibc>` as the target units' linker and C compiler.
+# linuxPortable (decision 122; was `zig`): Linux gnu programs that run on
+# other distributions, linked against an old glibc (default 2.17, the
+# oldest Rust's std supports on x86_64). The one backend, "zig", uses
+# `zig cc -target <arch>-linux-gnu.<glibc>` as the target units' linker and
+# C compiler.
 #
-#   targets.x86_64-unknown-linux-gnu.preset = breakbulk.presets.zig { glibc = "2.17"; };
+#   targets.x86_64-unknown-linux-gnu.preset = breakbulk.presets.linuxPortable { glibc = "2.17"; };
 #
 # A same-triple preset: the target is usually the host triple, which the
 # planner passes as `--target`, so the zig linker and rustflags reach target
@@ -19,6 +21,7 @@
 # breakbulk-unit has no zig special case: the wrapper does it all.
 {
   lib,
+  targetTraits,
   hostSpec,
   chooseLinker,
   chooseRunner,
@@ -27,7 +30,10 @@
 {
   pkgs,
   triple ? nativeTriple pkgs,
+  traits ? targetTraits.resolve { inherit triple; },
   glibc ? "2.17",
+  # How the old-glibc link is done; "zig" is the only one.
+  backend ? "zig",
   zig ? pkgs.buildPackages.zig,
   # Extra `zig cc` invocations' flags to warm the cache with, e.g.
   # [ "-lc++" ] for C++ code.
@@ -49,12 +55,13 @@
 let
   inherit (lib) mkDefault;
   bp = pkgs.buildPackages;
-  m = builtins.match "([a-z0-9_]+)-unknown-linux-gnu" triple;
   rustArch =
-    if m == null then
-      throw "breakbulk.presets.zig: `${triple}` is not a *-unknown-linux-gnu triple"
+    if backend != "zig" then
+      throw "breakbulk.presets.linuxPortable: unknown backend `${backend}`; the one backend is \"zig\""
+    else if !(traits.isLinux && traits.env == "gnu") then
+      throw "breakbulk.presets.linuxPortable: `${triple}` is not a Linux -gnu triple"
     else
-      lib.head m;
+      traits.arch;
   zigArch = { riscv64gc = "riscv64"; }.${rustArch} or rustArch;
   zigTarget = "${zigArch}-linux-gnu.${glibc}";
 
@@ -158,7 +165,7 @@ let
     lib.genAttrs rebuildInputs (
       n:
       let
-        p = pkgs.${n} or (throw "breakbulk.presets.zig: rebuildInputs: nixpkgs has no package `${n}`");
+        p = pkgs.${n} or (throw "breakbulk.presets.linuxPortable: rebuildInputs: nixpkgs has no package `${n}`");
         deps = lib.intersectAttrs (lib.functionArgs p.override) (removeAttrs self [ n ]);
       in
       (p.override ({ stdenv = zigStdenv; } // deps)).overrideAttrs {
@@ -179,7 +186,7 @@ let
   ];
   packageSet =
     if rebuildInputs != [ ] && triple != nativeTriple pkgs then
-      throw "breakbulk.presets.zig: rebuildInputs needs the native triple (${nativeTriple pkgs}), not ${triple}"
+      throw "breakbulk.presets.linuxPortable: rebuildInputs needs the native triple (${nativeTriple pkgs}), not ${triple}"
     else
       builtins.mapAttrs (
         n: v:
@@ -187,7 +194,7 @@ let
           if lib.elem n quiet || !(isDrv v) then
             v
           else
-            lib.warn "breakbulk.presets.zig: a package input uses nixpkgs' `${n}`, which needs nixpkgs' glibc, not ${glibc}; rebuild it with `presets.zig { rebuildInputs = [ \"${n}\" ]; }` or use the crate's vendored C code" v
+            lib.warn "breakbulk.presets.linuxPortable: a package input uses nixpkgs' `${n}`, which needs nixpkgs' glibc, not ${glibc}; rebuild it with `presets.linuxPortable { rebuildInputs = [ \"${n}\" ]; }` or use the crate's vendored C code" v
         )
       ) pkgs
       // {

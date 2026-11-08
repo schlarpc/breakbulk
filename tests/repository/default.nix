@@ -529,7 +529,7 @@ in
 
   # Decision 81: the dev shell does not need the plan. With a member's
   # Cargo.toml broken (planning would fail), the shell still evaluates and
-  # carries the native spec's Cargo env config (the default linuxGnu
+  # carries the native spec's Cargo env config (the default linux
   # preset's linker), computed from Cargo config files and rustc only.
   devshell-broken-manifest =
     let
@@ -564,7 +564,7 @@ in
       touch $out
     '';
 
-  # Decision 105: the native target gets presets.linuxGnu unless another
+  # Decision 105: the native target gets presets.linux unless another
   # preset is set, both through `preset` and by defining the target
   # directly from a preset (no doubled rustflags, no conflicting linker);
   # `preset = null` turns it off. The default reaches the plan: units carry
@@ -574,14 +574,14 @@ in
       t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).workspaces.main.target.${native}.spec;
       dflt = t [ ];
       off = t [ { targets.${native}.preset = lib.mkForce null; } ];
-      static = breakbulk.presets.staticGlibc { inherit pkgs; };
+      static = breakbulk.presets.linuxStatic { inherit pkgs; };
       direct = t [ { targets.${native} = static; } ];
-      viaOption = t [ { targets.${native}.preset = breakbulk.presets.staticGlibc; } ];
+      viaOption = t [ { targets.${native}.preset = breakbulk.presets.linuxStatic; } ];
       linkerOf = x: builtins.unsafeDiscardStringContext (toString x.linker);
       isStatic = x: lib.elem "target-feature=+crt-static" x.rustflags;
       unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (mwInst "a").units.build);
       checks = {
-        # linuxGnu: mold, and no static-linking rustflags.
+        # linux: mold, and no static-linking rustflags.
         defaultIsLinuxGnu = lib.hasSuffix "cc-mold" (linkerOf dflt) && dflt.rustflags == [ ];
         offIsEmpty = off.linker == null && off.rustflags == [ ] && off.packageSet == null;
         directKeepsOwn = isStatic direct && direct.rustflags == static.rustflags;
@@ -595,7 +595,7 @@ in
 
   # Decision 115: the native default follows the `pkgs` given to
   # mkRepository, not the evaluating machine. With `pkgs.pkgsMusl` the
-  # native triple is the musl one and its default preset linuxMusl
+  # native triple is the musl one and its default preset linuxStatic
   # (+crt-static, PKG_CONFIG_ALL_STATIC, the musl stdenv's cc). Evaluation
   # only: nothing here builds a musl-hosted toolchain or plans (the
   # rust-overlay toolchain is never forced).
@@ -657,7 +657,7 @@ in
             ROOT_IS_PATH = lib.boolToString (builtins.isPath root);
             ROOT_READS = lib.boolToString (builtins.pathExists (root + "/a/Cargo.lock"));
             REPO_HAS_WS = lib.boolToString (repo.workspaces ? a);
-            LIB_HAS_PRESETS = lib.boolToString (breakbulk.presets ? linuxGnu);
+            LIB_HAS_PRESETS = lib.boolToString (breakbulk.presets ? linux);
           };
         };
       env = (mkRepo (fixtures + "/multi-ws") [ probe ]).config.packages.app-a.env;

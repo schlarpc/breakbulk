@@ -7,7 +7,7 @@
 #                     C against the headers of the wasi-sdk release whose
 #                     wasi-libc Rust bundles (lib/wasi-sdk.nix); tests under
 #                     wasmtime
-#   riscv64-*         riscv64gc-unknown-linux-gnu via linuxGnu (nixpkgs cross,
+#   riscv64-*         riscv64gc-unknown-linux-gnu via linux (nixpkgs cross,
 #                     mold), openssl-sys and zstd-sys from the cross env
 #                     capture; product and tests under qemu-riscv64
 #   windows-gnu-*     x86_64-pc-windows-gnu (mingw gcc, msvcrt) and
@@ -18,23 +18,26 @@
 #   windows-dll-*     a windows-gnu test binary importing a DLL its build
 #                     script built: the test run finds it through WINEPATH;
 #                     without it, wine fails (missing DLL)
-#   zig-*             host triple against glibc 2.17 with zig cc; newest
-#                     GLIBC symbol version 2.17 (objdump -T); host units
-#                     keep the host linker (asserted on the plan)
-#   zig-container-eval evaluation only: the container runner below leaves
-#                     the test binary's derivation unchanged
-#   zig-native-glibc  HEAVY (builds OpenSSL and zlib with zig cc, ~5 min):
-#                     presets.zig's rebuildInputs; openssl-sys and libz-sys
-#                     link the rebuilt libraries; the product and libssl /
-#                     libcrypto need GLIBC_2.17 at most (objdump -T)
+#   linux-portable-*  linuxPortable (zig backend): the host triple against
+#                     glibc 2.17 with zig cc; newest GLIBC symbol version
+#                     2.17 (objdump -T); host units keep the host linker
+#                     (asserted on the plan)
+#   linux-portable-container-eval   evaluation only: the container runner
+#                     below leaves the test binary's derivation unchanged
+#   linux-portable-native-glibc   HEAVY (builds OpenSSL and zlib with zig
+#                     cc, ~5 min): linuxPortable's rebuildInputs; openssl-sys
+#                     and libz-sys link the rebuilt libraries; the product
+#                     and libssl / libcrypto need GLIBC_2.17 at most
+#                     (objdump -T)
 #
 # Not flake checks (decision 122): `containerChecks`, built by
-# `nix run .#test-zig-container` (network: the CentOS 7.9 image from
-# Docker Hub, ~75 MB):
-#   zig-centos7-*        the product and the test binaries run inside a
-#                        CentOS 7 userland (glibc 2.17 and its own loader)
-#                        with bwrap, not through the build machine's ld.so
-#   zig-native-centos7-* the zig-native product and tests in the container
+# `nix run .#test-linux-portable-container` (network: the CentOS 7.9 image
+# from Docker Hub, ~75 MB):
+#   linux-portable-centos7-*   the product and the test binaries run inside
+#                     a CentOS 7 userland (glibc 2.17 and its own loader)
+#                     with bwrap, not through the build machine's ld.so
+#   linux-portable-native-centos7-*   the linux-portable-native product and
+#                     tests in the container
 #
 # build-std (tests/fixtures/build-std, build-std-deps) is in ./build-std.nix.
 {
@@ -76,7 +79,7 @@ let
   wasip2Repo = mkRepo (fixtures + "/wasip2") [
     {
       workspaces.main = wsWith wasip2Rust [ wasip2 ];
-      targets.${wasip2}.preset = presets.wasip2 {
+      targets.${wasip2}.preset = presets.wasmComponent {
         rustc = wasip2Rust;
         withC = true;
       };
@@ -115,8 +118,9 @@ let
       # whose libc.a rustc bundles, byte for byte (decision 99).
       wasip2-linker =
         let
-          spec = presets.wasip2 {
+          spec = presets.wasmComponent {
             inherit pkgs;
+            triple = wasip2;
             rustc = wasip2Rust;
             withC = true;
           };
@@ -166,7 +170,7 @@ let
   riscv64Repo = mkRepo (fixtures + "/riscv64") [
     {
       workspaces.main = wsWith rvRust [ rv ];
-      targets.${rv}.preset = presets.linuxGnu;
+      targets.${rv}.preset = presets.linux;
       # openssl-sys and zstd-sys get pkg-config and the riscv64 openssl and
       # zstd from breakbulk's sysDefaults (lib/sys-defaults.nix), captured
       # with the riscv64 cross stdenv.
@@ -206,7 +210,7 @@ let
     {
       workspaces.main = wsWith wgnuRust wgnuTriples;
       targets = lib.genAttrs wgnuTriples (_: {
-        preset = presets.windowsGnu;
+        preset = presets.windows;
       });
     }
   ];
@@ -258,7 +262,7 @@ let
   windowsDllRepo = mkRepo (fixtures + "/windows-dll") [
     {
       workspaces.main = wsWith (rustWith [ "x86_64-pc-windows-gnu" ]) [ "x86_64-pc-windows-gnu" ];
-      targets."x86_64-pc-windows-gnu".preset = presets.windowsGnu;
+      targets."x86_64-pc-windows-gnu".preset = presets.windows;
     }
   ];
   windowsDllChecks =
@@ -304,14 +308,14 @@ let
           '';
     };
 
-  # --- zig -----------------------------------------------------------------------
+  # --- linux-portable (zig) ---------------------------------------------------
 
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   zigRust = rustWith [ ];
-  zigRepo = mkRepo (fixtures + "/zig") [
+  zigRepo = mkRepo (fixtures + "/linux-portable") [
     {
       workspaces.main = wsWith zigRust [ native ];
-      targets.${native}.preset = presets.zig { glibc = "2.17"; };
+      targets.${native}.preset = presets.linuxPortable { glibc = "2.17"; };
     }
   ];
   zigChecks =
@@ -332,8 +336,8 @@ let
     {
       # Every versioned GLIBC symbol the product imports is 2.17 or older;
       # it runs on the build machine's newer glibc.
-      zig-glibc =
-        pkgs.runCommand "zig-glibc"
+      linux-portable-glibc =
+        pkgs.runCommand "linux-portable-glibc"
           {
             nativeBuildInputs = [ pkgs.buildPackages.binutils ];
           }
@@ -348,14 +352,14 @@ let
             mkdir -p $out
             cp versions.txt out.txt $out/
           '';
-      zig-test = t.testRuns.app."bin/app";
+      linux-portable-test = t.testRuns.app."bin/app";
       # Evaluation only: the container runner reaches test runs, not units.
-      zig-container-eval =
+      linux-portable-container-eval =
         assert lib.assertMsg (
           zigContainerRepo.workspaces.main.target.${native}.tests.app.bin-app.drvPath
           == t.tests.app.bin-app.drvPath
         ) "zig: the container runner changed the test binary";
-        pkgs.runCommand "zig-container-eval" { } "touch $out";
+        pkgs.runCommand "linux-portable-container-eval" { } "touch $out";
     }
     // zigNativeChecks;
 
@@ -396,11 +400,11 @@ let
   '';
   # The same workspace and preset with the container as runner. Units are
   # the same derivations as zigRepo's (a runner reaches only test runs).
-  zigContainerRepo = mkRepo (fixtures + "/zig") [
+  zigContainerRepo = mkRepo (fixtures + "/linux-portable") [
     {
       workspaces.main = wsWith zigRust [ native ];
       targets.${native} = {
-        preset = presets.zig { glibc = "2.17"; };
+        preset = presets.linuxPortable { glibc = "2.17"; };
         runner = centos7Runner;
       };
       # The fixture's `runs_on_expected_glibc` test compares the runtime
@@ -414,7 +418,7 @@ let
       bin = "${t.packages.app}/bin/app";
     in
     {
-      zig-centos7-run = pkgs.runCommand "zig-centos7-run" { } ''
+      linux-portable-centos7-run = pkgs.runCommand "linux-portable-centos7-run" { } ''
         mkdir -p $out
         ${centos7Runner} /usr/bin/ldd --version > $out/ldd.txt
         head -n1 $out/ldd.txt
@@ -424,7 +428,7 @@ let
         grep -qx "zig: headers=2.17 args=3 runtime=2.17" $out/out.txt
       '';
       # libtest under CentOS 7, `runs_on_expected_glibc` included.
-      zig-centos7-test = t.testRuns.app."bin/app";
+      linux-portable-centos7-test = t.testRuns.app."bin/app";
     }
     // zigNativeContainerChecks;
 
@@ -437,7 +441,7 @@ let
   # by zig cc). OpenSSL is shared. The product links libssl dynamically; zig adds no rpath, so
   # runs set LD_LIBRARY_PATH to the rebuilt libraries, as a deployment
   # would ship them next to the program.
-  zigNativePreset = presets.zig {
+  zigNativePreset = presets.linuxPortable {
     glibc = "2.17";
     rebuildInputs = [
       "openssl"
@@ -463,7 +467,7 @@ let
     zigNativeLibs.openssl
     zigNativeLibs.zlib
   ];
-  zigNativeRepo = mkRepo (fixtures + "/zig-native") [
+  zigNativeRepo = mkRepo (fixtures + "/linux-portable-native") [
     {
       workspaces.main = wsWith zigRust [ native ];
       targets.${native} = {
@@ -483,8 +487,8 @@ let
     {
       # HEAVY: builds OpenSSL with zig cc (about 5 minutes on 4 cores).
       # The product and the libraries it loads need GLIBC_2.17 at most.
-      zig-native-glibc =
-        pkgs.runCommand "zig-native-glibc"
+      linux-portable-native-glibc =
+        pkgs.runCommand "linux-portable-native-glibc"
           {
             nativeBuildInputs = [ pkgs.buildPackages.binutils ];
           }
@@ -508,12 +512,12 @@ let
     in
     {
       # The product runs in the CentOS 7 container.
-      zig-native-centos7-run = pkgs.runCommand "zig-native-centos7-run" { } ''
+      linux-portable-native-centos7-run = pkgs.runCommand "linux-portable-native-centos7-run" { } ''
         mkdir -p $out
         LD_LIBRARY_PATH=${zigNativeLdPath} ${centos7Runner} ${bin} | tee $out/out.txt
         grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
       '';
-      zig-native-centos7-test = t.testRuns.app."lib/app";
+      linux-portable-native-centos7-test = t.testRuns.app."lib/app";
     };
 in
 {
@@ -526,6 +530,6 @@ in
       ;
   };
   checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks;
-  # Opt-in, network (decision 122): `nix run .#test-zig-container`.
+  # Opt-in, network (decision 122): `nix run .#test-linux-portable-container`.
   containerChecks = zigContainerChecks;
 }
