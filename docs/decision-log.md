@@ -1480,6 +1480,8 @@ feature-gated binaries all work in dynamic mode, with identical build-step
 IDs, product bytes and test outcomes on eight fixtures (Nix master, private
 store). Nothing changed for the default mode.
 
+>ack
+
 ## 112. ASK: dynamic-mode checks for products whose binaries all need features
 
 In dynamic mode, Nix can't know at evaluation time whether Cargo built any
@@ -1490,11 +1492,15 @@ post-link steps and "no source references" check (which would fail
 `nix flake check` when everything is skipped). Alternative: keep the full
 product in checks and accept that failure. Default: the lighter check.
 
+>discuss
+
 ## 113. FYI: `explainSharing` uses import-from-derivation even in dynamic mode
 
 It's a debugging tool, not part of a build, so it reads the build steps the
 default way. For crates downstream of an embedded product it describes the
 default mode's version of them.
+
+>this seems fine? brief discuss
 
 ## 114. FYI: your config answers are implemented
 
@@ -1505,17 +1511,23 @@ now reproducible), 41 (LLVM table with a `rustc -vV` fallback), 55/59
 (flake systems from a nix-systems input), 81 (the dev shell works with a
 broken `Cargo.toml`). Each has a test.
 
+>ack
+
 ## 115. ASK: musl build machines
 
 The Linux preset default (105) applies when the build machine is Linux with
 glibc. On a musl build machine (Alpine-style), the native target gets no
 preset. Should it get `linuxMusl`?
 
+>how does it know what the build machine is in a pure flake?
+
 ## 116. ASK: `nix-systems/default-linux` instead of `default`
 
 You said `nix-systems/default`; the flake uses `default-linux` because
 `default` also lists the two macOS systems, which breakbulk doesn't support
 yet. It's a one-line switch once Darwin works.
+
+>ack. do we have a gh issue for mac that includes this?
 
 ## 117. FYI: the coverage crash is a nixpkgs bug, already fixed upstream (resolves 73)
 
@@ -1525,6 +1537,8 @@ instrumented programs crash at exit. Already reported (nixpkgs#576588) and
 fixed on nixpkgs master (PR #578990, "rustc: use llvmPackages_23"), not yet
 in `nixos-unstable`. Details and a two-line reproducer:
 `docs/spikes/research-coverage-and-libpath.md`.
+
+>ack
 
 ## 118. ASK: coverage follow-ups
 
@@ -1536,6 +1550,8 @@ in `nixos-unstable`. Details and a two-line reproducer:
   a Cargo bug: with `build.build-dir` outside `target/`, Cargo drops build
   scripts' library paths from `LD_LIBRARY_PATH`). Want either filed? Nothing
   has been sent.
+  
+>a. yes b. what's the cost c. no
 
 ## 119. FYI: one rule for "library path inside the build" (resolves 84)
 
@@ -1550,6 +1566,8 @@ compile with a proc macro rebuild whenever any build script anywhere
 changed. Two crates (`sdl2-sys` bundled, `ort-sys` copy-dylibs) copy
 libraries into Cargo's target directory itself; no rule can support that in
 a sandbox, so that's a separate known gap.
+
+>ack
 
 ## 120. FYI: verification results (resolves 34, 96, 98, 103; updates 102)
 
@@ -1571,6 +1589,8 @@ a sandbox, so that's a separate known gap.
 - **build-std (98):** works. The standard library's own dependencies come
   from the toolchain's `rust-src`, so nothing extra is downloaded.
 
+>ack
+  
 ## 121. ASK: trim-paths details
 
 - breakbulk turns trim-paths on as `"all"` and then applies its own
@@ -1582,6 +1602,8 @@ a sandbox, so that's a separate known gap.
   others) fail planning. Alternative: apply breakbulk's own path hiding to
   just the "off" ones.
 Acceptable?
+
+>discuss
 
 ## 122. ASK: zig follow-ups
 
@@ -1595,6 +1617,8 @@ Acceptable?
   they're found via `LD_LIBRARY_PATH` or by shipping them alongside.
   Alternatives: link them statically, or have the zig linker record store
   paths.
+  
+>a. yea b. explain c. discuss, LD_LIBRARY_PATH probably not acceptable, why not elf fixups?
 
 ## 123. FYI: smaller verification notes
 
@@ -1604,6 +1628,8 @@ Acceptable?
 - Bare-metal build-std targets (`x86_64-unknown-none`) link with rustc's
   bundled lld, since there's no nixpkgs linker wrapper for them; the
   "never rust-lld" rule (68) is about the Linux wrapper.
+  
+>a. ack b. ack (never rust-lld? i don't remember that rule)
 
 ## 124. FYI: linker function, debug-output rule, wasip2 change (resolves 68, 97, 99)
 
@@ -1620,6 +1646,8 @@ Acceptable?
   1.97–1.99 → 33, 1.100–1.102 → 34, sourced from Rust's CI pins). The
   fetched library is byte-identical to the one inside each Rust toolchain,
   so std, C code and C library are one version. The link wrapper is gone.
+  
+>a. ack b. ack c. ack
 
 ## 125. ASK: Windows writes a `.pdb` even without debug info
 
@@ -1629,12 +1657,16 @@ write a PDB (1.2 MB for the test program). It carries symbol names for
 stack traces. Default: keep it in the `debug` output for every Windows
 binary. Alternative: discard it when debug info is off.
 
+>agree
+
 ## 126. FYI: smaller notes from batch A
 
 - With `split-debuginfo = "unpacked"`, libraries' `.dwo` files are still
   discarded, so source-level debugging into dependency code needs `packed`.
 - Building on a non-Linux machine now fails at evaluation with a clear
   message instead of silently choosing mold.
+  
+>a. ack b. why does mold only work on linux?
 
 ## 127. FYI: test options and link-step library folders (resolves 17, 61, 107)
 
@@ -1652,6 +1684,8 @@ binary. Alternative: discard it when debug info is off.
 - The test that was too strict with content-addressing on is fixed, and
   the dynamic-mode skip is gone.
 
+>a. ack b. ack c. ack d. ack
+
 ## 128. ASK: dynamic mode doesn't skip unchanged test re-runs yet
 
 In dynamic mode, test runs read their settings from a generated file that
@@ -1662,6 +1696,8 @@ re-run" saving is missing in dynamic mode. Fix: content-addressed copies
 of that file's inputs, like the default mode has. Do it now, or wait until
 dynamic mode is usable on a released Nix?
 
+>do we have a gh issue for it?
+
 > Resolved: later; recorded under "Known gaps (TODO)" in
 > `docs/implementation.md`.
 
@@ -1671,6 +1707,8 @@ Build-tool library folders (`NIX_LDFLAGS_FOR_BUILD`, e.g. cmake's) and
 `NIX_CFLAGS_LINK` aren't passed along, since setup hooks don't normally
 use them for libraries a binary links. If some library's setup hook does,
 it gets added.
+
+>research?
 
 
 ## 130. FYI: presets follow each workspace's compiler; future work written up (resolves 70, 91)
@@ -1685,6 +1723,8 @@ it gets added.
 - **91:** `docs/design.md` has a "Future work" section (pipelining via
   CRIU, interface-only rebuild cutoff blocked on rustc, content-addressed
   units blocked on NixOS/nix#11928), checked against upstream status today.
+  
+>a. ack b. ack, all in gh issues?
 
 ## 131. ASK: setting the same target field in both places
 
@@ -1693,6 +1733,8 @@ module definitions: lists concatenate, attribute sets merge, and a single
 value (like `preset` or `linker`) set in both places is an error unless one
 side uses `lib.mkForce`. Alternative: the workspace's value wins
 automatically for single values. Default: the module-system rule.
+
+>ack
 
 ## 132. FYI: field-trial gaps closed (resolves 109, 19, 123; and `root = self`)
 
@@ -1709,6 +1751,8 @@ automatically for single values. Default: the module-system rule.
 - `targets.<t>.stdenv` / `host.stdenv` override the C build environment.
 - On Cargo 1.101+, `cargo` in the dev shell gets the same crate IDs as the
   plan.
+  
+>a. self should be the doc default then if it makes lazy trees better? b. ack c. ack d. ack e. ack f. ack g. ack, is this useful? h. ack
 
 ## 133. ASK: other variants' tests run in `nix flake check` by default
 
@@ -1717,12 +1761,16 @@ Every build or coverage variant's tests now go into `repo.checks`; set
 tests run in `nix flake check` unless turned off. Alternative: off by
 default, opt in per variant.
 
+>discuss
+
 ## 134. ASK: toolchain references in products are now an error
 
 The default check fails when a product depends on rustc, its sysroot or
 cargo at run time. A binary built with `-C prefer-dynamic` legitimately
 needs libstd; the error message says how to keep only the source part of
 the check (`noSourceReferences { toolchain = [ ]; }`). OK as a default?
+
+>discuss
 
 ## 135. ASK: on Cargo 1.101+, the dev shell needs a working manifest again
 
@@ -1732,6 +1780,8 @@ undoes decision 81 for Cargo 1.101+ only; 1.99 and earlier are unchanged.
 Alternative: always set the trim-paths variable on 1.101+, which overrides
 a project's own setting. Neither is perfect; a third option is to fall
 back to "always set it" when planning fails.
+
+>discuss
 
 ## 136. FYI: the ten scattered decisions now each have one home
 
@@ -1760,12 +1810,18 @@ Following your "all 10, extensible for bring-your-own targets":
 Deferred, in "Known gaps (TODO)": install-layout sorting from traits
 (MinGW `.a` placement, macOS `.dylib`).
 
+>ack; do we have gh issues on the defers?
+
 ## 137. ASK: package-level `splitDebug` mismatch: warning or error?
 
 When a package adds or removes `splitDebug` against its target's setting,
 breakbulk now warns (removing it can be deliberate). Make it an error?
 
+>discuss
+
 ## 138. FYI: Android counts as Linux
 
 `isLinux` is true for `*-linux-android`, as in nixpkgs, so Android targets
 keep Linux linker and post-link choices.
+
+>discuss
