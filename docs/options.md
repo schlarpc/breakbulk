@@ -2981,8 +2981,6 @@ string
 
 ## workspaces\.\<name>\.variants\.\<name>\.targets
 
-
-
 The workspace’s targets (` workspaces.<ws>.targets `) this
 variant is planned for\. ` null `: every target\. A target left
 out has no ` target.<triple>.variants.<v> `, and nothing of the
