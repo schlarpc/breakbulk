@@ -28,7 +28,7 @@
         inherit nixpkgs;
       };
 
-      # breakbulk built by breakbulk (./breakbulk.nix, tests/self-host):
+      # breakbulk built by breakbulk (tests/self-host):
       # breakbulk-bb-<package>, each with bin/<program>. The binaries plans
       # and units use still come from lib/tools.nix (the bootstrap). The
       # names are listed here: the products' names come from the plan,

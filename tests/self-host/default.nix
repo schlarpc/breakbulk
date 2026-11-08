@@ -1,6 +1,6 @@
 # breakbulk builds itself (M2 exit: "the tool builds itself").
 #
-# `repo` is mkRepository over this repository with ./breakbulk.nix; its
+# `repo` is mkRepository over this repository's own workspace; its
 # products are breakbulk's four programs, built crate by crate through
 # breakbulk. lib/tools.nix (nixpkgs' buildRustPackage) still builds the
 # binaries every plan and unit uses: that is the bootstrap, and switching
@@ -35,7 +35,16 @@ let
 
   repo = breakbulk.mkRepository {
     inherit pkgs root;
-    modules = [ (root + "/breakbulk.nix") ] ++ modules;
+    modules = [
+      {
+        workspaces.breakbulk = {
+          path = ".";
+          # The profile lib/tools.nix's buildRustPackage builds with.
+          variants.default.profile = "release";
+        };
+      }
+    ]
+    ++ modules;
   };
   packages = repo.workspaces.breakbulk.packages;
 
