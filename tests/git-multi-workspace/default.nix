@@ -17,7 +17,9 @@
 #                 `cargo build -v` over the real repository (no source
 #                 replacement), unit by unit; `-<v>` on the other releases
 #                 of the supported window when the package set has
-#                 rust-overlay
+#                 rust-overlay; with the plan's `--config` for trim-paths
+#                 when the planner turned it on (`trimPathsDefault`,
+#                 Cargo >= 1.101)
 #
 # The repository sits at file:///build/gitdep, inside the sandbox's build
 # directory, where `repo` is copied before real Cargo fetches from it.
@@ -114,8 +116,14 @@ let
         cp -r --no-preserve=mode ${fixture}/consumer "$NIX_BUILD_TOP/skeleton"
         cd "$NIX_BUILD_TOP/skeleton"
         mkdir -p $out
-        cargo metadata --format-version 1 --locked > $out/metadata.json
-        cargo build -v --locked --target ${native} --profile dev \
+        common=(--locked)
+        # When the planner turned Cargo's trim-paths on (Cargo >= 1.101 and
+        # the project did not), the reference build does the same.
+        if grep -q '"trimPathsDefault":true' ${ws'.plans.build}/plan.json; then
+          common+=(--config 'profile.dev.trim-paths="all"')
+        fi
+        cargo metadata --format-version 1 "''${common[@]}" > $out/metadata.json
+        cargo build -v "''${common[@]}" --target ${native} --profile dev \
           --config "build.target-dir=\"$TMPDIR/target\"" 2> $out/build.log || { cat $out/build.log; exit 1; }
         $TMPDIR/target/${native}/debug/consumer > $out/output
         diff -u ${pkgs.writeText "expected" expectOutput} $out/output

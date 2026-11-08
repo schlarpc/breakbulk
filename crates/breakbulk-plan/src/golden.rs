@@ -34,7 +34,7 @@ use breakbulk_unit::splice::{
 };
 
 use crate::graph::{CARGO_BUILD_DIR_REMAP, OVERRIDDEN_OUT_DIR};
-use crate::records::Metadata;
+use crate::records::{Metadata, Package};
 
 /// Split a command line as Cargo prints it (`shell-escape` quoting: single
 /// quotes, and backslash escapes outside quotes).
@@ -263,6 +263,7 @@ struct Real<'a> {
     plan: &'a Plan,
     skeleton: String,
     crate_dirs: BTreeMap<String, String>,
+    packages: BTreeMap<&'a str, &'a Package>,
     out_dirs: BTreeMap<UnitId, String>,
     run_dirs: BTreeMap<UnitId, String>,
 }
@@ -413,11 +414,23 @@ fn normal_env(
 /// in the real build, then both forms are dropped. When the planner turned
 /// trim-paths on itself, it dropped Cargo's `--remap-path-scope` (breakbulk
 /// sets the scope), so the real side's is dropped too.
+///
+/// The package remap differs by design when the real build reads a git or
+/// registry source from `$CARGO_HOME` and the planner reads the same crate
+/// from its vendor directory. Cargo remaps a git checkout's root
+/// (`<checkouts>/<repo>/<rev>=/cargo/git/<repo hash>/<rev>`) or a registry's
+/// source directory (`=/cargo/registry/<id>`) only when the package lies
+/// there; any other package outside the workspace gets its own root remapped
+/// to `/cargo/deps/<name>-<version>` (cargo `src/compiler/trim_paths.rs`,
+/// `package_remap` and `git_checkout`, at 3c747ea3e; introduced by
+/// 5b3974ed2). The real side's `$CARGO_HOME` form is therefore rewritten to
+/// the vendored one, after checking that it names a directory holding `pkg`.
 fn trim_paths_normal(
     args: &[String],
     target: &Path,
     plan: &Plan,
     traced: bool,
+    pkg: Option<&Package>,
 ) -> Result<Vec<String>, String> {
     if !plan.trim_paths {
         return Ok(args.to_vec());
@@ -429,6 +442,21 @@ fn trim_paths_normal(
             .and_then(|r| r.rsplit_once('='))
         {
             if !traced && to == CARGO_BUILD_DIR_REMAP && Path::new(from) == target {
+                continue;
+            }
+            if !traced && (to.starts_with("/cargo/git/") || to.starts_with("/cargo/registry/")) {
+                let Some(p) = pkg.filter(|p| Path::new(p.dir()).starts_with(from)) else {
+                    return Err(format!(
+                        "the source remap `{a}` does not name the directory of {}",
+                        pkg.map_or("the unit's package", |p| p.id.as_str())
+                    ));
+                };
+                out.push(format!(
+                    "--remap-path-prefix={}=/cargo/deps/{}-{}",
+                    p.dir(),
+                    p.name,
+                    p.version
+                ));
                 continue;
             }
             if traced && let Some(rel) = to.strip_prefix(&format!("{CARGO_BUILD_DIR_REMAP}/")) {
@@ -505,6 +533,11 @@ pub fn compare_with(
             .packages
             .iter()
             .map(|p| (p.id.clone(), p.dir().to_owned()))
+            .collect(),
+        packages: metadata
+            .packages
+            .iter()
+            .map(|p| (p.id.as_str(), p))
             .collect(),
         out_dirs: real
             .iter()
@@ -591,9 +624,13 @@ pub fn compare_with(
             }
         };
         report.compared += 1;
+        let pkg = match &plan.units[*id] {
+            Unit::Compile(c) => resolver.packages.get(c.package.as_str()).copied(),
+            Unit::Run(_) => None,
+        };
         let (got, want) = match (
-            trim_paths_normal(&got, target, plan, true),
-            trim_paths_normal(&real[*id].args, target, plan, false),
+            trim_paths_normal(&got, target, plan, true, pkg),
+            trim_paths_normal(&real[*id].args, target, plan, false, pkg),
         ) {
             (Ok(g), Ok(w)) => (g, w),
             (Err(e), _) | (_, Err(e)) => {
@@ -799,9 +836,13 @@ fn compare_doctests(
             want.push(r.args[i].clone());
             i += 1;
         }
+        let pkg = resolver
+            .packages
+            .get(plan.doctests[id.as_str()].package.as_str())
+            .copied();
         let (got, want) = match (
-            trim_paths_normal(&got, target, plan, true),
-            trim_paths_normal(&want, target, plan, false),
+            trim_paths_normal(&got, target, plan, true, pkg),
+            trim_paths_normal(&want, target, plan, false, pkg),
         ) {
             (Ok(g), Ok(w)) => (g, w),
             (Err(e), _) | (_, Err(e)) => {
@@ -909,15 +950,55 @@ mod tests {
             "x",
         ]);
         let want = a(&["--remap-path-prefix=/s/ws=.", "-C", "x"]);
-        assert_eq!(trim_paths_normal(&real, t, &plan, false).unwrap(), want);
-        assert_eq!(trim_paths_normal(&traced, t, &plan, true).unwrap(), want);
+        assert_eq!(
+            trim_paths_normal(&real, t, &plan, false, None).unwrap(),
+            want
+        );
+        assert_eq!(
+            trim_paths_normal(&traced, t, &plan, true, None).unwrap(),
+            want
+        );
         // A remap that names another directory than <target>/<rel>.
         let wrong = a(&["--remap-path-prefix=/x/out=/cargo/build-dir/debug/build/a/1/out"]);
-        assert!(trim_paths_normal(&wrong, t, &plan, true).is_err());
+        assert!(trim_paths_normal(&wrong, t, &plan, true, None).is_err());
+        // A git package read from $CARGO_HOME by the real build: Cargo
+        // remaps the checkout root; the vendored plan remaps the package
+        // root to /cargo/deps/<name>-<version>.
+        let pkg: Package = serde_json::from_value(serde_json::json!({
+            "id": "git+file:///r#a@1.0.0", "name": "a", "version": "1.0.0",
+            "source": "git+file:///r#b7d7b61", "targets": [],
+            "manifest_path": "/h/git/checkouts/r-1/b7d7b61/crates/a/Cargo.toml"
+        }))
+        .unwrap();
+        let vendored =
+            a(&["--remap-path-prefix=/h/git/checkouts/r-1/b7d7b61/crates/a=/cargo/deps/a-1.0.0"]);
+        for to in [
+            "/cargo/git/9d632b146c62ec3e/b7d7b61",
+            "/cargo/registry/0123",
+        ] {
+            let real = vec![format!(
+                "--remap-path-prefix=/h/git/checkouts/r-1/b7d7b61={to}"
+            )];
+            assert_eq!(
+                trim_paths_normal(&real, t, &plan, false, Some(&pkg)).unwrap(),
+                vendored
+            );
+            // Without the package, or naming a directory not holding it.
+            assert!(trim_paths_normal(&real, t, &plan, false, None).is_err());
+            let other = vec![format!(
+                "--remap-path-prefix=/h/git/checkouts/r-2/b7d7b61={to}"
+            )];
+            assert!(trim_paths_normal(&other, t, &plan, false, Some(&pkg)).is_err());
+        }
+        // The traced side is compared as it is.
+        assert_eq!(
+            trim_paths_normal(&vendored, t, &plan, true, Some(&pkg)).unwrap(),
+            vendored
+        );
         // The project's own setting: its scope is compared.
         plan.trim_paths_default = false;
         assert_eq!(
-            trim_paths_normal(&real, t, &plan, false).unwrap()[0],
+            trim_paths_normal(&real, t, &plan, false, None).unwrap()[0],
             "--remap-path-scope=all"
         );
     }
