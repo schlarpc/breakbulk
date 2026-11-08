@@ -919,3 +919,4 @@ Spikes A, B and C gate M1 and M2. The rest are measurements to take as soon as t
 Accepted gaps with an agreed fix, not yet scheduled:
 
 - **Dynamic-mode test-run cutoff** (decision 128). In dynamic mode a test run reads its settings from a generated wrapper file that names the package's source view and build-script outputs, so any edit there re-runs it, even with `ca`, `test.stripForRun` and `test.runFiles`. Fix: content-addressed copies of the wrapper's inputs, as IFD mode's `stableSpec` does.
+- **Products placed at a fixed path in a source view** (decision 110). Crates like rust-embed read embedded files from a path relative to the source, not from an environment variable. Let a package place another product at a path inside its own source view (only that package's units change), as `packages.<name>.env` does for environment variables.
