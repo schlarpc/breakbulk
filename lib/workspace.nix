@@ -7,6 +7,8 @@
 #     root = ./.;                      # the repository root
 #     path = ".";                      # the workspace, relative to root
 #     toolchain = { inherit (pkgs) rustc cargo; };
+#     # toolchain.capabilities = { remapPathScope = false; };  overrides
+#     # (lib/toolchain-facts.nix); null values are ignored
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
 #     features = [ ];
@@ -27,6 +29,8 @@
 #   ws.plans.{build,test}      the plan derivations ($out/plan.json)
 #   ws.cargoEnv                the dev shell's cargo-env.json (no planning)
 #   ws.units.{build,test}      every unit derivation, by unit id
+#   ws.capabilities            the toolchain's capabilities, as the planner
+#                              and breakbulk-instantiate get them
 #
 # Arguments added for mkRepository (lib/repository.nix), all optional:
 #   select = [ "<pkg>" ];      plan with -p for each instead of --workspace
@@ -67,6 +71,7 @@
   testRuns,
   testApps,
   dynamic,
+  toolchainFacts,
   targetTraitsLib,
 }:
 pkgs:
@@ -225,6 +230,16 @@ let
     }
   ) views;
 
+  # What the toolchain can do (lib/toolchain-facts.nix), with the
+  # toolchain's own overrides: the one place the planner's and
+  # breakbulk-instantiate's capabilities come from.
+  capabilities =
+    (toolchainFacts.of {
+      inherit pkgs;
+      inherit (toolchain) rustc cargo;
+      capabilities = toolchain.capabilities or { };
+    }).capabilities;
+
   # Check and clippy variants link nothing: no roots, no test runs.
   checking = mode == "check" || mode == "clippy";
 
@@ -249,6 +264,7 @@ let
         ;
       packages = if kind == "test" then testSelect else select;
       inherit (toolchain) cargo rustc;
+      inherit capabilities;
       skeleton = skel;
       name = "${name}-plan";
     }
@@ -381,6 +397,7 @@ let
       overrides = overrides // packageOverrides;
       inherit strictSources shippedRemapScope;
       targetTraits = targetTraitsLib.forRust traits;
+      inherit capabilities;
       roots =
         if checking then
           null
@@ -485,7 +502,7 @@ in
     test = tested.unitsJson;
   }
   // lib.optionalAttrs bench { bench = benched.unitsJson; };
-  inherit delivery;
+  inherit delivery capabilities;
   # Dynamic-derivation mode: the outer derivations, by plan kind.
   outer = lib.optionalAttrs isDynamic {
     build = built.outer;

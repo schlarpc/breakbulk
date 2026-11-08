@@ -368,9 +368,10 @@ impl Resolve for Tokens<'_> {
 
     fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
         // Test harnesses remap every scope; so does everything without a
-        // shipped scope (no `splitDebug`) or on rustc before 1.95.
+        // shipped scope (no `splitDebug`) or with a rustc that has no
+        // `--remap-path-scope` (toolchains.json's `capabilities`).
         let scope = self.inputs.toolchains.shipped_remap_scope.as_deref()?;
-        if !has_remap_scope(&self.inputs.plan.rustc) || is_test_compile(unit) {
+        if !self.inputs.toolchains.capabilities.remap_path_scope || is_test_compile(unit) {
             return None;
         }
         // Coverage instruments target units only (the spec's rustflags), so
@@ -474,13 +475,6 @@ impl Resolve for Tokens<'_> {
             .collect::<Result<_, Error>>()?;
         Ok(self.token(Ref::Join { sep, items }))
     }
-}
-
-/// Whether rustc takes `--remap-path-scope` (breakbulk-format's
-/// `version::REMAP_PATH_SCOPE`). `rustc` is the plan's `rustc -vV` release
-/// line (`1.99.0 (… )`, `1.101.0-nightly …`).
-pub fn has_remap_scope(rustc: &str) -> bool {
-    breakbulk_format::version::REMAP_PATH_SCOPE.reached_by(rustc)
 }
 
 fn platform(unit: &Unit) -> Platform {

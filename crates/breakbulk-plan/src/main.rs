@@ -7,8 +7,8 @@
 //!   --kind build|test|bench [--mode build|check|clippy|coverage] \
 //!   [--clippy-driver PATH] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
-//!   [--config FILE-OR-VALUE]… [--spec FILE] --scratch DIR [--forbid PATH]… --out plan.json \
-//!   [--cargo-env cargo-env.json]
+//!   [--config FILE-OR-VALUE]… [--spec FILE] --capabilities FILE \
+//!   --scratch DIR [--forbid PATH]… --out plan.json [--cargo-env cargo-env.json]
 //!
 //! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
 //!   --target TRIPLE [--spec FILE] --scratch DIR --cargo-env cargo-env.json
@@ -16,6 +16,10 @@
 //!
 //! `--cargo-env-only` writes only the dev shell's `cargo-env.json`, from the
 //! project's Cargo config files and rustc, without running Cargo.
+//!
+//! `--capabilities` is the toolchain's capabilities as JSON
+//! (`breakbulk_format::Capabilities`, the Nix library's `toolchainFacts`):
+//! whether Cargo has `trim-paths` and allows unstable features.
 
 use std::process::ExitCode;
 
@@ -29,7 +33,8 @@ fn usage() -> ! {
          [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-arg A]... \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
-         [--config X]... [--spec FILE] --scratch DIR [--forbid PATH]... --out FILE \
+         [--config X]... [--spec FILE] --capabilities FILE --scratch DIR [--forbid PATH]... \
+         --out FILE \
          [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
          --target TRIPLE [--spec FILE] --scratch DIR --cargo-env FILE"
@@ -63,6 +68,7 @@ fn main() -> ExitCode {
         spec: None,
         trim_paths_default: false,
         std_vendor: None,
+        capabilities: None,
     };
     let mut out = None;
     let mut cargo_env_out: Option<String> = None;
@@ -111,6 +117,13 @@ fn main() -> ExitCode {
             "--scratch" => opts.scratch = val(),
             "--forbid" => opts.forbidden.push(val()),
             "--spec" => opts.spec = Some(val()),
+            "--capabilities" => match breakbulk_format::Capabilities::read(&val()) {
+                Ok(c) => opts.capabilities = Some(c),
+                Err(e) => {
+                    eprintln!("breakbulk-plan: --capabilities: {e}");
+                    return ExitCode::FAILURE;
+                }
+            },
             "--out" => out = Some(val()),
             "--cargo-env" => cargo_env_out = Some(val()),
             "--cargo-env-only" => cargo_env_only = true,
@@ -135,6 +148,9 @@ fn main() -> ExitCode {
         usage();
     }
     let Some(out) = out else { usage() };
+    if opts.capabilities.is_none() {
+        usage();
+    }
     match breakbulk_plan::plan_with_cargo_env(&opts) {
         Ok((plan, cargo_env)) => {
             let mut text = plan.to_canonical_json();

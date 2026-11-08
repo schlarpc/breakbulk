@@ -569,6 +569,17 @@ let
   # toolchain a runtime dependency). Only `${input}` is checked, so a
   # separate `debug` output is exempt. Paths are compared as strings, so
   # they are not realised for the check.
+  #
+  # One toolchain reference is allowed (decision 134): a toolchain path
+  # that holds a shared library the checked output itself loads. The
+  # needed libraries are read from the output's files (ELF `NEEDED`, PE
+  # imports), and a toolchain path is allowed when one of them is a file in
+  # its `lib`, `bin` or `lib/rustlib/<target>/{lib,bin}`. So a binary linked
+  # with `-C prefer-dynamic` may reference the sysroot whose `libstd-*.so`
+  # it loads, while rustc's own component, cargo and rust-src, which hold
+  # no such library, never are. (A rust-overlay toolchain's joined sysroot
+  # brings its rustc and cargo components along, so such a binary still
+  # fails there.) Only toolchain paths found in the closure cost a scan.
   noSourceReferences = mkHelper "noSourceReferences" { sources = null; toolchain = null; } (
     cfg:
     {
@@ -588,10 +599,41 @@ let
         closure = pkgs.closureInfo { rootPaths = [ input ]; };
         sourcesList = listFile "sources" sources;
         toolchainList = listFile "toolchain" toolchain;
+        # readelf reads ELF of every architecture; objdump -p prints PE
+        # imports ("DLL Name:").
+        binutils = pkgs.buildPackages.binutils-unwrapped;
       }
       ''
         set -euo pipefail
         bad=0
+        # The shared libraries the checked output's files load (computed
+        # once, on first use).
+        needed=
+        neededLibs() {
+          [ -z "$needed" ] || return 0
+          needed=$TMPDIR/needed
+          find -L ${input} -type f | while IFS= read -r f; do
+            { "$binutils/bin/readelf" -d "$f" 2>/dev/null || true; } \
+              | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p'
+            { "$binutils/bin/objdump" -p "$f" 2>/dev/null || true; } \
+              | sed -n 's/^[[:space:]]*DLL Name: *//p'
+          done | sort -u > "$needed"
+        }
+        # Whether toolchain path "$1" holds a library the output loads.
+        loadsFrom() {
+          neededLibs
+          local n d
+          while IFS= read -r n; do
+            [ -n "$n" ] || continue
+            for d in "$1/lib" "$1/bin" "$1"/lib/rustlib/*/lib "$1"/lib/rustlib/*/bin; do
+              if [ -e "$d/$n" ]; then
+                echo "noSourceReferences: ${product.name} loads $n from the Rust toolchain's $1: allowed" >&2
+                return 0
+              fi
+            done
+          done < "$needed"
+          return 1
+        }
         while IFS= read -r s; do
           [ -n "$s" ] || continue
           if grep -qxF "$s" "$closure/store-paths"; then
@@ -601,14 +643,14 @@ let
         done < "$sourcesList"
         while IFS= read -r s; do
           [ -n "$s" ] || continue
-          if grep -qxF "$s" "$closure/store-paths"; then
+          if grep -qxF "$s" "$closure/store-paths" && ! loadsFrom "$s"; then
             echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references the Rust toolchain $s" >&2
             bad=1
           fi
         done < "$toolchainList"
         if [ "$bad" = 1 ]; then
           echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in breakbulk's design." >&2
-          echo "(A binary that links std dynamically, -C prefer-dynamic, needs the toolchain at run time: turn this check off for it.)" >&2
+          echo "(A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic; \`noSourceReferences { toolchain = [ ]; }\` checks sources only.)" >&2
           exit 1
         fi
         touch "$out"

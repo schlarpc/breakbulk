@@ -465,7 +465,7 @@ in
             removeAttrs (bb.toolchainFacts.of {
               inherit pkgs;
               rustc = r;
-            }) [ ];
+            }) [ "capabilities" ];
         in
         [
           (f rust)
@@ -487,6 +487,61 @@ in
         }
         (lib.toInt (lib.versions.major pkgs.rustc.llvmPackages.llvm.version))
       ];
+    };
+    # Toolchain capabilities (lib/toolchain-facts.nix): from the rustc and
+    # cargo versions across the supported window; from the toolchain itself
+    # (IFD: `rustc --remap-path-scope`, `cargo -V`) without a version, which
+    # agrees with the table on both sides of 1.95; overrides win, null ones
+    # are ignored; an unknown name fails.
+    testToolchainCapabilities = {
+      expr =
+        let
+          caps =
+            tc: overrides:
+            (bb.toolchainFacts.of {
+              inherit pkgs;
+              rustc = tc;
+              cargo = tc;
+              capabilities = overrides;
+            }).capabilities;
+          noVersion = tc: removeAttrs tc [ "version" ];
+          r = v: pkgs.rust-bin.stable.${v}.minimal;
+          nightly = pkgs.rust-bin.nightly.latest.minimal;
+        in
+        [
+          (caps (r "1.94.0") { })
+          (caps (r "1.95.0") { })
+          (caps (r "1.97.0") { })
+          (caps (r "1.99.0") { })
+          (caps nightly { })
+          (caps pkgs.rustc { })
+          (caps (noVersion (r "1.94.0")) { })
+          (caps (noVersion (r "1.95.0")) { })
+          (caps (noVersion nightly) { })
+          (caps (r "1.99.0") {
+            remapPathScope = false;
+            trimPaths = true;
+            nightly = null;
+          })
+          (builtins.tryEval (caps (r "1.99.0") { remapPathscope = false; })).success
+        ];
+      expected =
+        let
+          c = remapPathScope: trimPaths: nightly: { inherit remapPathScope trimPaths nightly; };
+        in
+        [
+          (c false false false)
+          (c true false false)
+          (c true false false)
+          (c true false false)
+          (c true true true)
+          (c true false false)
+          (c false false false)
+          (c true false false)
+          (c true true true)
+          (c false true false)
+          false
+        ];
     };
     # Unknown names: no built-in traits, and every field fails only when
     # read.

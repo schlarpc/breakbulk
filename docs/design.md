@@ -255,7 +255,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 
 Any rustc/cargo pair works: nixpkgs `rustPlatform`, rust-overlay or fenix, including `fromRustupToolchainFile`. The planner runs the user's own cargo, so resolver and lockfile behavior match local builds. Nightly and build-std work when the user brings a nightly; the tool's defaults never need one.
 
-Supported Cargo releases form a rolling window: roughly the last six months of stable, plus current nightly. Features newer than the floor (`--remap-path-scope`, `trim-paths`) have fallbacks. Repositories pinned to older toolchains, MSRV variants and vendor-forked toolchains may work but are not tested.
+Supported Cargo releases form a rolling window: roughly the last six months of stable, plus current nightly. Features newer than the floor (`--remap-path-scope`, `trim-paths`) have fallbacks; whether a toolchain has them is decided once, as its capabilities (from its version, or by asking it), and a vendor-forked toolchain can override them. Repositories pinned to older toolchains, MSRV variants and vendor-forked toolchains may work but are not tested.
 
 ### Linker selection
 

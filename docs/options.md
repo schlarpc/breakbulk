@@ -2468,6 +2468,123 @@ in { rustc = tc; cargo = tc; }
 
 
 
+## workspaces\.\<name>\.toolchain\.capabilities
+
+
+
+What this toolchain can do, where breakbulk would otherwise
+decide it from the rustc and cargo versions (or, for a
+toolchain without a ` version ` attribute, by asking them
+through import-from-derivation)\. Set one only for a
+forked or patched toolchain whose version says otherwise;
+` null ` keeps breakbulk’s own answer\. The planner and the
+instantiator read nothing else
+(` breakbulk.toolchainFacts.of `, “Toolchain capabilities”
+in docs/implementation\.md)\.
+
+
+
+*Type:*
+submodule
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{ remapPathScope = false; }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.toolchain\.capabilities\.nightly
+
+
+
+Cargo allows unstable features (default: a ` -nightly ` or ` -dev `
+Cargo release)\.
+
+
+
+*Type:*
+null or boolean
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.toolchain\.capabilities\.remapPathScope
+
+
+
+rustc takes ` --remap-path-scope ` (default: rustc 1\.95 or later)\.
+Without it, every unit remaps every path scope, so debug info names
+no real source paths even where it is split off\.
+
+
+
+*Type:*
+null or boolean
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.toolchain\.capabilities\.trimPaths
+
+
+
+Cargo has the ` trim-paths ` profile setting (default: Cargo 1\.101 or
+later, nightly 1\.101 included)\. The planner then turns it on when the
+project has not\.
+
+
+
+*Type:*
+null or boolean
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.toolchain\.cargo
 
 

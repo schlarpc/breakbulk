@@ -70,12 +70,12 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
         traced.configs.push(v.config.clone());
         traced.std_vendor = Some(v);
     }
+    let capabilities = trace::capabilities(opts)?;
     let first = trace::run(&traced)?;
     // Cargo's trim-paths ("trim-paths" in docs/implementation.md): when the
-    // project has not turned it on and Cargo has it, trace again with it on.
-    let (traced, t) = if !graph::trace_trims_paths(&first.records)
-        && trace::has_trim_paths(&first.cargo_version)
-    {
+    // project has not turned it on and Cargo has it (the toolchain's
+    // capabilities), trace again with it on.
+    let (traced, t) = if !graph::trace_trims_paths(&first.records) && capabilities.trim_paths {
         let o = trace::with_trim_paths(&traced);
         match trace::run(&o) {
             Ok(t) => (o, t),
