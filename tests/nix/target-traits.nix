@@ -248,6 +248,34 @@ in
         }
       ];
     };
+    # Linked by rust-lld as lld-link, so a PDB on every link, as on msvc.
+    testUefi = {
+      expr = pick [
+        "isUefi"
+        "isMsvc"
+        "objectFormat"
+        "executableSuffix"
+        "debugArtifacts"
+        "kernel"
+        "dylibPathVar"
+        "debugInfo"
+      ] (r "x86_64-unknown-uefi");
+      expected = {
+        isUefi = true;
+        isMsvc = false;
+        objectFormat = "pe";
+        executableSuffix = ".efi";
+        debugArtifacts = [
+          {
+            suffix = ".pdb";
+            when = "always";
+          }
+        ];
+        kernel = null;
+        dylibPathVar = null;
+        debugInfo = "keep";
+      };
+    };
     testWasm = {
       expr =
         map

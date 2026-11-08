@@ -61,8 +61,9 @@
 #                            { suffix; when; perObject ? false;
 #                              directory ? false; }
 #                          `when` is "always" (for every crate the linker
-#                          produces, whatever -C debuginfo says: msvc's
-#                          `.pdb`, rustc always passes /DEBUG; decision 97),
+#                          produces, whatever -C debuginfo says: the
+#                          `.pdb` of msvc and UEFI, which rustc links
+#                          MSVC-style and always passes /DEBUG; decision 97),
 #                          "split-packed" or "split-unpacked" (with
 #                          debuginfo on and that -C split-debuginfo).
 #                          `perObject`: one per object file (`.dwo`), not
@@ -425,7 +426,11 @@ let
       staticLibraryPrefix = if isMsvc then "" else "lib";
       staticLibrarySuffix = if isMsvc then ".lib" else ".a";
       debugArtifacts =
-        if isMsvc then
+        # The targets rustc links with an MSVC-style linker (its
+        # `msvc`/`msvc-lld` flavor, `debuginfo-kind` pdb): Windows msvc and
+        # UEFI, whose base spec builds on msvc's and links with rust-lld
+        # as lld-link (rustc_target spec/base/uefi_msvc.rs).
+        if isMsvc || isUefi then
           [
             {
               suffix = ".pdb";
