@@ -53,7 +53,7 @@ let
   stages = import ./stages.nix { inherit lib wasmBindgen; };
   testRuns = import ./test-runs.nix { inherit lib stages; };
   products = import ./products.nix { inherit lib stages; };
-  variants = import ./variants.nix { inherit lib; };
+  variants = import ./variants.nix { inherit lib util manifest; };
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;

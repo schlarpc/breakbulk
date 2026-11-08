@@ -390,4 +390,116 @@ runTests "lib-unit" {
         int = true;
       };
     };
+
+  # cargo-hack's per-package matrix (field-trial gap 10). Expected sets are
+  # what `cargo hack check --workspace --feature-powerset` and
+  # `--each-feature --print-command-list` (cargo-hack 0.6.45) print for the
+  # variants fixture: app has no features (one plain run); lib-a has
+  # default = [x], x, y and no optional dependencies (no --all-features in
+  # the powerset; `default+x` is left out, since default enables x).
+  testPackageFeaturePowerset =
+    let
+      ws = {
+        root = ../fixtures/variants;
+        path = "ws";
+        mode = "check";
+      };
+      shape = lib.mapAttrs (
+        _: v: {
+          inherit (v) packages mode;
+          features = v.features or [ ];
+          all = v.allFeatures or false;
+          noDefault = v.noDefaultFeatures or false;
+        }
+      );
+      lib-a = features: noDefault: all: {
+        packages = [ "lib-a" ];
+        mode = "check";
+        inherit features noDefault all;
+      };
+      app = {
+        hack-app = {
+          packages = [ "app" ];
+          mode = "check";
+          features = [ ];
+          noDefault = false;
+          all = false;
+        };
+      };
+    in
+    {
+      expr = {
+        powerset = shape (bb.variants.packageFeaturePowerset ws);
+        each = shape (bb.variants.packageFeaturePowerset (ws // { eachFeature = true; }));
+        depth1 = lib.attrNames (
+          bb.variants.packageFeaturePowerset (
+            ws
+            // {
+              depth = 1;
+              packages = [ "lib-a" ];
+            }
+          )
+        );
+        excluded = lib.attrNames (
+          bb.variants.packageFeaturePowerset (
+            ws
+            // {
+              packages = [ "lib-a" ];
+              excludeFeatures = [ "default" ];
+              excludeNoDefaultFeatures = true;
+            }
+          )
+        );
+        # An optional dependency that is an implicit feature brings
+        # --all-features back.
+        optional = map (r: r.suffix) (
+          bb.variants.packageRuns {
+            features = {
+              a = [ "dep:o" ];
+            };
+            optionalDeps = [ "z" ];
+            eachFeature = false;
+            depth = null;
+            excludeFeatures = [ ];
+            excludeNoDefaultFeatures = false;
+            excludeAllFeatures = false;
+          }
+        );
+        unknown = (builtins.tryEval (bb.variants.packageFeaturePowerset (ws // { packages = [ "nope" ]; }))).success;
+      };
+      expected = {
+        powerset = app // {
+          "hack-lib-a.no-default-features" = lib-a [ ] true false;
+          "hack-lib-a.default" = lib-a [ "default" ] true false;
+          "hack-lib-a.x" = lib-a [ "x" ] true false;
+          "hack-lib-a.y" = lib-a [ "y" ] true false;
+          "hack-lib-a.default+y" = lib-a [ "default" "y" ] true false;
+          "hack-lib-a.x+y" = lib-a [ "x" "y" ] true false;
+        };
+        each = app // {
+          "hack-lib-a.all-features" = lib-a [ ] false true;
+          "hack-lib-a.no-default-features" = lib-a [ ] true false;
+          "hack-lib-a.default" = lib-a [ "default" ] true false;
+          "hack-lib-a.x" = lib-a [ "x" ] true false;
+          "hack-lib-a.y" = lib-a [ "y" ] true false;
+        };
+        depth1 = [
+          "hack-lib-a.default"
+          "hack-lib-a.no-default-features"
+          "hack-lib-a.x"
+          "hack-lib-a.y"
+        ];
+        excluded = [
+          "hack-lib-a.x"
+          "hack-lib-a.x+y"
+          "hack-lib-a.y"
+        ];
+        optional = [
+          ".all-features"
+          ".no-default-features"
+          ".a"
+        ];
+        unknown = false;
+      };
+    };
 }

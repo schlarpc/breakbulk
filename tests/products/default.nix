@@ -832,6 +832,17 @@ in
                 mode = "check";
                 targets = [ musl ];
               };
+            }
+            # cargo-hack's per-package matrix for lib-a, one feature at a
+            # time (field-trial gap 10).
+            // breakbulk.variants.packageFeaturePowerset {
+              root = fixtures + "/variants";
+              path = "ws";
+              packages = [ "lib-a" ];
+              eachFeature = true;
+              mode = "check";
+              profile = "release";
+              targets = [ native ];
             };
           };
         }
@@ -849,9 +860,19 @@ in
         lib.filterAttrs (_: ok: !ok) {
           nativeVariants = lib.attrNames n.variants == [
             "default"
+            "hack-lib-a.all-features"
+            "hack-lib-a.default"
+            "hack-lib-a.no-default-features"
+            "hack-lib-a.x"
+            "hack-lib-a.y"
             "quiet"
             "y-only"
           ];
+          hackPlan =
+            selects "hack-lib-a.y" "build" "lib-a"
+            && lib.hasInfix " --features y " (planCmd "hack-lib-a.y" "build")
+            && lib.hasInfix " --no-default-features " (planCmd "hack-lib-a.y" "build");
+          hackInChecks = repo.checks ? "main/${native}/variant-hack-lib-a.y/check";
           muslVariants = lib.attrNames m.variants == [ "musl-check" ];
           muslEmpty = m.packages == { } && m.tests == { } && m.testRuns == { } && m.doctests == { };
           muslChecks = under "main/${musl}/" == [ "main/${musl}/variant-musl-check/check" ];
@@ -883,6 +904,7 @@ in
     pkgs.runCommand "variants-narrowing"
       {
         inherit yRun;
+        hack = repo.checks."main/${native}/variant-hack-lib-a.y/check";
         report = builtins.toJSON names;
       }
       ''

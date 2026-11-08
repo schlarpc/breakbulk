@@ -43,6 +43,9 @@ in
       ) repo.checks
     )
   );
+  feature-powerset = pkgs.linkFarm "kmsrsos-feature-powerset" (
+    flat (lib.filterAttrs (n: _: lib.hasPrefix "main/${native}/variant-hack-" n) repo.checks)
+  );
   policy-features = pkgs.linkFarm "kmsrsos-policy-features" (
     flat (
       lib.filterAttrs (

@@ -546,6 +546,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
 - `env` values may reference any derivation, including another workspace's products: `env.UI_DIST = repo.workspaces.ui.target.wasm32-unknown-unknown.packages.ui;`. They are passed to instantiation by reference.
 - A curated module of defaults for common `-sys` crates ships with the library: native inputs only, never a switch that swaps a bundled C library for a system one (decision 106; the removed ones are listed in `lib/sys-defaults.nix`). User values merge over it with ordinary module priorities.
 - An override whose `version` or name matches nothing in any lockfile is an evaluation warning, not silence.
+- Feature matrices are sets of variants made by helpers: `breakbulk.variants.featurePowerset` (one feature list for the whole workspace, with `--no-default-features`) and `breakbulk.variants.packageFeaturePowerset` (cargo-hack's per-package runs: `--feature-powerset` or `--each-feature`, `depth`, exclusions; each run a variant with `packages = [ <pkg> ]`, as cargo-hack runs each package on its own).
 
 ### Outputs
 

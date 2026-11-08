@@ -10,9 +10,11 @@
 #     on kmsrs-server only (`stampEnv`);
 #   - Windows x86_64 and aarch64 (msvc via xwin) for kmsrs-server and
 #     kmsrs-client, with the project's own `+crt-static` from
-#     .cargo/config.toml (x86_64) and the flake's (both).
+#     .cargo/config.toml (x86_64) and the flake's (both);
+#   - the per-package feature powerset (`checks.feature-powerset`: `cargo
+#     hack check --workspace --all-targets --feature-powerset`), natively.
 # Not covered: the coverage gate (cargo-llvm-cov thresholds), the
-# per-package feature powerset (cargo-hack), the container, OS images and
+# container, OS images and
 # boot checks (non-Rust stages over these products), and the nightly
 # `fuzz` and `panic-audit` workspaces (no toolchain pinned in the repo).
 {
@@ -96,6 +98,16 @@ in
           "kmsrs-policy/strict-clock-skew"
         ];
       };
+    }
+    # cargo-hack's matrix: one `cargo check --all-targets -p <pkg>` plan
+    # per package and feature set (13 for this workspace), dev profile as
+    # `cargo hack check` uses; each is in repo.checks as
+    # `main/<native>/variant-hack-<pkg>…/check`.
+    // breakbulk.variants.packageFeaturePowerset {
+      inherit root;
+      mode = "check";
+      profile = "dev";
+      targets = [ native ];
     };
   };
 

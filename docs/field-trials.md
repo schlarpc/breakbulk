@@ -394,7 +394,13 @@ ASK marks a choice for the author.
 9. **`noSourceReferences` does not look for toolchain paths.** Fix 5 was
    found by hand. The check could also fail on the toolchain's store
    paths.
-10. **No per-package feature powerset.** kmsrsos runs `cargo hack check
+10. **No per-package feature powerset.** Done:
+    `breakbulk.variants.packageFeaturePowerset` gives cargo-hack's runs
+    (`--feature-powerset` or `--each-feature`, `depth`, feature and
+    no-default/all-features exclusions) as one `-p <pkg>` variant each; on
+    kmsrsos it gives the same 13 runs as `cargo hack --print-command-list`,
+    and the trial uses it (checks: `lib-unit`,
+    `products-variants-narrowing`). Before: kmsrsos runs `cargo hack check
     --feature-powerset` (each package's own features, others at default);
     `variants.featurePowerset` sets features for the whole workspace with
     `--no-default-features`, which is a different matrix.
