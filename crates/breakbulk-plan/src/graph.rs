@@ -111,8 +111,9 @@ const ALWAYS_KEPT_ENV: &[&str] = &["CARGO"];
 /// `src/compiler/custom_build.rs`), `:`-separated.
 const TRIM_PATHS_REMAP_VAR: &str = "CARGO_TRIM_PATHS_REMAP";
 
-/// The dynamic-library path variable on the planning host.
-const DYLIB_VAR: &str = "LD_LIBRARY_PATH";
+/// The dynamic-library path variable on the planning host, where Cargo ran
+/// every recorded process (one definition, `breakbulk-unit`'s).
+const DYLIB_VAR: &str = breakbulk_format::HOST_DYLIB_PATH_VAR;
 
 /// What `CARGO_TARGET_TMPDIR` (compile-time env of integration tests and
 /// benches) becomes: a fixed path that the test-run derivation creates

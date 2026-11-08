@@ -62,6 +62,7 @@
   instantiate,
   testRuns,
   stages,
+  breakbulkTraits,
 }:
 let
   inherit (builtins)
@@ -365,18 +366,24 @@ let
   # `CARGO_*` variables (names the shell cannot export go to `__bb_env`,
   # for `env`).
   envFromInfo =
-    { jq, extra }:
-    ''
+    {
+      jq,
+      extra,
+      # testRuns.dylibPathOf's result for the target.
+      dylibPath ? {
+        var = "LD_LIBRARY_PATH";
+        sep = ":";
+      },
+    }:
+    lib.optionalString (dylibPath != null) ''
       mapfile -t __bb_flags < <(${jq} -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
       __bb_dylib=
       if [ ''${#__bb_flags[@]} -gt 0 ]; then
-        __bb_dylib=$(${jq} -rn ${lib.escapeShellArg testRuns.dylibJq} "''${__bb_flags[@]}")
+        __bb_dylib=$(${jq} -rn ${lib.escapeShellArg (testRuns.dylibJqWith dylibPath.sep)} "''${__bb_flags[@]}")
       fi
-      for __bb_p in ${lib.escapeShellArgs extra}; do
-        __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
-      done
-      export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-      unset __bb_dylib __bb_p __bb_flags
+      ${testRuns.exportDylib dylibPath extra}unset __bb_dylib __bb_p __bb_flags
+    ''
+    + ''
       eval "$(${jq} -r '.testSpec.configEnv // {} | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
       for __bb_f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
         eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$__bb_f/directives.json")"
@@ -398,6 +405,12 @@ let
       target,
       runner ? null,
       testSystem ? null,
+      traits ? null,
+      # testRuns.dylibPathOf's result (default: from the traits and runner).
+      dylibPath ? testRuns.dylibPathOf {
+        traits = if traits != null then traits else breakbulkTraits.resolve { triple = target; };
+        inherit runner;
+      },
       testPkgs ?
         if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
           pkgs
@@ -477,7 +490,7 @@ let
           exit 0
         fi
         ${envFromInfo {
-          inherit jq;
+          inherit jq dylibPath;
           extra = extraLibs;
         }}
         ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
@@ -626,7 +639,7 @@ let
       roots = lib.mapAttrs (
         _: rs: lib.listToAttrs (map (r: lib.nameValuePair (testRuns.binaryKey r.breakbulkRoot) r) rs)
       ) byPackage;
-      inherit extraLibs;
+      inherit extraLibs dylibPath;
       runner = runnerList;
     };
 
@@ -665,6 +678,7 @@ let
             fi
             ${envFromInfo {
               inherit jq;
+              inherit (t) dylibPath;
               extra = t.extraLibs;
             }}
             ${

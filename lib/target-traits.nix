@@ -51,7 +51,7 @@
 #                          LD_LIBRARY_PATH elsewhere, null for wasm and
 #                          bare metal. A runner may deliver it under
 #                          another name (wine: WINEPATH), see
-#                          lib/presets/runner.nix
+#                          `dylibPathOf` in lib/test-runs.nix
 #   stagePreset            the default post-link stage chain for a target
 #                          with no `stagePreset` (lib/stages.nix):
 #                          "linuxGnu" (split debug info) on Linux, "msvc"

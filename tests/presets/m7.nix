@@ -15,6 +15,9 @@
 #                     +crt-static: only system DLLs, PE time stamp 0; run
 #                     and tests under wine. Determinism was checked by hand
 #                     (`nix-build --check` on the .exe link units)
+#   windows-dll-*     a windows-gnu test binary importing a DLL its build
+#                     script built: the test run finds it through WINEPATH;
+#                     without it, wine fails (missing DLL)
 #   zig-*             host triple against glibc 2.17 with zig cc; newest
 #                     GLIBC symbol version 2.17 (objdump -T); host units
 #                     keep the host linker (asserted on the plan)
@@ -239,7 +242,58 @@ let
     };
   windowsGnuChecks =
     windowsGnuChecksFor "windows-gnu" "x86_64-pc-windows-gnu"
-    // windowsGnuChecksFor "windows-gnullvm" "x86_64-pc-windows-gnullvm";
+    // windowsGnuChecksFor "windows-gnullvm" "x86_64-pc-windows-gnullvm"
+    // windowsDllChecks;
+
+  # A test binary that imports a DLL its build script built into OUT_DIR.
+  # The test run finds it through WINEPATH (the wine runner's
+  # dynamic-library variable); the negative control runs the same binary
+  # under the runner without it, which fails as a missing DLL (status 53).
+  windowsDllRepo = mkRepo (fixtures + "/windows-dll") [
+    {
+      workspaces.main = wsWith (rustWith [ "x86_64-pc-windows-gnu" ]) [ "x86_64-pc-windows-gnu" ];
+      targets."x86_64-pc-windows-gnu".preset = presets.windowsGnu;
+    }
+  ];
+  windowsDllChecks =
+    let
+      t = windowsDllRepo.workspaces.main.target."x86_64-pc-windows-gnu";
+      run = t.testRuns.windows-dll."lib/windows_dll";
+    in
+    {
+      windows-dll-test = run;
+      windows-dll-needs-dll =
+        pkgs.runCommand "windows-dll-needs-dll"
+          {
+            nativeBuildInputs = [
+              pkgs.buildPackages.binutils
+              pkgs.jq
+            ];
+          }
+          ''
+            exe=$(echo ${run.binary}/*)
+            objdump -p "$exe" | grep -i 'DLL Name' | tee dlls.txt
+            grep -q 'bbdll.dll' dlls.txt
+            # Before WINEPATH, the run set LD_LIBRARY_PATH to the same
+            # directories, as Cargo does on a Linux host: wine does not
+            # search it for DLLs.
+            # (Without content addressing, which copies them elsewhere.)
+            dirs=$(jq -rn ${lib.escapeShellArg breakbulk.testRuns.dylibJq} ${
+              lib.concatMapStringsSep " " (f: "${f}/directives.json") run.breakbulkTest.dylib.flags
+            })
+            echo "LD_LIBRARY_PATH=$dirs"
+            ls $dirs | grep -q bbdll.dll
+            set +e
+            LD_LIBRARY_PATH=$dirs ${lib.escapeShellArgs t.runner} "$exe" > out.txt 2>&1
+            status=$?
+            set -e
+            cat out.txt
+            [ "$status" = 53 ] || { echo "expected a missing-DLL failure (53), got $status"; exit 1; }
+            grep -q 'test result: ok' ${run}/log
+            mkdir -p $out
+            cp dlls.txt $out/
+          '';
+    };
 
   # --- zig -----------------------------------------------------------------------
 

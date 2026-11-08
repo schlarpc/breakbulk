@@ -169,7 +169,8 @@ pub struct TestSpec {
     pub env: BTreeMap<String, String>,
     /// The project's `[env]` variables Cargo set on the test unit (the
     /// plan's `configEnv`), which `cargo test` also sets on the test
-    /// process; not the runtime variables above, not `LD_LIBRARY_PATH`.
+    /// process; not the runtime variables above, not the host's
+    /// dynamic-library variable, which Cargo sets itself.
     pub config_env: BTreeMap<String, String>,
     /// `flags` outputs of the runs whose `rustc-env` values the process gets.
     pub env_flags: Vec<String>,
@@ -235,7 +236,7 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str, root: &RootOut) -> Result
     for (k, v) in &c.env {
         let into = if is_runtime_var(k) {
             &mut env
-        } else if plan.config_env.contains(k) && k != "LD_LIBRARY_PATH" {
+        } else if plan.config_env.contains(k) && k != breakbulk_format::HOST_DYLIB_PATH_VAR {
             &mut config_env
         } else {
             continue;

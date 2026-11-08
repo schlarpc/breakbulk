@@ -28,12 +28,20 @@ in
 {
   # wine with a fresh prefix in $TMPDIR (docs/spikes/msvc.md). `wine64` is
   # wineWow64Packages.minimal: 64-bit and 32-bit programs, no X11.
+  #
+  # A Windows program finds DLLs on its PATH, and the Windows PATH under
+  # wine is not the Unix one: wine prepends WINEPATH, `;`-separated, whose
+  # entries may be Unix paths (checked with wine 11.0: a DLL in a
+  # directory named by WINEPATH loads; on the Unix PATH or
+  # LD_LIBRARY_PATH it does not, exit status 53). So test runs give the
+  # dynamic-library path to Windows test binaries as WINEPATH
+  # (`breakbulkDylibPath`, read by testRuns.dylibPathOf).
   wine =
     {
       pkgs,
       wine ? pkgs.wineWow64Packages.minimal,
     }:
-    script pkgs "breakbulk-runner-wine" ''
+    (script pkgs "breakbulk-runner-wine" ''
       tmp="''${TMPDIR:-/tmp}"
       export HOME="$tmp/wine-home" WINEPREFIX="$tmp/wine-prefix"
       export WINEDEBUG="''${WINEDEBUG:--all}" WINEDLLOVERRIDES="''${WINEDLLOVERRIDES:-mscoree,mshtml=}"
@@ -42,7 +50,13 @@ in
         ${wine}/bin/wineboot --init >/dev/null 2>&1 || true
       fi
       exec ${wine}/bin/wine "$@"
-    '';
+    '')
+    // {
+      breakbulkDylibPath = {
+        var = "WINEPATH";
+        sep = ";";
+      };
+    };
 
   # qemu user-mode emulation. Programs built against a nixpkgs cross libc
   # name their dynamic loader by store path, so no -L sysroot is needed.

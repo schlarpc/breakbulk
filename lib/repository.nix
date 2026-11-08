@@ -462,6 +462,7 @@ let
       {
         mkWorkspace = { };
         runner = null;
+        testDylibPath = breakbulkLib.testRuns.dylibPathOf { traits = traitsOf wsName triple; };
         testSystem = null;
       }
     else
@@ -486,6 +487,12 @@ let
         # A program, or a list: program and arguments (as Cargo's
         # `target.<triple>.runner` takes a string or an array).
         runner = if runner == null then null else map (x: "${x}") (lib.toList runner);
+        # How its test processes find shared libraries: the runner's way
+        # (wine: WINEPATH), else the target's traits.
+        testDylibPath = breakbulkLib.testRuns.dylibPathOf {
+          traits = traitsOf wsName triple;
+          inherit runner;
+        };
         inherit (t) testSystem;
       };
 
@@ -679,7 +686,7 @@ let
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
       bench = v.benches;
-      inherit (s) runner testSystem;
+      inherit (s) runner testSystem testDylibPath;
     }
     // s.mkWorkspace
     // {

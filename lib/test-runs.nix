@@ -12,6 +12,10 @@
 #     target;        # the target triple
 #     runner = null;      # null (native) or [ program arg … ]
 #     testSystem = null;  # e.g. "aarch64-linux": run tests on that system
+#     traits = <built-in>;  # the target's traits (lib/target-traits.nix)
+#     dylibPath = <from the runner or the traits>;  # { var; sep; } or null:
+#                         # the variable the test process finds shared
+#                         # libraries through (`dylibPathOf`)
 #     testPkgs = <pkgs for testSystem>;
 #     packages = { };     # packages.<name>.test, as in the module options
 #     ca = null;          # null: automatic (stages.caAuto); true; false
@@ -52,7 +56,9 @@
 #     `RUST_TEST_THREADS=$NIX_BUILD_CORES`. Cargo applies `[env]` last but
 #     never over a variable it set itself (`apply_env_config`), so `[env]`
 #     loses to all of Cargo's own;
-#   - the dynamic-library path holds, sorted as Cargo sorts paths, the
+#   - the dynamic-library path (the target's variable, `dylibPathOf`:
+#     LD_LIBRARY_PATH on Linux, WINEPATH under wine, none for wasm) holds,
+#     sorted as Cargo sorts paths, the
 #     search paths printed by any run of the test's platform that lie inside
 #     the printing run's `out` or the `out` of a run it received `DEP_*`
 #     metadata from (Cargo: inside the target's output directory; the same
@@ -70,7 +76,11 @@
 #
 # Test binaries the plan lacks (required features) are instantiation's
 # stubs, which succeed and log why.
-{ lib, stages }:
+{
+  lib,
+  stages,
+  targetTraits,
+}:
 let
   inherit (builtins)
     fromJSON
@@ -86,6 +96,36 @@ let
   binaryKey = r: if r.kind == "test" then r.target else "${r.kind}/${r.target}";
 
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
+
+  # The variable that holds the dynamic-library path of a recorded
+  # process: the build machine's, since every recorded process (rustc,
+  # build scripts) ran there (Cargo's `dylib_path_envvar` for its host;
+  # breakbulk_unit::splice::DYLIB_PATH_VAR).
+  hostDylibPathVar = pkgs: (targetTraits.resolve { triple = targetTraits.nativeTriple pkgs.buildPackages; }).dylibPathVar;
+
+  # How a test process of a target finds shared libraries: `{ var; sep; }`,
+  # or null when it has no such variable (wasm, bare metal). The runner's
+  # own, when it declares one (`breakbulkDylibPath`: wine reads WINEPATH,
+  # not the Windows PATH), else the target's traits (`dylibPathVar`,
+  # `dylibPathSep`). Cargo itself sets its host's variable for the runner
+  # (`dylib_path_envvar`), which wine does not read.
+  dylibPathOf =
+    {
+      traits,
+      runner ? null,
+    }:
+    let
+      r = lib.findFirst (x: builtins.isAttrs x && x ? breakbulkDylibPath) null (lib.toList runner);
+    in
+    if r != null then
+      r.breakbulkDylibPath
+    else if traits.dylibPathVar == null then
+      null
+    else
+      {
+        var = traits.dylibPathVar;
+        sep = traits.dylibPathSep;
+      };
 
   # Values of the recorded env that a test process gets at run time
   # (`fill_env`), plus `CARGO_BIN_EXE_*`, which Cargo also sets on test
@@ -107,18 +147,39 @@ let
   # BTreeSet<PathBuf> does, then deduplicated), without its kind prefix,
   # kept when the printing run classified it as inside its own `out` or an
   # upstream run's (`inOutDir`/`inBuildDir`, `LibraryPath::for_dylib_path`
-  # in breakbulk-unit). The filter comes first: a value one run printed
-  # inside its `out` is kept even if another run printed it too.
-  dylibJq = ''
+  # in breakbulk-unit), joined with `sep`. The filter comes first: a value
+  # one run printed inside its `out` is kept even if another run printed it
+  # too.
+  dylibJqWith = sep: ''
     def strip: if test("^(native|crate|dependency|framework|all)=") then sub("^[a-z]+="; "") else . end;
     [inputs | .libraryPaths[] | select(.inOutDir or (.inBuildDir // false)) | .value]
     | unique_by(split("/"))
     | map(strip)
-    | join(":")
+    | join("${sep}")
   '';
+  dylibJq = dylibJqWith ":";
+
+  # Shell lines (bash) that put `$__bb_dylib`, then `extra`, before the
+  # test process's dynamic-library variable (`dylib`: { var; sep; } or
+  # null, then nothing at all).
+  exportDylib =
+    dylib: extra:
+    lib.optionalString (dylib != null) ''
+      for __bb_p in ${lib.escapeShellArgs extra}; do
+        __bb_dylib=''${__bb_dylib:+$__bb_dylib${dylib.sep}}$__bb_p
+      done
+      export ${dylib.var}=$__bb_dylib''${${dylib.var}:+${dylib.sep}${"$" + dylib.var}}
+    '';
 in
 rec {
-  inherit binaryKey dylibJq;
+  inherit
+    binaryKey
+    dylibJq
+    dylibJqWith
+    dylibPathOf
+    hostDylibPathVar
+    exportDylib
+    ;
 
   # Decision 94: what test runs read from the Rust toolchain, the shared
   # libraries of the sysroot's target library directory (`libstd-*.so`, for
@@ -215,13 +276,17 @@ rec {
       sysroot ? null,
       target,
       root,
+      # dylibPathOf's result for the target.
+      dylibPath,
+      # hostDylibPathVar: Cargo sets it on test processes itself.
+      hostVar,
     }:
     let
       unit = plan.units.${root.unit};
       env = lib.mapAttrs (_: resolve.text) (lib.filterAttrs (k: _: isRuntimeVar k) unit.env);
       configEnv = lib.mapAttrs (_: resolve.text) (
         lib.filterAttrs (
-          k: _: lib.elem k (plan.configEnv or [ ]) && !isRuntimeVar k && k != "LD_LIBRARY_PATH"
+          k: _: lib.elem k (plan.configEnv or [ ]) && !isRuntimeVar k && k != hostVar
         ) unit.env
       );
       manifest =
@@ -248,8 +313,17 @@ rec {
       dylib = {
         flags = lib.mapAttrsToList (id: _: units.${id}.flags) runs;
         extra = lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib";
-      };
+      }
+      # The variable and separator, when not LD_LIBRARY_PATH and `:`.
+      // lib.optionalAttrs (dylibPath != linuxDylib) { path = dylibPath; };
     };
+
+  linuxDylib = {
+    var = "LD_LIBRARY_PATH";
+    sep = ":";
+  };
+  # A spec's dynamic-library variable ({ var; sep; } or null).
+  specDylib = spec: spec.dylib.path or linuxDylib;
 
   # Shell lines that set up a test process's environment from a spec, for
   # bash. `jq` is the jq executable; `vars` replaces values of `spec.env`.
@@ -264,27 +338,26 @@ rec {
         f: lib.escapeShellArg "${f}/directives.json"
       ) spec.dylib.flags;
       env = spec.env // vars;
+      d = specDylib spec;
     in
     ''
       __bb_env=()
+    ''
+    + lib.optionalString (d != null) ''
       __bb_dylib=${
         if spec.dylib.flags == [ ] then
           "''"
         else
-          "$(${jq} -rn ${lib.escapeShellArg dylibJq} ${dylibs})"
+          "$(${jq} -rn ${lib.escapeShellArg (dylibJqWith d.sep)} ${dylibs})"
       }
       ${
         # Empty when off, so test runs without stable inputs are unchanged.
         lib.optionalString (spec.dylib.stable or null != null) ''
           for __bb_p in ${spec.dylib.stable}/dylib/*; do
-            __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
+            __bb_dylib=''${__bb_dylib:+$__bb_dylib${d.sep}}$__bb_p
           done
         ''
-      }for __bb_p in ${lib.escapeShellArgs spec.dylib.extra}; do
-        __bb_dylib=''${__bb_dylib:+$__bb_dylib:}$__bb_p
-      done
-      export LD_LIBRARY_PATH=$__bb_dylib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-      unset __bb_dylib __bb_p
+      }${exportDylib d spec.dylib.extra}unset __bb_dylib __bb_p
     ''
     + lib.concatStrings (
       lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") (spec.configEnv or { })
@@ -329,13 +402,14 @@ rec {
       name,
     }:
     let
+      sep = (specDylib spec).sep;
       dylibs = pkgs.runCommand "${name}-test-dylibs" (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }) ''
         mkdir -p $out/dylib
         shopt -s nullglob
-        paths=$(jq -rn ${lib.escapeShellArg dylibJq} ${
+        paths=$(jq -rn ${lib.escapeShellArg (dylibJqWith sep)} ${
           lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.dylib.flags
         })
-        IFS=: read -ra ps <<< "$paths"
+        IFS=${lib.escapeShellArg sep} read -ra ps <<< "$paths"
         i=0
         for p in "''${ps[@]}"; do
           d=$out/dylib/$(printf %04d $i)
@@ -359,7 +433,7 @@ rec {
     // {
       dylib = spec.dylib // {
         flags = [ ];
-        stable = if spec.dylib.flags == [ ] then null else dylibs;
+        stable = if spec.dylib.flags == [ ] || specDylib spec == null then null else dylibs;
       };
       envFlags = lib.optional (spec.envFlags != [ ]) env;
     };
@@ -685,6 +759,8 @@ rec {
       target,
       runner ? null,
       testSystem ? null,
+      traits ? targetTraits.resolve { triple = target; },
+      dylibPath ? dylibPathOf { inherit traits runner; },
       testPkgs ?
         if testSystem == null || testSystem == pkgs.stdenv.buildPlatform.system then
           pkgs
@@ -728,7 +804,9 @@ rec {
             resolve
             sysroot
             target
+            dylibPath
             ;
+          hostVar = hostDylibPathVar pkgs;
           root = r.breakbulkRoot;
         };
 

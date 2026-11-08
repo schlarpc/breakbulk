@@ -108,6 +108,9 @@ pkgs:
   # The target's traits (lib/target-traits.nix `resolve`); mkRepository
   # passes them with the user's `targets.<triple>.traits` merged in.
   traits ? targetTraitsLib.resolve { triple = target; },
+  # How test processes find shared libraries ({ var; sep; } or null;
+  # lib/test-runs.nix dylibPathOf): mkRepository passes the runner's.
+  testDylibPath ? testRuns.dylibPathOf { inherit traits runner; },
   # Variants (lib/variants.nix): `mode` is build, check, clippy or
   # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
   # matching rustc). `bench` adds a bench plan (`cargo bench --no-run`):
@@ -425,7 +428,9 @@ let
       runFilesDirs
       ca
       name
+      traits
       ;
+    dylibPath = testDylibPath;
     plan = plans.test;
     inst = tested;
     coverage = mode == "coverage";
@@ -516,7 +521,9 @@ in
           testSystem
           runFilesDirs
           ca
+          traits
           ;
+        dylibPath = testDylibPath;
         name = "${name}-bench";
         packages = lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots))) (
           pkg: {

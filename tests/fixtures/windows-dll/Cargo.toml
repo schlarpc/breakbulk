@@ -1,0 +1,12 @@
+# windows-dll: a build script links a C DLL (built with the target's C
+# compiler into its OUT_DIR, with an import library) and prints
+# `rustc-link-lib=dylib=bbdll`. The test binary imports bbdll.dll, which
+# only the build script's OUT_DIR holds, so its test run under wine needs
+# that directory on the Windows DLL search path (WINEPATH).
+[package]
+name = "windows-dll"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]

@@ -31,6 +31,11 @@ pub use validate::{
 pub use breakbulk_unit::env::append as append_env_list;
 /// The per-unit `BREAKBULK_UNIT` types, defined by `breakbulk-unit`.
 pub use breakbulk_unit::spec as rendered;
+/// The dynamic-library path variable of the machine units run on (the
+/// planning host's, where every recorded process ran): Cargo's
+/// `dylib_path_envvar`. A test process's own comes from the target's
+/// traits and runner (`dylibPathOf` in `lib/test-runs.nix`).
+pub use breakbulk_unit::splice::DYLIB_PATH_VAR as HOST_DYLIB_PATH_VAR;
 /// The wrapping table, shared with the planner's sentinel checks.
 pub use breakbulk_unit::splice::wrap;
 
