@@ -1180,7 +1180,7 @@ features your system Nix doesn't enable: dynamic mode (`nix run
 
 >why not test.dynamic or similar? or is there a way to make a check derivation not run by default?
 
-> Resolved: answered: checks can't be opt-in, and these tests need a different Nix, so they stay `nix run` commands; `nix run .#test-cutoff` still to add (TODO).
+> Resolved: answered: checks can't be opt-in, and these tests need a different Nix, so they stay `nix run` commands: `nix run .#test-dynamic`, `.#test-cutoff` and `.#test-options`.
 
 ## 88. FYI: independent code review fixed 5 bugs
 
