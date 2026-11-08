@@ -15,9 +15,11 @@
 # from the toolchain, which wine does not find.
 {
   lib,
+  targetTraits,
   chooseLinker,
   hostSpec,
   runners,
+  staticLinking,
 }:
 let
   # nixpkgs' cross package set for each Rust triple.
@@ -39,7 +41,7 @@ in
 {
   pkgs,
   triple ? "x86_64-pc-windows-gnu",
-  traits ? null,
+  traits ? targetTraits.resolve { inherit triple; },
   packageSet ? packageSetFor pkgs triple,
   crtStatic ? true,
   lld ? pkgs.buildPackages.lld,
@@ -53,13 +55,15 @@ let
   prefix = cc.targetPrefix;
   arch = lib.head (lib.splitString "-" triple);
   # The linker (./linker.nix, kind mingw-lld): the C driver with lld.
-  linker = chooseLinker (
-    {
-      inherit pkgs triple lld;
-      packageSet = tp;
-    }
-    // lib.optionalAttrs (traits != null) { inherit traits; }
-  );
+  linker = chooseLinker {
+    inherit
+      pkgs
+      triple
+      traits
+      lld
+      ;
+    packageSet = tp;
+  };
 in
 {
   packageSet = mkDefault tp;
@@ -68,10 +72,7 @@ in
   cxx = mkDefault "${cc}/bin/${prefix}c++";
   ar = mkDefault "${cc.bintools}/bin/${prefix}ar";
   rustflags =
-    lib.optionals crtStatic [
-      "-C"
-      "target-feature=+crt-static"
-    ]
+    (staticLinking { inherit traits crtStatic; }).rustflags
     # rustc's windows-gnu spec links `-l:libpthread.a` with +crt-static;
     # nixpkgs keeps winpthreads out of the gcc toolchain.
     ++ lib.optionals (!cc.isClang) [

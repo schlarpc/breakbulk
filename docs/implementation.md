@@ -676,7 +676,7 @@ A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple
 | Preset | Linker | C toolchain | Rustflags and env (target units) | Runner | Default stages |
 | --- | --- | --- | --- | --- | --- |
 | `linuxGnu` | mold via wrapped bintools (`-fuse-ld=mold`); lld when cross-language LTO is on | `pkgsCross.<x>.stdenv.cc` | `CC_<triple>`, `AR_<triple>` | native; `qemu-user` when cross without a builder | `splitDebug` |
-| `linuxMusl` | as `linuxGnu` | `pkgsCross.<x>-musl.stdenv.cc` | `+crt-static` | as `linuxGnu` | `splitDebug` |
+| `linuxMusl` | as `linuxGnu` | `pkgsCross.<x>-musl.stdenv.cc` | `+crt-static`; static `pkg-config` mode | as `linuxGnu` | `splitDebug` |
 | `staticGlibc` | mold, same as host | host `cc` | `+crt-static`, static-pie (mold links non-PIE static glibc Rust programs that crash at startup; `relocationModel = "static"` restores non-PIE), `-L native=` for `glibc.static` and the declared static archives; static `pkg-config` mode | native | `splitDebug` |
 | `msvc { arch; sdk }` | `lld-link` | `clang-cl`, `llvm-lib` from the LLVM matching rustc | `-Lnative=` for CRT, `um` and `ucrt` libs; `CFLAGS_<triple>` with `-imsvc`; `BINDGEN_EXTRA_CLANG_ARGS_<triple>` with `-isystem`; `RC`, `RCFLAGS`, `LIB`; optional `+crt-static` | `wine` with a `WINEPREFIX` in `$TMPDIR` | none |
 | `wasmBrowser` | lld from rustc's target spec, version-matched | unwrapped clang targeting wasm32 | none by default | `wasm-bindgen-test-runner` + headless Chromium, or Node | `bindgen` → `wasmOpt` |
@@ -685,6 +685,8 @@ A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple
 | `linuxGnu` for `riscv64gc-unknown-linux-gnu` | as `linuxGnu` (`pkgsCross.riscv64`) | as `linuxGnu` | as `linuxGnu` | `qemu-riscv64` | `splitDebug` |
 | `windowsGnu` | the toolchain's C driver with `-fuse-ld=lld`, `--no-insert-timestamp`, and an `ld.lld` shim that drops GCC's default `-pie` | `pkgsCross.mingwW64` (gcc, msvcrt) for `-gnu`; nixpkgs' `mingw-ucrt-x86_64-llvm` (clang, ucrt) for `-gnullvm` | `+crt-static` by default (only system DLLs); `-L native=` winpthreads for `-gnu` | `wine` (x86\_64, i686) | none |
 | `zig { glibc; rebuildInputs ? [ ] }` | `zig cc -target <arch>-linux-gnu.<glibc>` | the same `zig cc`, `zig c++`, `zig ar` | none | the build machine's `ld.so` (zig links the FHS loader path) | `splitDebug` |
+
+Static linking is one rule (`presets.staticLinking { traits; crtStatic; }`), used by `linuxMusl`, `staticGlibc`, `msvc` (`crtStatic`) and `windowsGnu`: `+crt-static` in the target rustflags, and, on an ELF target, where it makes the C library static too, `PKG_CONFIG_ALL_STATIC=1` in the target env. pkg-config-rs then passes `--static` to pkg-config (so `Libs.private` comes along) and prints `rustc-link-lib=static=…` for libraries with an archive in a non-system directory (pkg-config 0.3.34, `infer_static` and `is_static_available`; it has no rule of its own for musl). Before, only `staticGlibc` set it, so a musl product whose pkg-config library has a private dependency failed to link (`static-pkgconfig-musl-*` in `tests/presets/fixtures.nix`: `undefined symbol: bbbar_base` without it). On Windows `+crt-static` makes the C runtime static, but an .exe still loads DLLs, so pkg-config keeps its default there.
 
 ### msvc
 

@@ -276,7 +276,7 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 
 ### Static and musl
 
-Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust's self-contained crt, `libc.a` and libunwind (nixpkgs' musl has no `libunwind.a`), while C code compiles against nixpkgs' musl headers. Static glibc builds are static-pie by default. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
+Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust's self-contained crt, `libc.a` and libunwind (nixpkgs' musl has no `libunwind.a`), while C code compiles against nixpkgs' musl headers. Static glibc builds are static-pie by default. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode on musl and static glibc alike, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
 
 ### Zig
 

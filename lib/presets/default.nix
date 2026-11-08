@@ -224,6 +224,10 @@ let
         else
           null;
       r = linuxRunner { inherit pkgs tp nativeBuilder; };
+      st = staticLinking {
+        inherit traits;
+        crtStatic = extra.crtStatic or false;
+      };
     in
     {
       packageSet = mkDefault tp;
@@ -245,8 +249,8 @@ let
           "-C"
           "linker-plugin-lto"
         ]
-        ++ extra.rustflags or [ ];
-      env = defaultEnv (extra.env or { });
+        ++ st.rustflags;
+      env = defaultEnv st.env;
       runner = mkDefault r.runner;
       testSystem = mkDefault r.testSystem;
       host = hostSpec pkgs;
@@ -254,10 +258,40 @@ let
       stagePreset = mkDefault (extra.stagePreset or "linuxGnu");
     };
 
-  crtStaticFlags = [
-    "-C"
-    "target-feature=+crt-static"
-  ];
+  # Static linking, one rule for every preset: `+crt-static` in the target
+  # units' rustflags, and, where that makes the C library static too (an
+  # ELF target: musl, static glibc; a static executable has no dynamic
+  # loader, so it cannot load a shared library), PKG_CONFIG_ALL_STATIC in
+  # the target units' env, so that pkg-config-rs links every library it
+  # finds statically (`rustc-link-lib=static=…`, when the `.a` exists;
+  # pkg-config 0.3.34, `infer_static`, which has no rule of its own for
+  # musl). Target env, never host env: on host units it makes build
+  # scripts link `libc.a` and crash. Windows' `+crt-static` links the C
+  # runtime statically, but an .exe still loads DLLs, so pkg-config is
+  # left alone there.
+  #
+  #   staticLinking { traits; crtStatic ? true; } -> { rustflags; env; }
+  staticLinking =
+    {
+      traits,
+      crtStatic ? true,
+    }:
+    if !crtStatic then
+      {
+        rustflags = [ ];
+        env = { };
+      }
+    else
+      {
+        rustflags = [
+          "-C"
+          "target-feature=+crt-static"
+        ];
+        env = lib.optionalAttrs (traits.objectFormat == "elf") {
+          # pkg-config-rs: link every pkg-config library statically.
+          PKG_CONFIG_ALL_STATIC = "1";
+        };
+      };
 
   windowsArch =
     triple:
@@ -272,6 +306,7 @@ in
     chooseLinker
     hostSpec
     mkPreset
+    staticLinking
     ;
   inherit (linkers)
     linkerKind
@@ -286,13 +321,14 @@ in
   # (testSystem), else under qemu-user.
   linuxGnu = mkPreset (linuxGnuWith { });
 
-  # Linux musl: as linuxGnu with nixpkgs' musl cross toolchain, and
-  # `+crt-static`. rustc's default for musl targets stays: crt objects,
+  # Linux musl: as linuxGnu with nixpkgs' musl cross toolchain, and static
+  # linking (`staticLinking`: `+crt-static`, pkg-config libraries static).
+  # rustc's default for musl targets stays: crt objects,
   # libc.a and libunwind.a from the Rust target's self-contained directory
   # (`-C link-self-contained=no` fails: nixpkgs' musl toolchain has no
   # libunwind.a). C code compiles against nixpkgs' musl headers.
   linuxMusl = mkPreset (linuxGnuWith {
-    rustflags = crtStaticFlags;
+    crtStatic = true;
     stagePreset = "linuxMusl";
   });
 
@@ -323,6 +359,9 @@ in
     assert lib.assertMsg (
       triple == nativeTriple pkgs
     ) "breakbulk.presets.staticGlibc: ${triple} is not the host triple ${nativeTriple pkgs}";
+    let
+      st = staticLinking { inherit traits; };
+    in
     {
       packageSet = mkDefault pkgs;
       linker = mkDefault (chooseLinker { inherit pkgs triple traits; });
@@ -330,7 +369,7 @@ in
       cxx = mkDefault "${cc}/bin/c++";
       ar = mkDefault "${cc.bintools}/bin/ar";
       rustflags =
-        crtStaticFlags
+        st.rustflags
         ++ lib.optionals (relocationModel != null) [
           "-C"
           "relocation-model=${relocationModel}"
@@ -339,10 +378,7 @@ in
           "-L"
           "native=${d}"
         ]) ([ "${pkgs.glibc.static}/lib" ] ++ staticLibDirs);
-      env = defaultEnv {
-        # pkg-config-rs: link every pkg-config library statically.
-        PKG_CONFIG_ALL_STATIC = "1";
-      };
+      env = defaultEnv st.env;
       runner = mkDefault null;
       testSystem = mkDefault null;
       host = hostSpec pkgs;
@@ -414,7 +450,8 @@ in
         "-isystem"
         d
       ]) incdirs;
-      rustflags = map (d: "-Lnative=${d}") libdirs ++ lib.optionals crtStatic crtStaticFlags;
+      rustflags =
+        map (d: "-Lnative=${d}") libdirs ++ (staticLinking { inherit traits crtStatic; }).rustflags;
       env = defaultEnv {
         LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
         RC = "${tools}/llvm-rc";
@@ -498,9 +535,11 @@ in
     import ./windows-gnu.nix {
       inherit
         lib
+        targetTraits
         chooseLinker
         hostSpec
         runners
+        staticLinking
         ;
     }
   );

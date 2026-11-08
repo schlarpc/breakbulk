@@ -1,0 +1,8 @@
+# static-pkgconfig: a -sys crate finds a C library with pkg-config (the
+# pkg-config crate), which ships both libbbfoo.a and libbbfoo.so; `app`
+# links it. On a static target (musl with +crt-static, static glibc) the
+# preset's PKG_CONFIG_ALL_STATIC makes pkg-config-rs print
+# `rustc-link-lib=static=bbfoo`, so the product is fully static.
+[workspace]
+resolver = "3"
+members = ["app", "foo-sys"]

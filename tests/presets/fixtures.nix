@@ -9,6 +9,8 @@
 #                     and static glibc products have no INTERP or NEEDED;
 #                     build scripts stay dynamic; tests run (aarch64 under
 #                     qemu-user)
+#   static-pkgconfig-musl-*   a musl product links a library found with
+#                     pkg-config (both .a and .so present) statically
 #   presets-eval      evaluation-time assertions on preset values (and the
 #                     linker choice, lib/presets/linker.nix)
 #   presets-per-workspace  two workspaces on different Rust releases get
@@ -197,6 +199,52 @@ let
       targets = lib.genAttrs muslTriples (_: {
         preset = presets.linuxMusl;
       });
+    }
+  ];
+  # A C library with both static and shared builds and a pkg-config file,
+  # built for the target package set `p`. libbbfoo uses libbbbar, a private
+  # dependency: the shared libbbfoo.so names it itself, the static
+  # libbbfoo.a needs `-lbbbar` too, which pkg-config gives only with
+  # `--static` (`Libs.private`).
+  bbfoo =
+    p:
+    p.stdenv.mkDerivation {
+      name = "bbfoo";
+      dontUnpack = true;
+      buildPhase = ''
+        echo 'int bbbar_base(void) { return 40; }' > bbbar.c
+        echo 'int bbbar_base(void); int bbfoo_answer(void) { return bbbar_base() + 2; }' > bbfoo.c
+        for l in bbbar bbfoo; do
+          $CC -c -fPIC $l.c -o $l.o
+          $AR rcs lib$l.a $l.o
+        done
+        $CC -shared -o libbbbar.so bbbar.o
+        $CC -shared -o libbbfoo.so bbfoo.o -L. -lbbbar
+      '';
+      installPhase = ''
+        mkdir -p $out/lib/pkgconfig
+        cp lib*.a lib*.so $out/lib/
+        cat > $out/lib/pkgconfig/bbfoo.pc <<EOF
+        libdir=$out/lib
+        Name: bbfoo
+        Description: breakbulk test library
+        Version: 1.0
+        Libs: -L\''${libdir} -lbbfoo
+        Libs.private: -lbbbar
+        EOF
+      '';
+    };
+  # The -sys crate finds it with pkg-config (static-pkgconfig fixture).
+  staticPkgconfig = mkRepo (fixtures + "/static-pkgconfig") [
+    {
+      workspaces.main = staticWs // {
+        targets."x86_64-unknown-linux-musl" = { };
+      };
+      targets."x86_64-unknown-linux-musl".preset = presets.linuxMusl;
+      packages.foo-sys = {
+        nativeInputs = p: [ p.pkg-config ];
+        inputs = p: [ (bbfoo p) ];
+      };
     }
   ];
   glibcStatic = mkRepo (fixtures + "/static") [
@@ -862,6 +910,21 @@ in
   // staticChecks "static-glibc" glibcStatic native
   // staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl"
   // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
+  # musl links a pkg-config library statically: the preset's
+  # PKG_CONFIG_ALL_STATIC (lib/presets staticLinking) makes pkg-config-rs
+  # pick libbbfoo.a over libbbfoo.so.
+  // (
+    let
+      t = staticPkgconfig.workspaces.main.target."x86_64-unknown-linux-musl";
+    in
+    {
+      static-pkgconfig-musl-product = elfCheck "static-pkgconfig-musl-product" "static" "${t.packages.app}/bin/app";
+      static-pkgconfig-musl-run = pkgs.runCommand "static-pkgconfig-musl-run" { } ''
+        ${t.packages.app}/bin/app | tee $out
+        grep -qx "bbfoo says 42" $out
+      '';
+    }
+  )
   // sysNativeCrossChecks
   // msvcChecks
   // lib.optionalAttrs (xwinPkgs != null) { msvc-debug-outputs = msvcDebugOutputsEval; }
