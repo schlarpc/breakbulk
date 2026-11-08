@@ -187,11 +187,12 @@ pub struct TestSpec {
 }
 
 /// nextest's `--binaries-metadata` and `--cargo-metadata` for one test
-/// binary, as `nextestSpec` in `lib/test-runs.nix` synthesizes them (keep
-/// the two in sync). Placeholders the test run replaces: `@BINARY@` (the
-/// binary), `@TARGET@` (a scratch target directory), `@WS@` (a scratch
-/// workspace root), and the string `"@LIBDIR@"` (the whole JSON value of
-/// the target's sysroot library directory, which only the Nix side knows).
+/// binary, for both delivery modes (IFD mode gets it in `units.json`'s
+/// roots, `RootNextest`). Placeholders the test run replaces: `@BINARY@`
+/// (the binary), `@TARGET@` (a scratch target directory), `@WS@` (a
+/// scratch workspace root), and the string `"@LIBDIR@"` (the whole JSON
+/// value of the target's sysroot library directory, which only the Nix
+/// side knows).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Nextest {
@@ -200,12 +201,21 @@ pub struct Nextest {
     pub binaries: serde_json::Value,
 }
 
+/// The recorded variables a test process gets at run time: the list in
+/// `runtime-env.json`, which the Nix library reads too (`isRuntimeVar` in
+/// `lib/test-runs.nix`), so both delivery modes give a test the same env.
+#[derive(serde::Deserialize)]
+struct RuntimeEnv {
+    exact: Vec<String>,
+    prefixes: Vec<String>,
+}
+
 fn is_runtime_var(k: &str) -> bool {
-    k == "CARGO"
-        || k == "CARGO_MANIFEST_DIR"
-        || k == "CARGO_MANIFEST_PATH"
-        || k.starts_with("CARGO_PKG_")
-        || k.starts_with("CARGO_BIN_EXE_")
+    static LIST: std::sync::OnceLock<RuntimeEnv> = std::sync::OnceLock::new();
+    let l = LIST.get_or_init(|| {
+        serde_json::from_str(include_str!("runtime-env.json")).expect("runtime-env.json")
+    });
+    l.exact.iter().any(|e| e == k) || l.prefixes.iter().any(|p| k.starts_with(p.as_str()))
 }
 
 fn text(t: &Text, tokens: &Tokens) -> Result<String, Error> {
@@ -274,15 +284,58 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str, root: &RootOut) -> Result
     })
 }
 
-/// [`Nextest`] for a test binary: nextest-metadata's `BinaryListSummary`
-/// and a `cargo metadata` document, as nextest 0.9.146 reads them (see
-/// `nextestSpec` in `lib/test-runs.nix` for the reasoning behind each
-/// field).
+/// [`Nextest`] for a test root, with its source view as `tokens` resolve
+/// it (dynamic-derivation mode).
 fn nextest(
     tokens: &Tokens,
     plan: &Plan,
     unit: &CompileUnit,
     root: &RootOut,
+) -> Result<Nextest, Error> {
+    // The root of the tested package's source view (its test view when it
+    // has one), under which every path package is listed.
+    let view_root = tokens.reference(&Reference::Src(SrcRef {
+        src: unit.package.clone(),
+        rel: String::new(),
+    }))?;
+    nextest_for(plan, unit, root.kind, &root.target, &view_root)
+}
+
+/// The placeholder for the test's source view root in IFD mode's
+/// [`crate::output::RootNextest`], which the Nix side replaces.
+pub const VIEW_PLACEHOLDER: &str = "@VIEW@";
+
+/// [`Nextest`] for a test binary (`unit`, root `kind`/`target`) whose source
+/// view root is `view_root`: nextest-metadata's `BinaryListSummary` and a
+/// `cargo metadata` document, as nextest 0.9.146 reads them
+/// (nextest-runner/src/list/test_list.rs `from_binary_list`,
+/// src/test_command.rs, src/list/rust_build_meta.rs; spike in
+/// docs/spikes/m6-measurements.md, "nextest reuse"):
+///
+/// - the binary path is absolute and used as is (no remap), so the binary
+///   stays in its own store path (`@BINARY@`);
+/// - the test's cwd and `CARGO_MANIFEST_DIR` are the package's manifest
+///   directory in the cargo metadata: the package directory of its source
+///   view, as for libtest runs. The workspace root is that view's root;
+///   other path packages of the plan are listed under it too (their
+///   directories need not exist), so `package()` filtersets match them;
+/// - nextest sets `CARGO_PKG_*` from the package entry, so the entry is
+///   built from the test unit's recorded `CARGO_PKG_*` values;
+/// - no base output directories, linked paths, build-script out dirs or
+///   libdirs: nextest then adds nothing to the dynamic-library path, and
+///   keeps the environment the run already set, so the process sees what a
+///   libtest run sees;
+/// - dependency edges are not synthesized: `deps()` and `rdeps()`
+///   filtersets see none;
+/// - nextest requires `<workspace root>/Cargo.toml` to exist and writes its
+///   store under it, so the workspace root is a scratch directory made at
+///   build time (`@WS@`).
+pub fn nextest_for(
+    plan: &Plan,
+    unit: &CompileUnit,
+    root_kind: RootKind,
+    root_target: &str,
+    view_root: &str,
 ) -> Result<Nextest, Error> {
     use serde_json::{Value as J, json};
     let pkg_id = &unit.package;
@@ -291,12 +344,7 @@ fn nextest(
         _ => String::new(),
     };
     let or_null = |v: String| if v.is_empty() { J::Null } else { J::String(v) };
-    // The root of the tested package's source view (its test view when it
-    // has one), under which every path package is listed.
-    let view_root = tokens.reference(&Reference::Src(SrcRef {
-        src: pkg_id.clone(),
-        rel: String::new(),
-    }))?;
+    let view_root = view_root.to_owned();
     // One unit per path package: the test unit for the tested package, else
     // its first compile unit by id.
     let mut path_pkgs: BTreeMap<&str, &CompileUnit> = BTreeMap::new();
@@ -368,12 +416,12 @@ fn nextest(
         "target_directory": "@TARGET@",
         "metadata": null,
     });
-    let kind = kind_str(root.kind);
+    let kind = kind_str(root_kind);
     let pkg_name = env_of(unit, "CARGO_PKG_NAME");
-    let binary_id = match root.kind {
+    let binary_id = match root_kind {
         RootKind::Lib => pkg_name.clone(),
-        RootKind::Test => format!("{pkg_name}::{}", root.target),
-        _ => format!("{pkg_name}::{kind}/{}", root.target),
+        RootKind::Test => format!("{pkg_name}::{root_target}"),
+        _ => format!("{pkg_name}::{kind}/{root_target}"),
     };
     let platform = |triple: &str| json!({ "triple": triple, "target-features": "unknown" });
     let libdir = |triple: &str| {
@@ -398,7 +446,7 @@ fn nextest(
         binary_id.clone(),
         json!({
             "binary-id": binary_id,
-            "binary-name": root.target,
+            "binary-name": root_target,
             "package-id": pkg_id,
             "kind": kind,
             "binary-path": "@BINARY@",

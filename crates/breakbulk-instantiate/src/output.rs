@@ -107,6 +107,25 @@ pub struct RootOut {
     pub test: bool,
     #[serde(flatten)]
     pub what: RootWhat,
+    /// For a test binary the plan has: what nextest's reuse-build mode reads
+    /// to run it, for IFD mode's test runs (`nextestSpec` in
+    /// `lib/test-runs.nix`), from the same function as dynamic-derivation
+    /// mode's `TestSpec`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nextest: Option<RootNextest>,
+}
+
+/// [`crate::dynamic::Nextest`] as compact JSON text with placeholders the
+/// Nix side fills in at evaluation time: `@VIEW@` (the root of the test's
+/// source view) and `"@LIBDIR@"` (the whole JSON value of the target's
+/// sysroot library directory); `@BINARY@`, `@TARGET@` and `@WS@` the test
+/// run fills in at build time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootNextest {
+    pub binary_id: String,
+    pub cargo_metadata: String,
+    pub binaries: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

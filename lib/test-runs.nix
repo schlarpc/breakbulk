@@ -129,20 +129,12 @@ let
         sep = traits.dylibPathSep;
       };
 
-  # Values of the recorded env that a test process gets at run time
-  # (`fill_env`), plus `CARGO_BIN_EXE_*`, which Cargo also sets on test
-  # processes (cargo 0.97.0, `ops/cargo_test.rs`: the `unit_output` env
-  # from `artifact::get_env`; assert_cmd reads it at run time). The others
-  # (`CARGO_CRATE_NAME`, `OUT_DIR`, `CARGO_TARGET_TMPDIR`, …) are
-  # compile-time only. Keep in sync with `is_runtime_var` in
-  # crates/breakbulk-instantiate/src/dynamic.rs.
-  isRuntimeVar =
-    k:
-    k == "CARGO"
-    || k == "CARGO_MANIFEST_DIR"
-    || k == "CARGO_MANIFEST_PATH"
-    || lib.hasPrefix "CARGO_PKG_" k
-    || lib.hasPrefix "CARGO_BIN_EXE_" k;
+  # Values of the recorded env that a test process gets at run time: one
+  # list for both delivery modes, crates/breakbulk-instantiate's
+  # runtime-env.json (its `description` says why each is there), which
+  # breakbulk-instantiate reads too (`is_runtime_var` in dynamic.rs).
+  runtimeEnv = builtins.fromJSON (builtins.readFile ../crates/breakbulk-instantiate/src/runtime-env.json);
+  isRuntimeVar = k: lib.elem k runtimeEnv.exact || lib.any (p: lib.hasPrefix p k) runtimeEnv.prefixes;
 
   # The dynamic-library path, computed at run time from the runs' `flags`
   # outputs: every search path value (sorted by path component, as Cargo's
@@ -530,31 +522,13 @@ rec {
       // lib.filterAttrs (_: v: v != null) (t.nextest or { });
     };
 
-  # What nextest's reuse-build mode reads, synthesized for one test binary
-  # (docs/spikes/m6-measurements.md, "nextest reuse"). nextest-metadata's
-  # `BinaryListSummary` (`--binaries-metadata`) and a `cargo metadata`
-  # document (`--cargo-metadata`), as nextest 0.9.146 reads them
-  # (nextest-runner/src/list/test_list.rs `from_binary_list`,
-  # src/test_command.rs, src/list/rust_build_meta.rs):
-  #
-  #   - the binary path is absolute and used as is (no remap), so the binary
-  #     stays in its own store path; `@BINARY@` is replaced at build time;
-  #   - the test's cwd and CARGO_MANIFEST_DIR are the package's manifest
-  #     directory in the cargo metadata: the package directory of its source
-  #     view, as for libtest runs. The workspace root is that view's root;
-  #     other path packages of the plan are listed under it too (their
-  #     directories need not exist), so `package()` filtersets match them;
-  #   - nextest sets CARGO_PKG_* from the package entry, so the entry is
-  #     built from the test unit's recorded CARGO_PKG_* values;
-  #   - no base output directories, linked paths, build-script out dirs or
-  #     libdirs: nextest then adds nothing to the dynamic-library path, and
-  #     keeps the environment the run already set (breakbulk's dylib path,
-  #     `rustc-env`, `[env]`), so the process sees what a libtest run sees;
-  #   - dependency edges are not synthesized: `deps()` and `rdeps()`
-  #     filtersets see none.
-  #
-  # Dynamic-derivation mode synthesizes the same in Rust (`nextest` in
-  # crates/breakbulk-instantiate/src/dynamic.rs); keep the two in sync.
+  # What nextest's reuse-build mode reads for one test binary: the
+  # metadata breakbulk-instantiate synthesizes for both delivery modes
+  # (`nextest_for` in crates/breakbulk-instantiate/src/dynamic.rs, which
+  # says why each field is what it is), from the root's `nextest` in
+  # units.json, with the source view's root (`@VIEW@`) and the target's
+  # sysroot library directory (`"@LIBDIR@"`) filled in here. `@BINARY@`,
+  # `@TARGET@` and `@WS@` are filled in by the test run.
   nextestSpec =
     {
       plan,
@@ -566,7 +540,6 @@ rec {
     let
       unit = plan.units.${root.unit};
       pkgId = unit.package;
-      envOf = u: k: if u.env ? ${k} && isString u.env.${k} then u.env.${k} else "";
       viewRoot =
         let
           rel = resolve.dirOf pkgId;
@@ -578,141 +551,27 @@ rec {
           lib.removeSuffix "/${rel}" spec.sourceDir
         else
           throw "breakbulk: nextest: the source view ${dir} does not end in ${rel}";
-      relSuffix = rel: if rel == "" then "" else "/${rel}";
-      # One unit per path package: the test unit for the tested package,
-      # else any compile unit of that package.
-      pathPkgs = lib.mapAttrs (_: us: lib.head us) (
-        lib.groupBy (u: u.package) (
-          lib.filter (u: u.kind == "compile" && lib.hasPrefix "path+file://" u.package) (
-            lib.attrValues plan.units
-          )
-        )
-      );
-      pkgEntry =
-        id: u:
-        let
-          e = envOf (if id == pkgId then unit else u);
-          name = e "CARGO_PKG_NAME";
-          dir = "${viewRoot}${relSuffix (resolve.dirOf id)}";
-          orNull = v: if v == "" then null else v;
-        in
-        {
-          inherit id name;
-          version = e "CARGO_PKG_VERSION";
-          authors = lib.filter (a: a != "") (lib.splitString ":" (e "CARGO_PKG_AUTHORS"));
-          description = orNull (e "CARGO_PKG_DESCRIPTION");
-          homepage = orNull (e "CARGO_PKG_HOMEPAGE");
-          repository = orNull (e "CARGO_PKG_REPOSITORY");
-          license = orNull (e "CARGO_PKG_LICENSE");
-          license_file = orNull (e "CARGO_PKG_LICENSE_FILE");
-          rust_version = orNull (e "CARGO_PKG_RUST_VERSION");
-          readme = null;
-          documentation = null;
-          source = null;
-          dependencies = [ ];
-          targets = [ ];
-          features = { };
-          manifest_path = "${dir}/Cargo.toml";
-          metadata = null;
-          publish = null;
-          categories = [ ];
-          keywords = [ ];
-          edition = "2021";
-          links = null;
-          default_run = null;
-        };
-      ids = lib.attrNames pathPkgs;
-      nextestKind =
-        {
-          lib = "lib";
-          test = "test";
-          bin = "bin";
-          example = "example";
-          bench = "bench";
-        }
-        .${root.kind} or root.kind;
-      pkgName = envOf unit "CARGO_PKG_NAME";
-      binaryId =
-        if nextestKind == "lib" then
-          pkgName
-        else if nextestKind == "test" then
-          "${pkgName}::${root.target}"
-        else
-          "${pkgName}::${nextestKind}/${root.target}";
-      platform = triple: {
-        inherit triple;
-        target-features = "unknown";
-      };
       # The sysroot's target library directory, which the run's
       # dynamic-library path already ends with; without it nextest warns.
-      libdirOf =
-        triple:
-        if sysroot != null && triple == plan.target then
+      libdir =
+        if sysroot != null then
           {
             status = "available";
-            path = "${sysroot}/lib/rustlib/${triple}/lib";
+            path = "${sysroot}/lib/rustlib/${plan.target}/lib";
           }
         else
           {
             status = "unavailable";
             reason = "breakbulk";
           };
+      n =
+        root.nextest
+          or (throw "breakbulk: nextest: units.json has no nextest metadata for ${root.package} ${root.target}");
     in
     {
-      inherit binaryId;
-      cargoMetadata = toJSON {
-        version = 1;
-        packages = map (id: pkgEntry id pathPkgs.${id}) ids;
-        workspace_members = ids;
-        workspace_default_members = ids;
-        resolve = {
-          nodes = map (id: {
-            inherit id;
-            dependencies = [ ];
-            deps = [ ];
-            features = [ ];
-          }) ids;
-          root = null;
-        };
-        # nextest requires `<workspace root>/Cargo.toml` to exist and writes
-        # its store (`[store] dir`, default `target/nextest`) under it; the
-        # package's source view has neither, so the root is a scratch
-        # directory made at build time (`@WS@`).
-        workspace_root = "@WS@";
-        target_directory = "@TARGET@";
-        metadata = null;
-      };
-      binaries = toJSON {
-        rust-build-meta = {
-          target-directory = "@TARGET@";
-          build-directory = "@TARGET@";
-          base-output-directories = [ ];
-          non-test-binaries = { };
-          build-script-out-dirs = { };
-          build-script-info = { };
-          linked-paths = [ ];
-          platforms = {
-            host = {
-              platform = platform plan.host;
-              libdir = libdirOf plan.host;
-            };
-            targets = lib.optional (plan.target != plan.host) {
-              platform = platform plan.target;
-              libdir = libdirOf plan.target;
-            };
-          };
-          target-platforms = [ (platform plan.target) ];
-          target-platform = null;
-        };
-        rust-binaries.${binaryId} = {
-          binary-id = binaryId;
-          binary-name = root.target;
-          package-id = pkgId;
-          kind = nextestKind;
-          binary-path = "@BINARY@";
-          build-platform = if unit.platform == "host" && plan.target != plan.host then "host" else "target";
-        };
-      };
+      inherit (n) binaryId;
+      cargoMetadata = builtins.replaceStrings [ "@VIEW@" ] [ viewRoot ] n.cargoMetadata;
+      binaries = builtins.replaceStrings [ "\"@LIBDIR@\"" ] [ (toJSON libdir) ] n.binaries;
     };
 
   binaryConfig =

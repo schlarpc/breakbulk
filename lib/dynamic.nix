@@ -498,7 +498,7 @@ let
 
       # As testRuns.mkTestRuns's nextestRun, with the metadata from the
       # wrapper (TestSpec's `nextest`); `"@LIBDIR@"` becomes the sysroot's
-      # target library directory, as nextestSpec's `libdirOf` gives it.
+      # target library directory, as test-runs.nix's nextestSpec fills it in.
       nextestScript =
         b: cfg: args: bin:
         let

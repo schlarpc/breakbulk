@@ -1,0 +1,5 @@
+{
+  "description": "The recorded env variables of a test unit that its test process gets at run time (Cargo's fill_env), plus CARGO_BIN_EXE_*, which Cargo also sets on test processes (cargo 0.97.0, ops/cargo_test.rs: the unit_output env from artifact::get_env; assert_cmd reads it at run time). The others (CARGO_CRATE_NAME, OUT_DIR, CARGO_TARGET_TMPDIR, ...) are compile-time only. Read by breakbulk-instantiate (dynamic.rs, is_runtime_var) and by the Nix library (lib/test-runs.nix, isRuntimeVar): one list for both delivery modes.",
+  "exact": ["CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH"],
+  "prefixes": ["CARGO_PKG_", "CARGO_BIN_EXE_"]
+}

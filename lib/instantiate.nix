@@ -235,6 +235,8 @@ rec {
               ;
             unit = r.unit or null;
             reason = r.reason or null;
+            # Test roots: nextest's metadata (lib/test-runs.nix nextestSpec).
+            nextest = r.nextest or null;
           };
         }
       ) json.roots;

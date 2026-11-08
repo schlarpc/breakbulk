@@ -772,6 +772,7 @@ fn stub(inputs: &Inputs, prefix: &str, p: &PredictedRoot, variant: &str) -> Resu
             reason,
             stub: Drv { attrs },
         },
+        nextest: None,
     })
 }
 
@@ -787,6 +788,17 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
         }
     }
     let from_plan = |key: &RootKey, r: &Root| -> Result<RootOut, Error> {
+        let nextest = match plan.units.get(&r.unit) {
+            Some(Unit::Compile(c)) if key.3 => {
+                let n = dynamic::nextest_for(plan, c, key.1, &key.2, dynamic::VIEW_PLACEHOLDER)?;
+                Some(output::RootNextest {
+                    binary_id: n.binary_id,
+                    cargo_metadata: n.cargo_metadata.to_string(),
+                    binaries: n.binaries.to_string(),
+                })
+            }
+            _ => None,
+        };
         Ok(RootOut {
             package: key.0.clone(),
             target: key.2.clone(),
@@ -796,6 +808,7 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
                 unit: r.unit.clone(),
                 output: root_output(plan, r, inputs.toolchains.target_traits)?,
             },
+            nextest,
         })
     };
     let mut out = BTreeMap::new();
