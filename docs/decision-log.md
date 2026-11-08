@@ -1662,6 +1662,9 @@ re-run" saving is missing in dynamic mode. Fix: content-addressed copies
 of that file's inputs, like the default mode has. Do it now, or wait until
 dynamic mode is usable on a released Nix?
 
+> Resolved: later; recorded under "Known gaps (TODO)" in
+> `docs/implementation.md`.
+
 ## 129. FYI: link steps take only `NIX_LDFLAGS` from other packages
 
 Build-tool library folders (`NIX_LDFLAGS_FOR_BUILD`, e.g. cmake's) and
@@ -1669,8 +1672,6 @@ Build-tool library folders (`NIX_LDFLAGS_FOR_BUILD`, e.g. cmake's) and
 use them for libraries a binary links. If some library's setup hook does,
 it gets added.
 
-> Resolved (128): later; recorded under "Known gaps (TODO)" in
-> `docs/implementation.md`.
 
 ## 130. FYI: presets follow each workspace's compiler; future work written up (resolves 70, 91)
 
