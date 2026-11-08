@@ -1597,10 +1597,9 @@ null
 
 
 The stdenv of the host units’ environment capture (build
-scripts, proc macros and their dependencies) of this
-target’s plans\. ` null `: the build machine’s
-(` buildPackages.stdenv ` of the target’s package set)\. It must
-build for the build machine\.
+scripts, proc macros and their dependencies) of this target’s
+plans\. ` null `: the build machine’s (` buildPackages.stdenv ` of
+the target’s package set)\. It must build for the build machine\.
 
 
 
@@ -1624,7 +1623,7 @@ pkgs.clangStdenv
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1837,11 +1836,10 @@ attribute set of (null or raw value)
 
 
 The stdenv whose setup hooks the target units’ environment
-capture records (its C compiler, wrapper flags, hardening),
-for the base capture and every package’s own\. ` null `: the
-package set’s stdenv (` packageSet.stdenv `, or the build
-machine’s for a target without a package set)\. It must build
-for this target\.
+capture records (its C compiler, wrapper flags, hardening), for
+the base capture and every package’s own\. ` null `: the package
+set’s stdenv (` packageSet.stdenv `, or the build machine’s for a
+target without a package set)\. It must build for this target\.
 
 
 
@@ -1865,7 +1863,7 @@ pkgs.clangStdenv
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -2134,9 +2132,8 @@ attribute set of module
 
 
 
-The packages to plan for this target, each traced with
-` -p `, in the build and the test plan\. ` null ` traces
-` --workspace `\.
+The packages to plan for this target, each traced with ` -p `, in
+the build and the test plan\. ` null ` traces ` --workspace `\.
 
 
 
@@ -2160,13 +2157,12 @@ null
 
 
 
-Test binaries, test runs, test apps and doctests on this
-target\. ` false `: none (a target that is only built, such
-as a wasm component whose tests run natively); the test
-plan is then not traced, except for a check or clippy
-variant with ` allTargets `\. A list of packages: the test
-plan is ` cargo test --no-run -p <pkg> … ` for those
-packages only, and only their tests are run\. ` true `: the
+Test binaries, test runs, test apps and doctests on this target\.
+` false `: none (a target that is only built, such as a wasm
+component whose tests run natively); the test plan is then not
+traced, except for a check or clippy variant with ` allTargets `\. A
+list of packages: the test plan is ` cargo test --no-run -p <pkg> … `
+for those packages only, and only their tests are run\. ` true `: the
 variant’s or target’s package selection\.
 
 

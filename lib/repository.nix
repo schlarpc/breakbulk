@@ -626,7 +626,7 @@ let
       v = checkMode wsName vName ws.variants.${vName};
       entries = locks.${wsName};
       sel = selOf wsName triple v;
-      tsel = testSelOf ws triple v;
+      tsel = testSelOf wsName triple v;
       s = specFor wsName triple;
       # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
       # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
@@ -835,7 +835,7 @@ let
               v = ws.variants.${vName};
               sel = selOf wsName triple v;
               # Test outputs: none when the target has `tests = false`.
-              tsel = testSelOf ws triple v;
+              tsel = testSelOf wsName triple v;
               testsOn = tsel != false;
               tSel = if testsOn then tsel else null;
               ifTests = attrs: if testsOn then attrs else { };
