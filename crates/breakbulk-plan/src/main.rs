@@ -12,11 +12,15 @@
 //!   [--cargo-env cargo-env.json]
 //!
 //! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
-//!   --target TRIPLE [--spec FILE] --scratch DIR --cargo-env cargo-env.json
+//!   --target TRIPLE [--spec FILE] [--capabilities FILE --profile P [--trim-paths auto|on|off]] \
+//!   --scratch DIR --cargo-env cargo-env.json
 //! ```
 //!
 //! `--cargo-env-only` writes only the dev shell's `cargo-env.json`, from the
-//! project's Cargo config files and rustc, without running Cargo.
+//! project's Cargo config files and rustc, without running Cargo; with
+//! `--capabilities`, also the trim-paths variable for `--profile`, by the
+//! planner's rule from the workspace root's `Cargo.toml` and the config
+//! files, read as TOML (decision 135).
 //!
 //! `--capabilities` is the toolchain's capabilities as JSON
 //! (`breakbulk_format::Capabilities`, the Nix library's `toolchainFacts`):
@@ -37,7 +41,8 @@ fn usage() -> ! {
          [--config X]... [--spec FILE] --capabilities FILE [--trim-paths auto|on|off] \
          --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
-         --target TRIPLE [--spec FILE] --scratch DIR --cargo-env FILE"
+         --target TRIPLE [--spec FILE] [--capabilities FILE --profile P [--trim-paths auto|on|off]] \
+         --scratch DIR --cargo-env FILE"
     );
     std::process::exit(2)
 }

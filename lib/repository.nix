@@ -968,32 +968,15 @@ let
         name = wsName;
         inherit (ws) toolchain;
         inherit (ws.devShell) setTarget;
-        # Decision 123: the profile the planner turned trim-paths on for,
-        # from the build plan's header. Only a Cargo with trim-paths (the
-        # toolchain's `trimPaths` capability) may have it, so other Cargo
-        # never reads the plan (decision 81: the shell opens while a
-        # manifest is broken).
-        trimPathsProfile =
-          let
-            inst = instances.${nativeTriple}.${ws.defaultVariant} or null;
-            mayTrim = inst.capabilities.trimPaths;
-            plan = builtins.fromJSON (
-              builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
-            );
-          in
-          if inst == null || !mayTrim then
-            null
-          else if plan.trimPathsDefault or false then
-            plan.variant.profile
-          else
-            null;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
         targetEnv = envStrings (targetField wsName nativeTriple "env" { });
-        # How the planner passes the native spec to Cargo (IFD: a small
-        # derivation that reads the project's Cargo config and asks rustc,
+        # How the planner passes the native spec to Cargo, and the
+        # trim-paths variable when the planner turns it on for the default
+        # variant's profile (IFD: a small derivation that reads the
+        # project's Cargo config and root manifest as files and asks rustc,
         # apart from planning, so a broken manifest does not break the
-        # shell; decision 81). The file names tool paths without their
-        # context; the spec's own values carry it.
+        # shell; decisions 81, 135). The file names tool paths without
+        # their context; the spec's own values carry it.
         cargoEnv =
           let
             inst = instances.${nativeTriple}.${ws.defaultVariant} or null;

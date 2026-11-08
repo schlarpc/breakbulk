@@ -12,12 +12,13 @@
 #    rustflags as CARGO_TARGET_<TRIPLE>_RUSTFLAGS or CARGO_BUILD_RUSTFLAGS,
 #    whichever key the planner's `--config` used. Cargo appends these lists
 #    to the project's own, as it appends `--config` lists.
-#  - CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner turned Cargo's
-#    trim-paths on for the default variant's profile P itself (the plan's
-#    `trimPathsDefault`; Cargo 1.101 and later), so local `-C metadata`
-#    matches the plan's. Deciding that reads the build plan (IFD), so on
-#    Cargo 1.101 and later the shell needs the manifests to plan; earlier
-#    Cargo never reads it.
+#  - CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner turns Cargo's
+#    trim-paths on for the default variant's profile P (Cargo 1.101 and
+#    later, unless the project declares trim-paths or cargoTrimPaths says
+#    otherwise), so local `-C metadata` matches the plan's. It comes from
+#    the same `cargo-env.json`, by the planner's own file-reading rule, so
+#    the shell opens with a broken manifest on every Cargo version
+#    (decision 135; a manifest that is not valid TOML is a warning).
 #  - The union of the workspace's packages' inputs on the native platform,
 #    through nixpkgs' own setup hooks (what the env captures record per
 #    package). One shell cannot scope env per unit, and a union is only
@@ -48,11 +49,9 @@
   # targets.<native>.env, already strings.
   targetEnv ? { },
   # The planner's `cargo-env.json` for the native target: { env; warnings; }
-  # (crates/breakbulk-plan/src/spec.rs `CargoEnv`).
+  # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), the trim-paths
+  # variable included.
   cargoEnv ? { },
-  # The profile the planner turned trim-paths on for (the plan's
-  # `trimPathsDefault`, Cargo 1.101 and later), or null.
-  trimPathsProfile ? null,
 }:
 let
   envString = (import ./modules/types.nix { inherit lib; }).envString;
@@ -76,12 +75,6 @@ let
     // (cargoEnv.env or { })
     // lib.optionalAttrs setTarget {
       CARGO_BUILD_TARGET = nativeTriple;
-    }
-    # As the planner's `--config profile.<p>.trim-paths="all"`: trim-paths
-    # takes absolute paths out of the identity of path crates outside the
-    # workspace root, so without it local `-C metadata` differs.
-    // lib.optionalAttrs (trimPathsProfile != null) {
-      "CARGO_PROFILE_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] trimPathsProfile)}_TRIM_PATHS" = "all";
     };
 
   # Variables that change what Cargo builds but never reach the planner.

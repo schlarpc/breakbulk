@@ -504,6 +504,9 @@ in
       tools
       target
       spec
+      profile
+      trimPaths
+      capabilities
       ;
     inherit (toolchain) rustc;
     name = "${name}-cargo-env";

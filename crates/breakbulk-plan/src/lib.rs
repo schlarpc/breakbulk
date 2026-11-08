@@ -53,10 +53,32 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
 /// rustc (`-vV`, `--print cfg`), and never runs Cargo, so it works while
 /// the manifests are broken (decision 81). The same value as
 /// [`plan_with_cargo_env`]'s.
+///
+/// With the toolchain's capabilities, it also exports
+/// `CARGO_PROFILE_<P>_TRIM_PATHS=all` when the planner would turn
+/// trim-paths on for `opts.profile`, by the same file-reading rule
+/// ([`trim_paths::decide`]; decision 135): the variable, like the planner's
+/// `--config`, overrides the project's setting.
 pub fn cargo_env(opts: &trace::Options) -> Result<spec::CargoEnv, Error> {
-    Ok(spec::prepare_for(opts)?
+    let mut env = spec::prepare_for(opts)?
         .map(|p| p.cargo_env())
-        .unwrap_or_default())
+        .unwrap_or_default();
+    if let Some(caps) = &opts.capabilities {
+        let declared = trim_paths::declared(&trace::workspace_dir(opts));
+        env.warnings.extend(declared.warnings.iter().cloned());
+        if trim_paths::decide(opts.trim_paths, caps.trim_paths, &declared)? {
+            env.env.insert(trim_paths_var(&opts.profile), "all".into());
+        }
+    }
+    Ok(env)
+}
+
+/// `CARGO_PROFILE_<P>_TRIM_PATHS`: the profile name uppercased, `-` as `_`.
+pub fn trim_paths_var(profile: &str) -> String {
+    format!(
+        "CARGO_PROFILE_{}_TRIM_PATHS",
+        profile.to_ascii_uppercase().replace('-', "_")
+    )
 }
 
 /// [`plan`], plus the toolchain spec as Cargo environment configuration for
@@ -116,7 +138,12 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
     if let Some(p) = &prepared {
         p.apply(&mut plan)?;
     }
-    let cargo_env = prepared.as_ref().map(|p| p.cargo_env()).unwrap_or_default();
+    let mut cargo_env = prepared.as_ref().map(|p| p.cargo_env()).unwrap_or_default();
+    if opts.trim_paths_default {
+        cargo_env
+            .env
+            .insert(trim_paths_var(&opts.profile), "all".into());
+    }
     let mut forbidden = opts.forbidden.clone();
     forbidden.push(opts.scratch.clone());
     validate(

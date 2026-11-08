@@ -546,6 +546,63 @@ in
       echo "$linker" > $out
     '';
 
+  # Decision 135: on Cargo 1.101 (rust-overlay's nightly) the dev shell
+  # decides CARGO_PROFILE_DEV_TRIM_PATHS by the planner's file-reading
+  # rule, without a plan: with the workspace root's Cargo.toml broken, the
+  # shell still evaluates and sets it (cargo-env.json carries a warning
+  # naming the file); a project that declares trim-paths in any profile
+  # gets no variable; `cargoTrimPaths = false` and `sourcePaths = "keep"`
+  # set none either, and `cargoTrimPaths = true` sets it over the
+  # project's own setting.
+  devshell-trim-paths-files =
+    let
+      nightly = pkgs.rust-bin.nightly.latest.minimal;
+      ws =
+        root: extra:
+        (mkRepo root [
+          (oneWs ".")
+          {
+            workspaces.main = {
+              toolchain = {
+                rustc = nightly;
+                cargo = nightly;
+              };
+            }
+            // extra;
+          }
+        ]).workspaces.main;
+      brokenRoot = edited "stamps" "echo 'this is [not toml' >> Cargo.toml";
+      declares = edited "stamps" ''printf '\n[profile.bench.package.tool]\ntrim-paths = "none"\n' >> Cargo.toml'';
+      var = "CARGO_PROFILE_DEV_TRIM_PATHS";
+      shellVar = w: w.devShell.${var} or w.devShell.env.${var} or null;
+      cargoEnvOf =
+        w:
+        builtins.fromJSON (
+          builtins.unsafeDiscardStringContext (
+            builtins.readFile "${w.instances.${native}.default.cargoEnv}/cargo-env.json"
+          )
+        );
+      broken = ws brokenRoot { };
+      got = {
+        broken = shellVar broken;
+        brokenWarned = lib.any (lib.hasInfix "is not valid TOML") (cargoEnvOf broken).warnings;
+        declares = shellVar (ws declares { });
+        forced = shellVar (ws declares { cargoTrimPaths = true; });
+        off = shellVar (ws (fixtures + "/stamps") { cargoTrimPaths = false; });
+        keep = shellVar (ws (fixtures + "/stamps") { sourcePaths = "keep"; });
+      };
+      want = {
+        broken = "all";
+        brokenWarned = true;
+        declares = null;
+        forced = "all";
+        off = null;
+        keep = null;
+      };
+    in
+    assert lib.assertMsg (got == want) "devshell-trim-paths-files: ${builtins.toJSON got}";
+    evalCheck "devshell-trim-paths-files" (builtins.toJSON got);
+
   # Git dependencies built through units: instantiation finds each fetched
   # source under Cargo's package id, which keeps `git+` and the reference
   # query, and leaves the name out when the URL ends in it.

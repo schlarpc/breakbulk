@@ -152,12 +152,16 @@
 
   # The dev shell's `cargo-env.json`: the native toolchain spec as Cargo
   # environment configuration, as the planner passes it with `--config`
-  # (crates/breakbulk-plan/src/spec.rs `CargoEnv`). Computed apart from the
-  # plan, from the project's Cargo config files and `rustc --print cfg`
-  # only, so the dev shell still opens while a manifest is broken and
-  # planning fails (decision 81).
+  # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), and
+  # CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner would turn Cargo's
+  # trim-paths on (decision 135: the same rule, from the workspace root's
+  # Cargo.toml and the config files, read as TOML; a file that does not
+  # parse is a warning; the toolchain's `trimPaths` capability). Computed
+  # apart from the plan, from those files and `rustc --print cfg` only, so
+  # the dev shell still opens while a manifest is broken and planning fails
+  # (decision 81).
   #
-  #   breakbulk.mkCargoEnv pkgs { configSkeleton; wsDir; rustc; tools; target; spec; }
+  #   breakbulk.mkCargoEnv pkgs { configSkeleton; wsDir; rustc; tools; target; spec; capabilities; profile; trimPaths; }
   #   "''${drv}/cargo-env.json"
   mkCargoEnv =
     pkgs:
@@ -170,6 +174,12 @@
       target,
       spec ? null,
       name ? "breakbulk-cargo-env",
+      # With the toolchain's capabilities (lib/toolchain-facts.nix): the
+      # trim-paths variable for `profile` (mkPlan's `trimPaths`). Without:
+      # none.
+      capabilities ? null,
+      profile ? "dev",
+      trimPaths ? "auto",
     }:
     let
       args = [
@@ -180,6 +190,14 @@
         wsDir
         "--target"
         target
+      ]
+      ++ lib.optionals (capabilities != null) [
+        "--capabilities"
+        (toolchainFacts.capabilitiesFile capabilities)
+        "--profile"
+        profile
+        "--trim-paths"
+        trimPaths
       ]
       ++ lib.optionals (spec != null) [
         "--spec"

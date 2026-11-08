@@ -195,9 +195,10 @@ rec {
       )
     );
 
-  # A tree with only those config files and the workspace directory: what
-  # the dev shell's `cargo-env.json` derivation reads (lib/plan.nix
-  # mkCargoEnv; decision 81).
+  # A tree with only those config files, the workspace root's Cargo.toml
+  # (read as TOML for `trim-paths`, decision 135; never by Cargo) and the
+  # workspace directory: what the dev shell's `cargo-env.json` derivation
+  # reads (lib/plan.nix mkCargoEnv; decision 81).
   mkConfigSkeleton =
     pkgs:
     {
@@ -206,7 +207,9 @@ rec {
       name ? "breakbulk-config-skeleton",
     }:
     let
-      files = configFiles { inherit root wsDir; };
+      files =
+        configFiles { inherit root wsDir; }
+        ++ filter (existsFile root) [ (util.joinRel wsDir "Cargo.toml") ];
       tree = lib.fileset.toSource {
         inherit root;
         fileset = lib.fileset.unions (map (manifest.at root) files);
