@@ -8,7 +8,9 @@
 #
 # So an edit to the planner, the instantiator or breakbulk-format never
 # changes breakbulk-unit's store path, which every unit depends on (decision
-# 50). Edits to any member's Cargo.toml, or to Cargo.lock, still do.
+# 50), and neither does an edit to a member's integration tests (`tests/`),
+# which are left out. Edits to any member's Cargo.toml, or to Cargo.lock,
+# still do.
 #
 #   tools = breakbulk.mkTools pkgs;
 #   tools.breakbulk-plan  tools.breakbulk-shim  tools.breakbulk-unit
@@ -73,6 +75,17 @@ let
     "src/main.rs"
   ];
 
+  # A member's directory without its integration tests (`tests/`), which a
+  # binary's build never compiles (`cargo build -p`, no check phase): a
+  # test edit then changes no tool's store path, so breakbulk-unit (an
+  # input of every unit) stays the same when only its tests change.
+  crateFiles =
+    c:
+    let
+      dir = root + "/crates/${c}";
+    in
+    if builtins.pathExists (dir + "/tests") then lib.fileset.difference dir (dir + "/tests") else dir;
+
   srcFor =
     name:
     let
@@ -88,7 +101,7 @@ let
             (root + "/Cargo.lock")
           ]
           ++ map (c: root + "/crates/${c}/Cargo.toml") outside
-          ++ map (c: root + "/crates/${c}") inside
+          ++ map crateFiles inside
         );
       };
       stubs = lib.concatMap (

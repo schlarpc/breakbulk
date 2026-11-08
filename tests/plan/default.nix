@@ -471,9 +471,11 @@ in
 
   # Decision 50: breakbulk's binaries are built from narrow sources, so an
   # edit to the planner leaves breakbulk-unit (an input of every unit) and
-  # breakbulk-shim alone. Computes the tools' derivations from a copy of
-  # the repository with a line added to breakbulk-plan's main.rs and to
-  # breakbulk-format's lib.rs (IFD: the copy is a derivation), and compares
+  # breakbulk-shim alone, and so does an edit to breakbulk-unit's
+  # integration tests. Computes the tools' derivations from a copy of the
+  # repository with a line added to breakbulk-plan's main.rs, to
+  # breakbulk-format's lib.rs and to breakbulk-unit's tests/smoke.rs
+  # (IFD: the copy is a derivation), and compares
   # .drv paths with the real ones.
   tools-narrow =
     let
@@ -489,6 +491,7 @@ in
         cp -r --no-preserve=mode ${repo} $out
         echo '// edited' >> $out/crates/breakbulk-plan/src/main.rs
         echo '// edited' >> $out/crates/breakbulk-format/src/lib.rs
+        echo '// edited' >> $out/crates/breakbulk-unit/tests/smoke.rs
       '';
       # Realise the copy (IFD), then use it as a path value.
       editedRoot = builtins.seq (builtins.readDir edited) (
