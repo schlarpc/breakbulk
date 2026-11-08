@@ -2685,7 +2685,13 @@ pkgs.cargo
 
 
 clippy (with ` bin/clippy-driver `), for ` clippy ` variants\.
-It must be built for the same rustc\.
+It must be built for the same rustc: planning compares
+` clippy-driver --rustc --print sysroot ` with rustc’s and
+fails naming this option when they differ\. The default is
+nixpkgs’ clippy with nixpkgs’ rustc, and ` rustc ` itself
+otherwise, as a rustup-style toolchain with the clippy
+component (rust-overlay’s default profile, fenix’s
+` toolchain `) has ` bin/clippy-driver `\.
 
 
 
@@ -2697,7 +2703,7 @@ package
 *Default:*
 
 ```nix
-pkgs.clippy
+if rustc == pkgs.rustc then pkgs.clippy else rustc
 ```
 
 *Declared by:*

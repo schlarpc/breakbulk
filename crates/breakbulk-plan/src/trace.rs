@@ -43,6 +43,10 @@ pub struct Options {
     /// store path). Cargo then starts `shim clippy-driver rustc …` for
     /// workspace members only.
     pub clippy_driver: Option<String>,
+    /// The option that sets `clippy_driver`
+    /// (`workspaces.<ws>.toolchain.clippy`), for the error when it does not
+    /// match rustc.
+    pub clippy_option: Option<String>,
     /// Clippy's own arguments (`-D warnings`, `-W clippy::pedantic`), as
     /// `cargo clippy -- ARGS` passes them: `CLIPPY_ARGS`, each argument
     /// followed by `__CLIPPY_HACKERY__`. Kept only on clippy-driver units.
@@ -199,6 +203,41 @@ fn sysroot(opts: &Options) -> Result<PathBuf, Error> {
         "rustc --print sysroot",
     )?;
     Ok(PathBuf::from(s.trim()))
+}
+
+/// clippy-driver is a rustc with its own sysroot compiled in: one built for
+/// another rustc (nixpkgs' `clippy` beside a rust-overlay toolchain, even of
+/// the same release) makes the traced units point into that rustc's
+/// sysroot, which instantiation later rejects as an undeclared input. Both
+/// `--print sysroot` answers must therefore be the same path
+/// (`clippy-driver --rustc` behaves as plain rustc).
+fn check_clippy_driver(opts: &Options, driver: &str) -> Result<(), Error> {
+    let option = opts.clippy_option.as_deref().unwrap_or("the toolchain's clippy");
+    if !Path::new(driver).is_file() {
+        bail!(
+            "the clippy variant needs {driver}, which does not exist; set {option} to a \
+             package with bin/clippy-driver built for this rustc"
+        );
+    }
+    let ours = output(
+        {
+            let mut c = command(opts, driver);
+            c.args(["--rustc", "--print", "sysroot"]);
+            c
+        },
+        "clippy-driver --rustc --print sysroot",
+    )?;
+    let rustc = sysroot(opts)?;
+    if Path::new(ours.trim()) != rustc {
+        bail!(
+            "{driver} is built for another rustc: its sysroot is {}, rustc's is {}; set \
+             {option} to the clippy of this rustc (a rustup-style toolchain with the clippy \
+             component has bin/clippy-driver)",
+            ours.trim(),
+            rustc.display()
+        );
+    }
+    Ok(())
 }
 
 /// When the project's config turns on `-Zbuild-std`: the merged crates.io
@@ -433,8 +472,11 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     let metadata = Metadata::read(&meta_path)?;
 
     let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
-    if opts.mode == VariantMode::Clippy && opts.clippy_driver.is_none() {
-        bail!("the clippy variant needs --clippy-driver");
+    if opts.mode == VariantMode::Clippy {
+        let Some(driver) = &opts.clippy_driver else {
+            bail!("the clippy variant needs --clippy-driver");
+        };
+        check_clippy_driver(opts, driver)?;
     }
     let invocations: Vec<Vec<&str>> = match opts.kind {
         PlanKind::Build if checking => vec![vec!["check"]],

@@ -10,6 +10,7 @@
 #     kind = "build";        # or "test", or "bench" (`cargo bench --no-run`)
 #     mode = "build";        # or "check", "clippy", "coverage" (the variant's)
 #     clippyDriver = null;   # clippy-driver (a path) for mode = "clippy"
+#     clippyOption = null;   # the option that set it, named when it does not match rustc
 #     clippyArgs = [ ];      # clippy's arguments (`cargo clippy -- ARGS`)
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
@@ -53,6 +54,7 @@
       name ? "breakbulk-plan",
       mode ? "build",
       clippyDriver ? null,
+      clippyOption ? null,
       clippyArgs ? [ ],
       # The toolchain's capabilities (lib/toolchain-facts.nix), or null for
       # toolchainFacts' own for this rustc and cargo.
@@ -104,6 +106,10 @@
       ++ lib.optionals (clippyDriver != null) [
         "--clippy-driver"
         "${clippyDriver}"
+      ]
+      ++ lib.optionals (clippyDriver != null && clippyOption != null) [
+        "--clippy-option"
+        clippyOption
       ]
       ++ lib.concatMap (a: [
         "--clippy-arg"

@@ -228,7 +228,7 @@ let
         };
 
         toolchain = mkOption {
-          type = types.submodule {
+          type = types.submodule (tc: {
             options = {
               rustc = mkOption {
                 type = types.package;
@@ -244,11 +244,21 @@ let
               };
               clippy = mkOption {
                 type = types.package;
-                default = pkgs.clippy;
-                defaultText = lib.literalExpression "pkgs.clippy";
+                # Derivations compare by output path. A toolchain other
+                # than nixpkgs' (rust-overlay, fenix's combined ones)
+                # carries its own clippy-driver; nixpkgs' clippy is built
+                # for nixpkgs' rustc only.
+                default = if tc.config.rustc == pkgs.rustc then pkgs.clippy else tc.config.rustc;
+                defaultText = lib.literalExpression "if rustc == pkgs.rustc then pkgs.clippy else rustc";
                 description = ''
                   clippy (with `bin/clippy-driver`), for `clippy` variants.
-                  It must be built for the same rustc.
+                  It must be built for the same rustc: planning compares
+                  `clippy-driver --rustc --print sysroot` with rustc's and
+                  fails naming this option when they differ. The default is
+                  nixpkgs' clippy with nixpkgs' rustc, and `rustc` itself
+                  otherwise, as a rustup-style toolchain with the clippy
+                  component (rust-overlay's default profile, fenix's
+                  `toolchain`) has `bin/clippy-driver`.
                 '';
               };
               capabilities = mkOption {
@@ -285,7 +295,7 @@ let
                 '';
               };
             };
-          };
+          });
           default = { };
           example = lib.literalExpression ''
             let tc = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;

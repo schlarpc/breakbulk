@@ -124,10 +124,12 @@ pkgs:
   testDylibPath ? testRuns.dylibPathOf { inherit traits runner; },
   # Variants (lib/variants.nix): `mode` is build, check, clippy or
   # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
-  # matching rustc). `bench` adds a bench plan (`cargo bench --no-run`):
+  # matching rustc; `clippyOption`, the option that set it, is named when
+  # it does not). `bench` adds a bench plan (`cargo bench --no-run`):
   # ws.benches, ws.plans.bench, ws.units.bench.
   mode ? "build",
   clippyDriver ? null,
+  clippyOption ? null,
   clippyArgs ? [ ],
   bench ? false,
   # The target's toolchain spec (M3, from lib/repository.nix):
@@ -266,6 +268,7 @@ let
       inherit
         mode
         clippyDriver
+        clippyOption
         clippyArgs
         vendor
         tools

@@ -52,6 +52,11 @@
 #                    under `variant-<v>/` unless `checks = false`
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
+#   variants-clippy-toolchain   with rust-overlay's 1.99 as rustc and
+#                    cargo, `toolchain.clippy` defaults to that toolchain
+#                    and the clippy plan builds; nixpkgs' clippy (another
+#                    sysroot) and a toolchain without clippy-driver fail
+#                    planning naming `workspaces.main.toolchain.clippy`
 #   variants-coverage   with rust-overlay's 1.99 (nixpkgs' rustc 1.99
 #                    builds instrumented multi-crate binaries that crash
 #                    in the profiler runtime at exit, with plain Cargo
@@ -802,6 +807,45 @@ in
     pkgs.runCommand "variants-all-targets" { check = lib'; } ''
       cp $check/units $out
     '';
+
+  variants-clippy-toolchain =
+    let
+      withClippy = overlayRust.override { extensions = [ "clippy" ]; };
+      planOf =
+        toolchain:
+        (mkRepo (fixtures + "/variants") [
+          {
+            workspaces.main = {
+              path = "ws";
+              inherit toolchain;
+              variants.clippy.mode = "clippy";
+            };
+          }
+        ]).workspaces.main.instances.${native}.clippy.plans.build;
+    in
+    pkgs.runCommand "variants-clippy-toolchain"
+      {
+        follows = planOf {
+          rustc = withClippy;
+          cargo = withClippy;
+        };
+        mismatch = pkgs.testers.testBuildFailure (planOf {
+          rustc = withClippy;
+          cargo = withClippy;
+          clippy = pkgs.clippy;
+        });
+        missing = pkgs.testers.testBuildFailure (planOf {
+          rustc = overlayRust;
+          cargo = overlayRust;
+        });
+      }
+      ''
+        cat $mismatch/testBuildFailure.log $missing/testBuildFailure.log
+        grep -q 'is built for another rustc' $mismatch/testBuildFailure.log
+        grep -q 'set workspaces.main.toolchain.clippy to the clippy of this rustc' $mismatch/testBuildFailure.log
+        grep -q 'does not exist; set workspaces.main.toolchain.clippy' $missing/testBuildFailure.log
+        touch $out
+      '';
 
   variants-coverage =
     let

@@ -5,7 +5,7 @@
 //! breakbulk-plan --cargo C --rustc R --rustdoc D --shim S \
 //!   --skeleton DIR [--workspace REL] [--canonical-root /build/skeleton] \
 //!   --kind build|test|bench [--mode build|check|clippy|coverage] \
-//!   [--clippy-driver PATH] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
+//!   [--clippy-driver PATH [--clippy-option NAME]] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--spec FILE] --capabilities FILE \
 //!   [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]… --out plan.json \
@@ -35,7 +35,8 @@ fn usage() -> ! {
     eprintln!(
         "usage: breakbulk-plan --cargo C --rustc R --rustdoc D --shim S --skeleton DIR \
          [--workspace REL] [--canonical-root DIR] --kind build|test|bench \
-         [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-arg A]... \
+         [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-option NAME] \
+         [--clippy-arg A]... \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
          [--config X]... [--spec FILE] --capabilities FILE [--trim-paths auto|on|off] \
@@ -60,6 +61,7 @@ fn main() -> ExitCode {
         kind: PlanKind::Build,
         mode: VariantMode::Build,
         clippy_driver: None,
+        clippy_option: None,
         clippy_args: Vec::new(),
         target: String::new(),
         profile: "dev".into(),
@@ -107,6 +109,7 @@ fn main() -> ExitCode {
                 }
             }
             "--clippy-driver" => opts.clippy_driver = Some(val()),
+            "--clippy-option" => opts.clippy_option = Some(val()),
             "--clippy-arg" => opts.clippy_args.push(val()),
             "--target" => opts.target = val(),
             "--profile" => opts.profile = val(),

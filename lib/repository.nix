@@ -689,6 +689,7 @@ let
       inherit (cfg) ca;
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
+      clippyOption = "workspaces.${wsName}.toolchain.clippy";
       bench = v.benches;
       inherit (s) runner testSystem testDylibPath;
     }
