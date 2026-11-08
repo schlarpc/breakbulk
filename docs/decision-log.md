@@ -1732,3 +1732,40 @@ undoes decision 81 for Cargo 1.101+ only; 1.99 and earlier are unchanged.
 Alternative: always set the trim-paths variable on 1.101+, which overrides
 a project's own setting. Neither is perfect; a third option is to fall
 back to "always set it" when planning fails.
+
+## 136. FYI: the ten scattered decisions now each have one home
+
+Following your "all 10, extensible for bring-your-own targets":
+- **Target traits** (`lib/target-traits.nix`): one record of facts per
+  target (OS, environment, object format, file names, debug side files,
+  library path variable, default post-link steps), parsed the way rustc
+  names targets and checked against `rustc --print cfg` for all 248 targets
+  it recognises. For a custom target, set `targets.<triple>.traits`; every
+  decision then uses them. The Rust side receives the traits instead of
+  parsing target names.
+- **Three real bugs fixed along the way:** a package changing debug
+  splitting now gets a warning (90); Windows tests can now load DLLs built
+  by build scripts (wine looks at `WINEPATH`, not `LD_LIBRARY_PATH`); musl
+  builds now link pkg-config libraries statically (previously a link
+  error with private dependencies).
+- **Consolidated without changing any build step:** version gates,
+  runner choice, per-target variable names, the package-set table,
+  toolchain facts (LLVM, wasi-sdk), and the two Nix/Rust duplicate pairs
+  (nextest metadata, test runtime variables).
+- **Behaviour change:** test and bench binaries get `.exe` / `.wasm`
+  names on those targets.
+- Every crate rebuilds once: breakbulk's unit builder no longer includes
+  its own test files in its source, so future test edits don't rebuild
+  anything.
+Deferred, in "Known gaps (TODO)": install-layout sorting from traits
+(MinGW `.a` placement, macOS `.dylib`).
+
+## 137. ASK: package-level `splitDebug` mismatch: warning or error?
+
+When a package adds or removes `splitDebug` against its target's setting,
+breakbulk now warns (removing it can be deliberate). Make it an error?
+
+## 138. FYI: Android counts as Linux
+
+`isLinux` is true for `*-linux-android`, as in nixpkgs, so Android targets
+keep Linux linker and post-link choices.
