@@ -529,13 +529,21 @@ fn wrapper(
             .map(|id| tokens.unit(id, "flags"))
             .collect(),
     };
-    // The unit's debuginfo side files (`debug`), for the product's `linked`
-    // stage, when the unit has that output.
+    // The debuginfo side files (`debug`) of the unit, when it has that
+    // output, and of the libraries below a product root that have one
+    // (`.dwo` with `split-debuginfo=unpacked`, decision 126), for the
+    // product's `linked` stage: one path per line.
+    let traits = &inputs.toolchains.target_traits;
     let debug = match &info.unit {
-        Some(u) if matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(&inputs.toolchains.target_traits)) => {
-            tokens.unit(u, crate::DEBUG_OUTPUT)
+        Some(u) => {
+            let own = matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(traits));
+            own.then(|| u.clone())
+                .into_iter()
+                .chain(root.debug_units.iter().cloned())
+                .map(|id| tokens.unit(&id, crate::DEBUG_OUTPUT) + "\n")
+                .collect()
         }
-        _ => String::new(),
+        None => String::new(),
     };
     let json = to_canonical_json(&info).map_err(|e| Error(e.to_string()))?;
     small_drv(
@@ -554,9 +562,11 @@ fn wrapper(
     .map_err(|e| Error(format!("root {root_name}: {e}")))
 }
 
-/// Every wrapper's builder: `root`, `debug` and `not-built` when their
-/// attributes are set, `breakbulk-root.json` when `rootJson` is.
-const WRAPPER_SCRIPT: &str = r#"mkdir "$out" && { [ -z "$root" ] || ln -s "$root" "$out/root"; } && { [ -z "$debugRoot" ] || ln -s "$debugRoot" "$out/debug"; } && { [ -z "$notBuilt" ] || printf '%s\n' "$notBuilt" > "$out/not-built"; } && { [ -z "$rootJson" ] || printf '%s' "$rootJson" > "$out/breakbulk-root.json"; }"#;
+/// Every wrapper's builder: `root` and `not-built` when their attributes
+/// are set, `breakbulk-root.json` when `rootJson` is, and `debug`, a
+/// directory linking every file of the `debug` outputs `debugRoot` lists
+/// (one per line), when it lists any.
+const WRAPPER_SCRIPT: &str = r#"mkdir "$out" && { [ -z "$root" ] || ln -s "$root" "$out/root"; } && { [ -z "$debugRoot" ] || { mkdir "$out/debug" && printf '%s' "$debugRoot" | while read -r d; do for f in "$d"/*; do [ ! -e "$f" ] || [ -e "$out/debug/${f##*/}" ] || ln -s "$f" "$out/debug/" || exit 1; done; done; }; } && { [ -z "$notBuilt" ] || printf '%s\n' "$notBuilt" > "$out/not-built"; } && { [ -z "$rootJson" ] || printf '%s' "$rootJson" > "$out/breakbulk-root.json"; }"#;
 
 /// The doctest of one predicted library: the plan's doctest derivation with
 /// the package's test configuration (None when the plan has no doctest for

@@ -27,6 +27,11 @@
 #                    profile): the DWARF is in app.dwp, which splitDebug
 #                    puts next to the separate debug file, where gdb finds
 #                    it; gdb's backtrace and source lines as above
+#   source-paths-dwo the same with split-debuginfo = "unpacked": the
+#                    libraries' `.dwo` files reach the `linked` stage's
+#                    debug output with the bin's, and splitDebug packs the
+#                    ones the binary names into app.dwp (decision 126);
+#                    gdb's backtrace and source lines as above
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
 #   prefer-dynamic   -C prefer-dynamic: noSourceReferences allows the
@@ -320,6 +325,7 @@ let
   spModules = [
     (oneWs "." "dev")
     { workspaces.main.variants.packed.profile = "packed"; }
+    { workspaces.main.variants.unpacked.profile = "unpacked"; }
   ];
   sourcePaths = mkRepo (fixtures + "/source-paths") spModules;
   sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
@@ -357,6 +363,9 @@ let
     # debug info names files relative to the compilation directory, the
     # source view (rustc's working directory).
     grep -E '^#0 +dep::boom .* at dep/src/lib.rs:1[0-9]$' gdb.txt
+    # The argument's value: from the DWARF itself, not the line table
+    # (which split DWARF keeps in the binary).
+    grep -qF 'dep::boom (n=7)' gdb.txt
     grep -E '^#[1-9] .*app::main.* at app/src/main.rs:[0-9]+$' gdb.txt
     # gdb read the file from the dependency's source view, which the debug
     # output references.
@@ -1097,6 +1106,55 @@ in
         ${gdbCheck}
         mkdir -p $out
         cp gdb.txt $out/
+      '';
+
+  source-paths-dwo =
+    let
+      p = sourcePaths.workspaces.main.target.${native}.variants.unpacked.packages.app;
+    in
+    pkgs.runCommand "source-paths-dwo"
+      {
+        nativeBuildInputs = [
+          pkgs.gdb
+          pkgs.binutils-unwrapped
+        ];
+        app = p;
+        debug = p.debug;
+        linkedDebug = p.stages.linked.debug;
+        noSrc = p.checks.noSourceReferences;
+        depView = builtins.unsafeDiscardStringContext "${(inst sourcePaths).sources.workspace.dep}";
+      }
+      ''
+        set -euo pipefail
+        $app/bin/app > run.txt
+        grep -qxF 'formatted 42' run.txt
+        # The link unit's own `.dwo` files and its libraries' (`dep`, the
+        # registry crate `itoa`), and no .dwp.
+        ls $linkedDebug
+        ls $linkedDebug | grep -qE '^app[-.].*\.dwo$'
+        ls $linkedDebug | grep -qE '^dep[-.].*\.dwo$'
+        ls $linkedDebug | grep -qE '^itoa[-.].*\.dwo$'
+        test ! -e $linkedDebug/app.dwp
+        # splitDebug packed them into app.dwp next to the separate debug
+        # file, as rustc's own .dwp is with `packed`, and dropped the loose
+        # ones.
+        id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
+        test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
+        readelf -S -W $debug/lib/debug/.build-id/''${id:0:2}/app.dwp | grep -q '\.debug_info\.dwo'
+        test -L $debug/bin/app.dwp
+        test -z "$(find $debug -name '*.dwo')"
+        ${gdbCheck}
+        mkdir -p $out
+        cp gdb.txt $out/
+        # Negative control: without app.dwp, gdb has the line table but
+        # not the arguments, so the check above is not passing vacuously.
+        cp -r $debug nodwp
+        chmod -R u+w nodwp
+        rm nodwp/lib/debug/.build-id/''${id:0:2}/app.dwp
+        gdb -batch -nx -iex "set debug-file-directory $PWD/nodwp/lib/debug" \
+          -ex 'break dep::boom' -ex run -ex bt $app/bin/app > nodwp.txt 2>&1 || true
+        cat nodwp.txt
+        ! grep -qF 'dep::boom (n=7)' nodwp.txt
       '';
 
   trim-paths =

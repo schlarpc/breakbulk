@@ -1390,9 +1390,21 @@ fn debug_output_only_where_side_files() {
     assert!(compile(&mut p, "c-app").has_debug_output(msvc));
     let c = compile(&mut p, "c-ring-build");
     assert!(!c.has_debug_output(msvc));
-    // Libraries never.
+    // Libraries: only for per-object side files (`.dwo` with
+    // `split-debuginfo=unpacked`, decision 126), not for msvc's `.pdb` or
+    // a `.dwp`, which only a link writes.
     let c = compile(&mut p, "c-cfgif");
+    assert!(c.outputs.contains_key("rlib"));
     assert!(!c.has_debug_output(msvc));
+    assert!(!c.has_debug_output(elf));
+    c.args.extend(lit(&["-C", "debuginfo=2", "-C", "split-debuginfo=packed"]));
+    assert!(!c.has_debug_output(elf));
+    c.args.extend(lit(&["-C", "split-debuginfo=unpacked"]));
+    assert!(c.has_debug_output(elf));
+    assert!(!c.has_debug_output(msvc));
+    // A metadata-only library compiles no objects.
+    c.outputs.remove("rlib");
+    assert!(!c.has_debug_output(elf));
 }
 
 #[test]

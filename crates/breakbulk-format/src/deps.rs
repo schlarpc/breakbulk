@@ -373,6 +373,17 @@ pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
     seen
 }
 
+/// The compile units among [`units_below`] `id` that have a `debug` output
+/// on a target with these traits ([`CompileUnit::has_debug_output`]): the
+/// libraries whose `.dwo` files a binary linked from them names
+/// (`split-debuginfo=unpacked`, decision 126).
+pub fn debug_units_below(plan: &Plan, id: &UnitId, traits: &crate::TargetTraits) -> BTreeSet<UnitId> {
+    units_below(plan, id)
+        .into_iter()
+        .filter(|u| matches!(plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(traits)))
+        .collect()
+}
+
 /// The target-platform runs among [`units_below`] `id`: the build scripts
 /// whose copies of Cargo's `<profile>` directory sit next to `id`'s output
 /// (#23).

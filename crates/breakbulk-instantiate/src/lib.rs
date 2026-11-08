@@ -772,6 +772,7 @@ fn stub(inputs: &Inputs, prefix: &str, p: &PredictedRoot, variant: &str) -> Resu
         },
         nextest: None,
         build_script_runs: Vec::new(),
+        debug_units: Vec::new(),
     })
 }
 
@@ -814,6 +815,17 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
                 breakbulk_format::deps::target_runs_below(plan, &r.unit)
                     .into_iter()
                     .collect()
+            },
+            debug_units: if key.3 {
+                Vec::new()
+            } else {
+                breakbulk_format::deps::debug_units_below(
+                    plan,
+                    &r.unit,
+                    &inputs.toolchains.target_traits,
+                )
+                .into_iter()
+                .collect()
             },
         })
     };

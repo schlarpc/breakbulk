@@ -119,6 +119,12 @@ pub struct RootOut {
     /// product's `buildScriptFiles` stage and check (#23). Sorted.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub build_script_runs: Vec<String>,
+    /// For a product root the plan has: the units below it with a `debug`
+    /// output (`deps::debug_units_below`): libraries' `.dwo` files, which
+    /// the root's binary names, for the product's `linked` stage (decision
+    /// 126). Sorted.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub debug_units: Vec<String>,
 }
 
 /// [`crate::dynamic::Nextest`] as compact JSON text with placeholders the

@@ -180,12 +180,37 @@ let
           objcopy --only-keep-debug "$f" "$dbg"
           objcopy --strip-debug "$f"
           objcopy --add-gnu-debuglink="$dbg" "$f"
+          b=''${f##*/}
+          # With split-debuginfo = "unpacked", the binary's skeleton units
+          # name their `.dwo` files (its own and its libraries', decision
+          # 126) by rustc's absolute build path, which gdb opens as given
+          # and nowhere else (gdb 17.2, gdb/dwarf2/read.c, open_dwo_file).
+          # binutils' dwp packs the ones it names into `<binary>.dwp`,
+          # which gdb finds as below.
+          dwos=()
+          while IFS= read -r n; do
+            n=''${n##*/}
+            for d in bin lib; do
+              if [ -f "$debug/$d/$n" ]; then
+                dwos+=("$debug/$d/$n")
+                break
+              fi
+            done
+          done < <(readelf --debug-dump=info,no-follow-links --dwarf-depth=1 "$dbg" 2>/dev/null | sed -n 's/^.*DW_AT_\(GNU_\)\{0,1\}dwo_name *: .*: //p' | LC_ALL=C sort -u)
+          if [ ''${#dwos[@]} -gt 0 ] && [ ! -e "$debug/bin/$b.dwp" ] && [ ! -e "$debug/lib/$b.dwp" ]; then
+            case "$b" in
+              *.so|*.so.*) d=lib ;;
+              *) d=bin ;;
+            esac
+            echo "splitDebug: ''${f#$out/}: packing ''${#dwos[@]} .dwo files into $b.dwp"
+            mkdir -p "$debug/$d"
+            dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
+          fi
           # With split-debuginfo = "packed", the DWARF objects are in
           # `<binary>.dwp`. gdb looks for it next to the separate debug file
           # it found, under the binary's name (gdb 17.2,
           # gdb/dwarf2/read.c, open_and_init_dwp_file), so it moves there;
           # its install-layout place keeps a relative symlink.
-          b=''${f##*/}
           for d in bin lib; do
             if [ -f "$debug/$d/$b.dwp" ] && [ ! -L "$debug/$d/$b.dwp" ]; then
               mv "$debug/$d/$b.dwp" "$dir/$b.dwp"
@@ -193,6 +218,10 @@ let
             fi
           done
         done
+        # The `.dwo` files are in the `.dwp` files now, or no binary names
+        # them (an rlib member the link left out); gdb reads neither
+        # through their absolute names.
+        find "$debug" -name '*.dwo' -type f -delete
       ''
   );
 

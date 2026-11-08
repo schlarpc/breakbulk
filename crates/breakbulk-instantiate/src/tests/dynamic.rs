@@ -273,8 +273,8 @@ fn wrappers() {
     assert_eq!(w.builder, SHELL);
     assert_eq!(w.outputs, ["out"]);
     assert_eq!(w.env["root"], unit_path(APP, "out"));
-    // The bin's debuginfo side files, linked as `debug`.
-    assert_eq!(w.env["debugRoot"], unit_path(APP, "debug"));
+    // The bin's debuginfo side files, linked into `debug`.
+    assert_eq!(w.env["debugRoot"], unit_path(APP, "debug") + "\n");
     assert_eq!(w.env["PATH"], format!("{COREUTILS}/bin"));
     assert!(w.input_drvs[&drv_of(APP)].contains("out"));
     assert!(w.input_drvs[&drv_of(APP)].contains("debug"));
@@ -291,6 +291,22 @@ fn wrappers() {
     assert!(w.input_drvs[&drv_of(RUN)].contains("flags"));
 
     assert_eq!(w.env["notBuilt"], "");
+
+    // With unpacked split debuginfo, the `.dwo` files of the library below
+    // the bin too (decision 126).
+    let mut unpacked = dyn_inputs();
+    super::split_debuginfo_as(&mut unpacked, APP, "unpacked");
+    super::split_debuginfo_as(&mut unpacked, LIB, "unpacked");
+    let (resolved, _) = write_all(&unpacked);
+    let (_, w) = resolved
+        .iter()
+        .find(|(k, _)| k == "wrapper:smokeapp/bin/smokeapp")
+        .unwrap();
+    assert_eq!(
+        w.env["debugRoot"],
+        format!("{}\n{}\n", unit_path(APP, "debug"), unit_path(LIB, "debug"))
+    );
+    assert!(w.input_drvs[&drv_of(LIB)].contains("debug"));
 
     // A product root Cargo did not build: no `root`, a `not-built` marker
     // with the reason, and no dependency on the (failing) stub.

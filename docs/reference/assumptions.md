@@ -555,20 +555,20 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### X2. Which debuginfo side files a link writes
 
-- **Assumption.** On `*-windows-msvc` rustc passes `/DEBUG` to the linker for every linked crate whatever `-C debuginfo` and `-C strip` say, so a `.pdb` is always written; on ELF, with debuginfo on, `-C split-debuginfo=packed` writes one `.dwp` per linked output and `unpacked` one `.dwo` per object; the last `-C debuginfo` wins and `-g` means full; Cargo passes `-C split-debuginfo` only with `-C debuginfo`, and tolerates the side files' absence during the trace. (Apple's `.dSYM` is unverified; Darwin is not supported yet, #13.)
+- **Assumption.** On `*-windows-msvc` rustc passes `/DEBUG` to the linker for every linked crate whatever `-C debuginfo` and `-C strip` say, so a `.pdb` is always written; on ELF, with debuginfo on, `-C split-debuginfo=packed` writes one `.dwp` per linked output and `unpacked` one `.dwo` per object, for an rlib too (with `packed` an rlib keeps its DWARF objects inside); the last `-C debuginfo` wins and `-g` means full; Cargo passes `-C split-debuginfo` only with `-C debuginfo`, and tolerates the side files' absence during the trace. (Apple's `.dSYM` is unverified; Darwin is not supported yet, #13.)
 - **Where.** `crates/breakbulk-format/src/plan.rs`: `writes_debuginfo_side_files`, `DebugArtifactWhen`; `lib/target-traits.nix`: `debugArtifacts`; `crates/breakbulk-unit/src/compile.rs`: `DEBUG_SIDE_FILES`, `collect_outputs`.
 - **Upstream.** rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo` (1.95 through master); rustc_session `config.rs`, `select_debuginfo`; cargo `src/compiler/mod.rs`, `build_base_args`; spike A, surprise S9.
 - **Holds for.** 1.99 (msvc, ELF); the window for the trace.
-- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`. Rust: `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
+- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product). Rust: `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
 - **If it changes.** A unit without a `debug` output discards side files with a warning, or one with it has an empty output; the checks fail.
 
 ### X3. Names of uplifted side files
 
-- **Assumption.** Cargo uplifts a bin's `.dwp` as `<bin>.dwp`, while `.pdb` and `.dwo` keep rustc's names, which the binaries record.
+- **Assumption.** Cargo uplifts a bin's `.dwp` as `<bin>.dwp`, while `.pdb` and `.dwo` keep rustc's names, which the binaries record. The `.dwo` names are absolute (rustc's `--out-dir`, not remapped in the scopes breakbulk sets), and gdb opens an absolute DWO name only as given, so a product's `.dwo` files are reachable only packed into a `.dwp`.
 - **Where.** `lib/products.nix`: `mkLinked` (`debug` output); `lib/stage-helpers/default.nix`: `splitDebug`, `install`.
-- **Upstream.** cargo `src/compiler/build_runner/compilation_files.rs` (uplifting); rustc's link output names.
+- **Upstream.** cargo `src/compiler/build_runner/compilation_files.rs` (uplifting); rustc's link output names; gdb 17.2 `gdb/dwarf2/read.c`, `cutu_reader::open_dwo_file` (an absolute name is tried as is, never under `debug-file-directory`).
 - **Holds for.** 1.99.
-- **Pinned by.** `products-source-paths-dwp` (gdb finds the `.dwp`); `msvc-x86_64-pdb` (`llvm-symbolizer` with the `.pdb` beside the `.exe`).
+- **Pinned by.** `products-source-paths-dwp` (gdb finds the `.dwp`); `products-source-paths-dwo` (gdb reads the dependency's arguments from splitDebug's `.dwp`, and not without it, naming the absolute `/build/out/…` DWO paths); `msvc-x86_64-pdb` (`llvm-symbolizer` with the `.pdb` beside the `.exe`).
 - **If it changes.** Debuggers do not find the side files; the checks fail.
 
 ### X4. rustc's link temp directory

@@ -17,3 +17,10 @@ edition = "2021"
 [profile.packed]
 inherits = "dev"
 split-debuginfo = "packed"
+
+# split-debuginfo = "unpacked": DWARF in a `.dwo` per object file, of `dep`
+# and `itoa` too, which gdb must find through the product's debug output
+# (products-source-paths-dwo).
+[profile.unpacked]
+inherits = "dev"
+split-debuginfo = "unpacked"

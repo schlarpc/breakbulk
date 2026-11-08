@@ -305,24 +305,44 @@ pub struct CompileUnit {
 
 impl CompileUnit {
     /// Whether the unit gets a `debug` derivation output for the
-    /// debuginfo side files rustc writes next to a linked output (decision
-    /// 89): a target-platform unit with a `bin` output (bins, tests,
-    /// examples, benches, cdylibs, dylibs, staticlibs) whose traced command
-    /// makes rustc write side files on a target with these `traits`, by
-    /// [`writes_debuginfo_side_files`].
+    /// debuginfo side files rustc writes (decisions 89 and 126), by
+    /// [`writes_debuginfo_side_files`] on a target with these `traits`:
+    /// - a target-platform unit with a `bin` output (bins, tests,
+    ///   examples, benches, cdylibs, dylibs, staticlibs): any of the
+    ///   traits' artifacts;
+    /// - a target-platform library with an `rlib` output: only the
+    ///   per-object ones (`.dwo` with `-C split-debuginfo=unpacked`), which
+    ///   rustc writes beside each object file it compiles, linked or not.
+    ///   The linked binary's skeleton units name them; with `packed`, rustc
+    ///   keeps the DWARF objects in the rlib and packs them at the link.
+    ///
     /// Nix outputs are fixed before the build, so this is decided from the
     /// command line; host units (build scripts, proc macros) only run
-    /// during the build, so theirs are discarded.
+    /// during the build, so theirs are discarded, and a metadata-only
+    /// library (`check`) compiles no objects.
     pub fn has_debug_output(&self, traits: &TargetTraits) -> bool {
+        let per_object_only = if self.outputs.contains_key("bin") {
+            false
+        } else if self.outputs.contains_key("rlib") {
+            true
+        } else {
+            return false;
+        };
         self.platform == Platform::Target
-            && self.outputs.contains_key("bin")
             && writes_debuginfo_side_files(
                 self.args.iter().map(|a| match a {
                     Arg::Literal(s) => Some(s.as_str()),
                     _ => None,
                 }),
                 &self.krate.types,
-                traits,
+                &TargetTraits {
+                    debug_artifacts: traits
+                        .debug_artifacts
+                        .iter()
+                        .filter(|a| a.per_object || !per_object_only)
+                        .cloned()
+                        .collect(),
+                },
             )
     }
 }

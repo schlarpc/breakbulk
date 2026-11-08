@@ -588,10 +588,15 @@ fn versioned_override_wins() {
 /// Gives compile unit `id` packed split debuginfo, as Cargo passes it for
 /// a profile with `debug` and `split-debuginfo = "packed"`.
 fn split_debuginfo(inputs: &mut Inputs, id: &str) {
+    split_debuginfo_as(inputs, id, "packed");
+}
+
+/// As [`split_debuginfo`], with `split-debuginfo = "<kind>"`.
+fn split_debuginfo_as(inputs: &mut Inputs, id: &str, kind: &str) {
     let Some(Unit::Compile(c)) = inputs.plan.units.get_mut(id) else {
         panic!("{id} is not a compile unit")
     };
-    for a in ["-C", "debuginfo=2", "-C", "split-debuginfo=packed"] {
+    for a in ["-C", "debuginfo=2", "-C", &format!("split-debuginfo={kind}")] {
         c.args.push(breakbulk_format::Arg::Literal(a.into()));
     }
 }
@@ -624,6 +629,33 @@ fn names_and_outputs() {
     assert_eq!(
         outputs(RUN),
         Value::Strings(vec!["flags".into(), "out".into()])
+    );
+    // A library gets `debug` for its `.dwo` files with unpacked split
+    // debuginfo (decision 126), not with packed, and the bin's root lists
+    // it.
+    let lib_debug = |kind: &str| {
+        let mut inputs = smoke_inputs();
+        split_debuginfo_as(&mut inputs, APP, kind);
+        split_debuginfo_as(&mut inputs, LIB, kind);
+        let out = instantiate(&inputs).unwrap();
+        (
+            out.units[LIB].attrs["outputs"].clone(),
+            out.roots["smokeapp/bin/smokeapp"].debug_units.clone(),
+        )
+    };
+    assert_eq!(
+        lib_debug("unpacked"),
+        (
+            Value::Strings(vec!["rlib".into(), "rmeta".into(), "debug".into()]),
+            vec![LIB.to_owned()]
+        )
+    );
+    assert_eq!(
+        lib_debug("packed"),
+        (
+            Value::Strings(vec!["rlib".into(), "rmeta".into()]),
+            Vec::new()
+        )
     );
 }
 

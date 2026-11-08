@@ -93,36 +93,36 @@ let
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
-  # A root unit's `debug` output (its debuginfo side files, decision 89), as
-  # a path that may not exist: in dynamic-derivation mode the wrapper links
-  # it as `debug` when the unit has one.
+  # A root's debuginfo side files (decisions 89 and 126): its unit's
+  # `debug` output, and those of the libraries below it (`.dwo` files with
+  # split-debuginfo = "unpacked"), as paths that may not exist: in
+  # dynamic-derivation mode the wrapper's `debug` directory links them all.
   debugOf =
     r:
     if r.breakbulkRoot.dynamic or false then
-      "${r.breakbulkRoot.wrapper}/debug"
-    else if r ? debug then
-      "${r.debug}"
+      [ "${r.breakbulkRoot.wrapper}/debug" ]
     else
-      null;
+      lib.optional (r ? debug) "${r.debug}" ++ map toString (r.breakbulkRoot.debugBelow or [ ]);
 
   isDynamic = r: r.breakbulkRoot.dynamic or false;
 
   # The `linked` stage of one package: a directory of symlinks (`out`), and
   # the root units' debuginfo side files (`debug`) under the names Cargo
   # uplifts them to: a bin's `.dwp` renamed as the bin is (`<bin>.dwp`),
-  # `.pdb` and `.dwo` under rustc's names, which the binaries record.
+  # `.pdb` and `.dwo` under rustc's names, which the binaries record, with
+  # the `.dwo` files of the libraries below each root (decision 155).
   # Dynamic-derivation roots are read through their wrappers and left out
   # when not built. `debug` is declared only when a root can have side
-  # files (decision 97): a root unit with a `debug` output, or any
-  # dynamic-derivation root (its unit's outputs are not known at
-  # evaluation).
+  # files (decision 97): a root unit or a library below it with a `debug`
+  # output, or any dynamic-derivation root (its unit's outputs are not
+  # known at evaluation).
   mkLinked =
     pkgs: pkg: built:
     let
       # Only dynamic-derivation roots need the build-time bookkeeping; IFD
       # mode's script stays as it was.
       anyDyn = lib.any isDynamic built;
-      hasDebug = lib.any (r: debugOf r != null) built;
+      hasDebug = lib.any (r: debugOf r != [ ]) built;
     in
     pkgs.runCommand "${pkg}-linked"
       {
@@ -183,7 +183,7 @@ let
                 done
               ''
           )
-          + lib.optionalString (dbg != null) ''
+          + concatMapStrings (dbg: ''
             if [ -d ${dbg} ]; then
               for f in ${dbg}/*; do
                 [ -e "$f" ] || continue
@@ -194,7 +194,7 @@ let
                 esac
               done
             fi
-          ''
+          '') dbg
           + lib.optionalString dyn ''
             fi
           ''

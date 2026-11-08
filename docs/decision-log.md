@@ -2112,3 +2112,29 @@ follow the project's nixpkgs again), or `tools = breakbulk.mkTools pkgs` per
 repository. `import ./lib` without the flake keeps `mkTools pkgs`. Units
 still depend on `breakbulk-unit` (decision 50) and on the project's stdenv
 and rustc, so unit sharing is unchanged. Check: `default-tools`.
+
+## 155. FYI: libraries' `.dwo` files reach products (#24)
+
+With `split-debuginfo = "unpacked"`, a library unit now has a `debug` output
+for the `.dwo` files rustc writes beside its objects (`has_debug_output`: an
+`rlib` output and a per-object artifact in the target's traits; `.pdb` and
+`.dwp` stay with linking units). Each product root lists the units below it
+with such an output, and the `linked` stage collects their files with the
+root's own. This closes the gap noted in decision 126.
+
+Collecting them was not enough for a debugger: a binary's skeleton units
+name each `.dwo` by its absolute build path (`/build/out/…`), and gdb opens
+an absolute DWO name only as given (gdb 17.2, `open_dwo_file`), so even a
+bin's own `.dwo` files were never found from a product. `splitDebug` now
+packs the `.dwo` files each binary names into `<binary>.dwp` with binutils'
+`dwp`, where gdb already finds rustc's `.dwp` with `packed`, and drops the
+loose `.dwo` files (also those no binary names: rlib members the link left
+out). A product without `splitDebug` (`debugInfo = "keep"`) keeps the loose
+`.dwo` files in its `debug` output, unreachable by gdb as before. Only
+units built with `unpacked` change: library units gain an output.
+
+The alternative, remapping the out directory so that DWO names are relative
+and gdb searches `debug-file-directory` for them, would change every unit's
+arguments and interact with the remap scopes breakbulk sets; not tried.
+Check: `products-source-paths-dwo` (gdb shows `dep::boom (n=7)`, the
+argument only the DWARF objects hold, and not without the `.dwp`).
