@@ -64,6 +64,7 @@
   stages,
   breakbulkTraits,
   runners,
+  util,
 }:
 let
   inherit (builtins)
@@ -502,7 +503,7 @@ let
         b: cfg: args: bin:
         let
           nextest = if cfg.nextest.package != null then cfg.nextest.package else testPkgs.cargo-nextest;
-          runnerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] target)}_RUNNER";
+          runnerVar = util.cargoTargetEnvVar target "RUNNER";
           libdir = toJSON (
             if sysroot != null then
               {

@@ -221,6 +221,19 @@ rec {
     else
       throw "${what}; got a value of type ${builtins.typeOf root}";
 
+  # Per-target environment variable names, one helper each:
+  #
+  # Cargo's `CARGO_TARGET_<TRIPLE>_<KEY>`: the triple uppercased, with `-`
+  # and `.` as `_` (Cargo's `ConfigKey::as_env_key`; breakbulk-plan's
+  # spec.rs `target_env_var` is the Rust side).
+  cargoTargetEnvVar =
+    triple: key: "CARGO_TARGET_${lib.toUpper (replaceStrings [ "-" "." ] [ "_" "_" ] triple)}_${key}";
+  # The suffix of cc-rs's and bindgen's per-target variables
+  # (`CC_<suffix>`, `CFLAGS_<suffix>`, `BINDGEN_EXTRA_CLANG_ARGS_<suffix>`):
+  # the triple with `-` as `_`, case kept (cc-rs tries this spelling and
+  # the one with dashes).
+  tripleEnvSuffix = triple: replaceStrings [ "-" ] [ "_" ] triple;
+
   # Rust and Cargo releases, and the features breakbulk gates on them: one
   # parse and one table of named gates (breakbulk-format's
   # `version` module is the Rust programs' counterpart).

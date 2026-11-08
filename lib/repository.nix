@@ -418,7 +418,6 @@ let
   # and linkers, through `--config`), the env of each platform's units, the
   # store paths the plan will name, the target capture's package set, and
   # the runner.
-  envName = triple: lib.replaceStrings [ "-" ] [ "_" ] triple;
   storePathsIn =
     s:
     lib.concatMap (
@@ -428,7 +427,7 @@ let
     wsName: triple:
     let
       t = targetCfgOf wsName triple;
-      e = envName triple;
+      e = util.tripleEnvSuffix triple;
       flags = l: lib.concatStringsSep " " l;
       cEnv =
         lib.filterAttrs (_: v: v != null) {

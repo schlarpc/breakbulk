@@ -56,6 +56,7 @@ let
     inherit
       lib
       stages
+      util
       targetTraits
       runners
       ;
@@ -73,6 +74,7 @@ let
       testRuns
       stages
       runners
+      util
       ;
     breakbulkTraits = targetTraits;
   };

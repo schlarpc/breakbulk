@@ -79,6 +79,7 @@
 {
   lib,
   stages,
+  util,
   targetTraits,
   runners,
 }:
@@ -832,9 +833,7 @@ rec {
             root = r.breakbulkRoot;
           };
           nextest = if cfg.nextest.package != null then cfg.nextest.package else testPkgs.cargo-nextest;
-          runnerVar = "CARGO_TARGET_${
-            lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] target)
-          }_RUNNER";
+          runnerVar = util.cargoTargetEnvVar target "RUNNER";
         in
         testPkgs.runCommand "${name}-${s.name}-run"
           (

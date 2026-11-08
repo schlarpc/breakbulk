@@ -503,6 +503,21 @@ runTests "lib-unit" {
       };
     };
 
+  # Per-target variable names (breakbulk-plan's spec.rs `target_env_var`
+  # gives the same for these).
+  testTargetEnvNames = {
+    expr = [
+      (util.cargoTargetEnvVar "x86_64-unknown-linux-gnu" "RUNNER")
+      (util.cargoTargetEnvVar "thumbv7em-none-eabihf.json" "LINKER")
+      (util.tripleEnvSuffix "x86_64-pc-windows-msvc")
+    ];
+    expected = [
+      "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER"
+      "CARGO_TARGET_THUMBV7EM_NONE_EABIHF_JSON_LINKER"
+      "x86_64_pc_windows_msvc"
+    ];
+  };
+
   # util.rustVersion: one parse and named gates (breakbulk-format's
   # `version` module mirrors it).
   testRustVersion = {
