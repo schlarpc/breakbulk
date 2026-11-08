@@ -1576,3 +1576,6 @@ Build-tool library folders (`NIX_LDFLAGS_FOR_BUILD`, e.g. cmake's) and
 `NIX_CFLAGS_LINK` aren't passed along, since setup hooks don't normally
 use them for libraries a binary links. If some library's setup hook does,
 it gets added.
+
+> Resolved (128): later; recorded under "Known gaps (TODO)" in
+> `docs/implementation.md`.
