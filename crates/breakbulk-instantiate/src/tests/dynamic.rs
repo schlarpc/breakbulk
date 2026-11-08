@@ -88,6 +88,7 @@ fn outer(names: &[&str]) -> Outer {
             .map(|n| (n.to_string(), format!("{}.drv", n.replace('/', "."))))
             .collect(),
         units: Some("units.drv".into()),
+        build_script_flags: Some("build-script-flags.drv".into()),
         doctests: BTreeMap::new(),
     }
 }
@@ -219,12 +220,16 @@ fn nodes_are_in_dependency_order() {
             ("wrapper:smokeapp/bin/smokeapp", "smokeapp.bin.smokeapp.drv"),
             ("wrapper:smokeapp/test/it", "smokeapp.test.it.drv"),
             ("wrapper:*units", "units.drv"),
+            ("wrapper:*build-script-flags", "build-script-flags.drv"),
         ]
     );
     assert!(pos.contains_key("stub:smokeapp/test/it"));
     // A product stub fails, so it is not written: its wrapper says why.
     assert!(!pos.contains_key("stub:smokeapp/bin/admin-cli"));
-    assert_eq!(plan.nodes.last().unwrap().key, "wrapper:*units");
+    assert_eq!(
+        plan.nodes.last().unwrap().key,
+        "wrapper:*build-script-flags"
+    );
 }
 
 #[test]
@@ -244,6 +249,33 @@ fn units_output_depends_on_every_unit_output() {
     }
     // No stub: a check variant has no roots.
     assert!(!u.input_drvs.keys().any(|d| d.contains("stub")));
+}
+
+#[test]
+fn build_script_flags_output_lists_target_runs() {
+    let inputs = dyn_inputs();
+    let (resolved, _) = write_all(&inputs);
+    let (_, d) = resolved
+        .iter()
+        .find(|(k, _)| k == "wrapper:*build-script-flags")
+        .unwrap();
+    let mut target_runs = 0;
+    for (id, unit) in &inputs.plan.units {
+        let breakbulk_format::Unit::Run(r) = unit else {
+            continue;
+        };
+        let listed = d.env["flags"].contains(&unit_path(id, "flags"));
+        if r.platform == breakbulk_format::Platform::Target {
+            target_runs += 1;
+            assert!(listed, "{id}");
+            assert!(d.input_drvs[&drv_of(id)].contains("flags"), "{id}");
+        } else {
+            assert!(!listed, "{id}");
+        }
+    }
+    assert!(target_runs > 0);
+    // Only runs' flags: no compile unit, no stub.
+    assert!(!d.input_drvs.keys().any(|k| k.contains("stub")));
 }
 
 #[test]

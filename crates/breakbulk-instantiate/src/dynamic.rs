@@ -66,6 +66,14 @@ pub struct Outer {
     /// clippy variants need (they have no roots). None: no such output.
     #[serde(default)]
     pub units: Option<String>,
+    /// The output for a derivation listing the `flags` outputs of the
+    /// plan's target-platform runs (`$out/flags`, one per line), whose
+    /// `directives.json` names the files their scripts placed next to the
+    /// binaries (`targetDirs`, #23): what products' `buildScriptFiles` stage
+    /// and check read, without making products wait for every run. None: no
+    /// such output.
+    #[serde(default, rename = "buildScriptFlags")]
+    pub build_script_flags: Option<String>,
     /// Package name to the output for its doctest (`<package>.doctest.drv`):
     /// the predicted doctests of a test plan. Must cover every doctest of
     /// the plan.
@@ -679,6 +687,32 @@ fn all_units(
     )
 }
 
+/// The `buildScriptFlags` output's derivation: `$out/flags` lists the
+/// `flags` output of every target-platform run, one per line.
+fn build_script_flags(
+    inputs: &Inputs,
+    prefix: &str,
+    outer: &Outer,
+    output_name: &str,
+) -> Result<Drv, Error> {
+    let tokens = Tokens::new(inputs, prefix);
+    let mut list = String::new();
+    for (id, unit) in &inputs.plan.units {
+        if matches!(unit, Unit::Run(r) if r.platform == breakbulk_format::Platform::Target) {
+            list.push_str(&tokens.unit(id, "flags"));
+            list.push('\n');
+        }
+    }
+    small_drv(
+        inputs,
+        &tokens,
+        outer,
+        output_name,
+        r#"mkdir "$out" && printf '%s' "$flags" > "$out/flags""#,
+        [("flags", list)],
+    )
+}
+
 /// The derivations to write, units first in dependency order, then each
 /// root's stub (if any) and wrapper.
 pub fn dynamic_plan(
@@ -761,6 +795,18 @@ pub fn dynamic_plan(
         wrappers.push((
             "wrapper:*units".into(),
             all_units(inputs, &prefix, outer, output)?,
+            output.clone(),
+        ));
+    }
+    if let Some(output) = &outer.build_script_flags {
+        if taken.contains_key(output) || outer.units.as_ref() == Some(output) {
+            return err(format!(
+                "the build-script flags output {output} is also another output"
+            ));
+        }
+        wrappers.push((
+            "wrapper:*build-script-flags".into(),
+            build_script_flags(inputs, &prefix, outer, output)?,
             output.clone(),
         ));
     }

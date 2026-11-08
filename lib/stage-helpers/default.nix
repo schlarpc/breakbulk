@@ -594,16 +594,23 @@ let
   placedFilesFn =
     helperName: product: pkgs:
     let
-      flags =
-        product.buildScriptFlags or null;
+      flags = product.buildScriptFlags or null;
+      # A list of `flags` outputs (IFD mode), or `{ file; }` listing them,
+      # one per line (dynamic-derivation mode, known at build time).
+      flagsList =
+        if builtins.isList flags then
+          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}") flags
+        else
+          "$(cat ${lib.escapeShellArg flags.file})";
     in
     if flags == null then
-      throw "breakbulk stage helper `${helperName}`: the files build scripts place next to the binaries are known only in IFD mode (not with `mode = \"dynamic\"` yet, #23)"
+      throw "breakbulk stage helper `${helperName}`: this product does not know its target's build-script runs (`product.buildScriptFlags`; #23)"
     else
       ''
         placedFiles() {
           local f d
-          for f in ${lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") flags}; do
+          for f in ${flagsList}; do
+            f=$f/directives.json
             ${pkgs.buildPackages.jq}/bin/jq -r '(.targetDirs // [])[] | select(endswith("/deps") | not)' "$f"
           done | while IFS= read -r d; do
             find "$d" -mindepth 1 -maxdepth 1 \( -type f -o -type l \)
@@ -611,14 +618,14 @@ let
         }
       '';
 
-  # Decision #23: copy the files the target's build scripts placed next to
+  # #23: copy the files the target's build scripts placed next to
   # the binaries (as in Cargo's `target/<profile>`: shared libraries that
   # sdl2-sys `bundled` or ort-sys `copy-dylibs` copy there, Tauri's
   # external binaries and resources) into the product, beside its own
   # files, so `install` lays them out with them (a DLL next to the .exe in
   # bin/, a `.so` in lib/; on Linux the binary then needs a runpath to
   # find it, e.g. `patchelfRpath`). Symlinks are resolved. A name the
-  # product already has is an error. IFD mode only.
+  # product already has is an error.
   buildScriptFiles = mkHelper "buildScriptFiles" { } (
     _cfg:
     {

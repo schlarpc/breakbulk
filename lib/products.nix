@@ -351,10 +351,14 @@ let
       # The `flags` outputs of the build plan's target-platform runs, whose
       # `directives.json` names the files their scripts placed next to the
       # binaries (`targetDirs`, #23), for `stageHelpers.buildScriptFiles`
-      # and the `buildScriptFiles` check. null in dynamic-derivation mode,
-      # where the runs are not known at evaluation time.
+      # and the `buildScriptFiles` check: a list in IFD mode; in
+      # dynamic-derivation mode, where the runs are not known at evaluation
+      # time, `{ file; }`, a file listing them, read at build time.
+      dynamic = (inst.delivery or "ifd") == "dynamic";
       buildScriptFlags =
-        if (inst.delivery or "ifd") != "ifd" || !(inst ? plans.build) then
+        if dynamic then
+          if inst.buildScriptFlags or null == null then null else { file = "${inst.buildScriptFlags}/flags"; }
+        else if !(inst ? plans.build) then
           null
         else
           let
@@ -392,7 +396,10 @@ let
           );
           checkSet = stages.merge (
             [
-              (lib.optionalAttrs (buildScriptFlags != null && buildScriptFlags != [ ]) {
+              # On every product (passing when no build script placed
+              # files): in dynamic mode whether there are runs is known only
+              # at build time, and both modes have the same checks.
+              (lib.optionalAttrs (buildScriptFlags != null) {
                 buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
               })
               targetChecks

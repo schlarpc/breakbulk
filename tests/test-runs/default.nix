@@ -342,7 +342,7 @@ let
         grep -q 'test offline_ok ... ok' net.log
         cp -r --no-preserve=mode ${fixtures + "/test-control"} /build/checkout
         export CTL_EXPECT_NIX=1 NIX_BUILD_CORES=$NIX_BUILD_CORES RUST_TEST_THREADS=$NIX_BUILD_CORES
-        $envApp --nocapture | tee env.log
+        $envApp --show-output | tee env.log
         grep -q 'CARGO_MANIFEST_DIR=/build/checkout$' env.log
         grep -q 'cwd=/build/checkout$' env.log
         grep -q 'test result: ok. 4 passed' env.log

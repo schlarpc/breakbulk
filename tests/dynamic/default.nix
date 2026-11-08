@@ -88,6 +88,20 @@ let
 
   repos = {
     walking-skeleton = mkRepo "walking-skeleton" [ oneWs ];
+    # #23: a build script writes next to the binaries. The product takes
+    # the file with the `buildScriptFiles` stage (read in dynamic mode from
+    # the outer derivation's `build-script-flags.drv`), its check passes,
+    # and the test run finds `<profile>` and `deps` on its library path.
+    out-dir-walk = mkRepo "out-dir-walk" [
+      oneWs
+      {
+        packages.out-dir-walk.stages.buildScriptFiles = {
+          after = "splitDebug";
+          before = "install";
+          run = breakbulk.stages.helpers.buildScriptFiles { };
+        };
+      }
+    ];
     # Every build script includes ../common/build_common.rs.
     directives = mkRepo "directives" [
       oneWs
@@ -217,7 +231,11 @@ let
         grep -q 'test offline_ok ... ok' net.log
         cp -r --no-preserve=mode ${fixtures + "/test-control"} /build/checkout
         export NIX_BUILD_CORES RUST_TEST_THREADS=$NIX_BUILD_CORES
-        $envApp --nocapture | tee env.log
+        # The tests print what they got (grepped below). --show-output
+        # prints it after the results, per test: with --nocapture it could
+        # land inside another test's `test … ok` line, which the outcome
+        # comparison reads.
+        $envApp --show-output | tee env.log
         grep -q 'CARGO_MANIFEST_DIR=/build/checkout$' env.log
         grep -q 'cwd=/build/checkout$' env.log
         grep -q 'test result: ok. 4 passed' env.log
