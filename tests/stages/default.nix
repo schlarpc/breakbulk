@@ -16,7 +16,8 @@
 #                       has no source reference and `debug` has one;
 #                       noSourceReferences fails on an unsplit product
 #   stages-elf-helpers  strip, strip --strip-all, patchelfRpath
-#   stages-install      install layouts for unix, windows and wasm inputs
+#   stages-install      install layouts for unix (Linux, Apple), windows
+#                       (msvc, MinGW) and wasm inputs
 #   stages-no-store-paths  noStorePaths names every store path in any
 #                       file's bytes, and passes once each is allowed
 #   stages-zip          deterministicZip: same bytes from inputs that differ
@@ -655,6 +656,26 @@ let
     { name = "app.lib"; }
     { name = "notes.txt"; }
   ];
+  # MinGW: a staticlib and an import library end in `.a` (#17).
+  installWindowsGnu = installOf "x86_64-pc-windows-gnu" [
+    { name = "app.exe"; }
+    { name = "foo.dll"; }
+    { name = "libfoo.dll.a"; }
+    { name = "libbar.a"; }
+    { name = "notes.txt"; }
+  ];
+  installApple = installOf "aarch64-apple-darwin" [
+    {
+      name = "app";
+      x = true;
+    }
+    {
+      name = "libfoo.dylib";
+      x = true;
+    }
+    { name = "libbar.a"; }
+    { name = "notes.txt"; }
+  ];
   installWasm = installOf "wasm32-unknown-unknown" [
     { name = "ui.js"; }
     { name = "ui_bg.wasm"; }
@@ -756,6 +777,7 @@ in
   stages-install = pkgs.runCommand "stages-install" { } ''
     set -eu
     u=${installUnix}; w=${installWindows}; a=${installWasm}
+    g=${installWindowsGnu}; m=${installApple}
     test -x $u/bin/app
     test -f $u/lib/libfoo.so; test -f $u/lib/libfoo.so.1; test -f $u/lib/libbar.a
     test -f $u/notes.txt; test -f $u/share/doc/README
@@ -763,6 +785,9 @@ in
     test -f $w/lib/app.lib; test -f $w/notes.txt
     test -f $a/pkg/ui.js; test -f $a/pkg/ui_bg.wasm; test -f $a/pkg/share/doc/README
     test "$(ls $a)" = pkg
+    test -f $g/bin/app.exe; test -f $g/bin/foo.dll; test -f $g/lib/libfoo.dll.a
+    test -f $g/lib/libbar.a; test -f $g/notes.txt
+    test -x $m/bin/app; test -f $m/lib/libfoo.dylib; test -f $m/lib/libbar.a; test -f $m/notes.txt
     touch $out
   '';
 

@@ -506,7 +506,36 @@ let
       ...
     }:
     let
-      kind = layoutOf (traitsOf target pkgs);
+      t = traitsOf target pkgs;
+      kind = layoutOf t;
+      # File-name globs from the target's traits (#17): libraries (static,
+      # `.rlib`, and on unix shared ones, also versioned `.so.1`) go to
+      # lib/; executables, and on Windows DLLs and the debug side files
+      # that sit next to them (`.pdb`), go to bin/. An import library
+      # (`.dll.lib`, `.dll.a`) ends in the static suffix. Elsewhere an
+      # executable file goes to bin/; anything else stays at the top.
+      globOf =
+        suffixes:
+        lib.concatMapStringsSep "|" (x: "*${x}") (lib.unique (lib.filter (x: x != "") suffixes));
+      sideFiles = map (a: a.suffix) (
+        lib.filter (a: !(a.perObject or false) && !(a.directory or false)) t.debugArtifacts
+      );
+      globs = {
+        lib = globOf (
+          [
+            t.staticLibrarySuffix
+            ".rlib"
+          ]
+          ++ lib.optionals (kind == "unix") [
+            t.sharedLibrarySuffix
+            "${t.sharedLibrarySuffix}.*"
+          ]
+        );
+        bin = globOf (
+          [ t.executableSuffix ]
+          ++ lib.optionals (kind == "windows") ([ t.sharedLibrarySuffix ] ++ sideFiles)
+        );
+      };
       # The side files go to install's own `debug` output when no earlier
       # stage split debug information (whose `debug` holds them already).
       debug = kind != "wasm" && (product.linkedDebug or null) != null && !(product.debugSplit or false);
@@ -543,12 +572,10 @@ let
                 if [ -d "$f" ]; then
                   mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
                 fi
-                case "${kind}:$b" in
-                  windows:*.exe|windows:*.dll|windows:*.pdb) dest=bin ;;
-                  windows:*.lib) dest=lib ;;
-                  unix:*.so|unix:*.so.*|unix:*.a|unix:*.rlib) dest=lib ;;
-                  unix:*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;
-                  *) dest=. ;;
+                case "$b" in
+                  ${globs.lib}) dest=lib ;;
+                  ${lib.optionalString (globs.bin != "") "${globs.bin}) dest=bin ;;"}
+                  ${if kind == "unix" then ''*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;'' else "*) dest=. ;;"}
                 esac
                 mkdir -p "$out/$dest"
                 cp "$f" "$out/$dest/$b"
