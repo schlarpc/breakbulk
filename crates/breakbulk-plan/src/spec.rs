@@ -30,8 +30,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 
 use breakbulk_format::{Arg, Plan, Platform, Text, Unit};
+use cargo_platform::{Cfg, CfgExpr};
 use serde::Deserialize;
 
 use crate::{Error, bail};
@@ -294,7 +296,7 @@ impl ProjectConfig {
 }
 
 /// A function answering `rustc --print cfg --target <triple> <flags>`.
-pub type CfgQuery<'a> = dyn FnMut(&[String]) -> Result<Vec<CfgValue>, Error> + 'a;
+pub type CfgQuery<'a> = dyn FnMut(&[String]) -> Result<Vec<Cfg>, Error> + 'a;
 
 /// What Cargo's rustflags for target units come to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -323,7 +325,7 @@ impl ProjectConfig {
         query: &mut CfgQuery,
     ) -> Result<Effective, Error> {
         // `extra_args`: (all flags, the project's share and source).
-        let extra = |cfg: Option<&[CfgValue]>| -> Result<(Vec<String>, Effective), Error> {
+        let extra = |cfg: Option<&[Cfg]>| -> Result<(Vec<String>, Effective), Error> {
             let mut project = self
                 .target_rustflags
                 .get(triple)
@@ -334,7 +336,7 @@ impl ProjectConfig {
                 all.extend(spec.iter().cloned());
             }
             if let Some(cfg) = cfg {
-                let more = self.cfg_flags(cfg)?;
+                let more = self.cfg_flags(cfg);
                 project.extend(more.iter().cloned());
                 all.extend(more);
             }
@@ -382,19 +384,14 @@ impl ProjectConfig {
     }
 
     /// The flags of every `target.'cfg(…)'` key matching `cfg`, in key
-    /// order (Cargo's `target_cfgs` is a `BTreeMap`).
-    fn cfg_flags(&self, cfg: &[CfgValue]) -> Result<Vec<String>, Error> {
-        let mut flags = Vec::new();
-        for (key, v) in &self.target_rustflags {
-            if let Some(inner) = key.strip_prefix("cfg(").and_then(|k| k.strip_suffix(')')) {
-                let expr = CfgExpr::parse(inner)
-                    .map_err(|e| Error(format!("target.'{key}': cannot parse: {e}")))?;
-                if expr.matches(cfg) {
-                    flags.extend(v.iter().cloned());
-                }
-            }
-        }
-        Ok(flags)
+    /// order (Cargo's `target_cfgs` is a `BTreeMap`). A key that does not
+    /// parse matches nothing, as in Cargo (`CfgExpr::matches_key`).
+    fn cfg_flags(&self, cfg: &[Cfg]) -> Vec<String> {
+        self.target_rustflags
+            .iter()
+            .filter(|(key, _)| CfgExpr::matches_key(key, cfg))
+            .flat_map(|(_, v)| v.iter().cloned())
+            .collect()
     }
 }
 
@@ -540,26 +537,6 @@ impl Prepared {
     }
 }
 
-/// One line of `rustc --print cfg`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CfgValue {
-    Name(String),
-    KeyPair(String, String),
-}
-
-impl CfgValue {
-    pub fn parse_print_cfg(text: &str) -> Vec<CfgValue> {
-        text.lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(|l| match l.split_once('=') {
-                Some((k, v)) => CfgValue::KeyPair(k.to_owned(), v.trim_matches('"').to_owned()),
-                None => CfgValue::Name(l.to_owned()),
-            })
-            .collect()
-    }
-}
-
 /// `rustc --print cfg --target <triple> <flags>`, started in `cwd`, as
 /// Cargo queries it (with the rustflags, `TargetInfo::new`). Cargo drops
 /// `proc_macro` from the answer (`not_user_specific_cfg`).
@@ -568,7 +545,7 @@ pub fn target_cfg(
     triple: &str,
     flags: &[String],
     cwd: &Path,
-) -> Result<Vec<CfgValue>, Error> {
+) -> Result<Vec<Cfg>, Error> {
     let out = Command::new(rustc)
         .args(["--print", "cfg", "--target", triple])
         .args(flags)
@@ -584,148 +561,21 @@ pub fn target_cfg(
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    let mut cfg = CfgValue::parse_print_cfg(&String::from_utf8_lossy(&out.stdout));
-    cfg.retain(|c| *c != CfgValue::Name("proc_macro".into()));
+    parse_print_cfg(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The lines of `rustc --print cfg`, without `proc_macro`, as Cargo reads
+/// them (`TargetInfo::new`, `not_user_specific_cfg`).
+fn parse_print_cfg(text: &str) -> Result<Vec<Cfg>, Error> {
+    let mut cfg = Vec::new();
+    for line in text.lines() {
+        let c = Cfg::from_str(line)
+            .map_err(|e| Error(format!("rustc --print cfg: cannot parse `{line}`: {e}")))?;
+        if !matches!(&c, Cfg::Name(n) if *n == "proc_macro") {
+            cfg.push(c);
+        }
+    }
     Ok(cfg)
-}
-
-/// A `cfg(…)` predicate, as in Cargo's `cargo-platform` crate.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CfgExpr {
-    Not(Box<CfgExpr>),
-    All(Vec<CfgExpr>),
-    Any(Vec<CfgExpr>),
-    Value(CfgValue),
-    True,
-    False,
-}
-
-impl CfgExpr {
-    pub fn parse(s: &str) -> Result<CfgExpr, String> {
-        let toks = tokenize(s)?;
-        let mut p = Parser { toks, pos: 0 };
-        let e = p.expr()?;
-        if p.pos != p.toks.len() {
-            return Err(format!("unexpected `{}`", p.toks[p.pos]));
-        }
-        Ok(e)
-    }
-
-    pub fn matches(&self, cfg: &[CfgValue]) -> bool {
-        match self {
-            CfgExpr::Not(e) => !e.matches(cfg),
-            CfgExpr::All(es) => es.iter().all(|e| e.matches(cfg)),
-            CfgExpr::Any(es) => es.iter().any(|e| e.matches(cfg)),
-            CfgExpr::Value(v) => cfg.contains(v),
-            CfgExpr::True => true,
-            CfgExpr::False => false,
-        }
-    }
-}
-
-fn tokenize(s: &str) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    let mut chars = s.chars().peekable();
-    while let Some(&c) = chars.peek() {
-        if c.is_whitespace() {
-            chars.next();
-        } else if "(),=".contains(c) {
-            out.push(c.to_string());
-            chars.next();
-        } else if c == '"' {
-            chars.next();
-            let mut v = String::from("\"");
-            loop {
-                match chars.next() {
-                    Some('"') => break,
-                    Some(c) => v.push(c),
-                    None => return Err("unterminated string".into()),
-                }
-            }
-            out.push(v);
-        } else if c.is_alphanumeric() || c == '_' {
-            let mut v = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_alphanumeric() || c == '_' || c == '#' {
-                    v.push(c);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            out.push(v.strip_prefix("r#").unwrap_or(&v).to_owned());
-        } else {
-            return Err(format!("unexpected character `{c}`"));
-        }
-    }
-    Ok(out)
-}
-
-struct Parser {
-    toks: Vec<String>,
-    pos: usize,
-}
-
-impl Parser {
-    fn next(&mut self) -> Option<String> {
-        let t = self.toks.get(self.pos).cloned();
-        self.pos += 1;
-        t
-    }
-
-    fn peek(&self) -> Option<&str> {
-        self.toks.get(self.pos).map(String::as_str)
-    }
-
-    fn expect(&mut self, t: &str) -> Result<(), String> {
-        match self.next() {
-            Some(x) if x == t => Ok(()),
-            Some(x) => Err(format!("expected `{t}`, found `{x}`")),
-            None => Err(format!("expected `{t}`")),
-        }
-    }
-
-    fn list(&mut self) -> Result<Vec<CfgExpr>, String> {
-        self.expect("(")?;
-        let mut v = Vec::new();
-        while self.peek() != Some(")") {
-            v.push(self.expr()?);
-            if self.peek() == Some(",") {
-                self.next();
-            } else {
-                break;
-            }
-        }
-        self.expect(")")?;
-        Ok(v)
-    }
-
-    fn expr(&mut self) -> Result<CfgExpr, String> {
-        let name = self.next().ok_or("unexpected end")?;
-        if name.starts_with('"') || "(),=".contains(name.as_str()) {
-            return Err(format!("unexpected `{name}`"));
-        }
-        match (name.as_str(), self.peek()) {
-            ("all", Some("(")) => Ok(CfgExpr::All(self.list()?)),
-            ("any", Some("(")) => Ok(CfgExpr::Any(self.list()?)),
-            ("not", Some("(")) => {
-                let mut v = self.list()?;
-                if v.len() != 1 {
-                    return Err("not() takes one predicate".into());
-                }
-                Ok(CfgExpr::Not(Box::new(v.remove(0))))
-            }
-            (_, Some("=")) => {
-                self.next();
-                let v = self.next().ok_or("expected a string")?;
-                let v = v.strip_prefix('"').ok_or("expected a string")?;
-                Ok(CfgExpr::Value(CfgValue::KeyPair(name, v.to_owned())))
-            }
-            ("true", _) => Ok(CfgExpr::True),
-            ("false", _) => Ok(CfgExpr::False),
-            _ => Ok(CfgExpr::Value(CfgValue::Name(name))),
-        }
-    }
 }
 
 /// What planning needs from the spec, prepared before the trace.
@@ -753,8 +603,8 @@ pub fn prepare(
     scratch: &Path,
 ) -> Result<Prepared, Error> {
     let project = ProjectConfig::read(cwd, None)?;
-    let mut seen: BTreeMap<Vec<String>, Vec<CfgValue>> = BTreeMap::new();
-    let mut query = |flags: &[String]| -> Result<Vec<CfgValue>, Error> {
+    let mut seen: BTreeMap<Vec<String>, Vec<Cfg>> = BTreeMap::new();
+    let mut query = |flags: &[String]| -> Result<Vec<Cfg>, Error> {
         if let Some(c) = seen.get(flags) {
             return Ok(c.clone());
         }
@@ -944,16 +794,18 @@ impl Prepared {
 mod tests {
     use super::*;
 
-    fn cfgs() -> Vec<CfgValue> {
-        CfgValue::parse_print_cfg(
-            "debug_assertions\npanic=\"unwind\"\ntarget_arch=\"x86_64\"\ntarget_os=\"linux\"\nunix\n",
+    fn cfgs() -> Vec<Cfg> {
+        parse_print_cfg(
+            "debug_assertions\npanic=\"unwind\"\nproc_macro\ntarget_arch=\"x86_64\"\ntarget_os=\"linux\"\nunix\n",
         )
+        .unwrap()
     }
 
     #[test]
     fn cfg_expressions() {
         let c = cfgs();
-        let m = |s: &str| CfgExpr::parse(s).unwrap().matches(&c);
+        let m = |s: &str| CfgExpr::matches_key(&format!("cfg({s})"), &c);
+        assert!(!c.iter().any(|c| *c == Cfg::from_str("proc_macro").unwrap()));
         assert!(m("unix"));
         assert!(!m("windows"));
         assert!(m("target_os = \"linux\""));
@@ -965,8 +817,9 @@ mod tests {
         assert!(!m("false"));
         assert!(m("all()"));
         assert!(!m("any()"));
-        assert!(CfgExpr::parse("all(unix").is_err());
-        assert!(CfgExpr::parse("not(unix, windows)").is_err());
+        // Cargo ignores a key that does not parse.
+        assert!(!m("all(unix"));
+        assert!(!m("not(unix, windows)"));
     }
 
     fn dir(files: &[(&str, &str)]) -> PathBuf {
@@ -1096,15 +949,15 @@ mod tests {
 
     /// A stand-in for `rustc --print cfg`: `cfgs()` plus what the flags
     /// add (`--cfg NAME`, `-C target-feature=+F`), recording each query.
-    fn fake_rustc(queries: &mut Vec<Vec<String>>, flags: &[String]) -> Vec<CfgValue> {
+    fn fake_rustc(queries: &mut Vec<Vec<String>>, flags: &[String]) -> Vec<Cfg> {
         queries.push(flags.to_vec());
         let mut c = cfgs();
         for w in flags.windows(2) {
             match (w[0].as_str(), w[1].as_str()) {
-                ("--cfg", n) => c.push(CfgValue::Name(n.into())),
+                ("--cfg", n) => c.push(Cfg::from_str(n).unwrap()),
                 ("-C", f) => {
                     if let Some(f) = f.strip_prefix("target-feature=+") {
-                        c.push(CfgValue::KeyPair("target_feature".into(), f.into()));
+                        c.push(Cfg::from_str(&format!("target_feature=\"{f}\"")).unwrap());
                     }
                 }
                 _ => {}
