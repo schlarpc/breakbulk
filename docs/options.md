@@ -1626,12 +1626,14 @@ It is called once per workspace that builds this triple, with
 ` pkgs `, the triple and the workspace’s ` toolchain `, whose rustc
 it uses unless it was given ` rustc ` itself: msvc and wasm presets
 pick the LLVM tools and the wasi-sdk matching each workspace’s
-compiler\. It sets the fields below at default priority, so fields set here override
-the preset’s (lists concatenate; use ` lib.mkForce ` to replace
-one)\. Equivalent to defining the target as
-` breakbulk.presets.<name> { inherit pkgs; triple = …; } `\.
-Set ` null ` to use no preset on the native target (rustc’s own
-linker choice and the C toolchain Cargo finds)\.
+compiler\. It sets the fields below at default priority, so
+fields set here override the preset’s (lists concatenate; use
+` lib.mkForce ` to replace one)\. Defining the target as
+` breakbulk.presets.<name> { inherit pkgs; triple = …; } ` gives
+the same fields, except that the preset then sees no workspace
+toolchain (pass ` rustc ` there)\. Set ` null ` to use no preset on
+the native target (rustc’s own linker choice and the C toolchain
+Cargo finds)\.
 
 
 
