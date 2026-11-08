@@ -359,6 +359,8 @@ let
       linux-portable-test = t.testRuns.app."bin/app";
       # The preset's check: NEEDED names only glibc's libraries.
       linux-portable-libraries = t.packages.app.checks.portableLibraries;
+      # Decision 144: the product names no Nix store path.
+      linux-portable-no-store-paths = t.packages.app.checks.portableNoStorePaths;
       # Negative control: with only libc.so.6 allowed, the check fails
       # and names a library the product needs (libpthread.so.0, …).
       linux-portable-libraries-negative =
@@ -528,6 +530,9 @@ let
             fi
           '';
       linux-portable-native-libraries = t.packages.app.checks.portableLibraries;
+      # Decision 144: OpenSSL's compiled-in directories are system paths
+      # (the rebuild's OPENSSLDIR), so the product names no store path.
+      linux-portable-native-no-store-paths = t.packages.app.checks.portableNoStorePaths;
     };
   zigNativeContainerChecks =
     let

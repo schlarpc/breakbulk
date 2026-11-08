@@ -50,6 +50,10 @@
   # every target system has them (e.g. [ "libGL.so.1" ]). Anything else
   # must be linked statically (`portableLibraries` check).
   systemLibraries ? [ ],
+  # Store paths a product may name in its files anyway (the
+  # `portableNoStorePaths` check, stageHelpers.noStorePaths): shell globs
+  # against each whole path found, or store paths.
+  allowStorePaths ? [ ],
   zig ? pkgs.buildPackages.zig,
   # Extra `zig cc` invocations' flags to warm the cache with, e.g.
   # [ "-lc++" ] for C++ code.
@@ -69,6 +73,10 @@
   # listed too, or have none, are correct. Every other library input still
   # comes from nixpkgs and gets an evaluation warning.
   rebuildInputs ? [ ],
+  # Per-package changes to a rebuild, `<name> = old: { … }`, applied with
+  # overrideAttrs after breakbulk's own; an entry replaces the one in
+  # `defaultRebuildOverrides` below, and `null` drops it.
+  rebuildOverrides ? { },
   ...
 }:
 let
@@ -187,6 +195,30 @@ let
     enableShared = false;
   };
 
+  # Rebuilds whose compiled-in paths would name the store (decision 144;
+  # the `portableNoStorePaths` check finds them). nixpkgs' static OpenSSL
+  # configures OPENSSLDIR as its `etc` output (ENGINESDIR below it) and
+  # MODULESDIR as `$out/lib/ossl-modules`; all three are compiled into
+  # libcrypto from make variables (`-DOPENSSLDIR="\"$(OPENSSLDIR)\""`,
+  # OpenSSL 3.5.9 Configurations/unix-Makefile.tmpl). They are set for the
+  # build only (`buildFlags`), so `make install` still installs into the
+  # store; on the target system OpenSSL reads /etc/ssl/openssl.cnf, as on
+  # Arch, Alpine or openSUSE, with engines in /etc/ssl/engines-3.
+  defaultRebuildOverrides = {
+    openssl = old: {
+      buildFlags = (old.buildFlags or [ ]) ++ [
+        "OPENSSLDIR=/etc/ssl"
+        "MODULESDIR=/usr/lib/ossl-modules"
+      ];
+    };
+  };
+  overridesFor =
+    n:
+    let
+      o = (defaultRebuildOverrides // rebuildOverrides).${n} or null;
+    in
+    if o == null then _: { } else o;
+
   rebuilt = lib.fix (
     self:
     lib.genAttrs rebuildInputs (
@@ -195,7 +227,7 @@ let
         p = pkgs.${n} or (throw "breakbulk.presets.linuxPortable: rebuildInputs: nixpkgs has no package `${n}`");
         deps = lib.intersectAttrs (lib.functionArgs p.override) (removeAttrs self [ n ]);
       in
-      (p.override (
+      ((p.override (
         {
           stdenv = pkgs.stdenvAdapters.makeStaticLibraries zigStdenv;
         }
@@ -217,6 +249,8 @@ let
             done
           '';
         })
+      ).overrideAttrs
+        (overridesFor n)
     )
   );
 
@@ -271,6 +305,14 @@ in
     run = stageHelpers.neededLibraries {
       allowed = stageHelpers.glibcLibraries ++ systemLibraries;
       why = "linuxPortable links everything Nix provides statically (rebuildInputs builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
+    };
+  };
+  # No Nix store path anywhere in a product's files (decision 144): on
+  # another system nothing is there.
+  checks.portableNoStorePaths = {
+    run = stageHelpers.noStorePaths {
+      allow = allowStorePaths;
+      why = "a linuxPortable product runs where there is no Nix store; allow a path with `presets.linuxPortable { allowStorePaths = [ \"<glob>\" ]; }`";
     };
   };
   # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a

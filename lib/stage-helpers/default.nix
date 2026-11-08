@@ -712,6 +712,7 @@ let
             set -euo pipefail
             ${isElfFn}
             allowed=(${escapeShellArgs cfg.allowed})
+            why=${escapeShellArg (lib.optionalString (cfg.why != "") ": ${cfg.why}")}
             bad=0
             mkdir -p $out
             while IFS= read -r -d "" f; do
@@ -726,9 +727,7 @@ let
                 if [ "$ok" = 1 ]; then
                   echo "$rel: $lib" >> $out/needed
                 else
-                  echo "neededLibraries: ${product.name}: $rel needs $lib, which is not an allowed run-time library${
-                    lib.optionalString (cfg.why != "") ": ${cfg.why}"
-                  }" >&2
+                  echo "neededLibraries: ${product.name}: $rel needs $lib, which is not an allowed run-time library$why" >&2
                   bad=1
                 fi
               done < <(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
@@ -737,10 +736,82 @@ let
             touch $out/needed
           ''
       );
+  # A check (decision 144): no file in its input names a Nix store path,
+  # anywhere in its bytes: a program for other systems must not look for a
+  # file in a store that is not there (a statically linked OpenSSL's
+  # OPENSSLDIR, an rpath, an embedded tool path). Unlike Nix's reference
+  # scan, which sees only the hashes of the build's inputs, it matches any
+  # `<storeDir>/<32 characters>-<name>` string, so it also finds paths
+  # outside the closure and paths whose hash `remove-references-to`
+  # replaced with `eee…`. `allow` takes shell glob patterns matched against
+  # each whole path found (`/nix/store/<hash>-<name>…`, cut at the first
+  # character that cannot be in a store path name), such as
+  # "*-openssl-*-etc"; a derivation or store path matches itself and what
+  # lies below it. It fails naming every file and path.
+  noStorePaths =
+    mkHelper "noStorePaths"
+      {
+        allow = [ ];
+        why = "";
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          patterns = lib.concatMap (
+            a:
+            let
+              s = builtins.unsafeDiscardStringContext (toString a);
+            in
+            # A store path matches itself and anything below it.
+            if lib.hasPrefix "${builtins.storeDir}/" s && !(lib.hasInfix "*" s) then
+              [
+                s
+                "${s}/*"
+              ]
+            else
+              [ s ]
+          ) cfg.allow;
+        in
+        pkgs.runCommand (stageName product "noStorePaths") { } ''
+          set -euo pipefail
+          allowed=(${escapeShellArgs patterns})
+          why=${escapeShellArg (lib.optionalString (cfg.why != "") ": ${cfg.why}")}
+          bad=0
+          mkdir -p $out
+          : > $out/allowed
+          while IFS= read -r -d "" f; do
+            rel=''${f#${input}/}
+            while IFS= read -r p; do
+              ok=0
+              for a in "''${allowed[@]}"; do
+                # Unquoted: a glob pattern.
+                if [[ $p == $a ]]; then ok=1; break; fi
+              done
+              if [ "$ok" = 1 ]; then
+                echo "$rel: $p" >> $out/allowed
+              else
+                echo "noStorePaths: ${product.name}: $rel names the Nix store path $p$why" >&2
+                bad=1
+              fi
+            done < <({ LC_ALL=C grep -aoE '${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[A-Za-z0-9+._?=/-]*' "$f" || true; } | LC_ALL=C sort -u)
+          done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
+          if [ "$bad" = 1 ]; then
+            echo "A portable product must not name the Nix store; allow a path with \`stageHelpers.noStorePaths { allow = [ \"<glob>\" ]; }\`." >&2
+            exit 1
+          fi
+        ''
+      );
 in
 {
   inherit
     mkHelper
+    noStorePaths
     splitDebug
     strip
     patchelfRpath

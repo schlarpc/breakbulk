@@ -17,6 +17,8 @@
 #                       noSourceReferences fails on an unsplit product
 #   stages-elf-helpers  strip, strip --strip-all, patchelfRpath
 #   stages-install      install layouts for unix, windows and wasm inputs
+#   stages-no-store-paths  noStorePaths names every store path in any
+#                       file's bytes, and passes once each is allowed
 #   stages-zip          deterministicZip: same bytes from inputs that differ
 #                       in mtimes, modes and creation order
 #   stages-wasm-web wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
@@ -763,6 +765,61 @@ in
     test "$(ls $a)" = pkg
     touch $out
   '';
+
+  # Decision 144: noStorePaths finds every store path named in any file's
+  # bytes (an ELF binary's string, a text file, a path whose hash
+  # remove-references-to replaced), naming file and path, and passes once
+  # each is allowed, by glob or by store path.
+  stages-no-store-paths =
+    let
+      ref = pkgs.hello;
+      product = pkgs.runCommand "store-strings" { } ''
+        mkdir -p $out/bin $out/share
+        # Binary bytes around the string, as in a linked program.
+        printf '\177ELF\002\001\001\000\000conf=%s/etc/ssl\000\377\376' \
+          /nix/store/0123456789abcdfghijklmnpqrsvwxyz-openssl-3.5.9-etc > $out/bin/hello
+        printf 'modules=/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-openssl-3.5.9/lib/ossl-modules\n' > $out/share/conf
+        echo "tool=${ref}/bin/hello" >> $out/share/conf
+        echo "/nix/store/too-short-openssl" > $out/share/fine
+      '';
+      run = h: h {
+        input = product;
+        product.name = "p";
+        inherit pkgs;
+      };
+      strict = H.noStorePaths { why = "test"; };
+      allowed = H.noStorePaths {
+        allow = [
+          "*-openssl-*"
+          ref
+        ];
+      };
+      clean = H.noStorePaths { } {
+        input = pkgs.runCommand "clean" { } "mkdir -p $out/bin; echo /etc/ssl > $out/bin/x";
+        product.name = "clean";
+        inherit pkgs;
+      };
+    in
+    pkgs.runCommand "stages-no-store-paths"
+      {
+        failure = pkgs.testers.testBuildFailure (run strict);
+        allowedOut = run allowed;
+        inherit clean;
+        refPath = "${ref}";
+      }
+      ''
+        set -euo pipefail
+        log=$failure/testBuildFailure.log
+        cat $log
+        grep -qF 'noStorePaths: p: bin/hello names the Nix store path /nix/store/0123456789abcdfghijklmnpqrsvwxyz-openssl-3.5.9-etc/etc/ssl: test' $log
+        grep -qF 'noStorePaths: p: share/conf names the Nix store path /nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-openssl-3.5.9/lib/ossl-modules: test' $log
+        grep -qF "noStorePaths: p: share/conf names the Nix store path $refPath/bin/hello: test" $log
+        if grep -q 'share/fine' $log; then echo "a short path matched" >&2; exit 1; fi
+        test "$(grep -c 'noStorePaths: p:' $log)" = 3
+        cat $allowedOut/allowed
+        test "$(wc -l < $allowedOut/allowed)" = 3
+        touch $out
+      '';
 
   stages-zip =
     pkgs.runCommand "stages-zip"
