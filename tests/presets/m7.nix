@@ -17,7 +17,9 @@
 #                     (`nix-build --check` on the .exe link units)
 #   windows-dll-*     a windows-gnu test binary importing a DLL its build
 #                     script built: the test run finds it through WINEPATH;
-#                     without it, wine fails (missing DLL)
+#                     without it, wine fails (missing DLL); -beside-exe:
+#                     the copy its build script puts next to the binaries
+#                     goes beside the .exe with the buildScriptFiles stage
 #   linux-portable-*  linuxPortable (zig backend): the host triple against
 #                     glibc 2.17 with zig cc; newest GLIBC symbol version
 #                     2.17 (objdump -T); host units keep the host linker
@@ -270,13 +272,58 @@ let
       targets."x86_64-pc-windows-gnu".preset = presets.windows;
     }
   ];
+  # The same with the `buildScriptFiles` stage (#23): the DLL the build
+  # script copied next to the binaries goes into the product.
+  windowsDllStagedRepo = mkRepo (fixtures + "/windows-dll") [
+    {
+      workspaces.main = wsWith (rustWith [ "x86_64-pc-windows-gnu" ]) [ "x86_64-pc-windows-gnu" ];
+      targets."x86_64-pc-windows-gnu".preset = presets.windows;
+      packages.windows-dll.stages.buildScriptFiles = {
+        before = "install";
+        run = breakbulk.stages.helpers.buildScriptFiles { };
+      };
+    }
+  ];
   windowsDllChecks =
     let
       t = windowsDllRepo.workspaces.main.target."x86_64-pc-windows-gnu";
       run = t.testRuns.windows-dll."lib/windows_dll";
+      plain = t.packages.windows-dll;
+      staged = windowsDllStagedRepo.workspaces.main.target."x86_64-pc-windows-gnu".packages.windows-dll;
     in
     {
       windows-dll-test = run;
+      # #23: the build script copies bbdll.dll next to the binaries. The
+      # product's default `buildScriptFiles` check fails naming it, and the
+      # .exe alone fails as a missing DLL (53); with the stage, install
+      # puts the DLL beside the .exe in bin/, and the .exe runs under wine
+      # without WINEPATH, as from Cargo's target/<triple>/<profile>.
+      windows-dll-beside-exe =
+        pkgs.runCommand "windows-dll-beside-exe"
+          {
+            failure = pkgs.testers.testBuildFailure plain.checks.buildScriptFiles;
+            stagedCheck = staged.checks.buildScriptFiles;
+          }
+          ''
+            cat $failure/testBuildFailure.log
+            grep -qF 'bbdll.dll (from ' $failure/testBuildFailure.log
+            grep -qF 'packages.windows-dll.stages.buildScriptFiles = { before = "install"; run = ' $failure/testBuildFailure.log
+            ls ${plain}/bin ${staged}/bin
+            [ ! -e ${plain}/bin/bbdll.dll ]
+            set +e
+            ${lib.escapeShellArgs t.runner} ${plain}/bin/windows-dll.exe > plain.txt 2>&1
+            status=$?
+            set -e
+            cat plain.txt
+            [ "$status" = 53 ] || { echo "expected a missing-DLL failure (53), got $status"; exit 1; }
+            [ -f ${staged}/bin/bbdll.dll ]
+            unset WINEPATH
+            ${lib.escapeShellArgs t.runner} ${staged}/bin/windows-dll.exe > staged.txt
+            tr -d '\r' < staged.txt | tee staged2.txt
+            grep -qx 'answer=42' staged2.txt
+            mkdir -p $out
+            cp staged2.txt $out/
+          '';
       windows-dll-needs-dll =
         pkgs.runCommand "windows-dll-needs-dll"
           {
@@ -297,7 +344,10 @@ let
               lib.concatMapStringsSep " " (f: "${f}/directives.json") run.breakbulkTest.dylib.flags
             })
             echo "LD_LIBRARY_PATH=$dirs"
-            ls $dirs | grep -q bbdll.dll
+            # OUT_DIR, and since #23 the copy of <profile> the build script
+            # also put the DLL in.
+            listing=$(tr : '\n' <<< "$dirs" | while IFS= read -r d; do ls "$d"; done)
+            grep -q bbdll.dll <<< "$listing"
             set +e
             LD_LIBRARY_PATH=$dirs ${lib.escapeShellArgs t.runner} "$exe" > out.txt 2>&1
             status=$?

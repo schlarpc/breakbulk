@@ -21,6 +21,18 @@ fn main() {
         .status()
         .unwrap();
     assert!(status.success(), "{cc} failed");
+    // As sdl2-sys (`bundled`) does: copy the DLL next to the binaries,
+    // two directories above the one named after the package
+    // (`target/<triple>/<profile>`), where Windows finds it beside the .exe
+    // (#23).
+    let pkg = env::var("CARGO_PKG_NAME").unwrap();
+    let mut dir = out.clone();
+    while !dir.file_name().unwrap().to_string_lossy().contains(&pkg) {
+        assert!(dir.pop(), "no directory named after {pkg} above {}", out.display());
+    }
+    dir.pop();
+    dir.pop();
+    std::fs::copy(out.join("bbdll.dll"), dir.join("bbdll.dll")).unwrap();
     println!("cargo::rustc-link-search=native={}", out.display());
     println!("cargo::rustc-link-lib=dylib=bbdll");
     println!("cargo::rerun-if-changed=csrc/bbdll.c");
