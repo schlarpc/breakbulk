@@ -764,6 +764,35 @@ in
       touch $out
     '';
 
+  # `variants.default` is a definition merged with the user's while
+  # `defaultVariant` is "default" (#32): adding a clippy variant keeps it,
+  # `variants.default.profile` changes it, and a renamed default variant
+  # brings no empty `default` along.
+  default-variant =
+    let
+      variantsOf =
+        ws:
+        (mkRepo (fixtures + "/walking-skeleton") [
+          { workspaces.main = { path = "."; } // ws; }
+        ]).config.workspaces.main.variants;
+      withClippy = variantsOf { variants.clippy.mode = "clippy"; };
+      changed = variantsOf { variants.default.profile = "release"; };
+      renamed = variantsOf {
+        defaultVariant = "release";
+        variants.release.profile = "release";
+      };
+    in
+    assert lib.assertMsg (
+      lib.attrNames withClippy == [ "clippy" "default" ]
+    ) "default-variant: with clippy: ${toString (lib.attrNames withClippy)}";
+    assert lib.assertMsg (
+      lib.attrNames changed == [ "default" ] && changed.default.profile == "release"
+    ) "default-variant: changed";
+    assert lib.assertMsg (
+      lib.attrNames renamed == [ "release" ]
+    ) "default-variant: renamed: ${toString (lib.attrNames renamed)}";
+    evalCheck "default-variant" "ok";
+
   # Decision 19's question: `targets.<t>.stdenv` replaces the target
   # captures' stdenv (base and per-package), `host.stdenv` the host
   # captures'; unset, both are the package set's. The capture then records

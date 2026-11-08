@@ -2741,6 +2741,10 @@ pkgs.rustc
 
 Plan parameters\. Each variant is a separate pair of plans (build
 and test) per target; units that come out identical are shared\.
+While ` defaultVariant ` is ` "default" `, a ` default ` variant
+(` { } `) is always defined, merged with yours: adding
+` variants.clippy ` keeps it, and ` variants.default.profile `
+changes it\.
 
 
 
@@ -2752,9 +2756,7 @@ attribute set of (submodule)
 *Default:*
 
 ```nix
-{
-  default = { };
-}
+{ default = { }; }
 ```
 
 *Declared by:*

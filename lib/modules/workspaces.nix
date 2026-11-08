@@ -339,12 +339,14 @@ let
 
         variants = mkOption {
           type = types.attrsOf (types.submodule (variant config));
-          default = {
-            default = { };
-          };
+          defaultText = lib.literalExpression "{ default = { }; }";
           description = ''
             Plan parameters. Each variant is a separate pair of plans (build
             and test) per target; units that come out identical are shared.
+            While `defaultVariant` is `"default"`, a `default` variant
+            (`{ }`) is always defined, merged with yours: adding
+            `variants.clippy` keeps it, and `variants.default.profile`
+            changes it.
           '';
         };
 
@@ -486,6 +488,10 @@ let
 
         warnings = bt.warningsOption;
       };
+
+      # A definition, not the option's default, so that a user's variants
+      # merge with it instead of replacing it.
+      config.variants = lib.mkIf (config.defaultVariant == "default") { default = { }; };
 
       config.warnings = bt.unimplementedWarnings "workspaces.${name}" options {
         "M2, later" = [ [ "roots" ] ];
