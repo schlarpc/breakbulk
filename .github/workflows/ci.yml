@@ -1,6 +1,6 @@
 # Fast checks on every push to main and every pull request (#1): the Rust
 # tests, clippy and rustfmt in both Cargo workspaces, and the flake checks
-# listed in ci/fast-checks. Heavy checks (Windows SDK, wine, cross
+# listed in .github/fast-checks. Heavy checks (Windows SDK, wine, cross
 # toolchains, the CentOS 7 container) and the opt-in `nix run .#test-*`
 # scripts do not run on GitHub-hosted runners; run them locally.
 #
@@ -52,8 +52,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/determinate-nix-action@v3
       - uses: DeterminateSystems/flakehub-cache-action@main
-      - name: nix build (ci/fast-checks)
+      - name: nix build (.github/fast-checks)
         run: |
-          grep -v '^#' ci/fast-checks \
+          grep -v '^#' .github/fast-checks \
             | sed 's|^|.#checks.x86_64-linux.|' \
             | xargs nix build --keep-going --no-link --print-build-logs

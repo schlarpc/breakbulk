@@ -898,7 +898,7 @@ One small workspace per pattern from the design doc, under `tests/fixtures/`.
 
 ### CI environment
 
-GitHub Actions (`.github/workflows/ci.yml`, #1) runs the Rust tests, clippy and rustfmt of both workspaces and the flake checks in `ci/fast-checks` on x86_64-linux, with Determinate Nix and the FlakeHub cache. Heavy checks do not run on hosted runners. The full suite needs:
+GitHub Actions (`.github/workflows/ci.yml`, #1) runs the Rust tests, clippy and rustfmt of both workspaces and the flake checks in `.github/fast-checks` on x86_64-linux, with Determinate Nix and the FlakeHub cache. Heavy checks do not run on hosted runners. The full suite needs:
 
 - A released Nix for IFD mode, and Nix master (until a release ships `builder-rpc-v0`) with `dynamic-derivations` and `ca-derivations` enabled for dynamic-derivation mode.
 - A binary cache that stores realisations, for the CA island and embed tests.
