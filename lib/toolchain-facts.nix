@@ -13,7 +13,9 @@
 # when they can say, and otherwise from the toolchain itself, read by one
 # tiny derivation through import-from-derivation (`probe`). Nothing is
 # probed unless a fact the tables cannot give is read: nixpkgs' and
-# rust-overlay's rustc and cargo carry `version`, and the LLVM table covers
+# rust-overlay's rustc and cargo carry `version` (a `version` that is not a
+# Rust release, such as fenix's manifest dates, counts as none; fenix's
+# toolchains are therefore probed), and the LLVM table covers
 # every release up to llvmVersions.verifiedThrough. The facts are lazy, so
 # a preset that never reads `llvmMajor` (no LLVM tools) probes nothing.
 #
@@ -62,6 +64,20 @@ let
 
   # Whether a rustc or cargo release is a nightly or development build.
   isNightly = v: lib.hasInfix "-nightly" v || lib.hasInfix "-dev" v;
+
+  # A package's `version` when it is a Rust release (`1.99.0`,
+  # `1.101.0-nightly`, `1.100.0-beta.3`), else null, so the toolchain is
+  # asked. fenix's component packages (its `cargo`, `rustc-unwrapped`) set
+  # `version` to the channel manifest's date (`2026-10-15`; fenix
+  # `lib/mk-toolchain.nix`: `version = source.date or date`), which says
+  # nothing about the release or the channel; its combined toolchains
+  # (`rustc`, `toolchain`, `minimalToolchain`) have no `version`.
+  releaseOf =
+    drv:
+    let
+      v = drv.version or null;
+    in
+    if builtins.isString v && builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+(-.*)?" v != null then v else null;
 
   # `rustc -vV`'s release and LLVM major, and whether it takes
   # `--remap-path-scope`, as { release; llvmMajor; remapPathScope; }.
@@ -124,18 +140,22 @@ let
     }:
     let
       probed = probe { inherit pkgs rustc; };
-      version = rustc.version or probed.release;
-      fromTable = if rustc ? version then llvmVersions.lookup rustc.version else null;
+      rustcRelease = releaseOf rustc;
+      version = if rustcRelease != null then rustcRelease else probed.release;
+      fromTable = if rustcRelease != null then llvmVersions.lookup rustcRelease else null;
       cargoVersion =
         if cargo == null then
           throw "breakbulk.toolchainFacts: the trimPaths and nightly capabilities need `cargo`"
         else
-          cargo.version or (probeCargo { inherit pkgs cargo; }).release;
+          let
+            r = releaseOf cargo;
+          in
+          if r != null then r else (probeCargo { inherit pkgs cargo; }).release;
       unknown = lib.subtractLists capabilityNames (lib.attrNames capabilities);
       detected = {
         remapPathScope =
-          if rustc ? version then
-            util.rustVersion.atLeast capabilitySince.remapPathScope rustc.version
+          if rustcRelease != null then
+            util.rustVersion.atLeast capabilitySince.remapPathScope rustcRelease
           else
             probed.remapPathScope;
         trimPaths = util.rustVersion.atLeast capabilitySince.trimPaths cargoVersion;

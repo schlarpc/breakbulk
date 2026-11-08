@@ -17,6 +17,8 @@
 #                       noSourceReferences fails on an unsplit product
 #   stages-elf-helpers  strip, strip --strip-all, patchelfRpath
 #   stages-install      install layouts for unix, windows and wasm inputs
+#   stages-no-store-paths  noStorePaths names every store path in any
+#                       file's bytes, and passes once each is allowed
 #   stages-zip          deterministicZip: same bytes from inputs that differ
 #                       in mtimes, modes and creation order
 #   stages-wasm-web wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
@@ -764,6 +766,61 @@ in
     touch $out
   '';
 
+  # Decision 144: noStorePaths finds every store path named in any file's
+  # bytes (an ELF binary's string, a text file, a path whose hash
+  # remove-references-to replaced), naming file and path, and passes once
+  # each is allowed, by glob or by store path.
+  stages-no-store-paths =
+    let
+      ref = pkgs.hello;
+      product = pkgs.runCommand "store-strings" { } ''
+        mkdir -p $out/bin $out/share
+        # Binary bytes around the string, as in a linked program.
+        printf '\177ELF\002\001\001\000\000conf=%s/etc/ssl\000\377\376' \
+          /nix/store/0123456789abcdfghijklmnpqrsvwxyz-openssl-3.5.9-etc > $out/bin/hello
+        printf 'modules=/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-openssl-3.5.9/lib/ossl-modules\n' > $out/share/conf
+        echo "tool=${ref}/bin/hello" >> $out/share/conf
+        echo "/nix/store/too-short-openssl" > $out/share/fine
+      '';
+      run = h: h {
+        input = product;
+        product.name = "p";
+        inherit pkgs;
+      };
+      strict = H.noStorePaths { why = "test"; };
+      allowed = H.noStorePaths {
+        allow = [
+          "*-openssl-*"
+          ref
+        ];
+      };
+      clean = H.noStorePaths { } {
+        input = pkgs.runCommand "clean" { } "mkdir -p $out/bin; echo /etc/ssl > $out/bin/x";
+        product.name = "clean";
+        inherit pkgs;
+      };
+    in
+    pkgs.runCommand "stages-no-store-paths"
+      {
+        failure = pkgs.testers.testBuildFailure (run strict);
+        allowedOut = run allowed;
+        inherit clean;
+        refPath = "${ref}";
+      }
+      ''
+        set -euo pipefail
+        log=$failure/testBuildFailure.log
+        cat $log
+        grep -qF 'noStorePaths: p: bin/hello names the Nix store path /nix/store/0123456789abcdfghijklmnpqrsvwxyz-openssl-3.5.9-etc/etc/ssl: test' $log
+        grep -qF 'noStorePaths: p: share/conf names the Nix store path /nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-openssl-3.5.9/lib/ossl-modules: test' $log
+        grep -qF "noStorePaths: p: share/conf names the Nix store path $refPath/bin/hello: test" $log
+        if grep -q 'share/fine' $log; then echo "a short path matched" >&2; exit 1; fi
+        test "$(grep -c 'noStorePaths: p:' $log)" = 3
+        cat $allowedOut/allowed
+        test "$(wc -l < $allowedOut/allowed)" = 3
+        touch $out
+      '';
+
   stages-zip =
     pkgs.runCommand "stages-zip"
       {
@@ -856,7 +913,8 @@ in
   # Decision 112: a dynamic-mode product whose roots Cargo all skipped. Its
   # `linked` holds only the no-binaries marker, and every stage and check
   # (splitDebug, a stage and a check that would fail, a stage with
-  # structured attributes, noSourceReferences) passes the marker on to
+  # structured attributes, a stage and a check written as bare `derivation`
+  # calls, noSourceReferences) passes the marker on to
   # each output without running. A product with a built root runs its
   # stages as usual.
   stages-no-binaries =
@@ -892,10 +950,27 @@ in
         n:
         { pkgs, ... }:
         pkgs.runCommand n { } "echo ${n} ran; exit 1";
+      # A stage and a check written as a bare `derivation` call (decision
+      # 147), which `overrideAttrs` cannot wrap.
+      raw =
+        n: script:
+        { pkgs, ... }:
+        derivation {
+          name = n;
+          inherit (pkgs.stdenv.hostPlatform) system;
+          builder = "${pkgs.bash}/bin/bash";
+          args = [
+            "-c"
+            script
+          ];
+        };
       productOf =
-        roots:
+        {
+          roots,
+          ca ? false,
+        }:
         (breakbulk.products.mkProducts {
-          inherit pkgs;
+          inherit pkgs ca;
           inst = {
             inherit roots;
             sources = {
@@ -904,7 +979,6 @@ in
             };
           };
           triple = "x86_64-unknown-linux-gnu";
-          ca = false;
           targetStages = {
             boom = {
               before = "splitDebug";
@@ -922,20 +996,44 @@ in
                   ];
                 } "exit 1";
             };
+            rawStage = {
+              after = "structured";
+              run = raw "raw-stage" "echo raw stage ran; exit 1";
+            };
           };
-          targetChecks.bad = {
-            on = "linked";
-            run = { pkgs, ... }: fails "bad" { inherit pkgs; };
+          targetChecks = {
+            bad = {
+              on = "linked";
+              run = { pkgs, ... }: fails "bad" { inherit pkgs; };
+            };
+            rawBad = {
+              on = "linked";
+              run = raw "raw-bad" "echo raw check ran; exit 1";
+            };
+            rawGood = {
+              on = "linked";
+              run = raw "raw-good" "echo raw check ran > $out";
+            };
           };
         }).p;
       skipped = productOf {
-        "p/bin/a" = root "a" true;
-        "p/bin/b" = root "b" true;
+        roots = {
+          "p/bin/a" = root "a" true;
+          "p/bin/b" = root "b" true;
+        };
       };
-      # One root built: `boom` runs and fails.
-      built = productOf {
+      # One root built: `boom` runs and fails, and so does the raw stage; the
+      # raw check runs its own builder.
+      builtRoots = {
         "p/bin/a" = root "a" false;
         "p/bin/b" = root "b" true;
+      };
+      built = productOf { roots = builtRoots; };
+      # Content addressing reaches a bare `derivation` too (evaluated only:
+      # building it needs the `ca-derivations` feature).
+      builtCa = productOf {
+        roots = builtRoots;
+        ca = true;
       };
       m = S.noBinariesMarker;
     in
@@ -947,16 +1045,25 @@ in
         extra = skipped.stages.structured.extra;
         noSrc = skipped.checks.noSourceReferences;
         bad = skipped.checks.bad;
+        rawStage = skipped.stages.rawStage;
+        rawBad = skipped.checks.rawBad;
         builtBoom = pkgs.testers.testBuildFailure built.stages.boom;
+        builtRawGood = built.checks.rawGood;
+        caRaw =
+          assert builtCa.stages.rawStage.drvAttrs.__contentAddressed;
+          assert builtCa.checks.rawGood.drvAttrs.__contentAddressed;
+          assert builtCa.stages.rawStage.drvAttrs.builder == "${pkgs.stdenv.shell}";
+          "ok";
       }
       ''
         set -euo pipefail
         grep -qxF 'a: needs feature cli' $linked/${m}
         grep -qxF 'b: needs feature cli' $linked/${m}
-        for d in $product $debug $extra $noSrc $bad; do
+        for d in $product $debug $extra $noSrc $bad $rawStage $rawBad; do
           cmp $linked/${m} $d/${m}
         done
         grep -q 'boom ran' $builtBoom/testBuildFailure.log
+        grep -qxF 'raw check ran' $builtRawGood
         touch $out
       '';
 

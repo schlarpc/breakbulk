@@ -2000,6 +2000,9 @@ attribute set of anything
 
 
 The Cargo workspaces of the repository, by a name of your choice\.
+Without any definition, a repository whose root has a ` Cargo.toml `
+gets one workspace, ` default `, at the root, so ` mkRepository ` needs
+no modules; declaring any workspace turns that default off\.
 
 
 
@@ -2009,10 +2012,8 @@ attribute set of (submodule)
 
 
 *Default:*
-
-```nix
-{ }
-```
+` { default.path = "."; } ` when the repository root has a ` Cargo.toml `,
+else ` { } `
 
 *Declared by:*
  - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
@@ -2543,7 +2544,8 @@ in { rustc = tc; cargo = tc; }
 
 What this toolchain can do, where breakbulk would otherwise
 decide it from the rustc and cargo versions (or, for a
-toolchain without a ` version ` attribute, by asking them
+toolchain whose ` version ` attribute is missing or not a
+Rust release, such as fenix’s, by asking them
 through import-from-derivation)\. Set one only for a
 forked or patched toolchain whose version says otherwise;
 ` null ` keeps breakbulk’s own answer\. The planner and the

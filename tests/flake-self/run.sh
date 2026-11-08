@@ -15,7 +15,11 @@
 #   - breakbulk's flake-parts module with no `root` (flake-parts/flake.nix,
 #     in a second copy of the fixture) gives the same derivations: `root`
 #     defaults to the flake's `self`; its `packages` output lists the
-#     products. This fetches flake-parts from GitHub (pinned revision).
+#     products. This fetches flake-parts from GitHub (pinned revision);
+#   - the flake-parts module with no configuration at all
+#     (zero-config/flake.nix, around the walking-skeleton fixture): no
+#     `root` and no `modules` give one workspace, `default`, whose product
+#     is in `packages` and whose dev shell is `devShells.default`.
 #
 # Planning runs through IFD, so the first run builds the fixture's plans.
 # Not a flake check: it evaluates a flake.
@@ -25,12 +29,14 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 work=${WORK:-${TMPDIR:-/tmp}/breakbulk-flake-self}
 rm -rf "$work"
-mkdir -p "$work/flake" "$work/fp"
+mkdir -p "$work/flake" "$work/fp" "$work/zero"
 cp -r "$repo/tests/fixtures/outside-reads/." "$work/flake/"
 sed "s|@BREAKBULK@|path:$repo|" "$here/flake.nix" > "$work/flake/flake.nix"
 cp -r "$repo/tests/fixtures/outside-reads/." "$work/fp/"
 sed "s|@BREAKBULK@|path:$repo|" "$here/flake-parts/flake.nix" > "$work/fp/flake.nix"
-chmod -R u+w "$work/flake" "$work/fp"
+cp -r "$repo/tests/fixtures/walking-skeleton/." "$work/zero/"
+sed "s|@BREAKBULK@|path:$repo|" "$here/zero-config/flake.nix" > "$work/zero/flake.nix"
+chmod -R u+w "$work/flake" "$work/fp" "$work/zero"
 
 nix=(nix --extra-experimental-features 'nix-command flakes')
 
@@ -67,6 +73,15 @@ for lazy in true false; do
     exit 1
   }
   echo "  flake-parts module, default root: identical; packages $fpPkgs" >&2
+
+  zeroPkgs=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/zero#packages.x86_64-linux" --apply builtins.attrNames)
+  zeroShells=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/zero#devShells.x86_64-linux" --apply builtins.attrNames)
+  jq -e 'index("walking-skeleton")' <<< "$zeroPkgs" > /dev/null && jq -e 'index("default")' <<< "$zeroShells" > /dev/null || {
+    echo "flake-self: zero-config packages $zeroPkgs, devShells $zeroShells" >&2
+    exit 1
+  }
+  "${nix[@]}" build "${opts[@]}" --no-link "path:$work/zero#packages.x86_64-linux.walking-skeleton"
+  echo "  flake-parts module, zero configuration: packages $zeroPkgs, devShells $zeroShells" >&2
 
   if "${nix[@]}" eval "${opts[@]}" "path:$work/flake#wrong" 2> "$work/wrong.log"; then
     echo "flake-self: a wrong root was accepted" >&2
