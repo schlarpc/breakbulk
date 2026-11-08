@@ -2035,3 +2035,40 @@ doesn't affect units. Default proposal: do it.
 >agree
 
 > Resolved: do it.
+
+## 150. FYI: 142, 144, 145, 147, 149 and zero-config done
+
+- **149:** traced Cargo runs with `CARGO_CACHE_RUSTC_INFO=0`; plans are
+  byte-identical, and the planner now fails loudly if Cargo ever skips the
+  query.
+- **142:** fenix combined toolchains have no `version` and are probed
+  (works). Fenix *component* packages set `version` to a date
+  (`2026-10-15`), which breakbulk misread as release 2026 (it would have
+  turned on trim-paths for a Cargo without it). Fixed: a version that
+  isn't a release number counts as unknown and is probed. Builds verified
+  with fenix stable and nightly.
+- **144:** `stageHelpers.noStorePaths` (reusable) checks a product contains
+  no store paths; `linuxPortable` adds it by default. It caught static
+  OpenSSL's compiled-in config and module folders; they now point at
+  `/etc/ssl` and `/usr/lib/ossl-modules`.
+- **145:** `libgcc_s.so.1` and `libstdc++.so.6` are always allowed for
+  portable programs.
+- **147:** stages and checks written as a bare `derivation` are guarded too.
+- **Zero-config:** with no workspace declared and a `Cargo.toml` at the
+  root, `mkRepository { pkgs; root = self; }` builds it as workspace
+  `default`; the README quickstart now matches the code.
+
+## 151. ASK: where portable OpenSSL looks for its config
+
+Portable OpenSSL is built to look in `/etc/ssl` (Arch, Alpine, openSUSE)
+and `/usr/lib/ossl-modules`. Debian-family systems keep `openssl.cnf` in
+`/usr/lib/ssl` and RHEL-family in `/etc/pki/tls`, so there it won't find
+the system's config (certificates still come from `/etc/ssl/certs`).
+Override with `rebuildOverrides.openssl`. Is `/etc/ssl` the right default
+for your targets (CentOS 7 is RHEL-family)?
+
+## 152. FYI: scrubbed store paths count as store paths
+
+The store-path check also flags `/nix/store/eeee…` paths (references
+scrubbed by `remove-references-to`), because the program would still look
+there at run time.
