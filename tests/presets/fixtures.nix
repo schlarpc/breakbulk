@@ -9,7 +9,11 @@
 #                     and static glibc products have no INTERP or NEEDED;
 #                     build scripts stay dynamic; tests run (aarch64 under
 #                     qemu-user)
-#   presets-eval      evaluation-time assertions on preset values
+#   presets-eval      evaluation-time assertions on preset values (and the
+#                     linker choice, lib/presets/linker.nix)
+#   debug-outputs     a plain Linux release plan: no unit and no `linked`
+#                     stage has a `debug` output (decision 97)
+#   msvc-debug-outputs  msvc release: every linked target unit has one
 {
   pkgs,
   breakbulk,
@@ -198,6 +202,58 @@ let
       targets.${native}.preset = presets.staticGlibc;
     }
   ];
+
+  # Decision 97: a unit has a `debug` output only when rustc writes
+  # debuginfo side files (breakbulk-format
+  # `writes_debuginfo_side_files`). A plain Linux release build (linuxGnu,
+  # no split-debuginfo) has none, in either plan; msvc links always write a
+  # PDB, so its release bins and tests have one.
+  linuxRelease = mkRepo (fixtures + "/static") [
+    {
+      workspaces.main = staticWs;
+      targets.${native}.preset = presets.linuxGnu;
+    }
+  ];
+  debugOutputs =
+    inst:
+    lib.concatMap (
+      kind:
+      lib.mapAttrsToList (id: u: {
+        inherit id kind;
+        inherit (u) platform;
+        links = (u.outputs or { }) ? bin;
+        staticlib = (u.crate.types or [ ]) == [ "staticlib" ];
+        debug = lib.elem "debug" inst.units.${kind}.${id}.outputs;
+      }) (planOf inst kind).units
+    ) [ "build" "test" ];
+  debugOutputsEval =
+    let
+      linux = debugOutputs linuxRelease.workspaces.main.instances.${native}.default;
+      linuxLinked = lib.filter (u: u.links && u.platform == "target") linux;
+      linuxWithDebug = map (u: "${u.kind}/${u.id}") (lib.filter (u: u.debug) linux);
+      product = linuxRelease.workspaces.main.target.${native}.packages.app;
+    in
+    assert lib.assertMsg (linuxLinked != [ ]) "debug-outputs: no linked target units in the Linux plan";
+    assert lib.assertMsg (
+      linuxWithDebug == [ ]
+    ) "debug-outputs: Linux release units with a debug output: ${toString linuxWithDebug}";
+    assert lib.assertMsg (!(product.roots."bin/app" ? debug)) "debug-outputs: the Linux root has a debug output";
+    assert lib.assertMsg (
+      !(product.stages.linked ? debug)
+    ) "debug-outputs: the Linux product's linked stage has a debug output";
+    evalCheck "debug-outputs" "linked Linux release units without debug: ${toString (lib.length linuxLinked)}";
+  msvcDebugOutputsEval =
+    let
+      units = debugOutputs msvc.workspaces.main.instances.x86_64-pc-windows-msvc.default;
+      linked = lib.filter (u: u.links && u.platform == "target") units;
+      # Release (no debuginfo, `-C strip=debuginfo`): still a PDB.
+      bad = map (u: "${u.kind}/${u.id}") (
+        lib.filter (u: u.debug != (u.platform == "target" && u.links && !u.staticlib)) units
+      );
+    in
+    assert lib.assertMsg (linked != [ ]) "msvc-debug-outputs: no linked target units";
+    assert lib.assertMsg (bad == [ ]) "msvc-debug-outputs: wrong debug outputs: ${toString bad}";
+    evalCheck "msvc-debug-outputs" "linked msvc release units with debug: ${toString (lib.length linked)}";
 
   # The build-script compile unit of `app` in an instance's build plan.
   buildScriptOf =
@@ -631,6 +687,7 @@ in
   };
   checks = {
     presets-eval = presetsEval;
+    debug-outputs = debugOutputsEval;
     wasm-host-inputs = wasmHostInputsCheck;
 
     same-triple-eval = sameTripleEval;
@@ -649,6 +706,7 @@ in
   // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
   // sysNativeCrossChecks
   // msvcChecks
+  // lib.optionalAttrs (xwinPkgs != null) { msvc-debug-outputs = msvcDebugOutputsEval; }
   // wasmBrowserChecks
   // wasmComponentChecks;
 }
