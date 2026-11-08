@@ -34,6 +34,15 @@
 #                           the synthesized metadata; no config file
 #   nextest-repo            the same through the module options, with the
 #                           workspace's .config/nextest.toml found by default
+#   dylib-rule              testRuns.dylibJq over hand-written
+#                           directives.json files: a test process gets the
+#                           paths each run classified as inside its own
+#                           `out` or an upstream (`DEP_*`) run's `out`, the
+#                           rule compiles, runs and doctests use; files
+#                           without `inBuildDir` read as `inOutDir`; a value
+#                           kept by one run survives another run's
+#                           unclassified copy; sorted by path component and
+#                           deduplicated, kind prefix stripped
 #
 # `workspaces` exposes the mkWorkspace results for debugging.
 {
@@ -439,6 +448,63 @@ let
         mkdir -p $out
       '';
 
+  # Two runs' directives.json, as breakbulk-unit writes them.
+  dylibRule =
+    let
+      a = pkgs.writeText "a-directives.json" (
+        builtins.toJSON {
+          libraryPaths = [
+            {
+              value = "native=/s/a-out/lib";
+              inOutDir = true;
+              inBuildDir = true;
+            }
+            # Inside b's `out`, which a received through `DEP_B_ROOT`.
+            {
+              value = "/s/b-out/shared";
+              inOutDir = false;
+              inBuildDir = true;
+            }
+            # Outside every `out`: inBuildDir is not written when false.
+            {
+              value = "native=/usr/lib";
+              inOutDir = false;
+            }
+            # Inside b's `out` without a DEP_* route: not kept.
+            {
+              value = "/s/b-out/other";
+              inOutDir = false;
+            }
+          ];
+        }
+      );
+      # Written before inBuildDir existed.
+      b = pkgs.writeText "b-directives.json" (
+        builtins.toJSON {
+          libraryPaths = [
+            {
+              value = "/s/b-out/shared";
+              inOutDir = true;
+            }
+            {
+              value = "all=/s/b-out/a";
+              inOutDir = true;
+            }
+          ];
+        }
+      );
+    in
+    pkgs.runCommand "test-runs-dylib-rule" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      got=$(jq -rn ${lib.escapeShellArg breakbulk.testRuns.dylibJq} ${a} ${b})
+      # Sorted as PathBuf: the root before `all=`, before `native=`.
+      want=/s/b-out/shared:/s/b-out/a:/s/a-out/lib
+      if [ "$got" != "$want" ]; then
+        echo "dylib-rule: got $got, want $want" >&2
+        exit 1
+      fi
+      mkdir -p $out
+    '';
+
   # Decision 93: the same settings as the workspace's default, with one
   # package overriding it back to libtest.
   nxWsRepo = breakbulk.mkRepository {
@@ -479,6 +545,7 @@ in
   workspaces = {
     inherit doctestsWs ctl nxWs;
   };
+  dylib-rule = dylibRule;
   inherit nextest;
   nextest-repo = nextestRepo;
   nextest-workspace-default = nextestWorkspaceDefault;

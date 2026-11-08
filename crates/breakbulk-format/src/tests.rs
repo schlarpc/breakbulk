@@ -591,6 +591,15 @@ fn render_configuration_hooks() {
     };
     assert!(c.remap.is_empty());
     assert_eq!(c.remap_scope, None);
+
+    // When breakbulk turned trim-paths on, Cargo's remaps stay and the scope
+    // is breakbulk's, per product kind.
+    p.trim_paths_default = true;
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
+        panic!()
+    };
+    assert!(c.remap.is_empty());
+    assert_eq!(c.remap_scope.as_deref(), Some("macro,diagnostics"));
 }
 
 /// A chain lib -> mid -> leaf, plus a proc macro with its own dependency.

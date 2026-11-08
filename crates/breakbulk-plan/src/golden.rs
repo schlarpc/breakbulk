@@ -33,7 +33,7 @@ use breakbulk_unit::splice::{
     DYLIB_PATH_VAR, expand_args, expand_dylib_path, expand_env, prepend_dylib_path,
 };
 
-use crate::graph::OVERRIDDEN_OUT_DIR;
+use crate::graph::{CARGO_BUILD_DIR_REMAP, OVERRIDDEN_OUT_DIR};
 use crate::records::Metadata;
 
 /// Split a command line as Cargo prints it (`shell-escape` quoting: single
@@ -381,6 +381,14 @@ fn normal_env(
             // Classic layout: Cargo's OUT_DIR does not exist. New layout
             // (nightly 1.101): it exists, empty.
             "(a directory that does not exist)".to_owned()
+        } else if k == "CARGO_TRIM_PATHS_REMAP" {
+            // The plan leaves out the build-directory pair (the run's own
+            // OUT_DIR is its `out`, which it cannot name).
+            let build_dir = format!("{}={CARGO_BUILD_DIR_REMAP}", target.display());
+            v.split(':')
+                .filter(|p| *p != build_dir)
+                .collect::<Vec<_>>()
+                .join(":")
         } else if k == "CARGO_TARGET_TMPDIR" || k.starts_with("CARGO_BIN_EXE_") {
             "(a path)".to_owned()
         } else if k == "CARGO" {
@@ -391,6 +399,49 @@ fn normal_env(
         out.insert(k.clone(), v);
     }
     out
+}
+
+/// Cargo's trim-paths arguments in their comparable form. Cargo remaps its
+/// one build directory (`--remap-path-prefix=<target>=/cargo/build-dir`);
+/// the plan has one remap per `OUT_DIR` the unit names
+/// (`…=/cargo/build-dir/<rel>`), each checked here to be `<target>/<rel>`
+/// in the real build, then both forms are dropped. When the planner turned
+/// trim-paths on itself, it dropped Cargo's `--remap-path-scope` (breakbulk
+/// sets the scope), so the real side's is dropped too.
+fn trim_paths_normal(
+    args: &[String],
+    target: &Path,
+    plan: &Plan,
+    traced: bool,
+) -> Result<Vec<String>, String> {
+    if !plan.trim_paths {
+        return Ok(args.to_vec());
+    }
+    let mut out = Vec::new();
+    for a in args {
+        if let Some((from, to)) = a
+            .strip_prefix("--remap-path-prefix=")
+            .and_then(|r| r.rsplit_once('='))
+        {
+            if !traced && to == CARGO_BUILD_DIR_REMAP && Path::new(from) == target {
+                continue;
+            }
+            if traced && let Some(rel) = to.strip_prefix(&format!("{CARGO_BUILD_DIR_REMAP}/")) {
+                if Path::new(from) != target.join(rel) {
+                    return Err(format!(
+                        "the build-directory remap `{a}` does not name `{}`",
+                        target.join(rel).display()
+                    ));
+                }
+                continue;
+            }
+        }
+        if !traced && plan.trim_paths_default && a.starts_with("--remap-path-scope=") {
+            continue;
+        }
+        out.push(a.clone());
+    }
+    Ok(out)
 }
 
 fn is_empty_dir(p: &Path) -> bool {
@@ -535,8 +586,17 @@ pub fn compare_with(
             }
         };
         report.compared += 1;
-        let want = &real[*id].args;
-        if &got != want {
+        let (got, want) = match (
+            trim_paths_normal(&got, target, plan, true),
+            trim_paths_normal(&real[*id].args, target, plan, false),
+        ) {
+            (Ok(g), Ok(w)) => (g, w),
+            (Err(e), _) | (_, Err(e)) => {
+                report.problems.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
+        if got != want {
             report.problems.push(format!(
                 "{id} ({}): argv differs\n    real:   {}\n    traced: {}",
                 name_of(id),
@@ -734,6 +794,16 @@ fn compare_doctests(
             want.push(r.args[i].clone());
             i += 1;
         }
+        let (got, want) = match (
+            trim_paths_normal(&got, target, plan, true),
+            trim_paths_normal(&want, target, plan, false),
+        ) {
+            (Ok(g), Ok(w)) => (g, w),
+            (Err(e), _) | (_, Err(e)) => {
+                report.problems.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
         if got != want {
             report.problems.push(format!(
                 "{id}: argv differs\n    real:   {}\n    traced: {}",
@@ -806,6 +876,45 @@ mod tests {
             normal_env(&env(&other), t, &[])
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn trim_paths_forms() {
+        let mut plan: Plan = serde_json::from_value(serde_json::json!({
+            "version": 1, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
+            "host": "h", "target": "t",
+            "variant": { "profile": "dev", "features": [], "mode": "build" },
+            "skeletonRoot": "/build/skeleton", "trimPaths": true, "trimPathsDefault": true,
+            "units": {}, "roots": []
+        }))
+        .unwrap();
+        let t = Path::new("/tmp/t");
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let real = a(&[
+            "--remap-path-scope=all",
+            "--remap-path-prefix=/s/ws=.",
+            "--remap-path-prefix=/tmp/t=/cargo/build-dir",
+            "-C",
+            "x",
+        ]);
+        let traced = a(&[
+            "--remap-path-prefix=/s/ws=.",
+            "--remap-path-prefix=/tmp/t/debug/build/a/1/out=/cargo/build-dir/debug/build/a/1/out",
+            "-C",
+            "x",
+        ]);
+        let want = a(&["--remap-path-prefix=/s/ws=.", "-C", "x"]);
+        assert_eq!(trim_paths_normal(&real, t, &plan, false).unwrap(), want);
+        assert_eq!(trim_paths_normal(&traced, t, &plan, true).unwrap(), want);
+        // A remap that names another directory than <target>/<rel>.
+        let wrong = a(&["--remap-path-prefix=/x/out=/cargo/build-dir/debug/build/a/1/out"]);
+        assert!(trim_paths_normal(&wrong, t, &plan, true).is_err());
+        // The project's own setting: its scope is compared.
+        plan.trim_paths_default = false;
+        assert_eq!(
+            trim_paths_normal(&real, t, &plan, false).unwrap()[0],
+            "--remap-path-scope=all"
+        );
     }
 
     #[test]

@@ -1458,3 +1458,57 @@ compile with a proc macro rebuild whenever any build script anywhere
 changed. Two crates (`sdl2-sys` bundled, `ort-sys` copy-dylibs) copy
 libraries into Cargo's target directory itself; no rule can support that in
 a sandbox, so that's a separate known gap.
+
+## 120. FYI: verification results (resolves 34, 96, 98, 103; updates 102)
+
+- **trim-paths (34):** works on Cargo 1.101 nightly. breakbulk uses Cargo's
+  own path hiding when the project turns it on, and turns it on itself
+  otherwise; a shared path crate outside the workspace root now gets the
+  same crate ID from different workspaces and checkout locations.
+- **Debug files (96):** proven with real debuggers. gdb, given only a
+  product's `debug` output, shows a backtrace with file and line through a
+  dependency; packed `.dwp` files didn't work at first (wrong place) and
+  were fixed; on Windows, `llvm-symbolizer` resolves addresses through the
+  `.pdb` to `src/main.rs:40`.
+- **zig (103):** tests now run inside a real CentOS 7 (glibc 2.17)
+  container in the Nix sandbox; a negative control confirms the check
+  can fail.
+- **zig native libraries (102):** new opt-in `rebuildInputs` rebuilds listed
+  nixpkgs libraries with zig against glibc 2.17 (zlib ~10 s, OpenSSL
+  ~5 min); other library inputs on zig targets get a warning.
+- **build-std (98):** works. The standard library's own dependencies come
+  from the toolchain's `rust-src`, so nothing extra is downloaded.
+
+## 121. ASK: trim-paths details
+
+- breakbulk turns trim-paths on as `"all"` and then applies its own
+  per-product scope, so build scripts see `CARGO_TRIM_PATHS_SCOPE=all`.
+- A project that explicitly sets `trim-paths = "none"` is overridden,
+  because breakbulk can't tell that from "not set" without copying Cargo's
+  profile rules.
+- Mixed settings (on for some packages via profile overrides, off for
+  others) fail planning. Alternative: apply breakbulk's own path hiding to
+  just the "off" ones.
+Acceptable?
+
+## 122. ASK: zig follow-ups
+
+- The CentOS 7 container check downloads an image from Docker Hub and runs
+  in the regular checks (marked heavy). Move it behind a `nix run` command
+  like the dynamic-mode tests?
+- `rebuildInputs` must also list those libraries' own library dependencies
+  by hand; rebuilding dependencies automatically would also rebuild build
+  tools.
+- zig-built binaries get no runtime library path to the rebuilt libraries;
+  they're found via `LD_LIBRARY_PATH` or by shipping them alongside.
+  Alternatives: link them statically, or have the zig linker record store
+  paths.
+
+## 123. FYI: smaller verification notes
+
+- On Cargo 1.101+, `cargo` in the dev shell needs
+  `CARGO_PROFILE_<P>_TRIM_PATHS=all` to get the same crate IDs as the plan;
+  the dev shell will set it.
+- Bare-metal build-std targets (`x86_64-unknown-none`) link with rustc's
+  bundled lld, since there's no nixpkgs linker wrapper for them; the
+  "never rust-lld" rule (68) is about the Linux wrapper.

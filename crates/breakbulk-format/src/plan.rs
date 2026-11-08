@@ -34,8 +34,15 @@ pub struct Plan {
     pub variant: Variant,
     /// The canonical absolute skeleton path planning ran at.
     pub skeleton_root: String,
-    /// Whether Cargo's `trim-paths` was in effect.
+    /// Whether Cargo's `trim-paths` was in effect: every compile unit
+    /// carries Cargo's own remaps, and breakbulk adds none.
     pub trim_paths: bool,
+    /// Whether the planner turned `trim-paths` on itself, because the
+    /// project had not ("trim-paths" in `docs/implementation.md`). Cargo's
+    /// `--remap-path-scope` is then left out of the plan, and breakbulk
+    /// sets the scope per product kind, as with its own remaps.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trim_paths_default: bool,
     pub units: BTreeMap<UnitId, Unit>,
     /// The plan's products. Sorted.
     pub roots: Vec<Root>,
@@ -85,6 +92,33 @@ pub enum VariantMode {
     Check,
     Clippy,
     Coverage,
+}
+
+/// A working directory: a reference, or a literal store path. The literal
+/// form is a toolchain path: the standard library's own packages under
+/// `-Zbuild-std`, which Cargo compiles and runs in their directories in
+/// the sysroot's `rust-src` ("build-std" in `docs/implementation.md`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Cwd {
+    Ref(Reference),
+    Literal(String),
+}
+
+impl Cwd {
+    /// The rendered directory.
+    pub fn render<R: crate::Resolve>(&self, r: &R) -> Result<String, R::Error> {
+        match self {
+            Cwd::Ref(x) => r.reference(x),
+            Cwd::Literal(s) => Ok(s.clone()),
+        }
+    }
+}
+
+impl From<Reference> for Cwd {
+    fn from(r: Reference) -> Cwd {
+        Cwd::Ref(r)
+    }
 }
 
 /// A path the planner rewrote: resolved to a store path at instantiation.
@@ -190,7 +224,7 @@ pub struct Doctest {
     pub env_splices: Vec<Splice>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Reference,
+    pub cwd: Cwd,
 }
 
 impl Doctest {
@@ -264,7 +298,7 @@ pub struct CompileUnit {
     /// dependencies (proc macros, build dependencies with build scripts).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Reference,
+    pub cwd: Cwd,
     /// Output name to file names.
     pub outputs: BTreeMap<String, BTreeSet<String>>,
 }
@@ -373,7 +407,7 @@ pub struct RunUnit {
     pub script: Reference,
     pub env: BTreeMap<String, Text>,
     /// The working directory Cargo gave the script (the package directory).
-    pub cwd: Reference,
+    pub cwd: Cwd,
     /// Upstream runs whose `DEP_<links>_*` metadata this run receives.
     pub metadata_from: BTreeSet<UnitId>,
     /// Dynamic-path splices, as for compile units: the runs of packages the
@@ -458,8 +492,16 @@ pub(crate) fn for_each_literal(unit: &Unit, f: &mut dyn FnMut(&str, &dyn Fn() ->
                 }
             }
             env(&c.env, f);
+            if let Cwd::Literal(s) = &c.cwd {
+                f(s, &|| "cwd".into());
+            }
         }
-        Unit::Run(r) => env(&r.env, f),
+        Unit::Run(r) => {
+            env(&r.env, f);
+            if let Cwd::Literal(s) = &r.cwd {
+                f(s, &|| "cwd".into());
+            }
+        }
     }
 }
 
@@ -494,12 +536,16 @@ pub(crate) fn for_each_reference(unit: &Unit, f: &mut dyn FnMut(&Reference, &dyn
                 }
             }
             env(&c.env, f);
-            f(&c.cwd, &|| "cwd".into());
+            if let Cwd::Ref(r) = &c.cwd {
+                f(r, &|| "cwd".into());
+            }
         }
         Unit::Run(r) => {
             env(&r.env, f);
             f(&r.script, &|| "script".into());
-            f(&r.cwd, &|| "cwd".into());
+            if let Cwd::Ref(c) = &r.cwd {
+                f(c, &|| "cwd".into());
+            }
         }
     }
 }

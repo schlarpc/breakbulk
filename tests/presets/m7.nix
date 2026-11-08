@@ -17,9 +17,16 @@
 #   zig-*             host triple against glibc 2.17 with zig cc; newest
 #                     GLIBC symbol version 2.17 (objdump -T); host units
 #                     keep the host linker (asserted on the plan)
+#   zig-centos7-*     HEAVY (network: the CentOS 7.9 image, ~75 MB): the
+#                     product and the test binaries run inside a CentOS 7
+#                     userland (glibc 2.17 and its own loader) with bwrap,
+#                     not through the build machine's ld.so
+#   zig-native-*      HEAVY (builds OpenSSL and zlib with zig cc, ~5 min):
+#                     presets.zig's rebuildInputs; openssl-sys and libz-sys
+#                     link the rebuilt libraries; product and tests in the
+#                     CentOS 7 container
 #
-# tests/fixtures/build-std is exploratory and not a check: planning fails
-# (docs/implementation.md "build-std").
+# build-std (tests/fixtures/build-std, build-std-deps) is in ./build-std.nix.
 {
   pkgs,
   breakbulk,
@@ -258,11 +265,163 @@ let
             newest=$(printf '%s\n' "$max" GLIBC_2.17 | sort -V | tail -n1)
             [ "$newest" = GLIBC_2.17 ] || { echo "$max is newer than GLIBC_2.17"; exit 1; }
             ${lib.escapeShellArgs t.runner} ${bin} a b | tee out.txt
-            grep -qx "zig: headers=2.17 args=3 runtime-ok=true" out.txt
+            grep -qE "^zig: headers=2.17 args=3 runtime=2\.[0-9]+$" out.txt
             mkdir -p $out
             cp versions.txt out.txt $out/
           '';
       zig-test = t.testRuns.app."bin/app";
+    }
+    // zigContainerChecks;
+
+  # A real glibc 2.17 system: CentOS 7.9's userland from its Docker Hub
+  # image (a fixed-output pull by digest), unpacked into the store. The
+  # runner starts a program inside it with bubblewrap, which works inside
+  # the Nix sandbox (a nested user namespace): the image is the root, as a
+  # temporary overlay so mount points can be created; the store, $TMPDIR,
+  # /tmp and $out are bound in. Programs are exec'd directly, so the
+  # kernel loads the binary's own interpreter, /lib64/ld-linux-x86-64.so.2,
+  # which is CentOS's, and that finds CentOS's libc.so.6.
+  centos7Image = pkgs.dockerTools.pullImage {
+    imageName = "docker.io/library/centos";
+    # 7.9.2009, linux/amd64 (the manifest list is sha256:be65f488…).
+    imageDigest = "sha256:dead07b4d8ed7e29e98de0f4504d87e8880d4347859d839686a31da35a3b532f";
+    finalImageTag = "7.9.2009";
+    os = "linux";
+    arch = "amd64";
+    sha256 = "sha256-cb3pSApk6OB4P1rYNnR0rOxZdjTq9WaT0qwKb2b8Klk=";
+  };
+  centos7Rootfs = pkgs.runCommand "centos-7.9-rootfs" { nativeBuildInputs = [ pkgs.jq ]; } ''
+    tar -xf ${centos7Image} manifest.json
+    mkdir $out
+    for l in $(jq -r '.[0].Layers[]' manifest.json); do
+      tar -xf ${centos7Image} "$l"
+      tar -xf "$l" -C $out --no-same-owner --no-same-permissions --exclude='dev/*'
+    done
+    chmod -R u+rwX $out
+    test -e $out/usr/lib64/libc-2.17.so
+  '';
+  centos7Runner = pkgs.writeShellScript "breakbulk-runner-centos7" ''
+    args=(--overlay-src ${centos7Rootfs} --tmp-overlay / --dev /dev --proc /proc
+      --ro-bind /nix/store /nix/store)
+    for d in "''${TMPDIR:-}" /tmp "''${out:-}"; do
+      [[ -n $d && -e $d ]] && args+=(--bind "$d" "$d")
+    done
+    exec ${pkgs.bubblewrap}/bin/bwrap "''${args[@]}" --chdir "$PWD" "$@"
+  '';
+  # The same workspace and preset with the container as runner. Units are
+  # the same derivations as zigRepo's (a runner reaches only test runs).
+  zigContainerRepo = mkRepo (fixtures + "/zig") [
+    {
+      workspaces.main = wsWith zigRust [ native ];
+      targets.${native} = {
+        preset = presets.zig { glibc = "2.17"; };
+        runner = centos7Runner;
+      };
+      # The fixture's `runs_on_expected_glibc` test compares the runtime
+      # glibc (gnu_get_libc_version) with this.
+      packages.app.test.env.BB_EXPECT_RUNTIME_GLIBC = "2.17";
+    }
+  ];
+  zigContainerChecks =
+    let
+      t = zigContainerRepo.workspaces.main.target.${native};
+      tz = zigRepo.workspaces.main.target.${native};
+      bin = "${t.packages.app}/bin/app";
+    in
+    assert lib.assertMsg (
+      t.tests.app.bin-app.drvPath == tz.tests.app.bin-app.drvPath
+    ) "zig: the container runner changed the test binary";
+    {
+      zig-centos7-run = pkgs.runCommand "zig-centos7-run" { } ''
+        mkdir -p $out
+        ${centos7Runner} /usr/bin/ldd --version > $out/ldd.txt
+        head -n1 $out/ldd.txt
+        grep -qx 'ldd (GNU libc) 2\.17' $out/ldd.txt
+        # Exec'd directly: the binary's interpreter is CentOS's loader.
+        ${centos7Runner} ${bin} a b | tee $out/out.txt
+        grep -qx "zig: headers=2.17 args=3 runtime=2.17" $out/out.txt
+      '';
+      # libtest under CentOS 7, `runs_on_expected_glibc` included.
+      zig-centos7-test = t.testRuns.app."bin/app";
+    }
+    // zigNativeChecks;
+
+  # Native libraries rebuilt with zig cc against glibc 2.17 (decision 102):
+  # openssl-sys and libz-sys find them through breakbulk's sysDefaults
+  # (pkg-config, `inputs = p: [ p.openssl … ]`), called with the preset's
+  # package set. KNOWN GAP: zlib's configure does not recognise the
+  # wrapped zig cc as gcc and finds "no shared library support", so the
+  # rebuilt zlib is static only and libz-sys links its libz.a (still built
+  # by zig cc). OpenSSL is shared. The product links libssl dynamically; zig adds no rpath, so
+  # runs set LD_LIBRARY_PATH to the rebuilt libraries, as a deployment
+  # would ship them next to the program.
+  zigNativePreset = presets.zig {
+    glibc = "2.17";
+    rebuildInputs = [
+      "openssl"
+      "zlib"
+    ];
+  };
+  zigNativeLibs =
+    let
+      set = (zigNativePreset { inherit pkgs; }).packageSet.content;
+    in
+    {
+      inherit (set.breakbulkZigRebuilt) openssl zlib;
+      # The package set hands out the rebuilt packages, nixpkgs' otherwise
+      # (any other derivation with an evaluation warning; checked by hand:
+      # reading `set.curl` warns "a package input uses nixpkgs' `curl`…").
+      check =
+        set.openssl == set.breakbulkZigRebuilt.openssl
+        && set.openssl.drvPath != pkgs.openssl.drvPath
+        && set ? lib
+        && set.stdenv == pkgs.stdenv;
+    };
+  zigNativeLdPath = lib.makeLibraryPath [
+    zigNativeLibs.openssl
+    zigNativeLibs.zlib
+  ];
+  zigNativeRepo = mkRepo (fixtures + "/zig-native") [
+    {
+      workspaces.main = wsWith zigRust [ native ];
+      targets.${native} = {
+        preset = zigNativePreset;
+        runner = centos7Runner;
+      };
+      packages.app.test.env.LD_LIBRARY_PATH = zigNativeLdPath;
+    }
+  ];
+  zigNativeChecks =
+    let
+      t = zigNativeRepo.workspaces.main.target.${native};
+      bin = "${t.packages.app}/bin/app";
+      inherit (zigNativeLibs) openssl zlib;
+    in
+    assert lib.assertMsg zigNativeLibs.check "zig: rebuildInputs package set";
+    {
+      # HEAVY: builds OpenSSL with zig cc (about 5 minutes on 4 cores).
+      # The product and the libraries it loads need GLIBC_2.17 at most;
+      # it runs in the CentOS 7 container.
+      zig-native-centos7-run =
+        pkgs.runCommand "zig-native-centos7-run"
+          {
+            nativeBuildInputs = [ pkgs.buildPackages.binutils ];
+          }
+          ''
+            mkdir -p $out
+            for f in ${bin} ${lib.getLib openssl}/lib/libssl.so.3 ${lib.getLib openssl}/lib/libcrypto.so.3; do
+              v=$(objdump -T "$f" | { grep -o 'GLIBC_[0-9.]*' || true; } | sort -uV | tail -n1)
+              echo "$f: $v" | tee -a $out/versions.txt
+              newest=$(printf '%s\n' "$v" GLIBC_2.17 | sort -V | tail -n1)
+              [ "$newest" = GLIBC_2.17 ] || { echo "$f needs $v"; exit 1; }
+            done
+            readelf -dW ${bin} | grep NEEDED | tee $out/needed.txt
+            grep -q libcrypto.so.3 $out/needed.txt
+            readelf -dW ${lib.getLib openssl}/lib/libssl.so.3 | grep -q 'SONAME.*libssl.so.3'
+            LD_LIBRARY_PATH=${zigNativeLdPath} ${centos7Runner} ${bin} | tee $out/out.txt
+            grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
+          '';
+      zig-native-centos7-test = t.testRuns.app."lib/app";
     };
 in
 {

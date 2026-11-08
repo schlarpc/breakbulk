@@ -173,10 +173,10 @@ pub struct TestSpec {
     pub config_env: BTreeMap<String, String>,
     /// `flags` outputs of the runs whose `rustc-env` values the process gets.
     pub env_flags: Vec<String>,
-    /// `flags` and `out` of every run of the unit's platform, for the
-    /// dynamic-library path.
+    /// `flags` of every run of the unit's platform, for the dynamic-library
+    /// path. Each run's `directives.json` says which of its search paths go
+    /// on it (`LibraryPath::for_dylib_path` in breakbulk-unit).
     pub dylib_flags: Vec<String>,
-    pub dylib_outs: Vec<String>,
     /// The package's directory relative to the repository root (the source
     /// view's root), for test apps run in a checkout; None when
     /// `CARGO_MANIFEST_DIR` is not in a source view.
@@ -268,7 +268,6 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str, root: &RootOut) -> Result
         config_env,
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
-        dylib_outs: runs.iter().map(|id| tokens.unit(id, "out")).collect(),
         package_dir,
         nextest: nextest(tokens, plan, c, root)?,
     })

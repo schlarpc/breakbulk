@@ -161,6 +161,18 @@ let
           objcopy --only-keep-debug "$f" "$dbg"
           objcopy --strip-debug "$f"
           objcopy --add-gnu-debuglink="$dbg" "$f"
+          # With split-debuginfo = "packed", the DWARF objects are in
+          # `<binary>.dwp`. gdb looks for it next to the separate debug file
+          # it found, under the binary's name (gdb 17.2,
+          # gdb/dwarf2/read.c, open_and_init_dwp_file), so it moves there;
+          # its install-layout place keeps a relative symlink.
+          b=''${f##*/}
+          for d in bin lib; do
+            if [ -f "$debug/$d/$b.dwp" ] && [ ! -L "$debug/$d/$b.dwp" ]; then
+              mv "$debug/$d/$b.dwp" "$dir/$b.dwp"
+              ln -s "../lib/debug/.build-id/''${id:0:2}/$b.dwp" "$debug/$d/$b.dwp"
+            fi
+          done
         done
       ''
   );

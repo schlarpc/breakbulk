@@ -53,9 +53,11 @@
 #     never over a variable it set itself (`apply_env_config`), so `[env]`
 #     loses to all of Cargo's own;
 #   - the dynamic-library path holds, sorted as Cargo sorts paths, the
-#     search paths printed by any target-platform run that lie inside some
-#     target-platform run's `out` (Cargo: inside the target's output
-#     directory), then the sysroot's target library directory;
+#     search paths printed by any run of the test's platform that lie inside
+#     the printing run's `out` or the `out` of a run it received `DEP_*`
+#     metadata from (Cargo: inside the target's output directory; the same
+#     rule as for compiles, runs and doctests, `LibraryPath::for_dylib_path`
+#     in breakbulk-unit), then the sysroot's target library directory;
 #   - `/tmp/breakbulk-target-tmp`, the planner's `CARGO_TARGET_TMPDIR`, is
 #     created first;
 #   - `$out/log` holds the output; the run fails when the binary does.
@@ -103,13 +105,15 @@ let
   # The dynamic-library path, computed at run time from the runs' `flags`
   # outputs: every search path value (sorted by path component, as Cargo's
   # BTreeSet<PathBuf> does, then deduplicated), without its kind prefix,
-  # kept when it lies inside one of `outs`.
+  # kept when the printing run classified it as inside its own `out` or an
+  # upstream run's (`inOutDir`/`inBuildDir`, `LibraryPath::for_dylib_path`
+  # in breakbulk-unit). The filter comes first: a value one run printed
+  # inside its `out` is kept even if another run printed it too.
   dylibJq = ''
     def strip: if test("^(native|crate|dependency|framework|all)=") then sub("^[a-z]+="; "") else . end;
-    [inputs | .libraryPaths[].value]
+    [inputs | .libraryPaths[] | select(.inOutDir or (.inBuildDir // false)) | .value]
     | unique_by(split("/"))
     | map(strip)
-    | map(select(. as $p | $outs | any(. as $o | $p == $o or ($p | startswith($o + "/")))))
     | join(":")
   '';
 in
@@ -243,7 +247,6 @@ rec {
       envFlags = map (s: units.${s.splice}.flags) unit.envSplices;
       dylib = {
         flags = lib.mapAttrsToList (id: _: units.${id}.flags) runs;
-        outs = lib.mapAttrsToList (id: _: units.${id}.out) runs;
         extra = lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib";
       };
     };
@@ -257,7 +260,6 @@ rec {
       vars ? { },
     }:
     let
-      outs = toJSON (map toString spec.dylib.outs);
       dylibs = lib.concatMapStringsSep " " (
         f: lib.escapeShellArg "${f}/directives.json"
       ) spec.dylib.flags;
@@ -269,7 +271,7 @@ rec {
         if spec.dylib.flags == [ ] then
           "''"
         else
-          "$(${jq} -rn --argjson outs ${lib.escapeShellArg outs} ${lib.escapeShellArg dylibJq} ${dylibs})"
+          "$(${jq} -rn ${lib.escapeShellArg dylibJq} ${dylibs})"
       }
       ${
         # Empty when off, so test runs without stable inputs are unchanged.
@@ -303,7 +305,7 @@ rec {
       "__bb_env+=(${lib.escapeShellArg "${k}=${v}"})\n";
 
   # Decision 61: stable inputs for content-addressed test runs. A run spec
-  # names the `flags` and `out` of every build-script run of its platform
+  # names the `flags` of every build-script run of its platform
   # (the dynamic-library path, as Cargo builds it) and the `flags` of its
   # package's build script (`rustc-env`). Those are input-addressed, so an
   # edit to any package with a build script gives them new paths and
@@ -327,11 +329,10 @@ rec {
       name,
     }:
     let
-      outs = toJSON (map toString spec.dylib.outs);
       dylibs = pkgs.runCommand "${name}-test-dylibs" (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }) ''
         mkdir -p $out/dylib
         shopt -s nullglob
-        paths=$(jq -rn --argjson outs ${lib.escapeShellArg outs} ${lib.escapeShellArg dylibJq} ${
+        paths=$(jq -rn ${lib.escapeShellArg dylibJq} ${
           lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.dylib.flags
         })
         IFS=: read -ra ps <<< "$paths"
@@ -358,7 +359,6 @@ rec {
     // {
       dylib = spec.dylib // {
         flags = [ ];
-        outs = [ ];
         stable = if spec.dylib.flags == [ ] then null else dylibs;
       };
       envFlags = lib.optional (spec.envFlags != [ ]) env;

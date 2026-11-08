@@ -1,0 +1,6 @@
+# No trim-paths setting: on Cargo >= 1.101, breakbulk traces once, sees it
+# off, and traces again with `--config profile.dev.trim-paths="all"`,
+# then sets the remap scope per product kind.
+[workspace]
+resolver = "2"
+members = ["app", "lib"]
