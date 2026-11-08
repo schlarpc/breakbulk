@@ -494,9 +494,13 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
     toolchain = breakbulk.toolchains.fromRustupToolchainFile ./rust-toolchain.toml;
     targets.<triple> = {
       packages = null;                # null: --workspace; or a list traced with -p
+      tests = true;                   # false: no test plan outputs here; a list: `cargo test -p` those only
     };
     variants.<v> = { profile = "release"; features = [ ]; mode = "build"; };  # build | check | clippy | coverage
                                       # check/clippy: allTargets = true (--all-targets; false: plain `cargo check`)
+                                      # targets = null (or the triples it is planned for)
+                                      # packages = null (or a -p list in place of the target's)
+                                      # checks = true: its test runs and doctests in repo.checks
     roots = null;                     # override predicted root names
     devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
     test.runner = null;               # default test runner of its packages: libtest | nextest
@@ -555,7 +559,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
 | `repo.workspaces.<ws>.target.<triple>.doctests.<pkg>` | Doctest derivations |
 | `repo.workspaces.<ws>.target.<triple>.benches.<pkg>.<bench>` | Bench binaries from the bench variant |
 | `repo.workspaces.<ws>.target.<triple>.docs` | The documentation product (later) |
-| `repo.checks` | All checks and test runs flattened, ready for `checks.<system>` |
+| `repo.checks` | All checks and test runs flattened, ready for `checks.<system>`: the default variant's products, checks, test runs and doctests as `<ws>/<triple>/<pkg>/…`; other variants' test runs and doctests as `<ws>/<triple>/variant-<v>/<pkg>/…`; check and clippy variants as `<ws>/<triple>/variant-<v>/check` |
 | `repo.sources.<crate>` | Fetched crate sources by name (and `<name>@<version>`) |
 | `repo.workspaces.<ws>.devShell` | A shell matching the planner's Cargo invocation (see below) |
 | `repo.workspaces.<ws>.plans.<triple>.<variant>.{build,test}` | `plan.json`, for debugging |

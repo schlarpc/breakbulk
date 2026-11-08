@@ -34,6 +34,10 @@
 #                    between release and the custom profile;
 #                    the powerset's products have their features; the check
 #                    and clippy variants' unit checks build
+#   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
+#                    and `targets.<t>.tests` narrow plans and outputs per
+#                    target; other variants' test runs are in repo.checks
+#                    under `variant-<v>/` unless `checks = false`
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
 #   variants-coverage   with rust-overlay's 1.99 (nixpkgs' rustc 1.99
@@ -785,6 +789,104 @@ in
       ''
         cat $failure/log
         touch $out
+      '';
+
+  # Field-trial gaps 4 and 5: variants and test plans narrowed per target
+  # (`variants.<v>.targets`, `variants.<v>.packages`,
+  # `workspaces.<ws>.targets.<t>.tests`), and every variant's test runs in
+  # repo.checks under `variant-<v>/`. The musl target is never planned:
+  # only a check variant is planned for it, and nothing here builds it.
+  variants-narrowing =
+    let
+      musl = "x86_64-unknown-linux-musl";
+      repo = mkRepo (fixtures + "/variants") [
+        {
+          workspaces.main = {
+            path = "ws";
+            targets = {
+              ${native}.tests = [ "lib-a" ];
+              ${musl}.tests = false;
+            };
+            variants = {
+              default = {
+                profile = "release";
+                targets = [ native ];
+              };
+              # lib-a alone, with only `y`: its own test runs in checks.
+              y-only = {
+                profile = "release";
+                targets = [ native ];
+                packages = [ "lib-a" ];
+                noDefaultFeatures = true;
+                features = [ "y" ];
+              };
+              # The same, kept out of repo.checks.
+              quiet = {
+                profile = "release";
+                targets = [ native ];
+                packages = [ "lib-a" ];
+                features = [ "y" ];
+                checks = false;
+              };
+              musl-check = {
+                mode = "check";
+                targets = [ musl ];
+              };
+            };
+          };
+        }
+      ];
+      w = repo.workspaces.main;
+      n = w.target.${native};
+      m = w.target.${musl};
+      names = lib.attrNames repo.checks;
+      under = prefix: lib.filter (lib.hasPrefix prefix) names;
+      planCmd = vName: kind: w.instances.${native}.${vName}.plans.${kind}.drvAttrs.buildCommand;
+      selects = vName: kind: pkg: lib.hasInfix " -p ${lib.escapeShellArg pkg} " (planCmd vName kind);
+      yRun = repo.checks."main/${native}/variant-y-only/lib-a/test-lib";
+      defaultRun = repo.checks."main/${native}/lib-a/test-lib";
+      bad = lib.attrNames (
+        lib.filterAttrs (_: ok: !ok) {
+          nativeVariants = lib.attrNames n.variants == [
+            "default"
+            "quiet"
+            "y-only"
+          ];
+          muslVariants = lib.attrNames m.variants == [ "musl-check" ];
+          muslEmpty = m.packages == { } && m.tests == { } && m.testRuns == { } && m.doctests == { };
+          muslChecks = under "main/${musl}/" == [ "main/${musl}/variant-musl-check/check" ];
+          # `tests = [ "lib-a" ]`: the test plan is `-p lib-a`, the build
+          # plan stays `--workspace`.
+          testsNarrowed = lib.attrNames n.tests == [ "lib-a" ] && lib.attrNames n.testRuns == [ "lib-a" ];
+          testPlanSelects = selects "default" "test" "lib-a" && !(selects "default" "build" "lib-a");
+          productsKept = n.packages ? app;
+          # `packages` narrows both plans of a variant.
+          variantSelects = selects "y-only" "build" "lib-a" && !(selects "y-only" "build" "app");
+          yInChecks = repo.checks ? "main/${native}/variant-y-only/lib-a/test-lib";
+          yDiffers = yRun.drvPath != defaultRun.drvPath;
+          quietOut = under "main/${native}/variant-quiet/" == [ ];
+          defaultKept = repo.checks ? "main/${native}/lib-a/test-lib";
+        }
+      );
+      unknown = mkRepo (fixtures + "/variants") [
+        {
+          workspaces.main = {
+            path = "ws";
+            variants.default.targets = [ "riscv64gc-unknown-linux-gnu" ];
+          };
+        }
+      ];
+      unknownEval = builtins.tryEval (builtins.attrNames unknown.workspaces.main.target.${native}.variants);
+    in
+    assert lib.assertMsg (bad == [ ]) "variants-narrowing: failed ${toString bad}; checks: ${builtins.toJSON names}";
+    assert lib.assertMsg (!unknownEval.success) "variants-narrowing: a variant target outside the workspace's targets was accepted";
+    pkgs.runCommand "variants-narrowing"
+      {
+        inherit yRun;
+        report = builtins.toJSON names;
+      }
+      ''
+        printf '%s\n' "$report" > $out
       '';
 
   source-paths =

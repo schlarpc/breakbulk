@@ -84,6 +84,46 @@ let
             units clippy-driver compiles (workspace members).
           '';
         };
+        targets = mkOption {
+          type = types.nullOr (types.listOf types.str);
+          default = null;
+          example = [ "x86_64-unknown-linux-gnu" ];
+          description = ''
+            The workspace's targets (`workspaces.<ws>.targets`) this
+            variant is planned for. `null`: every target. A target left
+            out has no `target.<triple>.variants.<v>`, and nothing of the
+            variant in `repo.checks`; when the default variant is left
+            out, the target's `packages`, `tests` and test runs are empty.
+            Use it for gates that apply to one target only (clippy
+            natively, a `cargo check` gate for wasm).
+          '';
+        };
+        packages = mkOption {
+          type = types.nullOr (types.listOf types.str);
+          default = null;
+          example = [ "my-lib" ];
+          description = ''
+            The packages this variant plans, each traced with `-p`, in
+            place of the target's `packages` (`workspaces.<ws>.targets.<triple>.packages`).
+            `null`: the target's selection. Features then name the
+            selected package's own features, as with `cargo build -p
+            <pkg> --features <f>`; `breakbulk.variants.packageFeaturePowerset`
+            makes such variants.
+          '';
+        };
+        checks = mkOption {
+          type = types.bool;
+          default = true;
+          description = ''
+            Put this variant's enabled test runs and doctests in
+            `repo.checks`: the default variant's as
+            `<ws>/<triple>/<pkg>/test-<name>` and `…/<pkg>/doctest`, any
+            other build or coverage variant's as
+            `<ws>/<triple>/variant-<v>/<pkg>/test-<name>` and
+            `…/variant-<v>/<pkg>/doctest`. Check and clippy variants have
+            no test runs; their `check` is in `repo.checks` regardless.
+          '';
+        };
         benches = mkOption {
           type = types.bool;
           default = false;
@@ -159,7 +199,23 @@ let
                 default = null;
                 description = ''
                   The packages to plan for this target, each traced with
-                  `-p`. `null` traces `--workspace`.
+                  `-p`, in the build and the test plan. `null` traces
+                  `--workspace`.
+                '';
+              };
+              options.tests = mkOption {
+                type = types.either types.bool (types.listOf types.str);
+                default = true;
+                example = [ "my-lib" ];
+                description = ''
+                  Test binaries, test runs, test apps and doctests on this
+                  target. `false`: none (a target that is only built, such
+                  as a wasm component whose tests run natively); the test
+                  plan is then not traced, except for a check or clippy
+                  variant with `allTargets`. A list of packages: the test
+                  plan is `cargo test --no-run -p <pkg> …` for those
+                  packages only, and only their tests are run. `true`: the
+                  variant's or target's package selection.
                 '';
               };
             }

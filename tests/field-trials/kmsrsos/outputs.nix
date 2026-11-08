@@ -1,6 +1,6 @@
 # What kmsrsos's flake builds: the workspace, the static server and client,
-# the Windows binaries; plus the policy-features test runs (a non-default
-# variant, so not in repo.checks).
+# the Windows binaries; plus the policy-features test runs (the `policy`
+# variant's, in repo.checks under `variant-policy/`).
 {
   pkgs,
   lib,
@@ -11,7 +11,7 @@ let
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   musl = ws.target.x86_64-unknown-linux-musl.packages;
   win = t: ws.target.${t}.packages;
-  policy = ws.target.${native}.variants.policy;
+  flat = attrs: lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) attrs;
 in
 {
   build = pkgs.linkFarm "kmsrsos-build" (
@@ -28,19 +28,12 @@ in
   # The flake's checks: build, clippy and the tests natively (nextest, so no
   # doctests), and the policy features.
   ci = pkgs.linkFarm "kmsrsos-ci" (
-    lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) (
-      lib.filterAttrs (
-        n: _:
-        lib.hasPrefix "main/${native}/" n
-        && !(lib.hasSuffix "/doctest" n)
-        && !(lib.hasInfix "variant-policy" n)
-      ) repo.checks
-    )
+    flat (lib.filterAttrs (n: _: lib.hasPrefix "main/${native}/" n && !(lib.hasSuffix "/doctest" n)) repo.checks)
   );
   # Beyond the flake: the same tests on the static and Windows targets
   # (x86_64 under wine; aarch64 has no runner here).
   cross-tests = pkgs.linkFarm "kmsrsos-cross-tests" (
-    lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) (
+    flat (
       lib.filterAttrs (
         n: _:
         (
@@ -51,8 +44,10 @@ in
     )
   );
   policy-features = pkgs.linkFarm "kmsrsos-policy-features" (
-    lib.concatMapAttrs (pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${pkg}-${n}" d) rs.enabled) (
-      lib.filterAttrs (p: _: p == "kmsrs-policy" || p == "kmsrs-server") policy.namedTestRuns
+    flat (
+      lib.filterAttrs (
+        n: _: lib.hasPrefix "main/${native}/variant-policy/" n && lib.hasInfix "/test-" n
+      ) repo.checks
     )
   );
 }

@@ -30,6 +30,7 @@
 #
 # Arguments added for mkRepository (lib/repository.nix), all optional:
 #   select = [ "<pkg>" ];      plan with -p for each instead of --workspace
+#   testSelect = [ "<pkg>" ];  the test plan's -p list (default: select)
 #   noDefaultFeatures, allFeatures   passed to the planner
 #   variant = "<name>";        the variant's name in root stubs' messages
 #   packageOverrides."<name>@<version>" = { host = { env; envCapture; };
@@ -84,6 +85,8 @@ pkgs:
   tools ? mkTools pkgs,
   name ? "breakbulk",
   select ? [ ],
+  # The test plan's selection, when it differs (`targets.<t>.tests`).
+  testSelect ? select,
   noDefaultFeatures ? false,
   allFeatures ? false,
   variant ? profile,
@@ -209,7 +212,7 @@ let
         allFeatures
         spec
         ;
-      packages = select;
+      packages = if kind == "test" then testSelect else select;
       inherit (toolchain) cargo rustc;
       skeleton = skel;
       name = "${name}-plan";
@@ -272,7 +275,7 @@ let
   # derivation writes their doctests, with the test configuration IFD mode
   # gives them (testRuns.doctestConfig), so it must know them up front.
   predictedDoctests = lib.filterAttrs (
-    n: p: p.roots.doc != [ ] && (select == [ ] || lib.elem n select)
+    n: p: p.roots.doc != [ ] && (testSelect == [ ] || lib.elem n testSelect)
   ) wsRoots;
   instantiateWith =
     kind: args:

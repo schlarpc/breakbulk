@@ -57,21 +57,30 @@ in
       cargo = rust;
       clippy = rust;
     };
+    # Tests run natively only, as in the flake.
     targets = {
       ${native} = { };
       # `cargo check-wasm`: --workspace --exclude mtgac --exclude xtask.
-      ${wasm}.packages = lib.filter (n: n != "mtgac") (map memberName members);
-      ${windows}.packages = [ "mtgac" ];
+      ${wasm} = {
+        packages = lib.filter (n: n != "mtgac") (map memberName members);
+        tests = false;
+      };
+      ${windows} = {
+        packages = [ "mtgac" ];
+        tests = false;
+      };
     };
     variants = {
       default = { };
-      # The wasm gate is plain `cargo check` (decision 108).
+      # The wasm gate is plain `cargo check` (decision 108), for wasm only.
       check = {
         mode = "check";
         allTargets = false;
+        targets = [ wasm ];
       };
       clippy = {
         mode = "clippy";
+        targets = [ native ];
         profile = "dev";
         clippyArgs = [
           "--deny"

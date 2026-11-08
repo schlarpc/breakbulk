@@ -75,17 +75,27 @@ in
     });
     variants = {
       default = { };
+      # Both gates run natively only, as in the flake. The policy
+      # variant's test runs are in repo.checks under `variant-policy/`.
       clippy = {
         mode = "clippy";
+        targets = [ native ];
         clippyArgs = [
           "--deny"
           "warnings"
         ];
       };
-      policy.features = [
-        "kmsrs-policy/permissive-retail"
-        "kmsrs-policy/strict-clock-skew"
-      ];
+      policy = {
+        targets = [ native ];
+        packages = [
+          "kmsrs-policy"
+          "kmsrs-server"
+        ];
+        features = [
+          "kmsrs-policy/permissive-retail"
+          "kmsrs-policy/strict-clock-skew"
+        ];
+      };
     };
   };
 

@@ -28,9 +28,9 @@ in
   emu-ds = repo.workspaces.emu-ds.target.${wasm}.packages.datboi-emu-ds;
   # What the flake's checks run, from repo.checks: the host workspace's
   # products, tests and clippy, and the components' native unit tests
-  # (nextest there, so no doctests; doctests are in `doctests`). Left out:
-  # the components' wasm32 test runs and doctests, which repo.checks has
-  # because every target of a workspace gets test plans.
+  # (nextest there, so no doctests; doctests are in `doctests`). The
+  # components' wasm32 target has `tests = false`, so repo.checks has no
+  # wasm32 test runs; their native products are left out here.
   ci =
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;

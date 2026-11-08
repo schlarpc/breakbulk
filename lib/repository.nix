@@ -38,9 +38,12 @@
 # was built, the product is the first stub, which fails with the reason.
 # Every root is also under `.roots."<kind>/<target>"`.
 #
-# repo.checks (default variant): `<ws>/<triple>/<pkg>/build` (the
+# repo.checks: `<ws>/<triple>/<pkg>/build` (the default variant's
 # product), `…/<pkg>/<check>` (its checks), `…/<pkg>/test-<name>` (enabled
-# test runs) and `…/<pkg>/doctest`.
+# test runs) and `…/<pkg>/doctest`; other variants' test runs and doctests
+# as `<ws>/<triple>/variant-<v>/<pkg>/test-<name>` and `…/doctest`
+# (`variants.<v>.checks`), check and clippy variants as
+# `<ws>/<triple>/variant-<v>/check`.
 #
 # Test names (`tests.<pkg>.<name>`): an integration test by its name, the
 # library's unit tests as `lib`, a bin's unit tests as `bin-<name>`, an
@@ -505,6 +508,34 @@ let
 
   targetCfg = triple: cfg.targets.${triple} or { };
 
+  # The packages a variant plans on a target (null: the whole workspace):
+  # the variant's own selection, else the target's.
+  selOf = ws: triple: v: if v.packages != null then v.packages else ws.targets.${triple}.packages;
+  # The test plan's selection: false (no test outputs on this target), a
+  # list (`targets.<t>.tests`), or the variant's selection.
+  testSelOf =
+    ws: triple: v:
+    let
+      t = ws.targets.${triple}.tests;
+    in
+    if t == false then false else if builtins.isList t then t else selOf ws triple v;
+
+  # The variants planned for a target (`variants.<v>.targets`).
+  variantsFor =
+    wsName: ws: triple:
+    lib.filterAttrs (
+      vName: v:
+      let
+        unknown = lib.filter (t: !(ws.targets ? ${t})) v.targets;
+      in
+      if v.targets == null then
+        true
+      else if unknown != [ ] then
+        throw "breakbulk: workspaces.${wsName}.variants.${vName}.targets: ${lib.concatStringsSep ", " unknown} not among the workspace's targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})"
+      else
+        lib.elem triple v.targets
+    ) ws.variants;
+
   shippedRemapScopeOf =
     triple: v:
     products.shippedRemapScope {
@@ -519,7 +550,8 @@ let
     let
       v = checkMode wsName vName ws.variants.${vName};
       entries = locks.${wsName};
-      sel = ws.targets.${triple}.packages;
+      sel = selOf ws triple v;
+      tsel = testSelOf ws triple v;
       s = specFor wsName triple;
       # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
       # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
@@ -542,6 +574,7 @@ let
         ;
       variant = vName;
       select = if sel == null then [ ] else sel;
+      testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
       extraSources = extraSourcesOf entries;
       packageOverrides = instOverrides entries triple;
       inherit (cfg) strictSources;
@@ -715,24 +748,31 @@ let
   workspaceOut =
     wsName: ws:
     let
-      instances = lib.mapAttrs (triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) ws.variants) ws.targets;
+      instances = lib.mapAttrs (
+        triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor wsName ws triple)
+      ) ws.targets;
       perTarget = lib.mapAttrs (
         triple: vs:
         let
-          sel = ws.targets.${triple}.packages;
           variants = lib.mapAttrs (
             vName: inst:
             let
               v = ws.variants.${vName};
+              sel = selOf ws triple v;
+              # Test outputs: none when the target has `tests = false`.
+              tsel = testSelOf ws triple v;
+              testsOn = tsel != false;
+              tSel = if testsOn then tsel else null;
+              ifTests = attrs: if testsOn then attrs else { };
             in
             {
               packages = productsOf wsName ws triple inst sel;
-              tests = testsOf inst sel;
-              testRuns = selectPkgs sel inst.testRuns;
+              tests = ifTests (testsOf inst tSel);
+              testRuns = ifTests (selectPkgs tSel inst.testRuns);
               # testRuns named as `tests` names test binaries, for repo.checks.
-              namedTestRuns = namedRuns inst sel;
-              testApps = selectPkgs sel inst.testApps;
-              doctests = selectPkgs sel inst.doctests;
+              namedTestRuns = ifTests (namedRuns inst tSel);
+              testApps = ifTests (selectPkgs tSel inst.testApps);
+              doctests = ifTests (selectPkgs tSel inst.doctests);
               benches = benchesOf inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
@@ -756,12 +796,23 @@ let
               };
             }
           ) vs;
+          # The default variant's outputs; empty when it is not planned for
+          # this target (`variants.<v>.targets`).
           dflt =
-            variants.${ws.defaultVariant}
-              or (throw "breakbulk: workspaces.${wsName}.defaultVariant `${ws.defaultVariant}` is not one of its variants (${lib.concatStringsSep ", " (lib.attrNames ws.variants)})");
-          benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) ws.variants);
+            if !(ws.variants ? ${ws.defaultVariant}) then
+              throw "breakbulk: workspaces.${wsName}.defaultVariant `${ws.defaultVariant}` is not one of its variants (${lib.concatStringsSep ", " (lib.attrNames ws.variants)})"
+            else
+              variants.${ws.defaultVariant} or {
+                packages = { };
+                tests = { };
+                testRuns = { };
+                namedTestRuns = { };
+                testApps = { };
+                doctests = { };
+              };
+          benchVariants = lib.attrNames (lib.filterAttrs (n: v: v.benches && vs ? ${n}) ws.variants);
           benchVariant =
-            if ws.variants.${ws.defaultVariant}.benches or false then
+            if (ws.variants.${ws.defaultVariant}.benches or false) && vs ? ${ws.defaultVariant} then
               ws.defaultVariant
             else if lib.length benchVariants == 1 then
               lib.head benchVariants
@@ -839,9 +890,11 @@ let
 
   workspaces = lib.mapAttrs workspaceOut cfg.workspaces;
 
-  # repo.checks, for the default variant of every workspace and target:
-  # every product that built something (`build`) and its checks; every
-  # enabled test run (`test-<name>`, named as in `tests`) and doctest.
+  # repo.checks, for every workspace and target: the default variant's
+  # products that built something (`build`) and their checks; every
+  # enabled test run (`test-<name>`, named as in `tests`) and doctest of
+  # each variant with `checks = true` (other variants' under
+  # `variant-<v>/`); check and clippy variants' `check`.
   checks = lib.concatMapAttrs (
     wsName: w:
     lib.concatMapAttrs (
@@ -862,10 +915,26 @@ let
             // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
           )
       ) t.packages
+      # Test runs and doctests of every variant with `checks = true`: the
+      # default variant's under the package, the others' under
+      # `variant-<v>/`.
       // lib.concatMapAttrs (
-        pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/test-${n}" d) rs.enabled
-      ) t.namedTestRuns
-      // lib.mapAttrs' (pkg: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/doctest" d) t.doctests
+        vName: v:
+        let
+          vc = cfg.workspaces.${wsName}.variants.${vName};
+          prefix =
+            if vName == cfg.workspaces.${wsName}.defaultVariant then
+              "${wsName}/${triple}"
+            else
+              "${wsName}/${triple}/variant-${vName}";
+        in
+        lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
+          lib.concatMapAttrs (
+            pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
+          ) v.namedTestRuns
+          // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.doctests
+        )
+      ) t.variants
       // lib.optionalAttrs cfg.workspaces.${wsName}.benchSmoke (
         lib.concatMapAttrs (
           pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled

@@ -342,7 +342,12 @@ ASK marks a choice for the author.
    `MAGIC_DIR`). Proposal: a package's input library directories go to the
    link units that depend on it (a link-time capture), or the failure hint
    names `MAGIC_DIR`-style env. Which is right needs a design decision.
-4. **Variants and test plans apply to every target of a workspace.** The
+4. **Variants and test plans apply to every target of a workspace.** Done:
+   `variants.<v>.targets` lists the triples a variant is planned for,
+   `variants.<v>.packages` narrows a variant to a `-p` list, and
+   `workspaces.<ws>.targets.<t>.tests` turns a target's test outputs off
+   (`false`) or traces its test plan for some packages only (a list). The
+   trials use them; check: `products-variants-narrowing`. Before: the
    components' wasm32 target gets test plans, doctests and test runs under
    wasmtime in `repo.checks` (the flake runs their tests natively only);
    mtgac's `clippy` and `check` variants are planned for its wasm32 and msvc
@@ -356,7 +361,11 @@ ASK marks a choice for the author.
    for reasons the project does not gate on (see mtgac). Proposal: a
    variant option `allTargets = true` (the default, decision 75) that a
    gate like this sets to false.
-5. **Only the default variant's tests are in `repo.checks`.** kmsrsos's
+5. **Only the default variant's tests are in `repo.checks`.** Done: every
+   build or coverage variant's enabled test runs and doctests are in
+   `repo.checks` as `<ws>/<triple>/variant-<v>/<pkg>/test-<name>` (and
+   `…/doctest`); `variants.<v>.checks = false` leaves a variant out.
+   kmsrsos's policy check now reads them from `repo.checks`. Before: kmsrsos's
    `policy-features` check (tests under two features) needs
    `target.<t>.variants.policy.namedTestRuns` wired by hand. Proposal: a
    per-variant `checks = true`.

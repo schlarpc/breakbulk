@@ -1951,7 +1951,8 @@ attribute set of (submodule)
 
 
 The packages to plan for this target, each traced with
-` -p `\. ` null ` traces ` --workspace `\.
+` -p `, in the build and the test plan\. ` null ` traces
+` --workspace `\.
 
 
 
@@ -1964,6 +1965,47 @@ null or (list of string)
 
 ```nix
 null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.targets\.\<name>\.tests
+
+
+
+Test binaries, test runs, test apps and doctests on this
+target\. ` false `: none (a target that is only built, such
+as a wasm component whose tests run natively); the test
+plan is then not traced, except for a check or clippy
+variant with ` allTargets `\. A list of packages: the test
+plan is ` cargo test --no-run -p <pkg> … ` for those
+packages only, and only their tests are run\. ` true `: the
+variant’s or target’s package selection\.
+
+
+
+*Type:*
+boolean or list of string
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+
+
+*Example:*
+
+```nix
+[
+  "my-lib"
+]
 ```
 
 *Declared by:*
@@ -2224,6 +2266,44 @@ attribute set of (submodule)
 
 
 
+## workspaces\.\<name>\.variants\.\<name>\.packages
+
+
+
+The packages this variant plans, each traced with ` -p `, in
+place of the target’s ` packages ` (` workspaces.<ws>.targets.<triple>.packages `)\.
+` null `: the target’s selection\. Features then name the
+selected package’s own features, as with ` cargo build -p <pkg> --features <f> `; ` breakbulk.variants.packageFeaturePowerset `
+makes such variants\.
+
+
+
+*Type:*
+null or (list of string)
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+[
+  "my-lib"
+]
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.variants\.\<name>\.allFeatures
 
 
@@ -2299,6 +2379,36 @@ boolean
 
 ```nix
 false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.variants\.\<name>\.checks
+
+
+
+Put this variant’s enabled test runs and doctests in
+` repo.checks `: the default variant’s as
+` <ws>/<triple>/<pkg>/test-<name> ` and ` …/<pkg>/doctest `, any
+other build or coverage variant’s as
+` <ws>/<triple>/variant-<v>/<pkg>/test-<name> ` and
+` …/variant-<v>/<pkg>/doctest `\. Check and clippy variants have
+no test runs; their ` check ` is in ` repo.checks ` regardless\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
 ```
 
 *Declared by:*
@@ -2443,6 +2553,46 @@ string
 
 ```nix
 "release"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.variants\.\<name>\.targets
+
+
+
+The workspace’s targets (` workspaces.<ws>.targets `) this
+variant is planned for\. ` null `: every target\. A target left
+out has no ` target.<triple>.variants.<v> `, and nothing of the
+variant in ` repo.checks `; when the default variant is left
+out, the target’s ` packages `, ` tests ` and test runs are empty\.
+Use it for gates that apply to one target only (clippy
+natively, a ` cargo check ` gate for wasm)\.
+
+
+
+*Type:*
+null or (list of string)
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+[
+  "x86_64-unknown-linux-gnu"
+]
 ```
 
 *Declared by:*

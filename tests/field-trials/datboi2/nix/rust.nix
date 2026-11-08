@@ -182,10 +182,10 @@ in
   // lib.genAttrs components (c: {
     path = "crates/${c}";
     inherit toolchain;
-    # The component for wasm; its unit tests natively (flake.nix
+    # The component for wasm; its unit tests natively only (flake.nix
     # `<crate>-test`).
     targets = {
-      ${wasm} = { };
+      ${wasm}.tests = false;
       ${native} = { };
     };
   });
