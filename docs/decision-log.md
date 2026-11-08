@@ -1600,3 +1600,42 @@ module definitions: lists concatenate, attribute sets merge, and a single
 value (like `preset` or `linker`) set in both places is an error unless one
 side uses `lib.mkForce`. Alternative: the workspace's value wins
 automatically for single values. Default: the module-system rule.
+
+## 132. FYI: field-trial gaps closed (resolves 109, 19, 123; and `root = self`)
+
+- `root = self` works alongside `./.` (same build steps; with lazy trees,
+  your tree isn't copied to the store an extra time).
+- Modules receive `root`, `repo` and `breakbulk` as arguments.
+- Variants and test plans can be narrowed: `variants.<v>.targets`,
+  `variants.<v>.packages`, and `workspaces.<ws>.targets.<t>.tests`
+  (`false`, or a package list).
+- Every variant's tests reach `repo.checks`, named by variant.
+- `breakbulk.variants.packageFeaturePowerset` gives exactly the runs
+  cargo-hack prints (checked on kmsrsos: 13 runs).
+- The "no source references" check also fails on Rust toolchain paths.
+- `targets.<t>.stdenv` / `host.stdenv` override the C build environment.
+- On Cargo 1.101+, `cargo` in the dev shell gets the same crate IDs as the
+  plan.
+
+## 133. ASK: other variants' tests run in `nix flake check` by default
+
+Every build or coverage variant's tests now go into `repo.checks`; set
+`variants.<v>.checks = false` to leave one out. So a coverage variant's
+tests run in `nix flake check` unless turned off. Alternative: off by
+default, opt in per variant.
+
+## 134. ASK: toolchain references in products are now an error
+
+The default check fails when a product depends on rustc, its sysroot or
+cargo at run time. A binary built with `-C prefer-dynamic` legitimately
+needs libstd; the error message says how to keep only the source part of
+the check (`noSourceReferences { toolchain = [ ]; }`). OK as a default?
+
+## 135. ASK: on Cargo 1.101+, the dev shell needs a working manifest again
+
+To know whether the planner turned trim-paths on itself, the dev shell
+reads the build plan's header, which needs a working `Cargo.toml`. This
+undoes decision 81 for Cargo 1.101+ only; 1.99 and earlier are unchanged.
+Alternative: always set the trim-paths variable on 1.101+, which overrides
+a project's own setting. Neither is perfect; a third option is to fall
+back to "always set it" when planning fails.
