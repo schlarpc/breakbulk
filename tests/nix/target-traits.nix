@@ -89,7 +89,14 @@ let
     then
       true
     else
-      "${row.triple}: parsed ${builtins.toJSON (removeAttrs p [ "arch" "triple" ])}, rustc says ${builtins.toJSON row}";
+      "${row.triple}: parsed ${
+        builtins.toJSON (
+          removeAttrs p [
+            "arch"
+            "triple"
+          ]
+        )
+      }, rustc says ${builtins.toJSON row}";
   results = map check rows;
   mismatches = lib.filter builtins.isString results;
   known = lib.count (x: x == true) results;
@@ -179,10 +186,24 @@ in
       ];
     };
     testWasm = {
-      expr = map (t: pick [ "os" "env" "isWasm" "isWasi" "exeSuffix" "dylibPathVar" "objectFormat" ] (r t)) [
-        "wasm32-unknown-unknown"
-        "wasm32-wasip2"
-      ];
+      expr =
+        map
+          (
+            t:
+            pick [
+              "os"
+              "env"
+              "isWasm"
+              "isWasi"
+              "exeSuffix"
+              "dylibPathVar"
+              "objectFormat"
+            ] (r t)
+          )
+          [
+            "wasm32-unknown-unknown"
+            "wasm32-wasip2"
+          ];
       expected = [
         {
           os = "unknown";
@@ -351,15 +372,12 @@ in
     # One table of cross package sets (presets.targetPkgsFor), for the
     # Linux and the MinGW presets alike.
     testPackageSets = {
-      expr =
-        map
-          (t: (bb.presets.targetPkgsFor pkgs t).stdenv.hostPlatform.config)
-          [
-            "x86_64-unknown-linux-gnu"
-            "aarch64-unknown-linux-musl"
-            "x86_64-pc-windows-gnu"
-            "x86_64-pc-windows-gnullvm"
-          ];
+      expr = map (t: (bb.presets.targetPkgsFor pkgs t).stdenv.hostPlatform.config) [
+        "x86_64-unknown-linux-gnu"
+        "aarch64-unknown-linux-musl"
+        "x86_64-pc-windows-gnu"
+        "x86_64-pc-windows-gnullvm"
+      ];
       expected = [
         pkgs.stdenv.hostPlatform.config
         pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.hostPlatform.config
@@ -373,7 +391,12 @@ in
       expr =
         let
           rust = pkgs.rust-bin.stable."1.97.0".minimal;
-          f = r: removeAttrs (bb.toolchainFacts.of { inherit pkgs; rustc = r; }) [ ];
+          f =
+            r:
+            removeAttrs (bb.toolchainFacts.of {
+              inherit pkgs;
+              rustc = r;
+            }) [ ];
         in
         [
           (f rust)
@@ -429,16 +452,29 @@ in
     # A user's base fields recompute the derived ones; a derived field set
     # directly wins.
     testUserTraits = {
-      expr = pick [ "triple" "os" "env" "vendor" "isLinux" "objectFormat" "exeSuffix" "dylibPathVar" "stagePreset" ] (
-        tt.resolve {
-          triple = "my-board";
-          traits = {
-            os = "linux";
-            env = "musl";
-            exeSuffix = ".elf";
-          };
-        }
-      );
+      expr =
+        pick
+          [
+            "triple"
+            "os"
+            "env"
+            "vendor"
+            "isLinux"
+            "objectFormat"
+            "exeSuffix"
+            "dylibPathVar"
+            "stagePreset"
+          ]
+          (
+            tt.resolve {
+              triple = "my-board";
+              traits = {
+                os = "linux";
+                env = "musl";
+                exeSuffix = ".elf";
+              };
+            }
+          );
       expected = {
         triple = "my-board";
         os = "linux";
@@ -484,8 +520,9 @@ in
   };
 
   target-traits-rustc =
-    assert lib.assertMsg (mismatches == [ ])
-      "target-traits-rustc: parse disagrees with rustc:\n${lib.concatStringsSep "\n" mismatches}";
+    assert lib.assertMsg (
+      mismatches == [ ]
+    ) "target-traits-rustc: parse disagrees with rustc:\n${lib.concatStringsSep "\n" mismatches}";
     # Every target breakbulk has a preset or a test for is known.
     assert lib.assertMsg (known >= 200) "target-traits-rustc: only ${toString known} targets known";
     pkgs.runCommand "target-traits-rustc" { } ''

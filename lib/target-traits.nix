@@ -240,7 +240,15 @@ let
       wasiEnv = lib.removePrefix "wasi" osWord;
       ea =
         if os == "wasi" then
-          (if rest == "" || rest == "threads" then { env = wasiEnv; abi = ""; } else null)
+          (
+            if rest == "" || rest == "threads" then
+              {
+                env = wasiEnv;
+                abi = "";
+              }
+            else
+              null
+          )
         else if os == "redox" && rest == "" then
           {
             env = "relibc";
@@ -253,11 +261,25 @@ let
       # simulators all the same.
       sim =
         vendor == "apple"
-        && elem os [ "ios" "tvos" "watchos" ]
-        && elem arch [ "x86_64" "i386" ]
+        && elem os [
+          "ios"
+          "tvos"
+          "watchos"
+        ]
+        && elem arch [
+          "x86_64"
+          "i386"
+        ]
         && ea != null
         && ea.env == "";
-      e = if sim then { env = "sim"; abi = "sim"; } else ea;
+      e =
+        if sim then
+          {
+            env = "sim";
+            abi = "sim";
+          }
+        else
+          ea;
     in
     if n < 2 || os == null || e == null || (osAt == 2 && n < 3) then
       null
@@ -393,18 +415,20 @@ let
       unknownMsg = "breakbulk: no built-in traits for the target `${triple}`; declare them with `targets.\"${triple}\".traits = { os = …; env = …; … }` (see \"Target traits\" in docs/implementation.md)";
       unknown = lib.genAttrs fieldNames (f: throw "${unknownMsg} (needed: `${f}`)");
       base =
-        (if parsed != null then
-          parsed
-        else
-          {
-            inherit triple;
-            arch = lib.head (splitString "-" triple);
-            vendor = "unknown";
-            os = "unknown";
-            env = "";
-            abi = "";
-            families = [ ];
-          })
+        (
+          if parsed != null then
+            parsed
+          else
+            {
+              inherit triple;
+              arch = lib.head (splitString "-" triple);
+              vendor = "unknown";
+              os = "unknown";
+              env = "";
+              abi = "";
+              families = [ ];
+            }
+        )
         // lib.getAttrs (lib.intersectLists baseFields (lib.attrNames traits)) traits;
     in
     if parsed == null && traits == { } then unknown else derive base // traits;
