@@ -11,6 +11,17 @@
 # units only and host units (build scripts, proc macros) keep the host
 # linker through the planner's linker rewrite.
 #
+# Portable means (decision 122): everything Nix provides is linked
+# statically, and only glibc's own libraries (and the `systemLibraries`
+# the user names, such as libGL.so.1, which the target system has) are
+# loaded at run time. `rebuildInputs` are rebuilt as static libraries
+# only, pkg-config runs in static mode for target units
+# (PKG_CONFIG_ALL_STATIC), and every product gets the check
+# `portableLibraries` (stageHelpers.neededLibraries), which reads each ELF
+# file's NEEDED entries, as auditwheel does for Python wheels, and fails on
+# any other library. There is no bundling or rpath option: a product needs
+# nothing next to it.
+#
 # zig builds glibc's stubs, crt objects, libunwind and compiler-rt into its
 # global cache on first use (about 10 s). In a sandbox that cache starts
 # empty in every unit, so `cache` is a derivation that warms it once, and
@@ -22,6 +33,7 @@
 {
   lib,
   targetTraits,
+  stageHelpers,
   hostSpec,
   chooseLinker,
   chooseRunner,
@@ -34,6 +46,10 @@
   glibc ? "2.17",
   # How the old-glibc link is done; "zig" is the only one.
   backend ? "zig",
+  # Sonames a product may load besides glibc's own libraries, because
+  # every target system has them (e.g. [ "libGL.so.1" ]). Anything else
+  # must be linked statically (`portableLibraries` check).
+  systemLibraries ? [ ],
   zig ? pkgs.buildPackages.zig,
   # Extra `zig cc` invocations' flags to warm the cache with, e.g.
   # [ "-lc++" ] for C++ code.
@@ -42,13 +58,16 @@
   # (decision 102), e.g. [ "openssl" "zlib" ]: `packages.<name>.inputs`
   # functions get these from the target's package set instead of nixpkgs'
   # builds, which need nixpkgs' newer glibc. Each is
-  # `pkgs.<name>.override { stdenv = zigStdenv; … }`, with the other
-  # rebuilt packages passed for the arguments it takes, and its test
-  # phases off (test programs ask for the FHS loader, which the sandbox
-  # lacks). Opt-in: the rebuilds are not in any binary cache (openssl takes
-  # about 5 minutes on 4 cores), and only C libraries whose own library
-  # dependencies are listed too, or have none, are correct. Every other
-  # library input still comes from nixpkgs and gets an evaluation warning.
+  # `pkgs.<name>.override { stdenv = makeStaticLibraries zigStdenv; … }`
+  # (static libraries only, as pkgsStatic builds them; `static = true` and
+  # `shared = false` where the package takes them), with the other rebuilt
+  # packages passed for the arguments it takes, and its test phases off
+  # (test programs ask for the FHS loader, which the sandbox lacks); a
+  # rebuild that still installs a shared library fails. Opt-in: the
+  # rebuilds are not in any binary cache (openssl takes about 5 minutes on
+  # 4 cores), and only C libraries whose own library dependencies are
+  # listed too, or have none, are correct. Every other library input still
+  # comes from nixpkgs and gets an evaluation warning.
   rebuildInputs ? [ ],
   ...
 }:
@@ -160,6 +179,14 @@ let
       }
     );
 
+  # The arguments nixpkgs packages take for a static-only build.
+  staticArgs = {
+    static = true;
+    shared = false;
+    enableStatic = true;
+    enableShared = false;
+  };
+
   rebuilt = lib.fix (
     self:
     lib.genAttrs rebuildInputs (
@@ -168,10 +195,28 @@ let
         p = pkgs.${n} or (throw "breakbulk.presets.linuxPortable: rebuildInputs: nixpkgs has no package `${n}`");
         deps = lib.intersectAttrs (lib.functionArgs p.override) (removeAttrs self [ n ]);
       in
-      (p.override ({ stdenv = zigStdenv; } // deps)).overrideAttrs {
-        doCheck = false;
-        doInstallCheck = false;
-      }
+      (p.override (
+        {
+          stdenv = pkgs.stdenvAdapters.makeStaticLibraries zigStdenv;
+        }
+        // lib.intersectAttrs (lib.functionArgs p.override) staticArgs
+        // deps
+      )).overrideAttrs
+        (old: {
+          doCheck = false;
+          doInstallCheck = false;
+          # Static libraries only: a shared one would be linked in place of
+          # the archive and loaded from the store at run time.
+          postFixup = (old.postFixup or "") + ''
+            for o in $outputs; do
+              found=$(find "''${!o}" \( -name '*.so' -o -name '*.so.*' \) -print -quit)
+              if [ -n "$found" ]; then
+                echo "breakbulk.presets.linuxPortable: rebuildInputs builds static libraries only, but ${n} installed $found" >&2
+                exit 1
+              fi
+            done
+          '';
+        })
     )
   );
 
@@ -217,7 +262,17 @@ in
   cc = mkDefault zigCc;
   cxx = mkDefault zigCxx;
   ar = mkDefault zigAr;
-  env = { };
+  # pkg-config-rs links every pkg-config library statically (when its
+  # archive exists), as for linuxStatic; target units only.
+  env.PKG_CONFIG_ALL_STATIC = mkDefault "1";
+  # The auditwheel-like check: NEEDED names only glibc's libraries and
+  # `systemLibraries`.
+  checks.portableLibraries = {
+    run = stageHelpers.neededLibraries {
+      allowed = stageHelpers.glibcLibraries ++ systemLibraries;
+      why = "linuxPortable links everything Nix provides statically (rebuildInputs builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
+    };
+  };
   # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a
   # program for other distributions should; the Nix sandbox has none, so
   # tests run through the build machine's glibc loader, which also finds

@@ -247,7 +247,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | wasm32-wasip2 | M7 | rustup-dist with target, + the matching wasi-sdk sysroot's headers for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
-| Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
+| Host triple, old glibc (`linuxPortable`, zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
 | x86\_64-unknown-none (build-std) | M7 | nightly with `rust-src`, user-supplied | rustc's own (rust-lld) | none |
 | aarch64-apple-darwin | Later; no Mac builders | user's, built on Mac builders | ld64 or lld | native |
 
@@ -283,9 +283,9 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 
 Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust's self-contained crt, `libc.a` and libunwind (nixpkgs' musl has no `libunwind.a`), while C code compiles against nixpkgs' musl headers. Static glibc builds are static-pie by default. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode on musl and static glibc alike, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
 
-### Zig
+### Portable Linux
 
-A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
+`linuxPortable` builds Linux programs that run on other distributions, in the manner of Python's manylinux wheels: linked against an old glibc (2.17 by default), with everything Nix provides linked statically, so the program loads nothing at run time but glibc's own libraries and the system libraries the user names (`systemLibraries`, such as `libGL.so.1`). Native library inputs are rebuilt as static libraries only (`rebuildInputs`), pkg-config runs in static mode, and a default check reads each binary's `NEEDED` entries, as auditwheel does, and fails on any other library. There is no bundling or rpath option: the product needs nothing next to it. Its one backend is zig (`zig cc`). It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
 
 ## Content addressing and early cutoff
 

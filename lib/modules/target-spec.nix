@@ -62,6 +62,7 @@ let
     ]
     [ "stagePreset" ]
     [ "debugInfo" ]
+    [ "checks" ]
   ];
 
   # This target's traits: the built-in ones of the triple with `traits`

@@ -174,6 +174,12 @@ dev shell warns when it sees them.
 | x86\_64 Windows gnu and gnullvm (mingw-w64) | `windows` | lld | wine |
 | riscv64gc Linux gnu | `linux` | mold | qemu-user |
 
+`linuxPortable` makes programs for any glibc Linux at least as old as the
+glibc you name: everything Nix provides is linked statically (library
+inputs listed in `rebuildInputs` are rebuilt as static libraries), and a
+default check fails when a product loads any library but glibc's own and
+the `systemLibraries` you allow.
+
 The Windows preset on msvc needs the Microsoft CRT and Windows SDK, which are
 unfree. breakbulk downloads them with `breakbulk.xwinSdk`. build-std
 (`-Zbuild-std`) works with a nightly that has `rust-src`. Darwin is not

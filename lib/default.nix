@@ -98,6 +98,7 @@ let
       wasmBindgen
       wasiSdk
       ;
+    stageHelpers = stages.helpers;
   };
 
   mkFetch =

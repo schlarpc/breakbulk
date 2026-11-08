@@ -41,6 +41,7 @@
   runners,
   wasmBindgen,
   wasiSdk,
+  stageHelpers,
 }:
 let
   inherit (lib) mkDefault;
@@ -476,6 +477,7 @@ let
         inherit
           lib
           targetTraits
+          stageHelpers
           chooseLinker
           chooseRunner
           hostSpec

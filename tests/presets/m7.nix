@@ -21,14 +21,18 @@
 #   linux-portable-*  linuxPortable (zig backend): the host triple against
 #                     glibc 2.17 with zig cc; newest GLIBC symbol version
 #                     2.17 (objdump -T); host units keep the host linker
-#                     (asserted on the plan)
+#                     (asserted on the plan); the preset's
+#                     `portableLibraries` check passes (NEEDED: glibc's
+#                     libraries only), and fails, naming the library, when
+#                     only libc.so.6 is allowed
 #   linux-portable-container-eval   evaluation only: the container runner
 #                     below leaves the test binary's derivation unchanged
 #   linux-portable-native-glibc   HEAVY (builds OpenSSL and zlib with zig
-#                     cc, ~5 min): linuxPortable's rebuildInputs; openssl-sys
-#                     and libz-sys link the rebuilt libraries; the product
-#                     and libssl / libcrypto need GLIBC_2.17 at most
-#                     (objdump -T)
+#                     cc, ~5 min): linuxPortable's rebuildInputs, static
+#                     libraries only; openssl-sys and libz-sys link them
+#                     statically (static pkg-config), so the product needs
+#                     no library but glibc's and GLIBC_2.17 at most
+#                     (objdump -T); `portableLibraries` passes
 #
 # Not flake checks (decision 122): `containerChecks`, built by
 # `nix run .#test-linux-portable-container` (network: the CentOS 7.9 image
@@ -353,6 +357,30 @@ let
             cp versions.txt out.txt $out/
           '';
       linux-portable-test = t.testRuns.app."bin/app";
+      # The preset's check: NEEDED names only glibc's libraries.
+      linux-portable-libraries = t.packages.app.checks.portableLibraries;
+      # Negative control: with only libc.so.6 allowed, the check fails
+      # and names a library the product needs (libpthread.so.0, …).
+      linux-portable-libraries-negative =
+        let
+          strict = breakbulk.stageHelpers.neededLibraries {
+            allowed = [ "libc.so.6" ];
+            why = "only libc";
+          };
+        in
+        pkgs.runCommand "linux-portable-libraries-negative"
+          {
+            failure = pkgs.testers.testBuildFailure (strict {
+              input = t.packages.app;
+              product.name = "app";
+              inherit pkgs;
+            });
+          }
+          ''
+            cat $failure/testBuildFailure.log
+            grep -q 'neededLibraries: app: bin/app needs ld-linux-x86-64.so.2, which is not an allowed run-time library: only libc' $failure/testBuildFailure.log
+            touch $out
+          '';
       # Evaluation only: the container runner reaches test runs, not units.
       linux-portable-container-eval =
         assert lib.assertMsg (
@@ -432,15 +460,12 @@ let
     }
     // zigNativeContainerChecks;
 
-  # Native libraries rebuilt with zig cc against glibc 2.17 (decision 102):
-  # openssl-sys and libz-sys find them through breakbulk's sysDefaults
-  # (pkg-config, `inputs = p: [ p.openssl … ]`), called with the preset's
-  # package set. KNOWN GAP: zlib's configure does not recognise the
-  # wrapped zig cc as gcc and finds "no shared library support", so the
-  # rebuilt zlib is static only and libz-sys links its libz.a (still built
-  # by zig cc). OpenSSL is shared. The product links libssl dynamically; zig adds no rpath, so
-  # runs set LD_LIBRARY_PATH to the rebuilt libraries, as a deployment
-  # would ship them next to the program.
+  # Native libraries rebuilt with zig cc against glibc 2.17 (decisions
+  # 102, 122): openssl-sys and libz-sys find them through breakbulk's
+  # sysDefaults (pkg-config, `inputs = p: [ p.openssl … ]`), called with
+  # the preset's package set. The rebuilds are static libraries only and
+  # pkg-config runs in static mode, so the product links them statically
+  # and needs nothing at run time but glibc's libraries.
   zigNativePreset = presets.linuxPortable {
     glibc = "2.17";
     rebuildInputs = [
@@ -463,10 +488,6 @@ let
         && set ? lib
         && set.stdenv == pkgs.stdenv;
     };
-  zigNativeLdPath = lib.makeLibraryPath [
-    zigNativeLibs.openssl
-    zigNativeLibs.zlib
-  ];
   zigNativeRepo = mkRepo (fixtures + "/linux-portable-native") [
     {
       workspaces.main = wsWith zigRust [ native ];
@@ -474,19 +495,19 @@ let
         preset = zigNativePreset;
         runner = centos7Runner;
       };
-      packages.app.test.env.LD_LIBRARY_PATH = zigNativeLdPath;
     }
   ];
   zigNativeChecks =
     let
       t = zigNativeRepo.workspaces.main.target.${native};
       bin = "${t.packages.app}/bin/app";
-      inherit (zigNativeLibs) openssl;
+      inherit (zigNativeLibs) openssl zlib;
     in
     assert lib.assertMsg zigNativeLibs.check "zig: rebuildInputs package set";
     {
       # HEAVY: builds OpenSSL with zig cc (about 5 minutes on 4 cores).
-      # The product and the libraries it loads need GLIBC_2.17 at most.
+      # OpenSSL and zlib are archives only, linked into the product, which
+      # needs GLIBC_2.17 at most and no library but glibc's.
       linux-portable-native-glibc =
         pkgs.runCommand "linux-portable-native-glibc"
           {
@@ -494,16 +515,19 @@ let
           }
           ''
             mkdir -p $out
-            for f in ${bin} ${lib.getLib openssl}/lib/libssl.so.3 ${lib.getLib openssl}/lib/libcrypto.so.3; do
-              v=$(objdump -T "$f" | { grep -o 'GLIBC_[0-9.]*' || true; } | sort -uV | tail -n1)
-              echo "$f: $v" | tee -a $out/versions.txt
-              newest=$(printf '%s\n' "$v" GLIBC_2.17 | sort -V | tail -n1)
-              [ "$newest" = GLIBC_2.17 ] || { echo "$f needs $v"; exit 1; }
-            done
+            test -f ${lib.getLib openssl}/lib/libcrypto.a
+            test -f ${lib.getLib zlib}/lib/libz.a
+            v=$(objdump -T ${bin} | { grep -o 'GLIBC_[0-9.]*' || true; } | sort -uV | tail -n1)
+            echo "${bin}: $v" | tee $out/versions.txt
+            newest=$(printf '%s\n' "$v" GLIBC_2.17 | sort -V | tail -n1)
+            [ "$newest" = GLIBC_2.17 ] || { echo "${bin} needs $v"; exit 1; }
             readelf -dW ${bin} | grep NEEDED | tee $out/needed.txt
-            grep -q libcrypto.so.3 $out/needed.txt
-            readelf -dW ${lib.getLib openssl}/lib/libssl.so.3 | grep -q 'SONAME.*libssl.so.3'
+            if grep -E 'libssl|libcrypto|libz' $out/needed.txt; then
+              echo "the product loads OpenSSL or zlib at run time" >&2
+              exit 1
+            fi
           '';
+      linux-portable-native-libraries = t.packages.app.checks.portableLibraries;
     };
   zigNativeContainerChecks =
     let
@@ -514,7 +538,7 @@ let
       # The product runs in the CentOS 7 container.
       linux-portable-native-centos7-run = pkgs.runCommand "linux-portable-native-centos7-run" { } ''
         mkdir -p $out
-        LD_LIBRARY_PATH=${zigNativeLdPath} ${centos7Runner} ${bin} | tee $out/out.txt
+        ${centos7Runner} ${bin} | tee $out/out.txt
         grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
       '';
       linux-portable-native-centos7-test = t.testRuns.app."lib/app";
