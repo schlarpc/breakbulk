@@ -1880,3 +1880,23 @@ table or a cheap probe, overridable for forked compilers, with one source
 of truth passed to the Rust side. An inventory of every Cargo/rustc
 assumption breakbulk makes, each with the test that pins it, follows.
 Being implemented.
+
+## 141. ASK: a rust-overlay `prefer-dynamic` binary still fails the toolchain check
+
+With the new artifact-based check (134), a nixpkgs-rustc binary built with
+`-C prefer-dynamic` passes: it needs `libstd-*.so`, and only the folder
+holding it is in its closure. With a rust-overlay toolchain, the binary's
+library search path names the whole joined toolchain, which drags rustc
+and cargo into its closure, so it fails. Default: treat that as a real
+failure (shipping cargo with a binary is wrong). Alternative: allow anything
+reachable from the allowed folder. A third option: breakbulk points such
+binaries at the toolchain's `rust-std` component directly instead of the
+joined toolchain.
+
+## 142. ASK: toolchains without a version cost one small evaluation-time build
+
+Capabilities come from the version table when the toolchain says its
+version. For one that doesn't (likely fenix; not checked), a tiny rustc
+probe runs at evaluation time, in dynamic mode too. Alternative: have the
+Rust side probe at build time when a capability is unknown, which brings
+back a second place where the decision is made. Default: the probe.
