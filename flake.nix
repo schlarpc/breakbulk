@@ -79,6 +79,39 @@
             exec ${pkgs.bash}/bin/bash "$REPO/tests/test-options/run.sh" "$@"
           '');
         };
+      } // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
+        # zig binaries in a real glibc 2.17 userland (decision 122): pulls
+        # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
+        # cc, so it is not a flake check. Arguments go to nix-store.
+        #   nix run .#test-zig-container [-- --max-jobs 2 --cores 4]
+        test-zig-container =
+          let
+            checks = (import ./tests/presets/m7.nix {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }).containerChecks;
+            # The .drv files only: the checks are built when the app runs,
+            # not when it is built.
+            drvs = nixpkgs.lib.mapAttrsToList (n: d: "${n}=${builtins.unsafeDiscardOutputDependency d.drvPath}") checks;
+          in
+          {
+            type = "app";
+            program = toString (pkgs.writeShellScript "test-zig-container" ''
+              set -euo pipefail
+              status=0
+              for nd in ${nixpkgs.lib.escapeShellArgs drvs}; do
+                name=''${nd%%=*}
+                printf '\n== %s\n' "$name" >&2
+                if out=$(nix-store --realise "''${nd#*=}" "$@"); then
+                  echo "ok: $name $out" >&2
+                else
+                  echo "FAIL: $name" >&2
+                  status=1
+                fi
+              done
+              exit $status
+            '');
+          };
       });
 
       # Library tests. `roots-metadata-crates-io` uses import-from-derivation

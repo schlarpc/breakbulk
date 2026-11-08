@@ -21,14 +21,20 @@
 #   zig-*             host triple against glibc 2.17 with zig cc; newest
 #                     GLIBC symbol version 2.17 (objdump -T); host units
 #                     keep the host linker (asserted on the plan)
-#   zig-centos7-*     HEAVY (network: the CentOS 7.9 image, ~75 MB): the
-#                     product and the test binaries run inside a CentOS 7
-#                     userland (glibc 2.17 and its own loader) with bwrap,
-#                     not through the build machine's ld.so
-#   zig-native-*      HEAVY (builds OpenSSL and zlib with zig cc, ~5 min):
+#   zig-container-eval evaluation only: the container runner below leaves
+#                     the test binary's derivation unchanged
+#   zig-native-glibc  HEAVY (builds OpenSSL and zlib with zig cc, ~5 min):
 #                     presets.zig's rebuildInputs; openssl-sys and libz-sys
-#                     link the rebuilt libraries; product and tests in the
-#                     CentOS 7 container
+#                     link the rebuilt libraries; the product and libssl /
+#                     libcrypto need GLIBC_2.17 at most (objdump -T)
+#
+# Not flake checks (decision 122): `containerChecks`, built by
+# `nix run .#test-zig-container` (network: the CentOS 7.9 image from
+# Docker Hub, ~75 MB):
+#   zig-centos7-*        the product and the test binaries run inside a
+#                        CentOS 7 userland (glibc 2.17 and its own loader)
+#                        with bwrap, not through the build machine's ld.so
+#   zig-native-centos7-* the zig-native product and tests in the container
 #
 # build-std (tests/fixtures/build-std, build-std-deps) is in ./build-std.nix.
 {
@@ -343,8 +349,15 @@ let
             cp versions.txt out.txt $out/
           '';
       zig-test = t.testRuns.app."bin/app";
+      # Evaluation only: the container runner reaches test runs, not units.
+      zig-container-eval =
+        assert lib.assertMsg (
+          zigContainerRepo.workspaces.main.target.${native}.tests.app.bin-app.drvPath
+          == t.tests.app.bin-app.drvPath
+        ) "zig: the container runner changed the test binary";
+        pkgs.runCommand "zig-container-eval" { } "touch $out";
     }
-    // zigContainerChecks;
+    // zigNativeChecks;
 
   # A real glibc 2.17 system: CentOS 7.9's userland from its Docker Hub
   # image (a fixed-output pull by digest), unpacked into the store. The
@@ -398,12 +411,8 @@ let
   zigContainerChecks =
     let
       t = zigContainerRepo.workspaces.main.target.${native};
-      tz = zigRepo.workspaces.main.target.${native};
       bin = "${t.packages.app}/bin/app";
     in
-    assert lib.assertMsg (
-      t.tests.app.bin-app.drvPath == tz.tests.app.bin-app.drvPath
-    ) "zig: the container runner changed the test binary";
     {
       zig-centos7-run = pkgs.runCommand "zig-centos7-run" { } ''
         mkdir -p $out
@@ -417,7 +426,7 @@ let
       # libtest under CentOS 7, `runs_on_expected_glibc` included.
       zig-centos7-test = t.testRuns.app."bin/app";
     }
-    // zigNativeChecks;
+    // zigNativeContainerChecks;
 
   # Native libraries rebuilt with zig cc against glibc 2.17 (decision 102):
   # openssl-sys and libz-sys find them through breakbulk's sysDefaults
@@ -468,15 +477,14 @@ let
     let
       t = zigNativeRepo.workspaces.main.target.${native};
       bin = "${t.packages.app}/bin/app";
-      inherit (zigNativeLibs) openssl zlib;
+      inherit (zigNativeLibs) openssl;
     in
     assert lib.assertMsg zigNativeLibs.check "zig: rebuildInputs package set";
     {
       # HEAVY: builds OpenSSL with zig cc (about 5 minutes on 4 cores).
-      # The product and the libraries it loads need GLIBC_2.17 at most;
-      # it runs in the CentOS 7 container.
-      zig-native-centos7-run =
-        pkgs.runCommand "zig-native-centos7-run"
+      # The product and the libraries it loads need GLIBC_2.17 at most.
+      zig-native-glibc =
+        pkgs.runCommand "zig-native-glibc"
           {
             nativeBuildInputs = [ pkgs.buildPackages.binutils ];
           }
@@ -491,9 +499,20 @@ let
             readelf -dW ${bin} | grep NEEDED | tee $out/needed.txt
             grep -q libcrypto.so.3 $out/needed.txt
             readelf -dW ${lib.getLib openssl}/lib/libssl.so.3 | grep -q 'SONAME.*libssl.so.3'
-            LD_LIBRARY_PATH=${zigNativeLdPath} ${centos7Runner} ${bin} | tee $out/out.txt
-            grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
           '';
+    };
+  zigNativeContainerChecks =
+    let
+      t = zigNativeRepo.workspaces.main.target.${native};
+      bin = "${t.packages.app}/bin/app";
+    in
+    {
+      # The product runs in the CentOS 7 container.
+      zig-native-centos7-run = pkgs.runCommand "zig-native-centos7-run" { } ''
+        mkdir -p $out
+        LD_LIBRARY_PATH=${zigNativeLdPath} ${centos7Runner} ${bin} | tee $out/out.txt
+        grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
+      '';
       zig-native-centos7-test = t.testRuns.app."lib/app";
     };
 in
@@ -507,4 +526,6 @@ in
       ;
   };
   checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks;
+  # Opt-in, network (decision 122): `nix run .#test-zig-container`.
+  containerChecks = zigContainerChecks;
 }
