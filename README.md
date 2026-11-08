@@ -132,6 +132,12 @@ on by itself once Nix 2.36 ships. Known gaps and planned work are in the
 - `nix develop -c cargo test` runs the Rust tests.
 - `nix flake check` runs the test fixtures. Some download the Windows SDK,
   build cross toolchains and run wine.
+- CI (`.github/workflows/ci.yml`) runs on every push to `main` and every
+  pull request: `cargo fmt --check`, `cargo clippy -D warnings` and
+  `cargo test` in both Cargo workspaces, and the flake checks listed in
+  [`ci/fast-checks`](ci/fast-checks). The other flake checks and the
+  `nix run .#test-*` scripts are too heavy for hosted runners and run
+  locally.
 - `nix run .#test-dynamic`, `.#test-cutoff`, `.#test-options` and
   `.#test-linux-portable-container` run tests that need a Nix master build
   or extra downloads.

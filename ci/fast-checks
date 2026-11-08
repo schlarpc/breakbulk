@@ -1,0 +1,50 @@
+# Flake checks CI runs on every push and pull request (x86_64-linux), one
+# name per line under checks.x86_64-linux. Chosen to need no cross
+# toolchain, Windows SDK, wine, browser or long rebuild (OpenSSL), so they
+# fit a GitHub-hosted runner. Everything else runs locally with
+# `nix flake check` until the test tiers (#31) replace this list.
+lib-unit
+skeleton
+source-views
+target-traits
+flake-systems
+default-tools
+unit-smoke
+instantiate
+instantiate-eval
+stages-eval
+stages-chain
+stages-install
+stages-split-debug
+presets-eval
+plan-walking-skeleton
+plan-walking-skeleton-golden
+plan-walking-skeleton-test
+plan-crate-types
+plan-directives
+plan-build-script-signal
+plan-forced-target
+plan-tools-narrow
+repository-cargo-config-include
+repository-default-variant
+repository-devshell
+repository-devshell-broken-manifest
+repository-filtered-root
+repository-fmt
+repository-missing-input
+repository-module-args
+repository-multi-ws-sharing
+repository-options-doc
+repository-overrides
+repository-required-features
+repository-stamps
+repository-stamps-invalidation
+repository-version-req
+repository-zero-config
+loose-ends-cfg-rustflags
+loose-ends-devshell-target
+loose-ends-options-doc-in-sync
+loose-ends-options-md
+test-runs-doctests
+test-runs-test-control
+products-variants

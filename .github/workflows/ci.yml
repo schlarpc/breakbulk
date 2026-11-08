@@ -1,0 +1,59 @@
+# Fast checks on every push to main and every pull request (#1): the Rust
+# tests, clippy and rustfmt in both Cargo workspaces, and the flake checks
+# listed in ci/fast-checks. Heavy checks (Windows SDK, wine, cross
+# toolchains, the CentOS 7 container) and the opt-in `nix run .#test-*`
+# scripts do not run on GitHub-hosted runners; run them locally.
+#
+# Built paths go to the FlakeHub cache (flakehub-cache-action), which needs
+# the `id-token: write` permission. Pull requests from forks get no token
+# and build without the cache.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: cargo test, clippy, fmt
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [".", "breakbulk-drv"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: DeterminateSystems/flakehub-cache-action@main
+      - name: cargo fmt --check
+        working-directory: ${{ matrix.workspace }}
+        run: nix develop "$GITHUB_WORKSPACE" -c cargo fmt --check
+      - name: cargo clippy
+        working-directory: ${{ matrix.workspace }}
+        run: nix develop "$GITHUB_WORKSPACE" -c cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: ${{ matrix.workspace }}
+        run: nix develop "$GITHUB_WORKSPACE" -c cargo test --workspace
+
+  checks:
+    name: flake checks (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: DeterminateSystems/flakehub-cache-action@main
+      - name: nix build (ci/fast-checks)
+        run: |
+          grep -v '^#' ci/fast-checks \
+            | sed 's|^|.#checks.x86_64-linux.|' \
+            | xargs nix build --keep-going --no-link --print-build-logs
