@@ -50,13 +50,15 @@
 # Every stage and check runs through a guard (decision 112): when its
 # input holds `noBinariesMarker` (a `linked` stage of a product Cargo
 # built no binary of, in dynamic-derivation mode), it copies the marker to
-# its outputs and succeeds without running its own builder. Stages and
-# checks that are plain `derivation` calls (no `overrideAttrs`) are not
-# guarded.
+# its outputs and succeeds without running its own builder. A stage or
+# check made with a bare `derivation` call (no `overrideAttrs`) is guarded
+# too: it is rebuilt from its `drvAttrs` with the guard as builder
+# (decision 147).
 #
 # Content addressing: with `ca`, every stage and check derivation gets
 # `__contentAddressed = true; outputHashMode = "recursive";
-# outputHashAlgo = "sha256"` through overrideAttrs. `linked` is left as it
+# outputHashAlgo = "sha256"` (through overrideAttrs, or from `drvAttrs` for a
+# bare `derivation`, as for the guard). `linked` is left as it
 # is. Nix rejects such a derivation at evaluation unless the evaluator has
 # the `ca-derivations` experimental feature, and the build fails unless the
 # daemon has it too. Nix offers no way for an expression to test for the
@@ -132,27 +134,54 @@ let
       exec "$@"
     '';
 
+  # A derivation changed by `f` over its attributes: through
+  # `overrideAttrs` when it has one (mkDerivation, runCommand; their paths
+  # stay those of the plain override), else rebuilt with `derivation` from
+  # its `drvAttrs` (a bare `derivation` call, decision 147), keeping any
+  # attributes the caller added to the result. `f` gets the attributes and
+  # whether they are mkDerivation's.
+  modifyDrv =
+    drv: f:
+    if drv ? overrideAttrs then
+      drv.overrideAttrs (old: f old true)
+    else
+      drv // derivation (drv.drvAttrs // f drv.drvAttrs false);
+
   # A stage's or check's derivation, run through the guard above for its
-  # input. Derivations without `overrideAttrs` (plain `derivation` calls)
-  # are left as they are.
+  # input. Anything that is not a derivation is left as it is.
   guard =
     pkgs: input: drv:
-    if !(drv ? overrideAttrs && drv ? drvAttrs) then
+    if !(drv ? drvAttrs) then
       drv
     else
       let
         inherit (drv.drvAttrs) builder;
         args = drv.drvAttrs.args or [ ];
-      in
-      drv.overrideAttrs (_: {
-        realBuilder = pkgs.stdenv.shell;
-        args = [
+        guarded = [
           (guardScript pkgs)
           "${input}"
           builder
         ]
         ++ args;
-      });
+      in
+      modifyDrv drv (
+        _: mk:
+        {
+          args = guarded;
+        }
+        # mkDerivation sets `builder` from `realBuilder`.
+        // (
+          if mk then
+            { realBuilder = pkgs.stdenv.shell; }
+          else
+            {
+              builder = pkgs.stdenv.shell;
+              # The guard reads `$outputs`, which a bare `derivation` sets
+              # only when it names its outputs.
+              outputs = drv.drvAttrs.outputs or [ "out" ];
+            }
+        )
+      );
 
   # Default stage chains per preset (`stagePreset`), as data. Debug
   # handling is not among them: mkRepository puts the stage of the
@@ -335,10 +364,10 @@ let
         what: drv:
         if !useCa then
           drv
-        else if drv ? overrideAttrs then
-          drv.overrideAttrs (_: caAttrs)
+        else if drv ? drvAttrs then
+          modifyDrv drv (_: _: caAttrs)
         else
-          throw "breakbulk: ${what} of `${name}` returned a derivation without overrideAttrs, so it cannot be made content-addressed; build it with mkDerivation or runCommand, or set `ca = false`";
+          throw "breakbulk: ${what} of `${name}` returned something that is not a derivation, so it cannot be made content-addressed; set `ca = false`";
 
       built =
         lib.foldl'

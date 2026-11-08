@@ -785,7 +785,7 @@ stages.<name> = {
 - The effective stage set is the preset's defaults merged with the target's and the package's stage modules. `lib.mkForce null` removes a stage.
 - Order comes from `lib.toposort` over the `after` and `before` constraints. A cycle, or a reference to a missing stage, fails evaluation and lists every stage with its constraints.
 - The last stage in the order is the product. The `install` stage normalizes the layout (`bin/`, `lib/`, `.exe` with DLLs, `pkg/`) and runs last unless removed.
-- Every stage and check derivation runs through a guard (decision 112): its builder is wrapped so that, when its input holds the no-binaries marker (`breakbulk-no-binaries`, written by a dynamic-mode `linked` stage whose roots Cargo all skipped), it copies the marker to each of its outputs and succeeds without running the real builder. Stages and checks without `overrideAttrs` (plain `derivation` calls) are not wrapped.
+- Every stage and check derivation runs through a guard (decision 112): its builder is wrapped so that, when its input holds the no-binaries marker (`breakbulk-no-binaries`, written by a dynamic-mode `linked` stage whose roots Cargo all skipped), it copies the marker to each of its outputs and succeeds without running the real builder. The wrap goes through `overrideAttrs` when the derivation has it (`mkDerivation`, `runCommand`); a stage or check written as a bare `derivation` call is rebuilt from its `drvAttrs` with the guard as builder and its own builder and arguments passed through, and is guarded the same way (decision 147). Content addressing (`ca`) reaches such a derivation the same way.
 
 ### Checks
 

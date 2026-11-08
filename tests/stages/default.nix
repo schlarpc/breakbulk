@@ -856,7 +856,8 @@ in
   # Decision 112: a dynamic-mode product whose roots Cargo all skipped. Its
   # `linked` holds only the no-binaries marker, and every stage and check
   # (splitDebug, a stage and a check that would fail, a stage with
-  # structured attributes, noSourceReferences) passes the marker on to
+  # structured attributes, a stage and a check written as bare `derivation`
+  # calls, noSourceReferences) passes the marker on to
   # each output without running. A product with a built root runs its
   # stages as usual.
   stages-no-binaries =
@@ -892,10 +893,27 @@ in
         n:
         { pkgs, ... }:
         pkgs.runCommand n { } "echo ${n} ran; exit 1";
+      # A stage and a check written as a bare `derivation` call (decision
+      # 147), which `overrideAttrs` cannot wrap.
+      raw =
+        n: script:
+        { pkgs, ... }:
+        derivation {
+          name = n;
+          inherit (pkgs.stdenv.hostPlatform) system;
+          builder = "${pkgs.bash}/bin/bash";
+          args = [
+            "-c"
+            script
+          ];
+        };
       productOf =
-        roots:
+        {
+          roots,
+          ca ? false,
+        }:
         (breakbulk.products.mkProducts {
-          inherit pkgs;
+          inherit pkgs ca;
           inst = {
             inherit roots;
             sources = {
@@ -904,7 +922,6 @@ in
             };
           };
           triple = "x86_64-unknown-linux-gnu";
-          ca = false;
           targetStages = {
             boom = {
               before = "splitDebug";
@@ -922,20 +939,44 @@ in
                   ];
                 } "exit 1";
             };
+            rawStage = {
+              after = "structured";
+              run = raw "raw-stage" "echo raw stage ran; exit 1";
+            };
           };
-          targetChecks.bad = {
-            on = "linked";
-            run = { pkgs, ... }: fails "bad" { inherit pkgs; };
+          targetChecks = {
+            bad = {
+              on = "linked";
+              run = { pkgs, ... }: fails "bad" { inherit pkgs; };
+            };
+            rawBad = {
+              on = "linked";
+              run = raw "raw-bad" "echo raw check ran; exit 1";
+            };
+            rawGood = {
+              on = "linked";
+              run = raw "raw-good" "echo raw check ran > $out";
+            };
           };
         }).p;
       skipped = productOf {
-        "p/bin/a" = root "a" true;
-        "p/bin/b" = root "b" true;
+        roots = {
+          "p/bin/a" = root "a" true;
+          "p/bin/b" = root "b" true;
+        };
       };
-      # One root built: `boom` runs and fails.
-      built = productOf {
+      # One root built: `boom` runs and fails, and so does the raw stage; the
+      # raw check runs its own builder.
+      builtRoots = {
         "p/bin/a" = root "a" false;
         "p/bin/b" = root "b" true;
+      };
+      built = productOf { roots = builtRoots; };
+      # Content addressing reaches a bare `derivation` too (evaluated only:
+      # building it needs the `ca-derivations` feature).
+      builtCa = productOf {
+        roots = builtRoots;
+        ca = true;
       };
       m = S.noBinariesMarker;
     in
@@ -947,16 +988,25 @@ in
         extra = skipped.stages.structured.extra;
         noSrc = skipped.checks.noSourceReferences;
         bad = skipped.checks.bad;
+        rawStage = skipped.stages.rawStage;
+        rawBad = skipped.checks.rawBad;
         builtBoom = pkgs.testers.testBuildFailure built.stages.boom;
+        builtRawGood = built.checks.rawGood;
+        caRaw =
+          assert builtCa.stages.rawStage.drvAttrs.__contentAddressed;
+          assert builtCa.checks.rawGood.drvAttrs.__contentAddressed;
+          assert builtCa.stages.rawStage.drvAttrs.builder == "${pkgs.stdenv.shell}";
+          "ok";
       }
       ''
         set -euo pipefail
         grep -qxF 'a: needs feature cli' $linked/${m}
         grep -qxF 'b: needs feature cli' $linked/${m}
-        for d in $product $debug $extra $noSrc $bad; do
+        for d in $product $debug $extra $noSrc $bad $rawStage $rawBad; do
           cmp $linked/${m} $d/${m}
         done
         grep -q 'boom ran' $builtBoom/testBuildFailure.log
+        grep -qxF 'raw check ran' $builtRawGood
         touch $out
       '';
 
