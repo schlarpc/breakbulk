@@ -400,6 +400,8 @@ units; if it is too slow, the fallback is the original design.
 
 >ack
 
+> Resolved: default kept (names, not paths).
+
 ## 30. ASK: names of outputs inside a workspace
 
 Each predicted output is named `<package>/<kind>/<target>`, for example
@@ -410,6 +412,8 @@ names (`packages.app`, `tests.app.integration`) are built from them later.
 Tell me if you want a different internal scheme before it spreads.
 
 > ack
+
+> Resolved: default kept.
 
 ## 31. FYI: a library's own unit tests aren't predicted yet
 
@@ -448,6 +452,8 @@ projects to use per-target flags (simplest, but a trap), or fail planning
 with a message when both are present.
 
 >ack
+
+> Resolved: default kept (read the project's config, place flags under its key).
 
 ## 34. ASK: turning on Cargo's built-in path hiding (`trim-paths`)
 
@@ -497,6 +503,8 @@ binaries keeping a reference to crate sources if debug info isn't split off.
 Default: hide everywhere.
 
 >ack
+
+> Resolved: default kept (hide C paths everywhere).
 
 ## 37. FYI: environment capture is in production code
 
@@ -711,6 +719,8 @@ their binary's build step changes, even if the bytes are identical.
 
 >ack
 
+> Resolved: default kept.
+
 ## 53. ASK: three rules for ordering post-link steps
 
 - If two steps' order isn't determined by their `after`/`before`
@@ -765,6 +775,8 @@ entry replaces the general one entirely.
 
 >ack
 
+> Resolved: default kept.
+
 ## 57. ASK: your settings add to the built-in `-sys` crate defaults
 
 breakbulk ships default native dependencies for common `-sys` crates. If you
@@ -776,6 +788,8 @@ only meant to add one library.
 
 >ack.
 
+> Resolved: default kept.
+
 ## 58. ASK: what the dev shell warns about
 
 The dev shell warns about settings in your shell environment that the
@@ -786,6 +800,8 @@ location, terminal, network or credentials), plus `RUSTFLAGS`,
 that list right, too noisy, or missing anything you use?
 
 >sounds reasonable.
+
+> Resolved: default kept.
 
 ## 59. FYI: naming of outputs
 
@@ -942,6 +958,8 @@ preset.
 
 >ack, any downsides to static pie? _slightly_ slower code i assume?
 
+> Resolved: kept. Downsides of static-pie are small: a few relocations at startup and, on x86_64, position-independent code that is at most a couple of percent slower; in exchange, address randomisation.
+
 ## 70. ASK: Windows and wasm presets need your compiler passed in
 
 These presets need to know your rustc's LLVM version (to pick matching
@@ -1009,6 +1027,8 @@ linker flag itself.
 
 >ack
 
+> Resolved: default kept.
+
 ## 75. ASK: lint variants and benchmarks
 
 - `check` and `clippy` variants check all targets, like the usual
@@ -1020,6 +1040,8 @@ linker flag itself.
 Do these match how you'd want to configure them?
 
 >ack
+
+> Resolved: default kept.
 
 ## 76. FYI: smaller product choices
 
@@ -1281,6 +1303,8 @@ change the interface file on every edit. Nothing will be filed without you.
 
 >ack
 
+> Resolved: default kept.
+
 ## 96. FYI: review follow-ups done
 
 - Windows `.pdb` and DWARF `.dwp`/`.dwo` debug files are now kept, in a
@@ -1356,6 +1380,8 @@ Otherwise the `.exe` needs a GCC runtime DLL that isn't shipped next to it,
 so it won't run on its own (or under wine). Default: static.
 
 >ack
+
+> Resolved: default kept (static).
 
 ## 102. ASK: the zig preset and native libraries
 
@@ -1899,6 +1925,8 @@ joined toolchain.
 
 >agree
 
+> Resolved: default kept: such a binary fails the check.
+
 ## 142. ASK: toolchains without a version cost one small evaluation-time build
 
 Capabilities come from the version table when the toolchain says its
@@ -1908,6 +1936,8 @@ Rust side probe at build time when a capability is unknown, which brings
 back a second place where the decision is made. Default: the probe.
 
 >check fenix, agree.
+
+> Resolved: probe kept; checking which fenix toolchains lack a version.
 
 ## 143. FYI: presets renamed, traits redesigned, `debugInfo` setting (resolves 122c, 137, 138, 139)
 
@@ -1938,6 +1968,8 @@ path they contain (with an allow-list)?
 
 >yes, and as always this should be a composed bit of logic (one of the step hook things?)
 
+> Resolved: yes, as a composable check (a reusable stage/check helper the preset adds by default).
+
 ## 145. ASK: allow `libgcc_s` and `libstdc++` by default for portable binaries?
 
 The portable allow-list is glibc's own libraries and its loaders. Python's
@@ -1946,6 +1978,8 @@ nearly every Linux system has. Today a C++ dependency must add them via
 `systemLibraries`. Allow them by default?
 
 >yes
+
+> Resolved: yes, allow them by default.
 
 ## 146. FYI: trim-paths options, dev shell, variant defaults, stage guard (resolves 112, 121, 133, 135)
 
@@ -1997,3 +2031,5 @@ traced Cargo removes the dependency; it's a one-line planner change that
 doesn't affect units. Default proposal: do it.
 
 >agree
+
+> Resolved: do it.
