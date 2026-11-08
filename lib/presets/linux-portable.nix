@@ -12,9 +12,10 @@
 # linker through the planner's linker rewrite.
 #
 # Portable means (decision 122): everything Nix provides is linked
-# statically, and only glibc's own libraries (and the `systemLibraries`
-# the user names, such as libGL.so.1, which the target system has) are
-# loaded at run time. `rebuildInputs` are rebuilt as static libraries
+# statically, and only glibc's own libraries (and GCC's runtime
+# libraries, libgcc_s.so.1 and libstdc++.so.6, as manylinux allows, and
+# the `systemLibraries` the user names, such as libGL.so.1, which the
+# target system has) are loaded at run time. `rebuildInputs` are rebuilt as static libraries
 # only, pkg-config runs in static mode for target units
 # (PKG_CONFIG_ALL_STATIC), and every product gets the check
 # `portableLibraries` (stageHelpers.neededLibraries), which reads each ELF
@@ -46,9 +47,10 @@
   glibc ? "2.17",
   # How the old-glibc link is done; "zig" is the only one.
   backend ? "zig",
-  # Sonames a product may load besides glibc's own libraries, because
-  # every target system has them (e.g. [ "libGL.so.1" ]). Anything else
-  # must be linked statically (`portableLibraries` check).
+  # Sonames a product may load besides glibc's own libraries and GCC's
+  # runtime (libgcc_s.so.1, libstdc++.so.6), because every target system
+  # has them (e.g. [ "libGL.so.1" ]). Anything else must be linked
+  # statically (`portableLibraries` check).
   systemLibraries ? [ ],
   # Store paths a product may name in its files anyway (the
   # `portableNoStorePaths` check, stageHelpers.noStorePaths): shell globs
@@ -299,11 +301,11 @@ in
   # pkg-config-rs links every pkg-config library statically (when its
   # archive exists), as for linuxStatic; target units only.
   env.PKG_CONFIG_ALL_STATIC = mkDefault "1";
-  # The auditwheel-like check: NEEDED names only glibc's libraries and
-  # `systemLibraries`.
+  # The auditwheel-like check: NEEDED names only glibc's libraries, GCC's
+  # runtime libraries (decision 145) and `systemLibraries`.
   checks.portableLibraries = {
     run = stageHelpers.neededLibraries {
-      allowed = stageHelpers.glibcLibraries ++ systemLibraries;
+      allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
       why = "linuxPortable links everything Nix provides statically (rebuildInputs builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
     };
   };

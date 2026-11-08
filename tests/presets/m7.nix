@@ -24,7 +24,8 @@
 #                     (asserted on the plan); the preset's
 #                     `portableLibraries` check passes (NEEDED: glibc's
 #                     libraries only), and fails, naming the library, when
-#                     only libc.so.6 is allowed
+#                     only libc.so.6 is allowed; it allows libgcc_s and
+#                     libstdc++ (a g++-built program passes)
 #   linux-portable-container-eval   evaluation only: the container runner
 #                     below leaves the test binary's derivation unchanged
 #   linux-portable-native-glibc   HEAVY (builds OpenSSL and zlib with zig
@@ -383,6 +384,28 @@ let
             grep -q 'neededLibraries: app: bin/app needs ld-linux-x86-64.so.2, which is not an allowed run-time library: only libc' $failure/testBuildFailure.log
             touch $out
           '';
+      # Decision 145: the preset's check allows GCC's runtime libraries,
+      # as manylinux does: a g++-built program that needs libstdc++.so.6
+      # and libgcc_s.so.1 passes, and both are listed as needed.
+      linux-portable-libraries-cxx =
+        let
+          cxx = pkgs.runCommandCC "cxx-program" { } ''
+            mkdir -p $out/bin
+            printf '#include <iostream>\nint main() { try { throw 1; } catch (int) { std::cout << "ok"; } }\n' > m.cpp
+            g++ -shared-libgcc m.cpp -o $out/bin/cxx
+          '';
+          check = (presets.linuxPortable { glibc = "2.17"; } { inherit pkgs; }).checks.portableLibraries.run {
+            input = cxx;
+            product.name = "cxx";
+            inherit pkgs;
+          };
+        in
+        pkgs.runCommand "linux-portable-libraries-cxx" { } ''
+          cat ${check}/needed
+          grep -qxF 'bin/cxx: libstdc++.so.6' ${check}/needed
+          grep -qxF 'bin/cxx: libgcc_s.so.1' ${check}/needed
+          touch $out
+        '';
       # Evaluation only: the container runner reaches test runs, not units.
       linux-portable-container-eval =
         assert lib.assertMsg (

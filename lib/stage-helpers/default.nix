@@ -662,10 +662,9 @@ let
   # The sonames of glibc's own libraries, in every release since 2.17 (the
   # oldest a Rust std supports): what an ELF program for "any glibc Linux"
   # may load besides what it links statically, as manylinux's policy
-  # (auditwheel) allows for Python wheels, without libgcc_s and libstdc++
-  # (Rust programs linked by zig need neither; a C++ dependency can add
-  # them through linuxPortable's `systemLibraries`). The dynamic loaders
-  # are matched by name (`ld-linux-*.so.*`, `ld64.so.*`).
+  # (auditwheel) allows for Python wheels. GCC's runtime libraries are a
+  # separate list (`gccRuntimeLibraries`). The dynamic loaders are matched
+  # by name (`ld-linux-*.so.*`, `ld64.so.*`).
   glibcLibraries = [
     "libc.so.6"
     "libm.so.6"
@@ -683,6 +682,16 @@ let
     "ld-linux-*.so.*"
     "ld-linux.so.*"
     "ld64.so.*"
+  ];
+
+  # GCC's runtime libraries, which manylinux's policy (PEP 599 and later)
+  # also allows, since nearly every glibc system has them: the unwinder
+  # and C++ standard library a C++ dependency built with g++ loads.
+  # linuxPortable allows them by default (decision 145); a Rust program
+  # linked by zig needs neither (zig links its own unwinder).
+  gccRuntimeLibraries = [
+    "libgcc_s.so.1"
+    "libstdc++.so.6"
   ];
 
   # A check: every ELF file in its input may name in NEEDED (the shared
@@ -823,5 +832,6 @@ in
     noSourceReferences
     neededLibraries
     glibcLibraries
+    gccRuntimeLibraries
     ;
 }
