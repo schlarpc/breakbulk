@@ -480,6 +480,8 @@ repo = breakbulk.lib.mkRepository {
 };
 ```
 
+Modules receive `pkgs`, `root` (the repository root as a path, for reading project files), `repo` (the result itself, for another workspace's product used as an input; laziness makes the cycle harmless) and `breakbulk` (the library: presets, stage helpers, `xwinSdk`). `specialArgs` passed to `mkRepository` add to these and win.
+
 ### Options
 
 ```nix

@@ -40,9 +40,9 @@ let
 
   asPath = p: if builtins.isPath p then p else /. + p;
 
-  # mkRepository with the trial's module. The module receives the
-  # repository itself (`repo`, for products as inputs) and `breakbulk`
-  # through specialArgs; a flake would pass `self` the same way.
+  # mkRepository with the trial's module. mkRepository gives modules
+  # `root`, the repository itself (`repo`, for products as inputs) and
+  # `breakbulk`, as it would in the repository's own flake.
   trial =
     name: root: extra:
     let
@@ -50,11 +50,7 @@ let
         inherit pkgs tools;
         root = asPath root;
         modules = [ (./. + "/${name}/nix/rust.nix") ];
-        specialArgs = {
-          inherit breakbulk repo;
-          root = asPath root;
-        }
-        // extra;
+        specialArgs = extra;
       };
       flat =
         attrs: lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) attrs;

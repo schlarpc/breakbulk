@@ -368,7 +368,10 @@ ASK marks a choice for the author.
    catalogued "embed silently falls back" pattern, live). Proposal:
    `packages.<name>.overlays."<repo path>" = <derivation>`, a product
    placed into the package's source view at that path.
-7. **Modules cannot reach the repository or its root.** mkRepository gives
+7. **Modules cannot reach the repository or its root.** Done: modules
+   receive `root`, `repo` (the repository object) and `breakbulk` (the
+   library); the trial driver no longer passes them (check:
+   `repository-module-args`). Before: mkRepository gave
    modules `pkgs` only. A module that embeds another workspace's product
    needs the repository object (the products test and the trial driver pass
    it through `specialArgs` or a `let rec`), and reading project files needs

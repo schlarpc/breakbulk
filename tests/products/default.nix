@@ -401,12 +401,14 @@ let
   # --- embed ---------------------------------------------------------------------
 
   # A repository whose `host` workspace embeds the `payload` workspace's
-  # product. The module refers to the repository itself; Nix's laziness
-  # makes that fine, since building `payload` never reads `embedder`'s env.
+  # product. The module refers to the repository itself through its `repo`
+  # argument (mkRepository's specialArgs); Nix's laziness makes that fine,
+  # since building `payload` never reads `embedder`'s env.
   embedRepo =
     root:
-    let
-      repo = mkRepo root [
+    mkRepo root [
+      (
+        { repo, ... }:
         {
           workspaces = {
             payload = {
@@ -420,9 +422,8 @@ let
           };
           packages.embedder.env.PAYLOAD_BIN = "${repo.workspaces.payload.packages.payload}/bin/payload";
         }
-      ];
-    in
-    repo;
+      )
+    ];
   embed = embedRepo (fixtures + "/embed");
   embedEdited = embedRepo (edited "embed" "echo '// v2' >> payload/src/main.rs");
   hostInst = repo: repo.workspaces.host.instances.${native}.default;

@@ -8,7 +8,7 @@ This directory holds no source from those repositories. Each trial is:
 - `<name>/nix/rust.nix`: the module, written as the repository would carry it
   in place of its crane wiring. It receives `root` (the checkout),
   `breakbulk`, `pkgs` and `repo` (the repository object itself, for products
-  used as inputs).
+  used as inputs), which mkRepository gives every module.
 - `<name>/outputs.nix`: what the repository's own flake builds, as
   attributes of the trial (`build`, plus named products and checks).
 

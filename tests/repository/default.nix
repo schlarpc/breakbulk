@@ -604,6 +604,50 @@ in
     assert lib.assertMsg (sqliteInputs == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs ${toString sqliteInputs}";
     evalCheck "sys-defaults-no-switches" (toString envNames);
 
+  # Gap 7 of docs/field-trials.md: modules receive `root` (a path, also
+  # when the caller passed a string-like root), the repository object
+  # (`repo`) and the library (`breakbulk`) without the caller wiring them
+  # through specialArgs; the caller's specialArgs still win.
+  module-args =
+    let
+      probe =
+        {
+          root,
+          repo,
+          breakbulk,
+          ...
+        }:
+        {
+          workspaces.a.path = "a";
+          packages.app-a.env = {
+            ROOT_IS_PATH = lib.boolToString (builtins.isPath root);
+            ROOT_READS = lib.boolToString (builtins.pathExists (root + "/a/Cargo.lock"));
+            REPO_HAS_WS = lib.boolToString (repo.workspaces ? a);
+            LIB_HAS_PRESETS = lib.boolToString (breakbulk.presets ? linuxGnu);
+          };
+        };
+      env = (mkRepo (fixtures + "/multi-ws") [ probe ]).config.packages.app-a.env;
+      overridden =
+        (breakbulk.mkRepository {
+          inherit pkgs tools;
+          root = fixtures + "/multi-ws";
+          modules = [
+            (
+              { marker, ... }:
+              {
+                workspaces.a.path = "a";
+                packages.app-a.env.MARKER = marker;
+              }
+            )
+          ];
+          specialArgs.marker = "mine";
+        }).config.packages.app-a.env.MARKER;
+      want = lib.genAttrs [ "ROOT_IS_PATH" "ROOT_READS" "REPO_HAS_WS" "LIB_HAS_PRESETS" ] (_: "true");
+    in
+    assert lib.assertMsg (env == want) "module-args: ${builtins.toJSON env}";
+    assert lib.assertMsg (overridden == "mine") "module-args: caller specialArgs lost";
+    evalCheck "module-args" (builtins.toJSON env);
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }

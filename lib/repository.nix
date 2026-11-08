@@ -59,6 +59,8 @@
   products,
   variantsLib,
   presets,
+  # The whole library (lib/default.nix), for modules' `breakbulk` argument.
+  breakbulkLib,
 }:
 let
   versionReq = import ./modules/version-req.nix { inherit lib; };
@@ -86,8 +88,14 @@ let
 
   eval = lib.evalModules {
     modules = bbModules ++ [ sysDefaults ] ++ userModules;
+    # Module arguments: `pkgs`; `root` (the repository root, a path), for
+    # reading project files; `repo` (the result, below), for products used
+    # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk).
+    # The caller's specialArgs win.
     specialArgs = {
-      inherit pkgs;
+      inherit pkgs root;
+      repo = result;
+      breakbulk = breakbulkLib;
       breakbulkPresets = presets;
     }
     // specialArgs;
@@ -1166,39 +1174,44 @@ let
         "explainSharing ${what}: a = ${ra.label}, b = ${rb.label}\n"
         + (if units == [ ] then "  no units of ${what} in either plan\n" else lib.concatMapStrings unitText units);
     };
-in
-{
-  workspaces = guard workspaces;
-  checks = guard checks;
-  sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
-  inherit explainSharing warnings;
-  inherit (eval) config options;
-  optionsDoc = pkgs.nixosOptionsDoc {
-    options = removeAttrs eval.options [
-      "_module"
-      "warnings"
-    ];
-    warningsAreErrors = false;
-    # Declarations as paths in breakbulk's repository (docs/options.md links
-    # them from docs/), not store paths.
-    transformOptions =
-      opt:
-      opt
-      // {
-        declarations = map (
-          d:
-          let
-            parts = lib.splitString "/lib/" (toString d);
-            rel = "lib/${lib.last parts}";
-          in
-          if lib.length parts > 1 then
-            {
-              name = rel;
-              url = "../${rel}";
-            }
-          else
-            d
-        ) opt.declarations;
-      };
+
+  # The repository object. Modules receive it as `repo`, for products used
+  # as inputs (an embedded product of another workspace); laziness makes
+  # that fine as long as no option's structure depends on it.
+  result = {
+    workspaces = guard workspaces;
+    checks = guard checks;
+    sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
+    inherit explainSharing warnings;
+    inherit (eval) config options;
+    optionsDoc = pkgs.nixosOptionsDoc {
+      options = removeAttrs eval.options [
+        "_module"
+        "warnings"
+      ];
+      warningsAreErrors = false;
+      # Declarations as paths in breakbulk's repository (docs/options.md links
+      # them from docs/), not store paths.
+      transformOptions =
+        opt:
+        opt
+        // {
+          declarations = map (
+            d:
+            let
+              parts = lib.splitString "/lib/" (toString d);
+              rel = "lib/${lib.last parts}";
+            in
+            if lib.length parts > 1 then
+              {
+                name = rel;
+                url = "../${rel}";
+              }
+            else
+              d
+          ) opt.declarations;
+        };
+    };
   };
-}
+in
+result

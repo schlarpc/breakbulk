@@ -141,53 +141,55 @@ let
       presets
       ;
     variantsLib = variants;
+    breakbulkLib = self;
+  };
+  self = {
+    inherit
+      mkRepository
+      instantiate
+      predictedRoots
+      util
+      lockfile
+      manifest
+      roots
+      sourceViews
+      skeleton
+      envCapture
+      mkFetch
+      mkVendor
+      mkTools
+      mkPlan
+      mkCargoEnv
+      mkWorkspace
+      dynamic
+      ;
+
+    mkSkeleton = skeleton.mkSkeleton;
+
+    modules = import ./modules;
+    # imports = [ breakbulk.lib.flakeModule ]; in a flake-parts flake.
+    flakeModule = import ./modules/flake-parts.nix { inherit mkRepository; };
+    sysDefaults = ./sys-defaults.nix;
+    versionReq = import ./modules/version-req.nix { inherit lib; };
+
+    xwinSdk = import ./xwin-sdk.nix { inherit lib; };
+
+    inherit
+      wasmBindgen
+      stages
+      testRuns
+      testApps
+      products
+      variants
+      ;
+
+    # Toolchain presets (M3): breakbulk.presets.{linuxGnu, linuxMusl,
+    # staticGlibc, msvc, wasmBrowser, wasmComponent} and (M7) {wasip2,
+    # windowsGnu, zig}; runners; the Rust to
+    # LLVM version table.
+    inherit presets runners llvmVersions;
+    inherit (stages) mkProduct;
+    stageHelpers = stages.helpers;
   };
 in
-{
-  inherit
-    mkRepository
-    instantiate
-    predictedRoots
-    util
-    lockfile
-    manifest
-    roots
-    sourceViews
-    skeleton
-    envCapture
-    mkFetch
-    mkVendor
-    mkTools
-    mkPlan
-    mkCargoEnv
-    mkWorkspace
-    dynamic
-    ;
-
-  mkSkeleton = skeleton.mkSkeleton;
-
-  modules = import ./modules;
-  # imports = [ breakbulk.lib.flakeModule ]; in a flake-parts flake.
-  flakeModule = import ./modules/flake-parts.nix { inherit mkRepository; };
-  sysDefaults = ./sys-defaults.nix;
-  versionReq = import ./modules/version-req.nix { inherit lib; };
-
-  xwinSdk = import ./xwin-sdk.nix { inherit lib; };
-
-  inherit
-    wasmBindgen
-    stages
-    testRuns
-    testApps
-    products
-    variants
-    ;
-
-  # Toolchain presets (M3): breakbulk.presets.{linuxGnu, linuxMusl,
-  # staticGlibc, msvc, wasmBrowser, wasmComponent} and (M7) {wasip2,
-  # windowsGnu, zig}; runners; the Rust to
-  # LLVM version table.
-  inherit presets runners llvmVersions;
-  inherit (stages) mkProduct;
-  stageHelpers = stages.helpers;
-}
+self
