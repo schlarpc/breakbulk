@@ -809,6 +809,18 @@ in
     dirG = goldens "directives" dir;
   in
   {
+    # #39: a package with nightly `package.forced-target` would build for
+    # another target inside this target's plan; planning fails naming it.
+    forced-target =
+      let
+        failure = pkgs.testers.testBuildFailure (mk "forced-target" { inherit toolchain; }).plans.build;
+      in
+      pkgs.runCommand "forced-target-check" { inherit failure; } ''
+        cat $failure/testBuildFailure.log
+        grep -qF 'package `forced` builds for `wasm32-unknown-unknown`' $failure/testBuildFailure.log
+        grep -qF 'package.forced-target' $failure/testBuildFailure.log
+        touch $out
+      '';
     walking-skeleton-nightly =
       pkgs.runCommand "walking-skeleton-nightly-check"
         {

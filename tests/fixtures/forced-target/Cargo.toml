@@ -1,0 +1,6 @@
+# Nightly `package.forced-target` (per-package-target, #39): `forced`
+# builds for wasm32-unknown-unknown whatever `--target` says. breakbulk
+# plans one target at a time, so planning fails naming the package.
+[workspace]
+resolver = "2"
+members = ["app", "forced"]

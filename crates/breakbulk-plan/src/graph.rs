@@ -403,6 +403,38 @@ impl<'a> Builder<'a> {
         Ok(b)
     }
 
+    /// A compile for a target other than the planned one and the host
+    /// would be planned as a host unit (`platform_of`) with the wrong
+    /// traits, linker and spec. Cargo does that for a package with nightly
+    /// `package.forced-target` (`per-package-target`), which overrides
+    /// `--target` (#39). A `.json` target counts by its file stem, the name
+    /// Cargo gives its directory.
+    fn check_target(&self, rec: &Record) -> Result<(), Error> {
+        let Some(t) = arg_value(&rec.args, "--target").first().copied() else {
+            return Ok(());
+        };
+        let stem = |s: &str| {
+            let name = s.rsplit('/').next().unwrap_or(s);
+            name.strip_suffix(".json").unwrap_or(name).to_owned()
+        };
+        if t == self.ctx.target || t == self.ctx.host || stem(t) == stem(&self.ctx.target) {
+            return Ok(());
+        }
+        let package = rec
+            .env
+            .get("CARGO_PKG_NAME")
+            .map(String::as_str)
+            .unwrap_or("?");
+        bail!(
+            "package `{package}` builds for `{t}`, not for the planned target `{}`: \
+             breakbulk plans one target at a time and does not support \
+             `package.forced-target` (cargo-features = [\"per-package-target\"]); \
+             remove it, or leave the package out of this target's plan \
+             (`workspaces.<ws>.targets.<triple>.packages`)",
+            self.ctx.target
+        )
+    }
+
     fn platform_of(&self, path: &str) -> Platform {
         match under(path, &self.ctx.scratch).and_then(|r| r.split('/').next()) {
             Some(first) if first == self.ctx.target => Platform::Target,
@@ -421,6 +453,7 @@ impl<'a> Builder<'a> {
     }
 
     fn compile_rec(&self, rec: &'a Record) -> Result<CompileRec<'a>, Error> {
+        self.check_target(rec)?;
         let Some(hash) = codegen_value(&rec.args, "metadata") else {
             bail!(
                 "{}: the compile of `{}` has no `-C metadata`",
