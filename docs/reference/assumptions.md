@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: 73 pinned, 2 pinned for some rows only (L3, L4), 3 with no pinning test (S10, X4, L5). Each of the five has an issue; see [Gaps](#gaps).
+Status of the 78 entries: 74 pinned, 1 pinned for some rows only (L3), 3 with no pinning test (S10, X4, L5). Each of the four has an issue; see [Gaps](#gaps).
 
 ## Summary
 
@@ -80,7 +80,7 @@ Status of the 78 entries: 73 pinned, 2 pinned for some rows only (L3, L4), 3 wit
 | [L1](#l1-rustcs-self-contained-lld-arguments) | rustc's self-contained lld arguments | yes |
 | [L2](#l2-wasm32-wasip2-linking) | `wasm32-wasip2` linking | yes |
 | [L3](#l3-the-rust-to-wasi-sdk-table) | The Rust-to-wasi-sdk table | partly (#36) |
-| [L4](#l4-the-rust-to-llvm-table-and-rustc--vv) | The Rust-to-LLVM table and `rustc -vV` | partly (#37) |
+| [L4](#l4-the-rust-to-llvm-table-and-rustc--vv) | The Rust-to-LLVM table and `rustc -vV` | yes |
 | [L5](#l5-cross-language-lto) | Cross-language LTO | **no** (#10) |
 | [L6](#l6-musl-links-rusts-self-contained-crt) | musl links Rust's self-contained crt | yes |
 | [L7](#l7-crt-static-glibc-is-static-pie) | `+crt-static` glibc is static-pie | yes |
@@ -653,8 +653,8 @@ Status of the 78 entries: 73 pinned, 2 pinned for some rows only (L3, L4), 3 wit
 - **Where.** `lib/llvm-versions.nix`: `table`, `lookup`, `verifiedThrough`; `lib/toolchain-facts.nix`: `probe`; `crates/breakbulk-plan/src/trace.rs`: `run` (host), `rust_src_remap` (commit).
 - **Upstream.** `rustc -vV` of every rust-overlay stable 1.90.0–1.99.1 and nightly 1.101 at the pinned rust-overlay.
 - **Holds for.** 1.90 to nightly 1.101.
-- **Pinned by.** **Partly.** `target-traits` (`testToolchainFacts`: 1.97's row equals the probe of the same toolchain); every plan check (`host:`). Issue **#37**.
-- **If it changes.** Presets use LLVM tools of another major than rustc's; for LTO and wasm the linker may not read rustc's output.
+- **Pinned by.** `llvm-versions`: `rustc -vV` of the first and last release of every row (1.90.0, 1.91.0, 1.94.1, 1.95.0, 1.98.1, 1.99.0, 1.99.1) and of the current beta and nightly at the pinned rust-overlay equals `lookup`; `target-traits` (`testToolchainFacts`: the probe path); every plan check (`host:`).
+- **If it changes.** Presets use LLVM tools of another major than rustc's; for LTO and wasm the linker may not read rustc's output. `llvm-versions` fails, also when rust-overlay's beta or nightly passes `verifiedThrough`.
 
 ### L5. Cross-language LTO
 
@@ -831,7 +831,6 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 | [S10](#s10-directive-errors-and-warnings) | Directive error and warning paths are checked only against breakbulk's copy of Cargo's code | #33 |
 | [X4](#x4-rustcs-link-temp-directory) | No check rebuilds an msvc link to compare bytes | #35 |
 | [L3](#l3-the-rust-to-wasi-sdk-table) | Only the 1.99 row is compared with a toolchain's `libc.a` | #36 |
-| [L4](#l4-the-rust-to-llvm-table-and-rustc--vv) | Only the 1.97 row is compared with `rustc -vV` | #37 |
 | [L5](#l5-cross-language-lto) | Cross-language LTO has never built | #10 (existing) |
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), `include` and `config`-over-`config.toml` (T6, guarded at plan time), and the non-Linux rows of G3.

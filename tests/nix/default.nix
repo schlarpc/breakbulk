@@ -6,6 +6,7 @@
 #                            vendor config)
 #   target-traits, target-traits-rustc   lib/target-traits.nix (see
 #                            ./target-traits.nix)
+#   llvm-versions            lib/llvm-versions.nix against `rustc -vV`
 #   roots-metadata-fixtures  predicted targets == `cargo metadata` for fixtures
 #   roots-metadata-crates-io the same for real crates.io crates (IFD)
 #   roots-plans              predicted build/test/bench roots == what real
@@ -369,6 +370,42 @@ in
   lib-unit = import ./unit.nix { inherit pkgs bb runTests; };
 
   inherit (import ./target-traits.nix { inherit pkgs bb runTests; }) target-traits target-traits-rustc;
+
+  # #37 (assumption L4): every row of lib/llvm-versions.nix against the
+  # LLVM major that `rustc -vV` names, for the first and last release of
+  # each row at the pinned rust-overlay (rustc component only), plus the
+  # current beta and nightly up to `verifiedThrough`.
+  llvm-versions =
+    let
+      rs = pkgs.rust-bin;
+      toolchains = [
+        rs.stable."1.90.0".rustc
+        rs.stable."1.91.0".rustc
+        rs.stable."1.94.1".rustc
+        rs.stable."1.95.0".rustc
+        rs.stable."1.98.1".rustc
+        rs.stable."1.99.0".rustc
+        rs.stable."1.99.1".rustc
+        rs.beta.latest.rustc
+        rs.nightly.latest.rustc
+      ];
+      expected = map (t: {
+        inherit (t) version;
+        llvm = bb.llvmVersions.lookup t.version;
+      }) toolchains;
+      missing = lib.filter (e: e.llvm == null) expected;
+    in
+    assert lib.assertMsg (missing == [ ])
+      "llvm-versions: not in the table (extend it, or `verifiedThrough`): ${toString (map (e: e.version) missing)}";
+    pkgs.runCommand "llvm-versions" { } ''
+      set -eu
+      ${lib.concatMapStrings (t: ''
+        got=$(${t}/bin/rustc -vV | sed -n 's/^LLVM version: \([0-9][0-9]*\)\..*/\1/p')
+        echo "${t.version}: table ${toString (bb.llvmVersions.lookup t.version)}, rustc -vV $got"
+        [ "$got" = ${toString (bb.llvmVersions.lookup t.version)} ] || { echo "llvm-versions: ${t.version} mismatch" >&2; exit 1; }
+      '') toolchains}
+      touch $out
+    '';
 
   roots-metadata-fixtures = compareMetadata "roots-metadata-fixtures" [
     (metadataCase {
