@@ -58,7 +58,7 @@ breakbulk is a flake. Its library is `breakbulk.lib`.
       pkgs = nixpkgs.legacyPackages.${system};
       repo = breakbulk.lib.mkRepository {
         inherit pkgs;
-        root = ./.;            # or `root = self;`
+        root = self;           # the flake's own tree; `./.` works too
         modules = [ ./nix/rust.nix ];
       };
     in
@@ -112,8 +112,7 @@ another: `inputs.breakbulk.inputs.systems.follows = "systems";`. The
 library itself (`breakbulk.lib`) takes `pkgs` and works for any system.
 
 With flake-parts, import `breakbulk.lib.flakeModule` and set
-`perSystem.breakbulk = { root = ./.; modules = [ ./nix/rust.nix ]; }`
-(`root = self;` works too). It
+`perSystem.breakbulk = { root = self; modules = [ ./nix/rust.nix ]; }`. It
 adds packages, checks and dev shells for you.
 
 Other outputs, per workspace:
