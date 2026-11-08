@@ -1494,6 +1494,8 @@ product in checks and accept that failure. Default: the lighter check.
 
 >discuss
 
+> Resolved: option 3, via a generic pre-flight guard in the stage machinery (an empty product skips every stage and check); dynamic mode then uses the full product in checks. Being implemented.
+
 ## 113. FYI: `explainSharing` uses import-from-derivation even in dynamic mode
 
 It's a debugging tool, not part of a build, so it reads the build steps the
@@ -1501,6 +1503,8 @@ default way. For crates downstream of an embedded product it describes the
 default mode's version of them.
 
 >this seems fine? brief discuss
+
+> Resolved: fine as is.
 
 ## 114. FYI: your config answers are implemented
 
@@ -1521,6 +1525,8 @@ preset. Should it get `linuxMusl`?
 
 >how does it know what the build machine is in a pure flake?
 
+> Resolved: follows the `pkgs` you pass: a musl package set gets `linuxMusl` (now `linuxStatic`) (merged).
+
 ## 116. ASK: `nix-systems/default-linux` instead of `default`
 
 You said `nix-systems/default`; the flake uses `default-linux` because
@@ -1528,6 +1534,8 @@ You said `nix-systems/default`; the flake uses `default-linux` because
 yet. It's a one-line switch once Darwin works.
 
 >ack. do we have a gh issue for mac that includes this?
+
+> Resolved: keep `default-linux`; issue #13 notes the switch for Darwin.
 
 ## 117. FYI: the coverage crash is a nixpkgs bug, already fixed upstream (resolves 73)
 
@@ -1552,6 +1560,8 @@ in `nixos-unstable`. Details and a two-line reproducer:
   has been sent.
   
 >a. yes b. what's the cost c. no
+
+> Resolved: (a) yes, switch back once fixed (#20); (b) a probe costs one tiny cached build per toolchain; (c) don't file the drafts.
 
 ## 119. FYI: one rule for "library path inside the build" (resolves 84)
 
@@ -1605,6 +1615,8 @@ Acceptable?
 
 >discuss
 
+> Resolved: two options: `cargoTrimPaths` (who hides paths; by default on unless the project mentions `trim-paths` anywhere) and `sourcePaths = "hide" | "keep"` (whether to hide them at all); breakbulk's C prefix maps use Cargo's names when Cargo trims, so cc-rs and breakbulk agree; mixed settings keep failing. Being implemented.
+
 ## 122. ASK: zig follow-ups
 
 - The CentOS 7 container check downloads an image from Docker Hub and runs
@@ -1619,6 +1631,8 @@ Acceptable?
   paths.
   
 >a. yea b. explain c. discuss, LD_LIBRARY_PATH probably not acceptable, why not elf fixups?
+
+> Resolved: (a) container checks moved behind `nix run` (merged); (b) explained; (c) the preset (renamed `linuxPortable`) links everything from Nix statically, with a check that only glibc and declared system libraries are dynamic. Being implemented.
 
 ## 123. FYI: smaller verification notes
 
@@ -1659,6 +1673,8 @@ binary. Alternative: discard it when debug info is off.
 
 >agree
 
+> Resolved: keep the `.pdb`.
+
 ## 126. FYI: smaller notes from batch A
 
 - With `split-debuginfo = "unpacked"`, libraries' `.dwo` files are still
@@ -1667,6 +1683,8 @@ binary. Alternative: discard it when debug info is off.
   message instead of silently choosing mold.
   
 >a. ack b. why does mold only work on linux?
+
+> Resolved: (b) corrected: mold runs on macOS too; breakbulk just has no tested macOS build-machine setup (noted on #13).
 
 ## 127. FYI: test options and link-step library folders (resolves 17, 61, 107)
 
@@ -1710,6 +1728,7 @@ it gets added.
 
 >research?
 
+> Resolved: research: nothing beyond `NIX_LDFLAGS` is needed (`docs/spikes/link-flags.md`).
 
 ## 130. FYI: presets follow each workspace's compiler; future work written up (resolves 70, 91)
 
@@ -1736,6 +1755,8 @@ automatically for single values. Default: the module-system rule.
 
 >ack
 
+> Resolved: keep the module-system rule.
+
 ## 132. FYI: field-trial gaps closed (resolves 109, 19, 123; and `root = self`)
 
 - `root = self` works alongside `./.` (same build steps; with lazy trees,
@@ -1754,6 +1775,8 @@ automatically for single values. Default: the module-system rule.
   
 >a. self should be the doc default then if it makes lazy trees better? b. ack c. ack d. ack e. ack f. ack g. ack, is this useful? h. ack
 
+> Resolved: (a) README now uses `root = self` (reason: it means the repository root from any file; lazy trees treat both forms the same); the flake-parts module defaults to it.
+
 ## 133. ASK: other variants' tests run in `nix flake check` by default
 
 Every build or coverage variant's tests now go into `repo.checks`; set
@@ -1763,6 +1786,8 @@ default, opt in per variant.
 
 >discuss
 
+> Resolved: hand-written variants are tested by default; generated powerset variants are opt-in; coverage stays on. Being implemented.
+
 ## 134. ASK: toolchain references in products are now an error
 
 The default check fails when a product depends on rustc, its sysroot or
@@ -1771,6 +1796,8 @@ needs libstd; the error message says how to keep only the source part of
 the check (`noSourceReferences { toolchain = [ ]; }`). OK as a default?
 
 >discuss
+
+> Resolved: option 4: allow a toolchain reference only when the product's own needed-library list names a library in the sysroot (observe the artifact, not the flags). Being implemented.
 
 ## 135. ASK: on Cargo 1.101+, the dev shell needs a working manifest again
 
@@ -1782,6 +1809,8 @@ a project's own setting. Neither is perfect; a third option is to fall
 back to "always set it" when planning fails.
 
 >discuss
+
+> Resolved: resolved through 121: the dev shell uses the same file-reading rule, so it opens with a broken manifest on every Cargo version. Being implemented.
 
 ## 136. FYI: the ten scattered decisions now each have one home
 
@@ -1812,6 +1841,8 @@ Deferred, in "Known gaps (TODO)": install-layout sorting from traits
 
 >ack; do we have gh issues on the defers?
 
+> Resolved: deferred items are issues (#17).
+
 ## 137. ASK: package-level `splitDebug` mismatch: warning or error?
 
 When a package adds or removes `splitDebug` against its target's setting,
@@ -1819,9 +1850,33 @@ breakbulk now warns (removing it can be deliberate). Make it an error?
 
 >discuss
 
+> Resolved: debug splitting becomes a target property, `debugInfo = "split" | "keep" | "strip"`; packages can't toggle it, so no warning is needed. Being implemented.
+
 ## 138. FYI: Android counts as Linux
 
 `isLinux` is true for `*-linux-android`, as in nixpkgs, so Android targets
 keep Linux linker and post-link choices.
 
 >discuss
+
+> Resolved: `isLinux` excludes Android (new `kernel` fact); Android preset is issue #27. Being implemented.
+
+## 139. FYI: preset names follow purpose, not mechanism
+
+Renamed in the naming pass (no aliases; no users yet), with the mechanism
+inferred from the target triple: `linux` (was `linuxGnu`), `linuxStatic`
+(was `linuxMusl` and `staticGlibc`), `linuxPortable` (was `zig`),
+`windows` (was `msvc` and `windowsGnu`), `wasmWeb` (was `wasmBrowser`),
+`wasmComponent` (was `wasmComponent` and `wasip2`). Target traits were also
+renamed to neutral names (`executableSuffix`, `sharedLibrary*`,
+`staticLibrary*`, matching rustc's target-spec fields) and the debug side
+files became a declarative list. Being implemented.
+
+## 140. FYI: toolchain capabilities replace version numbers
+
+What breakbulk needs from a compiler (`--remap-path-scope`, `trim-paths`,
+nightly) becomes a per-toolchain capabilities record, from the version
+table or a cheap probe, overridable for forked compilers, with one source
+of truth passed to the Rust side. An inventory of every Cargo/rustc
+assumption breakbulk makes, each with the test that pins it, follows.
+Being implemented.
