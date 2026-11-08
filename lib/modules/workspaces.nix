@@ -217,6 +217,15 @@ let
         };
 
         test = {
+          stripForRun = mkOption {
+            type = types.bool;
+            default = false;
+            description = ''
+              The default `packages.<name>.test.stripForRun` for this
+              workspace's packages: test runs consume a debug-stripped copy
+              of each test binary. A package's own setting wins.
+            '';
+          };
           runner = mkOption {
             type = types.nullOr (
               types.enum [

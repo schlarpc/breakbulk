@@ -364,6 +364,69 @@ rec {
       envFlags = lib.optional (spec.envFlags != [ ]) env;
     };
 
+  # Decision 17, `test.stripForRun`: shell lines defining `stripForRun`,
+  # which strips debug info from the copy of a test binary its run
+  # consumes, so the source paths that the debug info of workspace
+  # libraries holds do not change the run's input. The GNU build ID goes
+  # too: the linker computes it over the whole file, debug info included.
+  # A file that is not ELF is left as it is.
+  stripScript = ''
+    stripForRun() {
+      chmod u+w "$1"
+      if [ "$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then
+        objcopy --strip-debug --remove-section=.note.gnu.build-id "$1"
+      else
+        echo "stripForRun: $1 is not ELF; left unchanged"
+      fi
+    }
+  '';
+
+  # The copy of a test binary a run executes, from `src` (a shell glob
+  # matching the one file): content-addressed when `caAttrs` says so,
+  # debug-stripped with `strip`. `prelude` runs first; `attrs` are extra
+  # derivation attributes.
+  binaryCopy =
+    {
+      pkgs,
+      name,
+      caAttrs,
+      strip,
+      src,
+      prelude ? "",
+      attrs ? { },
+    }:
+    pkgs.runCommand "${name}-bin${lib.optionalString strip "-stripped"}"
+      (
+        attrs
+        // caAttrs
+        // lib.optionalAttrs strip { nativeBuildInputs = [ pkgs.binutils-unwrapped-all-targets ]; }
+      )
+      ''
+        ${prelude}
+        files=(${src})
+        [ ''${#files[@]} -eq 1 ] || { echo "expected one file in ${src}" >&2; exit 1; }
+        mkdir -p $out
+        cp "''${files[0]}" $out/
+        ${lib.optionalString strip ''
+          ${stripScript}
+          stripForRun "$out/''${files[0]##*/}"
+        ''}
+      '';
+
+  # Decision 61, `test.runFiles`: a spec whose working directory and
+  # runtime CARGO_MANIFEST_DIR are `dir`, the package directory of a view
+  # holding only the listed files (lib/workspace.nix `runFilesDirs`).
+  narrowSpec =
+    dir: spec:
+    spec
+    // {
+      sourceDir = dir;
+      env = spec.env // {
+        CARGO_MANIFEST_DIR = dir;
+        CARGO_MANIFEST_PATH = "${dir}/Cargo.toml";
+      };
+    };
+
   # The package's test configuration, with defaults.
   testConfig =
     packages: pkg:
@@ -378,6 +441,8 @@ rec {
       includeIgnored = false;
       binaries = { };
       runner = "libtest";
+      stripForRun = false;
+      runFiles = null;
     }
     // t
     // {
@@ -630,6 +695,9 @@ rec {
             inherit (pkgs) overlays config;
           },
       packages ? { },
+      # runFilesDirs.<package> = the package directory of its `test.runFiles`
+      # view, for packages that set it (lib/workspace.nix).
+      runFilesDirs ? { },
       ca ? null,
       coverage ? false,
       name ? "breakbulk",
@@ -664,18 +732,19 @@ rec {
           root = r.breakbulkRoot;
         };
 
-      # The binary a run executes: a content-addressed copy when `ca`.
+      # The binary a run executes: a content-addressed copy when `ca`, a
+      # debug-stripped one with `test.stripForRun`, else the unit's output.
       binaryOf =
-        s:
-        if !useCa then
+        s: cfg:
+        if !useCa && !cfg.stripForRun then
           s.unitOut
         else
-          pkgs.runCommand "${s.name}-bin" caAttrs ''
-            files=(${s.unitOut}/*)
-            [ ''${#files[@]} -eq 1 ] || { echo "expected one file in ${s.unitOut}" >&2; exit 1; }
-            mkdir -p $out
-            cp "''${files[0]}" $out/
-          '';
+          binaryCopy {
+            inherit pkgs caAttrs;
+            inherit (s) name;
+            strip = cfg.stripForRun;
+            src = "${s.unitOut}/*";
+          };
 
       # A test run through nextest's reuse-build mode: nextest reads the
       # synthesized metadata (`nextestSpec`) and runs the one binary with
@@ -760,17 +829,26 @@ rec {
       run =
         r:
         let
+          cfg = testConfig packages r.breakbulkRoot.package;
+          base = spec r;
+          narrowed =
+            if cfg.runFiles == null then
+              base
+            else
+              narrowSpec (
+                runFilesDirs.${base.package}
+                  or (throw "breakbulk: packages.${base.package}.test.runFiles is set, but the package has no source view")
+              ) base;
           s =
             if useCa then
               stableSpec {
                 inherit pkgs caAttrs name;
-                spec = spec r;
+                spec = narrowed;
               }
             else
-              spec r;
-          cfg = testConfig packages s.package;
+              narrowed;
           args = testArgs cfg s.binary;
-          bin = binaryOf s;
+          bin = binaryOf s cfg;
         in
         if cfg.runner == "nextest" then
           nextestRun r s cfg args bin

@@ -252,6 +252,15 @@ let
         includeIgnored = a.includeIgnored || b.includeIgnored;
         sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
         runner = if b.runner != null then b.runner else a.runner;
+        stripForRun = if b.stripForRun != null then b.stripForRun else a.stripForRun;
+        # Several matching keys: the union of their lists.
+        runFiles =
+          if b.runFiles == null then
+            a.runFiles
+          else if a.runFiles == null then
+            b.runFiles
+          else
+            lib.unique (a.runFiles ++ b.runFiles);
         nextest = lib.mapAttrs (k: v: if b.nextest.${k} != null then b.nextest.${k} else v) a.nextest;
         binaries = lib.zipAttrsWith (
           _:
@@ -277,7 +286,8 @@ let
         sourceScope = [ ];
         binaries = { };
         # The workspace's defaults (decision 93); package settings win.
-        inherit (cfg.workspaces.${wsName}.test) runner nextest;
+        runFiles = null;
+        inherit (cfg.workspaces.${wsName}.test) runner nextest stripForRun;
       };
       # nextest reads `.config/nextest.toml` under the Cargo workspace root.
       nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";

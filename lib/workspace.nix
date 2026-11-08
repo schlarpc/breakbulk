@@ -187,6 +187,31 @@ let
     )
   );
 
+  # Members with `test.runFiles` (decision 61): the package directory of a
+  # view of the repository root holding only those paths (relative to the
+  # package directory, at their usual places), by package name. Test runs
+  # use it as their working directory and runtime CARGO_MANIFEST_DIR. A
+  # listed path that does not exist is an evaluation error; `[ ]` gives an
+  # empty package directory.
+  runFilesDirs = lib.concatMapAttrs (
+    pkgName: v:
+    let
+      files = packages.${pkgName}.test.runFiles or null;
+      at = rel: if rel == "" then root else root + "/${rel}";
+      view =
+        if files == [ ] then
+          pkgs.runCommand "${name}-${pkgName}-run-files" { } "mkdir -p $out${lib.optionalString (v.dir != "") "/${v.dir}"}"
+        else
+          lib.fileset.toSource {
+            inherit root;
+            fileset = lib.fileset.unions (map (p: at (util.joinRel v.dir p)) files);
+          };
+    in
+    lib.optionalAttrs (files != null) {
+      ${pkgName} = if v.dir == "" then "${view}" else "${view}/${v.dir}";
+    }
+  ) views;
+
   # Check and clippy variants link nothing: no roots, no test runs.
   checking = mode == "check" || mode == "clippy";
 
@@ -369,6 +394,7 @@ let
       runner
       testSystem
       packages
+      runFilesDirs
       ca
       name
       ;
@@ -459,6 +485,7 @@ in
           target
           runner
           testSystem
+          runFilesDirs
           ca
           ;
         name = "${name}-bench";

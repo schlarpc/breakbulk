@@ -203,6 +203,15 @@
               breakbulk = self.lib;
             }) [ "workspaces" ]
           )
+          # Test-run options: a debug-stripped copy (test.stripForRun,
+          # decision 17) and a narrowed working directory (test.runFiles,
+          # decision 61). The CA check: tests/test-options/run.sh.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-options-${n}" v) (
+            builtins.removeAttrs (import ./tests/test-options {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "runs" ]
+          )
           # Native libraries at the link steps of the packages that link a
           # `-sys` crate (decision 107).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "native-link-${n}" v) (

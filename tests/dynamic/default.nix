@@ -141,6 +141,25 @@ let
       oneWs
       { packages.ctl.test = ctlTest; }
     ];
+    # Test runs of a debug-stripped copy (test.stripForRun, decision 17) in
+    # a narrowed working directory (test.runFiles, decision 61); its tests
+    # assert the working directory and CARGO_MANIFEST_DIR, and read only
+    # listed files.
+    test-options = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = ../test-options/fixture;
+      modules = [
+        { inherit mode; }
+        oneWs
+        {
+          workspaces.main.test.stripForRun = true;
+          packages.app.test.runFiles = [
+            "data"
+            "notes.md"
+          ];
+        }
+      ];
+    };
     # A product with a bin Cargo skips (required features): left out.
     required-features = mkRepo "required-features" [ oneWs ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.

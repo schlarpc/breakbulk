@@ -496,6 +496,7 @@ repo = breakbulk.lib.mkRepository {
     roots = null;                     # override predicted root names
     devShell.setTarget = true;        # export CARGO_BUILD_TARGET in the dev shell
     test.runner = null;               # default test runner of its packages: libtest | nextest
+    test.stripForRun = false;         # default packages.<name>.test.stripForRun
     test.nextest = { profile = null; configFile = null; package = null; };  # defaults; packages override
     benchSmoke = false;               # run each bench once in test mode, as a check
     docs.noDeps = true;               # cargo doc --no-deps (later)
@@ -521,6 +522,8 @@ repo = breakbulk.lib.mkRepository {
     stages = { }; checks = { };
     test = {
       env = { }; path = [ ]; sourceScope = [ ];
+      runFiles = null;                # or [ "tests/fixtures" ]: the run's cwd holds only these (decision 61)
+      stripForRun = null;             # run a debug-stripped copy (null: the workspace's test.stripForRun; decision 17)
       args = [ ];                     # libtest flags for every test binary, e.g. [ "--skip" "net::" ]
       includeIgnored = false;         # also run #[ignore] tests
       runner = null;                  # libtest | nextest (null: the workspace's test.runner, else libtest)
@@ -617,6 +620,7 @@ A workspace package's source is `lib.fileset.toSource { root = <repository root>
 - **Default fileset:** the package directory, minus `target/`, `.git`, `result*`, and any nested directories that belong to other workspace members.
 - **Plus:** the package's `extraSources`, at their original relative paths.
 - **Test units** additionally get `test.sourceScope`.
+- **Test runs** with `test.runFiles` run in a narrower view instead: `lib.fileset.toSource` of only the listed paths (relative to the package directory, at their places in the repository), or an empty package directory for `[ ]`. A listed path that does not exist is an evaluation error.
 
 ### The planning skeleton
 
@@ -743,7 +747,7 @@ Debuginfo side files (decision 89): the `linked` stage has a second output, `deb
 - **Test binaries** are roots with `test = true` in the test plan. `tests.<pkg>.<name>` is the binary's `linked` stage. Test binaries are never stripped.
 - **`CARGO_BIN_EXE_<name>`** is compile-time env recorded by the planner, and is rewritten to the bin root's `linked` output. The test's compile unit therefore depends on that link.
 - **`CARGO_TARGET_TMPDIR`** is also compile-time env, but must be writable when the test runs. It is rewritten to a fixed path under the build directory, and the test-run derivation creates that path before running (see spikes).
-- **Test runs** are one derivation per test binary. A small CA derivation copies the test binary, and the test run consumes that copy, so a byte-identical binary does not re-run. The run uses the target's `runner`, with the package source view as the working directory (as Cargo does), plus Cargo's runtime env (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`), the package's `test.env`, and `test.path` on `PATH`. Its `system` is the target's `testSystem` when set. Its dynamic-library path holds the in-`out` search paths of **every** run of the test's platform in the plan, not only the test's dependencies, as Cargo does, then the sysroot's target library directory, from a small derivation holding only that directory's shared libraries (so a test run does not depend on the whole toolchain; decision 94). It succeeds on exit 0, and its output records the log.
+- **Test runs** are one derivation per test binary. A small CA derivation copies the test binary, and the test run consumes that copy, so a byte-identical binary does not re-run. With `test.stripForRun` (decision 17) the copy is stripped of debug info and of its GNU build ID (`objcopy --strip-debug --remove-section=.note.gnu.build-id`; the linker computes the ID over the whole file), because the debug info of the workspace libraries it links names their source views; files that are not ELF are copied as they are. Without `ca` the stripped copy is input-addressed. With `test.runFiles` (decision 61) the working directory and the runtime `CARGO_MANIFEST_DIR` (and `CARGO_MANIFEST_PATH`, which then may not exist) are the package directory of the narrowed view; a test reading another file fails. Test apps keep the package's whole view and the unstripped binary. In dynamic-derivation mode both options work the same, but a test run there reads its spec from the root's wrapper, whose `breakbulk-root.json` names input-addressed paths (the source view, build-script outputs), so dynamic-mode test runs are re-run after any such edit regardless (no cutoff yet). The run uses the target's `runner`, with the package source view as the working directory (as Cargo does), plus Cargo's runtime env (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`), the package's `test.env`, and `test.path` on `PATH`. Its `system` is the target's `testSystem` when set. Its dynamic-library path holds the in-`out` search paths of **every** run of the test's platform in the plan, not only the test's dependencies, as Cargo does, then the sysroot's target library directory, from a small derivation holding only that directory's shared libraries (so a test run does not depend on the whole toolchain; decision 94). It succeeds on exit 0, and its output records the log.
 - **Skipped tests:** a predicted test the plan lacks gets a test-run stub that succeeds and logs the reason.
 - **Test arguments:** `test.args` and `test.binaries.<binary>.args` are passed to the binary; `includeIgnored` adds `--include-ignored`. They are part of the test-run derivation, so changing them re-runs only the affected runs. `enable = false` leaves a binary's run out of `repo.checks`. Every test run sets `RUST_TEST_THREADS=$NIX_BUILD_CORES`.
 - **Test apps:** each test binary also gets a runnable app with the test run's working directory, environment and runner, run on the user's machine. It is the escape hatch for tests that need network, and the way to rerun one binary under a debugger or with a filter. Network access inside `nix flake check` (through a fixed-output test run) is a possible later addition; impure derivations are not used.
