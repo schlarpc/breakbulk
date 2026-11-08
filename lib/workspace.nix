@@ -399,9 +399,9 @@ let
   # Put a root unit's single linked file at $out/<dir>/<name>. Products and
   # their stages come in M4; this is only enough to run things.
   # A root's executable name: its target name with the target's executable
-  # suffix (traits.exeSuffix: `.exe` on Windows, `.wasm` for wasm), as
+  # suffix (traits.executableSuffix: `.exe` on Windows, `.wasm` for wasm), as
   # Cargo uplifts it.
-  exeName = r: "${r.breakbulkRoot.target}${traits.exeSuffix}";
+  exeName = r: "${r.breakbulkRoot.target}${traits.executableSuffix}";
 
   install =
     dir: fileName: r:

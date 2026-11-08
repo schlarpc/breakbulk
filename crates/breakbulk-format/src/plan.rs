@@ -313,7 +313,7 @@ impl CompileUnit {
     /// Nix outputs are fixed before the build, so this is decided from the
     /// command line; host units (build scripts, proc macros) only run
     /// during the build, so theirs are discarded.
-    pub fn has_debug_output(&self, traits: TargetTraits) -> bool {
+    pub fn has_debug_output(&self, traits: &TargetTraits) -> bool {
         self.platform == Platform::Target
             && self.outputs.contains_key("bin")
             && writes_debuginfo_side_files(
@@ -333,30 +333,69 @@ impl CompileUnit {
 /// `toolchains.json` as `targetTraits`, so no program re-derives a platform
 /// fact from the spelling of a triple, and a target the user declared
 /// traits for behaves as declared.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TargetTraits {
-    /// The target's linker writes a debuginfo side file for every crate it
-    /// links, whatever `-C debuginfo` and `-C strip` say: on
+    /// The debuginfo files rustc's link writes beside a linked output,
+    /// which `--print file-names` does not name (the traits'
+    /// `debugArtifacts`): `.pdb` on msvc, `.dwp`/`.dwo` on ELF, `.dSYM` on
+    /// Apple targets. Empty: none (wasm, a target with no split debuginfo).
+    pub debug_artifacts: Vec<DebugArtifact>,
+}
+
+impl TargetTraits {
+    /// A target whose links write no debuginfo side files.
+    pub const NONE: &'static TargetTraits = &TargetTraits {
+        debug_artifacts: Vec::new(),
+    };
+}
+
+/// One kind of debuginfo side file (the traits' `debugArtifacts` entries).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DebugArtifact {
+    /// The file name suffix: `.pdb`, `.dwp`, `.dwo`, `.dSYM`.
+    pub suffix: String,
+    /// When rustc's link writes it.
+    pub when: DebugArtifactWhen,
+    /// One per object file (`.dwo`), not one per linked output.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_object: bool,
+    /// A directory (`.dSYM`), not a file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub directory: bool,
+}
+
+/// When a [`DebugArtifact`] is written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebugArtifactWhen {
+    /// For every crate the linker produces (`bin`, `cdylib`, `dylib`,
+    /// `--test`), whatever `-C debuginfo` and `-C strip` say: on
     /// `*-windows-msvc`, rustc passes `/DEBUG` to the MSVC-style linker
     /// unconditionally (rustc_codegen_ssa back/linker.rs,
     /// `MsvcLinker::debuginfo` ignores its `strip` argument; 1.95 through
     /// master, and an msvc release build with `-C strip=debuginfo` was seen
     /// to write a 1.2 MB PDB).
-    pub linker_writes_debug_file: bool,
+    Always,
+    /// With debuginfo on and `-C split-debuginfo=packed`.
+    SplitPacked,
+    /// With debuginfo on and `-C split-debuginfo=unpacked`.
+    SplitUnpacked,
 }
 
 /// Whether rustc, given these command-line arguments (`None` for an
 /// argument that is not a literal: a build script's splices cannot set
 /// codegen options) for a crate of these types, writes debuginfo side files
-/// next to its linked output, on a target with these traits:
+/// next to its linked output, on a target with these traits: whether any of
+/// the traits' [`DebugArtifact`]s applies.
 ///
-/// - the linker's side file (`.pdb` on msvc) when
-///   [`TargetTraits::linker_writes_debug_file`], for every crate type the
-///   linker produces (`bin`, `cdylib`, `dylib`, and `--test`). A staticlib
-///   is archived, not linked.
-/// - `.dwp` (`packed`) or `.dwo` (`unpacked`) when the effective
-///   `-C split-debuginfo` is one of those and debuginfo is on. Cargo passes
+/// - [`DebugArtifactWhen::Always`] applies to every crate type the linker
+///   produces (`bin`, `cdylib`, `dylib`, and `--test`). A staticlib is
+///   archived, not linked.
+/// - [`DebugArtifactWhen::SplitPacked`] and
+///   [`DebugArtifactWhen::SplitUnpacked`] apply when the effective
+///   `-C split-debuginfo` is that value and debuginfo is on. Cargo passes
 ///   `-C split-debuginfo` only together with `-C debuginfo` (cargo
 ///   src/compiler/mod.rs, `build_base_args`), but rustflags can add
 ///   either. As in rustc (rustc_session config.rs `select_debuginfo`), a
@@ -365,7 +404,7 @@ pub struct TargetTraits {
 pub fn writes_debuginfo_side_files<'a>(
     args: impl IntoIterator<Item = Option<&'a str>>,
     crate_types: &[String],
-    traits: TargetTraits,
+    traits: &TargetTraits,
 ) -> bool {
     let mut debuginfo_on = false;
     let mut split = None;
@@ -397,8 +436,11 @@ pub fn writes_debuginfo_side_files<'a>(
         || crate_types
             .iter()
             .any(|t| matches!(t.as_str(), "bin" | "cdylib" | "dylib"));
-    (traits.linker_writes_debug_file && links)
-        || (debuginfo_on && matches!(split, Some("packed" | "unpacked")))
+    traits.debug_artifacts.iter().any(|a| match a.when {
+        DebugArtifactWhen::Always => links,
+        DebugArtifactWhen::SplitPacked => debuginfo_on && split == Some("packed"),
+        DebugArtifactWhen::SplitUnpacked => debuginfo_on && split == Some("unpacked"),
+    })
 }
 
 /// A build-script run.

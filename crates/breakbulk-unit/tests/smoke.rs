@@ -84,8 +84,8 @@ impl Tokens<'_> {
 
 impl Resolve for Tokens<'_> {
     type Error = String;
-    fn target_traits(&self) -> breakbulk_format::TargetTraits {
-        breakbulk_format::TargetTraits::default()
+    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
+        breakbulk_format::TargetTraits::NONE
     }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Ok(match r {
@@ -142,7 +142,7 @@ fn derivation_outputs(u: &Unit) -> Vec<String> {
             .keys()
             .map(|o| derivation_output(o).to_owned())
             .chain(
-                c.has_debug_output(breakbulk_format::TargetTraits::default())
+                c.has_debug_output(breakbulk_format::TargetTraits::NONE)
                     .then(|| "debug".to_owned()),
             )
             .collect(),

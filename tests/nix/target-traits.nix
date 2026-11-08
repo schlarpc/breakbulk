@@ -36,7 +36,7 @@ let
           arch = "x86_64";
           os = "linux";
           env = "musl";
-          exeSuffix = ".elf";
+          executableSuffix = ".elf";
         };
         # A known triple with one trait corrected.
         workspaces.main.targets."x86_64-unknown-linux-gnu".traits.dylibPathVar = "MY_LIBS";
@@ -100,6 +100,54 @@ let
   results = map check rows;
   mismatches = lib.filter builtins.isString results;
   known = lib.count (x: x == true) results;
+
+  # The file-name traits against `rustc --print file-names` per crate type
+  # (empty where rustc drops the crate type for the target: no dylibs on
+  # wasm, none of either on bare metal).
+  rustcFileNames = pkgs.runCommand "rustc-target-file-names" { nativeBuildInputs = [ pkgs.rustc ]; } ''
+    for t in $(rustc --print target-list); do
+      rustc --print cfg --target "$t" >/dev/null 2>&1 || continue
+      printf '%s' "$t"
+      for c in bin dylib cdylib staticlib; do
+        printf '\t%s' "$(rustc --print file-names --crate-type $c --crate-name foo --target "$t" - </dev/null 2>/dev/null)"
+      done
+      printf '\n'
+    done > $out
+  '';
+  fileNameRows = map (
+    l:
+    let
+      f = lib.splitString "\t" l;
+    in
+    {
+      triple = lib.elemAt f 0;
+      bin = lib.elemAt f 1;
+      dylib = lib.elemAt f 2;
+      cdylib = lib.elemAt f 3;
+      staticlib = lib.elemAt f 4;
+    }
+  ) (lib.filter (l: l != "") (lib.splitString "\n" (builtins.readFile rustcFileNames)));
+  checkFileNames =
+    row:
+    let
+      t = r row.triple;
+      expect = {
+        bin = "foo${t.executableSuffix}";
+        dylib = "${t.sharedLibraryPrefix}foo${t.sharedLibrarySuffix}";
+        cdylib = "${t.sharedLibraryPrefix}foo${t.sharedLibrarySuffix}";
+        staticlib = "${t.staticLibraryPrefix}foo${t.staticLibrarySuffix}";
+      };
+      wrong = lib.filter (c: row.${c} != "" && row.${c} != expect.${c}) (lib.attrNames expect);
+    in
+    if tt.parse row.triple == null then
+      null
+    else if wrong == [ ] then
+      true
+    else
+      "${row.triple}: ${lib.concatMapStringsSep ", " (c: "${c} is ${row.${c}}, traits say ${expect.${c}}") wrong}";
+  fileNameResults = map checkFileNames fileNameRows;
+  fileNameMismatches = lib.filter builtins.isString fileNameResults;
+  fileNamesKnown = lib.count (x: x == true) fileNameResults;
 in
 {
   target-traits = runTests "target-traits" {
@@ -111,11 +159,11 @@ in
         "env"
         "isLinux"
         "objectFormat"
-        "exeSuffix"
+        "executableSuffix"
         "dylibPathVar"
         "stagePreset"
-        "debugSideFile"
-        "linkerWritesDebugFile"
+        "kernel"
+        "debugArtifacts"
       ] (r "x86_64-unknown-linux-gnu");
       expected = {
         arch = "x86_64";
@@ -124,11 +172,21 @@ in
         env = "gnu";
         isLinux = true;
         objectFormat = "elf";
-        exeSuffix = "";
+        executableSuffix = "";
         dylibPathVar = "LD_LIBRARY_PATH";
         stagePreset = "linuxGnu";
-        debugSideFile = "dwp";
-        linkerWritesDebugFile = false;
+        kernel = "linux";
+        debugArtifacts = [
+          {
+            suffix = ".dwp";
+            when = "split-packed";
+          }
+          {
+            suffix = ".dwo";
+            when = "split-unpacked";
+            perObject = true;
+          }
+        ];
       };
     };
     testMsvc = {
@@ -137,13 +195,13 @@ in
         "isMsvc"
         "isMingw"
         "objectFormat"
-        "exeSuffix"
-        "dylibPrefix"
-        "dylibSuffix"
-        "staticlibPrefix"
-        "staticlibSuffix"
-        "debugSideFile"
-        "linkerWritesDebugFile"
+        "executableSuffix"
+        "sharedLibraryPrefix"
+        "sharedLibrarySuffix"
+        "staticLibraryPrefix"
+        "staticLibrarySuffix"
+        "debugArtifacts"
+        "kernel"
         "dylibPathVar"
         "dylibPathSep"
         "stagePreset"
@@ -153,20 +211,25 @@ in
         isMsvc = true;
         isMingw = false;
         objectFormat = "pe";
-        exeSuffix = ".exe";
-        dylibPrefix = "";
-        dylibSuffix = ".dll";
-        staticlibPrefix = "";
-        staticlibSuffix = ".lib";
-        debugSideFile = "pdb";
-        linkerWritesDebugFile = true;
+        executableSuffix = ".exe";
+        sharedLibraryPrefix = "";
+        sharedLibrarySuffix = ".dll";
+        staticLibraryPrefix = "";
+        staticLibrarySuffix = ".lib";
+        debugArtifacts = [
+          {
+            suffix = ".pdb";
+            when = "always";
+          }
+        ];
+        kernel = "windows";
         dylibPathVar = "PATH";
         dylibPathSep = ";";
         stagePreset = "msvc";
       };
     };
     testMingw = {
-      expr = map (t: pick [ "isMingw" "abi" "staticlibSuffix" "stagePreset" ] (r t)) [
+      expr = map (t: pick [ "isMingw" "abi" "staticLibrarySuffix" "stagePreset" ] (r t)) [
         "x86_64-pc-windows-gnu"
         "x86_64-pc-windows-gnullvm"
       ];
@@ -174,13 +237,13 @@ in
         {
           isMingw = true;
           abi = "";
-          staticlibSuffix = ".a";
+          staticLibrarySuffix = ".a";
           stagePreset = null;
         }
         {
           isMingw = true;
           abi = "llvm";
-          staticlibSuffix = ".a";
+          staticLibrarySuffix = ".a";
           stagePreset = null;
         }
       ];
@@ -195,7 +258,7 @@ in
               "env"
               "isWasm"
               "isWasi"
-              "exeSuffix"
+              "executableSuffix"
               "dylibPathVar"
               "objectFormat"
             ] (r t)
@@ -210,7 +273,7 @@ in
           env = "";
           isWasm = true;
           isWasi = false;
-          exeSuffix = ".wasm";
+          executableSuffix = ".wasm";
           dylibPathVar = null;
           objectFormat = "wasm";
         }
@@ -219,14 +282,14 @@ in
           env = "p2";
           isWasm = true;
           isWasi = true;
-          exeSuffix = ".wasm";
+          executableSuffix = ".wasm";
           dylibPathVar = null;
           objectFormat = "wasm";
         }
       ];
     };
     testOthers = {
-      expr = map (t: pick [ "os" "env" "abi" "objectFormat" "isLinux" "stagePreset" ] (r t)) [
+      expr = map (t: pick [ "os" "env" "abi" "objectFormat" "isLinux" "kernel" "stagePreset" ] (r t)) [
         "aarch64-unknown-linux-musl"
         "riscv64gc-unknown-linux-gnu"
         "x86_64-unknown-none"
@@ -241,6 +304,7 @@ in
           abi = "";
           objectFormat = "elf";
           isLinux = true;
+          kernel = "linux";
           stagePreset = "linuxGnu";
         }
         {
@@ -249,6 +313,7 @@ in
           abi = "";
           objectFormat = "elf";
           isLinux = true;
+          kernel = "linux";
           stagePreset = "linuxGnu";
         }
         {
@@ -257,6 +322,7 @@ in
           abi = "";
           objectFormat = "elf";
           isLinux = false;
+          kernel = null;
           stagePreset = null;
         }
         {
@@ -265,6 +331,7 @@ in
           abi = "eabihf";
           objectFormat = "elf";
           isLinux = false;
+          kernel = null;
           stagePreset = null;
         }
         {
@@ -272,8 +339,9 @@ in
           env = "";
           abi = "";
           objectFormat = "elf";
-          isLinux = true;
-          stagePreset = "linuxGnu";
+          isLinux = false;
+          kernel = "linux";
+          stagePreset = null;
         }
         {
           os = "macos";
@@ -281,6 +349,7 @@ in
           abi = "";
           objectFormat = "macho";
           isLinux = false;
+          kernel = "darwin";
           stagePreset = null;
         }
       ];
@@ -449,6 +518,33 @@ in
         true
       ];
     };
+    # A misspelt or renamed trait is an error, not silently ignored.
+    testMisnamedTrait = {
+      expr = fails (tt.resolve {
+        triple = "x86_64-unknown-linux-gnu";
+        traits.exeSuffix = ".elf";
+      }).os;
+      expected = true;
+    };
+    # Android: the Linux kernel, not a Linux userland (decision 138). No
+    # linker rule (issue #27), and qemu-user cannot run bionic programs.
+    testAndroid = {
+      expr =
+        let
+          a = r "aarch64-linux-android";
+        in
+        [
+          (fails (bb.presets.linkerKind { triple = "aarch64-linux-android"; }))
+          (bb.presets.runnerKind {
+            traits = a;
+            canExecute = false;
+          })
+        ];
+      expected = [
+        true
+        "none"
+      ];
+    };
     # A user's base fields recompute the derived ones; a derived field set
     # directly wins.
     testUserTraits = {
@@ -461,7 +557,7 @@ in
             "vendor"
             "isLinux"
             "objectFormat"
-            "exeSuffix"
+            "executableSuffix"
             "dylibPathVar"
             "stagePreset"
           ]
@@ -471,7 +567,7 @@ in
               traits = {
                 os = "linux";
                 env = "musl";
-                exeSuffix = ".elf";
+                executableSuffix = ".elf";
               };
             }
           );
@@ -482,7 +578,7 @@ in
         vendor = "unknown";
         isLinux = true;
         objectFormat = "elf";
-        exeSuffix = ".elf";
+        executableSuffix = ".elf";
         dylibPathVar = "LD_LIBRARY_PATH";
         stagePreset = "linuxGnu";
       };
@@ -491,7 +587,7 @@ in
     # target, and decisions made from it.
     testRepositoryTraits = {
       expr = {
-        board = pick [ "os" "env" "exeSuffix" "isLinux" "stagePreset" ] board;
+        board = pick [ "os" "env" "executableSuffix" "isLinux" "stagePreset" ] board;
         linker = bb.presets.linkerKind {
           triple = "my-board";
           traits = board;
@@ -507,7 +603,7 @@ in
         board = {
           os = "linux";
           env = "musl";
-          exeSuffix = ".elf";
+          executableSuffix = ".elf";
           isLinux = true;
           stagePreset = "linuxGnu";
         };
@@ -525,7 +621,10 @@ in
     ) "target-traits-rustc: parse disagrees with rustc:\n${lib.concatStringsSep "\n" mismatches}";
     # Every target breakbulk has a preset or a test for is known.
     assert lib.assertMsg (known >= 200) "target-traits-rustc: only ${toString known} targets known";
+    assert lib.assertMsg (fileNameMismatches == [ ])
+      "target-traits-rustc: file-name traits disagree with rustc --print file-names:\n${lib.concatStringsSep "\n" fileNameMismatches}";
+    assert lib.assertMsg (fileNamesKnown == known) "target-traits-rustc: file names checked for ${toString fileNamesKnown} targets, cfg for ${toString known}";
     pkgs.runCommand "target-traits-rustc" { } ''
-      echo "${toString known} of ${toString (lib.length rows)} rustc targets parsed, all agreeing with rustc --print cfg" > $out
+      echo "${toString known} of ${toString (lib.length rows)} rustc targets parsed, all agreeing with rustc --print cfg and --print file-names" > $out
     '';
 }

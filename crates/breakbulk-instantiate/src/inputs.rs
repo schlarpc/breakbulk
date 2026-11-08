@@ -60,8 +60,9 @@ pub struct Toolchains {
     #[serde(default)]
     pub shipped_remap_scope: Option<String>,
     /// The target platform's traits that instantiation needs (the Nix
-    /// library's `targetTraits.forRust`): whether link units get a `debug`
-    /// output for side files the linker always writes. Required, so a
+    /// library's `targetTraits.forRust`): the debuginfo side files its links
+    /// write (`debugArtifacts`), which decide whether link units get a
+    /// `debug` output. Required, so a
     /// caller cannot silently get another platform's behaviour.
     pub target_traits: breakbulk_format::TargetTraits,
 }

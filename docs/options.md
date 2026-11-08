@@ -1914,7 +1914,7 @@ the install layout and file names, debuginfo side files, the
 dynamic-library path of test processes, static linking\. Base
 fields (` arch `, ` vendor `, ` os `, ` env `, ` abi `, ` families `, as
 rustc’s ` target_* ` cfg values) recompute the derived ones
-(` isLinux `, ` objectFormat `, ` exeSuffix `, ` dylibPathVar `, …);
+(` isLinux `, ` objectFormat `, ` executableSuffix `, ` dylibPathVar `, …);
 derived fields set here win over the computed ones\. A triple with
 no built-in traits (a custom target, a ` .json ` target spec, an
 uncommon OS) needs at least the base fields here; reading any

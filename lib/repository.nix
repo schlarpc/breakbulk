@@ -775,7 +775,7 @@ let
         else
           pkgs.runCommand r.breakbulkRoot.target { } ''
             files=(${r}/*)
-            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}${traits.exeSuffix}
+            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}${traits.executableSuffix}
           '';
     in
     lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (

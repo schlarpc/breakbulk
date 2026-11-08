@@ -28,6 +28,15 @@ fn smoke_plan() -> Plan {
     Plan::from_json(&text).unwrap()
 }
 
+/// The traits' `debugArtifacts` of an ELF target (lib/target-traits.nix),
+/// as `toolchains.json` carries them.
+fn elf_traits() -> breakbulk_format::TargetTraits {
+    serde_json::from_str(
+        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}]}"#,
+    )
+    .unwrap()
+}
+
 fn smoke_inputs() -> Inputs {
     Inputs {
         plan: smoke_plan(),
@@ -53,7 +62,7 @@ fn smoke_inputs() -> Inputs {
                 env_capture: true,
             },
             shipped_remap_scope: None,
-            target_traits: Default::default(),
+            target_traits: elf_traits(),
         },
         overrides: Overrides {
             strict_sources: false,
@@ -161,8 +170,8 @@ impl RealPaths<'_> {
 
 impl Resolve for RealPaths<'_> {
     type Error = String;
-    fn target_traits(&self) -> breakbulk_format::TargetTraits {
-        self.0.toolchains.target_traits
+    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
+        &self.0.toolchains.target_traits
     }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         let (base, rel) = match r {
