@@ -142,6 +142,14 @@ pub struct BuildOutput {
     pub rerun_if_changed: Vec<String>,
     pub rerun_if_env_changed: Vec<String>,
     pub log_messages: Vec<LogMessage>,
+    /// Not a directive: the directories of the run's `out` that copy
+    /// Cargo's `<profile>` and `<profile>/deps` and hold files the script
+    /// wrote there (#23), in that order. Cargo puts both on a test's or
+    /// `cargo run`'s dynamic-library path, after the search paths
+    /// (`Compilation::fill_env`), so libraries scripts copy next to the
+    /// binaries are found; breakbulk's test runs do the same with these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_dirs: Vec<String>,
 }
 
 impl BuildOutput {

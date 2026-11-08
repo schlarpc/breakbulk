@@ -413,3 +413,32 @@ fn trim_paths_remap_gets_the_build_directory_pairs() {
         ""
     );
 }
+
+#[test]
+fn target_dirs_are_profile_and_deps_with_files() {
+    let out = Path::new("/nix/store/o");
+    let rel = "t/debug/build/foo-1/out";
+    let files = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        target_dirs(
+            out,
+            rel,
+            &files(&["t/debug/deps/libx.so", "t/debug/libx.so"])
+        ),
+        ["/nix/store/o/t/debug", "/nix/store/o/t/debug/deps"]
+    );
+    assert_eq!(
+        target_dirs(
+            out,
+            rel,
+            &files(&["t/debug/deps/libx.so", "t/debug/examples/libx.so"])
+        ),
+        ["/nix/store/o/t/debug/deps"]
+    );
+    assert!(target_dirs(out, rel, &[]).is_empty());
+    // New layout, a package named `build`: the profile is before the first `build`.
+    assert_eq!(
+        target_dirs(out, "debug/build/build/1/out", &files(&["debug/libx.so"])),
+        ["/nix/store/o/debug"]
+    );
+}

@@ -143,12 +143,17 @@ let
   # upstream run's (`inOutDir`/`inBuildDir`, `LibraryPath::for_dylib_path`
   # in breakbulk-unit), joined with `sep`. The filter comes first: a value
   # one run printed inside its `out` is kept even if another run printed it
-  # too.
+  # too. Then, as Cargo puts `<profile>` and `<profile>/deps` after the
+  # search paths (`Compilation::fill_env`), the copies of them in run
+  # outputs that hold files a script wrote there (`targetDirs`, #23):
+  # every `<profile>`, then every `deps`.
   dylibJqWith = sep: ''
     def strip: if test("^(native|crate|dependency|framework|all)=") then sub("^[a-z]+="; "") else . end;
-    [inputs | .libraryPaths[] | select(.inOutDir or (.inBuildDir // false)) | .value]
-    | unique_by(split("/"))
-    | map(strip)
+    [inputs] as $runs
+    | ([$runs[] | .libraryPaths[] | select(.inOutDir or (.inBuildDir // false)) | .value]
+       | unique_by(split("/"))
+       | map(strip))
+      + ([$runs[] | (.targetDirs // [])[]] | unique | sort_by(endswith("/deps")))
     | join("${sep}")
   '';
   dylibJq = dylibJqWith ":";

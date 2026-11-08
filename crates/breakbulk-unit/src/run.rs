@@ -484,8 +484,10 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
             removed.display()
         );
     }
-    write_json(&flags.join(DIRECTIVES_FILE), &success.output)?;
     let outside = files_outside(&out, &out_dir)?;
+    let mut output = success.output;
+    output.target_dirs = target_dirs(&out, &r.out_dir, &outside);
+    write_json(&flags.join(DIRECTIVES_FILE), &output)?;
     if !outside.is_empty() {
         write_json(&flags.join(TARGET_FILES_FILE), &outside)?;
     }
@@ -494,7 +496,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
             &flags.join(METADATA_FILE),
             &MetadataFile {
                 links: links.clone(),
-                metadata: success.output.metadata.clone(),
+                metadata: output.metadata.clone(),
                 out: Some(out_dir.display().to_string()),
             },
         )?;
@@ -530,6 +532,25 @@ pub fn prepare_out_dir(out: &Path, rel: &str) -> Result<PathBuf, Error> {
         std::fs::create_dir_all(&d).map_err(|e| io_err("creating", &d, e))?;
     }
     Ok(out_dir)
+}
+
+/// Of `<profile>` and `<profile>/deps` in the run's `out` (`rel` is
+/// `[<triple>/]<profile>/build/…/out`), the ones holding a file of `files`
+/// (paths relative to `out`), as absolute paths: what goes on a test's
+/// dynamic-library path ([`BuildOutput::target_dirs`]).
+pub fn target_dirs(out: &Path, rel: &str, files: &[String]) -> Vec<String> {
+    let Some((profile, _)) = rel.split_once("/build/") else {
+        return Vec::new();
+    };
+    [profile.to_owned(), format!("{profile}/deps")]
+        .into_iter()
+        .filter(|d| {
+            files
+                .iter()
+                .any(|f| Path::new(f).parent() == Some(Path::new(d)))
+        })
+        .map(|d| out.join(d).display().to_string())
+        .collect()
 }
 
 /// Files (and symlinks) under `out` but not under `out_dir`, relative to

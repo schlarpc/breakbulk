@@ -478,7 +478,9 @@ in
   # (classic layout with nixpkgs' Cargo 1.99), with `<profile>/deps`
   # beside it. A build script that walks up to `<target>/<profile>` writes
   # there and into `deps/`; the bin includes a file from OUT_DIR; the files
-  # outside OUT_DIR are listed in the run's `flags/target-files.json`.
+  # outside OUT_DIR are listed in the run's `flags/target-files.json`, and
+  # the test run finds both directories on its library path, as under
+  # `cargo test`.
   out-dir-walk =
     let
       ws = mk "out-dir-walk" { };
@@ -491,12 +493,14 @@ in
         bin = ws.packages.out-dir-walk;
         runOut = run.out;
         runFlags = run.flags;
+        testRun = ws.testRuns.out-dir-walk.library_path;
       }
       ''
         [ "$($bin/bin/out-dir-walk)" = walked=true ]
         cat $runFlags/target-files.json
         [ "$(cat $runFlags/target-files.json)" = '["${target}/debug/deps/walked.txt","${target}/debug/walked.txt"]' ]
         [ -f $runOut/${target}/debug/build/out-dir-walk-*/out/generated.rs ]
+        grep -q 'test result: ok. 1 passed' $testRun/log
         touch $out
       '';
 
