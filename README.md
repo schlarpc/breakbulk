@@ -191,8 +191,35 @@ supported yet.
 - **No headless Chromium test runner yet.** Browser wasm tests run in Node
   with the wasm-bindgen test runner.
 - **Cold builds lose Cargo's pipelining.** A dependent waits for the whole
-  upstream crate, not only its metadata. Expect 10 to 20% slower clean
-  optimized builds than Cargo.
+  upstream crate, not only its metadata. Clean optimized builds can be
+  slower than Cargo's: Cargo gained 5 to 39% from pipelining at 8 cores in
+  the M6 measurements, and close to nothing at 4 cores on wide workspaces.
+
+## Future work
+
+These were measured in M6 and are not built yet. Details and numbers:
+[docs/spikes/m6-measurements.md](docs/spikes/m6-measurements.md) and
+"Future work" in [docs/design.md](docs/design.md#future-work).
+
+- **Pipelining across derivations.** Splitting a library into a metadata
+  step and a code step brings back Cargo's pipelining. Running the
+  compiler's front end twice costs 23 to 49% more CPU and is slower than
+  no split at 4 cores, so it is not used. The one approach that keeps the
+  gain pauses the compiler with CRIU in one derivation and resumes it in
+  the next; it needs a spike first.
+- **Skipping dependents when a library's interface is unchanged.** Not
+  possible today: the compiler writes a hash of every source file into the
+  library's metadata, so any edit changes it. Replaying real history, it
+  would have saved 1 to 4% of library compiles. It needs a compiler
+  change that keeps source hashes and positions out of what dependents
+  read. Rust's planned public-API hash (`-Zpublic-api-hash`) is not in
+  nightly yet.
+- **Content-addressed build steps on fresh machines.** Nix downloads every
+  input of a content-addressed step before it can tell the step is cached:
+  1.83 GB for one test run, against 440 bytes when input-addressed. This
+  waits on a Nix fix (NixOS/nix#11928). Until then build steps are
+  input-addressed, and content-addressed test runs are off unless Nix's
+  `dynamic-derivations` feature is on or you set `ca = true`.
 
 ## Tip: fewer substituters, faster cold builds
 

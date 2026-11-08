@@ -352,7 +352,7 @@ An optional **pipelined split** makes a library two derivations: one producing `
 2. **Checkpoint and restore:** the `rmeta` derivation checkpoints the rustc process with CRIU at the metadata notification; the `rlib` derivation restores it and lets codegen finish. One frontend, and both files come from one process. Linux only, needs namespace privileges inside the sandbox, and needs a compatible CPU and kernel at restore.
 3. **`-Zno-codegen`:** the Buck2 approach. Needs `RUSTC_BOOTSTRAP` on the split crate's compile units only, never on build-script runs, together with an empty `-Zallow-features=` so stable-only code stays stable-only.
 
-Every backend falls back to an unsplit compile, checks that the `rlib`'s crate hash matches the `rmeta` its dependents used, and has a per-package opt-out for crates that do not build reproducibly. Which crates are split is deterministic configuration, never a machine-local heuristic. Rejected: a metadata-only `--emit=metadata` action (no optimized MIR for dependents' codegen, and a different crate hash), and `-Zalways-encode-mir` (still a different crate hash).
+M6 measured the backends; none is built yet, and only CRIU keeps the gain (see [Future work](#pipelined-split-the-criu-backend)). Every backend falls back to an unsplit compile, checks that the `rlib`'s crate hash matches the `rmeta` its dependents used, and has a per-package opt-out for crates that do not build reproducibly. Which crates are split is deterministic configuration, never a machine-local heuristic. Rejected: a metadata-only `--emit=metadata` action (no optimized MIR for dependents' codegen, and a different crate hash), and `-Zalways-encode-mir` (still a different crate hash).
 
 ### Operational notes
 
@@ -409,6 +409,30 @@ These patterns come from a survey of working Rust-in-Nix repositories. Each is e
 
 The traced planner removes most of these by construction, because the command lines and directive placement come from Cargo.
 
+## Future work
+
+M6 measured three parts of this design and built none of them ([spikes/m6-measurements.md](spikes/m6-measurements.md)). Each waits on a spike or on a change outside breakbulk. This section records the measurements, what blocks each one, and what would unblock it.
+
+### Pipelined split: the CRIU backend
+
+- **The gap is real.** On cold release builds at `-j8`, Cargo's pipelining saved 39% on ripgrep, 27% on rust-analyzer and 5% on helix (paired real builds, Cargo 1.99). A schedule simulation from Cargo's own timings gives 0% at 4 cores on wide workspaces (helix, nushell), 6–14% at 8 cores, and up to 67% on rust-analyzer's deep chain of large crates. The simulation is an upper bound for chains: in the real unsplit rust-analyzer build, the same units took 33% less time in total, probably because each unit had more cores for its own codegen.
+- **The stable backends are no-go as defaults.** Rerun and stop, and `-Zno-codegen`, run the frontend of each split library twice: 23–49% more CPU. At 4 cores that is slower than no split (−16% to −37% on helix, nushell and ripgrep dev); at 8 cores it breaks even on wide workspaces. At most they could be an opt-in for named crates on a deep chain.
+- **CRIU is the only backend that keeps Cargo's gain.** The `rmeta` derivation checkpoints rustc at its metadata notification; the `rlib` derivation restores it and lets codegen finish. There is one frontend, and both files come from one process.
+- **Next steps.** First measure how many codegen threads an unsplit unit runs inside the sandbox, where there is no Cargo jobserver, and whether `NIX_BUILD_CORES` should reach rustc: part of the deep-chain gap may close without any split. Then a spike that runs CRIU inside the Nix sandbox: namespace privileges, and restore on a builder with another CPU or kernel. Then the per-package opt-in (`packages.<name>.pipelining`, declared but not implemented), with the fallback and crate-hash check described in [Pipelining](#pipelining).
+
+### Early cutoff on rmeta bytes
+
+- **Blocked on rustc.** A library's `.rmeta` holds its source map: for every source file, its name, the hash of its contents (`src_hash`, `checksum_hash`), its length and its line table (rust-lang/rust `f5cedb83`, `compiler/rustc_span/src/lib.rs` `impl Encodable for SourceFile`, written by `encode_source_map` in `compiler/rustc_metadata/src/rmeta/encoder.rs`). So any edit to a library's source changes its rmeta, even a comment after the last item, and every dependent's rmeta records the new crate hash. Replaying real history, cutoff on rmeta bytes would have saved 1% of library compiles over 50 ripgrep commits and 4% over 31 breakbulk commits, the same on stable 1.99 and on nightly 2026-11-06, with the crate hash from metadata (rust-lang/rust#154724) or from HIR.
+- **What would unblock it.** The physical split in [The rustc limit](#the-rustc-limit-and-what-is-changing), with the source map named explicitly: one file with only what dependents' compiles read, and the spans, source hashes and line tables in another, read for diagnostics and debug info. breakbulk would then make the first file its own output and cut off on its bytes. A public-API hash alone does not unblock it: it lets Cargo skip a dependent, but in Nix the dependent's inputs have still changed.
+- **`-Zpublic-api-hash` status.** "Relink, Don't Rebuild" (tracking issue [rust-lang/rust#158844](https://github.com/rust-lang/rust/issues/158844)) is open. Its implementation, [#156940](https://github.com/rust-lang/rust/pull/156940), is a draft, last updated 2026-11-06. rust-lang/rust `main` has no such flag on 2026-11-07 (`compiler/rustc_session/src/options.rs` at `f5cedb83`). When a nightly has it, rerun `tools/history-replay/replay.py` with the flag.
+- **A limit to expect** (not measured): generic and inlined code is compiled in the dependent, and its debug info names the upstream crate's lines. With debug info on, such dependents change when upstream lines move, whatever the interface file does.
+
+### Full-CA units, and CA test runs on fresh machines
+
+- **Blocked on Nix.** To substitute a CA derivation, Nix resolves it, and resolving fetches the contents of every input first ([NixOS/nix#11928](https://github.com/NixOS/nix/issues/11928), open; the fix, [#14833](https://github.com/NixOS/nix/pull/14833), is open and not merged on 2026-11-07). Measured on Nix 2.35.2 with a `file://` cache: one CA test run on a fresh store downloaded 58 paths, 1.83 GB (rustc 1.11 GB, LLVM 577 MB), in 37 s. The same run, input-addressed, downloaded 1 path of 440 bytes in 0.28 s.
+- **Until then** units stay input-addressed, and CA test runs and stages stay off unless the evaluator has dynamic derivations or `ca = true` (decision 52), so a cache that serves fresh machines does not pay this cost. Test runs now depend on a small derivation with only the standard library's target libraries instead of the whole toolchain (decision 94), which removes the largest part of that download; the rest (the stdenv, the units) remains, and the cost has not been measured again.
+- **With the fix,** full-CA units become a mode switch: instantiation is templating and can emit either form. For cutoff they also need the rustc change above; today they would cut off only edits that do not touch a library's sources, which [dep-info source narrowing](#seams-below-the-crate) also cuts off without CA's cost.
+
 ## Roadmap, risks and open questions
 
 The traced planner comes first, delivered through IFD, because it works on every released Nix and every later phase builds on it.
@@ -420,7 +444,7 @@ The traced planner comes first, delivered through IFD, because it works on every
 3. **Day-one targets.** Linux gnu and musl on x86\_64 and aarch64, static glibc, wasm (browser and components), Windows msvc. Runners and native builders for tests.
 4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations with skip lists and runnable test apps, doctests, bench binaries, clippy and coverage variants.
 5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
-6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default on Cargo 1.101 and later (done), the docs product.
+6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness (done), full-CA units when Nix supports them, `trim-paths` by default on Cargo 1.101 and later (done), the docs product. The pipelined split, rmeta cutoff and full-CA units were measured and deferred (see [Future work](#future-work)).
 7. **Later targets.** wasip2, riscv64, windows-gnu, zig, build-std targets (done); Darwin on Mac builders.
 
 ### Conformance suite
