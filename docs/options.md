@@ -1308,16 +1308,20 @@ true
 
 
 
-Toolchain specs per target triple\. A workspace builds for the triples
-in ` workspaces.<ws>.targets `; their specs come from here\. On a Linux
+Toolchain specs per target triple, for every workspace that builds
+the triple (` workspaces.<ws>.targets `)\. Each workspace’s spec is
+these definitions together with its own
+` workspaces.<ws>.targets.<triple> `, evaluated with that workspace’s
+toolchain, so a preset uses each workspace’s rustc\. On a Linux
 (glibc) build machine the native triple always has an entry, with
-` presets.linuxGnu ` by default\. Any other triple with no entry uses an
-empty spec (the toolchain as Cargo finds it)\.
+` presets.linuxGnu ` by default\. Any other triple with no entry here or
+in the workspace uses an empty spec (the toolchain as Cargo finds
+it)\.
 
 
 
 *Type:*
-attribute set of (submodule)
+attribute set of module
 
 
 
@@ -1358,7 +1362,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1382,7 +1386,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1406,7 +1410,7 @@ list of string
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1430,7 +1434,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1454,7 +1458,7 @@ list of string
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1481,7 +1485,7 @@ attribute set of (null or raw value)
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1505,7 +1509,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1533,7 +1537,7 @@ attribute set of (string or absolute path or package or signed integer or boolea
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1557,7 +1561,7 @@ attribute set of (string or absolute path or package or signed integer or boolea
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1584,7 +1588,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1644,7 +1648,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1654,18 +1658,23 @@ null
 
 A toolchain preset (` breakbulk.presets.* `, or a preset with its
 options bound, such as ` breakbulk.presets.msvc { inherit sdk; } `)\.
-It is called with this target’s ` pkgs ` and triple, and sets the
-fields below at default priority, so fields set here override
-the preset’s (lists concatenate; use ` lib.mkForce ` to replace
-one)\. Equivalent to defining the target as
-` breakbulk.presets.<name> { inherit pkgs; triple = …; } `\.
-Set ` null ` to use no preset on the native target (rustc’s own
-linker choice and the C toolchain Cargo finds)\.
+It is called once per workspace that builds this triple, with
+` pkgs `, the triple and the workspace’s ` toolchain `, whose rustc
+it uses unless it was given ` rustc ` itself: msvc and wasm presets
+pick the LLVM tools and the wasi-sdk matching each workspace’s
+compiler\. It sets the fields below at default priority, so
+fields set here override the preset’s (lists concatenate; use
+` lib.mkForce ` to replace one)\. Defining the target as
+` breakbulk.presets.<name> { inherit pkgs; triple = …; } ` gives
+the same fields, except that the preset then sees no workspace
+toolchain (pass ` rustc ` there)\. Set ` null ` to use no preset on
+the native target (rustc’s own linker choice and the C toolchain
+Cargo finds)\.
 
 
 
 *Type:*
-null or (function that evaluates to a(n) raw value)
+null or breakbulk preset (function)
 
 
 
@@ -1683,7 +1692,7 @@ breakbulk.presets.linuxMusl
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1713,7 +1722,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1740,7 +1749,7 @@ list of string
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1780,7 +1789,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1819,7 +1828,7 @@ attribute set of (null or raw value)
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -1888,7 +1897,7 @@ null
 ```
 
 *Declared by:*
- - [lib/modules/targets\.nix](../lib/modules/targets.nix)
+ - [lib/modules/target-spec\.nix](../lib/modules/target-spec.nix)
 
 
 
@@ -2078,13 +2087,20 @@ null
 
 
 The triples this workspace is built for\. Each is planned on its
-own (` --target <triple> `), with its spec from
-` targets.<triple> `\. The default is the native triple only\.
+own (` --target <triple> `)\. Besides ` packages `, an entry takes
+every option of ` targets.<triple> `: they are merged with the
+repository-wide ` targets.<triple> ` for this workspace only, as
+two definitions of the same options merge (lists concatenate,
+attribute sets merge, and a single value such as ` preset ` or
+` linker ` set in both places needs ` lib.mkForce ` on the one that
+should win)\. The spec is evaluated with this workspace’s
+toolchain, so presets pick tools for its rustc\. The default is
+the native triple only\.
 
 
 
 *Type:*
-attribute set of (submodule)
+attribute set of module
 
 
 
@@ -2093,6 +2109,21 @@ attribute set of (submodule)
 ```nix
 { ${pkgs.stdenv.hostPlatform.rust.rustcTarget} = { }; }
 ```
+
+
+
+*Example:*
+
+````nix
+{
+  wasm32-unknown-unknown = {
+    packages = [ "ui" ];
+    # Any `targets.<triple>` option, for this workspace only.
+    rustflags = [ "--cfg" "getrandom_backend=\"wasm_js\"" ];
+  };
+}
+
+````
 
 *Declared by:*
  - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)

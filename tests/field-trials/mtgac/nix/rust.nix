@@ -92,10 +92,8 @@ in
 
   targets = {
     ${native}.preset = breakbulk.presets.linuxGnu;
-    ${wasm}.preset = breakbulk.presets.wasmBrowser { rustc = rust; };
-    ${windows}.preset = breakbulk.presets.msvc {
-      inherit sdk;
-      rustc = rust;
-    };
+    # LLVM tools for the workspace's rustc (decision 70).
+    ${wasm}.preset = breakbulk.presets.wasmBrowser;
+    ${windows}.preset = breakbulk.presets.msvc { inherit sdk; };
   };
 }

@@ -571,7 +571,7 @@ in
   # the mold linker wrapper.
   native-preset =
     let
-      t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).config.targets.${native};
+      t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).workspaces.main.target.${native}.spec;
       dflt = t [ ];
       off = t [ { targets.${native}.preset = lib.mkForce null; } ];
       static = breakbulk.presets.staticGlibc { inherit pkgs; };

@@ -10,6 +10,36 @@ let
   bt = import ./types.nix { inherit lib; };
   nativeTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
 
+  # The workspace-only option of `workspaces.<ws>.targets.<triple>`; the
+  # rest is ./target-spec.nix, merged with `targets.<triple>` per workspace
+  # by lib/repository.nix. Keyed, so the module system imports it once.
+  workspaceTarget = {
+    key = "breakbulk/modules/workspaces.nix#workspaceTarget";
+    _file = ./workspaces.nix;
+    options.packages = mkOption {
+      type = types.nullOr (types.listOf types.str);
+      default = null;
+      description = ''
+        The packages to plan for this target, each traced with `-p`, in
+        the build and the test plan. `null` traces `--workspace`.
+      '';
+    };
+    options.tests = mkOption {
+      type = types.either types.bool (types.listOf types.str);
+      default = true;
+      example = [ "my-lib" ];
+      description = ''
+        Test binaries, test runs, test apps and doctests on this target.
+        `false`: none (a target that is only built, such as a wasm
+        component whose tests run natively); the test plan is then not
+        traced, except for a check or clippy variant with `allTargets`. A
+        list of packages: the test plan is `cargo test --no-run -p <pkg> …`
+        for those packages only, and only their tests are run. `true`: the
+        variant's or target's package selection.
+      '';
+    };
+  };
+
   variant =
     { name, ... }:
     {
@@ -192,42 +222,31 @@ let
         };
 
         targets = mkOption {
-          type = types.attrsOf (
-            types.submodule {
-              options.packages = mkOption {
-                type = types.nullOr (types.listOf types.str);
-                default = null;
-                description = ''
-                  The packages to plan for this target, each traced with
-                  `-p`, in the build and the test plan. `null` traces
-                  `--workspace`.
-                '';
-              };
-              options.tests = mkOption {
-                type = types.either types.bool (types.listOf types.str);
-                default = true;
-                example = [ "my-lib" ];
-                description = ''
-                  Test binaries, test runs, test apps and doctests on this
-                  target. `false`: none (a target that is only built, such
-                  as a wasm component whose tests run natively); the test
-                  plan is then not traced, except for a check or clippy
-                  variant with `allTargets`. A list of packages: the test
-                  plan is `cargo test --no-run -p <pkg> …` for those
-                  packages only, and only their tests are run. `true`: the
-                  variant's or target's package selection.
-                '';
-              };
-            }
-          );
+          type = types.attrsOf (types.deferredModuleWith { staticModules = [ workspaceTarget ]; });
           default = {
             ${nativeTriple} = { };
           };
           defaultText = lib.literalExpression "{ \${pkgs.stdenv.hostPlatform.rust.rustcTarget} = { }; }";
+          example = lib.literalExpression ''
+            {
+              wasm32-unknown-unknown = {
+                packages = [ "ui" ];
+                # Any `targets.<triple>` option, for this workspace only.
+                rustflags = [ "--cfg" "getrandom_backend=\"wasm_js\"" ];
+              };
+            }
+          '';
           description = ''
             The triples this workspace is built for. Each is planned on its
-            own (`--target <triple>`), with its spec from
-            `targets.<triple>`. The default is the native triple only.
+            own (`--target <triple>`). Besides `packages`, an entry takes
+            every option of `targets.<triple>`: they are merged with the
+            repository-wide `targets.<triple>` for this workspace only, as
+            two definitions of the same options merge (lists concatenate,
+            attribute sets merge, and a single value such as `preset` or
+            `linker` set in both places needs `lib.mkForce` on the one that
+            should win). The spec is evaluated with this workspace's
+            toolchain, so presets pick tools for its rustc. The default is
+            the native triple only.
           '';
         };
 

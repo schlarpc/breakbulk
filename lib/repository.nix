@@ -28,6 +28,7 @@
 #   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
 #   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  runnable apps
 #   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
+#   repo.workspaces.<ws>.target.<triple>.spec          the resolved target spec
 #
 # A product (`packages.<pkg>`) is the package's build-plan roots (bins,
 # cdylibs, dylibs and staticlibs) passed through the target's post-link
@@ -328,12 +329,70 @@ let
       );
     });
 
+  # --- target specs, per workspace (decision 70) ------------------------------
+  #
+  # The spec of one workspace on one triple: the repository-wide
+  # `targets.<triple>` and the workspace's own `workspaces.<ws>.targets.<triple>`
+  # (both modules, lib/modules/target-spec.nix), evaluated together with the
+  # workspace's toolchain, so a preset picks tools for that workspace's
+  # rustc. `present` is false when neither defines anything but `packages`:
+  # such a target has no spec (the toolchain as Cargo finds it), as before.
+  specArgs = {
+    inherit pkgs;
+    breakbulkPresets = presets;
+  }
+  // specialArgs;
+  evalTargetSpec =
+    ws: triple:
+    let
+      repoDef = cfg.targets.${triple} or null;
+      wsDef = ws.targets.${triple} or null;
+      e = lib.evalModules {
+        modules = [ ./modules/target-spec.nix ] ++ lib.optional (repoDef != null) repoDef ++ lib.optional (wsDef != null) wsDef;
+        specialArgs = specArgs // {
+          name = triple;
+          breakbulkToolchain = ws.toolchain;
+        };
+      };
+      specOptions = lib.collect lib.isOption (
+        removeAttrs e.options [
+          "_module"
+          "packages"
+          "tests"
+        ]
+      );
+    in
+    {
+      inherit (e) config;
+      packages = e.config.packages or null;
+      tests = e.config.tests or true;
+      present = repoDef != null || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions);
+    };
+  targetSpecs = lib.mapAttrs (
+    _: ws: lib.genAttrs (lib.unique (lib.attrNames ws.targets ++ [ nativeTriple ])) (evalTargetSpec ws)
+  ) cfg.workspaces;
+  # The spec's values, or null when the workspace has none for the triple.
+  targetCfgOf =
+    wsName: triple:
+    let
+      s = targetSpecs.${wsName}.${triple};
+    in
+    if s.present then s.config else null;
+  # One field of it, or `default` without a spec.
+  targetField =
+    wsName: triple: field: default:
+    let
+      t = targetCfgOf wsName triple;
+    in
+    if t == null then default else t.${field};
+  selectionOf = wsName: triple: targetSpecs.${wsName}.${triple}.packages;
+
   # The package set of a target's units: the target spec's `packageSet`
   # (set by the presets), else pkgs for the native triple.
   targetPkgs =
-    triple:
+    wsName: triple:
     let
-      p = cfg.targets.${triple}.packageSet or null;
+      p = targetField wsName triple "packageSet" null;
     in
     if p != null then
       p
@@ -357,7 +416,7 @@ let
   specFor =
     wsName: triple:
     let
-      t = cfg.targets.${triple} or null;
+      t = targetCfgOf wsName triple;
       e = envName triple;
       flags = l: lib.concatStringsSep " " l;
       cEnv =
@@ -422,7 +481,7 @@ let
   # instantiate's overrides for one workspace on one target, keyed
   # "<name>@<version>".
   instOverrides =
-    entries: triple:
+    wsName: entries: triple:
     lib.listToAttrs (
       lib.concatMap (
         e:
@@ -434,8 +493,8 @@ let
             let
               # A target without a package set (msvc, wasm32-unknown-unknown)
               # still has the build machine's for its host units.
-              hasSet = (cfg.targets.${triple}.packageSet or null) != null || triple == nativeTriple;
-              p = if hasSet || platform == "host" then (if hasSet then targetPkgs triple else pkgs) else null;
+              hasSet = targetField wsName triple "packageSet" null != null || triple == nativeTriple;
+              p = if hasSet || platform == "host" then (if hasSet then targetPkgs wsName triple else pkgs) else null;
               sets =
                 if platform == "target" then
                   {
@@ -478,7 +537,7 @@ let
                 # targets.<t>.stdenv / host.stdenv (null: the set's).
                 stdenv =
                   let
-                    t = cfg.targets.${triple} or null;
+                    t = targetCfgOf wsName triple;
                   in
                   if t == null then null else if platform == "target" then t.stdenv else t.host.stdenv;
               };
@@ -524,19 +583,17 @@ let
     else
       v;
 
-  targetCfg = triple: cfg.targets.${triple} or { };
-
   # The packages a variant plans on a target (null: the whole workspace):
   # the variant's own selection, else the target's.
-  selOf = ws: triple: v: if v.packages != null then v.packages else ws.targets.${triple}.packages;
+  selOf = wsName: triple: v: if v.packages != null then v.packages else selectionOf wsName triple;
   # The test plan's selection: false (no test outputs on this target), a
-  # list (`targets.<t>.tests`), or the variant's selection.
+  # list (`workspaces.<ws>.targets.<t>.tests`), or the variant's selection.
   testSelOf =
-    ws: triple: v:
+    wsName: triple: v:
     let
-      t = ws.targets.${triple}.tests;
+      t = targetSpecs.${wsName}.${triple}.tests;
     in
-    if t == false then false else if builtins.isList t then t else selOf ws triple v;
+    if t == false then false else if builtins.isList t then t else selOf wsName triple v;
 
   # The variants planned for a target (`variants.<v>.targets`).
   variantsFor =
@@ -555,11 +612,11 @@ let
     ) ws.variants;
 
   shippedRemapScopeOf =
-    triple: v:
+    wsName: triple: v:
     products.shippedRemapScope {
       inherit triple;
-      stagePreset = (targetCfg triple).stagePreset or null;
-      targetStages = (targetCfg triple).stages or { };
+      stagePreset = targetField wsName triple "stagePreset" null;
+      targetStages = targetField wsName triple "stages" { };
       coverage = v.mode == "coverage";
     };
 
@@ -568,13 +625,13 @@ let
     let
       v = checkMode wsName vName ws.variants.${vName};
       entries = locks.${wsName};
-      sel = selOf ws triple v;
+      sel = selOf wsName triple v;
       tsel = testSelOf ws triple v;
       s = specFor wsName triple;
       # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
       # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
       # set, as stdenv's separateDebugInfo does. Target units only.
-      buildId = lib.optionalAttrs (shippedRemapScopeOf triple v != null) { NIX_SET_BUILD_ID = "1"; };
+      buildId = lib.optionalAttrs (shippedRemapScopeOf wsName triple v != null) { NIX_SET_BUILD_ID = "1"; };
     in
     mkWorkspace pkgs (
       {
@@ -594,11 +651,11 @@ let
       select = if sel == null then [ ] else sel;
       testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
       extraSources = extraSourcesOf entries;
-      packageOverrides = instOverrides entries triple;
+      packageOverrides = instOverrides wsName entries triple;
       inherit (cfg) strictSources;
       name = "${wsName}-${triple}-${vName}";
       inherit delivery;
-      shippedRemapScope = shippedRemapScopeOf triple v;
+      shippedRemapScope = shippedRemapScopeOf wsName triple v;
       packages = testConfigs wsName;
       inherit (cfg) ca;
       inherit (v) mode clippyArgs;
@@ -644,9 +701,9 @@ let
     products.mkProducts {
       inherit pkgs inst triple;
       select = sel;
-      stagePreset = (targetCfg triple).stagePreset or null;
-      targetStages = (targetCfg triple).stages or { };
-      targetChecks = (targetCfg triple).checks or { };
+      stagePreset = targetField wsName triple "stagePreset" null;
+      targetStages = targetField wsName triple "stages" { };
+      targetChecks = targetField wsName triple "checks" { };
       packageConfig = productConfig wsName triple;
       inherit (cfg) ca;
       lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
@@ -776,7 +833,7 @@ let
             vName: inst:
             let
               v = ws.variants.${vName};
-              sel = selOf ws triple v;
+              sel = selOf wsName triple v;
               # Test outputs: none when the target has `tests = false`.
               tsel = testSelOf ws triple v;
               testsOn = tsel != false;
@@ -860,6 +917,9 @@ let
           # The target spec's runner (a list: program and arguments, or
           # null) and test system, as test runs use them.
           inherit (s) runner testSystem;
+          # The resolved target spec of this workspace (the evaluated
+          # `targets.<triple>` options), or null when it has none.
+          spec = targetCfgOf wsName triple;
         }
       ) instances;
     in
@@ -895,7 +955,7 @@ let
           else
             null;
         overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
-        targetEnv = envStrings (cfg.targets.${nativeTriple}.env or { });
+        targetEnv = envStrings (targetField wsName nativeTriple "env" { });
         # How the planner passes the native spec to Cargo (IFD: a small
         # derivation that reads the project's Cargo config and asks rustc,
         # apart from planning, so a broken manifest does not break the

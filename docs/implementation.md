@@ -497,6 +497,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
     targets.<triple> = {
       packages = null;                # null: --workspace; or a list traced with -p
       tests = true;                   # false: no test plan outputs here; a list: `cargo test -p` those only
+      # … and any targets.<triple> option, merged over the repository-wide one for this workspace
     };
     variants.<v> = { profile = "release"; features = [ ]; mode = "build"; };  # build | check | clippy | coverage
                                       # check/clippy: allTargets = true (--all-targets; false: plain `cargo check`)
@@ -512,7 +513,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
     docs.noDeps = true;               # cargo doc --no-deps (later)
   };
 
-  targets.<triple> = {
+  targets.<triple> = {                # defaults for every workspace building <triple>
     preset = breakbulk.presets.linuxGnu;  # or msvc { … }, wasmBrowser, wasmComponent, musl, staticGlibc
                                       # default: linuxGnu for the native triple on a Linux glibc host, else null
     linker = null; cc = null; cxx = null; ar = null; cflags = [ ];
@@ -650,7 +651,7 @@ The skeleton copies file names only and needs no discovery rules; Cargo performs
 
 The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain (`llvmMajor`, `llvmPackages`). The table is the fast path; for a rustc it does not cover (older than its first release, newer than the last release checked, or without a version), a tiny derivation reads the major from `rustc -vV`, through import-from-derivation (decision 41).
 
-A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. On a Linux (glibc) build machine the native target gets `linuxGnu` unless another preset is set, either through `targets.<native>.preset` or by defining the target directly from a preset (every preset's value carries an internal marker for this); `preset = null` turns it off (decision 105). Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Every preset takes its linker from one function, `chooseLinker` in `lib/presets/linker.nix` (design.md "Linker selection"): `linkerKind { triple; lto; flavor; }` names the kind (`mold`, `clang-lld`, `lld-link`, `wasm-ld`, `wasm-component-ld`, `mingw-lld`, `zig`), and `chooseLinker` builds that wrapper from the preset's package set and LLVM. The Linker column below is that function's result. Preset env is added per unit by platform, never through Cargo's `[env]`.
+A preset is a function from `{ pkgs, triple, …options }` to a `targets.<triple>` module, so users override any field with ordinary module priorities. Target specs are resolved per (workspace, target) (decision 70): `targets.<triple>` and `workspaces.<ws>.targets.<triple>` are both kept as unevaluated modules, and `mkRepository` evaluates them together once per workspace that builds the triple (`lib/modules/target-spec.nix`), passing the workspace's toolchain. A preset applied through `preset` receives it as `toolchain` (every `breakbulk.presets.*` advertises that argument; a plain user function that does not is called without it) and uses its `rustc` unless the preset was given `rustc`, `llvmMajor` or `llvmPackages` itself. So two workspaces on different Rust releases that build the same triple get the LLVM tools (`lib/llvm-versions.nix`) and wasi-sdk (`lib/wasi-sdk.nix`) of their own compiler, from one repository-wide preset. A workspace's own entry merges with the repository's as two definitions of the same options do; a target with neither a repository-wide entry nor any spec field in the workspace has no spec, as before. The resolved spec is `repo.workspaces.<ws>.target.<triple>.spec`. On a Linux (glibc) build machine the native target gets `linuxGnu` unless another preset is set, either through `targets.<native>.preset` or by defining the target directly from a preset (every preset's value carries an internal marker for this); `preset = null` turns it off (decision 105). Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools. Every preset takes its linker from one function, `chooseLinker` in `lib/presets/linker.nix` (design.md "Linker selection"): `linkerKind { triple; lto; flavor; }` names the kind (`mold`, `clang-lld`, `lld-link`, `wasm-ld`, `wasm-component-ld`, `mingw-lld`, `zig`), and `chooseLinker` builds that wrapper from the preset's package set and LLVM. The Linker column below is that function's result. Preset env is added per unit by platform, never through Cargo's `[env]`.
 
 | Preset | Linker | C toolchain | Rustflags and env (target units) | Runner | Default stages |
 | --- | --- | --- | --- | --- | --- |
@@ -888,3 +889,9 @@ Spikes A, B and C gate M1 and M2. The rest are measurements to take as soon as t
 | CRIU in a sandbox | Can a builder checkpoint and restore rustc inside a nested namespace in the Nix sandbox, and is the rlib byte-identical to a normal compile? | Prototype outside Nix, then inside | The CRIU pipelining backend |
 | nextest reuse | Can a synthesized `binaries-metadata` file drive nextest over binaries that live in separate store paths? | Prototype with one fixture | M6 nextest integration |
 | Zig cache | Does zig accept a pre-warmed global cache that is read-only or only partly populated? | Try both on one target | The zig preset. Done: read-only fails; a writable copy at another path is a full hit (see "Zig") |
+
+## Known gaps (TODO)
+
+Accepted gaps with an agreed fix, not yet scheduled:
+
+- **Dynamic-mode test-run cutoff** (decision 128). In dynamic mode a test run reads its settings from a generated wrapper file that names the package's source view and build-script outputs, so any edit there re-runs it, even with `ca`, `test.stripForRun` and `test.runFiles`. Fix: content-addressed copies of the wrapper's inputs, as IFD mode's `stableSpec` does.

@@ -1576,3 +1576,27 @@ Build-tool library folders (`NIX_LDFLAGS_FOR_BUILD`, e.g. cmake's) and
 `NIX_CFLAGS_LINK` aren't passed along, since setup hooks don't normally
 use them for libraries a binary links. If some library's setup hook does,
 it gets added.
+
+> Resolved (128): later; recorded under "Known gaps (TODO)" in
+> `docs/implementation.md`.
+
+## 130. FYI: presets follow each workspace's compiler; future work written up (resolves 70, 91)
+
+- **70:** a target's settings are now worked out per workspace: the
+  repository-wide `targets.<triple>` settings plus the workspace's own
+  `workspaces.<ws>.targets.<triple>`, evaluated with that workspace's
+  compiler. Two workspaces on Rust 1.96 and 1.99 building wasm get LLVM 22
+  tools with wasi-sdk 30 and LLVM 23 tools with wasi-sdk 33 respectively.
+  You no longer pass `rustc` to presets. This fixed a real mismatch in
+  datboi2 (its nightly workspace was linked with the wrong LLVM's linker).
+- **91:** `docs/design.md` has a "Future work" section (pipelining via
+  CRIU, interface-only rebuild cutoff blocked on rustc, content-addressed
+  units blocked on NixOS/nix#11928), checked against upstream status today.
+
+## 131. ASK: setting the same target field in both places
+
+Repository-wide and per-workspace target settings combine like any two
+module definitions: lists concatenate, attribute sets merge, and a single
+value (like `preset` or `linker`) set in both places is an error unless one
+side uses `lib.mkForce`. Alternative: the workspace's value wins
+automatically for single values. Default: the module-system rule.
