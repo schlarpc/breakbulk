@@ -47,6 +47,13 @@
 # `null` removes one. `noSourceReferences` is added by default
 # (`defaultChecks = false` turns it off).
 #
+# Every stage and check runs through a guard (decision 112): when its
+# input holds `noBinariesMarker` (a `linked` stage of a product Cargo
+# built no binary of, in dynamic-derivation mode), it copies the marker to
+# its outputs and succeeds without running its own builder. Stages and
+# checks that are plain `derivation` calls (no `overrideAttrs`) are not
+# guarded.
+#
 # Content addressing: with `ca`, every stage and check derivation gets
 # `__contentAddressed = true; outputHashMode = "recursive";
 # outputHashAlgo = "sha256"` through overrideAttrs. `linked` is left as it
@@ -86,6 +93,66 @@ let
   };
 
   caAuto = builtins ? outputOf;
+
+  # Decision 112: the file a product's `linked` stage holds instead of
+  # binaries when Cargo built none of them (dynamic-derivation mode, where
+  # that is known only at build time; it holds the reasons). Every stage
+  # and check is guarded (`guard`): given an input with this file, it
+  # copies the file into each of its outputs and succeeds without running
+  # its own builder, so a product with nothing to ship builds, with its
+  # checks, to the marker.
+  noBinariesMarker = "breakbulk-no-binaries";
+
+  # The builder wrapper: `bash guard <input> <builder> <args…>`.
+  guardScript =
+    pkgs:
+    let
+      bp = pkgs.buildPackages;
+    in
+    bp.writeText "breakbulk-stage-guard.sh" ''
+      input=$1
+      shift
+      if [ -e "$input/${noBinariesMarker}" ]; then
+        dirs=()
+        if [ -n "''${NIX_ATTRS_SH_FILE-}" ]; then
+          # Structured attributes: `outputs` maps names to paths.
+          . "$NIX_ATTRS_SH_FILE"
+          dirs=("''${outputs[@]}")
+        else
+          for o in $outputs; do dirs+=("''${!o}"); done
+        fi
+        for d in "''${dirs[@]}"; do
+          ${bp.coreutils}/bin/mkdir -p "$d"
+          ${bp.coreutils}/bin/cp "$input/${noBinariesMarker}" "$d/"
+        done
+        echo "breakbulk: skipped: Cargo built none of this product's binaries:" >&2
+        ${bp.coreutils}/bin/cat "$input/${noBinariesMarker}" >&2
+        exit 0
+      fi
+      exec "$@"
+    '';
+
+  # A stage's or check's derivation, run through the guard above for its
+  # input. Derivations without `overrideAttrs` (plain `derivation` calls)
+  # are left as they are.
+  guard =
+    pkgs: input: drv:
+    if !(drv ? overrideAttrs && drv ? drvAttrs) then
+      drv
+    else
+      let
+        inherit (drv.drvAttrs) builder;
+        args = drv.drvAttrs.args or [ ];
+      in
+      drv.overrideAttrs (_: {
+        realBuilder = pkgs.stdenv.shell;
+        args = [
+          (guardScript pkgs)
+          "${input}"
+          builder
+        ]
+        ++ args;
+      });
 
   # Default stage chains per preset, as data.
   defaultStageNames = {
@@ -280,14 +347,16 @@ let
             acc: s:
             let
               drv = caify "stage `${s}`" (
-                ordered.live.${s}.run {
-                  input = acc.last;
-                  # `debugSplit`: an earlier stage has a `debug` output.
-                  product = product // {
-                    debugSplit = acc.split;
-                  };
-                  inherit target pkgs;
-                }
+                guard pkgs acc.last (
+                  ordered.live.${s}.run {
+                    input = acc.last;
+                    # `debugSplit`: an earlier stage has a `debug` output.
+                    product = product // {
+                      debugSplit = acc.split;
+                    };
+                    inherit target pkgs;
+                  }
+                )
               );
             in
             {
@@ -334,7 +403,7 @@ let
                 concatMapStringsSep "" (s: ", " + s) ordered.order
               })";
         in
-        caify "check `${c}`" (m.run { inherit input product pkgs; })
+        caify "check `${c}`" (guard pkgs input (m.run { inherit input product pkgs; }))
       ) (filterAttrs (_: v: v != null) allChecks);
     in
     lib.extendDerivation true (
@@ -359,5 +428,6 @@ in
     order
     caAuto
     caAttrs
+    noBinariesMarker
     ;
 }

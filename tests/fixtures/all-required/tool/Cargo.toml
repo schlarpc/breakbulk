@@ -1,0 +1,12 @@
+[package]
+name = "tool"
+version.workspace = true
+edition.workspace = true
+
+[features]
+cli = []
+
+[[bin]]
+name = "tool"
+path = "src/bin/tool.rs"
+required-features = ["cli"]

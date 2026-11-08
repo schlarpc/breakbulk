@@ -1,0 +1,4 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true

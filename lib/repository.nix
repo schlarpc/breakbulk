@@ -1028,19 +1028,16 @@ let
       triple: t:
       lib.concatMapAttrs (
         pkg: p:
-        # Dynamic-derivation mode cannot tell at evaluation time whether a
-        # product whose roots all have required features was built
-        # (lib/products.nix `uncertain`): its check builds the roots Cargo
-        # built and logs the others.
-        if p.uncertain or false then
-          { "${wsName}/${triple}/${pkg}/build" = p.buildCheck; }
-        else
-          lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
-            {
-              "${wsName}/${triple}/${pkg}/build" = p;
-            }
-            // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
-          )
+        # IFD mode leaves out a product whose roots Cargo all skipped (it is
+        # a stub). Dynamic-derivation mode cannot tell at evaluation time:
+        # such a product holds only the no-binaries marker and its stages
+        # and checks pass it on (decision 112), so it is in like any other.
+        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+          {
+            "${wsName}/${triple}/${pkg}/build" = p;
+          }
+          // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
+        )
       ) t.packages
       # Test runs and doctests of every variant with `checks = true`: the
       # default variant's under the package, the others' under

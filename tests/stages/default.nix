@@ -24,6 +24,10 @@
 #                       loaded and called from node
 #   stages-linked-crate-types  the `linked` stage of a cdylib+staticlib
 #                       library: two roots over one unit output
+#   stages-no-binaries  decision 112: a product whose roots were all
+#                       skipped (dynamic mode) holds the no-binaries marker,
+#                       and every stage and check passes it on without
+#                       running; with a built root, stages run
 #   stages-wasm-component  a core module through wasmOpt -> componentize
 #                       with metadata; the component imports nothing
 #
@@ -851,6 +855,113 @@ in
       test "$(ls ${linked} | tr '\n' ' ')" = "libfoo.a libfoo.so "
       touch $out
     '';
+
+  # Decision 112: a dynamic-mode product whose roots Cargo all skipped. Its
+  # `linked` holds only the no-binaries marker, and every stage and check
+  # (splitDebug, a stage and a check that would fail, a stage with
+  # structured attributes, noSourceReferences) passes the marker on to
+  # each output without running. A product with a built root runs its
+  # stages as usual.
+  stages-no-binaries =
+    let
+      wrapper =
+        name: notBuilt:
+        pkgs.runCommand "wrapper-${name}" { } (
+          if notBuilt then
+            ''
+              mkdir $out
+              echo "${name}: needs feature cli" > $out/not-built
+            ''
+          else
+            ''
+              mkdir -p $out/root
+              echo bin > $out/root/${name}
+            ''
+        );
+      root = name: notBuilt: {
+        breakbulkRoot = {
+          package = "p";
+          target = name;
+          kind = "bin";
+          test = false;
+          unit = "c-${name}";
+          reason = null;
+          dynamic = true;
+          wrapper = wrapper name notBuilt;
+          requiredFeatures = [ "cli" ];
+        };
+      };
+      fails =
+        n:
+        { pkgs, ... }:
+        pkgs.runCommand n { } "echo ${n} ran; exit 1";
+      productOf =
+        roots:
+        (breakbulk.products.mkProducts {
+          inherit pkgs;
+          inst = {
+            inherit roots;
+            sources = {
+              workspace = { };
+              crates = { };
+            };
+          };
+          triple = "x86_64-unknown-linux-gnu";
+          ca = false;
+          targetStages = {
+            boom = {
+              before = "splitDebug";
+              run = fails "boom";
+            };
+            structured = {
+              after = "splitDebug";
+              run =
+                { pkgs, ... }:
+                pkgs.runCommand "structured" {
+                  __structuredAttrs = true;
+                  outputs = [
+                    "out"
+                    "extra"
+                  ];
+                } "exit 1";
+            };
+          };
+          targetChecks.bad = {
+            on = "linked";
+            run = { pkgs, ... }: fails "bad" { inherit pkgs; };
+          };
+        }).p;
+      skipped = productOf {
+        "p/bin/a" = root "a" true;
+        "p/bin/b" = root "b" true;
+      };
+      # One root built: `boom` runs and fails.
+      built = productOf {
+        "p/bin/a" = root "a" false;
+        "p/bin/b" = root "b" true;
+      };
+      m = S.noBinariesMarker;
+    in
+    pkgs.runCommand "stages-no-binaries"
+      {
+        product = skipped;
+        linked = skipped.stages.linked;
+        debug = skipped.stages.splitDebug.debug;
+        extra = skipped.stages.structured.extra;
+        noSrc = skipped.checks.noSourceReferences;
+        bad = skipped.checks.bad;
+        builtBoom = pkgs.testers.testBuildFailure built.stages.boom;
+      }
+      ''
+        set -euo pipefail
+        grep -qxF 'a: needs feature cli' $linked/${m}
+        grep -qxF 'b: needs feature cli' $linked/${m}
+        for d in $product $debug $extra $noSrc $bad; do
+          cmp $linked/${m} $d/${m}
+        done
+        grep -q 'boom ran' $builtBoom/testBuildFailure.log
+        touch $out
+      '';
 
   stages-wasm-component =
     pkgs.runCommand "stages-wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; }

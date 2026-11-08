@@ -51,7 +51,7 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives embed config-env doctests test-control test-options required-features nextest)
+  fixtures=(walking-skeleton directives embed config-env doctests test-control test-options required-features all-required nextest)
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }
@@ -198,6 +198,12 @@ EOF
     [ -L "$p" ] || continue
     name=${p#"$(real "$dyn")/products/"}
     a=$(real "$(readlink "$p")")
+    if [ ! -L "$(real "$ifd")/products/$name" ] && [ -e "$a/breakbulk-no-binaries" ]; then
+      # Decision 112: Cargo built none of its binaries; IFD mode has no
+      # product for it.
+      echo "$f: product $name holds only the no-binaries marker (dynamic mode)" >&2
+      continue
+    fi
     b=$(real "$(readlink "$(real "$ifd")/products/$name")")
     ha=$(nix hash path "$a")
     hb=$(nix hash path "$b")
@@ -216,6 +222,18 @@ EOF
       d=$(real "${!m}")/$what
       if [ -d "$d" ]; then (cd "$d" && find . -mindepth 1 | sort); fi >"$WORK/$f-$what.$m"
     done
+    # Decision 112: dynamic mode's checks of a product Cargo built nothing
+    # of hold the no-binaries marker; IFD mode has none for it.
+    if [ "$what" = checks ]; then
+      while IFS= read -r c; do
+        t=$(real "$(readlink "$(real "$dyn")/checks/$c")")
+        if [ -e "$t/breakbulk-no-binaries" ]; then
+          echo "$f: check $c holds only the no-binaries marker (dynamic mode)" >&2
+          grep -vxF "./$c" "$WORK/$f-$what.dyn" >"$WORK/$f-$what.dyn.tmp" || true
+          mv "$WORK/$f-$what.dyn.tmp" "$WORK/$f-$what.dyn"
+        fi
+      done < <(comm -13 "$WORK/$f-$what.ifd" "$WORK/$f-$what.dyn" | sed 's|^\./||')
+    fi
     if diff -u "$WORK/$f-$what.ifd" "$WORK/$f-$what.dyn"; then
       echo "$f: $(grep -c . "$WORK/$f-$what.ifd") $what entries built in both modes" >&2
     else

@@ -50,12 +50,11 @@
 #
 # In dynamic-derivation mode whether Cargo built a root is known only at
 # build time, from its wrapper (`not-built`, lib/dynamic.nix): `linked`
-# leaves such roots out then, and fails with their reasons when it is left
-# with none. `.unbuilt` is empty. A product whose every root has required
-# features (by the prediction) may be all skipped, so `.uncertain` is set
-# and repo.checks uses `.buildCheck` for it instead of the product and its
-# checks: a derivation that builds every built root's unit and logs the
-# skipped ones, which succeeds in both cases.
+# leaves such roots out then. When it is left with none, it holds only
+# the no-binaries marker (`stages.noBinariesMarker`, with the reasons),
+# and every stage and check passes the marker on without running
+# (decision 112), so the product and its checks build in repo.checks
+# whether or not Cargo built anything. `.unbuilt` is empty.
 {
   lib,
   stages,
@@ -202,35 +201,14 @@ let
           for s in "''${skipped[@]}"; do
             printf 'breakbulk: left out of ${pkg}: %s\n' "$s" >&2
           done
+          # Decision 112: nothing to ship. The marker, with the reasons,
+          # makes every later stage and check pass it on.
           if [ "$linked" -eq 0 ] && [ ''${#skipped[@]} -gt 0 ]; then
-            printf 'error: %s\n' "''${skipped[@]}" >&2
-            exit 1
+            printf '%s\n' "''${skipped[@]}" > $out/${stages.noBinariesMarker}
+            echo "breakbulk: Cargo built none of ${pkg}'s binaries; the product holds only ${stages.noBinariesMarker}" >&2
           fi
         ''
       );
-
-  # Dynamic-derivation mode, for repo.checks: every root's wrapper (which
-  # builds its unit, when Cargo built it), with a log naming each root and
-  # whether it was built. Succeeds whether or not any root was built.
-  mkBuildCheck =
-    pkgs: pkg: rs:
-    pkgs.runCommand "${pkg}-roots"
-      {
-        wrappers = map (r: r.breakbulkRoot.wrapper) rs;
-        names = map rootName rs;
-      }
-      ''
-        mkdir -p $out
-        w=($wrappers)
-        n=($names)
-        for i in "''${!w[@]}"; do
-          if [ -e "''${w[$i]}/not-built" ]; then
-            printf '%s: skipped: %s\n' "''${n[$i]}" "$(<"''${w[$i]}/not-built")"
-          else
-            printf '%s: built\n' "''${n[$i]}"
-          fi
-        done | tee $out/log
-      '';
 
   # Decision 90: whether debug info is split off is decided per target,
   # from one stage set, and three things follow from it: the products'
@@ -352,21 +330,15 @@ let
               ;
             info = lib.optionalAttrs (lockfile != null) { inherit lockfile; };
           };
-          # Dynamic-derivation mode: every root may be skipped when each
-          # has required features.
-          uncertain = lib.all (
-            r: isDynamic r && (r.breakbulkRoot.requiredFeatures or null) != null && r.breakbulkRoot.requiredFeatures != [ ]
-          ) rs;
           extra = {
-            inherit roots uncertain;
+            inherit roots;
             # Evaluation warnings about this product (also printed).
             warnings = lib.optional (warning != null) warning;
             unbuilt = map (r: {
               root = rootName r;
               inherit (r.breakbulkRoot) reason;
             }) unbuilt;
-          }
-          // lib.optionalAttrs uncertain { buildCheck = mkBuildCheck pkgs pkg rs; };
+          };
         in
         (if warning == null then lib.id else lib.warn warning) ((if built == [ ] then head rs else p) // extra);
     in

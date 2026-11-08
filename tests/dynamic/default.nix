@@ -162,6 +162,10 @@ let
     };
     # A product with a bin Cargo skips (required features): left out.
     required-features = mkRepo "required-features" [ oneWs ];
+    # A product whose only bin Cargo skips (decision 112): in dynamic mode
+    # it and its checks build to the no-binaries marker; IFD mode leaves it
+    # out (run.sh accepts the difference only for marker outputs).
+    all-required = mkRepo "all-required" [ oneWs ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
     nextest = mkRepo "nextest" [
       oneWs
@@ -257,7 +261,7 @@ let
           + lib.concatStrings (
             lib.mapAttrsToList (p: d: ''
               ln -s ${d} $out/products/${wsName}/${p}
-            '') w.packages
+            '') (lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) w.packages)
           )
           + lib.concatStrings (
             lib.concatLists (
