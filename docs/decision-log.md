@@ -1512,3 +1512,34 @@ Acceptable?
 - Bare-metal build-std targets (`x86_64-unknown-none`) link with rustc's
   bundled lld, since there's no nixpkgs linker wrapper for them; the
   "never rust-lld" rule (68) is about the Linux wrapper.
+
+## 124. FYI: linker function, debug-output rule, wasip2 change (resolves 68, 97, 99)
+
+- **68:** linker choice now lives in one function (`lib/presets/linker.nix`):
+  `linkerKind` decides (mold, clang+lld for cross-language LTO, lld-link,
+  wasm-ld, wasm-component-ld, MinGW+lld, zig) from the target triple, LTO
+  mode and preset flavor; `chooseLinker` builds it. Every preset calls it;
+  `targets.<t>.linker` still overrides. No build step changed (714 checked).
+- **97:** build steps declare a `debug` output only when the compiler will
+  write side files, decided by one function from the traced command.
+  Linux release builds no longer get empty `debug` outputs.
+- **99:** wasip2 keeps Rust's bundled wasi-libc and compiles C code against
+  headers from the matching wasi-sdk release (table: Rust 1.95–1.96 → 30,
+  1.97–1.99 → 33, 1.100–1.102 → 34, sourced from Rust's CI pins). The
+  fetched library is byte-identical to the one inside each Rust toolchain,
+  so std, C code and C library are one version. The link wrapper is gone.
+
+## 125. ASK: Windows writes a `.pdb` even without debug info
+
+You said "`.pdb` whenever debug info is on", but rustc always passes
+`/DEBUG` to the Windows linker, so release builds with debug info off also
+write a PDB (1.2 MB for the test program). It carries symbol names for
+stack traces. Default: keep it in the `debug` output for every Windows
+binary. Alternative: discard it when debug info is off.
+
+## 126. FYI: smaller notes from batch A
+
+- With `split-debuginfo = "unpacked"`, libraries' `.dwo` files are still
+  discarded, so source-level debugging into dependency code needs `packed`.
+- Building on a non-Linux machine now fails at evaluation with a clear
+  message instead of silently choosing mold.

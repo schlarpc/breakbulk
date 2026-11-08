@@ -237,7 +237,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | wasm32-unknown-unknown | Day one | user's, with target | lld (wasm flavor) | wasm-bindgen test runner with headless Chromium, or wasmtime |
 | {x86\_64,aarch64}-pc-windows-msvc | Day one | user's + xwin SDK (unfree) | lld-link | wine |
 | Host triple, fully static glibc | Day one | user's + static archives | mold | native |
-| wasm32-wasip2 | M7 | rustup-dist with target, + nixpkgs wasi-libc for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
+| wasm32-wasip2 | M7 | rustup-dist with target, + the matching wasi-sdk sysroot's headers for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
 | Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
@@ -252,13 +252,15 @@ Supported Cargo releases form a rolling window: roughly the last six months of s
 
 ### Linker selection
 
-The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable.
+The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable. One function makes the choice (`presets.chooseLinker`, with the decision itself in `presets.linkerKind`); every preset and the host spec call it, and `targets.<t>.linker` (or `host.linker`) overrides it.
 
 - Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The native target gets the Linux preset by default, so this holds with no configuration. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
 - Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM; a rustc newer than the table is asked with `rustc -vV` at evaluation time).
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
+- Windows msvc: `lld-link` from the matching LLVM, wrapped so PDBs are reproducible. Windows MinGW (`-gnu`, `-gnullvm`): the toolchain's C driver with lld. The zig preset asks for zig's own linker (`zig cc`).
+- Any other target has no rule and fails at evaluation, naming `targets.<t>.linker`.
 - **wild** is an opt-in preset, gated by the determinism check.
-- Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so the mold linker wrapper drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
+- Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so every C-driver linker wrapper (mold, clang with lld, MinGW, zig) drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
 
 ### Windows msvc
 
@@ -267,7 +269,7 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 ### wasm
 
 - **Browser.** The `wasm-bindgen-cli` version is read from `Cargo.lock` and matched exactly; a missing version is a clear error. C code is compiled with an unwrapped clang targeting wasm32. A wrapped gcc can silently emit host objects instead.
-- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for WASI-style targets uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc instead of the one bundled with Rust, so headers and library match. On wasip2 this is not `-C link-self-contained=no`, which also drops the program's `crt1-command.o`: the preset puts nixpkgs' library directory first on the search path and swaps the crt1 objects in its linker wrapper.
+- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for `wasm32-unknown-unknown` components uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc (`-C link-self-contained=no`). On wasip2 the link keeps the wasi-libc bundled with Rust (turning it off also drops the program's `crt1-command.o`), and C code compiles against the headers of the wasi-sdk release that Rust release bundles, fetched as a fixed-output sysroot from a table of Rust release to wasi-sdk release; std, the C code and the library linked share one wasi-libc version (decision 99).
 - `wasm-opt` operates on core modules, so component pipelines run it before componentizing.
 
 ### Static and musl

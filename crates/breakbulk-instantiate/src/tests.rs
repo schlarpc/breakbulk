@@ -504,6 +504,17 @@ fn versioned_override_wins() {
     assert!(!run.env.contains_key("LIB_ONLY"));
 }
 
+/// Gives compile unit `id` packed split debuginfo, as Cargo passes it for
+/// a profile with `debug` and `split-debuginfo = "packed"`.
+fn split_debuginfo(inputs: &mut Inputs, id: &str) {
+    let Some(Unit::Compile(c)) = inputs.plan.units.get_mut(id) else {
+        panic!("{id} is not a compile unit")
+    };
+    for a in ["-C", "debuginfo=2", "-C", "split-debuginfo=packed"] {
+        c.args.push(breakbulk_format::Arg::Literal(a.into()));
+    }
+}
+
 #[test]
 fn names_and_outputs() {
     let out = instantiate(&smoke_inputs()).unwrap();
@@ -513,9 +524,14 @@ fn names_and_outputs() {
     assert_eq!(name(SCRIPT), "smokelib-0.1.0-build-script");
     assert_eq!(name(RUN), "smokelib-0.1.0-build-run");
     let outputs = |id: &str| out.units[id].attrs["outputs"].clone();
-    // A target bin also gets `debug` (its debuginfo side files), last.
+    // A Linux bin without split debuginfo writes no side files: no `debug`.
+    assert_eq!(outputs(APP), Value::Strings(vec!["out".into()]));
+    // With split debuginfo it gets `debug` (its `.dwp`), last.
+    let mut inputs = smoke_inputs();
+    split_debuginfo(&mut inputs, APP);
+    let split = instantiate(&inputs).unwrap();
     assert_eq!(
-        outputs(APP),
+        split.units[APP].attrs["outputs"],
         Value::Strings(vec!["out".into(), "debug".into()])
     );
     // A build script (a host unit) does not.

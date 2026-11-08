@@ -32,6 +32,7 @@
   llvmVersions,
   runners,
   wasmBindgen,
+  wasiSdk,
 }:
 let
   inherit (lib) mkDefault;
@@ -81,75 +82,28 @@ let
         inherit (pkgs) overlays config;
       };
 
-  # A C compiler driver that links with mold: nixpkgs' wrapped cc for `p`'s
-  # platform, with mold in its bintools (stdenvAdapters.useMoldLinker), and
-  # `-fuse-ld=mold`. The wrappers' rpath, NIX_LDFLAGS and hardening handling
-  # apply, driven by the unit's env capture. Runs on the build platform.
-  #
-  # rustc (1.90 and later) links x86_64-unknown-linux-gnu with its bundled
-  # rust-lld by default: it passes `-B<sysroot>/lib/rustlib/<host>/bin/gcc-ld
-  # -fuse-ld=lld` to the C driver (checked with rustc 1.95 and 1.99,
-  # `--print link-args`), which bypasses the Nix linker wrapper. The stable
-  # opt-out, `-C linker-features=-lld`, is a rustflag, and rustflags never
-  # reach host units, so the driver wrapper drops those two arguments
-  # instead (also inside an `@file` response file), for host and target
-  # units alike.
-  driverWrapper =
-    p: name: exe: flag:
-    "${p.buildPackages.writeShellScriptBin name ''
-      drop() {
-        case "$1" in
-        -fuse-ld=lld | -B*/lib/rustlib/*/bin/gcc-ld) return 0 ;;
-        esac
-        return 1
-      }
-      args=()
-      for a in "$@"; do
-        if [[ $a == @* && -f ''${a#@} ]]; then
-          rsp="''${TMPDIR:-/tmp}/${name}-$$-''${#args[@]}.rsp"
-          while IFS= read -r line || [[ -n $line ]]; do
-            drop "$line" || printf '%s\n' "$line"
-          done < "''${a#@}" > "$rsp"
-          args+=("@$rsp")
-        elif ! drop "$a"; then
-          args+=("$a")
-        fi
-      done
-      exec ${exe} ${flag} "''${args[@]}"
-    ''}/bin/${name}";
-
-  moldLinker =
-    p:
-    let
-      cc = (p.stdenvAdapters.useMoldLinker p.stdenv).cc;
-      prefix = cc.targetPrefix;
-    in
-    driverWrapper p "${prefix}cc-mold" "${cc}/bin/${prefix}cc" "-fuse-ld=mold";
-
-  # clang linking with lld from `llvm`, for cross-language LTO
-  # (`-Clinker-plugin-lto`), where the linker must read rustc's LLVM bitcode.
-  lldLinker =
-    p: llvm:
-    let
-      cc = llvm.clang;
-      prefix = cc.targetPrefix;
-    in
-    driverWrapper p "${prefix}clang-lld" "${cc}/bin/${prefix}clang" "-fuse-ld=lld";
+  # The linker choice (./linker.nix): one function for every preset.
+  linkers = import ./linker.nix { inherit lib; };
+  inherit (linkers) chooseLinker;
 
   # The host spec every preset sets: the build machine's linker. On a
   # native build host and target linkers are the same derivation, so host
   # units are identical whatever the target.
   hostSpec = pkgs: {
-    linker = mkDefault (moldLinker pkgs.buildPackages);
+    linker = mkDefault (chooseLinker {
+      pkgs = pkgs.buildPackages;
+      triple = nativeTriple pkgs.buildPackages;
+    });
     env = { };
   };
 
   defaultEnv = lib.mapAttrs (_: mkDefault);
 
-  # Shared by both wasm presets.
+  # Shared by the wasm presets.
   wasmCommon =
     {
       pkgs,
+      triple,
       rustc ? null,
       llvmMajor ? null,
       llvmPackages ? null,
@@ -165,10 +119,7 @@ let
     in
     {
       packageSet = mkDefault null;
-      # rustc's wasm32 targets name the lld wasm flavor themselves; the
-      # name `wasm-ld` keeps that flavor, with nixpkgs' lld matching rustc's
-      # LLVM instead of rustup's self-contained rust-lld.
-      linker = mkDefault "${llvm.lld}/bin/wasm-ld";
+      linker = mkDefault (chooseLinker { inherit pkgs triple llvm; });
       # Unwrapped: a wrapped compiler can silently emit host objects.
       cc = mkDefault "${clang}/bin/clang";
       cxx = mkDefault "${clang}/bin/clang++";
@@ -237,7 +188,11 @@ let
     in
     {
       packageSet = mkDefault tp;
-      linker = mkDefault (if crossLanguageLto then lldLinker tp llvm else moldLinker tp);
+      linker = mkDefault (chooseLinker {
+        inherit pkgs triple llvm;
+        lto = crossLanguageLto;
+        packageSet = tp;
+      });
       cc = mkDefault "${cc}/bin/${prefix}cc";
       cxx = mkDefault "${cc}/bin/${prefix}c++";
       ar = mkDefault "${cc.bintools}/bin/${prefix}ar";
@@ -270,10 +225,14 @@ in
 {
   inherit
     targetPkgsFor
-    moldLinker
-    lldLinker
+    chooseLinker
     hostSpec
     mkPreset
+    ;
+  inherit (linkers)
+    linkerKind
+    moldLinker
+    lldLinker
     ;
 
   # Linux glibc, native or cross (nixpkgs cross toolchains). Linker: mold
@@ -321,7 +280,7 @@ in
     ) "breakbulk.presets.staticGlibc: ${triple} is not the host triple ${nativeTriple pkgs}";
     {
       packageSet = mkDefault pkgs;
-      linker = mkDefault (moldLinker pkgs);
+      linker = mkDefault (chooseLinker { inherit pkgs triple; });
       cc = mkDefault "${cc}/bin/cc";
       cxx = mkDefault "${cc}/bin/c++";
       ar = mkDefault "${cc.bintools}/bin/ar";
@@ -377,14 +336,6 @@ in
       tools = "${llvm.llvm}/bin";
       incdirs = sdk.includeDirs ++ lib.concatMap (s: s.includeDirs or [ ]) extraSdks;
       libdirs = sdk.libDirs.${arch} ++ lib.concatMap (s: s.libDirs or [ ]) extraSdks;
-      linker = "${
-        bp.writeShellScriptBin "lld-link-stable" (
-          ''
-            LLD_LINK=${llvm.lld}/bin/lld-link
-          ''
-          + builtins.readFile ./lld-link-stable.sh
-        )
-      }/bin/lld-link-stable";
       cflags = [
         "--target=${triple}"
       ]
@@ -398,7 +349,7 @@ in
     ) "breakbulk.presets.msvc: triple ${triple} does not match arch ${arch}";
     {
       packageSet = mkDefault null;
-      linker = mkDefault linker;
+      linker = mkDefault (chooseLinker { inherit pkgs triple llvm; });
       cc = mkDefault "${clang}/bin/clang-cl";
       cxx = mkDefault "${clang}/bin/clang-cl";
       ar = mkDefault "${tools}/llvm-lib";
@@ -457,7 +408,7 @@ in
       llvmPackages ? null,
       ...
     }@args:
-    wasmCommon args
+    wasmCommon (args // { inherit triple; })
     // {
       stagePreset = mkDefault "wasmBrowser";
       runner = mkDefault (
@@ -475,12 +426,17 @@ in
   );
 
   # Later targets (M7), one file each.
-  wasip2 = mkPreset (import ./wasip2.nix { inherit lib wasmCommon runners; });
+  wasip2 = mkPreset (
+    import ./wasip2.nix {
+      inherit lib wasmCommon runners;
+      wasiSdkLib = wasiSdk;
+    }
+  );
   zig = mkPreset (
     import ./zig.nix {
       inherit
         lib
-        driverWrapper
+        chooseLinker
         hostSpec
         ;
     }
@@ -489,7 +445,7 @@ in
     import ./windows-gnu.nix {
       inherit
         lib
-        driverWrapper
+        chooseLinker
         hostSpec
         runners
         ;
@@ -511,7 +467,7 @@ in
       ...
     }@args:
     let
-      c = wasmCommon args;
+      c = wasmCommon (args // { inherit triple; });
       inc = "-isystem ${lib.getDev wasilibc}/include/${wasiTriple}";
     in
     c
