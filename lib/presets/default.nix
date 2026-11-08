@@ -32,6 +32,7 @@
   llvmVersions,
   runners,
   wasmBindgen,
+  wasiSdk,
 }:
 let
   inherit (lib) mkDefault;
@@ -98,12 +99,11 @@ let
 
   defaultEnv = lib.mapAttrs (_: mkDefault);
 
-  # Shared by the wasm presets. `linkerArgs`: extra chooseLinker arguments.
+  # Shared by the wasm presets.
   wasmCommon =
     {
       pkgs,
       triple,
-      linkerArgs ? { },
       rustc ? null,
       llvmMajor ? null,
       llvmPackages ? null,
@@ -119,7 +119,7 @@ let
     in
     {
       packageSet = mkDefault null;
-      linker = mkDefault (chooseLinker ({ inherit pkgs triple llvm; } // linkerArgs));
+      linker = mkDefault (chooseLinker { inherit pkgs triple llvm; });
       # Unwrapped: a wrapped compiler can silently emit host objects.
       cc = mkDefault "${clang}/bin/clang";
       cxx = mkDefault "${clang}/bin/clang++";
@@ -426,7 +426,12 @@ in
   );
 
   # Later targets (M7), one file each.
-  wasip2 = mkPreset (import ./wasip2.nix { inherit lib wasmCommon runners; });
+  wasip2 = mkPreset (
+    import ./wasip2.nix {
+      inherit lib wasmCommon runners;
+      wasiSdkLib = wasiSdk;
+    }
+  );
   zig = mkPreset (
     import ./zig.nix {
       inherit

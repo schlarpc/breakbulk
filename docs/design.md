@@ -237,7 +237,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | wasm32-unknown-unknown | Day one | user's, with target | lld (wasm flavor) | wasm-bindgen test runner with headless Chromium, or wasmtime |
 | {x86\_64,aarch64}-pc-windows-msvc | Day one | user's + xwin SDK (unfree) | lld-link | wine |
 | Host triple, fully static glibc | Day one | user's + static archives | mold | native |
-| wasm32-wasip2 | M7 | rustup-dist with target, + nixpkgs wasi-libc for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
+| wasm32-wasip2 | M7 | rustup-dist with target, + the matching wasi-sdk sysroot's headers for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
 | Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
@@ -269,7 +269,7 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 ### wasm
 
 - **Browser.** The `wasm-bindgen-cli` version is read from `Cargo.lock` and matched exactly; a missing version is a clear error. C code is compiled with an unwrapped clang targeting wasm32. A wrapped gcc can silently emit host objects instead.
-- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for WASI-style targets uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc instead of the one bundled with Rust, so headers and library match. On wasip2 this is not `-C link-self-contained=no`, which also drops the program's `crt1-command.o`: the preset puts nixpkgs' library directory first on the search path and swaps the crt1 objects in its linker wrapper.
+- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for `wasm32-unknown-unknown` components uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc (`-C link-self-contained=no`). On wasip2 the link keeps the wasi-libc bundled with Rust (turning it off also drops the program's `crt1-command.o`), and C code compiles against the headers of the wasi-sdk release that Rust release bundles, fetched as a fixed-output sysroot from a table of Rust release to wasi-sdk release; std, the C code and the library linked share one wasi-libc version (decision 99).
 - `wasm-opt` operates on core modules, so component pipelines run it before componentizing.
 
 ### Static and musl

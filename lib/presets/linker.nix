@@ -102,7 +102,7 @@ let
   # (rustc_codegen_ssa back/linker.rs, get_linker), so the real
   # wasm-component-ld is found there whatever toolchain is in use.
   componentLinker =
-    bp: wasmLd: libDir:
+    bp: wasmLd:
     "${bp.writeShellScriptBin "wasm-component-ld" ''
       self=$(readlink -f "$0")
       real=
@@ -117,33 +117,6 @@ let
         echo "breakbulk wasip2 preset: no wasm-component-ld on PATH; the Rust toolchain ships it in lib/rustlib/<host>/bin (rustup's and rust-overlay's do)" >&2
         exit 1
       fi
-      ${
-        if libDir != null then
-          ''
-            swap() {
-              case "$1" in
-              */lib/rustlib/wasm32-wasip2/lib/self-contained/crt1-command.o) printf '%s\n' ${libDir}/crt1-command.o ;;
-              */lib/rustlib/wasm32-wasip2/lib/self-contained/crt1-reactor.o) printf '%s\n' ${libDir}/crt1-reactor.o ;;
-              *) printf '%s\n' "$1" ;;
-              esac
-            }
-            args=()
-            for a in "$@"; do
-              if [[ $a == @* && -f ''${a#@} ]]; then
-                rsp="''${TMPDIR:-/tmp}/wasm-component-ld-$$-''${#args[@]}.rsp"
-                while IFS= read -r line || [[ -n $line ]]; do
-                  swap "$line"
-                done < "''${a#@}" > "$rsp"
-                args+=("@$rsp")
-              else
-                args+=("$(swap "$a")")
-              fi
-            done
-            set -- "''${args[@]}"
-          ''
-        else
-          ""
-      }
       # Last: rustc's `-flavor wasm` must stay the first arguments.
       exec "$real" "$@" --wasm-ld-path ${wasmLd}
     ''}/bin/wasm-component-ld";
@@ -235,9 +208,6 @@ let
       lld ? pkgs.buildPackages.lld,
       # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-gnu.<glibc>"; }.
       zig ? null,
-      # wasm-component-ld: a wasi-libc library directory whose crt1
-      # objects replace rustc's self-contained ones.
-      wasip2CrtDir ? null,
     }:
     let
       kind = linkerKind { inherit triple lto flavor; };
@@ -248,9 +218,7 @@ let
       clang-lld = lldLinker packageSet (needs kind "llvm" llvm);
       lld-link = lldLinkLinker bp (needs kind "llvm" llvm);
       wasm-ld = "${(needs kind "llvm" llvm).lld}/bin/wasm-ld";
-      wasm-component-ld =
-        componentLinker bp "${(needs kind "llvm" llvm).lld}/bin/wasm-ld"
-          wasip2CrtDir;
+      wasm-component-ld = componentLinker bp "${(needs kind "llvm" llvm).lld}/bin/wasm-ld";
       mingw-lld = mingwLinker pkgs packageSet lld;
       zig = zigLinker pkgs (needs kind "zig" zig);
     }

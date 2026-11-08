@@ -67,6 +67,7 @@ let
       ;
   };
   llvmVersions = import ./llvm-versions.nix { inherit lib; };
+  wasiSdk = import ./wasi-sdk.nix { inherit lib; };
   runners = import ./runners.nix { inherit lib; };
   presets = import ./presets {
     inherit
@@ -74,6 +75,7 @@ let
       llvmVersions
       runners
       wasmBindgen
+      wasiSdk
       ;
   };
 
@@ -186,8 +188,13 @@ in
   # Toolchain presets (M3): breakbulk.presets.{linuxGnu, linuxMusl,
   # staticGlibc, msvc, wasmBrowser, wasmComponent} and (M7) {wasip2,
   # windowsGnu, zig}; runners; the Rust to
-  # LLVM version table.
-  inherit presets runners llvmVersions;
+  # LLVM version table; the Rust to wasi-sdk table (lib/wasi-sdk.nix).
+  inherit
+    presets
+    runners
+    llvmVersions
+    wasiSdk
+    ;
   inherit (stages) mkProduct;
   stageHelpers = stages.helpers;
 }

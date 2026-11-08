@@ -4,8 +4,9 @@
 # substitute) cross toolchains.
 #
 #   wasip2-*          wasm32-wasip2 std component (rustc's wasm-component-ld),
-#                     C against nixpkgs' wasi-libc built for wasip2 (built
-#                     here, not cached by Hydra); tests under wasmtime
+#                     C against the headers of the wasi-sdk release whose
+#                     wasi-libc Rust bundles (lib/wasi-sdk.nix); tests under
+#                     wasmtime
 #   riscv64-*         riscv64gc-unknown-linux-gnu via linuxGnu (nixpkgs cross,
 #                     mold), openssl-sys and zstd-sys from the cross env
 #                     capture; product and tests under qemu-riscv64
@@ -98,15 +99,21 @@ let
             mkdir -p $out
             cp app.wit out.txt $out/
           '';
-      # The linker wrapper finds rustc's wasm-component-ld on PATH, swaps
-      # rustc's self-contained crt1 objects for wasilibc's (also inside a
-      # response file), keeps `-flavor wasm` first and adds the wasm-ld.
+      # The linker wrapper finds rustc's wasm-component-ld on PATH, passes
+      # rustc's arguments through unchanged (crt1 objects and libc from
+      # rustc's self-contained directory), keeps `-flavor wasm` first and
+      # adds the wasm-ld. C code gets the headers of the wasi-sdk release
+      # whose libc.a rustc bundles, byte for byte (decision 99).
       wasip2-linker =
         let
           spec = presets.wasip2 {
             inherit pkgs;
             rustc = wasip2Rust;
             withC = true;
+          };
+          sysroot = breakbulk.wasiSdk.sysrootFor {
+            inherit pkgs;
+            rustc = wasip2Rust;
           };
           sc = "/x/lib/rustlib/wasm32-wasip2/lib/self-contained";
           wasmLd =
@@ -115,6 +122,13 @@ let
               rustc = wasip2Rust;
             }).lld;
         in
+        assert lib.assertMsg (
+          spec.rustflags or [ ] == [ ]
+        ) "wasip2-linker: rustflags ${toString spec.rustflags}";
+        assert lib.assertMsg (
+          spec.cflags == [ "-isystem ${sysroot}/include/wasm32-wasip2" ]
+        ) "wasip2-linker: cflags ${toString spec.cflags}";
+        assert breakbulk.wasiSdk.versionFor wasip2Rust.version == "33";
         pkgs.runCommand "wasip2-linker" { } ''
           mkdir -p fake
           printf '#!${pkgs.runtimeShell}\nfor a in "$@"; do case $a in @*) cat "''${a#@}";; *) echo "$a";; esac; done\n' > fake/wasm-component-ld
@@ -122,11 +136,13 @@ let
           echo ${sc}/crt1-reactor.o > args.rsp
           PATH=$PWD/fake:$PATH ${spec.linker.content} -flavor wasm ${sc}/crt1-command.o x.o @args.rsp > got.txt
           cat got.txt
-          libdir=${lib.removePrefix "native=" (lib.last spec.rustflags)}
-          printf '%s\n' -flavor wasm $libdir/crt1-command.o x.o $libdir/crt1-reactor.o \
+          printf '%s\n' -flavor wasm ${sc}/crt1-command.o x.o ${sc}/crt1-reactor.o \
             --wasm-ld-path ${wasmLd}/bin/wasm-ld > want.txt
           diff want.txt got.txt
-          test -f $libdir/crt1-command.o
+          # The headers' library is the toolchain's own.
+          cmp ${sysroot}/lib/wasm32-wasip2/libc.a \
+            ${wasip2Rust}/lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a
+          test -f ${sysroot}/include/wasm32-wasip2/stdio.h
           touch $out
         '';
       wasip2-test-lib = t.testRuns.app."lib/app";

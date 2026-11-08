@@ -656,6 +656,21 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
+        # The Rust to wasi-sdk table (lib/wasi-sdk.nix, decision 99): an
+        # unknown Rust release fails evaluation, naming the file.
+        wasiSdkTable =
+          let
+            w = breakbulk.wasiSdk;
+            unknown = builtins.tryEval (w.versionFor "1.94.0");
+          in
+          w.versionFor "1.95.0" == "30"
+          && w.versionFor "1.96.1" == "30"
+          && w.versionFor "1.99.0" == "33"
+          && w.versionFor "1.100.0-beta.10-2026-11-05" == "34"
+          && w.versionFor "1.101.0-nightly-2026-11-06" == "34"
+          && !unknown.success
+          && fails (w.versionFor "1.200.0")
+          && lib.all (v: w.releases ? ${v}) (lib.attrValues w.table);
         # The linker choice (lib/presets/linker.nix), one rule per kind.
         linkerKinds =
           let
