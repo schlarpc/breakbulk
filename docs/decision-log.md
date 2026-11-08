@@ -1956,3 +1956,22 @@ wrapped, so it would run on an empty product in dynamic mode (and likely
 fail). Options: make such stages an evaluation error with a hint to use
 `stdenv.mkDerivation`/`runCommand`, or wrap them a different way (a small
 gate derivation in front). Default: leave as is (rare).
+
+## 148. FYI: inventory of what breakbulk assumes about Cargo and rustc
+
+`docs/reference/assumptions.md` lists 78 assumptions in 11 groups, each with
+where it lives, the upstream source, the versions it's known to hold for,
+the check that pins it, and what breaks if it changes. 72 are pinned by
+flake checks that run real Cargo or rustc; 2 are partly pinned (the LLVM
+and wasi-sdk version tables, #36 and #37); 4 have no pinning test (#33,
+#34, #35, and #10 for cross-language LTO).
+
+## 149. ASK: stop relying on Cargo's rustc-info cache being empty
+
+Planning only works because the build directory is fresh when the planner
+runs: Cargo caches `rustc -vV` output there, and the planner needs Cargo to
+actually run that query through the shim to learn Cargo's own environment.
+If a future Cargo wrote that cache earlier (say, during `cargo metadata`),
+every plan would fail loudly. Setting `CARGO_CACHE_RUSTC_INFO=0` on the
+traced Cargo removes the dependency; it's a one-line planner change that
+doesn't affect units. Default proposal: do it.
