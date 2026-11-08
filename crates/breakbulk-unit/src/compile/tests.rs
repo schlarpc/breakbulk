@@ -31,6 +31,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         remap: vec![],
         remap_scope: None,
         env_capture: None,
+        link_captures: Vec::new(),
         seed: None,
     }
 }

@@ -1543,3 +1543,36 @@ binary. Alternative: discard it when debug info is off.
   discarded, so source-level debugging into dependency code needs `packed`.
 - Building on a non-Linux machine now fails at evaluation with a clear
   message instead of silently choosing mold.
+
+## 127. FYI: test options and link-step library folders (resolves 17, 61, 107)
+
+- **17:** `test.stripForRun` (per package, or workspace default) makes test
+  runs use a copy of the test binary with debug info and build ID removed.
+  Verified with content-addressing on: after a README edit in a workspace
+  library, the test run was not re-run.
+- **61:** `test.runFiles = [ "tests/fixtures" ]` narrows a test's working
+  folder to the listed paths; editing an unlisted file no longer changes
+  the test run, and a test reading an unlisted file fails loudly.
+- **107:** every build step that links gets the library search folders
+  (`NIX_LDFLAGS`) of the other packages it links, host and target kept
+  apart, so a `-sys` crate that prints only `-lfoo` now works from another
+  package, and the binary records an rpath to the library.
+- The test that was too strict with content-addressing on is fixed, and
+  the dynamic-mode skip is gone.
+
+## 128. ASK: dynamic mode doesn't skip unchanged test re-runs yet
+
+In dynamic mode, test runs read their settings from a generated file that
+names the package's source folder and build-script outputs, so any edit
+there re-runs them, even with content-addressing, `stripForRun` and
+`runFiles`. Everything still works; only the "same binary, skip the
+re-run" saving is missing in dynamic mode. Fix: content-addressed copies
+of that file's inputs, like the default mode has. Do it now, or wait until
+dynamic mode is usable on a released Nix?
+
+## 129. FYI: link steps take only `NIX_LDFLAGS` from other packages
+
+Build-tool library folders (`NIX_LDFLAGS_FOR_BUILD`, e.g. cmake's) and
+`NIX_CFLAGS_LINK` aren't passed along, since setup hooks don't normally
+use them for libraries a binary links. If some library's setup hook does,
+it gets added.

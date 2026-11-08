@@ -135,22 +135,31 @@ let
     # runtime env; its test apps are `apps` in build.test-control.
     # With ca-derivations on (as here), IFD mode's test runs put
     # content-addressed copies of the build scripts' library directories on
-    # the dynamic-library path (decision 61, testRuns.stableSpec), which the
-    # env binary's exact-path assertion rejects; its test runs skip that
-    # test, and the test apps (no copies) run it in both modes.
+    # the dynamic-library path (decision 61, testRuns.stableSpec); the env
+    # binary's dylib-path test accepts those copies.
     test-control = mkRepo "test-control" [
       oneWs
-      {
-        packages.ctl.test = ctlTest // {
-          binaries = ctlTest.binaries // {
-            env.args = [
-              "--skip"
-              "dylib_path_has_only_out_dir_search_paths"
-            ];
-          };
-        };
-      }
+      { packages.ctl.test = ctlTest; }
     ];
+    # Test runs of a debug-stripped copy (test.stripForRun, decision 17) in
+    # a narrowed working directory (test.runFiles, decision 61); its tests
+    # assert the working directory and CARGO_MANIFEST_DIR, and read only
+    # listed files.
+    test-options = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = ../test-options/fixture;
+      modules = [
+        { inherit mode; }
+        oneWs
+        {
+          workspaces.main.test.stripForRun = true;
+          packages.app.test.runFiles = [
+            "data"
+            "notes.md"
+          ];
+        }
+      ];
+    };
     # A product with a bin Cargo skips (required features): left out.
     required-features = mkRepo "required-features" [ oneWs ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.

@@ -226,7 +226,12 @@ p: [ p.openssl ]
 Libraries for the platform being built (` openssl `)\. A function of
 a package set (` p: [ p.openssl ] `), called with the build
 machine’s set for host units and with the target’s set for
-target units; or a list used as given\.
+target units; or a list used as given\. Their library search
+paths (` NIX_LDFLAGS `, not compiler flags or ` PATH `) also reach
+the link steps of the packages that link this one (bins, tests,
+cdylibs, doctests of dependents), on the same platform, so a
+` -sys ` crate may print ` rustc-link-lib ` without a search path;
+binaries get an rpath to the library\.
 
 
 
@@ -791,6 +796,49 @@ list of package
 
 
 
+## packages\.\<name>\.test\.runFiles
+
+
+
+Narrow what this package’s test runs see: their working
+directory (and runtime ` CARGO_MANIFEST_DIR `) is a view holding
+only these paths, relative to the package directory, at their
+usual places; ` [ ] ` gives an empty directory\. Editing any other
+file of the package then leaves the test run’s own inputs
+unchanged, so with content addressing (` ca `) a byte-identical
+test binary is not re-run\. A test that reads a file not listed
+fails\. ` null `: the package’s whole source view (or its
+` test.sourceScope ` view), as ` cargo test ` sees it\. Test apps
+keep the whole view\.
+
+
+
+*Type:*
+null or (list of string)
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+
+
+*Example:*
+
+```nix
+[
+  "tests/fixtures"
+]
+```
+
+*Declared by:*
+ - [lib/modules/packages\.nix](../lib/modules/packages.nix)
+
+
+
 ## packages\.\<name>\.test\.runner
 
 
@@ -860,6 +908,38 @@ list of (absolute path or string)
 [
   "testdata"
 ]
+```
+
+*Declared by:*
+ - [lib/modules/packages\.nix](../lib/modules/packages.nix)
+
+
+
+## packages\.\<name>\.test\.stripForRun
+
+
+
+Run a copy of each test binary with its debug info (and build
+ID) stripped, content-addressed when ` ca ` is on\. Workspace
+libraries keep real source paths in their debug info, so an
+edit to any file of such a library (a README) changes the bytes
+of every test binary that links it; the stripped copy does not
+change, and the test is not re-run\. Backtraces still name
+functions, but not files and lines\. The unstripped binary stays
+in ` tests.<pkg>.<binary> ` for debugging\. ` null `: the
+workspace’s ` test.stripForRun `\.
+
+
+
+*Type:*
+null or boolean
+
+
+
+*Default:*
+
+```nix
+null
 ```
 
 *Declared by:*
@@ -2123,6 +2203,32 @@ null
 
 ```nix
 "nextest"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
+## workspaces\.\<name>\.test\.stripForRun
+
+
+
+The default ` packages.<name>.test.stripForRun ` for this
+workspace’s packages: test runs consume a debug-stripped copy
+of each test binary\. A package’s own setting wins\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+false
 ```
 
 *Declared by:*

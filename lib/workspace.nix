@@ -193,6 +193,31 @@ let
     )
   );
 
+  # Members with `test.runFiles` (decision 61): the package directory of a
+  # view of the repository root holding only those paths (relative to the
+  # package directory, at their usual places), by package name. Test runs
+  # use it as their working directory and runtime CARGO_MANIFEST_DIR. A
+  # listed path that does not exist is an evaluation error; `[ ]` gives an
+  # empty package directory.
+  runFilesDirs = lib.concatMapAttrs (
+    pkgName: v:
+    let
+      files = packages.${pkgName}.test.runFiles or null;
+      at = rel: if rel == "" then root else root + "/${rel}";
+      view =
+        if files == [ ] then
+          pkgs.runCommand "${name}-${pkgName}-run-files" { } "mkdir -p $out${lib.optionalString (v.dir != "") "/${v.dir}"}"
+        else
+          lib.fileset.toSource {
+            inherit root;
+            fileset = lib.fileset.unions (map (p: at (util.joinRel v.dir p)) files);
+          };
+    in
+    lib.optionalAttrs (files != null) {
+      ${pkgName} = if v.dir == "" then "${view}" else "${view}/${v.dir}";
+    }
+  ) views;
+
   # Check and clippy variants link nothing: no roots, no test runs.
   checking = mode == "check" || mode == "clippy";
 
@@ -239,18 +264,28 @@ let
 
   # Each package's own env capture per platform (envCapture.forPackage
   # gives the base capture when it declares no inputs), and its env.
+  # A package without inputs has no capture of its own (null), as in
+  # mkRepository: its units get the platform's base capture, and linking
+  # units of its dependents add nothing for it (decision 107).
   overrides = lib.mapAttrs (
     n: o:
-    lib.genAttrs [ "host" "target" ] (platform: {
-      env = o.env or { };
-      envCapture = envCapture.forPackage {
-        inherit pkgs platform;
-        name = n;
-        nativeInputs = o.nativeInputs or [ ];
-        inputs = o.inputs or [ ];
+    lib.genAttrs [ "host" "target" ] (
+      platform:
+      let
         stdenv = if platform == "host" then hostStdenv else targetStdenv;
-      };
-    })
+        c = envCapture.forPackage {
+          inherit pkgs platform stdenv;
+          name = n;
+          nativeInputs = o.nativeInputs or [ ];
+          inputs = o.inputs or [ ];
+        };
+      in
+      {
+        env = o.env or { };
+        envCapture =
+          if c.drvPath == (envCapture.base { inherit pkgs platform stdenv; }).drvPath then null else c;
+      }
+    )
   ) (lib.filterAttrs (_: o: o ? nativeInputs || o ? inputs || o ? env) packages);
 
   unitTools = {
@@ -382,6 +417,7 @@ let
       runner
       testSystem
       packages
+      runFilesDirs
       ca
       name
       ;
@@ -473,6 +509,7 @@ in
           target
           runner
           testSystem
+          runFilesDirs
           ca
           ;
         name = "${name}-bench";

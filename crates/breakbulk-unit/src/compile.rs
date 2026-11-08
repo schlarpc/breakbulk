@@ -25,7 +25,7 @@ use std::process::Stdio;
 
 use crate::diag::{Line, classify};
 use crate::directives::BuildOutput;
-use crate::env::{CFlags, Outer, layered, read_capture};
+use crate::env::{CFlags, Outer, capture_layer, layered};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{DEBUG_OUTPUT, RenderedArg, RenderedCompile, SpliceKind, derivation_output};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
@@ -159,11 +159,7 @@ pub fn invocation(
     argv.extend(added_args(c, dirs));
     let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
     expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
-    let capture = c
-        .env_capture
-        .as_deref()
-        .map(|p| read_capture(Path::new(p)))
-        .transpose()?;
+    let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     let cflags = CFlags {
         random_seed: c.seed.clone(),
         prefix_maps: c.remap.clone(),

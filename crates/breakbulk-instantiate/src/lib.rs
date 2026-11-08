@@ -396,6 +396,29 @@ impl Resolve for Tokens<'_> {
             .then(|| self.input(keys::capture(p))))
     }
 
+    fn link_captures(
+        &self,
+        _id: &UnitId,
+        unit: &CompileUnit,
+        packages: &BTreeSet<String>,
+    ) -> Result<Vec<String>, Error> {
+        let p = unit.platform;
+        // The unit's own capture is layer 2 already. An override without a
+        // capture of its own (no inputs) gives the base capture, which the
+        // unit has too.
+        let own = self.package_override(&unit.package).map(|(k, _)| k);
+        let chosen: BTreeSet<String> = packages
+            .iter()
+            .filter_map(|id| self.package_override(id))
+            .filter(|(k, o)| o.platform(p).env_capture && Some(k) != own.as_ref())
+            .map(|(k, _)| k)
+            .collect();
+        Ok(chosen
+            .into_iter()
+            .map(|k| self.input(keys::override_capture(&k, p)))
+            .collect())
+    }
+
     fn env_overlay(&self, _id: &UnitId, unit: &Unit) -> Result<BTreeMap<String, String>, Error> {
         let p = platform(unit);
         let mut env: BTreeMap<String, String> = self
