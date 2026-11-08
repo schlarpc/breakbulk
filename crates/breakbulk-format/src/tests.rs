@@ -591,6 +591,15 @@ fn render_configuration_hooks() {
     };
     assert!(c.remap.is_empty());
     assert_eq!(c.remap_scope, None);
+
+    // When breakbulk turned trim-paths on, Cargo's remaps stay and the scope
+    // is breakbulk's, per product kind.
+    p.trim_paths_default = true;
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
+        panic!()
+    };
+    assert!(c.remap.is_empty());
+    assert_eq!(c.remap_scope.as_deref(), Some("macro,diagnostics"));
 }
 
 /// A chain lib -> mid -> leaf, plus a proc macro with its own dependency.
@@ -1097,4 +1106,108 @@ fn doctests_validate_like_compiles() {
             literals: vec![],
         }));
     assert_error(&p, "a searchPathsOf splice outside a doctest");
+}
+
+#[test]
+fn debuginfo_side_files() {
+    let bin = ["bin".to_owned()];
+    let lib = ["lib".to_owned()];
+    let staticlib = ["staticlib".to_owned()];
+    let w = |args: &[&str], types: &[String]| {
+        writes_debuginfo_side_files(args.iter().map(|a| Some(*a)), types)
+    };
+    let msvc = ["--target", "x86_64-pc-windows-msvc"];
+    // msvc: a PDB for every linked crate, debuginfo or not.
+    assert!(w(&msvc, &bin));
+    assert!(w(&[&msvc[..], &["-C", "strip=debuginfo"]].concat(), &bin));
+    assert!(w(
+        &["--target=aarch64-pc-windows-msvc"],
+        &["cdylib".to_owned()]
+    ));
+    assert!(w(&[&msvc[..], &["--test"]].concat(), &lib));
+    assert!(!w(&msvc, &staticlib));
+    assert!(!w(&msvc, &lib));
+    // Linux: only split debuginfo, with debuginfo on.
+    let gnu = ["--target", "x86_64-unknown-linux-gnu"];
+    assert!(!w(&gnu, &bin));
+    assert!(!w(&[&gnu[..], &["-C", "debuginfo=2"]].concat(), &bin));
+    assert!(w(
+        &[
+            &gnu[..],
+            &["-C", "debuginfo=2", "-C", "split-debuginfo=packed"]
+        ]
+        .concat(),
+        &bin
+    ));
+    assert!(w(
+        &["-Cdebuginfo=1", "-Csplit-debuginfo=unpacked"],
+        &staticlib
+    ));
+    assert!(!w(
+        &["-C", "debuginfo=2", "-C", "split-debuginfo=off"],
+        &bin
+    ));
+    // The last value wins; `-g` after `-C debuginfo` is full debuginfo.
+    assert!(!w(
+        &[
+            "-C",
+            "debuginfo=2",
+            "-C",
+            "split-debuginfo=packed",
+            "-C",
+            "debuginfo=0"
+        ],
+        &bin
+    ));
+    assert!(w(
+        &[
+            "-C",
+            "debuginfo=none",
+            "-g",
+            "--codegen=split-debuginfo=packed"
+        ],
+        &bin
+    ));
+    assert!(!w(
+        &["-g", "-C", "debuginfo=none", "-C", "split-debuginfo=packed"],
+        &bin
+    ));
+    assert!(!w(&["-C", "split-debuginfo=packed"], &bin));
+    // A non-literal argument is a value, not the next option's name.
+    let args = [
+        Some("-C"),
+        None,
+        Some("-C"),
+        Some("debuginfo=2"),
+        Some("-C"),
+        Some("split-debuginfo=packed"),
+    ];
+    assert!(writes_debuginfo_side_files(args, &bin));
+}
+
+#[test]
+fn debug_output_only_where_side_files() {
+    let lit = |a: &[&str]| {
+        a.iter()
+            .map(|s| Arg::Literal((*s).into()))
+            .collect::<Vec<_>>()
+    };
+    let mut p = example();
+    // c-app: a target bin with no debuginfo flags.
+    assert!(!compile(&mut p, "c-app").has_debug_output());
+    compile(&mut p, "c-app").args.extend(lit(&[
+        "-C",
+        "debuginfo=2",
+        "-C",
+        "split-debuginfo=unpacked",
+    ]));
+    assert!(compile(&mut p, "c-app").has_debug_output());
+    // Host units never: their side files are discarded.
+    let c = compile(&mut p, "c-ring-build");
+    c.args.extend(lit(&["--target", "x86_64-pc-windows-msvc"]));
+    assert!(!c.has_debug_output());
+    // Libraries never.
+    let c = compile(&mut p, "c-cfgif");
+    c.args.extend(lit(&["--target", "x86_64-pc-windows-msvc"]));
+    assert!(!c.has_debug_output());
 }

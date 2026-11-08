@@ -9,7 +9,11 @@
 #                     and static glibc products have no INTERP or NEEDED;
 #                     build scripts stay dynamic; tests run (aarch64 under
 #                     qemu-user)
-#   presets-eval      evaluation-time assertions on preset values
+#   presets-eval      evaluation-time assertions on preset values (and the
+#                     linker choice, lib/presets/linker.nix)
+#   debug-outputs     a plain Linux release plan: no unit and no `linked`
+#                     stage has a `debug` output (decision 97)
+#   msvc-debug-outputs  msvc release: every linked target unit has one
 {
   pkgs,
   breakbulk,
@@ -43,6 +47,7 @@ let
     '';
 
   discard = builtins.unsafeDiscardStringContext;
+  fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
   planOf =
     inst: kind: builtins.fromJSON (discard (builtins.readFile "${inst.plans.${kind}}/plan.json"));
   unitText = drv: discard (drv.drvAttrs.BREAKBULK_UNIT or "");
@@ -198,6 +203,58 @@ let
     }
   ];
 
+  # Decision 97: a unit has a `debug` output only when rustc writes
+  # debuginfo side files (breakbulk-format
+  # `writes_debuginfo_side_files`). A plain Linux release build (linuxGnu,
+  # no split-debuginfo) has none, in either plan; msvc links always write a
+  # PDB, so its release bins and tests have one.
+  linuxRelease = mkRepo (fixtures + "/static") [
+    {
+      workspaces.main = staticWs;
+      targets.${native}.preset = presets.linuxGnu;
+    }
+  ];
+  debugOutputs =
+    inst:
+    lib.concatMap (
+      kind:
+      lib.mapAttrsToList (id: u: {
+        inherit id kind;
+        inherit (u) platform;
+        links = (u.outputs or { }) ? bin;
+        staticlib = (u.crate.types or [ ]) == [ "staticlib" ];
+        debug = lib.elem "debug" inst.units.${kind}.${id}.outputs;
+      }) (planOf inst kind).units
+    ) [ "build" "test" ];
+  debugOutputsEval =
+    let
+      linux = debugOutputs linuxRelease.workspaces.main.instances.${native}.default;
+      linuxLinked = lib.filter (u: u.links && u.platform == "target") linux;
+      linuxWithDebug = map (u: "${u.kind}/${u.id}") (lib.filter (u: u.debug) linux);
+      product = linuxRelease.workspaces.main.target.${native}.packages.app;
+    in
+    assert lib.assertMsg (linuxLinked != [ ]) "debug-outputs: no linked target units in the Linux plan";
+    assert lib.assertMsg (
+      linuxWithDebug == [ ]
+    ) "debug-outputs: Linux release units with a debug output: ${toString linuxWithDebug}";
+    assert lib.assertMsg (!(product.roots."bin/app" ? debug)) "debug-outputs: the Linux root has a debug output";
+    assert lib.assertMsg (
+      !(product.stages.linked ? debug)
+    ) "debug-outputs: the Linux product's linked stage has a debug output";
+    evalCheck "debug-outputs" "linked Linux release units without debug: ${toString (lib.length linuxLinked)}";
+  msvcDebugOutputsEval =
+    let
+      units = debugOutputs msvc.workspaces.main.instances.x86_64-pc-windows-msvc.default;
+      linked = lib.filter (u: u.links && u.platform == "target") units;
+      # Release (no debuginfo, `-C strip=debuginfo`): still a PDB.
+      bad = map (u: "${u.kind}/${u.id}") (
+        lib.filter (u: u.debug != (u.platform == "target" && u.links && !u.staticlib)) units
+      );
+    in
+    assert lib.assertMsg (linked != [ ]) "msvc-debug-outputs: no linked target units";
+    assert lib.assertMsg (bad == [ ]) "msvc-debug-outputs: wrong debug outputs: ${toString bad}";
+    evalCheck "msvc-debug-outputs" "linked msvc release units with debug: ${toString (lib.length linked)}";
+
   # The build-script compile unit of `app` in an instance's build plan.
   buildScriptOf =
     inst:
@@ -337,6 +394,11 @@ let
       # the product's `debug` output next to where the .exe sits in the
       # main one (bin/), not in the main output; the main output's closure
       # has no unit outputs (rlibs) and no sources, and the program runs.
+      # The PDB works: with the .exe and the debug output's PDB side by
+      # side (as a debugger sees them), llvm-symbolizer resolves the
+      # address of `msvc_smoke::main` (from the PDB's public symbols) to
+      # the function, with inlined frames, and to src/main.rs and a line
+      # in the source view, which the debug output references.
       msvc-x86_64-pdb =
         let
           p = x.variants.debuginfo.packages.msvc-smoke;
@@ -344,6 +406,7 @@ let
         assert lib.assertMsg (p ? debug) "msvc-x86_64-pdb: the product has no debug output";
         pkgs.runCommand "msvc-x86_64-pdb"
           {
+            nativeBuildInputs = [ pkgs.llvmPackages.llvm ];
             closure = pkgs.closureInfo { rootPaths = [ p ]; };
             debug = p.debug;
             noSources = p.checks.noSourceReferences;
@@ -366,8 +429,29 @@ let
             fi
             ${lib.escapeShellArgs x.runner} ${p}/bin/msvc-smoke.exe | tr -d '\r' > out.txt
             grep -qxF ${lib.escapeShellArg expect} out.txt
+            # Symbolize: main's section:offset from the PDB's publics, the
+            # section's RVA and the image base from the .exe.
+            mkdir dbg
+            cp ${p}/bin/msvc-smoke.exe "''${pdbs[0]}" dbg/
+            llvm-pdbutil dump --publics "''${pdbs[0]}" > publics.txt
+            read -r sec off < <(grep -A1 'msvc_smoke4main`' publics.txt \
+              | sed -n 's/.*addr = \([0-9]*\):\([0-9]*\).*/\1 \2/p' | head -n1)
+            llvm-readobj --file-headers --sections dbg/msvc-smoke.exe > headers.txt
+            base=$(sed -n 's/^ *ImageBase: \(0x[0-9A-Fa-f]*\)$/\1/p' headers.txt)
+            rva=$(sed -n 's/^ *VirtualAddress: \(0x[0-9A-Fa-f]*\)$/\1/p' headers.txt | sed -n "$((10#$sec))p")
+            addr=$(printf '0x%x' $((base + rva + 0x$off)))
+            llvm-symbolizer --obj=dbg/msvc-smoke.exe "$addr" | tee sym.txt
+            grep -qx 'msvc_smoke::main' sym.txt
+            grep -E '^/nix/store/[^/]*-source/src/main.rs:[0-9]+:[0-9]+$' sym.txt > lines.txt
+            # The source file the PDB names is there (the debug output
+            # references it) and its line is main's.
+            src=$(head -n1 lines.txt | cut -d: -f1)
+            line=$(head -n1 lines.txt | cut -d: -f2)
+            sed -n "''${line}p" "$src" | tee line.txt
+            grep -q 'fn main\|c_add\|pids' line.txt
             mkdir -p $out
             basename "''${pdbs[0]}" > $out/pdb
+            cp sym.txt $out/
           '';
       msvc-aarch64-build = pkgs.runCommand "msvc-aarch64-build" { nativeBuildInputs = [ pkgs.file ]; } ''
         file ${a.packages.msvc-smoke}/bin/msvc-smoke.exe | tee $out
@@ -572,6 +656,40 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
+        # The Rust to wasi-sdk table (lib/wasi-sdk.nix, decision 99): an
+        # unknown Rust release fails evaluation, naming the file.
+        wasiSdkTable =
+          let
+            w = breakbulk.wasiSdk;
+            unknown = builtins.tryEval (w.versionFor "1.94.0");
+          in
+          w.versionFor "1.95.0" == "30"
+          && w.versionFor "1.96.1" == "30"
+          && w.versionFor "1.99.0" == "33"
+          && w.versionFor "1.100.0-beta.10-2026-11-05" == "34"
+          && w.versionFor "1.101.0-nightly-2026-11-06" == "34"
+          && !unknown.success
+          && fails (w.versionFor "1.200.0")
+          && lib.all (v: w.releases ? ${v}) (lib.attrValues w.table);
+        # The linker choice (lib/presets/linker.nix), one rule per kind.
+        linkerKinds =
+          let
+            k = triple: args: presets.linkerKind ({ inherit triple; } // args);
+          in
+          k native { } == "mold"
+          && k "aarch64-unknown-linux-musl" { } == "mold"
+          && k "riscv64gc-unknown-linux-gnu" { } == "mold"
+          && k native { lto = true; } == "clang-lld"
+          && k native { flavor = "zig"; } == "zig"
+          && k "x86_64-pc-windows-msvc" { } == "lld-link"
+          && k "aarch64-pc-windows-msvc" { lto = true; } == "lld-link"
+          && k "x86_64-pc-windows-gnu" { } == "mingw-lld"
+          && k "x86_64-pc-windows-gnullvm" { } == "mingw-lld"
+          && k "wasm32-unknown-unknown" { } == "wasm-ld"
+          && k "wasm32-wasip1" { } == "wasm-ld"
+          && k "wasm32-wasip2" { } == "wasm-component-ld"
+          && fails (k "aarch64-apple-darwin" { })
+          && fails (k native { flavor = "gold"; });
         # `crtStatic = true` adds the flag (the option once shadowed the
         # flag list, and the preset failed with "expected a list but found
         # a Boolean"; found in the field trials).
@@ -611,6 +729,7 @@ in
   };
   checks = {
     presets-eval = presetsEval;
+    debug-outputs = debugOutputsEval;
     wasm-host-inputs = wasmHostInputsCheck;
 
     same-triple-eval = sameTripleEval;
@@ -629,6 +748,7 @@ in
   // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
   // sysNativeCrossChecks
   // msvcChecks
+  // lib.optionalAttrs (xwinPkgs != null) { msvc-debug-outputs = msvcDebugOutputsEval; }
   // wasmBrowserChecks
   // wasmComponentChecks;
 }

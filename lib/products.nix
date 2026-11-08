@@ -108,24 +108,25 @@ let
   # uplifts them to: a bin's `.dwp` renamed as the bin is (`<bin>.dwp`),
   # `.pdb` and `.dwo` under rustc's names, which the binaries record.
   # Dynamic-derivation roots are read through their wrappers and left out
-  # when not built.
+  # when not built. `debug` is declared only when a root can have side
+  # files (decision 97): a root unit with a `debug` output, or any
+  # dynamic-derivation root (its unit's outputs are not known at
+  # evaluation).
   mkLinked =
     pkgs: pkg: built:
     let
       # Only dynamic-derivation roots need the build-time bookkeeping; IFD
       # mode's script stays as it was.
       anyDyn = lib.any isDynamic built;
+      hasDebug = lib.any (r: debugOf r != null) built;
     in
     pkgs.runCommand "${pkg}-linked"
       {
-        outputs = [
-          "out"
-          "debug"
-        ];
+        outputs = [ "out" ] ++ lib.optional hasDebug "debug";
       }
       (
         ''
-          mkdir -p $out $debug
+          mkdir -p $out ${lib.optionalString hasDebug "$debug"}
           link() {
             # A library with two linkable crate types (cdylib and staticlib)
             # is one unit and several roots: each root names every file.

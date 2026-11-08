@@ -34,8 +34,15 @@ pub struct Plan {
     pub variant: Variant,
     /// The canonical absolute skeleton path planning ran at.
     pub skeleton_root: String,
-    /// Whether Cargo's `trim-paths` was in effect.
+    /// Whether Cargo's `trim-paths` was in effect: every compile unit
+    /// carries Cargo's own remaps, and breakbulk adds none.
     pub trim_paths: bool,
+    /// Whether the planner turned `trim-paths` on itself, because the
+    /// project had not ("trim-paths" in `docs/implementation.md`). Cargo's
+    /// `--remap-path-scope` is then left out of the plan, and breakbulk
+    /// sets the scope per product kind, as with its own remaps.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trim_paths_default: bool,
     pub units: BTreeMap<UnitId, Unit>,
     /// The plan's products. Sorted.
     pub roots: Vec<Root>,
@@ -85,6 +92,33 @@ pub enum VariantMode {
     Check,
     Clippy,
     Coverage,
+}
+
+/// A working directory: a reference, or a literal store path. The literal
+/// form is a toolchain path: the standard library's own packages under
+/// `-Zbuild-std`, which Cargo compiles and runs in their directories in
+/// the sysroot's `rust-src` ("build-std" in `docs/implementation.md`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Cwd {
+    Ref(Reference),
+    Literal(String),
+}
+
+impl Cwd {
+    /// The rendered directory.
+    pub fn render<R: crate::Resolve>(&self, r: &R) -> Result<String, R::Error> {
+        match self {
+            Cwd::Ref(x) => r.reference(x),
+            Cwd::Literal(s) => Ok(s.clone()),
+        }
+    }
+}
+
+impl From<Reference> for Cwd {
+    fn from(r: Reference) -> Cwd {
+        Cwd::Ref(r)
+    }
 }
 
 /// A path the planner rewrote: resolved to a store path at instantiation.
@@ -190,7 +224,7 @@ pub struct Doctest {
     pub env_splices: Vec<Splice>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Reference,
+    pub cwd: Cwd,
 }
 
 impl Doctest {
@@ -264,23 +298,101 @@ pub struct CompileUnit {
     /// dependencies (proc macros, build dependencies with build scripts).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Reference,
+    pub cwd: Cwd,
     /// Output name to file names.
     pub outputs: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl CompileUnit {
     /// Whether the unit gets a `debug` derivation output for the
-    /// debuginfo side files rustc writes next to a linked output (`.pdb`
-    /// on msvc, `.dwp`/`.dwo` with `split-debuginfo`; decision 89): the
-    /// target platform's linking units (bins, tests, examples, benches,
-    /// cdylibs, dylibs, staticlibs). Nix outputs are fixed before the
-    /// build, so the output is declared whether or not rustc writes any;
-    /// host units (build scripts, proc macros) only run during the build,
-    /// so theirs are discarded.
+    /// debuginfo side files rustc writes next to a linked output (decision
+    /// 89): a target-platform unit with a `bin` output (bins, tests,
+    /// examples, benches, cdylibs, dylibs, staticlibs) whose traced command
+    /// makes rustc write side files, by [`writes_debuginfo_side_files`].
+    /// Nix outputs are fixed before the build, so this is decided from the
+    /// command line; host units (build scripts, proc macros) only run
+    /// during the build, so theirs are discarded.
     pub fn has_debug_output(&self) -> bool {
-        self.platform == Platform::Target && self.outputs.contains_key("bin")
+        self.platform == Platform::Target
+            && self.outputs.contains_key("bin")
+            && writes_debuginfo_side_files(
+                self.args.iter().map(|a| match a {
+                    Arg::Literal(s) => Some(s.as_str()),
+                    _ => None,
+                }),
+                &self.krate.types,
+            )
     }
+}
+
+/// Whether rustc, given these command-line arguments (`None` for an
+/// argument that is not a literal: a build script's splices cannot set
+/// codegen options) for a crate of these types, writes debuginfo side files next to its linked output:
+///
+/// - `.pdb` on `*-windows-msvc` targets, for every crate type the linker
+///   produces (`bin`, `cdylib`, `dylib`, and `--test`): rustc passes
+///   `/DEBUG` to the MSVC-style linker unconditionally, whatever
+///   `-C debuginfo` and `-C strip` say (rustc_codegen_ssa back/linker.rs,
+///   `MsvcLinker::debuginfo` ignores its `strip` argument; 1.95 through
+///   master, and an msvc release build with `-C strip=debuginfo` was seen
+///   to write a 1.2 MB PDB). A staticlib is archived, not linked.
+/// - `.dwp` (`packed`) or `.dwo` (`unpacked`) when the effective
+///   `-C split-debuginfo` is one of those and debuginfo is on. Cargo passes
+///   `-C split-debuginfo` only together with `-C debuginfo` (cargo
+///   src/compiler/mod.rs, `build_base_args`), but rustflags can add
+///   either. As in rustc (rustc_session config.rs `select_debuginfo`), a
+///   `-g` after the last `-C debuginfo` means full debuginfo, and the last
+///   `-C` of an option wins.
+///
+/// The target is the `--target` argument (Cargo passes one to every target
+/// unit when the planner gives `--target`).
+pub fn writes_debuginfo_side_files<'a>(
+    args: impl IntoIterator<Item = Option<&'a str>>,
+    crate_types: &[String],
+) -> bool {
+    let mut target = None;
+    let mut debuginfo_on = false;
+    let mut split = None;
+    let mut test = false;
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        let Some(a) = a else { continue };
+        let codegen = match a {
+            "-C" | "--codegen" => it.next().flatten(),
+            "-g" => {
+                debuginfo_on = true;
+                None
+            }
+            "--test" => {
+                test = true;
+                None
+            }
+            "--target" => {
+                target = it.next().flatten();
+                None
+            }
+            _ => a
+                .strip_prefix("--codegen=")
+                .or_else(|| a.strip_prefix("-C"))
+                .or_else(|| {
+                    if let Some(t) = a.strip_prefix("--target=") {
+                        target = Some(t);
+                    }
+                    None
+                }),
+        };
+        match codegen.and_then(|c| c.split_once('=')) {
+            Some(("debuginfo", v)) => debuginfo_on = !matches!(v, "0" | "none"),
+            Some(("split-debuginfo", v)) => split = Some(v),
+            _ => {}
+        }
+    }
+    let msvc = target.is_some_and(|t| t.contains("-windows-msvc"));
+    let links = test
+        || crate_types
+            .iter()
+            .any(|t| matches!(t.as_str(), "bin" | "cdylib" | "dylib"));
+    (msvc && links) || (debuginfo_on && matches!(split, Some("packed" | "unpacked")))
 }
 
 /// A build-script run.
@@ -295,7 +407,7 @@ pub struct RunUnit {
     pub script: Reference,
     pub env: BTreeMap<String, Text>,
     /// The working directory Cargo gave the script (the package directory).
-    pub cwd: Reference,
+    pub cwd: Cwd,
     /// Upstream runs whose `DEP_<links>_*` metadata this run receives.
     pub metadata_from: BTreeSet<UnitId>,
     /// Dynamic-path splices, as for compile units: the runs of packages the
@@ -380,8 +492,16 @@ pub(crate) fn for_each_literal(unit: &Unit, f: &mut dyn FnMut(&str, &dyn Fn() ->
                 }
             }
             env(&c.env, f);
+            if let Cwd::Literal(s) = &c.cwd {
+                f(s, &|| "cwd".into());
+            }
         }
-        Unit::Run(r) => env(&r.env, f),
+        Unit::Run(r) => {
+            env(&r.env, f);
+            if let Cwd::Literal(s) = &r.cwd {
+                f(s, &|| "cwd".into());
+            }
+        }
     }
 }
 
@@ -416,12 +536,16 @@ pub(crate) fn for_each_reference(unit: &Unit, f: &mut dyn FnMut(&Reference, &dyn
                 }
             }
             env(&c.env, f);
-            f(&c.cwd, &|| "cwd".into());
+            if let Cwd::Ref(r) = &c.cwd {
+                f(r, &|| "cwd".into());
+            }
         }
         Unit::Run(r) => {
             env(&r.env, f);
             f(&r.script, &|| "script".into());
-            f(&r.cwd, &|| "cwd".into());
+            if let Cwd::Ref(c) = &r.cwd {
+                f(c, &|| "cwd".into());
+            }
         }
     }
 }

@@ -209,7 +209,7 @@ Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
 - **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change. The workspace libraries they link are compiled once, with the shipped scope, so their debug info still names their source views: an edit to any file of such a library (a README) changes the bytes of every test binary linking it. `test.stripForRun` (off by default) has the test run consume a debug-stripped copy instead, which does not change; the unstripped binary stays available for debugging.
 - With rustc older than 1.95, every scope is remapped.
 
-Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. Once it is available, breakbulk sets it by default when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later.
+Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. On Cargo 1.101 and later, breakbulk sets it when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. breakbulk cannot tell from the manifests whether the project set it without copying Cargo's profile rules, and a setting passed with `--config` would replace the project's. The planner therefore traces once, reads from the traced commands whether trim-paths is on, and traces again with it on only when it is off and Cargo is 1.101 or later. When the project set it, its own scope is kept.
 
 ### Tests as products
 
@@ -229,7 +229,7 @@ Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile
 
 ## Targets and toolchains
 
-Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component wasm, and Windows msvc. The later targets (M7) are presets, not a redesign: wasip2, riscv64, windows-gnu and windows-gnullvm, and zig work; build-std and Darwin do not yet (see below).
+Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component wasm, and Windows msvc. The later targets (M7) are presets, not a redesign: wasip2, riscv64, windows-gnu and windows-gnullvm, zig and build-std work; Darwin does not yet (see below).
 
 | Target | Phase | Toolchain | Linker | Runner |
 | --- | --- | --- | --- | --- |
@@ -239,11 +239,11 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | wasm32-unknown-unknown | Day one | user's, with target | lld (wasm flavor) | wasm-bindgen test runner with headless Chromium, or wasmtime |
 | {x86\_64,aarch64}-pc-windows-msvc | Day one | user's + xwin SDK (unfree) | lld-link | wine |
 | Host triple, fully static glibc | Day one | user's + static archives | mold | native |
-| wasm32-wasip2 | M7 | rustup-dist with target, + nixpkgs wasi-libc for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
+| wasm32-wasip2 | M7 | rustup-dist with target, + the matching wasi-sdk sysroot's headers for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
 | Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
-| x86\_64-unknown-none (build-std) | Later; planning fails today | nightly, user-supplied | lld | none |
+| x86\_64-unknown-none (build-std) | M7 | nightly with `rust-src`, user-supplied | rustc's own (rust-lld) | none |
 | aarch64-apple-darwin | Later; no Mac builders | user's, built on Mac builders | ld64 or lld | native |
 
 ### Bring your own toolchain
@@ -254,13 +254,15 @@ Supported Cargo releases form a rolling window: roughly the last six months of s
 
 ### Linker selection
 
-The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable.
+The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable. One function makes the choice (`presets.chooseLinker`, with the decision itself in `presets.linkerKind`); every preset and the host spec call it, and `targets.<t>.linker` (or `host.linker`) overrides it.
 
 - Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The native target gets the Linux preset by default, so this holds with no configuration. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
 - Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM; a rustc newer than the table is asked with `rustc -vV` at evaluation time).
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
+- Windows msvc: `lld-link` from the matching LLVM, wrapped so PDBs are reproducible. Windows MinGW (`-gnu`, `-gnullvm`): the toolchain's C driver with lld. The zig preset asks for zig's own linker (`zig cc`).
+- Any other target has no rule and fails at evaluation, naming `targets.<t>.linker`.
 - **wild** is an opt-in preset, gated by the determinism check.
-- Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so the mold linker wrapper drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
+- Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so every C-driver linker wrapper (mold, clang with lld, MinGW, zig) drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
 
 ### Windows msvc
 
@@ -269,7 +271,7 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 ### wasm
 
 - **Browser.** The `wasm-bindgen-cli` version is read from `Cargo.lock` and matched exactly; a missing version is a clear error. C code is compiled with an unwrapped clang targeting wasm32. A wrapped gcc can silently emit host objects instead.
-- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for WASI-style targets uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc instead of the one bundled with Rust, so headers and library match. On wasip2 this is not `-C link-self-contained=no`, which also drops the program's `crt1-command.o`: the preset puts nixpkgs' library directory first on the search path and swaps the crt1 objects in its linker wrapper.
+- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for `wasm32-unknown-unknown` components uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc (`-C link-self-contained=no`). On wasip2 the link keeps the wasi-libc bundled with Rust (turning it off also drops the program's `crt1-command.o`), and C code compiles against the headers of the wasi-sdk release that Rust release bundles, fetched as a fixed-output sysroot from a table of Rust release to wasi-sdk release; std, the C code and the library linked share one wasi-libc version (decision 99).
 - `wasm-opt` operates on core modules, so component pipelines run it before componentizing.
 
 ### Static and musl
@@ -278,7 +280,7 @@ Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust'
 
 ### Zig
 
-A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case.
+A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
 
 ## Content addressing and early cutoff
 
@@ -418,8 +420,8 @@ The traced planner comes first, delivered through IFD, because it works on every
 3. **Day-one targets.** Linux gnu and musl on x86\_64 and aarch64, static glibc, wasm (browser and components), Windows msvc. Runners and native builders for tests.
 4. **Products.** Stage pipelines, CA islands, side-branch checks, the debug output, test-run derivations with skip lists and runnable test apps, doctests, bench binaries, clippy and coverage variants.
 5. **Dynamic-derivation delivery** through `builder-rpc-v0`, selected automatically where available.
-6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default once stable, the docs product.
-7. **Later targets.** wasip2, riscv64, windows-gnu, zig (done); build-std targets, Darwin on Mac builders.
+6. **Below-crate seams and measurement.** Pipelined split, dep-info source narrowing, the history-replay measurement harness, full-CA units when Nix supports them, `trim-paths` by default on Cargo 1.101 and later (done), the docs product.
+7. **Later targets.** wasip2, riscv64, windows-gnu, zig, build-std targets (done); Darwin on Mac builders.
 
 ### Conformance suite
 

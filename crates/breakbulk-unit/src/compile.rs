@@ -113,13 +113,13 @@ pub fn added_args(c: &RenderedCompile, dirs: &WorkDirs) -> Vec<String> {
         "-L".to_owned(),
         format!("dependency={}", dirs.deps.display()),
     ];
-    if !c.remap.is_empty() {
-        for (from, to) in &c.remap {
-            args.push(format!("--remap-path-prefix={from}={to}"));
-        }
-        if let Some(scope) = &c.remap_scope {
-            args.push(format!("--remap-path-scope={scope}"));
-        }
+    for (from, to) in &c.remap {
+        args.push(format!("--remap-path-prefix={from}={to}"));
+    }
+    // With Cargo's trim-paths, `remap` is empty and the pairs are in the
+    // arguments; a scope still applies to them.
+    if let Some(scope) = &c.remap_scope {
+        args.push(format!("--remap-path-scope={scope}"));
     }
     args
 }

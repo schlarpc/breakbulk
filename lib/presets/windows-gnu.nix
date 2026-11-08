@@ -7,11 +7,7 @@
 #   targets.x86_64-pc-windows-gnu.preset = breakbulk.presets.windowsGnu;
 #
 # Linker: the toolchain's C driver (rustc's windows-gnu specs link through
-# a gcc-style driver), with `-fuse-ld=lld`; lld's GNU driver switches to
-# its MinGW driver for PE emulations (lld/tools/lld/lld.cpp). The driver
-# finds `ld.lld` through `-B`. `--no-insert-timestamp` keeps the PE header's
-# time stamp at 0: lld's MinGW driver leaves it to lld-link, which stamps
-# the current time (lld/MinGW/Driver.cpp, OPT_no_insert_timestamp).
+# a gcc-style driver), with lld (./linker.nix, kind mingw-lld).
 #
 # crtStatic (default true): `+crt-static` links libgcc_eh and winpthread
 # (gnu) or libunwind (gnullvm) statically, so the .exe needs only system
@@ -19,7 +15,7 @@
 # from the toolchain, which wine does not find.
 {
   lib,
-  driverWrapper,
+  chooseLinker,
   hostSpec,
   runners,
 }:
@@ -55,26 +51,11 @@ let
   cc = tp.stdenv.cc;
   prefix = cc.targetPrefix;
   arch = lib.head (lib.splitString "-" triple);
-  driver = if cc.isClang then "clang" else "gcc";
-  # `ld.lld` for the driver's -B: GCC 15+ is configured with default PIE and
-  # passes `-pie` to the linker for executables (its link spec:
-  # `%{static|shared|r:;!no-pie:-pie}`); GNU ld takes it for PE as
-  # --dynamicbase, lld's MinGW driver rejects it. lld's MinGW driver uses
-  # --dynamicbase by default, and rustc passes it too, so it is dropped.
-  ldLld = pkgs.buildPackages.writeShellScriptBin "ld.lld" ''
-    args=()
-    for a in "$@"; do
-      [[ $a == -pie ]] || args+=("$a")
-    done
-    exec ${lld}/bin/ld.lld "''${args[@]}"
-  '';
-  linker = driverWrapper tp "${prefix}${driver}-lld" "${cc}/bin/${prefix}cc" (
-    lib.concatStringsSep " " [
-      "-fuse-ld=lld"
-      "-B${ldLld}/bin"
-      "-Wl,--no-insert-timestamp"
-    ]
-  );
+  # The linker (./linker.nix, kind mingw-lld): the C driver with lld.
+  linker = chooseLinker {
+    inherit pkgs triple lld;
+    packageSet = tp;
+  };
 in
 {
   packageSet = mkDefault tp;

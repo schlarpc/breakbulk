@@ -90,8 +90,15 @@ fn appended_arguments() {
             "--remap-path-scope=macro,diagnostics"
         ]
     );
-    // No scope flag without remaps.
+    // Cargo's trim-paths remaps are in the arguments (no remaps of
+    // breakbulk's own): the scope still applies to them.
     u.remap.clear();
+    assert_eq!(
+        &added_args(&u, &dirs)[4..],
+        ["--remap-path-scope=macro,diagnostics"]
+    );
+    // No scope: no flag.
+    u.remap_scope = None;
     assert_eq!(added_args(&u, &dirs).len(), 4);
 }
 

@@ -268,7 +268,15 @@ pub fn render_unit_in<R: Resolve>(
                 Vec::new()
             };
             let (remap, remap_scope) = if plan.trim_paths {
-                (Vec::new(), None)
+                // Cargo's remaps are in the arguments. With the project's
+                // own setting its scope is too; when breakbulk set it,
+                // the scope is breakbulk's, per product kind.
+                let scope = if plan.trim_paths_default {
+                    r.remap_scope(id, c)
+                } else {
+                    None
+                };
+                (Vec::new(), scope)
             } else {
                 let mut remap = remap_bases(plan, &unit)
                     .iter()
@@ -322,7 +330,7 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|u| flags(u, r, weak))
                     .collect::<Result<_, _>>()?,
-                cwd: r.reference(&c.cwd)?,
+                cwd: c.cwd.render(r)?,
                 outputs: c
                     .outputs
                     .iter()
@@ -357,7 +365,7 @@ pub fn render_unit_in<R: Resolve>(
                 links: run.links.clone(),
                 script: r.reference(&run.script)?,
                 env,
-                cwd: r.reference(&run.cwd)?,
+                cwd: run.cwd.render(r)?,
                 metadata_from: run
                     .metadata_from
                     .iter()

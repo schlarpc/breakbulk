@@ -248,7 +248,19 @@ fn units_output_depends_on_every_unit_output() {
 
 #[test]
 fn wrappers() {
-    let inputs = dyn_inputs();
+    // Without debuginfo side files the wrapper has no `debug` to link.
+    let (resolved, _) = write_all(&dyn_inputs());
+    let w = resolved
+        .iter()
+        .find(|(k, _)| k == "wrapper:smokeapp/bin/smokeapp")
+        .unwrap()
+        .1
+        .clone();
+    assert_eq!(w.env["debugRoot"], "");
+    assert!(!w.input_drvs[&drv_of(APP)].contains("debug"));
+
+    let mut inputs = dyn_inputs();
+    split_debuginfo(&mut inputs, APP);
     let (resolved, _) = write_all(&inputs);
     let by_key: BTreeMap<&str, &crate::dynamic::Resolved> =
         resolved.iter().map(|(k, r)| (k.as_str(), r)).collect();
@@ -328,7 +340,9 @@ fn test_spec_of_a_test_root() {
     // `[env]` variables Cargo set (the plan's configEnv), one of them a
     // `relative` path into the package source; and one the plan does not
     // name (not from `[env]`).
-    let src = c.cwd.clone();
+    let breakbulk_format::Cwd::Ref(src) = c.cwd.clone() else {
+        panic!("the smoke unit has a reference as its cwd")
+    };
     c.env.insert(
         "BB_PLAIN".into(),
         breakbulk_format::Text::Literal("plain".into()),
