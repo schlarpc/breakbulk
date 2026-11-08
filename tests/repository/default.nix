@@ -764,6 +764,42 @@ in
       touch $out
     '';
 
+  # A crate at the repository root (#32): its default source view is the
+  # whole repository, so editing a Nix file or a note changes its units. A
+  # filtered `root` (lib.fileset.toSource) keeps them unchanged, and builds.
+  filtered-root =
+    let
+      withRepoFiles =
+        v:
+        edited "walking-skeleton" ''
+          mkdir nix
+          echo ${v} > nix/rust.nix
+          echo ${v} > NOTES.md
+        '';
+      filtered =
+        r:
+        lib.fileset.toSource {
+          root = r;
+          fileset = lib.fileset.unions [
+            (r + "/Cargo.toml")
+            (r + "/Cargo.lock")
+            (r + "/build.rs")
+            (r + "/src")
+          ];
+        };
+      repoOf = r: mkRepo r [ (oneWs ".") ];
+      whole = changedUnits (repoOf (withRepoFiles "a")) (repoOf (withRepoFiles "b"));
+      narrow = changedUnits (repoOf (filtered (withRepoFiles "a"))) (repoOf (filtered (withRepoFiles "b")));
+    in
+    assert lib.assertMsg (whole != [ ]) "filtered-root: the unfiltered root changed no units";
+    assert lib.assertMsg (narrow == [ ]) "filtered-root: changed units ${builtins.toJSON narrow}";
+    pkgs.runCommand "filtered-root" {
+      bin = (repoOf (filtered (withRepoFiles "a"))).workspaces.main.packages.walking-skeleton;
+    } ''
+      $bin/bin/walking-skeleton
+      echo ${lib.escapeShellArg (builtins.toJSON whole)} > $out
+    '';
+
   # `variants.default` is a definition merged with the user's while
   # `defaultVariant` is "default" (#32): adding a clippy variant keeps it,
   # `variants.default.profile` changes it, and a renamed default variant

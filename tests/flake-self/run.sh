@@ -87,7 +87,7 @@ for lazy in true false; do
     echo "flake-self: a wrong root was accepted" >&2
     exit 1
   fi
-  grep -qF '`root` must be a path (`root = ./.;`) or a flake'"'"'s `self`' "$work/wrong.log" || {
+  grep -qF '`root` must be a path (`root = ./.;`), a flake'"'"'s `self`, or a store path' "$work/wrong.log" || {
     cat "$work/wrong.log" >&2
     echo "flake-self: the error does not say what root accepts" >&2
     exit 1

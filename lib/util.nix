@@ -203,7 +203,7 @@ rec {
   rootPath =
     root:
     let
-      what = "breakbulk: mkRepository: `root` must be a path (`root = ./.;`) or a flake's `self`";
+      what = "breakbulk: mkRepository: `root` must be a path (`root = ./.;`), a flake's `self`, or a store path such as `lib.fileset.toSource { root = ./.; fileset = …; }`";
       s = if isAttrs root && root ? outPath then root.outPath else root;
       str = builtins.unsafeDiscardStringContext s;
       inStore = lib.hasPrefix "${builtins.storeDir}/" str;

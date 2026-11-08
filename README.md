@@ -68,6 +68,18 @@ modules = [{
 
 With flake-parts, import `breakbulk.lib.flakeModule`.
 
+A package's source is its directory. When the crate is at the repository
+root, that is the whole repository, so editing `flake.nix` or a README
+rebuilds it. Pass a filtered `root` to keep only what the build reads
+(add data files, `include_str!` targets and `extraSources` to the list):
+
+```nix
+root = nixpkgs.lib.fileset.toSource {
+  root = ./.;
+  fileset = nixpkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./src ];
+};
+```
+
 ## Configuration
 
 Configuration is NixOS-style modules; every option is in

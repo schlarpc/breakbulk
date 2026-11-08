@@ -86,7 +86,9 @@ let
   userModules = args.modules or [ ];
 
   # `root` as a path value: `./.`, or a flake's `self` (or any string-like
-  # value naming a store path, such as `self.outPath`). lib.fileset takes
+  # value naming a store path, such as `self.outPath` or a filtered
+  # `lib.fileset.toSource` result, which keeps repository files out of a
+  # root-level crate's source view). lib.fileset takes
   # only paths, so a store path string becomes the path of the same
   # location. That reads the tree in place: source views copy only their
   # filtered subsets, as from `./.`.
