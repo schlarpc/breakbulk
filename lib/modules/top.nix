@@ -27,6 +27,15 @@ in
         derivations are identical in both modes; products are not (they are
         resolved at build time in `dynamic`), so teams that mix Nix versions
         should pin the mode.
+
+        In `ifd`, evaluating another system's outputs builds its plans, which
+        needs a builder for that system: `nix flake check --all-systems` and
+        `nix flake show --all-systems` fail on a Linux machine for darwin
+        outputs ("Required system"). Plain `nix flake check` and `nix flake
+        show` evaluate only the current system and are unaffected, and
+        `dynamic` evaluates every system without builders. With `ifd`, list
+        only the systems you can build on (the common `nix-systems/default`
+        includes darwin).
       '';
     };
 
