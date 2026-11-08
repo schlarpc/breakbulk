@@ -834,6 +834,10 @@ in
       off = (mkRepo (fixtures + "/walking-skeleton") [ (oneWs ".") ]).checks;
     in
     assert lib.assertMsg (!(off ? "main/fmt")) "fmt: a check without fmt.enable";
+    # The resolved toolchain is an output, for treefmt's rustfmt.
+    assert lib.assertMsg (
+      (mkRepo (fixtures + "/walking-skeleton") [ (oneWs ".") ]).workspaces.main.toolchain.rustfmt == pkgs.rustfmt
+    ) "fmt: repo.workspaces.main.toolchain.rustfmt";
     pkgs.runCommand "fmt"
       {
         inherit clean;

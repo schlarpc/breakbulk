@@ -18,6 +18,7 @@
 #   repo.workspaces.<ws>.target.<triple>.variants.<v>.{packages,tests}
 #   repo.workspaces.<ws>.plans.<triple>.<v>.{build,test}  the plan derivations
 #   repo.workspaces.<ws>.devShell
+#   repo.workspaces.<ws>.toolchain.{rustc,cargo,clippy,rustfmt}   resolved
 #   repo.workspaces.<ws>.instances.<triple>.<v>           the mkWorkspace results
 #   repo.checks."<ws>/<triple>/<pkg>/<name>"              flattened
 #   repo.sources.<crate> / ."<crate>@<version>"           fetched crate sources
@@ -994,6 +995,9 @@ let
     in
     {
       inherit instances;
+      # The resolved toolchain (rustc, cargo, clippy, rustfmt), for wiring
+      # the same programs elsewhere (treefmt's rustfmt).
+      inherit (ws) toolchain;
       target = perTarget;
       packages = if defaultTriple == null then { } else perTarget.${defaultTriple}.packages;
       tests = if defaultTriple == null then { } else perTarget.${defaultTriple}.tests;

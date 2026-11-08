@@ -2232,6 +2232,15 @@ their own workspace)\. It reads the workspace directory and any
 ` rustfmt.toml ` or ` .rustfmt.toml ` above it up to the repository
 root, and needs no plan\.
 
+A project that formats with treefmt (treefmt-nix) can use its
+check instead\. Its rustfmt runs per file with one ` --edition `
+(treefmt-nix’s default is 2024), while ` cargo fmt ` takes each
+crate’s edition from its ` Cargo.toml `, and the edition sets
+rustfmt’s style edition; so pin ` style_edition ` in
+` rustfmt.toml `, or set ` programs.rustfmt.edition ` to the crates’
+edition\. Point ` programs.rustfmt.package ` at
+` repo.workspaces.<ws>.toolchain.rustfmt ` to use the same rustfmt\.
+
 
 
 *Type:*
