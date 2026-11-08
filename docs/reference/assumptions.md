@@ -22,7 +22,7 @@ Status of the 78 entries: 72 pinned, 2 pinned for some rows only (L3, L4), 4 wit
 | ID | Assumption | Pinned |
 | --- | --- | --- |
 | [T1](#t1-the-rustc-wrapper-calling-convention) | `RUSTC_WRAPPER` is started as `wrapper [workspace-wrapper] rustc ARGS` | yes |
-| [T2](#t2-rustc--vv-goes-through-the-wrapper-once-per-fresh-build-directory) | `rustc -vV` goes through the wrapper once per fresh build directory | yes |
+| [T2](#t2-cargo_cache_rustc_info0-sends-every-rustc--vv-through-the-wrapper) | `CARGO_CACHE_RUSTC_INFO=0` sends every `rustc -vV` through the wrapper | yes |
 | [T3](#t3-the--vv-record-carries-cargos-own-environment) | The `-vV` record carries Cargo's own environment | yes |
 | [T4](#t4-variables-cargo-gives-every-build-script-that-name-the-planner) | Variables Cargo gives every build script that name the planner | yes |
 | [T5](#t5-env-semantics) | `[env]` semantics | yes |
@@ -111,14 +111,14 @@ Status of the 78 entries: 72 pinned, 2 pinned for some rows only (L3, L4), 4 wit
 - **Pinned by.** Every plan check, e.g. `plan-walking-skeleton`, `plan-walking-skeleton-golden-1_95`, `plan-walking-skeleton-nightly`; the workspace-wrapper chain by `products-variants` and `products-variants-clippy-strict`. Rust: `tests::chain` (shim).
 - **If it changes.** The shim takes a rustc argument for a program, or the other way round; tracing fails at the first compile.
 
-### T2. `rustc -vV` goes through the wrapper once per fresh build directory
+### T2. `CARGO_CACHE_RUSTC_INFO=0` sends every `rustc -vV` through the wrapper
 
-- **Assumption.** In a build directory without Cargo's rustc-info cache, the first `cargo build`/`test`/`bench` runs `rustc -vV` through `RUSTC_WRAPPER`; `cargo metadata`, which the planner runs first with the same config, also asks, but cannot write the cache because the build directory does not exist yet.
-- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::new` (takes the env baseline from that record; fails with "the trace has no `rustc -vV` query record"); `trace.rs`: `run` (metadata, then the build, in a fresh scratch directory).
-- **Upstream.** cargo `0.100.0` `src/util/rustc.rs`: `Rustc::new` runs `-vV` through `cache.cached_output` on the wrapped command; `Cache` reads and writes `<build-dir>/.rustc_info.json` (`src/context/mod.rs`, `load_global_rustc`) and silently drops a failed write. Checked for this page with Cargo 1.99: `cargo metadata` sent `-vV` through the wrapper and left no build directory; the following `cargo build` sent `-vV` again; a second `cargo build` in the same directory sent none.
-- **Holds for.** Checked on 1.99; every plan check exercises the window.
-- **Pinned by.** Every plan check (planning fails without the record), e.g. `plan-walking-skeleton`, `differential-nightly`.
-- **If it changes.** If `cargo metadata` started creating the build directory, or the cache moved out of it, the build would hit the cache and planning would fail loudly. The test plan's second invocation (`cargo test --doc`) already hits the cache and records no `-vV`; the baseline comes from the first. Setting `CARGO_CACHE_RUSTC_INFO=0` for traced Cargo would remove this assumption.
+- **Assumption.** With `CARGO_CACHE_RUSTC_INFO=0` in its environment, every Cargo invocation (`cargo metadata`, `build`, `test`, `bench`, `check`) runs `rustc -vV` through `RUSTC_WRAPPER`, whether or not the build directory already holds a rustc-info cache; the planner sets it on every traced Cargo (decision 149), so planning no longer depends on the build directory being fresh.
+- **Where.** `crates/breakbulk-plan/src/trace.rs`: `command` (sets the variable), `cargo_env_names` (lists it as the planner's own, for `[env]` without `force`), `run` (fails when an invocation recorded no `-vV` query); `graph.rs`: `Builder::new` (takes the env baseline from the first `-vV` record; fails with "the trace has no `rustc -vV` query record").
+- **Upstream.** cargo `0.100.0` (commit `5f94df478`, Cargo 1.99) `src/context/mod.rs`: `GlobalContext::new` reads `CARGO_CACHE_RUSTC_INFO` once (any value but `0` keeps the cache); `load_global_rustc` then passes `None` for the cache location to `Rustc::new`; `src/util/rustc.rs`: `Cache::load` with no location gives an empty cache that never writes, so `cached_output` runs the wrapped `-vV` command every time. Same code in cargo `0.102.0` (nightly 1.101). Checked for this page with Cargo 1.99 and a logging wrapper: a second `cargo build` in the same target directory sent no `-vV` by default, and two `-vV` with `CARGO_CACHE_RUSTC_INFO=0`. Without the variable the planner relied on the build directory being fresh: `cargo metadata` cannot write the cache because the build directory does not exist yet, and the test plan's `cargo test --doc` hit the cache the first invocation wrote.
+- **Holds for.** The window (the variable is in Cargo's environment-variables reference).
+- **Pinned by.** Every plan check: planning fails when any invocation recorded no `-vV`; `test-runs-doctests` pins the test plan's second invocation (`cargo test --doc`), which hit the cache before. Plans were byte-identical before and after the change for seven fixtures (build and test plans).
+- **If it changes.** If Cargo stopped honouring the variable, an invocation in a build directory that already has a cache would record no `-vV` and planning would fail, naming the invocation.
 
 ### T3. The `-vV` record carries Cargo's own environment
 

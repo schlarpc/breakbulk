@@ -130,6 +130,7 @@ fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
         .chain(&[
             "HOME",
             "CARGO_HOME",
+            "CARGO_CACHE_RUSTC_INFO",
             "BREAKBULK_RUSTDOC",
             "BREAKBULK_METADATA",
             "BREAKBULK_RECORD",
@@ -233,6 +234,15 @@ fn command(opts: &Options, program: &str) -> Command {
     }
     cmd.env("HOME", scratch.join("home"))
         .env("CARGO_HOME", scratch.join("cargo-home"))
+        // No rustc-info cache (`<build-dir>/.rustc_info.json`): every Cargo
+        // invocation then sends its `rustc -vV` through the shim, whose
+        // record is Cargo's own environment (`graph::Builder::new`), however
+        // the build directory came to exist. Cargo reads the variable once
+        // at startup (cargo `src/context/mod.rs`, `GlobalContext::new`; any
+        // value but `0` keeps the cache) and passes no cache location to
+        // `Rustc::new` (`load_global_rustc`). It reaches every process
+        // Cargo starts, so the baseline subtraction drops it from units.
+        .env("CARGO_CACHE_RUSTC_INFO", "0")
         .env("BREAKBULK_RUSTDOC", &opts.rustdoc)
         .env("BREAKBULK_METADATA", scratch.join("metadata.json"))
         .current_dir(workspace_dir(opts));
@@ -465,7 +475,18 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
             }
         }
         output(cmd, &format!("cargo {}", sub.join(" ")))?;
-        records.extend(read_records(&record)?);
+        let recs = read_records(&record)?;
+        // With the rustc-info cache off, every invocation asks; one that
+        // did not means Cargo ignored `CARGO_CACHE_RUSTC_INFO=0`
+        // (assumption T2 in `docs/reference/assumptions.md`).
+        if !recs.iter().any(|r| r.mode == "query" && r.args == ["-vV"]) {
+            bail!(
+                "`cargo {}` sent no `rustc -vV` through the shim although its \
+                 rustc-info cache is off (CARGO_CACHE_RUSTC_INFO=0)",
+                sub.join(" ")
+            );
+        }
+        records.extend(recs);
     }
     Ok(Trace {
         records,

@@ -76,6 +76,7 @@ cargo build --frozen --offline <selection> \
 # bench variant: `cargo bench --no-run` with the bench profile
 # env: RUSTC_WRAPPER=breakbulk-shim  RUSTDOC=<dir>/rustdoc (a symlink to breakbulk-shim)
 #      BREAKBULK_RUSTDOC=<real rustdoc>  CARGO_TARGET_DIR=<scratch>  BREAKBULK_RECORD=<record dir>
+#      CARGO_CACHE_RUSTC_INFO=0
 ```
 
 - `<selection>` is `--workspace`, or `-p` for each package in the target's `packages` list.
@@ -85,6 +86,7 @@ cargo build --frozen --offline <selection> \
 - **Linkers** go under `target.<triple>.linker`. Cargo passes `-C linker` to every unit, including rlibs that never link, so a linker change changes every unit's derivation. The planner keeps Cargo's argv as it is.
 - Spec env is **not** passed to Cargo. Cargo's `[env]` reaches every process, including host build scripts; spec env is added per unit by platform at instantiation.
 - The user's own `.cargo/config.toml` is in the skeleton and applies as it does locally. Nothing from the user's home directory or shell is visible. Cargo reads `.cargo/config.toml` from every ancestor of its working directory, whatever `CARGO_HOME` says. In the Nix sandbox no ancestor has one; local planner runs and tests must stage the project outside `$HOME` (see [Testing and conformance](#testing-and-conformance)).
+- `CARGO_CACHE_RUSTC_INFO=0` turns off Cargo's rustc-info cache (`<build dir>/.rustc_info.json`), so every Cargo invocation sends `rustc -vV` through the shim, whose record is Cargo's own environment, the baseline that env filtering subtracts (decision 149). The planner fails when an invocation recorded no `-vV`. The variable reaches every process Cargo starts and is subtracted with the rest of the baseline.
 - The planner never sets `CARGO_INCREMENTAL` and never passes it through from its own environment, because the incremental setting is part of every unit's `-C metadata`. The `-C incremental=…` argument is stripped from argv instead (see [Env filtering](#env-filtering)).
 - The planner runs Cargo without `-v`. Verbosity changes argv: with `-vv`, non-local crates get `--cap-lints warn` instead of `--cap-lints allow`.
 - No runner is configured while tracing. With a runner, Cargo adds `--test-runtool` to `rustdoc --test`.
