@@ -631,12 +631,14 @@ let
     ) ws.variants;
 
   # The target's stage set's inputs (lib/products.nix targetStageSet): one
-  # decision, per target, of whether debug info is split off (decision
-  # 90), read by the products, the remap scope and the build ID alike.
+  # decision, per target, of what happens to debug info (`debugInfo`,
+  # decision 137), read by the products, the remap scope and the build ID
+  # alike.
   stageSetArgs = wsName: triple: {
     inherit triple;
     traits = traitsOf wsName triple;
     stagePreset = targetField wsName triple "stagePreset" null;
+    debugInfo = targetField wsName triple "debugInfo" null;
     targetStages = targetField wsName triple "stages" { };
   };
   shippedRemapScopeOf =
@@ -778,7 +780,7 @@ let
         else
           pkgs.runCommand r.breakbulkRoot.target { } ''
             files=(${r}/*)
-            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}${traits.exeSuffix}
+            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}${traits.executableSuffix}
           '';
     in
     lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (

@@ -5,7 +5,7 @@
 #
 #   targetTraits = breakbulk.targetTraits;
 #   t = targetTraits.resolve { triple = "x86_64-pc-windows-msvc"; };
-#   t.isMsvc  t.exeSuffix  t.dylibPathVar  …
+#   t.isMsvc  t.executableSuffix  t.dylibPathVar  …
 #   targetTraits.resolve { triple = "my-board"; traits = { os = "none"; }; }
 #
 # `parse` reads a built-in Rust target name into rustc's own cfg values
@@ -22,7 +22,7 @@
 # user's `traits` (`targets.<triple>.traits`, for a target breakbulk does
 # not know, or to correct one) over the parse, derives, and lets the
 # user's values win again, so a user can set a base field (`os`) and have
-# everything follow, or set a derived field (`exeSuffix`) directly. For a
+# everything follow, or set a derived field (`executableSuffix`) directly. For a
 # name `parse` does not know and no user traits, every field is an error
 # naming `targets.<triple>.traits`, raised only when something reads it,
 # so a target whose traits nothing needs still works.
@@ -31,19 +31,45 @@
 #
 #   triple                 the target name
 #   arch vendor os env abi families   as above (families: a list)
-#   isLinux                Linux kernel: os linux or android
+#   kernel                 the kernel the target's programs run on: "linux"
+#                          (os linux or android), "darwin" (Apple), the os
+#                          for other OSes with a kernel of their own
+#                          (windows, freebsd, …), null where there is none
+#                          to speak of (none, uefi, cuda, wasm, wasi)
+#   isLinux                a Linux userland: os linux (glibc, musl, …);
+#                          false for Android, whose userland (bionic, its
+#                          own linker and loader) breakbulk has no preset
+#                          for (decision 138; issue #27)
 #   isWindows isMsvc isMingw          os windows; env msvc; env gnu
 #   isApple isWasm isWasi isBareMetal isUefi
 #   objectFormat           "elf" | "pe" | "macho" | "wasm"
-#   exeSuffix              "" | ".exe" | ".efi" | ".wasm" | ".js"
-#   dylibPrefix dylibSuffix           "lib" ".so" | "" ".dll" | "lib" ".dylib" | "" ".wasm"
-#   staticlibPrefix staticlibSuffix   "lib" ".a" | "" ".lib" (msvc)
-#   debugSideFile          debuginfo kept beside a linked binary: "pdb"
-#                          (msvc), "dwp" (ELF, with split-debuginfo),
-#                          "dSYM" (Mach-O), or null
-#   linkerWritesDebugFile  the linker writes `debugSideFile` for every
-#                          linked crate, whatever -C debuginfo says (msvc:
-#                          rustc always passes /DEBUG; decision 97)
+#   executableSuffix       rustc's target-spec `exe_suffix`: "" | ".exe" |
+#                          ".efi" | ".wasm" | ".js" | ".ptx" | ".elf" (avr)
+#   sharedLibraryPrefix sharedLibrarySuffix   `dll_prefix`, `dll_suffix`
+#                          (dylib and cdylib): "lib" ".so" | "" ".dll"
+#                          (Windows, Cygwin) | "lib" ".dylib" | "" ".wasm" |
+#                          "lib" ".a" (AIX)
+#   staticLibraryPrefix staticLibrarySuffix   `staticlib_prefix`,
+#                          `staticlib_suffix`: "lib" ".a" | "" ".lib" (msvc)
+#                          The four file-name fields are what
+#                          `rustc --print file-names --crate-type <t>`
+#                          prints for the target (`target-traits-rustc`
+#                          checks every built-in target).
+#   debugArtifacts         the debuginfo files rustc's link writes beside a
+#                          linked output, which `--print file-names` does
+#                          not name: a list of
+#                            { suffix; when; perObject ? false;
+#                              directory ? false; }
+#                          `when` is "always" (for every crate the linker
+#                          produces, whatever -C debuginfo says: msvc's
+#                          `.pdb`, rustc always passes /DEBUG; decision 97),
+#                          "split-packed" or "split-unpacked" (with
+#                          debuginfo on and that -C split-debuginfo).
+#                          `perObject`: one per object file (`.dwo`), not
+#                          per output; `directory`: a directory (`.dSYM`).
+#                          breakbulk-format's `writes_debuginfo_side_files`
+#                          evaluates `when` against the traced flags to
+#                          decide whether a unit gets a `debug` output
 #   dylibPathVar dylibPathSep         the variable a process of this
 #                          platform finds shared libraries through, run
 #                          natively (Cargo's `dylib_path_envvar`): PATH on
@@ -52,10 +78,11 @@
 #                          bare metal. A runner may deliver it under
 #                          another name (wine: WINEPATH), see
 #                          `dylibPathOf` in lib/test-runs.nix
-#   stagePreset            the default post-link stage chain for a target
-#                          with no `stagePreset` (lib/stages.nix):
-#                          "linuxGnu" (split debug info) on Linux, "msvc"
-#                          (none) on msvc, null otherwise
+#   debugInfo              the default of `targets.<t>.debugInfo` (decision
+#                          137): "split" (into a `debug` output) on a Linux
+#                          ELF target, "keep" elsewhere (msvc's `.pdb` is
+#                          separate already; wasm and others have no
+#                          splitting stage)
 { lib }:
 let
   inherit (lib)
@@ -316,11 +343,16 @@ let
       isApple = elem b.os appleOses;
       isWasm = wasmArch b.arch;
       isUefi = b.os == "uefi";
-      isLinux = b.os == "linux" || b.os == "android";
+      # A Linux userland; Android has the Linux kernel, not this
+      # (decision 138).
+      isLinux = b.os == "linux";
+      isCuda = b.os == "cuda";
+      # Cygwin's programs are PE files named as on Windows.
+      isCygwin = b.os == "cygwin";
       objectFormat =
         if isApple then
           "macho"
-        else if isWindows || isUefi then
+        else if isWindows || isUefi || isCygwin then
           "pe"
         else if isWasm then
           "wasm"
@@ -339,41 +371,93 @@ let
         isLinux
         objectFormat
         ;
+      kernel =
+        if b.os == "linux" || b.os == "android" then
+          "linux"
+        else if isApple then
+          "darwin"
+        else if
+          isWasm
+          || elem b.os [
+            "none"
+            "uefi"
+            "unknown"
+            "cuda"
+          ]
+        then
+          null
+        else
+          b.os;
       isWasi = b.os == "wasi";
       isBareMetal = b.os == "none";
-      exeSuffix =
-        if isWindows then
+      # rustc's target specs: `exe_suffix`, `dll_prefix`/`dll_suffix`
+      # (dylib and cdylib), `staticlib_prefix`/`staticlib_suffix`
+      # (`target-traits-rustc` compares them with `--print file-names`).
+      executableSuffix =
+        if isWindows || isCygwin then
           ".exe"
         else if isUefi then
           ".efi"
         else if b.os == "emscripten" then
           ".js"
+        else if isCuda then
+          ".ptx"
         else if isWasm then
           ".wasm"
+        else if b.arch == "avr" then
+          ".elf"
         else
           "";
-      dylibPrefix = if isWindows || isWasm then "" else "lib";
-      dylibSuffix =
-        if isWindows then
+      sharedLibraryPrefix = if isWindows || isCygwin || isWasm || isCuda then "" else "lib";
+      sharedLibrarySuffix =
+        if isWindows || isCygwin then
           ".dll"
         else if isApple then
           ".dylib"
         else if isWasm then
           ".wasm"
+        else if isCuda then
+          ".ptx"
+        else if b.os == "aix" then
+          ".a"
         else
           ".so";
-      staticlibPrefix = if isMsvc then "" else "lib";
-      staticlibSuffix = if isMsvc then ".lib" else ".a";
-      debugSideFile =
+      staticLibraryPrefix = if isMsvc then "" else "lib";
+      staticLibrarySuffix = if isMsvc then ".lib" else ".a";
+      debugArtifacts =
         if isMsvc then
-          "pdb"
+          [
+            {
+              suffix = ".pdb";
+              when = "always";
+            }
+          ]
         else if objectFormat == "macho" then
-          "dSYM"
+          # From rustc's dsymutil run with split-debuginfo=packed. Not
+          # verified: breakbulk has no Darwin builders yet.
+          [
+            {
+              suffix = ".dSYM";
+              when = "split-packed";
+              directory = true;
+            }
+          ]
         else if objectFormat == "elf" then
-          "dwp"
+          [
+            # packed: one per linked output (rustc runs thorin).
+            {
+              suffix = ".dwp";
+              when = "split-packed";
+            }
+            # unpacked: one per object file, where rustc wrote it.
+            {
+              suffix = ".dwo";
+              when = "split-unpacked";
+              perObject = true;
+            }
+          ]
         else
-          null;
-      linkerWritesDebugFile = isMsvc;
+          [ ];
       dylibPathVar =
         if isWindows then
           "PATH"
@@ -384,13 +468,12 @@ let
         else
           "LD_LIBRARY_PATH";
       dylibPathSep = if isWindows then ";" else ":";
-      stagePreset =
-        if isLinux then
-          "linuxGnu"
-        else if isMsvc then
-          "msvc"
-        else
-          null;
+      # Decision 137: what a target's products do with debug info by
+      # default (`targets.<t>.debugInfo` overrides it): split it off into
+      # a `debug` output on a Linux ELF target; elsewhere keep it in the
+      # file (msvc's PDB is separate already; wasm and other targets have
+      # no splitting stage).
+      debugInfo = if isLinux && objectFormat == "elf" then "split" else "keep";
     };
 
   fieldNames = lib.attrNames (derive {
@@ -430,8 +513,15 @@ let
             }
         )
         // lib.getAttrs (lib.intersectLists baseFields (lib.attrNames traits)) traits;
+      # A misspelt or renamed field would otherwise be ignored silently.
+      misnamed = lib.subtractLists fieldNames (lib.attrNames traits);
     in
-    if parsed == null && traits == { } then unknown else derive base // traits;
+    if misnamed != [ ] then
+      throw "breakbulk: targets.\"${triple}\".traits: unknown trait(s) ${lib.concatStringsSep ", " misnamed}; known: ${lib.concatStringsSep ", " fieldNames}"
+    else if parsed == null && traits == { } then
+      unknown
+    else
+      derive base // traits;
 
   # The Rust target of the machine `pkgs` builds for (the native triple of
   # a native package set).
@@ -440,8 +530,8 @@ let
   # The name of the preset (`breakbulk.presets.<name>`) the native target
   # gets when it sets none (decisions 105, 115), or null. It follows the
   # `pkgs` given to mkRepository, not the machine evaluating: a glibc
-  # Linux package set gets "linuxGnu", a musl one (`pkgs.pkgsMusl`, or
-  # nixpkgs on a musl system) "linuxMusl".
+  # Linux package set gets "linux", a musl one (`pkgs.pkgsMusl`, or
+  # nixpkgs on a musl system) "linuxStatic".
   nativeDefaultPreset =
     pkgs:
     let
@@ -450,9 +540,9 @@ let
     if !h.isLinux then
       null
     else if h.isMusl then
-      "linuxMusl"
+      "linuxStatic"
     else if h.isGnu then
-      "linuxGnu"
+      "linux"
     else
       null;
 in
@@ -468,5 +558,5 @@ in
 
   # The part of the traits breakbulk's Rust programs read
   # (`toolchains.json`'s `targetTraits`, breakbulk-format `TargetTraits`).
-  forRust = t: { inherit (t) linkerWritesDebugFile; };
+  forRust = t: { inherit (t) debugArtifacts; };
 }

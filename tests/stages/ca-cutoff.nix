@@ -48,7 +48,7 @@ in
 S.mkProduct {
   name = "hello";
   inherit linked pkgs;
-  stages = S.defaultStages.linuxGnu;
+  stages = S.chain [ "splitDebug" ];
   sourcePaths = [ src ];
   ca = true;
 }

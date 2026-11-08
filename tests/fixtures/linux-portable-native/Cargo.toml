@@ -1,0 +1,9 @@
+# linuxPortable with native libraries (decisions 102, 122): openssl-sys and
+# libz-sys find OpenSSL and zlib with pkg-config (breakbulk's sysDefaults
+# declare them). With `rebuildInputs = [ "openssl" "zlib" ]` those come
+# from nixpkgs rebuilt with zig cc against glibc 2.17, as static libraries
+# linked into the product, which needs glibc 2.17 or older and nothing
+# else.
+[workspace]
+resolver = "3"
+members = ["app"]

@@ -510,8 +510,8 @@ struct Fake;
 
 impl Resolve for Fake {
     type Error = String;
-    fn target_traits(&self) -> TargetTraits {
-        TargetTraits::default()
+    fn target_traits(&self) -> &TargetTraits {
+        TargetTraits::NONE
     }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Ok(match r {
@@ -548,8 +548,8 @@ struct Configured;
 
 impl Resolve for Configured {
     type Error = String;
-    fn target_traits(&self) -> TargetTraits {
-        TargetTraits::default()
+    fn target_traits(&self) -> &TargetTraits {
+        TargetTraits::NONE
     }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
@@ -708,8 +708,8 @@ struct Keep;
 
 impl Resolve for Keep {
     type Error = String;
-    fn target_traits(&self) -> TargetTraits {
-        TargetTraits::default()
+    fn target_traits(&self) -> &TargetTraits {
+        TargetTraits::NONE
     }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
@@ -845,8 +845,8 @@ struct Weak;
 
 impl Resolve for Weak {
     type Error = String;
-    fn target_traits(&self) -> TargetTraits {
-        TargetTraits::default()
+    fn target_traits(&self) -> &TargetTraits {
+        TargetTraits::NONE
     }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
@@ -1262,11 +1262,9 @@ fn debuginfo_side_files() {
     let bin = ["bin".to_owned()];
     let lib = ["lib".to_owned()];
     let staticlib = ["staticlib".to_owned()];
-    let msvc = TargetTraits {
-        linker_writes_debug_file: true,
-    };
-    let other = TargetTraits::default();
-    let wt = |args: &[&str], types: &[String], t: TargetTraits| {
+    let msvc = &msvc_traits();
+    let other = &elf_traits();
+    let wt = |args: &[&str], types: &[String], t: &TargetTraits| {
         writes_debuginfo_side_files(args.iter().map(|a| Some(*a)), types, t)
     };
     let w = |args: &[&str], types: &[String]| wt(args, types, other);
@@ -1280,7 +1278,7 @@ fn debuginfo_side_files() {
     assert!(!wt(&[], &staticlib, msvc));
     assert!(!wt(&[], &lib, msvc));
     assert!(!w(&target, &bin));
-    // Elsewhere: only split debuginfo, with debuginfo on.
+    // ELF: only split debuginfo, with debuginfo on.
     let gnu = ["--target", "x86_64-unknown-linux-gnu"];
     assert!(!w(&gnu, &bin));
     assert!(!w(&[&gnu[..], &["-C", "debuginfo=2"]].concat(), &bin));
@@ -1336,6 +1334,37 @@ fn debuginfo_side_files() {
         Some("split-debuginfo=packed"),
     ];
     assert!(writes_debuginfo_side_files(args, &bin, other));
+    // A target with no debug artifacts (wasm) never, whatever the flags;
+    // one with only a packed artifact not for unpacked.
+    let split = ["-C", "debuginfo=2", "-C", "split-debuginfo=packed"];
+    assert!(!wt(&split, &bin, TargetTraits::NONE));
+    let packed_only = TargetTraits {
+        debug_artifacts: vec![DebugArtifact {
+            suffix: ".dSYM".into(),
+            when: DebugArtifactWhen::SplitPacked,
+            per_object: false,
+            directory: true,
+        }],
+    };
+    assert!(wt(&split, &bin, &packed_only));
+    assert!(!wt(
+        &["-C", "debuginfo=2", "-C", "split-debuginfo=unpacked"],
+        &bin,
+        &packed_only
+    ));
+}
+
+/// The traits' `debugArtifacts` of an ELF target (lib/target-traits.nix).
+fn elf_traits() -> TargetTraits {
+    serde_json::from_str(
+        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}]}"#,
+    )
+    .unwrap()
+}
+
+/// The traits' `debugArtifacts` of an msvc target.
+fn msvc_traits() -> TargetTraits {
+    serde_json::from_str(r#"{"debugArtifacts":[{"suffix":".pdb","when":"always"}]}"#).unwrap()
 }
 
 #[test]
@@ -1347,18 +1376,17 @@ fn debug_output_only_where_side_files() {
     };
     let mut p = example();
     // c-app: a target bin with no debuginfo flags.
-    assert!(!compile(&mut p, "c-app").has_debug_output(TargetTraits::default()));
+    let elf = &elf_traits();
+    assert!(!compile(&mut p, "c-app").has_debug_output(elf));
     compile(&mut p, "c-app").args.extend(lit(&[
         "-C",
         "debuginfo=2",
         "-C",
         "split-debuginfo=unpacked",
     ]));
-    assert!(compile(&mut p, "c-app").has_debug_output(TargetTraits::default()));
+    assert!(compile(&mut p, "c-app").has_debug_output(elf));
     // Host units never: their side files are discarded.
-    let msvc = TargetTraits {
-        linker_writes_debug_file: true,
-    };
+    let msvc = &msvc_traits();
     assert!(compile(&mut p, "c-app").has_debug_output(msvc));
     let c = compile(&mut p, "c-ring-build");
     assert!(!c.has_debug_output(msvc));

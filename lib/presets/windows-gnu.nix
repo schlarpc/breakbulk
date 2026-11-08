@@ -4,7 +4,7 @@
 # -lmsvcrt), and {x86_64,aarch64}-pc-windows-gnullvm with nixpkgs'
 # LLVM mingw-w64 toolchains (ucrt, clang, libunwind).
 #
-#   targets.x86_64-pc-windows-gnu.preset = breakbulk.presets.windowsGnu;
+#   targets.x86_64-pc-windows-gnu.preset = breakbulk.presets.windows;
 #
 # Linker: the toolchain's C driver (rustc's windows-gnu specs link through
 # a gcc-style driver), with lld (./linker.nix, kind mingw-lld).
@@ -30,7 +30,7 @@
     if traits.isMingw then
       targetPkgsFor pkgs triple
     else
-      throw "breakbulk.presets.windowsGnu: `${triple}` is not a windows-gnu or windows-gnullvm triple",
+      throw "breakbulk.presets.windows: `${triple}` is not a windows-gnu or windows-gnullvm triple",
   crtStatic ? true,
   lld ? pkgs.buildPackages.lld,
   wine ? pkgs.wineWow64Packages.minimal,
@@ -74,5 +74,4 @@ in
   }).runner;
   testSystem = mkDefault null;
   host = hostSpec pkgs;
-  stagePreset = mkDefault null;
 }

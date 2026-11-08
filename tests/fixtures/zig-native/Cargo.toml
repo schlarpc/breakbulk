@@ -1,8 +1,0 @@
-# zig with native libraries (decision 102): openssl-sys and libz-sys find
-# OpenSSL and zlib with pkg-config (breakbulk's sysDefaults declare them).
-# With the zig preset's `rebuildInputs = [ "openssl" "zlib" ]` those come
-# from nixpkgs rebuilt with zig cc against glibc 2.17, so the product and
-# the libraries it loads all need glibc 2.17 or older.
-[workspace]
-resolver = "3"
-members = ["app"]

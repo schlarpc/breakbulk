@@ -4,7 +4,7 @@
 # version-matched nixpkgs `wasm-ld` underneath instead of rustup's rust-lld
 # (./linker.nix, kind wasm-component-ld). Tests run under wasmtime.
 #
-#   targets.wasm32-wasip2.preset = breakbulk.presets.wasip2 { withC = true; };
+#   targets.wasm32-wasip2.preset = breakbulk.presets.wasmComponent { withC = true; };
 #
 # withC = true: C code compiles against the headers of the wasi-sdk
 # release whose wasi-libc the Rust toolchain bundles (decision 99): one
@@ -47,10 +47,9 @@ let
 in
 assert lib.assertMsg (
   triple == "wasm32-wasip2"
-) "breakbulk.presets.wasip2: ${triple} is not wasm32-wasip2";
+) "breakbulk.presets.wasmComponent: ${triple} is not wasm32-wasip2";
 common
 // {
-  stagePreset = mkDefault null;
   runner = mkDefault (chooseRunner {
     inherit pkgs wasmtime;
     traits = args.traits or null;

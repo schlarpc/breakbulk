@@ -656,6 +656,87 @@ let
         touch "$out"
       ''
   );
+  # ---------------------------------------------------------------------
+  # Run-time libraries
+
+  # The sonames of glibc's own libraries, in every release since 2.17 (the
+  # oldest a Rust std supports): what an ELF program for "any glibc Linux"
+  # may load besides what it links statically, as manylinux's policy
+  # (auditwheel) allows for Python wheels, without libgcc_s and libstdc++
+  # (Rust programs linked by zig need neither; a C++ dependency can add
+  # them through linuxPortable's `systemLibraries`). The dynamic loaders
+  # are matched by name (`ld-linux-*.so.*`, `ld64.so.*`).
+  glibcLibraries = [
+    "libc.so.6"
+    "libm.so.6"
+    "libmvec.so.1"
+    "libpthread.so.0"
+    "libdl.so.2"
+    "librt.so.1"
+    "libutil.so.1"
+    "libresolv.so.2"
+    "libnsl.so.1"
+    "libcrypt.so.1"
+    "libanl.so.1"
+    "libBrokenLocale.so.1"
+    "libthread_db.so.1"
+    "ld-linux-*.so.*"
+    "ld-linux.so.*"
+    "ld64.so.*"
+  ];
+
+  # A check: every ELF file in its input may name in NEEDED (the shared
+  # libraries the dynamic loader loads for it) only `allowed`, shell glob
+  # patterns of sonames; any other library fails the check, naming the
+  # file, the library and `why`. Like auditwheel's policy check, it reads
+  # the files, not their store-path references, so it holds for a
+  # library found anywhere at run time.
+  neededLibraries =
+    mkHelper "neededLibraries"
+      {
+        allowed = glibcLibraries;
+        why = "";
+        binutils = null;
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        pkgs.runCommand (stageName product "neededLibraries")
+          { nativeBuildInputs = [ (binutilsOf cfg pkgs) ]; }
+          ''
+            set -euo pipefail
+            ${isElfFn}
+            allowed=(${escapeShellArgs cfg.allowed})
+            bad=0
+            mkdir -p $out
+            while IFS= read -r -d "" f; do
+              isElf "$f" || continue
+              rel=''${f#${input}/}
+              while IFS= read -r lib; do
+                ok=0
+                for p in "''${allowed[@]}"; do
+                  # Unquoted: a glob pattern.
+                  if [[ $lib == $p ]]; then ok=1; break; fi
+                done
+                if [ "$ok" = 1 ]; then
+                  echo "$rel: $lib" >> $out/needed
+                else
+                  echo "neededLibraries: ${product.name}: $rel needs $lib, which is not an allowed run-time library${
+                    lib.optionalString (cfg.why != "") ": ${cfg.why}"
+                  }" >&2
+                  bad=1
+                fi
+              done < <(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
+            done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
+            [ "$bad" = 0 ]
+            touch $out/needed
+          ''
+      );
 in
 {
   inherit
@@ -669,5 +750,7 @@ in
     deterministicZip
     install
     noSourceReferences
+    neededLibraries
+    glibcLibraries
     ;
 }

@@ -1900,3 +1900,35 @@ version. For one that doesn't (likely fenix; not checked), a tiny rustc
 probe runs at evaluation time, in dynamic mode too. Alternative: have the
 Rust side probe at build time when a capability is unknown, which brings
 back a second place where the decision is made. Default: the probe.
+
+## 143. FYI: presets renamed, traits redesigned, `debugInfo` setting (resolves 122c, 137, 138, 139)
+
+- Presets are now `linux`, `linuxStatic`, `linuxPortable`, `windows`,
+  `wasmWeb`, `wasmComponent`; checks and the container app renamed to
+  match (`nix run .#test-linux-portable-container`).
+- File-name traits use neutral names and are checked against
+  `rustc --print file-names` for all 248 known targets; the check found and
+  fixed three wrong ones (avr, AIX, Cygwin).
+- Debug files are a declarative list (`debugArtifacts`).
+- `targets.<t>.debugInfo = "split" | "keep" | "strip"`; changing the
+  stage it inserts from a package is an evaluation error.
+- Android is no longer "Linux" and fails clearly (#27).
+- `linuxPortable` links everything from Nix statically and checks that only
+  glibc's libraries and declared `systemLibraries` are dynamic.
+Nothing else changed: about 4,080 derivations compared before and after.
+
+## 144. ASK: a "portable" binary can still contain a store path
+
+A static OpenSSL build records its config folder (`OPENSSLDIR`) as a Nix
+store path, so a `linuxPortable` product with OpenSSL still mentions
+`/nix/store/…-openssl-etc`; on another distribution OpenSSL would look for
+its config there. The new check only reads the needed-library list, so it
+doesn't catch this. Should `linuxPortable` products also fail on any store
+path they contain (with an allow-list)?
+
+## 145. ASK: allow `libgcc_s` and `libstdc++` by default for portable binaries?
+
+The portable allow-list is glibc's own libraries and its loaders. Python's
+manylinux rules also allow `libgcc_s.so.1` and `libstdc++.so.6`, which
+nearly every Linux system has. Today a C++ dependency must add them via
+`systemLibraries`. Allow them by default?

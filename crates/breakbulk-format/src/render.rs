@@ -20,7 +20,7 @@ pub trait Resolve {
     /// The traits of the plan's target platform (`toolchains.json`'s
     /// `targetTraits`), which decide platform-dependent parts of a unit
     /// (its `debug` output).
-    fn target_traits(&self) -> TargetTraits;
+    fn target_traits(&self) -> &TargetTraits;
     /// The literal path a reference stands for.
     fn reference(&self, r: &Reference) -> Result<String, Self::Error>;
     /// The `flags` output directory of a run unit.

@@ -135,10 +135,12 @@ All configuration is in NixOS-style modules. The full list of options is in
   targets and its variants (profiles, features, check, clippy, coverage,
   benches).
 - `targets.<triple>`: the toolchain spec of a target. Start from a preset
-  (`breakbulk.presets.linuxGnu`, `linuxMusl`, `staticGlibc`, `msvc`,
-  `wasmBrowser`, `wasmComponent`, `wasip2`, `windowsGnu`, `zig`) and override any field: linker, C
-  compiler, rustflags, env, test runner, post-link stages. On Linux the
-  native target uses `linuxGnu` (or `linuxMusl` when the `pkgs` you pass
+  (`breakbulk.presets.linux`, `linuxStatic`, `linuxPortable`, `windows`,
+  `wasmWeb`, `wasmComponent`; each picks its mechanism from the triple) and override any field: linker, C
+  compiler, rustflags, env, test runner, post-link stages, and
+  `debugInfo` (`split` into a `debug` output, the default on Linux;
+  `keep`; `strip`). On Linux the
+  native target uses `linux` (or `linuxStatic` when the `pkgs` you pass
   is a musl one, such as `pkgs.pkgsMusl`) unless you set another preset. A preset
   follows each workspace's compiler: two workspaces on different Rust
   releases get matching LLVM tools and wasi-sdk headers without passing
@@ -161,18 +163,24 @@ dev shell warns when it sees them.
 
 | Target | Preset | Linker | Test runner |
 | --- | --- | --- | --- |
-| x86\_64 and aarch64 Linux gnu | `linuxGnu` | mold | native, or qemu-user when cross |
-| x86\_64 and aarch64 Linux musl | `linuxMusl` | mold | native, or qemu-user |
-| Host triple, fully static glibc | `staticGlibc` | mold | native |
-| wasm32-unknown-unknown, browser | `wasmBrowser` | lld (wasm) | wasm-bindgen test runner with Node |
+| x86\_64 and aarch64 Linux gnu | `linux` | mold | native, or qemu-user when cross |
+| x86\_64 and aarch64 Linux musl | `linuxStatic` (or `linux`) | mold | native, or qemu-user |
+| Host triple, fully static glibc | `linuxStatic` | mold | native |
+| Host triple, old glibc (e.g. 2.17) | `linuxPortable` | zig cc | native |
+| wasm32-unknown-unknown, browser | `wasmWeb` | lld (wasm) | wasm-bindgen test runner with Node |
 | wasm32-unknown-unknown, component | `wasmComponent` | lld (wasm) | wasmtime |
-| x86\_64 and aarch64 Windows msvc | `msvc` | lld-link | wine (x86\_64) |
-| wasm32-wasip2 | `wasip2` | rustc's wasm-component-ld | wasmtime |
-| riscv64gc Linux gnu | `linuxGnu` | mold | qemu-user |
-| x86\_64 Windows gnu and gnullvm (mingw-w64) | `windowsGnu` | lld | wine |
-| Host triple, old glibc (e.g. 2.17) | `zig` | zig cc | native |
+| wasm32-wasip2 | `wasmComponent` | rustc's wasm-component-ld | wasmtime |
+| x86\_64 and aarch64 Windows msvc | `windows` | lld-link | wine (x86\_64) |
+| x86\_64 Windows gnu and gnullvm (mingw-w64) | `windows` | lld | wine |
+| riscv64gc Linux gnu | `linux` | mold | qemu-user |
 
-The Windows preset needs the Microsoft CRT and Windows SDK, which are
+`linuxPortable` makes programs for any glibc Linux at least as old as the
+glibc you name: everything Nix provides is linked statically (library
+inputs listed in `rebuildInputs` are rebuilt as static libraries), and a
+default check fails when a product loads any library but glibc's own and
+the `systemLibraries` you allow.
+
+The Windows preset on msvc needs the Microsoft CRT and Windows SDK, which are
 unfree. breakbulk downloads them with `breakbulk.xwinSdk`. build-std
 (`-Zbuild-std`) works with a nightly that has `rust-src`. Darwin is not
 supported yet.

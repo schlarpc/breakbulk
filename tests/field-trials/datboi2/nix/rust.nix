@@ -195,7 +195,7 @@ in
   targets.${wasm}.preset = breakbulk.presets.wasmComponent;
   # Without a preset the native target links with rustc's own rust-lld,
   # which bypasses nixpkgs' linker wrapper (no rpath for libmagic.so).
-  targets.${native}.preset = breakbulk.presets.linuxGnu;
+  targets.${native}.preset = breakbulk.presets.linux;
 
   packages = lib.mkMerge [
     {

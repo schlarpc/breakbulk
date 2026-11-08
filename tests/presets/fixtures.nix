@@ -122,7 +122,7 @@ let
     {
       workspaces.main.variants.default.profile = "dev";
       targets.${native} = {
-        preset = presets.linuxGnu;
+        preset = presets.linux;
         linker = "${markerLinker}";
         env.BB_MARKER = "target-only";
         rustflags = [
@@ -197,7 +197,7 @@ let
         targets = lib.genAttrs muslTriples (_: { });
       };
       targets = lib.genAttrs muslTriples (_: {
-        preset = presets.linuxMusl;
+        preset = presets.linuxStatic;
       });
     }
   ];
@@ -240,7 +240,7 @@ let
       workspaces.main = staticWs // {
         targets."x86_64-unknown-linux-musl" = { };
       };
-      targets."x86_64-unknown-linux-musl".preset = presets.linuxMusl;
+      targets."x86_64-unknown-linux-musl".preset = presets.linuxStatic;
       packages.foo-sys = {
         nativeInputs = p: [ p.pkg-config ];
         inputs = p: [ (bbfoo p) ];
@@ -250,19 +250,19 @@ let
   glibcStatic = mkRepo (fixtures + "/static") [
     {
       workspaces.main = staticWs;
-      targets.${native}.preset = presets.staticGlibc;
+      targets.${native}.preset = presets.linuxStatic;
     }
   ];
 
   # Decision 97: a unit has a `debug` output only when rustc writes
   # debuginfo side files (breakbulk-format
-  # `writes_debuginfo_side_files`). A plain Linux release build (linuxGnu,
+  # `writes_debuginfo_side_files`). A plain Linux release build (linux,
   # no split-debuginfo) has none, in either plan; msvc links always write a
   # PDB, so its release bins and tests have one.
   linuxRelease = mkRepo (fixtures + "/static") [
     {
       workspaces.main = staticWs;
-      targets.${native}.preset = presets.linuxGnu;
+      targets.${native}.preset = presets.linux;
     }
   ];
   debugOutputs =
@@ -359,7 +359,7 @@ let
         targets.${a64} = { };
         variants.default.profile = "dev";
       };
-      targets.${a64}.preset = presets.linuxGnu;
+      targets.${a64}.preset = presets.linux;
       packages = {
         openssl-sys = {
           nativeInputs = p: [ p.pkg-config ];
@@ -421,7 +421,7 @@ let
       };
       # LLVM tools for the workspace's rustc (decision 70).
       targets = lib.genAttrs msvcTriples (_: {
-        preset = presets.msvc { inherit sdk; };
+        preset = presets.windows { inherit sdk; };
       });
     }
   ];
@@ -527,7 +527,7 @@ let
   wasmBrowser = mkRepo (fixtures + "/wasm-browser") [
     {
       workspaces.main = wasmWs;
-      targets.${wasm}.preset = presets.wasmBrowser { rustc = wasmRust; };
+      targets.${wasm}.preset = presets.wasmWeb { rustc = wasmRust; };
     }
   ];
   # Package inputs on a target without a package set (field trials: the
@@ -537,7 +537,7 @@ let
   wasmHostInputs = mkRepo (fixtures + "/wasm-browser") [
     {
       workspaces.main = wasmWs;
-      targets.${wasm}.preset = presets.wasmBrowser { rustc = wasmRust; };
+      targets.${wasm}.preset = presets.wasmWeb { rustc = wasmRust; };
       packages.wasm-bindgen-macro.inputs = p: [ p.zlib ];
     }
   ];
@@ -559,18 +559,18 @@ let
       product = breakbulk.mkProduct {
         name = "ui";
         linked = t.packages.ui.roots."cdylib/ui";
-        stages = breakbulk.stages.defaultStages.wasmBrowser;
+        stages = breakbulk.stages.defaultStages.wasmWeb;
         target.triple = wasm;
         info.lockfile = fixtures + "/wasm-browser/Cargo.lock";
         inherit pkgs;
       };
     in
     {
-      wasm-browser-test = t.testRuns.ui.web;
+      wasm-web-test = t.testRuns.ui.web;
       # The bindgen stage with the lockfile-matched CLI (0.2.130), then
       # wasm-opt; the JS glue loads in Node and computes the digest.
-      wasm-browser-bindgen =
-        pkgs.runCommand "wasm-browser-bindgen"
+      wasm-web-bindgen =
+        pkgs.runCommand "wasm-web-bindgen"
           {
             nativeBuildInputs = [ pkgs.nodejs ];
             bindgen = product.stages.bindgen;
@@ -694,7 +694,7 @@ let
                 };
               };
               targets.${wasm}.preset = presets.wasmComponent;
-              targets.${wasip2}.preset = presets.wasip2 { withC = true; };
+              targets.${wasip2}.preset = presets.wasmComponent { withC = true; };
             }
           ]
           ++ extra
@@ -758,22 +758,22 @@ let
 
   presetsEval =
     let
-      gnu = presets.linuxGnu {
+      gnu = presets.linux {
         inherit pkgs;
         triple = native;
       };
-      cross = presets.linuxGnu {
+      cross = presets.linux {
         inherit pkgs;
         triple = "aarch64-unknown-linux-gnu";
       };
-      bound = presets.msvc { arch = "x86_64"; };
+      bound = presets.windows { crtStatic = true; };
       llvm = breakbulk.llvmVersions;
       checks = {
         partial = lib.isFunction bound && lib.functionArgs bound ? toolchain;
         nativeRunner = gnu.runner.content == null;
         crossRunnerQemu = lib.hasInfix "qemu-aarch64" (discard cross.runner.content);
         crossNativeBuilder =
-          (presets.linuxGnu {
+          (presets.linux {
             inherit pkgs;
             triple = "aarch64-unknown-linux-gnu";
             nativeBuilder = true;
@@ -858,9 +858,9 @@ let
         # a Boolean"; found in the field trials).
         msvcCrtStatic =
           let
-            p = presets.msvc {
+            p = presets.windows {
               inherit pkgs;
-              arch = "x86_64";
+              triple = "x86_64-pc-windows-msvc";
               llvmMajor = 22;
               crtStatic = true;
               sdk = {

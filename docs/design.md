@@ -122,6 +122,8 @@ The planner runs the user's Cargo over the project's own `.cargo/config.toml`, s
 
 A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/`cflags`, bindgen settings, SDK store paths, extra rustflags, `env`, and `runner`. The planner resolves every tool to a store path; a non-store tool path is a hard error naming the tool.
 
+Presets are named for what they are for, not how they do it: `linux`, `linuxStatic`, `linuxPortable` (runs on other distributions), `windows`, `wasmWeb`, `wasmComponent`. The mechanism follows from the target triple: `linuxStatic` is musl for a `-musl` triple and static-pie glibc for a `-gnu` one, `windows` is msvc or MinGW by the triple's ABI, `wasmComponent` componentizes core modules on `wasm32-unknown-unknown` and links components directly on `wasm32-wasip2`.
+
 - Spec rustflags reach Cargo through `--config`, never the `RUSTFLAGS` env var. Cargo takes rustflags from one key only (per-target rustflags win over `[build] rustflags`) and concatenates arrays only within that key. The planner therefore reads the project's config files and adds the spec's flags under `[build]` when the project uses `[build] rustflags` and no per-target rustflags, and under `target.<triple>` otherwise. The trace confirms that both sets of flags arrived.
 - Host and target specs are separate, and the separation is enforced per unit, not per triple. Spec env never goes through Cargo's `[env]` table, which reaches every process Cargo starts; it is added to each unit according to the unit's platform. This matters most when host and target share a triple (static glibc, zig), where triple-keyed variables such as `CC_<triple>` or `CFLAGS_<triple>` cannot tell host from target.
 - Linkers: when host and target triples differ, Cargo applies each `target.<triple>.linker` correctly. When they are the same triple, Cargo applies the target linker to host units too; if the host spec's linker differs, the planner rewrites the linker value in host units after checking it is exactly the one configured. Cargo passes `-C linker` to every unit, rlibs included, and breakbulk keeps it there, so a linker change rebuilds every unit, not only those that link.
@@ -173,13 +175,15 @@ Check and clippy variants check every target, as `cargo check --all-targets` doe
 
 ### Default stages per preset
 
-| Preset | Default stages |
-| --- | --- |
-| Linux gnu / musl | `splitDebug` |
-| Windows msvc | none (PDBs are already separate; `install` puts them in the `debug` output) |
-| wasm, browser | `bindgen` → `wasmOpt` |
-| wasm, component | `wasmOpt` → `componentize` |
-| Darwin (later) | `dsymutil` → `strip` → `adhocSign` |
+What happens to debug info is a property of the target, not of a stage list: `targets.<t>.debugInfo` is `"split"`, `"keep"` or `"strip"`, and puts the matching stage first. The units are shared by every package of the target and their remap scope and build ID depend on it, so no package can add or remove that stage.
+
+| Preset | debugInfo (default) | Default stages |
+| --- | --- | --- |
+| Linux gnu / musl | split | `splitDebug` |
+| Windows msvc | keep | none (PDBs are already separate; `install` puts them in the `debug` output) |
+| wasm, browser | keep | `bindgen` → `wasmOpt` |
+| wasm, component | keep | `wasmOpt` → `componentize` |
+| Darwin (later) | to decide (`.dSYM` via `dsymutil`) | `dsymutil` → `strip` → `adhocSign` |
 
 The tool never applies an implicit fixup phase. Stripping breaks some signing schemes, and some checks must see unstripped bytes, so any default stage can be removed or reordered.
 
@@ -205,8 +209,9 @@ Source paths must not end up in shipped outputs. Every crate's source is a store
 
 Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
 
-- **Shipped binaries and cdylibs** remap panic locations, `file!()` and diagnostics, but keep real store paths in debug info. `splitDebug` moves DWARF to a separate `debug` output (`$debug/lib/debug/.build-id/…`, found by gdb and debuginfod). The main output has no source references; the `debug` output references exactly the sources a debugger needs, so installing it gives source-level debugging with no setup.
+- **Shipped binaries and cdylibs** of a target that splits debug info (`debugInfo = "split"`, the default on Linux) remap panic locations, `file!()` and diagnostics, but keep real store paths in debug info. `splitDebug` moves DWARF to a separate `debug` output (`$debug/lib/debug/.build-id/…`, found by gdb and debuginfod). The main output has no source references; the `debug` output references exactly the sources a debugger needs, so installing it gives source-level debugging with no setup.
 - **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change. The workspace libraries they link are compiled once, with the shipped scope, so their debug info still names their source views: an edit to any file of such a library (a README) changes the bytes of every test binary linking it. `test.stripForRun` (off by default) has the test run consume a debug-stripped copy instead, which does not change; the unstripped binary stays available for debugging.
+- On a target that keeps or strips debug info, every scope is remapped.
 - With rustc older than 1.95, every scope is remapped.
 
 Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. On Cargo 1.101 and later, breakbulk sets it when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. A setting passed with `--config` would replace the project's, and copying Cargo's profile rules to see whether the project set it is not worth it, so breakbulk reads the files instead: any `trim-paths` under `[profile]` in the workspace root's `Cargo.toml` or the project's Cargo config leaves the choice to the project, and its own scope is kept. `cargoTrimPaths` forces it on or off, and `sourcePaths = "keep"` turns all path hiding off. Under Cargo's trim-paths, breakbulk's C prefix maps use Cargo's names, so they agree with cc-rs, which reads the same remaps from `CARGO_TRIM_PATHS_REMAP`.
@@ -242,7 +247,7 @@ Day one covers Linux gnu and musl on x86\_64 and aarch64, browser and component 
 | wasm32-wasip2 | M7 | rustup-dist with target, + the matching wasi-sdk sysroot's headers for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
 | riscv64gc-unknown-linux-gnu | M7 | user's + nixpkgs cross | mold | qemu-user |
 | x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | M7 | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
-| Host triple, old glibc (zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
+| Host triple, old glibc (`linuxPortable`, zig) | M7 | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
 | x86\_64-unknown-none (build-std) | M7 | nightly with `rust-src`, user-supplied | rustc's own (rust-lld) | none |
 | aarch64-apple-darwin | Later; no Mac builders | user's, built on Mac builders | ld64 or lld | native |
 
@@ -259,7 +264,7 @@ The linker is chosen automatically as a pure function of target, host and LTO mo
 - Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The native target gets the Linux preset by default, so this holds with no configuration. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](#per-package-overrides)).
 - Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM; a rustc newer than the table is asked with `rustc -vV` at evaluation time).
 - Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
-- Windows msvc: `lld-link` from the matching LLVM, wrapped so PDBs are reproducible. Windows MinGW (`-gnu`, `-gnullvm`): the toolchain's C driver with lld. The zig preset asks for zig's own linker (`zig cc`).
+- Windows msvc: `lld-link` from the matching LLVM, wrapped so PDBs are reproducible. Windows MinGW (`-gnu`, `-gnullvm`): the toolchain's C driver with lld. The `linuxPortable` preset's zig backend asks for zig's own linker (`zig cc`).
 - Any other target has no rule and fails at evaluation, naming `targets.<t>.linker`.
 - **wild** is an opt-in preset, gated by the determinism check.
 - Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so every C-driver linker wrapper (mold, clang with lld, MinGW, zig) drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
@@ -278,9 +283,9 @@ The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-o
 
 Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust's self-contained crt, `libc.a` and libunwind (nixpkgs' musl has no `libunwind.a`), while C code compiles against nixpkgs' musl headers. Static glibc builds are static-pie by default. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode on musl and static glibc alike, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
 
-### Zig
+### Portable Linux
 
-A zig preset exists for targeting an old glibc version. It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
+`linuxPortable` builds Linux programs that run on other distributions, in the manner of Python's manylinux wheels: linked against an old glibc (2.17 by default), with everything Nix provides linked statically, so the program loads nothing at run time but glibc's own libraries and the system libraries the user names (`systemLibraries`, such as `libGL.so.1`). Native library inputs are rebuilt as static libraries only (`rebuildInputs`), pkg-config runs in static mode, and a default check reads each binary's `NEEDED` entries, as auditwheel does, and fails on any other library. There is no bundling or rpath option: the product needs nothing next to it. Its one backend is zig (`zig cc`). It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
 
 ## Content addressing and early cutoff
 

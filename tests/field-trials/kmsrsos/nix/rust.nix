@@ -112,12 +112,12 @@ in
   };
 
   targets = {
-    ${native}.preset = breakbulk.presets.linuxGnu;
-    ${musl}.preset = breakbulk.presets.linuxMusl;
+    ${native}.preset = breakbulk.presets.linux;
+    ${musl}.preset = breakbulk.presets.linuxStatic;
   }
   // lib.genAttrs windows (_: {
     # LLVM tools for the workspace's rustc (decision 70).
-    preset = breakbulk.presets.msvc {
+    preset = breakbulk.presets.windows {
       inherit sdk;
       crtStatic = true;
     };

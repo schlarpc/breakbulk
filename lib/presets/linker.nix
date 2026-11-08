@@ -20,6 +20,9 @@
 #   clang-lld            isLinux with lto                clang with -fuse-ld=lld
 #   mold                 isLinux                         the wrapped cc with -fuse-ld=mold
 #
+# `isLinux` is a Linux userland; Android (the Linux kernel, its own
+# userland) has no rule and fails with a message naming issue #27.
+#
 # Every LLVM tool (lld, wasm-ld, lld-link, clang) comes from the LLVM
 # release matching rustc's (`llvm`, chosen by the preset through
 # breakbulk.llvmVersions), never rustup's self-contained rust-lld. Where
@@ -184,6 +187,8 @@ let
       "mingw-lld"
     else if t.isLinux then
       (if lto then "clang-lld" else "mold")
+    else if t.os == "android" then
+      throw "breakbulk.presets.chooseLinker: no linker rule for the Android target `${triple}`: Android has the Linux kernel but its own userland (bionic, the NDK's linker), which breakbulk has no preset for yet (issue #27); set `targets.${triple}.linker`"
     else
       throw "breakbulk.presets.chooseLinker: no linker rule for `${triple}`; set `targets.${triple}.linker`";
 

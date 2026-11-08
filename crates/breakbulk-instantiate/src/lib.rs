@@ -290,8 +290,8 @@ pub fn workspace_dir<'p>(plan: &Plan, id: &'p str) -> Option<&'p str> {
 impl Resolve for Tokens<'_> {
     type Error = Error;
 
-    fn target_traits(&self) -> breakbulk_format::TargetTraits {
-        self.inputs.toolchains.target_traits
+    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
+        &self.inputs.toolchains.target_traits
     }
 
     fn reference(&self, r: &Reference) -> Result<String, Error> {
@@ -571,7 +571,7 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
 /// A unit derivation's outputs: sorted, then `debug` last, so that it is
 /// never the default (first) output. `traits` are the target's
 /// (`toolchains.json`'s `targetTraits`).
-pub fn unit_outputs(unit: &Unit, traits: TargetTraits) -> Vec<String> {
+pub fn unit_outputs(unit: &Unit, traits: &TargetTraits) -> Vec<String> {
     match unit {
         Unit::Compile(c) => c
             .outputs
@@ -618,7 +618,7 @@ fn instantiate_unit(
     );
     attrs.insert(
         "outputs".into(),
-        Value::Strings(unit_outputs(unit, inputs.toolchains.target_traits)),
+        Value::Strings(unit_outputs(unit, &inputs.toolchains.target_traits)),
     );
     attrs.insert(
         "BREAKBULK_UNIT".into(),
@@ -699,7 +699,7 @@ fn plan_root_key(r: &Root) -> RootKey {
     (package, r.kind, r.target.clone(), r.test)
 }
 
-fn root_output(plan: &Plan, r: &Root, traits: TargetTraits) -> Result<String, Error> {
+fn root_output(plan: &Plan, r: &Root, traits: &TargetTraits) -> Result<String, Error> {
     let Some(unit) = plan.units.get(&r.unit) else {
         return err(format!("root {} names unknown unit {}", r.target, r.unit));
     };
@@ -804,7 +804,7 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
             test: key.3,
             what: RootWhat::Unit {
                 unit: r.unit.clone(),
-                output: root_output(plan, r, inputs.toolchains.target_traits)?,
+                output: root_output(plan, r, &inputs.toolchains.target_traits)?,
             },
             nextest,
         })

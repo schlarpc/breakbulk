@@ -1,5 +1,5 @@
 # Test-run options over ./fixture, through mkRepository (IFD, native
-# target, the linuxGnu preset: workspace libraries keep source paths in
+# target, the linux preset: workspace libraries keep source paths in
 # their debug info). Wired into the flake's checks as `test-options-*`.
 #
 #   nix build -f tests/test-options strip-for-run
