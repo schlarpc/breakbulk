@@ -73,6 +73,13 @@ pub fn cargo_env(opts: &trace::Options) -> Result<spec::CargoEnv, Error> {
     Ok(env)
 }
 
+/// The project's `build.target` (`--build-target-only`), merged across its
+/// config files by Cargo's rules, as written; `None` when unset. The Nix
+/// library reads it to choose a workspace's default target.
+pub fn build_target(opts: &trace::Options) -> Result<Option<Vec<String>>, Error> {
+    Ok(spec::ProjectConfig::read(&trace::workspace_dir(opts), None)?.build_target)
+}
+
 /// `CARGO_PROFILE_<P>_TRIM_PATHS`: the profile name uppercased, `-` as `_`.
 pub fn trim_paths_var(profile: &str) -> String {
     format!(

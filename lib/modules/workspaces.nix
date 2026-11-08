@@ -4,6 +4,7 @@
   config,
   pkgs,
   root,
+  projectBuildTarget,
   ...
 }:
 let
@@ -415,22 +416,55 @@ let
           description = "Removed: use `devShell.target`.";
         };
 
-        devShell.target = mkOption {
+        defaultTarget = mkOption {
           type = types.nullOr types.str;
           default =
             let
               ts = lib.attrNames config.targets;
+              # Read only when needed: an import-from-derivation unless the
+              # workspace has no Cargo config file.
+              buildTarget = projectBuildTarget config.path;
             in
             if lib.elem nativeTriple ts then
               nativeTriple
             else if lib.length ts == 1 then
               lib.head ts
+            else if buildTarget != null && lib.length buildTarget == 1 && lib.elem (lib.head buildTarget) ts then
+              lib.head buildTarget
             else
               null;
           defaultText = lib.literalMD ''
             the native triple when it is one of `targets`, else the only
-            target, else `null`
+            target, else the project's `build.target` when it is one of
+            `targets`, else `null`
           '';
+          example = "x86_64-unknown-uefi";
+          description = ''
+            The target whose products and tests the workspace's shortcuts
+            are (`packages`, `tests`, `testRuns`, and the flake-parts
+            module's `packages`), and the default of `devShell.target`.
+            Every target in `targets` is built either way; this only picks
+            which one the shortcuts name. `null`: the shortcuts are empty;
+            use `target.<triple>.packages`.
+
+            The default's `build.target` is read from the project's own
+            `.cargo/config.toml` files (from the workspace directory up to
+            the repository root, with Cargo's merging), as the planner reads
+            Cargo config: not `$CARGO_HOME`'s, not the environment. Only a
+            single triple counts: a list, `host-tuple` or a `.json` path
+            gives `null`. Reading it is an import-from-derivation, made only
+            when the earlier rules do not decide and the workspace has a
+            Cargo config file; setting this option skips it.
+
+            Not Cargo's own `package.default-target` (nightly, per package),
+            which breakbulk does not read.
+          '';
+        };
+
+        devShell.target = mkOption {
+          type = types.nullOr types.str;
+          default = config.defaultTarget;
+          defaultText = lib.literalExpression "defaultTarget";
           example = "x86_64-unknown-uefi";
           description = ''
             The target the dev shell is set up for, one of `targets`. The
@@ -440,9 +474,7 @@ let
             Binaries then go to `target/<triple>/…`. It also gets that
             target's linker and rustflags as the planner passes them, and
             its `env`. `null`: none of these, so the project's own
-            `build.target` (or Cargo's host default) applies. Set it for a
-            workspace that does not target the native triple and has
-            several targets.
+            `build.target` (or Cargo's host default) applies.
           '';
         };
 

@@ -218,4 +218,25 @@
         --scratch "$NIX_BUILD_TOP/scratch" \
         --cargo-env $out/cargo-env.json
     '';
+
+  # The project's `build.target` (breakbulk-plan --build-target-only), from
+  # the same config files as mkCargoEnv; read by import-from-derivation to
+  # choose a workspace's default target (`workspaces.<ws>.defaultTarget`).
+  #   breakbulk.mkBuildTarget pkgs { configSkeleton; wsDir; tools; }
+  #   "''${drv}/build-target.json"   { "buildTarget": [ … ] | null }
+  mkBuildTarget =
+    pkgs:
+    {
+      configSkeleton,
+      wsDir ? "",
+      tools,
+      name ? "breakbulk-build-target",
+    }:
+    pkgs.runCommand name { } ''
+      cp -r --no-preserve=mode ${configSkeleton} "$NIX_BUILD_TOP/skeleton"
+      mkdir -p $out
+      ${tools.breakbulk-plan}/bin/breakbulk-plan --build-target-only \
+        --skeleton "$NIX_BUILD_TOP/skeleton" --workspace ${lib.escapeShellArg wsDir} \
+        --out $out/build-target.json
+    '';
 }

@@ -14,6 +14,8 @@
 //! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
 //!   --target TRIPLE [--spec FILE] [--capabilities FILE --profile P [--trim-paths auto|on|off]] \
 //!   --scratch DIR --cargo-env cargo-env.json
+//!
+//! breakbulk-plan --build-target-only --skeleton DIR [--workspace REL] --out FILE
 //! ```
 //!
 //! `--cargo-env-only` writes only the dev shell's `cargo-env.json`, from the
@@ -21,6 +23,10 @@
 //! `--capabilities`, also the trim-paths variable for `--profile`, by the
 //! planner's rule from the workspace root's `Cargo.toml` and the config
 //! files, read as TOML (decision 135).
+//!
+//! `--build-target-only` writes `{"buildTarget": [...] | null}`: the
+//! project's `build.target` from its config files (not `$CARGO_HOME`'s or
+//! the environment's), merged by Cargo's rules, as written.
 //!
 //! `--capabilities` is the toolchain's capabilities as JSON
 //! (`breakbulk_format::Capabilities`, the Nix library's `toolchainFacts`):
@@ -43,7 +49,8 @@ fn usage() -> ! {
          --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
          --target TRIPLE [--spec FILE] [--capabilities FILE --profile P [--trim-paths auto|on|off]] \
-         --scratch DIR --cargo-env FILE"
+         --scratch DIR --cargo-env FILE\n       \
+         breakbulk-plan --build-target-only --skeleton DIR [--workspace REL] --out FILE"
     );
     std::process::exit(2)
 }
@@ -81,6 +88,7 @@ fn main() -> ExitCode {
     let mut out = None;
     let mut cargo_env_out: Option<String> = None;
     let mut cargo_env_only = false;
+    let mut build_target_only = false;
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| usage());
         match a.as_str() {
@@ -140,11 +148,15 @@ fn main() -> ExitCode {
             "--out" => out = Some(val()),
             "--cargo-env" => cargo_env_out = Some(val()),
             "--cargo-env-only" => cargo_env_only = true,
+            "--build-target-only" => build_target_only = true,
             _ => usage(),
         }
     }
     if cargo_env_only {
         return write_cargo_env_only(&opts, cargo_env_out);
+    }
+    if build_target_only {
+        return write_build_target_only(&opts, out);
     }
     if [
         &opts.cargo,
@@ -178,6 +190,27 @@ fn main() -> ExitCode {
                     eprintln!("breakbulk-plan: writing {path}: {e}");
                     return ExitCode::FAILURE;
                 }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("breakbulk-plan: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn write_build_target_only(opts: &Options, out: Option<String>) -> ExitCode {
+    let Some(out) = out else { usage() };
+    if opts.skeleton.is_empty() {
+        usage();
+    }
+    match breakbulk_plan::build_target(opts) {
+        Ok(t) => {
+            let text = serde_json::json!({ "buildTarget": t }).to_string();
+            if let Err(e) = std::fs::write(&out, text) {
+                eprintln!("breakbulk-plan: writing {out}: {e}");
+                return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
         }

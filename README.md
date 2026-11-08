@@ -68,6 +68,22 @@ modules = [{
 
 With flake-parts, import `breakbulk.lib.flakeModule`.
 
+A workspace that does not build for the machine you are on (firmware,
+wasm) lists its targets. `packages` and the dev shell then refer to its
+only target, or to the one its `.cargo/config.toml` names in
+`build.target`; set `defaultTarget` to choose otherwise. Every target's
+products are under `target.<triple>`:
+
+```nix
+modules = [{
+  workspaces.default.targets = {
+    x86_64-unknown-uefi = { };
+    aarch64-unknown-uefi = { };
+  };
+}];
+# repo.workspaces.default.target.aarch64-unknown-uefi.packages.app
+```
+
 A package's source is its directory. When the crate is at the repository
 root, that is the whole repository, so editing `flake.nix` or a README
 rebuilds it. Pass a filtered `root` to keep only what the build reads

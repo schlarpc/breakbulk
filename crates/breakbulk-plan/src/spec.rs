@@ -70,7 +70,8 @@ pub enum RustflagsKey {
     Target,
 }
 
-/// The rustflags settings of the project's config files.
+/// The settings of the project's config files the planner and the dev shell
+/// read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProjectConfig {
     /// `build.rustflags`, merged across files, when set anywhere.
@@ -79,18 +80,22 @@ pub struct ProjectConfig {
     pub target_rustflags: BTreeMap<String, Vec<String>>,
     /// The `[env]` table's variables, with their `force` flag, merged.
     pub env: BTreeMap<String, bool>,
+    /// `build.target`, merged, as written: a triple, `host-tuple` or a
+    /// `.json` path (Cargo's `BuildTargetConfig`).
+    pub build_target: Option<Vec<String>>,
     /// The files read, in precedence order (lowest first).
     pub files: Vec<PathBuf>,
-    /// The rustflags keys (`build`, `target.<key>`) whose value so far is a
-    /// string, which a later string replaces instead of extending.
+    /// The list keys (`build.rustflags`, `target.<key>.rustflags`,
+    /// `build.target`) whose value so far is a string, which a later string
+    /// replaces instead of extending.
     string_keys: BTreeSet<String>,
 }
 
-/// Merge a later (higher-precedence) rustflags value into `old`, as Cargo's
-/// `ConfigValue::merge` does (`src/cargo/util/context/config_value.rs`,
+/// Merge a later (higher-precedence) string-or-array value into `old`, as
+/// Cargo's `ConfigValue::merge` does (`src/cargo/util/context/config_value.rs`,
 /// `merge_helper`): arrays concatenate, lower precedence first; a string
 /// replaces a string; a string and an array do not merge.
-fn merge_rustflags(
+fn merge_list(
     old: &mut Option<Vec<String>>,
     strings: &mut BTreeSet<String>,
     key: String,
@@ -103,7 +108,7 @@ fn merge_rustflags(
             (false, false) => old.extend(new),
             (true, true) => *old = new,
             _ => bail!(
-                "{what}: `{key}.rustflags` is a string in one config file and an array in another, \
+                "{what}: `{key}` is a string in one config file and an array in another, \
                  which Cargo does not merge"
             ),
         },
@@ -207,11 +212,26 @@ impl ProjectConfig {
         }
         if let Some(b) = table.get("build").and_then(|b| b.get("rustflags")) {
             let v = string_list(b, &format!("{what}: build.rustflags"))?;
-            merge_rustflags(
+            merge_list(
                 &mut self.build_rustflags,
                 &mut self.string_keys,
-                "build".into(),
+                "build.rustflags".into(),
                 (v, b.is_str()),
+                &what,
+            )?;
+        }
+        if let Some(t) = table.get("build").and_then(|b| b.get("target")) {
+            // One target, not a whitespace-separated list: a string is a
+            // single value (Cargo's `BuildTargetConfigInner::One`).
+            let v = match t {
+                toml::Value::String(s) => vec![s.clone()],
+                _ => string_list(t, &format!("{what}: build.target"))?,
+            };
+            merge_list(
+                &mut self.build_target,
+                &mut self.string_keys,
+                "build.target".into(),
+                (v, t.is_str()),
                 &what,
             )?;
         }
@@ -241,10 +261,10 @@ impl ProjectConfig {
                 if let Some(r) = t.get("rustflags") {
                     let v = string_list(r, &format!("{what}: target.{key}.rustflags"))?;
                     let mut old = self.target_rustflags.remove(key);
-                    merge_rustflags(
+                    merge_list(
                         &mut old,
                         &mut self.string_keys,
-                        format!("target.{key}"),
+                        format!("target.{key}.rustflags"),
                         (v, r.is_str()),
                         &what,
                     )?;
@@ -1309,5 +1329,56 @@ mod tests {
             linker_args(&args),
             vec![(1, false, "/a".into()), (2, true, "/b".into())]
         );
+    }
+
+    /// `build.target` merges as Cargo's `ConfigValue::merge` does: a deeper
+    /// file's string replaces a string, arrays concatenate (lower precedence
+    /// first), a string and an array fail; a string is one value, even with
+    /// spaces in it.
+    #[test]
+    fn build_target_merge() {
+        let d = dir(&[
+            (
+                ".cargo/config.toml",
+                "[build]\ntarget = \"x86_64-unknown-uefi\"\n",
+            ),
+            (
+                "ws/.cargo/config.toml",
+                "[build]\ntarget = \"aarch64-unknown-uefi\"\n",
+            ),
+        ]);
+        assert_eq!(
+            read(&d, "ws").build_target,
+            Some(vec!["aarch64-unknown-uefi".into()])
+        );
+        assert_eq!(
+            read(&d, "").build_target,
+            Some(vec!["x86_64-unknown-uefi".into()])
+        );
+
+        let d = dir(&[
+            (".cargo/config.toml", "[build]\ntarget = [\"a\"]\n"),
+            (
+                "ws/.cargo/config.toml",
+                "[build]\ntarget = [\"b\", \"host-tuple\"]\n",
+            ),
+        ]);
+        assert_eq!(
+            read(&d, "ws").build_target,
+            Some(vec!["a".into(), "b".into(), "host-tuple".into()])
+        );
+
+        let d = dir(&[
+            (".cargo/config.toml", "[build]\ntarget = \"a\"\n"),
+            ("ws/.cargo/config.toml", "[build]\ntarget = [\"b\"]\n"),
+        ]);
+        let e = ProjectConfig::read(&d.join("ws"), None).unwrap_err();
+        assert!(
+            e.0.contains("`build.target` is a string in one config file"),
+            "{e}"
+        );
+
+        let d = dir(&[(".cargo/config.toml", "[build]\njobs = 4\n")]);
+        assert_eq!(read(&d, "").build_target, None);
     }
 }

@@ -17,7 +17,8 @@
 # Per system it sets `breakbulk.repo` (the mkRepository result) and, unless
 # turned off, adds:
 #  - checks."<ws>/<triple>/<pkg>/<name>": repo.checks;
-#  - packages."<pkg>" for each native product of the default variant
+#  - packages."<pkg>" for each product of the default variant on the
+#    workspace's default target (`defaultTarget`)
 #    ("<ws>-<pkg>" when two workspaces have a package of that name);
 #  - devShells."<ws>" for each workspace, and devShells.default when there
 #    is exactly one.
@@ -77,7 +78,7 @@ in
         exposePackages = mkOption {
           type = types.bool;
           default = true;
-          description = "Add the native products of every workspace to the flake's packages.";
+          description = "Add every workspace's products on its default target (`workspaces.<ws>.defaultTarget`) to the flake's packages.";
         };
         exposeDevShells = mkOption {
           type = types.bool;

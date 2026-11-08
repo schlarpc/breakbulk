@@ -272,37 +272,67 @@ let
       '';
     });
 
-  # `devShell.target` (#32): the native triple when the workspace targets
-  # it, else its only target, else none (no CARGO_BUILD_TARGET, so the
-  # project's `build.target` applies); a triple that is not one of the
-  # targets, and the removed `setTarget`, fail.
+  # `defaultTarget` and `devShell.target` (#32): the native triple when the
+  # workspace targets it, else its only target, else the project's
+  # `build.target` (one triple among the targets, read from its
+  # `.cargo/config.toml` files), else none: empty shortcuts, and no
+  # CARGO_BUILD_TARGET, so the project's `build.target` applies locally. A
+  # triple that is not one of the targets, and the removed `setTarget`,
+  # fail.
   devshell-target =
     let
-      shellOf =
-        ws:
+      # The walking skeleton with a `.cargo/config.toml` holding `config`.
+      withConfig =
+        config:
+        let
+          drv = pkgs.runCommand "walking-skeleton-config" { inherit config; } ''
+            cp -r --no-preserve=mode ${../fixtures/walking-skeleton} $out
+            mkdir $out/.cargo
+            printf '%b\n' "$config" > $out/.cargo/config.toml
+          '';
+        in
+        builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
+      repoOf =
+        root: ws:
         (breakbulk.mkRepository {
-          inherit pkgs tools;
-          root = ../fixtures/walking-skeleton;
+          inherit pkgs tools root;
           modules = [ { workspaces.main = ws; } ];
-        }).workspaces.main.devShell;
+        }).workspaces.main;
+      plain = repoOf ../fixtures/walking-skeleton;
       uefi = {
         x86_64-unknown-uefi = { };
         aarch64-unknown-uefi = { };
       };
-      targetOf = ws: (shellOf ws).drvAttrs.CARGO_BUILD_TARGET or null;
-      fails = ws: !(builtins.tryEval (shellOf ws).drvPath).success;
+      targetOf = ws: (plain ws).devShell.drvAttrs.CARGO_BUILD_TARGET or null;
+      fails = ws: !(builtins.tryEval (plain ws).devShell.drvPath).success;
+      buildTargetOf =
+        config: (repoOf (withConfig config) { targets = uefi; }).devShell.drvAttrs.CARGO_BUILD_TARGET or null;
       got = {
         native = targetOf { };
         withNative = targetOf { targets = uefi // { ${native} = { }; }; };
         only = targetOf { targets.x86_64-unknown-uefi = { }; };
         several = targetOf { targets = uefi; };
+        severalPackages = (plain { targets = uefi; }).packages;
         chosen = targetOf {
           targets = uefi;
           devShell.target = "aarch64-unknown-uefi";
         };
+        viaDefault = targetOf {
+          targets = uefi;
+          defaultTarget = "aarch64-unknown-uefi";
+        };
+        buildTarget = buildTargetOf ''[build]\ntarget = "aarch64-unknown-uefi"'';
+        buildTargetList = buildTargetOf ''[build]\ntarget = ["aarch64-unknown-uefi"]'';
+        buildTargetTwo = buildTargetOf ''[build]\ntarget = ["aarch64-unknown-uefi", "x86_64-unknown-uefi"]'';
+        buildTargetOther = buildTargetOf ''[build]\ntarget = "wasm32-unknown-unknown"'';
+        noBuildTarget = buildTargetOf "[build]\njobs = 2";
         notATarget = fails {
           targets = uefi;
           devShell.target = native;
+        };
+        defaultNotATarget = fails {
+          targets = uefi;
+          defaultTarget = native;
         };
         removed = fails { devShell.setTarget = false; };
       };
@@ -313,8 +343,16 @@ let
         withNative = native;
         only = "x86_64-unknown-uefi";
         several = null;
+        severalPackages = { };
         chosen = "aarch64-unknown-uefi";
+        viaDefault = "aarch64-unknown-uefi";
+        buildTarget = "aarch64-unknown-uefi";
+        buildTargetList = "aarch64-unknown-uefi";
+        buildTargetTwo = null;
+        buildTargetOther = null;
+        noBuildTarget = null;
         notATarget = true;
+        defaultNotATarget = true;
         removed = true;
       }
     ) "devshell-target: ${builtins.toJSON got}";

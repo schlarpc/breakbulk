@@ -21,6 +21,7 @@
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
 #   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
 #   breakbulk.mkCargoEnv pkgs { ... }     the dev shell's cargo-env.json (lib/plan.nix)
+#   breakbulk.mkBuildTarget pkgs { ... }  the project's build.target (lib/plan.nix)
 #   breakbulk.mkWorkspace pkgs { root; path; toolchain; ... }  (lib/workspace.nix)
 # The module-system entry point (M2):
 #   breakbulk.mkRepository { pkgs; root; modules; }  (lib/repository.nix)
@@ -126,7 +127,7 @@ let
     }).mkVendor;
 
   mkTools = import ./tools.nix { inherit lib; };
-  inherit (import ./plan.nix { inherit lib toolchainFacts; }) mkPlan mkCargoEnv;
+  inherit (import ./plan.nix { inherit lib toolchainFacts; }) mkPlan mkCargoEnv mkBuildTarget;
 
   mkWorkspace = import ./workspace.nix {
     inherit
@@ -187,6 +188,7 @@ let
       mkTools
       mkPlan
       mkCargoEnv
+      mkBuildTarget
       mkWorkspace
       dynamic
       ;

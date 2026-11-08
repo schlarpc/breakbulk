@@ -212,7 +212,10 @@ fn sysroot(opts: &Options) -> Result<PathBuf, Error> {
 /// `--print sysroot` answers must therefore be the same path
 /// (`clippy-driver --rustc` behaves as plain rustc).
 fn check_clippy_driver(opts: &Options, driver: &str) -> Result<(), Error> {
-    let option = opts.clippy_option.as_deref().unwrap_or("the toolchain's clippy");
+    let option = opts
+        .clippy_option
+        .as_deref()
+        .unwrap_or("the toolchain's clippy");
     if !Path::new(driver).is_file() {
         bail!(
             "the clippy variant needs {driver}, which does not exist; set {option} to a \

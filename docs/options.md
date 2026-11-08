@@ -2083,6 +2083,54 @@ null
 
 
 
+## workspaces\.\<name>\.defaultTarget
+
+
+
+The target whose products and tests the workspace’s shortcuts
+are (` packages `, ` tests `, ` testRuns `, and the flake-parts
+module’s ` packages `), and the default of ` devShell.target `\.
+Every target in ` targets ` is built either way; this only picks
+which one the shortcuts name\. ` null `: the shortcuts are empty;
+use ` target.<triple>.packages `\.
+
+The default’s ` build.target ` is read from the project’s own
+` .cargo/config.toml ` files (from the workspace directory up to
+the repository root, with Cargo’s merging), as the planner reads
+Cargo config: not ` $CARGO_HOME `’s, not the environment\. Only a
+single triple counts: a list, ` host-tuple ` or a ` .json ` path
+gives ` null `\. Reading it is an import-from-derivation, made only
+when the earlier rules do not decide and the workspace has a
+Cargo config file; setting this option skips it\.
+
+Not Cargo’s own ` package.default-target ` (nightly, per package),
+which breakbulk does not read\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+the native triple when it is one of ` targets `, else the only
+target, else the project’s ` build.target ` when it is one of
+` targets `, else ` null `
+
+
+
+*Example:*
+
+```nix
+"x86_64-unknown-uefi"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](../lib/modules/workspaces.nix)
+
+
+
 ## workspaces\.\<name>\.defaultVariant
 
 
@@ -2120,9 +2168,7 @@ rustflags stay off build scripts, and ` -C metadata ` matches\.
 Binaries then go to ` target/<triple>/… `\. It also gets that
 target’s linker and rustflags as the planner passes them, and
 its ` env `\. ` null `: none of these, so the project’s own
-` build.target ` (or Cargo’s host default) applies\. Set it for a
-workspace that does not target the native triple and has
-several targets\.
+` build.target ` (or Cargo’s host default) applies\.
 
 
 
@@ -2132,8 +2178,10 @@ null or string
 
 
 *Default:*
-the native triple when it is one of ` targets `, else the only
-target, else ` null `
+
+```nix
+defaultTarget
+```
 
 
 
@@ -3016,8 +3064,6 @@ list of string
 
 ## workspaces\.\<name>\.variants\.\<name>\.mode
 
-
-
 What the variant compiles\. ` build `: products and test binaries
 (` cargo build `, ` cargo test --no-run `)\. ` check `: ` cargo check `
 and ` cargo check --all-targets `, metadata only, no products or
@@ -3048,6 +3094,8 @@ one of “build”, “check”, “clippy”, “coverage”
 
 
 ## workspaces\.\<name>\.variants\.\<name>\.noDefaultFeatures
+
+
 
 Pass ` --no-default-features `\.
 

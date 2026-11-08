@@ -11,7 +11,7 @@
 # and the curated -sys defaults (lib/sys-defaults.nix), then makes one
 # mkWorkspace call per (workspace, target, variant). Outputs:
 #
-#   repo.workspaces.<ws>.packages.<pkg>                  native target, default variant
+#   repo.workspaces.<ws>.packages.<pkg>                  default target (defaultTarget), default variant
 #   repo.workspaces.<ws>.tests.<pkg>.<test>              the same, test binaries
 #   repo.workspaces.<ws>.target.<triple>.packages.<pkg>
 #   repo.workspaces.<ws>.target.<triple>.tests.<pkg>.<test>
@@ -98,10 +98,10 @@ let
     modules = bbModules ++ [ sysDefaults ] ++ userModules;
     # Module arguments: `pkgs`; `root` (the repository root, a path), for
     # reading project files; `repo` (the result, below), for products used
-    # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk).
-    # The caller's specialArgs win.
+    # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk);
+    # `projectBuildTarget` (below). The caller's specialArgs win.
     specialArgs = {
-      inherit pkgs root;
+      inherit pkgs root projectBuildTarget;
       repo = result;
       breakbulk = breakbulkLib;
       breakbulkPresets = presets;
@@ -109,6 +109,25 @@ let
     // specialArgs;
   };
   cfg = eval.config;
+
+  # The project's `build.target` for a workspace path, by the planner's
+  # config-file rule (breakbulk-plan --build-target-only; IFD), as a list
+  # of the values as written, or null. Without any config file, null with
+  # no derivation.
+  projectBuildTarget =
+    path:
+    let
+      wsDir = util.normalizeRel path;
+      drv = breakbulkLib.mkBuildTarget pkgs {
+        configSkeleton = breakbulkLib.skeleton.mkConfigSkeleton pkgs { inherit root wsDir; };
+        inherit wsDir tools;
+        name = "breakbulk-build-target";
+      };
+    in
+    if breakbulkLib.skeleton.configFiles { inherit root wsDir; } == [ ] then
+      null
+    else
+      (builtins.fromJSON (builtins.readFile "${drv}/build-target.json")).buildTarget;
 
   nativeTriple = targetTraits.nativeTriple pkgs;
 
@@ -861,14 +880,18 @@ let
       instances = lib.mapAttrs (
         triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor wsName ws triple)
       ) ws.targets;
-      shellTriple =
-        let
-          t = ws.devShell.target;
-        in
+      # A target option (`defaultTarget`, `devShell.target`): one of the
+      # workspace's targets, or null.
+      targetOption =
+        opt: t:
         if t == null || ws.targets ? ${t} then
           t
         else
-          throw "breakbulk: workspaces.${wsName}.devShell.target `${t}` is not one of its targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
+          throw "breakbulk: workspaces.${wsName}.${opt} `${t}` is not one of its targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
+      defaultTriple = targetOption "defaultTarget" ws.defaultTarget;
+      # Checked first, so that an invalid `defaultTarget` is named as such
+      # rather than as the `devShell.target` it defaults.
+      shellTriple = builtins.seq defaultTriple (targetOption "devShell.target" ws.devShell.target);
       perTarget = lib.mapAttrs (
         triple: vs:
         let
@@ -972,9 +995,9 @@ let
     {
       inherit instances;
       target = perTarget;
-      packages = perTarget.${nativeTriple}.packages or { };
-      tests = perTarget.${nativeTriple}.tests or { };
-      testRuns = perTarget.${nativeTriple}.testRuns or { };
+      packages = if defaultTriple == null then { } else perTarget.${defaultTriple}.packages;
+      tests = if defaultTriple == null then { } else perTarget.${defaultTriple}.tests;
+      testRuns = if defaultTriple == null then { } else perTarget.${defaultTriple}.testRuns;
       plans = lib.mapAttrs (_: lib.mapAttrs (_: inst: inst.plans)) instances;
       devShell = mkDevShell {
         inherit pkgs nativeTriple;
