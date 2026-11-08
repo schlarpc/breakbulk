@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: 74 pinned, 1 pinned for some rows only (L3), 3 with no pinning test (S10, X4, L5). Each of the four has an issue; see [Gaps](#gaps).
+Status of the 78 entries: 75 pinned, 3 with no pinning test (S10, X4, L5). Each of the three has an issue; see [Gaps](#gaps).
 
 ## Summary
 
@@ -79,7 +79,7 @@ Status of the 78 entries: 74 pinned, 1 pinned for some rows only (L3), 3 with no
 | [R3](#r3-the-doctest-command-line) | The doctest command line | yes |
 | [L1](#l1-rustcs-self-contained-lld-arguments) | rustc's self-contained lld arguments | yes |
 | [L2](#l2-wasm32-wasip2-linking) | `wasm32-wasip2` linking | yes |
-| [L3](#l3-the-rust-to-wasi-sdk-table) | The Rust-to-wasi-sdk table | partly (#36) |
+| [L3](#l3-the-rust-to-wasi-sdk-table) | The Rust-to-wasi-sdk table | yes |
 | [L4](#l4-the-rust-to-llvm-table-and-rustc--vv) | The Rust-to-LLVM table and `rustc -vV` | yes |
 | [L5](#l5-cross-language-lto) | Cross-language LTO | **no** (#10) |
 | [L6](#l6-musl-links-rusts-self-contained-crt) | musl links Rust's self-contained crt | yes |
@@ -644,8 +644,8 @@ Status of the 78 entries: 74 pinned, 1 pinned for some rows only (L3), 3 with no
 - **Where.** `lib/wasi-sdk.nix`: `table`, `versionFor`, `sysrootFor`; `lib/toolchain-facts.nix`: `wasiSdkVersion`.
 - **Upstream.** rust-lang/rust `src/ci/docker/host-x86_64/dist-various-2/Dockerfile` (`WASI_SDK_PATH`), `src/bootstrap/src/lib.rs` `wasi_libdir`; `e845ed8cc9c0` (wasi-sdk 34, 2026-08-25). Checked by hand: `libc.a` byte-identical for 1.95, 1.96, 1.97, 1.99, 1.100 beta, 1.101 nightly.
 - **Holds for.** 1.95 to 1.101; 1.100 and 1.102 from beta and master.
-- **Pinned by.** **Partly.** `wasip2-linker` (1.99 → 33, `libc.a` compared byte for byte); `presets-per-workspace` (1.96 → 30, the lookup only). Issue **#36**.
-- **If it changes.** C code compiles against headers of another wasi-libc than the one linked; nothing fails.
+- **Pinned by.** `wasi-sdk-table`: the table's sysroot `libc.a` equals rustc's self-contained `libc.a` for wasm32-wasip2, byte for byte, for 1.95.0, 1.96.1, 1.97.0, 1.99.1 and the current beta and nightly at the pinned rust-overlay; `wasip2-linker` (1.99 → 33, through the preset); `presets-per-workspace` (1.96 → 30, the lookup).
+- **If it changes.** C code compiles against headers of another wasi-libc than the one linked; `wasi-sdk-table` fails.
 
 ### L4. The Rust-to-LLVM table and `rustc -vV`
 
@@ -830,7 +830,6 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 | --- | --- | --- |
 | [S10](#s10-directive-errors-and-warnings) | Directive error and warning paths are checked only against breakbulk's copy of Cargo's code | #33 |
 | [X4](#x4-rustcs-link-temp-directory) | No check rebuilds an msvc link to compare bytes | #35 |
-| [L3](#l3-the-rust-to-wasi-sdk-table) | Only the 1.99 row is compared with a toolchain's `libc.a` | #36 |
 | [L5](#l5-cross-language-lto) | Cross-language LTO has never built | #10 (existing) |
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), `include` and `config`-over-`config.toml` (T6, guarded at plan time), and the non-Linux rows of G3.

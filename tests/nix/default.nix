@@ -7,6 +7,7 @@
 #   target-traits, target-traits-rustc   lib/target-traits.nix (see
 #                            ./target-traits.nix)
 #   llvm-versions            lib/llvm-versions.nix against `rustc -vV`
+#   wasi-sdk-table           lib/wasi-sdk.nix against rustc's wasip2 libc.a
 #   roots-metadata-fixtures  predicted targets == `cargo metadata` for fixtures
 #   roots-metadata-crates-io the same for real crates.io crates (IFD)
 #   roots-plans              predicted build/test/bench roots == what real
@@ -370,6 +371,41 @@ in
   lib-unit = import ./unit.nix { inherit pkgs bb runTests; };
 
   inherit (import ./target-traits.nix { inherit pkgs bb runTests; }) target-traits target-traits-rustc;
+
+  # #36 (assumption L3): every row of lib/wasi-sdk.nix against the
+  # toolchains: the table's wasi-sysroot `libc.a` equals the self-contained
+  # `libc.a` rustc ships for wasm32-wasip2, byte for byte, for the first
+  # and last release of each row at the pinned rust-overlay (rust-std
+  # component only) and its current beta and nightly.
+  wasi-sdk-table =
+    let
+      rs = pkgs.rust-bin;
+      channel = c: {
+        inherit (c.default) version;
+        std = c._components.wasm32-wasip2.rust-std;
+      };
+      toolchains = map channel [
+        rs.stable."1.95.0"
+        rs.stable."1.96.1"
+        rs.stable."1.97.0"
+        rs.stable."1.99.1"
+        rs.beta.latest
+        rs.nightly.latest
+      ];
+      sysroot = t: bb.wasiSdk.sysrootFor {
+        inherit pkgs;
+        version = bb.wasiSdk.versionFor t.version;
+      };
+    in
+    pkgs.runCommand "wasi-sdk-table" { } ''
+      set -eu
+      ${lib.concatMapStrings (t: ''
+        echo "${t.version}: wasi-sdk ${bb.wasiSdk.versionFor t.version}"
+        cmp ${sysroot t}/lib/wasm32-wasip2/libc.a \
+          ${t.std}/lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a
+      '') toolchains}
+      touch $out
+    '';
 
   # #37 (assumption L4): every row of lib/llvm-versions.nix against the
   # LLVM major that `rustc -vV` names, for the first and last release of
