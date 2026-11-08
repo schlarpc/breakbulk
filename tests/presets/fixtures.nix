@@ -11,6 +11,9 @@
 #                     qemu-user)
 #   presets-eval      evaluation-time assertions on preset values (and the
 #                     linker choice, lib/presets/linker.nix)
+#   presets-per-workspace  two workspaces on different Rust releases get
+#                     their own LLVM tools and wasi-sdk from one preset
+#                     (decision 70)
 #   debug-outputs     a plain Linux release plan: no unit and no `linked`
 #                     stage has a `debug` output (decision 97)
 #   msvc-debug-outputs  msvc release: every linked target unit has one
@@ -129,7 +132,7 @@ let
   ];
   stInst = sameTriple.workspaces.main.instances.${native}.default;
   stUnits = unitsOf stInst;
-  stHostLinker = discard sameTriple.config.targets.${native}.host.linker;
+  stHostLinker = discard sameTriple.workspaces.main.target.${native}.spec.host.linker;
   sameTripleEval =
     let
       host = lib.filter (u: u.platform == "host") stUnits;
@@ -368,11 +371,9 @@ let
         # Debug info on (the fixture's `release-debug` profile): a PDB.
         variants.debuginfo.profile = "release-debug";
       };
+      # LLVM tools for the workspace's rustc (decision 70).
       targets = lib.genAttrs msvcTriples (_: {
-        preset = presets.msvc {
-          inherit sdk;
-          rustc = msvcRust;
-        };
+        preset = presets.msvc { inherit sdk; };
       });
     }
   ];
@@ -543,13 +544,12 @@ let
     };
 
   # C via wasilibc, componentized, no imports.
+  # The preset gets the workspace's rustc (decision 70); see
+  # presets-per-workspace for the same with `rustc` passed.
   wasmComponent = mkRepo (fixtures + "/wasm-component") [
     {
       workspaces.main = wasmWs;
-      targets.${wasm}.preset = presets.wasmComponent {
-        rustc = wasmRust;
-        withC = true;
-      };
+      targets.${wasm}.preset = presets.wasmComponent { withC = true; };
     }
   ];
   wasmComponentChecks =
@@ -593,6 +593,121 @@ let
 
   # --- evaluation-time checks on preset values ---------------------------------
 
+  # Decision 70: target specs are resolved per (workspace, target), and a
+  # preset gets the workspace's rustc. Two workspaces on Rust 1.96 (LLVM
+  # 22, wasi-sdk 30) and 1.99 (LLVM 23, wasi-sdk 33) build wasm32 and
+  # wasip2 from the same repository-wide presets, with no `rustc` passed,
+  # and each gets its own clang, wasm-ld and wasi-sdk headers. A
+  # workspace's own `targets.<triple>` merges over the repository's for it
+  # alone; an explicit `rustc` still wins; an entry with only `packages`
+  # and no repository-wide spec has no spec, as before; and the wasm
+  # component fixture's products are the same derivations whether the
+  # preset is given `rustc` or takes the workspace's.
+  perWorkspace =
+    let
+      wasip2 = "wasm32-wasip2";
+      tc =
+        v:
+        let
+          r = pkgs.rust-bin.stable.${v}.minimal.override {
+            targets = [
+              wasm
+              wasip2
+            ];
+          };
+        in
+        {
+          rustc = r;
+          cargo = r;
+        };
+      repo =
+        extra:
+        mkRepo (fixtures + "/multi-ws") (
+          [
+            {
+              workspaces.b = {
+                path = "b";
+                toolchain = tc "1.96.0";
+                targets = {
+                  ${wasm} = { };
+                  ${wasip2} = { };
+                  "aarch64-unknown-linux-gnu".packages = [ "app-b" ];
+                };
+              };
+              workspaces.c = {
+                path = "c";
+                toolchain = tc "1.99.0";
+                targets = {
+                  ${wasm} = { };
+                  ${wasip2}.rustflags = [
+                    "--cfg"
+                    "only_c"
+                  ];
+                };
+              };
+              targets.${wasm}.preset = presets.wasmComponent;
+              targets.${wasip2}.preset = presets.wasip2 { withC = true; };
+            }
+          ]
+          ++ extra
+        );
+      r = repo [ ];
+      spec = repo': ws: t: repo'.workspaces.${ws}.target.${t}.spec;
+      # The LLVM major in a tool's store path name (clang-22.1.8, lld-23.1.3).
+      majorIn =
+        s:
+        let
+          m = builtins.match ".*-(clang|lld)-([0-9]+)\\.[^/]*/bin/.*" (discard s);
+        in
+        if m == null then null else lib.toInt (lib.elemAt m 1);
+      sysrootIn =
+        s:
+        let
+          m = builtins.match ".*-wasi-sysroot-([0-9]+)/.*" (discard (lib.concatStringsSep " " s));
+        in
+        if m == null then null else lib.head m;
+      explicit = repo [
+        {
+          targets.${wasm}.preset = lib.mkForce (presets.wasmComponent { inherit (tc "1.99.0") rustc; });
+        }
+      ];
+      componentExplicit = mkRepo (fixtures + "/wasm-component") [
+        {
+          workspaces.main = wasmWs;
+          targets.${wasm}.preset = presets.wasmComponent {
+            rustc = wasmRust;
+            withC = true;
+          };
+        }
+      ];
+      drvsOf = repo': map (d: d.drvPath) (lib.attrValues repo'.workspaces.main.target.${wasm}.packages);
+      checks = {
+        wasmLlvm =
+          majorIn (spec r "b" wasm).linker == 22
+          && majorIn (spec r "b" wasm).cc == 22
+          && majorIn (spec r "c" wasm).linker == 23
+          && majorIn (spec r "c" wasm).cc == 23;
+        wasip2WasiSdk =
+          sysrootIn (spec r "b" wasip2).cflags == "30"
+          && sysrootIn (spec r "c" wasip2).cflags == "33"
+          && majorIn (spec r "b" wasip2).cc == 22
+          && majorIn (spec r "c" wasip2).cc == 23;
+        workspaceOverride = (spec r "c" wasip2).rustflags == [
+          "--cfg"
+          "only_c"
+        ]
+        && (spec r "b" wasip2).rustflags == [ ];
+        explicitRustcWins = majorIn (spec explicit "b" wasm).linker == 23;
+        packagesOnlyHasNoSpec = spec r "b" "aarch64-unknown-linux-gnu" == null;
+        sameDrvs = drvsOf wasmComponent == drvsOf componentExplicit;
+      };
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
+    in
+    if failed == [ ] then
+      evalCheck "presets-per-workspace" (builtins.toJSON (lib.attrNames checks))
+    else
+      throw "presets-per-workspace: failed: ${toString failed}";
+
   presetsEval =
     let
       gnu = presets.linuxGnu {
@@ -606,7 +721,7 @@ let
       bound = presets.msvc { arch = "x86_64"; };
       llvm = breakbulk.llvmVersions;
       checks = {
-        partial = builtins.isFunction bound;
+        partial = lib.isFunction bound && lib.functionArgs bound ? toolchain;
         nativeRunner = gnu.runner.content == null;
         crossRunnerQemu = lib.hasInfix "qemu-aarch64" (discard cross.runner.content);
         crossNativeBuilder =
@@ -729,6 +844,7 @@ in
   };
   checks = {
     presets-eval = presetsEval;
+    presets-per-workspace = perWorkspace;
     debug-outputs = debugOutputsEval;
     wasm-host-inputs = wasmHostInputsCheck;
 

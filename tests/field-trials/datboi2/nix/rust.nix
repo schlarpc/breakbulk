@@ -190,7 +190,9 @@ in
     };
   });
 
-  targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = rust; };
+  # Each workspace's own rustc picks the LLVM tools (decision 70): the
+  # components' 1.96.1 gets LLVM 22, the emu lane's nightly LLVM 21.
+  targets.${wasm}.preset = breakbulk.presets.wasmComponent;
   # Without a preset the native target links with rustc's own rust-lld,
   # which bypasses nixpkgs' linker wrapper (no rpath for libmagic.so).
   targets.${native}.preset = breakbulk.presets.linuxGnu;
