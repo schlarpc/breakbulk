@@ -140,6 +140,186 @@ fn failure_ends_with_stderr_and_deduplicates_hints() {
     );
 }
 
+/// The `rerun-if-env-changed` lines pkg-config-rs prints for one probe of
+/// `libspa-0.2` on the native target (`Config::targeted_env_var`).
+fn pkg_config_declarations() -> String {
+    let t = "x86_64-unknown-linux-gnu";
+    let mut out = String::from("cargo:rerun-if-env-changed=LIBSPA_0.2_NO_PKG_CONFIG\n");
+    for base in [
+        "PKG_CONFIG",
+        "PKG_CONFIG_PATH",
+        "PKG_CONFIG_LIBDIR",
+        "PKG_CONFIG_SYSROOT_DIR",
+    ] {
+        for v in [
+            format!("{base}_{t}"),
+            format!("{base}_{}", t.replace('-', "_")),
+            format!("HOST_{base}"),
+            base.to_owned(),
+        ] {
+            out.push_str(&format!("cargo:rerun-if-env-changed={v}\n"));
+        }
+    }
+    out.push_str("cargo:rerun-if-env-changed=LIBSPA_DIR\n");
+    out
+}
+
+/// pkg-config-rs's `Error::Command` for a missing `pkg-config`, as a
+/// build script's `unwrap` panics with it.
+const PKG_CONFIG_MISSING: &str = "thread 'main' panicked at build.rs:8:10:\n\
+    called `Result::unwrap()` on an `Err` value: \
+    Could not run `PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags libspa-0.2`\n\
+    The pkg-config command could not be found.\n\
+    \n\
+    Most likely, you need to install a pkg-config package for your OS.\n";
+
+/// The `--- stdout` and `--- stderr` sections, as written for `stdout` and
+/// `stderr` (under 20 lines).
+fn sections(stdout: &str, stderr: &str) -> (String, String) {
+    let indent = |s: &str| s.lines().map(|l| format!("  {l}\n")).collect::<String>();
+    (
+        format!("  --- stdout\n{}", indent(stdout)),
+        format!(
+            "  --- stderr (last {} lines; all of it is above)\n{}",
+            stderr.lines().count(),
+            indent(stderr)
+        ),
+    )
+}
+
+#[test]
+fn pkg_config_missing_gets_one_hint_and_a_summary() {
+    let t = TempDir::new("pkgconfig");
+    let r = unit(t.path());
+    let stdout = pkg_config_declarations();
+    let e = judge_with_stderr(&r, 101 << 8, &stdout, PKG_CONFIG_MISSING).unwrap_err();
+    assert!(
+        e.0.contains(
+            "hint: `pkg-config` is not in the sandbox; add it with \
+             `packages.foo-sys.nativeInputs = p: [ p.pkg-config ];`\n      \
+             (the build script printed: The pkg-config command could not be found.)"
+        ),
+        "{e}"
+    );
+    assert!(
+        e.0.contains(
+            "hint: (17 unset variables of the `pkg-config` crate omitted \
+             (`PKG_CONFIG*`, `*_NO_PKG_CONFIG`); they are normally left unset)"
+        ),
+        "{e}"
+    );
+    // The variable no recognizer covers keeps its own hint.
+    assert!(e.0.contains("reads `LIBSPA_DIR`"), "{e}");
+    assert!(!e.0.contains("`PKG_CONFIG_PATH`"), "{e}");
+    assert_eq!(e.0.matches("hint:").count(), 3, "{e}");
+    // Hints only add lines: stdout and the stderr tail are as printed.
+    let (out, err) = sections(&stdout, PKG_CONFIG_MISSING);
+    assert!(e.0.contains(&out), "{e}");
+    assert!(e.0.ends_with(&err), "{e}");
+}
+
+#[test]
+fn recognizers_need_their_fingerprint() {
+    let t = TempDir::new("fingerprint");
+    let r = unit(t.path());
+    // The pkg-config message, but no pkg-config variable declared.
+    let stdout = "cargo:rerun-if-env-changed=FOO_DIR\ncargo:rerun-if-env-changed=FOO_STATIC\n";
+    let e = judge_with_stderr(&r, 101 << 8, stdout, PKG_CONFIG_MISSING).unwrap_err();
+    assert!(!e.0.contains("nativeInputs"), "{e}");
+    assert!(
+        e.0.contains(
+            "hint: the build script reads these unset variables (`rerun-if-env-changed`): \
+             `FOO_DIR`, `FOO_STATIC`; set any it needs with `packages.foo-sys.env.<NAME>`"
+        ),
+        "{e}"
+    );
+    let (out, err) = sections(stdout, PKG_CONFIG_MISSING);
+    assert!(e.0.contains(&out), "{e}");
+    assert!(e.0.ends_with(&err), "{e}");
+}
+
+#[test]
+fn recognized_failures() {
+    let t = TempDir::new("recognized");
+    let r = unit(t.path());
+    let hint = |stdout: &str, stderr: &str| -> String {
+        let e = judge_with_stderr(&r, 101 << 8, stdout, stderr).unwrap_err();
+        e.0.lines()
+            .filter(|l| l.starts_with("hint: "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    // pkg-config ran, and found no library.
+    let h = hint(
+        &pkg_config_declarations(),
+        "The system library `libspa-0.2` required by crate `libspa-sys` was not found.\n",
+    );
+    assert!(
+        h.contains("no `libspa-0.2.pc`; add the package that provides `libspa-0.2` to `packages.foo-sys.inputs`"),
+        "{h}"
+    );
+    // cc-rs, current and 1.0 wording.
+    let cc = "cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu\n\
+              cargo:rerun-if-env-changed=CC\ncargo:rerun-if-env-changed=CFLAGS\n";
+    for err in [
+        "\n\nerror occurred in cc-rs: failed to find tool \"cc\": No such file or directory (os error 2)\n\n",
+        "error occurred: Failed to find tool. Is `cc` installed?\n",
+    ] {
+        let h = hint(cc, err);
+        assert!(
+            h.contains("the `cc` crate could not run `cc`; add the package that provides it to `packages.foo-sys.nativeInputs`"),
+            "{h}"
+        );
+        assert!(
+            h.contains("(3 unset variables of the `cc` crate omitted"),
+            "{h}"
+        );
+    }
+    // bindgen at run time: clang-sys's warning is the fingerprint.
+    let h = hint(
+        "cargo:warning=could not execute `llvm-config` one or more times, if the LLVM_CONFIG_PATH \
+         environment variable is set to a full path to valid `llvm-config` executable it will be \
+         used to try to find an instance of `libclang` on your system: \"couldn't execute `llvm-config --prefix`\"\n",
+        "thread 'main' panicked at bindgen/lib.rs:618:31:\nUnable to find libclang: \"couldn't find any valid shared libraries matching: ['libclang.so']\"\n",
+    );
+    assert!(h.contains("p.rustPlatform.bindgenHook"), "{h}");
+    assert_eq!(h.matches("hint:").count(), 1, "{h}");
+    // openssl-sys.
+    let h = hint(
+        "cargo:rerun-if-env-changed=X86_64_UNKNOWN_LINUX_GNU_OPENSSL_DIR\nX86_64_UNKNOWN_LINUX_GNU_OPENSSL_DIR unset\n\
+         cargo:rerun-if-env-changed=OPENSSL_DIR\nOPENSSL_DIR unset\n",
+        "\nCould not find directory of OpenSSL installation, and this `-sys` crate cannot\n",
+    );
+    assert!(
+        h.contains("`packages.foo-sys.inputs = p: [ p.openssl ];`"),
+        "{h}"
+    );
+    assert!(
+        h.contains("(2 unset variables of the `openssl-sys` crate omitted"),
+        "{h}"
+    );
+    // prost-build: its own docs link is the fingerprint.
+    let protoc = "Error: Custom { kind: NotFound, error: \"Could not find `protoc`. If `protoc` is \
+                  installed, try setting the `PROTOC` environment variable to the path of the \
+                  `protoc` binary. To install it on Debian, run `apt-get install protobuf-compiler`. \
+                  It is also available at https://github.com/protocolbuffers/protobuf/releases  For \
+                  more information: https://docs.rs/prost-build/#sourcing-protoc\" }\n";
+    assert!(hint("", protoc).contains("p.protobuf"));
+    assert!(
+        !hint("", &protoc.replace("docs.rs/prost-build", "example.com")).contains("p.protobuf")
+    );
+    // cmake-rs.
+    let h = hint(
+        "CMAKE_x86_64-unknown-linux-gnu = None\nHOST_CMAKE = None\nCMAKE = None\n",
+        "thread 'main' panicked at cmake/src/lib.rs:1132:5:\n\nfailed to execute command: \
+         No such file or directory (os error 2)\nis `cmake` not installed?\n\nbuild script failed, must exit now\n",
+    );
+    assert!(
+        h.contains("`packages.foo-sys.nativeInputs = p: [ p.cmake ];`"),
+        "{h}"
+    );
+}
+
 #[test]
 fn death_by_signal_names_the_signal() {
     let t = TempDir::new("sig");

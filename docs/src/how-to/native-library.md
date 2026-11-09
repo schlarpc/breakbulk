@@ -53,6 +53,10 @@ when it is a proc macro or a build dependency).
 
 ## When the build still fails
 
+When `pkg-config`, a C compiler tool, libclang, OpenSSL, `protoc` or
+`cmake` is missing, the error includes a hint naming the input to add
+([Failure hints](../reference/unit-builder.md#failure-hints)).
+
 If a build script fails, or succeeds while it names a file that is missing
 from its sandbox, the error names the file and the option to add it to
 ([`extraSources`](../reference/options/packages.md#packagesnameextrasources) for files outside the package directory). Every

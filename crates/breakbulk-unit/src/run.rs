@@ -12,8 +12,9 @@
 //!    stderr, which is streamed as the script runs, so a panic is not buried
 //!    under stdout and hints.
 //! 6. Check `rerun-if-changed` paths against the sandbox: on failure, hint at
-//!    each missing path and each unset `rerun-if-env-changed` variable; on
-//!    success, warn about missing paths, or fail with `strictSources`.
+//!    each missing path, at failures of common crates ([`recognize`]) and
+//!    at the unset `rerun-if-env-changed` variables; on success, warn about
+//!    missing paths, or fail with `strictSources`.
 //! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
 //!    ([`remove_cmake_state`]).
 
@@ -207,20 +208,6 @@ pub fn path_hints(package: &str, cwd: &Path, missing: &[MissingPath]) -> Vec<Str
         .collect()
 }
 
-/// One hint line per unset variable.
-pub fn env_hints(package: &str, unset: &[&str]) -> Vec<String> {
-    let opt = option_prefix(package);
-    unset
-        .iter()
-        .map(|v| {
-            format!(
-                "the build script reads `{v}` (`rerun-if-env-changed`), which is not set; \
-                 set it with `{opt}.env.{v}` if the script needs it"
-            )
-        })
-        .collect()
-}
-
 /// The parts of a finished run that decide its result.
 pub struct Finished<'a> {
     pub run: &'a RenderedRun,
@@ -279,9 +266,16 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
     };
     if let Some(p) = parsed {
         let cwd = Path::new(&f.run.cwd);
+        let stderr = String::from_utf8_lossy(f.stderr_tail);
+        let lines = stdout.lines().chain(stderr.lines());
         let hints: Vec<String> = path_hints(&f.run.package, cwd, &missing_paths(p, cwd))
             .into_iter()
-            .chain(env_hints(&f.run.package, &unset_vars(p, f.env)))
+            .chain(recognize::hints(
+                &option_prefix(&f.run.package),
+                &p.rerun_if_env_changed,
+                &unset_vars(p, f.env),
+                lines,
+            ))
             .collect();
         for h in hints {
             msg.push_str("\nhint: ");
@@ -608,6 +602,8 @@ fn tee_stderr(mut from: std::process::ChildStderr) -> std::thread::JoinHandle<Ve
         kept
     })
 }
+
+mod recognize;
 
 #[cfg(test)]
 mod tests;

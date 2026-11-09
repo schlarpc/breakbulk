@@ -116,11 +116,41 @@ name them.
    any `error` directive. Print `warning` directives.
 6. Check every `rerun-if-changed` path against the sandbox.
    - On failure, add a hint for each missing path, naming the package
-     option to add it to; likewise for `rerun-if-env-changed` variables
-     that are unset.
+     option to add it to, then the [failure hints](#failure-hints).
    - On success, warn about missing paths, or fail when
      [`strictSources`](options/repository.md#strictsources) is set.
 7. Remove CMake's internal state (details below).
+
+### Failure hints
+
+A failed run gets hints after its stdout. The script's stdout, its
+streamed stderr and the repeated stderr tail are never changed.
+
+Some crates fail in a recognizable way when a tool or library is missing
+from the sandbox. A hint is added when the script printed the crate's
+error and the crate also left its fingerprint. The hint quotes the line
+it matched:
+
+| Crate | Error | Fingerprint | Hint |
+| --- | --- | --- | --- |
+| `pkg-config` | `The pkg-config command could not be found.` | declares `PKG_CONFIG*` or `*_NO_PKG_CONFIG` | `nativeInputs = p: [ p.pkg-config ];` |
+| `pkg-config` | ``The system library `X` … was not found`` | as above | add the package that provides `X` to `inputs` |
+| `cc` | `failed to find tool "X"` | declares `CC*`, `CFLAGS*` or `CXX*` | add the package that provides `X` to `nativeInputs` |
+| `bindgen`, `clang-sys` | `Unable to find libclang` | declares `BINDGEN_EXTRA_CLANG_ARGS*` or `LIBCLANG_PATH`, or clang-sys's `llvm-config` warning | `nativeInputs = p: [ p.rustPlatform.bindgenHook ];` |
+| `openssl-sys` | `Could not find directory of OpenSSL installation` | declares `*OPENSSL_*` | `inputs = p: [ p.openssl ];` and `nativeInputs = p: [ p.pkg-config ];` |
+| `prost-build` | ``Could not find `protoc` `` | its `docs.rs/prost-build` link | `nativeInputs = p: [ p.protobuf ];` |
+| `cmake` | ``is `cmake` not installed?`` | its `CMAKE… = …` lines | `nativeInputs = p: [ p.cmake ];` |
+
+Unset `rerun-if-env-changed` variables come last:
+
+- Those of a crate whose failure was recognized are counted, not listed
+  ("17 unset variables of the `pkg-config` crate omitted"). They are
+  normally left unset.
+- The rest go on one line, with the `packages.<name>.env` option to set
+  them.
+
+The table is built into `breakbulk-unit` and is not configurable: a user
+table would be an input of every build-script run.
 
 ### `OUT_DIR` and the target directory
 
