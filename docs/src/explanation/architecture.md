@@ -1,5 +1,8 @@
 # How a build works
 
+Take a small workspace: a binary `app` that depends on `ring`, which has
+a build script. `nix build` turns it into derivations in five steps.
+
 ```text
   your modules: presets, per-package settings, variants
         │
@@ -18,55 +21,90 @@
                 5. Products      stages, test runs, checks
 ```
 
-Cargo is consulted only when manifests, the lockfile or config change. A source edit reruns only the units whose inputs changed; in IFD mode the instantiate step does not rerun either.
+Planning (step 2) runs again only when `Cargo.toml`, `Cargo.lock` or Cargo
+config change. After a source edit, Nix rebuilds only the units whose
+inputs changed.
 
 ## 1. Fetch
 
-Fetch derivations are created from every lockfile at evaluation time. Registry crates are fixed-output derivations keyed by the lockfile's checksums and download at build time, only when a unit actually builds. Git sources are fetched during evaluation, because locating a crate inside a repository needs its tree. Workspace packages get filtered views of the repository root. The planner never serializes sources itself.
+breakbulk reads `Cargo.lock` and makes one fixed-output derivation per
+registry crate, checked against the lockfile's hash. A crate is downloaded
+only when a unit that needs it builds. Git dependencies are fetched during
+evaluation, because finding a crate inside a repository needs its files.
 
-## 2. Plan by tracing Cargo
+Your own packages get a *source view*: a filtered copy of their directory,
+at its place in the repository. Editing one package changes only that
+package's source view.
 
-The planner runs the user's own Cargo for one workspace, target and variant over a skeleton: manifests, lockfile, `.cargo/config.toml` and empty target files. Each (workspace, target, variant) gets two plans with named reference commands:
+## 2. Plan
 
-- **Build plan:** `cargo build --workspace --target T --profile P [--features …]`. Products come from this plan.
-- **Test plan:** `cargo test --no-run --workspace --target T --profile P [--features …]`. Test binaries come from this plan. `--no-run` skips doctests, so the test plan also traces `cargo test --doc` with a `RUSTDOC` wrapper that records each `rustdoc --test` command without running it.
+breakbulk runs your Cargo, not a reimplementation of it. It runs
+`cargo build` (and `cargo test --no-run` for tests) over a *skeleton* of
+the workspace: the manifests, the lockfile and Cargo config, with empty
+source files. A wrapper stands in for rustc:
 
-They are separate because Cargo turns on dev-dependency features only when test targets are built. Tracing products with `--all-targets` would ship binaries with features that plain `cargo build` would not enable. Units whose features are the same in both plans are identical derivations and are shared. A target can narrow the selection from `--workspace` to a package list (`-p ui`), for example a wasm target that builds only the UI crate.
+- for each rustc call, it records the command line and environment, and
+  writes empty outputs so that Cargo carries on;
+- for each build script, it puts a stub in its place. Cargo runs the stub,
+  which records the environment Cargo gave it and prints a marker for every
+  kind of output a real build script can print.
 
-A `RUSTC_WRAPPER` does the following:
+Cargo then places each marker exactly where it would place real output:
+on which rustc calls, in which position. That is how breakbulk knows,
+without running `ring`'s build script, where its `cargo:rustc-link-lib`
+lines will go. At build time the real values replace the markers.
 
-- Records information queries (`-vV`, `--print cfg`, file-name queries) and forwards them to the real rustc. The `-vV` record carries Cargo's own environment, the baseline for env filtering.
-- For each compile invocation, records argv, env and working directory, writes placeholder outputs, and emits the artifact notification Cargo waits for when pipelining.
-- For each build-script compile, writes a stub executable. When Cargo runs it, the stub records the exact environment Cargo gives build scripts and prints one tagged **sentinel** directive of each applicable kind.
+The result is `plan.json`: every unit, with Cargo's exact command line,
+and the edges between units. Tests compare these command lines with a
+real `cargo build` on several Cargo releases.
 
-Cargo places each sentinel exactly where it would place real output from that script: which units get it, at which position, and which dependent build scripts receive `DEP_*` metadata. The planner records those positions as splice points. Placement is therefore observed from Cargo; only the values are filled in at build time. A few placements depend on the values, and breakbulk applies those rules itself at build time: search paths inside the script's `OUT_DIR` come before all others, all link-argument kinds of one script form one ordered list, and doctests get every script's search paths sorted by value. [A spike](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/A-trace-fidelity.md) confirmed that the traced commands, with real build-script output filled in, equal a real `cargo build` unit for unit on Cargo 1.95 to 1.101.
+Build and test plans are separate, because Cargo enables dev-dependency
+features only when it builds tests. Units that come out the same in both
+are shared.
 
-The recorded invocations give the graph: `--extern` and `-L` paths name the producing unit, `OUT_DIR` ties a compile to its build-script run, the stub path ties a run to its compile, and sentinels give directive scoping and `DEP_*` edges. The unstable `--unit-graph` is not needed. Paths are then rewritten:
-
-- Target-directory paths become placeholders for the producing unit's outputs, in both of Cargo's build-directory layouts (the classic one and the per-unit one that nightly Cargo uses by default). Whether a unit is a host unit (build script, proc macro) or a target unit is read from where Cargo put its output.
-- Source paths become store paths of the source views.
-- Tool paths must already be store paths, or planning fails with the tool's name.
-- Recorded env is kept only where Cargo set it or the configuration declared it; the planner's own sandbox env, and what Cargo sets on its own process, are dropped.
-
-Each target is traced on its own. Host units come out identical for every target and are shared. A multi-target Cargo invocation is avoided because its feature resolution can differ from building each target alone.
+Details: [The traced planner](internals/planner.md),
+[Sentinel directives](../reference/sentinels.md),
+[Plan format](../reference/plan-format.md).
 
 ## 3. Instantiate
 
-`breakbulk-instantiate` turns the plan and the source map into one derivation per unit. It is pure templating, so rerunning it on every edit is cheap, and unchanged units come out byte-identical. The same Rust code serves both delivery modes:
+`breakbulk-instantiate` turns the plan into one derivation per unit. It is
+plain templating, so it is fast, and an unchanged unit always comes out
+as the same derivation.
 
-- **IFD mode:** it writes each unit's derivation attributes as JSON, which Nix imports and passes to `derivation`.
-- **Dynamic-derivation mode:** it writes the same derivations into the store through Nix's `builder-rpc-v0` interface and submits each root.
+There are two ways to hand those derivations to Nix:
 
-Both modes produce identical unit derivation paths. The default, `mode = "auto"`, picks dynamic-derivation mode when the evaluator has the `dynamic-derivations` feature and a Nix version with `builder-rpc-v0`, and IFD otherwise. Nix implementations without dynamic derivations, such as Lix, therefore use IFD mode with no configuration. Upstream Nix and Determinate Nix are tested; others are expected to work in IFD mode but are not tested.
+- **IFD mode** (the default on stable Nix): Nix builds the plan during
+  evaluation and imports the result (import-from-derivation).
+- **Dynamic-derivation mode** (Nix 2.36 and later): one derivation writes
+  the unit derivations into the store as it builds.
+
+Both give the same unit derivations. `mode = "auto"` picks dynamic mode
+when the evaluator supports it.
+
+Details: [Instantiation](internals/instantiation.md).
 
 ## 4. Units
 
-- Units are input-addressed. A cache hit is an ordinary narinfo lookup and downloads only the requested output.
-- Library units have separate `rmeta` and `rlib` outputs; compile units need every transitive `rmeta`, link units every `rlib`. A library unit lists only its direct dependencies as inputs: each `rmeta` output carries a manifest naming what lies below it, and Nix's reference scanning brings that into the sandbox, so the graph's inputs grow with its edges rather than with the square of its size. Link units list every `rlib`. With a nightly toolchain, rlibs carry no metadata, so link units also take every `rmeta`.
-- A build script is two units: its compile, and its run, with outputs `out` (`OUT_DIR`) and `flags`.
-- Build-script output is spliced in at the positions Cargo chose for the sentinels.
-- A unit's environment is a fixed, layered contract: a fixed base, the captured nixpkgs environment for its package's inputs, Cargo's recorded env, the toolchain spec for the unit's platform, and the package's overrides.
+A unit is one derivation for one rustc call or one build-script run. For
+`app`:
+
+| Unit | Outputs |
+| --- | --- |
+| compile `ring`'s build script | the script binary |
+| run `ring`'s build script | `out` (its `OUT_DIR`), `flags` (what it printed) |
+| compile `ring` | `rmeta`, `rlib` |
+| compile `app` | the binary |
+
+Units are input-addressed, so a binary cache serves them like any other
+derivation. A library's `rmeta` and `rlib` are separate outputs: compiling
+a dependent needs only `rmeta`, linking needs `rlib`.
+
+Details: [The unit builder](../reference/unit-builder.md).
 
 ## 5. Products
 
-Link outputs flow through named stages into packages, test runs and checks, described below.
+The linked binaries pass through named post-link stages (split debug
+information, strip, wasm-bindgen, …) to become the packages you build,
+and test binaries become test runs. See [Products, stages and
+tests](products.md).
