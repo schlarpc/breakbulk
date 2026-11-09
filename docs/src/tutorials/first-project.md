@@ -53,6 +53,22 @@ at its root. That workspace is called `default`. `packages.app` is the
 
 Run `git add flake.nix`.
 
+### Following your nixpkgs
+
+Flakes often add `inputs.breakbulk.inputs.nixpkgs.follows = "nixpkgs"`.
+For breakbulk, that choice decides which nixpkgs builds its own tools
+(`breakbulk-plan`, `breakbulk-unit`, …):
+
+| | Tools built with | First build | When you update nixpkgs |
+| --- | --- | --- | --- |
+| No `follows` (as above) | breakbulk's pinned nixpkgs | Tools come from a cache that has breakbulk's pin, or build once per breakbulk version, shared by all your projects | Tools stay the same |
+| `follows = "nixpkgs"` | your nixpkgs | Tools compile from source (a few minutes of Rust) unless a cache has that exact build | Tools rebuild |
+
+`breakbulk-unit` is an input of every unit, so a new build of it rebuilds
+every unit too. Your own crates still use your nixpkgs either way: the
+Rust toolchain, the C compiler and the libraries come from the `pkgs` you
+pass to `mkRepository`.
+
 ## 3. Build
 
 ```sh
