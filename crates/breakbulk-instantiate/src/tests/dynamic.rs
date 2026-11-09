@@ -606,6 +606,38 @@ fn test_spec_of_a_test_root() {
     );
 }
 
+#[test]
+fn nextest_metadata_leaves_out_build_std_packages() {
+    // A `-Zbuild-std` plan: the standard library's units are path packages
+    // in the toolchain's rust-src, outside the skeleton.
+    let mut plan = smoke_inputs().plan;
+    let core = "path+file:///nix/store/00000000000000000000000000000000-rust/lib/rustlib/src/rust/library/core#0.0.0";
+    let mut c = plan.units[LIB].clone();
+    let breakbulk_format::Unit::Compile(cu) = &mut c else {
+        panic!()
+    };
+    cu.package = core.into();
+    plan.units.insert("c-core".into(), c);
+    let breakbulk_format::Unit::Compile(app) = &plan.units[APP] else {
+        panic!()
+    };
+    let nx = crate::dynamic::nextest_for(&plan, app, RootKind::Bin, "smokeapp", "/view").unwrap();
+    let ids: Vec<&str> = nx.cargo_metadata["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&core), "{ids:?}");
+    assert!(ids.contains(&app.package.as_str()), "{ids:?}");
+    assert!(
+        !nx.cargo_metadata["workspace_members"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(core))
+    );
+}
+
 /// The plan with a doctest for `smokelib`, made from its library unit.
 fn with_doctest(mut inputs: Inputs) -> Inputs {
     let Some(breakbulk_format::Unit::Compile(c)) = inputs.plan.units.get(LIB).cloned() else {

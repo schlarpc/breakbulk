@@ -14,6 +14,11 @@
 #                    dependencies (hashbrown, libc, …) come from rust-src's
 #                    vendored copies, are planned, built, and linked into a
 #                    program that runs
+#   build-std-tests  both fixtures' test plans instantiate: each has its
+#                    test root with a test spec, and the cargo metadata
+#                    synthesized for nextest lists the fixture's own
+#                    package only, as `cargo metadata` does (the standard
+#                    library's packages are not in its resolve)
 {
   pkgs,
   breakbulk,
@@ -106,6 +111,32 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
         grep -q ' [Tt] __udivti3$' syms.txt
         mkdir -p $out
         cp header.txt syms.txt $out/
+      '';
+
+  build-std-tests =
+    pkgs.runCommand "build-std-tests"
+      {
+        nativeBuildInputs = [ pkgs.buildPackages.jq ];
+        bare = "${bare.workspaces.main.instances.${none}.default.unitsJson.test}";
+        hosted = "${hosted.workspaces.main.instances.${native}.default.unitsJson.test}";
+      }
+      ''
+        set -euo pipefail
+        check() {
+          # The metadata with its references (`{"input": …}` parts) blanked.
+          jq -e --arg root "$2" --arg pkg "$3" '
+            .roots[$root].testSpec.nextest.cargoMetadata
+            | [.parts[] | if type == "string" then . else "X" end] | add | fromjson
+            | (.workspace_members == [$pkg]) and ([.packages[].id] == [$pkg])
+          ' "$1" >/dev/null || {
+            echo "$1: the nextest metadata of $2 lists more than $3, or $2 is missing" >&2
+            jq '.roots | keys' "$1" >&2
+            exit 1
+          }
+        }
+        check $bare bare/bin-test/bare 'path+file:///build/skeleton#bare@0.1.0'
+        check $hosted app/bin-test/app 'path+file:///build/skeleton#app@0.1.0'
+        touch $out
       '';
 
   build-std-deps =

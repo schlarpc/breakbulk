@@ -337,7 +337,11 @@ fn nextest(
 ///   directory in the cargo metadata: the package directory of its source
 ///   view, as for libtest runs. The workspace root is that view's root;
 ///   other path packages of the plan are listed under it too (their
-///   directories need not exist), so `package()` filtersets match them;
+///   directories need not exist), so `package()` filtersets match them.
+///   Path packages outside the skeleton are the standard library's, from
+///   `-Zbuild-std`: `cargo metadata` resolves the workspace alone
+///   (cargo `ops/cargo_metadata.rs` has no build-std resolve), so they are
+///   left out;
 /// - each package lists its Cargo targets ([`Plan::path_packages`]): nextest
 ///   checks the names `binary()` and `binary_id()` filtersets use against
 ///   them (nextest-filtering `ParseContextCache::new`), and fails a run
@@ -371,15 +375,20 @@ pub fn nextest_for(
     };
     let or_null = |v: String| if v.is_empty() { J::Null } else { J::String(v) };
     let view_root = view_root.to_owned();
-    // One unit per path package: the test unit for the tested package, else
-    // its first compile unit by id.
-    let mut path_pkgs: BTreeMap<&str, &CompileUnit> = BTreeMap::new();
+    // One unit and directory per path package under the skeleton: the test
+    // unit for the tested package, else its first compile unit by id.
+    let mut path_pkgs: BTreeMap<&str, (&CompileUnit, &str)> = BTreeMap::new();
     for u in plan.units.values() {
         if let Unit::Compile(c) = u
-            && c.package.starts_with("path+file://")
+            && let Some(dir) = workspace_dir(plan, &c.package)
         {
-            path_pkgs.entry(c.package.as_str()).or_insert(c);
+            path_pkgs.entry(c.package.as_str()).or_insert((c, dir));
         }
+    }
+    if !path_pkgs.contains_key(pkg_id.as_str()) {
+        return err(format!(
+            "nextest: {pkg_id} is not a path package under the skeleton"
+        ));
     }
     let path_package = |id: &str| plan.path_packages.get(id);
     let lib_name = |id: &str| {
@@ -400,14 +409,9 @@ pub fn nextest_for(
             .unwrap_or_default()
     };
     let mut packages = Vec::new();
-    for (id, u) in &path_pkgs {
+    for (id, (u, dir)) in &path_pkgs {
         let u = if *id == pkg_id.as_str() { unit } else { u };
         let e = |k: &str| env_of(u, k);
-        let Some(dir) = workspace_dir(plan, id) else {
-            return err(format!(
-                "nextest: {id} is not a path package under the skeleton"
-            ));
-        };
         let dir = if dir.is_empty() {
             view_root.clone()
         } else {
@@ -436,7 +440,7 @@ pub fn nextest_for(
             .flat_map(|d| {
                 let name = path_pkgs
                     .get(d.package.as_str())
-                    .map(|u| env_of(u, "CARGO_PKG_NAME"))
+                    .map(|(u, _)| env_of(u, "CARGO_PKG_NAME"))
                     .unwrap_or_default();
                 d.kinds.iter().map(move |k| {
                     json!({

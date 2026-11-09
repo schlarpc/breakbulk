@@ -97,20 +97,8 @@ let
     benches = [ products.repos.benchesRepo ];
     bin-exe-not-built = [ (plain "bin-exe-not-built" [ ]) ];
     build-dep-leak = [ (plain "build-dep-leak" [ ]) ];
-    # Their test plans do not instantiate: breakbulk-instantiate finds the
-    # sysroot's crates outside the skeleton.
-    build-std = [
-      {
-        source = buildStd.repos.bare;
-        except.plans = [ "test" ];
-      }
-    ];
-    build-std-deps = [
-      {
-        source = buildStd.repos.hosted;
-        except.plans = [ "test" ];
-      }
-    ];
+    build-std = [ buildStd.repos.bare ];
+    build-std-deps = [ buildStd.repos.hosted ];
     # Its clippy units fail by design (disallowed methods): the default
     # variant only.
     clippy-conf = [ (plainAt "ws" "clippy-conf" [ ]) ];
