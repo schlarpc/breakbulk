@@ -564,11 +564,11 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### X3. Names of uplifted side files
 
-- **Assumption.** Cargo uplifts a bin's `.dwp` as `<bin>.dwp`, while `.pdb` and `.dwo` keep rustc's names, which the binaries record. The `.dwo` names are absolute (rustc's `--out-dir`, not remapped in the scopes breakbulk sets), and gdb opens an absolute DWO name only as given, so a product's `.dwo` files are reachable only packed into a `.dwp`.
+- **Assumption.** Cargo uplifts a bin's `.dwp` as `<bin>.dwp`, while `.pdb` and `.dwo` keep rustc's names, which the binaries record. The `.dwo` names are absolute (rustc's `--out-dir`, not remapped in the scopes breakbulk sets), and gdb opens an absolute DWO name only as given, so a product's `.dwo` files are reachable only packed into a `.dwp`. `llvm-dwp` packs DWARF 4 and DWARF 5 units (`-C dwarf-version=5`); binutils' `dwp` packs only DWARF 4 and, given DWARF 5 units, writes a `.dwp` with none in it and exits 0.
 - **Where.** `lib/products.nix`: `mkLinked` (`debug` output); `lib/stage-helpers/default.nix`: `splitDebug`, `install`.
-- **Upstream.** cargo `src/compiler/build_runner/compilation_files.rs` (uplifting); rustc's link output names; gdb 17.2 `gdb/dwarf2/read.c`, `cutu_reader::open_dwo_file` (an absolute name is tried as is, never under `debug-file-directory`).
+- **Upstream.** cargo `src/compiler/build_runner/compilation_files.rs` (uplifting); rustc's link output names; gdb 17.2 `gdb/dwarf2/read.c`, `cutu_reader::open_dwo_file` (an absolute name is tried as is, never under `debug-file-directory`); binutils 2.46 `gold/dwp.cc` (`Dwo_name_info_reader`, `Unit_reader`: the unit's ID only from `DW_AT_GNU_dwo_id`, the section table only DWARF 4's).
 - **Holds for.** 1.99.
-- **Pinned by.** `products-source-paths-dwp` (gdb finds the `.dwp`); `products-source-paths-dwo` (gdb reads the dependency's arguments from splitDebug's `.dwp`, and not without it, naming the absolute `/build/out/…` DWO paths); `msvc-x86_64-pdb` (`llvm-symbolizer` with the `.pdb` beside the `.exe`).
+- **Pinned by.** `products-source-paths-dwp` (gdb finds the `.dwp`); `products-source-paths-dwo` (gdb reads the dependency's arguments from splitDebug's `.dwp`, and not without it, naming the absolute `/build/out/…` DWO paths); `products-source-paths-dwo5` (the same with DWARF 5); `msvc-x86_64-pdb` (`llvm-symbolizer` with the `.pdb` beside the `.exe`).
 - **If it changes.** Debuggers do not find the side files; the checks fail.
 
 ### X4. rustc's link temp directory

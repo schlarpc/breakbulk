@@ -134,7 +134,7 @@ let
   # ---------------------------------------------------------------------
   # ELF
 
-  splitDebug = mkHelper "splitDebug" { binutils = null; } (
+  splitDebug = mkHelper "splitDebug" { binutils = null; llvm = null; } (
     cfg:
     {
       input,
@@ -149,7 +149,10 @@ let
           "out"
           "debug"
         ];
-        nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
+        nativeBuildInputs = [
+          (binutilsOf cfg pkgs)
+          (if cfg.llvm != null then cfg.llvm else pkgs.llvm)
+        ];
       }
       ''
         set -euo pipefail
@@ -186,8 +189,10 @@ let
           # name their `.dwo` files (its own and its libraries', decision
           # 126) by rustc's absolute build path, which gdb opens as given
           # and nowhere else (gdb 17.2, gdb/dwarf2/read.c, open_dwo_file).
-          # binutils' dwp packs the ones it names into `<binary>.dwp`,
-          # which gdb finds as below.
+          # llvm-dwp packs the ones it names into `<binary>.dwp`, which
+          # gdb finds as below. Not binutils' dwp: it reads only DWARF 4's
+          # DW_AT_GNU_dwo_id, so from DWARF 5 units it writes a .dwp with
+          # no units in it, and succeeds.
           dwos=()
           while IFS= read -r n; do
             n=''${n##*/}
@@ -205,7 +210,7 @@ let
             esac
             echo "splitDebug: ''${f#$out/}: packing ''${#dwos[@]} .dwo files into $b.dwp"
             mkdir -p "$debug/$d"
-            dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
+            llvm-dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
           fi
           # With split-debuginfo = "packed", the DWARF objects are in
           # `<binary>.dwp`. gdb looks for it next to the separate debug file

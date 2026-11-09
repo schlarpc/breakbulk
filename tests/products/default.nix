@@ -31,6 +31,8 @@
 #                    debug output with the bin's, and splitDebug packs the
 #                    ones the binary names into app.dwp;
 #                    gdb's backtrace and source lines as above
+#   source-paths-dwo5 the same with DWARF 5 (`-C dwarf-version=5`), which
+#                    binutils' dwp packs into an empty .dwp
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
 #   prefer-dynamic   -C prefer-dynamic: noSourceReferences allows the
@@ -332,7 +334,18 @@ let
     { workspaces.main.variants.unpacked.profile = "unpacked"; }
   ];
   sourcePaths = mkRepo (fixtures + "/source-paths") spModules;
-  sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
+  sourcePathsDwarf5 = mkRepo (fixtures + "/source-paths") (
+    spModules
+    ++ [
+      {
+        targets.${native}.rustflags = [
+          "-C"
+          "dwarf-version=5"
+        ];
+      }
+    ]
+  );
+  sourcePathsReadme =mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
   spApp = sourcePaths.workspaces.main.packages.app;
 
   # --- trim-paths ----------------------------------------------------------------
@@ -376,6 +389,64 @@ let
     grep -qxF "Located in $depView/dep/src/lib.rs" gdb.txt
     grep -qF 'panic!("boom {n}");' gdb.txt
   '';
+
+  # The `unpacked` variant's app through splitDebug, with every split unit
+  # at DWARF `version`: the `.dwo` files reach the linked stage, splitDebug
+  # packs them into app.dwp, and gdb reads the dependency's arguments from
+  # it, and not without it.
+  dwoCheck =
+    name: repo: version:
+    let
+      p = repo.workspaces.main.target.${native}.variants.unpacked.packages.app;
+    in
+    pkgs.runCommand name
+      {
+        nativeBuildInputs = [
+          pkgs.gdb
+          pkgs.binutils-unwrapped
+        ];
+        app = p;
+        debug = p.debug;
+        linkedDebug = p.stages.linked.debug;
+        noSrc = p.checks.noSourceReferences;
+        depView = builtins.unsafeDiscardStringContext "${(inst repo).sources.workspace.dep}";
+      }
+      ''
+        set -euo pipefail
+        $app/bin/app > run.txt
+        grep -qxF 'formatted 42' run.txt
+        # The link unit's own `.dwo` files and its libraries' (`dep`, the
+        # registry crate `itoa`), and no .dwp.
+        ls $linkedDebug
+        ls $linkedDebug | grep -qE '^app[-.].*\.dwo$'
+        ls $linkedDebug | grep -qE '^dep[-.].*\.dwo$'
+        ls $linkedDebug | grep -qE '^itoa[-.].*\.dwo$'
+        test ! -e $linkedDebug/app.dwp
+        readelf --debug-dump=info --dwarf-depth=1 $linkedDebug/*.dwo 2>/dev/null \
+          | sed -n 's/^ *Version: *//p' | sort -u > versions.txt
+        cat versions.txt
+        test "$(cat versions.txt)" = ${toString version}
+        # splitDebug packed them into app.dwp next to the separate debug
+        # file, as rustc's own .dwp is with `packed`, and dropped the loose
+        # ones.
+        id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
+        test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
+        readelf -S -W $debug/lib/debug/.build-id/''${id:0:2}/app.dwp | grep -q '\.debug_info\.dwo'
+        test -L $debug/bin/app.dwp
+        test -z "$(find $debug -name '*.dwo')"
+        ${gdbCheck}
+        mkdir -p $out
+        cp gdb.txt $out/
+        # Negative control: without app.dwp, gdb has the line table but
+        # not the arguments, so the check above is not passing vacuously.
+        cp -r $debug nodwp
+        chmod -R u+w nodwp
+        rm nodwp/lib/debug/.build-id/''${id:0:2}/app.dwp
+        gdb -batch -nx -iex "set debug-file-directory $PWD/nodwp/lib/debug" \
+          -ex 'break dep::boom' -ex run -ex bt $app/bin/app > nodwp.txt 2>&1 || true
+        cat nodwp.txt
+        ! grep -qF 'dep::boom (n=7)' nodwp.txt
+      '';
 
   # cc-rs 1.11.1 compiling C under Cargo's trim-paths.
   trimCcRepo =
@@ -1235,54 +1306,8 @@ in
         cp gdb.txt $out/
       '';
 
-  source-paths-dwo =
-    let
-      p = sourcePaths.workspaces.main.target.${native}.variants.unpacked.packages.app;
-    in
-    pkgs.runCommand "source-paths-dwo"
-      {
-        nativeBuildInputs = [
-          pkgs.gdb
-          pkgs.binutils-unwrapped
-        ];
-        app = p;
-        debug = p.debug;
-        linkedDebug = p.stages.linked.debug;
-        noSrc = p.checks.noSourceReferences;
-        depView = builtins.unsafeDiscardStringContext "${(inst sourcePaths).sources.workspace.dep}";
-      }
-      ''
-        set -euo pipefail
-        $app/bin/app > run.txt
-        grep -qxF 'formatted 42' run.txt
-        # The link unit's own `.dwo` files and its libraries' (`dep`, the
-        # registry crate `itoa`), and no .dwp.
-        ls $linkedDebug
-        ls $linkedDebug | grep -qE '^app[-.].*\.dwo$'
-        ls $linkedDebug | grep -qE '^dep[-.].*\.dwo$'
-        ls $linkedDebug | grep -qE '^itoa[-.].*\.dwo$'
-        test ! -e $linkedDebug/app.dwp
-        # splitDebug packed them into app.dwp next to the separate debug
-        # file, as rustc's own .dwp is with `packed`, and dropped the loose
-        # ones.
-        id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
-        test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
-        readelf -S -W $debug/lib/debug/.build-id/''${id:0:2}/app.dwp | grep -q '\.debug_info\.dwo'
-        test -L $debug/bin/app.dwp
-        test -z "$(find $debug -name '*.dwo')"
-        ${gdbCheck}
-        mkdir -p $out
-        cp gdb.txt $out/
-        # Negative control: without app.dwp, gdb has the line table but
-        # not the arguments, so the check above is not passing vacuously.
-        cp -r $debug nodwp
-        chmod -R u+w nodwp
-        rm nodwp/lib/debug/.build-id/''${id:0:2}/app.dwp
-        gdb -batch -nx -iex "set debug-file-directory $PWD/nodwp/lib/debug" \
-          -ex 'break dep::boom' -ex run -ex bt $app/bin/app > nodwp.txt 2>&1 || true
-        cat nodwp.txt
-        ! grep -qF 'dep::boom (n=7)' nodwp.txt
-      '';
+  source-paths-dwo = dwoCheck "source-paths-dwo" sourcePaths 4;
+  source-paths-dwo5 = dwoCheck "source-paths-dwo5" sourcePathsDwarf5 5;
 
   trim-paths =
     let
