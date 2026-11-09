@@ -23,11 +23,13 @@ Cargo's exact command line. So:
 
 - **[Tutorials](tutorials/first-project.md)** teach by doing. Start here if
   you have not used breakbulk before.
-- **How-to guides** solve one task each, for readers who know the basics.
+- **[How-to guides](how-to/binary-cache.md)** solve one task each, for
+  readers who know the basics.
 - **Reference** lists facts: every [module option](reference/options.md),
   the [presets](reference/presets.md), and what breakbulk
   [assumes about Cargo and rustc](reference/assumptions.md).
-- **Explanation** says why breakbulk works the way it does.
+- **[Explanation](explanation/why.md)** says why breakbulk works the way
+  it does.
 
 breakbulk is early. Known gaps and planned work are in the
 [issues](https://github.com/schlarpc/breakbulk/issues).
