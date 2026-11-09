@@ -86,7 +86,7 @@ rec {
       # requiredFeatures; } ]; } (see predictedRoots), or null to take the
       # plan's roots as they are.
       roots ? null,
-      # The `--remap-path-scope` of non-test compile units, for targets
+      # The `--remap-path-scope` of non-test target compile units, for targets
       # whose products split debug info off (`"macro,diagnostics"`), or
       # null for every scope. See inputs.rs `shipped_remap_scope`.
       shippedRemapScope ? null,

@@ -217,16 +217,17 @@ impl Resolve for RealPaths<'_> {
         self.0.toolchains.keep_source_paths
     }
     fn remap_scope(&self, _: &UnitId, c: &CompileUnit) -> Option<String> {
-        let scope = self.0.toolchains.shipped_remap_scope.as_ref()?;
         let test = c
             .args
             .iter()
             .any(|a| matches!(a, breakbulk_format::Arg::Literal(s) if s == "--test"));
-        let scope = match c.platform {
-            breakbulk_format::Platform::Target => scope.clone(),
-            breakbulk_format::Platform::Host => scope.replace(",coverage", ""),
-        };
-        (!test && self.0.toolchains.capabilities.remap_path_scope).then_some(scope)
+        if test || !self.0.toolchains.capabilities.remap_path_scope {
+            return None;
+        }
+        match c.platform {
+            breakbulk_format::Platform::Target => self.0.toolchains.shipped_remap_scope.clone(),
+            breakbulk_format::Platform::Host => Some("macro,diagnostics".into()),
+        }
     }
     fn env_capture(&self, _: &UnitId, u: &Unit) -> Result<Option<String>, String> {
         let p = platform(u);
@@ -322,8 +323,17 @@ fn shipped_remap_scope() {
             .collect()
     };
     let mut inputs = smoke_inputs();
-    assert!(scope_of(&inputs).values().all(Option::is_none));
+    // No shipped scope (a `keep` target): target units remap every scope;
+    // host units (the build script) keep their fixed scope, so they are the
+    // same units as for a `split` target.
+    let scopes = scope_of(&inputs);
+    for id in [APP, LIB, RUN] {
+        assert_eq!(scopes[id], None, "{id}");
+    }
+    assert_eq!(scopes[SCRIPT].as_deref(), Some("macro,diagnostics"));
+    let keep_script = instantiate(&inputs).unwrap().units[SCRIPT].clone();
     inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics".into());
+    assert_eq!(instantiate(&inputs).unwrap().units[SCRIPT], keep_script);
     let scopes = scope_of(&inputs);
     for id in [APP, LIB, SCRIPT] {
         assert_eq!(scopes[id].as_deref(), Some("macro,diagnostics"), "{id}");

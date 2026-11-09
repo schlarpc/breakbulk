@@ -116,11 +116,16 @@ let
     targetTraits = breakbulk.targetTraits.forRust (
       breakbulk.targetTraits.resolve { triple = "x86_64-unknown-linux-gnu"; }
     );
+    # No `--remap-path-scope`, as in unit-smoke's direct rendering, which
+    # gives no unit a scope (host units would otherwise get one).
     capabilities =
       (breakbulk.toolchainFacts.of {
         inherit pkgs;
         inherit (pkgs) rustc cargo;
-      }).capabilities;
+      }).capabilities
+      // {
+        remapPathScope = false;
+      };
   };
 
   inst = breakbulk.instantiate args;

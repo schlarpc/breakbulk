@@ -274,6 +274,36 @@ let
     }
   ];
   inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
+
+  # --- host units across debugInfo ---------------------------------------------
+
+  # One workspace with build scripts and a proc macro, planned for a target
+  # whose debug info is split off and for one that keeps it.
+  debugInfoRepo =
+    debugInfo:
+    mkRepo (fixtures + "/same-triple") [
+      (oneWs ".")
+      { targets.${native}.debugInfo = debugInfo; }
+    ];
+  # Host unit derivation name -> .drv path, both plans.
+  hostDrvs =
+    repo:
+    let
+      i = inst repo;
+    in
+    lib.listToAttrs (
+      lib.concatMap (
+        kind:
+        let
+          plan = builtins.fromJSON (
+            builtins.unsafeDiscardStringContext (builtins.readFile "${i.plans.${kind}}/plan.json")
+          );
+        in
+        lib.mapAttrsToList (
+          id: u: lib.nameValuePair i.units.${kind}.${id}.name (builtins.unsafeDiscardStringContext i.units.${kind}.${id}.drvPath)
+        ) (lib.filterAttrs (_: u: u.platform == "host") plan.units)
+      ) [ "build" "test" ]
+    );
 in
 {
   repos = {
@@ -287,6 +317,25 @@ in
       overrideRepo
       ;
   };
+
+  # Host units (build scripts, the proc macro, their runs) are the same
+  # derivations whatever the target's `debugInfo`: host units never ship,
+  # so their remap scope does not follow it.
+  host-units-shared =
+    let
+      split = hostDrvs (debugInfoRepo "split");
+      keep = hostDrvs (debugInfoRepo "keep");
+      differ = lib.attrNames (lib.filterAttrs (n: d: keep.${n} or null != d) split);
+      names = lib.attrNames split;
+    in
+    assert lib.assertMsg (
+      lib.any (lib.hasSuffix "-build-script") names && lib.any (lib.hasPrefix "pm-") names
+    ) "host-units-shared: expected build scripts and the proc macro among host units: ${toString names}";
+    assert lib.assertMsg (
+      lib.attrNames keep == names
+    ) "host-units-shared: host units differ by name: ${toString names} vs ${toString (lib.attrNames keep)}";
+    assert lib.assertMsg (differ == [ ]) "host-units-shared: host units differ between split and keep: ${toString differ}";
+    evalCheck "host-units-shared" "host units: ${toString names}";
 
   # Exactly the registry crates and the path crate outside every root are
   # shared by all three workspaces; `inner` (inside a's root) is shared

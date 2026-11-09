@@ -50,14 +50,15 @@ pub struct Toolchains {
     pub host: PlatformSpec,
     #[serde(default)]
     pub target: PlatformSpec,
-    /// The `--remap-path-scope` of compile units that end up in shipped
-    /// products whose debug information is split off (`splitDebug`), e.g.
-    /// `macro,diagnostics`: debug info keeps real store paths (plus
-    /// `coverage` in coverage variants, which host units leave out: they are
-    /// not instrumented). `None`: every scope is remapped. Test harnesses
-    /// (`--test`) always remap every scope, and so does every unit when
-    /// rustc has no `--remap-path-scope` (`capabilities`; "Source paths at
-    /// run time" in `docs/src/reference/unit-builder.md`).
+    /// The `--remap-path-scope` of target compile units that end up in
+    /// shipped products whose debug information is split off
+    /// (`splitDebug`), e.g. `macro,diagnostics`: debug info keeps real
+    /// store paths (plus `coverage` in coverage variants). `None`: every
+    /// scope is remapped. Host units do not read it: they always get
+    /// `macro,diagnostics`. Test harnesses (`--test`) always remap every
+    /// scope, and so does every unit when rustc has no `--remap-path-scope`
+    /// (`capabilities`; "Source paths at run time" in
+    /// `docs/src/reference/unit-builder.md`).
     #[serde(default)]
     pub shipped_remap_scope: Option<String>,
     /// `sourcePaths = "keep"`: add no remaps of breakbulk's

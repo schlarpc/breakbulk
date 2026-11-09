@@ -371,23 +371,20 @@ impl Resolve for Tokens<'_> {
     }
 
     fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
-        // Test harnesses remap every scope; so does everything without a
-        // shipped scope (no `splitDebug`) or with a rustc that has no
-        // `--remap-path-scope` (toolchains.json's `capabilities`).
-        let scope = self.inputs.toolchains.shipped_remap_scope.as_deref()?;
+        // Test harnesses remap every scope; so does everything with a rustc
+        // that has no `--remap-path-scope` (toolchains.json's
+        // `capabilities`).
         if !self.inputs.toolchains.capabilities.remap_path_scope || is_test_compile(unit) {
             return None;
         }
-        // Coverage instruments target units only (the spec's rustflags), so
-        // host units keep the build variant's scope and stay shared with it.
-        Some(match unit.platform {
-            Platform::Target => scope.to_owned(),
-            Platform::Host => scope
-                .split(',')
-                .filter(|s| *s != "coverage")
-                .collect::<Vec<_>>()
-                .join(","),
-        })
+        match unit.platform {
+            Platform::Target => self.inputs.toolchains.shipped_remap_scope.clone(),
+            // Not the shipped scope: that follows the target's `debugInfo`,
+            // which only matters for what ships, and host units never ship.
+            // One fixed scope keeps a single build of each host unit for
+            // every target.
+            Platform::Host => Some(HOST_REMAP_SCOPE.to_owned()),
+        }
     }
 
     fn env_capture(&self, _id: &UnitId, unit: &Unit) -> Result<Option<String>, Error> {
@@ -533,6 +530,12 @@ fn store_name(s: &str) -> String {
     n.truncate(211);
     n
 }
+
+/// The `--remap-path-scope` of host units (build scripts, proc macros) when
+/// rustc takes one: debug info and the like keep real store paths, as in a
+/// target whose debug info is split off. No `coverage`: host units are not
+/// instrumented.
+const HOST_REMAP_SCOPE: &str = "macro,diagnostics";
 
 fn is_test_compile(c: &CompileUnit) -> bool {
     c.args

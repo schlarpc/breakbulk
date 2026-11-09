@@ -107,7 +107,7 @@ pkgs:
   # "dynamic" (an outer derivation writes them through builder-rpc-v0;
   # lib/dynamic.nix). mkRepository resolves `mode = "auto"`.
   delivery ? "ifd",
-  # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
+  # `--remap-path-scope` for non-test target compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
   # Whether the planner turns Cargo's trim-paths on (null:
