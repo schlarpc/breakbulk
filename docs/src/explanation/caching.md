@@ -103,9 +103,9 @@ sure that:
   from build-script output after the run; the rest of the build tree is
   kept.
 
-Some fixtures check that their products rebuild bit-identically; a
-built-in check over sampled units and products is planned
-([#2](https://github.com/schlarpc/breakbulk/issues/2)).
+`nix run .#test-rebuild` builds every fixture's products and a sample
+of its units twice and compares the bytes (see
+[How breakbulk is tested](internals/testing.md#rebuild-check)).
 
 ## The rustc limit
 

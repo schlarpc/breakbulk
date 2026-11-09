@@ -25,7 +25,7 @@ one is either wired by hand today, or breaks without a word.
 | Cross tests (Windows, other architectures, wasm) | Tests disabled for cross targets | `runner` in the spec; native builders by `system` |
 | `wasm-bindgen-cli` version pinning | Hand-maintained hashes, or a nixpkgs version that matches by coincidence | Version read from `Cargo.lock` |
 | Workspace members used as build tools (code generators, `xtask`) | Rebuilt whenever any member changes | Per-unit graph rebuilds only what the tool depends on |
-| Reproducibility gates (rebuild checks, stamped artifacts, deterministic archives) | Bolted on per repository | Deterministic helpers; a built-in rebuild check is planned ([#2](https://github.com/schlarpc/breakbulk/issues/2)) |
+| Reproducibility gates (rebuild checks, stamped artifacts, deterministic archives) | Bolted on per repository | Deterministic helpers; `nix run .#test-rebuild` rebuilds every fixture's products and sampled units |
 | Nightly-only workspaces and build-std targets next to stable ones | Separate tooling per toolchain | Toolchain per workspace |
 
 ## Lessons from prior art

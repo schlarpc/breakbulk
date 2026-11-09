@@ -48,7 +48,7 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 
 ## Determinism and dogfooding
 
-- Some fixtures check that their products rebuild bit-identically (`nix build --rebuild`); a systematic check over every fixture and a sample of units is [#2](https://github.com/schlarpc/breakbulk/issues/2).
+- `nix run .#test-rebuild` (`tests/rebuild`) checks that builds are bit-identical. For every fixture it builds the products, their stages and a sample of the units, then builds each again with `nix build --rebuild` and compares the bytes. See [Rebuild check](#rebuild-check).
 - breakbulk builds itself (`tests/self-host`): its own binaries, built crate by crate through breakbulk, behave the same as the bootstrap build.
 
 ## Running the tests
@@ -56,6 +56,27 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 - `nix develop -c cargo test` runs the Rust tests.
 - `nix flake check` runs every flake check, the fixtures included. Some download the Windows SDK, build cross toolchains and run wine.
 - `nix run .#test-dynamic`, `.#test-cutoff`, `.#test-options` and `.#test-linux-portable-container` run tests that need a Nix master build or extra downloads, so they are not flake checks.
+- `nix run .#test-rebuild` runs the rebuild check. It builds every fixture twice, so it is not a flake check.
+
+### Rebuild check
+
+```sh
+nix run .#test-rebuild                                    # every fixture, every target
+nix run .#test-rebuild -- --list                          # the fixture names
+nix run .#test-rebuild -- --targets x86_64-unknown-linux-gnu walking-skeleton directives
+nix run .#test-rebuild -- --every 1 -- --max-jobs 2 --cores 4
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--targets REGEX` | Only instances whose target triple matches. Default: every target. |
+| `--every N` | Rebuild 1 in N units of each plan (default 4; 1 rebuilds all). |
+| `--seed S` | Pick another sample. The sample is deterministic: the units with the lowest sha256 of seed, plan and unit id. |
+| `-- …` | Options for every `nix` command. |
+
+The catalog (`tests/rebuild/default.nix`) reuses the repositories the other tests configure for each fixture. A fixture that fails by design, or that builds nothing through breakbulk, is in `skipped` with the reason. The `rebuild-catalog` flake check fails when a fixture directory is in neither list.
+
+The script exits non-zero when a fixture fails to evaluate or build, or when a rebuild differs. Reports go to `$WORK` (default `$TMPDIR/breakbulk-rebuild`), one directory per fixture. A differing output is kept as `<path>.check` next to the original, and `<name>.diff` holds `diffoscope` of the two (`diff -r` when diffoscope cannot be built). The next garbage collection removes the `.check` copies.
 
 ## CI environment
 

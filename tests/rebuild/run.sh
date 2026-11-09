@@ -91,7 +91,9 @@ for f in "${fixtures[@]}"; do
     status=1
     continue
   fi
-  mapfile -t drvs < <(sort -u "$dir/drvs")
+  # nix-instantiate prints `<drv>!<output>` for a derivation selected by a
+  # non-default output; every output is rebuilt anyway.
+  mapfile -t drvs < <(sed 's/!.*//' "$dir/drvs" | sort -u)
   if [ ${#drvs[@]} -eq 0 ]; then
     summary+=("empty $f (no derivations for these targets)")
     continue
