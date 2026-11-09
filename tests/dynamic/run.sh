@@ -60,6 +60,8 @@ else
     crate-types dev-dep-features build-dep-leak bin-exe-not-built sys-native
     feature-unification clippy-conf test-cutoff
     multi-ws outside-reads stamps missing-input test-only pkgid-short
+    post-link source-paths trim-paths trim-paths-cc variants
+    variants-coverage benches stdpaths git-multi-workspace git-revisions
   )
 fi
 

@@ -335,7 +335,7 @@
             builtins.removeAttrs (import ./tests/products {
               inherit pkgs;
               breakbulk = self.lib;
-            }) [ "repos" ]
+            }) [ "repos" "modules" ]
           )
           # Loose ends: [env] in test runs, test.sourceScope, the dev
           # shell's Cargo env config, wasm embedding.

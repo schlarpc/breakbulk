@@ -119,7 +119,8 @@
 #                    bench profile, opt-level 3); the test plan has none;
 #                    benchSmoke runs each once with `--test` as a check
 #
-# `repos` exposes each repository for debugging.
+# `repos` exposes each repository for debugging, `modules` the modules of
+# some (tests/dynamic adds its own to them).
 {
   # nixpkgs and rust-overlay as the flake pins them (the flake's checks
   # pass its own pkgs, which has the overlay).
@@ -474,7 +475,7 @@ let
 
   # --- variants ------------------------------------------------------------------
 
-  variantsRepo = mkRepo (fixtures + "/variants") [
+  variantsModules = [
     {
       workspaces.main = {
         path = "ws";
@@ -519,6 +520,7 @@ let
       };
     }
   ];
+  variantsRepo = mkRepo (fixtures + "/variants") variantsModules;
   vt = variantsRepo.workspaces.main.target.${native};
 
   # Coverage with an upstream toolchain (see variants-coverage).
@@ -613,6 +615,7 @@ let
   ];
 in
 {
+  modules.variants = variantsModules;
   repos = {
     inherit
       postLink
@@ -622,6 +625,7 @@ in
       variantsRepo
       benchesRepo
       embed
+      coverageRepo
       rustSrcRepo
       ;
     trimCc = trimCcRepo { };

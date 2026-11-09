@@ -527,10 +527,13 @@ in
   // lib.optionalAttrs bench { bench = benched.unitsJson; };
   inherit delivery capabilities;
   # Dynamic-derivation mode: the outer derivations, by plan kind.
-  outer = lib.optionalAttrs isDynamic {
-    build = built.outer;
-    test = tested.outer;
-  };
+  outer = lib.optionalAttrs isDynamic (
+    {
+      build = built.outer;
+      test = tested.outer;
+    }
+    // lib.optionalAttrs bench { bench = benched.outer; }
+  );
   # Dynamic-derivation mode: the unit derivations through IFD mode, for
   # explainSharing (lib/dynamic.nix `ifdUnits`).
   ifdUnits = lib.optionalAttrs isDynamic (

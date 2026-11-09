@@ -85,7 +85,8 @@ let
     inherit pkgs breakbulk;
     extraModules = [ { inherit mode; } ];
   };
-  products = (import ../products testArgs).repos;
+  productTests = import ../products testArgs;
+  products = productTests.repos;
   repository = (import ../repository testArgs).repos;
   presetFixtures =
     (import ../presets/fixtures.nix (
@@ -316,7 +317,24 @@ let
     source-paths = products.sourcePaths;
     trim-paths = products.trimPathsRepo;
     trim-paths-cc = products.trimCc;
-    variants = products.variantsRepo;
+    # tests/products' variants without `strict`'s `-D clippy::len_zero`,
+    # whose clippy unit fails by design in both modes, and without the
+    # coverage variant: nixpkgs' rustc builds instrumented binaries that
+    # crash at exit (variants-coverage has it on rust-overlay's rustc).
+    variants = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/variants";
+      modules = productTests.modules.variants ++ [
+        { inherit mode; }
+        {
+          workspaces.main.variants = {
+            strict.clippyArgs = lib.mkForce [ ];
+            coverage.targets = [ ];
+          };
+        }
+      ];
+    };
+    variants-coverage = products.coverageRepo;
     benches = products.benchesRepo;
     stdpaths = products.rustSrcRepo;
 
@@ -470,7 +488,8 @@ let
 
   # Every workspace, target and variant of a repository: `key` is
   # `<ws>/<triple>/<variant>`, `inst` the mkWorkspace result, `out` the
-  # repository's outputs for it (products, selected test runs, ...).
+  # repository's outputs for it (products, selected test runs, ...),
+  # `kinds` its planned plan kinds (build, test, bench).
   instancesOf =
     repo:
     lib.concatLists (
@@ -479,18 +498,30 @@ let
         lib.concatLists (
           lib.mapAttrsToList (
             triple: vs:
-            lib.mapAttrsToList (v: inst: {
-              key = "${wsName}/${triple}/${v}";
-              inherit inst;
-              out = w.target.${triple}.variants.${v};
-            }) vs
+            lib.mapAttrsToList (
+              v: inst:
+              let
+                out = w.target.${triple}.variants.${v};
+                # The test plan, unless a check variant checks the build
+                # plan only, or the target has no tests
+                # (`workspaces.<ws>.targets.<t>.tests = false`, which
+                # leaves the variant no test binaries or doctests).
+                testPlan =
+                  if out ? check then
+                    repo.config.workspaces.${wsName}.variants.${v}.allTargets
+                  else
+                    out.tests != { } || out.doctests != { };
+              in
+              {
+                key = "${wsName}/${triple}/${v}";
+                inherit inst out;
+                kinds = lib.filter (k: k != "test" || testPlan) (lib.attrNames inst.units);
+              }
+            ) vs
           ) w.instances
         )
       ) repo.workspaces
     );
-
-  # The plan kinds an instance has (build, test, and bench when planned).
-  kindsOf = i: lib.attrNames i.inst.units;
 
   linkEach =
     dir: attrs:
@@ -503,8 +534,18 @@ let
   # { pkg = { binary = run; }; } as { "pkg/binary" = run; }.
   flat2 = lib.concatMapAttrs (p: lib.mapAttrs' (b: lib.nameValuePair "${p}/${b}"));
 
+  # Fixtures whose test binaries link but cannot run here (no runner for
+  # the target): their test binaries are compared as products
+  # (`test-<pkg>-<name>`), and their test runs, doctests and the
+  # repo.checks that run tests are left out.
+  buildOnly = [ "windows-gnullvm-aarch64" ];
+  runsTests = n: !(lib.hasPrefix "test-" (baseNameOf n) || baseNameOf n == "doctest");
+
   build =
     name: repo:
+    let
+      runs = !(lib.elem name buildOnly);
+    in
     pkgs.runCommand "${name}-${mode}" { } (
       lib.concatMapStrings (
         i:
@@ -513,13 +554,24 @@ let
         ''
         # Dynamic mode: every outer derivation runs (run.sh reads their
         # logs), also for a plan no product or test run needs.
-        + linkEach "$out/units/${i.key}" (i.inst.allUnits or { })
+        + linkEach "$out/units/${i.key}" (
+          lib.filterAttrs (k: _: lib.elem k i.kinds) (i.inst.allUnits or { })
+        )
         + linkEach "$out/products/${i.key}" (
           lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) i.out.packages
         )
-        + linkEach "$out/runs/${i.key}" (flat2 i.out.testRuns)
-        + linkEach "$out/runs/${i.key}/bench" (flat2 (i.out.benchRuns or { }))
-        + linkEach "$out/doctests/${i.key}" i.out.doctests
+        + (
+          if runs then
+            linkEach "$out/runs/${i.key}" (flat2 i.out.testRuns)
+            + linkEach "$out/runs/${i.key}/bench" (flat2 (i.out.benchRuns or { }))
+            + linkEach "$out/doctests/${i.key}" i.out.doctests
+          else
+            linkEach "$out/products/${i.key}" (
+              lib.mapAttrs' (n: d: lib.nameValuePair "test-${lib.replaceStrings [ "/" ] [ "-" ] n}" d) (
+                flat2 i.out.tests
+              )
+            )
+        )
       ) (instancesOf repo)
       # repo.checks (what `nix flake check` builds), every one.
       + ''
@@ -528,7 +580,7 @@ let
       + lib.concatStrings (
         lib.mapAttrsToList (n: d: ''
           ln -s ${d} "$out/checks/${lib.replaceStrings [ "/" ] [ "-" ] n}"
-        '') repo.checks
+        '') (if runs then repo.checks else lib.filterAttrs (n: _: runsTests n) repo.checks)
       )
       + lib.optionalString (name == "test-control") ''
         ln -s ${ctlApps} $out/apps
@@ -558,7 +610,7 @@ let
                   )
                 )
               )
-            ) (kindsOf i)
+            ) i.kinds
           ) (instancesOf repo)
         )
       )
@@ -584,7 +636,10 @@ let
   plansOf =
     repos':
     lib.concatMap (
-      repo: lib.concatMap (i: map toString (lib.attrValues i.inst.plans)) (instancesOf repo)
+      repo:
+      lib.concatMap (
+        i: map toString (lib.attrValues (lib.filterAttrs (k: _: lib.elem k i.kinds) i.inst.plans))
+      ) (instancesOf repo)
     ) repos';
   prereqs =
     lib.mapAttrs (
@@ -615,9 +670,9 @@ in
   outer = lib.mapAttrs (
     _: repo:
     lib.listToAttrs (
-      lib.concatMap (
-        i: lib.mapAttrsToList (kind: o: lib.nameValuePair "${i.key}/${kind}" o) i.inst.outer
-      ) (instancesOf repo)
+      lib.concatMap (i: map (kind: lib.nameValuePair "${i.key}/${kind}" i.inst.outer.${kind}) i.kinds) (
+        instancesOf repo
+      )
     )
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
