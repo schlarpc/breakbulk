@@ -1443,8 +1443,7 @@ let
         "warnings"
       ];
       warningsAreErrors = false;
-      # Declarations as paths in breakbulk's repository (docs/options.md links
-      # them from docs/), not store paths.
+      # Declarations as links to breakbulk's repository, not store paths.
       transformOptions =
         opt:
         opt
@@ -1458,7 +1457,7 @@ let
             if lib.length parts > 1 then
               {
                 name = rel;
-                url = "../${rel}";
+                url = "https://github.com/schlarpc/breakbulk/blob/main/${rel}";
               }
             else
               d

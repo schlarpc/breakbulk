@@ -1,12 +1,12 @@
 # The documentation site: docs/src through mdBook, with the module options
-# page generated from `optionsMd` (tests/loose-ends, the same source as
-# docs/options.md) and the logo from docs/logo.
+# page generated from `optionsCommonMark` (a repository's
+# `optionsDoc.optionsCommonMark`) and the logo from docs/logo.
 #
 #   site    the built site (packages.<system>.docs-site)
 #   links   a check that every internal link and fragment resolves
 {
   pkgs,
-  optionsMd,
+  optionsCommonMark,
 }:
 let
   inherit (pkgs) lib;
@@ -18,7 +18,6 @@ let
       ./logo
     ];
   };
-  repoUrl = "https://github.com/schlarpc/breakbulk/blob/main";
 in
 rec {
   site = pkgs.runCommand "breakbulk-docs-site" { nativeBuildInputs = [ pkgs.mdbook ]; } ''
@@ -29,9 +28,8 @@ rec {
       echo '# Module options'
       echo
       echo 'Every option of `mkRepository`, generated from the module declarations.'
-      # Drop optionsMd's own title and regeneration note; its declaration
-      # links are relative to docs/, so point them at the repository.
-      tail -n +5 ${optionsMd} | sed 's|](\.\./lib/|](${repoUrl}/lib/|g'
+      echo
+      cat ${optionsCommonMark}
     } > book/src/reference/options.md
     mdbook build book --dest-dir $out
   '';

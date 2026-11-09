@@ -22,10 +22,10 @@
       # The documentation site (docs/default.nix).
       docsFor = pkgs: import ./docs {
         inherit pkgs;
-        optionsMd = (import ./tests/loose-ends {
+        optionsCommonMark = (self.lib.mkRepository {
           inherit pkgs;
-          breakbulk = self.lib;
-        }).options-md;
+          root = ./tests/fixtures/walking-skeleton;
+        }).optionsDoc.optionsCommonMark;
       };
     in
     {
@@ -308,7 +308,7 @@
             }) [ "repos" ]
           )
           # Loose ends: [env] in test runs, test.sourceScope, the dev
-          # shell's Cargo env config, wasm embedding, docs/options.md.
+          # shell's Cargo env config, wasm embedding.
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "loose-ends-${n}" v) (
             builtins.removeAttrs (import ./tests/loose-ends {
               inherit pkgs;
