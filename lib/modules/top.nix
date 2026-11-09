@@ -47,7 +47,9 @@ in
         unchanged input does not re-run them. Needs Nix's `ca-derivations`
         experimental feature in the evaluator and the daemon. `null` turns
         it on exactly when the evaluator has `dynamic-derivations` (which
-        needs `ca-derivations` too), and off otherwise (decision 52).
+        needs `ca-derivations` too), and off otherwise: Nix code cannot
+        tell whether `ca-derivations` is on, and without it a
+        content-addressed derivation is an error that cannot be caught.
       '';
     };
 
@@ -104,8 +106,7 @@ in
         string. Optional: with a hash, the fetch is fixed-output and a
         binary cache can serve it; without one, every fresh machine clones
         the source during evaluation. The hash is that of the fetched tree
-        (`builtins.fetchGit`'s `narHash`), not crane's `outputHashes`
-        (decision 14).
+        (`builtins.fetchGit`'s `narHash`), not crane's `outputHashes`.
       '';
     };
 

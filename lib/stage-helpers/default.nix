@@ -90,7 +90,7 @@ let
     }
   '';
 
-  # Decision 89: the debuginfo side files of the product's link units
+  # The debuginfo side files of the product's link units
   # (`.pdb` on msvc, `.dwp`/`.dwo` with `split-debuginfo`), as the `linked`
   # stage's `debug` output holds them, go into a stage's `debug` output in
   # the install layout: next to where their binary lands (Windows: bin/;
@@ -693,7 +693,7 @@ let
   # separate `debug` output is exempt. Paths are compared as strings, so
   # they are not realised for the check.
   #
-  # One toolchain reference is allowed (decision 134): a toolchain path
+  # One toolchain reference is allowed: a toolchain path
   # that holds a shared library the checked output itself loads. The
   # needed libraries are read from the output's files (ELF `NEEDED`, PE
   # imports), and a toolchain path is allowed when one of them is a file in
@@ -857,7 +857,7 @@ let
   # GCC's runtime libraries, which manylinux's policy (PEP 599 and later)
   # also allows, since nearly every glibc system has them: the unwinder
   # and C++ standard library a C++ dependency built with g++ loads.
-  # linuxPortable allows them by default (decision 145); a Rust program
+  # linuxPortable allows them by default; a Rust program
   # linked by zig needs neither (zig links its own unwinder).
   gccRuntimeLibraries = [
     "libgcc_s.so.1"
@@ -915,7 +915,7 @@ let
             touch $out/needed
           ''
       );
-  # A check (decision 144): no file in its input names a Nix store path,
+  # A check: no file in its input names a Nix store path,
   # anywhere in its bytes: a program for other systems must not look for a
   # file in a store that is not there (a statically linked OpenSSL's
   # OPENSSLDIR, an rpath, an embedded tool path). Unlike Nix's reference

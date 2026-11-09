@@ -6,7 +6,7 @@
 # Presets (lib/presets) fill it in; any field can be overridden. The
 # options are declared in ./target-spec.nix.
 #
-# Specs are resolved per (workspace, target) (decision 70): `targets.<t>`
+# Specs are resolved per (workspace, target): `targets.<t>`
 # holds the repository-wide definitions, `workspaces.<ws>.targets.<t>` a
 # workspace's own, and lib/repository.nix evaluates both together with
 # the workspace's toolchain, so a preset gets that workspace's rustc.
@@ -14,9 +14,10 @@
 #
 # How the fields reach units (lib/repository.nix, breakbulk-plan's spec.rs):
 #  - `rustflags`, `linker`, `host.linker` go to Cargo with `--config`
-#    (rustflags under the key the project uses; decision 33). On a
-#    same-triple target the planner rewrites host units' linker to
-#    `host.linker`.
+#    (rustflags under the key the project already uses: Cargo reads only
+#    one rustflags key, so flags under the other one would make it ignore
+#    the project's). On a same-triple target the planner rewrites host
+#    units' linker to `host.linker`.
 #  - `cc`, `cxx`, `ar`, `cflags`, `bindgen.extraClangArgs` become
 #    `CC_<triple>`, `CXX_<triple>`, `AR_<triple>`, `CFLAGS_<triple>` and
 #    `CXXFLAGS_<triple>`, `BINDGEN_EXTRA_CLANG_ARGS_<triple>` in `env`.

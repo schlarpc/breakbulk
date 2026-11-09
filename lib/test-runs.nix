@@ -180,7 +180,7 @@ rec {
     exportDylib
     ;
 
-  # Decision 94: what test runs read from the Rust toolchain, the shared
+  # What test runs read from the Rust toolchain, the shared
   # libraries of the sysroot's target library directory (`libstd-*.so`, for
   # binaries linked with `-C prefer-dynamic` and the like), copied into a
   # small derivation laid out as a sysroot (`lib/rustlib/<target>/lib`).
@@ -376,7 +376,7 @@ rec {
     else
       "__bb_env+=(${lib.escapeShellArg "${k}=${v}"})\n";
 
-  # Decision 61: stable inputs for content-addressed test runs. A run spec
+  # Stable inputs for content-addressed test runs. A run spec
   # names the `flags` of every build-script run of its platform
   # (the dynamic-library path, as Cargo builds it) and the `flags` of its
   # package's build script (`rustc-env`). Those are input-addressed, so an
@@ -437,7 +437,7 @@ rec {
       envFlags = lib.optional (spec.envFlags != [ ]) env;
     };
 
-  # Decision 17, `test.stripForRun`: shell lines defining `stripForRun`,
+  # `test.stripForRun`: shell lines defining `stripForRun`,
   # which strips debug info from the copy of a test binary its run
   # consumes, so the source paths that the debug info of workspace
   # libraries holds do not change the run's input. The GNU build ID goes
@@ -486,7 +486,7 @@ rec {
         ''}
       '';
 
-  # Decision 61, `test.runFiles`: a spec whose working directory and
+  # `test.runFiles`: a spec whose working directory and
   # runtime CARGO_MANIFEST_DIR are `dir`, the package directory of a view
   # holding only the listed files (lib/workspace.nix `runFilesDirs`).
   narrowSpec =

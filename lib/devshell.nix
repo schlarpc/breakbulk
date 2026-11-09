@@ -20,7 +20,7 @@
 #    otherwise), so local `-C metadata` matches the plan's. It comes from
 #    the same `cargo-env.json`, by the planner's own file-reading rule, so
 #    the shell opens with a broken manifest on every Cargo version
-#    (decision 135; a manifest that is not valid TOML is a warning).
+#    (a manifest that is not valid TOML is a warning).
 #  - The union of the workspace's packages' inputs on the native platform,
 #    through nixpkgs' own setup hooks (what the env captures record per
 #    package). One shell cannot scope env per unit, and a union is only

@@ -18,7 +18,7 @@
 #  - `prePatch`/`postPatch` (evdev-sys touching libevdev/.git when cross
 #    compiling; proc-macro-crate >= 2.0 replacing `env::var("CARGO")`):
 #    sources are never patched. proc-macro-crate does not need it here,
-#    because units keep Cargo's `CARGO` (decision 48).
+#    because units keep Cargo's `CARGO`.
 #  - evdev-sys's cross-only native inputs (python3, autoconf, automake,
 #    libtool; `buildPlatform != hostPlatform`): cross presets supply them.
 #  - nettle-sys's `clang` build input and `LIBCLANG_PATH` become
@@ -32,7 +32,7 @@
 #    tonic-reflection are kept as nixpkgs has them (their own build
 #    scripts compile protos).
 #  - Switches that make a crate use a system library instead of the one it
-#    bundles (decision 106). They change what gets built behind the
+#    bundles. They change what gets built behind the
 #    project's back (for example rusqlite's `bundled` feature would be
 #    ignored), so the library inputs are kept and the choice is left to
 #    the crate's own features and the project. Removed from nixpkgs'

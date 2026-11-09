@@ -39,7 +39,7 @@
 #   isLinux                a Linux userland: os linux (glibc, musl, …);
 #                          false for Android, whose userland (bionic, its
 #                          own linker and loader) breakbulk has no preset
-#                          for (decision 138; issue #27)
+#                          for (issue #27)
 #   isWindows isMsvc isMingw          os windows; env msvc; env gnu
 #   isApple isWasm isWasi isBareMetal isUefi
 #   objectFormat           "elf" | "pe" | "macho" | "wasm"
@@ -63,7 +63,7 @@
 #                          `when` is "always" (for every crate the linker
 #                          produces, whatever -C debuginfo says: the
 #                          `.pdb` of msvc and UEFI, which rustc links
-#                          MSVC-style and always passes /DEBUG; decision 97),
+#                          MSVC-style and always passes /DEBUG),
 #                          "split-packed" or "split-unpacked" (with
 #                          debuginfo on and that -C split-debuginfo).
 #                          `perObject`: one per object file (`.dwo`), not
@@ -344,8 +344,7 @@ let
       isApple = elem b.os appleOses;
       isWasm = wasmArch b.arch;
       isUefi = b.os == "uefi";
-      # A Linux userland; Android has the Linux kernel, not this
-      # (decision 138).
+      # A Linux userland; Android has the Linux kernel, not this.
       isLinux = b.os == "linux";
       isCuda = b.os == "cuda";
       # Cygwin's programs are PE files named as on Windows.
@@ -473,7 +472,7 @@ let
         else
           "LD_LIBRARY_PATH";
       dylibPathSep = if isWindows then ";" else ":";
-      # Decision 137: what a target's products do with debug info by
+      # What a target's products do with debug info by
       # default (`targets.<t>.debugInfo` overrides it): split it off into
       # a `debug` output on a Linux ELF target; elsewhere keep it in the
       # file (msvc's PDB is separate already; wasm and other targets have
@@ -533,7 +532,7 @@ let
   nativeTriple = pkgs: pkgs.stdenv.hostPlatform.rust.rustcTarget;
 
   # The name of the preset (`breakbulk.presets.<name>`) the native target
-  # gets when it sets none (decisions 105, 115), or null. It follows the
+  # gets when it sets none, or null. It follows the
   # `pkgs` given to mkRepository, not the machine evaluating: a glibc
   # Linux package set gets "linux", a musl one (`pkgs.pkgsMusl`, or
   # nixpkgs on a musl system) "linuxStatic".

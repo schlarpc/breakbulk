@@ -1,5 +1,4 @@
-# What breakbulk needs to know about a Rust toolchain, from one function
-# (decision 41's table-then-probe rule, for every fact):
+# What breakbulk needs to know about a Rust toolchain, from one function:
 #
 #   facts = breakbulk.toolchainFacts.of { inherit pkgs rustc cargo; };
 #   facts.version        "1.99.0" (rustc.version, else `rustc -vV`'s release)

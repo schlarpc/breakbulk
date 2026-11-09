@@ -234,9 +234,9 @@ rec {
     );
 
   # A tree with only those config files, the workspace root's Cargo.toml
-  # (read as TOML for `trim-paths`, decision 135; never by Cargo) and the
-  # workspace directory: what the dev shell's `cargo-env.json` derivation
-  # reads (lib/plan.nix mkCargoEnv; decision 81).
+  # (read as TOML for `trim-paths`; never by Cargo) and the workspace
+  # directory: what the dev shell's `cargo-env.json` derivation reads
+  # (lib/plan.nix mkCargoEnv).
   mkConfigSkeleton =
     pkgs:
     {

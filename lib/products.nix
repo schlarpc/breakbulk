@@ -11,7 +11,7 @@
 #                           # user's targets.<triple>.traits merged in
 #     stagePreset = null;   # a name in stages.defaultStageNames, or null
 #     debugInfo = null;     # "split" | "keep" | "strip", or null for the
-#                           # traits' default (decision 137)
+#                           # traits' default
 #     targetStages = { };   # targets.<triple>.stages
 #     targetChecks = { };   # targets.<triple>.checks
 #     packageConfig = pkg: [ { stages; checks; } … ];  # matching package
@@ -42,7 +42,7 @@
 # `packages.<name>` (unversioned keys first) its `stages` then its
 # `target.<triple>.stages`. Checks merge the same way over the default
 # `noSourceReferences`. What happens to debug info is the target's
-# decision (`debugInfo`, decision 137): a stage set that removes the stage
+# decision (`debugInfo`): a stage set that removes the stage
 # it inserts, or adds `splitDebug` where it inserts none, is an
 # evaluation error.
 #
@@ -58,8 +58,8 @@
 # build time, from its wrapper (`not-built`, lib/dynamic.nix): `linked`
 # leaves such roots out then. When it is left with none, it holds only
 # the no-binaries marker (`stages.noBinariesMarker`, with the reasons),
-# and every stage and check passes the marker on without running
-# (decision 112), so the product and its checks build in repo.checks
+# and every stage and check passes the marker on without running, so the
+# product and its checks build in repo.checks
 # whether or not Cargo built anything. `.unbuilt` is empty.
 {
   lib,
@@ -93,7 +93,7 @@ let
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
-  # A root's debuginfo side files (decisions 89 and 126): its unit's
+  # A root's debuginfo side files: its unit's
   # `debug` output, and those of the libraries below it (`.dwo` files with
   # split-debuginfo = "unpacked"), as paths that may not exist: in
   # dynamic-derivation mode the wrapper's `debug` directory links them all.
@@ -110,10 +110,10 @@ let
   # the root units' debuginfo side files (`debug`) under the names Cargo
   # uplifts them to: a bin's `.dwp` renamed as the bin is (`<bin>.dwp`),
   # `.pdb` and `.dwo` under rustc's names, which the binaries record, with
-  # the `.dwo` files of the libraries below each root (decision 155).
+  # the `.dwo` files of the libraries below each root.
   # Dynamic-derivation roots are read through their wrappers and left out
   # when not built. `debug` is declared only when a root can have side
-  # files (decision 97): a root unit or a library below it with a `debug`
+  # files: a root unit or a library below it with a `debug`
   # output, or any dynamic-derivation root (its unit's outputs are not
   # known at evaluation).
   mkLinked =
@@ -203,7 +203,7 @@ let
           for s in "''${skipped[@]}"; do
             printf 'breakbulk: left out of ${pkg}: %s\n' "$s" >&2
           done
-          # Decision 112: nothing to ship. The marker, with the reasons,
+          # Nothing to ship. The marker, with the reasons,
           # makes every later stage and check pass it on.
           if [ "$linked" -eq 0 ] && [ ''${#skipped[@]} -gt 0 ]; then
             printf '%s\n' "''${skipped[@]}" > $out/${stages.noBinariesMarker}
@@ -212,7 +212,7 @@ let
         ''
       );
 
-  # Decision 137: what happens to a target's debug info is one property of
+  # What happens to a target's debug info is one property of
   # the target, `targets.<triple>.debugInfo` (default: the traits'
   # `debugInfo`), and three things follow from it: the stage it puts first
   # in every product's chain (`splitDebug` for "split", `strip` for
@@ -222,7 +222,7 @@ let
   # splitDebug needs). The units are shared by every package of the target,
   # so neither the target's nor a package's `stages` may remove that stage,
   # or add `splitDebug` where the target does not split: either is an
-  # evaluation error naming `debugInfo` (decision 90 made it a warning).
+  # evaluation error naming `debugInfo`.
   # Overriding the inserted stage's attributes (`run`, `after`) is allowed.
   #
   # `targetStageSet`'s arguments: { triple; traits; stagePreset; debugInfo;
@@ -272,7 +272,7 @@ let
     set:
     let
       auto = debugStageName debugInfo;
-      fix = "debug splitting is decided per target, for every package of it (decision 137): set `targets.\"${triple}\".debugInfo` (\"split\", \"keep\" or \"strip\")";
+      fix = "debug splitting is decided per target, for every package of it: set `targets.\"${triple}\".debugInfo` (\"split\", \"keep\" or \"strip\")";
     in
     if auto != null && set ? ${auto} && set.${auto} == null then
       throw "breakbulk: ${where} removes the `${auto}` stage on ${triple}, which `debugInfo = \"${debugInfo}\"` inserts; ${fix}"

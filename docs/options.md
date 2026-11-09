@@ -989,7 +989,9 @@ Content-address post-link stages, checks and test runs, so that an
 unchanged input does not re-run them\. Needs Nix’s ` ca-derivations `
 experimental feature in the evaluator and the daemon\. ` null ` turns
 it on exactly when the evaluator has ` dynamic-derivations ` (which
-needs ` ca-derivations ` too), and off otherwise (decision 52)\.
+needs ` ca-derivations ` too), and off otherwise: Nix code cannot
+tell whether ` ca-derivations ` is on, and without it a
+content-addressed derivation is an error that cannot be caught\.
 
 
 
@@ -1017,8 +1019,7 @@ NAR hashes of git sources, keyed by the full ` Cargo.lock ` source
 string\. Optional: with a hash, the fetch is fixed-output and a
 binary cache can serve it; without one, every fresh machine clones
 the source during evaluation\. The hash is that of the fetched tree
-(` builtins.fetchGit `’s ` narHash `), not crane’s ` outputHashes `
-(decision 14)\.
+(` builtins.fetchGit `’s ` narHash `), not crane’s ` outputHashes `\.
 
 
 
@@ -1531,7 +1532,7 @@ null
 
 
 
-What this target’s products do with debug info (decision 137),
+What this target’s products do with debug info,
 for every package of the target, because the units are shared:
 
  - ` "split" `: the ` splitDebug ` stage, first after ` linked `, moves
@@ -2065,7 +2066,7 @@ false
 
 Who hides source paths in Rust code when Cargo has
 ` trim-paths ` (1\.101 and later: the toolchain’s ` trimPaths `
-capability; decision 121)\. ` null `: breakbulk turns it on
+capability)\. ` null `: breakbulk turns it on
 (` --config profile.<p>.trim-paths="all" `) unless the project
 declares ` trim-paths ` in any profile of the workspace root’s
 ` Cargo.toml ` or of its ` .cargo/config.toml ` files (any profile,
@@ -2328,8 +2329,8 @@ null
 
 
 
-Whether source paths are hidden in what this workspace builds
-(decision 121)\. ` hide `: as ` cargoTrimPaths ` says, through
+Whether source paths are hidden in what this workspace builds\.
+` hide `: as ` cargoTrimPaths ` says, through
 Cargo’s trim-paths or breakbulk’s own remaps, and every product
 gets the ` noSourceReferences ` check\. ` keep `: breakbulk neither
 turns Cargo’s trim-paths on nor adds remaps of its own (Rust or
@@ -3061,7 +3062,7 @@ other build or coverage variant’s as
 no test runs; their ` check ` is in ` repo.checks ` regardless\.
 Variants made by ` breakbulk.variants.featurePowerset ` and
 ` packageFeaturePowerset ` set this to ` false ` unless their
-arguments set it (decision 133)\.
+arguments set it\.
 
 
 

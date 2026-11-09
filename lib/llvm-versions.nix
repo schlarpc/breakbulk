@@ -8,7 +8,7 @@
 # evaluation time). For a rustc outside the table (older than its first
 # release, newer than `verifiedThrough`, or without a `version`), the major
 # is read from `rustc -vV` by a tiny derivation, through
-# import-from-derivation (decision 41), instead of failing.
+# import-from-derivation, instead of failing.
 #
 # Source: `rustc -vV` ("LLVM version") of every rust-overlay stable
 # toolchain 1.90.0 to 1.99.1 and nightly 1.101.0 (2026-11), at the

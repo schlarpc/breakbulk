@@ -59,7 +59,7 @@
       # The toolchain's capabilities (lib/toolchain-facts.nix), or null for
       # toolchainFacts' own for this rustc and cargo.
       capabilities ? null,
-      # Cargo's trim-paths (decision 121): "auto" (on when the toolchain
+      # Cargo's trim-paths: "auto" (on when the toolchain
       # has it, unless the project declares it), "on" or "off".
       trimPaths ? "auto",
     }:
@@ -160,12 +160,11 @@
   # environment configuration, as the planner passes it with `--config`
   # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), and
   # CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner would turn Cargo's
-  # trim-paths on (decision 135: the same rule, from the workspace root's
+  # trim-paths on (the same rule, from the workspace root's
   # Cargo.toml and the config files, read as TOML; a file that does not
   # parse is a warning; the toolchain's `trimPaths` capability). Computed
   # apart from the plan, from those files and `rustc --print cfg` only, so
-  # the dev shell still opens while a manifest is broken and planning fails
-  # (decision 81).
+  # the dev shell still opens while a manifest is broken and planning fails.
   #
   #   breakbulk.mkCargoEnv pkgs { configSkeleton; wsDir; rustc; tools; target; spec; capabilities; profile; trimPaths; }
   #   "''${drv}/cargo-env.json"

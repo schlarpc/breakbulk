@@ -7,7 +7,7 @@
 #   targets.wasm32-wasip2.preset = breakbulk.presets.wasmComponent { withC = true; };
 #
 # withC = true: C code compiles against the headers of the wasi-sdk
-# release whose wasi-libc the Rust toolchain bundles (decision 99): one
+# release whose wasi-libc the Rust toolchain bundles: one
 # wasi-libc version for std, the C code and the library linked. rustc links
 # libc.a and the crt1 objects from its own "self-contained" directory as
 # usual; breakbulk adds no library path and swaps no objects. The sysroot

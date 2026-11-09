@@ -14,7 +14,8 @@ rec {
 
   # A list of packages, or a function from a package set to one. The
   # function form (`p: [ p.openssl ]`) is called with the package set that
-  # matches each platform (decision 20); a plain list is used as given.
+  # matches each platform, rather than taking separate host and target
+  # lists, which are easy to mix up; a plain list is used as given.
   # Several definitions concatenate, whatever form each one has.
   inputs = types.coercedTo (types.listOf types.package) (l: _: l) (
     types.functionTo (types.listOf types.package)

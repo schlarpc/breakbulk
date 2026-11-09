@@ -203,7 +203,7 @@ let
             no test runs; their `check` is in `repo.checks` regardless.
             Variants made by `breakbulk.variants.featurePowerset` and
             `packageFeaturePowerset` set this to `false` unless their
-            arguments set it (decision 133).
+            arguments set it.
           '';
         };
         cargoTrimPaths = mkOption {
@@ -417,7 +417,7 @@ let
           description = ''
             Who hides source paths in Rust code when Cargo has
             `trim-paths` (1.101 and later: the toolchain's `trimPaths`
-            capability; decision 121). `null`: breakbulk turns it on
+            capability). `null`: breakbulk turns it on
             (`--config profile.<p>.trim-paths="all"`) unless the project
             declares `trim-paths` in any profile of the workspace root's
             `Cargo.toml` or of its `.cargo/config.toml` files (any profile,
@@ -439,8 +439,8 @@ let
           ];
           default = "hide";
           description = ''
-            Whether source paths are hidden in what this workspace builds
-            (decision 121). `hide`: as `cargoTrimPaths` says, through
+            Whether source paths are hidden in what this workspace builds.
+            `hide`: as `cargoTrimPaths` says, through
             Cargo's trim-paths or breakbulk's own remaps, and every product
             gets the `noSourceReferences` check. `keep`: breakbulk neither
             turns Cargo's trim-paths on nor adds remaps of its own (Rust or

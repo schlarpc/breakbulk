@@ -47,13 +47,12 @@
 # `null` removes one. `noSourceReferences` is added by default
 # (`defaultChecks = false` turns it off).
 #
-# Every stage and check runs through a guard (decision 112): when its
+# Every stage and check runs through a guard: when its
 # input holds `noBinariesMarker` (a `linked` stage of a product Cargo
 # built no binary of, in dynamic-derivation mode), it copies the marker to
 # its outputs and succeeds without running its own builder. A stage or
 # check made with a bare `derivation` call (no `overrideAttrs`) is guarded
-# too: it is rebuilt from its `drvAttrs` with the guard as builder
-# (decision 147).
+# too: it is rebuilt from its `drvAttrs` with the guard as builder.
 #
 # Content addressing: with `ca`, every stage and check derivation gets
 # `__contentAddressed = true; outputHashMode = "recursive";
@@ -96,7 +95,7 @@ let
 
   caAuto = builtins ? outputOf;
 
-  # Decision 112: the file a product's `linked` stage holds instead of
+  # The file a product's `linked` stage holds instead of
   # binaries when Cargo built none of them (dynamic-derivation mode, where
   # that is known only at build time; it holds the reasons). Every stage
   # and check is guarded (`guard`): given an input with this file, it
@@ -137,7 +136,7 @@ let
   # A derivation changed by `f` over its attributes: through
   # `overrideAttrs` when it has one (mkDerivation, runCommand; their paths
   # stay those of the plain override), else rebuilt with `derivation` from
-  # its `drvAttrs` (a bare `derivation` call, decision 147), keeping any
+  # its `drvAttrs` (a bare `derivation` call), keeping any
   # attributes the caller added to the result. `f` gets the attributes and
   # whether they are mkDerivation's.
   modifyDrv =
@@ -185,8 +184,7 @@ let
 
   # Default stage chains per preset (`stagePreset`), as data. Debug
   # handling is not among them: mkRepository puts the stage of the
-  # target's `debugInfo` (`splitDebug`, `strip`) first (lib/products.nix,
-  # decision 137).
+  # target's `debugInfo` (`splitDebug`, `strip`) first (lib/products.nix).
   defaultStageNames = {
     wasmWeb = [
       "bindgen"
@@ -355,7 +353,7 @@ let
       product = {
         inherit name sourcePaths toolchainPaths;
       }
-      # The link units' debuginfo side files (decision 89), for the stage
+      # The link units' debuginfo side files, for the stage
       # that writes the product's `debug` output.
       // lib.optionalAttrs (linked ? debug) { linkedDebug = linked.debug; }
       // info;

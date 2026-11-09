@@ -19,9 +19,9 @@
 #
 # Through `preset`, a target's preset is applied once per workspace and
 # given that workspace's toolchain (`toolchain`, see mkPreset), so presets
-# that need rustc's LLVM or wasi-sdk version follow each workspace's rustc
-# (decision 70). Calling a preset directly (`presets.windows { inherit pkgs
-# triple sdk; … }`) has no workspace: pass `rustc` there.
+# that need rustc's LLVM or wasi-sdk version follow each workspace's rustc.
+# Calling a preset directly (`presets.windows { inherit pkgs triple sdk;
+# … }`) has no workspace: pass `rustc` there.
 #
 # Every preset sets the host spec (`host.linker`, `host.env`) from
 # `pkgs.buildPackages`, so host units (build scripts, proc macros and their
@@ -56,7 +56,7 @@ let
   # which a target passes when it applies the preset for one workspace
   # (lib/modules/target-spec.nix): its `rustc` becomes the preset's `rustc`
   # unless one was given, so LLVM tools and the wasi-sdk follow each
-  # workspace's compiler (decision 70). Every stage advertises `toolchain`
+  # workspace's compiler. Every stage advertises `toolchain`
   # in its function arguments; a preset that does not (a plain user
   # function) is called without it.
   mkPreset =
@@ -560,7 +560,7 @@ in
   inherit (runnerChoice) runnerKind;
 
   # Presets are named for what they are for; the mechanism follows from
-  # the target triple's traits (decision 139). Options that do not apply
+  # the target triple's traits. Options that do not apply
   # to the triple's mechanism are ignored, so one bound preset can serve
   # several targets (`windows { inherit sdk; }` for an msvc and a gnu
   # triple).
@@ -595,7 +595,7 @@ in
       throw "breakbulk.presets.linuxStatic: `${triple}` is not a Linux -musl or -gnu triple"
   );
 
-  # Linux programs that run on other distributions (decision 122):
+  # Linux programs that run on other distributions:
   # `linuxPortable { glibc = "2.17"; systemLibraries = [ ]; backend =
   # "zig"; rebuildInputs = [ ]; }` (./linux-portable.nix).
   inherit (impl) linuxPortable;

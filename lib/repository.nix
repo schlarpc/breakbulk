@@ -328,7 +328,7 @@ let
         includeIgnored = false;
         sourceScope = [ ];
         binaries = { };
-        # The workspace's defaults (decision 93); package settings win.
+        # The workspace's defaults; package settings win.
         runFiles = null;
         inherit (cfg.workspaces.${wsName}.test) runner nextest stripForRun;
       };
@@ -353,7 +353,7 @@ let
       );
     });
 
-  # --- target specs, per workspace (decision 70) ------------------------------
+  # --- target specs, per workspace -------------------------------------------
   #
   # The spec of one workspace on one triple: the repository-wide
   # `targets.<triple>` and the workspace's own `workspaces.<ws>.targets.<triple>`
@@ -632,8 +632,8 @@ let
     ws: triple: lib.filterAttrs (_: v: v.targets == null || lib.elem triple v.targets) ws.variants;
 
   # The target's stage set's inputs (lib/products.nix targetStageSet): one
-  # decision, per target, of what happens to debug info (`debugInfo`,
-  # decision 137), read by the products, the remap scope and the build ID
+  # decision, per target, of what happens to debug info (`debugInfo`),
+  # read by the products, the remap scope and the build ID
   # alike.
   stageSetArgs = wsName: triple: {
     inherit triple;
@@ -699,7 +699,7 @@ let
       targetEnv = buildId // (s.mkWorkspace.targetEnv or { });
     }
     # Coverage: `-C instrument-coverage` on target units, through the
-    # spec's rustflags (so under the key the project uses, decision 33).
+    # spec's rustflags (so under the key the project uses).
     // lib.optionalAttrs (v.mode == "coverage") {
       spec =
         let
@@ -889,8 +889,8 @@ let
             // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
               # Every unit of both plans (`cargo check` and `cargo check
               # --all-targets`): for clippy, its lints on every workspace
-              # member. With `allTargets = false`, the build plan's only
-              # (decision 108); the test plan is then never planned.
+              # member. With `allTargets = false`, the build plan's only;
+              # the test plan is then never planned.
               check = variantsLib.unitsCheck {
                 inherit pkgs;
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
@@ -979,7 +979,7 @@ let
         # variant's profile (IFD: a small derivation that reads the
         # project's Cargo config and root manifest as files and asks rustc,
         # apart from planning, so a broken manifest does not break the
-        # shell; decisions 81, 135). The file names tool paths without
+        # shell). The file names tool paths without
         # their context; the spec's own values carry it.
         cargoEnv =
           let
@@ -1021,7 +1021,7 @@ let
         # IFD mode leaves out a product whose roots Cargo all skipped (it is
         # a stub). Dynamic-derivation mode cannot tell at evaluation time:
         # such a product holds only the no-binaries marker and its stages
-        # and checks pass it on (decision 112), so it is in like any other.
+        # and checks pass it on, so it is in like any other.
         lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
           {
             "${wsName}/${triple}/${pkg}/build" = p;

@@ -1,5 +1,5 @@
 # The wasi-sdk sysroot matching the wasi-libc a Rust release bundles for
-# its WASI targets (decision 99), so C code compiles against the same
+# its WASI targets, so C code compiles against the same
 # wasi-libc headers whose libc.a and crt1 objects rustc links from its
 # self-contained directory.
 #

@@ -1,4 +1,4 @@
-# linuxPortable (decision 122; was `zig`): Linux gnu programs that run on
+# linuxPortable: Linux gnu programs that run on
 # other distributions, linked against an old glibc (default 2.17, the
 # oldest Rust's std supports on x86_64). The one backend, "zig", uses
 # `zig cc -target <arch>-linux-gnu.<glibc>` as the target units' linker and
@@ -11,7 +11,7 @@
 # units only and host units (build scripts, proc macros) keep the host
 # linker through the planner's linker rewrite.
 #
-# Portable means (decision 122): everything Nix provides is linked
+# Portable means: everything Nix provides is linked
 # statically, and only glibc's own libraries (and GCC's runtime
 # libraries, libgcc_s.so.1 and libstdc++.so.6, as manylinux allows, and
 # the `systemLibraries` the user names, such as libGL.so.1, which the
@@ -61,7 +61,7 @@
   # [ "-lc++" ] for C++ code.
   warmFlags ? [ ],
   # Names of nixpkgs packages to rebuild with `zig cc` against `glibc`
-  # (decision 102), e.g. [ "openssl" "zlib" ]: `packages.<name>.inputs`
+  # e.g. [ "openssl" "zlib" ]: `packages.<name>.inputs`
   # functions get these from the target's package set instead of nixpkgs'
   # builds, which need nixpkgs' newer glibc. Each is
   # `pkgs.<name>.override { stdenv = makeStaticLibraries zigStdenv; … }`
@@ -197,8 +197,8 @@ let
     enableShared = false;
   };
 
-  # Rebuilds whose compiled-in paths would name the store (decision 144;
-  # the `portableNoStorePaths` check finds them). nixpkgs' static OpenSSL
+  # Rebuilds whose compiled-in paths would name the store (the
+  # `portableNoStorePaths` check finds them). nixpkgs' static OpenSSL
   # configures OPENSSLDIR as its `etc` output (ENGINESDIR below it) and
   # MODULESDIR as `$out/lib/ossl-modules`; all three are compiled into
   # libcrypto from make variables (`-DOPENSSLDIR="\"$(OPENSSLDIR)\""`,
@@ -302,14 +302,14 @@ in
   # archive exists), as for linuxStatic; target units only.
   env.PKG_CONFIG_ALL_STATIC = mkDefault "1";
   # The auditwheel-like check: NEEDED names only glibc's libraries, GCC's
-  # runtime libraries (decision 145) and `systemLibraries`.
+  # runtime libraries and `systemLibraries`.
   checks.portableLibraries = {
     run = stageHelpers.neededLibraries {
       allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
       why = "linuxPortable links everything Nix provides statically (rebuildInputs builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
     };
   };
-  # No Nix store path anywhere in a product's files (decision 144): on
+  # No Nix store path anywhere in a product's files: on
   # another system nothing is there.
   checks.portableNoStorePaths = {
     run = stageHelpers.noStorePaths {

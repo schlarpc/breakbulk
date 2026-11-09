@@ -16,10 +16,9 @@
 # gives one variant per subset of `features`, each with
 # `noDefaultFeatures = true` (as `cargo hack --feature-powerset` does) and
 # `features` set to the subset, and `checks = false` (pass `checks = true`
-# to put their test runs and doctests in repo.checks; decision 133). Units
-# identical between variants are
-# shared, so the cost is the crates whose features differ. That is a
-# workspace-wide matrix; cargo-hack's own is per package:
+# to put their test runs and doctests in repo.checks). Units identical
+# between variants are shared, so the cost is the crates whose features
+# differ. That is a workspace-wide matrix; cargo-hack's own is per package:
 #
 #   workspaces.main.variants =
 #     { default = { }; }
@@ -102,7 +101,7 @@ let
           {
             noDefaultFeatures = true;
             # Generated variants' test runs stay out of repo.checks unless
-            # asked for (decision 133).
+            # asked for.
             checks = false;
           }
           // settings

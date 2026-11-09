@@ -110,7 +110,7 @@ pkgs:
   # `--remap-path-scope` for non-test compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
-  # Decision 121: whether the planner turns Cargo's trim-paths on (null:
+  # Whether the planner turns Cargo's trim-paths on (null:
   # unless the project declares it; true; false), and whether source paths
   # are hidden at all ("hide") or left as they are ("keep": no trim-paths
   # from breakbulk and no remaps of its own).
@@ -213,7 +213,7 @@ let
     )
   );
 
-  # Members with `test.runFiles` (decision 61): the package directory of a
+  # Members with `test.runFiles`: the package directory of a
   # view of the repository root holding only those paths (relative to the
   # package directory, at their usual places), by package name. Test runs
   # use it as their working directory and runtime CARGO_MANIFEST_DIR. A
@@ -251,7 +251,7 @@ let
   # Check and clippy variants link nothing: no roots, no test runs.
   checking = mode == "check" || mode == "clippy";
 
-  # breakbulk-plan's `--trim-paths` (decision 121).
+  # breakbulk-plan's `--trim-paths`.
   trimPaths =
     if sourcePaths == "keep" then
       "off"
@@ -310,7 +310,7 @@ let
   # gives the base capture when it declares no inputs), and its env.
   # A package without inputs has no capture of its own (null), as in
   # mkRepository: its units get the platform's base capture, and linking
-  # units of its dependents add nothing for it (decision 107).
+  # units of its dependents add nothing for it.
   overrides = lib.mapAttrs (
     n: o:
     lib.genAttrs [ "host" "target" ] (
@@ -366,7 +366,7 @@ let
   isDynamic = delivery == "dynamic";
   breakbulkDrv = tools.breakbulk-drv or (dynamic.mkBreakbulkDrv pkgs);
   # Dynamic-derivation mode: the outer derivation is named
-  # `<ws>-<triple>-<variant>` for the build plan (decision 27), with `-test`
+  # `<ws>-<triple>-<variant>` for the build plan, with `-test`
   # for the test plan, since each plan has its own.
   # The libraries `cargo test --doc` covers (roots.nix `doc`) among the
   # selected members: in dynamic-derivation mode the test plan's outer
@@ -499,7 +499,7 @@ in
     ;
   skeleton = skel;
   # The toolchain spec as Cargo env config, for the dev shell; independent
-  # of the plans (decision 81).
+  # of the plans, so the shell opens even when planning fails.
   cargoEnv = mkCargoEnv pkgs {
     configSkeleton = skeleton.mkConfigSkeleton pkgs { inherit root wsDir; };
     inherit

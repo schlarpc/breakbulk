@@ -18,7 +18,7 @@
 let
   inherit (lib) types mkOption;
 
-  # Decisions 105, 115: on Linux the native target gets `presets.linux`
+  # On Linux the native target gets `presets.linux`
   # (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`) unless another
   # preset is set, so the native linker is nixpkgs' wrapped cc with mold,
   # as on every other target, instead of rustc's bundled rust-lld. A target
@@ -340,7 +340,7 @@ in
       default = null;
       example = "keep";
       description = ''
-        What this target's products do with debug info (decision 137),
+        What this target's products do with debug info,
         for every package of the target, because the units are shared:
 
         - `"split"`: the `splitDebug` stage, first after `linked`, moves

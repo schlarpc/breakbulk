@@ -90,7 +90,7 @@ rec {
       # whose products split debug info off (`"macro,diagnostics"`), or
       # null for every scope. See inputs.rs `shipped_remap_scope`.
       shippedRemapScope ? null,
-      # `sourcePaths = "keep"` (decision 121): no remaps of breakbulk's own.
+      # `sourcePaths = "keep"`: no remaps of breakbulk's own.
       keepSourcePaths ? false,
       # The target's traits as breakbulk-instantiate reads them
       # (`breakbulk.targetTraits.forRust`, lib/target-traits.nix).
@@ -247,8 +247,8 @@ rec {
             # Product roots: the target-platform runs below the unit (#23).
             buildScriptRuns = r.buildScriptRuns or [ ];
             # Product roots: the `debug` outputs of the units below (the
-            # libraries' `.dwo` files with split-debuginfo = "unpacked",
-            # decision 126), for the `linked` stage.
+            # libraries' `.dwo` files with split-debuginfo = "unpacked"),
+            # for the `linked` stage.
             debugBelow = map (id: units.${id}.debug) (r.debugUnits or [ ]);
           };
         }
