@@ -13,6 +13,7 @@
 - [Rebuild less when unrelated files change](how-to/filter-source.md)
 - [Format with treefmt](how-to/treefmt.md)
 - [Use a binary cache](how-to/binary-cache.md)
+- [Use a flake with several systems](how-to/multi-system.md)
 
 # Reference
 
