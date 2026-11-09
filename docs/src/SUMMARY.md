@@ -8,6 +8,10 @@
 
 # How-to guides
 
+- [Add a native library](how-to/native-library.md)
+- [Build for another target](how-to/targets.md)
+- [Rebuild less when unrelated files change](how-to/filter-source.md)
+- [Format with treefmt](how-to/treefmt.md)
 - [Use a binary cache](how-to/binary-cache.md)
 
 # Reference

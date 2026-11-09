@@ -23,7 +23,7 @@ Cargo's exact command line. So:
 
 - **[Tutorials](tutorials/first-project.md)** teach by doing. Start here if
   you have not used breakbulk before.
-- **[How-to guides](how-to/binary-cache.md)** solve one task each, for
+- **[How-to guides](how-to/native-library.md)** solve one task each, for
   readers who know the basics.
 - **Reference** lists facts: every [module option](reference/options.md),
   the [presets](reference/presets.md), and what breakbulk
