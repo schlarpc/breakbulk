@@ -21,7 +21,7 @@
 #   p                  the product (the last stage's output)
 #   p.stages.<name>    every stage, `linked` included
 #   p.stageOrder       stage names in order, without `linked`
-#   p.debug            the split debug output, when a stage produced one
+#   p.debug            the `debug` output of the last stage that has one
 #                      (splitDebug; install, for the link units' `.pdb` and
 #                      other debuginfo side files when nothing split before)
 #   p.checks.<name>    every check, `noSourceReferences` included
@@ -37,7 +37,10 @@
 #   - A stage set to `null` (e.g. `lib.mkForce null` in the module system)
 #     is removed. Constraints that name a removed stage are dropped.
 #   - `install` (helpers.install) is added unless the set has `install`;
-#     it always runs last; `install = null` removes it.
+#     `install = null` removes it. A stage runs before `install` unless it
+#     is ordered after it, by `after = "install"` or after a stage that is.
+#     Stages before `install` see the flat link output (what the helpers
+#     expect); stages after it see the installed layout (bin/, lib/, pkg/).
 #   - The order must be total: every stage must be ordered relative to the
 #     next by its constraints. A cycle, a missing reference or two stages
 #     whose relative order is not given fail evaluation, listing every stage
@@ -266,10 +269,25 @@ let
         }
       ) live;
 
-      # x must come before y.
+      # x must come before y by the stages' own constraints.
+      explicit = x: y: x != y && (elem x cons.${y}.after || elem y cons.${x}.before);
+      reachBy =
+        rel: x:
+        map (e: e.key) (
+          builtins.genericClosure {
+            startSet = map (key: { inherit key; }) (filter (rel x) names);
+            operator = e: map (key: { inherit key; }) (filter (rel e.key) names);
+          }
+        );
+      # The stages ordered after `install`, directly or through another
+      # stage. Counting only those that name `install` would also put a
+      # stage that is `after` one of them before `install`: a cycle.
+      afterInstall = if isLive "install" then reachBy explicit "install" else [ ];
+      # x must come before y: by constraint, or because every other stage
+      # runs before `install` by default.
       edge =
         x: y:
-        x != y && (elem x cons.${y}.after || elem y cons.${x}.before || (y == "install" && x != "install"));
+        explicit x y || (y == "install" && x != "install" && !(elem x afterInstall));
 
       fmtList = l: if l == [ ] then "-" else concatStringsSep ", " l;
       width = lib.foldl' (w: n: lib.max w (lib.stringLength n)) 6 names;
@@ -282,7 +300,7 @@ let
             c = cons.${n};
           in
           "  ${pad n}  after: ${fmtList c.rawAfter}; before: ${fmtList c.rawBefore}${
-              lib.optionalString (n == "install") "; runs last"
+              lib.optionalString (n == "install") "; others run before it unless ordered after it"
             }"
         ) names
         ++ lib.optional (removed != [ ]) "  removed: ${concatStringsSep ", " removed}"
@@ -297,16 +315,7 @@ let
       beforeLinked = filter (n: elem "linked" cons.${n}.rawBefore) names;
       sorted = lib.toposort edge names;
       # The stages on some cycle: those that can reach themselves.
-      succ = x: filter (edge x) names;
-      reach =
-        x:
-        map (e: e.key) (
-          builtins.genericClosure {
-            startSet = map (key: { inherit key; }) (succ x);
-            operator = e: map (key: { inherit key; }) (succ e.key);
-          }
-        );
-      onCycle = filter (x: elem x (reach x)) names;
+      onCycle = filter (x: elem x (reachBy edge x)) names;
       order = sorted.result;
       pairs = if length order < 2 then [ ] else lib.zipLists (lib.init order) (lib.tail order);
       unordered = filter (p: !(edge p.fst p.snd)) pairs;

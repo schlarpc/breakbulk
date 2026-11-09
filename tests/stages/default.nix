@@ -5,7 +5,7 @@
 #
 #   stages-eval         evaluation-time assertions: ordering from after/
 #                       before, preset chains, removal with null, `install`
-#                       last, error messages for cycles, missing and
+#                       and stages after it, error messages for cycles, missing and
 #                       ambiguous references, CA attributes, helper options
 #   stages-chain        three logging stages run in the computed order;
 #                       every intermediate is addressable
@@ -15,6 +15,9 @@
 #                       `linked` sees the unstripped bytes; the main output
 #                       has no source reference and `debug` has one;
 #                       noSourceReferences fails on an unsplit product
+#   stages-after-install  a wrapProgram stage after `install`: no reference
+#                       to an earlier stage's output, `debug` kept on Linux
+#                       `split` and on msvc, a check on `install`
 #   stages-elf-helpers  strip, strip --strip-all, patchelfRpath
 #   stages-install      install layouts for unix (Linux, Apple), windows
 #                       (msvc, MinGW) and wasm inputs
@@ -217,7 +220,7 @@ let
       expr = orderOf { install = null; };
       expected = [ ];
     };
-    # A replaced install still runs last.
+    # A replaced install keeps its default position.
     testCustomInstall = {
       expr = orderOf (
         (S.chain [ "splitDebug" ])
@@ -250,7 +253,7 @@ let
           (has "  a        after: b; before: -" e)
           (has "  b        after: a; before: -" e)
           (has "  linked   first (fixed)" e)
-          (has "  install  after: -; before: -; runs last" e)
+          (has "  install  after: -; before: -; others run before it unless ordered after it" e)
         ];
       expected = [
         true
@@ -261,14 +264,87 @@ let
         true
       ];
     };
-    testAfterInstallIsCycle = {
-      expr = has "cycle" (errorOf {
+    # A stage after `install`, one after that, and one that names neither
+    # (before `install` by default).
+    testAfterInstall = {
+      expr = orderOf (
+        S.merge [
+          (S.chain [ "splitDebug" ])
+          {
+            wrap = {
+              after = "install";
+              run = dummy;
+            };
+            sign = {
+              after = "wrap";
+              run = dummy;
+            };
+            patch = {
+              after = "splitDebug";
+              run = dummy;
+            };
+          }
+        ]
+      );
+      expected = [
+        "splitDebug"
+        "patch"
+        "install"
+        "wrap"
+        "sign"
+      ];
+    };
+    testBeforeAfterInstalled = {
+      expr = orderOf {
+        early = {
+          before = "late";
+          run = dummy;
+        };
         late = {
+          after = "install";
+          run = dummy;
+        };
+      };
+      expected = [
+        "early"
+        "install"
+        "late"
+      ];
+    };
+    # Stages after `install` follow the same total-order rule.
+    testAfterInstallAmbiguous = {
+      expr = has "nothing orders `a` and `b`" (errorOf {
+        a = {
+          after = "install";
+          run = dummy;
+        };
+        b = {
           after = "install";
           run = dummy;
         };
       });
       expected = true;
+    };
+    testAfterInstallCycle = {
+      expr = has "cycle among install, late" (errorOf {
+        late = {
+          after = "install";
+          before = "install";
+          run = dummy;
+        };
+      });
+      expected = true;
+    };
+    # Without `install`, a constraint naming it is dropped.
+    testAfterRemovedInstall = {
+      expr = orderOf {
+        late = {
+          after = "install";
+          run = dummy;
+        };
+        install = null;
+      };
+      expected = [ "late" ];
     };
     testMissing = {
       expr =
@@ -399,6 +475,43 @@ let
         productIsInstall = true;
       };
     };
+    testDebugAfterInstall = {
+      expr = {
+        order = helloWrapped.stageOrder;
+        linux = helloWrapped.debug.drvPath == helloWrapped.stages.splitDebug.debug.drvPath;
+        msvc = msvcSigned.debug.drvPath == msvcSigned.stages.install.debug.drvPath;
+        msvcFinal = msvcSigned.drvPath == msvcSigned.stages.sign.drvPath;
+      };
+      expected = {
+        order = [
+          "splitDebug"
+          "install"
+          "wrap"
+        ];
+        linux = true;
+        msvc = true;
+        msvcFinal = true;
+      };
+    };
+    # The buildScriptFiles check suggests a place before `install`, not
+    # after the last stage.
+    testBuildScriptFilesStanza = {
+      expr =
+        (H.buildScriptFilesIncluded {
+          input = helloLinked;
+          product = {
+            name = "p";
+            buildScriptFlags = [ ];
+            stageOrder = [
+              "splitDebug"
+              "install"
+              "wrap"
+            ];
+          };
+          inherit pkgs;
+        }).stanza;
+      expected = "packages.p.stages.buildScriptFiles = { after = \"splitDebug\"; before = \"install\"; run = breakbulk.stageHelpers.buildScriptFiles { }; };";
+    };
     testCheckOnMissingStage = {
       expr =
         (builtins.tryEval
@@ -493,6 +606,69 @@ let
   };
 
   closureOf = d: "${pkgs.closureInfo { rootPaths = [ d ]; }}/store-paths";
+
+  # --- stages after install --------------------------------------------------
+
+  # wrapProgram after `install`: the wrapper names only its own output.
+  wrapStage =
+    { input, pkgs, ... }:
+    pkgs.runCommand "hello-wrapped" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+      cp -R ${input} $out
+      chmod -R u+w $out
+      wrapProgram $out/bin/hello --set HELLO_WRAPPED 1
+    '';
+  helloWrapped = S.mkProduct {
+    name = "hello-wrapped";
+    linked = helloLinked;
+    stages = S.chain [ "splitDebug" ] // {
+      wrap = {
+        after = "install";
+        run = wrapStage;
+      };
+    };
+    target.triple = "x86_64-unknown-linux-gnu";
+    sourcePaths = [ helloSrc ];
+    inherit pkgs;
+    checks.installed = {
+      on = "install";
+      run =
+        { input, pkgs, ... }:
+        pkgs.runCommand "hello-installed" { } ''
+          test -x ${input}/bin/hello
+          test ! -e ${input}/bin/.hello-wrapped
+          touch $out
+        '';
+    };
+  };
+
+  # An msvc product: `install` writes the PDB to its own `debug` output,
+  # which a later `sign` stage without one keeps.
+  msvcLinked = pkgs.runCommand "app-linked" {
+    outputs = [
+      "out"
+      "debug"
+    ];
+  } ''
+    mkdir $out $debug
+    echo exe > $out/app.exe
+    echo pdb > $debug/app.pdb
+  '';
+  msvcSigned = S.mkProduct {
+    name = "app";
+    linked = msvcLinked;
+    stages.sign = {
+      after = "install";
+      run =
+        { input, pkgs, ... }:
+        pkgs.runCommand "app-signed" { } ''
+          cp -R ${input} $out
+          chmod -R u+w $out
+          echo signed >> $out/bin/app.exe
+        '';
+    };
+    target.triple = "x86_64-pc-windows-msvc";
+    inherit pkgs;
+  };
 
   # --- chain -----------------------------------------------------------------
 
@@ -752,6 +928,37 @@ in
         # noSourceReferences fails on an unsplit product, naming the source.
         test "$(cat $unsplitFails/testBuildFailure.exit)" = 1
         grep -q 'references source ${helloSrc}' $unsplitFails/testBuildFailure.log
+        touch $out
+      '';
+
+  # A stage after `install`: the wrapper's closure holds no earlier
+  # stage's output, the build ID and debuglink survive wrapping, `debug`
+  # is splitDebug's, and a check on `install` sees the installed layout.
+  # On msvc a signing stage after `install` keeps install's PDB.
+  stages-after-install =
+    pkgs.runCommand "stages-after-install"
+      {
+        nativeBuildInputs = [ pkgs.binutils-unwrapped-all-targets ];
+        checks = lib.attrValues helloWrapped.checks;
+      }
+      ''
+        set -euo pipefail
+        p=${helloWrapped}
+        test "$($p/bin/hello)" = "hello 42"
+        grep -qF "$p/bin/.hello-wrapped" $p/bin/hello
+        for d in ${helloWrapped.stages.install} ${helloWrapped.stages.splitDebug} ${helloLinked}; do
+          if grep -qxF $d ${closureOf helloWrapped}; then
+            echo "the wrapped product references $d"; exit 1
+          fi
+        done
+
+        id=$(readelf -n $p/bin/.hello-wrapped | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
+        test -f ${helloWrapped.debug}/lib/debug/.build-id/''${id:0:2}/''${id:2}.debug
+        readelf --string-dump=.gnu_debuglink $p/bin/.hello-wrapped | grep -q "''${id:2}.debug"
+
+        grep -qx 'exe' ${msvcSigned}/bin/app.exe
+        grep -qx 'signed' ${msvcSigned}/bin/app.exe
+        test "$(cat ${msvcSigned.debug}/bin/app.pdb)" = pdb
         touch $out
       '';
 

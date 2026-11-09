@@ -721,7 +721,8 @@ let
       # Where the stage goes in this product: after its last stage before
       # `install`, before `install` (when it has one).
       order = product.stageOrder or [ "install" ];
-      before = lib.filter (s: s != "install") order;
+      installAt = lib.lists.findFirstIndex (s: s == "install") null order;
+      before = if installAt == null then order else lib.take installAt order;
       position =
         lib.optionalString (before != [ ]) "after = \"${lib.last before}\"; "
         + lib.optionalString (lib.elem "install" order) "before = \"install\"; ";
