@@ -34,7 +34,7 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 | `embed` | A host crate embedding a wasm product via env | linux-gnu + wasm | Host instantiation does not depend on the product; only the embedding chain references it; identical wasm bytes do not rebuild the host (dynamic-derivation mode) |
 | `stamps` | Git revision and `SOURCE_DATE_EPOCH` per package | linux-gnu | Only the stamped package's units change |
 | `msvc` | C code, a resource via `rustc-link-arg-bins`, bindgen | x86\_64 msvc, aarch64 msvc | Builds; tests pass under wine |
-| `wasm-browser` | wasm-bindgen, `ring`, getrandom backend cfg from config | wasm | Bindgen version matched; browser tests pass |
+| `wasm-browser` | wasm-bindgen, `ring`, getrandom backend cfg from config | wasm | Bindgen version matched; tests pass in Node, headless Chromium and headless Firefox |
 | `wasm-component` | C via `wasilibc`, componentize, metadata stamp | wasm | Component has no imports |
 | `static` | musl and static-glibc products | musl x2, host | No `INTERP` or `NEEDED`; build scripts dynamic |
 | `same-triple` | Target spec with a marker linker and marker env on the host triple | host | No host unit (build-script compile, proc macro, host run) sees either marker; target-platform build-script runs do see spec env |
@@ -85,5 +85,5 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and eve
 - A stable Nix for IFD mode, and Nix master (until a release ships `builder-rpc-v0`) with `dynamic-derivations` and `ca-derivations` enabled for dynamic-derivation mode.
 - A binary cache that stores realisations, for the CA island and embed tests.
 - An aarch64 builder for native test runs. Without one, qemu-user through binfmt.
-- wine and headless Chromium for runners.
+- wine, headless Chromium and headless Firefox for runners.
 - `allowUnfree` scoped to the xwin SDK, for the msvc fixtures.

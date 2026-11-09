@@ -43,7 +43,7 @@ The preset is named for what you want; the target triple picks how:
 | `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `rebuildInputs`: nixpkgs libraries to rebuild against that glibc (`[ "openssl" ]`) |
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |
-| `wasmWeb` | `browser`: the test runner, `"node"` (default) |
+| `wasmWeb` | `browser`: where tests run, `"node"` (default), `"chromium"` or `"firefox"` (headless) |
 | `wasmComponent` | `withC`: compile C code for the component |
 
 The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are

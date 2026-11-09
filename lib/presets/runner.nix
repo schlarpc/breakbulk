@@ -91,7 +91,7 @@ let
       wine ? pkgs.wineWow64Packages.minimal,
       # wasmtime: the wasmtime package.
       wasmtime ? pkgs.buildPackages.wasmtime,
-      # wasm-bindgen: "node" or "chromium".
+      # wasm-bindgen: "node", "chromium" or "firefox".
       browser ? "node",
     }:
     let

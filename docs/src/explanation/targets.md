@@ -22,15 +22,23 @@ This page explains what each kind of target gets, and why.
 | `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine |
 | `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
 | `aarch64-pc-windows-gnullvm` | yours + nixpkgs LLVM mingw-w64 cross | lld, through the MinGW C driver | none |
-| `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), or wasmtime |
+| `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), headless Chromium or Firefox, or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
 | `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none |
 
-"Yours" means the toolchain you give the workspace (see below). Headless
-Chromium as a wasm test runner crashes in the sandbox
-([#8](https://github.com/schlarpc/breakbulk/issues/8)), so Node is the
-default. macOS targets do not work yet
+"Yours" means the toolchain you give the workspace (see below). macOS
+targets do not work yet
 ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
+
+wasm tests run in Node by default. With `browser = "chromium"` or
+`"firefox"`, every test runs in that headless browser, inside the Nix
+sandbox:
+
+| Sandbox gap | What the runner does |
+| --- | --- |
+| No `/etc/fonts`: Chromium aborts in its font code once a page loads ("Unable to receive message from renderer") | Points `FONTCONFIG_FILE` at a fontconfig file with DejaVu fonts (the runner's `fonts` argument) |
+| Chromium's own sandbox (user namespaces), a small `/dev/shm` | Nothing: wasm-bindgen-test-runner always starts Chromium with `--no-sandbox` and `--disable-dev-shm-usage`. The Nix sandbox still contains the browser. |
+| No writable home | `HOME` and the browser profile live under `$TMPDIR` |
 
 Details: [Target traits and presets](internals/toolchains.md).
 

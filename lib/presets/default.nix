@@ -454,9 +454,10 @@ let
     # wasm32-unknown-unknown for the browser: rustc's own wasm linker flavor,
     # with the version-matched `wasm-ld` instead of rustup's rust-lld; C code
     # with unwrapped clang targeting wasm32; tests under
-    # wasm-bindgen-test-runner in Node.js (browser = "chromium" for headless
-    # Chromium). The runner is a function of the workspace's lockfile, since
-    # the runner must be the exact wasm-bindgen version.
+    # wasm-bindgen-test-runner in Node.js (browser = "chromium" or
+    # "firefox" for that headless browser). The runner is a function of the
+    # workspace's lockfile, since the runner must be the exact wasm-bindgen
+    # version.
     wasmWeb = mkPreset (
       {
         pkgs,

@@ -1,5 +1,5 @@
 // Run by wasm-bindgen-test-runner (Node.js by default; the preset's
-// browser = "chromium" runs them in headless Chromium).
+// browser = "chromium" or "firefox" runs them in that headless browser).
 use wasm_bindgen_test::wasm_bindgen_test;
 
 #[wasm_bindgen_test]

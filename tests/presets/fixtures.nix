@@ -854,6 +854,18 @@ let
     pkgs.runCommand "wasm-host-inputs" {
       ui = wasmHostInputs.workspaces.main.target.${wasm}.packages.ui;
     } "ls $ui/pkg/*.wasm > $out";
+  # The same tests in a headless browser, inside the sandbox.
+  wasmBrowserIn =
+    browser:
+    (mkRepo (fixtures + "/wasm-browser") [
+      {
+        workspaces.main = wasmWs;
+        targets.${wasm}.preset = presets.wasmWeb {
+          rustc = wasmRust;
+          inherit browser;
+        };
+      }
+    ]).workspaces.main.target.${wasm}.testRuns.ui.web;
   wasmBrowserChecks =
     let
       t = wasmBrowser.workspaces.main.target.${wasm};
@@ -868,6 +880,8 @@ let
     in
     {
       wasm-web-test = t.testRuns.ui.web;
+      wasm-web-test-chromium = wasmBrowserIn "chromium";
+      wasm-web-test-firefox = wasmBrowserIn "firefox";
       # The bindgen stage with the lockfile-matched CLI (0.2.130), then
       # wasm-opt; the JS glue loads in Node and computes the digest.
       wasm-web-bindgen =

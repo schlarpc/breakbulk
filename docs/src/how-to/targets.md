@@ -83,6 +83,7 @@ target. Choose one from [Presets](../reference/presets.md):
 | A Windows program | `x86_64-pc-windows-gnu` | `presets.windows` |
 | A Windows program (MSVC) | `x86_64-pc-windows-msvc` | `presets.windows { inherit sdk; }` (below) |
 | wasm for browsers | `wasm32-unknown-unknown` | `presets.wasmWeb` |
+| wasm for browsers, tests in headless Chromium | `wasm32-unknown-unknown` | `presets.wasmWeb { browser = "chromium"; }` |
 
 A target whose linker rustc chooses itself (UEFI, bare metal) needs no
 preset: `workspaces.default.targets.x86_64-unknown-uefi = { };` is

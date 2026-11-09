@@ -16,6 +16,7 @@
 #   runners.wasmtime { inherit pkgs; }                    WASI modules and components
 #   runners.wasmBindgenTest { inherit pkgs; wasmBindgen; browser = "node"; }
 #                                                        wasm-bindgen-test binaries
+#                                                        (or "chromium", "firefox")
 { lib }:
 let
   script =
@@ -103,11 +104,17 @@ in
   # wasm-bindgen-test-runner, which must be the exact version of the
   # wasm-bindgen crate the test was built with (breakbulk.wasmBindgen).
   # browser = "node": tests run in Node.js (wasm-bindgen-test's default for
-  # tests without `run_in_browser`). browser = "chromium": headless
-  # Chromium through chromedriver, with a profile under $TMPDIR; tests
-  # marked `run_in_browser` need it. Not yet working inside the Nix
-  # sandbox: chromedriver starts Chromium, but its renderer dies ("Unable to
-  # receive message from renderer"); Node is the tested default.
+  # tests without `run_in_browser`). browser = "chromium" or "firefox":
+  # every test runs in that headless browser through its WebDriver
+  # (chromedriver, geckodriver), with its profile under $TMPDIR; tests marked
+  # `run_in_browser` need one.
+  #
+  # The sandbox has no /etc/fonts, and Chromium with no fontconfig
+  # configuration aborts in Skia's font manager ("Not implemented") once a
+  # page loads; chromedriver reports it as "Unable to receive message from
+  # renderer". So the browsers get a fontconfig file listing `fonts`.
+  # wasm-bindgen-test-runner itself starts Chromium with --no-sandbox and
+  # --disable-dev-shm-usage.
   wasmBindgenTest =
     {
       pkgs,
@@ -116,11 +123,34 @@ in
       nodejs ? pkgs.nodejs,
       chromium ? pkgs.chromium,
       chromedriver ? pkgs.chromedriver,
+      firefox ? pkgs.firefox,
+      geckodriver ? pkgs.geckodriver,
+      fonts ? [ pkgs.dejavu_fonts ],
     }:
     assert lib.assertOneOf "browser" browser [
       "node"
       "chromium"
+      "firefox"
     ];
+    let
+      # wasm-bindgen-test-runner reads webdriver.json from the working
+      # directory for extra capabilities.
+      inBrowser = driverEnv: capabilities: ''
+        export ${driverEnv}
+        export FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = fonts; }}
+        # Run tests in the browser even without `run_in_browser`.
+        export WASM_BINDGEN_USE_BROWSER=1
+        export WASM_BINDGEN_TEST_TIMEOUT="''${WASM_BINDGEN_TEST_TIMEOUT:-120}"
+        work="$tmp/wbt-work"
+        mkdir -p "$work"
+        cat > "$work/webdriver.json" <<EOF
+        ${capabilities}
+        EOF
+        prog="$(readlink -f "$1")"; shift
+        cd "$work"
+        exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$prog" "$@"
+      '';
+    in
     script pkgs "breakbulk-runner-wasm-bindgen-${browser}" (
       ''
         tmp="''${TMPDIR:-/tmp}"
@@ -128,28 +158,16 @@ in
         mkdir -p "$HOME"
         export PATH="${nodejs}/bin''${PATH:+:$PATH}"
       ''
-      + lib.optionalString (browser == "chromium") ''
-        export CHROMEDRIVER=${chromedriver}/bin/chromedriver
-        # Run tests in the browser even without `run_in_browser`.
-        export WASM_BINDGEN_USE_BROWSER=1
-        export WASM_BINDGEN_TEST_TIMEOUT="''${WASM_BINDGEN_TEST_TIMEOUT:-120}"
-        # wasm-bindgen-test-runner reads webdriver.json from the working
-        # directory for extra capabilities.
-        work="$tmp/wbt-work"
-        mkdir -p "$work"
-        cat > "$work/webdriver.json" <<EOF
-        {"goog:chromeOptions": {"binary": "${chromium}/bin/chromium",
-          "args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
-                   "--disable-gpu", "--no-zygote", "--disable-crash-reporter",
-                   "--disable-breakpad", "--user-data-dir=$tmp/chromium-profile"]}}
-        EOF
-        prog="$(readlink -f "$1")"; shift
-        cd "$work"
-        exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$prog" "$@"
-      ''
-      + lib.optionalString (browser == "node") ''
-        export WASM_BINDGEN_TEST_ONLY_NODE=1
-        exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$@"
-      ''
+      + {
+        node = ''
+          export WASM_BINDGEN_TEST_ONLY_NODE=1
+          exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$@"
+        '';
+        chromium = inBrowser "CHROMEDRIVER=${chromedriver}/bin/chromedriver" ''
+          {"goog:chromeOptions": {"binary": "${chromium}/bin/chromium",
+            "args": ["--user-data-dir=$tmp/chromium-profile"]}}'';
+        firefox = inBrowser "GECKODRIVER=${geckodriver}/bin/geckodriver" ''{"moz:firefoxOptions": {"binary": "${firefox}/bin/firefox"}}'';
+      }
+      .${browser}
     );
 }
