@@ -1,71 +1,168 @@
 # Caching and early cutoff
 
-## Why units are input-addressed
+*Early cutoff* means: when a derivation's output comes out byte-identical
+to last time, the derivations after it do not rebuild. Nix can only do this
+for content-addressed (CA) derivations. This page explains where breakbulk
+uses them, where it does not, and why.
 
-Nix (2.35 and current master) stores CA realisations in binary caches only for *resolved* derivations, and resolving a derivation realises the contents of all its inputs first. A fresh machine pulling a fully cached graph of CA units therefore downloads every intermediate rlib and every input, not just the requested binary. The fix is tracked as NixOS/nix#11928, with an open implementation in #14833. Caches that do not store realisations at all (Attic, FlakeHub Cache, which pushes store paths only) cannot serve CA outputs, so CA units there are always rebuilt.
+## Units are input-addressed
 
-Input-addressed units avoid all of this: a cache hit is a narinfo lookup, substitution never touches inputs, and every cache server works. Rust also gains less from unit-level cutoff than it seems, because most upstream edits change rustc's crate hash and cascade to dependents anyway.
+Every unit is an ordinary input-addressed derivation. A cache hit is a
+plain narinfo lookup, downloads only the output you asked for, and works
+on any binary cache.
 
-## Content-addressed islands
+CA units would cost too much today:
 
-Content addressing is used where cutoff pays off and a CA node's direct inputs are input-addressed, so resolving it downloads only those inputs:
+- To substitute a CA derivation, Nix first *resolves* it, which fetches
+  the contents of all its inputs. A fresh machine pulling a cached graph
+  of CA units would download every intermediate `rlib`, not just the
+  binary it asked for. The fix is
+  [NixOS/nix#11928](https://github.com/NixOS/nix/issues/11928), with an
+  open implementation in
+  [#14833](https://github.com/NixOS/nix/pull/14833).
+- Caches that store paths only, without realisations (Attic, FlakeHub
+  Cache), cannot serve CA outputs at all.
+- Rust gains less from unit-level cutoff than it seems: most upstream edits
+  change rustc's crate hash, which every dependent records, so they
+  rebuild anyway (see [The rustc limit](#the-rustc-limit)).
 
-- **Test runs** consume a CA copy of the test binary. Identical bytes, no re-run.
-- **Post-link stages** are CA. Identical input, no re-run of later stages.
-- **Embedded products.** In dynamic-derivation mode, products are always resolved at build time, because their first stage depends on a unit derivation that exists only after instantiation. A unit that embeds a product is therefore resolved too, and an identical product does not rebuild it. In IFD mode, products are input-addressed unless CA embedding is turned on.
+Full-CA units remain a mode switch for when Nix can resolve without
+fetching ([#16](https://github.com/schlarpc/breakbulk/issues/16)):
+instantiation is templating, so it can write either form.
 
-Rule: no input-addressed derivation sits downstream of a CA node, except the embedding chain, whose cost is documented. On caches without realisations, islands degrade gracefully: stages and test runs re-run; units are still substituted. The embedding chain in dynamic-derivation mode is deferred (resolved at build time) rather than CA, so it is still substituted as long as the product it embeds reproduces with the same bytes.
+## Content addressing at the edges
 
-**Full-CA units** remain a mode switch for when Nix resolves derivations from realisations without fetching input contents. Instantiation is templating, so it can emit either form.
+CA is used where cutoff pays off and a CA derivation's direct inputs are
+input-addressed, so resolving it downloads only those inputs:
+
+- **Test runs** run a CA copy of the test binary: identical bytes, no
+  re-run.
+- **Post-link stages and checks**: identical input, no re-run of what
+  follows.
+- **Embedded products**, in dynamic-derivation mode: a unit that embeds
+  another workspace's product is resolved at build time (whatever `ca`
+  says), so an identical product does not rebuild it.
+
+Test runs, stages and checks are content-addressed when
+[`ca`](../reference/options/repository.md#ca) is on. By default it is on
+exactly when the evaluator has dynamic derivations (which need Nix's
+`ca-derivations` feature too), because Nix code cannot tell whether
+`ca-derivations` is on. Without CA, stages and test runs
+simply re-run when their input's derivation changes.
+
+On a cache without realisations this degrades gracefully: units are still
+substituted; stages and test runs re-run.
 
 ## Where cutoff fires
 
-| Change | Cutoff |
+| Change | Cutoff? |
 | --- | --- |
 | rustc version bump | No: rustc writes its version into every crate's metadata, and Cargo hashes it into `-C metadata` |
 | `breakbulk-unit` or wrapper change | No for units (input-addressed); possible with full-CA units |
-| Recompiled build script with identical output | No for units (input-addressed); possible with full-CA units |
+| Build script recompiled with identical output | No for units; possible with full-CA units |
 | Byte-identical test binary | Yes: the test run is skipped |
 | Post-link stage given identical input | Yes |
-| Byte-identical embedded product | Yes in dynamic-derivation mode; opt-in in IFD mode |
-| Function-body edit in an upstream library | No: rustc's crate hash cascades to dependents |
+| Byte-identical embedded product | Yes, in dynamic-derivation mode |
+| Function-body edit in an upstream library | No: rustc's crate hash changes, and dependents rebuild |
 | Interface change | No, correctly |
 
-## Determinism requirements
+## What has to be deterministic
 
-Islands only cut off, and products only reproduce, if outputs are byte-stable.
+Cutoff and reproducible products need byte-stable outputs. breakbulk makes
+sure that:
 
-- `-C metadata` comes from Cargo's stable unit identity, never from derivation paths or absolute paths. The planner's skeleton sits at one fixed absolute path, because Cargo hashes the absolute path of path crates outside the workspace root (until `trim-paths`).
-- Source paths are remapped as described in [Source paths and debug information](products.md#source-paths-and-debug-information).
-- No `-C incremental` inside unit builds. The planner strips it from argv and never sets `CARGO_INCREMENTAL`, because the incremental setting is part of every unit's `-C metadata`.
-- A content-derived `--build-id`.
-- CMake's internal state (`CMakeFiles`, with its configure log) is removed from build-script output after the run; the rest of the build tree is kept.
-- A built-in check that rebuilds sampled units and products with `nix build --rebuild` and compares their outputs is planned ([#2](https://github.com/schlarpc/breakbulk/issues/2)); today individual fixtures check this.
+- `-C metadata` comes from Cargo's own unit identity, never from
+  derivation paths or absolute paths. The planner's skeleton always sits
+  at the same absolute path, because Cargo hashes the absolute path of
+  path crates outside the workspace root (unless `trim-paths` is on).
+- Source paths are hidden, as described in [Source paths and debug
+  information](products.md#source-paths-and-debug-information).
+- Units never build incrementally: the planner strips `-C incremental`
+  and never sets `CARGO_INCREMENTAL`, because the incremental setting is
+  part of every unit's `-C metadata`.
+- Binaries get a content-derived `--build-id`.
+- CMake's internal state (`CMakeFiles`, with its configure log) is removed
+  from build-script output after the run; the rest of the build tree is
+  kept.
 
-## The rustc limit, and what is changing
+Some fixtures check that their products rebuild bit-identically; a
+built-in check over sampled units and products is planned
+([#2](https://github.com/schlarpc/breakbulk/issues/2)).
 
-Today a dependent rebuilds after almost any upstream edit, because rustc's crate hash (SVH) covers bodies and source positions and dependents record it. Cargo behaves the same way.
+## The rustc limit
 
-- [rust-lang/rust#154724](https://github.com/rust-lang/rust/pull/154724), merged 2026-09-26 and shipping in 1.100, computes the crate hash from the encoded metadata bytes. rmeta byte-equality and crate-hash equality become the same thing. It also makes any byte-level nondeterminism in metadata a link error between separately built rmeta and rlib.
-- [Relink, Don't Rebuild](https://github.com/rust-lang/rust/issues/158844) (`-Z public-api-hash`) is not landed. Its main implementation, [#156940](https://github.com/rust-lang/rust/pull/156940), is a draft under review. The [2026 goal](https://goals.rust-lang.org/2026/roadmap-fast-builds.html) is listed as unfunded.
-- A published third-party measurement on an async-heavy codebase found the public hash unchanged for 2% of non-test edits. Every `async fn` body edit changed it, because coroutine MIR is encoded in metadata.
-- A public-hash design lets Cargo skip direct dependents, but a pure build system still rebuilds them, because their input bytes changed. Full cutoff at the first dependent needs a physical split: data that dependents read in one file, and spans and private data in another. That is the request to take upstream.
+A dependent rebuilds after almost any upstream edit, because rustc's crate
+hash covers function bodies and source positions, and dependents record
+it. Cargo behaves the same way. What is changing:
 
-## Seams below the crate
+- [rust-lang/rust#154724](https://github.com/rust-lang/rust/pull/154724)
+  (Rust 1.100) computes the crate hash from the encoded metadata bytes, so
+  equal `rmeta` bytes mean an equal crate hash. It also makes any byte
+  difference in metadata a link error between separately built `rmeta` and
+  `rlib`.
+- [Relink, Don't Rebuild](https://github.com/rust-lang/rust/issues/158844)
+  (`-Z public-api-hash`) has not landed. Its implementation,
+  [#156940](https://github.com/rust-lang/rust/pull/156940), is a draft;
+  the [2026 goal](https://goals.rust-lang.org/2026/roadmap-fast-builds.html)
+  is listed as unfunded.
+- A published measurement on an async-heavy codebase found the public hash
+  unchanged for only 2% of non-test edits: every `async fn` body edit
+  changed it, because coroutine MIR is in the metadata.
+- A public hash lets Cargo skip direct dependents, but a pure build system
+  still rebuilds them, because their input bytes changed. Cutting off at
+  the first dependent needs a physical split: what dependents read in one
+  file, spans and private data in another. That is what to ask rustc for
+  ([#15](https://github.com/schlarpc/breakbulk/issues/15)).
 
-- **rmeta and rlib as separate outputs.** Compile units need only transitive `rmeta` (reached through their direct dependencies' manifests); link units consume `rlib`. A machine building one crate on cached dependencies downloads only their `rmeta`; check and clippy variants consume only `rmeta`; full-CA units would cut off on `rmeta` bytes.
-- **Source narrowing from dep-info** (not built yet, [#7](https://github.com/schlarpc/breakbulk/issues/7)). An optional stage would derive each crate's exact file set, so edits to files outside its module tree would change nothing. The cost is re-running macro expansion. File reads by proc macros are not tracked and must be declared.
-- **Separate link derivations** need nightly `-Zno-link`/`-Zlink-only`, so linking stays inside bin and test units for now.
-- **Rejected: impure caches.** Rustc incremental state or a shared compiler cache mounted into the sandbox would give reuse within a crate, but outputs would depend on build history and could not be cached or shared. That reuse belongs to local `cargo`.
+## Below the crate
+
+- **`rmeta` and `rlib` are separate outputs.** Compiling a dependent needs
+  only `rmeta`; linking needs `rlib`. A machine building one crate on
+  cached dependencies downloads only their `rmeta`, and check and clippy
+  variants use only `rmeta`.
+- **Source narrowing from dep-info** (not built yet,
+  [#7](https://github.com/schlarpc/breakbulk/issues/7)) would give each
+  crate its exact file set, so edits outside its module tree change
+  nothing. The cost is re-running macro expansion, and files that proc
+  macros read are not tracked and must be declared.
+- **Separate link derivations** would need nightly `-Zno-link` and
+  `-Zlink-only`, so linking stays inside bin and test units.
+- **No impure caches.** rustc's incremental state or a shared compiler
+  cache in the sandbox would give reuse inside a crate, but outputs would
+  then depend on build history and could not be cached or shared. That
+  reuse belongs to local `cargo` in the dev shell.
 
 ## Pipelining
 
-Cargo starts a dependent as soon as an upstream library's `rmeta` is written, while the upstream codegen continues. Nix publishes a derivation's outputs only when it finishes, so one derivation per library cannot pipeline. Cargo's own measurements put pipelining at 10–20% on clean optimized builds (up to 26%), less on debug builds, and close to nothing on few cores. That is the cost breakbulk accepts by default.
+Cargo starts compiling a dependent as soon as an upstream library's
+`rmeta` is written, while the upstream library is still generating code.
+Nix publishes a derivation's outputs only when it finishes, so one
+derivation per library cannot do that. Cargo's own measurements put the
+gain at 10–20% on clean optimized builds (up to 26%), less on debug
+builds, and close to nothing on few cores. breakbulk accepts that cost by
+default.
 
-An optional **pipelined split** makes a library two derivations: one producing `rmeta`, one producing `rlib`. On stable rustc both must run the identical command, because the emit kinds are part of the crate hash; the first stops at rustc's metadata notification. Backends:
+A *pipelined split* would make a library two derivations, one for `rmeta`
+and one for `rlib`. On stable rustc both must run the identical command,
+because the kinds of output are part of the crate hash; the first stops
+when rustc reports the metadata written. Possible backends:
 
-1. **Rerun and stop:** the rules\_rust approach. Stable, but runs the frontend twice.
-2. **Checkpoint and restore:** the `rmeta` derivation checkpoints the rustc process with CRIU at the metadata notification; the `rlib` derivation restores it and lets codegen finish. One frontend, and both files come from one process. Linux only, needs namespace privileges inside the sandbox, and needs a compatible CPU and kernel at restore.
-3. **`-Zno-codegen`:** the Buck2 approach. Needs `RUSTC_BOOTSTRAP` on the split crate's compile units only, never on build-script runs, together with an empty `-Zallow-features=` so stable-only code stays stable-only.
+| Backend | How | Cost |
+| --- | --- | --- |
+| Rerun and stop (as rules\_rust does) | run rustc twice | the frontend runs twice |
+| `-Zno-codegen` (as Buck2 does) | a metadata-only compile, then a full one | the frontend runs twice; needs `RUSTC_BOOTSTRAP` on that crate's compiles only, with an empty `-Zallow-features=` |
+| CRIU checkpoint and restore | the `rmeta` derivation checkpoints rustc at the metadata notification; the `rlib` derivation restores it and finishes codegen | Linux only; needs namespace privileges in the sandbox and a compatible CPU and kernel at restore |
 
-None of the backends is built. Measured on real workspaces, the rerun and `-Zno-codegen` backends cost 23–49% more CPU and are slower than no split at 4 cores; only CRIU keeps the gain ([#14](https://github.com/schlarpc/breakbulk/issues/14)). Every backend falls back to an unsplit compile, checks that the `rlib`'s crate hash matches the `rmeta` its dependents used, and has a per-package opt-out for crates that do not build reproducibly. Which crates are split is deterministic configuration, never a machine-local heuristic. Rejected: a metadata-only `--emit=metadata` action (no optimized MIR for dependents' codegen, and a different crate hash), and `-Zalways-encode-mir` (still a different crate hash).
+None is built. Measured on real workspaces, the two rerun backends cost
+23–49% more CPU and are slower than no split at 4 cores; only CRIU keeps
+the gain ([#14](https://github.com/schlarpc/breakbulk/issues/14)).
+
+Any backend would fall back to an unsplit compile, check that the `rlib`'s
+crate hash matches the `rmeta` its dependents used, and allow a
+per-package opt-out for crates that do not build reproducibly. Which
+crates are split would be configuration
+([`packages.<name>.pipelining`](../reference/options/packages.md#packagesnamepipelining)),
+never a guess made on the building machine. Not options: a metadata-only
+`--emit=metadata` compile (no optimized MIR for dependents' codegen, and a
+different crate hash), and `-Zalways-encode-mir` (still a different crate
+hash).

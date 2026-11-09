@@ -1,58 +1,211 @@
 # The configuration model
 
-All user-facing configuration lives in the NixOS module system; the unit graph does not. Presets, per-package overrides and stage pipelines all need to merge (preset defaults, user additions, per-target exceptions), and the module system already provides typed options, list and attrset merging, `mkBefore`/`mkAfter`/`mkForce`, and generated docs. Its evaluation cost is acceptable for configuration and would not be for thousands of units.
+breakbulk's settings are NixOS-style modules. Here is one module that uses
+most of the pieces this page describes:
+
+```nix
+{
+  # (the workspace's toolchain must include the wasm target)
+  workspaces.default.targets = {
+    x86_64-unknown-linux-gnu = { };
+    wasm32-unknown-unknown.packages = [ "ui" ];
+  };
+  targets.wasm32-unknown-unknown.preset = breakbulk.presets.wasmWeb;
+
+  packages.openssl-sys.inputs = p: [ p.openssl ];
+  packages.app.env.GIT_REV = self.rev or "dirty";  # self: inline in flake.nix
+  packages.app.env.UI_DIST =
+    repo.workspaces.default.target.wasm32-unknown-unknown.packages.ui;
+
+  workspaces.default.variants.clippy.mode = "clippy";
+}
+```
+
+Modules suit configuration because presets, your settings and per-target
+exceptions all have to merge, and the module system already merges lists
+and attribute sets, has `mkBefore`, `mkAfter` and `mkForce`, checks types
+and generates the [options reference](../reference/options.md). The
+unit graph itself is not in the module system: evaluating modules is fine
+for settings, but too slow for thousands of units.
 
 ## Repository, workspaces, targets
 
-A **repository** object holds any number of **workspaces**, each with its own lockfile and toolchain. Each workspace is built for a set of **targets**; each target names a toolchain preset and, optionally, the packages to select for it. Target specs are set repository-wide and may be refined per workspace, and each workspace's spec is resolved with its own toolchain, so a preset picks tools matching that workspace's rustc.
+| Level | What it is | Options |
+| --- | --- | --- |
+| Repository | the result of one `mkRepository` call | [repository-wide](../reference/options/repository.md) |
+| Workspace | one Cargo workspace, with its own lockfile and toolchain | [`workspaces.<name>`](../reference/options/workspaces.md) |
+| Target | a target triple a workspace builds for | [`workspaces.<name>.targets`](../reference/options/workspaces.md#workspacesnametargets), and [`targets.<triple>`](../reference/options/targets.md) for its toolchain |
 
-Units are shared across workspaces when Cargo produces identical commands for them. For registry crates that means the same version, features, profile, toolchain and resolved dependencies. Path crates additionally depend on where they sit relative to each workspace root: Cargo hashes a crate inside the workspace root by its relative path and a crate outside it by its absolute path, and passes source paths the same way. A shared path crate therefore deduplicates when it lies **outside every workspace root that uses it**, or when every workspace is the same workspace. A crate that is a selected member in one workspace and a plain dependency in another also differs, through `CARGO_PRIMARY_PACKAGE`. A diagnostic explains why two units expected to be shared are not. It compares the units' commands and env, not Cargo's hashes: `-C metadata` leaves out rustflags, so two units can share it and still differ.
+A target's toolchain is set once for the repository (`targets.<triple>`)
+and can be refined for one workspace. Each workspace resolves it with its
+own compiler, so a preset picks tools that match that workspace's rustc.
+A target can also build only some packages (`packages = [ "ui" ]` above).
 
-## What is inherited from the project
+### Sharing between workspaces
 
-The planner runs the user's Cargo over the project's own `.cargo/config.toml`, so every setting there applies as it does locally, including nightly-only settings such as `resolver.feature-unification` when the user's toolchain is nightly. Settings outside the project are not visible to the planner: `~/.cargo/config.toml`, `CARGO_*` variables exported in the user's shell, and flags in aliases or scripts. They must be moved into project config to take effect. The dev shell warns when it sees `CARGO_*` variables that the planner will not.
+Units are shared between workspaces when Cargo gives them identical
+commands:
+
+- **Registry crates** are shared when version, features, profile,
+  toolchain and resolved dependencies are the same.
+- **Path crates** also depend on where they sit. Cargo names a crate
+  inside the workspace root by its relative path and one outside it by its
+  absolute path. So a path crate shared by several workspaces is one unit
+  only when it lies **outside every workspace root that uses it**.
+- **A workspace member** differs from the same crate used as a plain
+  dependency elsewhere (Cargo sets `CARGO_PRIMARY_PACKAGE` for members).
+
+When two units you expected to share differ, `repo.explainSharing` says
+why. It compares the units' commands and environment, not Cargo's hashes,
+because `-C metadata` leaves out rustflags.
+
+## What comes from your project
+
+The planner runs your Cargo over your project's `.cargo/config.toml`, so
+every setting there applies as it does locally, including nightly-only
+ones such as `resolver.feature-unification` when your toolchain is
+nightly.
+
+The planner does **not** see:
+
+- `~/.cargo/config.toml`;
+- `CARGO_*` variables in your shell;
+- flags in aliases or scripts.
+
+Move such settings into the project's config. The dev shell warns when it
+sees `CARGO_*` variables or a `~/.cargo/config.toml` that Nix builds will
+not.
 
 ## Toolchain presets
 
-A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/[`cflags`](../reference/options/targets.md#targetsnamecflags), bindgen settings, SDK store paths, extra rustflags, `env`, and `runner`. The planner resolves every tool to a store path; a non-store tool path is a hard error naming the tool.
+A preset sets a target's toolchain: linker, C compiler and archiver,
+[`cflags`](../reference/options/targets.md#targetsnamecflags), bindgen
+settings, SDKs, extra rustflags, environment and test runner. Every tool
+must be a store path; any other path is an error naming the tool.
 
-Presets are named for what they are for, not how they do it: `linux`, `linuxStatic`, `linuxPortable` (runs on other distributions), `windows`, `wasmWeb`, `wasmComponent`. The mechanism follows from the target triple: `linuxStatic` is musl for a `-musl` triple and static-pie glibc for a `-gnu` one, `windows` is msvc or MinGW by the triple's ABI, `wasmComponent` componentizes core modules on `wasm32-unknown-unknown` and links components directly on `wasm32-wasip2`.
+Presets are named for what you want (`linux`, `linuxStatic`,
+`linuxPortable`, `windows`, `wasmWeb`, `wasmComponent`), and the triple
+picks how. For example, `linuxStatic` uses musl for a `-musl` triple and
+static glibc for a `-gnu` one. See [Presets](../reference/presets.md).
 
-- Spec rustflags reach Cargo through `--config`, never the `RUSTFLAGS` env var. Cargo takes rustflags from one key only (per-target rustflags win over `[build] rustflags`) and concatenates arrays only within that key. The planner therefore reads the project's config files and adds the spec's flags under `[build]` when the project uses `[build] rustflags` and no per-target rustflags, and under `target.<triple>` otherwise. The trace confirms that both sets of flags arrived.
-- Host and target specs are separate, and the separation is enforced per unit, not per triple. Spec env never goes through Cargo's `[env]` table, which reaches every process Cargo starts; it is added to each unit according to the unit's platform. This matters most when host and target share a triple (static glibc, zig), where triple-keyed variables such as `CC_<triple>` or `CFLAGS_<triple>` cannot tell host from target.
-- Linkers: when host and target triples differ, Cargo applies each `target.<triple>.linker` correctly. When they are the same triple, Cargo applies the target linker to host units too; if the host spec's linker differs, the planner rewrites the linker value in host units after checking it is exactly the one configured. Cargo passes `-C linker` to every unit, rlibs included, and breakbulk keeps it there, so a linker change rebuilds every unit, not only those that link.
+How a target's settings reach the build:
+
+- **Rustflags** go to Cargo with `--config`, under the key your project
+  already uses (`[build]` or `[target.<triple>]`). Cargo reads only one
+  rustflags key, so flags under the other key would make it ignore
+  yours.
+- **Host and target settings stay apart per unit**, not per triple. A
+  target's environment is added only to that target's units, never
+  through Cargo's `[env]`, which reaches every process. This matters when
+  host and target are the same triple (static glibc, `linuxPortable`),
+  where `CC_<triple>` cannot tell them apart.
+- **Linkers:** when host and target are the same triple, Cargo gives the
+  target linker to build scripts too; breakbulk puts the host linker back
+  in those units. Cargo passes `-C linker` to every unit, so changing the
+  linker rebuilds everything.
+
+Details: [The traced planner](internals/planner.md),
+[Target traits and presets](internals/toolchains.md).
 
 ## Per-package overrides
 
-`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `nativeInputs`, `inputs` and [`extraSources`](../reference/options/packages.md#packagesnameextrasources) for that package's units only. `nativeInputs` are tools that run on the build machine (`pkg-config`, `cmake`, `protoc`); `inputs` are libraries for the platform being built (`openssl`). This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`. It declares the native inputs only: switches that make a crate use a system library instead of the one it bundles (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so they are left to the project.
+[`packages.<name>`](../reference/options/packages.md) sets environment,
+tools and libraries for one package's units, and nothing else:
 
-Inputs are turned into environment by nixpkgs itself: a small derivation per package and platform runs a real `stdenv` with those inputs and records the environment its setup hooks produce. Packages without inputs share one base capture per platform, which gives build scripts the same baseline tools and hardening flags as `buildRustPackage`.
+| Option | For | Example |
+| --- | --- | --- |
+| [`env`](../reference/options/packages.md#packagesnameenv) | variables | a build stamp: `GIT_REV`, `SOURCE_DATE_EPOCH` |
+| [`nativeInputs`](../reference/options/packages.md#packagesnamenativeinputs) | tools that run on the build machine | `pkg-config`, `cmake`, `protoc` |
+| [`inputs`](../reference/options/packages.md#packagesnameinputs) | libraries for the platform being built | `openssl` |
+| [`extraSources`](../reference/options/packages.md#packagesnameextrasources) | files outside the package directory | `../../wit` |
 
-One exception follows from how native libraries are linked: a `-sys` crate's `rustc-link-lib` is applied where the final binary links, which is a unit of another package. Every unit that links (bins, tests, cdylibs, dylibs, staticlibs, proc macros, build-script compiles, doctests) therefore also gets the library search flags (`NIX_LDFLAGS`, nothing else) of every package it links that has inputs, on its own platform only. The linker wrapper turns them into `-L` and records an rpath to each directory it links a shared library from, as `cargo build` finds the library on a system where it is installed.
+A setting can be narrowed to some versions of the package
+([`version`](../reference/options/packages.md#packagesnameversion)) or
+to one target's units
+([`target.<triple>`](../reference/options/packages.md#packagesnametarget)).
+
+breakbulk ships settings for common `-sys` crates, from nixpkgs'
+`defaultCrateOverrides` ([`sysDefaults.enable`](../reference/options/repository.md#sysdefaultsenable)).
+They declare tools and libraries only. Switches that make a crate use a
+system library instead of its bundled copy
+(`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so
+they are left to you.
+
+### How inputs become environment
+
+nixpkgs does it: a small derivation per package and platform runs a real
+`stdenv` with the inputs and records what its setup hooks set
+(`PKG_CONFIG_PATH`, compiler wrapper flags, …). Packages without inputs
+share one capture per platform, which gives build scripts the same tools
+and hardening flags as `buildRustPackage`.
+
+A `-sys` crate's `rustc-link-lib` takes effect where the final binary
+links, in another package's unit. So every unit that links also gets the
+library search paths (`NIX_LDFLAGS`, nothing else) of the packages it
+links that have inputs. The binary gets a run-time path to each such
+library, as it would find the library on a system where it is installed.
+
+Details: [Environment capture](internals/env-capture.md).
 
 ## Source views
 
-A package's source is a filtered view of the **repository root**, not its crate directory: the crate directory plus declared extras, at their original relative layout. Paths such as `../../wit`, `../shared/assets` or `../../../patches` therefore resolve unchanged, and editing an unrelated file changes no source path. Test units can declare a wider scope for tests that read repository files, and a test run can be narrowed to the files its tests read ([`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles)), so that editing any other file of the package does not re-run it.
+A package's source is the package's directory plus its `extraSources`,
+at their original places in the repository. So relative paths like
+`../../wit` or `../shared/assets` work unchanged, and editing a file
+outside them changes nothing for the package.
 
-When a build script fails, or succeeds while declaring a `rerun-if-changed` path that is missing from its sandbox, the error or warning names the path and the option to add it to. Missing paths on success are warnings by default; `strictSources = true` turns them into errors.
+For tests:
 
-Registry crates are fetched as one fixed-output derivation per `Cargo.lock` entry using the lockfile's checksums. Their store paths are exposed as `sources.<crate>`, so steps that need files from inside a dependency (a bundled SDK, JS glue shipped in a crate) are attribute lookups.
+- [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
+  adds repository paths to the source of the package's tests (test
+  compiles, doctests and test runs) only, for tests that read files;
+- [`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles)
+  narrows a test run to the files its tests read, so editing any other
+  file of the package does not re-run it.
+
+When a build script fails, or succeeds while it names a
+`rerun-if-changed` path that is missing from its sandbox, the message
+names the path and the option to add it to. Missing paths on success are
+warnings;
+[`strictSources`](../reference/options/repository.md#strictsources)
+makes them errors.
+
+Registry crates are under `repo.sources.<crate>`, for steps that need a
+file from inside a dependency (a bundled SDK, JS glue shipped in a
+crate).
+
+Details: [Fetching and source views](internals/sources.md).
 
 ## Products as inputs
 
-An override's env or inputs may reference any product, including one built for another target, for example a wasm UI bundle or a set of components embedded by a host crate. Products reach the instantiate step as references, not as dependencies, so only the embedding unit and its dependents wait for the product; the rest of the host build starts immediately.
+A package's `env` or `inputs` can name any product, even one built for
+another target: `UI_DIST` in the example above is a wasm build. Products
+are passed by reference, so only the unit that embeds the product, and
+its dependents, wait for it. The rest of the build starts at once.
 
 ## Variants
 
-Profiles, feature sets (including a feature powerset), check modes (clippy, coverage instrumentation) and toolchains are plan parameters. Each variant is a separate plan, and units that come out identical are shared. What is identical follows from Cargo:
+A variant is another plan for the same workspace and target: a profile, a
+feature set, or a check mode
+([`variants.<name>`](../reference/options/workspaces.md#workspacesnamevariants)).
+Units that come out the same are shared. What is shared follows from how
+Cargo builds:
 
 | Between | Shared | Not shared |
 | --- | --- | --- |
-| Build and check or clippy | Build scripts, proc macros and their dependencies | Regular library dependencies, which Cargo compiles in check mode |
-| Check and clippy | All dependencies | Workspace members |
-| Build and coverage | Host units | Target units, whose commands carry the instrumentation flag |
-| Build and test plans | Units whose features are unaffected by dev-dependencies | Units whose features dev-dependencies change |
-| Two profiles with the same settings (`release`, `bench`, a custom profile that only inherits `release`) | Everything; a unit's identity contains the profile's settings, not its name | Nothing |
-| Two profiles with different settings (opt-level, debuginfo, …) | Nothing | Everything |
+| build and check or clippy | build scripts, proc macros and their dependencies | other dependencies, which Cargo compiles in check mode |
+| check and clippy | all dependencies | workspace members |
+| build and coverage | host units | target units, which carry the instrumentation flag |
+| build and test plans | units whose features dev-dependencies do not change | units whose features they change |
+| profiles with the same settings (`release`, `bench`, a profile that only inherits `release`) | everything: a unit depends on a profile's settings, not its name | nothing |
+| profiles with different settings | nothing | everything |
 
-Check and clippy variants check every target, as `cargo check --all-targets` does, unless the variant turns that off for a gate that runs plain `cargo check`. Check and clippy variants should use the same profile as the main build variant to share host units. Cargo's own `clippy` defaults to the dev profile.
+Check and clippy variants check every target, as
+`cargo check --all-targets` does, unless
+[`allTargets`](../reference/options/workspaces.md#workspacesnamevariantsnamealltargets)
+is off (for a gate that runs plain `cargo check`). Give them the same
+profile as your build variant to share build scripts and proc macros;
+Cargo's own `clippy` uses the dev profile.
+
+For feature matrices, `breakbulk.variants.featurePowerset` and
+`packageFeaturePowerset` generate variants, as cargo-hack does.

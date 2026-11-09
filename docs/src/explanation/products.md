@@ -1,30 +1,47 @@
 # Products, stages and tests
 
-`ws.packages.<name>` gives the right artifact for its target with no configuration. Underneath it, every step is its own named derivation that can be read, replaced or removed.
+`repo.workspaces.<ws>.packages.app` gives you the finished `app` for its
+target, with no configuration. Underneath, every step is its own named
+derivation that you can read, replace or remove.
 
 ## Three layers
 
-1. **Units.** One derivation per Cargo unit. Internal, but inspectable.
-2. **Stage pipelines.** A product is the raw link output passed through ordered, named stages. Each stage is its own content-addressed derivation, so every intermediate is addressable (`.stages.linked`) and cutoff applies between stages.
-3. **Sugar.** `ws.packages.<name>` and `ws.target.<triple>.packages.<name>` are the raw output, run through the target preset's default stages, installed in the usual layout (`bin/`, `lib/`, `.exe` with DLLs, `pkg/` for wasm).
-
-## Default stages per preset
-
-What happens to debug info is a property of the target, not of a stage list: [`targets.<t>.debugInfo`](../reference/options/targets.md#targetsnamedebuginfo) is `"split"`, `"keep"` or `"strip"`, and puts the matching stage first. The units are shared by every package of the target and their remap scope and build ID depend on it, so no package can add or remove that stage.
-
-| Preset | debugInfo (default) | Default stages |
+| Layer | What it is | Where |
 | --- | --- | --- |
-| Linux gnu / musl | split | `splitDebug` |
-| Windows msvc | keep | none (PDBs are already separate; `install` puts them in the `debug` output) |
-| wasm, browser | keep | `bindgen` → `wasmOpt` |
-| wasm, component | keep | `wasmOpt` → `componentize` |
-| Darwin (not yet, [#13](https://github.com/schlarpc/breakbulk/issues/13)) | to decide (`.dSYM` via `dsymutil`) | `dsymutil` → `strip` → `adhocSign` |
+| Units | one derivation per Cargo unit | internal, but inspectable |
+| Stages | the linked output passed through ordered, named steps | `.stages.<name>`, e.g. `.stages.linked` |
+| Packages | the last stage, installed in the usual layout (`bin/`, `lib/`, `.exe` with its DLLs, `pkg/` for wasm) | `packages.<pkg>`, `target.<triple>.packages.<pkg>` |
 
-The tool never applies an implicit fixup phase. Stripping breaks some signing schemes, and some checks must see unstripped bytes, so any default stage can be removed or reordered.
+Each stage is its own derivation. With content addressing on (see
+[Caching and early cutoff](caching.md)), a stage whose input did not
+change does not re-run, and neither do the stages after it.
 
-## Transforms and checks
+## Default stages
 
-Stages that change the artifact form the chain. Checks that only inspect it (ISA level, DLL import closure, PE headers, signature verification, "no interpreter, no needed libraries") hang off a named stage instead. They see exactly the bytes they need, never block the chain, and appear under `checks` automatically.
+The target's preset picks the default stages. What happens to debug
+information comes first, and is set per target with
+[`targets.<triple>.debugInfo`](../reference/options/targets.md#targetsnamedebuginfo):
+`"split"`, `"keep"` or `"strip"`. It is per target, not per package,
+because every package of a target shares the same units, and the units'
+path remapping and build ID depend on it.
+
+| Target | `debugInfo` default | Default stages |
+| --- | --- | --- |
+| Linux (gnu, musl) | `split` | `splitDebug` |
+| Windows (MSVC) | `keep` | none: PDBs are already separate files; `install` puts them in the `debug` output |
+| wasm for browsers | `keep` | `bindgen` → `wasmOpt` |
+| wasm components | `keep` | `wasmOpt` → `componentize` |
+| macOS (not yet, [#13](https://github.com/schlarpc/breakbulk/issues/13)) | to decide (`.dSYM` via `dsymutil`) | `dsymutil` → `strip` → `adhocSign` |
+
+There is no hidden fixup phase. Stripping breaks some signing schemes, and
+some checks need unstripped bytes, so every default stage can be removed
+or reordered.
+
+## Your own stages and checks
+
+A stage changes the artifact; a check only looks at it. A check hangs off
+a named stage, sees exactly those bytes, never blocks the chain, and shows
+up in `checks` by itself:
 
 ```nix
 packages.server.checks.isa = { on = "linked"; run = isaCheck; };  # sees pre-strip bytes
@@ -36,33 +53,113 @@ packages.app.target."x86_64-pc-windows-msvc".stages = {
 };
 ```
 
-The tool provides stage helpers: `splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt`, `componentize`, `deterministicZip`. User stages are ordinary derivations: container images, initramfs and boot images, distribution packages, catalog generation and signing, metadata stamping.
+Typical checks: ISA level, DLL import closure, PE headers, signature
+verification, "no interpreter, no needed libraries".
+
+breakbulk ships stage helpers: `splitDebug`, `strip`, `patchelfRpath`,
+`bindgen`, `wasmOpt`, `componentize`, `deterministicZip`. Your own stages
+are ordinary derivations: container images, boot images, distribution
+packages, signing, metadata stamps.
+
+Details: [Products, stages and tests (internals)](internals/products.md).
 
 ## Source paths and debug information
 
-Source paths must not end up in shipped outputs. Every crate's source is a store path, so an embedded source path is a real store reference: Nix would treat the sources as a runtime dependency, and any edit to a package would change the bytes of every binary that embeds its paths, defeating cutoff.
+Every crate's source is a store path. If a binary contained a source path,
+Nix would see a runtime dependency on the sources, and any edit to a
+package would change every binary that names its files. So breakbulk
+hides source paths, by kind of output (rustc's `--remap-path-scope`,
+stable since 1.95):
 
-Paths are remapped by scope (rustc's `--remap-path-scope`, stable since 1.95):
+| Output | Panic messages, `file!()`, diagnostics | Debug information |
+| --- | --- | --- |
+| Binaries and cdylibs, `debugInfo = "split"` (Linux default) | hidden | real store paths, moved to a separate `debug` output |
+| Test binaries | hidden | hidden; kept in the binary for backtraces in test logs |
+| Anything on a target that keeps or strips debug info | hidden | hidden |
+| Anything built with rustc older than 1.95 | hidden | hidden |
 
-- **Shipped binaries and cdylibs** of a target that splits debug info (`debugInfo = "split"`, the default on Linux) remap panic locations, `file!()` and diagnostics, but keep real store paths in debug info. `splitDebug` moves DWARF to a separate `debug` output (`$debug/lib/debug/.build-id/…`, found by gdb and debuginfod). The main output has no source references; the `debug` output references exactly the sources a debugger needs, so installing it gives source-level debugging with no setup.
-- **Test binaries** keep their debug info, because symbolized backtraces in test-run logs matter, and remap every scope, so a test binary's bytes do not change when unrelated files in its package change. The workspace libraries they link are compiled once, with the shipped scope, so their debug info still names their source views: an edit to any file of such a library (a README) changes the bytes of every test binary linking it. `test.stripForRun` (off by default) has the test run consume a debug-stripped copy instead, which does not change; the unstripped binary stays available for debugging.
-- On a target that keeps or strips debug info, every scope is remapped.
-- With rustc older than 1.95, every scope is remapped.
+With `split`, `splitDebug` moves the DWARF to the `debug` output
+(`$debug/lib/debug/.build-id/…`, where gdb and debuginfod look). The main
+output names no sources; the `debug` output names exactly the sources a
+debugger needs, so installing it gives source-level debugging with no
+setup.
 
-Remapping is breakbulk's job until Cargo can do it. Cargo's `trim-paths` profile setting (stable in Cargo 1.101; a hard error on earlier stable releases) computes the same remaps and also removes absolute paths from the identity of path crates outside the workspace root. Its default is off for every profile, `release` included. On Cargo 1.101 and later, breakbulk sets it when the project has not set it, uses Cargo's remaps instead of its own, and sets the scope per product kind as above. A setting passed with `--config` would replace the project's, and copying Cargo's profile rules to see whether the project set it is not worth it, so breakbulk reads the files instead: any `trim-paths` under `[profile]` in the workspace root's `Cargo.toml` or the project's Cargo config leaves the choice to the project, and its own scope is kept. `cargoTrimPaths` forces it on or off, and `sourcePaths = "keep"` turns all path hiding off. Under Cargo's trim-paths, breakbulk's C prefix maps use Cargo's names, so they agree with cc-rs, which reads the same remaps from `CARGO_TRIM_PATHS_REMAP`.
+One catch for tests: the workspace libraries a test binary links are
+compiled once, for shipping, so their debug information names their
+sources. Editing any file of such a library, even a README, changes the
+test binary. [`test.stripForRun`](../reference/options/packages.md#packagesnameteststripforrun)
+(off by default) runs a debug-stripped copy instead, which does not
+change; the unstripped binary stays available for debugging.
 
-## Tests as products
+### Cargo's trim-paths
 
-- Every test, bench and example binary is an attribute, so VM tests and system tests can consume it.
-- Each test binary gets a test-run derivation that uses the target's `runner` and any declared env and `PATH` additions (a software GPU driver, external tools). The test run consumes a content-addressed copy of the test binary, so a byte-identical test binary is not re-run.
-- `CARGO_BIN_EXE_*` is wired to the right product, and nextest configuration is respected.
-- Test-run derivations for another architecture set `system` to that architecture, so Nix sends them to native builders. Emulation through the runner is the fallback.
-- Targets that Cargo skips because their `required-features` are not enabled still have attributes. Building such a product fails with the reason; such a test run succeeds and logs that it was skipped, as `cargo test` does.
-- Tests that cannot run in the sandbox (network, a writable home, devices) are skipped with libtest's own filters, per package or per test binary. Changing a skip list re-runs only the affected test runs.
-- Every test binary also has a runnable app that sets up the same working directory, environment and runner as its test run, but runs on the user's machine: the escape hatch for network tests, debuggers and single-test reruns.
-- **Doctests** get one derivation per library crate, which runs `rustdoc --test` against the crate and its dependencies. Compiling and running happen in one rustdoc process, so doctests have no cutoff and re-run whenever the crate or anything below it changes.
-- **Benches** come only from a bench variant (`cargo bench --no-run`, bench profile), which provides optimized bench binaries to run outside Nix. `cargo test --no-run` builds no benches, so the test plan has none. Optional smoke checks run each bench once in test mode.
+Cargo's `trim-paths` profile setting (Cargo 1.101 and later) computes the
+same remaps, and also keeps absolute paths out of the identity of path
+crates outside the workspace root. Cargo leaves it off by default. On
+Cargo 1.101 and later breakbulk turns it on, uses Cargo's remaps instead
+of its own, and keeps the per-kind scopes above, unless the project sets
+`trim-paths` itself:
 
-## Documentation
+- any `trim-paths` under `[profile]` in the workspace root's `Cargo.toml`
+  or the project's Cargo config leaves the choice to the project;
+- [`workspaces.<ws>.cargoTrimPaths`](../reference/options/workspaces.md#workspacesnamecargotrimpaths)
+  forces it on or off;
+- [`sourcePaths = "keep"`](../reference/options/workspaces.md#workspacesnamesourcepaths)
+  turns all path hiding off.
 
-`cargo doc` writes every crate into one shared directory and updates cross-crate indexes in place, which does not split into per-crate derivations on stable rustdoc. The docs product (not built yet, [#6](https://github.com/schlarpc/breakbulk/issues/6)) is therefore one derivation per workspace and target that replays the traced `rustdoc` commands in Cargo's order, against the check-mode `rmeta` units it shares with check and clippy variants. Per-crate documentation waits for rustdoc's mergeable cross-crate info to stabilize.
+Under Cargo's trim-paths, breakbulk's C prefix maps use Cargo's names, so
+they agree with cc-rs, which reads the same remaps from
+`CARGO_TRIM_PATHS_REMAP`.
+
+## Tests
+
+Every test, bench and example binary is an attribute
+(`target.<triple>.tests.<pkg>.<test>`), so VM tests and system tests can
+use it. Each test binary also gets:
+
+- **a test run**, a derivation that runs it with the target's `runner`
+  and any declared environment and `PATH` additions (a software GPU
+  driver, external tools). With content addressing on, it runs a
+  content-addressed copy of the binary, so a byte-identical binary is not
+  run again;
+- **a test app** (`testApps`), which sets up the same working directory,
+  environment and runner but runs on your machine: the way out for network
+  tests, debuggers and running a single test.
+
+More behavior:
+
+- `CARGO_BIN_EXE_*` points at the right binaries, and nextest
+  configuration is respected (`test.runner = "nextest"`).
+- [`targets.<triple>.testSystem`](../reference/options/targets.md#targetsnametestsystem)
+  sends a target's test runs to native builders of that system, instead
+  of emulating them through the runner.
+- A target that Cargo skips because its `required-features` are off
+  still has an attribute. Building that product fails with the reason;
+  its test run succeeds and logs that it was skipped, as `cargo test`
+  does.
+- Tests that cannot run in the sandbox (network, a writable home,
+  devices) are skipped with libtest's own filters
+  ([`test.args`](../reference/options/packages.md#packagesnametestargs)),
+  per package or per test binary. Changing a skip list re-runs only the
+  affected test runs.
+
+**Doctests** get one derivation per library, which runs `rustdoc --test`.
+rustdoc compiles and runs the examples in one process, so doctests have
+no cutoff: they re-run whenever the library or anything below it changes.
+
+**Benches** come only from a bench variant (`cargo bench --no-run`, bench
+profile), which gives optimized bench binaries to run outside Nix.
+`cargo test --no-run` builds no benches.
+[`benchSmoke`](../reference/options/workspaces.md#workspacesnamebenchsmoke)
+runs each bench once in test mode, as a check.
+
+## Documentation (not built yet)
+
+A `cargo doc` product is planned
+([#6](https://github.com/schlarpc/breakbulk/issues/6)). `cargo doc` writes
+every crate into one shared directory and updates cross-crate indexes in
+place, so it does not split into per-crate derivations on stable rustdoc.
+The plan is one derivation per workspace and target that replays the
+traced `rustdoc` commands in Cargo's order, against the check-mode `rmeta`
+units it shares with check and clippy variants. Per-crate documentation
+waits for rustdoc's mergeable cross-crate info to stabilize.

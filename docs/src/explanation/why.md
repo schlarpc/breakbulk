@@ -1,33 +1,83 @@
 # Why breakbulk
 
-Rust in Nix forces a choice between fidelity and granularity, and real projects need both.
+Rust in Nix has made you choose between two kinds of tool:
 
-- **Fidelity tools** (`buildRustPackage`, crane, naersk) run real Cargo. Build scripts, profiles, `.cargo/config.toml`, cross builds and zigbuild-style toolchains behave exactly as they do locally. Reuse is coarse: at best a "dependencies blob" plus the workspace. One `Cargo.lock` change rebuilds every dependency, nothing is shared between projects, and every check variant (clippy, tests, coverage) carries its own full copy of the dependency build.
-- **Granularity tools** (crate2nix, cargo2nix, `buildRustCrate`) build one derivation per crate and share them across projects. They reimplement Cargo in Nix and shell: feature resolution, build-script semantics, profiles and config are approximations, and every gap is a silent difference from `cargo build`. They need checked-in generated Nix or import-from-derivation (IFD).
+| | Fidelity tools | Granularity tools |
+| --- | --- | --- |
+| Examples | `buildRustPackage`, crane, naersk | crate2nix, cargo2nix, `buildRustCrate` |
+| How | run real Cargo | one derivation per crate, Cargo reimplemented in Nix |
+| Behaves like `cargo build` | yes: build scripts, profiles, `.cargo/config.toml`, cross builds | approximately; every gap is a silent difference |
+| Reuse | coarse: one "dependencies" derivation per project | per crate, across projects |
+| A `Cargo.lock` change | rebuilds every dependency | rebuilds what changed |
+| Generated files | none | checked-in Nix, or import-from-derivation |
 
-Neither handles the patterns real repositories rely on. Examples: many workspaces with their own lockfiles sharing path crates, a host binary embedding a wasm build, per-package build stamps that must not invalidate dependencies, and ordered post-link steps that implicit stripping breaks.
+Real projects need both. And neither handles patterns such as:
 
-**Goal.** One derivation per Cargo unit, with command lines that are exactly Cargo's, so that:
+- several workspaces, each with its own lockfile, sharing path crates;
+- a binary that embeds a wasm build;
+- a per-package build stamp (a git revision) that must not rebuild the
+  dependencies;
+- post-link steps in a fixed order, which implicit stripping breaks.
 
-- each plan matches a named Cargo command under the same project config (for example `cargo build --workspace --target T --profile P`), across native, cross, wasm and Windows targets;
-- outputs are shared across machines, workspaces and projects through an ordinary binary cache;
-- nothing generated is checked in, and there is no IFD where the Nix installation supports dynamic derivations;
-- a change rebuilds only the affected crates and their dependents, and re-runs only the test binaries whose bytes changed.
+## The goal
 
-**Non-goals.**
+One derivation per Cargo unit, with Cargo's exact command line. So:
 
-- Beating Cargo's incremental edit loop on the crate being edited. That stays in plain `cargo` in the dev shell.
-- Beating Cargo on a cold build of a single workspace. breakbulk optimizes for cache hits and narrow rebuilds; a cold build is expected to be somewhat slower than crane (see [Pipelining](caching.md#pipelining)). A cold build worse than about twice crane's time is a bug to investigate.
-- Mutable caches inside the sandbox (rustc incremental state, shared compiler caches). They trade reproducibility for speed in a way the design refuses.
-- Timed benchmark runs inside Nix. Sandbox timings on shared builders are noise, and a cached timing never re-measures. Bench binaries are built; they are run where timing means something.
+- each plan matches a named Cargo command (`cargo build --workspace
+  --target T --profile P`) under the project's own config, on native,
+  cross, wasm and Windows targets;
+- outputs are shared across machines, workspaces and projects through an
+  ordinary binary cache;
+- nothing generated is checked in, and there is no import-from-derivation
+  where Nix supports dynamic derivations;
+- a change rebuilds only the crates it affects and their dependents, and
+  re-runs only the test binaries whose bytes changed.
+
+## Not goals
+
+- **Beating Cargo's edit loop.** For the crate you are editing, use plain
+  `cargo` in the dev shell.
+- **Beating Cargo on a cold build.** breakbulk aims at cache hits and
+  narrow rebuilds. A cold build is expected to be somewhat slower than
+  crane (see [Pipelining](caching.md#pipelining)); more than about twice
+  crane's time is a bug.
+- **Mutable caches in the sandbox** (rustc incremental state, shared
+  compiler caches). They give up reproducibility.
+- **Timing benchmarks inside Nix.** Timings on shared builders are noise,
+  and a cached timing never measures again. Bench binaries are built, to
+  run where timing means something.
 
 ## Principles
 
-1. **Cargo plans, Nix executes.** The tool implements Cargo's public, documented formats (manifests, lockfiles, build-script instructions, target auto-discovery) and observes everything else from Cargo. It never encodes Cargo's behavior: resolution, unit selection, flag scoping or propagation. Every rustc command line is Cargo's own.
-2. **The unit graph is static; build-script output binds late.** A build script can change flags, env and link arguments, but never which units exist. The whole graph is planned before any build script runs. Where each script's output goes is observed from Cargo during planning; the values are spliced in at build time.
-3. **Toolchains are data.** Linker, C compiler, archiver, SDKs, rustflags and test runner come from a per-platform spec. The planner never hardcodes a tool, and host and target specs never leak into each other. The environment that native inputs need (`PATH`, `PKG_CONFIG_PATH`, wrapper flags) is captured from nixpkgs' own setup hooks, not recomputed.
-4. **Configuration is scoped to the units that need it.** Env vars, inputs and extra sources attach to named packages and reach only those units, so a build stamp or a large SDK never invalidates unrelated crates.
-5. **Input addressing by default; content addressing where it pays.** Units are input-addressed, so a cache hit downloads only what was asked for, on any cache server. Content addressing (CA) is used at the edges of the graph (test runs, post-link stages, embedded products), where early cutoff pays off and the cost of resolution is small. Full CA for units is a future mode, gated on Nix (see [Caching and early cutoff](caching.md)).
-6. **Sugar over addressable layers.** The default package output is the sensible thing for its target. Every layer underneath (units, link outputs, post-link stages) stays addressable and overridable, so a default never becomes a trap.
-7. **Stable toolchains by default.** Nothing in the default path needs nightly Rust. Nightly is something users bring, not something the tool requires. Optional optimizations may use unstable rustc flags only behind a fallback, and never in a way that reaches build scripts.
-8. **Inherit what changes the build; delegate what breakbulk must decide anyway.** Cargo settings that change what gets built (feature unification, profiles, `[env]`) are inherited from project config and never turned on behind the user's back. Settings that only change something breakbulk has to decide regardless, such as how paths are spelled in outputs, are delegated to Cargo when Cargo can do it.
+1. **Cargo plans, Nix executes.** breakbulk implements Cargo's documented
+   formats (manifests, lockfiles, build-script output, target discovery)
+   and observes everything else from Cargo. It never reimplements feature
+   resolution, unit selection or flag scoping. Every rustc command line is
+   Cargo's own.
+2. **The unit graph is fixed before anything builds.** A build script can
+   change flags, environment and link arguments, but not which units
+   exist. Where its output goes is observed during planning; the values
+   are filled in at build time.
+3. **Toolchains are data.** Linker, C compiler, SDKs, rustflags and test
+   runner come from a per-platform spec. Nothing is hard-coded, and host
+   and target settings never mix. The environment native libraries need
+   comes from nixpkgs' own setup hooks.
+4. **Settings reach only the units that need them.** Environment, inputs
+   and extra sources belong to named packages, so a build stamp or a large
+   SDK does not rebuild unrelated crates.
+5. **Input addressing by default; content addressing where it pays.**
+   Units are input-addressed, so any cache serves them and a hit downloads
+   only what you asked for. Content addressing is used at the edges (test
+   runs, post-link stages, embedded products), where it saves rebuilds
+   cheaply. See [Caching and early cutoff](caching.md).
+6. **Good defaults over addressable layers.** The default package is the
+   right thing for its target, and every layer under it (units, link
+   outputs, post-link stages) can still be read or replaced.
+7. **Stable Rust by default.** Nothing in the default path needs nightly.
+   Optional features may use unstable rustc flags only with a fallback,
+   and never for build scripts.
+8. **Inherit what changes the build; delegate what breakbulk must decide
+   anyway.** Settings that change what gets built (feature unification,
+   profiles, `[env]`) come from the project's config and are never turned
+   on behind your back. Settings breakbulk has to decide regardless, such
+   as how paths are spelled in outputs, go to Cargo when Cargo can do it.
