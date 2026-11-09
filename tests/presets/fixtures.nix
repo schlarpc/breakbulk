@@ -563,7 +563,157 @@ let
         file ${a.packages.msvc-smoke}/bin/msvc-smoke.exe | tee $out
         grep -qi 'PE32+ executable.*\(aarch64\|arm64\)' $out
       '';
+      msvc-post-link = msvcPostLinkCheck;
     };
+
+  # --- post-link on msvc ---------------------------------------------------------
+  #
+  # The post-link fixture for x86_64-pc-windows-msvc with a Windows
+  # pipeline: `stageDlls` copies the VC++ runtime DLLs the .exe imports
+  # next to it, `sign` appends an overlay to the .exe (where an Authenticode
+  # signature goes), `deterministicZip` packs the result. A check on
+  # `linked` sees the .exe as the linker wrote it. The DLLs come from wine
+  # (no redistributable DLLs in the xwin download); wine runs the unpacked
+  # zip.
+
+  msvcX86 = "x86_64-pc-windows-msvc";
+  msvcPostLinkRust = rustWith [ msvcX86 ];
+  wine = pkgs.wineWow64Packages.minimal;
+
+  # Copies each imported DLL named like the VC++ redistributable's from
+  # `dllDir`; OS DLLs (kernel32, api-ms-win-*) are never staged.
+  stageRuntimeDlls =
+    dllDir:
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    pkgs.runCommand "${product.name}-stage-dlls" { nativeBuildInputs = [ pkgs.llvmPackages.llvm ]; } ''
+      set -euo pipefail
+      mkdir -p $out
+      cp -RL --no-preserve=mode,ownership ${input}/. $out/
+      for exe in $out/*.exe; do
+        llvm-readobj --coff-imports "$exe" | sed -n 's/^ *Name: \(.*\.dll\)$/\1/Ip'
+      done | tr 'A-Z' 'a-z' | LC_ALL=C sort -u > imports.txt
+      cat imports.txt
+      grep -E '^(vcruntime|msvcp)[0-9_a-z]*\.dll$' imports.txt > runtime.txt || true
+      [ -s runtime.txt ] || { echo "no VC++ runtime import" >&2; exit 1; }
+      while read -r dll; do
+        cp ${dllDir}/"$dll" $out/
+      done < runtime.txt
+    '';
+
+  # Appends a fixed marker to every .exe: a PE ignores bytes past its
+  # last section, so the program still runs.
+  signExe =
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    pkgs.runCommand "${product.name}-sign" { } ''
+      mkdir -p $out
+      cp -RL --no-preserve=mode,ownership ${input}/. $out/
+      for exe in $out/*.exe; do printf 'BREAKBULK-SIGNED' >> "$exe"; done
+    '';
+
+  # Fails unless the .exe has no overlay marker and no DLL beside it.
+  unsignedExe =
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    pkgs.runCommand "${product.name}-unsigned" { nativeBuildInputs = [ pkgs.file ]; } ''
+      set -euo pipefail
+      ls -la ${input}/
+      exe=$(echo ${input}/*.exe)
+      file -L "$exe" | grep -q 'PE32+ executable'
+      if grep -qaF BREAKBULK-SIGNED "$exe"; then echo "$exe is signed" >&2; exit 1; fi
+      if find -L ${input}/ -iname '*.dll' | grep .; then echo "DLLs in linked" >&2; exit 1; fi
+      sha256sum "$exe" > $out
+    '';
+
+  msvcPostLink = mkRepo (fixtures + "/post-link") [
+    {
+      workspaces.main = {
+        toolchain = {
+          rustc = msvcPostLinkRust;
+          cargo = msvcPostLinkRust;
+        };
+        targets.${msvcX86} = { };
+        variants.default.profile = "dev";
+      };
+      targets.${msvcX86} = {
+        preset = presets.windows { inherit sdk; };
+        checks.unsigned = {
+          on = "linked";
+          run = unsignedExe;
+        };
+      };
+      packages.server.target.${msvcX86}.stages = {
+        stageDlls = {
+          after = "linked";
+          run = stageRuntimeDlls "${wine}/lib/wine/x86_64-windows";
+        };
+        sign = {
+          after = "stageDlls";
+          run = signExe;
+        };
+        zip = {
+          after = "sign";
+          run = breakbulk.stageHelpers.deterministicZip;
+        };
+      };
+    }
+  ];
+  msvcPostLinkCheck =
+    let
+      t = msvcPostLink.workspaces.main.target.${msvcX86};
+      server = t.packages.server;
+      tool = t.packages.tool;
+    in
+    assert lib.assertMsg (
+      server.stageOrder == [
+        "stageDlls"
+        "sign"
+        "zip"
+        "install"
+      ]
+    ) "msvc-post-link: server stages ${builtins.toJSON server.stageOrder}";
+    assert lib.assertMsg (
+      tool.stageOrder == [ "install" ]
+    ) "msvc-post-link: tool stages ${builtins.toJSON tool.stageOrder}";
+    pkgs.runCommand "msvc-post-link"
+      {
+        nativeBuildInputs = [ pkgs.unzip ];
+        linked = server.stages.linked;
+        unsigned = server.checks.unsigned;
+        toolUnsigned = tool.checks.unsigned;
+        zip = server.stages.zip;
+      }
+      ''
+        set -euo pipefail
+        ls -la $linked ${server} $zip
+        # The check's .exe is linked's, unchanged.
+        [ "$(cut -d' ' -f1 $unsigned)" = "$(sha256sum $linked/server.exe | cut -d' ' -f1)" ]
+        unzip -Z1 $zip/server.zip | tee entries.txt
+        grep -qx server.exe entries.txt
+        grep -qx vcruntime140.dll entries.txt
+        ! grep -q '\.pdb$' entries.txt
+        # The product carries the zip; the .exe in it is signed.
+        cmp ${server}/server.zip $zip/server.zip
+        mkdir x && (cd x && unzip -q $zip/server.zip)
+        grep -qaF BREAKBULK-SIGNED x/server.exe
+        ${lib.escapeShellArgs t.runner} x/server.exe a b | tr -d '\r' > out.txt
+        grep -qx 'server 3' out.txt
+        mkdir -p $out
+        cp entries.txt $out/
+      '';
 
   # --- wasm ----------------------------------------------------------------------
 
