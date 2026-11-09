@@ -1,5 +1,5 @@
 //! The toolchain spec's share of planning ("Toolchain presets" and "Path
-//! rewriting" in `docs/implementation.md`, decision 33).
+//! rewriting" in `docs/implementation.md`).
 //!
 //! The spec (`--spec FILE`, JSON) carries the target's extra rustflags, the
 //! target linker and the host linker. Spec env never reaches Cargo; it is

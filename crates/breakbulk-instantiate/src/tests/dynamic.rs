@@ -293,7 +293,7 @@ fn wrappers() {
     assert_eq!(w.env["notBuilt"], "");
 
     // With unpacked split debuginfo, the `.dwo` files of the library below
-    // the bin too (decision 126).
+    // the bin too.
     let mut unpacked = dyn_inputs();
     super::split_debuginfo_as(&mut unpacked, APP, "unpacked");
     super::split_debuginfo_as(&mut unpacked, LIB, "unpacked");

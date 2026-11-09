@@ -179,7 +179,7 @@ fn canonical_json_is_sorted_compact_and_stable() {
     assert_eq!(q.to_canonical_json(), a);
 }
 
-/// `roots` is a set (decision 9): read in any order and with repeats, it
+/// `roots` is a set: read in any order and with repeats, it
 /// is written sorted and once each, the same bytes as before it was typed
 /// as a set.
 #[test]
@@ -637,7 +637,7 @@ fn render_configuration_hooks() {
     assert_eq!(c.remap_scope.as_deref(), Some("macro,diagnostics"));
 }
 
-/// Decision 121: a run's C prefix maps under Cargo's trim-paths use Cargo's
+/// A run's C prefix maps under Cargo's trim-paths use Cargo's
 /// names (`CARGO_TRIM_PATHS_REMAP`'s pairs and the expanded build-directory
 /// pair), so they agree with cc-rs's; without trim-paths, breakbulk's own.
 #[test]
@@ -1391,7 +1391,7 @@ fn debug_output_only_where_side_files() {
     let c = compile(&mut p, "c-ring-build");
     assert!(!c.has_debug_output(msvc));
     // Libraries: only for per-object side files (`.dwo` with
-    // `split-debuginfo=unpacked`, decision 126), not for msvc's `.pdb` or
+    // `split-debuginfo=unpacked`), not for msvc's `.pdb` or
     // a `.dwp`, which only a link writes.
     let c = compile(&mut p, "c-cfgif");
     assert!(c.outputs.contains_key("rlib"));

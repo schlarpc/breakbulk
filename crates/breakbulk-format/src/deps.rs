@@ -376,7 +376,7 @@ pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
 /// The compile units among [`units_below`] `id` that have a `debug` output
 /// on a target with these traits ([`CompileUnit::has_debug_output`]): the
 /// libraries whose `.dwo` files a binary linked from them names
-/// (`split-debuginfo=unpacked`, decision 126).
+/// (`split-debuginfo=unpacked`).
 pub fn debug_units_below(
     plan: &Plan,
     id: &UnitId,

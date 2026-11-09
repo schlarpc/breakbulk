@@ -531,7 +531,7 @@ fn wrapper(
     };
     // The debuginfo side files (`debug`) of the unit, when it has that
     // output, and of the libraries below a product root that have one
-    // (`.dwo` with `split-debuginfo=unpacked`, decision 126), for the
+    // (`.dwo` with `split-debuginfo=unpacked`), for the
     // product's `linked` stage: one path per line.
     let traits = &inputs.toolchains.target_traits;
     let debug = match &info.unit {

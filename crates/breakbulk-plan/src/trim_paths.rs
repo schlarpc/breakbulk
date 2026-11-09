@@ -1,5 +1,5 @@
 //! Whether the planner turns Cargo's `trim-paths` on ("trim-paths" in
-//! `docs/implementation.md`, decision 121).
+//! `docs/implementation.md`).
 //!
 //! A profile setting passed with `--config` replaces the project's own, so
 //! the planner passes one only when the project declares none. It does not
@@ -10,7 +10,7 @@
 //! `package.<spec>` override, whatever the profile and value) counts as
 //! declared. A file that does not parse is a warning and counts as
 //! declaring nothing, so the dev shell, which uses the same rule, still
-//! opens while a manifest is broken (decision 135).
+//! opens while a manifest is broken.
 
 use std::path::{Path, PathBuf};
 

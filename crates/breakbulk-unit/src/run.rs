@@ -15,7 +15,7 @@
 //!    each missing path and each unset `rerun-if-env-changed` variable; on
 //!    success, warn about missing paths, or fail with `strictSources`.
 //! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
-//!    ([`remove_cmake_state`], decision 65).
+//!    ([`remove_cmake_state`]).
 
 use std::collections::BTreeMap;
 use std::io::Read;

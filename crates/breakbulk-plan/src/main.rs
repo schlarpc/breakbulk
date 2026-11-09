@@ -22,7 +22,8 @@
 //! project's Cargo config files and rustc, without running Cargo; with
 //! `--capabilities`, also the trim-paths variable for `--profile`, by the
 //! planner's rule from the workspace root's `Cargo.toml` and the config
-//! files, read as TOML (decision 135).
+//! files, read as TOML rather than by running Cargo, so the dev shell still
+//! opens while a manifest is broken.
 //!
 //! `--build-target-only` writes `{"buildTarget": [...] | null}`: the
 //! project's `build.target` from its config files (not `$CARGO_HOME`'s or

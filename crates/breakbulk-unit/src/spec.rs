@@ -412,7 +412,7 @@ pub struct RenderedCompile {
     pub env_capture: Option<String>,
     /// For a unit that links: the env captures (as `env_capture`) of the
     /// other packages in its link closure, on its platform, that have their
-    /// own inputs (decision 107). Only their library search variables
+    /// own inputs. Only their library search variables
     /// ([`crate::env::LINK_VARS`]) are used, appended to layer 2, so the
     /// linker wrapper finds (and records an rpath to) the native libraries
     /// a `-sys` crate below names with `rustc-link-lib` alone.
@@ -524,7 +524,7 @@ pub struct RenderedRun {
     /// the run names, with the names Rust remaps them to; under Cargo's
     /// trim-paths, Cargo's names (the pairs of `CARGO_TRIM_PATHS_REMAP`
     /// and the expanded build-directory pair), so they agree with the maps
-    /// cc-rs derives from that variable (decision 121). They become
+    /// cc-rs derives from that variable. They become
     /// `-ffile-prefix-map` in `NIX_CFLAGS_COMPILE`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remap: Vec<(String, String)>,

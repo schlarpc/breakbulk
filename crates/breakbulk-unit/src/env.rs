@@ -280,8 +280,8 @@ pub fn read_capture(path: &Path) -> Result<BTreeMap<String, String>, Error> {
     })
 }
 
-/// The variables of another package's env capture that a linking unit takes
-/// (decision 107): the library search flags nixpkgs' bintools-wrapper setup
+/// The variables of another package's env capture that a linking unit takes:
+/// the library search flags nixpkgs' bintools-wrapper setup
 /// hook writes for every library input (`bintoolsWrapper_addLDVars` appends
 /// `-L<input>/lib` to `NIX_LDFLAGS${role_post}`). A capture's `inputs` are
 /// `buildInputs` of its stdenv, whose role suffix is empty; the

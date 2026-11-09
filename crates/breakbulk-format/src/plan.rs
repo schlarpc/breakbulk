@@ -305,7 +305,7 @@ pub struct CompileUnit {
 
 impl CompileUnit {
     /// Whether the unit gets a `debug` derivation output for the
-    /// debuginfo side files rustc writes (decisions 89 and 126), by
+    /// debuginfo side files rustc writes, by
     /// [`writes_debuginfo_side_files`] on a target with these `traits`:
     /// - a target-platform unit with a `bin` output (bins, tests,
     ///   examples, benches, cdylibs, dylibs, staticlibs): any of the

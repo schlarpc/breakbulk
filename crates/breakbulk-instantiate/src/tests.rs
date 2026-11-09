@@ -353,7 +353,7 @@ fn shipped_remap_scope() {
     );
 }
 
-/// `sourcePaths = "keep"` (decision 121): no unit gets a remap, a scope or
+/// `sourcePaths = "keep"`: no unit gets a remap, a scope or
 /// a C prefix map from breakbulk.
 #[test]
 fn keep_source_paths() {
@@ -433,7 +433,7 @@ fn layers_and_overrides() {
         app.env_capture.as_deref(),
         Some(input_value("capture:target").as_str())
     );
-    // Decision 107: the bin links smokelib, whose target override has a
+    // The bin links smokelib, whose target override has a
     // capture of its own, so its linker gets that capture's library search
     // flags. The library itself links nothing; the build script is a host
     // unit, and smokelib has no host capture.
@@ -636,8 +636,7 @@ fn names_and_outputs() {
         Value::Strings(vec!["flags".into(), "out".into()])
     );
     // A library gets `debug` for its `.dwo` files with unpacked split
-    // debuginfo (decision 126), not with packed, and the bin's root lists
-    // it.
+    // debuginfo, not with packed, and the bin's root lists it.
     let lib_debug = |kind: &str| {
         let mut inputs = smoke_inputs();
         split_debuginfo_as(&mut inputs, APP, kind);

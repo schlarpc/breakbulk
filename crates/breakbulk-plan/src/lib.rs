@@ -51,13 +51,13 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
 /// The toolchain spec as Cargo environment configuration for the dev shell,
 /// without tracing: it reads only the project's Cargo config files and asks
 /// rustc (`-vV`, `--print cfg`), and never runs Cargo, so it works while
-/// the manifests are broken (decision 81). The same value as
+/// the manifests are broken. The same value as
 /// [`plan_with_cargo_env`]'s.
 ///
 /// With the toolchain's capabilities, it also exports
 /// `CARGO_PROFILE_<P>_TRIM_PATHS=all` when the planner would turn
 /// trim-paths on for `opts.profile`, by the same file-reading rule
-/// ([`trim_paths::decide`]; decision 135): the variable, like the planner's
+/// ([`trim_paths::decide`]): the variable, like the planner's
 /// `--config`, overrides the project's setting.
 pub fn cargo_env(opts: &trace::Options) -> Result<spec::CargoEnv, Error> {
     let mut env = spec::prepare_for(opts)?

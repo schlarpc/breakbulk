@@ -44,7 +44,7 @@ pub trait Resolve {
     fn remap_scope(&self, _id: &UnitId, _unit: &CompileUnit) -> Option<String> {
         None
     }
-    /// `sourcePaths = "keep"` (decision 121): breakbulk adds no remaps of
+    /// `sourcePaths = "keep"`: breakbulk adds no remaps of
     /// its own, neither Rust (`--remap-path-prefix`, `--remap-path-scope`)
     /// nor C (`-ffile-prefix-map`). Cargo's own trim-paths remaps, when the
     /// project turned them on, stay in the arguments as traced.
@@ -59,7 +59,7 @@ pub trait Resolve {
     /// For a unit that links: the env captures of `packages` (the other
     /// packages of its link closure on its platform, [`link_packages`])
     /// that have inputs of their own, whose library search variables reach
-    /// its linker (decision 107). Packages without a capture of their own
+    /// its linker. Packages without a capture of their own
     /// are left out.
     fn link_captures(
         &self,
@@ -171,7 +171,7 @@ pub fn is_linking(c: &CompileUnit) -> bool {
         .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
 }
 
-/// The packages a linking unit links, other than its own (decision 107):
+/// The packages a linking unit links, other than its own:
 /// the packages of the crates in `crates` (its [`Graph::crate_deps`]) that
 /// are on the unit's platform and are not proc macros. A target unit's
 /// closure never reaches a host unit, and a proc macro's dependencies are
@@ -455,7 +455,7 @@ fn run_remap<R: Resolve>(
 /// A run's C prefix maps and its own `OUT_DIR`'s name.
 type RunRemap = (Vec<(String, String)>, Option<String>);
 
-/// A run's C prefix maps under Cargo's trim-paths (decision 121): the
+/// A run's C prefix maps under Cargo's trim-paths: the
 /// pairs of its `CARGO_TRIM_PATHS_REMAP` (the package and the sysroot,
 /// which cc-rs turns into `-f*-prefix-map` flags itself) and Cargo's
 /// build-directory pair expanded per `OUT_DIR` (`buildDirRemap`, which

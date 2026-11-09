@@ -1205,8 +1205,8 @@ impl<'a> Builder<'a> {
             env.insert(k.clone(), v.clone());
         }
         // Under trim-paths, the C prefix maps' names for the OUT_DIRs this
-        // run names, its own included (decision 121): Cargo's one
-        // build-directory pair, expanded as for compile units.
+        // run names, its own included: Cargo's one build-directory pair,
+        // expanded as for compile units.
         let build_dir_remap = if env.get(TRIM_PATHS_REMAP_VAR).is_some_and(|v| !v.is_empty()) {
             let mut runs = self.runs_named_in_env(&env);
             runs.insert(id.clone());

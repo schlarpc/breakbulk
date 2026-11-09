@@ -8,7 +8,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     # The systems this flake's outputs are defined for (the nix-systems
-    # pattern, decision 55/59): x86_64-linux and aarch64-linux. A consumer
+    # pattern): x86_64-linux and aarch64-linux. A consumer
     # overrides the list with `inputs.breakbulk.inputs.systems.follows` (or
     # `.url`) pointing at another nix-systems flake, e.g. its own.
     systems.url = "github:nix-systems/default-linux";
@@ -72,7 +72,7 @@
             exec ${pkgs.bash}/bin/bash "$REPO/tests/dynamic/run.sh" "$@"
           '');
         };
-        # Content-addressed test cutoff (decisions 61, 17): private store
+        # Content-addressed test cutoff: private store
         # with ca-derivations on the command line only.
         #   nix run .#test-cutoff
         test-cutoff = {
@@ -83,7 +83,7 @@
             exec ${pkgs.bash}/bin/bash "$REPO/tests/test-cutoff/run.sh" "$@"
           '');
         };
-        # stripForRun and runFiles under content addressing (decisions 17, 61).
+        # stripForRun and runFiles under content addressing.
         #   nix run .#test-options
         test-options = {
           type = "app";
@@ -94,7 +94,7 @@
           '');
         };
       } // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
-        # linuxPortable (zig) binaries in a real glibc 2.17 userland (decision 122): pulls
+        # linuxPortable (zig) binaries in a real glibc 2.17 userland: pulls
         # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
         # cc, so it is not a flake check. Arguments go to nix-store.
         #   nix run .#test-linux-portable-container [-- --max-jobs 2 --cores 4]
@@ -139,7 +139,7 @@
           inherit pkgs;
           breakbulk = self.lib;
         }
-        # The systems come from the `systems` input (decision 55/59): with
+        # The systems come from the `systems` input: with
         # another list in its place, the outputs follow it.
         // {
           # Every internal link and fragment of the documentation site.
@@ -315,9 +315,9 @@
               breakbulk = self.lib;
             }) [ "workspaces" ]
           )
-          # Test-run options: a debug-stripped copy (test.stripForRun,
-          # decision 17) and a narrowed working directory (test.runFiles,
-          # decision 61). The CA check: tests/test-options/run.sh.
+          # Test-run options: a debug-stripped copy (test.stripForRun) and a
+          # narrowed working directory (test.runFiles). The CA check:
+          # tests/test-options/run.sh.
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-options-${n}" v) (
             builtins.removeAttrs (import ./tests/test-options {
               inherit pkgs;
@@ -325,7 +325,7 @@
             }) [ "runs" ]
           )
           # Native libraries at the link steps of the packages that link a
-          # `-sys` crate (decision 107).
+          # `-sys` crate.
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "native-link-${n}" v) (
             builtins.removeAttrs (import ./tests/native-link {
               inherit pkgs;
