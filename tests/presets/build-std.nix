@@ -71,11 +71,8 @@ let
 
   none = "x86_64-unknown-none";
   # No preset: the target spec's own linker (rust-lld, self-contained);
-  # there is no C toolchain for this target. No tests: the target has no
-  # `test` crate.
-  bare = mkRepo (fixtures + "/build-std") none [
-    { workspaces.main.targets.${none}.tests = false; }
-  ];
+  # there is no C toolchain for this target.
+  bare = mkRepo (fixtures + "/build-std") none [ ];
   barePlan = planOf bare none;
   bareCrates = cratesOf barePlan;
 

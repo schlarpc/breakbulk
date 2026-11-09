@@ -363,7 +363,18 @@ let
     windows-dll-staged = extraTargets.windowsDllStagedRepo;
     linux-portable = extraTargets.zigRepo;
     linux-portable-native = extraTargets.zigNativeRepo;
-    build-std = buildStd.bare;
+    # Without the test plan: x86_64-unknown-none has no `test` crate, so its
+    # test binaries do not compile (build-std-tests checks the plan's
+    # instantiation only).
+    build-std =
+      (import ../presets/build-std.nix (
+        testArgs
+        // {
+          extraModules = testArgs.extraModules ++ [
+            { workspaces.main.targets.x86_64-unknown-none.tests = false; }
+          ];
+        }
+      )).repos.bare;
     build-std-deps = buildStd.hosted;
 
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
