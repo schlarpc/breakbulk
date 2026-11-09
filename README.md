@@ -59,10 +59,17 @@ The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is l
 
 ## Status
 
-Early. The default mode reads Cargo's plan at evaluation time
-(import-from-derivation); a mode without it works on Nix master and turns
-on by itself once Nix 2.36 ships. Known gaps and planned work are in the
-[issues](https://github.com/schlarpc/breakbulk/issues).
+**Early, mostly feature complete.** Linux (glibc, musl, static, portable),
+Windows (MSVC and MinGW), wasm (browser, components, WASI) and riscv64
+targets build and test, with build scripts, doctests, variants and
+post-link stages. It has been used on the author's own repositories;
+options may still change.
+
+Not yet: macOS targets ([#13](https://github.com/schlarpc/breakbulk/issues/13)), a `cargo doc` product
+([#6](https://github.com/schlarpc/breakbulk/issues/6)). Until Nix 2.36 ships, breakbulk reads Cargo's plan at
+evaluation time (import-from-derivation), and the first evaluation of a
+large workspace takes minutes ([#19](https://github.com/schlarpc/breakbulk/issues/19)). Everything planned is in
+the [issues](https://github.com/schlarpc/breakbulk/issues).
 
 ## Development
 
