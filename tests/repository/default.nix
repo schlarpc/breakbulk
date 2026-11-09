@@ -940,6 +940,55 @@ in
     assert lib.assertMsg (off.config.sysDefaults.packages == { }) "sys-defaults: enable = false";
     evalCheck "sys-defaults" (builtins.toJSON itoa);
 
+  # `workspaces.<ws>.memberDefaults`: a package-shaped layer under every
+  # member's own settings. A member's `test.env` merges over it, its
+  # `test.runner` wins, and `extraSources` reaches every member's source
+  # view (path packages: app-b, a/inner, shared) but no registry crate's.
+  member-defaults =
+    let
+      base = [ (oneWs "b") ];
+      md = {
+        workspaces.main.memberDefaults = {
+          env.MD_UNIT = "md";
+          test.env = {
+            MD_ONLY = "md";
+            MD_BOTH = "md";
+          };
+          test.runner = "nextest";
+          extraSources = [ "c" ];
+        };
+        packages.app-b.test = {
+          env.MD_BOTH = "own";
+          runner = "libtest";
+        };
+      };
+      repo = mkRepo (fixtures + "/multi-ws") (base ++ [ md ]);
+      plain = mkRepo (fixtures + "/multi-ws") base;
+      i = repo.workspaces.main.instances.${native}.default;
+      run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
+      script = run.drvAttrs.buildCommand;
+      hasC = view: (builtins.readDir view) ? c;
+      units = unitsNamed i "build";
+      envOf =
+        n:
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+    in
+    assert lib.assertMsg (
+      lib.hasInfix "export MD_ONLY=md" script && lib.hasInfix "export MD_BOTH=own" script
+    ) "member-defaults: test env in ${script}";
+    # The package's `test.runner = "libtest"` wins over the default nextest.
+    assert lib.assertMsg (!(run.drvAttrs ? nextestCargoMetadata)) "member-defaults: app-b runs under nextest";
+    assert lib.assertMsg (lib.all (n: hasC i.sources.workspace.${n}) [
+      "b"
+      "a/inner"
+      "shared"
+    ]) "member-defaults: a member's view lacks c/";
+    assert lib.assertMsg (i.sources.crates == (plain.workspaces.main.instances.${native}.default).sources.crates)
+      "member-defaults: registry crate sources changed";
+    assert lib.assertMsg ((envOf "shared-0.1.0-lib").MD_UNIT or null == "md" && !((envOf "libc-0.2.191-lib") ? MD_UNIT))
+      "member-defaults: unit env placement";
+    evalCheck "member-defaults" script;
+
   # Modules receive `root` (a path, also when the caller passed a
   # string-like root), the repository object (`repo`) and the library
   # (`breakbulk`) without the caller wiring them through specialArgs; the

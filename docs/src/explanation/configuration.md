@@ -124,6 +124,23 @@ A setting can be narrowed to some versions of the package
 to one target's units
 ([`target.<triple>`](../reference/options/packages.md#packagesnametarget)).
 
+Settings that every member of a workspace shares go in
+[`workspaces.<ws>.memberDefaults`](../reference/options/workspaces.md#workspacesnamememberdefaults).
+It takes the same options as `packages.<name>`:
+
+```nix
+workspaces.main.memberDefaults = {
+  test.env.RUST_LOG = "debug";
+  test.path = [ pkgs.git ];
+  test.runner = "nextest";
+};
+packages.legacy.test.runner = "libtest";  # the package's own value wins
+```
+
+Members are the workspace's path packages. Their own `packages.<name>`
+settings go on top: lists concatenate, `env` merges, and a single value
+(`test.runner`) is the package's when it sets one.
+
 breakbulk ships settings for common `-sys` crates, from nixpkgs'
 `defaultCrateOverrides` ([`sysDefaults.packages`](../reference/options/repository.md#sysdefaultspackages)),
 as the lowest layer under `packages`. They apply only on platforms with a

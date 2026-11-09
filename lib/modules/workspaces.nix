@@ -10,6 +10,7 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
+  settings = (import ./package-settings.nix { inherit lib; }).settings;
   nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
 
   # `workspaces.<ws>.toolchain.capabilities.<name>` (lib/toolchain-facts.nix).
@@ -614,54 +615,27 @@ let
           '';
         };
 
-        test = {
-          stripForRun = mkOption {
-            type = types.bool;
-            default = false;
-            description = ''
-              The default `packages.<name>.test.stripForRun` for this
-              workspace's packages: test runs consume a debug-stripped copy
-              of each test binary. A package's own setting wins.
-            '';
-          };
-          runner = mkOption {
-            type = types.nullOr (
-              types.enum [
-                "libtest"
-                "nextest"
-              ]
-            );
-            default = null;
-            example = "nextest";
-            description = ''
-              The default `packages.<name>.test.runner` for this
-              workspace's packages: `libtest` or `nextest`. A package's own
-              setting wins. `null` means `libtest`.
-            '';
-          };
-          nextest = {
-            profile = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-              example = "ci";
-              description = "The default nextest profile for this workspace's test runs; a package's `test.nextest.profile` wins (`null`: `default`).";
-            };
-            configFile = mkOption {
-              type = types.nullOr types.path;
-              default = null;
-              description = ''
-                The default nextest configuration file for this workspace's
-                test runs; a package's `test.nextest.configFile` wins.
-                `null`: the workspace's `.config/nextest.toml` when it
-                exists.
-              '';
-            };
-            package = mkOption {
-              type = types.nullOr types.package;
-              default = null;
-              description = "The default cargo-nextest for this workspace's test runs; a package's `test.nextest.package` wins.";
-            };
-          };
+        memberDefaults = mkOption {
+          type = types.submodule settings;
+          default = { };
+          # The options of `packages.<name>`, documented there.
+          visible = "shallow";
+          example = lib.literalExpression ''
+            {
+              test.env.RUST_LOG = "debug";
+              test.runner = "nextest";
+              extraSources = [ "testdata" ];
+            }
+          '';
+          description = ''
+            Settings for every member of this workspace (the path packages
+            of its `Cargo.lock`), with the options of
+            [`packages.<name>`](packages.md). They are the lowest layer
+            under the package's own `packages.<name>` settings: lists
+            concatenate, `env` attributes merge, and the package's own value
+            wins for single values (`test.runner`). Dependencies from a
+            registry or git do not get them.
+          '';
         };
 
         benchSmoke = mkOption {

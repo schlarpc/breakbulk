@@ -166,7 +166,7 @@ let
         { inherit mode; }
         oneWs
         {
-          workspaces.main.test.stripForRun = true;
+          workspaces.main.memberDefaults.test.stripForRun = true;
           packages.app.test.runFiles = [
             "data"
             "notes.md"

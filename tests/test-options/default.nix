@@ -5,7 +5,7 @@
 #   nix build -f tests/test-options strip-for-run
 #   tests/test-options/run.sh     content-addressed, in a private store
 #
-#   strip-for-run   `workspaces.<ws>.test.stripForRun`: an edit
+#   strip-for-run   `workspaces.<ws>.memberDefaults.test.stripForRun`: an edit
 #                   to util's README changes the bytes of app's test binary
 #                   (util's debug info names its source view; the control),
 #                   but not those of the stripped copy the test run
@@ -76,7 +76,7 @@ let
   runsOf = r: (instOf r).testRuns.app;
 
   strip = {
-    workspaces.main.test.stripForRun = true;
+    workspaces.main.memberDefaults.test.stripForRun = true;
   };
   narrow = {
     packages.app.test.runFiles = [ "data" ];

@@ -549,7 +549,7 @@ let
       {
         workspaces.main = {
           variants.default.profile = "dev";
-          test = {
+          memberDefaults.test = {
             runner = "nextest";
             nextest.profile = "ci";
           };

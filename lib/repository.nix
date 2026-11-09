@@ -237,8 +237,9 @@ let
 
   # The package settings of one lockfile entry of workspace `wsName` on
   # `triple`, as a list of `packages.<name>`-shaped layers, lowest first:
-  # the curated defaults (`sysDefaults.packages`), then each matching
-  # `packages` key.
+  # the curated defaults (`sysDefaults.packages`), the workspace's
+  # `memberDefaults` for its path packages, then each matching `packages`
+  # key.
   layersFor =
     wsName: triple: e:
     let
@@ -256,6 +257,7 @@ let
         };
     in
     lib.optional (sys != null) (if packageSetOf wsName triple != null then sys e else hostOnly (sys e))
+    ++ lib.optional (e.source or null == null) cfg.workspaces.${wsName}.memberDefaults
     ++ map (k: cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
 
   # The merged override for one lockfile entry, or null.
@@ -340,9 +342,14 @@ let
         includeIgnored = false;
         sourceScope = [ ];
         binaries = { };
-        # The workspace's defaults; package settings win.
         runFiles = null;
-        inherit (cfg.workspaces.${wsName}.test) runner nextest stripForRun;
+        runner = null;
+        stripForRun = null;
+        nextest = {
+          profile = null;
+          configFile = null;
+          package = null;
+        };
       };
       # nextest reads `.config/nextest.toml` under the Cargo workspace root.
       nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";
@@ -592,9 +599,7 @@ let
                   in
                   if t == null then null else if platform == "target" then t.stdenv else t.host.stdenv;
               };
-        in
-        lib.optional (o != null) (
-          lib.nameValuePair "${e.name}@${e.version}" {
+          ov = {
             host = {
               env = envStrings (o.env // o.host.env);
               envCapture = capture "host" (catFn o.nativeInputs o.host.nativeInputs) (catFn o.inputs o.host.inputs);
@@ -604,7 +609,13 @@ let
               envCapture = capture "target" (catFn o.nativeInputs t.nativeInputs) (catFn o.inputs t.inputs);
             };
             inherit (o) strictSources;
-          }
+          };
+          # Members always have a layer (`memberDefaults`); one that sets
+          # nothing is left out, so instantiation's inputs do not change.
+          empty = s: s.env == { } && s.envCapture == null;
+        in
+        lib.optional (o != null && !(empty ov.host && empty ov.target && ov.strictSources == null)) (
+          lib.nameValuePair "${e.name}@${e.version}" ov
         )
       ) entries
     );
