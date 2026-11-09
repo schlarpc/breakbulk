@@ -1,38 +1,112 @@
 # Outputs and entry points
 
-## Entry point
+## `mkRepository`
 
 ```nix
 repo = breakbulk.lib.mkRepository {
   inherit pkgs;
-  root = ./.;                 # or a flake's self (turned into a path: lib.fileset takes only paths)
-  modules = [ ./nix/rust.nix ];
+  root = self;                  # the repository: a flake's self, or ./. outside flakes
+  modules = [ ./nix/rust.nix ]; # optional
 };
 ```
 
-`modules` may be left out: with no [`workspaces`](options/workspaces.md#workspaces) declared, a root that has a `Cargo.toml` is one workspace, `default`, at `"."` (`repo.workspaces.default.packages.<pkg>`); declaring any workspace turns that default off. The flake-parts module needs no `modules` either, so importing it is the whole configuration of a single-workspace repository.
+- `pkgs`: the package set to build with.
+- `root`: the repository root. A flake's `self` is turned into a path,
+  because `lib.fileset` takes only paths.
+- `modules`: breakbulk configuration, as NixOS-style modules (see
+  [Module options](options.md)). Without any, a root that has a
+  `Cargo.toml` is one workspace, `default`, at `"."`; declaring any
+  [`workspaces`](options/workspaces.md#workspaces) turns that default off.
+- `specialArgs`: extra module arguments.
 
-Modules receive `pkgs`, `root` (the repository root as a path, for reading project files), `repo` (the result itself, for another workspace's product used as an input; laziness makes the cycle harmless) and `breakbulk` (the library: presets, stage helpers, `xwinSdk`). `specialArgs` passed to `mkRepository` add to these and win.
+Modules receive these arguments:
 
+- `pkgs`;
+- `root`, the repository root as a path, for reading project files;
+- `repo`, the result itself, to use another workspace's product as an
+  input (laziness makes the cycle harmless);
+- `breakbulk`, the library: presets, stage helpers, `xwinSdk`.
 
-## Outputs
+`specialArgs` add to these and win.
 
-| Attribute | Contents |
-| --- | --- |
-| `repo.workspaces.<ws>.target.<triple>.packages.<pkg>` | The product after default stages; `.stages.<name>` for each intermediate; `.debug` where split |
-| `repo.workspaces.<ws>.packages.<pkg>`, `.tests.<pkg>.<test>` | The same, for the workspace's default target ([`defaultTarget`](options/workspaces.md#workspacesnamedefaulttarget)) |
-| `repo.workspaces.<ws>.target.<triple>.variants.<v>.{packages,tests}` | The same, for another variant |
-| `repo.workspaces.<ws>.target.<triple>.tests.<pkg>.<test>` | Test binaries, for VM and system tests |
-| `repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>` | Test-run derivations |
-| `repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<test>` | Runnable apps: the test binary with its test-run environment, run outside the sandbox |
-| `repo.workspaces.<ws>.target.<triple>.doctests.<pkg>` | Doctest derivations |
-| `repo.workspaces.<ws>.target.<triple>.benches.<pkg>.<bench>` | Bench binaries from the bench variant |
-| `repo.workspaces.<ws>.target.<triple>.docs` | The documentation product (not built yet, [#6](https://github.com/schlarpc/breakbulk/issues/6)) |
-| `repo.checks` | All checks and test runs flattened, ready for `checks.<system>`: the default variant's products, checks, test runs and doctests as `<ws>/<triple>/<pkg>/…`; other variants' test runs and doctests as `<ws>/<triple>/variant-<v>/<pkg>/…`; check and clippy variants as `<ws>/<triple>/variant-<v>/check` |
-| `repo.sources.<crate>` | Fetched crate sources by name (and `<name>@<version>`) |
-| `repo.workspaces.<ws>.toolchain.{rustc,cargo,clippy,rustfmt}` | The workspace's resolved toolchain |
-| `repo.workspaces.<ws>.target.<triple>.{spec,traits}` | The resolved target spec and the target's traits |
-| `repo.workspaces.<ws>.devShell` | A shell matching the planner's Cargo invocation ([The Nix library](../explanation/internals/nix-library.md#dev-shell)) |
-| `repo.workspaces.<ws>.plans.<triple>.<variant>.{build,test}` | `plan.json`, for debugging |
-| `repo.explainSharing` | Given two plans and a package, the inputs that make its units differ |
-| `repo.config`, `repo.options`, `repo.optionsDoc` | The evaluated modules, and their `nixosOptionsDoc` |
+## The flake-parts module
+
+```nix
+imports = [ inputs.breakbulk.lib.flakeModule ];
+perSystem = { ... }: {
+  breakbulk.modules = [ ./nix/rust.nix ];
+};
+```
+
+`root` defaults to the flake's `self`. Per system it sets
+`breakbulk.repo` (the `mkRepository` result) and adds `repo.checks` to
+`checks`, the default target's products to `packages`, and each
+workspace's dev shell to `devShells`.
+
+## The result
+
+`<ws>` is a workspace name, `<triple>` a target, `<v>` a variant,
+`<pkg>` a package.
+
+```nix
+repo = {
+  workspaces.<ws> = {
+    # Shortcuts for the default target (defaultTarget) and variant:
+    packages.<pkg>;          # a product: the build after the default stages
+    tests.<pkg>.<test>;      # a test binary
+    devShell;                # a shell matching the planner's Cargo invocation
+    toolchain = { rustc; cargo; clippy; rustfmt; };   # resolved
+
+    target.<triple> = {
+      packages.<pkg>;        # products for this target
+      tests.<pkg>.<test>;    # test binaries, e.g. for VM tests
+      testRuns.<pkg>.<test>; # derivations that run them
+      testApps.<pkg>.<test>; # the same, runnable outside the sandbox
+      doctests.<pkg>;        # each library's doctests
+      benches.<pkg>.<bench>; # bench binaries, from a bench variant
+      variants.<v> = { packages; tests; };
+      spec;                  # the resolved target spec
+      traits;                # the target's traits
+    };
+
+    plans.<triple>.<v> = { build; test; };   # plan.json, for debugging
+  };
+
+  checks."<ws>/<triple>/<pkg>/<name>";   # everything to check, for checks.<system>
+  sources.<crate>;                       # fetched crate sources
+  explainSharing;                        # why two plans' units differ
+  config; options; optionsDoc;           # the evaluated modules
+};
+```
+
+### Products
+
+A product such as `packages.<pkg>` is the package's built binaries and
+libraries, passed through the target's post-link stages and installed
+(`bin/`, `lib/`). It also has:
+
+- `.stages.<name>`: every intermediate stage, e.g. `.stages.linked`;
+- `.debug`: split debug information, where the target splits it;
+- `.checks.<name>`: the product's checks.
+
+### `checks`
+
+All checks and test runs, flattened for a flake's `checks.<system>`:
+
+- the default variant's products, their checks, test runs and doctests,
+  as `<ws>/<triple>/<pkg>/build`, `…/<pkg>/<check>`, `…/<pkg>/test-<name>`
+  and `…/<pkg>/doctest`;
+- other variants' test runs and doctests, as
+  `<ws>/<triple>/variant-<v>/<pkg>/…`;
+- check and clippy variants, as `<ws>/<triple>/variant-<v>/check`.
+
+### `explainSharing`
+
+`repo.explainSharing { a; b; package; }` takes two plans (from `plans`)
+and optionally a package name, and lists the inputs that make its units
+(or every package's) differ between them.
+
+### Not built yet
+
+`target.<triple>.docs`, the `cargo doc` product
+([#6](https://github.com/schlarpc/breakbulk/issues/6)).

@@ -2,13 +2,21 @@
 
 `plan.json` is a versioned, deterministic description of one (workspace, target, variant, plan kind): every unit, with arguments split into literals, references and splice points. It contains no store paths for sources, so it changes only when manifests, the lockfile, config or the toolchain change.
 
+This abridged example shows one library compile and the build-script run
+it depends on (`…` marks elided values):
+
 ```json
 {
   "version": 1,
   "kind": "build",
-  "cargo": "1.96.1", "rustc": "1.96.1 (…)", "host": "x86_64-unknown-linux-gnu",
-  "target": "wasm32-unknown-unknown", "variant": { "profile": "release", "features": [], "mode": "build" },
-  "skeletonRoot": "/build/skeleton", "trimPaths": false, "trimPathsDefault": false,
+  "cargo": "1.96.1",
+  "rustc": "1.96.1 (…)",
+  "host": "x86_64-unknown-linux-gnu",
+  "target": "wasm32-unknown-unknown",
+  "variant": { "profile": "release", "features": [], "mode": "build" },
+  "skeletonRoot": "/build/skeleton",
+  "trimPaths": false,
+  "trimPathsDefault": false,
   "units": {
     "c-8f3a1d2e9b0c4f17": {
       "kind": "compile",
@@ -16,24 +24,40 @@
       "crate": { "name": "ring", "types": ["lib"], "edition": "2021" },
       "platform": "target",
       "program": ["/nix/store/…-rustc/bin/rustc"],
-      "args": ["--crate-name", "ring", [{ "crateSrc": "…ring@0.17.14", "rel": "src/lib.rs" }], "…",
-               "--extern", ["cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
-               { "splice": "r-ring-…", "kind": "rustc-cfg" },
-               { "splice": "r-ring-…", "kind": "rustc-link-lib" },
-               { "splice": "r-ring-…", "kind": "rustc-link-arg", "kinds": ["rustc-link-arg"] }],
-      "env": { "CARGO_PKG_NAME": "ring", "OUT_DIR": [{ "out": "r-ring-…", "output": "out" }] },
+      "args": [
+        "--crate-name",
+        "ring",
+        [{ "crateSrc": "…ring@0.17.14", "rel": "src/lib.rs" }],
+        "--extern",
+        ["cfg_if=", { "out": "c-…", "output": "rmeta", "file": "libcfg_if-….rmeta" }],
+        { "splice": "r-ring-…", "kind": "rustc-cfg" },
+        { "splice": "r-ring-…", "kind": "rustc-link-lib" },
+        { "splice": "r-ring-…", "kind": "rustc-link-arg", "kinds": ["rustc-link-arg"] }
+      ],
+      "env": {
+        "CARGO_PKG_NAME": "ring",
+        "OUT_DIR": [{ "out": "r-ring-…", "output": "out" }]
+      },
       "envSplices": [{ "splice": "r-ring-…", "kind": "rustc-env" }],
       "cwd": { "crateSrc": "…ring@0.17.14", "rel": "" },
-      "outputs": { "rmeta": ["libring-….rmeta"], "rlib": ["libring-….rlib"] }
+      "outputs": {
+        "rmeta": ["libring-….rmeta"],
+        "rlib": ["libring-….rlib"]
+      }
     },
     "r-ring-…": {
-      "kind": "run", "package": "…ring@0.17.14", "platform": "target", "links": "ring_core_0_17_14_",
+      "kind": "run",
+      "package": "…ring@0.17.14",
+      "platform": "target",
+      "links": "ring_core_0_17_14_",
       "script": { "out": "c-…", "output": "bin" },
-      "env": { "TARGET": "wasm32-unknown-unknown", "…": "…" },
+      "env": { "TARGET": "wasm32-unknown-unknown" },
       "metadataFrom": []
     }
   },
-  "roots": [{ "package": "…", "target": "app", "kind": "bin", "unit": "c-…", "test": false }]
+  "roots": [
+    { "package": "…", "target": "app", "kind": "bin", "unit": "c-…", "test": false }
+  ]
 }
 ```
 
@@ -47,8 +71,8 @@
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
-- **[`trimPaths`](options/workspaces.md#workspacesnametoolchaincapabilitiestrimpaths)** and **`trimPathsDefault`** (omitted when false): see [trim-paths](../explanation/internals/planner.md#trim-paths).
-- **[`roots`](options/workspaces.md#workspacesnameroots)** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test and example binaries in a test plan; bench binaries in the bench variant's plan. A set: the Rust type is an ordered set (like `features`, `metadataFrom` and an output's file names), so it is written sorted and without repeats by construction.
+- **`trimPaths`** and **`trimPathsDefault`** (omitted when false): see [trim-paths](../explanation/internals/planner.md#trim-paths).
+- **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test and example binaries in a test plan; bench binaries in the bench variant's plan. A set: the Rust type is an ordered set (like `features`, `metadataFrom` and an output's file names), so it is written sorted and without repeats by construction.
 
 ## Invariants
 

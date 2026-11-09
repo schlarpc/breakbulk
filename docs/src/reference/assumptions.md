@@ -213,7 +213,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 ### T13. Which targets each command builds
 
 - **Assumption.** `cargo build` builds libraries and bins; `cargo test --no-run` builds libraries, lib and bin harnesses, integration tests and examples (as plain bins), bins only when the package has integration tests, and no benches; `cargo bench --no-run` builds lib and bin harnesses in bench mode and benches; an unharnessed test or bench is compiled as a plain bin; `CARGO_PRIMARY_PACKAGE=1` marks every compile of a selected member, its host copy included.
-- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::roots`, `target_of`; `lib/roots.nix`: [`roots`](options/workspaces.md#workspacesnameroots).
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::roots`, `target_of`; `lib/roots.nix`: `roots`.
 - **Upstream.** cargo `src/ops/cargo_compile/unit_generator.rs`, `UnitGenerator::filter_default_targets`, `new_units` (`0.100.0`); spike A.
 - **Holds for.** The window (spike A); 1.99 (checks).
 - **Pinned by.** `roots-plans` (predicted roots equal what real `cargo build`, `test --no-run` and `bench --no-run` compile); `products-benches`.

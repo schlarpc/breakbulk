@@ -2,7 +2,7 @@
 
 Many flakes define outputs for several systems, for example with the
 `nix-systems/default` input, which includes macOS. In IFD mode (the
-default on released Nix), breakbulk can only list the checks and packages
+default on stable Nix), breakbulk can only list the checks and packages
 of systems you can build on.
 
 ## Why

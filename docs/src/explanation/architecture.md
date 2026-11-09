@@ -1,13 +1,21 @@
 # How a build works
 
 ```text
-  Configuration (modules) ──────────┬──────────────┐
-  presets, per-package settings,    │              │
-  variants, workspaces              ▼              ▼
-1. Fetch ──────────────────▶ 2. Plan ──────▶ 3. Instantiate ──▶ 4. Units ──▶ 5. Products
-   crates from Cargo.lock;      trace real      plan.json →       one derivation   stages, test runs,
-   source views per package     Cargo over a    one .drv per      per Cargo unit   checks
-                                skeleton        unit
+  your modules: presets, per-package settings, variants
+        │
+        │      1. Fetch         crates from Cargo.lock;
+        │            │          a source view per package
+        │            ▼
+        ├─────▶ 2. Plan          trace real Cargo over a skeleton
+        │            │          → plan.json
+        │            ▼
+        └─────▶ 3. Instantiate   plan.json → one .drv per unit
+                     │
+                     ▼
+                4. Units         one derivation per Cargo unit
+                     │
+                     ▼
+                5. Products      stages, test runs, checks
 ```
 
 Cargo is consulted only when manifests, the lockfile or config change. A source edit reruns only the units whose inputs changed; in IFD mode the instantiate step does not rerun either.

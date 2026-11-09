@@ -1,8 +1,14 @@
 # Rebuild less when unrelated files change
 
-A package's source is its directory inside the repository you pass as
-`root`. When the crate sits at the repository root, that is the whole
-repository, so an edit to `flake.nix` or a README rebuilds it.
+Each package's units see only that package's directory (plus its
+`extraSources`), so an edit elsewhere in the repository does not rebuild
+them. The exception is a package whose directory is the repository root:
+a single-crate repository, or a workspace whose root `Cargo.toml` is also
+a package. That package's directory is the whole repository, so editing
+`flake.nix`, a README or CI configuration rebuilds it and everything that
+depends on it.
+
+Members in subdirectories (`crates/foo`) need nothing on this page.
 
 ## Pass a filtered root
 
