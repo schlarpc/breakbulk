@@ -21,8 +21,6 @@ Cargo's exact command line. So:
 
 The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is loaded piece by piece, not in containers.
 
-Documentation: <https://schlarpc.github.io/breakbulk/>.
-
 ## Quickstart
 
 ```nix
@@ -54,69 +52,24 @@ Documentation: <https://schlarpc.github.io/breakbulk/>.
 - `nix develop` gives a shell where plain `cargo` behaves like breakbulk's
   planner.
 
-With no configuration, the Cargo workspace at the repository root is used.
-Settings go in `modules`, for example:
+The [tutorial](https://schlarpc.github.io/breakbulk/tutorials/first-project.html) walks through this
+step by step.
 
-```nix
-modules = [{
-  packages.openssl-sys.inputs = p: [ p.openssl ];  # a native library for one crate
-  packages.app.env.GIT_REV = self.rev or "dirty";  # reaches only `app`'s units
-}];
-```
+## Documentation
 
-With flake-parts, import `breakbulk.lib.flakeModule`.
+<https://schlarpc.github.io/breakbulk/>
 
-A workspace that does not build for the machine you are on (firmware,
-wasm) lists its targets. `packages` and the dev shell then refer to its
-only target, or to the one its `.cargo/config.toml` names in
-`build.target`; set `defaultTarget` to choose otherwise. Every target's
-products are under `target.<triple>`:
-
-```nix
-modules = [{
-  workspaces.default.targets = {
-    x86_64-unknown-uefi = { };
-    aarch64-unknown-uefi = { };
-  };
-}];
-# repo.workspaces.default.target.aarch64-unknown-uefi.packages.app
-```
-
-A package's source is its directory. When the crate is at the repository
-root, that is the whole repository, so editing `flake.nix` or a README
-rebuilds it. Pass a filtered `root` to keep only what the build reads
-(add data files, `include_str!` targets and `extraSources` to the list):
-
-```nix
-root = nixpkgs.lib.fileset.toSource {
-  root = ./.;
-  fileset = nixpkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./src ];
-};
-```
-
-## Configuration
-
-Configuration is NixOS-style modules; every option is in the
-[options reference](https://schlarpc.github.io/breakbulk/reference/options.html). breakbulk reads your project's own
-`.cargo/config.toml`, but not `~/.cargo/config.toml` or `CARGO_*`
-variables in your shell.
-
-## Presets
-
-A target's toolchain comes from a preset; the target triple picks the
-mechanism.
-
-| Preset | Produces | Example triples |
-| --- | --- | --- |
-| `linux` | a normal Linux program (the native default) | `x86_64-unknown-linux-gnu`, `aarch64-…`, `riscv64gc-…` |
-| `linuxStatic` | a self-contained static Linux program | `*-linux-musl`, or the host triple with static glibc |
-| `linuxPortable` | a program for any Linux with glibc at least a given version | the host triple |
-| `windows` | a Windows program (MSVC or MinGW) | `*-pc-windows-msvc`, `*-pc-windows-gnu`, `*-gnullvm` |
-| `wasmWeb` | wasm for browsers and Node, through wasm-bindgen | `wasm32-unknown-unknown` |
-| `wasmComponent` | a WebAssembly component | `wasm32-unknown-unknown`, `wasm32-wasip2` |
-
-The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
-unfree; breakbulk downloads them with `breakbulk.xwinSdk`.
+- How-to guides: [native libraries](https://schlarpc.github.io/breakbulk/how-to/native-library.html),
+  [other targets](https://schlarpc.github.io/breakbulk/how-to/targets.html) (musl, aarch64, Windows,
+  wasm), [narrowing sources](https://schlarpc.github.io/breakbulk/how-to/filter-source.html),
+  [treefmt](https://schlarpc.github.io/breakbulk/how-to/treefmt.html),
+  [binary caches](https://schlarpc.github.io/breakbulk/how-to/binary-cache.html).
+- Reference: [module options](https://schlarpc.github.io/breakbulk/reference/options.html),
+  [presets](https://schlarpc.github.io/breakbulk/reference/presets.html),
+  [outputs](https://schlarpc.github.io/breakbulk/reference/outputs.html).
+- Explanation: [why breakbulk](https://schlarpc.github.io/breakbulk/explanation/why.html),
+  [how a build works](https://schlarpc.github.io/breakbulk/explanation/architecture.html),
+  [trade-offs](https://schlarpc.github.io/breakbulk/explanation/trade-offs.html).
 
 ## Status
 
