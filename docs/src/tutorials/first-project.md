@@ -96,6 +96,9 @@ In the shell, plain `cargo` sees the same configuration as breakbulk's
 planner. Use it for the edit-compile loop; use `nix build` for results you
 keep or share.
 
+To enter the shell automatically when you `cd` into the project, [set up
+direnv](../how-to/direnv.md).
+
 ## Next steps
 
 - Every setting is a module option. See the

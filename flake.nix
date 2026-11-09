@@ -50,7 +50,9 @@
         in
         nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "breakbulk-bb-${n}" v) selfBuilt
         # The documentation site: nix build .#docs-site
-        // { docs-site = (docsFor pkgs).site; });
+        // { docs-site = (docsFor pkgs).site; }
+        # For a project's .envrc: `use breakbulk` (lib/direnvrc.nix).
+        // { direnvrc = import ./lib/direnvrc.nix pkgs; });
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
