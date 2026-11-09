@@ -230,5 +230,5 @@ in
 )
 # -Zbuild-std (./build-std.nix): rust-overlay's nightly with rust-src.
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
-  builtins.removeAttrs (import ./build-std.nix { inherit pkgs breakbulk; }) [ "repos" ]
+  (import ./build-std.nix { inherit pkgs breakbulk; }).checks
 )

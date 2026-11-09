@@ -6,42 +6,55 @@
 #   mode = "ifd" | "dynamic"
 #
 # Attributes:
-#   repos.<fixture>          the mkRepository results
+#   repos.<fixture>          the mkRepository results: most are the
+#                            repositories of the IFD-mode tests
+#                            (tests/products, tests/repository,
+#                            tests/presets), with `mode` added
 #   build.<fixture>          a derivation linking every product, test
-#                            run and doctest of the fixture's default
-#                            variants (products/<ws>/<pkg>,
-#                            runs/<ws>/<pkg>/<binary>, doctests/<ws>/<pkg>;
-#                            in dynamic mode also units-<ws>-<kind>, every
-#                            unit of each plan), its repo.checks
+#                            run, bench run and doctest of every
+#                            workspace, target and variant (<i> is
+#                            <ws>/<triple>/<variant>): products/<i>/<pkg>,
+#                            runs/<i>/<pkg>/<binary>,
+#                            runs/<i>/bench/<pkg>/<binary>,
+#                            doctests/<i>/<pkg>; in dynamic mode also
+#                            units/<i>/<kind>, every unit of each plan),
+#                            its repo.checks
 #                            (checks/<name>), for test-control `apps`,
 #                            a run of its test apps, and for
 #                            source-paths-dwo/-dwp `gdb`, gdb in a
 #                            dependency through the product's debug output
-#   unitDrvs.<fixture>       a JSON file: "<ws>/<kind>" -> unit id (or
+#   unitDrvs.<fixture>       a JSON file: "<i>/<kind>" -> unit id (or
 #                            `doctest:<pkg>`) -> .drv path (IFD mode)
 #   explain.<fixture>        whether repo.explainSharing finds every unit
 #                            of the first workspace's build plan shared
 #                            with itself (it must)
-#   outer.<fixture>."<ws>/<kind>"   the outer derivations (dynamic mode)
+#   outer.<fixture>."<i>/<kind>"   the outer derivations (dynamic mode)
 #   mayDiffer.<fixture>      a regex of unit derivation names that may
 #                            differ between the modes (embedding chains)
 #   checkVariant             (dynamic mode) a check variant's check of the
 #                            walking skeleton: every unit of both plans,
 #                            through the outer derivations' `units.drv`
-#   prereqs                  the plans and breakbulk's tools: with the
+#   prereqs.<fixture>, prereqs.tools
+#                            the plans and breakbulk's tools: with the
 #                            outputs upstream of the units, what run.sh
 #                            copies into the private store, so that only
 #                            breakbulk's own derivations are built there
 {
-  pkgs ? import (
+  # nixpkgs and rust-overlay as the flake pins them (the preset fixtures
+  # need rust-overlay's toolchains).
+  pkgs ?
     let
-      n = (builtins.fromJSON (builtins.readFile ../../flake.lock)).nodes.nixpkgs.locked;
+      lock = (builtins.fromJSON (builtins.readFile ../../flake.lock)).nodes;
+      fetch =
+        n:
+        fetchTarball {
+          url = "https://github.com/${n.owner}/${n.repo}/archive/${n.rev}.tar.gz";
+          sha256 = n.narHash;
+        };
     in
-    fetchTarball {
-      url = "https://github.com/${n.owner}/${n.repo}/archive/${n.rev}.tar.gz";
-      sha256 = n.narHash;
-    }
-  ) { },
+    import (fetch lock.nixpkgs.locked) {
+      overlays = [ (import (fetch lock.rust-overlay.locked)) ];
+    },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
   mode ? "auto",
 }:
@@ -66,6 +79,28 @@ let
       variants.default.profile = "dev";
     };
   };
+
+  # The repositories of the IFD-mode tests, in this mode.
+  testArgs = {
+    inherit pkgs breakbulk;
+    extraModules = [ { inherit mode; } ];
+  };
+  products = (import ../products testArgs).repos;
+  repository = (import ../repository testArgs).repos;
+  presetFixtures =
+    (import ../presets/fixtures.nix (
+      testArgs
+      // {
+        # As the flake's: unfree admitted for the xwin SDK only.
+        xwinPkgs = import pkgs.path {
+          inherit (pkgs.stdenv.hostPlatform) system;
+          config.allowUnfreePredicate = p: lib.getName p == "xwin-sdk";
+        };
+      }
+    )).repos;
+  extraTargets = (import ../presets/extra-targets.nix testArgs).repos;
+  buildStd = (import ../presets/build-std.nix testArgs).repos;
+  nightly = pkgs.rust-bin.nightly.latest.minimal;
 
   # test-control's test configuration, as tests/test-runs uses it: a
   # per-binary skip list, test.env and test.path.
@@ -176,8 +211,9 @@ let
         }
       ];
     };
-    # A product with a bin Cargo skips (required features): left out.
-    required-features = mkRepo "required-features" [ oneWs ];
+    # A product with a bin Cargo skips (required features): left out; the
+    # `full` variant builds it.
+    required-features = repository.rf;
     # A product whose only bin Cargo skips: in dynamic mode
     # it and its checks build to the no-binaries marker; IFD mode leaves it
     # out (run.sh accepts the difference only for marker outputs).
@@ -202,6 +238,112 @@ let
         };
       }
     ];
+    # The tests/plan fixtures, planned as there (mkWorkspace's defaults).
+    crate-types = mkRepo "crate-types" [
+      oneWs
+      # The staticlib keeps its objects' debug info, which names the source
+      # view (splitDebug splits linked files only): the check fails in both
+      # modes.
+      { packages.stat.checks.noSourceReferences = null; }
+    ];
+    dev-dep-features = mkRepo "dev-dep-features" [ oneWs ];
+    build-dep-leak = mkRepo "build-dep-leak" [ oneWs ];
+    bin-exe-not-built = mkRepo "bin-exe-not-built" [ oneWs ];
+    sys-native = mkRepo "sys-native" [
+      oneWs
+      {
+        packages = {
+          openssl-sys = {
+            nativeInputs = p: [ p.pkg-config ];
+            inputs = p: [ p.openssl ];
+            env.BB_MARKER = "ssl";
+          };
+          cm-sys.nativeInputs = p: [ p.cmake ];
+          bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
+        };
+      }
+    ];
+    # Nightly `resolver.feature-unification = "package"`.
+    feature-unification = mkRepo "feature-unification" [
+      oneWs
+      {
+        workspaces.main.toolchain = {
+          rustc = nightly;
+          cargo = nightly;
+        };
+      }
+    ];
+    # Check and clippy variants with clippy.toml files. Without
+    # tests/products' `-D clippy::disallowed_methods` the disallowed calls
+    # are warnings, so the clippy units build.
+    clippy-conf = mkRepo "clippy-conf" [
+      {
+        workspaces.main = {
+          path = "ws";
+          variants = {
+            default.profile = "dev";
+            check.mode = "check";
+            clippy.mode = "clippy";
+          };
+        };
+      }
+    ];
+    # A git source whose crates come from two inheriting workspaces, as
+    # tests/git-multi-workspace builds it.
+    git-multi-workspace = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/git-multi-workspace/consumer";
+      modules = [
+        { inherit mode; }
+        oneWs
+        { gitTrees."file:///build/gitdep" = fixtures + "/git-multi-workspace/repo"; }
+      ];
+    };
+    git-revisions = (import ../git-revisions testArgs).repos.repository;
+    # tests/test-cutoff's fixture, as its stable-inputs check builds it.
+    test-cutoff = mkRepo "test-cutoff" [ oneWs ];
+
+    # tests/repository
+    multi-ws = repository.multiWs;
+    outside-reads = repository.outside;
+    stamps = repository.stampsA;
+    missing-input = repository.provided;
+    test-only = repository.testOnly;
+    pkgid-short = repository.pkgidShort;
+
+    # tests/products
+    post-link = products.postLink;
+    source-paths = products.sourcePaths;
+    trim-paths = products.trimPathsRepo;
+    trim-paths-cc = products.trimCc;
+    variants = products.variantsRepo;
+    benches = products.benchesRepo;
+    stdpaths = products.rustSrcRepo;
+
+    # tests/presets
+    same-triple = presetFixtures.sameTriple;
+    static-musl = presetFixtures.musl;
+    static-glibc = presetFixtures.glibcStatic;
+    static-pkgconfig = presetFixtures.staticPkgconfig;
+    sys-native-aarch64 = presetFixtures.sysNativeCross;
+    cross-lto = presetFixtures.crossLto;
+    cross-lto-off = presetFixtures.crossLtoOff;
+    wasm-browser = presetFixtures.wasmBrowser;
+    wasm-component = presetFixtures.wasmComponent;
+    msvc = presetFixtures.msvc;
+    msvc-post-link = presetFixtures.msvcPostLink;
+    wasip2 = extraTargets.wasip2Repo;
+    riscv64 = extraTargets.riscv64Repo;
+    windows-gnu = extraTargets.windowsGnuRepo;
+    windows-gnullvm-aarch64 = extraTargets.windowsGnullvmA64Repo;
+    uefi = extraTargets.uefiRepo;
+    windows-dll = extraTargets.windowsDllRepo;
+    windows-dll-staged = extraTargets.windowsDllStagedRepo;
+    linux-portable = extraTargets.zigRepo;
+    linux-portable-native = extraTargets.zigNativeRepo;
+    build-std = buildStd.bare;
+    build-std-deps = buildStd.hosted;
+
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
     nextest = mkRepo "nextest" [
       oneWs
@@ -326,48 +468,59 @@ let
     embed = "^(embedder|host)-";
   };
 
-  inst = repo: wsName: repo.workspaces.${wsName}.instances.${native}.default;
+  # Every workspace, target and variant of a repository: `key` is
+  # `<ws>/<triple>/<variant>`, `inst` the mkWorkspace result, `out` the
+  # repository's outputs for it (products, selected test runs, ...).
+  instancesOf =
+    repo:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        wsName: w:
+        lib.concatLists (
+          lib.mapAttrsToList (
+            triple: vs:
+            lib.mapAttrsToList (v: inst: {
+              key = "${wsName}/${triple}/${v}";
+              inherit inst;
+              out = w.target.${triple}.variants.${v};
+            }) vs
+          ) w.instances
+        )
+      ) repo.workspaces
+    );
+
+  # The plan kinds an instance has (build, test, and bench when planned).
+  kindsOf = i: lib.attrNames i.inst.units;
+
+  linkEach =
+    dir: attrs:
+    lib.concatStrings (
+      lib.mapAttrsToList (n: d: ''
+        mkdir -p "$(dirname "${dir}/${n}")"
+        ln -s ${d} "${dir}/${n}"
+      '') attrs
+    );
+  # { pkg = { binary = run; }; } as { "pkg/binary" = run; }.
+  flat2 = lib.concatMapAttrs (p: lib.mapAttrs' (b: lib.nameValuePair "${p}/${b}"));
 
   build =
     name: repo:
     pkgs.runCommand "${name}-${mode}" { } (
-      lib.concatStrings (
-        lib.mapAttrsToList (
-          wsName: w:
-          ''
-            mkdir -p $out/products/${wsName} $out/runs/${wsName}
-          ''
-          # Dynamic mode: every outer derivation runs (run.sh reads their
-          # logs), also for a plan no product or test run needs.
-          + lib.concatStrings (
-            lib.mapAttrsToList (kind: d: ''
-              ln -s ${d} $out/units-${wsName}-${kind}
-            '') ((inst repo wsName).allUnits or { })
-          )
-          + lib.concatStrings (
-            lib.mapAttrsToList (p: d: ''
-              ln -s ${d} $out/products/${wsName}/${p}
-            '') (lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) w.packages)
-          )
-          + lib.concatStrings (
-            lib.concatLists (
-              lib.mapAttrsToList (
-                p: bs:
-                lib.mapAttrsToList (b: d: ''
-                  mkdir -p "$(dirname "$out/runs/${wsName}/${p}/${b}")"
-                  ln -s ${d} "$out/runs/${wsName}/${p}/${b}"
-                '') bs
-              ) (inst repo wsName).testRuns
-            )
-          )
-          + lib.concatStrings (
-            lib.mapAttrsToList (p: d: ''
-              mkdir -p $out/doctests/${wsName}
-              ln -s ${d} $out/doctests/${wsName}/${p}
-            '') (inst repo wsName).doctests
-          )
-        ) repo.workspaces
-      )
+      lib.concatMapStrings (
+        i:
+        ''
+          mkdir -p $out/products/${i.key} $out/runs/${i.key}
+        ''
+        # Dynamic mode: every outer derivation runs (run.sh reads their
+        # logs), also for a plan no product or test run needs.
+        + linkEach "$out/units/${i.key}" (i.inst.allUnits or { })
+        + linkEach "$out/products/${i.key}" (
+          lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) i.out.packages
+        )
+        + linkEach "$out/runs/${i.key}" (flat2 i.out.testRuns)
+        + linkEach "$out/runs/${i.key}/bench" (flat2 (i.out.benchRuns or { }))
+        + linkEach "$out/doctests/${i.key}" i.out.doctests
+      ) (instancesOf repo)
       # repo.checks (what `nix flake check` builds), every one.
       + ''
         mkdir -p $out/checks
@@ -391,18 +544,23 @@ let
     repo:
     pkgs.writeText "unit-drvs.json" (
       builtins.toJSON (
-        lib.concatMapAttrs (
-          wsName: _:
-          lib.mapAttrs'
-            (kind: us: lib.nameValuePair "${wsName}/${kind}" (lib.mapAttrs (_: u: discard u.drvPath) us))
-            {
-              inherit ((inst repo wsName).units) build;
-              # The test plan's outer derivation also writes the doctests.
-              test =
-                (inst repo wsName).units.test
-                // lib.mapAttrs' (p: d: lib.nameValuePair "doctest:${p}" d) (inst repo wsName).doctests;
-            }
-        ) repo.workspaces
+        lib.listToAttrs (
+          lib.concatMap (
+            i:
+            map (
+              kind:
+              lib.nameValuePair "${i.key}/${kind}" (
+                lib.mapAttrs (_: u: discard u.drvPath) (
+                  i.inst.units.${kind}
+                  # The test plan's outer derivation also writes the doctests.
+                  // lib.optionalAttrs (kind == "test") (
+                    lib.mapAttrs' (p: d: lib.nameValuePair "doctest:${p}" d) i.inst.doctests
+                  )
+                )
+              )
+            ) (kindsOf i)
+          ) (instancesOf repo)
+        )
       )
     );
 
@@ -421,29 +579,34 @@ let
   # What instantiation needs that no unit or product depends on: the
   # plans (read at evaluation time in IFD mode, an input of the outer
   # derivation in dynamic mode) and breakbulk's tools. run.sh copies these
-  # and every output upstream of the units into the private store.
-  prereqs = pkgs.writeText "dynamic-prereqs" (
-    lib.concatStringsSep "\n" (
-      lib.concatMap (
-        repo:
-        lib.concatLists (
-          lib.mapAttrsToList (
-            wsName: _: map toString (lib.attrValues (inst repo wsName).plans)
-          ) repo.workspaces
-        )
-      ) (lib.attrValues repos)
-      ++ map toString (lib.attrValues (inst lintRepo "main").plans)
-      ++ map toString (lib.attrValues lintRepo.workspaces.main.instances.${native}.lint.plans)
-      ++ map toString (
-        lib.attrValues tools
-        ++ [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.jq
-        ]
+  # and every output upstream of the units into the private store. Per
+  # fixture, so that a run plans only the fixtures it compares.
+  plansOf =
+    repos':
+    lib.concatMap (
+      repo: lib.concatMap (i: map toString (lib.attrValues i.inst.plans)) (instancesOf repo)
+    ) repos';
+  prereqs =
+    lib.mapAttrs (
+      name: repo:
+      pkgs.writeText "dynamic-prereqs-${name}" (
+        lib.concatStringsSep "\n" (plansOf ([ repo ] ++ lib.optional (name == "walking-skeleton") lintRepo))
       )
-    )
-  );
+    ) repos
+    // {
+      tools = pkgs.writeText "dynamic-prereqs-tools" (
+        lib.concatStringsSep "\n" (
+          map toString (
+            lib.attrValues tools
+            ++ [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+            ]
+          )
+        )
+      );
+    };
 in
 {
   inherit repos prereqs mayDiffer;
@@ -451,9 +614,11 @@ in
   unitDrvs = lib.mapAttrs (_: unitDrvs) repos;
   outer = lib.mapAttrs (
     _: repo:
-    lib.concatMapAttrs (
-      wsName: _: lib.mapAttrs' (kind: o: lib.nameValuePair "${wsName}/${kind}" o) (inst repo wsName).outer
-    ) repo.workspaces
+    lib.listToAttrs (
+      lib.concatMap (
+        i: lib.mapAttrsToList (kind: o: lib.nameValuePair "${i.key}/${kind}" o) i.inst.outer
+      ) (instancesOf repo)
+    )
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
   explain = lib.mapAttrs (

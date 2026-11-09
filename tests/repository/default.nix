@@ -23,6 +23,8 @@
     }
   ) { },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
+  # Modules added to every repository (tests/dynamic sets `mode`).
+  extraModules ? [ ],
 }:
 let
   inherit (pkgs) lib;
@@ -34,7 +36,7 @@ let
     root: modules:
     breakbulk.mkRepository {
       inherit pkgs root tools;
-      inherit modules;
+      modules = modules ++ extraModules;
     };
 
   # One workspace at `path`, dev profile (faster; every check uses it).
@@ -243,6 +245,16 @@ let
     }
   ];
 
+  # --- pkgid-short -------------------------------------------------------------
+
+  pkgidShort = mkRepo (fixtures + "/pkgid-short") [
+    (oneWs "app")
+    {
+      gitTrees."https://example.invalid/me/gitdep" = fixtures + "/pkgid-short/repo";
+      gitTrees."https://example.invalid/me/tools" = fixtures + "/pkgid-short/tools";
+    }
+  ];
+
   # --- overrides and options ---------------------------------------------------
 
   # Evaluation only: the repository is never built.
@@ -339,6 +351,7 @@ in
       provided
       overrideRepo
       testOnly
+      pkgidShort
       ;
   };
 
@@ -878,16 +891,7 @@ in
   # source under Cargo's package id, which keeps `git+` and the reference
   # query, and leaves the name out when the URL ends in it.
   pkgid-short =
-    let
-      repo = mkRepo (fixtures + "/pkgid-short") [
-        (oneWs "app")
-        {
-          gitTrees."https://example.invalid/me/gitdep" = fixtures + "/pkgid-short/repo";
-          gitTrees."https://example.invalid/me/tools" = fixtures + "/pkgid-short/tools";
-        }
-      ];
-    in
-    pkgs.runCommand "pkgid-short" { app = repo.workspaces.main.packages.app; } ''
+    pkgs.runCommand "pkgid-short" { app = pkgidShort.workspaces.main.packages.app; } ''
       [ "$($app/bin/app)" = "gitdep 43" ]
       touch $out
     '';

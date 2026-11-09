@@ -53,7 +53,14 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives embed config-env doctests test-control test-options required-features all-required nextest out-dir-walk source-paths-dwo source-paths-dwp)
+  fixtures=(
+    walking-skeleton directives embed config-env doctests test-control
+    test-options required-features all-required nextest out-dir-walk
+    source-paths-dwo source-paths-dwp
+    crate-types dev-dep-features build-dep-leak bin-exe-not-built sys-native
+    feature-unification clippy-conf test-cutoff
+    multi-ws outside-reads stamps missing-input test-only pkgid-short
+  )
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }
@@ -75,16 +82,17 @@ sysbuild() { nix-build "$REPO/tests/dynamic" --no-out-link --arg mode '"ifd"' "$
 
 say "building the fixtures in IFD mode with the system Nix"
 copy=()
-prereqs=$(sysbuild -A prereqs)
-copy+=("$prereqs")
-# The nixpkgs the test expression imports, so that Nix master need not
-# download it.
-nixpkgs=$(nix-instantiate --eval --raw -E "
-  let n = (builtins.fromJSON (builtins.readFile $REPO/flake.lock)).nodes.nixpkgs.locked;
-  in fetchTarball { url = \"https://github.com/\${n.owner}/\${n.repo}/archive/\${n.rev}.tar.gz\"; sha256 = n.narHash; }")
-copy+=("$nixpkgs")
+copy+=("$(sysbuild -A prereqs.tools)")
+# The nixpkgs and rust-overlay the test expression imports, so that Nix
+# master need not download them.
+for input in nixpkgs rust-overlay; do
+  copy+=("$(nix-instantiate --eval --raw -E "
+    let n = (builtins.fromJSON (builtins.readFile $REPO/flake.lock)).nodes.\"$input\".locked;
+    in fetchTarball { url = \"https://github.com/\${n.owner}/\${n.repo}/archive/\${n.rev}.tar.gz\"; sha256 = n.narHash; }")")
+done
 case $REPO in /nix/store/*) copy+=("$REPO") ;; esac
 for f in "${fixtures[@]}"; do
+  copy+=("$(sysbuild -A "prereqs.$f")")
   out=$(sysbuild -A "build.$f")
   echo "$f (system, IFD): $out" >&2
   drv=$(nix-store -q --deriver "$out")
@@ -196,7 +204,7 @@ EOF
   done
 
   # Products: the same bytes.
-  for p in "$(real "$dyn")"/products/*/*; do
+  for p in "$(real "$dyn")"/products/*/*/*/*; do
     [ -L "$p" ] || continue
     name=${p#"$(real "$dyn")/products/"}
     a=$(real "$(readlink "$p")")

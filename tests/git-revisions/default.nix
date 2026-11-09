@@ -33,6 +33,8 @@
     }
   ) { },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
+  # Modules added to the repository (tests/dynamic sets `mode`).
+  extraModules ? [ ],
 }:
 let
   inherit (pkgs) lib;
@@ -139,7 +141,8 @@ let
           ${srcRev1} = fixture + "/repo-r1";
         };
       }
-    ];
+    ]
+    ++ extraModules;
   };
 
   inst = ws: repository.workspaces.${ws}.instances.${native}.default;

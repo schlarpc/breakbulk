@@ -22,6 +22,8 @@
 {
   pkgs,
   breakbulk,
+  # Modules added to every repository (tests/dynamic sets `mode`).
+  extraModules ? [ ],
 }:
 let
   inherit (pkgs) lib;
@@ -47,7 +49,8 @@ let
           };
         }
       ]
-      ++ modules;
+      ++ modules
+      ++ extraModules;
     };
 
   planOf =
@@ -91,59 +94,62 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
   "libc"
 ]) "build-std-deps: crates ${builtins.toJSON hostedCrates}";
 {
-  repos = { inherit bare hosted; };
-
-  build-std =
-    pkgs.runCommand "build-std"
-      {
-        nativeBuildInputs = [ pkgs.buildPackages.binutils ];
-        bin = bare.workspaces.main.target.${none}.packages.bare;
-      }
-      ''
-        set -euo pipefail
-        f=$(find -L $bin -type f -name bare | head -n1)
-        readelf -hW $f | tee header.txt
-        grep -q 'Machine:.*X86-64' header.txt
-        if readelf -lW $f | grep -q INTERP; then echo "has an interpreter" >&2; exit 1; fi
-        if readelf -dW $f 2>/dev/null | grep -q NEEDED; then echo "needs libraries" >&2; exit 1; fi
-        nm $f > syms.txt
-        grep -q ' T _start$' syms.txt
-        grep -q ' [Tt] __udivti3$' syms.txt
-        mkdir -p $out
-        cp header.txt syms.txt $out/
-      '';
-
-  build-std-tests =
-    pkgs.runCommand "build-std-tests"
-      {
-        nativeBuildInputs = [ pkgs.buildPackages.jq ];
-        bare = "${bare.workspaces.main.instances.${none}.default.unitsJson.test}";
-        hosted = "${hosted.workspaces.main.instances.${native}.default.unitsJson.test}";
-      }
-      ''
-        set -euo pipefail
-        check() {
-          # The metadata with its references (`{"input": …}` parts) blanked.
-          jq -e --arg root "$2" --arg pkg "$3" '
-            .roots[$root].testSpec.nextest.cargoMetadata
-            | [.parts[] | if type == "string" then . else "X" end] | add | fromjson
-            | (.workspace_members == [$pkg]) and ([.packages[].id] == [$pkg])
-          ' "$1" >/dev/null || {
-            echo "$1: the nextest metadata of $2 lists more than $3, or $2 is missing" >&2
-            jq '.roots | keys' "$1" >&2
-            exit 1
-          }
+  repos = {
+    inherit bare hosted;
+  };
+  checks = {
+    build-std =
+      pkgs.runCommand "build-std"
+        {
+          nativeBuildInputs = [ pkgs.buildPackages.binutils ];
+          bin = bare.workspaces.main.target.${none}.packages.bare;
         }
-        check $bare bare/bin-test/bare 'path+file:///build/skeleton#bare@0.1.0'
-        check $hosted app/bin-test/app 'path+file:///build/skeleton#app@0.1.0'
-        touch $out
-      '';
+        ''
+          set -euo pipefail
+          f=$(find -L $bin -type f -name bare | head -n1)
+          readelf -hW $f | tee header.txt
+          grep -q 'Machine:.*X86-64' header.txt
+          if readelf -lW $f | grep -q INTERP; then echo "has an interpreter" >&2; exit 1; fi
+          if readelf -dW $f 2>/dev/null | grep -q NEEDED; then echo "needs libraries" >&2; exit 1; fi
+          nm $f > syms.txt
+          grep -q ' T _start$' syms.txt
+          grep -q ' [Tt] __udivti3$' syms.txt
+          mkdir -p $out
+          cp header.txt syms.txt $out/
+        '';
 
-  build-std-deps =
-    pkgs.runCommand "build-std-deps" { app = hosted.workspaces.main.packages.app; } ''
-      $app/bin/app | tee out.txt
-      grep -qx 'hashmap has 3 entries' out.txt
-      mkdir -p $out
-      cp out.txt $out/
-    '';
+    build-std-tests =
+      pkgs.runCommand "build-std-tests"
+        {
+          nativeBuildInputs = [ pkgs.buildPackages.jq ];
+          bare = "${bare.workspaces.main.instances.${none}.default.unitsJson.test}";
+          hosted = "${hosted.workspaces.main.instances.${native}.default.unitsJson.test}";
+        }
+        ''
+          set -euo pipefail
+          check() {
+            # The metadata with its references (`{"input": …}` parts) blanked.
+            jq -e --arg root "$2" --arg pkg "$3" '
+              .roots[$root].testSpec.nextest.cargoMetadata
+              | [.parts[] | if type == "string" then . else "X" end] | add | fromjson
+              | (.workspace_members == [$pkg]) and ([.packages[].id] == [$pkg])
+            ' "$1" >/dev/null || {
+              echo "$1: the nextest metadata of $2 lists more than $3, or $2 is missing" >&2
+              jq '.roots | keys' "$1" >&2
+              exit 1
+            }
+          }
+          check $bare bare/bin-test/bare 'path+file:///build/skeleton#bare@0.1.0'
+          check $hosted app/bin-test/app 'path+file:///build/skeleton#app@0.1.0'
+          touch $out
+        '';
+
+    build-std-deps =
+      pkgs.runCommand "build-std-deps" { app = hosted.workspaces.main.packages.app; } ''
+        $app/bin/app | tee out.txt
+        grep -qx 'hashmap has 3 entries' out.txt
+        mkdir -p $out
+        cp out.txt $out/
+      '';
+  };
 }

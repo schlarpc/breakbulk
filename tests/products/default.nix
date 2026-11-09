@@ -137,6 +137,8 @@
       overlays = [ (import (fetch lock.rust-overlay.locked)) ];
     },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
+  # Modules added to every repository (tests/dynamic sets `mode`).
+  extraModules ? [ ],
 }:
 let
   inherit (pkgs) lib;
@@ -149,7 +151,7 @@ let
     root: modules:
     breakbulk.mkRepository {
       inherit pkgs root tools;
-      inherit modules;
+      modules = modules ++ extraModules;
     };
 
   oneWs = path: profile: {
@@ -577,6 +579,21 @@ let
       )
     );
 
+  # The stdpaths fixture on a toolchain with rust-src (see rust-src).
+  rustSrcRepo =
+    let
+      tc = pkgs.rust-bin.stable."1.99.0".minimal.override { extensions = [ "rust-src" ]; };
+    in
+    mkRepo (fixtures + "/stdpaths") [
+      {
+        workspaces.main.toolchain = {
+          rustc = tc;
+          cargo = tc;
+        };
+        targets.${native}.preset = breakbulk.presets.linux;
+      }
+    ];
+
   # --- benches -------------------------------------------------------------------
 
   benchesRepo = mkRepo (fixtures + "/benches") [
@@ -605,6 +622,7 @@ in
       variantsRepo
       benchesRepo
       embed
+      rustSrcRepo
       ;
     trimCc = trimCcRepo { };
   };
@@ -1648,16 +1666,7 @@ in
   # The product's runtime references stay glibc and gcc's libs.
   rust-src =
     let
-      tc = pkgs.rust-bin.stable."1.99.0".minimal.override { extensions = [ "rust-src" ]; };
-      repo = mkRepo (fixtures + "/stdpaths") [
-        {
-          workspaces.main.toolchain = {
-            rustc = tc;
-            cargo = tc;
-          };
-          targets.${native}.preset = breakbulk.presets.linux;
-        }
-      ];
+      repo = rustSrcRepo;
       plan = builtins.fromJSON (
         builtins.unsafeDiscardStringContext (
           builtins.readFile "${repo.workspaces.main.plans.${native}.default.build}/plan.json"

@@ -26,6 +26,8 @@
   pkgs,
   breakbulk,
   xwinPkgs ? null,
+  # Modules added to every repository (tests/dynamic sets `mode`).
+  extraModules ? [ ],
 }:
 let
   inherit (pkgs) lib;
@@ -44,7 +46,7 @@ let
     root: modules:
     breakbulk.mkRepository {
       inherit pkgs root tools;
-      inherit modules;
+      modules = modules ++ extraModules;
     };
 
   evalCheck =
@@ -1201,6 +1203,9 @@ in
       glibcStatic
       sysNativeCross
       msvc
+      msvcPostLink
+      crossLto
+      crossLtoOff
       wasmBrowser
       wasmComponent
       staticPkgconfig
