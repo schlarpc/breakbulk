@@ -178,6 +178,9 @@ let
       modules = [
         { inherit mode; }
         oneWs
+        # As tests/loose-ends: the tests compare a source path the library
+        # embedded at compile time with the test run's, one view for both.
+        { packages.config-env.test.scopeTestsDir = false; }
       ];
     };
     # Doctests: a dev-dependency, should_panic, rustc-env and rustc-cfg

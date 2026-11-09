@@ -158,9 +158,11 @@ unset NIX_REMOTE NIX_PATH
 STORE="local?root=$WORK/store"
 nixm() { "$NIX_MASTER/bin/nix" --store "$STORE" "$@"; }
 
+mapfile -t copy < <(printf '%s\n' "${copy[@]}" | sort -u)
 say "copying ${#copy[@]} paths (and their closures) into $WORK/store"
-# The system Nix reads them; Nix master writes the private store.
-"$NIX_MASTER/bin/nix" copy --no-check-sigs --to "$STORE" "${copy[@]}"
+# The system Nix reads them; Nix master writes the private store. On stdin:
+# every fixture's paths together are too many for one command line.
+printf '%s\n' "${copy[@]}" | "$NIX_MASTER/bin/nix" copy --no-check-sigs --to "$STORE" --stdin
 
 mbuild() { nixm build -f "$REPO/tests/dynamic" --no-link --print-out-paths "$@"; }
 real() { printf '%s%s' "$WORK/store" "$1"; }
