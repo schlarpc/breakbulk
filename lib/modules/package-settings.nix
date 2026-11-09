@@ -1,30 +1,20 @@
 # The settings of one package's units: the options of `packages.<name>`
 # other than its matching (`version`). Also the shape of
-# `sysDefaults.packages.<name>`'s result.
+# `workspaces.<ws>.memberDefaults` and of `sysDefaults.packages.<name>`'s
+# result.
 { lib }:
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
 
-  targetOverride =
-    { ... }:
-    {
-      options = {
-        env = bt.mkEnv "Environment for this package's units on this target (target units only).";
-        nativeInputs = bt.mkInputs "Build-machine tools for this package's units on this target (target units only).";
-        inputs = bt.mkInputs "Libraries for this package's units on this target (target units only).";
-        stages = mkOption {
-          type = bt.stages;
-          default = { };
-          description = "Post-link stages for this package's products on this target, as `targets.<triple>.stages` (`after = \"install\"` for wrappers and packaging).";
-        };
-        checks = mkOption {
-          type = bt.stages;
-          default = { };
-          description = "Checks on this package's products on this target.";
-        };
-      };
-    };
+  # Which units are on which side.
+  sides = "[sides](../../explanation/configuration.md#host-and-target-sides)";
+
+  side = name: {
+    env = bt.mkEnv "Environment for this package's ${name} units only (${sides}).";
+    nativeInputs = bt.mkInputs "Build-machine tools for this package's ${name} units only (${sides}).";
+    inputs = bt.mkInputs "Libraries for this package's ${name} units only (${sides}).";
+  };
 
   testBinary = {
     options = {
@@ -41,34 +31,32 @@ let
     };
   };
 
-in
-{
-  # Keyed, so the module system imports it once wherever it is used.
-  settings = {
-    key = "breakbulk/modules/package-settings.nix#settings";
+  # Every setting but the per-triple layer, which has these same options.
+  common = {
+    key = "breakbulk/modules/package-settings.nix#common";
     _file = ./package-settings.nix;
     options = {
       env = bt.mkEnv ''
-        Environment for every unit of this package (compiles and build
-        script runs, host and target). Values may be derivations,
+        Environment for every unit of this package, on both ${sides}
+        (compiles and build-script runs). Values may be derivations,
         including another workspace's products; they are passed by
         reference.
       '';
       nativeInputs = bt.mkInputs ''
         Tools that run on the build machine (`pkg-config`, `cmake`,
-        `protoc`). A function of the build platform's package set, or a
-        list.
+        `protoc`), for this package's units on both ${sides}. A function of
+        the build platform's package set, or a list.
       '';
       inputs = bt.mkInputs ''
-        Libraries for the platform being built (`openssl`). A function of
-        a package set (`p: [ p.openssl ]`), called with the build
-        machine's set for host units and with the target's set for
-        target units; or a list used as given. Their library search
-        paths (`NIX_LDFLAGS`, not compiler flags or `PATH`) also reach
-        the link steps of the packages that link this one (bins, tests,
-        cdylibs, doctests of dependents), on the same platform, so a
-        `-sys` crate may print `rustc-link-lib` without a search path;
-        binaries get an rpath to the library.
+        Libraries for the platform being built (`openssl`), for this
+        package's units on both ${sides}. A function of a package set
+        (`p: [ p.openssl ]`), called with the build machine's set for host
+        units and with the target's set for target units; or a list used
+        as given. Their library search paths (`NIX_LDFLAGS`, not compiler
+        flags or `PATH`) also reach the link steps of the packages that
+        link this one (bins, tests, cdylibs, doctests of dependents), on
+        the same platform, so a `-sys` crate may print `rustc-link-lib`
+        without a search path; binaries get an rpath to the library.
       '';
       extraSources = mkOption {
         type = types.listOf (types.either types.path types.str);
@@ -85,27 +73,18 @@ in
         '';
       };
 
-      host = {
-        env = bt.mkEnv "Environment for this package's host units only (build scripts, proc macros, build dependencies).";
-        nativeInputs = bt.mkInputs "Tools for this package's host units only.";
-        inputs = bt.mkInputs "Libraries for this package's host units only.";
-      };
-
-      target = mkOption {
-        type = types.attrsOf (types.submodule targetOverride);
-        default = { };
-        description = "Settings for this package's target units on one target triple.";
-      };
+      forHost = side "host";
+      forTarget = side "target";
 
       stages = mkOption {
         type = bt.stages;
         default = { };
-        description = "Post-link stages for this package's products, on every target, as `targets.<triple>.stages` (`after = \"install\"` for wrappers and packaging).";
+        description = "Post-link stages for this package's products, as `targets.<triple>.stages` (`after = \"install\"` for wrappers and packaging).";
       };
       checks = mkOption {
         type = bt.stages;
         default = { };
-        description = "Checks on this package's products, on every target.";
+        description = "Checks on this package's products.";
       };
 
       test = {
@@ -226,7 +205,36 @@ in
         default = null;
         description = "Override the repository's `strictSources` for this package's build scripts.";
       };
+    };
+  };
+in
+{
+  inherit common;
 
+  # Keyed, so the module system imports it once wherever it is used.
+  settings = {
+    key = "breakbulk/modules/package-settings.nix#settings";
+    _file = ./package-settings.nix;
+    imports = [ common ];
+    options.target = mkOption {
+      type = types.attrsOf (types.submodule common);
+      default = { };
+      # The same options as the package level, documented there.
+      visible = "shallow";
+      example = lib.literalExpression ''
+        {
+          x86_64-pc-windows-msvc.forTarget.env.FFMPEG_DIR = ffmpegWin;
+          x86_64-pc-windows-msvc.stages.sign = { after = "install"; run = sign; };
+        }
+      '';
+      description = ''
+        Settings for this package on one target triple, with every option
+        of the package level (`env`, `forHost`, `forTarget`, `stages`,
+        `test`, …). They apply to the plans for that triple, on top of the
+        package-level settings of the same definition: `env` still means
+        both ${sides} (the build-script compile of a plan for this triple
+        included), `forTarget.env` the target side only.
+      '';
     };
   };
 }

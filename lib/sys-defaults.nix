@@ -23,7 +23,7 @@
 #  - evdev-sys's cross-only native inputs (python3, autoconf, automake,
 #    libtool; `buildPlatform != hostPlatform`): cross presets supply them.
 #  - nettle-sys's `clang` build input and `LIBCLANG_PATH` become
-#    `rustPlatform.bindgenHook` on its host units, which sets both.
+#    `rustPlatform.bindgenHook`, which sets both.
 #  - `crateBin` (rink): target discovery is Cargo's own.
 #  - prost-build's `protobuf`: prost-build is a library that other crates'
 #    build scripts call, so `protoc` is needed by those packages' build
@@ -195,13 +195,15 @@ in
     inputs = p: [ p.webkitgtk_4_1 ];
   };
   nettle-sys = {
-    nativeInputs = pc;
-    inputs = p: [ p.nettle ];
     # nixpkgs adds clang and LIBCLANG_PATH for bindgen. bindgen runs in
-    # the build script (a host unit), and rustPlatform.bindgenHook sets
-    # LIBCLANG_PATH plus the clang arguments bindgen needs to find the
-    # C headers.
-    host.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
+    # the build-script run, which is on the side of the package it builds
+    # for, and rustPlatform.bindgenHook sets LIBCLANG_PATH plus the clang
+    # arguments bindgen needs to find the C headers.
+    nativeInputs = p: [
+      p.pkg-config
+      p.rustPlatform.bindgenHook
+    ];
+    inputs = p: [ p.nettle ];
   };
   openssl.inputs = p: [ p.openssl ];
   openssl-sys = {

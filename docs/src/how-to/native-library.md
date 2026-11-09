@@ -58,11 +58,21 @@ crate's own switch, for example:
 packages.libsqlite3-sys.env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
 ```
 
-## Settings for build scripts only
+## Settings for one side only
 
-[`packages.<name>.host.inputs`](../reference/options/packages.md#packagesnamehostinputs), `.host.nativeInputs` and `.host.env` reach
-only the package's host units (its build script, or the package itself
-when it is a proc macro or a build dependency).
+[`packages.<name>.forHost`](../reference/options/packages.md#packagesnameforhostinputs)
+(`inputs`, `nativeInputs`, `env`) reaches only the package's host units:
+its build-script compile, or the package itself when it is a proc macro
+or a build dependency.
+[`forTarget`](../reference/options/packages.md#packagesnamefortargetinputs)
+reaches only its target units, the build-script run included. The table
+of which unit is on which side is in
+[The configuration model](../explanation/configuration.md#host-and-target-sides).
+
+```nix
+packages.nettle-sys.forHost.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
+packages.ffmpeg-sys-next.target.x86_64-pc-windows-msvc.forTarget.env.FFMPEG_DIR = ffmpegWin;
+```
 
 ## When the build still fails
 

@@ -989,6 +989,48 @@ in
       "member-defaults: unit env placement";
     evalCheck "member-defaults" script;
 
+  # `forHost`/`forTarget` sides and the package-shaped `target.<triple>`
+  # layer. libc has a build script: its compile is a host unit, its run
+  # and lib are target units. `target.<other triple>` reaches nothing
+  # here. memberDefaults and sysDefaults take the same shape.
+  package-sides =
+    let
+      other = "aarch64-unknown-linux-gnu";
+      repo = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "b")
+        {
+          packages.libc = {
+            forTarget.env.FT = "1";
+            target.${native} = {
+              forHost.env.FH = "1";
+              env.TB = "1";
+            };
+            target.${other}.forHost.env.FH_OTHER = "1";
+          };
+          workspaces.main.memberDefaults.target.${native}.forTarget.env.MDT = "1";
+          sysDefaults.packages.itoa = _: { target.${native}.forTarget.env.SYST = "1"; };
+        }
+      ];
+      units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
+      envOf =
+        n:
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+      lib' = envOf "libc-0.2.191-lib";
+      run = envOf "libc-0.2.191-build-run";
+      script = envOf "libc-0.2.191-build-script";
+      checks = {
+        forTargetRunAndLib = lib' ? FT && run ? FT && !(script ? FT);
+        forHostOneTriple = script ? FH && !(lib' ? FH) && !(run ? FH);
+        otherTriple = !(script ? FH_OTHER);
+        bothSidesOneTriple = lib' ? TB && script ? TB && run ? TB;
+        memberDefaults = (envOf "shared-0.1.0-lib") ? MDT && !((envOf "shared-0.1.0-build-script") ? MDT);
+        sysDefaults = (envOf "itoa-1.0.11-lib") ? SYST;
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "package-sides: failed ${toString bad}";
+    evalCheck "package-sides" (builtins.toJSON checks);
+
   # Modules receive `root` (a path, also when the caller passed a
   # string-like root), the repository object (`repo`) and the library
   # (`breakbulk`) without the caller wiring them through specialArgs; the

@@ -229,8 +229,10 @@ in
       default = { };
       description = ''
         Environment added to this target's units only (layer 4 of the
-        unit environment contract), never through Cargo's `[env]`, so
-        build scripts and proc macros (host units) do not see it.
+        unit environment contract; which units are on which
+        [side](../../explanation/configuration.md#host-and-target-sides)),
+        never through Cargo's `[env]`, so build-script compiles and proc
+        macros (host units) do not see it.
         List-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, …) are
         appended to the env capture's value.
       '';
@@ -291,7 +293,7 @@ in
       env = mkOption {
         type = bt.envAttrs;
         default = { };
-        description = "Environment added to host units of this target's plans only.";
+        description = "Environment added to host units of this target's plans only ([sides](../../explanation/configuration.md#host-and-target-sides)).";
       };
     };
     stages = mkOption {

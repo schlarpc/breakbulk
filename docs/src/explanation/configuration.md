@@ -120,9 +120,41 @@ tools and libraries for one package's units, and nothing else:
 | [`extraSources`](../reference/options/packages.md#packagesnameextrasources) | files outside the package directory | `../../wit` |
 
 A setting can be narrowed to some versions of the package
-([`version`](../reference/options/packages.md#packagesnameversion)) or
-to one target's units
-([`target.<triple>`](../reference/options/packages.md#packagesnametarget)).
+([`version`](../reference/options/packages.md#packagesnameversion)), to
+one side ([`forHost`](../reference/options/packages.md#packagesnameforhostenv)
+or [`forTarget`](../reference/options/packages.md#packagesnamefortargetenv),
+below), or to one target triple
+([`target.<triple>`](../reference/options/packages.md#packagesnametarget),
+which takes every package option, `forHost` and `forTarget` included):
+
+```nix
+packages.castaway.forTarget.env.CASTAWAY_GIT_REV = rev;  # every triple, target side
+packages.ffmpeg-sys-next.target.x86_64-pc-windows-msvc.forTarget.env.FFMPEG_DIR = ffmpeg;
+packages.foo.target.x86_64-pc-windows-msvc.forHost.env.X = "1";  # one triple, host side
+packages.bar.target.x86_64-pc-windows-msvc.env.Y = "1";  # one triple, both sides
+```
+
+### Host and target sides
+
+A plan for a target has host units, which run on the build machine, and
+target units. `forHost` settings reach only host units, `forTarget`
+settings only target units, and the top-level `env`, `nativeInputs` and
+`inputs` reach both. As in Cargo:
+
+| Unit | Side |
+| --- | --- |
+| a build script's compile | host |
+| a build script's run | the side of the package it builds for |
+| proc macros and build dependencies (and their dependencies) | host |
+| libs, bins, tests, examples and doctests of a package built for the target | target |
+
+So a stamp in `packages.<name>.env` also reaches the build-script compile,
+and every new value recompiles the build script. Put it in
+`forTarget.env` to change only the run and the package's own units. A
+package used on both sides (a crate that both a build script and your
+binary depend on) has units on each, and each gets its side's settings.
+
+### Shared settings and layer order
 
 Settings that every member of a workspace shares go in
 [`workspaces.<ws>.memberDefaults`](../reference/options/workspaces.md#workspacesnamememberdefaults).
@@ -137,9 +169,19 @@ workspaces.main.memberDefaults = {
 packages.legacy.test.runner = "libtest";  # the package's own value wins
 ```
 
-Members are the workspace's path packages. Their own `packages.<name>`
-settings go on top: lists concatenate, `env` merges, and a single value
-(`test.runner`) is the package's when it sets one.
+Members are the workspace's path packages. A unit's package settings are
+these layers, lowest first, each followed by its own `target.<triple>`:
+
+| Layer | Applies to |
+| --- | --- |
+| [`sysDefaults.packages.<name>`](../reference/options/repository.md#sysdefaultspackages) | curated `-sys` crates, where a package set exists |
+| `workspaces.<ws>.memberDefaults` | the workspace's path packages |
+| `packages.<name>` | that package, in every workspace |
+
+Lists concatenate, `env` merges, and a single value (`test.runner`) is
+the highest layer's that sets one. Variant layers
+(`variantDefaults`, `variants.<v>.target.<triple>`) differ: there two
+single values conflict unless one uses `lib.mkForce`.
 
 breakbulk ships settings for common `-sys` crates, from nixpkgs'
 `defaultCrateOverrides` ([`sysDefaults.packages`](../reference/options/repository.md#sysdefaultspackages)),

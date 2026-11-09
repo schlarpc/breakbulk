@@ -65,17 +65,25 @@ let
   # Everything the native build needs: host-side and target-side inputs
   # are the same package sets on a native build. A cross target's own
   # inputs are libraries for another platform, so they are left out.
-  forTarget = o: if target == null then { } else o.target.${target} or { };
+  # `overrides` are already merged for `target` (or the native triple).
+  native = target == null || target == nativeTriple;
   nativeInputs = lib.unique (
-    lib.concatMap (o: o.nativeInputs pkgs.buildPackages ++ o.host.nativeInputs pkgs.buildPackages ++ ((forTarget o).nativeInputs or (_: [ ])) pkgs.buildPackages) overrides
+    lib.concatMap (
+      o:
+      lib.concatMap (side: side.nativeInputs pkgs.buildPackages) [
+        o
+        o.forHost
+        o.forTarget
+      ]
+    ) overrides
   );
   inputs = lib.unique (
     lib.concatMap (
-      o: o.inputs pkgs ++ o.host.inputs pkgs ++ (if target == nativeTriple then (forTarget o).inputs or (_: [ ]) else _: [ ]) pkgs
+      o: o.inputs pkgs ++ o.forHost.inputs pkgs ++ lib.optionals native (o.forTarget.inputs pkgs)
     ) overrides
   );
 
-  envOf = o: lib.mapAttrs (_: envString) (o.env // o.host.env // ((forTarget o).env or { }));
+  envOf = o: lib.mapAttrs (_: envString) (o.env // o.forHost.env // o.forTarget.env);
   envs = map envOf overrides ++ [ targetEnv ];
   conflicts = lib.filterAttrs (_: vs: lib.length (lib.unique vs) > 1) (lib.zipAttrs envs);
   packageEnv = lib.foldl' (a: b: a // b) { } envs;

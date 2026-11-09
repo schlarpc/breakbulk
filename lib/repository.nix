@@ -212,8 +212,8 @@ let
   };
   emptyOverride = emptySide // {
     extraSources = [ ];
-    host = emptySide;
-    target = { };
+    forHost = emptySide;
+    forTarget = emptySide;
     strictSources = null;
   };
   catFn = f: g: p: f p ++ g p;
@@ -227,11 +227,8 @@ let
     mergeSide a b
     // {
       extraSources = a.extraSources ++ b.extraSources;
-      host = mergeSide a.host b.host;
-      target = lib.zipAttrsWith (_: lib.foldl' mergeSide emptySide) [
-        a.target
-        b.target
-      ];
+      forHost = mergeSide a.forHost b.forHost;
+      forTarget = mergeSide a.forTarget b.forTarget;
       strictSources = if b.strictSources != null then b.strictSources else a.strictSources;
     };
 
@@ -239,11 +236,12 @@ let
   # `triple`, as a list of `packages.<name>`-shaped layers, lowest first:
   # the curated defaults (`sysDefaults.packages`), the workspace's
   # `memberDefaults` for its path packages, then each matching `packages`
-  # key.
+  # key; each followed by its own `target.<triple>`.
   layersFor =
     wsName: triple: e:
     let
       sys = cfg.sysDefaults.packages.${e.name} or null;
+      withTriple = l: [ l ] ++ lib.optional (l.target ? ${triple}) l.target.${triple};
       # The curated defaults name nixpkgs libraries: on a target without
       # a package set, only its host units (the build machine's set) get
       # them.
@@ -252,13 +250,18 @@ let
         l
         // emptySide
         // {
-          host = mergeSide l l.host;
-          target = { };
+          forHost = mergeSide l l.forHost;
+          forTarget = emptySide;
         };
     in
-    lib.optional (sys != null) (if packageSetOf wsName triple != null then sys e else hostOnly (sys e))
-    ++ lib.optional (e.source or null == null) cfg.workspaces.${wsName}.memberDefaults
-    ++ map (k: cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
+    lib.optionals (sys != null) (
+      let
+        ls = withTriple (sys e);
+      in
+      if packageSetOf wsName triple != null then ls else map hostOnly ls
+    )
+    ++ lib.optionals (e.source or null == null) (withTriple cfg.workspaces.${wsName}.memberDefaults)
+    ++ lib.concatMap (k: withTriple cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
 
   # The merged override for one lockfile entry, or null.
   overrideFor =
@@ -278,23 +281,10 @@ let
     in
     if e == null then [ ] else layersFor wsName triple e;
 
-  # Product settings for mkProducts: each layer's stages and checks, then
-  # its target.<triple> stages and checks.
+  # Product settings for mkProducts: each layer's stages and checks.
   productConfig =
     wsName: triple: pkg:
-    lib.concatMap (
-      o:
-      let
-        t = o.target.${triple} or { };
-      in
-      [
-        { inherit (o) stages checks; }
-        {
-          stages = t.stages or { };
-          checks = t.checks or { };
-        }
-      ]
-    ) (memberLayers wsName triple pkg);
+    map (o: { inherit (o) stages checks; }) (memberLayers wsName triple pkg);
 
   # The layers' `test` settings merged, for mkTestRuns:
   # `{ <pkg> = { test = …; }; }` for the workspace's path packages.
@@ -556,7 +546,6 @@ let
         e:
         let
           o = overrideFor wsName triple e;
-          t = o.target.${triple} or emptySide;
           capture =
             platform: nativeInputs: inputs:
             let
@@ -601,12 +590,12 @@ let
               };
           ov = {
             host = {
-              env = envStrings (o.env // o.host.env);
-              envCapture = capture "host" (catFn o.nativeInputs o.host.nativeInputs) (catFn o.inputs o.host.inputs);
+              env = envStrings (o.env // o.forHost.env);
+              envCapture = capture "host" (catFn o.nativeInputs o.forHost.nativeInputs) (catFn o.inputs o.forHost.inputs);
             };
             target = {
-              env = envStrings (o.env // t.env);
-              envCapture = capture "target" (catFn o.nativeInputs t.nativeInputs) (catFn o.inputs t.inputs);
+              env = envStrings (o.env // o.forTarget.env);
+              envCapture = capture "target" (catFn o.nativeInputs o.forTarget.nativeInputs) (catFn o.inputs o.forTarget.inputs);
             };
             inherit (o) strictSources;
           };
