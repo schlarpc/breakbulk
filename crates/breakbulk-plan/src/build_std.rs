@@ -1,4 +1,5 @@
-//! `-Zbuild-std` ("build-std" in `docs/implementation.md`).
+//! `-Zbuild-std` ("build-std" in
+//! `docs/src/explanation/internals/toolchains.md`).
 //!
 //! Cargo resolves the standard library's own workspace
 //! (`<sysroot>/lib/rustlib/src/rust/library`, with its own `Cargo.lock`)

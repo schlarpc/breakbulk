@@ -1,5 +1,5 @@
-# mkRepository: the module-system entry point ("Nix library" in
-# docs/implementation.md).
+# mkRepository: the module-system entry point
+# (docs/src/explanation/internals/nix-library.md).
 #
 #   repo = breakbulk.mkRepository {
 #     inherit pkgs;

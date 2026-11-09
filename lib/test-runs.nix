@@ -1,5 +1,6 @@
-# Test runs and doctests ("Tests as products" in docs/design.md; "Tests" in
-# docs/implementation.md).
+# Test runs and doctests ("Tests as products" in
+# docs/src/explanation/products.md; "Tests" in
+# docs/src/explanation/internals/products.md).
 #
 #   t = breakbulk.testRuns.mkTestRuns {
 #     pkgs;

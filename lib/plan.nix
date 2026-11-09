@@ -1,5 +1,5 @@
 # The plan derivation: skeleton + vendor directory + toolchain -> plan.json
-# ("Trace planner" in docs/implementation.md).
+# (docs/src/explanation/internals/planner.md).
 #
 #   plan = breakbulk.mkPlan pkgs {
 #     skeleton;              # breakbulk.mkSkeleton output (repository-root shaped)

@@ -1,7 +1,8 @@
 //! `breakbulk-unit doctest`: run one library's doctests.
 //!
 //! The doctest derivation of a library runs the test plan's traced
-//! `rustdoc --test` command ("Tests" in `docs/implementation.md`). rustdoc
+//! `rustdoc --test` command ("Tests" in
+//! `docs/src/explanation/internals/products.md`). rustdoc
 //! compiles every example against the crate's `rlib` and its dependencies,
 //! then runs it, in one process; so there is no output but the log, and no
 //! cutoff.

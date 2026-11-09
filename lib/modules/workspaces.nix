@@ -332,8 +332,7 @@ let
                   forked or patched toolchain whose version says otherwise;
                   `null` keeps breakbulk's own answer. The planner and the
                   instantiator read nothing else
-                  (`breakbulk.toolchainFacts.of`, "Toolchain capabilities"
-                  in docs/implementation.md).
+                  (`breakbulk.toolchainFacts.of`).
                 '';
               };
             };

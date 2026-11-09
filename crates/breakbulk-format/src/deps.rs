@@ -3,15 +3,15 @@
 //!
 //! rustc loads the metadata of every crate below the one it compiles, and
 //! Cargo passes `-L` for the search paths of every build script below it
-//! (`to_link`). Naming all of those as derivation inputs makes the input
-//! edges of a graph grow with the sum of all closure sizes, roughly the
-//! square of the unit count (`docs/spikes/scale.md`). Instead, a library
-//! unit's derivation names only its direct dependencies; each library's
-//! `rmeta` output carries a manifest ([`breakbulk_unit::manifest`]) naming
-//! its own `rmeta`, the proc macros it names, the `flags` of the build
-//! scripts whose search paths it was given that its dependencies' manifests
-//! do not already name, and its direct dependencies' `rmeta` directories.
-//! Nix's reference scanning then puts everything below into the sandbox, and
+//! (`to_link`). Naming all of those as derivation inputs makes the input edges
+//! of a graph grow with the sum of all closure sizes, roughly the square of
+//! the unit count (`docs/spikes/scale.md` at the spikes-archive tag). Instead,
+//! a library unit's derivation names only its direct dependencies; each
+//! library's `rmeta` output carries a manifest ([`breakbulk_unit::manifest`])
+//! naming its own `rmeta`, the proc macros it names, the `flags` of the build
+//! scripts whose search paths it was given that its dependencies' manifests do
+//! not already name, and its direct dependencies' `rmeta` directories. Nix's
+//! reference scanning then puts everything below into the sandbox, and
 //! `breakbulk-unit` walks the manifests to build the dependency directory.
 //!
 //! Units that link (bins, tests, proc macros, cdylibs, build scripts) still

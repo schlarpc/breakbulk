@@ -1,7 +1,8 @@
 //! breakbulk-shim: the rustc wrapper, rustdoc wrapper and build-script stub
 //! that let `breakbulk-plan` trace Cargo without compiling anything.
 //!
-//! Modes (see "breakbulk-shim modes" in docs/implementation.md):
+//! Modes (see "`breakbulk-shim` modes" in
+//! docs/src/explanation/internals/planner.md):
 //!
 //! | Mode | Detected by | Action |
 //! | --- | --- | --- |

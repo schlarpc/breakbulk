@@ -1,4 +1,5 @@
-# Field trials: breakbulk on the author's own repositories (docs/field-trials.md).
+# Field trials: breakbulk on the author's own repositories (findings:
+# docs/field-trials.md at the spikes-archive tag).
 #
 # Nothing here contains the repositories' source. Each trial is a module
 # (`<name>/nix/rust.nix`) written the way the repository would carry it,

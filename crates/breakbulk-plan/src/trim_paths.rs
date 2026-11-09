@@ -1,5 +1,5 @@
 //! Whether the planner turns Cargo's `trim-paths` on ("trim-paths" in
-//! `docs/implementation.md`).
+//! `docs/src/explanation/internals/planner.md`).
 //!
 //! A profile setting passed with `--config` replaces the project's own, so
 //! the planner passes one only when the project declares none. It does not

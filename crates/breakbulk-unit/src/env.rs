@@ -1,4 +1,5 @@
-//! The environment contract ("Unit execution" in `docs/implementation.md`).
+//! The environment contract ("Environment contract" in
+//! `docs/src/reference/unit-builder.md`).
 //!
 //! A unit's child process (rustc or a build script) gets an environment built
 //! from scratch, in layers:

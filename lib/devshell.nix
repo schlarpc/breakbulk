@@ -1,4 +1,5 @@
-# The dev shell of one workspace ("Dev shell" in docs/implementation.md):
+# The dev shell of one workspace ("Dev shell" in
+# docs/src/explanation/internals/nix-library.md):
 # local Cargo set up as the planner runs it.
 #
 #  - CARGO_BUILD_TARGET=<target> (`devShell.target`: by default the native

@@ -1,4 +1,4 @@
-# breakbulk module for kmsrsos (field trial; docs/field-trials.md).
+# breakbulk module for kmsrsos (field trial).
 #
 # Replaces the crane wiring of its flake.nix for the Rust parts:
 #   - one workspace, 1.96.1 from rust-toolchain.toml, release;

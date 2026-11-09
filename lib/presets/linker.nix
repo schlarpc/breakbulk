@@ -1,4 +1,5 @@
-# The linker choice ("Linker selection" in docs/design.md): one function,
+# The linker choice ("Linker selection" in docs/src/explanation/targets.md):
+# one function,
 # called by every preset and by the host spec, from the target triple, the
 # LTO mode and the preset's flavor to a linker. `targets.<t>.linker` (or
 # `host.linker`) overrides it like any preset field.
@@ -88,7 +89,7 @@ let
     driverWrapper p "${prefix}clang-lld" "${cc}/bin/${prefix}clang" "-fuse-ld=lld";
 
   # lld-link, wrapped so the PDB, and so the .exe, are reproducible
-  # (./lld-link-stable.sh, docs/spikes/msvc.md).
+  # (./lld-link-stable.sh).
   lldLinkLinker =
     bp: llvm:
     "${

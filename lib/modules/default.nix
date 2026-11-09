@@ -1,4 +1,4 @@
-# breakbulk's option declarations ("Options" in docs/implementation.md).
+# breakbulk's option declarations.
 # mkRepository evaluates these with the user's modules; `pkgs` is passed as
 # a module argument.
 [

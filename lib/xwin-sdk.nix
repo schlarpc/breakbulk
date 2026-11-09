@@ -1,6 +1,6 @@
 # The MSVC CRT and Windows SDK for cross-compiling to *-pc-windows-msvc
-# ("Windows msvc" in docs/design.md, "msvc" under "Toolchain presets" in
-# docs/implementation.md; spike: docs/spikes/msvc.md).
+# ("Windows msvc" in docs/src/explanation/targets.md and
+# docs/src/explanation/internals/toolchains.md).
 #
 #   sdk = breakbulk.xwinSdk {
 #     inherit pkgs;              # the build machine's package set

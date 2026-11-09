@@ -1,5 +1,4 @@
-//! Types for `plan.json`, as described under "Plan format" in
-//! `docs/implementation.md`.
+//! Types for `plan.json`, as described in `docs/src/reference/plan-format.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,7 +37,8 @@ pub struct Plan {
     /// carries Cargo's own remaps, and breakbulk adds none.
     pub trim_paths: bool,
     /// Whether the planner turned `trim-paths` on itself, because the
-    /// project had not ("trim-paths" in `docs/implementation.md`). Cargo's
+    /// project had not ("trim-paths" in
+    /// `docs/src/explanation/internals/planner.md`). Cargo's
     /// `--remap-path-scope` is then left out of the plan, and breakbulk
     /// sets the scope per product kind, as with its own remaps.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -97,7 +97,8 @@ pub enum VariantMode {
 /// A working directory: a reference, or a literal store path. The literal
 /// form is a toolchain path: the standard library's own packages under
 /// `-Zbuild-std`, which Cargo compiles and runs in their directories in
-/// the sysroot's `rust-src` ("build-std" in `docs/implementation.md`).
+/// the sysroot's `rust-src` ("build-std" in
+/// `docs/src/explanation/internals/toolchains.md`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Cwd {
@@ -349,7 +350,8 @@ impl CompileUnit {
 
 /// What breakbulk's Rust programs need to know about the target platform.
 /// The Nix library decides it from its target traits (`lib/target-traits.nix`,
-/// `forRust`; "Target traits" in `docs/implementation.md`) and passes it in
+/// `forRust`; "Target traits" in
+/// `docs/src/explanation/internals/toolchains.md`) and passes it in
 /// `toolchains.json` as `targetTraits`, so no program re-derives a platform
 /// fact from the spelling of a triple, and a target the user declared
 /// traits for behaves as declared.

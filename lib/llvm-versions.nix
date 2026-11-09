@@ -1,6 +1,6 @@
 # The LLVM major version inside a rustc, for picking version-matched LLVM
-# tools (lld, lld-link, clang, clang-cl, llvm-lib) from nixpkgs (decision
-# 41; "Toolchain presets" in docs/implementation.md).
+# tools (lld, lld-link, clang, clang-cl, llvm-lib) from nixpkgs ("Toolchain
+# presets" in docs/src/explanation/internals/toolchains.md).
 #
 # Only nixpkgs' own rustc names its LLVM (`rustc.llvmPackages`); rust-overlay
 # and fenix toolchains do not. This table maps the Rust release to the LLVM

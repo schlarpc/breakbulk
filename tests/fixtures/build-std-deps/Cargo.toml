@@ -2,8 +2,8 @@
 # whole standard library rebuilt from the nightly toolchain's rust-src
 # (`-Zbuild-std`, from .cargo/config.toml). std's own crates.io
 # dependencies (hashbrown, libc, addr2line, …) are not in this lockfile;
-# they come from rust-src's vendored copies (docs/implementation.md,
-# "build-std").
+# they come from rust-src's vendored copies ("build-std"
+# in docs/src/explanation/internals/toolchains.md).
 [package]
 name = "app"
 version = "0.1.0"

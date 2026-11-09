@@ -15,7 +15,7 @@
 //! | `rustc-env` | none: env var on the compile |
 //!
 //! Each splice expands on its own, in place ("Fields" in
-//! `docs/implementation.md`, from spike A's wrapping table):
+//! `docs/src/reference/plan-format.md`):
 //!
 //! - **`rustc-link-search`.** Cargo collects the `-L` paths of every run the
 //!   unit links, then stable-sorts them so that paths inside the printing

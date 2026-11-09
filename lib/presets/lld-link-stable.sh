@@ -1,5 +1,6 @@
 # lld-link wrapper that keeps rustc's random temp dir out of the PDB
-# (docs/spikes/msvc.md, "Determinism"). $LLD_LINK is set above this line.
+# (docs/spikes/msvc.md at the spikes-archive tag, "Determinism"). $LLD_LINK
+# is set above this line.
 #
 # rustc links from a temp dir it creates next to the output,
 # <out-dir>/rustcXXXXXX (rustc_codegen_ssa back/link.rs, TempDirBuilder

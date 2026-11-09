@@ -1,5 +1,4 @@
-# Environment capture ("Environment capture" in docs/implementation.md;
-# spike: docs/spikes/C-env-capture.md).
+# Environment capture (docs/src/explanation/internals/env-capture.md).
 #
 # Runs a real nixpkgs stdenv with a package's inputs and records the
 # environment its setup hooks produced, as $out/env.json: a flat JSON object

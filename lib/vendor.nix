@@ -26,9 +26,11 @@
 # is kept byte-identical and the stub `Cargo.toml` one level up gives Cargo's
 # `find_workspace_root` the [workspace] table it would find in a checkout
 # (or, with several workspaces in one source, `package.workspace` names the
-# crate's stub: docs/spikes/git-multi-workspace.md). Only `readme`/`license-file` inherited from the workspace are rewritten,
-# because Cargo resolves them relative to the workspace root and the vendor
-# layout has a different depth (CARGO_PKG_README would differ otherwise).
+# crate's stub: docs/spikes/git-multi-workspace.md at the spikes-archive
+# tag). Only `readme`/`license-file` inherited from the workspace are
+# rewritten, because Cargo resolves them relative to the workspace root and
+# the vendor layout has a different depth (CARGO_PKG_README would differ
+# otherwise).
 {
   lib,
   pkgs,

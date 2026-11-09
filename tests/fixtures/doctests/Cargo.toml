@@ -1,4 +1,5 @@
-# Doctests ("doctests" in docs/implementation.md): a doctest that uses a
+# Doctests ("doctests" in docs/src/explanation/internals/testing.md): a
+# doctest that uses a
 # dev-dependency, a `should_panic` doctest, a doctest reading a build
 # script's `rustc-env`, `compile_fail`, `no_run` and `ignore` blocks, and an
 # edition-2024 crate, whose doctests rustdoc merges into one binary.

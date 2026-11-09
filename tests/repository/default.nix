@@ -825,10 +825,10 @@ in
     assert lib.assertMsg (sqliteInputs == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs ${toString sqliteInputs}";
     evalCheck "sys-defaults-no-switches" (toString envNames);
 
-  # Gap 7 of docs/field-trials.md: modules receive `root` (a path, also
-  # when the caller passed a string-like root), the repository object
-  # (`repo`) and the library (`breakbulk`) without the caller wiring them
-  # through specialArgs; the caller's specialArgs still win.
+  # Modules receive `root` (a path, also when the caller passed a
+  # string-like root), the repository object (`repo`) and the library
+  # (`breakbulk`) without the caller wiring them through specialArgs; the
+  # caller's specialArgs still win.
   module-args =
     let
       probe =

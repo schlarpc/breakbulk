@@ -1,5 +1,6 @@
-//! The toolchain spec's share of planning ("Toolchain presets" and "Path
-//! rewriting" in `docs/implementation.md`).
+//! The toolchain spec's share of planning ("Toolchain presets" in
+//! `docs/src/explanation/internals/toolchains.md`, "Path rewriting" in
+//! `docs/src/explanation/internals/planner.md`).
 //!
 //! The spec (`--spec FILE`, JSON) carries the target's extra rustflags, the
 //! target linker and the host linker. Spec env never reaches Cargo; it is
@@ -469,7 +470,8 @@ pub fn config_text(spec: &Spec, key: RustflagsKey, target: &str, host: &str) -> 
 }
 
 /// The spec's `--config` as Cargo's environment configuration, for the dev
-/// shell ("Dev shell" in `docs/implementation.md`): local Cargo given these
+/// shell ("Dev shell" in `docs/src/explanation/internals/nix-library.md`):
+/// local Cargo given these
 /// variables applies the spec as the planner's `--config` does. Cargo
 /// appends an environment list to the config files' list for the same key
 /// (`GlobalContext::get_cv_with_env`, "Lists are always merged"), as it

@@ -1,4 +1,5 @@
-# How a target's test binaries run ("Tests as products" in docs/design.md):
+# How a target's test binaries run ("Tests as products" in
+# docs/src/explanation/products.md):
 # one function, called by every preset, as the linker choice is
 # (./linker.nix). `targets.<t>.runner` and `testSystem` override it like
 # any preset field.

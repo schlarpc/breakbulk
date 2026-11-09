@@ -1,4 +1,4 @@
-# breakbulk module for mtgac (field trial; docs/field-trials.md).
+# breakbulk module for mtgac (field trial).
 #
 # Replaces the crane wiring of its flake.nix for the Rust parts:
 #   - one workspace (crates/* and xtask), 1.96.1 from rust-toolchain.toml;

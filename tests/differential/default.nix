@@ -1,5 +1,5 @@
-# The directive differential test ("Testing and conformance", item 3, in
-# docs/implementation.md), property-test style.
+# The directive differential test (item 3 in
+# docs/src/explanation/internals/testing.md), property-test style.
 #
 # For each seed, gen.py writes a random workspace: path crates only (no
 # network), with normal, build and dev dependencies, proc macros, `links`

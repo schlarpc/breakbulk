@@ -12,14 +12,15 @@
 //! restricted daemon socket that `builder-rpc-v0` provides (`$NIX_REMOTE`).
 //! Each wrapper is then submitted as its output of the outer derivation.
 //!
-//! Writing follows spike B (docs/spikes/B-delivery.md): output paths are
-//! computed here with harmonia's `hashDerivationModulo`, the ATerm is printed
-//! and added as a text-hashed store object whose references are its input
-//! sources and input derivations, as `Store::writeDerivation` does. `nix
-//! derivation add` cannot be used: it reads input `.drv` files on the client
-//! side, and paths added during the build are not visible in its sandbox.
-//! The daemon recomputes input-addressed outputs when it registers a `.drv`,
-//! so a wrong hash cannot get into the store.
+//! Writing follows spike B (docs/spikes/B-delivery.md at the spikes-archive
+//! tag): output paths are computed here with harmonia's
+//! `hashDerivationModulo`, the ATerm is printed and added as a text-hashed
+//! store object whose references are its input sources and input derivations,
+//! as `Store::writeDerivation` does. `nix derivation add` cannot be used: it
+//! reads input `.drv` files on the client side, and paths added during the
+//! build are not visible in its sandbox. The daemon recomputes input-addressed
+//! outputs when it registers a `.drv`, so a wrong hash cannot get into the
+//! store.
 //!
 //! A unit whose inputs include a content-addressed or deferred derivation
 //! (an embedded product) stays deferred: its outputs are placeholders, and

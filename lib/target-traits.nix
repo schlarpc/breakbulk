@@ -1,7 +1,7 @@
 # Target traits: every fact about a target platform that breakbulk decides
 # something from, in one record, from one function ("Target traits" in
-# docs/implementation.md). Other code never inspects a triple's spelling;
-# it reads these fields.
+# docs/src/explanation/internals/toolchains.md). Other code never inspects a
+# triple's spelling; it reads these fields.
 #
 #   targetTraits = breakbulk.targetTraits;
 #   t = targetTraits.resolve { triple = "x86_64-pc-windows-msvc"; };
@@ -499,7 +499,7 @@ let
     }:
     let
       parsed = parse triple;
-      unknownMsg = "breakbulk: no built-in traits for the target `${triple}`; declare them with `targets.\"${triple}\".traits = { os = …; env = …; … }` (see \"Target traits\" in docs/implementation.md)";
+      unknownMsg = "breakbulk: no built-in traits for the target `${triple}`; declare them with `targets.\"${triple}\".traits = { os = …; env = …; … }` (see https://schlarpc.github.io/breakbulk/explanation/internals/toolchains.html#target-traits)";
       unknown = lib.genAttrs fieldNames (f: throw "${unknownMsg} (needed: `${f}`)");
       base =
         (

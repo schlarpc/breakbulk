@@ -1,4 +1,4 @@
-# Variants ("Variants" in docs/design.md): helpers for
+# Variants ("Variants" in docs/src/explanation/configuration.md): helpers for
 # `workspaces.<ws>.variants`, and the derivations mkRepository makes for
 # variants that link nothing.
 #

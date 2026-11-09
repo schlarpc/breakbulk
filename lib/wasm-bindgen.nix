@@ -1,5 +1,5 @@
-# A wasm-bindgen-cli that matches a workspace's Cargo.lock ("wasm" under
-# "Toolchain presets" in docs/implementation.md).
+# A wasm-bindgen-cli that matches a workspace's Cargo.lock ("wasm" in
+# docs/src/explanation/internals/toolchains.md).
 #
 # wasm-bindgen's CLI and the `wasm-bindgen` crate must be the same version
 # exactly: the crate embeds a schema version in the custom section the CLI

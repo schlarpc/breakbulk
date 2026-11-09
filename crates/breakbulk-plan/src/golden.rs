@@ -354,7 +354,7 @@ pub fn compare(plan: &Plan, log: &str, target: &Path, metadata: &Metadata) -> Re
 
 /// The env comparison's normal form, applied to both sides. What it removes
 /// or replaces is what breakbulk replaces by design ("Env filtering" in
-/// `docs/implementation.md`):
+/// `docs/src/explanation/internals/planner.md`):
 ///
 /// - `NUM_JOBS`: the plan records 1; `breakbulk-unit` sets the core count.
 /// - In the dynamic-library path, Cargo's `deps` and profile directories

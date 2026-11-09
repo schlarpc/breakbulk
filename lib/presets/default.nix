@@ -1,5 +1,6 @@
-# Toolchain presets ("Toolchain presets" in docs/implementation.md, "Targets
-# and toolchains" in docs/design.md).
+# Toolchain presets ("Toolchain presets" in
+# docs/src/explanation/internals/toolchains.md;
+# docs/src/explanation/targets.md).
 #
 # A preset is a function from `{ pkgs, triple, …options }` to a module value
 # for `targets.<triple>`, so every field can be overridden with ordinary
@@ -354,7 +355,7 @@ let
       }
     );
 
-    # Windows msvc through xwin (docs/spikes/msvc.md): lld-link (wrapped so
+    # Windows msvc through xwin: lld-link (wrapped so
     # the PDB, and so the .exe, are reproducible), clang-cl and llvm-lib from
     # the LLVM matching rustc, include directories as -imsvc for cc and
     # -isystem for bindgen, RC/RCFLAGS/LIB/INCLUDE on target units only,

@@ -1,5 +1,5 @@
 # Dynamic-derivation mode ("Dynamic-derivation mode" and "Mode selection" in
-# docs/implementation.md; spike B in docs/spikes/B-delivery.md).
+# docs/src/explanation/internals/instantiation.md).
 #
 #   d = breakbulk.dynamic;
 #   d.available                  whether `mode = "auto"` picks dynamic

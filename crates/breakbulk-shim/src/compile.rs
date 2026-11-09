@@ -1,6 +1,6 @@
 //! Compile mode: record the invocation, then fake rustc's outputs.
 //!
-//! See "Faking a compile" in docs/implementation.md.
+//! See "Faking a compile" in docs/src/explanation/internals/planner.md.
 
 use crate::args::RustcArgs;
 use crate::stub;

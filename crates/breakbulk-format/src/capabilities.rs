@@ -1,12 +1,12 @@
 //! What the toolchain can do, as the Nix library decides it
 //! (`toolchainFacts.of`'s `capabilities`, `lib/toolchain-facts.nix`;
-//! "Toolchain capabilities" in `docs/implementation.md`). One source of
-//! truth: the Nix library's table or probe, overridable per toolchain
-//! (`workspaces.<ws>.toolchain.capabilities`) for a forked or patched
-//! compiler. No breakbulk program reads a Rust or Cargo version to decide
-//! a feature. The planner gets them as `--capabilities <file>`,
-//! breakbulk-instantiate as `toolchains.json`'s `capabilities`; both are
-//! this type's JSON.
+//! "Toolchain capabilities" in `docs/src/explanation/internals/planner.md`).
+//! One source of truth: the Nix library's table or probe, overridable per
+//! toolchain (`workspaces.<ws>.toolchain.capabilities`) for a forked or
+//! patched compiler. No breakbulk program reads a Rust or Cargo version to
+//! decide a feature. The planner gets them as `--capabilities <file>`,
+//! breakbulk-instantiate as `toolchains.json`'s `capabilities`; both are this
+//! type's JSON.
 
 use serde::{Deserialize, Serialize};
 

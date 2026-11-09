@@ -1,6 +1,6 @@
 # A git source whose crates come from two workspaces that both use
 # workspace inheritance, with other values for the same keys
-# (tests/fixtures/git-multi-workspace, docs/spikes/git-multi-workspace.md).
+# (tests/fixtures/git-multi-workspace).
 # Wired into the flake's checks as `git-multi-workspace-*`.
 #
 #   nix build -f tests/git-multi-workspace golden

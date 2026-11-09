@@ -40,7 +40,7 @@ pub trait Resolve {
     /// The `--remap-path-scope` for a compile unit, or `None` for no scope
     /// flag (every scope); `breakbulk-instantiate` gives shipped units
     /// `macro,diagnostics` when their product splits debug info ("Source
-    /// paths at run time" in `docs/implementation.md`).
+    /// paths at run time" in `docs/src/reference/unit-builder.md`).
     fn remap_scope(&self, _id: &UnitId, _unit: &CompileUnit) -> Option<String> {
         None
     }

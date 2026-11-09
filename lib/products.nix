@@ -1,6 +1,6 @@
 # Products of mkRepository: each package's build-plan roots through the
-# target's post-link stages ("Products and stages" in docs/design.md;
-# "Products, stages and tests" in docs/implementation.md).
+# target's post-link stages (docs/src/explanation/products.md;
+# docs/src/explanation/internals/products.md).
 #
 #   products = breakbulk.products.mkProducts {
 #     pkgs;

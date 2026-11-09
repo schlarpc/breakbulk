@@ -93,7 +93,8 @@ impl std::fmt::Display for SpliceKind {
 /// A splice point: "run `splice`'s directives of `kind` go here".
 ///
 /// `S` names the run: a unit id in `plan.json`, the run's `flags` directory in
-/// `BREAKBULK_UNIT`. The shapes ("Fields" in `docs/implementation.md`):
+/// `BREAKBULK_UNIT`. The shapes ("Fields" in
+/// `docs/src/reference/plan-format.md`):
 ///
 /// - `rustc-cfg`, `rustc-check-cfg`, `rustc-link-lib` (arguments) and
 ///   `rustc-env` (`envSplices`): the run's values of that kind.

@@ -1,7 +1,7 @@
 # Test apps: every test binary as a runnable flake app, with its test run's
-# working directory, environment and runner, run on the user's machine
-# ("Tests" in docs/implementation.md). The escape hatch for tests that
-# cannot run in the sandbox (network, devices), and the way to rerun one
+# working directory, environment and runner, run on the user's machine ("Tests"
+# in docs/src/explanation/internals/products.md). The escape hatch for tests
+# that cannot run in the sandbox (network, devices), and the way to rerun one
 # binary under a debugger or with a filter.
 #
 #   apps = breakbulk.testApps.mkTestApps {

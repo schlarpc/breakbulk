@@ -1,7 +1,7 @@
 # Field trials
 
 breakbulk modules for three of the author's repositories, used to try
-breakbulk on real code. Findings are in `docs/field-trials.md`.
+breakbulk on real code. Findings are in `docs/field-trials.md` at the `spikes-archive` tag.
 
 This directory holds no source from those repositories. Each trial is:
 

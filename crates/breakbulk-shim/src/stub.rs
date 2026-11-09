@@ -1,7 +1,7 @@
 //! Build-script stub: installed in place of a compiled build script; when
 //! Cargo runs it, it records the environment and prints sentinel directives.
 //!
-//! See "Sentinel directives" in docs/implementation.md.
+//! See docs/src/reference/sentinels.md.
 
 use crate::args::RustcArgs;
 use crate::{Error, record};

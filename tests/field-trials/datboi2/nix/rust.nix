@@ -1,4 +1,4 @@
-# breakbulk module for datboi2 (field trial; docs/field-trials.md).
+# breakbulk module for datboi2 (field trial).
 #
 # Written as the repository would carry it in nix/rust.nix, replacing the
 # crane wiring in its flake.nix:

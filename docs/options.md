@@ -1967,11 +1967,11 @@ null
 
 Facts about this target platform that override or extend the
 built-in ones breakbulk reads from the triple
-(` breakbulk.targetTraits.resolve `, “Target traits” in
-docs/implementation\.md)\. Every platform-dependent decision reads
-the resulting traits: the linker kind, the default debug handling,
-the install layout and file names, debuginfo side files, the
-dynamic-library path of test processes, static linking\. Base
+(` breakbulk.targetTraits.resolve `)\. Every platform-dependent
+decision reads the resulting traits: the linker kind, the default
+debug handling, the install layout and file names, debuginfo side
+files, the dynamic-library path of test processes, static linking\.
+Base
 fields (` arch `, ` vendor `, ` os `, ` env `, ` abi `, ` families `, as
 rustc’s ` target_* ` cfg values) recompute the derived ones
 (` isLinux `, ` objectFormat `, ` executableSuffix `, ` dylibPathVar `, …);
@@ -2661,8 +2661,7 @@ through import-from-derivation)\. Set one only for a
 forked or patched toolchain whose version says otherwise;
 ` null ` keeps breakbulk’s own answer\. The planner and the
 instantiator read nothing else
-(` breakbulk.toolchainFacts.of `, “Toolchain capabilities”
-in docs/implementation\.md)\.
+(` breakbulk.toolchainFacts.of `)\.
 
 
 

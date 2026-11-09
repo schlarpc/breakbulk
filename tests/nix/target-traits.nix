@@ -1,5 +1,5 @@
 # Target traits (lib/target-traits.nix; "Target traits" in
-# docs/implementation.md).
+# docs/src/explanation/internals/toolchains.md).
 #
 #   target-traits        evaluation assertions: built-in traits of the
 #                        targets breakbulk has presets for, a user's

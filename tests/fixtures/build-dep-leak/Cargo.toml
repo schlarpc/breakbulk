@@ -1,5 +1,6 @@
 # Build dependencies emitting link directives must not leak into target
-# links ("build-dep-leak" in docs/implementation.md; native only for now).
+# links ("build-dep-leak" in docs/src/explanation/internals/testing.md;
+# native only for now).
 #
 # - helper: a build-dependency of app only. Its build script links a static
 #   library (`helper_host_marker`); only host units may see it.

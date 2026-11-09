@@ -18,7 +18,8 @@
 # every release up to llvmVersions.verifiedThrough. The facts are lazy, so
 # a preset that never reads `llvmMajor` (no LLVM tools) probes nothing.
 #
-# Capabilities ("Toolchain capabilities" in docs/implementation.md) are the
+# Capabilities ("Toolchain capabilities" in
+# docs/src/explanation/internals/planner.md) are the
 # features breakbulk turns on or off per toolchain. They are decided here
 # only: the planner gets them as `--capabilities`, breakbulk-instantiate
 # in `toolchains.json` (breakbulk-format's `Capabilities`), and no Rust

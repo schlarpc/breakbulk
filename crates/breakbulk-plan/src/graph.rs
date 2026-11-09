@@ -1,6 +1,7 @@
 //! From records to `plan.json`: unit identity, edges, sentinel conversion,
 //! path rewriting, env filtering and roots ("Unit identity and graph
-//! edges", "Path rewriting" and "Env filtering" in `docs/implementation.md`).
+//! edges", "Path rewriting" and "Env filtering" in
+//! `docs/src/explanation/internals/planner.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -117,7 +118,8 @@ const DYLIB_VAR: &str = breakbulk_format::HOST_DYLIB_PATH_VAR;
 
 /// What `CARGO_TARGET_TMPDIR` (compile-time env of integration tests and
 /// benches) becomes: a fixed path that the test-run derivation creates
-/// before running the test ("Tests" in `docs/implementation.md`). Cargo's
+/// before running the test ("Tests" in
+/// `docs/src/explanation/internals/products.md`). Cargo's
 /// value names its target directory, which breakbulk does not have.
 pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
 

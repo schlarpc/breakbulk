@@ -1,6 +1,6 @@
 //! Sentinels: finding them in traced argv and env, checking their shapes
 //! against the sentinel table, and turning them into splice points
-//! ("Sentinel directives" in `docs/implementation.md`).
+//! (`docs/src/reference/sentinels.md`).
 
 use breakbulk_format::{LinkArgKind, SpliceKind, contains_sentinel};
 

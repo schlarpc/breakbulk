@@ -1,5 +1,5 @@
-# Products and post-link stages ("Products, stages and tests" in
-# docs/implementation.md; "Products and stages" in docs/design.md).
+# Products and post-link stages (docs/src/explanation/products.md;
+# docs/src/explanation/internals/products.md).
 #
 #   p = breakbulk.stages.mkProduct {
 #     name = "server";

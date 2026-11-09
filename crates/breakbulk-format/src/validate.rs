@@ -1,4 +1,5 @@
-//! The plan invariants from "Plan format" in `docs/implementation.md`.
+//! The plan invariants from "Invariants" in
+//! `docs/src/reference/plan-format.md`.
 //!
 //! [`validate`] checks invariants 2 and 3 and the shape rules that splice
 //! expansion relies on. Invariant 1 (canonical form) holds by construction

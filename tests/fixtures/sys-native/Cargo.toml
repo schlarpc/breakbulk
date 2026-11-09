@@ -1,4 +1,5 @@
-# sys-native ("sys-native" in docs/implementation.md): `-sys` crates that
+# sys-native ("sys-native" in docs/src/explanation/internals/testing.md):
+# `-sys` crates that
 # need native inputs, each declared on its own package only.
 #
 #  - openssl-sys (crates.io) finds OpenSSL with pkg-config:

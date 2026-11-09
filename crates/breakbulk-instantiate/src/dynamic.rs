@@ -315,8 +315,7 @@ pub const VIEW_PLACEHOLDER: &str = "@VIEW@";
 /// view root is `view_root`: nextest-metadata's `BinaryListSummary` and a
 /// `cargo metadata` document, as nextest 0.9.146 reads them
 /// (nextest-runner/src/list/test_list.rs `from_binary_list`,
-/// src/test_command.rs, src/list/rust_build_meta.rs; spike in
-/// docs/spikes/m6-measurements.md, "nextest reuse"):
+/// src/test_command.rs, src/list/rust_build_meta.rs):
 ///
 /// - the binary path is absolute and used as is (no remap), so the binary
 ///   stays in its own store path (`@BINARY@`);

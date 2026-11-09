@@ -1,4 +1,5 @@
-# Test control ("test-control" in docs/implementation.md): #[ignore] tests,
+# Test control ("test-control" in docs/src/explanation/internals/testing.md):
+# #[ignore] tests,
 # a network test skipped by a per-binary skip list, a test that runs the
 # package's bin through CARGO_BIN_EXE_ctl, a test that needs a feature, and
 # tests of the runtime environment a test run gives (working directory,

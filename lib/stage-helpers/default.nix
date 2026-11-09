@@ -1,4 +1,5 @@
-# Stage and check helpers ("Stage helpers" in docs/implementation.md).
+# Stage and check helpers ("Stage helpers" in
+# docs/src/explanation/internals/products.md).
 #
 # Every helper is usable two ways:
 #

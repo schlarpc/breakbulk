@@ -1,5 +1,5 @@
 # Test runners for cross targets ("runner" in the target spec;
-# docs/design.md "Tests as products").
+# "Tests as products" in docs/src/explanation/products.md).
 #
 # A runner is an executable invoked as Cargo invokes `target.<triple>.runner`:
 #
@@ -43,7 +43,7 @@ in
         inherit (pkgs) overlays config;
       };
 
-  # wine with a fresh prefix in $TMPDIR (docs/spikes/msvc.md). `wine64` is
+  # wine with a fresh prefix in $TMPDIR. `wine64` is
   # wineWow64Packages.minimal: 64-bit and 32-bit programs, no X11.
   #
   # A Windows program finds DLLs on its PATH, and the Windows PATH under

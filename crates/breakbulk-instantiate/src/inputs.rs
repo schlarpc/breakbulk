@@ -57,7 +57,7 @@ pub struct Toolchains {
     /// not instrumented). `None`: every scope is remapped. Test harnesses
     /// (`--test`) always remap every scope, and so does every unit when
     /// rustc has no `--remap-path-scope` (`capabilities`; "Source paths at
-    /// run time" in `docs/implementation.md`).
+    /// run time" in `docs/src/reference/unit-builder.md`).
     #[serde(default)]
     pub shipped_remap_scope: Option<String>,
     /// `sourcePaths = "keep"`: add no remaps of breakbulk's

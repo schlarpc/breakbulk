@@ -1,7 +1,7 @@
 //! `breakbulk-plan`: runs the user's cargo over the planning skeleton with
 //! `breakbulk-shim` as its rustc wrapper, rustdoc and build-script stub, and
-//! turns the records into `plan.json` ("Trace planner" in
-//! `docs/implementation.md`).
+//! turns the records into `plan.json`
+//! (`docs/src/explanation/internals/planner.md`).
 //!
 //! - [`trace`] runs cargo (and `cargo metadata`) and collects the records.
 //! - [`graph`] turns records into units: identity, edges, sentinels, env.
@@ -100,10 +100,11 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
         traced.configs.push(v.config.clone());
         traced.std_vendor = Some(v);
     }
-    // Cargo's trim-paths ("trim-paths" in docs/implementation.md, decision
-    // 121): turned on with `--config` unless the project's files declare it
-    // (or `--trim-paths` says otherwise), when the toolchain has it (its
-    // capabilities). One trace either way.
+    // Cargo's trim-paths ("trim-paths" in
+    // docs/src/explanation/internals/planner.md): turned on with `--config`
+    // unless the project's files declare it (or `--trim-paths` says
+    // otherwise), when the toolchain has it (its capabilities). One trace
+    // either way.
     let capabilities = trace::capabilities(opts)?;
     let declared = trim_paths::declared(&trace::workspace_dir(&traced));
     for w in &declared.warnings {

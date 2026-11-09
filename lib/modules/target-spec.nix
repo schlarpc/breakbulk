@@ -150,11 +150,11 @@ in
       description = ''
         Facts about this target platform that override or extend the
         built-in ones breakbulk reads from the triple
-        (`breakbulk.targetTraits.resolve`, "Target traits" in
-        docs/implementation.md). Every platform-dependent decision reads
-        the resulting traits: the linker kind, the default debug handling,
-        the install layout and file names, debuginfo side files, the
-        dynamic-library path of test processes, static linking. Base
+        (`breakbulk.targetTraits.resolve`). Every platform-dependent
+        decision reads the resulting traits: the linker kind, the default
+        debug handling, the install layout and file names, debuginfo side
+        files, the dynamic-library path of test processes, static linking.
+        Base
         fields (`arch`, `vendor`, `os`, `env`, `abi`, `families`, as
         rustc's `target_*` cfg values) recompute the derived ones
         (`isLinux`, `objectFormat`, `executableSuffix`, `dylibPathVar`, …);

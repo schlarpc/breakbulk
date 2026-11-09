@@ -1,4 +1,5 @@
-//! Running cargo with the shim ("Invocation" in `docs/implementation.md`).
+//! Running cargo with the shim ("Invocation" in
+//! `docs/src/explanation/internals/planner.md`).
 //!
 //! Cargo runs with an empty environment apart from `PATH`, `TMPDIR` and the
 //! planner's own variables, a scratch `HOME` and `CARGO_HOME`, and one

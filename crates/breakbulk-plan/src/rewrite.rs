@@ -1,4 +1,5 @@
-//! Path rewriting ("Path rewriting" in `docs/implementation.md`).
+//! Path rewriting ("Path rewriting" in
+//! `docs/src/explanation/internals/planner.md`).
 //!
 //! Every recorded argument and env value is split into literal text and
 //! references:
