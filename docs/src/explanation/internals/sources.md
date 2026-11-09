@@ -46,9 +46,10 @@ Git crates that use workspace inheritance get the original `[workspace]` table a
 
 A workspace package's source is `lib.fileset.toSource { root = <repository root>; fileset = …; }`. Because the root is the repository root, relative paths outside the crate resolve unchanged.
 
-- **Default fileset:** the package directory, minus `target/`, `.git`, `result*`, and any nested directories that belong to other workspace members.
+- **Default fileset:** the package directory, minus `target/`, `.git`, `result*`, any nested directories that belong to other workspace members, and the package's test-only paths: its `tests/` directory (unless [`test.scopeTestsDir`](../../reference/options/packages.md#packagesnametestscopetestsdir) is off) and the [`test.sourceScope`](../../reference/options/packages.md#packagesnametestsourcescope) entries inside it.
 - **Plus:** the package's [`extraSources`](../../reference/options/packages.md#packagesnameextrasources), at their original relative paths.
-- **Test units** additionally get [`test.sourceScope`](../../reference/options/packages.md#packagesnametestsourcescope).
+- **Test units** (`--test` compiles, doctests and test runs) get a second view: the package directory without the test-only removals, plus `test.sourceScope`. A package with no test-only paths and no `sourceScope` has one view.
+- **Non-test units** carry their package's test-only paths in the rendered unit (`testOnly`), only so that a failure naming one (a missing `include_str!` file) ends with a hint at the option.
 - **Test runs** with [`test.runFiles`](../../reference/options/packages.md#packagesnametestrunfiles) run in a narrower view instead: `lib.fileset.toSource` of only the listed paths (relative to the package directory, at their places in the repository), or an empty package directory for `[ ]`. A listed path that does not exist is an evaluation error.
 
 ## The planning skeleton

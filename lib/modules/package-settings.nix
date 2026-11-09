@@ -99,12 +99,29 @@ let
           default = [ ];
           example = [ "testdata" ];
           description = ''
-            Extra repository paths (paths, or strings relative to the
-            repository root) in the source view of this package's test
-            units: its test harnesses (`--test` compiles), doctests and
-            test runs, whose working directory is the package directory
-            of that view. Other units keep the package's normal view, so
-            editing these paths re-runs only this package's tests.
+            Repository paths (paths, or strings relative to the
+            repository root) that only this package's test units see: its
+            test harnesses (`--test` compiles), doctests and test runs,
+            whose working directory is the package directory of their
+            view. A path outside the package is added to the test view. A
+            path inside the package is also removed from the view of its
+            other units (the library, bins, build script, examples).
+            Either way, editing it re-runs only this package's tests. The
+            package's `tests/` directory is in this scope too
+            (`scopeTestsDir`).
+          '';
+        };
+        scopeTestsDir = mkOption {
+          type = types.nullOr types.bool;
+          default = null;
+          description = ''
+            Whether the package's `tests/` directory is test-only, as if
+            listed in `sourceScope`: Cargo builds the files in it only as
+            integration tests, so a fixture edit there re-runs only this
+            package's tests. Set it to `false` when non-test code reads
+            from `tests/` at compile time (`include_str!("../tests/…")`, a
+            build script that generates tests from fixtures); such a
+            library fails with a hint naming this option. `null`: `true`.
           '';
         };
         runFiles = mkOption {

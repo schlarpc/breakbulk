@@ -352,6 +352,7 @@ mod tests {
                 remap_scope: None,
                 env_capture: None,
                 link_captures: Vec::new(),
+                test_only: Vec::new(),
                 seed: None,
             },
             search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),

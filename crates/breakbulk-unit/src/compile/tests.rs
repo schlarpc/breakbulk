@@ -32,6 +32,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         remap_scope: None,
         env_capture: None,
         link_captures: Vec::new(),
+        test_only: Vec::new(),
         seed: None,
     }
 }
@@ -335,12 +336,12 @@ fn rustc_failure_names_the_crate() {
         env: BTreeMap::new(),
         cwd: t.path().to_owned(),
     };
-    let e = run_rustc(&inv, "smokelib").unwrap_err();
+    let e = run_rustc(&inv, "smokelib", &|_| Vec::new()).unwrap_err();
     assert_eq!(e.0, "could not compile `smokelib` (exit status: 3)");
     let inv = Invocation {
         argv: vec!["/bin/sh".into(), "-c".into(), "kill -SEGV $$".into()],
         ..inv
     };
-    let e = run_rustc(&inv, "x").unwrap_err();
+    let e = run_rustc(&inv, "x", &|_| Vec::new()).unwrap_err();
     assert!(e.0.contains("signal: 11"), "{e}");
 }

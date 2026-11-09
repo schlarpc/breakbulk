@@ -216,16 +216,23 @@ outside them changes nothing for the package.
 
 For tests:
 
+- the package's `tests/` directory is test-only: only its test units (test
+  compiles, doctests and test runs) see it, so a fixture edit there re-runs
+  the package's tests and rebuilds nothing else.
+  [`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
+  turns that off for code that reads `tests/` at compile time;
 - [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
-  adds repository paths to the source of the package's tests (test
-  compiles, doctests and test runs) only, for tests that read files;
+  makes more paths test-only: a path outside the package is added to its
+  tests' source, and a path inside it is removed from the source of its
+  other units;
 - [`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles)
   narrows a test run to the files its tests read, so editing any other
   file of the package does not re-run it.
 
 When a build script fails, or succeeds while it names a
 `rerun-if-changed` path that is missing from its sandbox, the message
-names the path and the option to add it to. Missing paths on success are
+names the path and the option to add it to. So does a failing library or
+build script that reads a test-only path. Missing paths on success are
 warnings;
 [`strictSources`](../reference/options/repository.md#strictsources)
 makes them errors.

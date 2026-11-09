@@ -174,7 +174,10 @@ let
   crates = lib.listToAttrs (
     map (e: lib.nameValuePair (crateId e) (fetch.crateSource e).path) (lockfile.remoteEntries entries)
   );
-  views = sourceViews.workspaceViews { inherit root wsDir extraSources; };
+  views = sourceViews.workspaceViews {
+    inherit root wsDir extraSources;
+    test = lib.mapAttrs (_: p: p.test or { }) packages;
+  };
   # Path packages Cargo loads from outside the workspace root.
   closureDirs = skel.passthru.description.packages;
   memberDirs = lib.catAttrs "dir" (lib.attrValues views);
@@ -183,35 +186,25 @@ let
     let
       pkgName = (builtins.fromTOML (builtins.readFile (root + "/${util.joinRel dir "Cargo.toml"}"))).package.name;
     in
-    sourceViews.sourceView {
+    # Not tested, so no test view; test-only paths still stay out.
+    sourceViews.packageViews {
       inherit root;
       pkgDir = dir;
       memberDirs = closureDirs;
       extraSources = extraSources.${pkgName} or [ ];
+      test = packages.${pkgName}.test or { };
     }
   );
-  workspace = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.src) views // outsideViews;
-  # Members with `test.sourceScope`: a wider view for their test units, by
-  # directory (instantiate's `sources.workspaceTest`).
-  workspaceTest = lib.listToAttrs (
-    lib.concatLists (
-      lib.mapAttrsToList (
-        pkgName: v:
-        let
-          scope = packages.${pkgName}.test.sourceScope or [ ];
-        in
-        lib.optional (scope != [ ]) (
-          lib.nameValuePair v.dir (
-            sourceViews.sourceView {
-              inherit root memberDirs;
-              pkgDir = v.dir;
-              extraSources = (extraSources.${pkgName} or [ ]) ++ scope;
-            }
-          )
-        )
-      ) views
-    )
+  allViews = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v) views // outsideViews;
+  workspace = lib.mapAttrs (_: v: v.src) allViews;
+  # Members with test-only paths or `test.sourceScope`: the view of their
+  # test units, by directory (instantiate's `sources.workspaceTest`).
+  workspaceTest = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.testSrc) (
+    lib.filterAttrs (_: v: v.testSrc != null) views
   );
+  # Test-only paths by directory (instantiate's `sources.testOnly`), for
+  # the hint when a non-test unit misses one.
+  testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
 
   # Clippy variants: each member's clippy config tree, by directory
   # (instantiate's `sources.clippyConf`).
@@ -407,7 +400,12 @@ let
       inherit system;
       plan = "${plans.${kind}}/plan.json";
       sources = {
-        inherit workspace crates clippyConf;
+        inherit
+          workspace
+          crates
+          clippyConf
+          testOnly
+          ;
       }
       // lib.optionalAttrs (kind == "test") { inherit workspaceTest; };
       tools = unitTools;

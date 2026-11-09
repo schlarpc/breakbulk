@@ -31,6 +31,7 @@ use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
 use crate::splice::expand_dylib_path;
+use crate::test_only;
 use crate::{
     DIRECTIVES_FILE, Error, METADATA_FILE, TARGET_FILES_FILE, io_err, read_directives,
     read_metadata, write_json,
@@ -134,7 +135,7 @@ pub fn run_cflags(r: &RenderedRun, out: &Path) -> CFlags {
 }
 
 /// The `packages.<name>` option prefix for hints.
-fn option_prefix(package: &str) -> String {
+pub(crate) fn option_prefix(package: &str) -> String {
     let name = package_name_version(package).map_or(package, |(n, _)| n);
     if name
         .bytes()
@@ -264,23 +265,35 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
             reparsed.as_ref()
         }
     };
+    let cwd = Path::new(&f.run.cwd);
+    let stderr = String::from_utf8_lossy(f.stderr_tail);
+    let mut hints = Vec::new();
     if let Some(p) = parsed {
-        let cwd = Path::new(&f.run.cwd);
-        let stderr = String::from_utf8_lossy(f.stderr_tail);
         let lines = stdout.lines().chain(stderr.lines());
-        let hints: Vec<String> = path_hints(&f.run.package, cwd, &missing_paths(p, cwd))
-            .into_iter()
-            .chain(recognize::hints(
-                &option_prefix(&f.run.package),
-                &p.rerun_if_env_changed,
-                &unset_vars(p, f.env),
-                lines,
-            ))
-            .collect();
-        for h in hints {
-            msg.push_str("\nhint: ");
-            msg.push_str(&h);
-        }
+        hints.extend(path_hints(&f.run.package, cwd, &missing_paths(p, cwd)));
+        hints.extend(recognize::hints(
+            &option_prefix(&f.run.package),
+            &p.rerun_if_env_changed,
+            &unset_vars(p, f.env),
+            lines,
+        ));
+    }
+    // The script's output, or the paths it declared, naming a test-only path.
+    let mut text = format!("{stdout}\n{stderr}");
+    for m in parsed.map(|p| missing_paths(p, cwd)).unwrap_or_default() {
+        text.push('\n');
+        text.push_str(&m.path.display().to_string());
+    }
+    hints.extend(test_only::hints(
+        &f.run.package,
+        &text,
+        &f.run.test_only,
+        &f.run.remap,
+        cwd,
+    ));
+    for h in hints {
+        msg.push_str("\nhint: ");
+        msg.push_str(&h);
     }
     // Cargo prints the script's stderr after its stdout. breakbulk streamed
     // it as the script ran, so stdout and the hints would bury a panic;

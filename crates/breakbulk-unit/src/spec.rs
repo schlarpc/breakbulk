@@ -419,6 +419,12 @@ pub struct RenderedCompile {
     /// a `-sys` crate below names with `rustc-link-lib` alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_captures: Vec<String>,
+    /// For a unit that is not a test unit: the package's test-only paths
+    /// (its `tests/` directory, `test.sourceScope` entries inside it), left
+    /// out of the source view it sees, as absolute paths in that view. Only
+    /// for the hint when the unit fails naming one ([`crate::test_only`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_only: Vec<String>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change
@@ -536,6 +542,12 @@ pub struct RenderedRun {
     /// Fail a successful run whose `rerun-if-changed` paths are missing
     /// from the sandbox, instead of only warning.
     pub strict_sources: bool,
+    /// For a unit that is not a test unit: the package's test-only paths
+    /// (its `tests/` directory, `test.sourceScope` entries inside it), left
+    /// out of the source view it sees, as absolute paths in that view. Only
+    /// for the hint when the unit fails naming one ([`crate::test_only`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_only: Vec<String>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change

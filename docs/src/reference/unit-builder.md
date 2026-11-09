@@ -48,7 +48,9 @@ Nothing from the planner's environment reaches a unit.
 5. Point `--out-dir` at `$TMPDIR/out` and run the recorded program.
 6. Parse rustc's JSON diagnostics from stderr, print each `rendered`
    field, and drop artifact notifications. Without this, build logs are
-   unreadable JSON.
+   unreadable JSON. If rustc fails and its output names a path under one
+   of the unit's `testOnly` paths (test-only paths its source view leaves
+   out), add a hint naming the option that keeps the path.
 7. Move outputs into place (details below): `.rmeta` to `$rmeta`, `.rlib`
    to `$rlib`, binaries and cdylibs to `$out`, debuginfo side files to
    `$debug`. Discard dep-info.
@@ -116,7 +118,9 @@ name them.
    any `error` directive. Print `warning` directives.
 6. Check every `rerun-if-changed` path against the sandbox.
    - On failure, add a hint for each missing path, naming the package
-     option to add it to, then the [failure hints](#failure-hints).
+     option to add it to, then the [failure hints](#failure-hints), and
+     a hint for each test-only path the script's output names, as for
+     compiles.
    - On success, warn about missing paths, or fail when
      [`strictSources`](options/repository.md#strictsources) is set.
 7. Remove CMake's internal state (details below).

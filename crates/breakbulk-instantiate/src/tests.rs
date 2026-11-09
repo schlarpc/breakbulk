@@ -44,6 +44,7 @@ fn smoke_inputs() -> Inputs {
             workspace: ["smokelib".into(), "smokeapp".into()].into(),
             workspace_test: Default::default(),
             clippy_conf: Default::default(),
+            test_only: Default::default(),
             crates: Default::default(),
         },
         toolchains: Toolchains {
@@ -769,6 +770,42 @@ fn clippy_units_get_the_config_tree() {
     for id in [APP, SCRIPT, RUN] {
         assert_eq!(clippy.units[id], check.units[id], "{id}");
     }
+}
+
+/// Test-only paths reach the package's non-test units (for the hint) as
+/// paths in their source view, and not its test units.
+#[test]
+fn test_only_paths_reach_non_test_units() {
+    let mut inputs = smoke_inputs();
+    let Unit::Compile(c) = inputs.plan.units.get_mut(APP).unwrap() else {
+        panic!()
+    };
+    c.args.push(breakbulk_format::Arg::Literal("--test".into()));
+    inputs.sources.workspace_test = ["smokeapp".into()].into();
+    inputs.sources.test_only = BTreeMap::from([
+        ("smokeapp".into(), vec!["smokeapp/tests".into()]),
+        ("smokelib".into(), vec!["smokelib/tests".into()]),
+    ]);
+    let out = instantiate(&inputs).unwrap();
+    let text = |id: &str| {
+        let Value::Parts { parts } = &out.units[id].attrs["BREAKBULK_UNIT"] else {
+            panic!()
+        };
+        parts
+            .iter()
+            .map(|p| match p {
+                Part::Literal(s) => s.clone(),
+                Part::Input { input, .. } => format!("<{input}>"),
+                other => format!("{other:?}"),
+            })
+            .collect::<String>()
+    };
+    assert!(
+        text(LIB).contains(r#""testOnly":["<src:smokelib>/smokelib/tests"]"#),
+        "{}",
+        text(LIB)
+    );
+    assert!(!text(APP).contains("testOnly"), "{}", text(APP));
 }
 
 #[test]

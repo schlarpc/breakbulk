@@ -66,6 +66,24 @@ substituted; stages and test runs re-run.
 | Function-body edit in an upstream library | No: rustc's crate hash changes, and dependents rebuild |
 | Interface change | No, correctly |
 
+## Test-only paths
+
+Some edits should not reach a unit at all. A package's `tests/` directory
+is in the source of its test units only, so editing a fixture there
+changes only those units:
+
+| Edit | Rebuilds |
+| --- | --- |
+| a fixture in `tests/` | the package's test harnesses, doctest and test runs |
+| a path in [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope) | the same |
+| any other file of the package | the package and everything that depends on it |
+
+The cost is a second source view for such a package. Non-test code that
+reads a test-only path at compile time (`include_str!("../tests/…")`)
+fails with a hint;
+[`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
+puts `tests/` back into every view.
+
 ## What has to be deterministic
 
 Cutoff and reproducible products need byte-stable outputs. breakbulk makes

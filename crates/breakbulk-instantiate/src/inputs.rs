@@ -33,6 +33,11 @@ pub struct Sources {
     /// views, by directory.
     #[serde(default)]
     pub clippy_conf: BTreeSet<String>,
+    /// Path packages' test-only paths (relative to the repository root),
+    /// which their normal source views leave out, by directory. Only for
+    /// hints ([`breakbulk_format::Resolve::test_only_paths`]).
+    #[serde(default)]
+    pub test_only: BTreeMap<String, Vec<String>>,
     /// Fetched crate sources, by Cargo package id.
     #[serde(default)]
     pub crates: BTreeSet<String>,

@@ -298,6 +298,7 @@ let
         args = a.args ++ b.args;
         includeIgnored = a.includeIgnored || b.includeIgnored;
         sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
+        scopeTestsDir = if b.scopeTestsDir != null then b.scopeTestsDir else a.scopeTestsDir;
         runner = if b.runner != null then b.runner else a.runner;
         stripForRun = if b.stripForRun != null then b.stripForRun else a.stripForRun;
         # Several matching keys: the union of their lists.
@@ -331,6 +332,7 @@ let
         args = [ ];
         includeIgnored = false;
         sourceScope = [ ];
+        scopeTestsDir = null;
         binaries = { };
         runFiles = null;
         runner = null;

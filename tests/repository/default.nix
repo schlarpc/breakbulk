@@ -273,6 +273,29 @@ let
       };
     }
   ];
+  # --- test-only ---------------------------------------------------------------
+
+  testOnlyScope = {
+    packages.proto.test.sourceScope = [ "proto/testdata" ];
+  };
+  testOnlyOptOut = {
+    packages.proto.test.scopeTestsDir = false;
+  };
+  testOnlyRepo =
+    edit: modules:
+    mkRepo (if edit == null then fixtures + "/test-only" else edited "test-only" edit) (
+      [
+        (oneWs ".")
+        testOnlyScope
+      ]
+      ++ modules
+    );
+  testOnly = testOnlyRepo null [ ];
+  addFixture = "echo 43 > proto/tests/fixtures/extra.txt";
+  editTestdata = "echo 42 >> proto/testdata/more.txt";
+  includeFrom = file: "echo 'pub const DATA: &str = include_str!(\"../${file}\");' >> proto/src/lib.rs";
+  protoLib = repo: (unitsNamed (inst repo) "build")."proto-0.1.0-lib";
+
   inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
 
   # --- host units across debugInfo ---------------------------------------------
@@ -315,6 +338,7 @@ in
       missing
       provided
       overrideRepo
+      testOnly
       ;
   };
 
@@ -480,6 +504,74 @@ in
         [ "$got" = "app 3.1 vendored 7" ]
         touch $out
       '';
+
+  # `tests/` and in-package `test.sourceScope` paths are test-only: editing
+  # them changes only proto's test harnesses (and its test runs), not its
+  # library or app; `scopeTestsDir = false` keeps `tests/` in every view,
+  # set on the package, in `memberDefaults` or per triple (`target.<t>`),
+  # and a package's `true` overrides `memberDefaults`' `false`. The
+  # integration test reads both at its paths.
+  test-only =
+    let
+      runOf = repo: (inst repo).testRuns.proto.read.drvPath;
+      fixtureEdit = testOnlyRepo addFixture [ ];
+      testdataEdit = testOnlyRepo editTestdata [ ];
+      testUnits = [
+        "proto-0.1.0-test"
+        "proto-0.1.0-test-read"
+      ];
+      changedWith = m: changedUnits (testOnlyRepo null [ m ]) (testOnlyRepo addFixture [ m ]);
+      optOuts = {
+        package = testOnlyOptOut;
+        memberDefaults.workspaces.main.memberDefaults.test.scopeTestsDir = false;
+        target.packages.proto.target.${native}.test.scopeTestsDir = false;
+      };
+      optOutChanged = lib.mapAttrs (_: changedWith) optOuts;
+      backOn = changedWith {
+        workspaces.main.memberDefaults.test.scopeTestsDir = false;
+        packages.proto.test.scopeTestsDir = true;
+      };
+    in
+    assert lib.assertMsg (changedUnits testOnly fixtureEdit == testUnits)
+      "test-only: a fixture edit changed ${builtins.toJSON (changedUnits testOnly fixtureEdit)}";
+    assert lib.assertMsg (changedUnits testOnly testdataEdit == testUnits)
+      "test-only: a testdata edit changed ${builtins.toJSON (changedUnits testOnly testdataEdit)}";
+    assert lib.assertMsg (
+      runOf fixtureEdit != runOf testOnly && runOf testdataEdit != runOf testOnly
+    ) "test-only: the edits left proto's test run unchanged";
+    assert lib.assertMsg (lib.all (c: lib.elem "proto-0.1.0-lib" c && lib.elem "app-0.1.0-bin" c) (
+      lib.attrValues optOutChanged
+    )) "test-only: with scopeTestsDir = false, a fixture edit changed only ${builtins.toJSON optOutChanged}";
+    assert lib.assertMsg (backOn == testUnits)
+      "test-only: the package's scopeTestsDir = true did not override memberDefaults: ${builtins.toJSON backOn}";
+    pkgs.runCommand "test-only"
+      {
+        read = (inst testOnly).testRuns.proto.read;
+        app = testOnly.workspaces.main.packages.app;
+      }
+      ''
+        grep -q 'test reads_fixtures ... ok' $read/log
+        [ "$($app/bin/app)" = 42 ]
+        touch $out
+      '';
+
+  # A library that reads a test-only path at compile time fails with a hint
+  # naming the option that keeps it; with `scopeTestsDir = false` it builds.
+  test-only-hint = pkgs.runCommand "test-only-hint" {
+    tests = expectFailure "test-only-tests" (protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ ])) [
+      "proto/tests/fixtures/input.txt"
+      "packages.proto.test.scopeTestsDir = false"
+    ];
+    scope = expectFailure "test-only-scope" (protoLib (testOnlyRepo (includeFrom "testdata/more.txt") [ ])) [
+      "proto/testdata/more.txt"
+      "packages.proto.test.sourceScope"
+      "packages.proto.extraSources"
+    ];
+    optOut = protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ testOnlyOptOut ]);
+  } ''
+    cat $tests/log $scope/log
+    touch $out
+  '';
 
   # Override keys: name, name@requirement, the version option; merging
   # order (versioned last); warnings for unmatched and unimplemented

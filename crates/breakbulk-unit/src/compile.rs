@@ -29,7 +29,7 @@ use crate::env::{CFlags, Outer, capture_layer, layered};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{DEBUG_OUTPUT, RenderedArg, RenderedCompile, SpliceKind, derivation_output};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
-use crate::{Error, io_err, manifest, read_directives};
+use crate::{Error, io_err, manifest, read_directives, test_only};
 
 /// The directories a compile works in, under `$TMPDIR`.
 #[derive(Clone, Debug)]
@@ -217,8 +217,12 @@ pub(crate) fn fresh_dir(dir: &Path) -> Result<(), Error> {
 }
 
 /// Run rustc, rendering its stderr. Returns an error naming the crate when
-/// it fails.
-pub fn run_rustc(inv: &Invocation, crate_name: &str) -> Result<(), Error> {
+/// it fails, followed by `hints` of what rustc printed.
+pub fn run_rustc(
+    inv: &Invocation,
+    crate_name: &str,
+    hints: &dyn Fn(&str) -> Vec<String>,
+) -> Result<(), Error> {
     eprintln!("     Running `{}`", shell_words(&inv.argv));
     let mut child = command(&inv.argv, &inv.env, &inv.cwd)
         .stdin(Stdio::null())
@@ -227,6 +231,7 @@ pub fn run_rustc(inv: &Invocation, crate_name: &str) -> Result<(), Error> {
         .map_err(|e| Error(format!("could not start `{}`: {e}", inv.argv[0])))?;
     let stderr = child.stderr.take().expect("stderr is piped");
     let mut future_incompat = 0;
+    let mut printed = String::new();
     {
         let mut err = std::io::stderr().lock();
         for line in BufReader::new(stderr).split(b'\n') {
@@ -236,6 +241,7 @@ pub fn run_rustc(inv: &Invocation, crate_name: &str) -> Result<(), Error> {
             match classify(line) {
                 Line::Print(text) => {
                     let _ = err.write_all(text.as_bytes());
+                    printed.push_str(&text);
                 }
                 Line::Drop => {}
                 Line::FutureIncompat(n) => future_incompat += n,
@@ -251,10 +257,15 @@ pub fn run_rustc(inv: &Invocation, crate_name: &str) -> Result<(), Error> {
         );
     }
     if !status.success() {
-        return Err(Error(format!(
+        let mut msg = format!(
             "could not compile `{crate_name}` ({})",
             describe_status(&status)
-        )));
+        );
+        for h in hints(&printed) {
+            msg.push_str("\nhint: ");
+            msg.push_str(&h);
+        }
+        return Err(Error(msg));
     }
     Ok(())
 }
@@ -381,7 +392,9 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     let inv = invocation(c, outer, &directives, &dirs)?;
     link_deps(&all_deps(c, &below), &dirs.deps)?;
     fresh_dir(&dirs.out)?;
-    run_rustc(&inv, &c.krate.name)?;
+    run_rustc(&inv, &c.krate.name, &|text| {
+        test_only::hints(&c.package, text, &c.test_only, &c.remap, Path::new(&c.cwd))
+    })?;
     collect_outputs(&c.outputs, &dirs.out, |o| outer.output(o))?;
     if c.outputs.contains_key("rmeta") {
         let dir = outer.output("rmeta")?;

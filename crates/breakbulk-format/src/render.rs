@@ -92,6 +92,12 @@ pub trait Resolve {
     ) -> Result<Option<String>, Self::Error> {
         Ok(None)
     }
+    /// For a unit that is not a test unit: its package's test-only paths,
+    /// which its source view leaves out, as absolute paths for the hint
+    /// when it fails reading one (`RenderedCompile::test_only`).
+    fn test_only_paths(&self, _id: &UnitId, _unit: &Unit) -> Result<Vec<String>, Self::Error> {
+        Ok(Vec::new())
+    }
     /// `strictSources` for a run's package.
     fn strict_sources(&self, _id: &UnitId, _run: &RunUnit) -> bool {
         false
@@ -380,6 +386,7 @@ pub fn render_unit_in<R: Resolve>(
                 remap_scope,
                 env_capture,
                 link_captures,
+                test_only: r.test_only_paths(id, &unit)?,
                 seed: Some(id.to_string()),
             })
         }
@@ -432,6 +439,7 @@ pub fn render_unit_in<R: Resolve>(
                 remap,
                 out_dir_remap,
                 strict_sources: r.strict_sources(id, run),
+                test_only: r.test_only_paths(id, &unit)?,
                 seed: Some(id.to_string()),
             })
         }

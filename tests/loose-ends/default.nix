@@ -97,6 +97,9 @@ let
     root = fixtures + "/config-env";
     inherit tools;
     name = "config-env";
+    # The tests compare a source path the library embedded at compile time
+    # with the one the test run gets, which needs one view for both.
+    packages.config-env.test.scopeTestsDir = false;
   };
 
   configEnv =

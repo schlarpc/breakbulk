@@ -1,0 +1,11 @@
+# Test-only paths: `proto/tests` (Cargo builds it only as integration
+# tests) and `proto/testdata` (in `test.sourceScope` in the checks) are
+# left out of the view of proto's library and kept for its test units.
+# `app` depends on proto.
+[workspace]
+resolver = "2"
+members = ["proto", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

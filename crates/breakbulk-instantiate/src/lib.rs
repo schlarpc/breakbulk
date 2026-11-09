@@ -466,6 +466,20 @@ impl Resolve for Tokens<'_> {
         }))
     }
 
+    fn test_only_paths(&self, _id: &UnitId, unit: &Unit) -> Result<Vec<String>, Error> {
+        if self.test_package.is_some() {
+            return Ok(Vec::new());
+        }
+        let Some(dir) = workspace_dir(&self.inputs.plan, unit.package()) else {
+            return Ok(Vec::new());
+        };
+        let Some(paths) = self.inputs.sources.test_only.get(dir) else {
+            return Ok(Vec::new());
+        };
+        let view = self.input(keys::src(dir));
+        Ok(paths.iter().map(|p| format!("{view}/{p}")).collect())
+    }
+
     fn strict_sources(&self, _id: &UnitId, run: &RunUnit) -> bool {
         self.package_override(&run.package)
             .and_then(|(_, o)| o.strict_sources)

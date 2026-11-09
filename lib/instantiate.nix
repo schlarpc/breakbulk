@@ -66,6 +66,10 @@ rec {
       #   units (`test.sourceScope`): its `--test` compiles and doctests
       # sources.clippyConf."<dir>" = a member's clippy config tree
       #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
+      # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
+      #   the paths left out of that package's normal view
+      #   (sourceViews.testOnlyPaths), for a hint when a non-test unit
+      #   misses one
       # sources.crates."<Cargo package id>" = fetched crate source
       sources ? { },
       # Tool name to a store path or a path inside one. Must include
@@ -107,6 +111,7 @@ rec {
       workspace = sources.workspace or { };
       workspaceTest = sources.workspaceTest or { };
       clippyConf = sources.clippyConf or { };
+      testOnly = sources.testOnly or { };
       crates = sources.crates or { };
       spec = p: { env = { }; envCapture = null; } // p;
       platformSpec = { inherit host target; };
@@ -126,6 +131,7 @@ rec {
         }
         // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
         // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
+        // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir targetTraits;
