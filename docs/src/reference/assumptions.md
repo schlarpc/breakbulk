@@ -427,7 +427,7 @@ Status of the 78 entries: all 78 pinned; [Gaps](#gaps) is empty.
 - **Where.** `crates/breakbulk-plan/src/graph.rs`: `TARGET_TMPDIR`, `rewrite_env`; `lib/test-runs.nix` (creates it).
 - **Upstream.** The Cargo book (environment variables for crates); cargo `src/compiler/mod.rs`.
 - **Holds for.** The window.
-- **Pinned by.** `test-runs-test-control`. Portability of the fixed path: #21.
+- **Pinned by.** `test-runs-test-control`. Portability of the fixed path (#21), checked by hand with the test-control fixture's `env` test run: with `sandbox-build-dir = /var/bbuild` it passes; with `sandbox = false` it fails when `/tmp/breakbulk-target-tmp` already exists and belongs to another user (a test app's run, or another build user), because the value is compiled into the binary and unsandboxed builds share `/tmp`.
 - **If it changes.** A test that writes there fails.
 
 ## Rustflags, linkers and config

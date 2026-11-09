@@ -70,7 +70,7 @@ The debug outputs are tested with debuggers, not only for presence (`products-so
 
 - **Test binaries** are roots with `test = true` in the test plan. `tests.<pkg>.<name>` is the binary installed as `bin/<target><exe suffix>`, the suffix from the target's traits (`.exe` on Windows, `.wasm` for wasm, none on Linux), as Cargo names it; `benches.<pkg>.<name>` likewise. Test binaries are never stripped.
 - **`CARGO_BIN_EXE_<name>`** is compile-time env recorded by the planner, and is rewritten to the bin root's `linked` output. The test's compile unit therefore depends on that link.
-- **`CARGO_TARGET_TMPDIR`** is also compile-time env, but must be writable when the test runs. It is rewritten to a fixed path under the build directory, and the test-run derivation creates that path before running (see spikes).
+- **`CARGO_TARGET_TMPDIR`** is also compile-time env, but must be writable when the test runs. It is rewritten to the fixed path `/tmp/breakbulk-target-tmp`, and the test-run derivation creates that path before running (see spikes). In the sandbox `/tmp` is private to the build; unsandboxed builds share it (#21).
 - **Test runs** are one derivation per test binary. A small CA derivation copies the test binary, and the test run consumes that copy, so a byte-identical binary does not re-run.
 
   With `test.stripForRun` the copy is stripped of debug info and of its GNU build ID (`objcopy --strip-debug --remove-section=.note.gnu.build-id`; the linker computes the ID over the whole file), because the debug info of the workspace libraries it links names their source views; files that are not ELF are copied as they are. Without `ca` the stripped copy is input-addressed.
