@@ -560,7 +560,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         let recs = read_records(&record)?;
         // With the rustc-info cache off, every invocation asks; one that
         // did not means Cargo ignored `CARGO_CACHE_RUSTC_INFO=0`
-        // (assumption T2 in `docs/reference/assumptions.md`).
+        // (assumption T2 in `docs/src/reference/assumptions.md`).
         if !recs.iter().any(|r| r.mode == "query" && r.args == ["-vV"]) {
             bail!(
                 "`cargo {}` sent no `rustc -vV` through the shim although its \

@@ -1,0 +1,45 @@
+# The documentation site (#26): build packages.x86_64-linux.docs-site
+# (docs/default.nix) and deploy it to GitHub Pages on every push to main.
+# CI checks its links on pull requests (docs-site-links in
+# .github/fast-checks).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: DeterminateSystems/flakehub-cache-action@main
+      - name: nix build .#docs-site
+        run: |
+          nix build --print-build-logs .#docs-site
+          # `result` is a symlink into the store; upload a plain copy.
+          cp -rL result site
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

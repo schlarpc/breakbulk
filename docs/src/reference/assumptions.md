@@ -10,7 +10,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 
 - **Assumption**: one sentence.
 - **Where**: the breakbulk file and function that rely on it.
-- **Upstream**: the source that establishes it. Cargo citations are to rust-lang/cargo at the commit each release reports: `0.100.0` is Cargo 1.99 (`5f94df478`), `3c747ea3e` is nightly 1.101 (2026-11-03); up to 1.97 the same files live under `src/cargo/core/compiler/`. Most come from [spike A](../spikes/A-trace-fidelity.md) and the code comments; the ones marked "checked for this page" were re-read in the source or re-run.
+- **Upstream**: the source that establishes it. Cargo citations are to rust-lang/cargo at the commit each release reports: `0.100.0` is Cargo 1.99 (`5f94df478`), `3c747ea3e` is nightly 1.101 (2026-11-03); up to 1.97 the same files live under `src/cargo/core/compiler/`. Most come from [spike A](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/A-trace-fidelity.md) and the code comments; the ones marked "checked for this page" were re-read in the source or re-run.
 - **Holds for**: the releases it was observed or tested on. "The window" means Cargo and rustc 1.95, 1.97 and 1.99 (stable) and nightly 1.101, the releases the golden and differential checks run.
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
@@ -232,7 +232,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### S1. Sentinel placement and shapes
 
-- **Assumption.** Cargo places each sentinel directive where it would place that kind of real output, in the shapes and on the units listed in the sentinel table ("Sentinel directives" in [implementation.md](../implementation.md#sentinel-directives)): `rustc-cfg`, `rustc-check-cfg` and `rustc-env` on every compile of the package and its `rustdoc --test`; `rustc-link-lib` on the lib (or the other targets when there is no lib); search paths on the package and its same-platform dependents; each `rustc-link-arg*` kind on its targets.
+- **Assumption.** Cargo places each sentinel directive where it would place that kind of real output, in the shapes and on the units listed in the sentinel table ("Sentinel directives" in [implementation.md](https://github.com/schlarpc/breakbulk/blob/main/docs/implementation.md#sentinel-directives)): `rustc-cfg`, `rustc-check-cfg` and `rustc-env` on every compile of the package and its `rustdoc --test`; `rustc-link-lib` on the lib (or the other targets when there is no lib); search paths on the package and its same-platform dependents; each `rustc-link-arg*` kind on its targets.
 - **Where.** `crates/breakbulk-shim/src/stub.rs`: `sentinels`, `line`; `crates/breakbulk-plan/src/sentinel.rs`: `parse_pair`, `env_sentinel`, `dep_sentinel`, `dylib_sentinel`; `graph.rs`: `convert_args`, `convert_env`; `crates/breakbulk-unit/src/splice.rs`: `wrap`.
 - **Upstream.** cargo `src/compiler/mod.rs`: `add_native_deps`, `add_custom_flags`, `pass_l_flag`; `src/compiler/custom_build.rs`: `BuildOutput::parse`; spike A, wrapping table.
 - **Holds for.** The window (identical on all four).
@@ -324,7 +324,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 - **Assumption.** Cargo sets the build machine's dynamic-library variable: on a compile, the search paths of its host plugin dependencies' runs (proc macros, build dependencies with build scripts), appended after the inherited value; on a run, those of its build dependencies' runs; on a test process, those of every run of the test's platform; on `rustdoc --test`, those of every host run, sorted, before the inherited value; build scripts also get the sysroot's library directory. It keeps only paths lexically inside the platform's artifact directory; breakbulk keeps paths inside the printing run's `out` or a `DEP_*` upstream's `out` instead.
 - **Where.** `crates/breakbulk-unit/src/directives.rs`: `LibraryPath::for_dylib_path`; `splice.rs`: `expand_dylib_path`, `prepend_dylib_path`; `crates/breakbulk-plan/src/graph.rs`: `dylib_path`; `lib/test-runs.nix`: `dylibJq`; `lib/workspace.nix`: `unitTools` (`rustc-sysroot`).
-- **Upstream.** cargo `0.100.0` `src/compiler/mod.rs`: `add_plugin_deps`, `filter_dynamic_search_path`; `src/compiler/compilation.rs`: `fill_env`; [research-coverage-and-libpath.md](../spikes/research-coverage-and-libpath.md) section 2 (and a survey of 1207 crates for the substitute rule).
+- **Upstream.** cargo `0.100.0` `src/compiler/mod.rs`: `add_plugin_deps`, `filter_dynamic_search_path`; `src/compiler/compilation.rs`: `fill_env`; [research-coverage-and-libpath.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/research-coverage-and-libpath.md) section 2 (and a survey of 1207 crates for the substitute rule).
 - **Holds for.** The window.
 - **Pinned by.** `differential*` (env compared); `test-runs-dylib-rule`; `test-runs-test-control`; `test-runs-test-control-stable-dylibs`. Rust: `splice::tests::dylib_paths_append_like_add_plugin_deps`.
 - **If it changes.** A proc macro, build script or test cannot load a library its build script built.
@@ -575,7 +575,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 - **Assumption.** rustc links from a randomly named directory `<out-dir>/rustcXXXXXX` next to the output and passes files in it (`symbols.o`, extracted objects) by absolute path; a response file holds one argument per line, quoted when needed.
 - **Where.** `lib/presets/lld-link-stable.sh` (copies those inputs to a fixed path so the PDB, and so the `.exe`, are reproducible); `lib/presets/linker.nix`: `lldLinkLinker`.
-- **Upstream.** rustc 1.99.1 `compiler/rustc_codegen_ssa/src/back/link.rs` (`TempDirBuilder::new().prefix("rustc")`); [spikes/msvc.md](../spikes/msvc.md), "Determinism".
+- **Upstream.** rustc 1.99.1 `compiler/rustc_codegen_ssa/src/back/link.rs` (`TempDirBuilder::new().prefix("rustc")`); [spikes/msvc.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/msvc.md), "Determinism".
 - **Holds for.** 1.99 (rust-overlay), the msvc fixture's toolchain.
 - **Pinned by.** `msvc-x86_64-relink` (HEAVY: the Windows SDK): the msvc fixture's bin unit, with debug info, linked by hand twice with the same output paths gives byte-identical `.exe` and `.pdb`, and the wrapper copied at least one `rustcXXXXXX` input (`symbols.o`); with plain lld-link in the wrapper's place, the two links differ (negative control).
 - **If it changes.** msvc `.exe` and `.pdb` are no longer reproducible; `msvc-x86_64-relink` fails (a renamed directory leaves the wrapper nothing to copy).
@@ -770,7 +770,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 - **Assumption.** `find_workspace_root` walks the lexical ancestors of a manifest path (symlinks are not resolved), and a `package.workspace` pointer makes Cargo read `[workspace]` from that file without checking membership.
 - **Where.** `lib/vendor.nix` (stub one level up; `.breakbulk-workspace-<hash>` pointers).
-- **Upstream.** cargo `0.100.0` `src/workspace/workspace.rs`, `find_workspace_root_with_loader`, `find_root_iter`; `src/workspace/parser/mod.rs`, `load_inheritable_fields`; [git-multi-workspace.md](../spikes/git-multi-workspace.md).
+- **Upstream.** cargo `0.100.0` `src/workspace/workspace.rs`, `find_workspace_root_with_loader`, `find_root_iter`; `src/workspace/parser/mod.rs`, `load_inheritable_fields`; [git-multi-workspace.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/git-multi-workspace.md).
 - **Holds for.** 1.95, 1.99, nightly 1.101.
 - **Pinned by.** `vendor-git-inherit`, `git-multi-workspace-build`, `git-multi-workspace-golden`, `git-multi-workspace-golden-1_95`, `git-multi-workspace-golden-nightly`.
 - **If it changes.** Inheriting git crates fail to load.

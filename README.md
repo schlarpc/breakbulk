@@ -21,9 +21,7 @@ Cargo's exact command line. So:
 
 The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is loaded piece by piece, not in containers.
 
-Design: [docs/design.md](docs/design.md). Implementation:
-[docs/implementation.md](docs/implementation.md). Options:
-[docs/options.md](docs/options.md).
+Documentation: <https://schlarpc.github.io/breakbulk/>.
 
 ## Quickstart
 
@@ -98,8 +96,8 @@ root = nixpkgs.lib.fileset.toSource {
 
 ## Configuration
 
-Configuration is NixOS-style modules; every option is in
-[docs/options.md](docs/options.md). breakbulk reads your project's own
+Configuration is NixOS-style modules; every option is in the
+[options reference](https://schlarpc.github.io/breakbulk/reference/options.html). breakbulk reads your project's own
 `.cargo/config.toml`, but not `~/.cargo/config.toml` or `CARGO_*`
 variables in your shell.
 

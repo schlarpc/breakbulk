@@ -19,6 +19,14 @@
       systems = import inputs.systems;
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
         f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
+      # The documentation site (docs/default.nix).
+      docsFor = pkgs: import ./docs {
+        inherit pkgs;
+        optionsMd = (import ./tests/loose-ends {
+          inherit pkgs;
+          breakbulk = self.lib;
+        }).options-md;
+      };
     in
     {
       # The evaluation-time library (see lib/default.nix).
@@ -40,7 +48,9 @@
             breakbulk = self.lib;
           }).selfBuilt;
         in
-        nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "breakbulk-bb-${n}" v) selfBuilt);
+        nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "breakbulk-bb-${n}" v) selfBuilt
+        # The documentation site: nix build .#docs-site
+        // { docs-site = (docsFor pkgs).site; });
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
@@ -132,6 +142,9 @@
         # The systems come from the `systems` input (decision 55/59): with
         # another list in its place, the outputs follow it.
         // {
+          # Every internal link and fragment of the documentation site.
+          docs-site-links = (docsFor pkgs).links;
+
           flake-systems =
             let
               other = (import ./flake.nix).outputs (inputs // {

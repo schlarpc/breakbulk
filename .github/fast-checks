@@ -47,6 +47,7 @@ loose-ends-cfg-rustflags
 loose-ends-devshell-target
 loose-ends-options-doc-in-sync
 loose-ends-options-md
+docs-site-links
 test-runs-doctests
 test-runs-test-control
 products-variants
