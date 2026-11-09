@@ -64,6 +64,8 @@ rec {
       # sources.workspace."<dir relative to the repository root>" = source view
       # sources.workspaceTest."<dir>" = the wider view of that package's test
       #   units (`test.sourceScope`): its `--test` compiles and doctests
+      # sources.clippyConf."<dir>" = a member's clippy config tree
+      #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
       # sources.crates."<Cargo package id>" = fetched crate source
       sources ? { },
       # Tool name to a store path or a path inside one. Must include
@@ -104,6 +106,7 @@ rec {
     let
       workspace = sources.workspace or { };
       workspaceTest = sources.workspaceTest or { };
+      clippyConf = sources.clippyConf or { };
       crates = sources.crates or { };
       spec = p: { env = { }; envCapture = null; } // p;
       platformSpec = { inherit host target; };
@@ -122,6 +125,7 @@ rec {
           crates = lib.attrNames crates;
         }
         // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
+        // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir targetTraits;
@@ -172,6 +176,7 @@ rec {
       inputs =
         lib.mapAttrs' (d: v: lib.nameValuePair "src:${d}" (str v)) workspace
         // lib.mapAttrs' (d: v: lib.nameValuePair "test-src:${d}" (str v)) workspaceTest
+        // lib.mapAttrs' (d: v: lib.nameValuePair "clippy-conf:${d}" (str v)) clippyConf
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
         // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
         // lib.concatMapAttrs (

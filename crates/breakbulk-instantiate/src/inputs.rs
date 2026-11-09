@@ -27,6 +27,12 @@ pub struct Sources {
     /// get a wider source view (`test.sourceScope`), by directory.
     #[serde(default)]
     pub workspace_test: BTreeSet<String>,
+    /// Workspace members with a clippy config tree (clippy variants): the
+    /// `.clippy.toml` and `clippy.toml` files of the package directory and
+    /// its ancestors up to the repository root, rooted there like source
+    /// views, by directory.
+    #[serde(default)]
+    pub clippy_conf: BTreeSet<String>,
     /// Fetched crate sources, by Cargo package id.
     #[serde(default)]
     pub crates: BTreeSet<String>,

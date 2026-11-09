@@ -172,7 +172,9 @@ let
             test runs; `target.<triple>.variants.<v>.check` builds every
             unit and is in `repo.checks`. `clippy`: as `check`, with
             clippy-driver as `RUSTC_WORKSPACE_WRAPPER` (workspace members
-            only, so dependencies are shared with `check`). `coverage`:
+            only, so dependencies are shared with `check`), and the
+            `clippy.toml` files of each member's directory and its parents
+            up to the repository root (`CLIPPY_CONF_DIR`). `coverage`:
             `build` with `-C instrument-coverage` on target units.
             Use the same profile as the build variant to share host units;
             Cargo's own `clippy` uses the dev profile.

@@ -99,6 +99,10 @@ pub mod keys {
     pub fn test_src(dir: &str) -> String {
         format!("test-src:{dir}")
     }
+    /// A workspace member's clippy config tree, by directory.
+    pub fn clippy_conf(dir: &str) -> String {
+        format!("clippy-conf:{dir}")
+    }
     /// A fetched crate's source, by package id.
     pub fn crate_src(id: &str) -> String {
         format!("crate:{id}")
@@ -445,6 +449,21 @@ impl Resolve for Tokens<'_> {
             merge_layer_with(self, &mut env, layer)?;
         }
         Ok(env)
+    }
+
+    fn clippy_conf_dir(&self, _id: &UnitId, unit: &CompileUnit) -> Result<Option<String>, Error> {
+        let Some(dir) = workspace_dir(&self.inputs.plan, &unit.package) else {
+            return Ok(None);
+        };
+        if !self.inputs.sources.clippy_conf.contains(dir) {
+            return Ok(None);
+        }
+        let tree = self.input(keys::clippy_conf(dir));
+        Ok(Some(if dir.is_empty() {
+            tree
+        } else {
+            format!("{tree}/{dir}")
+        }))
     }
 
     fn strict_sources(&self, _id: &UnitId, run: &RunUnit) -> bool {

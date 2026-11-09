@@ -1,0 +1,10 @@
+# Clippy config lookup: `clippy.toml` at the repository root, above the
+# workspace, applies to `rooted`; `own` has its own `clippy.toml`, which
+# replaces the root's (clippy takes the nearest file and merges nothing).
+[workspace]
+resolver = "2"
+members = ["rooted", "own"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

@@ -1,0 +1,1 @@
+disallowed-methods = [{ path = "std::vec::Vec::is_empty", reason = "own config" }]

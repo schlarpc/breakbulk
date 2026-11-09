@@ -221,12 +221,12 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### T14. The clippy chain
 
-- **Assumption.** With `RUSTC_WORKSPACE_WRAPPER=clippy-driver`, Cargo starts `wrapper clippy-driver rustc …` for workspace members only, and passes `CLIPPY_ARGS` (each argument followed by `__CLIPPY_HACKERY__`) to every process.
-- **Where.** `crates/breakbulk-plan/src/trace.rs`: `run`; `graph.rs`: `compile_unit` (keeps `CLIPPY_ARGS` on clippy-driver units only).
-- **Upstream.** cargo `src/util/rustc.rs` (workspace wrapper for members); `cargo clippy`'s driver protocol.
+- **Assumption.** With `RUSTC_WORKSPACE_WRAPPER=clippy-driver`, Cargo starts `wrapper clippy-driver rustc …` for workspace members only, and passes `CLIPPY_ARGS` (each argument followed by `__CLIPPY_HACKERY__`) to every process. Clippy-driver looks for its config from `CLIPPY_CONF_DIR` (else `CARGO_MANIFEST_DIR`), canonicalized, walking up and taking the first directory with `.clippy.toml` or `clippy.toml` (`.clippy.toml` first), with no merging.
+- **Where.** `crates/breakbulk-plan/src/trace.rs`: `run`; `graph.rs`: `compile_unit` (keeps `CLIPPY_ARGS` on clippy-driver units only); `crates/breakbulk-format/src/render.rs`: `render_unit_in` (`CLIPPY_CONF_DIR`); `lib/source-views.nix`: `clippyConfTree`.
+- **Upstream.** cargo `src/util/rustc.rs` (workspace wrapper for members); `cargo clippy`'s driver protocol; clippy `clippy_config/src/conf.rs`: `load_conf_file`.
 - **Holds for.** 1.99.
-- **Pinned by.** `products-variants` (dependencies shared between check and clippy, members not); `products-variants-clippy-strict` (a lint argument fails the member).
-- **If it changes.** Clippy units lose their arguments or dependencies stop being shared; both checks fail.
+- **Pinned by.** `products-variants` (dependencies shared between check and clippy, members not); `products-variants-clippy-strict` (a lint argument fails the member); `products-variants-clippy-conf` (a root and a member's own `clippy.toml`).
+- **If it changes.** Clippy units lose their arguments or config, or dependencies stop being shared; these checks fail.
 
 ## Sentinels and the placement of build-script output
 

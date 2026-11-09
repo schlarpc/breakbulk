@@ -63,6 +63,12 @@
 #                    target; invalid layers fail evaluation
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
+#   variants-clippy-conf   clippy units find `clippy.toml` above the
+#                    workspace (a root `disallowed-methods` fails
+#                    `rooted`) and a member's own file instead of the
+#                    root's (`own`); an edit to the root file changes
+#                    only clippy units, and a `CLIPPY_CONF_DIR` in `env`
+#                    replaces breakbulk's
 #   variants-clippy-toolchain   with rust-overlay's 1.99 as rustc and
 #                    cargo, `toolchain.clippy` defaults to that toolchain
 #                    and the clippy plan builds; nixpkgs' clippy (another
@@ -971,6 +977,73 @@ in
       }
       ''
         cat $failure/log
+        touch $out
+      '';
+
+  variants-clippy-conf =
+    let
+      repoAt =
+        root: extra:
+        mkRepo root [
+          {
+            workspaces.main = {
+              path = "ws";
+              variants = {
+                default.profile = "dev";
+                check.mode = "check";
+                clippy = {
+                  mode = "clippy";
+                  clippyArgs = [
+                    "-D"
+                    "clippy::disallowed_methods"
+                  ];
+                };
+              };
+            };
+          }
+          extra
+        ];
+      repo = repoAt (fixtures + "/clippy-conf") { };
+      edited' = repoAt (edited "clippy-conf" "echo '# edited' >> clippy.toml") { };
+      # A user's CLIPPY_CONF_DIR names `own`'s directory for `rooted` too,
+      # whose config allows `len`: `rooted`'s clippy unit then passes.
+      userDir = repoAt (fixtures + "/clippy-conf") {
+        packages.rooted.env.CLIPPY_CONF_DIR = "${fixtures + "/clippy-conf/ws/own"}";
+      };
+      clippyUnits = r: unitsOf r "clippy" "build";
+      changed =
+        vName: kind:
+        lib.attrNames (
+          lib.filterAttrs (n: d: (drvsOf edited' vName kind).${n} or null != d) (drvsOf repo vName kind)
+        );
+    in
+    assert lib.assertMsg (
+      changed "default" "build" == [ ] && changed "check" "build" == [ ] && changed "check" "test" == [ ]
+    ) "variants-clippy-conf: a clippy.toml edit changed build or check units";
+    assert lib.assertMsg (
+      changed "clippy" "build" == [
+        "own-0.1.0-lib"
+        "rooted-0.1.0-lib"
+      ]
+    ) "variants-clippy-conf: clippy units changed by a root clippy.toml edit: ${builtins.toJSON (changed "clippy" "build")}";
+    pkgs.runCommand "variants-clippy-conf"
+      {
+        rooted = expectFailure "rooted-clippy" (clippyUnits repo)."rooted-0.1.0-lib" [
+          "disallowed method `std::vec::Vec::len`"
+          "root config"
+        ];
+        own = expectFailure "own-clippy" (clippyUnits repo)."own-0.1.0-lib" [
+          "disallowed method `std::vec::Vec::is_empty`"
+          "own config"
+        ];
+        user = (clippyUnits userDir)."rooted-0.1.0-lib";
+      }
+      ''
+        cat $rooted/log $own/log
+        if grep -q 'root config' $own/log; then
+          echo "a member with its own clippy.toml saw the root's" >&2
+          exit 1
+        fi
         touch $out
       '';
 

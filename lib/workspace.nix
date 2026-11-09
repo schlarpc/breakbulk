@@ -213,6 +213,12 @@ let
     )
   );
 
+  # Clippy variants: each member's clippy config tree, by directory
+  # (instantiate's `sources.clippyConf`).
+  clippyConf = lib.optionalAttrs (mode == "clippy") (
+    lib.genAttrs memberDirs (dir: sourceViews.clippyConfTree { inherit root; pkgDir = dir; })
+  );
+
   # Members with `test.runFiles`: the package directory of a
   # view of the repository root holding only those paths (relative to the
   # package directory, at their usual places), by package name. Test runs
@@ -401,7 +407,7 @@ let
       inherit system;
       plan = "${plans.${kind}}/plan.json";
       sources = {
-        inherit workspace crates;
+        inherit workspace crates clippyConf;
       }
       // lib.optionalAttrs (kind == "test") { inherit workspaceTest; };
       tools = unitTools;

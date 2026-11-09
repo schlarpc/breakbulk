@@ -43,6 +43,7 @@ fn smoke_inputs() -> Inputs {
         sources: Sources {
             workspace: ["smokelib".into(), "smokeapp".into()].into(),
             workspace_test: Default::default(),
+            clippy_conf: Default::default(),
             crates: Default::default(),
         },
         toolchains: Toolchains {
@@ -731,6 +732,42 @@ fn test_units_use_the_test_view() {
     // Every other unit is unchanged.
     for id in [LIB, SCRIPT, RUN] {
         assert_eq!(plain.units[id], wide.units[id], "{id}");
+    }
+}
+
+/// Clippy variants: a unit clippy-driver runs on (a wrapper chain) gets
+/// `CLIPPY_CONF_DIR` in its package's clippy config tree; other units, and
+/// the same unit outside a clippy plan, get nothing.
+#[test]
+fn clippy_units_get_the_config_tree() {
+    let inputs_of = |mode: breakbulk_format::VariantMode| {
+        let mut inputs = smoke_inputs();
+        inputs.plan.variant.mode = mode;
+        let Unit::Compile(c) = inputs.plan.units.get_mut(LIB).unwrap() else {
+            panic!()
+        };
+        c.program.insert(
+            0,
+            breakbulk_format::Text::Literal(format!("{RUSTC}/bin/clippy-driver")),
+        );
+        inputs.sources.clippy_conf = ["smokelib".into(), "smokeapp".into()].into();
+        inputs
+    };
+    let has_conf = |d: &Drv| {
+        let Value::Parts { parts } = &d.attrs["BREAKBULK_UNIT"] else {
+            panic!()
+        };
+        parts.iter().any(|p| match p {
+            Part::Input { input, .. } => input == "clippy-conf:smokelib",
+            _ => false,
+        })
+    };
+    let clippy = instantiate(&inputs_of(breakbulk_format::VariantMode::Clippy)).unwrap();
+    let check = instantiate(&inputs_of(breakbulk_format::VariantMode::Check)).unwrap();
+    assert!(has_conf(&clippy.units[LIB]));
+    assert!(!has_conf(&check.units[LIB]));
+    for id in [APP, SCRIPT, RUN] {
+        assert_eq!(clippy.units[id], check.units[id], "{id}");
     }
 }
 

@@ -267,6 +267,23 @@ is off (for a gate that runs plain `cargo check`). Give them the same
 profile as your build variant to share build scripts and proc macros;
 Cargo's own `clippy` uses the dev profile.
 
+Clippy units find `clippy.toml` as `cargo clippy` does: clippy-driver
+gets `CLIPPY_CONF_DIR` pointing at the member's directory in a small tree
+that holds only the `.clippy.toml` and `clippy.toml` files of that
+directory and its parents. Clippy takes the nearest one. A `clippy.toml`
+at the repository root, above the workspace, works with no setup.
+
+| | `cargo clippy` | breakbulk |
+| --- | --- | --- |
+| Where the search starts | the member's directory | the same |
+| Where it stops | `/` (so `~/clippy.toml` counts) | the repository root |
+| What an edit rebuilds | | only the clippy units of members below the file |
+
+A `CLIPPY_CONF_DIR` you set in a package's `env` replaces breakbulk's.
+`rustfmt.toml` needs nothing: no unit reads it, and the
+[`fmt` check](../reference/options/workspaces.md#workspacesnamefmtenable)
+already sees the rustfmt config files above the workspace.
+
 For feature matrices, `breakbulk.variants.featurePowerset` and
 `packageFeaturePowerset` generate variants, as cargo-hack does.
 

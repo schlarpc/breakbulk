@@ -70,6 +70,33 @@ rec {
       };
     };
 
+  # A clippy-mode unit's config tree, rooted at the repository root: every
+  # `.clippy.toml` and `clippy.toml` in `pkgDir` and its ancestors up to
+  # the root, at their places. Clippy-driver gets
+  # `CLIPPY_CONF_DIR=<tree>/<pkgDir>` and does its own lookup there, so
+  # breakbulk picks no file. The package's `Cargo.toml` is in the tree only
+  # so that `<pkgDir>` exists: clippy canonicalizes its start directory.
+  # Not in the source views, because then every edit to a config file would
+  # rebuild every build and check unit below it.
+  clippyConfTree =
+    { root, pkgDir }:
+    let
+      at = manifest.at root;
+      ancestors =
+        d: [ d ] ++ lib.optionals (d != "") (ancestors (util.normalizeRel (builtins.dirOf d)));
+      configs = lib.concatMap (
+        d:
+        map (n: fs.maybeMissing (at (util.joinRel d n))) [
+          ".clippy.toml"
+          "clippy.toml"
+        ]
+      ) (ancestors pkgDir);
+    in
+    fs.toSource {
+      inherit root;
+      fileset = fs.unions ([ (at (util.joinRel pkgDir "Cargo.toml")) ] ++ configs);
+    };
+
   # Views for every member of a workspace, keyed by package name.
   # `extraSources.<package name>` adds per-package extras.
   workspaceViews =

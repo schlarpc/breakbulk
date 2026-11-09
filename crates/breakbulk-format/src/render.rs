@@ -9,7 +9,7 @@ use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
     Arg, CompileUnit, CrateSrcRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, TargetTraits,
-    Text, Unit, UnitId, for_each_reference,
+    Text, Unit, UnitId, VariantMode, for_each_reference,
 };
 use crate::{CanonicalError, Splice, to_canonical_json};
 
@@ -79,6 +79,18 @@ pub trait Resolve {
         _unit: &Unit,
     ) -> Result<BTreeMap<String, String>, Self::Error> {
         Ok(BTreeMap::new())
+    }
+    /// For a compile unit clippy-driver runs on: the directory clippy
+    /// starts its `clippy.toml` lookup in (`CLIPPY_CONF_DIR`), or `None` to
+    /// leave clippy to its default (`CARGO_MANIFEST_DIR`). The unit's env
+    /// layers still win over it, as a user's `CLIPPY_CONF_DIR` does under
+    /// Cargo.
+    fn clippy_conf_dir(
+        &self,
+        _id: &UnitId,
+        _unit: &CompileUnit,
+    ) -> Result<Option<String>, Self::Error> {
+        Ok(None)
     }
     /// `strictSources` for a run's package.
     fn strict_sources(&self, _id: &UnitId, _run: &RunUnit) -> bool {
@@ -271,6 +283,13 @@ pub fn render_unit_in<R: Resolve>(
                 })
             };
             let mut env = env(&c.env, r)?;
+            // A wrapper chain in a clippy plan is clippy-driver over rustc.
+            if plan.variant.mode == VariantMode::Clippy
+                && c.program.len() > 1
+                && let Some(dir) = r.clippy_conf_dir(id, c)?
+            {
+                env.insert("CLIPPY_CONF_DIR".into(), dir);
+            }
             merge_layer_with(r, &mut env, overlay)?;
             let link_captures = if is_linking(c) {
                 let packages = link_packages(plan, c, &graph.crate_deps(id));
