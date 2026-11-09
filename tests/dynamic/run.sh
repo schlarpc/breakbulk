@@ -62,6 +62,10 @@ else
     multi-ws outside-reads stamps missing-input test-only pkgid-short
     post-link source-paths trim-paths trim-paths-cc variants
     variants-coverage benches stdpaths git-multi-workspace git-revisions
+    build-std build-std-deps same-triple static-musl static-glibc
+    static-pkgconfig cross-lto cross-lto-off uefi sys-native-aarch64
+    wasm-browser wasm-component wasip2 riscv64 linux-portable
+    windows-gnullvm-aarch64
   )
 fi
 
@@ -288,7 +292,14 @@ for k in bad:
     print(f"  {k}:\n    IFD     {a.get(k)}\n    dynamic {b.get(k)}", file=sys.stderr)
 n = sum(len(v) for v in a.values())
 print(f"{len(a)} logs, {n} test outcomes: {'identical' if not bad else 'DIFFERENT'} in both modes", file=sys.stderr)
-sys.exit(1 if bad or not a else 0)
+# No log at all is a failure only when there are runs or doctests to read.
+linked = any(
+    os.path.islink(os.path.join(d, n))
+    for sub in ("runs", "doctests")
+    for d, ds, fs in os.walk(os.path.join(ifd, sub))
+    for n in ds + fs
+)
+sys.exit(1 if bad or (linked and not a) else 0)
 EOF
     echo "FAIL: $f: different test outcomes" >&2
     status=1

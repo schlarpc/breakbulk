@@ -679,11 +679,13 @@ in
   explain = lib.mapAttrs (
     _: repo:
     let
-      ws = lib.head (lib.attrNames repo.workspaces);
+      # The first instance (`<ws>/<triple>/<variant>`): a workspace may
+      # have no native target.
+      i = (lib.head (instancesOf repo)).key;
     in
     (repo.explainSharing {
-      a = ws;
-      b = ws;
+      a = i;
+      b = i;
     }).shared
   ) repos;
 }
