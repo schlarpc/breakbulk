@@ -16,6 +16,10 @@
 #                     +crt-static: only system DLLs, PE time stamp 0; run
 #                     and tests under wine. Determinism was checked by hand
 #                     (`nix-build --check` on the .exe link units)
+#   windows-gnullvm-aarch64-build   aarch64-pc-windows-gnullvm: product
+#                     and test binary link as ARM64 PE32+, time stamp 0,
+#                     only system DLLs; nothing runs them. Rebuilds checked
+#                     by hand (`nix build --rebuild` on every unit and stage)
 #   windows-dll-*     a windows-gnu test binary importing a DLL its build
 #                     script built: the test run finds it through WINEPATH;
 #                     without it, wine fails (missing DLL); -beside-exe:
@@ -261,7 +265,55 @@ let
   windowsGnuChecks =
     windowsGnuChecksFor "windows-gnu" "x86_64-pc-windows-gnu"
     // windowsGnuChecksFor "windows-gnullvm" "x86_64-pc-windows-gnullvm"
-    // windowsDllChecks;
+    // windowsDllChecks
+    // windowsGnullvmAarch64Checks;
+
+  # aarch64 gnullvm: nixpkgs' ucrtAarch64 (LLVM mingw-w64). Its own
+  # repository, so the x86_64 checks keep their toolchain. wine runs no
+  # ARM64 code, so the product and the test binary are only linked.
+  wgnuA64 = "aarch64-pc-windows-gnullvm";
+  windowsGnullvmA64Repo = mkRepo (fixtures + "/windows-gnu") [
+    {
+      workspaces.main = wsWith (rustWith [ wgnuA64 ]) [ wgnuA64 ];
+      targets.${wgnuA64}.preset = presets.windows;
+    }
+  ];
+  windowsGnullvmAarch64Checks =
+    let
+      t = windowsGnullvmA64Repo.workspaces.main.target.${wgnuA64};
+      exe = "${t.packages.gnu-smoke}/bin/gnu-smoke.exe";
+    in
+    {
+      # An ARM64 PE32+ linked by lld (no time stamp), importing only
+      # system DLLs; the test binary links too.
+      windows-gnullvm-aarch64-build =
+        pkgs.runCommand "windows-gnullvm-aarch64-build"
+          {
+            nativeBuildInputs = [
+              pkgs.file
+              pkgs.llvmPackages.llvm
+            ];
+            tests = lib.attrValues t.tests.gnu-smoke;
+          }
+          ''
+            set -euo pipefail
+            file ${exe} | tee file.txt
+            grep -q 'PE32+ executable.*ARM64' file.txt
+            llvm-readobj --file-headers --coff-imports ${exe} > pe.txt
+            grep -q 'Machine: IMAGE_FILE_MACHINE_ARM64 ' pe.txt
+            grep -q 'TimeDateStamp: 1970-01-01 00:00:00 (0x0)' pe.txt || { grep TimeDateStamp pe.txt; echo "PE time stamp is not 0"; exit 1; }
+            sed -n 's/^ *Name: \(.*\.dll\)$/\1/Ip' pe.txt | tee dlls.txt
+            [ -s dlls.txt ]
+            if grep -viE 'kernel32|api-ms-win|ntdll|user32|ws2_32|bcrypt|advapi32|userenv' dlls.txt; then
+              echo "imports a non-system DLL"; exit 1
+            fi
+            find -L $tests -type f -name '*.exe' > tests.txt
+            [ -s tests.txt ]
+            while read -r f; do file -L "$f" | grep -q 'PE32+ executable.*ARM64'; done < tests.txt
+            mkdir -p $out
+            cp file.txt dlls.txt $out/
+          '';
+    };
 
   # A test binary that imports a DLL its build script built into OUT_DIR.
   # The test run finds it through WINEPATH (the wine runner's

@@ -689,7 +689,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 - **Where.** `lib/presets/windows-gnu.nix`; `lib/presets/linker.nix`: `mingwLinker` (drops GCC's `-pie`).
 - **Upstream.** rustc_target `spec/base/windows_gnu.rs`.
 - **Holds for.** 1.99.
-- **Pinned by.** `windows-gnu-run`, `windows-gnu-test`, `windows-gnullvm-run`, `windows-gnullvm-test`, `windows-dll-test`.
+- **Pinned by.** `windows-gnu-run`, `windows-gnu-test`, `windows-gnullvm-run`, `windows-gnullvm-test`, `windows-gnullvm-aarch64-build`, `windows-dll-test`.
 - **If it changes.** MinGW links fail or need DLLs wine does not find; the checks fail.
 
 ### L9. wasm32 default target features

@@ -108,7 +108,7 @@ The wasmtime runner keeps its compilation cache in `$TMPDIR`.
 
 ### Windows MinGW (gnu, gnullvm)
 
-GCC 15 and later passes `-pie` to the linker for every executable (its link spec `%{static|shared|r:;!no-pie:-pie}`). GNU ld reads it as `--dynamicbase` for PE; lld's MinGW driver rejects it, so the preset's `ld.lld` drops it (lld's MinGW driver uses `--dynamicbase` by default, and rustc passes it too). lld stamps PE headers with the current time unless told otherwise (`lld/MinGW/Driver.cpp`), hence `--no-insert-timestamp`. With these, the `.exe` link units of both triples pass `nix-build --check`. nixpkgs' mingw gcc keeps winpthreads outside the toolchain, and rustc's `+crt-static` link asks for `-l:libpthread.a`, hence the extra search path. aarch64 `-gnullvm` maps to `pkgsCross.ucrtAarch64` but is untested.
+GCC 15 and later passes `-pie` to the linker for every executable (its link spec `%{static|shared|r:;!no-pie:-pie}`). GNU ld reads it as `--dynamicbase` for PE; lld's MinGW driver rejects it, so the preset's `ld.lld` drops it (lld's MinGW driver uses `--dynamicbase` by default, and rustc passes it too). lld stamps PE headers with the current time unless told otherwise (`lld/MinGW/Driver.cpp`), hence `--no-insert-timestamp`. With these, the `.exe` link units of both triples pass `nix-build --check`. nixpkgs' mingw gcc keeps winpthreads outside the toolchain, and rustc's `+crt-static` link asks for `-l:libpthread.a`, hence the extra search path. aarch64 `-gnullvm` uses `pkgsCross.ucrtAarch64`; its product and test binary link (ARM64 PE, time stamp 0, only system DLLs) and rebuild byte-identically, but nothing runs them: wine runs no ARM64 code.
 
 ### linuxPortable (zig)
 

@@ -21,6 +21,7 @@ This page explains what each kind of target gets, and why.
 | your own triple, old glibc (`linuxPortable`) | yours + `zig cc` | zig | the build machine's `ld.so` |
 | `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine |
 | `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
+| `aarch64-pc-windows-gnullvm` | yours + nixpkgs LLVM mingw-w64 cross | lld, through the MinGW C driver | none |
 | `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
 | `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none |
