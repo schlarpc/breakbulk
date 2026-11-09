@@ -284,6 +284,31 @@ rec {
     else
       "__bb_env+=(${lib.escapeShellArg "${k}=${v}"})\n";
 
+  # `copyDylibsScript sep`: shell lines (bash, `jq` on PATH) that copy
+  # the dynamic-library path of the `directives.json` files in the array
+  # `__bb_flags` into `$dylibs/dylib/<NNNN>/` (default `$out`).
+  copyDylibsScript = sep: ''
+    __bb_dest=''${dylibs:-$out}/dylib
+    mkdir -p "$__bb_dest"
+    if [ ''${#__bb_flags[@]} -gt 0 ]; then
+      shopt -s nullglob
+      __bb_paths=$(jq -rn ${lib.escapeShellArg (dylibJqWith sep)} "''${__bb_flags[@]}")
+      IFS=${lib.escapeShellArg sep} read -ra __bb_ps <<< "$__bb_paths"
+      __bb_i=0
+      for __bb_p in "''${__bb_ps[@]}"; do
+        __bb_d=$__bb_dest/$(printf %04d $__bb_i)
+        mkdir -p "$__bb_d"
+        for __bb_f in "$__bb_p"/*; do
+          if [ -e "$__bb_f" ] && [ ! -d "$__bb_f" ]; then cp -L "$__bb_f" "$__bb_d/"; fi
+        done
+        __bb_i=$((__bb_i + 1))
+      done
+    fi
+  '';
+  # The `rustc-env` values of several `directives.json` files (`jq -s`), in
+  # order, as one.
+  mergeRustcEnvJq = "{env: (map(.env) | add)}";
+
   # Stable inputs for content-addressed test runs. A run spec
   # names the `flags` of every build-script run of its platform
   # (the dynamic-library path, as Cargo builds it) and the `flags` of its
@@ -301,6 +326,8 @@ rec {
   #
   # Identical contents give identical paths, so the test run (also
   # content-addressed) is not re-run. Only used when `ca` is on.
+  # Dynamic-derivation mode makes the same copies at build time
+  # (lib/dynamic.nix `stableInfo`).
   stableSpec =
     {
       pkgs,
@@ -309,29 +336,17 @@ rec {
       name,
     }:
     let
-      sep = (specDylib spec).sep;
       dylibs = pkgs.runCommand "${name}-test-dylibs" (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }) ''
-        mkdir -p $out/dylib
-        shopt -s nullglob
-        paths=$(jq -rn ${lib.escapeShellArg (dylibJqWith sep)} ${
+        __bb_flags=(${
           lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.dylib.flags
         })
-        IFS=${lib.escapeShellArg sep} read -ra ps <<< "$paths"
-        i=0
-        for p in "''${ps[@]}"; do
-          d=$out/dylib/$(printf %04d $i)
-          mkdir -p "$d"
-          for f in "$p"/*; do
-            if [ -e "$f" ] && [ ! -d "$f" ]; then cp -L "$f" "$d/"; fi
-          done
-          i=$((i + 1))
-        done
+        ${copyDylibsScript (specDylib spec).sep}
       '';
       env = pkgs.runCommand "${name}-${storeName spec.package}-rustc-env" (
         caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }
       ) ''
         mkdir -p $out
-        jq -s '{env: (map(.env) | add)}' ${
+        jq -s ${lib.escapeShellArg mergeRustcEnvJq} ${
           lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.envFlags
         } > $out/directives.json
       '';

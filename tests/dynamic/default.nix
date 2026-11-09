@@ -31,6 +31,10 @@
 #   outer.<fixture>."<i>/<kind>"   the outer derivations (dynamic mode)
 #   mayDiffer.<fixture>      a regex of unit derivation names that may
 #                            differ between the modes (embedding chains)
+#   cutoff.<name>.{before,after}
+#                            test runs before and after an edit that
+#                            changes nothing the `kept` run reads (dynamic
+#                            mode: run.sh checks it is not re-run)
 #   checkVariant             (dynamic mode) a check variant's check of the
 #                            walking skeleton: every unit of both plans,
 #                            through the outer derivations' `units.drv`
@@ -57,6 +61,9 @@
     },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
   mode ? "auto",
+  # `cutoff`'s edit: a number other than 1, new on each run.sh run, so
+  # that the edited fixtures are new to the store.
+  cutoffEdit ? "2",
 }:
 let
   inherit (pkgs) lib;
@@ -682,9 +689,89 @@ let
         )
       );
     };
+
+  # Content-addressed cutoff of test runs, as tests/test-cutoff and
+  # tests/test-options check it in IFD mode: `cutoff.<name>.{before,after}`
+  # are test runs before and after an edit (`cutoffEdit`) that changes
+  # nothing the `kept` run reads; run.sh builds `after` after `before` and
+  # checks `kept` is not re-run.
+  #   test-cutoff    beta's function body: beta's build script is rebuilt
+  #                  and re-run, so alpha's test (`kept`) gets new
+  #                  input-addressed paths; beta's own run (`changed`,
+  #                  in beta's source view) is re-run
+  #   test-options   util's README and app's notes.md, with
+  #                  test.stripForRun and test.runFiles = [ "data" ] as in
+  #                  tests/test-options: app's test binary changes (util's
+  #                  debug info), its stripped copy does not
+  cutoff =
+    let
+      edited =
+        tag: src: script:
+        let
+          drv = pkgs.runCommand "dynamic-cutoff-${tag}-${cutoffEdit}" { } ''
+            cp -r --no-preserve=mode ${src} $out
+            cd $out
+            ${script}
+          '';
+        in
+        builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
+      runsOf =
+        root: modules:
+        (breakbulk.mkRepository {
+          inherit pkgs tools root;
+          modules = [
+            { inherit mode; }
+            oneWs
+          ]
+          ++ modules;
+        }).workspaces.main.instances.${native}.default.testRuns;
+      cutoffRuns =
+        root:
+        let
+          runs = runsOf root [ ];
+        in
+        {
+          kept = runs.alpha."lib/alpha";
+          changed = runs.beta."lib/beta";
+        };
+      options = [
+        {
+          workspaces.main.memberDefaults.test.stripForRun = true;
+          packages.app.test.runFiles = [ "data" ];
+        }
+      ];
+      optionsRuns = root: { kept = (runsOf root options).app.data; };
+      cutoffFixture = fixtures + "/test-cutoff";
+      optionsFixture = ../test-options/fixture;
+    in
+    {
+      test-cutoff = {
+        before = cutoffRuns cutoffFixture;
+        after = cutoffRuns (
+          edited "test-cutoff" cutoffFixture ''
+            sed -i 's/^    1$/    ${cutoffEdit}/' beta/src/lib.rs
+            grep -q '^    ${cutoffEdit}$' beta/src/lib.rs
+          ''
+        );
+      };
+      test-options = {
+        before = optionsRuns optionsFixture;
+        after = optionsRuns (
+          edited "test-options" optionsFixture ''
+            echo 'More words ${cutoffEdit}.' >> util/README.md
+            echo 'More notes ${cutoffEdit}.' >> app/notes.md
+          ''
+        );
+      };
+    };
 in
 {
-  inherit repos prereqs mayDiffer;
+  inherit
+    repos
+    prereqs
+    mayDiffer
+    cutoff
+    ;
   build = lib.mapAttrs build repos;
   unitDrvs = lib.mapAttrs (_: unitDrvs) repos;
   outer = lib.mapAttrs (

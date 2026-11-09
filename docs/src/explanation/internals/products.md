@@ -77,7 +77,9 @@ The debug outputs are tested with debuggers, not only for presence (`products-so
 
   With [`test.runFiles`](../../reference/options/packages.md#packagesnametestrunfiles) the working directory and the runtime `CARGO_MANIFEST_DIR` (and `CARGO_MANIFEST_PATH`, which then may not exist) are the package directory of the narrowed view; a test reading another file fails. Test apps keep the package's whole view and the unstripped binary.
 
-  In dynamic-derivation mode both options work the same, but a test run there reads its spec from the root's wrapper, whose `breakbulk-root.json` names input-addressed paths (the source view, build-script outputs), so dynamic-mode test runs are re-run after any such edit regardless (no cutoff yet).
+  With `ca`, the paths a run's spec names that change with unrelated edits are replaced by small CA copies: the dynamic-library path's entries (their files only) and the package's build-script `rustc-env` values. An edit to another package with a build script then does not re-run a test whose binary is byte-identical.
+
+  Dynamic-derivation mode does the same at build time. A test run there would read its spec from the root's wrapper, whose `breakbulk-root.json` names the source view and every build script's outputs. Instead, one CA derivation per run copies what the run needs out of it: the spec, narrowed by `test.runFiles` and without nextest's metadata for a libtest run, the `rustc-env` values, and, in a second output, the dynamic-library copies (the same for every run of the platform, so stored once). The run does not depend on the wrapper.
 
   The run uses the target's `runner`, with the package source view as the working directory (as Cargo does), plus Cargo's runtime env (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`), the package's [`test.env`](../../reference/options/packages.md#packagesnametestenv), and [`test.path`](../../reference/options/packages.md#packagesnametestpath) on `PATH`.
 

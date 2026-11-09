@@ -27,7 +27,9 @@
 #   - the test apps of test-control behave the same in both modes;
 #   - gdb, given a split-debuginfo product's debug output, shows a
 #     dependency's source and arguments in both modes;
-#   - repo.explainSharing works in dynamic mode.
+#   - repo.explainSharing works in dynamic mode;
+#   - with test-cutoff and test-options: a test run whose inputs' contents
+#     an edit leaves unchanged is not re-run (`cutoff` in default.nix).
 #
 # The system daemon's configuration and /etc/nix are not touched: Nix master
 # runs as the calling user against `local?root=$WORK/store` with its own
@@ -312,6 +314,69 @@ EOF
     echo "$f: explainSharing works in dynamic-derivation mode" >&2
   else
     echo "FAIL: $f: explainSharing in dynamic-derivation mode" >&2
+    status=1
+  fi
+done
+
+# Content-addressed cutoff of test runs (`cutoff.<name>` in default.nix),
+# as tests/test-cutoff and tests/test-options check it in IFD mode. The
+# store is kept between runs, so the edit is new on each run: what the
+# second build builds shows what the edit re-ran.
+edit=$(date +%s)
+for c in test-cutoff test-options; do
+  case " ${fixtures[*]} " in *" $c "*) ;; *) continue ;; esac
+  say "$c: test-run cutoff in dynamic-derivation mode (edit $edit)"
+  cbuild() { mbuild --arg mode '"dynamic"' --argstr cutoffEdit "$edit" "$@"; }
+  attrs=(kept)
+  [ "$c" = test-cutoff ] && attrs+=(changed)
+  ok=1
+  if ! cbuild "${attrs[@]/#/cutoff.$c.before.}" >"$WORK/cutoff-before.out" 2>"$WORK/cutoff-before.log"; then
+    tail -30 "$WORK/cutoff-before.log" >&2
+    ok=0
+  elif ! cbuild "${attrs[@]/#/cutoff.$c.after.}" >"$WORK/cutoff-after.out" 2>"$WORK/cutoff-after.log"; then
+    tail -30 "$WORK/cutoff-after.log" >&2
+    ok=0
+  fi
+  if [ $ok = 1 ]; then
+    grep -o "building '[^']*'" "$WORK/cutoff-after.log" | sed 's/^building //' >"$WORK/cutoff-after.built" || true
+    echo "built after the edit:" >&2
+    sed 's/^/  /' "$WORK/cutoff-after.built" >&2
+    drv() { nixm path-info --derivation -f "$REPO/tests/dynamic" --arg mode '"dynamic"' --argstr cutoffEdit "$edit" "cutoff.$c.$1"; }
+    keptName=$(basename "$(drv before.kept)" | cut -d- -f2-)
+    # Not vacuous: the edit changed the run's derivation.
+    if [ "$(drv before.kept)" = "$(drv after.kept)" ]; then
+      echo "the edit did not change the kept run's derivation (vacuous)" >&2
+      ok=0
+    fi
+    if [ "$(head -1 "$WORK/cutoff-before.out")" != "$(head -1 "$WORK/cutoff-after.out")" ]; then
+      echo "the kept run has a new output path" >&2
+      ok=0
+    fi
+    if grep -qF "$keptName" "$WORK/cutoff-after.built"; then
+      echo "the kept run ($keptName) was re-run" >&2
+      ok=0
+    fi
+    case $c in
+      test-cutoff)
+        # beta's test runs in beta's source view, which the edit changed.
+        changedName=$(basename "$(drv before.changed)" | cut -d- -f2-)
+        grep -qF "$changedName" "$WORK/cutoff-after.built" || {
+          echo "beta's test run was not re-run (vacuous)" >&2
+          ok=0
+        }
+        ;;
+      test-options)
+        grep -q 'app-data-bin-stripped\.drv' "$WORK/cutoff-after.built" || {
+          echo "the stripped copy was not rebuilt (vacuous)" >&2
+          ok=0
+        }
+        ;;
+    esac
+  fi
+  if [ $ok = 1 ]; then
+    echo "$c: the kept test run was not re-run after the edit" >&2
+  else
+    echo "FAIL: $c: test-run cutoff in dynamic-derivation mode" >&2
     status=1
   fi
 done
