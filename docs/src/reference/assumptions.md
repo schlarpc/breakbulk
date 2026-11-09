@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of the two has an issue; see [Gaps](#gaps).
+Status of the 78 entries: 77 pinned, 1 with no pinning test (S10). It has an issue; see [Gaps](#gaps).
 
 ## Summary
 
@@ -81,7 +81,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 | [L2](#l2-wasm32-wasip2-linking) | `wasm32-wasip2` linking | yes |
 | [L3](#l3-the-rust-to-wasi-sdk-table) | The Rust-to-wasi-sdk table | yes |
 | [L4](#l4-the-rust-to-llvm-table-and-rustc--vv) | The Rust-to-LLVM table and `rustc -vV` | yes |
-| [L5](#l5-cross-language-lto) | Cross-language LTO | **no** (#10) |
+| [L5](#l5-cross-language-lto) | Cross-language LTO | yes |
 | [L6](#l6-musl-links-rusts-self-contained-crt) | musl links Rust's self-contained crt | yes |
 | [L7](#l7-crt-static-glibc-is-static-pie) | `+crt-static` glibc is static-pie | yes |
 | [L8](#l8-windows-gnu-link-specs) | windows-gnu link specs | yes |
@@ -658,11 +658,11 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### L5. Cross-language LTO
 
-- **Assumption.** With `-C linker-plugin-lto`, rustc emits LLVM bitcode that clang with `lld` from the LLVM release matching rustc's links, together with C code compiled to bitcode.
-- **Where.** `lib/presets/linker.nix`: `linkerKind` (`clang-lld`), `lldLinker`; `lib/presets/default.nix`: `linuxGnuWith` (`crossLanguageLto`).
+- **Assumption.** With `-C linker-plugin-lto`, rustc emits LLVM bitcode that clang with `lld` from the LLVM release matching rustc's links, together with C code compiled to bitcode by that release's clang (`-flto=thin`) and archived by its `llvm-ar`.
+- **Where.** `lib/presets/linker.nix`: `linkerKind` (`clang-lld`), `lldLinker`; `lib/presets/default.nix`: `linuxGnuWith` (`crossLanguageLto`: `cc`, `cxx`, `ar`, `cflags`).
 - **Upstream.** The rustc book, "Linker-plugin-based LTO".
-- **Holds for.** Not tested.
-- **Pinned by.** **Nothing.** Existing issue **#10** (its exit criteria are a building fixture).
+- **Holds for.** 1.99 (LLVM 23) on x86_64 Linux.
+- **Pinned by.** `cross-lto`: the build script's archive holds bitcode; the C function is inlined into its Rust caller and has no symbol left; without the option, the symbol and the call are there; the archive and the binary rebuild byte for byte.
 - **If it changes.** The preset fails to link, or links without LTO.
 
 ### L6. musl links Rust's self-contained crt
@@ -829,7 +829,6 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 | Entry | Gap | Issue |
 | --- | --- | --- |
 | [S10](#s10-directive-errors-and-warnings) | Directive error and warning paths are checked only against breakbulk's copy of Cargo's code | #33 |
-| [L5](#l5-cross-language-lto) | Cross-language LTO has never built | #10 (existing) |
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), `include` and `config`-over-`config.toml` (T6, guarded at plan time), and the non-Linux rows of G3.
 

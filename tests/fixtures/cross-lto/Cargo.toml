@@ -1,0 +1,15 @@
+# Cross-language LTO: C compiled to LLVM bitcode by a build script (cc-rs
+# with the preset's clang and `-flto=thin`) and Rust compiled with
+# `-C linker-plugin-lto`, linked by lld. With LTO across both languages the
+# C function is inlined into its Rust caller and disappears; without it the
+# binary calls it.
+[package]
+name = "cross-lto"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+cc = "1"
+
+[workspace]

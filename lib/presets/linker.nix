@@ -80,11 +80,20 @@ let
 
   # clang linking with lld from `llvm`, for cross-language LTO
   # (`-Clinker-plugin-lto`), where the linker must read rustc's LLVM bitcode.
+  # nixpkgs' clang wrapper has GNU binutils as its bintools, so
+  # `-fuse-ld=lld` finds no `ld.lld`; lld goes into its bintools the way
+  # useMoldLinker adds mold.
   lldLinker =
     p: llvm:
     let
-      cc = llvm.clang;
-      prefix = cc.targetPrefix;
+      prefix = llvm.clang.targetPrefix;
+      cc = llvm.clang.override {
+        bintools = llvm.clang.bintools.override {
+          extraBuildCommands = ''
+            ln -s ${llvm.lld}/bin/ld.lld $out/bin/${prefix}ld.lld
+          '';
+        };
+      };
     in
     driverWrapper p "${prefix}clang-lld" "${cc}/bin/${prefix}clang" "-fuse-ld=lld";
 

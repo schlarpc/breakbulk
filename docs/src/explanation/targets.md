@@ -70,7 +70,7 @@ override it.
 | Target | Linker |
 | --- | --- |
 | Linux | **mold**, through nixpkgs' wrapped C compiler |
-| Linux, with cross-language LTO | clang with lld (untested: [#10](https://github.com/schlarpc/breakbulk/issues/10)) |
+| Linux, with cross-language LTO | clang with lld; C code compiled to bitcode by the same clang |
 | Windows MSVC | `lld-link`, wrapped so that PDBs are reproducible |
 | Windows MinGW (`-gnu`, `-gnullvm`) | the MinGW C driver with lld |
 | wasm | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |

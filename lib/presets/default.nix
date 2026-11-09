@@ -232,9 +232,22 @@ let
         lto = crossLanguageLto;
         packageSet = tp;
       });
-      cc = mkDefault "${cc}/bin/${prefix}cc";
-      cxx = mkDefault "${cc}/bin/${prefix}c++";
-      ar = mkDefault "${cc.bintools}/bin/${prefix}ar";
+      # With crossLanguageLto, C code is LLVM bitcode for the linker to
+      # optimize with rustc's: the LLVM's clang compiles it, and its llvm-ar
+      # archives it (GNU ar cannot index bitcode members).
+      cc = mkDefault (
+        if crossLanguageLto then "${llvm.clang}/bin/${llvm.clang.targetPrefix}clang" else "${cc}/bin/${prefix}cc"
+      );
+      cxx = mkDefault (
+        if crossLanguageLto then
+          "${llvm.clang}/bin/${llvm.clang.targetPrefix}clang++"
+        else
+          "${cc}/bin/${prefix}c++"
+      );
+      ar = mkDefault (
+        if crossLanguageLto then "${llvm.llvm}/bin/llvm-ar" else "${cc.bintools}/bin/${prefix}ar"
+      );
+      cflags = lib.optionals crossLanguageLto [ "-flto=thin" ];
       rustflags =
         lib.optionals crossLanguageLto [
           "-C"

@@ -18,6 +18,10 @@
 #   debug-outputs     a plain Linux release plan: no unit and no `linked`
 #                     stage has a `debug` output
 #   msvc-debug-outputs  msvc release: every linked target unit has one
+#   cross-lto         linux { crossLanguageLto = true; }: the build
+#                     script's C is bitcode, and lld inlines it into its
+#                     Rust caller (the plain linux preset does not); the
+#                     archive and the linked binary rebuild byte for byte
 {
   pkgs,
   breakbulk,
@@ -715,6 +719,96 @@ let
         cp entries.txt $out/
       '';
 
+  # --- cross-language LTO --------------------------------------------------------
+  #
+  # linux { crossLanguageLto = true; } on the native triple: the build
+  # script's C (cc-rs, the preset's clang, `-flto=thin`) is an archive of
+  # LLVM bitcode, and lld, given rustc's bitcode too, inlines the C function
+  # into its Rust caller: the product has no `cross_lto_mix`, and the
+  # caller computes the C constant itself. Negative control: the plain
+  # linux preset keeps the symbol and the call.
+
+  crossLtoRust = rustWith [ ];
+  crossLtoWith =
+    preset:
+    mkRepo (fixtures + "/cross-lto") [
+      {
+        workspaces.main = {
+          toolchain = {
+            rustc = crossLtoRust;
+            cargo = crossLtoRust;
+          };
+          targets.${native} = { };
+          variants.default.profile = "release";
+        };
+        targets.${native}.preset = preset;
+      }
+    ];
+  crossLto = crossLtoWith (presets.linux { crossLanguageLto = true; });
+  crossLtoOff = crossLtoWith presets.linux;
+  crossLtoCheck =
+    let
+      ws = crossLto.workspaces.main;
+      unit =
+        name:
+        lib.findFirst (u: u.name == name) (throw "cross-lto: no unit ${name}") (
+          lib.attrValues ws.instances.${native}.default.units.build
+        );
+      run = unit "cross-lto-0.1.0-build-run";
+      bin = unit "cross-lto-0.1.0-bin";
+      # A second build of a unit, as `nix build --rebuild` would do: one
+      # extra attribute gives another derivation with the same build.
+      salted = d: derivation (d.drvAttrs // { breakbulkSalt = "cross-lto"; });
+    in
+    pkgs.runCommand "cross-lto"
+      {
+        nativeBuildInputs = [
+          pkgs.llvmPackages.llvm
+          pkgs.file
+        ];
+        product = ws.target.${native}.packages.cross-lto;
+        control = crossLtoOff.workspaces.main.target.${native}.packages.cross-lto;
+        run = run.out;
+        run2 = (salted run).out;
+        binUnit = bin.out;
+        binUnit2 = (salted bin).out;
+      }
+      ''
+        set -euo pipefail
+        # The archive the build script made holds bitcode, not machine code.
+        lib=$(find -L $run -name libmix.a)
+        mkdir members && (cd members && llvm-ar x "$lib")
+        file members/*.o | tee members.txt
+        grep -q 'LLVM IR bitcode' members.txt
+        caller() {
+          llvm-objdump -d --no-show-raw-insn --disassemble-symbols=cross_lto_caller "$1" > "$2"
+          cat "$2"
+          grep -q 'cross_lto_caller' "$2"
+        }
+        # LTO: no C symbol, the caller multiplies by the C constant
+        # (2654435761 = 0x9e3779b1) and calls nothing.
+        bin=$product/bin/cross-lto
+        llvm-nm "$bin" > lto-syms.txt
+        if grep cross_lto_mix lto-syms.txt; then echo "cross_lto_mix survived LTO" >&2; exit 1; fi
+        caller "$bin" lto.txt
+        grep -qi '0x9e3779b1' lto.txt
+        if grep -qE '^ +[0-9a-f]+:\s+(call|jmp)' lto.txt; then echo "the caller still calls" >&2; exit 1; fi
+        [ "$($bin)" = "cross-lto: $(printf '%08x' $(( ((1 * 2654435761) ^ 0x5bd1e995) + 1 & 0xffffffff )))" ]
+        # Control, without LTO: the symbol and the call are there.
+        llvm-nm $control/bin/cross-lto > plain-syms.txt
+        grep -q ' T cross_lto_mix$' plain-syms.txt
+        caller $control/bin/cross-lto plain.txt
+        grep -qE '^ +[0-9a-f]+:\s+(call|jmp).*<cross_lto_mix' plain.txt
+        [ "$($control/bin/cross-lto)" = "$($bin)" ]
+        # Reproducible: the bitcode archive and the LTO-linked binary
+        # rebuild byte for byte.
+        [ "$run" != "$run2" ] && [ "$binUnit" != "$binUnit2" ]
+        cmp "$lib" "$(find -L $run2 -name libmix.a)"
+        cmp $binUnit/cross_lto-* $binUnit2/cross_lto-*
+        mkdir -p $out
+        cp members.txt lto.txt plain.txt $out/
+      '';
+
   # --- wasm ----------------------------------------------------------------------
 
   wasm = "wasm32-unknown-unknown";
@@ -1102,6 +1196,7 @@ in
     presets-per-workspace = perWorkspace;
     debug-outputs = debugOutputsEval;
     wasm-host-inputs = wasmHostInputsCheck;
+    cross-lto = crossLtoCheck;
 
     same-triple-eval = sameTripleEval;
     same-triple-build = pkgs.runCommand "same-triple-run" { } ''
