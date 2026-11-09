@@ -48,7 +48,7 @@
         };
       });
 
-      # HEAVY and opt-in: dynamic-derivation mode (M5) against IFD mode, on
+      # HEAVY and opt-in: dynamic-derivation mode against IFD mode, on
       # Nix master (built from a pinned commit) in a private chroot store
       # under $WORK (default $TMPDIR/breakbulk-dynamic). `nix flake check`
       # cannot run it: stock Nix has no builder-rpc-v0.
@@ -90,7 +90,7 @@
         #   nix run .#test-linux-portable-container [-- --max-jobs 2 --cores 4]
         test-linux-portable-container =
           let
-            checks = (import ./tests/presets/m7.nix {
+            checks = (import ./tests/presets/extra-targets.nix {
               inherit pkgs;
               breakbulk = self.lib;
             }).containerChecks;
@@ -249,7 +249,7 @@
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
             builtins.removeAttrs p [ "workspaces" ]
           )
-          # mkRepository (M2): sharing, invalidation and override tests.
+          # mkRepository: sharing, invalidation and override tests.
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "repository-${n}" v) (
             builtins.removeAttrs r [ "repos" ]
           )

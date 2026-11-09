@@ -1,4 +1,4 @@
-# wasm32-wasip2 (M7): std programs and libraries linked straight to
+# wasm32-wasip2: std programs and libraries linked straight to
 # components by rustc's own `wasm-component-ld` (the linker rustc's target
 # spec names, shipped in the toolchain's lib/rustlib/<host>/bin), with the
 # version-matched nixpkgs `wasm-ld` underneath instead of rustup's rust-lld

@@ -248,7 +248,7 @@ let
           description = "Override the repository's `strictSources` for this package's build scripts.";
         };
 
-        pipelining = bt.notImplemented "M6" (mkOption {
+        pipelining = bt.notImplemented 14 (mkOption {
           type = types.nullOr types.bool;
           default = null;
           description = "Opt this package in or out of the pipelined split.";
@@ -259,7 +259,7 @@ let
 
       config.warnings =
         bt.unimplementedWarnings "packages.${lib.strings.escapeNixIdentifier name}" options {
-          M6 = [ [ "pipelining" ] ];
+          "14" = [ [ "pipelining" ] ];
         };
     };
 in

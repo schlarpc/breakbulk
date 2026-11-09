@@ -1,5 +1,6 @@
-# M7 fixtures: later targets through mkRepository (IFD). Imported by
-# ./default.nix; every attribute is a flake check. All are HEAVY-ish: they
+# More target fixtures (riscv64, windows-gnu, wasip2, zig) through
+# mkRepository (IFD). Imported by ./default.nix; every attribute is a flake
+# check. All are HEAVY-ish: they
 # download rust-overlay toolchains with extra targets and build (or
 # substitute) cross toolchains.
 #

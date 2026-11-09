@@ -1,7 +1,7 @@
 # A minimal end-to-end entry for one workspace, in IFD mode: fetch ->
 # skeleton -> vendor -> plan -> instantiate -> units -> root products. The
-# module system (mkRepository) replaces this in M2; it keeps no options
-# beyond what the walking skeleton and the M1 fixtures need.
+# module system (mkRepository) is built on it; it keeps no options
+# beyond what mkRepository and the planner fixtures need.
 #
 #   ws = breakbulk.mkWorkspace pkgs {
 #     root = ./.;                      # the repository root
@@ -12,7 +12,7 @@
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
 #     features = [ ];
-#     # Per-package overrides (a minimal stand-in for M2's `packages.<name>`):
+#     # Per-package overrides (what mkRepository's `packages.<name>` becomes):
 #     # they reach only that package's units, on both platforms.
 #     packages.openssl-sys = {
 #       nativeInputs = p: [ p.pkg-config ];   # or a plain list
@@ -49,7 +49,7 @@
 #   ws.checks."test/<pkg>/<binary>", ."doctest/<pkg>"
 #                              enabled test runs and doctests, flat
 #
-# Test options (M2's module options take these over): `runner` (null or a
+# Test options (set by mkRepository's module options): `runner` (null or a
 # list), `testSystem`, `packages.<name>.test` (env, path, args,
 # includeIgnored, binaries.<binary>.{args,enable}), `ca` (null: automatic),
 # `checkout` (the user's checkout of the repository root, for test apps).
@@ -132,7 +132,7 @@ pkgs:
   clippyOption ? null,
   clippyArgs ? [ ],
   bench ? false,
-  # The target's toolchain spec (M3, from lib/repository.nix):
+  # The target's toolchain spec (from lib/repository.nix):
   #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)
   #   specTools.<name> = <store path>  tool paths the spec puts in the plan
   #   hostEnv = { };                    the host spec's env (host units only)
@@ -436,7 +436,7 @@ let
   benched = inst "bench";
 
   # Put a root unit's single linked file at $out/<dir>/<name>. Products and
-  # their stages come in M4; this is only enough to run things.
+  # their stages are in lib/repository.nix; this is only enough to run things.
   # A root's executable name: its target name with the target's executable
   # suffix (traits.executableSuffix: `.exe` on Windows, `.wasm` for wasm), as
   # Cargo uplifts it.

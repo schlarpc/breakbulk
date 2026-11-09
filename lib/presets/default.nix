@@ -465,7 +465,7 @@ let
       }
     );
 
-    # Later targets (M7), one file each.
+    # Further targets, one file each.
     wasip2 = mkPreset (
       import ./wasip2.nix {
         inherit lib wasmCommon chooseRunner;

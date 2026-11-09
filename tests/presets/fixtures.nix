@@ -1,4 +1,4 @@
-# M3 fixtures: toolchain presets end to end through mkRepository (IFD).
+# Toolchain presets end to end through mkRepository (IFD).
 # Imported by ./default.nix; every attribute is a flake check.
 #
 #   same-triple-*     a marker linker, env and rustflags on the native
@@ -342,7 +342,7 @@ let
 
   # --- cross sys-native (aarch64) ----------------------------------------------
   #
-  # M1's sys-native fixture for aarch64-unknown-linux-gnu: pkg-config +
+  # The sys-native fixture for aarch64-unknown-linux-gnu: pkg-config +
   # openssl, cmake and bindgen + cc, each declared on its own package and
   # captured with the aarch64 cross stdenv for target units. The product
   # runs under qemu-user.

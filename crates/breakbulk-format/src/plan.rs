@@ -210,7 +210,7 @@ pub struct SearchPathsSplice {
 }
 
 /// A traced `rustdoc --test` of one library, from `cargo test --doc`. Run
-/// by the doctest derivation (M4), which compiles and runs the examples in
+/// by the doctest derivation, which compiles and runs the examples in
 /// one process. Its shape is a compile unit's, without outputs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

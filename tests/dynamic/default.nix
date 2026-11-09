@@ -1,4 +1,4 @@
-# Dynamic-derivation mode (M5) against IFD mode, over the same fixtures.
+# Dynamic-derivation mode against IFD mode, over the same fixtures.
 # Needs Nix 2.36 (master) with `dynamic-derivations` and `ca-derivations`;
 # tests/dynamic/run.sh runs it in a private store and compares the modes
 # (`nix run .#test-dynamic`). This file only describes what to build.

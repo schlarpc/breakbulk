@@ -447,7 +447,7 @@ let
     in
     if p == null then pkgs else p;
 
-  # --- toolchain specs (M3) -------------------------------------------------
+  # --- toolchain specs ------------------------------------------------------
   #
   # A target's spec as mkWorkspace takes it: the planner's part (rustflags
   # and linkers, through `--config`), the env of each platform's units, the

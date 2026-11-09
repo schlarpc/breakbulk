@@ -14,10 +14,10 @@
 #     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers;
 #     preset stage sets in breakbulk.stages.defaultStages)
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
-# breakbulk.predictedRoots { ... }. Dynamic-derivation mode (M5):
+# breakbulk.predictedRoots { ... }. Dynamic-derivation mode:
 # breakbulk.dynamic.{instantiate, mkTestRuns, mkBreakbulkDrv, available}
 # (lib/dynamic.nix).
-# Planning and the M1 end-to-end entry:
+# Planning and the minimal end-to-end entry:
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
 #   breakbulk.defaultTools pkgs           the ones mkRepository uses without
 #                                         `tools` (see `defaultTools` below)
@@ -25,13 +25,13 @@
 #   breakbulk.mkCargoEnv pkgs { ... }     the dev shell's cargo-env.json (lib/plan.nix)
 #   breakbulk.mkBuildTarget pkgs { ... }  the project's build.target (lib/plan.nix)
 #   breakbulk.mkWorkspace pkgs { root; path; toolchain; ... }  (lib/workspace.nix)
-# The module-system entry point (M2):
+# The module-system entry point:
 #   breakbulk.mkRepository { pkgs; root; modules; }  (lib/repository.nix)
 #   breakbulk.modules           the option declarations (lib/modules)
 #   breakbulk.sysDefaults       the curated -sys crate module
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
-# Toolchains (M3): breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
+# Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
 #   breakbulk.testApps.mkTestApps { ... } (runnable apps)

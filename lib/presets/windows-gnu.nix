@@ -1,4 +1,4 @@
-# Windows through mingw-w64 (M7): {x86_64,i686}-pc-windows-gnu with
+# Windows through mingw-w64: {x86_64,i686}-pc-windows-gnu with
 # nixpkgs' gcc mingw-w64 cross toolchains (msvcrt, the CRT Rust's own
 # windows-gnu builds link: rustc_target spec/base/windows_gnu.rs passes
 # -lmsvcrt), and {x86_64,aarch64}-pc-windows-gnullvm with nixpkgs'

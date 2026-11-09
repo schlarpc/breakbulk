@@ -61,17 +61,20 @@ rec {
       inherit description;
     };
 
-  # A stage or check definition (products come in M4). Kept as raw values
+  # A stage or check definition. Kept as raw values
   # so `lib.mkForce null` can remove one.
   stages = types.attrsOf (types.nullOr types.raw);
 
-  # Mark an option as declared ahead of its milestone. `milestone` is the
-  # milestone that implements it, e.g. "M4".
+  # The GitHub issue that tracks issue number `n`.
+  issueUrl = n: "https://github.com/schlarpc/breakbulk/issues/${toString n}";
+
+  # Mark an option as declared ahead of its implementation. `issue` is the
+  # number of the issue that tracks it.
   notImplemented =
-    milestone: opt:
+    issue: opt:
     opt
     // {
-      description = (opt.description or "") + "\n\nNot implemented yet (${milestone}): setting it only gives an evaluation warning.";
+      description = (opt.description or "") + "\n\nNot implemented yet ([#${toString issue}](${issueUrl issue})): setting it only gives an evaluation warning.";
     };
 
   # The paths (lists of attribute names) of options in `paths` that some
@@ -127,13 +130,13 @@ rec {
   # Warnings for options of a submodule that are set but not implemented:
   # `prefix` names the submodule instance (e.g. `targets.wasm32-unknown-unknown`).
   unimplementedWarnings =
-    prefix: options: byMilestone:
+    prefix: options: byIssue:
     lib.concatLists (
       lib.mapAttrsToList (
-        milestone: paths:
+        issue: paths:
         map (
-          p: "breakbulk: `${prefix}.${lib.concatStringsSep "." p}` is set but not implemented yet (${milestone}); it has no effect."
+          p: "breakbulk: `${prefix}.${lib.concatStringsSep "." p}` is set but not implemented yet (${issueUrl issue}); it has no effect."
         ) (setPaths options paths)
-      ) byMilestone
+      ) byIssue
     );
 }

@@ -20,7 +20,7 @@
 #    sources are never patched. proc-macro-crate does not need it here,
 #    because units keep Cargo's `CARGO` (decision 48).
 #  - evdev-sys's cross-only native inputs (python3, autoconf, automake,
-#    libtool; `buildPlatform != hostPlatform`): cross presets are M3.
+#    libtool; `buildPlatform != hostPlatform`): cross presets supply them.
 #  - nettle-sys's `clang` build input and `LIBCLANG_PATH` become
 #    `rustPlatform.bindgenHook` on its host units, which sets both.
 #  - `crateBin` (rink): target discovery is Cargo's own.

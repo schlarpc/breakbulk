@@ -1,4 +1,4 @@
-# Products, stages, source paths, products as inputs and variants (M4),
+# Products, stages, source paths, products as inputs and variants,
 # through mkRepository (IFD mode, native target). Wired into the flake's
 # checks as `products-*`.
 #

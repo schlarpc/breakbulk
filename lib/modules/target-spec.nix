@@ -1,5 +1,5 @@
-# The toolchain spec of one target platform, for one workspace (M3;
-# decision 70). Repository-wide definitions (`targets.<triple>`) and a
+# The toolchain spec of one target platform, for one workspace (decision
+# 70). Repository-wide definitions (`targets.<triple>`) and a
 # workspace's own (`workspaces.<ws>.targets.<triple>`) are both modules of
 # this kind; lib/repository.nix evaluates them together once per
 # (workspace, target), with `name` the triple and `breakbulkToolchain` the

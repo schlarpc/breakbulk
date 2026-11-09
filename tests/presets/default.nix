@@ -15,7 +15,8 @@
 #   msvc-sdk              HEAVY, network, unfree: the xwin CRT + SDK splat
 #                         (~250 MB) and its layout and case symlinks
 #
-# The M3 fixtures (presets through mkRepository) are in ./fixtures.nix.
+# The preset fixtures through mkRepository are in ./fixtures.nix and
+# ./extra-targets.nix.
 {
   pkgs,
   breakbulk,
@@ -218,14 +219,14 @@ in
   '';
 }
 // lib.optionalAttrs (xwinPkgs != null && pkgs.stdenv.buildPlatform.system == "x86_64-linux") msvc
-# M3 fixtures through mkRepository (./fixtures.nix): IFD, rust-overlay
+# Preset fixtures through mkRepository (./fixtures.nix): IFD, rust-overlay
 # toolchains with cross targets, nixpkgs cross toolchains (cached).
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
   (import ./fixtures.nix { inherit pkgs breakbulk xwinPkgs; }).checks
 )
-# M7 fixtures (./m7.nix): later targets, with the same requirements.
+# More target fixtures (./extra-targets.nix), with the same requirements.
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
-  (import ./m7.nix { inherit pkgs breakbulk; }).checks
+  (import ./extra-targets.nix { inherit pkgs breakbulk; }).checks
 )
 # -Zbuild-std (./build-std.nix): rust-overlay's nightly with rust-src.
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (

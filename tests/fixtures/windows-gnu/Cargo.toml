@@ -1,4 +1,4 @@
-# windows-gnu (M7): x86_64-pc-windows-gnu through nixpkgs' mingw-w64 cross
+# windows-gnu: x86_64-pc-windows-gnu through nixpkgs' mingw-w64 cross
 # toolchain (msvcrt, like Rust's own windows-gnu builds), linked by lld
 # through the mingw gcc driver. C code (cc with the mingw gcc) calls the
 # CRT and kernel32; a test unwinds through a panic (libgcc_eh). The

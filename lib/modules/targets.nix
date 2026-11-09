@@ -1,4 +1,4 @@
-# targets.<triple>: the toolchain spec of one target platform (M3).
+# targets.<triple>: the toolchain spec of one target platform.
 #
 # A spec is data: the linker, C toolchain, rustflags, env and runner for a
 # target's units, plus the host spec (`host.*`) for the host units (build

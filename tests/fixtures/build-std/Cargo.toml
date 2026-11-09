@@ -1,4 +1,4 @@
-# build-std (M7, exploratory): a no_std x86_64-unknown-none kernel-style
+# build-std (exploratory): a no_std x86_64-unknown-none kernel-style
 # binary with core and compiler_builtins rebuilt from the nightly
 # toolchain's rust-src (`-Zbuild-std`, from .cargo/config.toml).
 [package]

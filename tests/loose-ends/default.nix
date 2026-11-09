@@ -1,4 +1,4 @@
-# Loose ends from M1-M4, one check each. Wired into the flake's checks as
+# Loose ends, one check each. Wired into the flake's checks as
 # `loose-ends-*`.
 #
 #   nix build -f tests/loose-ends config-env

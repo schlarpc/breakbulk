@@ -1,4 +1,4 @@
-# End-to-end fixture checks for the traced planner (M1), in IFD mode:
+# End-to-end fixture checks for the traced planner, in IFD mode:
 # breakbulk.mkWorkspace plans each fixture with the real cargo, instantiates
 # the plan, builds the units, and compares the products' behaviour with a
 # plain `cargo build` of the same fixture.

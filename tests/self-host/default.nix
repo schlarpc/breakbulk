@@ -1,4 +1,4 @@
-# breakbulk builds itself (M2 exit: "the tool builds itself").
+# breakbulk builds itself.
 #
 # `repo` is mkRepository over this repository's own workspace; its
 # products are breakbulk's four programs, built crate by crate through

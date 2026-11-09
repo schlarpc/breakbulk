@@ -402,7 +402,7 @@ let
           '';
         };
 
-        roots = bt.notImplemented "M2, later" (mkOption {
+        roots = bt.notImplemented 46 (mkOption {
           type = types.nullOr types.raw;
           default = null;
           description = ''
@@ -601,7 +601,7 @@ let
           '';
         };
 
-        docs.noDeps = bt.notImplemented "M6" (mkOption {
+        docs.noDeps = bt.notImplemented 6 (mkOption {
           type = types.bool;
           default = true;
           description = "Document only workspace members (`cargo doc --no-deps`).";
@@ -653,8 +653,8 @@ let
       config.variants = lib.mkIf (config.defaultVariant == "default") { default = { }; };
 
       config.warnings = bt.unimplementedWarnings "workspaces.${name}" options {
-        "M2, later" = [ [ "roots" ] ];
-        M6 = [
+        "46" = [ [ "roots" ] ];
+        "6" = [
           [
             "docs"
             "noDeps"

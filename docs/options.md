@@ -299,7 +299,7 @@ p: [ p.openssl ]
 
 Opt this package in or out of the pipelined split\.
 
-Not implemented yet (M6): setting it only gives an evaluation warning\.
+Not implemented yet ([\#14](https://github\.com/schlarpc/breakbulk/issues/14)): setting it only gives an evaluation warning\.
 
 
 
@@ -2215,7 +2215,7 @@ defaultTarget
 
 Document only workspace members (` cargo doc --no-deps `)\.
 
-Not implemented yet (M6): setting it only gives an evaluation warning\.
+Not implemented yet ([\#6](https://github\.com/schlarpc/breakbulk/issues/6)): setting it only gives an evaluation warning\.
 
 
 
@@ -2304,7 +2304,7 @@ string
 Replace the predicted root names\. The escape hatch for a bug in
 breakbulk’s target auto-discovery\.
 
-Not implemented yet (M2, later): setting it only gives an evaluation warning\.
+Not implemented yet ([\#46](https://github\.com/schlarpc/breakbulk/issues/46)): setting it only gives an evaluation warning\.
 
 
 

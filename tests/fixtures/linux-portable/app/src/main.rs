@@ -33,7 +33,7 @@ mod tests {
         assert!(v.starts_with("2."), "{v}");
     }
 
-    // Set by the container test run (tests/presets/m7.nix, zig-centos7-*):
+    // Set by the container test run (tests/presets/extra-targets.nix, zig-centos7-*):
     // the glibc the test binary really runs on.
     #[test]
     fn runs_on_expected_glibc() {

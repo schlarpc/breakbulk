@@ -1,4 +1,4 @@
-# Checks for mkRepository (M2): overrides, multi-workspace sharing,
+# Checks for mkRepository: overrides, multi-workspace sharing,
 # invalidation, required features, failure hints, the dev shell and the
 # option docs. IFD throughout (plans are read at evaluation time).
 #
@@ -467,7 +467,7 @@ in
     assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package") "overrides: no unmatched warning: ${builtins.toJSON ws}";
     assert lib.assertMsg (has "`packages.itoa` matches no package") "overrides: itoa >=2 should match nothing";
     assert lib.assertMsg (has "packages.app-b.pipelining") "overrides: no warning for pipelining (not implemented)";
-    # targets.<triple>.rustflags (M3) reach target units only.
+    # targets.<triple>.rustflags reach target units only.
     assert lib.assertMsg (
       lib.hasInfix "bb_target_mark" units."libc-0.2.191-lib".drvAttrs.BREAKBULK_UNIT
       && !(lib.hasInfix "bb_target_mark" units."libc-0.2.191-build-script".drvAttrs.BREAKBULK_UNIT)
