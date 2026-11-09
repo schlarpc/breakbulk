@@ -26,4 +26,4 @@ needs a builder for each one:
   with dynamic derivations), where evaluating another system's outputs
   needs no builder for it.
 
-See [`mode`](../reference/options/repository.md#mode) in the [module options](../reference/options.md).
+See [`mode`](../reference/options/repository.md#mode).

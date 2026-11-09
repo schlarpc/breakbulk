@@ -55,5 +55,5 @@ when it is a proc macro or a build dependency).
 
 If a build script fails, or succeeds while it names a file that is missing
 from its sandbox, the error names the file and the option to add it to
-([`extraSources`](../reference/options/packages.md#packagesnameextrasources) for files outside the package directory). See the
-[module options](../reference/options.md) for `packages.<name>`.
+([`extraSources`](../reference/options/packages.md#packagesnameextrasources) for files outside the package directory). Every
+per-package setting is in [Package options](../reference/options/packages.md).
