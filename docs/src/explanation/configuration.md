@@ -14,7 +14,7 @@ The planner runs the user's Cargo over the project's own `.cargo/config.toml`, s
 
 ## Toolchain presets
 
-A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/`cflags`, bindgen settings, SDK store paths, extra rustflags, `env`, and `runner`. The planner resolves every tool to a store path; a non-store tool path is a hard error naming the tool.
+A preset is a per-platform spec: `rustc`/`cargo`/std, `linker`, `cc`/`cxx`/`ar`/[`cflags`](../reference/options/targets.md#targetsnamecflags), bindgen settings, SDK store paths, extra rustflags, `env`, and `runner`. The planner resolves every tool to a store path; a non-store tool path is a hard error naming the tool.
 
 Presets are named for what they are for, not how they do it: `linux`, `linuxStatic`, `linuxPortable` (runs on other distributions), `windows`, `wasmWeb`, `wasmComponent`. The mechanism follows from the target triple: `linuxStatic` is musl for a `-musl` triple and static-pie glibc for a `-gnu` one, `windows` is msvc or MinGW by the triple's ABI, `wasmComponent` componentizes core modules on `wasm32-unknown-unknown` and links components directly on `wasm32-wasip2`.
 
@@ -24,7 +24,7 @@ Presets are named for what they are for, not how they do it: `linux`, `linuxStat
 
 ## Per-package overrides
 
-`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `nativeInputs`, `inputs` and `extraSources` for that package's units only. `nativeInputs` are tools that run on the build machine (`pkg-config`, `cmake`, `protoc`); `inputs` are libraries for the platform being built (`openssl`). This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`. It declares the native inputs only: switches that make a crate use a system library instead of the one it bundles (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so they are left to the project.
+`packages.<name>` (optionally narrowed by version range and platform) sets `env`, `nativeInputs`, `inputs` and [`extraSources`](../reference/options/packages.md#packagesnameextrasources) for that package's units only. `nativeInputs` are tools that run on the build machine (`pkg-config`, `cmake`, `protoc`); `inputs` are libraries for the platform being built (`openssl`). This is how build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings), external SDK paths and vendored C sources are supplied, without changing the hash of any other unit. A curated set of defaults for common `-sys` crates ships with the tool, seeded from nixpkgs' `defaultCrateOverrides`. It declares the native inputs only: switches that make a crate use a system library instead of the one it bundles (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so they are left to the project.
 
 Inputs are turned into environment by nixpkgs itself: a small derivation per package and platform runs a real `stdenv` with those inputs and records the environment its setup hooks produce. Packages without inputs share one base capture per platform, which gives build scripts the same baseline tools and hardening flags as `buildRustPackage`.
 
@@ -32,7 +32,7 @@ One exception follows from how native libraries are linked: a `-sys` crate's `ru
 
 ## Source views
 
-A package's source is a filtered view of the **repository root**, not its crate directory: the crate directory plus declared extras, at their original relative layout. Paths such as `../../wit`, `../shared/assets` or `../../../patches` therefore resolve unchanged, and editing an unrelated file changes no source path. Test units can declare a wider scope for tests that read repository files, and a test run can be narrowed to the files its tests read (`test.runFiles`), so that editing any other file of the package does not re-run it.
+A package's source is a filtered view of the **repository root**, not its crate directory: the crate directory plus declared extras, at their original relative layout. Paths such as `../../wit`, `../shared/assets` or `../../../patches` therefore resolve unchanged, and editing an unrelated file changes no source path. Test units can declare a wider scope for tests that read repository files, and a test run can be narrowed to the files its tests read ([`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles)), so that editing any other file of the package does not re-run it.
 
 When a build script fails, or succeeds while declaring a `rerun-if-changed` path that is missing from its sandbox, the error or warning names the path and the option to add it to. Missing paths on success are warnings by default; `strictSources = true` turns them into errors.
 

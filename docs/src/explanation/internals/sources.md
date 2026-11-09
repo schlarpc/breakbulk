@@ -6,7 +6,7 @@ Fetch derivations are created from the lockfiles at evaluation time. Registry cr
 
 - Every `Cargo.lock` in the repository is read with `builtins.fromTOML`. Entries are merged by (source, name, version, checksum), so a crate locked by several workspaces is fetched once.
 - A crates.io entry becomes `fetchurl` of `https://static.crates.io/crates/<name>/<name>-<version>.crate`, using the lockfile's SHA-256 checksum. An unpack derivation then writes the `.cargo-checksum.json` (`{"files":{},"package":"<checksum>"}`) that Cargo's directory sources require.
-- Other registries need their download URL template from `registries.<name>.dl`, because reading the registry's `config.json` would need a fetch at evaluation time.
+- Other registries need their download URL template from [`registries.<name>.dl`](../../reference/options/repository.md#registriesnamedl), because reading the registry's `config.json` would need a fetch at evaluation time.
 
 ## Git dependencies
 
@@ -45,9 +45,9 @@ Git crates that use workspace inheritance get the original `[workspace]` table a
 A workspace package's source is `lib.fileset.toSource { root = <repository root>; fileset = …; }`. Because the root is the repository root, relative paths outside the crate resolve unchanged.
 
 - **Default fileset:** the package directory, minus `target/`, `.git`, `result*`, and any nested directories that belong to other workspace members.
-- **Plus:** the package's `extraSources`, at their original relative paths.
-- **Test units** additionally get `test.sourceScope`.
-- **Test runs** with `test.runFiles` run in a narrower view instead: `lib.fileset.toSource` of only the listed paths (relative to the package directory, at their places in the repository), or an empty package directory for `[ ]`. A listed path that does not exist is an evaluation error.
+- **Plus:** the package's [`extraSources`](../../reference/options/packages.md#packagesnameextrasources), at their original relative paths.
+- **Test units** additionally get [`test.sourceScope`](../../reference/options/packages.md#packagesnametestsourcescope).
+- **Test runs** with [`test.runFiles`](../../reference/options/packages.md#packagesnametestrunfiles) run in a narrower view instead: `lib.fileset.toSource` of only the listed paths (relative to the package directory, at their places in the repository), or an empty package directory for `[ ]`. A listed path that does not exist is an evaluation error.
 
 ## The planning skeleton
 

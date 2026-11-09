@@ -47,8 +47,8 @@
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
-- **`trimPaths`** and **`trimPathsDefault`** (omitted when false): see [trim-paths](../explanation/internals/planner.md#trim-paths).
-- **`roots`** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test and example binaries in a test plan; bench binaries in the bench variant's plan. A set: the Rust type is an ordered set (like `features`, `metadataFrom` and an output's file names), so it is written sorted and without repeats by construction.
+- **[`trimPaths`](options/workspaces.md#workspacesnametoolchaincapabilitiestrimpaths)** and **`trimPathsDefault`** (omitted when false): see [trim-paths](../explanation/internals/planner.md#trim-paths).
+- **[`roots`](options/workspaces.md#workspacesnameroots)** are the plan's products: bins, cdylibs and staticlibs in a build plan (plain `cargo build` never builds examples); test and example binaries in a test plan; bench binaries in the bench variant's plan. A set: the Rust type is an ordered set (like `features`, `metadataFrom` and an output's file names), so it is written sorted and without repeats by construction.
 
 ## Invariants
 

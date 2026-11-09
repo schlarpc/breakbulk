@@ -1,0 +1,5 @@
+/* A wider default sidebar: option names such as
+   `workspaces.<name>.targets.<name>.packages` are long. */
+:root {
+  --sidebar-target-width: 400px;
+}

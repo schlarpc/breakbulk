@@ -25,7 +25,7 @@ Supported Cargo releases form a rolling window: roughly the last six months of s
 
 ## Linker selection
 
-The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable. One function makes the choice (`presets.chooseLinker`, with the decision itself in `presets.linkerKind`); every preset and the host spec call it, and `targets.<t>.linker` (or `host.linker`) overrides it.
+The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable. One function makes the choice (`presets.chooseLinker`, with the decision itself in `presets.linkerKind`); every preset and the host spec call it, and [`targets.<t>.linker`](../reference/options/targets.md#targetsnamelinker) (or [`host.linker`](../reference/options/targets.md#targetsnamehostlinker)) overrides it.
 
 - Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The native target gets the Linux preset by default, so this holds with no configuration. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](configuration.md#per-package-overrides)).
 - Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM; a rustc newer than the table is asked with `rustc -vV` at evaluation time).

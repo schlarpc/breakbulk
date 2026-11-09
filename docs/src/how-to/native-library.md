@@ -8,7 +8,7 @@ shows how to declare it for one package, so no other crate rebuilds.
 
 breakbulk ships settings for many common `-sys` crates (`openssl-sys`,
 `libz-sys`, `libsqlite3-sys`, …), taken from nixpkgs'
-`defaultCrateOverrides`. They are on by default (`sysDefaults.enable`). If
+`defaultCrateOverrides`. They are on by default ([`sysDefaults.enable`](../reference/options/repository.md#sysdefaultsenable)). If
 your crate is one of them, it builds with no configuration.
 
 ## Declare the library and its tools
@@ -47,7 +47,7 @@ packages.libsqlite3-sys.env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
 
 ## Settings for build scripts only
 
-`packages.<name>.host.inputs`, `.host.nativeInputs` and `.host.env` reach
+[`packages.<name>.host.inputs`](../reference/options/packages.md#packagesnamehostinputs), `.host.nativeInputs` and `.host.env` reach
 only the package's host units (its build script, or the package itself
 when it is a proc macro or a build dependency).
 
@@ -55,5 +55,5 @@ when it is a proc macro or a build dependency).
 
 If a build script fails, or succeeds while it names a file that is missing
 from its sandbox, the error names the file and the option to add it to
-(`extraSources` for files outside the package directory). See the
+([`extraSources`](../reference/options/packages.md#packagesnameextrasources) for files outside the package directory). See the
 [module options](../reference/options.md) for `packages.<name>`.

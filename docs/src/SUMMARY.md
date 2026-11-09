@@ -18,6 +18,10 @@
 # Reference
 
 - [Module options](reference/options.md)
+  - [Repository-wide](reference/options/repository.md)
+  - [Workspaces](reference/options/workspaces.md)
+  - [Targets](reference/options/targets.md)
+  - [Packages](reference/options/packages.md)
 - [Outputs and entry points](reference/outputs.md)
 - [Presets](reference/presets.md)
 - [Cargo and rustc assumptions](reference/assumptions.md)

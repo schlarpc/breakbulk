@@ -10,7 +10,7 @@ repo = breakbulk.lib.mkRepository {
 };
 ```
 
-`modules` may be left out: with no `workspaces` declared, a root that has a `Cargo.toml` is one workspace, `default`, at `"."` (`repo.workspaces.default.packages.<pkg>`); declaring any workspace turns that default off. The flake-parts module needs no `modules` either, so importing it is the whole configuration of a single-workspace repository.
+`modules` may be left out: with no [`workspaces`](options/workspaces.md#workspaces) declared, a root that has a `Cargo.toml` is one workspace, `default`, at `"."` (`repo.workspaces.default.packages.<pkg>`); declaring any workspace turns that default off. The flake-parts module needs no `modules` either, so importing it is the whole configuration of a single-workspace repository.
 
 Modules receive `pkgs`, `root` (the repository root as a path, for reading project files), `repo` (the result itself, for another workspace's product used as an input; laziness makes the cycle harmless) and `breakbulk` (the library: presets, stage helpers, `xwinSdk`). `specialArgs` passed to `mkRepository` add to these and win.
 
@@ -20,7 +20,7 @@ Modules receive `pkgs`, `root` (the repository root as a path, for reading proje
 | Attribute | Contents |
 | --- | --- |
 | `repo.workspaces.<ws>.target.<triple>.packages.<pkg>` | The product after default stages; `.stages.<name>` for each intermediate; `.debug` where split |
-| `repo.workspaces.<ws>.packages.<pkg>`, `.tests.<pkg>.<test>` | The same, for the workspace's default target (`defaultTarget`) |
+| `repo.workspaces.<ws>.packages.<pkg>`, `.tests.<pkg>.<test>` | The same, for the workspace's default target ([`defaultTarget`](options/workspaces.md#workspacesnamedefaulttarget)) |
 | `repo.workspaces.<ws>.target.<triple>.variants.<v>.{packages,tests}` | The same, for another variant |
 | `repo.workspaces.<ws>.target.<triple>.tests.<pkg>.<test>` | Test binaries, for VM and system tests |
 | `repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>` | Test-run derivations |

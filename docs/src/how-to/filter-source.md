@@ -23,7 +23,7 @@ repo = breakbulk.lib.mkRepository {
 ```
 
 Add everything the build reads: `.cargo/config.toml`, data files,
-`include_str!` targets, and each package's `extraSources`.
+`include_str!` targets, and each package's [`extraSources`](../reference/options/packages.md#packagesnameextrasources).
 
 ## Files outside a package's directory
 

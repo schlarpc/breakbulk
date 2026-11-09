@@ -15,5 +15,5 @@ mechanism.
 The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
 unfree. breakbulk downloads them with `breakbulk.xwinSdk`.
 
-A target's preset is set by `targets.<triple>.preset`; see the
+A target's preset is set by [`targets.<triple>.preset`](options/targets.md#targetsnamepreset); see the
 [module options](options.md).

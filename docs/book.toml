@@ -1,7 +1,7 @@
 # The documentation site (mdBook), built by docs/default.nix as
 # packages.<system>.docs-site and published to GitHub Pages by
-# .github/workflows/pages.yml. src/reference/options.md is generated at
-# build time from the module options; do not add it here.
+# .github/workflows/pages.yml. src/reference/options/*.md are generated at
+# build time from the module options (options-pages.py); do not add them.
 [book]
 title = "breakbulk"
 language = "en"
@@ -11,3 +11,4 @@ src = "src"
 git-repository-url = "https://github.com/schlarpc/breakbulk"
 edit-url-template = "https://github.com/schlarpc/breakbulk/edit/main/docs/{path}"
 site-url = "/breakbulk/"
+additional-css = ["theme.css"]

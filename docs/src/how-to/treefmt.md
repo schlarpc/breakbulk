@@ -37,11 +37,11 @@ rustfmt:
 }
 ```
 
-`toolchain.rustfmt` is nixpkgs' rustfmt when the workspace uses nixpkgs'
+[`toolchain.rustfmt`](../reference/options/workspaces.md#workspacesnametoolchainrustfmt) is nixpkgs' rustfmt when the workspace uses nixpkgs'
 rustc, and otherwise the toolchain's own, so formatting matches `cargo fmt`
 in the dev shell.
 
-Use treefmt's check instead of breakbulk's `workspaces.<ws>.fmt.enable`;
+Use treefmt's check instead of breakbulk's [`workspaces.<ws>.fmt.enable`](../reference/options/workspaces.md#workspacesnamefmtenable);
 with both, the same files are checked twice.
 
 ## Match the edition

@@ -10,7 +10,7 @@
 
 ## Default stages per preset
 
-What happens to debug info is a property of the target, not of a stage list: `targets.<t>.debugInfo` is `"split"`, `"keep"` or `"strip"`, and puts the matching stage first. The units are shared by every package of the target and their remap scope and build ID depend on it, so no package can add or remove that stage.
+What happens to debug info is a property of the target, not of a stage list: [`targets.<t>.debugInfo`](../reference/options/targets.md#targetsnamedebuginfo) is `"split"`, `"keep"` or `"strip"`, and puts the matching stage first. The units are shared by every package of the target and their remap scope and build ID depend on it, so no package can add or remove that stage.
 
 | Preset | debugInfo (default) | Default stages |
 | --- | --- | --- |

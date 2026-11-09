@@ -213,7 +213,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 ### T13. Which targets each command builds
 
 - **Assumption.** `cargo build` builds libraries and bins; `cargo test --no-run` builds libraries, lib and bin harnesses, integration tests and examples (as plain bins), bins only when the package has integration tests, and no benches; `cargo bench --no-run` builds lib and bin harnesses in bench mode and benches; an unharnessed test or bench is compiled as a plain bin; `CARGO_PRIMARY_PACKAGE=1` marks every compile of a selected member, its host copy included.
-- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::roots`, `target_of`; `lib/roots.nix`: `roots`.
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::roots`, `target_of`; `lib/roots.nix`: [`roots`](options/workspaces.md#workspacesnameroots).
 - **Upstream.** cargo `src/ops/cargo_compile/unit_generator.rs`, `UnitGenerator::filter_default_targets`, `new_units` (`0.100.0`); spike A.
 - **Holds for.** The window (spike A); 1.99 (checks).
 - **Pinned by.** `roots-plans` (predicted roots equal what real `cargo build`, `test --no-run` and `bench --no-run` compile); `products-benches`.
@@ -703,7 +703,7 @@ Status of the 78 entries: 76 pinned, 2 with no pinning test (S10, L5). Each of t
 
 ### L10. Toolchain capabilities from versions and probes
 
-- **Assumption.** A Cargo release allows unstable features exactly when its version string contains `-nightly` or `-dev` (the planner clears `RUSTC_BOOTSTRAP`); `remapPathScope` (P6) and `trimPaths` (P1) follow the versions given there. A package's `version` is read as the release only when it looks like one (`<major>.<minor>.<patch>[-…]`); otherwise the toolchain is probed. fenix's component packages carry the channel manifest's date as `version` (fenix `5161c3b`, `lib/mk-toolchain.nix`), and its combined toolchains carry none.
+- **Assumption.** A Cargo release allows unstable features exactly when its version string contains `-nightly` or `-dev` (the planner clears `RUSTC_BOOTSTRAP`); [`remapPathScope`](options/workspaces.md#workspacesnametoolchaincapabilitiesremappathscope) (P6) and [`trimPaths`](options/workspaces.md#workspacesnametoolchaincapabilitiestrimpaths) (P1) follow the versions given there. A package's `version` is read as the release only when it looks like one (`<major>.<minor>.<patch>[-…]`); otherwise the toolchain is probed. fenix's component packages carry the channel manifest's date as `version` (fenix `5161c3b`, `lib/mk-toolchain.nix`), and its combined toolchains carry none.
 - **Where.** `lib/toolchain-facts.nix`: `isNightly`, `releaseOf`, `capabilitySince`, `of`; `crates/breakbulk-format/src/capabilities.rs`.
 - **Upstream.** cargo `src/version.rs` and `channel()` (release channel, `RUSTC_BOOTSTRAP=1` as `dev`).
 - **Holds for.** The window.

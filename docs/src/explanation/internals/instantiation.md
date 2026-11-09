@@ -74,4 +74,4 @@ Nix attribute names, and a dynamic derivation's outputs, must be known at evalua
 - for a product the plan lacks, a stub derivation that fails with the reason ("`admin-cli` was not built by Cargo in variant `release`: required features `[cli]` not enabled");
 - for a test run the plan lacks, a stub that succeeds and logs that the test was skipped, as `cargo test` does.
 
-A root in the plan that was not predicted is an error listing both sets, because it means the discovery implementation has a bug. An explicit `roots` option is the escape hatch. A single "all roots" output was rejected because building any one product would then build every product.
+A root in the plan that was not predicted is an error listing both sets, because it means the discovery implementation has a bug. An explicit [`roots`](../../reference/options/workspaces.md#workspacesnameroots) option is the escape hatch. A single "all roots" output was rejected because building any one product would then build every product.

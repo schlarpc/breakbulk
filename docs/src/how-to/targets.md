@@ -29,11 +29,11 @@ modules = [{
 }];
 ```
 
-`workspaces.<ws>.targets` says which targets a workspace builds. Once you
+[`workspaces.<ws>.targets`](../reference/options/workspaces.md#workspacesnametargets) says which targets a workspace builds. Once you
 list any, only those are built: add your own machine's triple too
 (`x86_64-unknown-linux-gnu = { };`) if you still want native products.
 `targets.<triple>` sets the target's toolchain for every workspace; its
-`preset` picks one of the [presets](../reference/presets.md). A target
+[`preset`](../reference/options/targets.md#targetsnamepreset) picks one of the [presets](../reference/presets.md). A target
 whose linker rustc chooses itself (UEFI, bare metal) needs no preset.
 
 ## 3. Build
@@ -46,7 +46,7 @@ repo.workspaces.default.target.x86_64-unknown-linux-musl.packages.app
 
 When a workspace lists exactly one target, `packages` and the dev shell
 use it. With several, they use the target the project's
-`.cargo/config.toml` names in `build.target`, or `defaultTarget` if you
+`.cargo/config.toml` names in `build.target`, or [`defaultTarget`](../reference/options/workspaces.md#workspacesnamedefaulttarget) if you
 set it.
 
 ## Windows (MSVC)
