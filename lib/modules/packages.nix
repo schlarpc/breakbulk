@@ -21,7 +21,7 @@ let
         stages = mkOption {
           type = bt.stages;
           default = { };
-          description = "Post-link stages for this package's products on this target.";
+          description = "Post-link stages for this package's products on this target, as `targets.<triple>.stages` (`after = \"install\"` for wrappers and packaging).";
         };
         checks = mkOption {
           type = bt.stages;
@@ -120,7 +120,7 @@ let
         stages = mkOption {
           type = bt.stages;
           default = { };
-          description = "Post-link stages for this package's products, on every target.";
+          description = "Post-link stages for this package's products, on every target, as `targets.<triple>.stages` (`after = \"install\"` for wrappers and packaging).";
         };
         checks = mkOption {
           type = bt.stages;

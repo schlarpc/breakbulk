@@ -10,7 +10,7 @@ derivation that you can read, replace or remove.
 | --- | --- | --- |
 | Units | one derivation per Cargo unit | internal, but inspectable |
 | Stages | the linked output passed through ordered, named steps | `.stages.<name>`, e.g. `.stages.linked` |
-| Packages | the last stage, installed in the usual layout (`bin/`, `lib/`, `.exe` with its DLLs, `pkg/` for wasm) | `packages.<pkg>`, `target.<triple>.packages.<pkg>` |
+| Packages | the last stage: by default `install`, which lays out the usual tree (`bin/`, `lib/`, `.exe` with its DLLs, `pkg/` for wasm) | `packages.<pkg>`, `target.<triple>.packages.<pkg>` |
 
 Each stage is its own derivation. With content addressing on (see
 [Caching and early cutoff](caching.md)), a stage whose input did not
@@ -52,6 +52,32 @@ packages.app.target."x86_64-pc-windows-msvc".stages = {
   strip     = lib.mkForce null;  # signing breaks if stripped
 };
 ```
+
+A wrapper or package belongs after `install`, where the binary is already
+at `bin/app`:
+
+```nix
+packages.app.stages.wrap = {
+  after = "install";
+  run = { input, pkgs, ... }:
+    pkgs.runCommand "app-wrapped" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+      cp -R ${input} $out; chmod -R u+w $out
+      wrapProgram $out/bin/app --set APP_MODE prod
+    '';
+};
+```
+
+`install` is an ordinary stage with a default position:
+
+| Stage | Runs | Sees |
+| --- | --- | --- |
+| names neither `install` nor a stage after it | before `install` | the flat link output (`app`, `libfoo.so`) |
+| `after = "install"`, or after such a stage | after `install` | the installed layout (`bin/`, `lib/`, `pkg/`) |
+
+The stage helpers (`splitDebug`, `strip`, `bindgen`, …) expect the flat
+link output. A wrapper made before `install` would run the earlier
+stage's binary, so the product would carry both copies. More in
+[Wrap or package a binary](../how-to/wrap-package.md).
 
 Typical checks: ISA level, DLL import closure, PE headers, signature
 verification, "no interpreter, no needed libraries".

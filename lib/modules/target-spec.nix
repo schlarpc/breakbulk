@@ -308,7 +308,11 @@ in
         stage `debugInfo` inserts and the stage preset's defaults
         (`stagePreset`). A stage is `{ after ? null; before ? null; run
         = { input, product, target, pkgs }: <derivation>; }`; `null`
-        removes one. Package settings (`packages.<name>.stages`) merge
+        removes one. A stage runs before `install` and sees the flat link
+        output, unless it is ordered after `install` (`after =
+        "install"`, or after such a stage); then it sees the installed
+        layout (`bin/`, `lib/`, `pkg/`), the place for wrappers and
+        packaging. Package settings (`packages.<name>.stages`) merge
         over these. Neither may remove the stage `debugInfo` inserts or
         add `splitDebug` where it inserts none; set `debugInfo` instead.
       '';
