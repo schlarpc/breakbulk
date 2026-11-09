@@ -80,6 +80,34 @@ pub struct Metadata {
     pub packages: Vec<Package>,
     pub workspace_members: Vec<String>,
     pub workspace_root: String,
+    /// Null with `--no-deps`.
+    #[serde(default)]
+    pub resolve: Option<Resolve>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Resolve {
+    pub nodes: Vec<ResolveNode>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ResolveNode {
+    pub id: String,
+    #[serde(default)]
+    pub deps: Vec<NodeDep>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct NodeDep {
+    pub pkg: String,
+    #[serde(default)]
+    pub dep_kinds: Vec<DepKindInfo>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DepKindInfo {
+    pub kind: Option<String>,
+    pub target: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

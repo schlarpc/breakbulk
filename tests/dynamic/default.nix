@@ -213,6 +213,12 @@ let
           env.NX_EXPECT_NIX = "1";
         };
         packages.other.test.runner = "nextest";
+        # The ci profile's `binary()` and `rdeps()` overrides need the
+        # targets and dependency edges in the synthesized metadata.
+        packages.solo.test = {
+          runner = "nextest";
+          nextest.profile = "ci";
+        };
       }
     ];
   };

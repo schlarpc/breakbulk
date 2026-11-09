@@ -66,6 +66,56 @@ pub struct Plan {
     /// `sysroot_remap`); breakbulk adds it to its own remaps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rust_src_remap: Option<(String, String)>,
+    /// Test plans: every path package under the skeleton that the plan
+    /// compiles, by package id, with its Cargo targets and its dependencies
+    /// on the other packages listed here, as `cargo metadata` gives them.
+    /// The cargo metadata synthesized for nextest lists them, so its
+    /// `binary()` and `deps()` filtersets see what they would under Cargo.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub path_packages: BTreeMap<String, PathPackage>,
+}
+
+/// A path package of a test plan ([`Plan::path_packages`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PathPackage {
+    /// Sorted.
+    pub targets: Vec<PathTarget>,
+    /// Sorted by package id.
+    pub dependencies: Vec<PathDependency>,
+}
+
+/// One Cargo target of a path package, as `cargo metadata` lists it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PathTarget {
+    pub name: String,
+    /// `bin`, `example`, `test`, `bench`, `custom-build`, or a library's
+    /// crate types.
+    pub kind: Vec<String>,
+    pub crate_types: Vec<String>,
+    /// The source path relative to the skeleton root (an absolute path when
+    /// it lies outside).
+    pub src_path: String,
+}
+
+/// A dependency edge between two path packages: Cargo's resolve node `deps`
+/// entry, one `(kind, target)` per way the dependency is declared.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PathDependency {
+    pub package: String,
+    /// Sorted.
+    pub kinds: Vec<DepKind>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DepKind {
+    /// `dev` or `build`; None for a normal dependency.
+    pub kind: Option<String>,
+    /// The `[target.<cfg>]` table the dependency is declared in.
+    pub target: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

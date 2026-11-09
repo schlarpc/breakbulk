@@ -1,8 +1,9 @@
 # nextest test runs (`test.runner = "nextest"`): retries, a slow-timeout
-# that terminates a hung attempt, a default filter, a per-test override,
+# that terminates a hung attempt, a default filter, per-test overrides,
 # and the runtime environment nextest gives a test process. The project's
-# nextest configuration is .config/nextest.toml. Two packages, so the
-# synthesized cargo metadata lists more than the tested one.
+# nextest configuration is .config/nextest.toml. Three packages, so the
+# synthesized cargo metadata lists more than the tested one: `nx` depends
+# on `other`, `solo` on nothing.
 [workspace]
-members = ["nx", "other"]
+members = ["nx", "other", "solo"]
 resolver = "2"

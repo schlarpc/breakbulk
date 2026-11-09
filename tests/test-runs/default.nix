@@ -34,7 +34,10 @@
 #                           fixture: retries, a per-test slow-timeout that
 #                           terminates a hung attempt, a default filter
 #                           naming another package, junit, package env from
-#                           the synthesized metadata; no config file
+#                           the synthesized metadata; no config file; an
+#                           override on `package(nx) and binary(flaky)`
+#                           applies to that binary only, and one on
+#                           `rdeps(other)` to `nx` and not to `solo`
 #   nextest-repo            the same through the module options, with the
 #                           workspace's .config/nextest.toml found by default
 #   dylib-rule              testRuns.dylibJq over hand-written
@@ -406,6 +409,11 @@ let
       env.NX_EXPECT_NIX = "1";
     };
     packages.other.test.runner = "nextest";
+    packages.solo.test = {
+      runner = "nextest";
+      nextest.profile = "ci";
+      nextest.configFile = fixtures + "/nextest/.config/nextest.toml";
+    };
   };
 
   nextest =
@@ -423,6 +431,7 @@ let
         flaky = r.nx.flaky;
         nxLib = r.nx."lib/nx";
         other = r.other."lib/other";
+        solo = r.solo."lib/solo";
       }
       ''
         cat $flaky/log
@@ -443,6 +452,16 @@ let
         grep -E 'PASS .*nx unit_ok|PASS .*nx tests::unit_ok' $nxLib/log
         # No configuration file: nextest's defaults.
         grep -E 'PASS .*other tests::adds' $other/log
+        # `package(nx) and binary(flaky)`: success output shown for the
+        # flaky binary's tests, not for the library's.
+        grep -q nx-runtime-env-success-output $flaky/log
+        ! grep -q nx-unit-success-output $nxLib/log
+        # `rdeps(other)`: success output kept in junit for nx, which
+        # depends on other, and not for solo.
+        grep -q nx-unit-success-output $nxLib/nextest/ci/junit.xml
+        grep -E 'PASS .*solo tests::solo_ok' $solo/log
+        grep -q 'testsuite name="solo"' $solo/nextest/ci/junit.xml
+        ! grep -q solo-success-output $solo/nextest/ci/junit.xml
         mkdir -p $out
         cp $flaky/log $out/
       '';

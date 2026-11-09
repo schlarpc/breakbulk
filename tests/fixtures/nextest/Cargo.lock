@@ -12,3 +12,7 @@ dependencies = [
 [[package]]
 name = "other"
 version = "0.1.0"
+
+[[package]]
+name = "solo"
+version = "0.1.0"

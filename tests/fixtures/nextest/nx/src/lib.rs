@@ -6,6 +6,7 @@ pub fn twice(x: u32) -> u32 {
 mod tests {
     #[test]
     fn unit_ok() {
+        println!("nx-unit-success-output");
         assert_eq!(super::twice(2), 4);
     }
 }

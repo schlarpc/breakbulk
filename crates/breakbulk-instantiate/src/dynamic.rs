@@ -324,14 +324,21 @@ pub const VIEW_PLACEHOLDER: &str = "@VIEW@";
 ///   view, as for libtest runs. The workspace root is that view's root;
 ///   other path packages of the plan are listed under it too (their
 ///   directories need not exist), so `package()` filtersets match them;
+/// - each package lists its Cargo targets ([`Plan::path_packages`]): nextest
+///   checks the names `binary()` and `binary_id()` filtersets use against
+///   them (nextest-filtering `ParseContextCache::new`), and fails a run
+///   whose configuration names a binary it does not know;
+/// - the dependency edges between path packages, for `deps()` and
+///   `rdeps()` (guppy's `depends_on`, any dependency kind). guppy matches
+///   each resolve edge to a declared dependency by the dependency's library
+///   name and version requirement, so each edge is declared with `*` and
+///   no rename, under the library's own name, whatever the manifest says;
 /// - nextest sets `CARGO_PKG_*` from the package entry, so the entry is
 ///   built from the test unit's recorded `CARGO_PKG_*` values;
 /// - no base output directories, linked paths, build-script out dirs or
 ///   libdirs: nextest then adds nothing to the dynamic-library path, and
 ///   keeps the environment the run already set, so the process sees what a
 ///   libtest run sees;
-/// - dependency edges are not synthesized: `deps()` and `rdeps()`
-///   filtersets see none;
 /// - nextest requires `<workspace root>/Cargo.toml` to exist and writes its
 ///   store under it, so the workspace root is a scratch directory made at
 ///   build time (`@WS@`).
@@ -360,6 +367,24 @@ pub fn nextest_for(
             path_pkgs.entry(c.package.as_str()).or_insert(c);
         }
     }
+    let path_package = |id: &str| plan.path_packages.get(id);
+    let lib_name = |id: &str| {
+        path_package(id)
+            .and_then(|p| p.targets.iter().find(|t| is_lib_target(&t.kind)))
+            .map(|t| t.name.replace('-', "_"))
+            .unwrap_or_default()
+    };
+    // The edges whose both ends are listed.
+    let deps_of = |id: &str| -> Vec<&breakbulk_format::PathDependency> {
+        path_package(id)
+            .map(|p| {
+                p.dependencies
+                    .iter()
+                    .filter(|d| path_pkgs.contains_key(d.package.as_str()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let mut packages = Vec::new();
     for (id, u) in &path_pkgs {
         let u = if *id == pkg_id.as_str() { unit } else { u };
@@ -374,6 +399,48 @@ pub fn nextest_for(
         } else {
             format!("{view_root}/{dir}")
         };
+        let targets: Vec<J> = path_package(id)
+            .map(|p| &p.targets[..])
+            .unwrap_or_default()
+            .iter()
+            .map(|t| {
+                let src = if t.src_path.starts_with('/') {
+                    t.src_path.clone()
+                } else {
+                    format!("{view_root}/{}", t.src_path)
+                };
+                json!({
+                    "name": t.name,
+                    "kind": t.kind,
+                    "crate_types": t.crate_types,
+                    "src_path": src,
+                })
+            })
+            .collect();
+        let dependencies: Vec<J> = deps_of(id)
+            .into_iter()
+            .flat_map(|d| {
+                let name = path_pkgs
+                    .get(d.package.as_str())
+                    .map(|u| env_of(u, "CARGO_PKG_NAME"))
+                    .unwrap_or_default();
+                d.kinds.iter().map(move |k| {
+                    json!({
+                        "name": name,
+                        "source": null,
+                        "req": "*",
+                        "kind": k.kind,
+                        "optional": false,
+                        "uses_default_features": true,
+                        "features": [],
+                        "target": k.target,
+                        "rename": null,
+                        "registry": null,
+                        "path": null,
+                    })
+                })
+            })
+            .collect();
         let authors: Vec<String> = e("CARGO_PKG_AUTHORS")
             .split(':')
             .filter(|a| !a.is_empty())
@@ -393,8 +460,8 @@ pub fn nextest_for(
             "readme": null,
             "documentation": null,
             "source": null,
-            "dependencies": [],
-            "targets": [],
+            "dependencies": dependencies,
+            "targets": targets,
             "features": {},
             "manifest_path": format!("{dir}/Cargo.toml"),
             "metadata": null,
@@ -409,7 +476,22 @@ pub fn nextest_for(
     let ids: Vec<&str> = path_pkgs.keys().copied().collect();
     let nodes: Vec<J> = ids
         .iter()
-        .map(|id| json!({ "id": id, "dependencies": [], "deps": [], "features": [] }))
+        .map(|id| {
+            let deps = deps_of(id);
+            json!({
+                "id": id,
+                "dependencies": deps.iter().map(|d| &d.package).collect::<Vec<_>>(),
+                "deps": deps
+                    .iter()
+                    .map(|d| json!({
+                        "name": lib_name(&d.package),
+                        "pkg": d.package,
+                        "dep_kinds": d.kinds,
+                    }))
+                    .collect::<Vec<_>>(),
+                "features": [],
+            })
+        })
         .collect();
     let cargo_metadata = json!({
         "version": 1,
@@ -480,6 +562,17 @@ pub fn nextest_for(
         binary_id,
         cargo_metadata,
         binaries,
+    })
+}
+
+/// Whether a `cargo metadata` target kind list is a library's (its crate
+/// types) rather than a bin, example, test, bench or build script.
+fn is_lib_target(kind: &[String]) -> bool {
+    !kind.iter().any(|k| {
+        matches!(
+            k.as_str(),
+            "bin" | "example" | "test" | "bench" | "custom-build"
+        )
     })
 }
 

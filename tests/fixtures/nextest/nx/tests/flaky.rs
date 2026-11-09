@@ -38,6 +38,7 @@ fn excluded_always_fails() {
 /// starting nextest.
 #[test]
 fn runtime_env() {
+    println!("nx-runtime-env-success-output");
     let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     assert_eq!(std::path::Path::new(&dir), std::env::current_dir().unwrap());
     assert!(std::path::Path::new("Cargo.toml").exists());

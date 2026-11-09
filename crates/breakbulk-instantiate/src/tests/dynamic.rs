@@ -391,6 +391,41 @@ fn test_spec_of_a_test_root() {
             r
         })
         .collect();
+    // The path packages' targets (one never built) and the edge
+    // smokeapp -> smokelib.
+    let pkg_of = |id: &str| plan.units[id].package().to_owned();
+    let (app_id, lib_id) = (pkg_of(APP), pkg_of(LIB));
+    let target = |name: &str, kind: &str, src: &str| breakbulk_format::PathTarget {
+        name: name.into(),
+        kind: vec![kind.into()],
+        crate_types: vec![if kind == "lib" { "lib" } else { "bin" }.into()],
+        src_path: src.into(),
+    };
+    plan.path_packages = BTreeMap::from([
+        (
+            app_id.clone(),
+            breakbulk_format::PathPackage {
+                targets: vec![
+                    target("smokeapp", "bin", "smokeapp/src/main.rs"),
+                    target("unbuilt", "test", "smokeapp/tests/unbuilt.rs"),
+                ],
+                dependencies: vec![breakbulk_format::PathDependency {
+                    package: lib_id.clone(),
+                    kinds: vec![breakbulk_format::DepKind {
+                        kind: None,
+                        target: None,
+                    }],
+                }],
+            },
+        ),
+        (
+            lib_id.clone(),
+            breakbulk_format::PathPackage {
+                targets: vec![target("smokelib", "lib", "smokelib/src/lib.rs")],
+                dependencies: vec![],
+            },
+        ),
+    ]);
     inputs.plan = plan;
     inputs.roots = predicted(vec![proot("smokeapp", RootKind::Bin, true, None)]);
     let units = instantiate(&inputs).unwrap();
@@ -480,6 +515,37 @@ fn test_spec_of_a_test_root() {
     let app = pkgs.iter().find(|p| p["name"] == "smokeapp").unwrap();
     assert_eq!(app["manifest_path"], format!("{view}/smokeapp/Cargo.toml"));
     assert_eq!(app["version"], "0.1.0");
+    // Targets, for `binary()` filtersets: under the source view.
+    let targets: Vec<&str> = app["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(targets, ["smokeapp", "unbuilt"]);
+    assert_eq!(
+        app["targets"][1]["src_path"],
+        format!("{view}/smokeapp/tests/unbuilt.rs")
+    );
+    // The edge, for `deps()`: declared under the library's name with `*`,
+    // and resolved to the library's package.
+    assert_eq!(app["dependencies"][0]["name"], "smokelib");
+    assert_eq!(app["dependencies"][0]["req"], "*");
+    let node = meta["resolve"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == app_id.as_str())
+        .unwrap();
+    assert_eq!(node["dependencies"], serde_json::json!([lib_id]));
+    assert_eq!(
+        node["deps"],
+        serde_json::json!([{
+            "name": "smokelib",
+            "pkg": lib_id,
+            "dep_kinds": [{ "kind": null, "target": null }],
+        }])
+    );
 }
 
 /// The plan with a doctest for `smokelib`, made from its library unit.

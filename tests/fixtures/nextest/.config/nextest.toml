@@ -3,13 +3,24 @@ retries = 1
 
 [profile.ci]
 retries = 2
-# Names another package, so the synthesized cargo metadata must list it.
-default-filter = "not test(/^excluded_/) & (package(nx) | package(other))"
+# Names other packages, so the synthesized cargo metadata must list them.
+default-filter = "not test(/^excluded_/) & (package(nx) | package(other) | package(solo))"
 fail-fast = false
 
 [[profile.ci.overrides]]
 filter = "test(hangs_once)"
 slow-timeout = { period = "1s", terminate-after = 2 }
+
+# A binary name: nextest checks it against the packages' targets in the
+# cargo metadata. Applies to the `flaky` test binary only.
+[[profile.ci.overrides]]
+filter = "package(nx) and binary(flaky)"
+success-output = "immediate"
+
+# Needs the dependency edges: `nx` depends on `other`, `solo` does not.
+[[profile.ci.overrides]]
+filter = "rdeps(other)"
+junit.store-success-output = true
 
 [profile.ci.junit]
 path = "junit.xml"

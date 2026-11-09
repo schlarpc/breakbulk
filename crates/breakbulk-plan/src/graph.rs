@@ -6,10 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::{
-    Arg, CompileUnit, CrateInfo, Cwd, Doctest, LinkArgKind, OutRef, PLAN_VERSION, PackageTarget,
-    Piece, Plan, PlanKind, Platform, Reference, Root, RootKind, RunUnit, SearchIn,
-    SearchPathsSplice, Splice, SpliceKind, Text, Unit, UnitId, Variant, VariantMode,
-    contains_sentinel,
+    Arg, CompileUnit, CrateInfo, Cwd, DepKind, Doctest, LinkArgKind, OutRef, PLAN_VERSION,
+    PackageTarget, PathDependency, PathPackage, PathTarget, Piece, Plan, PlanKind, Platform,
+    Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice, SpliceKind, Text,
+    Unit, UnitId, Variant, VariantMode, contains_sentinel,
 };
 
 use crate::records::{Metadata, Package, Record, Target};
@@ -1329,6 +1329,76 @@ impl<'a> Builder<'a> {
         roots
     }
 
+    /// [`Plan::path_packages`]: the path packages under the skeleton that
+    /// the plan compiles, with their targets and the dependency edges
+    /// between them from `cargo metadata`'s resolve graph.
+    fn path_packages(&self) -> BTreeMap<String, PathPackage> {
+        let skeleton = self.ctx.skeleton.trim_end_matches('/');
+        let under = |p: &str| {
+            p.strip_prefix(skeleton)
+                .and_then(|r| r.strip_prefix('/'))
+                .map(str::to_owned)
+        };
+        let pkgs: BTreeMap<&str, &Package> = self
+            .compiles
+            .iter()
+            .map(|c| c.package)
+            .filter(|p| p.is_path() && (p.dir() == skeleton || under(p.dir()).is_some()))
+            .map(|p| (p.id.as_str(), p))
+            .collect();
+        let nodes = self
+            .metadata
+            .resolve
+            .as_ref()
+            .map(|r| &r.nodes[..])
+            .unwrap_or(&[]);
+        pkgs.iter()
+            .map(|(id, p)| {
+                let mut targets: Vec<PathTarget> = p
+                    .targets
+                    .iter()
+                    .map(|t| PathTarget {
+                        name: t.name.clone(),
+                        kind: t.kind.clone(),
+                        crate_types: t.crate_types.clone(),
+                        src_path: under(&t.src_path).unwrap_or_else(|| t.src_path.clone()),
+                    })
+                    .collect();
+                targets.sort();
+                let mut dependencies: Vec<PathDependency> = nodes
+                    .iter()
+                    .filter(|n| n.id == *id)
+                    .flat_map(|n| &n.deps)
+                    .filter(|d| pkgs.contains_key(d.pkg.as_str()))
+                    .map(|d| {
+                        let mut kinds: Vec<DepKind> = d
+                            .dep_kinds
+                            .iter()
+                            .map(|k| DepKind {
+                                kind: k.kind.clone(),
+                                target: k.target.clone(),
+                            })
+                            .collect();
+                        kinds.sort();
+                        kinds.dedup();
+                        PathDependency {
+                            package: d.pkg.clone(),
+                            kinds,
+                        }
+                    })
+                    .collect();
+                dependencies.sort();
+                (
+                    (*id).to_owned(),
+                    PathPackage {
+                        targets,
+                        dependencies,
+                    },
+                )
+            })
+            .collect()
+    }
+
     /// The traced `rustdoc --test` commands, one per library, keyed
     /// `d-<package name>`.
     fn doctests(&self) -> Result<BTreeMap<String, Doctest>, Error> {
@@ -1453,6 +1523,11 @@ impl<'a> Builder<'a> {
             doctests: self.doctests()?,
             config_env: self.ctx.config_env.clone(),
             rust_src_remap: self.ctx.rust_src_remap.clone(),
+            path_packages: if self.ctx.kind == PlanKind::Test {
+                self.path_packages()
+            } else {
+                BTreeMap::new()
+            },
         };
         plan.normalize();
         Ok(plan)
