@@ -1,0 +1,8 @@
+[package]
+name = "arg-bin-form"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "present"
+path = "src/main.rs"

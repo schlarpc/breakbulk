@@ -39,6 +39,12 @@
 #
 # `versions` is empty when the package set has no rust-overlay (`nix build
 # -f` uses plain nixpkgs; the flake's package set has it).
+#
+# errors.nix compares the outputs Cargo rejects or warns about, on the same
+# releases:
+#
+#   nix build -f tests/differential errors.default   # or errors.nightly
+#
 #   python3 tests/differential/gen.py --seed 17 --out /tmp/ws   # look at one
 {
   pkgs ? import (
@@ -191,9 +197,23 @@ let
     # Not vacuous: most seeds print search paths of both classes.
     [ $((detected * 2)) -ge $n ]
   '';
+  # The error paths (errors.nix) on the same releases: `default` is the
+  # suite's own toolchain, the others are versionToolchains' labels.
+  errors = import ./errors.nix {
+    inherit pkgs breakbulk tools;
+    toolchains = {
+      # nixpkgs' cargo is built without a release channel, which makes it
+      # a `dev` build that allows unstable features, whatever its version
+      # says; the planner reads the channel from the version.
+      default = toolchain // {
+        capabilities.nightly = true;
+      };
+    }
+    // versionToolchains;
+  };
 in
 {
-  inherit seeds one versionSeeds;
+  inherit seeds one versionSeeds errors;
   differential = aggregate "differential-check" seeds;
   versions = lib.mapAttrs (label: aggregate "differential-${label}-check") versionSeeds;
 }

@@ -507,6 +507,34 @@ fn rustc_env() {
 fn rustc_bootstrap() {
     let e = parse_err("cargo::rustc-env=RUSTC_BOOTSTRAP=1\n");
     assert!(e.starts_with("cannot set `RUSTC_BOOTSTRAP=1` from build script of `ring v0.17.14`."));
+    // The help names the library's crate name, or 1 without a library.
+    assert!(
+        e.ends_with(
+            "set the environment variable `RUSTC_BOOTSTRAP=mylib` before running cargo instead."
+        ),
+        "{e}"
+    );
+    let t = vec![
+        PackageTarget {
+            name: "my-tool".into(),
+            kind: vec!["bin".into()],
+        },
+        PackageTarget {
+            name: "my-lib".into(),
+            kind: vec!["cdylib".into(), "rlib".into()],
+        },
+    ];
+    let e = parse(b"cargo::rustc-env=RUSTC_BOOTSTRAP=1\n", &ctx_with(&t, None))
+        .unwrap_err()
+        .0;
+    assert!(e.contains("`RUSTC_BOOTSTRAP=my_lib`"), "{e}");
+    let e = parse(
+        b"cargo::rustc-env=RUSTC_BOOTSTRAP=1\n",
+        &ctx_with(&t[..1], None),
+    )
+    .unwrap_err()
+    .0;
+    assert!(e.contains("`RUSTC_BOOTSTRAP=1`"), "{e}");
     // Only the exact name is refused.
     assert_eq!(
         parse_ok("cargo::rustc-env=RUSTC_BOOTSTRAPX=1\n").env,

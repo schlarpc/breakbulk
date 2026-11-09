@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: 77 pinned, 1 with no pinning test (S10). It has an issue; see [Gaps](#gaps).
+Status of the 78 entries: all 78 pinned; [Gaps](#gaps) is empty.
 
 ## Summary
 
@@ -44,7 +44,7 @@ Status of the 78 entries: 77 pinned, 1 with no pinning test (S10). It has an iss
 | [S7](#s7-dep_-metadata) | `DEP_*` metadata | yes |
 | [S8](#s8-links-overrides) | `links` overrides | yes |
 | [S9](#s9-directive-values) | Directive values | yes |
-| [S10](#s10-directive-errors-and-warnings) | Directive errors and warnings | **no** (#33) |
+| [S10](#s10-directive-errors-and-warnings) | Directive errors and warnings | yes |
 | [S11](#s11-dynamic-library-paths) | Dynamic-library paths | yes |
 | [S12](#s12-cargo-appends-its-own-dynamic-library-path) | Cargo appends its own dynamic-library path | yes |
 | [U1](#u1-the-classic-build-directory-layout) | The classic build-directory layout | yes |
@@ -313,12 +313,12 @@ Status of the 78 entries: 77 pinned, 1 with no pinning test (S10). It has an iss
 
 ### S10. Directive errors and warnings
 
-- **Assumption.** Cargo 1.99's error paths hold across the window: an unknown `cargo::` key is an error; `rustc-env=RUSTC_BOOTSTRAP=…` is an error (a warning only when nightly features are allowed and Cargo's own `RUSTC_BOOTSTRAP` permits it); `rustc-flags` with anything but `-l`/`-L` is an error; `rustc-link-arg-bin` naming no bin is an error; `cargo::error=` fails the run with Cargo's streaming rules.
-- **Where.** `crates/breakbulk-unit/src/directives.rs`: `parse`, `streamed_log_messages`; `crates/breakbulk-plan/src/graph.rs`: `run_unit` (`nightly_features_allowed`, from the `nightly` capability).
+- **Assumption.** Cargo 1.99's error paths hold across the window: an unknown `cargo::` key, or a `cargo::` line without `=`, is an error; `rustc-env=RUSTC_BOOTSTRAP=…` is an error whose help names the library's crate name (a warning when nightly features are allowed, or Cargo's own `RUSTC_BOOTSTRAP` lists that name); `rustc-env` without a value is an error; `rustc-flags` with anything but `-l`/`-L`, or a flag without a value, is an error; `rustc-link-arg-bin` naming no bin and `rustc-link-arg-bins`/`-examples` without such a target are errors; `rustc-link-arg-cdylib` without a cdylib is a warning; `cargo::error=` fails the run with Cargo's streaming rules (leading whitespace, `\r\n`, invalid UTF-8); `cargo::` needs `rust-version` 1.77 or later. Cargo prints a rejected directive's message alone, and before "build script logged errors" or an unsuccessful exit, the `warning` and `error` lines it collected while the script ran.
+- **Where.** `crates/breakbulk-unit/src/directives.rs`: `parse`, `streamed_log_messages`; `crates/breakbulk-unit/src/run.rs`: `judge`; `crates/breakbulk-plan/src/graph.rs`: `run_unit` (`nightly_features_allowed`, from the `nightly` capability, [L10](#l10-toolchain-capabilities-from-versions-and-probes)).
 - **Upstream.** cargo `0.100.0` `src/compiler/custom_build.rs`: `BuildOutput::parse`, the `exec_with_streaming` callback in `build_work`; rust-lang/cargo#7088.
-- **Holds for.** 1.99 by reading the source.
-- **Pinned by.** **Nothing.** Rust: `directives::tests::new_syntax_unknown_key_is_error`, `rustc_bootstrap`, `rustc_flags_splitting`, `link_arg_target_validation`, `streaming_errors_match_cargo`, `msrv_gate` check the copy only. Issue **#33**.
-- **If it changes.** A unit fails where `cargo build` succeeds, or succeeds where it fails; nothing notices.
+- **Holds for.** The window.
+- **Pinned by.** `differential-errors`, `differential-errors-1_95`, `differential-errors-1_97`, `differential-errors-nightly` (`tests/differential/errors.nix`: real `cargo build` and `breakbulk-unit unit` on one build script per case, `tests/fixtures/directive-errors`; outcome and messages compared). Rust: `directives::tests::new_syntax_unknown_key_is_error`, `rustc_bootstrap`, `rustc_flags_splitting`, `link_arg_target_validation`, `streaming_errors_match_cargo`, `msrv_gate`; `run::tests::failures_print_streamed_messages_first`.
+- **If it changes.** A unit fails where `cargo build` succeeds, or the other way round; the checks fail.
 
 ### S11. Dynamic-library paths
 
@@ -826,9 +826,7 @@ Status of the 78 entries: 77 pinned, 1 with no pinning test (S10). It has an iss
 
 Assumptions that no flake check pins, or pins for some cases only. Each has an issue with the exit criterion "a test that fails if this assumption changes".
 
-| Entry | Gap | Issue |
-| --- | --- | --- |
-| [S10](#s10-directive-errors-and-warnings) | Directive error and warning paths are checked only against breakbulk's copy of Cargo's code | #33 |
+None at the moment.
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), `include` and `config`-over-`config.toml` (T6, guarded at plan time), and the non-Linux rows of G3.
 

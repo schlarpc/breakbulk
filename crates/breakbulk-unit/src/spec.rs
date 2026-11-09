@@ -320,6 +320,15 @@ impl PackageTarget {
     pub fn is_cdylib(&self) -> bool {
         self.has_kind("cdylib")
     }
+    /// Cargo's `Target::is_lib`: the library, whatever its crate types.
+    pub fn is_lib(&self) -> bool {
+        !self.kind.iter().any(|k| {
+            matches!(
+                k.as_str(),
+                "bin" | "example" | "test" | "bench" | "custom-build"
+            )
+        })
+    }
 }
 
 /// `host` or `target`, observed from Cargo's output layout.

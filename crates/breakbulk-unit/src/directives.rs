@@ -436,10 +436,16 @@ pub fn parse(input: &[u8], ctx: &ParseContext<'_>) -> Result<BuildOutput, Direct
                             ),
                         });
                     } else {
+                        // Cargo's `library_name`: the library's crate name.
+                        let allow = ctx
+                            .targets
+                            .iter()
+                            .find(|t| t.is_lib())
+                            .map_or("1".to_owned(), |t| t.name.replace('-', "_"));
                         bail!(
                             "cannot set `RUSTC_BOOTSTRAP={val}` from {whence}.\n\
                              note: crates cannot set `RUSTC_BOOTSTRAP` themselves, as doing so would subvert the stability guarantees of Rust for your project.\n\
-                             help: If you're sure you want to do this in your project, set the environment variable `RUSTC_BOOTSTRAP=1` before running cargo instead."
+                             help: If you're sure you want to do this in your project, set the environment variable `RUSTC_BOOTSTRAP={allow}` before running cargo instead."
                         );
                     }
                 } else {

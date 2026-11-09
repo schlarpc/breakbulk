@@ -1,0 +1,28 @@
+# Directive error paths (tests/directive-errors): one package per case,
+# each build script printing fixed bytes.
+[workspace]
+resolver = "2"
+members = [
+    "arg-bin-absent",
+    "arg-bin-form",
+    "arg-bins-nobin",
+    "arg-cdylib-none",
+    "arg-examples-none",
+    "bootstrap",
+    "crlf-error",
+    "env-no-value",
+    "exit-failure",
+    "flags-no-value",
+    "flags-ok",
+    "flags-other",
+    "indented-error",
+    "logged-error",
+    "msrv-new",
+    "msrv-old",
+    "msrv-old-metadata",
+    "no-equals",
+    "old-metadata",
+    "unknown-key",
+    "utf8-error",
+    "warnings",
+]

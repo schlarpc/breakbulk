@@ -44,6 +44,15 @@ fn judge_with_stderr(
     stdout: &str,
     stderr: &str,
 ) -> Result<Success, Error> {
+    judge_full(r, status, stdout, stderr).map_err(|f| f.error)
+}
+
+fn judge_full(
+    r: &RenderedRun,
+    status: i32,
+    stdout: &str,
+    stderr: &str,
+) -> Result<Success, Failure> {
     let env = BTreeMap::from([("SET".to_owned(), "1".to_owned())]);
     judge(&Finished {
         run: r,
@@ -340,11 +349,58 @@ fn error_directives_follow_cargo() {
     // (decision log #8).
     let s = judge_with(&r, 0, "  cargo::error=soft\n").unwrap();
     assert_eq!(s.warnings, ["error: foo-sys@1.2.3: soft"]);
-    // A directive Cargo rejects fails the run.
-    let e = judge_with(&r, 0, "cargo::rustc-link-arg-bins=x\n").unwrap_err();
-    assert!(e.0.contains("does not have a bin target"), "{e}");
+    // A directive Cargo rejects fails the run with Cargo's message alone.
+    let e = judge_full(
+        &r,
+        0,
+        "cargo::warning=w\ncargo::rustc-link-arg-bins=x\n",
+        "",
+    )
+    .unwrap_err();
+    assert!(
+        e.error
+            .0
+            .starts_with("invalid instruction `cargo::rustc-link-arg-bins`"),
+        "{}",
+        e.error
+    );
+    assert!(
+        e.error.0.contains("does not have a bin target"),
+        "{}",
+        e.error
+    );
+    assert!(e.messages.is_empty(), "{:?}", e.messages);
     let e = judge_with(&r, 0, "cargo::bogus=x\n").unwrap_err();
+    assert!(
+        e.0.starts_with("invalid output in build script of `foo-sys v1.2.3`"),
+        "{e}"
+    );
     assert!(e.0.contains("Unknown key: `bogus`"), "{e}");
+}
+
+#[test]
+fn failures_print_streamed_messages_first() {
+    let t = TempDir::new("msgs");
+    let r = unit(t.path());
+    let stdout = "cargo::warning=w\ncargo::error=e\n  cargo::error=indented\n";
+    let streamed = ["warning: foo-sys@1.2.3: w", "error: foo-sys@1.2.3: e"];
+    // Logged errors: what Cargo collected while the script ran, then its
+    // error alone.
+    let e = judge_full(&r, 0, stdout, "").unwrap_err();
+    assert_eq!(e.messages, streamed);
+    assert!(
+        e.error.0.starts_with("build script logged errors"),
+        "{}",
+        e.error
+    );
+    // An unsuccessful exit: the same, then the error with its context.
+    let e = judge_full(&r, 1 << 8, stdout, "").unwrap_err();
+    assert_eq!(e.messages, streamed);
+    assert!(
+        e.error.0.starts_with("failed to run custom build command"),
+        "{}",
+        e.error
+    );
 }
 
 #[test]

@@ -7,8 +7,9 @@
 //!    when the package declares `links`.
 //! 5. Fail on a non-zero exit, on death by signal (naming the signal), on a
 //!    directive Cargo rejects, and on an `error` directive by Cargo's rule
-//!    (only lines starting exactly with `cargo::error=`; decision log #8).
-//!    Print warnings. A failure ends with the last lines of the script's
+//!    (only lines starting exactly with `cargo::error=`; decision log #8),
+//!    with Cargo's messages ([`judge`]). Print warnings. A failure ends with
+//!    the last lines of the script's
 //!    stderr, which is streamed as the script runs, so a panic is not buried
 //!    under stdout and hints.
 //! 6. Check `rerun-if-changed` paths against the sandbox: on failure, hint at
@@ -242,6 +243,37 @@ pub struct Success {
     pub warnings: Vec<String>,
 }
 
+/// A failed run, as Cargo reports it: the build script's messages, then
+/// the error.
+#[derive(Debug)]
+pub struct Failure {
+    /// The `warning` and `error` directives Cargo collected while the script
+    /// ran ([`streamed_log_messages`]), as Cargo prints them before the
+    /// error of a run that exited unsuccessfully or logged errors.
+    pub messages: Vec<String>,
+    pub error: Error,
+}
+
+impl Failure {
+    fn bare(error: Error) -> Failure {
+        Failure {
+            messages: Vec::new(),
+            error,
+        }
+    }
+}
+
+/// A build script's message as Cargo prints it, prefixed `name@version`.
+fn message_line(spec: &str, LogMessage { severity, message }: &LogMessage) -> String {
+    match severity {
+        Severity::Warning => format!("warning: {spec}: {message}"),
+        Severity::Error => format!("error: {spec}: {message}"),
+    }
+}
+
+/// Cargo's error for a run that failed as a process (or, in breakbulk, for
+/// `strictSources`), with the script's stdout as Cargo shows it, then
+/// breakbulk's [`diagnostics`].
 fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Error {
     let descr = package_descr(&f.run.package);
     let mut msg =
@@ -255,6 +287,14 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
             msg.push('\n');
         }
     }
+    msg.push_str(&diagnostics(f, parsed));
+    Error(msg)
+}
+
+/// What breakbulk adds to a failure: hints at missing paths and unset
+/// variables, and the end of the script's stderr.
+fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
+    let mut msg = String::new();
     // Directives Cargo would still parse from a failed run's output, for
     // the hints. A parse error here is not worth reporting over the failure.
     let reparsed;
@@ -266,6 +306,7 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
         }
     };
     let cwd = Path::new(&f.run.cwd);
+    let stdout = String::from_utf8_lossy(f.stdout);
     let stderr = String::from_utf8_lossy(f.stderr_tail);
     let mut hints = Vec::new();
     if let Some(p) = parsed {
@@ -310,7 +351,7 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
             msg.push('\n');
         }
     }
-    Error(msg)
+    msg
 }
 
 fn context<'a>(f: &'a Finished<'a>) -> ParseContext<'a> {
@@ -325,28 +366,39 @@ fn context<'a>(f: &'a Finished<'a>) -> ParseContext<'a> {
 }
 
 /// Decide the result of a finished run.
-pub fn judge(f: &Finished<'_>) -> Result<Success, Error> {
+///
+/// As Cargo: a run that exited unsuccessfully fails with "failed to run
+/// custom build command"; a directive Cargo rejects fails with Cargo's
+/// message alone; an `error` directive fails with "build script logged
+/// errors". The first and last print the streamed messages first.
+pub fn judge(f: &Finished<'_>) -> Result<Success, Failure> {
+    // Cargo's prefix for build-script messages is `name@version`.
+    let spec = package_spec(&f.run.package);
+    let streamed = streamed_log_messages(f.stdout);
+    let streamed_lines = || streamed.iter().map(|m| message_line(&spec, m)).collect();
     if !f.status.success() {
         let reason = format!(
             "process didn't exit successfully: `{}` ({})",
             shell_words(f.argv),
             describe_status(&f.status)
         );
-        return Err(failure(f, reason, None));
+        return Err(Failure {
+            messages: streamed_lines(),
+            error: failure(f, reason, None),
+        });
     }
     let descr = package_descr(&f.run.package);
     let mut ctx = context(f);
     ctx.pkg_descr = &descr;
-    let output = parse(f.stdout, &ctx).map_err(|e| failure(f, e.0, None))?;
-    if streamed_log_messages(f.stdout)
-        .iter()
-        .any(|m| m.severity == Severity::Error)
-    {
-        return Err(failure(
-            f,
-            "build script logged errors".into(),
-            Some(&output),
-        ));
+    let output = parse(f.stdout, &ctx).map_err(|e| Failure::bare(Error(e.0)))?;
+    if streamed.iter().any(|m| m.severity == Severity::Error) {
+        return Err(Failure {
+            messages: streamed_lines(),
+            error: Error(format!(
+                "build script logged errors{}",
+                diagnostics(f, Some(&output))
+            )),
+        });
     }
     let cwd = Path::new(&f.run.cwd);
     let missing = missing_paths(&output, cwd);
@@ -356,17 +408,12 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Error> {
             "`strictSources` is set and the build script declared paths that are not in the sandbox:\n  {}",
             hints.join("\n  ")
         );
-        return Err(failure(f, reason, Some(&output)));
+        return Err(Failure::bare(failure(f, reason, Some(&output))));
     }
-    // Cargo's prefix for build-script messages is `name@version`.
-    let spec = package_spec(&f.run.package);
     let mut warnings: Vec<String> = output
         .log_messages
         .iter()
-        .map(|LogMessage { severity, message }| match severity {
-            Severity::Warning => format!("warning: {spec}: {message}"),
-            Severity::Error => format!("error: {spec}: {message}"),
-        })
+        .map(|m| message_line(&spec, m))
         .collect();
     warnings.extend(hints.into_iter().map(|h| format!("warning: {spec}: {h}")));
     Ok(Success { output, warnings })
@@ -472,7 +519,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .iter()
         .filter_map(|m| m.out.as_deref().map(PathBuf::from))
         .collect();
-    let success = judge(&Finished {
+    let judged = judge(&Finished {
         run: r,
         argv: &argv,
         env: &env,
@@ -481,7 +528,16 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         status,
         stdout: &stdout,
         stderr_tail: &stderr_tail,
-    })?;
+    });
+    let success = match judged {
+        Ok(s) => s,
+        Err(Failure { messages, error }) => {
+            for m in &messages {
+                eprintln!("{m}");
+            }
+            return Err(error);
+        }
+    };
     for w in &success.warnings {
         eprintln!("{w}");
     }

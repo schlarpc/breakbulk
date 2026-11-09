@@ -260,6 +260,14 @@
           }
           # The same on rust-overlay's 1.95, 1.97 and nightly, 6 seeds each.
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "differential-${n}" v) d.versions
+          # Directive error paths against real Cargo, on the same releases:
+          # differential-errors (nixpkgs' Cargo), differential-errors-<label>.
+          // nixpkgs.lib.mapAttrs' (
+            n: v:
+            nixpkgs.lib.nameValuePair (
+              "differential-errors" + nixpkgs.lib.optionalString (n != "default") "-${n}"
+            ) v
+          ) d.errors
           # End-to-end fixtures through the traced planner (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "plan-${n}" v) (
             builtins.removeAttrs p [ "workspaces" ]
