@@ -5,7 +5,12 @@
   </picture>
 </h1>
 
+[![Documentation](https://img.shields.io/badge/docs-schlarpc.github.io%2Fbreakbulk-blue)](https://schlarpc.github.io/breakbulk/)
+[![CI](https://github.com/schlarpc/breakbulk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/schlarpc/breakbulk/actions/workflows/ci.yml)
+
 breakbulk builds Rust projects with Nix, one derivation per Cargo unit.
+**[Read the documentation](https://schlarpc.github.io/breakbulk/)**, or
+start with the [tutorial](https://schlarpc.github.io/breakbulk/tutorials/first-project.html).
 
 A Cargo unit is one rustc call (a library, a binary, a test harness) or one
 build-script run. breakbulk runs your own Cargo once to record what it would
