@@ -209,3 +209,8 @@ Cargo's own `clippy` uses the dev profile.
 
 For feature matrices, `breakbulk.variants.featurePowerset` and
 `packageFeaturePowerset` generate variants, as cargo-hack does.
+
+A variant's settings can differ per target: a target's `variantDefaults`
+applies to every variant on it, and `variants.<v>.target.<triple>` to one
+variant. See [Different features per
+target](../how-to/targets.md#different-features-per-target).

@@ -383,6 +383,7 @@ let
           "_module"
           "packages"
           "tests"
+          "variantDefaults"
         ]
       );
     in
@@ -631,6 +632,19 @@ let
   variantsFor =
     ws: triple: lib.filterAttrs (_: v: v.targets == null || lib.elem triple v.targets) ws.variants;
 
+  # Each planned variant's settings on each target: its own, then the
+  # target's `variantDefaults`, then its `target.<triple>` layer. Every
+  # per-variant decision below reads these.
+  variantCells = lib.mapAttrs (
+    wsName: ws:
+    lib.mapAttrs (
+      triple: _:
+      lib.mapAttrs (
+        _: v: v.onTarget (targetSpecs.${wsName}.${triple}.config.variantDefaults or { }) triple
+      ) (variantsFor ws triple)
+    ) ws.targets
+  ) cfg.workspaces;
+
   # The target's stage set's inputs (lib/products.nix targetStageSet): one
   # decision, per target, of what happens to debug info (`debugInfo`),
   # read by the products, the remap scope and the build ID
@@ -649,7 +663,7 @@ let
   instance =
     wsName: ws: triple: vName:
     let
-      v = ws.variants.${vName};
+      v = variantCells.${wsName}.${triple}.${vName};
       entries = locks.${wsName};
       sel = selOf wsName triple v;
       tsel = testSelOf wsName triple v;
@@ -866,7 +880,7 @@ let
           variants = lib.mapAttrs (
             vName: inst:
             let
-              v = ws.variants.${vName};
+              v = variantCells.${wsName}.${triple}.${vName};
               sel = selOf wsName triple v;
               # Test outputs: none when the target has `tests = false`.
               tsel = testSelOf wsName triple v;
@@ -916,9 +930,10 @@ let
               testApps = { };
               doctests = { };
             };
-          benchVariants = lib.attrNames (lib.filterAttrs (n: v: v.benches && vs ? ${n}) ws.variants);
+          cells = variantCells.${wsName}.${triple};
+          benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) cells);
           benchVariant =
-            if (ws.variants.${ws.defaultVariant}.benches or false) && vs ? ${ws.defaultVariant} then
+            if cells.${ws.defaultVariant}.benches or false then
               ws.defaultVariant
             else if lib.length benchVariants == 1 then
               lib.head benchVariants
@@ -1020,7 +1035,7 @@ let
       lib.concatMapAttrs (
         vName: v:
         let
-          vc = cfg.workspaces.${wsName}.variants.${vName};
+          vc = variantCells.${wsName}.${triple}.${vName};
           prefix =
             if vName == cfg.workspaces.${wsName}.defaultVariant then
               "${wsName}/${triple}"
@@ -1131,7 +1146,14 @@ let
   warned = x: lib.foldr (w: acc: lib.warn w acc) x warnings;
   # The modules' `assertions` (lib/modules/types.nix): any false one fails
   # whatever the repository is read for, with every such message.
-  failedAssertions = map (a: a.message) (lib.filter (a: !a.assertion) cfg.assertions);
+  # Each variant's settings on each target have their own, as a target
+  # layer can break what the variant's own settings satisfy.
+  cellAssertions = lib.concatMap (lib.concatMap (lib.concatMap (v: v.assertions))) (
+    map (lib.mapAttrsToList (_: lib.attrValues)) (lib.attrValues variantCells)
+  );
+  failedAssertions = lib.unique (
+    map (a: a.message) (lib.filter (a: !a.assertion) (cfg.assertions ++ cellAssertions))
+  );
   # `mode = "auto"`: dynamic-derivation mode when the evaluator has
   # `builtins.outputOf` and is Nix 2.36 or later (lib/dynamic.nix).
   delivery = dynamic.resolveMode cfg.mode;

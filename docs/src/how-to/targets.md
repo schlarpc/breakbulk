@@ -103,6 +103,64 @@ the one the project's `.cargo/config.toml` names in `build.target`. Set
 `defaultTarget` to choose another. See [Outputs](../reference/outputs.md)
 for everything under `target.<triple>`.
 
+## Different features per target
+
+When you control the crate, prefer `cfg` and target-specific
+dependencies (`[target.'cfg(windows)'.dependencies]`): they also work
+under plain Cargo. Use the options below for crates whose own features
+are the switch, as a CI matrix would pass
+`--target wasm32-unknown-unknown --no-default-features --features web`.
+
+A target's
+[`variantDefaults`](../reference/options/workspaces.md#workspacesnametargetsnamevariantdefaults)
+applies to every variant on that target:
+
+```nix
+workspaces.default.targets = {
+  x86_64-unknown-linux-gnu = { };
+  x86_64-pc-windows-msvc.variantDefaults.features = [ "windows" ];
+  wasm32-unknown-unknown.variantDefaults = {
+    noDefaultFeatures = true;
+    features = [ "web" ];
+  };
+};
+```
+
+One variant can differ on one target with
+[`variants.<v>.target.<triple>`](../reference/options/workspaces.md#workspacesnamevariantsnametarget),
+which takes any variant option:
+
+```nix
+workspaces.default.variants.clippy = {
+  mode = "clippy";
+  # No test harness on wasm: lint the libraries and bins only.
+  target.wasm32-unknown-unknown.allTargets = false;
+};
+workspaces.default.variants.minimal = {
+  noDefaultFeatures = true;
+  # Not even the target's `windows` feature.
+  target.x86_64-pc-windows-msvc.features = lib.mkForce [ ];
+};
+```
+
+The layers merge in this order, by module rules:
+
+| Order | Layer |
+| --- | --- |
+| 1 | `variants.<v>` |
+| 2 | `targets.<triple>.variantDefaults` |
+| 3 | `variants.<v>.target.<triple>` |
+
+Lists such as `features` concatenate. A single value, such as `profile`
+or `noDefaultFeatures`, set to different values in two layers is an
+error unless one uses `lib.mkForce`. `lib.mkForce` on a list replaces the
+other layers' lists.
+
+`breakbulk.variants.packageFeaturePowerset` runs keep their own
+`features`, `noDefaultFeatures` and `allFeatures` over `variantDefaults`:
+each run selects one package (`-p`), and Cargo rejects a feature that
+the selected package does not have.
+
 ## Windows (MSVC)
 
 The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are

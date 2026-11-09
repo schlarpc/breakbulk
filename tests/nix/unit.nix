@@ -404,12 +404,15 @@ runTests "lib-unit" {
         path = "ws";
         mode = "check";
       };
+      # A run's own feature settings are `mkOverride 90` definitions, so
+      # a target's variantDefaults do not change them.
+      own = d: assert d._type == "override" && d.priority == 90; d.content;
       shape = lib.mapAttrs (
         _: v: {
           inherit (v) packages mode;
-          features = v.features or [ ];
-          all = v.allFeatures or false;
-          noDefault = v.noDefaultFeatures or false;
+          features = own v.features;
+          all = own v.allFeatures;
+          noDefault = own v.noDefaultFeatures;
         }
       );
       lib-a = features: noDefault: all: {

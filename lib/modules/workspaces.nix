@@ -58,6 +58,29 @@ let
         variant's or target's package selection.
       '';
     };
+    options.variantDefaults = mkOption {
+      type = types.deferredModule;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          noDefaultFeatures = true;
+          features = [ "web" ];
+        }
+      '';
+      description = ''
+        Settings for every variant planned on this target: any option of
+        `variants.<v>`, for facts about the target ("msvc needs the
+        `windows` feature", "wasm has no default features"). For each
+        variant on this target they merge over the variant's own settings,
+        and its `variants.<v>.target.<triple>` merges over them, by module
+        rules: lists concatenate, and a single value set to different values
+        in two of these places needs `lib.mkForce` on the one that wins.
+
+        Variants made by `breakbulk.variants.packageFeaturePowerset` keep
+        their own `features`, `noDefaultFeatures` and `allFeatures` over
+        these: Cargo rejects a feature that no selected package has.
+      '';
+    };
   };
 
   # `ws`: the workspace's config, for defaults a variant inherits;
@@ -68,14 +91,26 @@ let
       name,
       options,
       config,
+      extendModules,
       ...
     }:
     let
       at = "workspaces.${wsName}.variants.${name}";
       checkMode = config.mode == "check" || config.mode == "clippy";
       unknownTargets = lib.filter (t: !(ws.targets ? ${t})) (if config.targets == null then [ ] else config.targets);
+      planned = if config.targets == null then lib.attrNames ws.targets else config.targets;
+      unplannedLayers = lib.filter (t: !(lib.elem t planned)) (lib.attrNames config.target);
     in
     {
+      # Through extendModules, so the variant's own definitions keep their
+      # priorities: a value merged first could not be replaced by a plain
+      # definition in a later layer.
+      config.onTarget =
+        defaults: triple:
+        (extendModules {
+          modules = [ defaults ] ++ lib.optional (config.target ? ${triple}) config.target.${triple};
+        }).config;
+
       config.assertions = [
         {
           assertion = !(config.benches && checkMode);
@@ -88,6 +123,10 @@ let
         {
           assertion = unknownTargets == [ ];
           message = "breakbulk: ${at}.targets${bt.setIn options.targets}: ${lib.concatStringsSep ", " unknownTargets} not among the workspace's targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
+        }
+        {
+          assertion = unplannedLayers == [ ];
+          message = "breakbulk: ${at}.target${bt.setIn options.target}: ${lib.concatStringsSep ", " unplannedLayers} not among the targets this variant is planned for (${lib.concatStringsSep ", " planned})";
         }
       ];
 
@@ -175,6 +214,39 @@ let
             out, the target's `packages`, `tests` and test runs are empty.
             Use it for gates that apply to one target only (clippy
             natively, a `cargo check` gate for wasm).
+          '';
+        };
+        target = mkOption {
+          type = types.attrsOf types.deferredModule;
+          default = { };
+          example = lib.literalExpression ''
+            {
+              x86_64-pc-windows-msvc.features = [ "windows" ];
+              wasm32-unknown-unknown = {
+                noDefaultFeatures = lib.mkForce true;
+                allTargets = false;
+              };
+            }
+          '';
+          description = ''
+            This variant's settings on one of its targets: any option of
+            the variant (`features`, `noDefaultFeatures`, `profile`,
+            `allTargets`, `clippyArgs`, `packages`, `benches`, `checks`, …)
+            except `targets`. They merge over the variant's own settings
+            and the target's `variantDefaults`
+            (`workspaces.<ws>.targets.<triple>.variantDefaults`), in that
+            order, by module rules: lists concatenate, and a single
+            value set to different values in two of these places needs
+            `lib.mkForce` on the one that wins. Only targets the variant is planned for are allowed.
+          '';
+        };
+        onTarget = mkOption {
+          type = types.raw;
+          internal = true;
+          readOnly = true;
+          description = ''
+            The variant's settings on one target, as a function of the
+            target's `variantDefaults` module and the triple.
           '';
         };
         packages = mkOption {

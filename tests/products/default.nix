@@ -53,6 +53,12 @@
 #                    and `targets.<t>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
 #                    under `variant-<v>/` unless `checks = false`
+#   variants-per-target   `targets.<t>.variantDefaults` and
+#                    `variants.<v>.target.<t>` (wasm32 with rust-overlay's
+#                    1.99): a feature on one target only, a variant's
+#                    layer replacing the defaults, a package run keeping
+#                    its own features, `allTargets = false` on one
+#                    target; invalid layers fail evaluation
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
 #   variants-clippy-toolchain   with rust-overlay's 1.99 as rustc and
@@ -1019,6 +1025,119 @@ in
       ''
         printf '%s\n' "$report" > $out
       '';
+
+  # Per-target variant settings: castaway's shape (one `default` variant,
+  # a feature only on another target, through that target's
+  # `variantDefaults`), a variant replacing the defaults in its own target
+  # layer, a package run keeping its own features over the defaults, and
+  # `allTargets = false` on one target only. wasm32 stands in for msvc,
+  # with a rust-overlay toolchain that has its std.
+  variants-per-target =
+    let
+      wasm = "wasm32-unknown-unknown";
+      wasmRust = overlayRust.override { targets = [ wasm ]; };
+      repoWith =
+        extra:
+        mkRepo (fixtures + "/variants") [
+          {
+            workspaces.main = lib.mkMerge [
+              {
+                path = "ws";
+                toolchain = {
+                  rustc = wasmRust;
+                  cargo = wasmRust;
+                };
+                targets = {
+                  ${native} = { };
+                  ${wasm}.variantDefaults.features = [ "lib-a/y" ];
+                };
+              }
+              extra
+            ];
+          }
+        ];
+      repo = repoWith {
+        variants = {
+          default.profile = "release";
+          own = {
+            profile = "release";
+            features = [ "lib-a/x" ];
+            target.${wasm} = {
+              features = lib.mkForce [ ];
+              noDefaultFeatures = true;
+            };
+          };
+          gate = {
+            mode = "check";
+            profile = "release";
+            target.${wasm}.allTargets = false;
+          };
+        }
+        // breakbulk.variants.packageFeaturePowerset {
+          root = fixtures + "/variants";
+          path = "ws";
+          packages = [ "lib-a" ];
+          eachFeature = true;
+          mode = "check";
+          profile = "release";
+        };
+      };
+      w = repo.workspaces.main;
+      planCmd = triple: vName: kind: w.instances.${triple}.${vName}.plans.${kind}.drvAttrs.buildCommand;
+      has = triple: vName: s: lib.hasInfix " ${s} " (planCmd triple vName "build");
+      unitsOf = triple: lib.length w.target.${triple}.variants.gate.check.units;
+      planUnits =
+        triple: kind:
+        lib.length (lib.concatMap (u: u.outputs) (lib.attrValues w.instances.${triple}.gate.units.${kind}));
+      fails =
+        extra:
+        !(builtins.tryEval (
+          builtins.deepSeq (lib.mapAttrs (_: lib.mapAttrs (_: p: p.build.drvPath)) (repoWith extra).workspaces.main.plans) true
+        )).success;
+      bad = lib.attrNames (
+        lib.filterAttrs (_: ok: !ok) {
+          # The default variant: lib-a/y on wasm only.
+          defaultNative = !(has native "default" "--features");
+          defaultWasm = has wasm "default" "--features lib-a/y";
+          # `own`: its feature natively; on wasm its layer replaces both.
+          ownNative = has native "own" "--features lib-a/x" && !(has native "own" "--no-default-features");
+          ownWasm = !(has wasm "own" "--features") && has wasm "own" "--no-default-features";
+          # A `-p lib-a` run keeps exactly its own features on wasm.
+          hackWasm =
+            has wasm "hack-lib-a.x" "--features x"
+            && !(lib.hasInfix "lib-a/y" (planCmd wasm "hack-lib-a.x" "build"));
+          hackNoDefault =
+            !(has wasm "hack-lib-a.no-default-features" "--features")
+            && has wasm "hack-lib-a.no-default-features" "--no-default-features";
+          # `allTargets = false` on wasm only: the build plan's units there,
+          # both plans' natively.
+          gateWasm = unitsOf wasm == planUnits wasm "build";
+          gateNative = unitsOf native == planUnits native "build" + planUnits native "test";
+          # A build variant cannot take `allTargets = false`, on one
+          # target either.
+          rejectsBuildAllTargets = fails { variants.default.target.${wasm}.allTargets = false; };
+          # A layer for a target the variant is not planned for.
+          rejectsUnplanned = fails {
+            variants.default = {
+              targets = [ native ];
+              target.${wasm}.profile = "dev";
+            };
+          };
+          # A single value set in the variant and its layer conflicts
+          # without mkForce.
+          conflicts = fails {
+            variants.default = {
+              profile = "release";
+              target.${wasm}.profile = "dev";
+            };
+          };
+        }
+      );
+    in
+    assert lib.assertMsg (bad == [ ]) "variants-per-target: failed ${toString bad}";
+    pkgs.runCommand "variants-per-target" { gate = w.target.${wasm}.variants.gate.check; } ''
+      cp $gate/units $out
+    '';
 
   source-paths =
     let
