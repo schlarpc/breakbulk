@@ -596,7 +596,12 @@ fn split_debuginfo_as(inputs: &mut Inputs, id: &str, kind: &str) {
     let Some(Unit::Compile(c)) = inputs.plan.units.get_mut(id) else {
         panic!("{id} is not a compile unit")
     };
-    for a in ["-C", "debuginfo=2", "-C", &format!("split-debuginfo={kind}")] {
+    for a in [
+        "-C",
+        "debuginfo=2",
+        "-C",
+        &format!("split-debuginfo={kind}"),
+    ] {
         c.args.push(breakbulk_format::Arg::Literal(a.into()));
     }
 }

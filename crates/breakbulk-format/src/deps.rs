@@ -377,10 +377,16 @@ pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
 /// on a target with these traits ([`CompileUnit::has_debug_output`]): the
 /// libraries whose `.dwo` files a binary linked from them names
 /// (`split-debuginfo=unpacked`, decision 126).
-pub fn debug_units_below(plan: &Plan, id: &UnitId, traits: &crate::TargetTraits) -> BTreeSet<UnitId> {
+pub fn debug_units_below(
+    plan: &Plan,
+    id: &UnitId,
+    traits: &crate::TargetTraits,
+) -> BTreeSet<UnitId> {
     units_below(plan, id)
         .into_iter()
-        .filter(|u| matches!(plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(traits)))
+        .filter(
+            |u| matches!(plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(traits)),
+        )
         .collect()
 }
 

@@ -1397,7 +1397,8 @@ fn debug_output_only_where_side_files() {
     assert!(c.outputs.contains_key("rlib"));
     assert!(!c.has_debug_output(msvc));
     assert!(!c.has_debug_output(elf));
-    c.args.extend(lit(&["-C", "debuginfo=2", "-C", "split-debuginfo=packed"]));
+    c.args
+        .extend(lit(&["-C", "debuginfo=2", "-C", "split-debuginfo=packed"]));
     assert!(!c.has_debug_output(elf));
     c.args.extend(lit(&["-C", "split-debuginfo=unpacked"]));
     assert!(c.has_debug_output(elf));
