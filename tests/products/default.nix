@@ -606,6 +606,7 @@ in
       benchesRepo
       embed
       ;
+    trimCc = trimCcRepo { };
   };
 
   embed =

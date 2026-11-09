@@ -86,6 +86,8 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
   "libc"
 ]) "build-std-deps: crates ${builtins.toJSON hostedCrates}";
 {
+  repos = { inherit bare hosted; };
+
   build-std =
     pkgs.runCommand "build-std"
       {

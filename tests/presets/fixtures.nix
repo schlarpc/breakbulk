@@ -1189,6 +1189,7 @@ in
       msvc
       wasmBrowser
       wasmComponent
+      staticPkgconfig
       ;
   };
   checks = {

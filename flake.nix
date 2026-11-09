@@ -95,6 +95,19 @@
             exec ${pkgs.bash}/bin/bash "$REPO/tests/test-options/run.sh" "$@"
           '');
         };
+        # HEAVY: builds every fixture's products and a sample of its units,
+        # then rebuilds them with `nix build --rebuild` and compares bytes.
+        #   nix run .#test-rebuild -- [--targets REGEX] [--every N] [fixture ...] [-- nix options]
+        test-rebuild = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "test-rebuild" ''
+            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.gnugrep pkgs.jq ]}
+            export REPO=''${REPO:-${self}}
+            # Built on the first difference only: diffoscope's closure is large.
+            export DIFFOSCOPE_DRV=''${DIFFOSCOPE_DRV:-${builtins.unsafeDiscardOutputDependency pkgs.diffoscopeMinimal.drvPath}}
+            exec ${pkgs.bash}/bin/bash "$REPO/tests/rebuild/run.sh" "$@"
+          '');
+        };
       } // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
         # linuxPortable (zig) binaries in a real glibc 2.17 userland: pulls
         # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
@@ -146,6 +159,13 @@
         // {
           # Every internal link and fragment of the documentation site.
           docs-site-links = (docsFor pkgs).links;
+
+          # Every fixture is in `nix run .#test-rebuild`'s catalog or
+          # skipped with a reason (evaluation only).
+          rebuild-catalog = pkgs.writeText "rebuild-catalog" (builtins.toJSON (import ./tests/rebuild {
+            inherit pkgs;
+            breakbulk = self.lib;
+          }).names);
 
           flake-systems =
             let
@@ -290,7 +310,7 @@
             builtins.removeAttrs (import ./tests/git-multi-workspace {
               inherit pkgs;
               breakbulk = self.lib;
-            }) [ "repo" ]
+            }) [ "repo" "ws" ]
           )
           # Stable test-run inputs for content-addressed cutoff (decision
           # 61), built input-addressed; the CA check itself needs

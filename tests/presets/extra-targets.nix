@@ -723,7 +723,9 @@ in
       wasip2Repo
       riscv64Repo
       windowsGnuRepo
+      windowsDllRepo
       zigRepo
+      zigNativeRepo
       ;
   };
   checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks // uefiChecks;
