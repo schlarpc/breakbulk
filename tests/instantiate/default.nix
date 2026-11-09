@@ -47,7 +47,7 @@ let
       fileset = lib.fileset.unions [
         (root + "/Cargo.toml")
         (root + "/Cargo.lock")
-        (root + "/crates")
+        (lib.fileset.difference (root + "/crates") (root + "/crates/breakbulk-drv"))
         # The crate's tests read the smoke plan.
         (root + "/tests/unit-smoke/plan.json")
       ];

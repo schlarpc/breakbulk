@@ -1,4 +1,4 @@
 /target
 /result*
-/breakbulk-drv/target
+/crates/breakbulk-drv/target
 __pycache__/

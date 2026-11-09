@@ -25,7 +25,12 @@
 }:
 pkgs:
 let
-  members = lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir (root + "/crates")));
+  # The directories under crates/ that the workspace does not exclude
+  # (crates/breakbulk-drv is a workspace of its own).
+  excluded = (builtins.fromTOML (builtins.readFile (root + "/Cargo.toml"))).workspace.exclude or [ ];
+  members = lib.filter (c: !lib.elem "crates/${c}" excluded) (
+    lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir (root + "/crates")))
+  );
   manifestOf = c: builtins.fromTOML (builtins.readFile (root + "/crates/${c}/Cargo.toml"));
 
   # Path dependencies of a member: [dependencies] and [build-dependencies],

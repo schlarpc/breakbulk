@@ -147,15 +147,15 @@ let
           (root + "/crates/breakbulk-instantiate")
           (root + "/crates/breakbulk-format")
           (root + "/crates/breakbulk-unit")
-          (root + "/breakbulk-drv/Cargo.toml")
-          (root + "/breakbulk-drv/Cargo.lock")
-          (root + "/breakbulk-drv/src")
+          (root + "/crates/breakbulk-drv/Cargo.toml")
+          (root + "/crates/breakbulk-drv/Cargo.lock")
+          (root + "/crates/breakbulk-drv/src")
         ];
       };
-      cargoRoot = "breakbulk-drv";
-      buildAndTestSubdir = "breakbulk-drv";
+      cargoRoot = "crates/breakbulk-drv";
+      buildAndTestSubdir = "crates/breakbulk-drv";
       cargoLock = {
-        lockFile = root + "/breakbulk-drv/Cargo.lock";
+        lockFile = root + "/crates/breakbulk-drv/Cargo.lock";
         outputHashes."harmonia-protocol-3.3.0" = "sha256-LLWOdT+JwMLYDQ5WwK7HIxz6cUNSs79iKhsJV8Mg7Hw=";
       };
       doCheck = false;

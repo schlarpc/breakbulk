@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Its own workspace and lockfile (see its Cargo.toml).
+exclude = ["crates/breakbulk-drv"]
 
 [workspace.package]
 version = "0.1.0"

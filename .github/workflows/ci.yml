@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workspace: [".", "breakbulk-drv"]
+        workspace: [".", "crates/breakbulk-drv"]
     steps:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/determinate-nix-action@v3
