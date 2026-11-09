@@ -97,9 +97,14 @@ let
     benches = [ products.repos.benchesRepo ];
     bin-exe-not-built = [ (plain "bin-exe-not-built" [ ]) ];
     build-dep-leak = [ (plain "build-dep-leak" [ ]) ];
-    build-std = [ buildStd.repos.bare ];
-    # Its test plan does not instantiate: breakbulk-instantiate finds the
-    # sysroot's `alloc` outside the skeleton.
+    # Their test plans do not instantiate: breakbulk-instantiate finds the
+    # sysroot's crates outside the skeleton.
+    build-std = [
+      {
+        source = buildStd.repos.bare;
+        except.plans = [ "test" ];
+      }
+    ];
     build-std-deps = [
       {
         source = buildStd.repos.hosted;
