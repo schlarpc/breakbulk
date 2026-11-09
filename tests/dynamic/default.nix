@@ -355,7 +355,8 @@ let
     windows-gnu = extraTargets.windowsGnuRepo;
     windows-gnullvm-aarch64 = extraTargets.windowsGnullvmA64Repo;
     uefi = extraTargets.uefiRepo;
-    windows-dll = extraTargets.windowsDllRepo;
+    # Only the staged repository: the other's buildScriptFiles check fails
+    # by design in both modes (the DLL beside the .exe is not staged).
     windows-dll-staged = extraTargets.windowsDllStagedRepo;
     linux-portable = extraTargets.zigRepo;
     linux-portable-native = extraTargets.zigNativeRepo;
@@ -514,7 +515,7 @@ let
               in
               {
                 key = "${wsName}/${triple}/${v}";
-                inherit inst out;
+                inherit triple inst out;
                 kinds = lib.filter (k: k != "test" || testPlan) (lib.attrNames inst.units);
               }
             ) vs
@@ -534,18 +535,23 @@ let
   # { pkg = { binary = run; }; } as { "pkg/binary" = run; }.
   flat2 = lib.concatMapAttrs (p: lib.mapAttrs' (b: lib.nameValuePair "${p}/${b}"));
 
-  # Fixtures whose test binaries link but cannot run here (no runner for
-  # the target): their test binaries are compared as products
-  # (`test-<pkg>-<name>`), and their test runs, doctests and the
-  # repo.checks that run tests are left out.
-  buildOnly = [ "windows-gnullvm-aarch64" ];
-  runsTests = n: !(lib.hasPrefix "test-" (baseNameOf n) || baseNameOf n == "doctest");
+  # Targets whose test binaries link but cannot run here (no runner): their
+  # test binaries are compared as products (`test-<pkg>-<name>`), and
+  # their test runs, doctests and the repo.checks that run tests
+  # (`<ws>/<triple>/…/test-<name>`, `…/doctest`) are left out.
+  buildOnly = [
+    "aarch64-pc-windows-gnullvm"
+    "aarch64-pc-windows-msvc"
+  ];
+  runsTests =
+    n:
+    !(
+      lib.elem (lib.elemAt (lib.splitString "/" n) 1) buildOnly
+      && (lib.hasPrefix "test-" (baseNameOf n) || baseNameOf n == "doctest")
+    );
 
   build =
     name: repo:
-    let
-      runs = !(lib.elem name buildOnly);
-    in
     pkgs.runCommand "${name}-${mode}" { } (
       lib.concatMapStrings (
         i:
@@ -561,7 +567,7 @@ let
           lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) i.out.packages
         )
         + (
-          if runs then
+          if !(lib.elem i.triple buildOnly) then
             linkEach "$out/runs/${i.key}" (flat2 i.out.testRuns)
             + linkEach "$out/runs/${i.key}/bench" (flat2 (i.out.benchRuns or { }))
             + linkEach "$out/doctests/${i.key}" i.out.doctests
@@ -580,7 +586,7 @@ let
       + lib.concatStrings (
         lib.mapAttrsToList (n: d: ''
           ln -s ${d} "$out/checks/${lib.replaceStrings [ "/" ] [ "-" ] n}"
-        '') (if runs then repo.checks else lib.filterAttrs (n: _: runsTests n) repo.checks)
+        '') (lib.filterAttrs (n: _: runsTests n) repo.checks)
       )
       + lib.optionalString (name == "test-control") ''
         ln -s ${ctlApps} $out/apps

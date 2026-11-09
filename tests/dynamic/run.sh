@@ -65,7 +65,8 @@ else
     build-std build-std-deps same-triple static-musl static-glibc
     static-pkgconfig cross-lto cross-lto-off uefi sys-native-aarch64
     wasm-browser wasm-component wasip2 riscv64 linux-portable
-    windows-gnullvm-aarch64
+    windows-gnullvm-aarch64 windows-gnu windows-dll-staged linux-portable-native
+    msvc msvc-post-link
   )
 fi
 
