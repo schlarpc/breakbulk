@@ -766,8 +766,15 @@ in
       lib.filter (lib.hasInfix "/variant-fp-") (lib.attrNames variantsRepo.checks) == [ ]
     ) "variants: powerset variants in repo.checks";
     assert lib.assertMsg (
-      lib.any (lib.hasPrefix "main/${native}/variant-coverage/") (lib.attrNames variantsRepo.checks)
+      lib.any (lib.hasPrefix "main/${native}/variant-coverage/lib-a/test-") (lib.attrNames variantsRepo.checks)
     ) "variants: the coverage variant's test runs are not in repo.checks";
+    # Its products and their checks too, and the custom build variant's.
+    assert lib.assertMsg (lib.all (n: variantsRepo.checks ? ${n}) [
+      "main/${native}/variant-coverage/app/build"
+      "main/${native}/variant-coverage/app/noSourceReferences"
+      "main/${native}/variant-custom/app/build"
+      "main/${native}/variant-custom/app/noSourceReferences"
+    ]) "variants: other variants' products are not in repo.checks";
     pkgs.runCommand "variants"
       {
         app = vt.packages.app;
@@ -919,12 +926,15 @@ in
                 noDefaultFeatures = true;
                 features = [ "y" ];
               };
-              # The same, kept out of repo.checks.
+              # The same with app's product, kept out of repo.checks.
               quiet = {
                 profile = "release";
                 targets = [ native ];
-                packages = [ "lib-a" ];
-                features = [ "y" ];
+                packages = [
+                  "lib-a"
+                  "app"
+                ];
+                features = [ "lib-a/y" ];
                 checks = false;
               };
               musl-check = {
@@ -984,7 +994,7 @@ in
           variantSelects = selects "y-only" "build" "lib-a" && !(selects "y-only" "build" "app");
           yInChecks = repo.checks ? "main/${native}/variant-y-only/lib-a/test-lib";
           yDiffers = yRun.drvPath != defaultRun.drvPath;
-          quietOut = under "main/${native}/variant-quiet/" == [ ];
+          quietOut = under "main/${native}/variant-quiet/" == [ ] && n.variants.quiet.packages ? app;
           defaultKept = repo.checks ? "main/${native}/lib-a/test-lib";
         }
       );

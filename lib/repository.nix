@@ -41,12 +41,12 @@
 # was built, the product is the first stub, which fails with the reason.
 # Every root is also under `.roots."<kind>/<target>"`.
 #
-# repo.checks: `<ws>/<triple>/<pkg>/build` (the default variant's
-# product), `…/<pkg>/<check>` (its checks), `…/<pkg>/test-<name>` (enabled
-# test runs) and `…/<pkg>/doctest`; other variants' test runs and doctests
-# as `<ws>/<triple>/variant-<v>/<pkg>/test-<name>` and `…/doctest`
-# (`variants.<v>.checks`), check and clippy variants as
-# `<ws>/<triple>/variant-<v>/check`.
+# repo.checks: for each build or coverage variant with `checks = true`,
+# `<pkg>/build` (the product), `<pkg>/<check>` (its checks),
+# `<pkg>/test-<name>` (enabled test runs) and `<pkg>/doctest`, under
+# `<ws>/<triple>/` for the default variant and
+# `<ws>/<triple>/variant-<v>/` for the others; check and clippy variants
+# as `<ws>/<triple>/variant-<v>/check`.
 #
 # Test names (`tests.<pkg>.<name>`): an integration test by its name, the
 # library's unit tests as `lib`, a bin's unit tests as `bin-<name>`, an
@@ -1007,32 +1007,17 @@ let
 
   workspaces = lib.mapAttrs workspaceOut cfg.workspaces;
 
-  # repo.checks, for every workspace and target: the default variant's
-  # products that built something (`build`) and their checks; every
-  # enabled test run (`test-<name>`, named as in `tests`) and doctest of
-  # each variant with `checks = true` (other variants' under
-  # `variant-<v>/`); check and clippy variants' `check`.
+  # repo.checks, for every workspace and target, from each build or
+  # coverage variant with `checks = true` (the default variant's under the
+  # target, the others' under `variant-<v>/`): its products that built
+  # something (`<pkg>/build`) and their checks, every enabled test run
+  # (`<pkg>/test-<name>`, named as in `tests`) and doctest; check and
+  # clippy variants' `check`.
   checks = lib.concatMapAttrs (
     wsName: w:
     lib.concatMapAttrs (
       triple: t:
       lib.concatMapAttrs (
-        pkg: p:
-        # IFD mode leaves out a product whose roots Cargo all skipped (it is
-        # a stub). Dynamic-derivation mode cannot tell at evaluation time:
-        # such a product holds only the no-binaries marker and its stages
-        # and checks pass it on, so it is in like any other.
-        lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
-          {
-            "${wsName}/${triple}/${pkg}/build" = p;
-          }
-          // lib.mapAttrs' (n: c: lib.nameValuePair "${wsName}/${triple}/${pkg}/${n}" c) (p.checks or { })
-        )
-      ) t.packages
-      # Test runs and doctests of every variant with `checks = true`: the
-      # default variant's under the package, the others' under
-      # `variant-<v>/`.
-      // lib.concatMapAttrs (
         vName: v:
         let
           vc = cfg.workspaces.${wsName}.variants.${vName};
@@ -1044,6 +1029,20 @@ let
         in
         lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
           lib.concatMapAttrs (
+            pkg: p:
+            # IFD mode leaves out a product whose roots Cargo all skipped
+            # (it is a stub). Dynamic-derivation mode cannot tell at
+            # evaluation time: such a product holds only the no-binaries
+            # marker and its stages and checks pass it on, so it is in
+            # like any other.
+            lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+              {
+                "${prefix}/${pkg}/build" = p;
+              }
+              // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
+            )
+          ) v.packages
+          // lib.concatMapAttrs (
             pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
           ) v.namedTestRuns
           // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.doctests

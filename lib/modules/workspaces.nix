@@ -194,13 +194,15 @@ let
           type = types.bool;
           default = true;
           description = ''
-            Put this variant's enabled test runs and doctests in
-            `repo.checks`: the default variant's as
-            `<ws>/<triple>/<pkg>/test-<name>` and `…/<pkg>/doctest`, any
-            other build or coverage variant's as
-            `<ws>/<triple>/variant-<v>/<pkg>/test-<name>` and
-            `…/variant-<v>/<pkg>/doctest`. Check and clippy variants have
-            no test runs; their `check` is in `repo.checks` regardless.
+            Put this build or coverage variant's outputs in `repo.checks`:
+            its products (`<pkg>/build`), their checks (`<pkg>/<check>`),
+            its enabled test runs (`<pkg>/test-<name>`) and doctests
+            (`<pkg>/doctest`). The default variant's are under
+            `<ws>/<triple>/`, any other variant's under
+            `<ws>/<triple>/variant-<v>/`. A product whose roots Cargo all
+            skipped (required features) is left out. Check and clippy
+            variants have no products or test runs; their `check` is in
+            `repo.checks` regardless.
             Variants made by `breakbulk.variants.featurePowerset` and
             `packageFeaturePowerset` set this to `false` unless their
             arguments set it.

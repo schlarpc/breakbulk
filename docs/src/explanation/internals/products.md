@@ -35,7 +35,7 @@ stages.<name> = {
 checks.<name> = { on = "linked"; run = { input, product, pkgs }: <derivation>; };
 ```
 
-Each check becomes `repo.checks."<ws>/<triple>/<pkg>/<name>"`. Every product gets `noSourceReferences` by default, which fails if the main output's runtime closure contains a source-view or crate-source store path, or one of the Rust toolchain's (rustc, its sysroot, cargo, a rust-overlay toolchain's components such as rust-src): a std panic location that names rust-src, or an embedded tool path, would make the toolchain a runtime dependency.
+Each check becomes `repo.checks."<ws>/<triple>/<pkg>/<name>"` (another variant's: `<ws>/<triple>/variant-<v>/<pkg>/<name>`). Every product gets `noSourceReferences` by default, which fails if the main output's runtime closure contains a source-view or crate-source store path, or one of the Rust toolchain's (rustc, its sysroot, cargo, a rust-overlay toolchain's components such as rust-src): a std panic location that names rust-src, or an embedded tool path, would make the toolchain a runtime dependency.
 
 The `debug` output is exempt. One toolchain reference is allowed: a toolchain path holding a shared library the checked output itself loads, read from its files (ELF `NEEDED`, PE imports) and looked up in that path's `lib`, `bin` and `lib/rustlib/<target>/{lib,bin}`.
 

@@ -93,12 +93,18 @@ libraries, passed through the target's post-link stages and installed
 
 All checks and test runs, flattened for a flake's `checks.<system>`:
 
-- the default variant's products, their checks, test runs and doctests,
-  as `<ws>/<triple>/<pkg>/build`, `…/<pkg>/<check>`, `…/<pkg>/test-<name>`
-  and `…/<pkg>/doctest`;
-- other variants' test runs and doctests, as
-  `<ws>/<triple>/variant-<v>/<pkg>/…`;
-- check and clippy variants, as `<ws>/<triple>/variant-<v>/check`.
+| What | Default variant | Other variants |
+|---|---|---|
+| product | `<ws>/<triple>/<pkg>/build` | `<ws>/<triple>/variant-<v>/<pkg>/build` |
+| product check | `…/<pkg>/<check>` | `…/variant-<v>/<pkg>/<check>` |
+| test run | `…/<pkg>/test-<name>` | `…/variant-<v>/<pkg>/test-<name>` |
+| doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
+| check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
+
+The first four rows come from every build or coverage variant with
+[`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)
+(the default for hand-written variants, not for the feature-matrix
+helpers'). A product whose roots Cargo all skipped is left out.
 
 ### `explainSharing`
 
