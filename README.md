@@ -57,25 +57,6 @@ The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is l
 - `nix develop` gives a shell where plain `cargo` behaves like breakbulk's
   planner.
 
-The [tutorial](https://schlarpc.github.io/breakbulk/tutorials/first-project.html) walks through this
-step by step.
-
-## Documentation
-
-<https://schlarpc.github.io/breakbulk/>
-
-- How-to guides: [native libraries](https://schlarpc.github.io/breakbulk/how-to/native-library.html),
-  [other targets](https://schlarpc.github.io/breakbulk/how-to/targets.html) (musl, aarch64, Windows,
-  wasm), [narrowing sources](https://schlarpc.github.io/breakbulk/how-to/filter-source.html),
-  [treefmt](https://schlarpc.github.io/breakbulk/how-to/treefmt.html),
-  [binary caches](https://schlarpc.github.io/breakbulk/how-to/binary-cache.html).
-- Reference: [module options](https://schlarpc.github.io/breakbulk/reference/options.html),
-  [presets](https://schlarpc.github.io/breakbulk/reference/presets.html),
-  [outputs](https://schlarpc.github.io/breakbulk/reference/outputs.html).
-- Explanation: [why breakbulk](https://schlarpc.github.io/breakbulk/explanation/why.html),
-  [how a build works](https://schlarpc.github.io/breakbulk/explanation/architecture.html),
-  [trade-offs](https://schlarpc.github.io/breakbulk/explanation/trade-offs.html).
-
 ## Status
 
 Early. The default mode reads Cargo's plan at evaluation time
@@ -86,16 +67,8 @@ on by itself once Nix 2.36 ships. Known gaps and planned work are in the
 ## Development
 
 - `nix develop -c cargo test` runs the Rust tests.
-- `nix flake check` runs the test fixtures. Some download the Windows SDK,
-  build cross toolchains and run wine.
-- CI (`.github/workflows/ci.yml`) runs on every push to `main` and every
-  pull request: `cargo fmt --check`, `cargo clippy -D warnings` and
-  `cargo test` in both Cargo workspaces, and the flake checks listed in
-  [`.github/fast-checks`](.github/fast-checks). The other flake checks and the
-  `nix run .#test-*` scripts are too heavy for hosted runners and run
-  locally.
-- `nix run .#test-dynamic`, `.#test-cutoff`, `.#test-options` and
-  `.#test-linux-portable-container` run tests that need a Nix master build
-  or extra downloads.
+- `nix flake check` runs every check, the test fixtures included.
+
+More, including what CI runs: [How breakbulk is tested](https://schlarpc.github.io/breakbulk/explanation/internals/testing.html).
 
 breakbulk is MIT-licensed. See [LICENSE](LICENSE).

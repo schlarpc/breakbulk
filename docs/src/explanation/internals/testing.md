@@ -49,9 +49,15 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 - Some fixtures check that their products rebuild bit-identically (`nix build --rebuild`); a systematic check over every fixture and a sample of units is [#2](https://github.com/schlarpc/breakbulk/issues/2).
 - breakbulk builds itself (`tests/self-host`): its own binaries, built crate by crate through breakbulk, behave the same as the bootstrap build.
 
+## Running the tests
+
+- `nix develop -c cargo test` runs the Rust tests.
+- `nix flake check` runs every flake check, the fixtures included. Some download the Windows SDK, build cross toolchains and run wine.
+- `nix run .#test-dynamic`, `.#test-cutoff`, `.#test-options` and `.#test-linux-portable-container` run tests that need a Nix master build or extra downloads, so they are not flake checks.
+
 ## CI environment
 
-GitHub Actions (`.github/workflows/ci.yml`, #1) runs the Rust tests, clippy and rustfmt of both workspaces and the flake checks in `.github/fast-checks` on x86_64-linux, with Determinate Nix and the FlakeHub cache. Heavy checks do not run on hosted runners. The full suite needs:
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` in both Cargo workspaces, and the flake checks listed in `.github/fast-checks`, on x86_64-linux with Determinate Nix and the FlakeHub cache. The other flake checks and the `nix run .#test-*` scripts are too heavy for hosted runners and run locally. The full suite needs:
 
 - A released Nix for IFD mode, and Nix master (until a release ships `builder-rpc-v0`) with `dynamic-derivations` and `ca-derivations` enabled for dynamic-derivation mode.
 - A binary cache that stores realisations, for the CA island and embed tests.
