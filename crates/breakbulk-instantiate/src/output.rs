@@ -34,7 +34,7 @@ use breakbulk_format::RootKind;
 use serde::Serialize;
 
 /// The version of the `units.json` format.
-pub const UNITS_VERSION: u32 = 2;
+pub const UNITS_VERSION: u32 = 3;
 
 /// `BREAKBULK_UNIT` values longer than this many bytes, after the Nix side
 /// has substituted every reference, are passed with `passAsFile`. Linux
@@ -107,12 +107,11 @@ pub struct RootOut {
     pub test: bool,
     #[serde(flatten)]
     pub what: RootWhat,
-    /// For a test binary the plan has: what nextest's reuse-build mode reads
-    /// to run it, for IFD mode's test runs (`nextestSpec` in
-    /// `lib/test-runs.nix`), from the same function as dynamic-derivation
-    /// mode's `TestSpec`.
+    /// For a test binary the plan has: what its test run and test app need
+    /// ([`crate::dynamic::TestSpec`], the same function dynamic mode's
+    /// `breakbulk-root.json` comes from), with references as parts.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub nextest: Option<RootNextest>,
+    pub test_spec: Option<RootTestSpec>,
     /// For a product root the plan has: the target-platform runs it depends
     /// on (`deps::target_runs_below`), whose copies of Cargo's `<profile>`
     /// may hold files their scripts placed next to the binaries, for the
@@ -127,17 +126,30 @@ pub struct RootOut {
     pub debug_units: Vec<String>,
 }
 
-/// [`crate::dynamic::Nextest`] as compact JSON text with placeholders the
-/// Nix side fills in at evaluation time: `@VIEW@` (the root of the test's
-/// source view) and `"@LIBDIR@"` (the whole JSON value of the target's
-/// sysroot library directory); `@BINARY@`, `@TARGET@` and `@WS@` the test
-/// run fills in at build time.
+/// [`crate::dynamic::TestSpec`] in `units.json`: every string a value the
+/// Nix side resolves.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootTestSpec {
+    pub env: BTreeMap<String, Value>,
+    pub config_env: BTreeMap<String, Value>,
+    pub env_flags: Vec<Value>,
+    pub dylib_flags: Vec<Value>,
+    pub package_dir: Option<String>,
+    pub nextest: RootNextest,
+}
+
+/// [`crate::dynamic::Nextest`] with each document as compact JSON text.
+/// Placeholders left: `"@LIBDIR@"` (the whole JSON value of the target's
+/// sysroot library directory), which the Nix side fills in at evaluation
+/// time, and `@BINARY@`, `@TARGET@` and `@WS@`, which the test run fills in
+/// at build time.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootNextest {
     pub binary_id: String,
-    pub cargo_metadata: String,
-    pub binaries: String,
+    pub cargo_metadata: Value,
+    pub binaries: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

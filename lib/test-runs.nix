@@ -4,9 +4,7 @@
 #
 #   t = breakbulk.testRuns.mkTestRuns {
 #     pkgs;
-#     plan;          # the test plan derivation ($out/plan.json)
-#     inst;          # breakbulk.instantiate's result for that plan
-#     sources;       # { workspace; crates; } as given to instantiate
+#     inst;          # breakbulk.instantiate's result for a test plan
 #     tools;         # tool name -> store path, as given to instantiate
 #                    # (`rustc-sysroot` names the sysroot; runs get only
 #                    # its target libraries, see `testLibs`)
@@ -70,10 +68,15 @@
 #   - `$out/log` holds the output; the run fails when the binary does.
 #
 # With `test.runner = "nextest"`, the same environment is set up, then
-# cargo-nextest runs the one binary in its reuse-build mode from
-# synthesized metadata (`nextestSpec`), with the package's
-# `test.nextest.profile` and `configFile`; libtest arguments go after
-# `--`. nextest's store (junit and the like) is copied to `$out/nextest`.
+# cargo-nextest runs the one binary in its reuse-build mode from the
+# metadata breakbulk-instantiate synthesizes (`nextestSpec`), with the
+# package's `test.nextest.profile` and `configFile`; libtest arguments go
+# after `--`. nextest's store (junit and the like) is copied to
+# `$out/nextest`.
+#
+# What each run needs from the plan (env, `[env]` values, the runs for the
+# dynamic-library path and `rustc-env`, nextest's metadata) comes from
+# breakbulk-instantiate, through `units.json` (`runSpec`).
 #
 # Test binaries the plan lacks (required features) are instantiation's
 # stubs, which succeed and log why.
@@ -86,25 +89,14 @@
 }:
 let
   inherit (builtins)
-    fromJSON
-    isString
-    readFile
+    replaceStrings
     toJSON
-    unsafeDiscardStringContext
     ;
-
-  noCtx = v: unsafeDiscardStringContext (toString v);
 
   # The key of a test binary within its package.
   binaryKey = r: if r.kind == "test" then r.target else "${r.kind}/${r.target}";
 
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
-
-  # The variable that holds the dynamic-library path of a recorded
-  # process: the build machine's, since every recorded process (rustc,
-  # build scripts) ran there (Cargo's `dylib_path_envvar` for its host;
-  # breakbulk_unit::splice::DYLIB_PATH_VAR).
-  hostDylibPathVar = pkgs: (targetTraits.resolve { triple = targetTraits.nativeTriple pkgs.buildPackages; }).dylibPathVar;
 
   # How a test process of a target finds shared libraries: `{ var; sep; }`,
   # or null when it has no such variable (wasm, bare metal). The runner's
@@ -129,13 +121,6 @@ let
         var = traits.dylibPathVar;
         sep = traits.dylibPathSep;
       };
-
-  # Values of the recorded env that a test process gets at run time: one
-  # list for both delivery modes, crates/breakbulk-instantiate's
-  # runtime-env.json (its `description` says why each is there), which
-  # breakbulk-instantiate reads too (`is_runtime_var` in dynamic.rs).
-  runtimeEnv = builtins.fromJSON (builtins.readFile ../crates/breakbulk-instantiate/src/runtime-env.json);
-  isRuntimeVar = k: lib.elem k runtimeEnv.exact || lib.any (p: lib.hasPrefix p k) runtimeEnv.prefixes;
 
   # The dynamic-library path, computed at run time from the runs' `flags`
   # outputs: every search path value (sorted by path component, as Cargo's
@@ -177,7 +162,6 @@ rec {
     dylibJq
     dylibJqWith
     dylibPathOf
-    hostDylibPathVar
     exportDylib
     ;
 
@@ -202,100 +186,24 @@ rec {
         done
       '';
 
-  # Resolve plan text (a string, or a list of pieces) to a string with
-  # string context: `src`, `crateSrc` and `out` references as instantiation
-  # resolves them, and a literal store path at the start of a value as the
-  # tool it lies in.
-  mkResolver =
-    {
-      plan,
-      units,
-      sources,
-      tools,
-    }:
-    let
-      workspace = sources.workspace or { };
-      crates = sources.crates or { };
-      skeleton = lib.removeSuffix "/" plan.skeletonRoot;
-      dirOf =
-        id:
-        let
-          url = lib.removePrefix "path+file://" id;
-          path = lib.head (lib.splitString "#" (lib.head (lib.splitString "?" url)));
-          rel = lib.removePrefix "/" (lib.removePrefix skeleton path);
-        in
-        if lib.hasPrefix "path+file://" id && lib.hasPrefix skeleton path then
-          rel
-        else
-          throw "breakbulk: ${id} is not a path package under ${skeleton}";
-      relSuffix = rel: if rel == "" then "" else "/${rel}";
-      toolList = lib.sort (a: b: lib.stringLength a.path > lib.stringLength b.path) (
-        lib.mapAttrsToList (n: v: {
-          path = noCtx v;
-          value = v;
-        }) tools
-      );
-      literal =
-        s:
-        let
-          t = lib.findFirst (t: lib.hasPrefix t.path s) null toolList;
-        in
-        if t == null then s else "${t.value}${lib.removePrefix t.path s}";
-      piece =
-        p:
-        if isString p then
-          literal p
-        else if p ? src then
-          "${workspace.${dirOf p.src} or (throw "breakbulk: no source view for ${p.src}")}${relSuffix p.rel}"
-        else if p ? crateSrc then
-          "${crates.${p.crateSrc}}${relSuffix p.rel}"
-        else
-          let
-            u = plan.units.${p.out};
-            output =
-              if u.kind == "run" then
-                "out"
-              else if p.output == "bin" then
-                "out"
-              else
-                p.output;
-          in
-          "${units.${p.out}.${output}}${if p ? file then "/${p.file}" else ""}";
-      text = t: if isString t then literal t else lib.concatMapStrings piece t;
-    in
-    {
-      inherit text dirOf;
-    };
-
-  # What one test binary needs to run, shared by test runs and test apps.
+  # What one test binary needs to run, shared by test runs and test apps:
+  # the root's test spec as breakbulk-instantiate computes it for both
+  # delivery modes (`test_spec` in crates/breakbulk-instantiate/src/
+  # dynamic.rs; dynamic mode reads the same from breakbulk-root.json), and
+  # what only this side knows: the sysroot and the target's dylib variable.
   runSpec =
     {
-      plan,
       units,
-      resolve,
       sysroot ? null,
       target,
       root,
       # dylibPathOf's result for the target.
       dylibPath,
-      # hostDylibPathVar: Cargo sets it on test processes itself.
-      hostVar,
     }:
     let
-      unit = plan.units.${root.unit};
-      env = lib.mapAttrs (_: resolve.text) (lib.filterAttrs (k: _: isRuntimeVar k) unit.env);
-      configEnv = lib.mapAttrs (_: resolve.text) (
-        lib.filterAttrs (
-          k: _: lib.elem k (plan.configEnv or [ ]) && !isRuntimeVar k && k != hostVar
-        ) unit.env
-      );
-      manifest =
-        unit.env.CARGO_MANIFEST_DIR
-          or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
-      manifestRef = lib.findFirst (p: !isString p && p ? src) null (
-        if isString manifest then [ ] else manifest
-      );
-      runs = lib.filterAttrs (_: u: u.kind == "run" && u.platform == unit.platform) plan.units;
+      t =
+        root.testSpec
+          or (throw "breakbulk: units.json has no test spec for ${root.package} ${root.target}");
     in
     {
       package = root.package;
@@ -303,15 +211,14 @@ rec {
       name = storeName "${root.package}-${binaryKey root}";
       # The unit's output: a directory holding the one binary.
       unitOut = units.${root.unit}.out;
-      inherit env configEnv;
+      inherit (t) env configEnv envFlags;
       # The package directory, relative to the repository root.
-      packageDir = if manifestRef == null then null else manifestRef.rel;
-      sourceDir = env.CARGO_MANIFEST_DIR;
-      # Runs whose `rustc-env` values the process gets: the package's build
-      # script (Cargo's `script_metas`).
-      envFlags = map (s: units.${s.splice}.flags) unit.envSplices;
+      inherit (t) packageDir;
+      sourceDir =
+        t.env.CARGO_MANIFEST_DIR
+          or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
       dylib = {
-        flags = lib.mapAttrsToList (id: _: units.${id}.flags) runs;
+        flags = t.dylibFlags;
         extra = lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib";
       }
       # The variable and separator, when not LD_LIBRARY_PATH and `:`.
@@ -529,55 +436,45 @@ rec {
     };
 
   # What nextest's reuse-build mode reads for one test binary: the
-  # metadata breakbulk-instantiate synthesizes for both delivery modes
-  # (`nextest_for` in crates/breakbulk-instantiate/src/dynamic.rs, which
-  # says why each field is what it is), from the root's `nextest` in
-  # units.json, with the source view's root (`@VIEW@`) and the target's
-  # sysroot library directory (`"@LIBDIR@"`) filled in here. `@BINARY@`,
-  # `@TARGET@` and `@WS@` are filled in by the test run.
+  # metadata breakbulk-instantiate synthesizes (`nextest_for` in
+  # crates/breakbulk-instantiate/src/dynamic.rs, which says why each field
+  # is what it is), with the target's sysroot library directory
+  # (`"@LIBDIR@"`) filled in here. With `test.runFiles` (`spec` narrowed),
+  # the tested package's manifest is in the narrowed view, as in dynamic
+  # mode. `@BINARY@`, `@TARGET@` and `@WS@` are filled in by the test run.
   nextestSpec =
     {
-      plan,
-      resolve,
-      spec,
       root,
+      spec,
+      target,
       sysroot ? null,
     }:
     let
-      unit = plan.units.${root.unit};
-      pkgId = unit.package;
-      viewRoot =
-        let
-          rel = resolve.dirOf pkgId;
-          dir = noCtx spec.sourceDir;
-        in
-        if rel == "" then
-          spec.sourceDir
-        else if lib.hasSuffix "/${rel}" dir then
-          lib.removeSuffix "/${rel}" spec.sourceDir
-        else
-          throw "breakbulk: nextest: the source view ${dir} does not end in ${rel}";
+      n = root.testSpec.nextest;
+      orig = root.testSpec.env.CARGO_MANIFEST_DIR;
       # The sysroot's target library directory, which the run's
       # dynamic-library path already ends with; without it nextest warns.
       libdir =
         if sysroot != null then
           {
             status = "available";
-            path = "${sysroot}/lib/rustlib/${plan.target}/lib";
+            path = "${sysroot}/lib/rustlib/${target}/lib";
           }
         else
           {
             status = "unavailable";
             reason = "breakbulk";
           };
-      n =
-        root.nextest
-          or (throw "breakbulk: nextest: units.json has no nextest metadata for ${root.package} ${root.target}");
     in
     {
       inherit (n) binaryId;
-      cargoMetadata = builtins.replaceStrings [ "@VIEW@" ] [ viewRoot ] n.cargoMetadata;
-      binaries = builtins.replaceStrings [ "\"@LIBDIR@\"" ] [ (toJSON libdir) ] n.binaries;
+      cargoMetadata =
+        if spec.sourceDir == orig then
+          n.cargoMetadata
+        else
+          replaceStrings [ (toJSON "${orig}/Cargo.toml") ] [ (toJSON "${spec.sourceDir}/Cargo.toml") ]
+            n.cargoMetadata;
+      binaries = replaceStrings [ "\"@LIBDIR@\"" ] [ (toJSON libdir) ] n.binaries;
     };
 
   binaryConfig =
@@ -619,9 +516,7 @@ rec {
   mkTestRuns =
     {
       pkgs,
-      plan,
       inst,
-      sources,
       tools,
       target,
       runner ? null,
@@ -638,12 +533,7 @@ rec {
       name ? "breakbulk",
     }:
     let
-      planJson = fromJSON (unsafeDiscardStringContext (readFile "${plan}/plan.json"));
       inherit (inst) units;
-      resolve = mkResolver {
-        plan = planJson;
-        inherit units sources tools;
-      };
       useCa = if ca == null then stages.caAuto else ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
@@ -657,15 +547,12 @@ rec {
       spec =
         r:
         runSpec {
-          plan = planJson;
           inherit
             units
-            resolve
             sysroot
             target
             dylibPath
             ;
-          hostVar = hostDylibPathVar pkgs;
           root = r.breakbulkRoot;
         };
 
@@ -692,8 +579,7 @@ rec {
         r: s: cfg: args: bin:
         let
           nx = nextestSpec {
-            plan = planJson;
-            inherit resolve sysroot;
+            inherit sysroot target;
             spec = s;
             root = r.breakbulkRoot;
           };
@@ -866,7 +752,6 @@ rec {
         specs
         testPkgs
         ;
-      plan = planJson;
       runner = runnerList;
     };
 }

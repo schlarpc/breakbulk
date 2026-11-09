@@ -546,6 +546,64 @@ fn test_spec_of_a_test_root() {
             "dep_kinds": [{ "kind": null, "target": null }],
         }])
     );
+
+    // IFD mode's spec (units.json, references as parts), substituted as
+    // lib/instantiate.nix does, is the wrapper's.
+    let ifd = units.roots["smokeapp/bin-test/smokeapp"]
+        .test_spec
+        .as_ref()
+        .unwrap();
+    let mut attrs: BTreeMap<String, Value> = ["name", "system", "builder"]
+        .into_iter()
+        .map(|k| (k.to_owned(), Value::String(k.to_owned())))
+        .collect();
+    let mut put = |k: String, v: &Value| attrs.insert(k, v.clone());
+    for (k, v) in &ifd.env {
+        put(format!("env/{k}"), v);
+    }
+    for (k, v) in &ifd.config_env {
+        put(format!("configEnv/{k}"), v);
+    }
+    for (i, v) in ifd.env_flags.iter().enumerate() {
+        put(format!("envFlags/{i}"), v);
+    }
+    for (i, v) in ifd.dylib_flags.iter().enumerate() {
+        put(format!("dylibFlags/{i}"), v);
+    }
+    put("cargoMetadata".into(), &ifd.nextest.cargo_metadata);
+    put("binaries".into(), &ifd.nextest.binaries);
+    let got = resolve(&Drv { attrs }, &vals, &written, usize::MAX).unwrap();
+    let mut env = serde_json::Map::new();
+    let mut config_env = serde_json::Map::new();
+    let (mut env_flags, mut dylib_flags) = (Vec::new(), Vec::new());
+    for (k, v) in &got.env {
+        let v = serde_json::Value::String(v.clone());
+        if let Some(k) = k.strip_prefix("env/") {
+            env.insert(k.into(), v);
+        } else if let Some(k) = k.strip_prefix("configEnv/") {
+            config_env.insert(k.into(), v);
+        } else if k.starts_with("envFlags/") {
+            env_flags.push(v);
+        } else if k.starts_with("dylibFlags/") {
+            dylib_flags.push(v);
+        }
+    }
+    let json = |k: &str| serde_json::from_str::<serde_json::Value>(&got.env[k]).unwrap();
+    assert_eq!(
+        serde_json::json!({
+            "env": env,
+            "configEnv": config_env,
+            "envFlags": env_flags,
+            "dylibFlags": dylib_flags,
+            "packageDir": ifd.package_dir,
+            "nextest": {
+                "binaryId": ifd.nextest.binary_id,
+                "cargoMetadata": json("cargoMetadata"),
+                "binaries": json("binaries"),
+            },
+        }),
+        *spec
+    );
 }
 
 /// The plan with a doctest for `smokelib`, made from its library unit.

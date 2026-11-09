@@ -333,8 +333,6 @@ runTests "lib-unit" {
       args = {
         pkgs = user;
         inst = throw "unused";
-        plan = throw "unused";
-        sources = throw "unused";
         tools = { };
         target = "x";
         testSystem = other;

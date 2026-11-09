@@ -165,13 +165,13 @@ pub struct RootInfo {
     pub build_script_flags: Vec<String>,
 }
 
-/// What a test run needs from the plan (`runSpec` in `lib/test-runs.nix`).
+/// What a test run needs from the plan, for both delivery modes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestSpec {
     /// The test unit's recorded env that a test process gets at run time:
     /// `CARGO`, `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_PKG_*`,
-    /// `CARGO_BIN_EXE_*` (`isRuntimeVar` in `lib/test-runs.nix`).
+    /// `CARGO_BIN_EXE_*` (`runtime-env.json`).
     pub env: BTreeMap<String, String>,
     /// The project's `[env]` variables Cargo set on the test unit (the
     /// plan's `configEnv`), which `cargo test` also sets on the test
@@ -193,8 +193,7 @@ pub struct TestSpec {
 }
 
 /// nextest's `--binaries-metadata` and `--cargo-metadata` for one test
-/// binary, for both delivery modes (IFD mode gets it in `units.json`'s
-/// roots, `RootNextest`). Placeholders the test run replaces: `@BINARY@`
+/// binary. Placeholders the test run replaces: `@BINARY@`
 /// (the binary), `@TARGET@` (a scratch target directory), `@WS@` (a
 /// scratch workspace root), and the string `"@LIBDIR@"` (the whole JSON
 /// value of the target's sysroot library directory, which only the Nix
@@ -208,8 +207,7 @@ pub struct Nextest {
 }
 
 /// The recorded variables a test process gets at run time: the list in
-/// `runtime-env.json`, which the Nix library reads too (`isRuntimeVar` in
-/// `lib/test-runs.nix`), so both delivery modes give a test the same env.
+/// `runtime-env.json` (its `description` says why each is there).
 #[derive(serde::Deserialize)]
 struct RuntimeEnv {
     exact: Vec<String>,
@@ -241,9 +239,18 @@ fn text(t: &Text, tokens: &Tokens) -> Result<String, Error> {
     })
 }
 
-/// The test spec of a test root's unit, rendered with tokens. `tokens` must
-/// resolve the package's source as its test units do (`test_package`).
-fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str, root: &RootOut) -> Result<TestSpec, Error> {
+/// The test spec of a test root (`unit`, root `kind`/`target`), rendered
+/// with tokens: the one function both delivery modes take it from (IFD
+/// mode's `RootTestSpec` in `units.json`, dynamic mode's
+/// `breakbulk-root.json`). `tokens` must resolve the package's source as
+/// its test units do ([`test_tokens`]).
+pub(crate) fn test_spec(
+    tokens: &Tokens,
+    plan: &Plan,
+    unit: &str,
+    kind: RootKind,
+    target: &str,
+) -> Result<TestSpec, Error> {
     let Some(Unit::Compile(c)) = plan.units.get(unit) else {
         return err(format!("the test root unit {unit} is not a compile unit"));
     };
@@ -286,17 +293,28 @@ fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str, root: &RootOut) -> Result
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
         package_dir,
-        nextest: nextest(tokens, plan, c, root)?,
+        nextest: nextest(tokens, plan, c, kind, target)?,
     })
 }
 
+/// Tokens for a test root's spec: its package's source resolves to the
+/// package's test view (`sourceScope`), as for its test units.
+pub(crate) fn test_tokens<'a>(inputs: &'a Inputs, prefix: &'a str, unit: &str) -> Tokens<'a> {
+    let mut tokens = Tokens::new(inputs, prefix);
+    if let Some(Unit::Compile(c)) = inputs.plan.units.get(unit) {
+        tokens.test_package = Some(c.package.clone());
+    }
+    tokens
+}
+
 /// [`Nextest`] for a test root, with its source view as `tokens` resolve
-/// it (dynamic-derivation mode).
+/// it.
 fn nextest(
     tokens: &Tokens,
     plan: &Plan,
     unit: &CompileUnit,
-    root: &RootOut,
+    kind: RootKind,
+    target: &str,
 ) -> Result<Nextest, Error> {
     // The root of the tested package's source view (its test view when it
     // has one), under which every path package is listed.
@@ -304,12 +322,8 @@ fn nextest(
         src: unit.package.clone(),
         rel: String::new(),
     }))?;
-    nextest_for(plan, unit, root.kind, &root.target, &view_root)
+    nextest_for(plan, unit, kind, target, &view_root)
 }
-
-/// The placeholder for the test's source view root in IFD mode's
-/// [`crate::output::RootNextest`], which the Nix side replaces.
-pub const VIEW_PLACEHOLDER: &str = "@VIEW@";
 
 /// [`Nextest`] for a test binary (`unit`, root `kind`/`target`) whose source
 /// view root is `view_root`: nextest-metadata's `BinaryListSummary` and a
@@ -585,7 +599,10 @@ fn wrapper(
     root: &RootOut,
     output_name: &str,
 ) -> Result<Drv, Error> {
-    let mut tokens = Tokens::new(inputs, prefix);
+    let tokens = match &root.what {
+        RootWhat::Unit { unit, .. } if root.test => test_tokens(inputs, prefix, unit),
+        _ => Tokens::new(inputs, prefix),
+    };
     let (target, unit, reason) = match &root.what {
         RootWhat::Unit { unit, output } => (tokens.unit(unit, output), Some(unit.clone()), None),
         // A test stub succeeds and logs why, so test runs and test binaries
@@ -598,13 +615,13 @@ fn wrapper(
         RootWhat::Stub { reason, .. } => (String::new(), None, Some(reason.clone())),
     };
     let spec = match (&unit, root.test) {
-        (Some(u), true) => {
-            // Test units see their package's test view (`sourceScope`).
-            if let Some(Unit::Compile(c)) = inputs.plan.units.get(u) {
-                tokens.test_package = Some(c.package.clone());
-            }
-            Some(test_spec(&tokens, &inputs.plan, u, root)?)
-        }
+        (Some(u), true) => Some(test_spec(
+            &tokens,
+            &inputs.plan,
+            u,
+            root.kind,
+            &root.target,
+        )?),
         _ => None,
     };
     let info = RootInfo {

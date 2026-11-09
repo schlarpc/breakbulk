@@ -479,14 +479,8 @@ let
       traits
       ;
     dylibPath = testDylibPath;
-    plan = plans.test;
     inst = tested;
     coverage = mode == "coverage";
-    # Test runs resolve only test units' env: their package's test view.
-    sources = {
-      workspace = workspace // workspaceTest;
-      inherit crates;
-    };
     tools = unitTools;
   };
 
@@ -585,9 +579,7 @@ in
             };
           }
         );
-        plan = plans.bench;
         inst = benched;
-        sources = { inherit workspace crates; };
         tools = unitTools;
       }).runs;
   packages = lib.mapAttrs' (

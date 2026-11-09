@@ -806,7 +806,7 @@ fn stub(inputs: &Inputs, prefix: &str, p: &PredictedRoot, variant: &str) -> Resu
             reason,
             stub: Drv { attrs },
         },
-        nextest: None,
+        test_spec: None,
         build_script_runs: Vec::new(),
         debug_units: Vec::new(),
     })
@@ -824,13 +824,32 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
         }
     }
     let from_plan = |key: &RootKey, r: &Root| -> Result<RootOut, Error> {
-        let nextest = match plan.units.get(&r.unit) {
-            Some(Unit::Compile(c)) if key.3 => {
-                let n = dynamic::nextest_for(plan, c, key.1, &key.2, dynamic::VIEW_PLACEHOLDER)?;
-                Some(output::RootNextest {
-                    binary_id: n.binary_id,
-                    cargo_metadata: n.cargo_metadata.to_string(),
-                    binaries: n.binaries.to_string(),
+        let test_spec = match plan.units.get(&r.unit) {
+            Some(Unit::Compile(_)) if key.3 => {
+                let tokens = dynamic::test_tokens(inputs, prefix, &r.unit);
+                let s = dynamic::test_spec(&tokens, plan, &r.unit, key.1, &key.2)?;
+                let v = |t: &str| -> Result<Value, Error> {
+                    Ok(Value::Parts {
+                        parts: tokens.split(t)?,
+                    })
+                };
+                let map = |m: &BTreeMap<String, String>| -> Result<BTreeMap<String, Value>, Error> {
+                    m.iter().map(|(k, t)| Ok((k.clone(), v(t)?))).collect()
+                };
+                let list = |l: &[String]| -> Result<Vec<Value>, Error> {
+                    l.iter().map(|t| v(t)).collect()
+                };
+                Some(output::RootTestSpec {
+                    env: map(&s.env)?,
+                    config_env: map(&s.config_env)?,
+                    env_flags: list(&s.env_flags)?,
+                    dylib_flags: list(&s.dylib_flags)?,
+                    package_dir: s.package_dir,
+                    nextest: output::RootNextest {
+                        binary_id: s.nextest.binary_id,
+                        cargo_metadata: v(&s.nextest.cargo_metadata.to_string())?,
+                        binaries: v(&s.nextest.binaries.to_string())?,
+                    },
                 })
             }
             _ => None,
@@ -844,7 +863,7 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
                 unit: r.unit.clone(),
                 output: root_output(plan, r, &inputs.toolchains.target_traits)?,
             },
-            nextest,
+            test_spec,
             build_script_runs: if key.3 {
                 Vec::new()
             } else {

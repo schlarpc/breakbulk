@@ -236,8 +236,21 @@ rec {
         attrs // lib.optionalAttrs big { passAsFile = [ "BREAKBULK_UNIT" ]; };
       mkDrv = d: derivation (drvAttrs d);
 
+      testSpec = t: {
+        env = lib.mapAttrs (_: value) t.env;
+        configEnv = lib.mapAttrs (_: value) t.configEnv;
+        envFlags = map value t.envFlags;
+        dylibFlags = map value t.dylibFlags;
+        inherit (t) packageDir;
+        nextest = {
+          inherit (t.nextest) binaryId;
+          cargoMetadata = value t.nextest.cargoMetadata;
+          binaries = value t.nextest.binaries;
+        };
+      };
+
       units =
-        assert lib.assertMsg (json.version == 2) "breakbulk: units.json version ${toString json.version} is not supported";
+        assert lib.assertMsg (json.version == 3) "breakbulk: units.json version ${toString json.version} is not supported";
         lib.mapAttrs (_: mkDrv) json.units;
 
       rootsOut = lib.mapAttrs (
@@ -253,8 +266,10 @@ rec {
               ;
             unit = r.unit or null;
             reason = r.reason or null;
-            # Test roots: nextest's metadata (lib/test-runs.nix nextestSpec).
-            nextest = r.nextest or null;
+            # Test roots: what the test run needs (lib/test-runs.nix), as
+            # breakbulk-instantiate computes it for both delivery modes
+            # (`test_spec` in its dynamic.rs).
+            testSpec = if r ? testSpec then testSpec r.testSpec else null;
             # Product roots: the target-platform runs below the unit (#23).
             buildScriptRuns = r.buildScriptRuns or [ ];
             # Product roots: the `debug` outputs of the units below (the

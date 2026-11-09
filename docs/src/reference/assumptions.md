@@ -594,7 +594,7 @@ Status of the 78 entries: 77 pinned, 1 with no pinning test (S10). It has an iss
 ### R1. Test-process environment
 
 - **Assumption.** `cargo test` gives a test process, of its recorded compile-time env, only `CARGO`, `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_PKG_*` and `CARGO_BIN_EXE_*`, plus the `rustc-env` values of its package's build script and the project's `[env]` below all of these, and runs it in the package directory.
-- **Where.** `crates/breakbulk-instantiate/src/runtime-env.json`; `lib/test-runs.nix`: `isRuntimeVar`; `crates/breakbulk-instantiate/src/dynamic.rs`: `is_runtime_var`.
+- **Where.** `crates/breakbulk-instantiate/src/runtime-env.json`; `crates/breakbulk-instantiate/src/dynamic.rs`: `is_runtime_var`, `test_spec`.
 - **Upstream.** cargo `0.97.0` `ops/cargo_test.rs` (`unit_output` env from `artifact::get_env`), `core/compiler/compilation.rs`, `fill_env`; `script_metas`.
 - **Holds for.** 1.96 by source, 1.99 by check.
 - **Pinned by.** `test-runs-test-control` (runtime env, cwd, `rustc-env`); `loose-ends-config-env`; `test-runs-test-control-bin-exe`. Rust: `tests::dynamic::test_spec_of_a_test_root` (instantiate).
