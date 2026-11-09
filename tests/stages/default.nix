@@ -27,7 +27,7 @@
 #                       loaded and called from node
 #   stages-linked-crate-types  the `linked` stage of a cdylib+staticlib
 #                       library: two roots over one unit output
-#   stages-no-binaries  decision 112: a product whose roots were all
+#   stages-no-binaries  a product whose roots were all
 #                       skipped (dynamic mode) holds the no-binaries marker,
 #                       and every stage and check passes it on without
 #                       running; with a built root, stages run
@@ -791,7 +791,7 @@ in
     touch $out
   '';
 
-  # Decision 144: noStorePaths finds every store path named in any file's
+  # noStorePaths finds every store path named in any file's
   # bytes (an ELF binary's string, a text file, a path whose hash
   # remove-references-to replaced), naming file and path, and passes once
   # each is allowed, by glob or by store path.
@@ -935,7 +935,7 @@ in
       touch $out
     '';
 
-  # Decision 112: a dynamic-mode product whose roots Cargo all skipped. Its
+  # A dynamic-mode product whose roots Cargo all skipped. Its
   # `linked` holds only the no-binaries marker, and every stage and check
   # (splitDebug, a stage and a check that would fail, a stage with
   # structured attributes, a stage and a check written as bare `derivation`

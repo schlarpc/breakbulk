@@ -1,4 +1,4 @@
-# Test-run options (decisions 17 and 61): `app`'s tests link the workspace
+# Test-run options: `app`'s tests link the workspace
 # library `util`, which has a README; `app`'s `data` test reads
 # data/input.txt from its working directory, and its `notes` test reads
 # notes.md, which `test.runFiles = [ "data" ]` leaves out.

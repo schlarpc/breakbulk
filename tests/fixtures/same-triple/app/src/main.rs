@@ -1,4 +1,4 @@
-// Target units get the spec's rustflags and the project's (decision 33),
+// Target units get the spec's rustflags and the project's,
 // and the spec's env.
 #[cfg(not(project_flag))]
 compile_error!("the project's [build] rustflags did not reach a target unit");

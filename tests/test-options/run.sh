@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Content-addressed cutoff with `test.stripForRun` and `test.runFiles`
-# (decisions 17 and 61), in a private store with ca-derivations, as
-# tests/test-cutoff/run.sh does it. The system Nix's configuration is not
+# Content-addressed cutoff with `test.stripForRun` and `test.runFiles`, in
+# a private store with ca-derivations, as tests/test-cutoff/run.sh does it. The system Nix's configuration is not
 # touched.
 #
 #   tests/test-options/run.sh

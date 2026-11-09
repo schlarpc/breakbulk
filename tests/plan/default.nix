@@ -544,7 +544,7 @@ in
         cp warns.log broken.log $result/
       '';
 
-  # Decision 50: breakbulk's binaries are built from narrow sources, so an
+  # breakbulk's binaries are built from narrow sources, so an
   # edit to the planner leaves breakbulk-unit (an input of every unit) and
   # breakbulk-shim alone, and so does an edit to breakbulk-unit's
   # integration tests. Computes the tools' derivations from a copy of the
@@ -720,7 +720,7 @@ in
         mkdir -p $out
       '';
 
-  # Decision 65: cm-sys leaves the cmake crate's build tree in OUT_DIR;
+  # cm-sys leaves the cmake crate's build tree in OUT_DIR;
   # breakbulk-unit removes its `CMakeFiles` (the configure log names
   # randomly named try-compile directories), so two builds of the run give
   # the same tree, except for the output's own path (a salted copy of the

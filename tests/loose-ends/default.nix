@@ -358,7 +358,7 @@ let
     ) "devshell-target: ${builtins.toJSON got}";
     pkgs.runCommand "devshell-target" { } "touch $out";
 
-  # Decision 123: with Cargo 1.101 (rust-overlay's nightly) the planner
+  # With Cargo 1.101 (rust-overlay's nightly) the planner
   # turns trim-paths on for the release profile itself (`trimPathsDefault`),
   # and the dev shell sets CARGO_PROFILE_RELEASE_TRIM_PATHS=all, so a local
   # `cargo build -v --release` again gives exactly the plan's `-C metadata`
@@ -620,7 +620,7 @@ let
 
   # --- test-libs --------------------------------------------------------------
 
-  # Decision 94: a test run depends on the sysroot's target libraries only
+  # A test run depends on the sysroot's target libraries only
   # (a small copy), not on the whole Rust toolchain.
   testLibs =
     let

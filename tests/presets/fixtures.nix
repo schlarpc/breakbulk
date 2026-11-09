@@ -3,8 +3,8 @@
 #
 #   same-triple-*     a marker linker, env and rustflags on the native
 #                     triple reach target units only (spec.rs's linker
-#                     rewrite; decision 33's key choice with a project
-#                     [build] rustflags)
+#                     rewrite; the spec's rustflags go under the
+#                     project's own [build] rustflags key)
 #   static-*          HEAVY-ish (cross toolchains): musl x86_64 and aarch64
 #                     and static glibc products have no INTERP or NEEDED;
 #                     build scripts stay dynamic; tests run (aarch64 under
@@ -15,9 +15,8 @@
 #                     linker choice, lib/presets/linker.nix)
 #   presets-per-workspace  two workspaces on different Rust releases get
 #                     their own LLVM tools and wasi-sdk from one preset
-#                     (decision 70)
 #   debug-outputs     a plain Linux release plan: no unit and no `linked`
-#                     stage has a `debug` output (decision 97)
+#                     stage has a `debug` output
 #   msvc-debug-outputs  msvc release: every linked target unit has one
 {
   pkgs,
@@ -254,7 +253,7 @@ let
     }
   ];
 
-  # Decision 97: a unit has a `debug` output only when rustc writes
+  # A unit has a `debug` output only when rustc writes
   # debuginfo side files (breakbulk-format
   # `writes_debuginfo_side_files`). A plain Linux release build (linux,
   # no split-debuginfo) has none, in either plan; msvc links always write a
@@ -420,7 +419,7 @@ let
         # Debug info on (the fixture's `release-debug` profile): a PDB.
         variants.debuginfo.profile = "release-debug";
       };
-      # LLVM tools for the workspace's rustc (decision 70).
+      # LLVM tools for the workspace's rustc.
       targets = lib.genAttrs msvcTriples (_: {
         preset = presets.windows { inherit sdk; };
       });
@@ -440,7 +439,7 @@ let
         grep -qxF ${lib.escapeShellArg expect} $out
       '';
       msvc-x86_64-test = x.testRuns.msvc-smoke."bin/msvc-smoke";
-      # Decision 89: with debug info on, lld-link writes a PDB. It lands in
+      # With debug info on, lld-link writes a PDB. It lands in
       # the product's `debug` output next to where the .exe sits in the
       # main one (bin/), not in the main output; the main output's closure
       # has no unit outputs (rlibs) and no sources, and the program runs.
@@ -650,7 +649,7 @@ let
     };
 
   # C via wasilibc, componentized, no imports.
-  # The preset gets the workspace's rustc (decision 70); see
+  # The preset gets the workspace's rustc; see
   # presets-per-workspace for the same with `rustc` passed.
   wasmComponent = mkRepo (fixtures + "/wasm-component") [
     {
@@ -699,7 +698,7 @@ let
 
   # --- evaluation-time checks on preset values ---------------------------------
 
-  # Decision 70: target specs are resolved per (workspace, target), and a
+  # Target specs are resolved per (workspace, target), and a
   # preset gets the workspace's rustc. Two workspaces on Rust 1.96 (LLVM
   # 22, wasi-sdk 30) and 1.99 (LLVM 23, wasi-sdk 33) build wasm32 and
   # wasip2 from the same repository-wide presets, with no `rustc` passed,
@@ -842,7 +841,7 @@ let
           && llvm.majorFor "1.99.0" == 23
           && llvm.majorFor "1.101.0-nightly" == 23
           && llvm.majorFor "1.90.0" == 20;
-        # Outside the table (decision 41): null from the table, and the
+        # Outside the table: null from the table, and the
         # LLVM major read from `rustc -vV` (import-from-derivation). The
         # toolchains are 1.97 (LLVM 22) and 1.99 (LLVM 23), given a version
         # the table does not know, or none.
@@ -877,7 +876,7 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
-        # The Rust to wasi-sdk table (lib/wasi-sdk.nix, decision 99): an
+        # The Rust to wasi-sdk table (lib/wasi-sdk.nix): an
         # unknown Rust release fails evaluation, naming the file.
         wasiSdkTable =
           let

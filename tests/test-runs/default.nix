@@ -210,7 +210,7 @@ let
       '';
 
   # The env binary's dylib-path test with the stable inputs that
-  # content-addressed test runs use (testRuns.stableSpec, decision 61),
+  # content-addressed test runs use (testRuns.stableSpec),
   # built input-addressed as stock Nix cannot build CA: the build script's
   # library directory is on the path as a copy, which the test accepts.
   testControlStableDylibs =
@@ -540,7 +540,7 @@ let
       mkdir -p $out
     '';
 
-  # Decision 93: the same settings as the workspace's default, with one
+  # The same settings as the workspace's default, with one
   # package overriding it back to libtest.
   nxWsRepo = breakbulk.mkRepository {
     inherit pkgs tools;

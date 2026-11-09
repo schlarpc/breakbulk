@@ -1,7 +1,7 @@
-# Native libraries reach the link steps of the packages that link them
-# (decision 107), over ./fixture: `foo-sys` prints only
-# `rustc-link-lib=foo`, and `packages.foo-sys.inputs` names a small C shared
-# library built here from ./foo.c. Wired into the flake's checks as
+# Native libraries reach the link steps of the packages that link them,
+# over ./fixture: `foo-sys` prints only `rustc-link-lib=foo`, and
+# `packages.foo-sys.inputs` names a small C shared library built here from
+# ./foo.c. Wired into the flake's checks as
 # `native-link-*`.
 #
 #   nix build -f tests/native-link runs

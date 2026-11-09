@@ -541,7 +541,7 @@ in
       touch $out_
     '';
 
-  # Decision 81: the dev shell does not need the plan. With a member's
+  # The dev shell does not need the plan. With a member's
   # Cargo.toml broken (planning would fail), the shell still evaluates and
   # carries the native spec's Cargo env config (the default linux
   # preset's linker), computed from Cargo config files and rustc only.
@@ -676,7 +676,7 @@ in
       touch $out
     '';
 
-  # Decision 135: on Cargo 1.101 (rust-overlay's nightly) the dev shell
+  # On Cargo 1.101 (rust-overlay's nightly) the dev shell
   # decides CARGO_PROFILE_DEV_TRIM_PATHS by the planner's file-reading
   # rule, without a plan: with the workspace root's Cargo.toml broken, the
   # shell still evaluates and sets it (cargo-env.json carries a warning
@@ -751,7 +751,7 @@ in
       touch $out
     '';
 
-  # Decision 105: the native target gets presets.linux unless another
+  # The native target gets presets.linux unless another
   # preset is set, both through `preset` and by defining the target
   # directly from a preset (no doubled rustflags, no conflicting linker);
   # `preset = null` turns it off. The default reaches the plan: units carry
@@ -780,7 +780,7 @@ in
     assert lib.assertMsg (bad == [ ]) "native-preset: failed ${toString bad}";
     evalCheck "native-preset" (builtins.toJSON checks);
 
-  # Decision 115: the native default follows the `pkgs` given to
+  # The native default follows the `pkgs` given to
   # mkRepository, not the evaluating machine. With `pkgs.pkgsMusl` the
   # native triple is the musl one and its default preset linuxStatic
   # (+crt-static, PKG_CONFIG_ALL_STATIC, the musl stdenv's cc). Evaluation
@@ -812,7 +812,7 @@ in
     assert lib.assertMsg (bad == [ ]) "native-preset-musl: failed ${toString bad}";
     evalCheck "native-preset-musl" (builtins.toJSON checks);
 
-  # Decision 106: the curated -sys defaults set no switch that swaps a
+  # The curated -sys defaults set no switch that swaps a
   # bundled C library for a system one; their library inputs stay.
   sys-defaults-no-switches =
     let
@@ -1089,7 +1089,7 @@ in
     assert lib.assertMsg (!(fails badVersion.config.packages.foo.env)) "option-assertions: the version's type error reached another option";
     evalCheck "option-assertions" (builtins.toJSON got);
 
-  # Decision 19's question: `targets.<t>.stdenv` replaces the target
+  # `targets.<t>.stdenv` replaces the target
   # captures' stdenv (base and per-package), `host.stdenv` the host
   # captures'; unset, both are the package set's. The capture then records
   # clang's wrapper as `cc`, and the product still builds.

@@ -5,12 +5,12 @@
 #   nix build -f tests/test-options strip-for-run
 #   tests/test-options/run.sh     content-addressed, in a private store
 #
-#   strip-for-run   decision 17, `workspaces.<ws>.test.stripForRun`: an edit
+#   strip-for-run   `workspaces.<ws>.test.stripForRun`: an edit
 #                   to util's README changes the bytes of app's test binary
 #                   (util's debug info names its source view; the control),
 #                   but not those of the stripped copy the test run
 #                   consumes; the run passes.
-#   run-files       decision 61, `packages.app.test.runFiles = [ "data" ]`:
+#   run-files       `packages.app.test.runFiles = [ "data" ]`:
 #                   the `data` test runs in a view holding only data/, with
 #                   CARGO_MANIFEST_DIR pointing at it, and passes; the
 #                   `notes` test, which reads the unlisted notes.md, fails;

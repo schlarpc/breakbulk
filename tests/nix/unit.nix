@@ -504,7 +504,7 @@ runTests "lib-unit" {
     };
 
   # Generated variants keep their test runs out of repo.checks unless the
-  # arguments opt in (decision 133); hand-written variants default to in.
+  # arguments opt in; hand-written variants default to in.
   testGeneratedVariantChecks =
     let
       ws = {

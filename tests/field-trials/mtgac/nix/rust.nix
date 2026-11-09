@@ -72,7 +72,7 @@ in
     };
     variants = {
       default = { };
-      # The wasm gate is plain `cargo check` (decision 108), for wasm only.
+      # The wasm gate is plain `cargo check`, for wasm only.
       check = {
         mode = "check";
         allTargets = false;
@@ -92,7 +92,7 @@ in
 
   targets = {
     ${native}.preset = breakbulk.presets.linux;
-    # LLVM tools for the workspace's rustc (decision 70).
+    # LLVM tools for the workspace's rustc.
     ${wasm}.preset = breakbulk.presets.wasmWeb;
     ${windows}.preset = breakbulk.presets.windows { inherit sdk; };
   };

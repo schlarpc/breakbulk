@@ -543,7 +543,7 @@ in
             }).capabilities;
           noVersion = tc: removeAttrs tc [ "version" ];
           # fenix's component packages: `version` is the channel
-          # manifest's date, not a release (decision 142).
+          # manifest's date, not a release.
           dateVersion = tc: tc // { version = "2026-10-15"; };
           r = v: pkgs.rust-bin.stable.${v}.minimal;
           nightly = pkgs.rust-bin.nightly.latest.minimal;
@@ -627,7 +627,7 @@ in
       }).os;
       expected = true;
     };
-    # Android: the Linux kernel, not a Linux userland (decision 138). No
+    # Android: the Linux kernel, not a Linux userland. No
     # linker rule (issue #27), and qemu-user cannot run bionic programs.
     testAndroid = {
       expr =

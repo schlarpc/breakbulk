@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Content-addressed cutoff of test runs (decision 61), in a private store
+# Content-addressed cutoff of test runs, in a private store
 # with ca-derivations. The system Nix's configuration is not touched: the
 # calling user's Nix builds into `local?root=$WORK/store` with the
 # `ca-derivations` feature on the command line only, substituting from the

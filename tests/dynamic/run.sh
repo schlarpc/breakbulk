@@ -199,7 +199,7 @@ EOF
     name=${p#"$(real "$dyn")/products/"}
     a=$(real "$(readlink "$p")")
     if [ ! -L "$(real "$ifd")/products/$name" ] && [ -e "$a/breakbulk-no-binaries" ]; then
-      # Decision 112: Cargo built none of its binaries; IFD mode has no
+      # Cargo built none of its binaries; IFD mode has no
       # product for it.
       echo "$f: product $name holds only the no-binaries marker (dynamic mode)" >&2
       continue
@@ -222,7 +222,7 @@ EOF
       d=$(real "${!m}")/$what
       if [ -d "$d" ]; then (cd "$d" && find . -mindepth 1 | sort); fi >"$WORK/$f-$what.$m"
     done
-    # Decision 112: dynamic mode's checks of a product Cargo built nothing
+    # Dynamic mode's checks of a product Cargo built nothing
     # of hold the no-binaries marker; IFD mode has none for it.
     if [ "$what" = checks ]; then
       while IFS= read -r c; do

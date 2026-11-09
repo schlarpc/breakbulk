@@ -116,7 +116,7 @@ in
     ${musl}.preset = breakbulk.presets.linuxStatic;
   }
   // lib.genAttrs windows (_: {
-    # LLVM tools for the workspace's rustc (decision 70).
+    # LLVM tools for the workspace's rustc.
     preset = breakbulk.presets.windows {
       inherit sdk;
       crtStatic = true;

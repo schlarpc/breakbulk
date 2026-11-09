@@ -1,4 +1,4 @@
-# Decision 112: `tool`'s only bin needs a feature the default variant does
+# `tool`'s only bin needs a feature the default variant does
 # not enable, so Cargo builds none of its binaries. In dynamic-derivation
 # mode its product holds the no-binaries marker and every stage and check
 # passes it on; IFD mode leaves it out of repo.checks.

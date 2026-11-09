@@ -8,7 +8,6 @@
 #                    the stage and sets the units' remap scope; removing
 #                    that stage or adding `splitDebug` against it, at
 #                    target or package level, fails evaluation
-#                    (decision 137)
 #   post-link        stage order from target and package stages; a stage
 #                    removed with mkForce null; a check on `linked` sees
 #                    unstripped bytes; checks in repo.checks
@@ -30,7 +29,7 @@
 #   source-paths-dwo the same with split-debuginfo = "unpacked": the
 #                    libraries' `.dwo` files reach the `linked` stage's
 #                    debug output with the bin's, and splitDebug packs the
-#                    ones the binary names into app.dwp (decision 126);
+#                    ones the binary names into app.dwp;
 #                    gdb's backtrace and source lines as above
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
@@ -38,7 +37,6 @@
 #                    sysroot that holds the libstd-*.so the binary loads
 #                    (nixpkgs' rustc), and fails on rust-overlay's rustc and
 #                    cargo components the joined sysroot brings along
-#                    (decision 134)
 #   variants         build, check, clippy (with and without clippy
 #                    arguments), coverage, a custom profile inheriting
 #                    release and a feature powerset: host units shared
@@ -49,7 +47,7 @@
 #                    between release and the custom profile;
 #                    the powerset's products have their features, and its
 #                    variants' test runs are not in repo.checks (the
-#                    coverage variant's are; decision 133); the check
+#                    coverage variant's are); the check
 #                    and clippy variants' unit checks build
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
 #                    and `targets.<t>.tests` narrow plans and outputs per
@@ -91,7 +89,7 @@
 #                    references; `default`'s debug info keeps store paths
 #                    (gdb lists the shared crate's source), `set`'s does
 #                    not (scope `all`); `default`'s tests pass
-#   trim-paths-cc    decision 121, nightly Cargo 1.101: a build script
+#   trim-paths-cc    nightly Cargo 1.101: a build script
 #                    compiling C with cc-rs 1.11.1 under the trim-paths the
 #                    planner turned on: the C object's `__FILE__` and debug
 #                    info name only Cargo's form (`./cfile/c/where.c`), never
@@ -373,7 +371,7 @@ let
     grep -qF 'panic!("boom {n}");' gdb.txt
   '';
 
-  # Decision 121: cc-rs 1.11.1 compiling C under Cargo's trim-paths.
+  # cc-rs 1.11.1 compiling C under Cargo's trim-paths.
   trimCcRepo =
     extra:
     mkRepo (fixtures + "/trim-paths-cc") [
@@ -410,7 +408,7 @@ let
             mode = "coverage";
             profile = "release";
           };
-          # Plain `cargo check` (decision 108).
+          # Plain `cargo check`.
           check-lib = {
             mode = "check";
             profile = "release";
@@ -762,7 +760,7 @@ in
     assert lib.assertMsg (
       variantsRepo.checks ? "main/${native}/variant-clippy/check"
     ) "variants: no clippy check in repo.checks";
-    # Decision 133: the powerset's variants keep their test runs out of
+    # The powerset's variants keep their test runs out of
     # repo.checks; the hand-written coverage variant's are in.
     assert lib.assertMsg (
       lib.filter (lib.hasInfix "/variant-fp-") (lib.attrNames variantsRepo.checks) == [ ]
@@ -789,7 +787,7 @@ in
         cat $check/units $clippy/units > $out
       '';
 
-  # Decision 108: `allTargets = false` checks the build plan's units only
+  # `allTargets = false` checks the build plan's units only
   # (`cargo check`); the default also checks the test plan's (`cargo check
   # --all-targets`). A build variant rejects it.
   variants-all-targets =
@@ -1487,7 +1485,7 @@ in
         touch $out
       '';
 
-  # Decision 134: a product linked with `-C prefer-dynamic` loads
+  # A product linked with `-C prefer-dynamic` loads
   # libstd-*.so from the sysroot, which its RUNPATH names. With nixpkgs'
   # rustc the sysroot (rustc.unwrapped) is the only toolchain path in its
   # closure, and its NEEDED libstd is there: the check passes. With
@@ -1540,7 +1538,7 @@ in
         touch $out
       '';
 
-  # Decision 137: what happens to debug info is a target property,
+  # What happens to debug info is a target property,
   # `targets.<t>.debugInfo`. It inserts the stage (splitDebug for "split",
   # strip for "strip", none for "keep") and sets the units' remap scope and
   # build ID; neither the target's nor a package's `stages` may remove that

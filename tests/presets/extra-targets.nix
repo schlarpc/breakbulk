@@ -38,7 +38,7 @@
 #                     no library but glibc's and GLIBC_2.17 at most
 #                     (objdump -T); `portableLibraries` passes
 #
-# Not flake checks (decision 122): `containerChecks`, built by
+# Not flake checks: `containerChecks`, built by
 # `nix run .#test-linux-portable-container` (network: the CentOS 7.9 image
 # from Docker Hub, ~75 MB):
 #   linux-portable-centos7-*   the product and the test binaries run inside
@@ -123,7 +123,7 @@ let
       # rustc's arguments through unchanged (crt1 objects and libc from
       # rustc's self-contained directory), keeps `-flavor wasm` first and
       # adds the wasm-ld. C code gets the headers of the wasi-sdk release
-      # whose libc.a rustc bundles, byte for byte (decision 99).
+      # whose libc.a rustc bundles, byte for byte.
       wasip2-linker =
         let
           spec = presets.wasmComponent {
@@ -411,7 +411,7 @@ let
       linux-portable-test = t.testRuns.app."bin/app";
       # The preset's check: NEEDED names only glibc's libraries.
       linux-portable-libraries = t.packages.app.checks.portableLibraries;
-      # Decision 144: the product names no Nix store path.
+      # The product names no Nix store path.
       linux-portable-no-store-paths = t.packages.app.checks.portableNoStorePaths;
       # Negative control: with only libc.so.6 allowed, the check fails
       # and names a library the product needs (libpthread.so.0, …).
@@ -435,7 +435,7 @@ let
             grep -q 'neededLibraries: app: bin/app needs ld-linux-x86-64.so.2, which is not an allowed run-time library: only libc' $failure/testBuildFailure.log
             touch $out
           '';
-      # Decision 145: the preset's check allows GCC's runtime libraries,
+      # The preset's check allows GCC's runtime libraries,
       # as manylinux does: a g++-built program that needs libstdc++.so.6
       # and libgcc_s.so.1 passes, and both are listed as needed.
       linux-portable-libraries-cxx =
@@ -604,7 +604,7 @@ let
             fi
           '';
       linux-portable-native-libraries = t.packages.app.checks.portableLibraries;
-      # Decision 144: OpenSSL's compiled-in directories are system paths
+      # OpenSSL's compiled-in directories are system paths
       # (the rebuild's OPENSSLDIR), so the product names no store path.
       linux-portable-native-no-store-paths = t.packages.app.checks.portableNoStorePaths;
     };
@@ -633,6 +633,6 @@ in
       ;
   };
   checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks;
-  # Opt-in, network (decision 122): `nix run .#test-linux-portable-container`.
+  # Opt-in, network: `nix run .#test-linux-portable-container`.
   containerChecks = zigContainerChecks;
 }

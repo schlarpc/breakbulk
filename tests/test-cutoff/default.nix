@@ -1,4 +1,4 @@
-# Stable test-run inputs for content-addressed cutoff (decision 61), over
+# Stable test-run inputs for content-addressed cutoff, over
 # tests/fixtures/test-cutoff: `alpha` has a test and a build script that
 # sets `rustc-env`; `beta`, unrelated, has a build script whose OUT_DIR is a
 # search path (so it is on every test's dynamic-library path, as Cargo

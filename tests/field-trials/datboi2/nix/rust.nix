@@ -190,7 +190,7 @@ in
     };
   });
 
-  # Each workspace's own rustc picks the LLVM tools (decision 70): the
+  # Each workspace's own rustc picks the LLVM tools: the
   # components' 1.96.1 gets LLVM 22, the emu lane's nightly LLVM 21.
   targets.${wasm}.preset = breakbulk.presets.wasmComponent;
   # Without a preset the native target links with rustc's own rust-lld,
