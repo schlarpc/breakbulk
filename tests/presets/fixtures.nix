@@ -1190,6 +1190,7 @@ in
       wasmBrowser
       wasmComponent
       staticPkgconfig
+      crossLto
       ;
   };
   checks = {

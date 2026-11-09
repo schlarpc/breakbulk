@@ -111,7 +111,11 @@ let
         except.plans = [ "test" ];
       }
     ];
+    # Its clippy units fail by design (disallowed methods): the default
+    # variant only.
+    clippy-conf = [ (plainAt "ws" "clippy-conf" [ ]) ];
     crate-types = [ (plain "crate-types" [ ]) ];
+    cross-lto = [ presetFixtures.repos.crossLto ];
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
     doctests = [ dynamic.repos.doctests ];
@@ -155,6 +159,7 @@ let
     sys-native = [ presetFixtures.repos.sysNativeCross ];
     test-control = [ dynamic.repos.test-control ];
     test-cutoff = [ (plain "test-cutoff" [ ]) ];
+    test-only = [ repository.repos.testOnly ];
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];
     # The `strict` clippy variant fails on lib-a by design.
@@ -182,6 +187,8 @@ let
   skipped = {
     build-script-signal = "a build script dies of a signal by design";
     diagnostics = "a unit fails to compile by design";
+    directive-errors = "build scripts print outputs Cargo rejects, by design";
+    uefi = "not bit-identical: rustc's temporary symbols.o path lands in the PDB";
     forced-target = "planning fails by design";
     roots-layouts = "root prediction only; nothing is built";
     vendor-collision = "a Cargo build over the vendor directory; fetches GitHub repositories at evaluation";
