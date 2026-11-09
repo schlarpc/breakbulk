@@ -1,0 +1,60 @@
+# How breakbulk is tested
+
+Trace golden tests and directive differential tests guard against Cargo changes; invalidation and sharing tests guard the main promise, that an edit rebuilds only what it should. Every place breakbulk relies on Cargo or rustc behavior beyond a documented format, with the upstream source, the releases it holds for and the check that pins it, is listed in [reference/assumptions.md](../../reference/assumptions.md).
+
+1. **Rust unit tests** for the directive parser (both syntaxes, every directive, malformed input), path rewriting, env filtering, splice expansion, plan canonicalization and unit ordering.
+2. **Trace golden tests.** For each fixture, run real `cargo build -vv` and the traced planner on the same skeleton, render the plan back to concrete argv and env with the same scratch layout, and diff per unit after normalizing paths. Both sides run at the same verbosity, because verbosity changes argv (`--cap-lints`) and only `-vv` prints per-process env. The comparison also diffs target-directory file listings, which differ only in debuginfo side files. A negative control (one splice per kind, no search-path ordering) must produce diffs, so the comparison is not vacuous. Fixtures are copied outside `$HOME` before each run, because Cargo reads `.cargo/config.toml` from every ancestor directory. This runs against the oldest release in the supported window (about six months of stable), the latest stable and the latest nightly. `tests/plan` runs it (`breakbulk-plan-golden`).
+3. **Directive differential tests.** Generate dependency graphs and build-script outputs (several values per kind, duplicates, paths inside and outside the build directory, mixed order). Let stubs replay them so Cargo applies them, and separately expand the sentinel plan with `breakbulk-unit`'s splicing. The two argv and env sets must be identical. The same harness checks that sentinels do not change any unit's `-C metadata`.
+4. **Root prediction tests.** Compare the Nix prediction with `cargo metadata` targets over a corpus of real workspaces. The target sets must be identical, with `required-features` as the only allowed difference in what is built.
+5. **Fixture builds.** Each fixture builds and tests on its targets in IFD mode, and in dynamic-derivation mode on a Nix with `builder-rpc-v0`. Unit derivation paths must be identical in both modes, and product bytes identical. `nix run .#test-dynamic` (`tests/dynamic/run.sh`) does this on Nix master in a private chroot store: the system Nix builds each fixture in IFD mode, everything upstream of the units is copied into the private store, and Nix master builds the fixture in dynamic-derivation mode (so the outer derivations write and build every unit) and then in IFD mode, and compares every unit and doctest `.drv` path of both plans, the product bytes, the test runs' and doctests' outcomes, the `repo.checks` sets, the test apps and `explainSharing`. It is opt-in, because `nix flake check` on a released Nix cannot run it.
+6. **Invalidation tests.** Instantiate a fixture, apply a scripted edit, instantiate again, and compare the sets of unit `.drv` paths. Each test states which units may change. For example: changing a build stamp on the top package changes only that package's units.
+7. **Sharing tests.** For fixtures with several workspaces or variants, assert the exact set of shared unit derivations, using the same comparison as `explainSharing`.
+
+## Fixtures
+
+One small workspace per pattern in [Patterns and prior art](../prior-art.md), under `tests/fixtures/`.
+
+| Fixture | Pattern | Targets | Asserts |
+| --- | --- | --- | --- |
+| `directives` | Every build-script directive, `links` chains, `DEP_*` | linux-gnu | Placement matches Cargo; signal death fails |
+| `build-dep-leak` | A build dependency emitting `rustc-link-lib` | linux-gnu → aarch64 | Target link args contain no host libs |
+| `sys-native` | pkg-config, cmake and bindgen `-sys` crates with `nativeInputs` and `inputs` | linux-gnu, aarch64 | Builds; captured env reaches only that package |
+| `native-link` (`tests/native-link`) | A `-sys` crate printing only `rustc-link-lib=foo`, against a C shared library from `inputs`; a bin, tests and a doctest in other packages | linux-gnu | The bin links and runs with an empty environment (rpath); only linking units get the library search flags; a change to the input touches no unrelated package |
+| `missing-input` | A `-sys` crate with an undeclared input | linux-gnu | Failure names the variable or path and the option to set |
+| `crate-types` | `["cdylib", "rlib"]`, `staticlib`, proc macro | linux-gnu, wasm | All outputs present |
+| `outside-reads` | `include_str!` of `../`, a proc macro reading a sibling directory | linux-gnu | Builds; editing an unrelated sibling changes nothing |
+| `multi-ws` | Three workspaces sharing a path crate and registry crates; one workspace contains the path crate | linux-gnu | Registry units shared; path crate shared only outside every root; `explainSharing` names the reason otherwise |
+| `git-revisions` | Four workspaces depending on one local git repository: the same branch locked at two commits, the same commit by `branch` and by `rev` | linux-gnu | Each workspace gets its own revision; git units shared only between workspaces locking the same source at the same commit; package ids equal real Cargo's |
+| `vendor-collision` | A crates.io crate and a git fork with the same name and version | linux-gnu | Each consumer gets its own source |
+| `dev-dep-features` | A dev-dependency enabling extra features on a normal dependency | linux-gnu | The build plan's product lacks the feature; the test plan's binaries have it |
+| `required-features` | Bins and tests with `required-features` | linux-gnu | Stubs fail or skip with the reason; enabled variants build them |
+| `feature-unification` | `resolver.feature-unification = "package"` (and `[unstable] feature-unification`) in project config; two bins enabling different features of a shared member, which has a doctest | linux-gnu, nightly | The plan contains one unit per feature set of the shared dependency (one per package, as Cargo builds them); golden on both plans; each bin sees its own set; the shared member's doctest is traced although the bins have no library (`plan-feature-unification`) |
+| `embed` | A host crate embedding a wasm product via env | linux-gnu + wasm | Host instantiation does not depend on the product; only the embedding chain references it; identical wasm bytes do not rebuild the host (dynamic-derivation mode) |
+| `stamps` | Git revision and `SOURCE_DATE_EPOCH` per package | linux-gnu | Only the stamped package's units change |
+| `msvc` | C code, a resource via `rustc-link-arg-bins`, bindgen | x86\_64 msvc, aarch64 msvc | Builds; tests pass under wine |
+| `wasm-browser` | wasm-bindgen, `ring`, getrandom backend cfg from config | wasm | Bindgen version matched; browser tests pass |
+| `wasm-component` | C via `wasilibc`, componentize, metadata stamp | wasm | Component has no imports |
+| `static` | musl and static-glibc products | musl x2, host | No `INTERP` or `NEEDED`; build scripts dynamic |
+| `same-triple` | Target spec with a marker linker and marker env on the host triple | host | No host unit (build-script compile, proc macro, host run) sees either marker; target-platform build-script runs do see spec env |
+| `variants` | Feature powerset, clippy, coverage, a custom profile that only inherits `release` | linux-gnu | Host units shared between build and clippy at the same profile; dependencies shared between check and clippy; no target units shared between build and coverage; all units shared between `release` and the custom profile |
+| `post-link` | Custom stages, `mkForce null` on `strip`, a check on `linked` | linux-gnu, msvc | Stage order; check sees unstripped bytes |
+| `source-paths` | Panics in dependencies, `splitDebug`, test binaries | linux-gnu | No source references in main outputs; `debug` references sources; editing a README in a package does not change its test binary |
+| `trim-paths` | `trim-paths = "all"` in the profile; a second workspace without the setting; a path crate outside both roots with generated code in `OUT_DIR` | linux-gnu, Cargo ≥ 1.101 (nightly) | Cargo's remaps used, none added; path crates outside the root hashed without absolute paths (one `-C metadata` in both workspaces and at two other skeleton locations; stable 1.99 refuses those locations); the project's setting and scope kept; the second workspace planned with trim-paths on (the planner reads that the project declares none) and scoped per product kind; `OUT_DIR` paths read `/cargo/build-dir/…`; products have no source references; the second workspace's debug output works in gdb; tests pass (`products-trim-paths`) |
+| `doctests` | Doctests using a dev-dependency, one `should_panic`, an edition-2024 crate | linux-gnu, aarch64 | Doctests run; cross doctests run under the runner or skip with a reason |
+| `test-control` | Tests that need network, `#[ignore]` tests, a skip list per binary | linux-gnu | Skipped tests do not run; changing a skip list re-runs only that test run; the test app runs the network test outside the sandbox |
+| `benches` | A libtest bench and a Criterion bench | linux-gnu | Bench binaries come from the bench variant only, built with the bench profile; the test plan has none; smoke checks pass with `--test` |
+
+## Determinism and dogfooding
+
+- Some fixtures check that their products rebuild bit-identically (`nix build --rebuild`); a systematic check over every fixture and a sample of units is [#2](https://github.com/schlarpc/breakbulk/issues/2).
+- breakbulk builds itself (`tests/self-host`): its own binaries, built crate by crate through breakbulk, behave the same as the bootstrap build.
+
+## CI environment
+
+GitHub Actions (`.github/workflows/ci.yml`, #1) runs the Rust tests, clippy and rustfmt of both workspaces and the flake checks in `.github/fast-checks` on x86_64-linux, with Determinate Nix and the FlakeHub cache. Heavy checks do not run on hosted runners. The full suite needs:
+
+- A released Nix for IFD mode, and Nix master (until a release ships `builder-rpc-v0`) with `dynamic-derivations` and `ca-derivations` enabled for dynamic-derivation mode.
+- A binary cache that stores realisations, for the CA island and embed tests.
+- An aarch64 builder for native test runs. Without one, qemu-user through binfmt.
+- wine and headless Chromium for runners.
+- `allowUnfree` scoped to the xwin SDK, for the msvc fixtures.

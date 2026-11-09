@@ -17,8 +17,12 @@
 # Reference
 
 - [Module options](reference/options.md)
+- [Outputs and entry points](reference/outputs.md)
 - [Presets](reference/presets.md)
 - [Cargo and rustc assumptions](reference/assumptions.md)
+- [Plan format](reference/plan-format.md)
+- [Sentinel directives](reference/sentinels.md)
+- [The unit builder](reference/unit-builder.md)
 
 # Explanation
 
@@ -30,3 +34,12 @@
 - [Caching and early cutoff](explanation/caching.md)
 - [Trade-offs and risks](explanation/trade-offs.md)
 - [Patterns and prior art](explanation/prior-art.md)
+- [Internals](explanation/internals/components.md)
+  - [The traced planner](explanation/internals/planner.md)
+  - [Instantiation](explanation/internals/instantiation.md)
+  - [Environment capture](explanation/internals/env-capture.md)
+  - [Fetching and source views](explanation/internals/sources.md)
+  - [The Nix library](explanation/internals/nix-library.md)
+  - [Target traits and presets](explanation/internals/toolchains.md)
+  - [Products, stages and tests](explanation/internals/products.md)
+  - [How breakbulk is tested](explanation/internals/testing.md)
