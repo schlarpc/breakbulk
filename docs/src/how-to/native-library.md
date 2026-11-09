@@ -8,8 +8,21 @@ shows how to declare it for one package, so no other crate rebuilds.
 
 breakbulk ships settings for many common `-sys` crates (`openssl-sys`,
 `libz-sys`, `libsqlite3-sys`, …), taken from nixpkgs'
-`defaultCrateOverrides`. They are on by default ([`sysDefaults.enable`](../reference/options/repository.md#sysdefaultsenable)). If
-your crate is one of them, it builds with no configuration.
+`defaultCrateOverrides`. The list is in
+[`sysDefaults.packages`](../reference/options/repository.md#sysdefaultspackages).
+If your crate is one of them, it builds with no configuration.
+
+Your own `packages.<name>` settings add to them. To drop or replace one,
+assign it:
+
+```nix
+sysDefaults.packages.libsqlite3-sys = null;                    # drop
+sysDefaults.packages.zstd-sys = _: { inputs = p: [ p.zstd ]; };  # replace
+```
+
+They apply only where nixpkgs has a package set: always for build
+scripts, and for target units only when the target has one. On msvc or
+`wasm32-unknown-unknown`, those crates build their bundled copies.
 
 ## Declare the library and its tools
 

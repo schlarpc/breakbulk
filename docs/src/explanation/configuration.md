@@ -125,8 +125,9 @@ to one target's units
 ([`target.<triple>`](../reference/options/packages.md#packagesnametarget)).
 
 breakbulk ships settings for common `-sys` crates, from nixpkgs'
-`defaultCrateOverrides` ([`sysDefaults.enable`](../reference/options/repository.md#sysdefaultsenable)).
-They declare tools and libraries only. Switches that make a crate use a
+`defaultCrateOverrides` ([`sysDefaults.packages`](../reference/options/repository.md#sysdefaultspackages)),
+as the lowest layer under `packages`. They apply only on platforms with a
+nixpkgs package set. They declare tools and libraries only. Switches that make a crate use a
 system library instead of its bundled copy
 (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so
 they are left to you.

@@ -34,6 +34,9 @@
 #                harness name the product; the host workspace's
 #                instantiation and `util`'s units do not depend on it; the
 #                embedded bytes are a valid component.
+#   sys-defaults-no-package-set   `sysDefaults.packages` settings do not
+#                reach target units of a target without a package set
+#                (wasm32-unknown-unknown); `packages` settings do.
 #   cfg-rustflags  spec rustflags that turn on a `target.'cfg(…)'` key: the
 #                planner asks rustc for the cfg with Cargo's rustflags and
 #                puts the spec's flags under the target key; the product
@@ -510,6 +513,46 @@ let
         cp run.txt $out/
       '';
 
+  # --- sys-defaults-no-package-set --------------------------------------------
+
+  # `sysDefaults.packages` on a target without a nixpkgs package set
+  # (wasm32-unknown-unknown): its target units get neither the env nor a
+  # capture of the inputs (which would fail for want of a package set);
+  # `packages` settings still apply there.
+  sysDefaultsNoSet =
+    let
+      repo = breakbulk.mkRepository {
+        inherit pkgs tools;
+        root = fixtures + "/wasm-embed";
+        modules = [
+          {
+            workspaces.ui = {
+              path = "ui";
+              toolchain = {
+                rustc = wasmRust;
+                cargo = wasmRust;
+              };
+              targets = lib.mkForce { ${wasm} = { }; };
+              variants.default.profile = "release";
+            };
+            targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = wasmRust; };
+            sysDefaults.packages.ui = _: {
+              env.SYS_UI = "curated";
+              inputs = p: [ p.zlib ];
+            };
+            packages.ui.env.USER_UI = "user";
+          }
+        ];
+      };
+      i = repo.workspaces.ui.instances.${wasm}.default;
+      unit = lib.findFirst (u: u.name == "ui-0.1.0-lib") (throw "no ui lib unit") (lib.attrValues i.units.build);
+      data = builtins.fromJSON (builtins.unsafeDiscardStringContext unit.drvAttrs.BREAKBULK_UNIT);
+    in
+    assert lib.assertMsg (
+      !(data.env ? SYS_UI) && data.env.USER_UI or null == "user" && !(lib.hasInfix "no-package-set" (data.envCapture or ""))
+    ) "sys-defaults-no-package-set: ui lib ${builtins.toJSON data.env} ${data.envCapture or ""}";
+    pkgs.runCommand "loose-ends-sys-defaults-no-package-set" { } "touch $out";
+
   # --- cfg-rustflags ----------------------------------------------------------
 
   # The spec's `--cfg bb_spec` turns on the project's `target.'cfg(bb_spec)'`
@@ -656,6 +699,7 @@ in
   devshell-trim-paths = devshellTrimPaths;
   inherit devshell-target;
   wasm-embed = wasmEmbedCheck;
+  sys-defaults-no-package-set = sysDefaultsNoSet;
   cfg-rustflags = cfgRustflags;
   inherit names;
   runner-list = runnerList;

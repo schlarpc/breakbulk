@@ -865,14 +865,80 @@ in
   # bundled C library for a system one; their library inputs stay.
   sys-defaults-no-switches =
     let
-      pkgsCfg = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).config.packages;
-      envNames = lib.concatMap (p: lib.attrNames (p.env or { })) (lib.attrValues pkgsCfg);
+      repo = mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ];
+      sysCfg = repo.config.sysDefaults.packages;
+      # Every entry at an old and a new version (aws-lc-sys differs).
+      settings = lib.concatMap (
+        n:
+        map (version: sysCfg.${n} { inherit version; name = n; }) [
+          "0.41.0"
+          "0.42.0"
+        ]
+      ) (lib.attrNames sysCfg);
+      envNames = lib.concatMap (p: lib.attrNames p.env) settings;
       switches = lib.filter (n: builtins.match ".*_(USE_PKG_CONFIG|USE_SYSTEM|NO_VENDOR|SYSTEM)" n != null) envNames;
-      sqliteInputs = map lib.getName (pkgsCfg.libsqlite3-sys.inputs pkgs);
+      inputsOf = n: version: map lib.getName ((sysCfg.${n} { inherit version; name = n; }).inputs pkgs);
+      awsOld = sysCfg.aws-lc-sys {
+        name = "aws-lc-sys";
+        version = "0.41.0";
+      };
     in
     assert lib.assertMsg (switches == [ ]) "sys-defaults: system-library switches ${toString switches}";
-    assert lib.assertMsg (sqliteInputs == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs ${toString sqliteInputs}";
+    assert lib.assertMsg (inputsOf "libsqlite3-sys" "0.30.0" == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs";
+    # aws-lc-sys by version: a function of the lockfile entry.
+    assert lib.assertMsg (inputsOf "aws-lc-sys" "0.42.0" == [ "aws-lc" ]) "sys-defaults: aws-lc-sys 0.42 inputs";
+    assert lib.assertMsg (
+      inputsOf "aws-lc-sys" "0.41.0" == [ ] && awsOld.env.AWS_LC_SYS_CMAKE_BUILDER or null == "1"
+    ) "sys-defaults: aws-lc-sys 0.41 settings";
+    # The reference docs list every curated name.
+    assert lib.assertMsg (lib.all (n: lib.hasInfix "`${n}`" repo.options.sysDefaults.packages.description) (
+      lib.attrNames breakbulk.sysDefaults
+    )) "sys-defaults: a curated name is missing from the option's description";
+    # Curated entries are not `packages` keys (no warnings, no internal keys).
+    assert lib.assertMsg (repo.config.packages == { }) "sys-defaults: packages ${toString (lib.attrNames repo.config.packages)}";
     evalCheck "sys-defaults-no-switches" (toString envNames);
+
+  # `sysDefaults.packages`: the lowest layer under `packages`, replaced by a
+  # plain definition (`null` opts out), and off with `sysDefaults.enable`.
+  # On a target without a package set, only host units get them
+  # (tests/loose-ends, sys-defaults-no-package-set).
+  sys-defaults =
+    let
+      repo = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "b")
+        {
+          # Stand-ins for curated entries, at the curated priority.
+          sysDefaults.packages = lib.mapAttrs (_: lib.mkDefault) {
+            itoa = _: {
+              env.SYS_ITOA = "curated";
+              env.SYS_BOTH = "curated";
+            };
+            libc = _: { env.SYS_LIBC = "curated"; };
+          };
+        }
+        {
+          packages.itoa.env.SYS_BOTH = "user";
+          sysDefaults.packages.libc = null;
+          sysDefaults.packages.libsqlite3-sys = null;
+        }
+      ];
+      units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
+      envOf =
+        n:
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+      itoa = envOf "itoa-1.0.11-lib";
+      libc = envOf "libc-0.2.191-lib";
+      off = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "b")
+        { sysDefaults.enable = false; }
+      ];
+    in
+    assert lib.assertMsg (itoa.SYS_ITOA or null == "curated" && itoa.SYS_BOTH or null == "user")
+      "sys-defaults: itoa env ${builtins.toJSON itoa}";
+    assert lib.assertMsg (!(libc ? SYS_LIBC)) "sys-defaults: libc = null left ${builtins.toJSON libc}";
+    assert lib.assertMsg (repo.config.sysDefaults.packages.libsqlite3-sys == null) "sys-defaults: libsqlite3-sys not null";
+    assert lib.assertMsg (off.config.sysDefaults.packages == { }) "sys-defaults: enable = false";
+    evalCheck "sys-defaults" (builtins.toJSON itoa);
 
   # Modules receive `root` (a path, also when the caller passed a
   # string-like root), the repository object (`repo`) and the library

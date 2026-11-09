@@ -7,8 +7,8 @@
 #     modules = [ ./nix/rust.nix ];
 #   };
 #
-# It evaluates breakbulk's options (lib/modules) with the user's modules
-# and the curated -sys defaults (lib/sys-defaults.nix), then makes one
+# It evaluates breakbulk's options (lib/modules, the curated -sys
+# defaults included) with the user's modules, then makes one
 # mkWorkspace call per (workspace, target, variant). Outputs:
 #
 #   repo.workspaces.<ws>.packages.<pkg>                  default target (defaultTarget), default variant
@@ -73,7 +73,6 @@ let
   versionReq = import ./modules/version-req.nix { inherit lib; };
   bt = import ./modules/types.nix { inherit lib; };
   bbModules = import ./modules;
-  sysDefaults = ./sys-defaults.nix;
   mkDevShell = import ./devshell.nix { inherit lib; };
 in
 {
@@ -96,7 +95,7 @@ let
   root = util.rootPath args.root;
 
   eval = lib.evalModules {
-    modules = bbModules ++ [ sysDefaults ] ++ userModules;
+    modules = bbModules ++ userModules;
     # Module arguments: `pkgs`; `root` (the repository root, a path), for
     # reading project files; `repo` (the result, below), for products used
     # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk);
@@ -187,18 +186,12 @@ let
     && (p.req == null || versionReq.matches p.req e.version)
     && (o.version == null || versionReq.matches o.version e.version);
 
-  # Keys some module other than the curated defaults defined.
-  userKeys = lib.unique (
-    lib.concatMap (d: lib.attrNames d.value) (
-      lib.filter (d: d.file != "breakbulk/lib/sys-defaults.nix") eval.options.packages.definitionsWithLocations
-    )
-  );
   unmatchedWarnings = map (
     k:
     "breakbulk: `packages.${lib.strings.escapeNixIdentifier k}` matches no package in any workspace's Cargo.lock${
       lib.optionalString (cfg.packages.${k}.version != null) " (version requirement `${cfg.packages.${k}.version}`)"
     }; it has no effect."
-  ) (lib.filter (k: !(lib.any (overrideMatches k) allEntries)) userKeys);
+  ) (lib.filter (k: !(lib.any (overrideMatches k) allEntries)) (lib.attrNames cfg.packages));
 
   # Unversioned keys first, so a versioned override wins over a plain one.
   orderedKeys = lib.sort (
@@ -212,16 +205,14 @@ let
     if va != vb then vb else a < b
   ) (lib.attrNames cfg.packages);
 
-  emptyOverride = {
+  emptySide = {
     env = { };
     nativeInputs = _: [ ];
     inputs = _: [ ];
+  };
+  emptyOverride = emptySide // {
     extraSources = [ ];
-    host = {
-      env = { };
-      nativeInputs = _: [ ];
-      inputs = _: [ ];
-    };
+    host = emptySide;
     target = { };
     strictSources = null;
   };
@@ -231,46 +222,67 @@ let
     nativeInputs = catFn a.nativeInputs b.nativeInputs;
     inputs = catFn a.inputs b.inputs;
   };
-  mergeOverride = a: b: {
-    env = a.env // b.env;
-    nativeInputs = catFn a.nativeInputs b.nativeInputs;
-    inputs = catFn a.inputs b.inputs;
-    extraSources = a.extraSources ++ b.extraSources;
-    host = mergeSide a.host b.host;
-    target = lib.zipAttrsWith (_: lib.foldl' mergeSide (mergeSide emptyOverride.host emptyOverride.host)) [
-      a.target
-      b.target
-    ];
-    strictSources = if b.strictSources != null then b.strictSources else a.strictSources;
-  };
+  mergeOverride =
+    a: b:
+    mergeSide a b
+    // {
+      extraSources = a.extraSources ++ b.extraSources;
+      host = mergeSide a.host b.host;
+      target = lib.zipAttrsWith (_: lib.foldl' mergeSide emptySide) [
+        a.target
+        b.target
+      ];
+      strictSources = if b.strictSources != null then b.strictSources else a.strictSources;
+    };
+
+  # The package settings of one lockfile entry of workspace `wsName` on
+  # `triple`, as a list of `packages.<name>`-shaped layers, lowest first:
+  # the curated defaults (`sysDefaults.packages`), then each matching
+  # `packages` key.
+  layersFor =
+    wsName: triple: e:
+    let
+      sys = cfg.sysDefaults.packages.${e.name} or null;
+      # The curated defaults name nixpkgs libraries: on a target without
+      # a package set, only its host units (the build machine's set) get
+      # them.
+      hostOnly =
+        l:
+        l
+        // emptySide
+        // {
+          host = mergeSide l l.host;
+          target = { };
+        };
+    in
+    lib.optional (sys != null) (if packageSetOf wsName triple != null then sys e else hostOnly (sys e))
+    ++ map (k: cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
 
   # The merged override for one lockfile entry, or null.
   overrideFor =
-    e:
+    wsName: triple: e:
     let
-      ks = lib.filter (k: overrideMatches k e) orderedKeys;
+      ls = layersFor wsName triple e;
     in
-    if ks == [ ] then null else lib.foldl' (acc: k: mergeOverride acc cfg.packages.${k}) emptyOverride ks;
+    if ls == [ ] then null else lib.foldl' mergeOverride emptyOverride ls;
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
-  # The `packages.<name>` keys matching a workspace's path package `pkg`
-  # (unversioned keys first).
-  memberKeys =
-    wsName: pkg:
+  # The layers of a workspace's path package `pkg`.
+  memberLayers =
+    wsName: triple: pkg:
     let
-      es = lib.filter (e: e.name == pkg && e.source or null == null) locks.${wsName};
+      e = lib.findFirst (e: e.name == pkg && e.source or null == null) null locks.${wsName};
     in
-    lib.filter (k: lib.any (overrideMatches k) es) orderedKeys;
+    if e == null then [ ] else layersFor wsName triple e;
 
-  # Product settings for mkProducts: each key's stages and checks, then its
-  # target.<triple> stages and checks.
+  # Product settings for mkProducts: each layer's stages and checks, then
+  # its target.<triple> stages and checks.
   productConfig =
     wsName: triple: pkg:
     lib.concatMap (
-      k:
+      o:
       let
-        o = cfg.packages.${k};
         t = o.target.${triple} or { };
       in
       [
@@ -280,12 +292,12 @@ let
           checks = t.checks or { };
         }
       ]
-    ) (memberKeys wsName pkg);
+    ) (memberLayers wsName triple pkg);
 
-  # packages.<name>.test merged over matching keys, for mkTestRuns:
+  # The layers' `test` settings merged, for mkTestRuns:
   # `{ <pkg> = { test = …; }; }` for the workspace's path packages.
   testConfigs =
-    wsName:
+    wsName: triple:
     let
       members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
       mergeTest = a: b: {
@@ -348,11 +360,8 @@ let
         };
     in
     lib.genAttrs members (pkg: {
-      test = withDefaults (
-        lib.foldl' (acc: k: mergeTest acc cfg.packages.${k}.test) empty (memberKeys wsName pkg)
-      );
+      test = withDefaults (lib.foldl' (acc: l: mergeTest acc l.test) empty (memberLayers wsName triple pkg));
     });
-
   # --- target specs, per workspace -------------------------------------------
   #
   # The spec of one workspace on one triple: the repository-wide
@@ -539,8 +548,8 @@ let
       lib.concatMap (
         e:
         let
-          o = overrideFor e;
-          t = o.target.${triple} or (mergeSide emptyOverride.host emptyOverride.host);
+          o = overrideFor wsName triple e;
+          t = o.target.${triple} or emptySide;
           capture =
             platform: nativeInputs: inputs:
             let
@@ -550,9 +559,9 @@ let
               sets = envCapture.sets p platform;
               # Target units of such a target cannot have library inputs.
               # The error belongs to the units that would use them, so a
-              # package that never builds for this target (a curated
-              # -sys default, a native-only crate) costs nothing: its
-              # capture is a derivation that fails with the reason.
+              # package that never builds for this target (a native-only
+              # crate) costs nothing: its capture is a derivation that fails
+              # with the reason.
               noSet =
                 let
                   probe = builtins.tryEval (
@@ -602,11 +611,11 @@ let
 
   # extraSources by package name, from every matching override.
   extraSourcesOf =
-    entries:
+    wsName: triple: entries:
     lib.foldl' (
       acc: e:
       let
-        o = overrideFor e;
+        o = overrideFor wsName triple e;
       in
       if o == null || o.extraSources == [ ] then
         acc
@@ -692,7 +701,7 @@ let
       variant = vName;
       select = if sel == null then [ ] else sel;
       testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
-      extraSources = extraSourcesOf entries;
+      extraSources = extraSourcesOf wsName triple entries;
       packageOverrides = instOverrides wsName entries triple;
       inherit (cfg) strictSources;
       name = "${wsName}-${triple}-${vName}";
@@ -700,7 +709,7 @@ let
       shippedRemapScope = shippedRemapScopeOf wsName triple v;
       inherit (v) cargoTrimPaths sourcePaths;
       traits = traitsOf wsName triple;
-      packages = testConfigs wsName;
+      packages = testConfigs wsName triple;
       inherit (cfg) ca;
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
@@ -987,7 +996,9 @@ let
         name = wsName;
         inherit (ws) toolchain;
         target = ws.devShell.target;
-        overrides = lib.filter (o: o != null) (map overrideFor locks.${wsName});
+        overrides = lib.filter (o: o != null) (
+          map (overrideFor wsName (if ws.devShell.target == null then nativeTriple else ws.devShell.target)) locks.${wsName}
+        );
         targetEnv = lib.optionalAttrs (ws.devShell.target != null) (envStrings (targetField wsName ws.devShell.target "env" { }));
         # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default

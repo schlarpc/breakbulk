@@ -28,7 +28,7 @@
 # The module-system entry point:
 #   breakbulk.mkRepository { pkgs; root; modules; }  (lib/repository.nix)
 #   breakbulk.modules           the option declarations (lib/modules)
-#   breakbulk.sysDefaults       the curated -sys crate module
+#   breakbulk.sysDefaults       the curated -sys crate settings, by name
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
 # Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
@@ -226,7 +226,7 @@ let
     modules = import ./modules;
     # imports = [ breakbulk.lib.flakeModule ]; in a flake-parts flake.
     flakeModule = import ./modules/flake-parts.nix { inherit mkRepository; };
-    sysDefaults = ./sys-defaults.nix;
+    sysDefaults = import ./sys-defaults.nix { inherit lib; };
     versionReq = import ./modules/version-req.nix { inherit lib; };
 
     xwinSdk = import ./xwin-sdk.nix { inherit lib; };

@@ -1,10 +1,17 @@
-# Repository-wide options: delivery mode, source strictness, fetching.
-{ lib, ... }:
+# Repository-wide options: delivery mode, source strictness, fetching,
+# and the curated defaults for -sys crates (lib/sys-defaults.nix).
+{ lib, config, ... }:
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
+  settings = (import ./package-settings.nix { inherit lib; }).settings;
+  curated = import ../sys-defaults.nix { inherit lib; };
 in
 {
+  config.sysDefaults.packages = lib.mkIf config.sysDefaults.enable (
+    lib.mapAttrs (_: v: lib.mkDefault (if builtins.isFunction v then v else _: v)) curated
+  );
+
   options = {
     mode = mkOption {
       type = types.enum [
@@ -147,10 +154,39 @@ in
       type = types.bool;
       default = true;
       description = ''
-        Apply breakbulk's curated overrides for common `-sys` crates
-        (seeded from nixpkgs' `defaultCrateOverrides`). Your own
-        `packages.<name>` values merge with them: lists concatenate, env
-        attributes merge, and `lib.mkForce` replaces a default.
+        Define breakbulk's curated settings for common `-sys` crates
+        (seeded from nixpkgs' `defaultCrateOverrides`) in
+        `sysDefaults.packages`.
+      '';
+    };
+
+    sysDefaults.packages = mkOption {
+      type = types.attrsOf (types.nullOr (types.functionTo (types.submodule settings)));
+      default = { };
+      # The result has the options of `packages.<name>`, documented there.
+      visible = "shallow";
+      example = lib.literalExpression ''
+        {
+          libsqlite3-sys = null;  # no curated inputs
+          aws-lc-sys = { version, ... }: { inputs = p: [ p.aws-lc ]; };
+        }
+      '';
+      description = ''
+        Default settings for a package, by crate name: a function of the
+        package's lockfile entry (`{ name, version, ... }`) that returns
+        settings with the options of `packages.<name>`. They are the
+        lowest layer; `packages.<name>` settings add to them (lists
+        concatenate, env attributes merge).
+
+        They name nixpkgs libraries, so they apply only where a package
+        set exists: host units always (the build machine's), target units
+        only when `targets.<triple>.packageSet` exists (or the target is
+        the native one). On other targets (msvc, wasm32-unknown-unknown)
+        those crates build their bundled copies.
+
+        The curated entries are defined at `mkDefault` priority, so a
+        plain definition replaces one: `null` turns it off, a function
+        replaces it. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curated)}.
       '';
     };
 
