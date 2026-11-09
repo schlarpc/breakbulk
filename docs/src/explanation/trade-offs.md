@@ -33,9 +33,9 @@ behavior. This page lists them, with the issues that track each.
   build-script output lands, on several Cargo releases. Every such
   dependency is listed in [Cargo and rustc
   assumptions](../reference/assumptions.md).
-- **Nix features not yet in a stable release.** Dynamic-derivation mode needs
-  `builder-rpc-v0`, which is on Nix master only. IFD mode is the default
-  on stable Nix.
+- **Nix features not yet in a stable release.** Dynamic-derivation mode
+  needs `builder-rpc-v0`, which is on Nix master only. IFD mode is the
+  default on stable Nix.
 - **Content addressing in Nix and caches.** Nix fetches all inputs of a
   content-addressed derivation before it can substitute it, and several
   cache servers store no realisations. So units are input-addressed, and

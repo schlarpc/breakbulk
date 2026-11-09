@@ -2,9 +2,10 @@
 
 ## Patterns breakbulk supports
 
-These patterns come from a survey of working Rust-in-Nix repositories. Each is either hand-wired today or breaks silently.
+These patterns come from a survey of working Rust-in-Nix repositories. Each
+one is either wired by hand today, or breaks without a word.
 
-| Pattern | What goes wrong today | How the design handles it |
+| Pattern | What goes wrong today | How breakbulk handles it |
 | --- | --- | --- |
 | Copied cross-toolchain plumbing (msvc via xwin: linker, cc, ar, cflags, bindgen args, SDK paths) | The same 30–60 lines copied between repositories, drifting apart | One toolchain preset |
 | Build stamps (git revision, `SOURCE_DATE_EPOCH`, compiled-in settings) | Set only on the final build, by hand, to avoid rebuilding all dependencies on every commit | Per-package env reaches only that package's units |
@@ -24,25 +25,74 @@ These patterns come from a survey of working Rust-in-Nix repositories. Each is e
 | Cross tests (Windows, other architectures, wasm) | Tests disabled for cross targets | `runner` in the spec; native builders by `system` |
 | `wasm-bindgen-cli` version pinning | Hand-maintained hashes, or a nixpkgs version that matches by coincidence | Version read from `Cargo.lock` |
 | Workspace members used as build tools (code generators, `xtask`) | Rebuilt whenever any member changes | Per-unit graph rebuilds only what the tool depends on |
-| Reproducibility gates (rebuild checks, stamped artifacts, deterministic archives) | Bolted on per repository | Built-in rebuild check; deterministic helpers |
+| Reproducibility gates (rebuild checks, stamped artifacts, deterministic archives) | Bolted on per repository | Deterministic helpers; a built-in rebuild check is planned ([#2](https://github.com/schlarpc/breakbulk/issues/2)) |
 | Nightly-only workspaces and build-std targets next to stable ones | Separate tooling per toolchain | Toolchain per workspace |
 
 ## Lessons from prior art
 
-| Source | Take | Leave |
-| --- | --- | --- |
-| cargo-dyndrv (Obsidian Systems) | Planning at build time via dynamic derivations; build-script output applied late through argument files; build-script compile and run as separate units; `OUT_DIR` as its own output | Rebuilding rustc flags from `--unit-graph`; `-C metadata` hashed from derivation paths and absolute paths; serializing every source inside the planner; overrides keyed by full package ID; link flags propagating through build-dependency edges |
-| crane | Real-Cargo fidelity; per-crate fetching from `Cargo.lock` with no IFD; vendoring one directory per source with generated source replacement; optional `outputHashes` for git sources; a skeleton source for planning; source cleaning; checks as first-class outputs | The coarse dependencies-blob target directory |
-| crate2nix, `buildRustCrate` | Per-crate sharing across projects; the curated `defaultCrateOverrides` for `-sys` crates; cross builds through nixpkgs splicing | Feature resolution in Nix; checked-in generated Nix; reimplementing Cargo |
-| Bazel `rules_rust`, Buck2 | Pipelined metadata actions with identical commands; platforms and toolchains as data; a content-hashed action cache | Their own reimplementation of Cargo semantics |
+What breakbulk takes from each, and what it leaves.
 
-## Issues found in cargo-dyndrv that this design avoids
+**cargo-dyndrv (Obsidian Systems)**
 
-- `-C metadata` is a hash of upstream derivation paths, unit-graph indices and absolute source paths. It defeats cutoff, changes when unrelated crates join the graph, and differs between sandbox and local builds.
-- Link flags from build dependencies' build scripts reach target links, which breaks cross builds or adds host libraries to target binaries.
-- `rustc-link-lib` and `rustc-link-arg` apply to every downstream compile instead of only the package's own targets.
-- Most Cargo env vars and profile settings are missing (`panic`, `overflow-checks`, LTO, `codegen-units`), and some are misparsed.
-- A build script killed by a signal counts as success, and a `rustc-flags` directive corrupts the next argument.
+- Takes:
+  - planning at build time via dynamic derivations;
+  - build-script output applied late through argument files;
+  - build-script compile and run as separate units;
+  - `OUT_DIR` as its own output.
+- Leaves:
+  - rebuilding rustc flags from `--unit-graph`;
+  - `-C metadata` hashed from derivation paths and absolute paths;
+  - serializing every source inside the planner;
+  - overrides keyed by full package ID;
+  - link flags propagating through build-dependency edges.
+
+**crane**
+
+- Takes:
+  - real-Cargo fidelity;
+  - per-crate fetching from `Cargo.lock` with no IFD;
+  - vendoring one directory per source with generated source replacement;
+  - optional `outputHashes` for git sources;
+  - a skeleton source for planning;
+  - source cleaning;
+  - checks as first-class outputs.
+- Leaves:
+  - the coarse dependencies-blob target directory.
+
+**crate2nix, `buildRustCrate`**
+
+- Takes:
+  - per-crate sharing across projects;
+  - the curated `defaultCrateOverrides` for `-sys` crates;
+  - cross builds through nixpkgs splicing.
+- Leaves:
+  - feature resolution in Nix;
+  - checked-in generated Nix;
+  - reimplementing Cargo.
+
+**Bazel `rules_rust`, Buck2**
+
+- Takes:
+  - pipelined metadata actions with identical commands;
+  - platforms and toolchains as data;
+  - a content-hashed action cache.
+- Leaves:
+  - their own reimplementation of Cargo semantics.
+
+## Issues found in cargo-dyndrv that breakbulk avoids
+
+- `-C metadata` is a hash of upstream derivation paths, unit-graph indices
+  and absolute source paths. It defeats cutoff, changes when unrelated
+  crates join the graph, and differs between sandbox and local builds.
+- Link flags from build dependencies' build scripts reach target links,
+  which breaks cross builds or adds host libraries to target binaries.
+- `rustc-link-lib` and `rustc-link-arg` apply to every downstream compile
+  instead of only the package's own targets.
+- Most Cargo env vars and profile settings are missing (`panic`,
+  `overflow-checks`, LTO, `codegen-units`), and some are misparsed.
+- A build script killed by a signal counts as success, and a `rustc-flags`
+  directive corrupts the next argument.
 - Multiple crate types per unit (`["cdylib", "rlib"]`) are rejected.
 
-The traced planner removes most of these by construction, because the command lines and directive placement come from Cargo.
+The traced planner removes most of these by construction, because the
+command lines and directive placement come from Cargo.

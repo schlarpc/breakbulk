@@ -1,5 +1,7 @@
 # Fetching and source views
 
+Crates are fetched from the lockfiles: registry crates at build time, git sources during evaluation. Your own packages get source views, filtered copies of their directories, and planning runs over a skeleton with empty source files. This page covers each of those.
+
 Fetch derivations are created from the lockfiles at evaluation time. Registry crates download at build time. Git sources are fetched during evaluation.
 
 ## Registry crates

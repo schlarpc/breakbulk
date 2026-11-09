@@ -1,5 +1,7 @@
 # How breakbulk is tested
 
+breakbulk's promise is that a build behaves like `cargo build` and that an edit rebuilds only what it should. The test suite checks both: golden tests compare traced commands against real Cargo, and invalidation and sharing tests compare derivation sets. This page lists the kinds of tests, the fixtures, and how to run them.
+
 Trace golden tests and directive differential tests guard against Cargo changes; invalidation and sharing tests guard the main promise, that an edit rebuilds only what it should. Every place breakbulk relies on Cargo or rustc behavior beyond a documented format, with the upstream source, the releases it holds for and the check that pins it, is listed in [reference/assumptions.md](../../reference/assumptions.md).
 
 1. **Rust unit tests** for the directive parser (both syntaxes, every directive, malformed input), path rewriting, env filtering, splice expansion, plan canonicalization and unit ordering.

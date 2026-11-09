@@ -1,24 +1,22 @@
 # Components
 
-```mermaid
-flowchart LR
-  subgraph eval["Evaluation: Nix library"]
-    modules["Modules and config<br/>mkRepository + user modules<br/>Presets, overrides, stages"]
-    fetch["Fetch and source views<br/>Per-crate fetchurl, fetchGit<br/>lib.fileset views from root"]
-    gen["Generated inputs<br/>Skeleton, toolchains.json, sources.json<br/>Predicted roots, env-capture references"]
-    modules --> fetch --> gen
-  end
-  subgraph build["Build time: derivations and binaries"]
-    capture["Env capture<br/>One small stdenv derivation per package and platform<br/>Output: env.json"]
-    plan["Plan derivations<br/>breakbulk-plan runs the user's cargo over the skeleton<br/>Build plan and test plan; cargo calls breakbulk-shim<br/>Output: plan.json"]
-    inst["Instantiate<br/>breakbulk-instantiate templates one .drv per unit<br/>IFD: units.json imported by Nix<br/>Dynamic: written through builder-rpc-v0"]
-    units["Unit derivations (input-addressed)<br/>Builder breakbulk-unit, mode compile or run<br/>Outputs: rmeta, rlib, out, flags"]
-    products["Products<br/>linked, then named CA stages, then install<br/>Checks and test runs hang off stages"]
-    plan --> inst --> units --> products
-    capture --> units
-  end
-  gen --> plan
-  gen --> inst
+breakbulk is five small Rust programs and a Nix library. The library evaluates your configuration and wires everything up; the programs plan, instantiate and build units. This page lists the pieces, how they connect, and where breakbulk took ideas from cargo-dyndrv.
+
+```text
+Evaluation (the Nix library)
+  modules ──▶ fetch and source views ──▶ skeleton, toolchains.json,
+                                         sources.json, predicted roots
+                                                 │
+Build time                                       ▼
+  plan derivations (breakbulk-plan + breakbulk-shim) ──▶ plan.json
+                                                 │
+                                                 ▼
+  breakbulk-instantiate ──▶ one .drv per unit (IFD or dynamic)
+                                                 │
+  env captures (env.json) ──────────────────────▶│
+                                                 ▼
+  units (breakbulk-unit: compile, run) ──▶ products: linked, stages,
+                                           install; checks, test runs
 ```
 
 The skeleton and toolchain spec feed planning; the source map, toolchains and env captures feed instantiation by reference. Stage and check configuration from the modules is applied when products are assembled.

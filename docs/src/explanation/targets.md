@@ -1,53 +1,173 @@
 # Targets and toolchains
 
-breakbulk's targets are presets, not special cases: each is a toolchain spec chosen by the target triple. Linux gnu and musl on x86\_64, aarch64 and riscv64, static glibc, portable Linux (old glibc), browser and component wasm, wasip2, Windows msvc and MinGW, and build-std targets work. Darwin does not yet ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
+A target is not a special case in breakbulk. Each one is a toolchain
+spec, usually from a [preset](../reference/presets.md), chosen by the
+target triple. For example, `x86_64-unknown-linux-musl` with
+`presets.linuxStatic` gives nixpkgs' musl cross toolchain, mold as the
+linker, and qemu (or a native builder) to run the tests.
 
-| Target | Toolchain | Linker | Runner |
+To set a target up, see [Build for another target](../how-to/targets.md).
+This page explains what each kind of target gets, and why.
+
+## What works
+
+| Target | Toolchain | Linker | Tests run on |
 | --- | --- | --- | --- |
-| x86\_64-unknown-linux-gnu | user's (e.g. from `rust-toolchain.toml`) | mold | native |
-| aarch64-unknown-linux-gnu | user's + nixpkgs cross | mold | native aarch64 builder, else qemu-user |
-| {x86\_64,aarch64}-unknown-linux-musl | user's + nixpkgs musl cross | mold or lld | native builder, else qemu-user |
-| wasm32-unknown-unknown | user's, with target | lld (wasm flavor) | Node through wasm-bindgen's test runner (headless Chromium crashes in the sandbox, [#8](https://github.com/schlarpc/breakbulk/issues/8)), or wasmtime |
-| {x86\_64,aarch64}-pc-windows-msvc | user's + xwin SDK (unfree) | lld-link | wine |
-| Host triple, fully static glibc | user's + static archives | mold | native |
-| wasm32-wasip2 | rustup-dist with target, + the matching wasi-sdk sysroot's headers for C | rustc's wasm-component-ld over version-matched wasm-ld | wasmtime |
-| riscv64gc-unknown-linux-gnu | user's + nixpkgs cross | mold | qemu-user |
-| x86\_64-pc-windows-gnu, x86\_64-pc-windows-gnullvm | user's + nixpkgs mingw-w64 cross (gcc/msvcrt; LLVM/ucrt) | lld through the mingw C driver | wine |
-| Host triple, old glibc (`linuxPortable`, zig) | user's + `zig cc` | zig (its lld) | native, through the build machine's `ld.so` |
-| x86\_64-unknown-none (build-std) | nightly with `rust-src`, user-supplied | rustc's own (rust-lld) | none |
-| aarch64-apple-darwin (not yet) | user's, built on Mac builders | ld64 or lld | native |
+| `x86_64-unknown-linux-gnu` | yours | mold | the build machine |
+| `aarch64-unknown-linux-gnu` | yours + nixpkgs cross | mold | an aarch64 builder, else qemu-user |
+| `riscv64gc-unknown-linux-gnu` | yours + nixpkgs cross | mold | qemu-user |
+| `{x86_64,aarch64}-unknown-linux-musl` | yours + nixpkgs musl cross | mold | a native builder, else qemu-user |
+| your own triple, static glibc | yours + static archives | mold | the build machine |
+| your own triple, old glibc (`linuxPortable`) | yours + `zig cc` | zig | the build machine's `ld.so` |
+| `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine |
+| `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
+| `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), or wasmtime |
+| `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
+| `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none |
+
+"Yours" means the toolchain you give the workspace (see below). Headless
+Chromium as a wasm test runner crashes in the sandbox
+([#8](https://github.com/schlarpc/breakbulk/issues/8)), so Node is the
+default. macOS targets do not work yet
+([#13](https://github.com/schlarpc/breakbulk/issues/13)).
+
+Details: [Target traits and presets](internals/toolchains.md).
 
 ## Bring your own toolchain
 
-Any rustc/cargo pair works: nixpkgs `rustPlatform`, rust-overlay or fenix, including `fromRustupToolchainFile`. The planner runs the user's own cargo, so resolver and lockfile behavior match local builds. Nightly and build-std work when the user brings a nightly; the tool's defaults never need one.
+Any rustc and cargo pair works: nixpkgs' `rustPlatform`, rust-overlay or
+fenix, including a toolchain made from your `rust-toolchain.toml`. Set it
+as the workspace's
+[`toolchain`](../reference/options/workspaces.md#workspacesnametoolchain).
+breakbulk runs your own cargo, so resolver and lockfile behavior match
+your local builds.
 
-Supported Cargo releases form a rolling window: roughly the last six months of stable, plus current nightly. Features newer than the floor (`--remap-path-scope`, `trim-paths`) have fallbacks; whether a toolchain has them is decided once, as its capabilities (from its version, or by asking it), and a vendor-forked toolchain can override them. Repositories pinned to older toolchains, MSRV variants and vendor-forked toolchains may work but are not tested.
+Nightly and build-std work when you bring a nightly. breakbulk's defaults
+never need one.
+
+Supported Cargo releases are a rolling window: about the last six months
+of stable, plus the current nightly.
+
+- Newer features (`--remap-path-scope`, `trim-paths`) have fallbacks.
+  Whether a toolchain has them is decided once, as its
+  [`capabilities`](../reference/options/workspaces.md#workspacesnametoolchaincapabilities),
+  from its version or by asking it. A patched or forked toolchain can
+  override them.
+- Older toolchains, MSRV builds and forked toolchains may work, but are
+  not tested.
 
 ## Linker selection
 
-The linker is chosen automatically as a pure function of target, host and LTO mode, recorded in the plan, and overridable. One function makes the choice (`presets.chooseLinker`, with the decision itself in `presets.linkerKind`); every preset and the host spec call it, and [`targets.<t>.linker`](../reference/options/targets.md#targetsnamelinker) (or [`host.linker`](../reference/options/targets.md#targetsnamehostlinker)) overrides it.
+A preset picks the linker from the target's traits. One function makes
+the choice for every preset
+(`presets.linkerKind`, used by `presets.chooseLinker`).
+[`targets.<triple>.linker`](../reference/options/targets.md#targetsnamelinker)
+and
+[`host.linker`](../reference/options/targets.md#targetsnamehostlinker)
+override it.
 
-- Linux ELF on a Linux host: **mold**, through nixpkgs' wrapped bintools. The native target gets the Linux preset by default, so this holds with no configuration. The wrapper's rpath handling, `NIX_LDFLAGS` and hardening flags apply because the unit environment carries the variables nixpkgs' setup hooks set (see [Per-package overrides](configuration.md#per-package-overrides)).
-- Cross-language LTO (`-Clinker-plugin-lto`) or non-Linux host: **lld** from the LLVM release that matches rustc's (from a version table, because only nixpkgs' rustc names its LLVM; a rustc newer than the table is asked with `rustc -vV` at evaluation time).
-- Where rustc's target spec names the linker itself (wasm, wasip2): defer to it, and only make sure the version-matched `lld` is the one found.
-- Windows msvc: `lld-link` from the matching LLVM, wrapped so PDBs are reproducible. Windows MinGW (`-gnu`, `-gnullvm`): the toolchain's C driver with lld. The `linuxPortable` preset's zig backend asks for zig's own linker (`zig cc`).
-- Any other target has no rule and fails at evaluation, naming `targets.<t>.linker`.
-- Never rustc's self-contained `rust-lld`, which bypasses the Nix linker wrapper. rustc uses it by default on `x86_64-unknown-linux-gnu` since about 1.90, and its opt-out is a rustflag that cannot reach build scripts, so every C-driver linker wrapper (mold, clang with lld, MinGW, zig) drops the `-fuse-ld=lld` and `-B…/gcc-ld` arguments rustc adds.
+| Target | Linker |
+| --- | --- |
+| Linux | **mold**, through nixpkgs' wrapped C compiler |
+| Linux, with cross-language LTO | clang with lld (untested: [#10](https://github.com/schlarpc/breakbulk/issues/10)) |
+| Windows MSVC | `lld-link`, wrapped so that PDBs are reproducible |
+| Windows MinGW (`-gnu`, `-gnullvm`) | the MinGW C driver with lld |
+| wasm | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |
+| `linuxPortable` | zig's own linker (`zig cc`) |
+| anything else | none: the preset fails at evaluation and names `targets.<triple>.linker` |
+
+On Linux the link goes through nixpkgs' wrapper, so its rpath handling,
+`NIX_LDFLAGS` and hardening flags apply. That works because each unit's
+environment carries what nixpkgs' setup hooks set (see [Per-package
+overrides](configuration.md#per-package-overrides)).
+
+Every LLVM tool comes from the LLVM release that matches rustc's. Only
+nixpkgs' rustc says which LLVM it uses, so breakbulk keeps a table of
+Rust release to LLVM release, and asks `rustc -vV` for a rustc newer than
+the table.
+
+### Never rustc's own `rust-lld`
+
+Since about Rust 1.90, rustc links `x86_64-unknown-linux-gnu` with its
+bundled `rust-lld` by default. That bypasses the Nix linker wrapper.
+rustc's opt-out is a rustflag, and rustflags never reach build scripts.
+So every C-driver linker breakbulk uses (mold, clang with lld, MinGW,
+zig) drops the two arguments rustc adds for it (`-fuse-ld=lld` and
+`-B…/gcc-ld`).
+
+The exceptions are targets without a preset, such as UEFI and bare metal
+(`x86_64-unknown-none`): nixpkgs has no linker wrapper for them, so they
+use the linker rustc's own target spec names.
 
 ## Windows msvc
 
-The preset packages the common cross pattern once: an `xwin` CRT and SDK fixed-output derivation with pinned versions and `meta.license` unfree; `lld-link`; `clang-cl` and `llvm-lib` for C code; `-imsvc` include paths for cc and the same paths as `-isystem` for bindgen; `RC` and `LIB` for resource compilers; optional `crt-static`; and wine as the runner. It has an extension point for further SDKs, such as the Windows Driver Kit.
+The `windows` preset packages the usual MSVC cross setup:
+
+- the CRT and Windows SDK from `xwin`, as a pinned fixed-output derivation
+  (unfree: Microsoft's license);
+- `lld-link` for linking;
+- `clang-cl` and `llvm-lib` for C code, with the SDK's include paths for
+  cc (`-imsvc`) and for bindgen (`-isystem`);
+- `RC` and `LIB` for resource compilers;
+- optional static CRT (`crtStatic`);
+- wine as the test runner.
+
+`extraSdks` adds further SDKs, such as the Windows Driver Kit.
 
 ## wasm
 
-- **Browser.** The `wasm-bindgen-cli` version is read from `Cargo.lock` and matched exactly; a missing version is a clear error. C code is compiled with an unwrapped clang targeting wasm32. A wrapped gcc can silently emit host objects instead.
-- **Components.** Core modules from `wasm32-unknown-unknown` are componentized with `wasm-tools component new`, which gives components with no WASI imports. `wasm32-wasip2` std builds link straight to components with rustc's own `wasm-component-ld`. C code for `wasm32-unknown-unknown` components uses clang plus nixpkgs `wasilibc`, and the link uses that same wasi-libc (`-C link-self-contained=no`). On wasip2 the link keeps the wasi-libc bundled with Rust (turning it off also drops the program's `crt1-command.o`), and C code compiles against the headers of the wasi-sdk release that Rust release bundles, fetched as a fixed-output sysroot from a table of Rust release to wasi-sdk release; std, the C code and the library linked share one wasi-libc version.
-- `wasm-opt` operates on core modules, so component pipelines run it before componentizing.
+**Browser** (`wasmWeb`):
+
+- The `wasm-bindgen-cli` version comes from `Cargo.lock` and must match
+  exactly; a missing version is a clear error.
+- C code compiles with an unwrapped clang for wasm32. A wrapped gcc can
+  silently build host objects instead.
+
+**Components** (`wasmComponent`):
+
+- On `wasm32-unknown-unknown`, core modules become components with
+  `wasm-tools component new`. They have no WASI imports. C code uses
+  clang and nixpkgs' `wasilibc`, and the link uses that same wasi-libc.
+- On `wasm32-wasip2`, std programs link straight to components with
+  rustc's `wasm-component-ld`. The link keeps the wasi-libc bundled with
+  Rust. C code compiles against the headers of the wasi-sdk release that
+  Rust release bundles, so std, the C code and the library share one
+  wasi-libc version.
+- `wasm-opt` works on core modules, so it runs before componentizing.
 
 ## Static and musl
 
-Musl targets use nixpkgs cross toolchains with `crt-static`; the link uses Rust's self-contained crt, `libc.a` and libunwind (nixpkgs' musl has no `libunwind.a`), while C code compiles against nixpkgs' musl headers. Static glibc builds are static-pie by default. A static build on the host triple passes the host triple explicitly as the target, so target rustflags (`crt-static`, static relocation, static archive search paths) reach only target units, while build scripts and proc macros stay dynamic. Static-only environment (static `pkg-config` mode on musl and static glibc alike, static archive paths) is scoped to target units by platform, because on the host it makes build scripts link `libc.a` and crash.
+- **musl** targets use nixpkgs' musl cross toolchain with `crt-static`.
+  The link uses Rust's own crt, `libc.a` and libunwind (nixpkgs' musl has
+  no `libunwind.a`); C code compiles against nixpkgs' musl headers.
+- **Static glibc** builds are static-pie.
+- A static build of your own triple still names that triple as the
+  target. So the static settings (rustflags, static `pkg-config`, static
+  archive paths) reach only target units, and build scripts and proc
+  macros stay dynamic. On the host, those settings would make build
+  scripts link `libc.a` and crash.
 
 ## Portable Linux
 
-`linuxPortable` builds Linux programs that run on other distributions, in the manner of Python's manylinux wheels: linked against an old glibc (2.17 by default), with everything Nix provides linked statically, so the program loads nothing at run time but glibc's own libraries, GCC's runtime (`libgcc_s.so.1`, `libstdc++.so.6`, as manylinux allows) and the system libraries the user names (`systemLibraries`, such as `libGL.so.1`). Native library inputs are rebuilt as static libraries only (`rebuildInputs`), pkg-config runs in static mode, and a default check reads each binary's `NEEDED` entries, as auditwheel does, and fails on any other library. A second default check fails on any Nix store path named anywhere in the product's files, with an allow-list: on another system nothing is there (a static OpenSSL's compiled-in configuration directory, for one, is rebuilt to point at `/etc/ssl`). There is no bundling or rpath option: the product needs nothing next to it. Its one backend is zig (`zig cc`). It is a same-triple preset: host units keep the host linker through the linker rewrite. Zig rebuilds its libc in an empty per-sandbox cache, so the preset includes a derivation that pre-warms that cache; zig's own wrapper copies it into the unit's `$TMPDIR` (zig cannot use a read-only cache), so the unit builder needs no zig special case. Tests run through the build machine's newer `ld.so`; a heavy check also runs the product and tests inside a CentOS 7 (glibc 2.17) container.
+`linuxPortable` builds programs that run on other Linux distributions,
+like Python's manylinux wheels:
+
+- It links against an old glibc (2.17 by default), with `zig cc`.
+- Everything Nix provides is linked statically. At run time the program
+  loads only glibc's libraries, GCC's runtime (`libgcc_s.so.1`,
+  `libstdc++.so.6`) and the system libraries you name
+  (`systemLibraries`, such as `libGL.so.1`).
+- Native library inputs must be rebuilt as static libraries
+  (`rebuildInputs`), and `pkg-config` runs in static mode.
+- Two checks run on every product: one reads each binary's `NEEDED`
+  entries, as auditwheel does, and fails on any other library; the other
+  fails on any Nix store path in the product's files, which would not
+  exist on another system.
+- There is no bundling or rpath option: the product needs nothing next to
+  it.
+
+Tests run with the build machine's newer `ld.so`. A heavier check, run
+outside `nix flake check`, also runs the product and its tests in a
+CentOS 7 (glibc 2.17) container.
+
+Details: [linuxPortable](internals/toolchains.md#linuxportable-zig).
