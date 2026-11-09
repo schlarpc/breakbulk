@@ -20,6 +20,9 @@
 #                     and test binary link as ARM64 PE32+, time stamp 0,
 #                     only system DLLs; nothing runs them. Rebuilds checked
 #                     by hand (`nix build --rebuild` on every unit and stage)
+#   uefi-*            x86_64- and aarch64-unknown-uefi with no preset (the
+#                     target spec's rust-lld as lld-link): an EFI application
+#                     PE with a PDB in the debug output
 #   windows-dll-*     a windows-gnu test binary importing a DLL its build
 #                     script built: the test run finds it through WINEPATH;
 #                     without it, wine fails (missing DLL); -beside-exe:
@@ -314,6 +317,45 @@ let
             cp file.txt dlls.txt $out/
           '';
     };
+
+  # --- uefi ----------------------------------------------------------------------
+
+  # No preset: `targets.<t> = { }` and rustc's target spec links with its
+  # own rust-lld as lld-link.
+  uefiTriples = [
+    "x86_64-unknown-uefi"
+    "aarch64-unknown-uefi"
+  ];
+  uefiRepo = mkRepo (fixtures + "/uefi") [
+    { workspaces.main = wsWith (rustWith uefiTriples) uefiTriples; }
+  ];
+  uefiCheckFor =
+    triple: machine:
+    let
+      product = uefiRepo.workspaces.main.target.${triple}.packages.app;
+    in
+    pkgs.runCommand "uefi-${triple}"
+      {
+        nativeBuildInputs = [ pkgs.llvmPackages.llvm ];
+        inherit product;
+        debug = product.debug;
+      }
+      ''
+        set -euo pipefail
+        efi=$product/bin/app.efi
+        llvm-readobj --file-headers "$efi" > headers.txt
+        grep -q 'Machine: ${machine} ' headers.txt
+        grep -q 'Subsystem: IMAGE_SUBSYSTEM_EFI_APPLICATION ' headers.txt
+        # The PDB is in the debug output, under the name the .efi gives.
+        pdb=$(echo $debug/bin/*.pdb)
+        grep -qaF "$(basename "$pdb")" "$efi"
+        mkdir -p $out
+        cp headers.txt $out/
+      '';
+  uefiChecks = {
+    uefi-x86_64 = uefiCheckFor "x86_64-unknown-uefi" "IMAGE_FILE_MACHINE_AMD64";
+    uefi-aarch64 = uefiCheckFor "aarch64-unknown-uefi" "IMAGE_FILE_MACHINE_ARM64";
+  };
 
   # A test binary that imports a DLL its build script built into OUT_DIR.
   # The test run finds it through WINEPATH (the wine runner's
@@ -684,7 +726,7 @@ in
       zigRepo
       ;
   };
-  checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks;
+  checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks // uefiChecks;
   # Opt-in, network: `nix run .#test-linux-portable-container`.
   containerChecks = zigContainerChecks;
 }

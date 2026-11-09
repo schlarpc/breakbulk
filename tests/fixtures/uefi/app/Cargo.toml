@@ -1,0 +1,13 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# No libtest harness on UEFI.
+[[bin]]
+name = "app"
+test = false
+
+[dependencies]
+greet = { path = "../greet" }

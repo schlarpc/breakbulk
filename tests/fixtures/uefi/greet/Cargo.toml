@@ -1,0 +1,10 @@
+[package]
+name = "greet"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# No libtest harness on UEFI.
+[lib]
+test = false
+doctest = false

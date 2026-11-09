@@ -1,0 +1,18 @@
+# UEFI with no preset: `app` is a no_std UEFI application using the
+# library `greet`. rustc's target spec links it with its own rust-lld as
+# lld-link, which writes a PDB for every link. The tests build it for
+# x86_64-unknown-uefi and aarch64-unknown-uefi.
+[workspace]
+resolver = "3"
+members = ["app", "greet"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
