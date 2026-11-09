@@ -12,3 +12,9 @@ git-repository-url = "https://github.com/schlarpc/breakbulk"
 edit-url-template = "https://github.com/schlarpc/breakbulk/edit/main/docs/{path}"
 site-url = "/breakbulk/"
 additional-css = ["theme.css"]
+
+# Nested chapters (the options pages, Internals) stay folded in the sidebar
+# until you open their section, like a page's own headings.
+[output.html.fold]
+enable = true
+level = 0
