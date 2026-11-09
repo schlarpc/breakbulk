@@ -25,6 +25,8 @@
 #     test outcomes (libtest's `test … ok` lines, nextest's status lines
 #     without timings), and both modes have the same repo.checks, all built;
 #   - the test apps of test-control behave the same in both modes;
+#   - gdb, given a split-debuginfo product's debug output, shows a
+#     dependency's source and arguments in both modes;
 #   - repo.explainSharing works in dynamic mode.
 #
 # The system daemon's configuration and /etc/nix are not touched: Nix master
@@ -51,7 +53,7 @@ JOBS=${JOBS:-2}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
-  fixtures=(walking-skeleton directives embed config-env doctests test-control test-options required-features all-required nextest out-dir-walk)
+  fixtures=(walking-skeleton directives embed config-env doctests test-control test-options required-features all-required nextest out-dir-walk source-paths-dwo source-paths-dwp)
 fi
 
 say() { printf '\n== %s\n' "$*" >&2; }

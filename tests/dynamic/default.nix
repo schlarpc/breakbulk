@@ -13,8 +13,10 @@
 #                            runs/<ws>/<pkg>/<binary>, doctests/<ws>/<pkg>;
 #                            in dynamic mode also units-<ws>-<kind>, every
 #                            unit of each plan), its repo.checks
-#                            (checks/<name>), and for test-control `apps`,
-#                            a run of its test apps
+#                            (checks/<name>), for test-control `apps`,
+#                            a run of its test apps, and for
+#                            source-paths-dwo/-dwp `gdb`, gdb in a
+#                            dependency through the product's debug output
 #   unitDrvs.<fixture>       a JSON file: "<ws>/<kind>" -> unit id (or
 #                            `doctest:<pkg>`) -> .drv path (IFD mode)
 #   explain.<fixture>        whether repo.explainSharing finds every unit
@@ -180,6 +182,26 @@ let
     # it and its checks build to the no-binaries marker; IFD mode leaves it
     # out (run.sh accepts the difference only for marker outputs).
     all-required = mkRepo "all-required" [ oneWs ];
+    # Split debug info: with `unpacked` the wrapper of app's root links its
+    # own and its libraries' `.dwo` files into its `debug` directory, which
+    # splitDebug packs into app.dwp; with `packed` rustc's app.dwp. gdb
+    # reads both (`gdb` in build.<fixture>).
+    source-paths-dwo = mkRepo "source-paths" [
+      {
+        workspaces.main = {
+          path = ".";
+          variants.default.profile = "unpacked";
+        };
+      }
+    ];
+    source-paths-dwp = mkRepo "source-paths" [
+      {
+        workspaces.main = {
+          path = ".";
+          variants.default.profile = "packed";
+        };
+      }
+    ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
     nextest = mkRepo "nextest" [
       oneWs
@@ -251,6 +273,46 @@ let
         grep -h '^test .* \.\.\. ' net.log env.log | sort > $out/tests
       '';
 
+  # gdb on the source-paths product with only its debug output's
+  # lib/debug as debug-file-directory, as tests/products' gdbCheck: a
+  # breakpoint in the dependency `dep` with its argument (which only the
+  # DWARF objects hold, so it needs the .dwp), dep's and app's files and
+  # lines, and dep's source.
+  gdbCheck =
+    name: repo:
+    let
+      app = repo.workspaces.main.packages.app;
+    in
+    pkgs.runCommand "${name}-gdb-${mode}"
+      {
+        nativeBuildInputs = [
+          pkgs.gdb
+          pkgs.binutils-unwrapped
+        ];
+        inherit app;
+        debug = app.debug;
+      }
+      ''
+        set -euo pipefail
+        id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
+        test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
+        readelf -S -W $debug/lib/debug/.build-id/''${id:0:2}/app.dwp | grep -q '\.debug_info\.dwo'
+        test -z "$(find $debug -name '*.dwo')"
+        gdb -batch -nx -iex "set debug-file-directory $debug/lib/debug" \
+          -ex 'break dep::boom' -ex run -ex bt -ex 'frame 0' -ex list \
+          $app/bin/app > gdb.txt 2>&1 || true
+        cat gdb.txt
+        grep -E '^#0 +dep::boom \(n=7\) at dep/src/lib.rs:1[0-9]$' gdb.txt
+        grep -E '^#[1-9] .*app::main.* at app/src/main.rs:[0-9]+$' gdb.txt
+        grep -qF 'panic!("boom {n}");' gdb.txt
+        mkdir -p $out
+        cp gdb.txt $out/
+      '';
+  gdbChecked = [
+    "source-paths-dwo"
+    "source-paths-dwp"
+  ];
+
   # Products differ between the modes (resolved at build time in dynamic
   # mode), so the units downstream of an embedded product do too: the
   # embedder and, through it, the host. Every other unit is identical.
@@ -311,6 +373,9 @@ let
       )
       + lib.optionalString (name == "test-control") ''
         ln -s ${ctlApps} $out/apps
+      ''
+      + lib.optionalString (lib.elem name gdbChecked) ''
+        ln -s ${gdbCheck name repo} $out/gdb
       ''
     );
 
