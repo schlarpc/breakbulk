@@ -133,7 +133,7 @@ for f in "${fixtures[@]}"; do
     status=1
   fi
   if [ ${#differs[@]} -eq 0 ] && [ -z "$other" ]; then
-    summary+=("ok $f: ${#built[@]} derivations rebuilt bit-identically")
+    summary+=("ok $f: ${#built[@]} of ${#drvs[@]} derivations rebuilt bit-identically")
   fi
 done
 

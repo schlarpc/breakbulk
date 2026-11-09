@@ -88,15 +88,24 @@ let
   };
 
   # Fixture name -> the repositories (mkRepository) or workspaces
-  # (mkWorkspace) built from it. Where another test configures the fixture
-  # (presets, inputs, stages), that configuration is reused.
+  # (mkWorkspace) built from it, each optionally as
+  # `{ source; except = { variants; plans; }; }` to leave out variants or
+  # plans ("build", "test") that fail. Where another test configures the
+  # fixture (presets, inputs, stages), that configuration is reused.
   catalog = {
     all-required = [ dynamic.repos.all-required ];
     benches = [ products.repos.benchesRepo ];
     bin-exe-not-built = [ (plain "bin-exe-not-built" [ ]) ];
     build-dep-leak = [ (plain "build-dep-leak" [ ]) ];
     build-std = [ buildStd.repos.bare ];
-    build-std-deps = [ buildStd.repos.hosted ];
+    # Its test plan does not instantiate: breakbulk-instantiate finds the
+    # sysroot's `alloc` outside the skeleton.
+    build-std-deps = [
+      {
+        source = buildStd.repos.hosted;
+        except.plans = [ "test" ];
+      }
+    ];
     crate-types = [ (plain "crate-types" [ ]) ];
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
@@ -143,7 +152,13 @@ let
     test-cutoff = [ (plain "test-cutoff" [ ]) ];
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];
-    variants = [ products.repos.variantsRepo ];
+    # The `strict` clippy variant fails on lib-a by design.
+    variants = [
+      {
+        source = products.repos.variantsRepo;
+        except.variants = [ "strict" ];
+      }
+    ];
     walking-skeleton = [ dynamic.repos.walking-skeleton ];
     wasip2 = [ extraTargets.repos.wasip2Repo ];
     wasm-browser = [ presetFixtures.repos.wasmBrowser ];
@@ -191,16 +206,23 @@ let
     in
     map (id: units.${id}) (lib.take n sorted);
 
-  unitDrvs = inst: sample "build" inst.units.build ++ sample "test" inst.units.test;
+  unitDrvs =
+    except: inst:
+    lib.concatMap (plan: sample plan inst.units.${plan}) (
+      lib.subtractLists (except.plans or [ ]) [
+        "build"
+        "test"
+      ]
+    );
 
   # One mkWorkspace result: its own target is the native one.
-  fromWorkspace = ws: {
+  fromWorkspace = except: ws: {
     products = lib.optionals (wanted native) (productDrvs ws.packages);
-    units = lib.optionals (wanted native) (unitDrvs ws);
+    units = lib.optionals (wanted native) (unitDrvs except ws);
   };
 
   fromRepository =
-    repo:
+    except: repo:
     let
       parts = lib.concatLists (
         lib.mapAttrsToList (
@@ -217,9 +239,9 @@ let
                   {
                     # A check or clippy variant's packages are not products.
                     products = lib.optionals (!(vv ? check)) (productDrvs vv.packages);
-                    units = unitDrvs inst;
+                    units = unitDrvs except inst;
                   }
-                ) variants
+                ) (removeAttrs variants (except.variants or [ ]))
               )
             ) w.instances
           )
@@ -231,7 +253,13 @@ let
       units = lib.concatMap (p: p.units) parts;
     };
 
-  of = x: if x ? workspaces then fromRepository x else fromWorkspace x;
+  of =
+    x:
+    let
+      except = x.except or { };
+      source = x.source or x;
+    in
+    if source ? workspaces then fromRepository except source else fromWorkspace except source;
 
   missing = lib.filter (n: !(catalog ? ${n} || skipped ? ${n})) (
     lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir fixtures))
