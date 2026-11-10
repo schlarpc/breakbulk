@@ -779,7 +779,16 @@ let
     let
       sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
       toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
-      strs = l: lib.unique (map (s: builtins.unsafeDiscardStringContext "${s}") l);
+      # The store path each source lies in, not the source itself: a git
+      # crate's source is a directory inside its tree, and a closure lists
+      # whole store paths only.
+      storeRoot =
+        s:
+        let
+          rel = lib.removePrefix "${builtins.storeDir}/" s;
+        in
+        if rel == s then s else "${builtins.storeDir}/${lib.head (lib.splitString "/" rel)}";
+      strs = l: lib.unique (map (s: storeRoot (builtins.unsafeDiscardStringContext "${s}")) l);
       listFile = name: l: builtins.toFile name (concatStringsSep "\n" (strs l) + "\n");
       checkName = product.checkName or "noSourceReferences";
     in
