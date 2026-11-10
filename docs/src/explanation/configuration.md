@@ -207,6 +207,47 @@ library, as it would find the library on a system where it is installed.
 
 Details: [Environment capture](internals/env-capture.md).
 
+## The dev shell
+
+`repo.workspaces.<ws>.devShell` sets up local Cargo as the planner runs
+it, for one target,
+[`devShell.target`](../reference/options/workspaces.md#workspacesnamedevshelltarget).
+The shell sets these variables, in this order. A later value replaces
+an earlier one.
+
+1. Each package's `env`, `forHost.env` and `forTarget.env`, for every
+   package in `Cargo.lock` order. Without them, code such as
+   `include_bytes!(env!("X"))` does not compile in the shell.
+2. The target's `env`.
+3. The Cargo env config for the target: its linker and rustflags, and
+   `CARGO_PROFILE_<P>_TRIM_PATHS` when the planner turns trim-paths on.
+4. `CARGO_BUILD_TARGET`.
+
+When two packages set a variable to different values, the shell keeps
+the last one and gives a warning. The warning names each package, its
+value and the value the shell uses. breakbulk does not rank packages.
+To choose a value, set it in
+[`devShell.env`](../reference/options/workspaces.md#workspacesnamedevshellenv).
+
+`devShell.env` applies last, over all of the above. A value sets or
+replaces a variable. `null` removes it:
+
+```nix
+packages.app.forTarget.env.APP_WEB_DIST = webDist;
+workspaces.main.devShell.env = {
+  APP_WEB_DIST = null;  # build.rs uses its dev fallback
+  RUST_LOG = "debug";
+};
+```
+
+When a variable names a derivation, the shell needs that derivation,
+so opening the shell builds it. With `null`, the shell does not need it.
+A project's `build.rs` that has a fallback for an unset variable then
+runs that fallback.
+
+Do not change the variables from items 3 and 4 unless you must. Then
+local Cargo builds with other flags than Nix does.
+
 ## Source views
 
 A package's source is the package's directory plus its `extraSources`,
