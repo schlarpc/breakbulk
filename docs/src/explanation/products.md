@@ -192,7 +192,8 @@ divide the cores between runs.
 - The default yields to a value you set. `RUST_TEST_THREADS` from the
   project's `[env]` in `.cargo/config.toml`,
   [`test.env`](../reference/options/packages.md#packagesnametestenv) or
-  `test.binaries.<binary>.env` wins.
+  [`test.binaries.<binary>.env`](../reference/options/packages.md#packagesnametestbinariesnameenv)
+  wins.
 - A timing-sensitive test should set `RUST_TEST_THREADS` in
   `test.binaries.<binary>.env` (for example to `"1"`), or skip itself
   with `test.binaries.<binary>.args`.
