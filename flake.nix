@@ -305,7 +305,8 @@
             }) [ "repos" "repo" "lockfiles" ]
           )
           # One git source, crates from two inheriting workspaces: argv
-          # and CARGO_PKG_* against real Cargo over a local repository.
+          # and CARGO_PKG_* against real Cargo over a local repository;
+          # the same source through builtins.fetchGit (lazy trees).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-multi-workspace-${n}" v) (
             builtins.removeAttrs (import ./tests/git-multi-workspace {
               inherit pkgs;

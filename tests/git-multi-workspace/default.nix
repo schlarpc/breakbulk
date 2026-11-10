@@ -14,6 +14,15 @@
 #                 built by real Cargo from the real repository prints
 #                 (CARGO_PKG_VERSION, _README, _LICENSE_FILE, _LICENSE,
 #                 _DESCRIPTION of a crate from each workspace)
+#   fetched       the consumer with the repository fetched by
+#                 `builtins.fetchGit` (IFD: `repo` is built first), as a
+#                 gitTrees override and through the lockfile's own fetch;
+#                 under lazy trees both give virtual paths. Every path in
+#                 its noSourceReferences source list is in the store, and
+#                 two fetches of the same revision give the same path
+#   fetched-reference
+#                 noSourceReferences fails for a product that names a git
+#                 crate's source, with the repository fetched as above
 #   golden[-<v>]  the build plan, rendered, has the argv of real
 #                 `cargo build -v` over the real repository (no source
 #                 replacement), unit by unit; `-<v>` on the other releases
@@ -96,6 +105,44 @@ let
     };
   ws = mk toolchains.default;
 
+  # `repo` as a URL for `builtins.fetchGit`. Reading HEAD builds `repo`:
+  # fetchGit does not build what its URL names.
+  repoUrl = builtins.seq (builtins.readFile "${repo}/HEAD") "file://${builtins.unsafeDiscardStringContext repo}";
+
+  # Crate `a` through the lockfile's own fetch, at the fetchable URL. Each
+  # call fetches again, which under lazy trees gives a new virtual path.
+  fetchedCrate =
+    _:
+    ((breakbulk.mkFetch pkgs { }).crateSource (
+      breakbulk.lockfile.mkEntry {
+        name = "a";
+        version = "1.0.0";
+        source = "git+${repoUrl}?branch=main#${rev}";
+        checksum = null;
+      }
+    )).path;
+
+  fetchedWs = breakbulk.mkWorkspace pkgs {
+    root = fixture + "/consumer";
+    inherit tools;
+    toolchain = toolchains.default;
+    name = "git-multi-workspace-fetched";
+    fetchArgs.gitTrees.${url} = builtins.fetchGit {
+      url = repoUrl;
+      inherit rev;
+    };
+  };
+
+  noSourceReferences =
+    input:
+    breakbulk.stageHelpers.noSourceReferences { } {
+      inherit input pkgs;
+      product = {
+        name = "consumer";
+        sourcePaths = lib.attrValues fetchedWs.sources.workspace ++ lib.attrValues fetchedWs.sources.crates;
+      };
+    };
+
   # Real Cargo over the real repository, with the consumer at the plan's
   # skeleton root: metadata.json, build.log, output; then the golden
   # comparison against `ws'`s build plan.
@@ -159,6 +206,45 @@ in
       "$(sed -n 's/.*"workspace" = "\([^"]*\)".*/\1/p' c-2.0.0/Cargo.toml)" ]
     touch $out
   '';
+
+  fetched =
+    let
+      check = noSourceReferences fetchedWs.packages.consumer;
+    in
+    pkgs.runCommand "git-multi-workspace-fetched"
+      {
+        inherit check;
+        inherit (check) sourcesList;
+        # With context, so that the sources are in the sandbox.
+        sources = lib.attrValues fetchedWs.sources.workspace ++ lib.attrValues fetchedWs.sources.crates;
+        crate = fetchedCrate 0;
+        first = builtins.unsafeDiscardStringContext (fetchedCrate 1);
+        second = builtins.unsafeDiscardStringContext (fetchedCrate 2);
+      }
+      ''
+        cat $sourcesList
+        [ $(grep -c /nix/store/ $sourcesList) -ge 2 ]
+        while IFS= read -r s; do
+          [ -e "$s" ] || { echo "not in the store: $s" >&2; exit 1; }
+        done < $sourcesList
+        [ "$first" = "$crate" ]
+        [ "$first" = "$second" ]
+        [ -f "$first/Cargo.toml" ]
+        touch $out
+      '';
+
+  fetched-reference =
+    let
+      embeds = pkgs.runCommand "embeds-git-source" { } ''
+        echo ${lib.head (lib.attrValues fetchedWs.sources.crates)} > $out
+      '';
+      failure = pkgs.testers.testBuildFailure (noSourceReferences embeds);
+    in
+    pkgs.runCommand "git-multi-workspace-fetched-reference" { inherit failure; } ''
+      cat $failure/testBuildFailure.log
+      grep -q 'references source' $failure/testBuildFailure.log
+      touch $out
+    '';
 
   build =
     pkgs.runCommand "git-multi-workspace-build"

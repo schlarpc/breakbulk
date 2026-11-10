@@ -49,3 +49,5 @@ docs-site-links
 test-runs-doctests
 test-runs-test-control
 products-variants
+git-multi-workspace-fetched
+git-multi-workspace-fetched-reference
