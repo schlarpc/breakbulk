@@ -16,6 +16,7 @@ Fetch derivations are created from the lockfiles at evaluation time. Registry cr
 - Without a content hash, every fresh machine clones the source during evaluation, and evaluation fails if the remote is unreachable. `gitHashes.<source url>` (optional) switches that source to a fixed-output fetch, which a binary cache can serve. This follows crane's `outputHashes`.
 - The crate inside the repository is found by walking the fetched tree's `Cargo.toml` files, stopping at the first match. A `subdir` hint per URL skips the walk.
 - Fetches are keyed by URL and locked revision, because two workspaces can lock the same git source at different revisions.
+- With `lazy-trees = true` (Determinate Nix), `builtins.fetchGit` returns a virtual store path. That path does not exist, and it changes with every evaluation. So breakbulk copies each fetched tree to its real store path with `builtins.path` and the tree's NAR hash. Nix skips the copy when the path is already in the store. A crate's source path then names a real path, also where breakbulk writes it without string context, such as the source list of `noSourceReferences`. `gitTrees` values that are fetched trees (a `fetchGit` or `fetchTree` result, or a flake input) get the same treatment.
 
 ## Vendoring for planning
 

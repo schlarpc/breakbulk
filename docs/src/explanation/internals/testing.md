@@ -88,3 +88,12 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and eve
 - An aarch64 builder for native test runs. Without one, qemu-user through binfmt.
 - wine, headless Chromium and headless Firefox for runners.
 - `allowUnfree` scoped to the xwin SDK, for the msvc fixtures.
+
+### Nix settings
+
+The checks run with the evaluating Nix's settings. One setting changes what the tests see: `lazy-trees`. With `lazy-trees = true`, `builtins.fetchGit` returns a virtual store path. Most fixtures point git sources at local directories (`gitTrees`), which are never virtual. `git-multi-workspace-fetched` and `git-multi-workspace-fetched-reference` fetch their git source with `builtins.fetchGit`, so they cover this setting. To check both values, build them twice:
+
+```sh
+nix build .#checks.x86_64-linux.git-multi-workspace-fetched{,-reference}
+nix build .#checks.x86_64-linux.git-multi-workspace-fetched{,-reference} --option lazy-trees false
+```
