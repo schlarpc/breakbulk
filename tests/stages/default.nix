@@ -14,7 +14,9 @@
 #                       lines only with the debug output; a check on
 #                       `linked` sees the unstripped bytes; the main output
 #                       has no source reference and `debug` has one;
-#                       noSourceReferences fails on an unsplit product
+#                       noSourceReferences fails on an unsplit product,
+#                       its message naming the docs, the narrowing and the
+#                       removal under the check's own name
 #   stages-after-install  a wrapProgram stage after `install`: no reference
 #                       to an earlier stage's output, `debug` kept on Linux
 #                       `split` and on msvc, a check on `install`
@@ -22,7 +24,8 @@
 #   stages-install      install layouts for unix (Linux, Apple), windows
 #                       (msvc, MinGW) and wasm inputs
 #   stages-no-store-paths  noStorePaths names every store path in any
-#                       file's bytes, and passes once each is allowed
+#                       file's bytes and how to remove the check, and
+#                       passes once each is allowed
 #   stages-zip          deterministicZip: same bytes from inputs that differ
 #                       in mtimes, modes and creation order
 #   stages-wasm-web wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
@@ -597,10 +600,12 @@ let
   };
 
   # Without splitDebug the product's main output references the source.
+  # `sourcesOnly` runs the same helper under another name.
   helloUnsplit = S.mkProduct {
     name = "hello-unsplit";
     linked = helloLinked;
     stages = { };
+    checks.sourcesOnly.run = H.noSourceReferences { toolchain = [ ]; };
     sourcePaths = [ helloSrc ];
     inherit pkgs;
   };
@@ -888,6 +893,7 @@ in
         ];
         checks = lib.attrValues hello.checks;
         unsplitFails = pkgs.testers.testBuildFailure helloUnsplit.checks.noSourceReferences;
+        renamedFails = pkgs.testers.testBuildFailure helloUnsplit.checks.sourcesOnly;
       }
       ''
         set -euo pipefail
@@ -925,9 +931,21 @@ in
         if grep -qxF ${helloSrc} ${closureOf hello}; then echo "product references the source"; exit 1; fi
         grep -qxF ${helloSrc} ${closureOf hello.debug}
 
-        # noSourceReferences fails on an unsplit product, naming the source.
+        # noSourceReferences fails on an unsplit product, naming the source,
+        # the docs section, how to narrow the check and how to remove it.
+        log=$unsplitFails/testBuildFailure.log
+        cat $log
         test "$(cat $unsplitFails/testBuildFailure.exit)" = 1
-        grep -q 'references source ${helloSrc}' $unsplitFails/testBuildFailure.log
+        grep -q 'references source ${helloSrc}' $log
+        grep -qF '"Source paths and debug information"' $log
+        grep -qF 'explanation/products.html#source-paths-and-debug-information' $log
+        if grep -qF 'design' $log; then echo "message names the design document"; exit 1; fi
+        grep -qxF 'Check sources only: packages.hello-unsplit.checks.noSourceReferences.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };' $log
+        test "$(tail -n1 $log)" = 'or, when hello-unsplit may reference them: packages.hello-unsplit.checks.noSourceReferences = null;'
+        # Under another name, the message names that name.
+        log=$renamedFails/testBuildFailure.log
+        grep -qxF 'Check sources only: packages.hello-unsplit.checks.sourcesOnly.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };' $log
+        test "$(tail -n1 $log)" = 'or, when hello-unsplit may reference them: packages.hello-unsplit.checks.sourcesOnly = null;'
         touch $out
       '';
 
@@ -1048,6 +1066,7 @@ in
         grep -qF "noStorePaths: p: share/conf names the Nix store path $refPath/bin/hello: test" $log
         if grep -q 'share/fine' $log; then echo "a short path matched" >&2; exit 1; fi
         test "$(grep -c 'noStorePaths: p:' $log)" = 3
+        test "$(tail -n1 $log)" = 'or, when p may name them: packages.p.checks.noStorePaths = null;'
         cat $allowedOut/allowed
         test "$(wc -l < $allowedOut/allowed)" = 3
         touch $out

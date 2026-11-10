@@ -529,6 +529,7 @@ let
           ''
             cat $failure/testBuildFailure.log
             grep -q 'neededLibraries: app: bin/app needs ld-linux-x86-64.so.2, which is not an allowed run-time library: only libc' $failure/testBuildFailure.log
+            test "$(tail -n1 $failure/testBuildFailure.log)" = 'or, when app may load them: packages.app.checks.neededLibraries = null;'
             touch $out
           '';
       # The preset's check allows GCC's runtime libraries,

@@ -47,7 +47,8 @@
 #     with its constraints.
 #
 # Checks are `{ on ? <the product>; run = { input, product, pkgs }: drv; }`;
-# `null` removes one. `noSourceReferences` is added by default
+# a check's `product` also has `checkName`, the name it runs under (for
+# its failure message). `null` removes one. `noSourceReferences` is added by default
 # (`defaultChecks = false` turns it off).
 #
 # Every stage and check runs through a guard: when its
@@ -442,9 +443,11 @@ let
           guard pkgs input (
             m.run {
               inherit input pkgs;
-              # The stage names after `linked`, in order, for messages.
+              # The stage names after `linked`, in order, and the check's
+              # own name, for messages.
               product = product // {
                 stageOrder = ordered.order;
+                checkName = c;
               };
             }
           )

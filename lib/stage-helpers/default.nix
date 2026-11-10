@@ -690,6 +690,16 @@ let
   # ---------------------------------------------------------------------
   # Checks
 
+  # The last line of a failing check's message: how to remove it. The
+  # name comes from `product.checkName`, not the helper's name, because a
+  # check may run a helper under another name (linuxPortable's
+  # `portableLibraries`).
+  removeCheckLine =
+    helperName: product: when:
+    "or, when ${product.name} ${when}: packages.${product.name}.checks.${
+      product.checkName or helperName
+    } = null;";
+
   # Fails when the closure of the checked output (by default the product's
   # main output) contains any of `sources` (store paths; default: the
   # product's `sourcePaths`) or of `toolchain` (default: the product's
@@ -732,8 +742,9 @@ let
         lib.optionalString (before != [ ]) "after = \"${lib.last before}\"; "
         + lib.optionalString (lib.elem "install" order) "before = \"install\"; ";
       stanza = "packages.${product.name}.stages.buildScriptFiles = { ${position}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
+      removal = removeCheckLine "buildScriptFiles" product "does not need them at run time";
     in
-    pkgs.runCommand "${product.name}-build-script-files" { inherit stanza; } ''
+    pkgs.runCommand "${product.name}-build-script-files" { inherit stanza removal; } ''
       set -euo pipefail
       ${placedFilesFn "buildScriptFilesIncluded" product pkgs}
       missing=()
@@ -749,7 +760,7 @@ let
           echo "buildScriptFiles: build scripts placed files next to the binaries, where cargo run finds them, but ${product.name} does not include them:"
           printf '  %s\n' "''${missing[@]}"
           echo "Include them: $stanza"
-          echo "or, when ${product.name} does not need them at run time: packages.${product.name}.checks.buildScriptFiles = null;"
+          echo "$removal"
         } >&2
         exit 1
       fi
@@ -770,6 +781,7 @@ let
       toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
       strs = l: lib.unique (map (s: builtins.unsafeDiscardStringContext "${s}") l);
       listFile = name: l: builtins.toFile name (concatStringsSep "\n" (strs l) + "\n");
+      checkName = product.checkName or "noSourceReferences";
     in
     pkgs.runCommand "${product.name}-no-source-references"
       {
@@ -779,6 +791,8 @@ let
         # readelf reads ELF of every architecture; objdump -p prints PE
         # imports ("DLL Name:").
         binutils = pkgs.buildPackages.binutils-unwrapped;
+        narrowing = "packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };";
+        removal = removeCheckLine "noSourceReferences" product "may reference them";
       }
       ''
         set -euo pipefail
@@ -826,8 +840,12 @@ let
           fi
         done < "$toolchainList"
         if [ "$bad" = 1 ]; then
-          echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in breakbulk's design." >&2
-          echo "(A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic; \`noSourceReferences { toolchain = [ ]; }\` checks sources only.)" >&2
+          {
+            echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in the breakbulk documentation: https://schlarpc.github.io/breakbulk/explanation/products.html#source-paths-and-debug-information"
+            echo "A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic."
+            echo "Check sources only: $narrowing"
+            echo "$removal"
+          } >&2
           exit 1
         fi
         touch "$out"
@@ -893,7 +911,10 @@ let
           ...
         }:
         pkgs.runCommand (stageName product "neededLibraries")
-          { nativeBuildInputs = [ (binutilsOf cfg pkgs) ]; }
+          {
+            nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
+            removal = removeCheckLine "neededLibraries" product "may load them";
+          }
           ''
             set -euo pipefail
             ${isElfFn}
@@ -918,7 +939,10 @@ let
                 fi
               done < <(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
             done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
-            [ "$bad" = 0 ]
+            if [ "$bad" = 1 ]; then
+              echo "$removal" >&2
+              exit 1
+            fi
             touch $out/needed
           ''
       );
@@ -964,7 +988,9 @@ let
               [ s ]
           ) cfg.allow;
         in
-        pkgs.runCommand (stageName product "noStorePaths") { } ''
+        pkgs.runCommand (stageName product "noStorePaths") {
+          removal = removeCheckLine "noStorePaths" product "may name them";
+        } ''
           set -euo pipefail
           allowed=(${escapeShellArgs patterns})
           why=${escapeShellArg (lib.optionalString (cfg.why != "") ": ${cfg.why}")}
@@ -989,6 +1015,7 @@ let
           done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
           if [ "$bad" = 1 ]; then
             echo "A portable product must not name the Nix store; allow a path with \`stageHelpers.noStorePaths { allow = [ \"<glob>\" ]; }\`." >&2
+            echo "$removal" >&2
             exit 1
           fi
         ''
