@@ -26,6 +26,11 @@
 #                CARGO_PROFILE_RELEASE_TRIM_PATHS=all, and local `-C
 #                metadata` values again equal the plan's; the Cargo 1.99
 #                shell does not export it.
+#   devshell-env `devShell.env` over two packages' env: null removes a
+#                variable and the shell's dependency on its derivation
+#                (inputs and .drv closure), a value replaces one and is
+#                not a conflict, and an unsettled conflict warns with each
+#                package's value, the winner and the fix.
 #   wasm-embed   the flagship pattern: a native host bin embeds (with
 #                include_bytes!) the wasm component that another
 #                workspace builds for wasm32 with the wasmComponent preset
@@ -364,6 +369,76 @@ let
     ) "devshell-target: ${builtins.toJSON got}";
     pkgs.runCommand "devshell-target" { } "touch $out";
 
+  # `devShell.env` over package env, in the walking skeleton (Cargo.lock
+  # order: itoa, then walking-skeleton). `marker` fails to build, so a
+  # shell that still needed it could not build either.
+  devshellEnv =
+    let
+      marker = pkgs.runCommand "devshell-env-marker" { } "exit 1";
+      shellOf =
+        env:
+        (breakbulk.mkRepository {
+          inherit pkgs tools;
+          root = ../fixtures/walking-skeleton;
+          modules = [
+            {
+              workspaces.main.devShell.env = env;
+              packages.itoa.env = {
+                BB_X = "${marker}";
+                BB_C = "from-itoa";
+                BB_Y = "from-itoa";
+              };
+              packages.walking-skeleton.env = {
+                BB_C = "from-ws";
+                BB_Y = "from-ws";
+              };
+            }
+          ];
+        }).workspaces.main.devShell;
+      plain = shellOf { };
+      over = shellOf {
+        BB_X = null;
+        BB_Y = "y";
+        CARGO_BUILD_TARGET = null;
+      };
+      inputsOf = s: lib.attrNames (builtins.getContext (builtins.toJSON s.drvAttrs));
+      conflict =
+        var:
+        "breakbulk: the dev shell of workspace `main`: ${var} is set to different values: itoa@1.0.11 = \"from-itoa\", walking-skeleton@0.1.0 = \"from-ws\". The shell uses \"from-ws\" from walking-skeleton@0.1.0: the last value, with packages in Cargo.lock order and the target's env after them. To choose a value, set `workspaces.main.devShell.env.${var}`.";
+      # The closure of the shell's .drv file: every derivation it needs.
+      drvClosure = s: pkgs.closureInfo { rootPaths = [ (builtins.unsafeDiscardOutputDependency s.drvPath) ]; };
+    in
+    assert lib.assertMsg (
+      plain.warnings == map conflict [
+        "BB_C"
+        "BB_Y"
+      ]
+    ) "devshell-env: the shell without devShell.env warns ${builtins.toJSON plain.warnings}";
+    assert lib.assertMsg (over.warnings == [ (conflict "BB_C") ])
+      "devshell-env: the shell with devShell.env warns ${builtins.toJSON over.warnings}";
+    assert lib.assertMsg (lib.elem marker.drvPath (inputsOf plain))
+      "devshell-env: the shell without devShell.env does not depend on the marker";
+    assert lib.assertMsg (!(lib.elem marker.drvPath (inputsOf over)))
+      "devshell-env: BB_X = null leaves the shell depending on the marker";
+    over.overrideAttrs (_: {
+      name = "loose-ends-devshell-env";
+      phases = [ "buildPhase" ];
+      markerDrv = builtins.unsafeDiscardStringContext marker.drvPath;
+      plainClosure = drvClosure plain;
+      overClosure = drvClosure over;
+      buildPhase = ''
+        grep -qxF "$markerDrv" $plainClosure/store-paths
+        if grep -qxF "$markerDrv" $overClosure/store-paths; then
+          echo "the shell's closure has $markerDrv" >&2; exit 1
+        fi
+        [ -z "''${BB_X+set}" ]
+        [ -z "''${CARGO_BUILD_TARGET+set}" ]
+        [ "$BB_Y" = y ]
+        [ "$BB_C" = from-ws ]
+        touch $out
+      '';
+    });
+
   # With Cargo 1.101 (rust-overlay's nightly) the planner
   # turns trim-paths on for the release profile itself (`trimPathsDefault`),
   # and the dev shell sets CARGO_PROFILE_RELEASE_TRIM_PATHS=all, so a local
@@ -701,6 +776,7 @@ in
   inherit devshell;
   devshell-trim-paths = devshellTrimPaths;
   inherit devshell-target;
+  devshell-env = devshellEnv;
   wasm-embed = wasmEmbedCheck;
   sys-defaults-no-package-set = sysDefaultsNoSet;
   cfg-rustflags = cfgRustflags;

@@ -27,8 +27,14 @@
 #    package). One shell cannot scope env per unit, and a union is only
 #    valid within one platform: a cross target's own `inputs` (libraries
 #    for that platform) are left out, its `nativeInputs` and `env` are
-#    not. Package env is merged the same way, and a variable two packages
-#    set differently is a warning.
+#    not. Package env is merged the same way: packages in Cargo.lock
+#    order, then the target's `env`, the last value winning. A variable
+#    two of them set differently is a warning that names each value and
+#    `devShell.env`.
+#  - `devShell.env`, over all of the above: a value replaces, null
+#    removes (and with it the shell's dependency on the value's
+#    derivation). There is no ranking between packages, as a conflict
+#    between them concerns only the shell, and `devShell.env` settles it.
 #  - A warning, when the shell starts, for each variable in the user's
 #    environment that changes what Cargo builds but that the planner never
 #    sees: CARGO_* (except those that only affect output location, the
@@ -49,11 +55,15 @@
   toolchain,
   # The triple the shell is set up for (`devShell.target`), or null.
   target ? nativeTriple,
-  # Merged per-package overrides (repository.nix's `overrideFor`) of the
-  # workspace's packages.
-  overrides ? [ ],
+  # The workspace's packages that have settings, in Cargo.lock order:
+  # [ { id = "<name>@<version>"; override; } ], `override` being
+  # repository.nix's `overrideFor`, already merged for `target` (or the
+  # native triple).
+  packages ? [ ],
   # targets.<target>.env, already strings.
   targetEnv ? { },
+  # devShell.env: env values, or null to remove.
+  shellEnv ? { },
   # The planner's `cargo-env.json` for `target`: { env; warnings; }
   # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), the trim-paths
   # variable included.
@@ -62,10 +72,10 @@
 let
   envString = (import ./modules/types.nix { inherit lib; }).envString;
 
+  overrides = map (p: p.override) packages;
   # Everything the native build needs: host-side and target-side inputs
   # are the same package sets on a native build. A cross target's own
   # inputs are libraries for another platform, so they are left out.
-  # `overrides` are already merged for `target` (or the native triple).
   native = target == null || target == nativeTriple;
   nativeInputs = lib.unique (
     lib.concatMap (
@@ -84,16 +94,63 @@ let
   );
 
   envOf = o: lib.mapAttrs (_: envString) (o.env // o.forHost.env // o.forTarget.env);
-  envs = map envOf overrides ++ [ targetEnv ];
-  conflicts = lib.filterAttrs (_: vs: lib.length (lib.unique vs) > 1) (lib.zipAttrs envs);
-  packageEnv = lib.foldl' (a: b: a // b) { } envs;
+  # Lowest first.
+  sources =
+    map (p: {
+      label = p.id;
+      env = envOf p.override;
+    }) packages
+    ++ [
+      {
+        label = "the env of target `${toString target}`";
+        env = targetEnv;
+      }
+    ];
+  packageEnv = lib.foldl' (a: s: a // s.env) { } sources;
 
-  ownEnv =
-    packageEnv
-    // (cargoEnv.env or { })
+  # How the planner runs Cargo for `target`.
+  planEnv =
+    (cargoEnv.env or { })
     // lib.optionalAttrs (target != null) {
       CARGO_BUILD_TARGET = target;
     };
+
+  # { <var> = [ { label; value; } … ]; } for the variables that sources
+  # set to different values and that neither `planEnv` nor `devShell.env`
+  # replaces.
+  conflicts =
+    lib.filterAttrs
+      (
+        var: setters:
+        !(planEnv ? ${var} || shellEnv ? ${var}) && lib.length (lib.unique (map (s: s.value) setters)) > 1
+      )
+      (
+        lib.zipAttrs (
+          map (
+            s:
+            lib.mapAttrs (_: value: {
+              inherit (s) label;
+              inherit value;
+            }) s.env
+          ) sources
+        )
+      );
+  # Without the context: a warning message cannot carry one.
+  show = v: builtins.unsafeDiscardStringContext (builtins.toJSON v);
+  conflictWarning =
+    var: setters:
+    let
+      last = lib.last setters;
+    in
+    "${var} is set to different values: ${
+      lib.concatMapStringsSep ", " (s: "${s.label} = ${show s.value}") setters
+    }. The shell uses ${show last.value} from ${last.label}: the last value, with packages in Cargo.lock order and the target's env after them. To choose a value, set `workspaces.${name}.devShell.env.${var}`.";
+
+  ownEnv = lib.filterAttrs (_: v: v != null) (
+    packageEnv
+    // planEnv
+    // lib.mapAttrs (_: v: if v == null then null else envString v) shellEnv
+  );
 
   # Variables that change what Cargo builds but never reach the planner.
   watched = [
@@ -124,10 +181,11 @@ let
     toolchain.cargo
     toolchain.rustc
   ];
+  warnings = map (w: "breakbulk: the dev shell of workspace `${name}`: ${w}") (
+    (cargoEnv.warnings or [ ]) ++ lib.mapAttrsToList conflictWarning conflicts
+  );
 in
-lib.foldr (w: lib.warn "breakbulk: the dev shell of workspace `${name}`: ${w}") (
-lib.warnIf (conflicts != { })
-  "breakbulk: the dev shell of workspace `${name}` merges package env that differs between packages: ${lib.concatStringsSep ", " (lib.attrNames conflicts)}; the shell has the last value"
+lib.foldr lib.warn
   (
     pkgs.mkShell {
       name = "breakbulk-${name}";
@@ -158,6 +216,9 @@ lib.warnIf (conflicts != { })
         unset __bb_v __bb_f
         unset -f __breakbulk_warn
       '';
+      # The messages that evaluating the shell prints, for reading them
+      # without parsing the evaluator's stderr.
+      passthru = { inherit warnings; };
     }
   )
-) (cargoEnv.warnings or [ ])
+  warnings

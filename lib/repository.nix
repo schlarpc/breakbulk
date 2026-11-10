@@ -998,9 +998,13 @@ let
         name = wsName;
         inherit (ws) toolchain;
         target = ws.devShell.target;
-        overrides = lib.filter (o: o != null) (
-          map (overrideFor wsName (if ws.devShell.target == null then nativeTriple else ws.devShell.target)) locks.${wsName}
+        packages = lib.filter (p: p.override != null) (
+          map (e: {
+            id = "${e.name}@${e.version}";
+            override = overrideFor wsName (if ws.devShell.target == null then nativeTriple else ws.devShell.target) e;
+          }) locks.${wsName}
         );
+        shellEnv = ws.devShell.env;
         targetEnv = lib.optionalAttrs (ws.devShell.target != null) (envStrings (targetField wsName ws.devShell.target "env" { }));
         # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default

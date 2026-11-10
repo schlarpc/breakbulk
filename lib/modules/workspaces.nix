@@ -614,6 +614,43 @@ let
             target's linker and rustflags as the planner passes them, and
             its `env`. `null`: none of these, so the project's own
             `build.target` (or Cargo's host default) applies.
+
+            The shell also merges every package's `env`, `forHost.env` and
+            `forTarget.env`. Set `devShell.env` to change or remove any of
+            these variables.
+          '';
+        };
+
+        devShell.env = mkOption {
+          type = types.attrsOf (types.nullOr bt.envValue);
+          default = { };
+          example = lib.literalExpression ''
+            {
+              MY_ASSETS_DIR = null;  # unset: build.rs falls back to its dev path
+              RUST_LOG = "debug";
+            }
+          '';
+          description = ''
+            Variables for the dev shell, applied last, over everything the
+            shell sets. The shell sets, in this order:
+
+            1. each package's `env`, `forHost.env` and `forTarget.env`, for
+               every package in `Cargo.lock` order;
+            2. the `env` of `devShell.target`;
+            3. the Cargo env config for `devShell.target`: its linker,
+               its rustflags, and trim-paths when the planner turns it on;
+            4. `CARGO_BUILD_TARGET`.
+
+            A value sets or replaces the variable. A variable set here is
+            not reported as a conflict between packages. `null` removes
+            the variable: the shell does not set it, and does not depend on
+            the derivation its value named, so that derivation is not built
+            when the shell opens. A variable from your own environment
+            stays set.
+
+            Changing or removing a variable from 3 or 4 makes local Cargo
+            differ from the plan: it compiles with other flags than Nix
+            builds do, and `-C metadata` can differ.
           '';
         };
 
