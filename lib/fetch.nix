@@ -30,7 +30,8 @@
   # `update_submodules`), so this defaults to true.
   gitSubmodules ? { },
   # gitTrees."<Cargo.lock source string or URL>" = <path>: use this tree
-  # instead of fetching (a local checkout, or a test fixture).
+  # instead of fetching (a local checkout, a test fixture, or a fetched
+  # tree such as a flake input).
   gitTrees ? { },
 }:
 let
@@ -156,6 +157,24 @@ let
       // lib.optionalAttrs (hash != null) { narHash = hash; }
     );
 
+  # A fetched tree (a `fetchGit` or `fetchTree` result, or a flake input)
+  # as a real store path. Not its `outPath`: under lazy trees that is a
+  # virtual path, real only where string context carries it into a
+  # derivation, so the string without context names nothing and changes
+  # with every evaluation. The NAR hash lets Nix skip the copy when the
+  # path is in the store. Not for reading the tree: read-only evaluation
+  # only computes this path.
+  realTree =
+    t:
+    if isAttrs t && t ? narHash && t ? outPath && !(t ? drvPath) then
+      builtins.path {
+        path = t.outPath;
+        name = substring 33 (-1) (baseNameOf (builtins.unsafeDiscardStringContext t.outPath));
+        sha256 = t.narHash;
+      }
+    else
+      t;
+
   # Find the directory of package `name`@`version` inside a git tree the way
   # cargo's `PathSource::read_packages` does (cargo src/sources/path.rs):
   # depth-first, entries sorted by name, skipping dot directories below the
@@ -262,13 +281,14 @@ let
     {
       inherit tree subdir;
       # String with context: the crate directory inside the fetched tree.
-      path = if subdir == "" then "${tree}" else "${tree}/${subdir}";
+      path = if subdir == "" then "${realTree tree}" else "${realTree tree}/${subdir}";
     };
 in
 rec {
   inherit
     crateUrl
     gitTree
+    realTree
     gitCrate
     locateInTree
     unpackRegistryCrate
