@@ -72,9 +72,9 @@
 # cargo-nextest runs the one binary in its reuse-build mode from the
 # metadata breakbulk-instantiate synthesizes (`nextestSpec`), with the
 # package's `test.nextest.profile` and `configFile`; libtest arguments go
-# after `--`. nextest's `test-threads` defaults to `$NIX_BUILD_CORES`
-# under the project's configuration and `NEXTEST_TEST_THREADS`. nextest's store (junit and the like) is copied to
-# `$out/nextest`.
+# after `--`. nextest's `test-threads` defaults to `$NIX_BUILD_CORES`;
+# the project's configuration and `NEXTEST_TEST_THREADS` override it.
+# nextest's store (junit and the like) is copied to `$out/nextest`.
 #
 # What each run needs from the plan (env, `[env]` values, the runs for the
 # dynamic-library path and `rustc-env`, nextest's metadata) comes from
