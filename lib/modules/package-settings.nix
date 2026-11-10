@@ -23,6 +23,7 @@ let
         default = [ ];
         description = "libtest arguments for this test binary.";
       };
+      env = bt.mkEnv "Environment for this test binary's run, over `test.env`.";
       enable = mkOption {
         type = types.bool;
         default = true;

@@ -180,6 +180,28 @@ More behavior:
   per package or per test binary. Changing a skip list re-runs only the
   affected test runs.
 
+**Test threads.** Each test binary is its own derivation, and Nix builds
+up to `max-jobs` derivations at once. Each test run starts `cores` test
+threads by default: it sets `RUST_TEST_THREADS` to `$NIX_BUILD_CORES`.
+So the real parallelism is `max-jobs × cores`, next to any compiles
+that run at the same time. Nix has no jobserver, so breakbulk cannot
+divide the cores between runs.
+
+- A machine that runs many checks at once should set `cores` in its Nix
+  configuration, so that `max-jobs × cores` is about its CPU count.
+- The default yields to a value you set. `RUST_TEST_THREADS` from the
+  project's `[env]` in `.cargo/config.toml`,
+  [`test.env`](../reference/options/packages.md#packagesnametestenv) or
+  `test.binaries.<binary>.env` wins.
+- A timing-sensitive test should set `RUST_TEST_THREADS` in
+  `test.binaries.<binary>.env` (for example to `"1"`), or skip itself
+  with `test.binaries.<binary>.args`.
+- nextest does not read `RUST_TEST_THREADS`. Under nextest the default
+  is nextest's `test-threads`, set to `$NIX_BUILD_CORES`. A
+  `test-threads` in the project's nextest profile wins over it, and
+  `NEXTEST_TEST_THREADS` in `test.env` or `test.binaries.<binary>.env`
+  wins over both.
+
 **Doctests** get one derivation per library, which runs `rustdoc --test`.
 rustdoc compiles and runs the examples in one process, so doctests have
 no cutoff: they re-run whenever the library or anything below it changes.

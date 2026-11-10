@@ -315,10 +315,12 @@ let
           lib.foldl'
             (x: y: {
               args = x.args ++ y.args;
+              env = x.env // envStrings y.env;
               enable = x.enable && y.enable;
             })
             {
               args = [ ];
+              env = { };
               enable = true;
             }
         ) [

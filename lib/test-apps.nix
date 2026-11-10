@@ -19,8 +19,9 @@
 #
 # The app runs the test binary (not a content-addressed copy) in the
 # package's directory with the same dynamic-library path, `rustc-env`
-# values, `CARGO_*` runtime variables, `test.env` and `test.path` as its
-# test run, under the target's runner, and creates
+# values, `CARGO_*` runtime variables, `test.env`,
+# `test.binaries.<binary>.env` and `test.path` as its test run, under the
+# target's runner, and creates
 # `/tmp/breakbulk-target-tmp`. With `checkout`, `CARGO_MANIFEST_DIR` and
 # `CARGO_MANIFEST_PATH` name the checkout, so tests that read files through
 # them see the working tree; values compiled in with `env!` still name the
@@ -64,8 +65,7 @@
               inherit spec vars;
               jq = "${pkgs.jq}/bin/jq";
             }}
-            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
+            ${testRunsLib.configScript cfg spec.binary}
             mkdir -p /tmp/breakbulk-target-tmp
             files=(${spec.unitOut}/*)
             cd ${lib.escapeShellArg dir}

@@ -553,7 +553,7 @@ let
 
       # What both runners share: the skip check, the environment, the test
       # configuration's env and PATH.
-      prelude = cfg: ''
+      prelude = cfg: key: ''
         info=${if useCa then "$spec" else "$wrapper"}/breakbulk-root.json
         reason=$(${jq} -r '.reason // ""' "$info")
         if [ -n "$reason" ]; then
@@ -567,9 +567,8 @@ let
           extra = extraLibs;
           stable = useCa;
         }}
-        ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-        ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
-        export RUST_TEST_THREADS=$NIX_BUILD_CORES
+        ${testRuns.configScript cfg key}
+        ${testRuns.threadsScript}
         ${lib.optionalString coverage ''
           mkdir -p $out/profraw
           export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
@@ -601,6 +600,7 @@ let
           ${lib.optionalString (
             runnerList != [ ]
           ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
+          ${testRuns.nextestThreadsScript}
           ws=$TMPDIR/nextest-ws
           mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
           touch $ws/Cargo.toml
@@ -619,6 +619,7 @@ let
             --cargo-metadata $TMPDIR/cargo-metadata.json \
             ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
             --profile ${lib.escapeShellArg cfg.nextest.profile} \
+            ${testRuns.nextestThreadsFlag} \
             --no-tests=warn --color never \
             ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee $out/log
           status=''${PIPESTATUS[0]}
@@ -686,7 +687,7 @@ let
             // caAttrs
           )
           (
-            prelude cfg
+            prelude cfg key
             + narrowScript b.package cfg
             + (
               if cfg.runner == "nextest" then
@@ -783,8 +784,7 @@ let
                   export CARGO_MANIFEST_DIR=$dir CARGO_MANIFEST_PATH=$dir/Cargo.toml
                 ''
             }
-            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
+            ${testRunsLib.configScript cfg (testRunsLib.binaryKey b)}
             mkdir -p /tmp/breakbulk-target-tmp
             files=(${b.wrapper}/root/*)
             cd "$dir"

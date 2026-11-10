@@ -51,10 +51,11 @@
 #     Cargo gave the test unit), then the package's build script
 #     `rustc-env` values, then `CARGO`, `CARGO_MANIFEST_DIR`,
 #     `CARGO_MANIFEST_PATH` and `CARGO_PKG_*` from the test unit's recorded
-#     env, then `test.env`, `test.path` on `PATH`, and
-#     `RUST_TEST_THREADS=$NIX_BUILD_CORES`. Cargo applies `[env]` last but
-#     never over a variable it set itself (`apply_env_config`), so `[env]`
-#     loses to all of Cargo's own;
+#     env, then `test.env`, then `test.binaries.<binary>.env`, `test.path`
+#     on `PATH`, and last `RUST_TEST_THREADS=$NIX_BUILD_CORES` only when
+#     none of these set it. Cargo applies `[env]` last but never over a
+#     variable it set itself (`apply_env_config`), so `[env]` loses to all
+#     of Cargo's own;
 #   - the dynamic-library path (the target's variable, `dylibPathOf`:
 #     LD_LIBRARY_PATH on Linux, WINEPATH under wine, none for wasm) holds,
 #     sorted as Cargo sorts paths, the
@@ -71,7 +72,8 @@
 # cargo-nextest runs the one binary in its reuse-build mode from the
 # metadata breakbulk-instantiate synthesizes (`nextestSpec`), with the
 # package's `test.nextest.profile` and `configFile`; libtest arguments go
-# after `--`. nextest's store (junit and the like) is copied to
+# after `--`. nextest's `test-threads` defaults to `$NIX_BUILD_CORES`
+# under the project's configuration and `NEXTEST_TEST_THREADS`. nextest's store (junit and the like) is copied to
 # `$out/nextest`.
 #
 # What each run needs from the plan (env, `[env]` values, the runs for the
@@ -496,9 +498,36 @@ rec {
     cfg: binary:
     {
       args = [ ];
+      env = { };
       enable = true;
     }
     // (cfg.binaries.${binary} or { });
+
+  # Shell lines that export a test binary's configuration: `test.env`, then
+  # `test.binaries.<binary>.env`, then `test.path` on PATH.
+  configScript =
+    cfg: binary:
+    lib.concatStrings (
+      lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") (
+        cfg.env // (binaryConfig cfg binary).env
+      )
+    )
+    + lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}\n";
+
+  # Only a default: the variable may already hold a value from `[env]` or
+  # the test configuration, which wins.
+  threadsScript = ''
+    export RUST_TEST_THREADS=''${RUST_TEST_THREADS:-$NIX_BUILD_CORES}
+  '';
+
+  # nextest does not read RUST_TEST_THREADS. Its default goes in a tool
+  # config file, not NEXTEST_TEST_THREADS: nextest ranks that variable over
+  # the project's `test-threads` and a tool config file under it, so the
+  # user's variable and profile both still win.
+  nextestThreadsScript = ''
+    printf '[profile.default]\ntest-threads = %s\n' "$NIX_BUILD_CORES" > $TMPDIR/breakbulk-nextest.toml
+  '';
+  nextestThreadsFlag = "--tool-config-file breakbulk:$TMPDIR/breakbulk-nextest.toml";
 
   # The attributes a package's doctest derivation gets from its test
   # configuration: the runner (a list), `test.args` with
@@ -625,9 +654,9 @@ rec {
               spec = s;
               jq = "${testPkgs.jq}/bin/jq";
             }}
-            ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-            ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
-            export RUST_TEST_THREADS=$NIX_BUILD_CORES
+            ${configScript cfg s.binary}
+            ${threadsScript}
+            ${nextestThreadsScript}
             ${lib.optionalString (
               runnerList != [ ]
             ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
@@ -649,6 +678,7 @@ rec {
               --cargo-metadata $TMPDIR/cargo-metadata.json \
               ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
               --profile ${lib.escapeShellArg cfg.nextest.profile} \
+              ${nextestThreadsFlag} \
               --no-tests=warn --color never \
               ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee $out/log
             status=''${PIPESTATUS[0]}
@@ -708,9 +738,8 @@ rec {
                 spec = s;
                 jq = "${testPkgs.jq}/bin/jq";
               }}
-              ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)}
-              ${lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}"}
-              export RUST_TEST_THREADS=$NIX_BUILD_CORES
+              ${configScript cfg s.binary}
+              ${threadsScript}
               ${lib.optionalString coverage ''
                 mkdir -p $out/profraw
                 export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
