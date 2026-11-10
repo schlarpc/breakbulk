@@ -1,0 +1,5 @@
+# `one` of ../plain, under the project's `[env]` (.cargo/config.toml).
+[package]
+name = "tt"
+version = "0.1.0"
+edition = "2021"

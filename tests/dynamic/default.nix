@@ -384,6 +384,10 @@ let
       )).repos.bare;
     build-std-deps = buildStd.hosted;
 
+    # tests/test-runs' test-threads: RUST_TEST_THREADS from `test.env`,
+    # `test.binaries.<bin>.env` and `[env]` wins over the default, under
+    # libtest and nextest.
+    test-threads = (import ../test-runs testArgs).repos.test-threads;
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
     nextest = mkRepo "nextest" [
       oneWs

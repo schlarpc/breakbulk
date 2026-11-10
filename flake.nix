@@ -327,7 +327,7 @@
             builtins.removeAttrs (import ./tests/test-runs {
               inherit pkgs;
               breakbulk = self.lib;
-            }) [ "workspaces" ]
+            }) [ "workspaces" "repos" ]
           )
           # Products through stages, source paths, products as inputs and
           # variants through mkRepository (IFD).

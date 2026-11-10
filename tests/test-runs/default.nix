@@ -49,8 +49,18 @@
 #                           kept by one run survives another run's
 #                           unclassified copy; sorted by path component and
 #                           deduplicated, kind prefix stripped
+#   test-threads            over the `test-threads` fixture: the `one`
+#                           test, which fails unless RUST_TEST_THREADS is
+#                           1, passes with it set through `test.env`,
+#                           `test.binaries.<bin>.env` and the project's
+#                           `[env]`, with libtest and with nextest;
+#                           without a setting, RUST_TEST_THREADS and
+#                           nextest's thread count are NIX_BUILD_CORES; a
+#                           nextest profile's `test-threads` and
+#                           NEXTEST_TEST_THREADS win over that default
 #
-# `workspaces` exposes the mkWorkspace results for debugging.
+# `workspaces` exposes the mkWorkspace results for debugging; `repos` the
+# mkRepository results that tests/dynamic builds in both modes.
 {
   pkgs ? import (
     let
@@ -62,6 +72,8 @@
     }
   ) { },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
+  # Modules added to `repos` (tests/dynamic sets `mode`).
+  extraModules ? [ ],
 }:
 let
   inherit (pkgs) lib;
@@ -594,11 +606,113 @@ let
         ! grep -q 'Nextest run ID' $other/log
         mkdir -p $out
       '';
+
+  # --- test threads --------------------------------------------------------
+
+  # One workspace per way of setting the thread count. Every test run of
+  # every workspace must pass: `one` asserts 1 everywhere, the others
+  # assert only where their marker is set.
+  testThreadsRepo =
+    let
+      ws = path: test: {
+        inherit path;
+        variants.default.profile = "dev";
+        memberDefaults.test = test;
+      };
+      nx = test: test // { runner = "nextest"; };
+      oneThread.RUST_TEST_THREADS = "1";
+      binary = {
+        binaries.one.env = oneThread;
+        binaries.cores.env.TT_EXPECT_DEFAULT = "1";
+      };
+    in
+    breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/test-threads";
+      modules = [
+        {
+          workspaces = {
+            env = ws "plain" { env = oneThread; };
+            binary = ws "plain" binary;
+            config = ws "env-config" { };
+            nextest-env = ws "plain" (nx { env = oneThread; });
+            nextest-binary = ws "plain" (
+              nx (
+                lib.recursiveUpdate binary {
+                  binaries.nextest_one.env = {
+                    NEXTEST_TEST_THREADS = "1";
+                    TT_EXPECT_NEXTEST_ONE = "1";
+                  };
+                }
+              )
+            );
+            nextest-config = ws "env-config" (nx { });
+            nextest-profile = ws "plain" (nx {
+              env = oneThread;
+              binaries.nextest_one.env.TT_EXPECT_NEXTEST_ONE = "1";
+              nextest.configFile = pkgs.writeText "nextest.toml" ''
+                [profile.default]
+                test-threads = 1
+              '';
+            });
+          };
+        }
+      ]
+      ++ extraModules;
+    };
+  testThreads =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      runs = lib.concatMapAttrs (
+        w: v:
+        lib.mapAttrs' (
+          n: d: lib.nameValuePair (lib.replaceStrings [ "-" ] [ "_" ] "${w}_${n}") d
+        ) (removeAttrs v.target.${native}.testRuns.tt [ "lib/tt" ])
+      ) testThreadsRepo.workspaces;
+    in
+    assert lib.assertMsg (
+      lib.attrNames runs == [
+        "binary_cores"
+        "binary_nextest_one"
+        "binary_one"
+        "config_one"
+        "env_cores"
+        "env_nextest_one"
+        "env_one"
+        "nextest_binary_cores"
+        "nextest_binary_nextest_one"
+        "nextest_binary_one"
+        "nextest_config_one"
+        "nextest_env_cores"
+        "nextest_env_nextest_one"
+        "nextest_env_one"
+        "nextest_profile_cores"
+        "nextest_profile_nextest_one"
+        "nextest_profile_one"
+      ]
+    ) "test-threads: unexpected test runs ${toString (lib.attrNames runs)}";
+    pkgs.runCommand "test-runs-test-threads" runs ''
+      for r in $env_one $binary_one $config_one; do
+        grep -q 'test one_thread ... ok' $r/log
+      done
+      grep -q 'test default_threads ... ok' $binary_cores/log
+      for r in $nextest_env_one $nextest_binary_one $nextest_config_one $nextest_profile_one; do
+        grep -E 'PASS .*tt::one one_thread' $r/log
+      done
+      grep -E 'PASS .*tt::cores default_threads' $nextest_binary_cores/log
+      grep -E 'PASS .*tt::nextest_one nextest_one_thread' $nextest_binary_nextest_one/log
+      grep -E 'PASS .*tt::nextest_one nextest_one_thread' $nextest_profile_nextest_one/log
+      mkdir -p $out
+    '';
 in
 {
   workspaces = {
     inherit doctestsWs ctl nxWs;
   };
+  repos = {
+    test-threads = testThreadsRepo;
+  };
+  test-threads = testThreads;
   dylib-rule = dylibRule;
   inherit nextest;
   nextest-repo = nextestRepo;

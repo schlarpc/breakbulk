@@ -57,7 +57,7 @@ if [ $# -gt 0 ]; then
 else
   fixtures=(
     walking-skeleton directives embed config-env doctests test-control
-    test-options required-features all-required nextest out-dir-walk
+    test-options test-threads required-features all-required nextest out-dir-walk
     source-paths-dwo source-paths-dwp
     crate-types dev-dep-features build-dep-leak bin-exe-not-built sys-native
     feature-unification clippy-conf test-cutoff

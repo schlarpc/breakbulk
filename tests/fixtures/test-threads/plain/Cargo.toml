@@ -1,0 +1,9 @@
+# Test-run thread counts. `one` fails unless RUST_TEST_THREADS is 1.
+# `cores` checks the default, when TT_EXPECT_DEFAULT is set. `nextest_one`
+# checks that nextest runs one test at a time, when TT_EXPECT_NEXTEST_ONE
+# is set. ../env-config has the same `one` under a project `[env]` that
+# sets RUST_TEST_THREADS.
+[package]
+name = "tt"
+version = "0.1.0"
+edition = "2021"
