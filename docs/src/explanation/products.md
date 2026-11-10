@@ -51,6 +51,8 @@ packages.app.target."x86_64-pc-windows-msvc".stages = {
   zip       = { after = "stageDlls"; run = deterministicZip; };
   strip     = lib.mkForce null;  # signing breaks if stripped
 };
+
+packages.dev-tool.checks.noSourceReferences = null;  # null removes a check too
 ```
 
 A wrapper or package belongs after `install`, where the binary is already
@@ -109,6 +111,15 @@ With `split`, `splitDebug` moves the DWARF to the `debug` output
 output names no sources; the `debug` output names exactly the sources a
 debugger needs, so installing it gives source-level debugging with no
 setup.
+
+Every product gets the `noSourceReferences` check. It fails when the main
+output references a source path or a Rust toolchain path. A toolchain
+path is allowed when it holds a shared library the product loads, such as
+`libstd-*.so` with `-C prefer-dynamic`. To check sources only, set
+`packages.<name>.checks.noSourceReferences.run =
+breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; }`. To remove
+the check from a package, set `packages.<name>.checks.noSourceReferences =
+null`.
 
 One catch for tests: the workspace libraries a test binary links are
 compiled once, for shipping, so their debug information names their

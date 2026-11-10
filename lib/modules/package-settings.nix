@@ -84,7 +84,13 @@ let
       checks = mkOption {
         type = bt.stages;
         default = { };
-        description = "Checks on this package's products.";
+        example = lib.literalExpression "{ noSourceReferences = null; }";
+        description = ''
+          Checks on this package's products, as `targets.<triple>.checks`.
+          They are added to the target's checks and to the default checks
+          (`noSourceReferences`, `buildScriptFiles`). `null` removes a check
+          from this package only.
+        '';
       };
 
       test = {
