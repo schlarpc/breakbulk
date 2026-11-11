@@ -329,10 +329,10 @@ let
         traits ? targetTraits.resolve { inherit triple; },
         staticLibDirs ? [ ],
         # null: rustc's default (pic), which with +crt-static gives a
-        # static-pie executable. "static" gives a non-PIE static executable,
-        # as the design doc first planned, but mold 3.0.0 links Rust
-        # non-PIE static glibc executables that crash at startup in
-        # `_dl_get_origin` (bfd and lld do not; C programs are unaffected).
+        # static-pie executable. Not "static" (non-PIE) by default: mold
+        # 3.0.0 links Rust non-PIE static glibc executables that crash at
+        # startup in `_dl_get_origin` (bfd and lld do not; C programs are
+        # unaffected).
         relocationModel ? null,
         ...
       }:
