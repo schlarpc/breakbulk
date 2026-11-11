@@ -533,7 +533,7 @@ let
               };
             };
             targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = wasmRust; };
-            packages.host.env.UI_WASM = "${repo.workspaces.ui.target.${wasm}.packages.ui}/pkg/ui.wasm";
+            packages.host.env.UI_WASM = "${repo.workspaces.ui.target.${wasm}.packages.ui}/lib/ui.wasm";
           }
         ];
       };

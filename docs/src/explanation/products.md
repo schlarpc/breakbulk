@@ -10,7 +10,7 @@ derivation that you can read, replace or remove.
 | --- | --- | --- |
 | Units | one derivation per Cargo unit | internal, but inspectable |
 | Stages | the linked output passed through ordered, named steps | `.stages.<name>`, e.g. `.stages.linked` |
-| Packages | the last stage: by default `install`, which lays out the usual tree (`bin/`, `lib/`, `.exe` with its DLLs, `pkg/` for wasm) | `packages.<pkg>`, `target.<triple>.packages.<pkg>` |
+| Packages | the last stage: by default `install`, which lays out the usual tree (`bin/`, `lib/`, see [The installed layout](#the-installed-layout)) | `packages.<pkg>`, `target.<triple>.packages.<pkg>` |
 
 Each stage is its own derivation. With content addressing on (see
 [Caching and early cutoff](caching.md)), a stage whose input did not
@@ -69,12 +69,32 @@ packages.app.stages.wrap = {
 };
 ```
 
+### The installed layout
+
+`install` places each file the package's roots produce by what the root
+is, under the name Cargo uplifts it to in `target/<profile>/`:
+
+| Root | Goes to | Examples |
+| --- | --- | --- |
+| bin | `bin/` | `bin/app`, `bin/app.exe`, `bin/app.wasm` (a wasi command) |
+| staticlib | `lib/` | `lib/libfoo.a`, `lib/foo.lib` |
+| cdylib, dylib | `lib/`; `bin/` on Windows and Cygwin, where a DLL is found beside the executable | `lib/libfoo.so`, `lib/foo.wasm`, `bin/foo.dll` |
+
+Other files go by suffix: libraries (an import library such as
+`foo.dll.lib` too) to `lib/`, executables to `bin/`, a `.pdb` next to the
+file it describes. Where a suffix does not decide (`.wasm` is both
+executables' and libraries' suffix), the file stays at the top.
+Directories that earlier stages made are kept as they are, so `bindgen`'s
+`pkg/` (the JavaScript glue and its `.wasm`) and a stage's `share/` land
+unchanged. Where each kind goes comes from the target's traits
+(`sharedLibraryDir`), so a target you define controls it.
+
 `install` is an ordinary stage with a default position:
 
 | Stage | Runs | Sees |
 | --- | --- | --- |
 | names neither `install` nor a stage after it | before `install` | the flat link output (`app`, `libfoo.so`) |
-| `after = "install"`, or after such a stage | after `install` | the installed layout (`bin/`, `lib/`, `pkg/`) |
+| `after = "install"`, or after such a stage | after `install` | the installed layout (`bin/`, `lib/`, and `pkg/` after `bindgen`) |
 
 The stage helpers (`splitDebug`, `strip`, `bindgen`, …) expect the flat
 link output. A wrapper made before `install` would run the earlier

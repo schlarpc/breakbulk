@@ -102,7 +102,7 @@ Rust's dist builds copy that directory's wasi-libc from `$WASI_SDK_PATH/share/wa
 
 `lib/wasi-sdk.nix` maps the Rust release to that wasi-sdk release and fetches its sysroot asset from GitHub (fixed-output); each sysroot's `lib/wasm32-wasip2/libc.a` is byte-identical to the toolchain's self-contained one (checked for 1.95, 1.96, 1.97, 1.99, 1.100 beta and 1.101 nightly, and by the `wasip2-linker` check).
 
-A Rust release outside the table fails evaluation with a message naming the file; `wasiSdkVersion` or `wasiSdk` (a sysroot path) override it. An earlier version put nixpkgs' wasi-libc ahead of rustc's directory and swapped the crt1 objects in the linker wrapper; that linked nixpkgs' wasi-libc (wasi-sdk 32) in place of the one Rust ships and tests std with (33). Products are components, installed under `pkg/` like every wasm product.
+A Rust release outside the table fails evaluation with a message naming the file; `wasiSdkVersion` or `wasiSdk` (a sysroot path) override it. An earlier version put nixpkgs' wasi-libc ahead of rustc's directory and swapped the crt1 objects in the linker wrapper; that linked nixpkgs' wasi-libc (wasi-sdk 32) in place of the one Rust ships and tests std with (33). Products are components, installed by root kind: a command under `bin/`, a library component under `lib/`.
 
 The wasmtime runner keeps its compilation cache in `$TMPDIR`.
 

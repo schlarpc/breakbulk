@@ -47,10 +47,11 @@
 # evaluation error.
 #
 # `linked` is one directory holding every built root's files, as
-# symlinks: a bin under its target name (Cargo's uplifted name, the
-# `-C extra-filename` hash removed, its extension kept), library outputs
-# (cdylib, staticlib, dylib, .wasm) under their own names. `install` lays
-# them out (bin/, lib/, pkg/ for wasm). A package whose roots were all
+# symlinks, under Cargo's uplifted names: a bin under its target name and
+# a staticlib under its library name (the `-C extra-filename` hash
+# removed, the extension kept), a cdylib or dylib under rustc's name,
+# which has no hash. `install` lays them out by root kind (`rootFiles`):
+# bin/, lib/, or the traits' `sharedLibraryDir`. A package whose roots were all
 # skipped (required features) is the first root's stub, which fails with
 # the reason.
 #
@@ -117,8 +118,13 @@ let
   # output, or any dynamic-derivation root (its unit's outputs are not
   # known at evaluation).
   mkLinked =
-    pkgs: pkg: built:
+    pkgs: traits: pkg: built:
     let
+      # A staticlib's file as Cargo uplifts it: rustc names it with the
+      # `-C extra-filename` hash Cargo gives it (cdylibs and dylibs of
+      # path packages get none).
+      staticPrefix = lib.escapeShellArg traits.staticLibraryPrefix;
+      staticSuffix = lib.escapeShellArg traits.staticLibrarySuffix;
       # Only dynamic-derivation roots need the build-time bookkeeping; IFD
       # mode's script stays as it was.
       anyDyn = lib.any isDynamic built;
@@ -179,7 +185,11 @@ let
             else
               ''
                 for f in ${src}/*; do
-                  link "$f" "''${f##*/}"
+                  b=''${f##*/}
+                  case "$b" in
+                    ${staticPrefix}${target}-*${staticSuffix}) link "$f" ${staticPrefix}${target}${staticSuffix} ;;
+                    *) link "$f" "$b" ;;
+                  esac
                 done
               ''
           )
@@ -375,6 +385,27 @@ let
                 lib.concatMap (r: map (id: inst.units.build.${id}.flags) (r.breakbulkRoot.buildScriptRuns or [ ])) built
               );
           unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
+          # Each root's file in `linked`, by name, to its root kind, for
+          # `install` (and the same names in dynamic-derivation mode, whose
+          # predicted roots carry the kind and target). mkLinked fails when
+          # two roots produce one name, so the map is unambiguous.
+          rootFiles = lib.listToAttrs (
+            lib.concatMap (
+              r:
+              let
+                inherit (r.breakbulkRoot) kind target;
+                file =
+                  {
+                    bin = target + traits.executableSuffix;
+                    staticlib = traits.staticLibraryPrefix + target + traits.staticLibrarySuffix;
+                    cdylib = traits.sharedLibraryPrefix + target + traits.sharedLibrarySuffix;
+                    dylib = traits.sharedLibraryPrefix + target + traits.sharedLibrarySuffix;
+                  }
+                  .${kind} or null;
+              in
+              lib.optional (file != null) (nameValuePair file kind)
+            ) built
+          );
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           confs = packageConfig pkg;
           stageSet = stages.merge (
@@ -402,7 +433,7 @@ let
           );
           p = stages.mkProduct {
             name = pkg;
-            linked = mkLinked pkgs pkg built;
+            linked = mkLinked pkgs traits pkg built;
             stages = stageSet;
             checks = checkSet;
             target = { inherit triple traits; };
@@ -418,18 +449,8 @@ let
               # A staticlib's objects keep their debug information with real
               # source paths: the final link, not this product, decides
               # whether to split or strip it.
-              # `linked` keeps rustc's file name, with the
-              # `-C extra-filename` hash; a stage may uplift it.
-              sourcesAllowedIn = lib.concatMap (
-                r:
-                let
-                  stem = traits.staticLibraryPrefix + r.breakbulkRoot.target;
-                in
-                [
-                  (stem + traits.staticLibrarySuffix)
-                  (stem + "-*" + traits.staticLibrarySuffix)
-                ]
-              ) (filter (r: r.breakbulkRoot.kind == "staticlib") built);
+              sourcesAllowedIn = lib.attrNames (lib.filterAttrs (_: k: k == "staticlib") rootFiles);
+              inherit rootFiles;
             };
           };
           extra = {

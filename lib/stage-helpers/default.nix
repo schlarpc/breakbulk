@@ -69,15 +69,6 @@ let
     });
 
   # How `install` and `placeDebug` lay files out for a platform.
-  layoutOf =
-    t:
-    if t.isWasm then
-      "wasm"
-    else if t.isWindows then
-      "windows"
-    else
-      "unix";
-
   # Copy the input into "$1" (created), following symlinks, writable.
   copyIn = input: ''
     copyIn() {
@@ -345,8 +336,9 @@ let
           work=$TMPDIR/in
           copyIn "$work"
           ${oneWasm "bindgen"}
-          mkdir -p "$out"
-          wasm-bindgen --target ${escapeShellArg cfg.target} --out-dir "$out" \
+          # pkg/: wasm-bindgen's layout, which install keeps.
+          mkdir -p "$out/pkg"
+          wasm-bindgen --target ${escapeShellArg cfg.target} --out-dir "$out/pkg" \
             ${escapeShellArgs cfg.extraArgs} "$wasm"
         ''
       );
@@ -518,19 +510,24 @@ let
           ''
       );
 
-  # Final layout, by the target's traits (`traitsOf`):
-  #   wasm:    everything under pkg/
-  #   windows: .exe, .dll, .pdb under bin/ (DLLs next to the executable);
-  #            .lib under lib/
-  #   others:  executables under bin/; .so*, .a, .rlib under lib/
+  # Final layout. A root's file (`product.rootFiles`, file name to root
+  # kind, from mkProducts) goes by its kind: a bin to bin/, a staticlib to
+  # lib/, a cdylib or dylib to the traits' `sharedLibraryDir` (bin/ on
+  # Windows and Cygwin, where DLLs are found beside the executable; lib/
+  # elsewhere). Other files (renamed or added by a stage, import
+  # libraries, debug side files) go by suffix, from the traits: static
+  # libraries and `.rlib` to lib/, shared libraries to `sharedLibraryDir`,
+  # executables to bin/; where executables have no suffix, an executable
+  # file goes to bin/. A suffix that both executables and shared libraries
+  # have (`.wasm`) decides nothing. A debug side file (`.pdb`) goes next to
+  # the file of the same stem, else to bin/; anything else stays at the
+  # top. Top-level directories are copied unchanged, so a stage that
+  # already produced bin/, share/ or pkg/ (bindgen) keeps it.
   # The link units' debuginfo side files (`product.linkedDebug`: `.pdb`,
   # `.dwp`, `.dwo`) go to a `debug` output in the same layout, so `.pdb`
   # sits in `$debug/bin` as the `.exe` does in `$out/bin`; only when no
   # earlier stage split debug information (`product.debugSplit`), whose
   # `debug` output holds them instead, and not for wasm.
-  # Top-level directories of the input are copied unchanged, so a stage
-  # that already produced bin/ or share/ keeps it; other top-level files are
-  # copied to the top level unchanged.
   install = mkHelper "install" { } (
     _cfg:
     {
@@ -542,38 +539,44 @@ let
     }:
     let
       t = traitsOf target pkgs;
-      kind = layoutOf t;
-      # File-name globs from the target's traits (#17): libraries (static,
-      # `.rlib`, and on unix shared ones, also versioned `.so.1`) go to
-      # lib/; executables, and on Windows DLLs and the debug side files
-      # that sit next to them (`.pdb`), go to bin/. An import library
-      # (`.dll.lib`, `.dll.a`) ends in the static suffix. Elsewhere an
-      # executable file goes to bin/; anything else stays at the top.
+      rootFiles = product.rootFiles or { };
+      dirOfKind =
+        k:
+        if k == "bin" then
+          "bin"
+        else if k == "cdylib" || k == "dylib" then
+          t.sharedLibraryDir
+        else
+          "lib";
       globOf =
         suffixes:
         lib.concatMapStringsSep "|" (x: "*${x}") (lib.unique (lib.filter (x: x != "") suffixes));
+      ambiguous = t.executableSuffix != "" && t.executableSuffix == t.sharedLibrarySuffix;
+      shared = lib.optionals (!ambiguous) [
+        t.sharedLibrarySuffix
+        "${t.sharedLibrarySuffix}.*"
+      ];
       sideFiles = map (a: a.suffix) (
         lib.filter (a: !(a.perObject or false) && !(a.directory or false)) t.debugArtifacts
       );
+      # File-name globs by destination; an import library (`.dll.lib`,
+      # `.dll.a`) ends in the static suffix.
       globs = {
         lib = globOf (
           [
             t.staticLibrarySuffix
             ".rlib"
           ]
-          ++ lib.optionals (kind == "unix") [
-            t.sharedLibrarySuffix
-            "${t.sharedLibrarySuffix}.*"
-          ]
+          ++ lib.optionals (t.sharedLibraryDir == "lib") shared
         );
         bin = globOf (
-          [ t.executableSuffix ]
-          ++ lib.optionals (kind == "windows") ([ t.sharedLibrarySuffix ] ++ sideFiles)
+          lib.optional (!ambiguous) t.executableSuffix ++ lib.optionals (t.sharedLibraryDir == "bin") shared
         );
+        side = globOf sideFiles;
       };
       # The side files go to install's own `debug` output when no earlier
       # stage split debug information (whose `debug` holds them already).
-      debug = kind != "wasm" && (product.linkedDebug or null) != null && !(product.debugSplit or false);
+      debug = !t.isWasm && (product.linkedDebug or null) != null && !(product.debugSplit or false);
     in
     pkgs.runCommand (stageName product "install")
       (lib.optionalAttrs debug {
@@ -593,30 +596,32 @@ let
           mkdir -p "$debug"
           placeDebug "$debug"
         ''}
-        ${
-          if kind == "wasm" then
-            ''
-              mkdir -p "$out/pkg"
-              cp -R "$work"/. "$out/pkg/"
-            ''
-          else
-            ''
-              for f in "$work"/* "$work"/.[!.]*; do
-                [ -e "$f" ] || continue
-                b=$(basename "$f")
-                if [ -d "$f" ]; then
-                  mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
-                fi
-                case "$b" in
-                  ${globs.lib}) dest=lib ;;
-                  ${lib.optionalString (globs.bin != "") "${globs.bin}) dest=bin ;;"}
-                  ${if kind == "unix" then ''*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;'' else "*) dest=. ;;"}
-                esac
-                mkdir -p "$out/$dest"
-                cp "$f" "$out/$dest/$b"
-              done
-            ''
-        }
+        sides=()
+        for f in "$work"/* "$work"/.[!.]*; do
+          [ -e "$f" ] || continue
+          b=$(basename "$f")
+          if [ -d "$f" ]; then
+            mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
+          fi
+          case "$b" in
+            ${lib.concatStrings (lib.mapAttrsToList (n: k: "${lib.escapeShellArg n}) dest=${dirOfKind k} ;;\n") rootFiles)}
+            ${lib.optionalString (globs.side != "") "${globs.side}) sides+=(\"$f\"); continue ;;"}
+            ${lib.optionalString (globs.lib != "") "${globs.lib}) dest=lib ;;"}
+            ${lib.optionalString (globs.bin != "") "${globs.bin}) dest=bin ;;"}
+            ${if t.executableSuffix == "" then ''*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;'' else "*) dest=. ;;"}
+          esac
+          mkdir -p "$out/$dest"
+          cp "$f" "$out/$dest/$b"
+        done
+        for f in "''${sides[@]}"; do
+          b=$(basename "$f")
+          dest=bin
+          for d in bin lib; do
+            if compgen -G "$out/$d/''${b%.*}.*" > /dev/null; then dest=$d; break; fi
+          done
+          mkdir -p "$out/$dest"
+          cp "$f" "$out/$dest/$b"
+        done
       ''
   );
 

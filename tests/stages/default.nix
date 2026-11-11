@@ -22,7 +22,10 @@
 #                       `split` and on msvc, a check on `install`
 #   stages-elf-helpers  strip, strip --strip-all, patchelfRpath
 #   stages-install      install layouts for unix (Linux, Apple), windows
-#                       (msvc, MinGW) and wasm inputs
+#                       (msvc, MinGW), Cygwin and wasm inputs: root files
+#                       by kind (a wasm cdylib to lib/, a wasm bin to bin/,
+#                       a Cygwin DLL to bin/), other files by suffix,
+#                       directories (bindgen's pkg/, share/) unchanged
 #   stages-no-store-paths  noStorePaths names every store path in any
 #                       file's bytes and how to remove the check, and
 #                       passes once each is allowed
@@ -762,6 +765,8 @@ let
       }
     ];
     target.triple = "wasm32-unknown-unknown";
+    # As mkProducts gives it: install places the root's file by kind.
+    info.rootFiles."adder.wasm" = "cdylib";
     inherit pkgs;
   };
 
@@ -801,22 +806,29 @@ let
 
   # --- install ---------------------------------------------------------------
 
-  installOf =
-    triple: files:
+  # `rootFiles` (file name to root kind) as mkProducts gives it; a file
+  # name with a `/` is created in that directory.
+  installOf' =
+    triple: rootFiles: files:
     H.install {
       input = pkgs.runCommand "install-in-${triple}" { } ''
         mkdir -p $out/share/doc
         cd $out
         echo doc > share/doc/README
         ${lib.concatMapStrings (f: ''
+          mkdir -p "$(dirname ${f.name})"
           echo ${f.name} > ${f.name}
           ${lib.optionalString (f.x or false) "chmod +x ${f.name}"}
         '') files}
       '';
-      product.name = "inst";
+      product = {
+        name = "inst";
+        inherit rootFiles;
+      };
       target = { inherit triple; };
       inherit pkgs;
     };
+  installOf = triple: installOf' triple { };
   installUnix = installOf "x86_64-unknown-linux-gnu" [
     {
       name = "app";
@@ -857,10 +869,45 @@ let
     { name = "libbar.a"; }
     { name = "notes.txt"; }
   ];
-  installWasm = installOf "wasm32-unknown-unknown" [
-    { name = "ui.js"; }
-    { name = "ui_bg.wasm"; }
-  ];
+  # A cdylib and a bin with the same suffix, placed by root kind; bindgen's
+  # pkg/ and an earlier stage's share/ kept as they are.
+  installWasm =
+    installOf' "wasm32-unknown-unknown"
+      {
+        "ui.wasm" = "cdylib";
+        "cli.wasm" = "bin";
+      }
+      [
+        { name = "ui.wasm"; }
+        { name = "cli.wasm"; }
+        { name = "pkg/ui.js"; }
+        { name = "pkg/ui_bg.wasm"; }
+      ];
+  # Cygwin's DLL beside the executable, as on Windows, though it is not
+  # `isWindows`.
+  installCygwin =
+    installOf' "x86_64-pc-cygwin"
+      {
+        "foo.dll" = "cdylib";
+        "app.exe" = "bin";
+      }
+      [
+        { name = "foo.dll"; }
+        { name = "app.exe"; }
+      ];
+  # A bin and a cdylib of one package, by root kind.
+  installRoots =
+    installOf' "x86_64-unknown-linux-gnu"
+      {
+        app = "bin";
+        "libapp.so" = "cdylib";
+        "libapp.a" = "staticlib";
+      }
+      [
+        { name = "app"; }
+        { name = "libapp.so"; }
+        { name = "libapp.a"; }
+      ];
 
   stageArgs = input: {
     inherit input pkgs;
@@ -1008,8 +1055,11 @@ in
     test -f $u/notes.txt; test -f $u/share/doc/README
     test -f $w/bin/app.exe; test -f $w/bin/app.pdb; test -f $w/bin/vcruntime140.dll
     test -f $w/lib/app.lib; test -f $w/notes.txt
-    test -f $a/pkg/ui.js; test -f $a/pkg/ui_bg.wasm; test -f $a/pkg/share/doc/README
-    test "$(ls $a)" = pkg
+    test -f $a/lib/ui.wasm; test -f $a/bin/cli.wasm
+    test -f $a/pkg/ui.js; test -f $a/pkg/ui_bg.wasm; test -f $a/share/doc/README
+    c=${installCygwin}; r=${installRoots}
+    test -f $c/bin/foo.dll; test -f $c/bin/app.exe
+    test -f $r/bin/app; test -f $r/lib/libapp.so; test -f $r/lib/libapp.a
     test -f $g/bin/app.exe; test -f $g/bin/foo.dll; test -f $g/lib/libfoo.dll.a
     test -f $g/lib/libbar.a; test -f $g/notes.txt
     test -x $m/bin/app; test -f $m/lib/libfoo.dylib; test -f $m/lib/libbar.a; test -f $m/notes.txt
@@ -1104,7 +1154,7 @@ in
         test -f $pkg/wasm_hello.js
         test -f $pkg/wasm_hello.d.ts
         wasm-tools validate --features all $pkg/wasm_hello_bg.wasm
-        before=$(stat -c %s ${wasmBrowser.stages.bindgen}/wasm_hello_bg.wasm)
+        before=$(stat -c %s ${wasmBrowser.stages.bindgen}/pkg/wasm_hello_bg.wasm)
         after=$(stat -c %s $pkg/wasm_hello_bg.wasm)
         echo "bindgen: $before bytes; wasmOpt: $after bytes"
         test "$after" -lt "$before"
@@ -1322,7 +1372,7 @@ in
     pkgs.runCommand "stages-wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; }
       ''
         set -euo pipefail
-        c=${component}/pkg/adder.wasm
+        c=${component}/lib/adder.wasm
         wasm-tools print $c > print.txt
         head -n1 print.txt | grep -q '^(component'
         wasm-tools component wit $c | tee wit.txt

@@ -122,8 +122,8 @@ let
             ];
           }
           ''
-            # install puts every wasm target's files under pkg/.
-            wasm=${t.packages.app}/pkg/app.wasm
+            # A wasi command: a bin root, in bin/.
+            wasm=${t.packages.app}/bin/app.wasm
             wasm-tools validate --features component-model "$wasm"
             wasm-tools component wit "$wasm" > app.wit
             grep -q 'import wasi:cli/environment@0.2' app.wit

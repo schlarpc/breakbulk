@@ -51,6 +51,9 @@
 #                          "lib" ".a" (AIX)
 #   staticLibraryPrefix staticLibrarySuffix   `staticlib_prefix`,
 #                          `staticlib_suffix`: "lib" ".a" | "" ".lib" (msvc)
+#   sharedLibraryDir       where `install` puts a shared library: "bin"
+#                          (Windows, Cygwin: found beside the executable
+#                          or on PATH) | "lib"
 #                          The four file-name fields are what
 #                          `rustc --print file-names --crate-type <t>`
 #                          prints for the target (`target-traits-rustc`
@@ -424,6 +427,10 @@ let
           ".so";
       staticLibraryPrefix = if isMsvc then "" else "lib";
       staticLibrarySuffix = if isMsvc then ".lib" else ".a";
+      # Where an installed shared library goes: next to the executables
+      # where the loader looks there (Windows and Cygwin search the
+      # executable's directory and PATH, not lib/).
+      sharedLibraryDir = if isWindows || isCygwin then "bin" else "lib";
       debugArtifacts =
         # The targets rustc links with an MSVC-style linker (its
         # `msvc`/`msvc-lld` flavor, `debuginfo-kind` pdb): Windows msvc and

@@ -931,7 +931,7 @@ let
           }
           ''
             ls $bindgen ${product}
-            cp -r ${product.stages.bindgen} pkg
+            cp -r ${product.stages.bindgen}/pkg pkg
             chmod -R u+w pkg
             # --target web glue: instantiate from bytes in Node.
             cat > run.mjs <<'EOF'

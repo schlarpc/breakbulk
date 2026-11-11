@@ -143,13 +143,14 @@ let
     paths = map (c: repo.workspaces.${c}.target.${wasm}.packages.${c}) components;
   };
 
-  # The emu core: wasm-bindgen --target web --no-typescript into pkg/, plus
-  # the crate's asset/ and test-page/ at the root (flake.nix emuDsFor).
+  # The emu core: wasm-bindgen --target web --no-typescript (bindgen writes
+  # pkg/), plus the crate's asset/ and test-page/ at the root (flake.nix
+  # emuDsFor).
   emuInstall =
     { input, pkgs, ... }:
     pkgs.runCommand "datboi-emu-ds" { } ''
-      mkdir -p $out/pkg
-      cp -r ${input}/. $out/pkg/
+      mkdir -p $out
+      cp -r ${input}/. $out/
       cp -r ${root + "/crates/datboi-emu-ds/asset"}/. $out/
       cp -r ${root + "/crates/datboi-emu-ds/test-page"}/. $out/
     '';
