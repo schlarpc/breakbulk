@@ -16,7 +16,8 @@
 #
 # Per system it sets `breakbulk.repo` (the mkRepository result) and, unless
 # turned off, adds:
-#  - checks."<ws>/<triple>/<pkg>/<name>": repo.checks;
+#  - checks."<ws>/<triple>/<pkg>/<name>": repo.checks, groups included
+#    (`all`, every prefix, `checkGroups`);
 #  - packages."<pkg>" for each product of the default variant on the
 #    workspace's default target (`defaultTarget`)
 #    ("<ws>-<pkg>" when two workspaces have a package of that name);

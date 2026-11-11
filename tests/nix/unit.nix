@@ -573,4 +573,36 @@ runTests "lib-unit" {
       false
     ];
   };
+
+  # Check-group patterns: `*` within a segment, `**` across any number.
+  testCheckGroupMatches = {
+    expr = map (p: bb.checkGroups.matches (lib.head p) (lib.last p)) [
+      [ "*/fmt" "main/fmt" ]
+      [ "*/fmt" "main/x86_64-unknown-linux-gnu/fmt" ]
+      [ "*/*/variant-clippy/**" "main/x86_64-unknown-linux-gnu/variant-clippy/check" ]
+      [ "*/*/variant-clippy/**" "main/x86_64-unknown-linux-gnu/variant-clippy/app/build" ]
+      [ "*/*/variant-clippy/**" "main/x86_64-unknown-linux-gnu/app/build" ]
+      [ "**/test-*" "main/x86_64-unknown-linux-gnu/app/test-it" ]
+      [ "main/**" "main" ]
+      [ "ma?n/*-unknown-*/app/build" "main/x86_64-unknown-linux-gnu/app/build" ]
+    ];
+    expected = [
+      true
+      false
+      true
+      true
+      false
+      true
+      true
+      true
+    ];
+  };
+  testCheckGroupPrefixes = {
+    expr = bb.checkGroups.properPrefixes "a/b/c/d";
+    expected = [
+      "a"
+      "a/b"
+      "a/b/c"
+    ];
+  };
 }

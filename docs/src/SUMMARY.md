@@ -16,6 +16,7 @@
 - [Enter the dev shell with direnv](how-to/direnv.md)
 - [Use a binary cache](how-to/binary-cache.md)
 - [Use a flake with several systems](how-to/multi-system.md)
+- [Run the checks in CI](how-to/ci.md)
 
 # Reference
 

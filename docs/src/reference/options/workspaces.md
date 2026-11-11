@@ -996,8 +996,6 @@ true
 
 ## `workspaces.<name>.variants.<name>.benches`
 
-
-
 Also trace ` cargo bench --no-run ` with this variant’s settings
 (use ` profile = "bench" `): bench binaries, and lib and bin
 harnesses in bench mode, at
@@ -1025,6 +1023,8 @@ false
 
 
 ## `workspaces.<name>.variants.<name>.cargoTrimPaths`
+
+
 
 This variant’s ` workspaces.<ws>.cargoTrimPaths `\.
 

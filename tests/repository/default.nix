@@ -376,6 +376,71 @@ in
     assert lib.assertMsg (differ == [ ]) "host-units-shared: host units differ between split and keep: ${toString differ}";
     evalCheck "host-units-shared" "host units: ${toString names}";
 
+  # Check groups over the three workspaces: every proper prefix of a check
+  # name holds exactly the checks under it, `all` every check, and
+  # checkGroups select by glob and take derivations; a group name that
+  # is taken, a workspace named `all` and a pattern that matches nothing
+  # are evaluation errors.
+  check-groups =
+    let
+      groupsRepo =
+        extra:
+        mkRepo (fixtures + "/multi-ws") (
+          [
+            {
+              workspaces = lib.genAttrs [ "a" "b" ] (ws: {
+                path = ws;
+                variants.default.profile = "dev";
+              });
+            }
+          ]
+          ++ extra
+        );
+      marker = pkgs.writeText "marker" "";
+      repo = groupsRepo [
+        {
+          checkGroups = {
+            builds = [ "*/*/*/build" ];
+            extra = [
+              "a/**"
+              marker
+            ];
+          };
+        }
+      ];
+      c = repo.checks;
+      isGroup = n: c.${n}.breakbulkCheckGroup or false;
+      leaves = lib.filter (n: !(isGroup n)) (lib.attrNames c);
+      entriesOf = n: lib.sort lib.lessThan (lib.attrNames c.${n}.passthru.entries);
+      under = p: lib.filter (lib.hasPrefix "${p}/") leaves;
+      failsOn = extra: !(builtins.tryEval (lib.attrNames (groupsRepo extra).checks)).success;
+    in
+    assert lib.assertMsg (c ? a && c ? b && c ? "a/${native}" && c ? all) "check-groups: groups ${toString (lib.filter isGroup (lib.attrNames c))}";
+    assert lib.assertMsg (entriesOf "a" == under "a") "check-groups: a holds ${toString (entriesOf "a")}";
+    assert lib.assertMsg (entriesOf "a/${native}" == under "a/${native}") "check-groups: a/${native} holds ${toString (entriesOf "a/${native}")}";
+    assert lib.assertMsg (entriesOf "all" == lib.sort lib.lessThan leaves) "check-groups: all holds ${toString (entriesOf "all")}";
+    assert lib.assertMsg (
+      entriesOf "builds" == lib.filter (n: lib.hasSuffix "/build" n && lib.length (lib.splitString "/" n) == 4) leaves
+    ) "check-groups: builds holds ${toString (entriesOf "builds")}";
+    assert lib.assertMsg (
+      lib.filter (n: !(lib.hasPrefix "derivations/" n)) (entriesOf "extra") == under "a"
+      && lib.any (lib.hasPrefix "derivations/0-marker") (entriesOf "extra")
+    ) "check-groups: extra holds ${toString (entriesOf "extra")}";
+    assert lib.assertMsg (failsOn [ { checkGroups.a = [ "b/**" ]; } ]) "check-groups: a group named like a prefix group";
+    assert lib.assertMsg (failsOn [ { checkGroups.all = [ "b/**" ]; } ]) "check-groups: a group named all";
+    assert lib.assertMsg (
+      !(builtins.tryEval (groupsRepo [ { checkGroups.none = [ "c/**" ]; } ]).checks.none.drvPath).success
+    ) "check-groups: a pattern matching nothing";
+    assert lib.assertMsg (failsOn [
+      {
+        workspaces.all = {
+          path = "c";
+          variants.default.profile = "dev";
+        };
+      }
+    ]) "check-groups: a workspace named all";
+    evalCheck "check-groups" "groups: ${toString (lib.filter isGroup (lib.attrNames c))}";
+
   # Exactly the registry crates and the path crate outside every root are
   # shared by all three workspaces; `inner` (inside a's root) is shared
   # only by b and c, which both see it from outside.

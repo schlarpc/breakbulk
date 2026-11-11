@@ -43,6 +43,7 @@
 }:
 let
   util = import ./util.nix { inherit lib; };
+  checkGroups = import ./check-groups.nix { inherit lib util; };
   targetTraits = import ./target-traits.nix { inherit lib; };
   lockfile = import ./lockfile.nix { inherit lib util; };
   manifest = import ./manifest.nix { inherit lib util; };
@@ -219,6 +220,7 @@ let
       mkBuildTarget
       mkWorkspace
       dynamic
+      checkGroups
       ;
 
     mkSkeleton = skeleton.mkSkeleton;

@@ -74,6 +74,7 @@ repo = {
   };
 
   checks."<ws>/<triple>/<pkg>/<name>";   # everything to check, for checks.<system>
+  checks.all; checks."<prefix>";         # groups: every check, everything under a prefix
   sources.<crate>;                       # fetched crate sources
   explainSharing;                        # why two plans' units differ
   config; options; optionsDoc;           # the evaluated modules
@@ -106,6 +107,19 @@ The first four rows come from every build or coverage variant with
 [`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)
 (the default for hand-written variants, not for the feature-matrix
 helpers'). A product whose roots Cargo all skipped is left out.
+
+Groups are checks too, each an aggregate (a `linkFarm` of the checks it
+holds) that builds them as one installable
+([Run the checks in CI](../how-to/ci.md)):
+
+- every proper prefix of a check name: `<ws>`, `<ws>/<triple>`,
+  `<ws>/<triple>/<pkg>`, `<ws>/<triple>/variant-<v>`, and so on;
+- `all`, every check (so a workspace may not be named `all`);
+- each of [`checkGroups`](options/repository.md#checkgroups).
+
+They add about one name per distinct prefix to `nix flake check`'s list,
+and build nothing the checks themselves do not. A group has
+`breakbulkCheckGroup = true`, which tells it from a leaf check.
 
 ### `explainSharing`
 

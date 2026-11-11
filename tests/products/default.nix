@@ -1138,7 +1138,7 @@ in
       w = repo.workspaces.main;
       n = w.target.${native};
       m = w.target.${musl};
-      names = lib.attrNames repo.checks;
+      names = lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) repo.checks);
       under = prefix: lib.filter (lib.hasPrefix prefix) names;
       planCmd = vName: kind: w.instances.${native}.${vName}.plans.${kind}.drvAttrs.buildCommand;
       selects = vName: kind: pkg: lib.hasInfix " -p ${lib.escapeShellArg pkg} " (planCmd vName kind);

@@ -32,6 +32,50 @@ null
 
 
 
+## `checkGroups`
+
+
+
+Named groups of checks, each an aggregate check in ` repo.checks `
+(and the flake’s ` checks `) that builds what it holds as one
+installable\. Each item is a glob over check names, where ` * `
+matches within one ` / `-separated segment and ` ** ` any number of
+segments, or a derivation to include as is\. A pattern that
+matches no check is an error, as is a name that is already a
+check, a prefix group (every proper prefix of a check name is
+one) or ` all `\.
+
+
+
+*Type:*
+attribute set of list of (string or package)
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  clippy = [ "*/*/variant-clippy/**" ];
+  fmt = [ "*/fmt" ];
+  release = [ "host/*/variant-release/**" self.packages.x86_64-linux.docs ];
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+
+
 ## `gitHashes`
 
 

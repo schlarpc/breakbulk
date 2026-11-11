@@ -46,7 +46,9 @@
 # `<pkg>/test-<name>` (enabled test runs) and `<pkg>/doctest`, under
 # `<ws>/<triple>/` for the default variant and
 # `<ws>/<triple>/variant-<v>/` for the others; check and clippy variants
-# as `<ws>/<triple>/variant-<v>/check`.
+# as `<ws>/<triple>/variant-<v>/check`. Every proper prefix of those names,
+# `all` and each of `checkGroups` is also a check: an aggregate of the
+# checks it selects (lib/check-groups.nix).
 #
 # Test names (`tests.<pkg>.<name>`): an integration test by its name, the
 # library's unit tests as `lib`, a bin's unit tests as `bin-<name>`, an
@@ -1488,7 +1490,16 @@ let
   # that fine as long as no option's structure depends on it.
   result = {
     workspaces = guard workspaces;
-    checks = guard checks;
+    checks = guard (
+      if cfg.workspaces ? all then
+        throw "breakbulk: a workspace is named `all`, which is the name of the group of every check; rename the workspace"
+      else
+        checks
+        // breakbulkLib.checkGroups.groups {
+          inherit pkgs checks;
+          user = cfg.checkGroups;
+        }
+    );
     sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
     inherit explainSharing warnings;
     inherit (eval) config options;
