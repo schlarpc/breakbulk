@@ -189,6 +189,32 @@ More behavior:
   per package or per test binary. Changing a skip list re-runs only the
   affected test runs.
 
+**Test output.** A test run's output goes to the build log only: see it
+with `nix log <run>` or `nix build -L`. The run's own output (`$out`) is
+an empty directory. The output holds timings and, with more than one
+test thread, result lines in a varying order. If it were in `$out`, a
+passing run would fail `nix build --rebuild`, which compares outputs, and
+`--rebuild` is how you check that a test still passes. breakbulk does not
+parse the output into a stable form either: that would tie it to
+libtest's and nextest's formats, and `harness = false` tests have
+neither. Doctest runs work the same way.
+
+- [`test.keepLog`](../reference/options/packages.md#packagesnametestkeeplog)
+  copies the raw output to `$out/log`, for a binary cache that does not
+  store build logs or a CI that keeps logs as artifacts. Such a run is
+  not reproducible under `--rebuild`.
+- [`test.postRun`](../reference/options/packages.md#packagesnametestpostrun)
+  (per package, and per binary under `test.binaries.<binary>.postRun`)
+  is a shell snippet that runs inside the run after it passes, with the
+  raw output in `$log`. Under nextest, `$nextestDir` is nextest's store,
+  so `cp -r "$nextestDir/ci" "$out/junit"` keeps a profile's JUnit
+  report. Whether the result is reproducible depends on what the
+  snippet puts in `$out`.
+- A coverage variant's runs keep their profiles in `$out/profraw`, named
+  by content. The counters themselves can differ between runs (hash
+  seeds, timing), so coverage runs are outside the `--rebuild`
+  guarantee.
+
 **Test threads.** Each test binary is its own derivation, and Nix builds
 up to `max-jobs` derivations at once. Each test run starts `cores` test
 threads by default: it sets `RUST_TEST_THREADS` to `$NIX_BUILD_CORES`.

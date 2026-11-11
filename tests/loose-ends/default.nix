@@ -104,7 +104,10 @@ let
     name = "config-env";
     # The tests compare a source path the library embedded at compile time
     # with the one the test run gets, which needs one view for both.
-    packages.config-env.test.scopeTestsDir = false;
+    packages.config-env.test = {
+      scopeTestsDir = false;
+      keepLog = true;
+    };
   };
 
   configEnv =
@@ -155,7 +158,10 @@ let
       root = fixtures + "/test-scope";
     };
   scopeBase = {
-    workspaces.main.variants.default.profile = "dev";
+    workspaces.main = {
+      variants.default.profile = "dev";
+      memberDefaults.test.keepLog = true;
+    };
   };
   noScope = mkRepo [ scopeBase ];
   withScope = mkRepo [
@@ -685,7 +691,14 @@ let
   namesRepo = breakbulk.mkRepository {
     inherit pkgs tools;
     root = fixtures + "/names";
-    modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
+    modules = [
+      {
+        workspaces.main = {
+          variants.default.profile = "dev";
+          memberDefaults.test.keepLog = true;
+        };
+      }
+    ];
   };
   names =
     let

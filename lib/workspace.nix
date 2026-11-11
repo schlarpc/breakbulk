@@ -385,7 +385,7 @@ let
           outerName = if kind == "build" then name else "${name}-${kind}";
           doctests = lib.optionalAttrs (kind == "test" && !checking) (
             lib.mapAttrs (
-              pkg: _: testRuns.doctestConfig { inherit packages runner; } pkg
+              pkg: _: testRuns.doctestConfig { inherit pkgs packages runner; } pkg
             ) predictedDoctests
           );
         }

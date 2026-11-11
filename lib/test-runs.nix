@@ -18,8 +18,8 @@
 #     testPkgs = <pkgs for testSystem>;
 #     packages = { };     # packages.<name>.test, as in the module options
 #     ca = null;          # null: automatic (stages.caAuto); true; false
-#     coverage = false;   # coverage variants: LLVM_PROFILE_FILE points into
-#                         # $out/profraw, so each run keeps its profiles
+#     coverage = false;   # coverage variants: each run keeps its profiles
+#                         # in $out/profraw (`postRunSnippets`)
 #     name = "breakbulk";
 #   };
 #
@@ -66,7 +66,12 @@
 #     in breakbulk-unit), then the sysroot's target library directory;
 #   - `/tmp/breakbulk-target-tmp`, the planner's `CARGO_TARGET_TMPDIR`, is
 #     created first;
-#   - `$out/log` holds the output; the run fails when the binary does.
+#   - the output goes to the build log and to `$log` in $TMPDIR, not to
+#     `$out`: it holds timings and, with several test threads, lines in a
+#     varying order, and `nix build --rebuild` compares every output. `$out`
+#     is an empty directory, unless a `test.postRun` snippet (or `keepLog`)
+#     puts something there after a passing run (`postRunScript`);
+#   - the run fails when the binary does.
 #
 # With `test.runner = "nextest"`, the same environment is set up, then
 # cargo-nextest runs the one binary in its reuse-build mode from the
@@ -74,7 +79,7 @@
 # package's `test.nextest.profile` and `configFile`; libtest arguments go
 # after `--`. nextest's `test-threads` defaults to `$NIX_BUILD_CORES`;
 # the project's configuration and `NEXTEST_TEST_THREADS` override it.
-# nextest's store (junit and the like) is copied to `$out/nextest`.
+# nextest's store (junit and the like) is `$nextestDir` for `test.postRun`.
 #
 # What each run needs from the plan (env, `[env]` values, the runs for the
 # dynamic-library path and `rustc-env`, nextest's metadata) comes from
@@ -441,6 +446,8 @@ rec {
       runner = "libtest";
       stripForRun = false;
       runFiles = null;
+      postRun = "";
+      keepLog = false;
     }
     // t
     // {
@@ -499,9 +506,59 @@ rec {
     {
       args = [ ];
       env = { };
+      postRun = "";
       enable = true;
     }
     // (cfg.binaries.${binary} or { });
+
+  # A run's raw output, besides the build log: `$log` in `test.postRun`.
+  logFile = "$TMPDIR/breakbulk-test.log";
+
+  # Coverage: the profiles go to $TMPDIR, and a snippet of
+  # `postRunSnippets` moves them into $out. LLVM_PROFILE_FILE's `%p` (the
+  # process ID) differs on every run, so they are renamed by content.
+  # The counters themselves can still differ (hash seeds, timing), so
+  # coverage runs are outside the `--rebuild` guarantee.
+  coverageEnvScript = coverage: lib.optionalString coverage ''
+    mkdir -p $TMPDIR/profraw
+    export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
+  '';
+  coverageCollect = ''
+    mkdir -p "$out/profraw"
+    for f in "$TMPDIR"/profraw/*.profraw; do
+      [ -e "$f" ] || continue
+      b=''${f##*/}
+      cp "$f" "$out/profraw/''${b%-*}-$(sha256sum "$f" | cut -c1-32).profraw"
+    done
+  '';
+
+  # What runs after a passing run, in order: breakbulk's own (coverage),
+  # the package's `test.postRun`, the binary's, then `keepLog`'s copy.
+  # Doctests have no binary.
+  postRunSnippets =
+    {
+      cfg,
+      binary ? null,
+      coverage ? false,
+    }:
+    lib.optional coverage coverageCollect
+    ++ lib.optional (cfg.postRun != "") cfg.postRun
+    ++ lib.optional (binary != null && (binaryConfig cfg binary).postRun != "") (binaryConfig cfg binary).postRun
+    ++ lib.optional cfg.keepLog ''cp "$log" "$out/log"'';
+
+  # The snippets in a subshell, so that a snippet's `cd` or `exit` stays
+  # its own; `$log` and `$out` are set.
+  postRunScript =
+    args:
+    let
+      snippets = postRunSnippets args;
+    in
+    lib.optionalString (snippets != [ ]) ''
+      (
+        set -euo pipefail
+        ${lib.concatStringsSep "\n" snippets}
+      )
+    '';
 
   # Shell lines that export a test binary's configuration: `test.env`, then
   # `test.binaries.<binary>.env`, then `test.path` on PATH.
@@ -537,14 +594,29 @@ rec {
   # doctest derivation.
   doctestConfig =
     {
+      pkgs,
       packages,
       runner ? null,
     }:
     pkg:
     let
       cfg = testConfig packages pkg;
+      snippets = postRunSnippets { inherit cfg; };
     in
     {
+      # A script, run in $TMPDIR with `$log` and `$out` set, after passing
+      # doctests (breakbulk-unit's doctest.rs).
+      BREAKBULK_TEST_POST_RUN =
+        if snippets == [ ] then
+          ""
+        else
+          # The doctest derivation has no PATH; snippets get stdenv's basic
+          # tools, as test runs (runCommand) do.
+          "${pkgs.writeShellScript "breakbulk-${pkg}-doctest-post-run" (
+            "set -euo pipefail\n"
+            + "export PATH=${lib.makeBinPath pkgs.stdenv.initialPath}\${PATH:+:$PATH}\n"
+            + lib.concatStringsSep "\n" snippets
+          )}";
       BREAKBULK_TEST_RUNNER = toJSON (if runner == null then [ ] else lib.toList runner);
       BREAKBULK_TEST_ARGS = toJSON (cfg.args ++ lib.optional cfg.includeIgnored "--include-ignored");
       BREAKBULK_TEST_ENV = toJSON (
@@ -660,11 +732,9 @@ rec {
             ${lib.optionalString (
               runnerList != [ ]
             ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
-            ${lib.optionalString coverage ''
-              mkdir -p $out/profraw
-              export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
-            ''}
+            ${coverageEnvScript coverage}
             ws=$TMPDIR/nextest-ws
+            log=${logFile}
             mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
             touch $ws/Cargo.toml
             files=(${bin}/*)
@@ -680,16 +750,18 @@ rec {
               --profile ${lib.escapeShellArg cfg.nextest.profile} \
               ${nextestThreadsFlag} \
               --no-tests=warn --color never \
-              ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee $out/log
+              ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee "$log"
             status=''${PIPESTATUS[0]}
             set -e
-            if [ -d $ws/target/nextest ]; then
-              cp -r $ws/target/nextest $out/nextest
-            fi
             if [ "$status" -ne 0 ]; then
               echo "test binary ${s.package} ${s.binary} failed under nextest (exit status $status)" >&2
               exit "$status"
             fi
+            nextestDir=$ws/target/nextest
+            ${postRunScript {
+              inherit cfg coverage;
+              binary = s.binary;
+            }}
           '';
 
       run =
@@ -740,21 +812,23 @@ rec {
               }}
               ${configScript cfg s.binary}
               ${threadsScript}
-              ${lib.optionalString coverage ''
-                mkdir -p $out/profraw
-                export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
-              ''}
+              ${coverageEnvScript coverage}
               mkdir -p /tmp/breakbulk-target-tmp $out
+              log=${logFile}
               files=(${bin}/*)
               cd ${lib.escapeShellArg s.sourceDir}
               set +e
-              env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+              env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
               status=''${PIPESTATUS[0]}
               set -e
               if [ "$status" -ne 0 ]; then
                 echo "test binary ${s.package} ${s.binary} failed (exit status $status)" >&2
                 exit "$status"
               fi
+              ${postRunScript {
+                inherit cfg coverage;
+                binary = s.binary;
+              }}
             '';
 
       runs = lib.mapAttrs (
@@ -776,7 +850,7 @@ rec {
       ) byPackage;
 
       doctests = lib.mapAttrs (
-        pkg: attrs: derivation (attrs // doctestConfig { inherit packages runner; } pkg)
+        pkg: attrs: derivation (attrs // doctestConfig { inherit pkgs packages runner; } pkg)
       ) (inst.doctestAttrs or { });
 
       checks =

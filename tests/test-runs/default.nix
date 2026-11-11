@@ -58,6 +58,11 @@
 #                           nextest's thread count are NIX_BUILD_CORES; a
 #                           nextest profile's `test-threads` and
 #                           NEXTEST_TEST_THREADS win over that default
+#   post-run                a run's `$out` is empty by default; the
+#                           package's `test.postRun`, the binary's and
+#                           `keepLog`'s copy run in that order after a
+#                           passing run and see `$log`; the doctest run
+#                           gets the package's snippet and `keepLog`
 #
 # `workspaces` exposes the mkWorkspace results for debugging; `repos` the
 # mkRepository results that tests/dynamic builds in both modes.
@@ -99,7 +104,17 @@ let
 
   # --- doctests -------------------------------------------------------------
 
-  doctestsWs = mk "doctests" { };
+  # The checks below read the runs' output, so they keep it
+  # (`test.keepLog`); `$out` is otherwise empty.
+  keepLog = names: lib.genAttrs names (_: { test.keepLog = true; });
+
+  doctestsWs = mk "doctests" {
+    packages = keepLog [
+      "dd"
+      "e2024"
+      "helper"
+    ];
+  };
 
   # Plain `cargo test --doc` over the same sources.
   cargoDoctests =
@@ -155,6 +170,7 @@ let
   # --- test-control -----------------------------------------------------------
 
   ctlTest = {
+    keepLog = true;
     env.CTL_EXPECT_NIX = "1";
     path = [ pkgs.hello ];
     binaries.net.args = [
@@ -412,16 +428,25 @@ let
       '';
   # --- nextest -------------------------------------------------------------
 
+  # nextest's store (the `ci` profile's junit) reaches `$out` through
+  # `test.postRun`.
+  keepJunit = {
+    keepLog = true;
+    postRun = ''cp -r "$nextestDir" "$out/nextest"'';
+  };
   nxWs = mk "nextest" {
-    packages.nx.test = {
+    packages.nx.test = keepJunit // {
       runner = "nextest";
       nextest.profile = "ci";
       nextest.configFile = fixtures + "/nextest/.config/nextest.toml";
       env.NX_FROM_TEST_ENV = "yes";
       env.NX_EXPECT_NIX = "1";
     };
-    packages.other.test.runner = "nextest";
-    packages.solo.test = {
+    packages.other.test = {
+      keepLog = true;
+      runner = "nextest";
+    };
+    packages.solo.test = keepJunit // {
       runner = "nextest";
       nextest.profile = "ci";
       nextest.configFile = fixtures + "/nextest/.config/nextest.toml";
@@ -459,7 +484,7 @@ let
         ! grep -q 'excluded_always_fails' $flaky/log
         # Package env from the synthesized metadata, test.env, the profile.
         grep -E 'PASS .*nx::flaky runtime_env' $flaky/log
-        # junit from the profile's config lands in the output.
+        # junit from the profile's config, put in the output by postRun.
         grep -q 'testsuite name="nx::flaky"' $flaky/nextest/ci/junit.xml
         grep -E 'PASS .*nx unit_ok|PASS .*nx tests::unit_ok' $nxLib/log
         # No configuration file: nextest's defaults.
@@ -486,7 +511,10 @@ let
     root = fixtures + "/nextest";
     modules = [
       {
-        workspaces.main.variants.default.profile = "dev";
+        workspaces.main = {
+          variants.default.profile = "dev";
+          memberDefaults.test.keepLog = true;
+        };
         packages.nx.test = {
           runner = "nextest";
           nextest.profile = "ci";
@@ -583,6 +611,7 @@ let
           memberDefaults.test = {
             runner = "nextest";
             nextest.profile = "ci";
+            keepLog = true;
           };
         };
         packages.other.test.runner = "libtest";
@@ -617,7 +646,9 @@ let
       ws = path: test: {
         inherit path;
         variants.default.profile = "dev";
-        memberDefaults.test = test;
+        memberDefaults.test = test // {
+          keepLog = true;
+        };
       };
       nx = test: test // { runner = "nextest"; };
       oneThread.RUST_TEST_THREADS = "1";
@@ -704,6 +735,54 @@ let
       grep -E 'PASS .*tt::nextest_one nextest_one_thread' $nextest_profile_nextest_one/log
       mkdir -p $out
     '';
+
+  # --- post-run --------------------------------------------------------------
+
+  postRunRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/test-control";
+    modules = [
+      {
+        workspaces.main.variants.default.profile = "dev";
+        packages.ctl.test = lib.recursiveUpdate ctlTest {
+          keepLog = false;
+          postRun = ''
+            grep -q '^test result: ok' "$log"
+            echo package >> "$out/order"
+          '';
+          binaries.env.postRun = ''
+            echo binary >> "$out/order"
+          '';
+        };
+      }
+      # A second matching key: a later layer.
+      { packages."ctl@0.1.0".test.keepLog = true; }
+    ];
+  };
+  postRun =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      t = postRunRepo.workspaces.main.target.${native};
+    in
+    pkgs.runCommand "test-runs-post-run"
+      {
+        plain = (mk "test-control" { packages.ctl.test = removeAttrs ctlTest [ "keepLog" ]; }).testRuns.ctl.env;
+        envRun = t.testRuns.ctl.env;
+        net = t.testRuns.ctl.net;
+        doctest = t.doctests.ctl;
+      }
+      ''
+        # Without postRun or keepLog, the output is an empty directory.
+        [ -z "$(ls -A $plain)" ]
+        # Package, then binary, then keepLog's copy (a later layer's keepLog
+        # wins over the earlier false).
+        [ "$(cat $envRun/order)" = "$(printf 'package\nbinary')" ]
+        grep -q 'test result: ok' $envRun/log
+        [ "$(cat $net/order)" = package ]
+        [ "$(cat $doctest/order)" = package ]
+        grep -q 'test result: ok' $doctest/log
+        mkdir -p $out
+      '';
 in
 {
   workspaces = {
@@ -712,6 +791,7 @@ in
   repos = {
     test-threads = testThreadsRepo;
   };
+  post-run = postRun;
   test-threads = testThreads;
   dylib-rule = dylibRule;
   inherit nextest;

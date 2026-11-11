@@ -1026,8 +1026,6 @@ false
 
 ## `workspaces.<name>.variants.<name>.cargoTrimPaths`
 
-
-
 This variant’s ` workspaces.<ws>.cargoTrimPaths `\.
 
 
@@ -1121,6 +1119,8 @@ list of string
 
 
 ## `workspaces.<name>.variants.<name>.features`
+
+
 
 Features to enable (` --features `), as Cargo spells them (` pkg/feat ` is allowed)\.
 

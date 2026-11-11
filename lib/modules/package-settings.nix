@@ -24,6 +24,11 @@ let
         description = "libtest arguments for this test binary.";
       };
       env = bt.mkEnv "Environment for this test binary's run, over `test.env`.";
+      postRun = mkOption {
+        type = types.lines;
+        default = "";
+        description = "A shell snippet run after this binary's passing run, after the package's `test.postRun` (see there).";
+      };
       enable = mkOption {
         type = types.bool;
         default = true;
@@ -175,6 +180,35 @@ let
           type = types.bool;
           default = false;
           description = "Also run `#[ignore]` tests.";
+        };
+        postRun = mkOption {
+          type = types.lines;
+          default = "";
+          example = ''cp -r "$nextestDir/ci" "$out/junit"'';
+          description = ''
+            A shell snippet run inside each passing test run and doctest
+            run of this package, after the tests: `$log` is the run's raw
+            output and `$out` the run's output directory, empty otherwise.
+            With `test.runner = "nextest"`, `$nextestDir` is nextest's
+            store (JUnit reports). The package's snippet runs first, then
+            the binary's (`test.binaries.<binary>.postRun`), then
+            `keepLog`'s. Whatever a snippet puts in `$out` decides whether
+            the run is reproducible: breakbulk keeps `$out` empty so that
+            `nix build --rebuild` of a passing run succeeds, and the output
+            stays in the build log (`nix log`).
+          '';
+        };
+        keepLog = mkOption {
+          type = types.nullOr types.bool;
+          default = null;
+          description = ''
+            Keep each test run's and doctest run's raw output in
+            `$out/log`, as a `postRun` of `cp "$log" "$out/log"`. For a
+            binary cache that does not store build logs, or a CI that keeps
+            them as artifacts. The output holds timings and, with more than
+            one test thread, lines in a varying order, so such a run is
+            not reproducible under `nix build --rebuild`. `null`: off.
+          '';
         };
         binaries = mkOption {
           type = types.attrsOf (types.submodule testBinary);

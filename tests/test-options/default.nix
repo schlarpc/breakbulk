@@ -67,7 +67,11 @@ let
       modules = [
         {
           inherit ca;
-          workspaces.main.variants.default.profile = "dev";
+          workspaces.main = {
+            variants.default.profile = "dev";
+            # Some checks read the runs' output.
+            memberDefaults.test.keepLog = true;
+          };
         }
       ]
       ++ modules;

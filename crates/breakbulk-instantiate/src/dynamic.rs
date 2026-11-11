@@ -76,10 +76,11 @@ pub struct Outer {
 /// The attributes a doctest derivation gets from the package's test
 /// configuration (`doctestConfig` in `lib/test-runs.nix`), each the value of
 /// [`doctest_key`] in `values.json`.
-pub const DOCTEST_CONFIG: [&str; 3] = [
+pub const DOCTEST_CONFIG: [&str; 4] = [
     "BREAKBULK_TEST_RUNNER",
     "BREAKBULK_TEST_ARGS",
     "BREAKBULK_TEST_ENV",
+    "BREAKBULK_TEST_POST_RUN",
 ];
 
 /// The `values.json` key of one doctest configuration attribute.

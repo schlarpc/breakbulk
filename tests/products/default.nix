@@ -607,6 +607,8 @@ let
       workspaces.main = {
         path = ".";
         benchSmoke = true;
+        # `benches` reads the smoke runs' output.
+        memberDefaults.test.keepLog = true;
         variants = {
           default.profile = "dev";
           bench = {
@@ -1368,7 +1370,6 @@ in
         # to a breakpoint in the dependency, prints the backtrace through
         # it with source files and lines, and lists the source.
         ${gdbCheck}
-        cat $depTests/log
         touch $out
       '';
 
@@ -1574,7 +1575,6 @@ in
         # refuses, naming the crate whose absolute path Cargo would hash.
         grep -q 'shared 0.1.0' $stableAt/log
         test ! -e $stableAt/plan.json
-        cat $tests/log
         touch $out
       '';
 

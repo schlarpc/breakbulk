@@ -292,6 +292,7 @@ let
     wsName: triple:
     let
       members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
+      joinLines = a: b: if a == "" then b else if b == "" then a else a + "\n" + b;
       mergeTest = a: b: {
         env = a.env // envStrings b.env;
         path = a.path ++ b.path;
@@ -301,6 +302,8 @@ let
         scopeTestsDir = if b.scopeTestsDir != null then b.scopeTestsDir else a.scopeTestsDir;
         runner = if b.runner != null then b.runner else a.runner;
         stripForRun = if b.stripForRun != null then b.stripForRun else a.stripForRun;
+        postRun = joinLines a.postRun b.postRun;
+        keepLog = if b.keepLog != null then b.keepLog else a.keepLog;
         # Several matching keys: the union of their lists.
         runFiles =
           if b.runFiles == null then
@@ -316,11 +319,13 @@ let
             (x: y: {
               args = x.args ++ y.args;
               env = x.env // envStrings y.env;
+              postRun = joinLines x.postRun y.postRun;
               enable = x.enable && y.enable;
             })
             {
               args = [ ];
               env = { };
+              postRun = "";
               enable = true;
             }
         ) [
@@ -339,6 +344,8 @@ let
         runFiles = null;
         runner = null;
         stripForRun = null;
+        postRun = "";
+        keepLog = null;
         nextest = {
           profile = null;
           configFile = null;

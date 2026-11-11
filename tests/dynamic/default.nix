@@ -78,7 +78,7 @@ let
     breakbulk.mkRepository {
       inherit pkgs tools;
       root = fixtures + "/${fixture}";
-      modules = [ { inherit mode; } ] ++ modules;
+      modules = testArgs.extraModules ++ modules;
     };
   oneWs = {
     workspaces.main = {
@@ -88,9 +88,23 @@ let
   };
 
   # The repositories of the IFD-mode tests, in this mode.
+  # Every workspace keeps its runs' output (`test.keepLog`): run.sh
+  # compares the test outcomes of both modes from it.
+  keepLogs = {
+    options.workspaces = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          config.memberDefaults.test.keepLog = lib.mkDefault true;
+        }
+      );
+    };
+  };
   testArgs = {
     inherit pkgs breakbulk;
-    extraModules = [ { inherit mode; } ];
+    extraModules = [
+      { inherit mode; }
+      keepLogs
+    ];
   };
   productTests = import ../products testArgs;
   products = productTests.repos;

@@ -639,6 +639,30 @@ attribute set of (string or absolute path or package or signed integer or boolea
 
 
 
+## `packages.<name>.test.binaries.<name>.postRun`
+
+
+
+A shell snippet run after this binary’s passing run, after the package’s ` test.postRun ` (see there)\.
+
+
+
+*Type:*
+strings concatenated with “\\n”
+
+
+
+*Default:*
+
+```nix
+""
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
 ## `packages.<name>.test.env`
 
 
@@ -680,6 +704,35 @@ boolean
 
 ```nix
 false
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.keepLog`
+
+
+
+Keep each test run’s and doctest run’s raw output in
+` $out/log `, as a ` postRun ` of ` cp "$log" "$out/log" `\. For a
+binary cache that does not store build logs, or a CI that keeps
+them as artifacts\. The output holds timings and, with more than
+one test thread, lines in a varying order, so such a run is
+not reproducible under ` nix build --rebuild `\. ` null `: off\.
+
+
+
+*Type:*
+null or boolean
+
+
+
+*Default:*
+
+```nix
+null
 ```
 
 *Declared by:*
@@ -794,6 +847,47 @@ list of package
 
 ```nix
 [ ]
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.postRun`
+
+
+
+A shell snippet run inside each passing test run and doctest
+run of this package, after the tests: ` $log ` is the run’s raw
+output and ` $out ` the run’s output directory, empty otherwise\.
+With ` test.runner = "nextest" `, ` $nextestDir ` is nextest’s
+store (JUnit reports)\. The package’s snippet runs first, then
+the binary’s (` test.binaries.<binary>.postRun `), then
+` keepLog `’s\. Whatever a snippet puts in ` $out ` decides whether
+the run is reproducible: breakbulk keeps ` $out ` empty so that
+` nix build --rebuild ` of a passing run succeeds, and the output
+stays in the build log (` nix log `)\.
+
+
+
+*Type:*
+strings concatenated with “\\n”
+
+
+
+*Default:*
+
+```nix
+""
+```
+
+
+
+*Example:*
+
+```nix
+"cp -r \"$nextestDir/ci\" \"$out/junit\""
 ```
 
 *Declared by:*

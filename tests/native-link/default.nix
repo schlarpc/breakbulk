@@ -48,7 +48,11 @@ let
       root = ./fixture;
       modules = [
         {
-          workspaces.main.variants.default.profile = "dev";
+          workspaces.main = {
+            variants.default.profile = "dev";
+            # native-link-runs reads the runs' output.
+            memberDefaults.test.keepLog = true;
+          };
           packages.foo-sys.inputs = [ lib' ];
         }
       ];

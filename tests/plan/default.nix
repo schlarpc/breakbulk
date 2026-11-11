@@ -483,7 +483,7 @@ in
   # `cargo test`.
   out-dir-walk =
     let
-      ws = mk "out-dir-walk" { };
+      ws = mk "out-dir-walk" { packages.out-dir-walk.test.keepLog = true; };
       run = lib.findFirst (u: u.name == "out-dir-walk-0.1.0-build-run") (throw "out-dir-walk: no run") (
         lib.attrValues ws.units.build
       );

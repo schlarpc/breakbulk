@@ -26,9 +26,16 @@
 //!   environment, list-like variables (`PATH`) appended
 //!   ([`crate::env::merge_layer`]).
 //!
+//! - [`POST_RUN_VAR`]: a program run after passing doctests (the
+//!   package's `test.postRun` snippets, `test.keepLog`'s copy), in
+//!   `$TMPDIR`, with `log` and `out` set.
+//!
 //! `RUST_TEST_THREADS` is set to the job count ([`Outer::jobs`]) unless the
 //! test env sets it. The combined stdout and stderr go to the build log and
-//! to `$out/log`. The derivation fails when rustdoc exits non-zero.
+//! to [`LOG_FILE`] in `$TMPDIR`, not `$out`: the output holds timings and
+//! lines in a varying order, and `nix build --rebuild` compares `$out`,
+//! which stays empty unless the post-run program fills it. The derivation
+//! fails when rustdoc exits non-zero.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
@@ -49,8 +56,10 @@ pub const RUNNER_VAR: &str = "BREAKBULK_TEST_RUNNER";
 pub const TEST_ARGS_VAR: &str = "BREAKBULK_TEST_ARGS";
 pub const TEST_ENV_VAR: &str = "BREAKBULK_TEST_ENV";
 
-/// The log file in `$out`.
-pub const LOG_FILE: &str = "log";
+pub const POST_RUN_VAR: &str = "BREAKBULK_TEST_POST_RUN";
+
+/// The log file in `$TMPDIR`.
+pub const LOG_FILE: &str = "breakbulk-doctest.log";
 
 /// `BREAKBULK_UNIT` of a doctest derivation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +94,7 @@ pub struct TestConfig {
     pub runner: Vec<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub post_run: Option<String>,
 }
 
 impl TestConfig {
@@ -102,6 +112,10 @@ impl TestConfig {
             runner: parse(outer, RUNNER_VAR)?,
             args: parse(outer, TEST_ARGS_VAR)?,
             env: parse(outer, TEST_ENV_VAR)?,
+            post_run: outer
+                .get(POST_RUN_VAR)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned),
         })
     }
 }
@@ -267,11 +281,34 @@ pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
     link_deps(&d.compile.deps, &deps)?;
     let out = outer.output("out")?;
     fresh_dir(&out)?;
-    let status = run_logged(&inv, &out.join(LOG_FILE))?;
+    let log = outer.tmpdir().join(LOG_FILE);
+    let status = run_logged(&inv, &log)?;
     if !status.success() {
         return Err(Error(format!(
             "doctests of `{}` failed ({})",
             d.compile.krate.name,
+            describe_status(&status)
+        )));
+    }
+    if let Some(program) = &config.post_run {
+        post_run(program, outer, &log, &out)?;
+    }
+    Ok(())
+}
+
+/// Run the post-run program with the derivation's environment and `log`
+/// and `out`.
+fn post_run(program: &str, outer: &Outer, log: &Path, out: &Path) -> Result<(), Error> {
+    let status = std::process::Command::new(program)
+        .current_dir(outer.tmpdir())
+        .env("log", log)
+        .env("out", out)
+        .stdin(Stdio::null())
+        .status()
+        .map_err(|e| Error(format!("could not start `{program}`: {e}")))?;
+    if !status.success() {
+        return Err(Error(format!(
+            "the doctests' test.postRun failed ({})",
             describe_status(&status)
         )));
     }
@@ -413,6 +450,7 @@ mod tests {
                 ("PATH".into(), "/tools/bin".into()),
                 ("EXTRA".into(), "yes".into()),
             ]),
+            post_run: None,
         };
         let outer = Outer {
             vars: BTreeMap::from([("NIX_BUILD_CORES".into(), "3".into())]),

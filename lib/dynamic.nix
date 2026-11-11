@@ -569,10 +569,8 @@ let
         }}
         ${testRuns.configScript cfg key}
         ${testRuns.threadsScript}
-        ${lib.optionalString coverage ''
-          mkdir -p $out/profraw
-          export LLVM_PROFILE_FILE=$out/profraw/%m-%p.profraw
-        ''}
+        ${testRuns.coverageEnvScript coverage}
+        log=${testRuns.logFile}
       '';
 
       # As testRuns.mkTestRuns's nextestRun, with the metadata from the
@@ -621,30 +619,36 @@ let
             --profile ${lib.escapeShellArg cfg.nextest.profile} \
             ${testRuns.nextestThreadsFlag} \
             --no-tests=warn --color never \
-            ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee $out/log
+            ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee "$log"
           status=''${PIPESTATUS[0]}
           set -e
-          if [ -d $ws/target/nextest ]; then
-            cp -r $ws/target/nextest $out/nextest
-          fi
           if [ "$status" -ne 0 ]; then
             echo "test binary ${b.package} ${testRuns.binaryKey b} failed under nextest (exit status $status)" >&2
             exit "$status"
           fi
+          nextestDir=$ws/target/nextest
+          ${testRuns.postRunScript {
+            inherit cfg coverage;
+            binary = testRuns.binaryKey b;
+          }}
         '';
 
-      libtestScript = b: args: bin: ''
+      libtestScript = b: cfg: args: bin: ''
         mkdir -p /tmp/breakbulk-target-tmp $out
         files=(${bin})
         cd "$CARGO_MANIFEST_DIR"
         set +e
-        env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee $out/log
+        env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
         status=''${PIPESTATUS[0]}
         set -e
         if [ "$status" -ne 0 ]; then
           echo "test binary ${b.package} ${testRuns.binaryKey b} failed (exit status $status)" >&2
           exit "$status"
         fi
+        ${testRuns.postRunScript {
+          inherit cfg coverage;
+          binary = testRuns.binaryKey b;
+        }}
       '';
 
       run =
@@ -693,7 +697,7 @@ let
               if cfg.runner == "nextest" then
                 nextestScript b cfg args binGlob
               else if cfg.runner == "libtest" then
-                libtestScript b args binGlob
+                libtestScript b cfg args binGlob
               else
                 throw "breakbulk: packages.${b.package}.test.runner must be \"libtest\" or \"nextest\", not ${toJSON cfg.runner}"
             )

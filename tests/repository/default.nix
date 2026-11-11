@@ -299,6 +299,8 @@ let
       [
         (oneWs ".")
         testOnlyScope
+        # test-only reads the run's output.
+        { packages.proto.test.keepLog = true; }
       ]
       ++ modules
     );

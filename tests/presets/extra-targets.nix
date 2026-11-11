@@ -393,6 +393,8 @@ let
     {
       workspaces.main = wsWith (rustWith [ "x86_64-pc-windows-gnu" ]) [ "x86_64-pc-windows-gnu" ];
       targets."x86_64-pc-windows-gnu".preset = presets.windows;
+      # windows-dll-needs-dll reads the run's output.
+      packages.windows-dll.test.keepLog = true;
     }
   ];
   # The same with the `buildScriptFiles` stage (#23): the DLL the build
