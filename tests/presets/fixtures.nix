@@ -857,17 +857,53 @@ let
       ui = wasmHostInputs.workspaces.main.target.${wasm}.packages.ui;
     } "ls $ui/pkg/*.wasm > $out";
   # The same tests in a headless browser, inside the sandbox.
-  wasmBrowserIn =
+  wasmBrowserOn =
     browser:
-    (mkRepo (fixtures + "/wasm-browser") [
-      {
-        workspaces.main = wasmWs;
-        targets.${wasm}.preset = presets.wasmWeb {
-          rustc = wasmRust;
-          inherit browser;
+    wasmBrowserWith {
+      targets.${wasm}.preset = presets.wasmWeb {
+        rustc = wasmRust;
+        inherit browser;
+      };
+    };
+  wasmBrowserIn = browser: (wasmBrowserOn browser).workspaces.main.target.${wasm}.testRuns.ui.web;
+  # Compile and build-script units by drvPath, for configurations of the
+  # wasm-browser fixture that differ only in the test runner.
+  wasmBrowserWith =
+    module:
+    mkRepo (fixtures + "/wasm-browser") [
+      { workspaces.main = wasmWs; }
+      module
+    ];
+  wasmBrowserUnits =
+    repo:
+    let
+      i = repo.workspaces.main.instances.${wasm}.default;
+    in
+    map (u: discard u.drvPath) (lib.attrValues i.units.build ++ lib.attrValues i.units.test);
+  wasmRunnerSharing =
+    let
+      configs = {
+        node = wasmBrowser;
+        chromium = wasmBrowserOn "chromium";
+        firefox = wasmBrowserOn "firefox";
+        override = wasmBrowserWith {
+          targets.${wasm} = {
+            preset = presets.wasmWeb { rustc = wasmRust; };
+            runner = lib.mkForce "${pkgs.coreutils}/bin/true";
+          };
         };
-      }
-    ]).workspaces.main.target.${wasm}.testRuns.ui.web;
+      };
+      units = lib.mapAttrs (_: wasmBrowserUnits) configs;
+      differing = lib.filterAttrs (_: u: u != units.node) units;
+      runs = lib.mapAttrs (_: r: discard r.workspaces.main.target.${wasm}.testRuns.ui.web.drvPath) configs;
+    in
+    # Guards against a runner setting that never takes effect.
+    assert lib.assertMsg (lib.length (lib.unique (lib.attrValues runs)) == lib.length (lib.attrValues runs))
+      "wasm-web-runner-sharing: two configurations have the same test run: ${builtins.toJSON runs}";
+    assert lib.assertMsg (units.node != [ ]) "wasm-web-runner-sharing: no units";
+    assert lib.assertMsg (differing == { })
+      "wasm-web-runner-sharing: units differ from the node runner's in ${toString (lib.attrNames differing)}";
+    evalCheck "wasm-web-runner-sharing" "${toString (lib.length units.node)} units identical across ${toString (lib.attrNames configs)}";
   wasmBrowserChecks =
     let
       t = wasmBrowser.workspaces.main.target.${wasm};
@@ -884,6 +920,7 @@ let
       wasm-web-test = t.testRuns.ui.web;
       wasm-web-test-chromium = wasmBrowserIn "chromium";
       wasm-web-test-firefox = wasmBrowserIn "firefox";
+      wasm-web-runner-sharing = wasmRunnerSharing;
       # The bindgen stage with the lockfile-matched CLI (0.2.130), then
       # wasm-opt; the JS glue loads in Node and computes the digest.
       wasm-web-bindgen =
