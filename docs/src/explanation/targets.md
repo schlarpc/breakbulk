@@ -19,12 +19,19 @@ This page explains what each kind of target gets, and why.
 | `{x86_64,aarch64}-unknown-linux-musl` | yours + nixpkgs musl cross | mold | a native builder, else qemu-user |
 | your own triple, static glibc | yours + static archives | mold | the build machine |
 | your own triple, old glibc (`linuxPortable`) | yours + `zig cc` | zig | the build machine's `ld.so` |
-| `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine |
+| `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine (x86_64); none (aarch64) |
 | `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
 | `aarch64-pc-windows-gnullvm` | yours + nixpkgs LLVM mingw-w64 cross | lld, through the MinGW C driver | none |
 | `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), headless Chromium or Firefox, or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
-| `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none |
+| `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none: no `test` crate, so test binaries do not compile |
+
+For a preset's target, "none" means nothing on the build machine runs the target's programs.
+The test binaries and doctests still build, but their runs fail with a
+message naming `targets.<triple>.runner` and `testSystem`, and they are
+not in `repo.checks`, so `nix flake check` checks what can be checked.
+Setting either option gives the target a runner and puts its runs back
+(`target.<triple>.canRunTests` says which applies).
 
 "Yours" means the toolchain you give the workspace (see below). macOS
 targets do not work yet

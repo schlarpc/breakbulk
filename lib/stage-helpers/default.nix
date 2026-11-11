@@ -768,7 +768,7 @@ let
     ''
   );
 
-  noSourceReferences = mkHelper "noSourceReferences" { sources = null; toolchain = null; } (
+  noSourceReferences = mkHelper "noSourceReferences" { sources = null; toolchain = null; sourcesAllowedIn = null; } (
     cfg:
     {
       input,
@@ -779,6 +779,9 @@ let
     let
       sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
       toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
+      # File name globs (any directory) whose own references to sources
+      # are allowed: a source is still an error when another file names it.
+      allowedIn = if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
       # The store path each source lies in, not the source itself: a git
       # crate's source is a directory inside its tree, and a closure lists
       # whole store paths only.
@@ -800,6 +803,7 @@ let
         # readelf reads ELF of every architecture; objdump -p prints PE
         # imports ("DLL Name:").
         binutils = pkgs.buildPackages.binutils-unwrapped;
+        allowedIn = concatStringsSep "\n" allowedIn;
         narrowing = "packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };";
         removal = removeCheckLine "noSourceReferences" product "may reference them";
       }
@@ -837,6 +841,15 @@ let
         while IFS= read -r s; do
           [ -n "$s" ] || continue
           if grep -qxF "$s" "$closure/store-paths"; then
+            if [ -n "$allowedIn" ]; then
+              excludes=()
+              while IFS= read -r f; do excludes+=("--exclude=$f"); done <<< "$allowedIn"
+              # -a: an archive is binary, and grep would only say so.
+              if ! grep -RlqaF "''${excludes[@]}" "$s" ${input}; then
+                echo "noSourceReferences: ${product.name} references source $s only from files matching ${concatStringsSep ", " allowedIn}: allowed" >&2
+                continue
+              fi
+            fi
             echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references source $s" >&2
             bad=1
           fi

@@ -35,6 +35,10 @@
 #                    binutils' dwp packs into an empty .dwp
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
+#   staticlib-sources   crate-types' staticlib passes noSourceReferences:
+#                    sources named only by the archive (its objects' debug
+#                    info) are allowed; a stage adding a file that names
+#                    the same sources fails it
 #   prefer-dynamic   -C prefer-dynamic: noSourceReferences allows the
 #                    sysroot that holds the libstd-*.so the binary loads
 #                    (nixpkgs' rustc), and fails on rust-overlay's rustc and
@@ -1723,6 +1727,55 @@ in
       ''
         cat $failure/testBuildFailure.log
         grep -qF 'references the Rust toolchain ${builtins.unsafeDiscardStringContext "${sysroot}"}' $failure/testBuildFailure.log
+        touch $out
+      '';
+
+  # A staticlib keeps its objects' debug information, with real source
+  # paths, for the final link to split or strip: noSourceReferences allows
+  # sources named only by the archive. A source that another file of the
+  # same product names still fails.
+  staticlib-sources =
+    let
+      repo =
+        extra:
+        mkRepo (fixtures + "/crate-types") (
+          [
+            (oneWs "." "dev")
+          ]
+          ++ extra
+        );
+      plain = (repo [ ]).workspaces.main.packages.stat;
+      naming = (repo [
+        {
+          packages.stat.stages.nameSource = {
+            after = "splitDebug";
+            before = "install";
+            run =
+              { input, product, pkgs, ... }:
+              pkgs.runCommand "stat-name-source" { } ''
+                cp -r --no-preserve=mode ${input} $out
+                echo ${toString product.sourcePaths} > $out/where.txt
+              '';
+          };
+        }
+      ]).workspaces.main.packages.stat;
+    in
+    pkgs.runCommand "staticlib-sources"
+      {
+        clean = plain.checks.noSourceReferences;
+        failure = pkgs.testers.testBuildFailure naming.checks.noSourceReferences;
+      }
+      ''
+        # The archive names a source, so the passing check allowed it.
+        named=0
+        while IFS= read -r s; do
+          if [ -n "$s" ] && grep -aqF "$s" ${plain}/lib/libstat*.a; then named=1; fi
+        done < ${plain.checks.noSourceReferences.drvAttrs.sourcesList}
+        [ "$named" = 1 ] || { echo "the archive names no source: the test proves nothing" >&2; exit 1; }
+        cat $failure/testBuildFailure.log
+        # where.txt names every source, the archive's too: none is allowed.
+        grep -q 'references source' $failure/testBuildFailure.log
+        if grep -q ': allowed$' $failure/testBuildFailure.log; then exit 1; fi
         touch $out
       '';
 

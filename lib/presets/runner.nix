@@ -22,8 +22,9 @@
 #   native-builder    nativeBuilder                     directly, on a builder of
 #                                                       the target's system (testSystem)
 #   qemu-user         isLinux                           qemu-user
-#   none              otherwise                         nowhere: no runner, tests
-#                                                       fail where they cannot run
+#   none              otherwise                         nowhere: runners.none, which
+#                                                       fails naming the options; the
+#                                                       runs are not in repo.checks
 #
 # How a test process finds shared libraries under a runner is the runner's
 # (`breakbulkDylibPath`, lib/runners.nix) or the traits'
@@ -107,7 +108,12 @@ let
     in
     {
       native = none;
-      none = none;
+      none = none // {
+        runner = runners.none {
+          pkgs = bp;
+          inherit (traits) triple;
+        };
+      };
       native-builder = none // {
         testSystem = hostPlatform.system;
       };

@@ -20,6 +20,10 @@
 #                     and test binary link as ARM64 PE32+, time stamp 0,
 #                     only system DLLs; nothing runs them. Rebuilds checked
 #                     by hand (`nix build --rebuild` on every unit and stage)
+#   windows-gnullvm-aarch64-no-runner   the same target has no runner:
+#                     canRunTests is false, repo.checks has no test runs
+#                     or doctests for it, and a run fails naming
+#                     targets.<t>.runner and testSystem
 #   uefi-*            x86_64- and aarch64-unknown-uefi with no preset (the
 #                     target spec's rust-lld as lld-link): an EFI application
 #                     PE with a PDB in the debug output
@@ -287,8 +291,30 @@ let
     let
       t = windowsGnullvmA64Repo.workspaces.main.target.${wgnuA64};
       exe = "${t.packages.gnu-smoke}/bin/gnu-smoke.exe";
+      checkNames = lib.attrNames windowsGnullvmA64Repo.checks;
+      runChecks = lib.filter (
+        n: lib.hasInfix "/${wgnuA64}/" n && (lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n)
+      ) checkNames;
+      run = lib.head (lib.attrValues t.testRuns.gnu-smoke);
     in
+    assert lib.assertMsg (!t.canRunTests) "windows-gnullvm-aarch64: canRunTests is true";
+    assert lib.assertMsg (runChecks == [ ]) "windows-gnullvm-aarch64: repo.checks has test runs: ${toString runChecks}";
+    assert lib.assertMsg (lib.any (lib.hasSuffix "/gnu-smoke/build") checkNames)
+      "windows-gnullvm-aarch64: the product is not in repo.checks";
     {
+      # Nothing runs ARM64 Windows code here: the run fails naming the
+      # options that would give it a runner.
+      windows-gnullvm-aarch64-no-runner =
+        pkgs.runCommand "windows-gnullvm-aarch64-no-runner"
+          {
+            failure = pkgs.testers.testBuildFailure run;
+          }
+          ''
+            cat $failure/testBuildFailure.log
+            grep -qF 'targets."${wgnuA64}".runner' $failure/testBuildFailure.log
+            grep -qF 'targets."${wgnuA64}".testSystem' $failure/testBuildFailure.log
+            touch $out
+          '';
       # An ARM64 PE32+ linked by lld (no time stamp), importing only
       # system DLLs; the test binary links too.
       windows-gnullvm-aarch64-build =

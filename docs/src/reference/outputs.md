@@ -67,6 +67,7 @@ repo = {
       variants.<v> = { packages; tests; };
       spec;                  # the resolved target spec
       traits;                # the target's traits
+      canRunTests;           # false: no runner; runs not in checks
     };
 
     plans.<triple>.<v> = { build; test; };   # plan.json, for debugging

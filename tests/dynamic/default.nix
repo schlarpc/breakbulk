@@ -250,13 +250,7 @@ let
       }
     ];
     # The tests/plan fixtures, planned as there (mkWorkspace's defaults).
-    crate-types = mkRepo "crate-types" [
-      oneWs
-      # The staticlib keeps its objects' debug info, which names the source
-      # view (splitDebug splits linked files only): the check fails in both
-      # modes.
-      { packages.stat.checks.noSourceReferences = null; }
-    ];
+    crate-types = mkRepo "crate-types" [ oneWs ];
     dev-dep-features = mkRepo "dev-dep-features" [ oneWs ];
     build-dep-leak = mkRepo "build-dep-leak" [ oneWs ];
     bin-exe-not-built = mkRepo "bin-exe-not-built" [ oneWs ];
@@ -541,6 +535,7 @@ let
               {
                 key = "${wsName}/${triple}/${v}";
                 inherit triple inst out;
+                inherit (w.target.${triple}) canRunTests;
                 kinds = lib.filter (k: k != "test" || testPlan) (lib.attrNames inst.units);
               }
             ) vs
@@ -560,21 +555,9 @@ let
   # { pkg = { binary = run; }; } as { "pkg/binary" = run; }.
   flat2 = lib.concatMapAttrs (p: lib.mapAttrs' (b: lib.nameValuePair "${p}/${b}"));
 
-  # Targets whose test binaries link but cannot run here (no runner): their
-  # test binaries are compared as products (`test-<pkg>-<name>`), and
-  # their test runs, doctests and the repo.checks that run tests
-  # (`<ws>/<triple>/…/test-<name>`, `…/doctest`) are left out.
-  buildOnly = [
-    "aarch64-pc-windows-gnullvm"
-    "aarch64-pc-windows-msvc"
-  ];
-  runsTests =
-    n:
-    !(
-      lib.elem (lib.elemAt (lib.splitString "/" n) 1) buildOnly
-      && (lib.hasPrefix "test-" (baseNameOf n) || baseNameOf n == "doctest")
-    );
-
+  # Targets with no runner (`canRunTests = false`) have no test runs or
+  # doctests in repo.checks; their test binaries are compared as products
+  # (`test-<pkg>-<name>`) instead of run.
   build =
     name: repo:
     pkgs.runCommand "${name}-${mode}" { } (
@@ -592,7 +575,7 @@ let
           lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) i.out.packages
         )
         + (
-          if !(lib.elem i.triple buildOnly) then
+          if i.canRunTests then
             linkEach "$out/runs/${i.key}" (flat2 i.out.testRuns)
             + linkEach "$out/runs/${i.key}/bench" (flat2 (i.out.benchRuns or { }))
             + linkEach "$out/doctests/${i.key}" i.out.doctests
@@ -611,7 +594,7 @@ let
       + lib.concatStrings (
         lib.mapAttrsToList (n: d: ''
           ln -s ${d} "$out/checks/${lib.replaceStrings [ "/" ] [ "-" ] n}"
-        '') (lib.filterAttrs (n: _: runsTests n) repo.checks)
+        '') repo.checks
       )
       + lib.optionalString (name == "test-control") ''
         ln -s ${ctlApps} $out/apps

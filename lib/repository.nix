@@ -506,6 +506,7 @@ let
     if t == null then
       {
         mkWorkspace = { };
+        canRunTests = true;
         runner = null;
         testDylibPath = breakbulkLib.testRuns.dylibPathOf { traits = traitsOf wsName triple; };
         testSystem = null;
@@ -532,6 +533,7 @@ let
         # A program, or a list: program and arguments (as Cargo's
         # `target.<triple>.runner` takes a string or an array).
         runner = if runner == null then null else map (x: "${x}") (lib.toList runner);
+        canRunTests = !(lib.any (x: x.breakbulkNoRunner or false) (lib.toList runner));
         # How its test processes find shared libraries: the runner's way
         # (wine: WINEPATH), else the target's traits.
         testDylibPath = breakbulkLib.testRuns.dylibPathOf {
@@ -976,6 +978,10 @@ let
           # The target spec's runner (a list: program and arguments, or
           # null) and test system, as test runs use them.
           inherit (s) runner testSystem;
+          # false when the target's runner is `runners.none` (a preset
+          # found nothing that runs its programs): its test runs and
+          # doctests fail naming the options, and are not in repo.checks.
+          inherit (s) canRunTests;
           # The resolved target spec of this workspace (the evaluated
           # `targets.<triple>` options), or null when it has none.
           spec = targetCfgOf wsName triple;
@@ -1076,13 +1082,15 @@ let
               // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
             )
           ) v.packages
-          // lib.concatMapAttrs (
-            pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
-          ) v.namedTestRuns
-          // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.doctests
+          // lib.optionalAttrs t.canRunTests (
+            lib.concatMapAttrs (
+              pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
+            ) v.namedTestRuns
+            // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.doctests
+          )
         )
       ) t.variants
-      // lib.optionalAttrs cfg.workspaces.${wsName}.benchSmoke (
+      // lib.optionalAttrs (cfg.workspaces.${wsName}.benchSmoke && t.canRunTests) (
         lib.concatMapAttrs (
           pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
         ) t.namedBenchRuns

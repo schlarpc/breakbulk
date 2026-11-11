@@ -415,6 +415,21 @@ let
               ;
             info = lib.optionalAttrs (lockfile != null) { inherit lockfile; } // {
               inherit buildScriptFlags;
+              # A staticlib's objects keep their debug information with real
+              # source paths: the final link, not this product, decides
+              # whether to split or strip it.
+              # `linked` keeps rustc's file name, with the
+              # `-C extra-filename` hash; a stage may uplift it.
+              sourcesAllowedIn = lib.concatMap (
+                r:
+                let
+                  stem = traits.staticLibraryPrefix + r.breakbulkRoot.target;
+                in
+                [
+                  (stem + traits.staticLibrarySuffix)
+                  (stem + "-*" + traits.staticLibrarySuffix)
+                ]
+              ) (filter (r: r.breakbulkRoot.kind == "staticlib") built);
             };
           };
           extra = {

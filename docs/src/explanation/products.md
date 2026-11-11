@@ -102,6 +102,7 @@ stable since 1.95):
 | Output | Panic messages, `file!()`, diagnostics | Debug information |
 | --- | --- | --- |
 | Binaries and cdylibs, `debugInfo = "split"` (Linux default) | hidden | real store paths, moved to a separate `debug` output |
+| Staticlibs, `debugInfo = "split"` | hidden | real store paths, kept in the archive |
 | Test binaries | hidden | hidden; kept in the binary for backtraces in test logs |
 | Anything on a target that keeps or strips debug info | hidden | hidden |
 | Anything built with rustc older than 1.95 | hidden | hidden |
@@ -112,8 +113,16 @@ output names no sources; the `debug` output names exactly the sources a
 debugger needs, so installing it gives source-level debugging with no
 setup.
 
+A staticlib is not the end of the line: another program links it, and
+that final link (and its own split or strip) decides what happens to the
+debug information. So a staticlib keeps its objects' DWARF, real source
+paths included, and its dependencies' objects inside the archive keep
+theirs.
+
 Every product gets the `noSourceReferences` check. It fails when the main
-output references a source path or a Rust toolchain path. A toolchain
+output references a source path or a Rust toolchain path. A source named
+only by the product's staticlib archives is allowed; a source that any
+other file names still fails. A toolchain
 path is allowed when it holds a shared library the product loads, such as
 `libstd-*.so` with `-C prefer-dynamic`. To check sources only, set
 `packages.<name>.checks.noSourceReferences.run =

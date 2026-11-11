@@ -17,6 +17,8 @@
 #   runners.wasmBindgenTest { inherit pkgs; wasmBindgen; browser = "node"; }
 #                                                        wasm-bindgen-test binaries
 #                                                        (or "chromium", "firefox")
+#   runners.none { inherit pkgs; triple; }               no way to run: fails naming
+#                                                        the options that give one
 { lib }:
 let
   script =
@@ -74,6 +76,20 @@ in
         var = "WINEPATH";
         sep = ";";
       };
+    };
+
+  # For a target whose programs nothing here can run. A test run under it
+  # fails with what to set; `breakbulkNoRunner` keeps such runs and
+  # doctests out of repo.checks (`canRunTests` on the target's outputs).
+  # Setting the target's `runner` or `testSystem` replaces it.
+  none =
+    { pkgs, triple }:
+    (script pkgs "breakbulk-runner-none-${triple}" ''
+      echo 'breakbulk: nothing runs ${triple} programs on this machine, so its tests cannot run. Set targets."${triple}".runner (a program, as Cargo'"'"'s target.<triple>.runner) or targets."${triple}".testSystem (a Nix system whose builders run them).' >&2
+      exit 1
+    '')
+    // {
+      breakbulkNoRunner = true;
     };
 
   # qemu user-mode emulation. Programs built against a nixpkgs cross libc
