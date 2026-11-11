@@ -97,3 +97,5 @@ The checks run with the evaluating Nix's settings. One setting changes what the 
 nix build .#checks.x86_64-linux.git-multi-workspace-fetched{,-reference}
 nix build .#checks.x86_64-linux.git-multi-workspace-fetched{,-reference} --option lazy-trees false
 ```
+
+CI covers both values. Its `lazy-trees` job builds `git-multi-workspace-fetched`, `git-multi-workspace-fetched-reference` and `products-source-paths` once with `lazy-trees = true` and once with `false`, and fails if a check's derivation path differs between the two. Its `lix` job evaluates and builds the two git checks with Lix, which has no lazy trees, and fails if Lix evaluates a different derivation from Determinate Nix. Every other CI check runs with the runner's default settings.

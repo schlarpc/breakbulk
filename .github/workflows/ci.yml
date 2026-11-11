@@ -57,3 +57,61 @@ jobs:
           grep -v '^#' .github/fast-checks \
             | sed 's|^|.#checks.x86_64-linux.|' \
             | xargs nix build --keep-going --no-link --print-build-logs
+
+  # Lazy trees turn `builtins.fetchGit` results and the flake's own source
+  # into virtual store paths. The checks below fetch a git source or compare
+  # product references against the source view, so a virtual path leaking
+  # into a derivation fails them. They run with the setting forced both
+  # ways, because the runner's default can change with the Nix release. The
+  # derivation paths must also agree: a leaked virtual path differs per
+  # evaluation and between the settings.
+  lazy-trees:
+    name: git sources, lazy-trees ${{ matrix.lazy-trees }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lazy-trees: ["true", "false"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: DeterminateSystems/flakehub-cache-action@main
+      - name: nix build with lazy-trees = ${{ matrix.lazy-trees }}
+        run: |
+          checks=(git-multi-workspace-fetched git-multi-workspace-fetched-reference products-source-paths)
+          nix config show lazy-trees
+          for c in "${checks[@]}"; do
+            this=$(nix eval --raw --no-eval-cache --option lazy-trees ${{ matrix.lazy-trees }} ".#checks.x86_64-linux.$c.drvPath")
+            other=$(nix eval --raw --no-eval-cache --option lazy-trees ${{ matrix.lazy-trees == 'true' && 'false' || 'true' }} ".#checks.x86_64-linux.$c.drvPath")
+            if [ "$this" != "$other" ]; then
+              echo "$c: derivation depends on lazy-trees: $this vs $other" >&2
+              exit 1
+            fi
+          done
+          printf '.#checks.x86_64-linux.%s\n' "${checks[@]}" \
+            | xargs nix build --no-eval-cache --option lazy-trees ${{ matrix.lazy-trees }} --keep-going --no-link --print-build-logs
+
+  # Lix has no lazy trees, and its `builtins.path` and `builtins.fetchGit`
+  # are separate implementations of the calls `realTree` in lib/fetch.nix
+  # relies on. Lix evaluates as a client of the runner's Nix daemon.
+  lix:
+    name: git sources, Lix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - uses: DeterminateSystems/flakehub-cache-action@main
+      - name: nix build with Lix
+        run: |
+          lix=$(nix build --no-link --print-out-paths --inputs-from . "nixpkgs#lix^out")
+          checks=(git-multi-workspace-fetched git-multi-workspace-fetched-reference)
+          for c in "${checks[@]}"; do
+            ours=$("$lix/bin/nix" eval --raw --extra-experimental-features 'nix-command flakes' ".#checks.x86_64-linux.$c.drvPath")
+            theirs=$(nix eval --raw ".#checks.x86_64-linux.$c.drvPath")
+            if [ "$ours" != "$theirs" ]; then
+              echo "$c: Lix evaluates a different derivation: $ours vs $theirs" >&2
+              exit 1
+            fi
+          done
+          printf '.#checks.x86_64-linux.%s\n' "${checks[@]}" \
+            | xargs "$lix/bin/nix" build --extra-experimental-features 'nix-command flakes' --keep-going --no-link --print-build-logs
