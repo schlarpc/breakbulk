@@ -46,6 +46,7 @@ repository-zero-config
 loose-ends-cfg-rustflags
 loose-ends-devshell-target
 docs-site-links
+docs-options-fresh
 test-runs-doctests
 test-runs-test-control
 products-variants

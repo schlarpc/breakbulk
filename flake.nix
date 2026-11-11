@@ -66,6 +66,12 @@
       # cannot run it: stock Nix has no builder-rpc-v0.
       #   nix run .#test-dynamic -- [fixture ...]
       apps = forAllSystems (pkgs: {
+        # Regenerate docs/src/reference/options from the modules (checked
+        # by docs-options-fresh). Run from the checkout's root.
+        update-docs-options = {
+          type = "app";
+          program = toString (docsFor pkgs).updateOptions;
+        };
         test-dynamic = {
           type = "app";
           program = toString (pkgs.writeShellScript "test-dynamic" ''
@@ -159,6 +165,8 @@
         // {
           # Every internal link and fragment of the documentation site.
           docs-site-links = (docsFor pkgs).links;
+          # The committed options pages are what the modules generate.
+          docs-options-fresh = (docsFor pkgs).optionsFresh;
 
           # Every fixture is in `nix run .#test-rebuild`'s catalog or
           # skipped with a reason (evaluation only).
