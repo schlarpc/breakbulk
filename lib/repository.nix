@@ -402,6 +402,7 @@ let
           "_module"
           "packages"
           "tests"
+          "products"
           "variantDefaults"
         ]
       );
@@ -410,6 +411,7 @@ let
       inherit (e) config;
       packages = e.config.packages or null;
       tests = e.config.tests or true;
+      products = e.config.products or true;
       present = repoDef != null || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions);
     };
   targetSpecs = lib.mapAttrs (
@@ -651,6 +653,15 @@ let
       t = targetSpecs.${wsName}.${triple}.tests;
     in
     if t == false then false else if builtins.isList t then t else selOf wsName triple v;
+
+  # The packages with products: false (none; the build plan is then never
+  # read), the target's list, or the variant's selection.
+  productSelOf =
+    wsName: triple: v:
+    let
+      p = targetSpecs.${wsName}.${triple}.products;
+    in
+    if p == false then false else if builtins.isList p then p else selOf wsName triple v;
 
   # The variants planned for a target (`variants.<v>.targets`).
   variantsFor =
@@ -913,7 +924,11 @@ let
               ifTests = attrs: if testsOn then attrs else { };
             in
             {
-              packages = productsOf wsName ws triple v inst sel;
+              packages =
+                let
+                  psel = productSelOf wsName triple v;
+                in
+                if psel == false then { } else productsOf wsName ws triple v inst psel;
               tests = ifTests (testsOf inst tSel);
               testRuns = ifTests (selectPkgs tSel inst.testRuns);
               # testRuns named as `tests` names test binaries, for repo.checks.

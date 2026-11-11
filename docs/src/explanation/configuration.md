@@ -41,6 +41,23 @@ and can be refined for one workspace. Each workspace resolves it with its
 own compiler, so a preset picks tools that match that workspace's rustc.
 A target can also build only some packages (`packages = [ "ui" ]` above).
 
+A target can be only built or only tested. Crates that ship as wasm but
+run their unit tests natively are one example:
+
+```nix
+workspaces.components.targets = {
+  wasm32-unknown-unknown.tests = false;       # products, no test runs
+  x86_64-unknown-linux-gnu.products = false;  # test runs, no products
+};
+```
+
+[`tests = false`](../reference/options/workspaces.md#workspacesnametargetsnametests)
+leaves out test binaries, runs, apps and doctests, and the test plan is
+not traced.
+[`products = false`](../reference/options/workspaces.md#workspacesnametargetsnameproducts)
+leaves out products and their checks, and the build plan is not traced.
+Either also takes a list of packages.
+
 ### Sharing between workspaces
 
 Units are shared between workspaces when Cargo gives them identical

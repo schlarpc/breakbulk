@@ -527,6 +527,44 @@ null
 
 
 
+## `workspaces.<name>.targets.<name>.products`
+
+
+
+Products on this target, the counterpart of ` tests `\. ` false `: none
+(a target that is only tested, such as the native target of
+crates that ship as wasm and run their unit tests natively): the
+build plan is not traced, and the target has no ` packages.<pkg> `
+and no product checks; test binaries, test runs, test apps,
+doctests and benches are unchanged\. A list of packages: products
+for those packages only\. ` true `: every package the variant plans\.
+
+
+
+*Type:*
+boolean or list of string
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+
+
+*Example:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+
+
 ## `workspaces.<name>.targets.<name>.tests`
 
 
@@ -968,8 +1006,6 @@ false
 
 ## `workspaces.<name>.variants.<name>.allTargets`
 
-
-
 For ` check ` and ` clippy ` variants: also check every target,
 as ` cargo check --all-targets ` does (tests, examples, benches
 in test mode, through the test plan)\. ` false `: plain ` cargo check ` (libraries and bins, the build plan only), for gates
@@ -995,6 +1031,8 @@ true
 
 
 ## `workspaces.<name>.variants.<name>.benches`
+
+
 
 Also trace ` cargo bench --no-run ` with this variant’s settings
 (use ` profile = "bench" `): bench binaries, and lib and bin

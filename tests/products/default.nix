@@ -59,6 +59,9 @@
 #                    and `targets.<t>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
 #                    under `variant-<v>/` unless `checks = false`
+#   tests-only       `targets.<t>.tests = false` on wasm32 and
+#                    `products = false` on the native target: native test
+#                    runs and doctests only; `products = [ "app" ]`
 #   variants-per-target   `targets.<t>.variantDefaults` and
 #                    `variants.<v>.target.<t>` (wasm32 with rust-overlay's
 #                    1.99): a feature on one target only, a variant's
@@ -1205,6 +1208,61 @@ in
   # layer, a package run keeping its own features over the defaults, and
   # `allTargets = false` on one target only. wasm32 stands in for msvc,
   # with a rust-overlay toolchain that has its std.
+  # A target only built (wasm32, `tests = false`) next to one only tested
+  # (native, `products = false`): repo.checks has the native test runs and
+  # doctests and no native product or product check, nor any wasm test
+  # run; `products = [ "app" ]` keeps app's product only.
+  tests-only =
+    let
+      wasm = "wasm32-unknown-unknown";
+      wasmRust = overlayRust.override { targets = [ wasm ]; };
+      repoWith =
+        nativeTarget:
+        mkRepo (fixtures + "/variants") [
+          {
+            workspaces.main = {
+              path = "ws";
+              variants.default.profile = "dev";
+              toolchain = {
+                rustc = wasmRust;
+                cargo = wasmRust;
+              };
+              targets = {
+                ${native} = nativeTarget;
+                ${wasm}.tests = false;
+              };
+            };
+          }
+        ];
+      repo = repoWith { products = false; };
+      # Three packages with products (cdylib, staticlib, bin).
+      partial = mkRepo (fixtures + "/crate-types") [
+        {
+          workspaces.main = {
+            path = ".";
+            variants.default.profile = "dev";
+            targets.${native}.products = [ "app" ];
+          };
+        }
+      ];
+      leaves = r: lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) r.checks);
+      nativeChecks = lib.filter (lib.hasPrefix "main/${native}/") (leaves repo);
+      wasmChecks = lib.filter (lib.hasPrefix "main/${wasm}/") (leaves repo);
+      isRun = n: lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n;
+      t = repo.workspaces.main.target;
+    in
+    assert lib.assertMsg (t.${native}.packages == { }) "products-tests-only: native products ${toString (lib.attrNames t.${native}.packages)}";
+    assert lib.assertMsg (
+      nativeChecks != [ ] && lib.all isRun nativeChecks && lib.any (lib.hasSuffix "/doctest") nativeChecks
+    ) "products-tests-only: native checks ${toString nativeChecks}";
+    assert lib.assertMsg (
+      wasmChecks != [ ] && !(lib.any isRun wasmChecks)
+    ) "products-tests-only: wasm checks ${toString wasmChecks}";
+    assert lib.assertMsg (
+      lib.attrNames partial.workspaces.main.target.${native}.packages == [ "app" ]
+    ) "products-tests-only: with a list, native products ${toString (lib.attrNames partial.workspaces.main.target.${native}.packages)}";
+    evalCheck "products-tests-only" (builtins.toJSON { inherit nativeChecks wasmChecks; });
+
   variants-per-target =
     let
       wasm = "wasm32-unknown-unknown";

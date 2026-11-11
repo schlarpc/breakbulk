@@ -59,6 +59,20 @@ let
         variant's or target's package selection.
       '';
     };
+    options.products = mkOption {
+      type = types.either types.bool (types.listOf types.str);
+      default = true;
+      example = false;
+      description = ''
+        Products on this target, the counterpart of `tests`. `false`: none
+        (a target that is only tested, such as the native target of
+        crates that ship as wasm and run their unit tests natively): the
+        build plan is not traced, and the target has no `packages.<pkg>`
+        and no product checks; test binaries, test runs, test apps,
+        doctests and benches are unchanged. A list of packages: products
+        for those packages only. `true`: every package the variant plans.
+      '';
+    };
     options.variantDefaults = mkOption {
       type = types.deferredModule;
       default = { };
