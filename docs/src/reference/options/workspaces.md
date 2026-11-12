@@ -206,9 +206,10 @@ defaultTarget
 
 ## `workspaces.<name>.docs.noDeps`
 
-Document only workspace members (` cargo doc --no-deps `)\.
-
-Not implemented yet ([\#6](https://github\.com/schlarpc/breakbulk/issues/6)): setting it only gives an evaluation warning\.
+Document only the planned packages, as ` cargo doc --no-deps `
+does, in ` target.<triple>.docs `\. ` false `: their dependencies
+too, as ` cargo doc `; links to a dependency’s items then go to
+its pages in the same folder\.
 
 *Type:*
 boolean
@@ -217,6 +218,12 @@ boolean
 
 ```nix
 true
+```
+
+*Example:*
+
+```nix
+false
 ```
 
 *Declared by:*

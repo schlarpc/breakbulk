@@ -19,7 +19,8 @@
 #
 #   - every unit .drv path the outer derivations wrote equals IFD mode's,
 #     for the build and the test plan, and both modes have the same units;
-#     so does every doctest .drv path;
+#     so does every doctest .drv path, and the doc fixtures' docs
+#     derivation's;
 #   - every product has the same bytes in both modes;
 #   - every test run and doctest succeeded in both modes, with the same
 #     test outcomes (libtest's `test … ok` lines, nextest's status lines
@@ -77,7 +78,7 @@ else
     msvc msvc-post-link
     test-home test-closure doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist build-script-outputs manifest-dir nested-cargo
-    declared-paths run-files-ca-off roots-override
+    declared-paths run-files-ca-off roots-override docs docs-deps
   )
 fi
 
@@ -204,7 +205,7 @@ for f in "${fixtures[@]}"; do
   mapfile -t keys < <(python3 -c 'import json, sys; print("\n".join(sorted(json.load(open(sys.argv[1])))))' "$ifdUnits")
   for key in "${keys[@]}"; do
     outer=$(nixm path-info --derivation -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "outer.$f.\"$key\"")
-    nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\|doctest:[^ ]*\) \(.*\)$/\1 \2/p' >"$WORK/units.dynamic"
+    nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\|doctest:[^ ]*\|docs\) \(.*\)$/\1 \2/p' >"$WORK/units.dynamic"
     if ! python3 - "$ifdUnits" "$key" "$WORK/units.dynamic" "$mayDiffer" <<'EOF'; then
 import json, re, sys
 ifd = json.load(open(sys.argv[1]))[sys.argv[2]]
@@ -233,18 +234,24 @@ EOF
     fi
   done
 
-  # Products: the same bytes.
+  # Products: the same bytes. Dynamic mode's docs are a link to the docs
+  # derivation's output, through its wrapper: compared where it leads.
+  follow() {
+    local p=$1
+    while [ -L "$p" ]; do p=$(real "$(readlink "$p")"); done
+    printf '%s' "$p"
+  }
   for p in "$(real "$dyn")"/products/*/*/*/*; do
     [ -L "$p" ] || continue
     name=${p#"$(real "$dyn")/products/"}
-    a=$(real "$(readlink "$p")")
+    a=$(follow "$(real "$(readlink "$p")")")
     if [ ! -L "$(real "$ifd")/products/$name" ] && [ -e "$a/breakbulk-no-binaries" ]; then
       # Cargo built none of its binaries; IFD mode has no
       # product for it.
       echo "$f: product $name holds only the no-binaries marker (dynamic mode)" >&2
       continue
     fi
-    b=$(real "$(readlink "$(real "$ifd")/products/$name")")
+    b=$(follow "$(real "$(readlink "$(real "$ifd")/products/$name")")")
     ha=$(nix hash path "$a")
     hb=$(nix hash path "$b")
     if [ "$ha" = "$hb" ]; then

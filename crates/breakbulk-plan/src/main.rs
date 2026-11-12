@@ -4,7 +4,7 @@
 //! ```text
 //! breakbulk-plan --cargo C --rustc R --rustdoc D --shim S \
 //!   --skeleton DIR [--workspace REL] [--canonical-root /build/skeleton] \
-//!   --kind build|test|bench [--mode build|check|clippy|coverage] \
+//!   --kind build|test|bench|doc [--no-deps] [--mode build|check|clippy|coverage] \
 //!   [--clippy-driver PATH [--clippy-option NAME]] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--cargo-config FILE] [--spec FILE] --capabilities FILE \
@@ -41,6 +41,8 @@
 //! (`variants.<v>.cargoConfig`), a TOML file: Cargo gets it with
 //! `--config`, and the planner's reader of the project's config loads it
 //! last, over the project's files.
+//!
+//! `--kind doc` traces `cargo doc`, with `--no-deps` `cargo doc --no-deps`.
 
 use std::process::ExitCode;
 
@@ -50,7 +52,7 @@ use breakbulk_plan::trace::Options;
 fn usage() -> ! {
     eprintln!(
         "usage: breakbulk-plan --cargo C --rustc R --rustdoc D --shim S --skeleton DIR \
-         [--workspace REL] [--canonical-root DIR] --kind build|test|bench \
+         [--workspace REL] [--canonical-root DIR] --kind build|test|bench|doc [--no-deps] \
          [--mode build|check|clippy|coverage] [--clippy-driver PATH] [--clippy-option NAME] \
          [--clippy-arg A]... \
          --target TRIPLE \
@@ -85,6 +87,7 @@ fn main() -> ExitCode {
         features: Vec::new(),
         all_features: false,
         no_default_features: false,
+        no_deps: false,
         packages: Vec::new(),
         configs: Vec::new(),
         cargo_config: None,
@@ -119,6 +122,7 @@ fn main() -> ExitCode {
                     "build" => PlanKind::Build,
                     "test" => PlanKind::Test,
                     "bench" => PlanKind::Bench,
+                    "doc" => PlanKind::Doc,
                     _ => usage(),
                 }
             }
@@ -147,6 +151,7 @@ fn main() -> ExitCode {
             ),
             "--all-features" => opts.all_features = true,
             "--no-default-features" => opts.no_default_features = true,
+            "--no-deps" => opts.no_deps = true,
             "-p" | "--package" => opts.packages.push(val()),
             "--config" => opts.configs.push(val()),
             "--cargo-config" => opts.cargo_config = Some(val()),

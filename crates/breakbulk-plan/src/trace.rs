@@ -61,6 +61,9 @@ pub struct Options {
     pub no_default_features: bool,
     /// `-p` selection; empty means `--workspace`.
     pub packages: Vec<String>,
+    /// Doc plans: `cargo doc --no-deps`, documenting the selected packages
+    /// only.
+    pub no_deps: bool,
     /// Extra `--config` values (files or `key=value`): source replacement,
     /// the toolchain spec's rustflags and linkers.
     pub configs: Vec<String>,
@@ -135,7 +138,7 @@ impl Trace {
                 })?
                 .executable_suffix
                 .clone(),
-            keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
+            keep_workspace_wrapper: runs_clippy(opts),
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
             trim_paths_default: opts.trim_paths_default,
@@ -163,13 +166,20 @@ fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
         ])
         .map(|k| (*k).to_owned())
         .collect();
-    if opts.clippy_driver.is_some() && opts.mode == VariantMode::Clippy {
+    if opts.clippy_driver.is_some() && runs_clippy(opts) {
         names.insert("RUSTC_WORKSPACE_WRAPPER".into());
         if !opts.clippy_args.is_empty() {
             names.insert("CLIPPY_ARGS".into());
         }
     }
     names
+}
+
+/// Whether the trace runs clippy-driver as Cargo's workspace wrapper: a
+/// clippy variant's plans, but not its doc plan, whose members' check-mode
+/// units are then the check variant's, and whose docs a lint cannot fail.
+fn runs_clippy(opts: &Options) -> bool {
+    opts.mode == VariantMode::Clippy && opts.kind != PlanKind::Doc
 }
 
 /// Variables passed through from the planner's own environment.
@@ -460,7 +470,11 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     // false`), whose dependencies' build-script runs then reach every
     // doctest's `-L` list. Cargo starts each test binary through the
     // runner, which does nothing, and then asks rustdoc for the doctests.
+    // A doc plan is `cargo doc` in every variant: rustdoc reads check-mode
+    // units, which a check variant's plans share.
     let sub: &[&str] = match opts.kind {
+        PlanKind::Doc if opts.no_deps => &["doc", "--no-deps"],
+        PlanKind::Doc => &["doc"],
         PlanKind::Build if checking => &["check"],
         PlanKind::Test if checking => &["check", "--all-targets"],
         PlanKind::Bench if checking => {
@@ -541,7 +555,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .map_err(|e| Error(format!("writing {}: {e}", meta_path.display())))?;
     let metadata = Metadata::read(&meta_path)?;
 
-    if opts.mode == VariantMode::Clippy {
+    if runs_clippy(opts) {
         let Some(driver) = &opts.clippy_driver else {
             bail!("the clippy variant needs --clippy-driver");
         };
@@ -559,7 +573,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .args(selection_args(opts))
         .env("BREAKBULK_RECORD", &record);
     if let Some(driver) = &opts.clippy_driver
-        && opts.mode == VariantMode::Clippy
+        && runs_clippy(opts)
     {
         cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
         if !opts.clippy_args.is_empty() {

@@ -169,10 +169,18 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
             }
         }
     }
+    // So are the rustdoc commands of a doc plan.
+    let docs: Vec<(String, Unit)> = plan
+        .docs
+        .iter()
+        .enumerate()
+        .map(|(i, d)| (d.label(i), Unit::Compile(d.as_compile())))
+        .collect();
     let units = plan
         .units
         .iter()
-        .chain(doctests.iter().map(|(id, u)| (*id, u)));
+        .chain(doctests.iter().map(|(id, u)| (*id, u)))
+        .chain(docs.iter().map(|(id, u)| (id, u)));
     for (id, unit) in units {
         let id_ = Some(id.as_str());
         if let Unit::Compile(c) = unit

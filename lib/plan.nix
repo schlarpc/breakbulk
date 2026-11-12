@@ -7,7 +7,8 @@
 #     vendor;                # breakbulk.mkVendor output
 #     cargo; rustc;          # the toolchain (rustc provides bin/rustc and bin/rustdoc)
 #     tools;                 # breakbulk.mkTools pkgs
-#     kind = "build";        # or "test", or "bench" (`cargo bench --no-run`)
+#     kind = "build";        # or "test", "bench" (`cargo bench --no-run`), "doc"
+#     noDeps = false;        # kind = "doc": `cargo doc --no-deps`
 #     mode = "build";        # or "check", "clippy", "coverage" (the variant's)
 #     clippyDriver = null;   # clippy-driver (a path) for mode = "clippy"
 #     clippyOption = null;   # the option that set it, named when it does not match rustc
@@ -46,6 +47,7 @@
       rustc,
       tools,
       kind ? "build",
+      noDeps ? false,
       target,
       profile ? "dev",
       features ? [ ],
@@ -110,6 +112,7 @@
         "--target-traits"
         (targetTraits.forRustFile traits)
       ]
+      ++ lib.optional (kind == "doc" && noDeps) "--no-deps"
       ++ lib.optionals (mode != "build") [
         "--mode"
         mode

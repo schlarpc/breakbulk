@@ -352,13 +352,41 @@ profile), which gives optimized bench binaries to run outside Nix.
 [`benchSmoke`](../reference/options/workspaces.md#workspacesnamebenchsmoke)
 runs each bench once in test mode, as a check.
 
-## Documentation (not built yet)
+## Documentation
 
-A `cargo doc` product is planned
-([#6](https://github.com/schlarpc/breakbulk/issues/6)). `cargo doc` writes
-every crate into one shared directory and updates cross-crate indexes in
-place, so it does not split into per-crate derivations on stable rustdoc.
-The plan is one derivation per workspace and target that replays the
-traced `rustdoc` commands in Cargo's order, against the check-mode `rmeta`
-units it shares with check and clippy variants. Per-crate documentation
-waits for rustdoc's mergeable cross-crate info to stabilize.
+`target.<triple>.docs` is what `cargo doc` writes: one folder with a
+directory per documented crate (`base/index.html`), the shared search
+index, `crates.js` and `static.files/`. Each variant has its own
+(`target.<triple>.variants.<v>.docs`); `target.<triple>.docs` is the
+default variant's. Open `<crate>/index.html` in it, as in Cargo's
+`target/doc`.
+
+- By default only the planned packages are documented, as with
+  `cargo doc --no-deps`. With
+  [`docs.noDeps = false`](../reference/options/workspaces.md#workspacesnamedocsnodeps)
+  their dependencies are documented too, and links to a dependency's
+  items go to its pages in the same folder.
+- It is one derivation. rustdoc merges the cross-crate files (the search
+  index, the list of crates, the implementors of each trait) into the
+  folder as each crate is documented, and stable rustdoc has no way to
+  merge them later. So any change to any documented crate runs every
+  rustdoc again.
+- The crates rustdoc reads are check-mode units: metadata only, no code.
+  They are the same derivations as a check variant's with the same
+  profile and features, so the docs and `cargo check` share them.
+- Each crate is documented after the documented crates it uses. A link
+  from one crate to another resolves only when the other's pages are
+  already there, so every link that can resolve does. Under
+  `cargo doc --no-deps`, Cargo does not order the members, and which
+  links resolve can change from run to run.
+- A proc macro's pages are in the same folder as the rest, as with
+  `cargo doc` without `--target`. With `--target`, Cargo puts them in
+  `target/doc` and the other crates in `target/<triple>/doc`.
+
+Cargo 1.99 fails `cargo doc --release --target x86_64-unknown-linux-gnu`
+on an x86\_64 Linux host, without `--no-deps`, with "document output
+filename collision" when a proc macro is a workspace member and another
+member depends on it; without `--target` it succeeds. breakbulk always
+passes `--target`, so the doc plan of such a workspace fails the same
+way with a release profile and `docs.noDeps = false`. Use
+`docs.noDeps = true`, or the docs of a variant with the `dev` profile.

@@ -8,6 +8,7 @@
 mod canonical;
 pub mod capabilities;
 pub mod deps;
+mod docs;
 mod doctest;
 mod normalize;
 mod plan;
@@ -17,6 +18,7 @@ mod validate;
 pub use canonical::{CanonicalError, to_canonical_json};
 pub use capabilities::Capabilities;
 pub use deps::{Graph, crate_deps, crate_deps_of};
+pub use docs::render_docs;
 pub use doctest::{closure_runs, render_doctest};
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;

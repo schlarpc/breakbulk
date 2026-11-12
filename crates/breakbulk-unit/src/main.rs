@@ -14,9 +14,10 @@ use breakbulk_unit::Error;
 use breakbulk_unit::env::Outer;
 use breakbulk_unit::spec::RenderedUnit;
 
-const USAGE: &str = "usage: breakbulk-unit unit|doctest\n       \
+const USAGE: &str = "usage: breakbulk-unit unit|doctest|docs\n       \
     breakbulk-unit test-run-hints SPEC LOG\n\n\
-    Builds the unit (or runs the doctests) described by $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath).";
+    Builds the unit (or runs the doctests, or writes the documentation) described by \
+    $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath).";
 
 fn read_unit(outer: &Outer) -> Result<RenderedUnit, Error> {
     let (text, whence) = if let Some(path) = outer.get("BREAKBULK_UNITPath") {
@@ -40,6 +41,9 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("test-run-hints") {
         return breakbulk_unit::view_hints::test_run_main(&args[1..]);
+    }
+    if args == ["docs"] {
+        return breakbulk_unit::docs::main();
     }
     if args != ["unit"] {
         eprintln!("{USAGE}");

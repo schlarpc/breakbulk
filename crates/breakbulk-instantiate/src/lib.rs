@@ -21,9 +21,9 @@ use breakbulk_format::rendered::{
     DEBUG_OUTPUT, SourceView, Widen, derivation_output, package_name_version,
 };
 use breakbulk_format::{
-    CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, SrcRef, TargetTraits,
-    Unit, UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in,
-    to_canonical_json, unit_env_value, validate,
+    CompileUnit, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind, SrcRef,
+    TargetTraits, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs, render_doctest,
+    render_unit_in, to_canonical_json, unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -721,6 +721,47 @@ fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, E
     Ok(Drv { attrs })
 }
 
+/// A doc plan's docs derivation: `breakbulk-unit docs` over its rendered
+/// rustdoc commands, named `<target>-doc` after Cargo's `target/<triple>/doc`
+/// (a target spec file by its stem), with the one output `out`.
+fn instantiate_docs(inputs: &Inputs, prefix: &str) -> Result<Drv, Error> {
+    let tokens = Tokens::new(inputs, prefix);
+    let rendered = render_docs(&inputs.plan, &tokens).map_err(|e| Error(format!("docs: {e}")))?;
+    let text = to_canonical_json(&rendered).map_err(|e| Error(format!("docs: {e}")))?;
+    let text = tokens.tokenize_store_paths("docs", &text)?;
+    let builder = tokens.input(keys::tool(TOOL_UNIT));
+    let target = &inputs.plan.target;
+    let stem = target
+        .rsplit('/')
+        .next()
+        .unwrap_or(target)
+        .trim_end_matches(".json");
+    let mut attrs = BTreeMap::new();
+    attrs.insert(
+        "name".into(),
+        Value::String(store_name(&format!("{stem}-doc"))),
+    );
+    attrs.insert(
+        "builder".into(),
+        Value::Parts {
+            parts: tokens.split(&builder)?,
+        },
+    );
+    attrs.insert("args".into(), Value::Strings(vec!["docs".into()]));
+    attrs.insert(
+        "system".into(),
+        Value::String(inputs.toolchains.system.clone()),
+    );
+    attrs.insert("outputs".into(), Value::Strings(vec!["out".into()]));
+    attrs.insert(
+        "BREAKBULK_UNIT".into(),
+        Value::Parts {
+            parts: tokens.split(&text)?,
+        },
+    );
+    Ok(Drv { attrs })
+}
+
 /// How a root is matched between the plan and the prediction.
 type RootKey = (String, RootKind, String, bool);
 
@@ -1003,6 +1044,19 @@ pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
             Err(e) => errors.push(e.0),
         }
     }
+    // A doc plan always has its docs derivation, even with nothing to
+    // document (an empty folder), so that it can be named before planning.
+    let docs = if inputs.plan.kind == PlanKind::Doc {
+        match instantiate_docs(inputs, &prefix) {
+            Ok(d) => Some(d),
+            Err(e) => {
+                errors.push(e.0);
+                None
+            }
+        }
+    } else {
+        None
+    };
     if !errors.is_empty() {
         return err(errors.join("\n"));
     }
@@ -1012,6 +1066,7 @@ pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
         units,
         roots: instantiate_roots(inputs, &prefix)?,
         doctests,
+        docs,
     })
 }
 

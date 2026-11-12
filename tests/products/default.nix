@@ -981,6 +981,53 @@ let
       };
     }
   ];
+
+  # --- docs --------------------------------------------------------------------
+
+  # With dependencies at Cargo's default profile for `cargo doc`, `dev`:
+  # Cargo 1.99's `cargo doc --release --target <host triple>` fails with
+  # "document output filename collision" on this workspace (the proc macro
+  # `derive` is a member and a dependency of `util`), as it does outside
+  # breakbulk; `--no-deps` and `dev` do not.
+  docsRepo =
+    noDeps: profile:
+    mkRepo (fixtures + "/docs") [
+      {
+        workspaces.main = {
+          path = ".";
+          docs = { inherit noDeps; };
+          variants.default = { inherit profile; };
+          variants.check = {
+            mode = "check";
+            inherit profile;
+          };
+        };
+      }
+    ];
+  docsNoDeps = docsRepo true "release";
+  docsDeps = docsRepo false "dev";
+
+  # Plain `cargo doc` over the fixture, offline against the same vendor
+  # directory, without `--target`: Cargo then writes every crate, proc
+  # macros too, into the one folder `target/doc`, as the docs derivation
+  # does. Each of `runs` is one `cargo doc` with those arguments, into the
+  # same folder. Under `--no-deps` Cargo does not order the members'
+  # rustdocs (with one job it documented `util` before `base`, leaving
+  # util's links to base unresolved), so that reference documents them one
+  # package at a time, in the docs derivation's order.
+  cargoDoc =
+    repo: runs:
+    pkgs.runCommandCC "docs-cargo-doc" { nativeBuildInputs = [ pkgs.cargo pkgs.rustc ]; } ''
+      export CARGO_HOME=$TMPDIR/cargo-home
+      cp -r --no-preserve=mode ${fixtures + "/docs"} "$NIX_BUILD_TOP/ws"
+      cd "$NIX_BUILD_TOP/ws"
+      ${lib.concatMapStrings (args: ''
+        cargo doc --frozen --offline ${args} \
+          --config ${(inst repo).vendor.configFile} 2> doc.log || { cat doc.log; exit 1; }
+      '') runs}
+      cp -r target/doc $out
+      rm $out/.lock
+    '';
 in
 {
   modules.variants = variantsModules;
@@ -1004,6 +1051,8 @@ in
       nestedCargo
       nestedCargoFlags
       cargoConfigRepo
+      docsNoDeps
+      docsDeps
       ;
     trimCc = trimCcRepo { };
   };
@@ -1022,6 +1071,100 @@ in
         {"keys":[],"links":null,"package":"gen","version":"0.1.0"}
         EOF
         touch $out
+      '';
+
+  docs =
+    let
+      check = repo: repo.workspaces.main.instances.${native}.check;
+      drvSet = us: lib.genAttrs (map (u: builtins.unsafeDiscardStringContext u.drvPath) us) (_: true);
+      # The doc plan's units against the check variant's build plan: each
+      # is shared (the check plan also has the members' own units, which
+      # `cargo doc` needs only for the members other members use).
+      sharing =
+        repo:
+        let
+          e = repo.explainSharing {
+            a = (inst repo).plans.doc;
+            b = (check repo).plans.build;
+          };
+          docUnits = lib.filter (u: (u.onlyIn or null) != e.b) e.units;
+        in
+        {
+          inherit e;
+          notShared = lib.filter (u: !u.same) docUnits;
+          shared = lib.length docUnits;
+        };
+      # The unit derivations the docs derivation names as inputs: all of
+      # them the check variant's.
+      inputsOf =
+        repo:
+        let
+          docs = repo.workspaces.main.target.${native}.docs;
+          ctx = lib.attrNames (builtins.getContext docs.drvAttrs.BREAKBULK_UNIT);
+          units = drvSet (lib.attrValues (inst repo).units.doc);
+        in
+        lib.filter (d: units ? ${d}) ctx;
+      notCheckUnits =
+        repo: lib.filter (d: !((drvSet (lib.attrValues (check repo).units.build)) ? ${d})) (inputsOf repo);
+      sharedNoDeps = sharing docsNoDeps;
+      sharedDeps = sharing docsDeps;
+    in
+    assert lib.assertMsg (
+      sharedNoDeps.notShared == [ ] && sharedNoDeps.shared > 0
+    ) "docs: doc-plan units not shared with the check variant:\n${sharedNoDeps.e.text}";
+    assert lib.assertMsg (
+      sharedDeps.notShared == [ ] && sharedDeps.shared > 0
+    ) "docs: doc-plan units not shared with the check variant (deps):\n${sharedDeps.e.text}";
+    assert lib.assertMsg (
+      inputsOf docsDeps != [ ] && notCheckUnits docsDeps == [ ]
+    ) "docs: the docs derivation names units that are not the check variant's: ${builtins.toJSON (notCheckUnits docsDeps)}";
+    pkgs.runCommand "docs"
+      {
+        noDeps = docsNoDeps.workspaces.main.target.${native}.docs;
+        noDepsRef = cargoDoc docsNoDeps (
+          map (p: "--no-deps --release -p ${p}") [
+            "base"
+            "derive"
+            "util"
+            "app"
+          ]
+        );
+        deps = docsDeps.workspaces.main.target.${native}.docs;
+        depsRef = cargoDoc docsDeps [ "-j1" ];
+        # The default target's, and the default variant's.
+        variantDocs = docsNoDeps.workspaces.main.target.${native}.variants.default.docs;
+      }
+      ''
+        set -euo pipefail
+        [ "$noDeps" = "$variantDocs" ]
+        # The same files and bytes, but for the store path of the registry
+        # crate's source, which its source pages name (its fetched source
+        # here, the vendor directory under Cargo).
+        same() {
+          for d in "$1" "$2"; do
+            rm -rf "$TMPDIR/cmp"; cp -r --no-preserve=mode "$d" "$TMPDIR/cmp"
+            find "$TMPDIR/cmp" -type f -exec sed -i -E \
+              's#${builtins.storeDir}/[a-z0-9]{32}-(breakbulk-vendor/[0-9a-f]+/)?#/SOURCE/#g' {} +
+            mv "$TMPDIR/cmp" "$TMPDIR/cmp-$(basename "$d")"
+          done
+          diff -r "$TMPDIR/cmp-$(basename "$1")" "$TMPDIR/cmp-$(basename "$2")"
+        }
+        same "$noDeps" "$noDepsRef"
+        same "$deps" "$depsRef"
+        # Cross-crate links: to a member, to the proc macro, and with deps
+        # to the registry crate's pages in the same folder.
+        for d in "$deps" "$noDeps"; do
+          grep -q 'href="../util/fn.make.html"' "$d/app/index.html"
+          grep -q 'href="../base/struct.Widget.html"' "$d/app/index.html"
+          grep -q 'href="../derive/derive.Describe.html"' "$d/util/struct.Gadget.html"
+        done
+        grep -q 'href="../itoa/struct.Buffer.html"' "$deps/base/trait.Render.html"
+        [ ! -e "$noDeps/itoa" ] && [ -d "$deps/itoa" ]
+        # The implementors of base's trait from util, merged in.
+        grep -q util "$deps/trait.impl/base/trait.Render.js"
+        # The build script's cfg and env reached rustdoc.
+        grep -q 'Set by the build script.' "$deps/util/fn.generated.html"
+        mkdir $out
       '';
 
   ui-dist = pkgs.runCommand "ui-dist" { app = uiDistRepo.workspaces.default.packages.app; } ''

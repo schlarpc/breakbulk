@@ -32,7 +32,8 @@
 //! doctest derivation IFD mode makes, with the package's test configuration
 //! (runner, arguments, env) from `values.json`, and a wrapper
 //! `<outer name>-<package>.doctest` whose `root` links its output, or whose
-//! `not-built` says why the plan has none.
+//! `not-built` says why the plan has none. A doc plan's docs derivation
+//! gets a wrapper `<outer name>-docs` whose `root` links its output.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -71,6 +72,10 @@ pub struct Outer {
     /// the plan.
     #[serde(default)]
     pub doctests: BTreeMap<String, String>,
+    /// Doc plans: the output for the docs derivation's wrapper
+    /// (`docs.drv`), whose `root` links the docs derivation's output.
+    #[serde(default)]
+    pub docs: Option<String>,
 }
 
 /// The attributes a doctest derivation gets from the package's test
@@ -758,6 +763,9 @@ fn doctest(
     Ok((drv, w))
 }
 
+/// The node key of a doc plan's docs derivation.
+const DOCS_NODE: &str = "docs";
+
 /// The node key of a package's doctest derivation.
 fn doctest_node(package: &str) -> String {
     format!("doctest:{package}")
@@ -898,6 +906,41 @@ pub fn dynamic_plan(
             drvs.insert(doctest_node(package), d);
         }
         wrappers.push((format!("wrapper:{package}.doctest"), w, output.clone()));
+    }
+    match (&units.docs, &outer.docs) {
+        (None, None) => {}
+        (Some(d), Some(output)) => {
+            if let Some(other) = taken.insert(output.clone(), "the docs".into()) {
+                return err(format!(
+                    "the root {other} and the docs have the same output name {output}"
+                ));
+            }
+            drvs.insert(DOCS_NODE.into(), d.clone());
+            let tokens = Tokens::new(inputs, &prefix);
+            let w = small_drv(
+                inputs,
+                &tokens,
+                outer,
+                output,
+                WRAPPER_SCRIPT,
+                [
+                    ("root", tokens.unit(DOCS_NODE, "out")),
+                    ("debugRoot", String::new()),
+                    ("notBuilt", String::new()),
+                    ("rootJson", String::new()),
+                ],
+            )
+            .map_err(|e| Error(format!("docs: {e}")))?;
+            wrappers.push((format!("wrapper:{DOCS_NODE}"), w, output.clone()));
+        }
+        (Some(_), None) => {
+            return err("the plan has docs, but outer.json names no output for them");
+        }
+        (None, Some(output)) => {
+            return err(format!(
+                "outer.json names the docs output {output}, but the plan is no doc plan"
+            ));
+        }
     }
     let mut order = Vec::new();
     let mut state: BTreeMap<String, bool> = BTreeMap::new();

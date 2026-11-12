@@ -1,0 +1,7 @@
+[package]
+name = "base"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+itoa = "=1.0.11"

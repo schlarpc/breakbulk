@@ -48,6 +48,11 @@ pub fn doctest(id: &str, package: &str, version: &str) -> String {
     format!("doctest {id} ({})", package_version(package, version))
 }
 
+/// A rustdoc command of `cargo doc`: `rustdoc of util (util 0.1.0)`.
+pub fn doc(krate: &str, package: &str, version: &str) -> String {
+    format!("rustdoc of {krate} ({})", package_version(package, version))
+}
+
 /// [`compile`] or [`run`] for a unit of a plan.
 pub fn unit(id: &str, u: &Unit) -> String {
     match u {

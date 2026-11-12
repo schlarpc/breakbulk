@@ -16,7 +16,8 @@
 #                            <ws>/<triple>/<variant>): products/<i>/<pkg>,
 #                            runs/<i>/<pkg>/<binary>,
 #                            runs/<i>/bench/<pkg>/<binary>,
-#                            doctests/<i>/<pkg>; in dynamic mode also
+#                            doctests/<i>/<pkg>, for the doc fixtures
+#                            products/<i>/doc (the docs); in dynamic mode also
 #                            units/<i>/<kind>, every unit of each plan),
 #                            its repo.checks
 #                            (checks/<name>), for test-control `apps`,
@@ -28,7 +29,8 @@
 #                            closures/<i>/<pkg>/<binary>/closure, each
 #                            test run's input closure
 #   unitDrvs.<fixture>       a JSON file: "<i>/<kind>" -> unit id (or
-#                            `doctest:<pkg>`) -> .drv path (IFD mode)
+#                            `doctest:<pkg>`, or `docs`) -> .drv path (IFD
+#                            mode)
 #   explain.<fixture>        whether repo.explainSharing finds every unit
 #                            of the first workspace's build plan shared
 #                            with itself (it must)
@@ -424,6 +426,10 @@ let
     # A product of another target of the same workspace in a package's
     # env.
     ui-dist = products.uiDistRepo;
+    # `cargo doc`, as tests/products' docs check: members only (release),
+    # and with dependencies (dev). Their docs are compared as products.
+    docs = products.docsNoDeps;
+    docs-deps = products.docsDeps;
     # Products of the same plan in a package's env and inputs: an infinite
     # recursion in dynamic mode (#126), so not in run.sh's default list.
     same-workspace-products = products.sameWsRepo;
@@ -682,12 +688,20 @@ let
     ui-dist = "^app-";
   };
 
-  # Every workspace, target and variant of a repository: `key` is
-  # `<ws>/<triple>/<variant>`, `inst` the mkWorkspace result, `out` the
-  # repository's outputs for it (products, selected test runs, ...),
-  # `kinds` its planned plan kinds (build, test, bench).
+  # The fixtures whose doc plans are compared: every variant of them gets
+  # one; the other fixtures' are never planned.
+  docFixtures = [
+    "docs"
+    "docs-deps"
+  ];
+
+  # Every workspace, target and variant of the repository of fixture
+  # `name`: `key` is `<ws>/<triple>/<variant>`, `inst` the mkWorkspace
+  # result, `out` the repository's outputs for it (products, selected test
+  # runs, ...), `kinds` its planned plan kinds (build, test, bench, and doc
+  # for docFixtures).
   instancesOf =
-    repo:
+    name: repo:
     lib.concatLists (
       lib.mapAttrsToList (
         wsName: w:
@@ -712,7 +726,9 @@ let
                 key = "${wsName}/${triple}/${v}";
                 inherit triple inst out;
                 inherit (w.target.${triple}) canRunTests;
-                kinds = lib.filter (k: k != "test" || testPlan) (lib.attrNames inst.units);
+                kinds = lib.filter (k: (k != "test" || testPlan) && (k != "doc" || lib.elem name docFixtures)) (
+                  lib.attrNames inst.units
+                );
               }
             ) vs
           ) w.instances
@@ -749,6 +765,8 @@ let
         )
         + linkEach "$out/products/${i.key}" (
           lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) i.out.packages
+          # The docs, compared as a product.
+          // lib.optionalAttrs (lib.elem "doc" i.kinds) { doc = i.out.docs; }
         )
         + (
           if i.canRunTests then
@@ -770,7 +788,7 @@ let
               )
             )
         )
-      ) (instancesOf repo)
+      ) (instancesOf name repo)
       # repo.checks (what `nix flake check` builds), every one.
       + ''
         mkdir -p $out/checks
@@ -791,7 +809,7 @@ let
   discard = builtins.unsafeDiscardStringContext;
 
   unitDrvs =
-    repo:
+    name: repo:
     pkgs.writeText "unit-drvs.json" (
       builtins.toJSON (
         lib.listToAttrs (
@@ -806,10 +824,12 @@ let
                   // lib.optionalAttrs (kind == "test") (
                     lib.mapAttrs' (p: d: lib.nameValuePair "doctest:${p}" d) i.inst.doctests
                   )
+                  # The doc plan's, its docs derivation.
+                  // lib.optionalAttrs (kind == "doc") { docs = i.inst.docs; }
                 )
               )
             ) i.kinds
-          ) (instancesOf repo)
+          ) (instancesOf name repo)
         )
       )
     );
@@ -832,18 +852,18 @@ let
   # and every output upstream of the units into the private store. Per
   # fixture, so that a run plans only the fixtures it compares.
   plansOf =
-    repos':
+    name: repos':
     lib.concatMap (
       repo:
       lib.concatMap (
         i: map toString (lib.attrValues (lib.filterAttrs (k: _: lib.elem k i.kinds) i.inst.plans))
-      ) (instancesOf repo)
+      ) (instancesOf name repo)
     ) repos';
   prereqs =
     lib.mapAttrs (
       name: repo:
       pkgs.writeText "dynamic-prereqs-${name}" (
-        lib.concatStringsSep "\n" (plansOf ([ repo ] ++ lib.optional (name == "walking-skeleton") lintRepo))
+        lib.concatStringsSep "\n" (plansOf name ([ repo ] ++ lib.optional (name == "walking-skeleton") lintRepo))
       )
     ) repos
     // {
@@ -934,23 +954,23 @@ in
     cutoff
     ;
   build = lib.mapAttrs build repos;
-  unitDrvs = lib.mapAttrs (_: unitDrvs) repos;
+  unitDrvs = lib.mapAttrs unitDrvs repos;
   outer = lib.mapAttrs (
-    _: repo:
+    name: repo:
     lib.listToAttrs (
       lib.concatMap (i: map (kind: lib.nameValuePair "${i.key}/${kind}" i.inst.outer.${kind}) i.kinds) (
-        instancesOf repo
+        instancesOf name repo
       )
     )
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
   unpredicted = repository.rootsPredicted.workspaces.main.packages.app;
   explain = lib.mapAttrs (
-    _: repo:
+    name: repo:
     let
       # The first instance (`<ws>/<triple>/<variant>`): a workspace may
       # have no native target.
-      i = (lib.head (instancesOf repo)).key;
+      i = (lib.head (instancesOf name repo)).key;
     in
     (repo.explainSharing {
       a = i;

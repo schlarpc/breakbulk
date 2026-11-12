@@ -71,10 +71,11 @@ repo = {
         benches.<pkg>.<bench>;       # bench binaries, in a bench variant
         benchRuns.<pkg>.<binary>;    # each bench run once in test mode
         namedBenchRuns.<pkg>.<bench>;  # the same, named as in benches; .enabled
+        docs;                        # `cargo doc`'s folder
         check;                       # check and clippy variants only
       };
       # The default variant's, as above:
-      packages; tests; testRuns; namedTestRuns; testApps; doctests;
+      packages; tests; testRuns; namedTestRuns; testApps; doctests; docs;
       # The bench variant's (the default variant, or the only one with benches):
       benches; benchRuns; namedBenchRuns;
       runner;                # the runner (a list), or null
@@ -84,7 +85,7 @@ repo = {
       canRunTests;           # false: no runner; its runs not in checks, its apps not in apps
     };
 
-    plans.<triple>.<v> = { build; test; };   # plan.json, for debugging
+    plans.<triple>.<v> = { build; test; doc; };   # plan.json, for debugging
     vendor = { dir; configFile; cargoHome; };  # Cargo.lock's dependencies, for Cargo offline
   };
 
@@ -107,6 +108,18 @@ libraries, passed through the target's post-link stages and installed
 - `.stages.<name>`: every intermediate stage, e.g. `.stages.linked`;
 - `.debug`: split debug information, where the target splits it;
 - `.checks.<name>`: the product's checks.
+
+### Documentation
+
+`docs` is the folder `cargo doc` writes, for the variant's packages on
+the target: a directory per documented crate (`<crate>/index.html`),
+`crates.js`, `search.index/`, `src/`, `static.files/`, `trait.impl/`.
+[`docs.noDeps`](options/workspaces.md#workspacesnamedocsnodeps) (`true`
+by default) documents the planned packages only (`cargo doc --no-deps`);
+`false` documents their dependencies too. Proc macros are in the same
+folder. The doc plan (`plans.<triple>.<v>.doc`) is traced only when
+`docs` is used. Docs are not in `checks`. See
+[Documentation](../explanation/products.md#documentation).
 
 ### `checks`
 
@@ -191,7 +204,12 @@ both delivery modes.
 
 `repo.explainSharing { a; b; package; }` takes two plans (from `plans`)
 and optionally a package name, and lists the inputs that make its units
-(or every package's) differ between them.
+(or every package's) differ between them. Units are paired by package,
+crate name, crate types, platform and test mode; where several units of
+a plan share these (a check plan checks a proc macro that is a member,
+and builds it for its dependents), identical units are paired first,
+then units with the same outputs. With `b` a check variant's build plan,
+`a` a doc plan shows which of the docs' units the check variant shares.
 
 ### `nixFeatures`
 
@@ -215,8 +233,3 @@ derivations, with both at their defaults, it is:
   [`test.runFiles`](options/packages.md#packagesnametestrunfiles) and
   [`test.stripForRun`](options/packages.md#packagesnameteststripforrun)
   do not save test runs.
-
-### Not built yet
-
-`target.<triple>.docs`, the `cargo doc` product
-([#6](https://github.com/schlarpc/breakbulk/issues/6)).

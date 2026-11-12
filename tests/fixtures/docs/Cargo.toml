@@ -1,0 +1,11 @@
+# Documentation ("docs" in docs/src/explanation/internals/testing.md):
+# libraries that link to each other's items, a trait implemented in another
+# crate, a re-export, a proc macro (a host unit), a build script's cfg and
+# env reaching rustdoc, a bin, and a registry dependency.
+[workspace]
+resolver = "2"
+members = ["base", "util", "derive", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

@@ -89,6 +89,7 @@ fn outer(names: &[&str]) -> Outer {
             .collect(),
         units: Some("units.drv".into()),
         doctests: BTreeMap::new(),
+        docs: None,
     }
 }
 
@@ -730,6 +731,72 @@ fn doctests() {
     // A doctest of the plan that was not predicted is an error.
     let e = dynamic_plan(&inputs, &units, &outer(&ROOTS)).unwrap_err().0;
     assert!(e.contains("smokelib"), "{e}");
+}
+
+#[test]
+fn docs() {
+    let mut inputs = smoke_inputs();
+    let Some(breakbulk_format::Unit::Compile(c)) = inputs.plan.units.get(LIB).cloned() else {
+        panic!()
+    };
+    inputs.plan.kind = breakbulk_format::PlanKind::Doc;
+    inputs.plan.roots.clear();
+    inputs.plan.docs.push(breakbulk_format::Doc {
+        package: c.package,
+        krate: c.krate,
+        platform: c.platform,
+        program: c.program,
+        args: c.args,
+        env: c.env,
+        env_splices: c.env_splices,
+        dylib_path_from: c.dylib_path_from,
+        cwd: c.cwd,
+    });
+    let units = instantiate(&inputs).unwrap();
+    let ifd = units.docs.as_ref().expect("a doc plan has docs");
+    assert_eq!(attr(ifd, "name"), "x86_64-unknown-linux-gnu-doc");
+
+    let mut o = outer(&[]);
+    o.docs = Some("docs.drv".into());
+    let plan = dynamic_plan(&inputs, &units, &o).unwrap();
+    let vals = values(&inputs);
+    let mut written = BTreeMap::new();
+    let mut by_key = BTreeMap::new();
+    for n in &plan.nodes {
+        let r = resolve(&n.drv, &vals, &written, units.pass_as_file_above).unwrap();
+        written.insert(
+            n.key.clone(),
+            Written {
+                drv_path: drv_of(&n.key),
+                outputs: r
+                    .outputs
+                    .iter()
+                    .map(|o| (o.clone(), unit_path(&n.key, o)))
+                    .collect(),
+            },
+        );
+        by_key.insert(n.key.clone(), (r, n.submit_as.clone()));
+    }
+    // The docs derivation is IFD mode's.
+    let (d, submit) = &by_key["docs"];
+    assert_eq!(submit, &None);
+    for k in ifd.attrs.keys() {
+        if k != "args" && k != "outputs" {
+            assert_eq!(d.env[k], attr(ifd, k), "{k}");
+        }
+    }
+    assert_eq!(d.args, ["docs"]);
+    // Its wrapper, submitted as `docs.drv`.
+    let (w, submit) = &by_key["wrapper:docs"];
+    assert_eq!(submit.as_deref(), Some("docs.drv"));
+    assert_eq!(w.name, "ws-x86_64-unknown-linux-gnu-dev-docs");
+    assert_eq!(w.env["root"], unit_path("docs", "out"));
+
+    // Docs the Nix side did not expect, or expected of a plan without them.
+    let e = dynamic_plan(&inputs, &units, &outer(&[])).unwrap_err().0;
+    assert!(e.contains("names no output"), "{e}");
+    let units = instantiate(&smoke_inputs()).unwrap();
+    assert!(units.docs.is_none());
 }
 
 #[test]

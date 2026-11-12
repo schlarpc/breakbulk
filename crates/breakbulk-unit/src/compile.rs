@@ -223,6 +223,17 @@ pub fn run_rustc(
     crate_name: &str,
     hints: &dyn Fn(&str) -> Vec<String>,
 ) -> Result<(), Error> {
+    run_diagnosed(inv, crate_name, "compile", hints)
+}
+
+/// [`run_rustc`] for any program that prints rustc's JSON diagnostics,
+/// rustdoc too: a failure reads "could not `verb` `crate_name`".
+pub fn run_diagnosed(
+    inv: &Invocation,
+    crate_name: &str,
+    verb: &str,
+    hints: &dyn Fn(&str) -> Vec<String>,
+) -> Result<(), Error> {
     eprintln!("     Running `{}`", shell_words(&inv.argv));
     let mut child = command(&inv.argv, &inv.env, &inv.cwd)
         .stdin(Stdio::null())
@@ -258,7 +269,7 @@ pub fn run_rustc(
     }
     if !status.success() {
         let mut msg = format!(
-            "could not compile `{crate_name}` ({})",
+            "could not {verb} `{crate_name}` ({})",
             describe_status(&status)
         );
         for h in hints(&printed) {

@@ -1006,11 +1006,17 @@ let
           '';
         };
 
-        docs.noDeps = bt.notImplemented 6 (mkOption {
+        docs.noDeps = mkOption {
           type = types.bool;
           default = true;
-          description = "Document only workspace members (`cargo doc --no-deps`).";
-        });
+          example = false;
+          description = ''
+            Document only the planned packages, as `cargo doc --no-deps`
+            does, in `target.<triple>.docs`. `false`: their dependencies
+            too, as `cargo doc`; links to a dependency's items then go to
+            its pages in the same folder.
+          '';
+        };
 
         warnings = bt.warningsOption;
         assertions = bt.assertionsOption;
@@ -1059,12 +1065,6 @@ let
 
       config.warnings =
         bt.unimplementedWarnings "workspaces.${name}" options {
-          "6" = [
-            [
-              "docs"
-              "noDeps"
-            ]
-          ];
         }
         ++ map (
           v:

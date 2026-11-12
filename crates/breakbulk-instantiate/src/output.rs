@@ -57,6 +57,9 @@ pub struct UnitsJson {
     /// derivation (`breakbulk-unit doctest`, output `out`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub doctests: BTreeMap<String, Drv>,
+    /// Doc plans: the docs derivation (`breakbulk-unit docs`, output `out`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Drv>,
 }
 
 /// The attributes of one derivation, passed to `derivation` after

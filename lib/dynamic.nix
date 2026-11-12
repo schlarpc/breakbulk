@@ -14,6 +14,7 @@
 #                                # package name -> the attributes its
 #                                # doctest derivation gets from the test
 #                                # configuration (testRuns.doctestConfig)
+#     docs = false;              # doc plans: the plan has a docs derivation
 #   };
 #   i.outer                      the outer derivation (CA, text-hashed,
 #                                requiredSystemFeatures = builder-rpc-v0)
@@ -32,7 +33,10 @@
 #                                output (its `log`), resolved at build
 #                                time; a log saying why, when the plan has
 #                                no doctest for the package
-#   i.allUnits                   a derivation that depends on every output
+#   i.docs                       doc plans: a small derivation linking the
+#                                docs derivation's output, resolved at
+#                                build time; null for other plans
+#   i.allUnits                  a derivation that depends on every output
 #                                of every unit of the plan (the outer
 #                                derivation's `units.drv` output)
 #   i.units                      an error: units are not known at
@@ -171,6 +175,7 @@ let
       tools,
       roots,
       doctests ? { },
+      docs ? false,
       ...
     }:
     let
@@ -180,6 +185,7 @@ let
           "coreutils"
           "outerName"
           "doctests"
+          "docs"
         ]
       );
       # Without predicted roots (check and clippy plans) the outer
@@ -218,7 +224,8 @@ let
       # A derivation on every output of every unit; root outputs always have
       # a `.` before `.drv`, so they cannot be named like it.
       unitsOutput = "units.drv";
-
+      # Likewise the docs derivation's wrapper.
+      docsOutput = "docs.drv";
 
       outer = derivation {
         name = outerName;
@@ -238,18 +245,23 @@ let
           "--values"
           (toFile "values.json" (toJSON valuesJson))
           "--outer"
-          (toFile "outer.json" (toJSON {
-            name = outerName;
-            inherit outputs;
-            units = unitsOutput;
-            doctests = doctestOutputs;
-          }))
+          (toFile "outer.json" (
+            toJSON (
+              {
+                name = outerName;
+                inherit outputs;
+                units = unitsOutput;
+                doctests = doctestOutputs;
+              }
+              // lib.optionalAttrs docs { docs = docsOutput; }
+            )
+          ))
         ];
         outputs =
           if dupes != [ ] then
             throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
           else
-            outputList ++ lib.attrValues doctestOutputs ++ [ unitsOutput ];
+            outputList ++ lib.attrValues doctestOutputs ++ [ unitsOutput ] ++ lib.optional docs docsOutput;
         BREAKBULK_INPUTS = context;
         __contentAddressed = true;
         outputHashMode = "text";
@@ -349,6 +361,18 @@ let
             inherit wrapper;
           };
         };
+
+      # The docs derivation's output, through its wrapper's `root`.
+      docsOut = derivation {
+        name = outerName;
+        inherit system;
+        wrapper = builtins.outputOf outer.${docsOutput}.outPath "out";
+        builder = tools.shell;
+        args = [
+          "-c"
+          ''${coreutils}/bin/ln -s "$wrapper/root" "$out"''
+        ];
+      };
     in
     {
       inherit outer allUnits;
@@ -356,6 +380,7 @@ let
       delivery = "dynamic";
       roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) predicted);
       doctests = lib.mapAttrs (pkg: _: mkDoctest pkg) doctests;
+      docs = if docs then docsOut else null;
       units = throw "breakbulk: unit derivations are not known at evaluation time in dynamic-derivation mode (repo.explainSharing reads them through IFD mode)";
       # The unit derivations IFD mode would make: the same .drv paths as the
       # outer derivation writes, except downstream of an embedded product.

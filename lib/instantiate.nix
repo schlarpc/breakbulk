@@ -11,6 +11,8 @@
 #                               units.json)
 #   inst.doctestAttrs.<package> the attributes of a library's doctest
 #                               derivation (test plans), before `derivation`
+#   inst.docs                   doc plans: the docs derivation (`cargo doc`'s
+#                               folder); null for other plans
 #
 # The instantiate derivation sees only names and tool paths, never a value
 # with string context: units.json names every input by key, and this file
@@ -341,6 +343,8 @@ rec {
       doctestAttrs = lib.mapAttrs' (
         id: d: lib.nameValuePair (lib.removePrefix "d-" id) (drvAttrs d)
       ) (json.doctests or { });
+      # Doc plans: `breakbulk-unit docs`, every traced rustdoc into its `out`.
+      docs = if json ? docs then mkDrv json.docs else null;
     };
 
   # A root name as instantiation names roots: `<package>/<kind>/<target>`,

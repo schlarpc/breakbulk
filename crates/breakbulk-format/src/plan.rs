@@ -50,6 +50,10 @@ pub struct Plan {
     /// `d-<package name>`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub doctests: BTreeMap<String, Doctest>,
+    /// Doc plans: the traced `rustdoc` commands of `cargo doc`, in the
+    /// order the docs derivation runs them ([`Doc`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub docs: Vec<Doc>,
     /// The variables the project's `[env]` config table sets on the
     /// processes Cargo starts. Units keep them in their recorded env;
     /// test runs take their values from the test unit's recorded env, as
@@ -125,6 +129,8 @@ pub enum PlanKind {
     Test,
     /// `cargo bench --no-run`: bench binaries and harnesses in bench mode.
     Bench,
+    /// `cargo doc`: the check-mode units rustdoc reads, and [`Plan::docs`].
+    Doc,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -317,6 +323,55 @@ impl Doctest {
             outputs: BTreeMap::new(),
             uplifted: BTreeMap::new(),
         }
+    }
+}
+
+/// A traced `rustdoc` of one Cargo target (a library or a bin), from
+/// `cargo doc`, without its output directory (`-o`): the docs derivation
+/// gives every command the same one. Its shape is a compile unit's, without
+/// outputs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Doc {
+    pub package: String,
+    #[serde(rename = "crate")]
+    pub krate: CrateInfo,
+    /// The platform Cargo documented the target for: `host` for a proc
+    /// macro, which Cargo documents into its host directory (`target/doc`)
+    /// even with `--target`.
+    pub platform: Platform,
+    pub program: Vec<Text>,
+    pub args: Vec<Arg>,
+    pub env: BTreeMap<String, Text>,
+    pub env_splices: Vec<Splice>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<UnitId>,
+    pub cwd: Cwd,
+}
+
+impl Doc {
+    /// The command as a compile unit with no outputs, for the checks,
+    /// normalization and rendering compile units share.
+    pub fn as_compile(&self) -> CompileUnit {
+        CompileUnit {
+            package: self.package.clone(),
+            krate: self.krate.clone(),
+            platform: self.platform,
+            test: false,
+            program: self.program.clone(),
+            args: self.args.clone(),
+            env: self.env.clone(),
+            env_splices: self.env_splices.clone(),
+            dylib_path_from: self.dylib_path_from.clone(),
+            cwd: self.cwd.clone(),
+            outputs: BTreeMap::new(),
+            uplifted: BTreeMap::new(),
+        }
+    }
+
+    /// A label for messages: `doc:<crate>` with `#<n>`, its index.
+    pub fn label(&self, index: usize) -> String {
+        format!("doc:{}#{index}", self.krate.name)
     }
 }
 

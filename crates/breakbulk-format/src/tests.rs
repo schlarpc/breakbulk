@@ -1333,6 +1333,57 @@ fn doctests_validate_like_compiles() {
     assert_error(&p, "a searchPathsOf splice outside a doctest");
 }
 
+/// A rustdoc command of a doc plan documenting `ring`, which reads
+/// `cfg_if`'s metadata.
+fn ring_doc(p: &mut Plan) -> Doc {
+    let c = compile(p, "c-ring").clone();
+    Doc {
+        package: c.package,
+        krate: c.krate,
+        platform: Platform::Target,
+        program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
+        args: c.args,
+        env: c.env,
+        env_splices: c.env_splices,
+        dylib_path_from: vec![],
+        cwd: c.cwd,
+    }
+}
+
+#[test]
+fn docs_validate_and_render_like_compiles() {
+    let mut p = example();
+    p.kind = PlanKind::Doc;
+    let d = ring_doc(&mut p);
+    let mut app = d.clone();
+    app.krate.name = "app".into();
+    // Their order is kept: it is the order they run in.
+    p.docs = vec![d.clone(), app];
+    assert_eq!(errors(&p), Vec::<String>::new());
+    let back = Plan::from_json(&p.to_canonical_json()).unwrap();
+    assert_eq!(back.docs[0].krate.name, "ring");
+    assert_eq!(back.docs[1].krate.name, "app");
+
+    let r = render_docs(&p, &Fake).unwrap();
+    assert_eq!(r.commands.len(), 2);
+    let ring = &r.commands[0];
+    // The crates it names, as metadata; no outputs, no remapping.
+    assert_eq!(
+        ring.deps,
+        ["/nix/store/c-cfgif-rmeta/libcfg_if-1.rmeta".to_owned()]
+    );
+    assert!(ring.outputs.is_empty() && ring.remap.is_empty());
+    assert!(ring.args.iter().any(|a| matches!(
+        a,
+        RenderedArg::Splice(s) if s.kind == SpliceKind::RustcCfg
+    )));
+
+    let mut bad = d;
+    bad.args.push(Arg::Literal("-o/build/doc".into()));
+    p.docs = vec![bad];
+    assert_error(&p, "forbidden path `/build`");
+}
+
 #[test]
 fn debuginfo_side_files() {
     let bin = ["bin".to_owned()];

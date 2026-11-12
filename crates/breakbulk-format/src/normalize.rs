@@ -105,5 +105,21 @@ impl Plan {
             }
             sort_dedup(&mut d.krate.types);
         }
+        // Their order is the order they run in; only their parts are
+        // normalized.
+        for d in &mut self.docs {
+            d.program = std::mem::take(&mut d.program)
+                .into_iter()
+                .map(normalize_text)
+                .collect();
+            d.args = std::mem::take(&mut d.args)
+                .into_iter()
+                .map(normalize_arg)
+                .collect();
+            for v in d.env.values_mut() {
+                *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
+            }
+            sort_dedup(&mut d.krate.types);
+        }
     }
 }

@@ -113,6 +113,10 @@ let
     directives = [ dynamic.repos.directives ];
     doctest-false = [ (plain "doctest-false" [ ]) ];
     doctests = [ dynamic.repos.doctests ];
+    docs = [
+      products.repos.docsNoDeps
+      products.repos.docsDeps
+    ];
     doctest-off = [ (plain "doctest-off" [ ]) ];
     embed = [ products.repos.embed ];
     exclusive-features = [ repository.repos.exclusive ];

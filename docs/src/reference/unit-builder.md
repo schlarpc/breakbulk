@@ -6,6 +6,12 @@ with few dependencies and two modes:
 - `compile`: one rustc call;
 - `run`: one build-script run.
 
+The same binary runs a library's doctests (`breakbulk-unit doctest`) and
+writes a doc plan's documentation (`breakbulk-unit docs`): every traced
+`rustdoc` command in turn, each as a compile with no outputs, with
+`-o $out` and its own dependency directory
+([Documentation](../explanation/internals/products.md#documentation)).
+
 Test runs are not units; they belong to [products](../explanation/products.md).
 
 ## Environment contract

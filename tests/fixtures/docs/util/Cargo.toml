@@ -1,0 +1,8 @@
+[package]
+name = "util"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+base = { path = "../base" }
+derive = { path = "../derive" }

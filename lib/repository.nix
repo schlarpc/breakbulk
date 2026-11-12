@@ -16,7 +16,7 @@
 #   repo.workspaces.<ws>.target.<triple>.packages.<pkg>
 #   repo.workspaces.<ws>.target.<triple>.tests.<pkg>.<test>
 #   repo.workspaces.<ws>.target.<triple>.variants.<v>.{packages,tests}
-#   repo.workspaces.<ws>.plans.<triple>.<v>.{build,test}  the plan derivations
+#   repo.workspaces.<ws>.plans.<triple>.<v>.{build,test,doc}  the plan derivations
 #   repo.workspaces.<ws>.devShell
 #   repo.workspaces.<ws>.toolchain.{rustc,cargo,clippy,rustfmt}   resolved
 #   repo.workspaces.<ws>.instances.<triple>.<v>           the mkWorkspace results
@@ -33,6 +33,8 @@
 #   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
 #   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  test apps (`nix run`)
 #   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
+#   repo.workspaces.<ws>.target.<triple>.docs          `cargo doc`'s folder
+#                                                      (also per variant)
 #   repo.workspaces.<ws>.target.<triple>.spec          the resolved target spec
 #   repo.workspaces.<ws>.target.<triple>.traits        the target's traits
 #
@@ -972,6 +974,7 @@ let
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
       clippyOption = "workspaces.${wsName}.toolchain.clippy";
       bench = v.benches;
+      docsNoDeps = ws.docs.noDeps;
       inherit (s) runner testSystem testDylibPath;
       # Host units' tests run with the native target's settings, as Cargo
       # gives them `target.<host>.runner`.
@@ -1195,6 +1198,8 @@ let
               benches = benchesOf (traitsOf wsName triple) inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
+              # `cargo doc` of the variant's packages (lib/workspace.nix).
+              inherit (inst) docs;
             }
             // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
               # Every unit of both plans (`cargo check` and `cargo check
@@ -1225,6 +1230,7 @@ let
               namedTestRuns = { };
               testApps = { };
               doctests = { };
+              docs = null;
             };
           cells = variantCells.${wsName}.${triple};
           benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) cells);
@@ -1255,6 +1261,7 @@ let
             namedTestRuns
             testApps
             doctests
+            docs
             ;
           # The target spec's runner (a list: program and arguments, or
           # null) and test system, as test runs use them.
@@ -1525,7 +1532,8 @@ let
   #   }
   #
   # pairs the package's units in the two plans (by kind, crate name, crate
-  # types, platform and test mode) and, for each pair, says whether the
+  # types, platform and test mode; among several such, identical units
+  # first, then those with the same outputs) and, for each pair, says whether the
   # unit derivations are the same and, when not, which fields of the
   # rendered units differ: argv (as added and removed arguments), env, cwd,
   # the env capture, and which dependency units differ. Store paths are
@@ -1614,20 +1622,26 @@ let
     else
       "${pkgNameOf u.package} ${u.crate.name} [${lib.concatStringsSep "," u.crate.types}]${lib.optionalString (isTestUnit u) " test"} (${u.platform})";
 
+  # Unit ids of one plan, by label, sorted, for one package (or all, when
+  # null).
+  grouped =
+    plan: pkg:
+    lib.mapAttrs (_: lib.sort (a: b: a < b)) (
+      lib.groupBy (id: unitLabel plan.units.${id}) (
+        lib.filter (id: pkg == null || pkgNameOf plan.units.${id}.package == pkg) (lib.attrNames plan.units)
+      )
+    );
+
   # Units of one plan, by label, for one package (or all, when null).
   labelled =
     plan: pkg:
-    let
-      ids = lib.filter (id: pkg == null || pkgNameOf plan.units.${id}.package == pkg) (lib.attrNames plan.units);
-      groups = lib.groupBy (id: unitLabel plan.units.${id}) ids;
-    in
     lib.concatMapAttrs (
       l: is:
       if lib.length is == 1 then
         { ${l} = lib.head is; }
       else
-        lib.listToAttrs (lib.imap0 (i: id: lib.nameValuePair "${l} #${toString i}" id) (lib.sort (a: b: a < b) is))
-    ) groups;
+        lib.listToAttrs (lib.imap0 (i: id: lib.nameValuePair "${l} #${toString i}" id) is)
+    ) (grouped plan pkg);
 
   # Unit ids a plan unit refers to (its dependencies, its script, its runs).
   refsOf =
@@ -1728,18 +1742,77 @@ let
       unitsOf = r: if r.inst.delivery == "dynamic" then r.inst.ifdUnits.${r.kind} else r.inst.units.${r.kind};
       ua = unitsOf ra;
       ub = unitsOf rb;
-      la = labelled pa package;
-      lb = labelled pb package;
+      ga = grouped pa package;
+      gb = grouped pb package;
       allA = labelled pa null;
       allB = labelled pb null;
       revA = lib.mapAttrs' (l: id: lib.nameValuePair id l) allA;
       revB = lib.mapAttrs' (l: id: lib.nameValuePair id l) allB;
-      labels = lib.sort (x: y: x < y) (lib.unique (lib.attrNames la ++ lib.attrNames lb));
-      pair =
+      labels = lib.sort (x: y: x < y) (lib.unique (lib.attrNames ga ++ lib.attrNames gb));
+      outputsOf = plan: id: lib.attrNames (plan.units.${id}.outputs or { });
+      # The units of one label, paired: identical derivations first, then
+      # units with the same outputs (a check plan both checks and builds a
+      # proc macro that is a member), then in unit id order. Several
+      # entries are numbered.
+      entriesOf =
         l:
         let
-          ia = la.${l} or null;
-          ib = lb.${l} or null;
+          step =
+            match: st:
+            lib.foldl' (
+              acc: x:
+              let
+                y = lib.findFirst (match x) null acc.bs;
+              in
+              if y == null then
+                acc // { as = acc.as ++ [ x ]; }
+              else
+                acc
+                // {
+                  pairs = acc.pairs ++ [
+                    {
+                      ia = x;
+                      ib = y;
+                    }
+                  ];
+                  bs = lib.remove y acc.bs;
+                }
+            ) (st // { as = [ ]; }) st.as;
+          paired =
+            lib.pipe
+              {
+                pairs = [ ];
+                as = ga.${l} or [ ];
+                bs = gb.${l} or [ ];
+              }
+              [
+                (step (x: y: ua.${x}.drvPath == ub.${y}.drvPath))
+                (step (x: y: outputsOf pa x == outputsOf pb y))
+                (step (_: _: true))
+              ];
+          entries =
+            paired.pairs
+            ++ map (x: {
+              ia = x;
+              ib = null;
+            }) paired.as
+            ++ map (y: {
+              ia = null;
+              ib = y;
+            }) paired.bs;
+        in
+        if lib.length entries == 1 then
+          [ (lib.head entries // { unit = l; }) ]
+        else
+          lib.imap0 (i: e: e // { unit = "${l} #${toString i}"; }) entries;
+      pair =
+        {
+          unit,
+          ia,
+          ib,
+        }:
+        let
+          l = unit;
         in
         if ia == null || ib == null then
           {
@@ -1773,7 +1846,7 @@ let
             fields = fieldDiffs (renderedOf da) (renderedOf db);
             deps = depDiff;
           };
-      units = map pair labels;
+      units = map pair (lib.concatMap entriesOf labels);
       show = v: builtins.toJSON v;
       fieldText =
         f: d:

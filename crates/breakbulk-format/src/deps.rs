@@ -326,6 +326,21 @@ pub fn doctest_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
     deps
 }
 
+/// What a rustdoc command of a doc plan puts in its dependency directory:
+/// the crate files its arguments name and every crate below them, as
+/// `rmeta` where a library has one, whatever the documented crate's type
+/// (rustdoc links nothing, so a bin's dependencies are read as metadata as
+/// well). Named as inputs: the docs derivation reads no manifests.
+pub fn doc_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
+    let g = Graph::new(plan);
+    let mut deps = BTreeSet::new();
+    for o in direct_crate_refs(plan, c) {
+        deps.insert(o.clone());
+        deps.extend(g.below(&o.out, "rmeta").iter().cloned());
+    }
+    deps
+}
+
 /// Every unit `id` depends on, transitively, by any route: references
 /// (`out` of compiles and runs, a run's script), splices, search-path
 /// splices, `envSplices`, `dylibPathFrom` and `metadataFrom`. Ids that are

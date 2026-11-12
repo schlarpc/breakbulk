@@ -27,9 +27,12 @@
 #                              e.g. "c/cdylib/c" for a library's cdylib
 #   ws.tests."<pkg>/<kind>/<target>"   test-plan roots
 #   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target><exe suffix>
-#   ws.plans.{build,test}      the plan derivations ($out/plan.json)
+#   ws.plans.{build,test,doc}  the plan derivations ($out/plan.json)
 #   ws.cargoEnv                the dev shell's cargo-env.json (no planning)
-#   ws.units.{build,test}      every unit derivation, by unit id
+#   ws.units.{build,test,doc}  every unit derivation, by unit id
+#   ws.docs                    the doc plan's docs (`cargo doc`'s folder);
+#                              `docsNoDeps = true` (the default) traces
+#                              `cargo doc --no-deps`
 #   ws.capabilities            the toolchain's capabilities, as the planner
 #                              and breakbulk-instantiate get them
 #
@@ -159,6 +162,8 @@ pkgs:
   clippyOption ? null,
   clippyArgs ? [ ],
   bench ? false,
+  # The doc plan's `cargo doc --no-deps` (`workspaces.<ws>.docs.noDeps`).
+  docsNoDeps ? true,
   # The target's toolchain spec (from lib/repository.nix):
   #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)
   #   specTools.<name> = <store path>  tool paths the spec puts in the plan
@@ -290,15 +295,13 @@ let
     lib.imap0 (i: p: lib.nameValuePair "cargo-config-${toString i}" p) (util.storePathsIn cargoConfigText)
   );
 
-  plans = lib.genAttrs ([ "build" "test" ] ++ lib.optional bench "bench") (
+  plans = lib.genAttrs ([ "build" "test" "doc" ] ++ lib.optional bench "bench") (
     kind:
     mkPlan pkgs {
       vendor = vendored;
       inherit
         mode
-        clippyDriver
         clippyOption
-        clippyArgs
         tools
         kind
         target
@@ -314,6 +317,10 @@ let
       packages = if kind == "test" then testSelect else select;
       profile = if kind == "test" && !checking then testProfile else profile;
       cargoConfig = cargoConfigFile;
+      # A doc plan runs no clippy (breakbulk-plan's `runs_clippy`).
+      clippyDriver = if kind == "doc" then null else clippyDriver;
+      clippyArgs = if kind == "doc" then [ ] else clippyArgs;
+      noDeps = docsNoDeps;
       inherit (toolchain) cargo rustc;
       inherit capabilities;
       skeleton = skel;
@@ -457,6 +464,7 @@ let
               } pkg
             ) predictedDoctests
           );
+          docs = kind == "doc";
         }
       )
     else
@@ -477,9 +485,9 @@ let
           custom
           ;
       }
-      # The build plan has no test units; the bench plan's benches and
-      # harnesses in bench mode are.
-      // lib.optionalAttrs (kind != "build") { inherit workspaceTest; };
+      # The build and doc plans have no test units; the bench plan's
+      # benches and harnesses in bench mode are.
+      // lib.optionalAttrs (kind == "test" || kind == "bench") { inherit workspaceTest; };
       tools = unitTools;
       host = {
         envCapture = captures.host;
@@ -497,7 +505,7 @@ let
       targetTraits = targetTraitsLib.forRust traits;
       inherit capabilities;
       roots =
-        if checking then
+        if checking || kind == "doc" then
           null
         else
           planRoots {
@@ -511,6 +519,7 @@ let
   built = inst "build";
   tested = inst "test";
   benched = inst "bench";
+  documented = inst "doc";
 
   # Put a root unit's single linked file at $out/<dir>/<name>. Products and
   # their stages are in lib/repository.nix; this is only enough to run things.
@@ -592,11 +601,13 @@ in
   units = {
     build = built.units;
     test = tested.units;
+    doc = documented.units;
   }
   // lib.optionalAttrs bench { bench = benched.units; };
   unitsJson = {
     build = built.unitsJson;
     test = tested.unitsJson;
+    doc = documented.unitsJson;
   }
   // lib.optionalAttrs bench { bench = benched.unitsJson; };
   inherit delivery capabilities;
@@ -605,6 +616,7 @@ in
     {
       build = built.outer;
       test = tested.outer;
+      doc = documented.outer;
     }
     // lib.optionalAttrs bench { bench = benched.outer; }
   );
@@ -614,6 +626,7 @@ in
     {
       build = built.ifdUnits;
       test = tested.ifdUnits;
+      doc = documented.ifdUnits;
     }
     // lib.optionalAttrs bench { bench = benched.ifdUnits; }
   );
@@ -623,9 +636,13 @@ in
     {
       build = built.allUnits;
       test = tested.allUnits;
+      doc = documented.allUnits;
     }
     // lib.optionalAttrs bench { bench = benched.allUnits; }
   );
+  # The doc plan's documentation, `cargo doc`'s folder: `<crate>/index.html`
+  # per documented crate, `crates.js`, `search.index/`, `static.files/`, ….
+  docs = documented.docs;
   # Bench-plan roots (benches and harnesses in bench mode), by root name.
   benches = if bench then benched.roots else { };
   # Smoke runs of the bench plan's binaries: each once with `--test`, in
