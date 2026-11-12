@@ -187,9 +187,13 @@ The version of `package`. `null`: the one version the product's roots depend on.
 ### `componentize`
 
 Makes a WebAssembly component from the input's single core
-module with `wasm-tools component new`, then adds `metadata`
-with `wasm-tools metadata add`. The module keeps its file name.
-The `wasmComponent` preset's last stage before `install`.
+module with `wasm-tools component new`, then adds metadata
+with `wasm-tools metadata add`, as `wasmMetadata` does: by
+default the fields of the package's `Cargo.toml`
+(`cargoMetadata`), with `metadata` over them. With nothing to
+add it runs no `metadata add`. The module keeps its file
+name. The `wasmComponent` preset's last stage before
+`install`.
 
 #### `componentize.adapter`
 
@@ -206,16 +210,41 @@ implements.
 
 *Example:* `{ name = "wasi_snapshot_preview1"; module = ./wasi_snapshot_preview1.reactor.wasm; }`
 
+#### `componentize.cargoMetadata`
+
+Fill the `metadata` fields that are not set from the package's
+`Cargo.toml` (`product.package`), as cargo-component does:
+`name`, `authors` (joined with `,`), `description`, `licenses`
+(from `license`), `source` (from `repository`), `homepage` and
+`version`, each when the manifest has it. `false` adds only what
+`metadata` sets. A product without `package` (made with
+`mkProduct` directly) gets no defaults.
+
+*Type:* boolean
+
+*Default:* `true`
+
 #### `componentize.metadata`
 
-Metadata for `wasm-tools metadata add`. Each field is the
-flag of its name in kebab case (`processedBy` is
-`--processed-by`): a string or a list of strings is passed
-once per value, an attribute set as `NAME=VERSION` per
-entry. Fields not listed here are passed the same way, for
-flags of later wasm-tools versions.
+Metadata for `wasm-tools metadata add`, which works on core
+modules and on components. Each field is passed as the flag of
+its name in kebab case: `processedBy` is `--processed-by`.
 
-*Type:* open submodule of attribute set of (string or list of string or attribute set of string)
+- A string is passed as it is.
+- A derivation or a path is read when the stage runs: the flag
+  gets its file's content, without one trailing newline. A string
+  such as `"${drv}"` is not read: it is passed as the store path
+  it names.
+- A list is passed once per element.
+- An attribute set is passed once per entry, as `NAME=VERSION`.
+- `null` leaves the field out.
+
+Fields not listed here are passed the same way, for the flags of
+later wasm-tools versions. With `cargoMetadata`, each string field
+that has a `Cargo.toml` field and is not set here, not even to
+`null`, comes from the package's manifest.
+
+*Type:* open submodule of attribute set of (null or string or package or absolute path or list of (string or package or absolute path) or attribute set of (string or package or absolute path))
 
 *Default:* `{ }`
 
@@ -223,43 +252,42 @@ flags of later wasm-tools versions.
 
 ```nix
 {
-  licenses = "MIT OR Apache-2.0";
-  name = "comp";
-  processedBy = {
-    breakbulk = "0.1.0";
-  };
+  name = "app:core";
+  revision = revisionFile;   # a derivation: its file's content
+  processedBy.breakbulk = "0.1.0";
+  homepage = null;           # not from Cargo.toml
 }
 ```
 
 #### `componentize.metadata.authors`
 
-The people or organisation responsible. `null` adds none.
+The people or organisation responsible, a free-form string. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `authors` from `Cargo.toml`, joined with `,`, with `cargoMetadata`; else `null`
 
 #### `componentize.metadata.description`
 
-A description. `null` adds none.
+A description. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `description` from `Cargo.toml`, with `cargoMetadata`; else `null`
 
 #### `componentize.metadata.homepage`
 
-A URL with more information. `null` adds none.
+A URL with more information; wasm-tools fails on a string that is not a URL. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `homepage` from `Cargo.toml`, with `cargoMetadata`; else `null`
 
 #### `componentize.metadata.language`
 
 Source languages, by name, as `NAME=VERSION` in the producers section.
 
-*Type:* attribute set of string
+*Type:* attribute set of (string or package or absolute path)
 
 *Default:* `{ }`
 
@@ -267,25 +295,25 @@ Source languages, by name, as `NAME=VERSION` in the producers section.
 
 #### `componentize.metadata.licenses`
 
-The licenses, as an SPDX expression. `null` adds none.
+The licenses, as an SPDX expression; wasm-tools fails on any other string. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `license` from `Cargo.toml`, with `cargoMetadata`; else `null`
 
 #### `componentize.metadata.name`
 
-The component's name, in the names section. `null` adds none.
+The module's or component's name, in the names section. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `name` from `Cargo.toml`, with `cargoMetadata`; else `null`
 
 #### `componentize.metadata.processedBy`
 
-Tools that processed the component, by name, as `NAME=VERSION` in the producers section.
+Tools that processed the module, by name, as `NAME=VERSION` in the producers section.
 
-*Type:* attribute set of string
+*Type:* attribute set of (string or package or absolute path)
 
 *Default:* `{ }`
 
@@ -293,9 +321,9 @@ Tools that processed the component, by name, as `NAME=VERSION` in the producers 
 
 #### `componentize.metadata.revision`
 
-The source control revision. `null` adds none.
+The source control revision. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
 *Default:* `null`
 
@@ -303,7 +331,7 @@ The source control revision. `null` adds none.
 
 SDKs, by name, as `NAME=VERSION` in the producers section.
 
-*Type:* attribute set of string
+*Type:* attribute set of (string or package or absolute path)
 
 *Default:* `{ }`
 
@@ -311,19 +339,19 @@ SDKs, by name, as `NAME=VERSION` in the producers section.
 
 #### `componentize.metadata.source`
 
-A URL of the source code. `null` adds none.
+A URL of the source code; wasm-tools fails on a string that is not a URL. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `repository` from `Cargo.toml`, with `cargoMetadata`; else `null`
 
 #### `componentize.metadata.version`
 
-The version of the packaged software. `null` adds none.
+The version of the packaged software. `null` leaves it out.
 
-*Type:* null or string
+*Type:* null or string or package or absolute path
 
-*Default:* `null`
+*Default:* the package's `version` from `Cargo.toml`, with `cargoMetadata`; else `null`
 
 #### `componentize.wasmTools`
 
@@ -499,6 +527,169 @@ Also remove the symbol tables (`--strip-all`), not only the debug information.
 #### `strip.binutils`
 
 The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
+### `wasmMetadata`
+
+Adds `metadata` to every `.wasm` file in place with
+`wasm-tools metadata add`, which works on core modules and on
+components (on a component's outermost level). With
+`cargoMetadata`, the default, the fields not set come from the
+package's `Cargo.toml`. `componentize` adds metadata in the
+same way; use this stage for a core module, or after
+`componentize` for values it should not add. With nothing to
+add it copies its input. It fails when the input has no
+`.wasm` file.
+
+#### `wasmMetadata.cargoMetadata`
+
+Fill the `metadata` fields that are not set from the package's
+`Cargo.toml` (`product.package`), as cargo-component does:
+`name`, `authors` (joined with `,`), `description`, `licenses`
+(from `license`), `source` (from `repository`), `homepage` and
+`version`, each when the manifest has it. `false` adds only what
+`metadata` sets. A product without `package` (made with
+`mkProduct` directly) gets no defaults.
+
+*Type:* boolean
+
+*Default:* `true`
+
+#### `wasmMetadata.metadata`
+
+Metadata for `wasm-tools metadata add`, which works on core
+modules and on components. Each field is passed as the flag of
+its name in kebab case: `processedBy` is `--processed-by`.
+
+- A string is passed as it is.
+- A derivation or a path is read when the stage runs: the flag
+  gets its file's content, without one trailing newline. A string
+  such as `"${drv}"` is not read: it is passed as the store path
+  it names.
+- A list is passed once per element.
+- An attribute set is passed once per entry, as `NAME=VERSION`.
+- `null` leaves the field out.
+
+Fields not listed here are passed the same way, for the flags of
+later wasm-tools versions. With `cargoMetadata`, each string field
+that has a `Cargo.toml` field and is not set here, not even to
+`null`, comes from the package's manifest.
+
+*Type:* open submodule of attribute set of (null or string or package or absolute path or list of (string or package or absolute path) or attribute set of (string or package or absolute path))
+
+*Default:* `{ }`
+
+*Example:*
+
+```nix
+{
+  name = "app:core";
+  revision = revisionFile;   # a derivation: its file's content
+  processedBy.breakbulk = "0.1.0";
+  homepage = null;           # not from Cargo.toml
+}
+```
+
+#### `wasmMetadata.metadata.authors`
+
+The people or organisation responsible, a free-form string. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `authors` from `Cargo.toml`, joined with `,`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.metadata.description`
+
+A description. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `description` from `Cargo.toml`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.metadata.homepage`
+
+A URL with more information; wasm-tools fails on a string that is not a URL. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `homepage` from `Cargo.toml`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.metadata.language`
+
+Source languages, by name, as `NAME=VERSION` in the producers section.
+
+*Type:* attribute set of (string or package or absolute path)
+
+*Default:* `{ }`
+
+*Example:* `{ Rust = "1.99.0"; }`
+
+#### `wasmMetadata.metadata.licenses`
+
+The licenses, as an SPDX expression; wasm-tools fails on any other string. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `license` from `Cargo.toml`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.metadata.name`
+
+The module's or component's name, in the names section. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `name` from `Cargo.toml`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.metadata.processedBy`
+
+Tools that processed the module, by name, as `NAME=VERSION` in the producers section.
+
+*Type:* attribute set of (string or package or absolute path)
+
+*Default:* `{ }`
+
+*Example:* `{ breakbulk = "0.1.0"; }`
+
+#### `wasmMetadata.metadata.revision`
+
+The source control revision. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* `null`
+
+#### `wasmMetadata.metadata.sdk`
+
+SDKs, by name, as `NAME=VERSION` in the producers section.
+
+*Type:* attribute set of (string or package or absolute path)
+
+*Default:* `{ }`
+
+*Example:* `{ wasi-sdk = "25"; }`
+
+#### `wasmMetadata.metadata.source`
+
+A URL of the source code; wasm-tools fails on a string that is not a URL. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `repository` from `Cargo.toml`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.metadata.version`
+
+The version of the packaged software. `null` leaves it out.
+
+*Type:* null or string or package or absolute path
+
+*Default:* the package's `version` from `Cargo.toml`, with `cargoMetadata`; else `null`
+
+#### `wasmMetadata.wasmTools`
+
+The package to run instead of `wasm-tools` from the stage's `pkgs`.
 
 *Type:* null or package
 

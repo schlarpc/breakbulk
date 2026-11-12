@@ -46,7 +46,6 @@ let
   ];
   isExtractor = lib.hasPrefix "datboi-ex-";
   guestOf = c: if isExtractor c then "datboi-guest-extractor" else "datboi-guest-transform";
-  moduleName = c: lib.replaceStrings [ "-" ] [ "_" ] c;
 
   # ---- non-Rust inputs (the same recipes as flake.nix) ----------------------
 
@@ -102,41 +101,35 @@ let
 
   # ---- component stamping (flake.nix transformPackageFor) ---------------------
 
-  # After componentize: the D54 identity stamp, with the git tree hashes of
-  # the crate and its lane's guest crate as the revision; installed as
-  # lib/<module>.wasm, the layout DATBOI_COMPONENTS_DIR expects.
+  # The D54 revision: the git tree hashes of the crate and of its lane's
+  # guest crate.
+  revision =
+    c:
+    pkgs.runCommand "${c}-revision" { nativeBuildInputs = [ pkgs.gitMinimal ]; } ''
+      export GIT_DIR="$TMPDIR/rev-git"
+      git init -q "$GIT_DIR"
+      export GIT_INDEX_FILE="$TMPDIR/rev-index"
+      git --work-tree=${root + "/crates/${c}"} add -A
+      tree=$(git write-tree)
+      export GIT_INDEX_FILE="$TMPDIR/rev-index-guest"
+      git --work-tree=${root + "/crates/${guestOf c}"} add -A
+      guest=$(git write-tree)
+      printf 'tree:%s;guest:%s' "$tree" "$guest" > $out
+    '';
+
+  # After componentize: the D54 identity stamp. description, authors,
+  # licenses and version come from the crate's Cargo.toml; `install` then
+  # places the component as lib/<module>.wasm, the layout
+  # DATBOI_COMPONENTS_DIR expects.
   stamp =
     c:
-    { input, pkgs, ... }:
-    let
-      manifest = builtins.fromTOML (builtins.readFile (root + "/crates/${c}/Cargo.toml"));
-    in
-    pkgs.runCommand "${c}-stamped"
-      {
-        nativeBuildInputs = [
-          pkgs.wasm-tools
-          pkgs.gitMinimal
-        ];
-      }
-      ''
-        export GIT_DIR="$TMPDIR/rev-git"
-        git init -q "$GIT_DIR"
-        export GIT_INDEX_FILE="$TMPDIR/rev-index"
-        git --work-tree=${root + "/crates/${c}"} add -A
-        tree=$(git write-tree)
-        export GIT_INDEX_FILE="$TMPDIR/rev-index-guest"
-        git --work-tree=${root + "/crates/${guestOf c}"} add -A
-        guest=$(git write-tree)
-        mkdir -p $out/lib
-        wasm-tools metadata add ${input}/${moduleName c}.wasm \
-          --name "datboi:${lib.removePrefix "datboi-" c}" \
-          --description ${lib.escapeShellArg manifest.package.description} \
-          --authors ${lib.escapeShellArg (builtins.head manifest.package.authors)} \
-          --licenses ${lib.escapeShellArg manifest.package.license} \
-          --source "https://github.com/schlarpc/datboi/tree/main/crates/${c}" \
-          --revision "tree:$tree;guest:$guest" \
-          -o "$out/lib/${moduleName c}.wasm"
-      '';
+    breakbulk.stageHelpers.wasmMetadata {
+      metadata = {
+        name = "datboi:${lib.removePrefix "datboi-" c}";
+        source = "https://github.com/schlarpc/datboi/tree/main/crates/${c}";
+        revision = revision c;
+      };
+    };
 
   transforms = pkgs.symlinkJoin {
     name = "datboi-transforms";
@@ -284,7 +277,6 @@ in
           after = "componentize";
           run = stamp c;
         };
-        install = lib.mkForce null;
       };
     }))
   ];

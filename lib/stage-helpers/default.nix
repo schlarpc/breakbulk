@@ -572,53 +572,235 @@ let
           ''
       );
 
-  # `metadata` keys map to `wasm-tools metadata add` flags: strings and lists
-  # of strings become `--<kebab-key> value` (once per value); attribute sets
-  # (for `language`, `processedBy`, `sdk`) become `NAME=VERSION` values.
-  metadataArgs =
-    metadata:
-    lib.concatLists (
-      mapAttrsToList (
-        k: v:
+  # ---------------------------------------------------------------------
+  # wasm metadata (`wasm-tools metadata add`), shared by `componentize` and
+  # `wasmMetadata`
+
+  # A value: a string, or a derivation or path whose file the stage reads
+  # at build time. `str` first: `package` would turn a store-path string
+  # into a derivation, and such a string stays literal.
+  metadataValue = types.oneOf [
+    types.str
+    types.package
+    types.path
+  ];
+
+  # The fields `wasm-tools metadata add` writes as one string, and the
+  # `Cargo.toml` field each one defaults from (as cargo-component's
+  # `add_component_metadata` fills them), or null for none.
+  metadataStrings = {
+    name = {
+      what = "The module's or component's name, in the names section.";
+      cargo = "name";
+    };
+    authors = {
+      what = "The people or organisation responsible, a free-form string.";
+      cargo = "authors";
+    };
+    description = {
+      what = "A description.";
+      cargo = "description";
+    };
+    licenses = {
+      what = "The licenses, as an SPDX expression; wasm-tools fails on any other string.";
+      cargo = "license";
+    };
+    source = {
+      what = "A URL of the source code; wasm-tools fails on a string that is not a URL.";
+      cargo = "repository";
+    };
+    homepage = {
+      what = "A URL with more information; wasm-tools fails on a string that is not a URL.";
+      cargo = "homepage";
+    };
+    revision = {
+      what = "The source control revision.";
+      cargo = null;
+    };
+    version = {
+      what = "The version of the packaged software.";
+      cargo = "version";
+    };
+  };
+
+  # The defaults from a package's `[package]` table (`product.package`).
+  # Cargo's `authors` is a list; cargo-component joins it with ",".
+  cargoMetadataOf =
+    pkg:
+    lib.filterAttrs (_: v: v != null) (
+      lib.mapAttrs (
+        _: f:
         let
-          flag =
-            "--"
-            + lib.concatMapStrings (c: if lib.toLower c != c then "-" + lib.toLower c else c) (
-              lib.stringToCharacters k
-            );
-          values =
-            if isAttrs v then
-              mapAttrsToList (n: ver: "${n}=${ver}") v
-            else if builtins.isList v then
-              v
-            else
-              [ (toString v) ];
+          v = if f.cargo == null then null else pkg.${f.cargo} or null;
         in
-        lib.concatMap (x: [
-          flag
-          x
-        ]) values
-      ) (lib.filterAttrs (k: v: k != "_module" && v != null) metadata)
+        if builtins.isList v then (if v == [ ] then null else concatStringsSep "," v) else v
+      ) metadataStrings
     );
 
-  # A `metadata` field that `wasm-tools metadata add` writes as a custom
-  # section of one string.
-  metadataString =
-    what:
-    mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      description = "${what} `null` adds none.";
-    };
-  # A producers-section field: tool names to versions.
-  metadataProducers =
+  # A field counts as set by its definition's priority, not its value: a
+  # `null` the user sets leaves the field out, an unset field (also `null`)
+  # takes the Cargo.toml default.
+  defaultPrio = (lib.mkOptionDefault null).priority;
+
+  producersOption =
     what: example:
     mkOption {
-      type = types.attrsOf types.str;
+      type = types.attrsOf metadataValue;
       default = { };
       inherit example;
       description = "${what}, by name, as `NAME=VERSION` in the producers section.";
     };
+
+  metadataOption = mkOption {
+    type = types.submodule (
+      { options, ... }:
+      {
+        freeformType = types.attrsOf (
+          types.nullOr (
+            types.oneOf [
+              metadataValue
+              (types.listOf metadataValue)
+              (types.attrsOf metadataValue)
+            ]
+          )
+        );
+        options =
+          lib.mapAttrs (
+            _: f:
+            mkOption {
+              type = types.nullOr metadataValue;
+              default = null;
+              defaultText =
+                if f.cargo == null then
+                  literalExpression "null"
+                else
+                  lib.literalMD "the package's `${f.cargo}` from `Cargo.toml`${
+                    lib.optionalString (f.cargo == "authors") ", joined with `,`"
+                  }, with `cargoMetadata`; else `null`";
+              description = "${f.what} `null` leaves it out.";
+            }
+          ) metadataStrings
+          // {
+            language = producersOption "Source languages" { Rust = "1.99.0"; };
+            processedBy = producersOption "Tools that processed the module" { breakbulk = "0.1.0"; };
+            sdk = producersOption "SDKs" { wasi-sdk = "25"; };
+            explicit = mkOption {
+              type = types.listOf types.str;
+              internal = true;
+              readOnly = true;
+              description = "The string fields given, even as null, which `cargoMetadata` leaves alone.";
+            };
+          };
+        config.explicit = lib.filter (n: options.${n}.highestPrio < defaultPrio) (attrNames metadataStrings);
+      }
+    );
+    default = { };
+    example = literalExpression ''
+      {
+        name = "app:core";
+        revision = revisionFile;   # a derivation: its file's content
+        processedBy.breakbulk = "0.1.0";
+        homepage = null;           # not from Cargo.toml
+      }
+    '';
+    description = ''
+      Metadata for `wasm-tools metadata add`, which works on core
+      modules and on components. Each field is passed as the flag of
+      its name in kebab case: `processedBy` is `--processed-by`.
+
+      - A string is passed as it is.
+      - A derivation or a path is read when the stage runs: the flag
+        gets its file's content, without one trailing newline. A string
+        such as `"''${drv}"` is not read: it is passed as the store path
+        it names.
+      - A list is passed once per element.
+      - An attribute set is passed once per entry, as `NAME=VERSION`.
+      - `null` leaves the field out.
+
+      Fields not listed here are passed the same way, for the flags of
+      later wasm-tools versions. With `cargoMetadata`, each string field
+      that has a `Cargo.toml` field and is not set here, not even to
+      `null`, comes from the package's manifest.
+    '';
+  };
+
+  cargoMetadataOption = mkOption {
+    type = types.bool;
+    default = true;
+    description = ''
+      Fill the `metadata` fields that are not set from the package's
+      `Cargo.toml` (`product.package`), as cargo-component does:
+      `name`, `authors` (joined with `,`), `description`, `licenses`
+      (from `license`), `source` (from `repository`), `homepage` and
+      `version`, each when the manifest has it. `false` adds only what
+      `metadata` sets. A product without `package` (made with
+      `mkProduct` directly) gets no defaults.
+    '';
+  };
+
+  # The metadata to add: `metadata` with the defaults of `cargoMetadata`,
+  # without nulls and empty sets.
+  metadataOf =
+    cfg: product:
+    let
+      given = removeAttrs cfg.metadata [
+        "_module"
+        "explicit"
+      ];
+      defaults = lib.optionalAttrs cfg.cargoMetadata (
+        removeAttrs (cargoMetadataOf (product.package or { })) cfg.metadata.explicit
+      );
+    in
+    lib.filterAttrs (_: v: v != null && v != { } && v != [ ]) (given // defaults);
+
+  # Shell lines that set the array `meta` to the `wasm-tools metadata add`
+  # arguments for a metadataOf result, reading derivations and paths when
+  # the stage runs.
+  metadataShell =
+    helper: metadata:
+    let
+      flagOf =
+        k:
+        "--"
+        + lib.concatMapStrings (c: if lib.toLower c != c then "-" + lib.toLower c else c) (
+          lib.stringToCharacters k
+        );
+      isFile = v: isDerivation v || builtins.isPath v;
+      # One argument: `prefix` and then the value.
+      arg =
+        flag: prefix: v:
+        if isFile v then
+          ''
+            metaRead ${escapeShellArg "${v}"}
+            meta+=(${escapeShellArg flag} ${escapeShellArg prefix}"$metaValue")''
+        else
+          "meta+=(${escapeShellArg flag} ${escapeShellArg (prefix + v)})";
+      field =
+        k: v:
+        let
+          flag = flagOf k;
+        in
+        if isAttrs v && !(isDerivation v) then
+          mapAttrsToList (n: arg flag "${n}=") v
+        else if builtins.isList v then
+          map (arg flag "") v
+        else
+          [ (arg flag "" v) ];
+    in
+    ''
+      # metaValue: the content of file "$1", without one trailing newline.
+      metaRead() {
+        if [ ! -f "$1" ]; then
+          echo "${helper}: the metadata value $1 is not a file" >&2
+          exit 1
+        fi
+        metaValue=$(cat "$1"; echo x)
+        metaValue=''${metaValue%x}
+        metaValue=''${metaValue%$'\n'}
+      }
+      meta=()
+      ${concatStringsSep "\n" (lib.concatLists (mapAttrsToList field metadata))}
+    '';
 
   componentize =
     mkHelper
@@ -626,9 +808,13 @@ let
         name = "componentize";
         description = ''
           Makes a WebAssembly component from the input's single core
-          module with `wasm-tools component new`, then adds `metadata`
-          with `wasm-tools metadata add`. The module keeps its file name.
-          The `wasmComponent` preset's last stage before `install`.
+          module with `wasm-tools component new`, then adds metadata
+          with `wasm-tools metadata add`, as `wasmMetadata` does: by
+          default the fields of the package's `Cargo.toml`
+          (`cargoMetadata`), with `metadata` over them. With nothing to
+          add it runs no `metadata add`. The module keeps its file
+          name. The `wasmComponent` preset's last stage before
+          `install`.
         '';
         options = {
           adapter = mkOption {
@@ -661,44 +847,8 @@ let
               implements.
             '';
           };
-          metadata = mkOption {
-            type = types.submodule {
-              freeformType = types.attrsOf (
-                types.oneOf [
-                  types.str
-                  (types.listOf types.str)
-                  (types.attrsOf types.str)
-                ]
-              );
-              options = {
-                name = metadataString "The component's name, in the names section.";
-                language = metadataProducers "Source languages" { Rust = "1.99.0"; };
-                processedBy = metadataProducers "Tools that processed the component" { breakbulk = "0.1.0"; };
-                sdk = metadataProducers "SDKs" { wasi-sdk = "25"; };
-                authors = metadataString "The people or organisation responsible.";
-                description = metadataString "A description.";
-                licenses = metadataString "The licenses, as an SPDX expression.";
-                source = metadataString "A URL of the source code.";
-                homepage = metadataString "A URL with more information.";
-                revision = metadataString "The source control revision.";
-                version = metadataString "The version of the packaged software.";
-              };
-            };
-            default = { };
-            example = {
-              name = "comp";
-              processedBy.breakbulk = "0.1.0";
-              licenses = "MIT OR Apache-2.0";
-            };
-            description = ''
-              Metadata for `wasm-tools metadata add`. Each field is the
-              flag of its name in kebab case (`processedBy` is
-              `--processed-by`): a string or a list of strings is passed
-              once per value, an attribute set as `NAME=VERSION` per
-              entry. Fields not listed here are passed the same way, for
-              flags of later wasm-tools versions.
-            '';
-          };
+          metadata = metadataOption;
+          cargoMetadata = cargoMetadataOption;
           wasmTools = toolOption "wasm-tools";
         };
       }
@@ -724,7 +874,7 @@ let
                 "--adapt"
                 "${cfg.adapter}"
               ];
-          meta = metadataArgs cfg.metadata;
+          meta = metadataOf cfg product;
         in
         pkgs.runCommand (stageName product "componentize")
           { nativeBuildInputs = [ (toolOf cfg.wasmTools pkgs "wasm-tools") ]; }
@@ -736,14 +886,68 @@ let
             ${oneWasm "componentize"}
             wasm-tools component new "$wasm" ${escapeShellArgs adapt} -o "$wasm.component"
             ${
-              if meta == [ ] then
+              if meta == { } then
                 ''mv "$wasm.component" "$wasm"''
               else
                 ''
-                  wasm-tools metadata add ${escapeShellArgs meta} "$wasm.component" -o "$wasm"
+                  ${metadataShell "componentize" meta}
+                  wasm-tools metadata add "''${meta[@]}" "$wasm.component" -o "$wasm"
                   rm "$wasm.component"
                 ''
             }
+          ''
+      );
+
+  wasmMetadata =
+    mkHelper
+      {
+        name = "wasmMetadata";
+        description = ''
+          Adds `metadata` to every `.wasm` file in place with
+          `wasm-tools metadata add`, which works on core modules and on
+          components (on a component's outermost level). With
+          `cargoMetadata`, the default, the fields not set come from the
+          package's `Cargo.toml`. `componentize` adds metadata in the
+          same way; use this stage for a core module, or after
+          `componentize` for values it should not add. With nothing to
+          add it copies its input. It fails when the input has no
+          `.wasm` file.
+        '';
+        options = {
+          metadata = metadataOption;
+          cargoMetadata = cargoMetadataOption;
+          wasmTools = toolOption "wasm-tools";
+        };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          meta = metadataOf cfg product;
+        in
+        pkgs.runCommand (stageName product "wasmMetadata")
+          { nativeBuildInputs = [ (toolOf cfg.wasmTools pkgs "wasm-tools") ]; }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            copyIn "$out"
+            ${metadataShell "wasmMetadata" meta}
+            mapfile -d "" wasms < <(find "$out" -type f -name '*.wasm' -print0 | LC_ALL=C sort -z)
+            if [ "''${#wasms[@]}" -eq 0 ]; then
+              echo "wasmMetadata: no .wasm file in the input" >&2
+              exit 1
+            fi
+            [ "''${#meta[@]}" -gt 0 ] || exit 0
+            for f in "''${wasms[@]}"; do
+              echo "wasmMetadata: ''${f#$out/}"
+              wasm-tools metadata add "''${meta[@]}" "$f" -o "$f.meta"
+              mv "$f.meta" "$f"
+            done
           ''
       );
 
@@ -1774,6 +1978,7 @@ in
     bindgen
     wasmOpt
     componentize
+    wasmMetadata
     deterministicZip
     install
     buildScriptFiles

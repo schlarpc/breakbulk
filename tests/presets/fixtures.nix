@@ -1046,6 +1046,30 @@ let
         mkdir -p $out
         cp core.wat comp.wit meta.txt $out/
       '';
+      # The product, with no metadata set: componentize fills it from
+      # comp's Cargo.toml, `license` from the workspace's.
+      wasm-component-metadata =
+        pkgs.runCommand "wasm-component-metadata"
+          {
+            nativeBuildInputs = [
+              pkgs.wasm-tools
+              pkgs.jq
+            ];
+          }
+          ''
+            set -euo pipefail
+            wasm-tools metadata show --json ${t.packages.comp}/lib/comp.wasm | jq .component.metadata | tee $out
+            expect() {
+              [ "$(jq -r ".$1" $out)" = "$2" ] || { echo "$1 is not $2" >&2; exit 1; }
+            }
+            expect name comp
+            expect description 'A checksum component'
+            expect licenses 'MIT OR Apache-2.0'
+            expect source https://example.com/comp
+            expect version 0.1.0
+            expect homepage null
+            expect authors null
+          '';
     };
 
   # --- evaluation-time checks on preset values ---------------------------------

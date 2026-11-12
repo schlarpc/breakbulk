@@ -150,6 +150,12 @@ The `windows` preset packages the usual MSVC cross setup:
   Rust release bundles, so std, the C code and the library share one
   wasi-libc version.
 - `wasm-opt` works on core modules, so it runs before componentizing.
+- `componentize` adds metadata to the component, by default the name,
+  description, authors, license, repository, homepage and version from
+  the package's `Cargo.toml`, as cargo-component does. The
+  [`wasmMetadata`](../reference/stage-helpers.md#wasmmetadata) stage adds
+  metadata to core modules too, and takes values computed in a
+  derivation, such as a source revision.
 
 ## Static and musl
 

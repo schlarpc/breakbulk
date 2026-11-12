@@ -39,7 +39,7 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 | `stamps` | Git revision and `SOURCE_DATE_EPOCH` per package | linux-gnu | Only the stamped package's units change |
 | `msvc` | C code, a resource via `rustc-link-arg-bins`, bindgen | x86\_64 msvc, aarch64 msvc | Builds; tests pass under wine |
 | `wasm-browser` | wasm-bindgen, `ring`, getrandom backend cfg from config | wasm | Bindgen version matched; tests pass in Node, headless Chromium and headless Firefox |
-| `wasm-component` | C via `wasilibc`, componentize, metadata stamp | wasm | Component has no imports |
+| `wasm-component` | C via `wasilibc`, componentize, metadata stamp; `description`, `repository` and a workspace-inherited `license` in the manifest | wasm | Component has no imports; with no metadata set, the product's component has the manifest's name, description, licenses, source and version (`wasm-component-metadata`) |
 | `static` | musl and static-glibc products | musl x2, host | No `INTERP` or `NEEDED`; build scripts dynamic |
 | `same-triple` | Target spec with a marker linker and marker env on the host triple | host | No host unit (build-script compile, proc macro, host run) sees either marker; target-platform build-script runs do see spec env |
 | `variants` | Feature powerset, clippy, coverage, a custom profile that only inherits `release` | linux-gnu | Host units shared between build and clippy at the same profile; dependencies shared between check and clippy; no target units shared between build and coverage; all units shared between `release` and the custom profile |

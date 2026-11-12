@@ -331,6 +331,9 @@ let
       packageConfig ? _: [ ],
       ca ? null,
       lockfile ? null,
+      # Package name -> its `[package]` table, workspace fields resolved
+      # (manifest.packageInfo's `package`), for `product.package`.
+      cargoPackages ? { },
       # false: no default noSourceReferences check (`sourcePaths = "keep"`).
       defaultChecks ? true,
       sourcePaths ? attrValues inst.sources.workspace ++ attrValues inst.sources.crates,
@@ -436,14 +439,17 @@ let
               ;
             # `product` attributes; docs/src/reference/stage-functions.md
             # lists each (checked by products-product-attributes).
-            info = lib.optionalAttrs (lockfile != null) { inherit lockfile; } // {
-              inherit buildScriptFlags;
-              # A staticlib's objects keep their debug information with real
-              # source paths: the final link, not this product, decides
-              # whether to split or strip it.
-              sourcesAllowedIn = lib.attrNames (lib.filterAttrs (_: k: k == "staticlib") rootFiles);
-              inherit rootFiles;
-            };
+            info =
+              lib.optionalAttrs (lockfile != null) { inherit lockfile; }
+              // lib.optionalAttrs (cargoPackages ? ${pkg}) { package = cargoPackages.${pkg}; }
+              // {
+                inherit buildScriptFlags;
+                # A staticlib's objects keep their debug information with
+                # real source paths: the final link, not this product,
+                # decides whether to split or strip it.
+                sourcesAllowedIn = lib.attrNames (lib.filterAttrs (_: k: k == "staticlib") rootFiles);
+                inherit rootFiles;
+              };
           };
           extra = {
             inherit roots;

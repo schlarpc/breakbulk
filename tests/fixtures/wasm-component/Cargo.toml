@@ -2,7 +2,10 @@
 # docs/src/explanation/internals/testing.md): a
 # wasm32-unknown-unknown core module with C compiled against nixpkgs'
 # wasilibc, componentized by the product's stages. The component must have
-# no imports.
+# no imports. Its manifest fields are the component's metadata.
 [workspace]
 resolver = "3"
 members = ["comp"]
+
+[workspace.package]
+license = "MIT OR Apache-2.0"

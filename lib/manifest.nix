@@ -269,5 +269,8 @@ rec {
       # Cargo defaults version to 0.0.0 since 1.75.
       version = field "version" "0.0.0";
       edition = field "edition" "2015";
+      # The [package] table as written, with each field inherited from the
+      # workspace (`<field>.workspace = true`) replaced by its value there.
+      package = lib.mapAttrs (f: v: if isAttrs v && (v.workspace or false) then field f null else v) pkg;
     };
 }

@@ -1003,6 +1003,17 @@ let
       packageConfig = productConfig wsName triple vName;
       inherit (cfg) ca;
       lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
+      cargoPackages =
+        let
+          wsManifest = manifest.readManifest root (wsDirOf ws);
+        in
+        lib.mapAttrs (
+          _: m:
+          (manifest.packageInfo {
+            inherit root wsManifest;
+            dir = util.normalizeRel m.path;
+          }).package
+        ) ws.members;
       }
     );
 

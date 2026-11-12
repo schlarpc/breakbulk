@@ -50,6 +50,11 @@
 #                       with its versions, a missing key or links name
 #                       failing with what there is; options of both forms
 #                       or of neither fail evaluation
+#   stages-wasm-metadata  componentize's metadata: a revision read from a
+#                       derivation, defaults from `product.package`, a
+#                       field set to null left out; `cargoMetadata =
+#                       false` gives `wasm-tools component new`'s bytes;
+#                       wasmMetadata on a core module
 #
 # Reproducibility of the zip stage across real rebuilds is checked by hand
 # with `nix build --rebuild .#checks.x86_64-linux.stages-zip.zip` (the
@@ -596,7 +601,14 @@ let
     };
     testHelperComponentizeMetadata = {
       expr =
-        lib.hasInfix "wasm-tools metadata add --licenses MIT --name comp --processed-by 'breakbulk=0.1.0' --x-custom a --x-custom b "
+        lib.hasInfix ''
+          meta=()
+          meta+=(--licenses MIT)
+          meta+=(--name comp)
+          meta+=(--processed-by 'breakbulk=0.1.0')
+          meta+=(--x-custom a)
+          meta+=(--x-custom b)
+        ''
           (H.componentize {
             metadata = {
               name = "comp";
@@ -610,6 +622,96 @@ let
           } helperArgs).buildCommand;
       expected = true;
     };
+    # Defaults from `product.package`: a field given wins, `null` leaves
+    # one out, `cargoMetadata = false` adds none.
+    testHelperMetadataDefaults =
+      let
+        args = helperArgs // {
+          product = {
+            name = "p";
+            package = {
+              name = "p";
+              version = "1.2.3";
+              authors = [
+                "A"
+                "B"
+              ];
+              description = "From the manifest";
+              license = "MIT";
+              repository = "https://example.com/p";
+              edition = "2021";
+            };
+          };
+        };
+        metaOf = h: lib.filter (lib.hasPrefix "meta+=") (map lib.trim (lib.splitString "\n" (h args).buildCommand));
+      in
+      {
+        expr = {
+          defaults = metaOf H.wasmMetadata;
+          given = metaOf (
+            H.wasmMetadata {
+              metadata = {
+                name = "q";
+                licenses = null;
+              };
+            }
+          );
+          off = metaOf (H.componentize { cargoMetadata = false; });
+        };
+        expected = {
+          defaults = [
+            "meta+=(--authors A,B)"
+            "meta+=(--description 'From the manifest')"
+            "meta+=(--licenses MIT)"
+            "meta+=(--name p)"
+            "meta+=(--source https://example.com/p)"
+            "meta+=(--version 1.2.3)"
+          ];
+          given = [
+            "meta+=(--authors A,B)"
+            "meta+=(--description 'From the manifest')"
+            "meta+=(--name q)"
+            "meta+=(--source https://example.com/p)"
+            "meta+=(--version 1.2.3)"
+          ];
+          off = [ ];
+        };
+      };
+    # A derivation or a path is read at build time; a string naming a
+    # store path stays a literal.
+    testHelperMetadataFiles =
+      let
+        file = pkgs.writeText "rev" "abc\n";
+        path = builtins.unsafeDiscardStringContext "${file}";
+        cmd =
+          (H.wasmMetadata {
+            cargoMetadata = false;
+            metadata = {
+              revision = file;
+              source = "${file}";
+              processedBy.tool = file;
+            };
+          } helperArgs).buildCommand;
+      in
+      {
+        expr = lib.filter (lib.hasPrefix "meta") (
+          map lib.trim (
+            lib.splitString "\n" (lib.replaceStrings [ path ] [ "FILE" ] (builtins.unsafeDiscardStringContext cmd))
+          )
+        );
+        expected = [
+          "metaRead() {"
+          "metaValue=$(cat \"$1\"; echo x)"
+          "metaValue=\${metaValue%x}"
+          "metaValue=\${metaValue%$'\\n'}"
+          "meta=()"
+          "metaRead FILE"
+          "meta+=(--processed-by 'tool='\"$metaValue\")"
+          "metaRead FILE"
+          "meta+=(--revision ''\"$metaValue\")"
+          "meta+=(--source FILE)"
+        ];
+      };
     # Every helper the library exports declares a kind and describes
     # itself and each option (the generated reference lists them).
     testHelperDeclarations = {
@@ -854,6 +956,64 @@ let
     # As mkProducts gives it: install places the root's file by kind.
     info.rootFiles."adder.wasm" = "cdylib";
     inherit pkgs;
+  };
+
+  # --- wasm metadata -----------------------------------------------------------
+
+  # A revision computed in a derivation, as a stamp would compute one.
+  revisionFile = pkgs.runCommand "adder-revision" { } "printf 'tree:abc;guest:def\\n' > $out";
+  # The adder as a product of a package with these manifest fields.
+  withPackage =
+    stages:
+    S.mkProduct {
+      name = "adder";
+      linked = addLinked;
+      inherit stages pkgs;
+      target.triple = "wasm32-unknown-unknown";
+      info = {
+        rootFiles."adder.wasm" = "cdylib";
+        package = {
+          name = "adder";
+          version = "0.3.0";
+          authors = [
+            "A. Author"
+            "B. Author"
+          ];
+          description = "Adds two numbers";
+          license = "MIT OR Apache-2.0";
+          repository = "https://example.com/adder";
+          homepage = "https://example.com/";
+        };
+      };
+    };
+  componentized =
+    componentizeRun:
+    withPackage (
+      S.merge [
+        S.defaultStages.wasmComponent
+        { componentize.run = componentizeRun; }
+      ]
+    );
+  metaDefaults = componentized (
+    H.componentize {
+      metadata = {
+        revision = revisionFile;
+        homepage = null;
+      };
+    }
+  );
+  metaOff = componentized (H.componentize { cargoMetadata = false; });
+  # A core module, not componentized.
+  metaCore = withPackage {
+    meta = {
+      after = "linked";
+      run = H.wasmMetadata {
+        metadata = {
+          name = "adder-core";
+          revision = revisionFile;
+        };
+      };
+    };
   };
 
   # --- zip -------------------------------------------------------------------
@@ -1467,6 +1627,58 @@ in
         grep -q 'adder' meta.txt
         grep -q 'Rust.*1.99.0' meta.txt
         grep -q 'breakbulk.*0.0.0' meta.txt
+        touch $out
+      '';
+
+  stages-wasm-metadata =
+    pkgs.runCommand "stages-wasm-metadata"
+      {
+        nativeBuildInputs = [
+          pkgs.wasm-tools
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        # The outermost component's or module's field, or "null".
+        field() { wasm-tools metadata show --json "$1" | jq -r "(.component.metadata // .module).$2"; }
+        expect() {
+          local got
+          got=$(field "$1" "$2")
+          if [ "$got" != "$3" ]; then
+            echo "$1: $2 is '$got', not '$3'" >&2
+            exit 1
+          fi
+        }
+
+        c=${metaDefaults}/lib/adder.wasm
+        wasm-tools print $c | head -n1 | grep -q '^(component'
+        wasm-tools metadata show $c
+        # From the derivation, without its trailing newline.
+        expect $c revision 'tree:abc;guest:def'
+        # From the package's manifest.
+        expect $c name adder
+        expect $c description 'Adds two numbers'
+        expect $c licenses 'MIT OR Apache-2.0'
+        expect $c source https://example.com/adder
+        expect $c authors 'A. Author,B. Author'
+        expect $c version 0.3.0
+        # Set to null: left out.
+        expect $c homepage null
+
+        # cargoMetadata = false and no metadata: wasm-tools component new's
+        # bytes, as before metadata defaults.
+        wasm-tools component new ${metaOff.stages.wasmOpt}/adder.wasm -o plain.wasm
+        cmp plain.wasm ${metaOff}/lib/adder.wasm
+
+        # A core module.
+        m=${metaCore}/lib/adder.wasm
+        wasm-tools print $m | head -n1 | grep -q '^(module'
+        wasm-tools metadata show $m
+        expect $m name adder-core
+        expect $m revision 'tree:abc;guest:def'
+        expect $m description 'Adds two numbers'
+        expect $m homepage https://example.com/
         touch $out
       '';
 

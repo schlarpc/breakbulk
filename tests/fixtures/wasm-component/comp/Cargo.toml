@@ -3,6 +3,11 @@ name = "comp"
 version = "0.1.0"
 edition = "2024"
 publish = false
+# componentize's metadata defaults (the wasm-component-metadata check);
+# `license` is inherited from the workspace.
+description = "A checksum component"
+license.workspace = true
+repository = "https://example.com/comp"
 
 [lib]
 crate-type = ["cdylib"]

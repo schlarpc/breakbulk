@@ -64,7 +64,8 @@ The helpers are in `lib/stage-helpers/default.nix`. Each is made with `mkHelper`
 | [`patchelfRpath`](../../reference/stage-helpers.md#patchelfrpath) | Adds rpaths for libraries loaded at runtime, after any rpath shrinking |
 | [`bindgen`](../../reference/stage-helpers.md#bindgen) | Lockfile-matched `wasm-bindgen` ([where the CLI comes from](../../reference/stage-helpers.md#bindgenwasmbindgen)) |
 | [`wasmOpt`](../../reference/stage-helpers.md#wasmopt) | `wasm-opt` on a core module |
-| [`componentize`](../../reference/stage-helpers.md#componentize) | `wasm-tools component new`, then `wasm-tools metadata add` |
+| [`componentize`](../../reference/stage-helpers.md#componentize) | `wasm-tools component new`, then `wasm-tools metadata add` as `wasmMetadata` |
+| [`wasmMetadata`](../../reference/stage-helpers.md#wasmmetadata) | `wasm-tools metadata add` on every `.wasm` file. Each field becomes the flag of its kebab-case name; the defaults come from `product.package` (the package's `[package]` table, read with `manifest.packageInfo` at evaluation time in both modes); a derivation or path value is read when the stage runs, so the flags are an array the stage builds, not arguments fixed at evaluation |
 | [`deterministicZip`](../../reference/stage-helpers.md#deterministiczip) | Sorted entries, fixed timestamps, no extra attributes |
 | [`install`](../../reference/stage-helpers.md#install) | Final layout; the link units' debuginfo side files (`.pdb`) in a `debug` output in the same layout, when no earlier stage split debug information |
 | [`buildScriptFiles`](../../reference/stage-helpers.md#buildscriptfiles) | Copies the files build scripts placed next to the binaries into the product |
