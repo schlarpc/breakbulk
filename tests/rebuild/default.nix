@@ -124,6 +124,7 @@ let
     optional-dependency = [ repository.repos.optionalDep ];
     out-dir-walk = [ dynamic.repos.out-dir-walk ];
     outside-reads = [ repository.repos.outside ];
+    own-view = [ repository.repos.ownView ];
     pkgid-short = [
       (plainAt "app" "pkgid-short" [
         {

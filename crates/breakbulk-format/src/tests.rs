@@ -12,7 +12,7 @@ const APP: &str = "path+file:///build/skeleton/app#0.1.0";
 fn example_json() -> String {
     format!(
         r#"{{
-  "version": 3,
+  "version": 4,
   "kind": "build",
   "cargo": "1.96.1", "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
   "target": "wasm32-unknown-unknown",
@@ -266,8 +266,8 @@ fn schema_is_strict() {
         1,
     );
     assert!(Plan::from_json(&json).is_err());
-    let json = example_json().replacen(r#""version": 3"#, r#""version": 4"#, 1);
-    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(4))));
+    let json = example_json().replacen(r#""version": 4"#, r#""version": 5"#, 1);
+    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(5))));
 }
 
 #[test]
@@ -551,6 +551,7 @@ impl Resolve for Fake {
                 Some(f) => format!("/nix/store/{}-{}/{f}", o.out, o.output),
                 None => format!("/nix/store/{}-{}", o.out, o.output),
             },
+            Reference::Empty(e) => format!("/nix/store/empty/{}", e.rel),
         })
     }
     fn flags(&self, run: &UnitId) -> Result<String, String> {
@@ -563,6 +564,7 @@ impl Resolve for Fake {
                 format!("/crates/{}", s.crate_src.rsplit('#').next().unwrap())
             }
             Reference::Out(o) => format!("/out/{}", o.out),
+            Reference::Empty(_) => unreachable!("the empty directory is not remapped"),
         })
     }
 }
@@ -659,6 +661,36 @@ fn render_configuration_hooks() {
     };
     assert!(c.remap.is_empty());
     assert_eq!(c.remap_scope.as_deref(), Some("macro,diagnostics"));
+}
+
+/// An `empty` reference: its JSON form, validated like the others, rendered
+/// below the empty directory, with no remap of its own.
+#[test]
+fn empty_references() {
+    let mut p = example();
+    let r = |rel: &str| {
+        Text::Concat(vec![Piece::Ref(Reference::Empty(EmptyRef {
+            rel: rel.into(),
+        }))])
+    };
+    compile(&mut p, "c-ring")
+        .env
+        .insert("BB_ROOT".into(), r("assets"));
+    let json = p.to_canonical_json();
+    assert!(json.contains(r#""BB_ROOT":[{"empty":"assets"}]"#), "{json}");
+    let mut back = Plan::from_json(&json).unwrap();
+    assert_eq!(compile(&mut back, "c-ring").env["BB_ROOT"], r("assets"));
+    assert_eq!(errors(&p), Vec::<String>::new());
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
+        panic!()
+    };
+    assert_eq!(c.env["BB_ROOT"], "/nix/store/empty/assets");
+    assert_eq!(c.remap.len(), 2, "{:?}", c.remap);
+
+    compile(&mut p, "c-ring")
+        .env
+        .insert("BB_ROOT".into(), r("/abs"));
+    assert_error(&p, "`rel` must be relative");
 }
 
 /// A run's C prefix maps under Cargo's trim-paths use Cargo's

@@ -283,6 +283,7 @@ impl Resolve for Real<'_> {
         };
         match r {
             Reference::Src(s) => Ok(join(&self.skeleton, &s.rel)),
+            Reference::Empty(e) => Ok(join(&self.skeleton, &e.rel)),
             Reference::CrateSrc(s) => self
                 .crate_dirs
                 .get(&s.crate_src)
@@ -941,7 +942,7 @@ mod tests {
     #[test]
     fn trim_paths_forms() {
         let mut plan: Plan = serde_json::from_value(serde_json::json!({
-            "version": 3, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
+            "version": 4, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
             "host": "h", "target": "t",
             "variant": { "profile": "dev", "features": [], "mode": "build" },
             "skeletonRoot": "/build/skeleton", "trimPaths": true, "trimPathsDefault": true,

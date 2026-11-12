@@ -108,6 +108,7 @@ fn input_value(key: &str) -> String {
     match key {
         "src:smokelib" => "/nix/store/33333333333333333333333333333333-source".into(),
         "src:smokeapp" => "/nix/store/44444444444444444444444444444444-source".into(),
+        keys::EMPTY_DIR => "/nix/store/99999999999999999999999999999999-empty".into(),
         "tool:rustc" => RUSTC.into(),
         "tool:breakbulk-unit" => UNIT.into(),
         "tool:shell" => SHELL.into(),
@@ -188,6 +189,7 @@ impl Resolve for RealPaths<'_> {
                 s.rel.as_str(),
             ),
             Reference::CrateSrc(s) => (input_value(&keys::crate_src(&s.crate_src)), s.rel.as_str()),
+            Reference::Empty(e) => (input_value(keys::EMPTY_DIR), e.rel.as_str()),
             Reference::Out(o) => {
                 let output = match &self.0.plan.units[&o.out] {
                     Unit::Run(_) => "out",
@@ -213,6 +215,7 @@ impl Resolve for RealPaths<'_> {
                 format!("{n}-{v}")
             }
             Reference::Out(o) => format!("/breakbulk/build/{}", o.out),
+            Reference::Empty(_) => unreachable!(),
         })
     }
     fn keep_source_paths(&self) -> bool {

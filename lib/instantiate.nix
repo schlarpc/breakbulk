@@ -51,6 +51,18 @@ let
     "host"
     "target"
   ];
+
+  # What the plan's `empty` references resolve in: repository paths in the
+  # units of registry and git crates, which have no source view. This
+  # directory, copied with every entry left out. Not nixpkgs'
+  # emptyDirectory: that is built with stdenv and changes with nixpkgs,
+  # and with it every unit that names it. This store path depends only on
+  # its name and its (empty) contents.
+  emptyDir = builtins.path {
+    name = "empty";
+    path = ./.;
+    filter = _: _: false;
+  };
 in
 rec {
   instantiate =
@@ -185,6 +197,9 @@ rec {
         // lib.mapAttrs' (d: v: lib.nameValuePair "test-src:${d}" (str v)) workspaceTest
         // lib.mapAttrs' (d: v: lib.nameValuePair "clippy-conf:${d}" (str v)) clippyConf
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
+        // {
+          "empty-dir" = str emptyDir;
+        }
         // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
         // lib.concatMapAttrs (
           p: s:

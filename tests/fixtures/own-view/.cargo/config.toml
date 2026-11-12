@@ -1,0 +1,9 @@
+# Paths relative to the repository root, this file's directory's parent.
+# Cargo sets them on every compile, registry crates' included.
+[env]
+# The repository root, with a trailing `/`.
+BB_ROOT = { value = "", relative = true }
+# A root-level directory, in the root package's directory.
+BB_ASSETS = { value = "assets", relative = true }
+# A directory inside the member lib1.
+BB_LIB1_DATA = { value = "crates/lib1/data", relative = true }

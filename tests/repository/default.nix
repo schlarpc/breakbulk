@@ -197,6 +197,28 @@ let
   outsideAsset = mkRepo (edited "outside-reads" "echo 'asset v2' > assets/data.txt") outsideModules;
   outsideSchema = mkRepo (edited "outside-reads" "echo 'hello v2' > schema/greeting.txt") outsideModules;
 
+  # --- own-view ------------------------------------------------------------------
+
+  ownViewModules = [
+    {
+      workspaces.main = {
+        path = ".";
+        variants.default.profile = "dev";
+      };
+      workspaces.virt = {
+        path = "virtual";
+        variants.default.profile = "dev";
+      };
+      packages.app.extraSources = [ "crates/lib1/data" ];
+      packages.lib1.extraSources = [ "assets" ];
+      packages.vmember.extraSources = [ "assets" ];
+    }
+  ];
+  ownView = mkRepo (fixtures + "/own-view") ownViewModules;
+  ownViewNotes = mkRepo (edited "own-view" "echo changed >> notes.txt") ownViewModules;
+  ownViewApp = mkRepo (edited "own-view" "echo '// edited' >> src/main.rs") ownViewModules;
+  ownViewAsset = mkRepo (edited "own-view" "echo 'asset v2' > assets/data.txt") ownViewModules;
+
   # --- stamps --------------------------------------------------------------------
 
   stampsWith =
@@ -378,6 +400,7 @@ in
     inherit
       multiWs
       outside
+      ownView
       stampsA
       rf
       optionalDep
@@ -551,6 +574,75 @@ in
     "app-0.1.0-test"
     "reader-0.1.0-lib"
     "reader-0.1.0-test"
+  ];
+
+  # Repository paths resolve in each unit's own view. lib1, a member of a
+  # workspace whose root is the package app, compiles in the workspace
+  # root, in its own view; config `[env]` paths reach a crate that lists
+  # them in extraSources, also in another package's directory, and the
+  # registry crate itoa's units in both workspaces (the virtual one too)
+  # as the empty directory, keeping the trailing `/` of the root.
+  own-view =
+    let
+      # The build plan's compile unit of a package, by an infix of its id.
+      unitOf =
+        ws: infix:
+        let
+          plan = builtins.fromJSON (
+            builtins.unsafeDiscardStringContext (
+              builtins.readFile "${ownView.workspaces.${ws}.instances.${native}.default.plans.build}/plan.json"
+            )
+          );
+        in
+        lib.head (lib.attrValues (lib.filterAttrs (_: u: u.kind == "compile" && lib.hasInfix infix u.package) plan.units));
+      lib1 = unitOf "main" "/crates/lib1#";
+      itoaPaths =
+        ws:
+        let
+          u = unitOf ws "#itoa@";
+        in
+        lib.assertMsg (
+          u.env.BB_ROOT == [ { empty = ""; } "/" ] && u.env.BB_ASSETS == [ { empty = "assets"; } ]
+        ) "own-view: itoa's config paths in ${ws} are ${builtins.toJSON { inherit (u.env) BB_ROOT BB_ASSETS; }}";
+    in
+    assert itoaPaths "main";
+    assert itoaPaths "virt";
+    assert lib.assertMsg (
+      lib1.cwd == { src = lib1.package; rel = ""; } && lib1.env.BB_LIB1_DATA == [ { src = lib1.package; rel = "crates/lib1/data"; } ]
+    ) "own-view: lib1's cwd ${builtins.toJSON lib1.cwd} and BB_LIB1_DATA ${builtins.toJSON lib1.env.BB_LIB1_DATA}";
+    pkgs.runCommand "own-view"
+      {
+        app = ownView.workspaces.main.packages.app;
+        vmember = ownView.workspaces.virt.packages.vmember;
+        # Every test run (lib1's integration test) and product.
+        all = ownView.checks.all;
+      }
+      ''
+        got=$($app/bin/app); echo "$got"
+        [ "$got" = "app: asset v1 | lib1 data | lib1: lib1 data | asset v1 | 7" ]
+        got=$($vmember/bin/vmember); echo "$got"
+        [ "$got" = "vmember: asset v1 3" ]
+        touch $out
+      '';
+  # A file of the root package's directory reaches only the root package's
+  # units: not the member's, whose working directory is the workspace
+  # root, nor the registry crate's, which carry the root as a config path.
+  own-view-notes = invalidation "own-view-notes" ownView ownViewNotes [
+    "app-0.1.0-bin"
+    "app-0.1.0-test"
+  ];
+  own-view-app = invalidation "own-view-app" ownView ownViewApp [
+    "app-0.1.0-bin"
+    "app-0.1.0-test"
+  ];
+  # The root-level directory reaches the root package and lib1, which lists
+  # it, and their dependents; not itoa.
+  own-view-asset = invalidation "own-view-asset" ownView ownViewAsset [
+    "app-0.1.0-bin"
+    "app-0.1.0-test"
+    "lib1-0.1.0-lib"
+    "lib1-0.1.0-test"
+    "lib1-0.1.0-test-it"
   ];
 
   # A per-package stamp reaches only that package's units.

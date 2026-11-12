@@ -221,7 +221,8 @@ pub fn link_packages<'a>(
 
 /// The bases a compile unit's paths are remapped from: the source view or
 /// crate source of every `src` and `crateSrc` reference (with `rel` empty),
-/// and every run `out` reference (an `OUT_DIR`).
+/// and every run `out` reference (an `OUT_DIR`). Not the directory of
+/// `empty` references: no compiled file is in it.
 pub fn remap_bases(plan: &Plan, unit: &Unit) -> BTreeSet<Reference> {
     let mut bases = BTreeSet::new();
     for_each_reference(unit, &mut |r, _| {
@@ -241,7 +242,7 @@ pub fn remap_bases(plan: &Plan, unit: &Unit) -> BTreeSet<Reference> {
                     file: None,
                 })
             }
-            Reference::Out(_) => return,
+            Reference::Out(_) | Reference::Empty(_) => return,
         };
         bases.insert(base);
     });

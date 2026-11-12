@@ -8,16 +8,17 @@
 //! | --- | --- |
 //! | a compile unit's output file (both build-directory layouts) | `{"out": unit, "output": …, "file": …}` |
 //! | a run's `OUT_DIR`, or a path below it | `{"out": run, "output": "out"}` and the rest |
-//! | `<skeleton>/<rel>` | `{"src": <path package>, "rel": <rel>}` |
+//! | `<skeleton>/<rel>` in a path package's unit | `{"src": <that package>, "rel": <rel>}` |
+//! | `<skeleton>/<rel>` in another package's unit | `{"empty": <rel>}` |
 //! | `<crate dir>/<rel>` of a non-path package | `{"crateSrc": <package id>, "rel": <rel>}` |
 //!
 //! Outputs are known from the shim's compile records, so no layout is
 //! parsed: an output path is looked up as it is. Any other path inside the
 //! planner's scratch directory is an error naming the value.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use breakbulk_format::{CrateSrcRef, OutRef, Piece, Platform, Reference, SrcRef, Text};
+use breakbulk_format::{CrateSrcRef, EmptyRef, OutRef, Piece, Platform, Reference, SrcRef, Text};
 
 use crate::Error;
 use crate::records::Metadata;
@@ -29,8 +30,10 @@ pub struct Rewriter {
     pub scratch: String,
     /// The skeleton root: path packages live below it.
     pub skeleton: String,
-    /// Path packages: directory → package id. Longest prefix wins.
-    pub path_packages: Vec<(String, String)>,
+    /// The packages with a source view: the path packages in the
+    /// skeleton. Registry and git crates have none, nor, under
+    /// -Zbuild-std, the standard library's path packages.
+    pub viewed: BTreeSet<String>,
     /// Other packages: crate directory (as Cargo names it, and resolved
     /// through symlinks) → package id.
     pub crate_dirs: Vec<(String, String)>,
@@ -90,7 +93,9 @@ impl Rewriter {
         for p in &metadata.packages {
             let dir = p.dir().to_owned();
             if p.is_path() {
-                r.path_packages.push((dir, p.id.clone()));
+                if under(&dir, &r.skeleton).is_some() {
+                    r.viewed.insert(p.id.clone());
+                }
             } else {
                 if let Ok(c) = std::fs::canonicalize(&dir) {
                     let c = c.to_string_lossy().into_owned();
@@ -102,8 +107,6 @@ impl Rewriter {
             }
         }
         // Longest first, so nested packages win.
-        r.path_packages
-            .sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
         r.crate_dirs
             .sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
         r
@@ -246,28 +249,28 @@ impl Rewriter {
                  and no build script's OUT_DIR"
             )));
         }
-        if under(p, &self.skeleton).is_some() {
-            // A path inside a package belongs to that package's source view.
-            // Any other skeleton path (the workspace root, Cargo's working
-            // directory for members) is resolved in the owning unit's own
-            // view, which is rooted at the repository root too.
-            let owned = owner.filter(|o| self.path_packages.iter().any(|(_, id)| id == o));
-            let Some(id) = self
-                .path_packages
-                .iter()
-                .find(|(d, _)| under(p, d).is_some())
-                .map(|(_, id)| id.as_str())
-                .or(owned)
-            else {
+        if let Some(rel) = under(p, &self.skeleton) {
+            // In the owning unit's own view (rooted at the repository root,
+            // like every view), not in the view of the package whose
+            // directory holds the path: that would tie the unit to all of
+            // that package's files (all of the root package's, for the
+            // workspace root, Cargo's working directory for members), and
+            // the root package's view leaves out its members' directories.
+            let Some(owner) = owner else {
                 return Err(Error(format!(
-                    "`{p}` is in the skeleton but in no package's directory"
+                    "`{p}` is in the repository, but the value belongs to no package"
                 )));
             };
-            let rel = under(p, &self.skeleton).expect("checked above").to_owned();
-            return Ok(vec![Piece::Ref(Reference::Src(SrcRef {
-                src: id.to_owned(),
-                rel,
-            }))]);
+            let rel = rel.to_owned();
+            let r = if self.viewed.contains(owner) {
+                Reference::Src(SrcRef {
+                    src: owner.to_owned(),
+                    rel,
+                })
+            } else {
+                Reference::Empty(EmptyRef { rel })
+            };
+            return Ok(vec![Piece::Ref(r)]);
         }
         for (dir, id) in &self.crate_dirs {
             if let Some(rest) = under(p, dir) {
@@ -288,8 +291,13 @@ impl Rewriter {
             if i > at {
                 pieces.push(Piece::Literal(s[at..i].to_owned()));
             }
-            pieces.extend(self.path(&s[i..end], owner)?);
-            at = end;
+            // A trailing `/` stays text: a reference to a directory resolves
+            // without one (`relative = true` with an empty value names the
+            // config's directory with a trailing `/`).
+            let p = &s[i..end];
+            let p = p.strip_suffix('/').filter(|p| !p.is_empty()).unwrap_or(p);
+            pieces.extend(self.path(p, owner)?);
+            at = i + p.len();
         }
         if at < s.len() {
             pieces.push(Piece::Literal(s[at..].to_owned()));
@@ -324,7 +332,7 @@ mod tests {
         let r = Rewriter {
             scratch: "/build/scratch/target".into(),
             skeleton: "/build/skeleton".into(),
-            path_packages: vec![("/build/skeleton/app".into(), app.into())],
+            viewed: [app.to_owned()].into(),
             ..Default::default()
         };
         let src = |rel: &str| {
@@ -347,6 +355,57 @@ mod tests {
                 Piece::Literal("\x1f-L\x1f".into()),
                 src("app/b"),
             ])
+        );
+    }
+
+    #[test]
+    fn repository_paths_resolve_in_the_owners_view() {
+        let app = "path+file:///build/skeleton#app@0.1.0";
+        let lib1 = "path+file:///build/skeleton/crates/lib1#0.1.0";
+        let itoa = "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.11";
+        let r = Rewriter {
+            scratch: "/build/scratch/target".into(),
+            skeleton: "/build/skeleton".into(),
+            viewed: [app.to_owned(), lib1.to_owned()].into(),
+            ..Default::default()
+        };
+        let src = |id: &str, rel: &str| {
+            vec![Piece::Ref(Reference::Src(SrcRef {
+                src: id.into(),
+                rel: rel.into(),
+            }))]
+        };
+        // The workspace root and a path in another package's directory:
+        // each unit's own view, also for a member nested in the root
+        // package's directory.
+        for p in [
+            "/build/skeleton",
+            "/build/skeleton/assets",
+            "/build/skeleton/src",
+        ] {
+            let rel = under(p, "/build/skeleton").unwrap();
+            assert_eq!(r.path(p, Some(lib1)).unwrap(), src(lib1, rel));
+            assert_eq!(r.path(p, Some(app)).unwrap(), src(app, rel));
+        }
+        assert_eq!(
+            r.path("/build/skeleton/crates/lib1/data", Some(app))
+                .unwrap(),
+            src(app, "crates/lib1/data")
+        );
+        // A registry crate's unit has no view: the empty directory.
+        assert_eq!(
+            r.path("/build/skeleton/assets", Some(itoa)).unwrap(),
+            vec![Piece::Ref(Reference::Empty(EmptyRef {
+                rel: "assets".into()
+            }))]
+        );
+        assert!(r.path("/build/skeleton/assets", None).is_err());
+        // `relative = true` with an empty value: the trailing `/` stays.
+        let mut root = src(lib1, "");
+        root.push(Piece::Literal("/".into()));
+        assert_eq!(
+            r.text("/build/skeleton/", Some(lib1)).unwrap(),
+            Text::Concat(root)
         );
     }
 

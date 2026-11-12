@@ -53,7 +53,8 @@ set up the same home in their own derivation
    - workspace members: the package's path from the repository root.
 
    With Cargo's remaps and `trimPathsDefault`, add only the scope.
-5. Point `--out-dir` at `$TMPDIR/out` and run the recorded program.
+5. Point `--out-dir` at `$TMPDIR/out` and run the recorded program in
+   its [working directory](#working-directory).
 6. Parse rustc's JSON diagnostics from stderr, print each `rendered`
    field, and drop artifact notifications. Without this, build logs are
    unreadable JSON. If rustc fails and its output names a path under one
@@ -63,6 +64,29 @@ set up the same home in their own derivation
    to `$rlib`, binaries and cdylibs to `$out` (a bin under the name the
    plan's `uplifted` gives it), debuginfo side files to `$debug`. Discard
    dep-info.
+
+### Working directory
+
+A compile (and a doctest) runs in the directory Cargo ran it in, with the
+path rewritten like every other ([Path
+rewriting](../explanation/internals/planner.md#path-rewriting)):
+
+- A workspace package's unit: the workspace root, inside the unit's own
+  source view (its test view for a test unit). Cargo runs rustc and
+  rustdoc of a package in its workspace in the workspace root, with a
+  source path relative to it: `crates/lib1/src/lib.rs` for a member in
+  `crates/lib1`. Every view is rooted at the repository root, so a
+  workspace in `ws/` runs in `<view>/ws`. A member of a workspace whose
+  root is also a package therefore runs in its own view, not in the root
+  package's.
+- A path package outside its workspace's directory: its package
+  directory, in its own view.
+- A registry or git crate's unit: its crate source.
+- Under `-Zbuild-std`, the standard library's units: their directory in
+  the toolchain.
+
+A build-script run runs in its package directory: in the package's
+source view, or in the crate source.
 
 ### The dependency directory
 

@@ -107,6 +107,8 @@ pub mod keys {
     pub fn crate_src(id: &str) -> String {
         format!("crate:{id}")
     }
+    /// The constant empty directory of `empty` references.
+    pub const EMPTY_DIR: &str = "empty-dir";
     pub fn tool(name: &str) -> String {
         format!("tool:{name}")
     }
@@ -329,6 +331,7 @@ impl Resolve for Tokens<'_> {
                 }
                 (self.input(keys::crate_src(&s.crate_src)), s.rel.as_str())
             }
+            Reference::Empty(e) => (self.input(keys::EMPTY_DIR.into()), e.rel.as_str()),
             Reference::Out(o) => {
                 let output = match self.inputs.plan.units.get(&o.out) {
                     Some(Unit::Run(_)) => "out",
@@ -367,6 +370,7 @@ impl Resolve for Tokens<'_> {
                 None => return err(format!("cannot name the crate source {}", s.crate_src)),
             },
             Reference::Out(o) => format!("/breakbulk/build/{}", o.out),
+            Reference::Empty(_) => return err("the empty directory is not remapped"),
         })
     }
 

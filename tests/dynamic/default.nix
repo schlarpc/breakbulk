@@ -329,6 +329,7 @@ let
     # tests/repository
     multi-ws = repository.multiWs;
     outside-reads = repository.outside;
+    own-view = repository.ownView;
     stamps = repository.stampsA;
     missing-input = repository.provided;
     test-only = repository.testOnly;

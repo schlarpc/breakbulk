@@ -7,7 +7,7 @@ it depends on (`…` marks elided values):
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "kind": "build",
   "cargo": "1.96.1",
   "rustc": "1.96.1 (…)",
@@ -63,7 +63,7 @@ it depends on (`…` marks elided values):
 
 ## Fields
 
-- **Argument segments.** A string is a literal argument. An array is one argument made by concatenating literals and references. A reference object is `src`, `crateSrc` or `out`. A splice object expands at build time to zero or more arguments, wrapped as the sentinel table shows, in the order the script printed them:
+- **Argument segments.** A string is a literal argument. An array is one argument made by concatenating literals and references. A reference object is `src` (a path in the source view of a workspace package's unit), `crateSrc` (in a fetched crate), `out` (in a unit's output) or `empty` (`{ "empty": <rel> }`, a repository path in a registry or git crate's unit, inside one constant empty directory; see [Path rewriting](../explanation/internals/planner.md#path-rewriting)). A splice object expands at build time to zero or more arguments, wrapped as the sentinel table shows, in the order the script printed them:
   - `{ "splice": R, "kind": K }` for `rustc-cfg`, `rustc-check-cfg` and `rustc-link-lib`: run R's values of kind K.
   - `{ "splice": R, "kind": "rustc-link-search", "in": "out" }` or `"in": "other"`: run R's search paths inside its `out`, or all its other search paths.
   - `{ "splice": R, "kind": "rustc-link-arg", "kinds": [ … ] }`: run R's link arguments whose kind is in `kinds`, in printed order across kinds. A `rustc-link-arg-bin` entry carries its bin name (`"rustc-link-arg-bin=app"`). One splice per run covers every link-arg kind, because Cargo keeps one ordered list of link arguments per run; one splice per kind would reorder them.

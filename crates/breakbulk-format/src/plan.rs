@@ -9,7 +9,7 @@ pub use breakbulk_unit::spec::{
 };
 
 /// The only plan format version this crate reads and writes.
-pub const PLAN_VERSION: u32 = 3;
+pub const PLAN_VERSION: u32 = 4;
 
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
 /// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`).
@@ -182,6 +182,9 @@ pub enum Reference {
     CrateSrc(CrateSrcRef),
     /// An output of another unit in the plan.
     Out(OutRef),
+    /// `<skeleton>/<rel>` in a unit of a package that has no source view
+    /// (a registry or git crate): `<rel>` in one constant empty directory.
+    Empty(EmptyRef),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -198,6 +201,14 @@ pub struct SrcRef {
 pub struct CrateSrcRef {
     /// The package id.
     pub crate_src: String,
+    pub rel: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyRef {
+    /// Relative path inside the empty directory; empty for the directory.
+    #[serde(rename = "empty")]
     pub rel: String,
 }
 

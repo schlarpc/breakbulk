@@ -92,6 +92,7 @@ impl Resolve for Tokens<'_> {
             Reference::Src(s) if s.rel.is_empty() => BB_SRC.to_owned(),
             Reference::Src(s) => format!("{BB_SRC}/{}", s.rel),
             Reference::CrateSrc(s) => return Err(format!("no crate sources here: {s:?}")),
+            Reference::Empty(e) => return Err(format!("no empty directory here: {e:?}")),
             Reference::Out(o) => {
                 let output = match &self.plan.units[&o.out] {
                     Unit::Run(_) => "out",
@@ -114,7 +115,7 @@ impl Resolve for Tokens<'_> {
             // Cargo's trim-paths.
             Reference::Src(_) => ".".into(),
             Reference::Out(o) => format!("/breakbulk/build/{}", o.out),
-            Reference::CrateSrc(_) => unreachable!(),
+            Reference::CrateSrc(_) | Reference::Empty(_) => unreachable!(),
         })
     }
     fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {

@@ -345,6 +345,7 @@ fn check_reference(plan: &Plan, r: &Reference) -> Result<(), String> {
     let rel = match r {
         Reference::Src(s) => &s.rel,
         Reference::CrateSrc(s) => &s.rel,
+        Reference::Empty(e) => &e.rel,
         Reference::Out(o) => {
             return match plan.units.get(&o.out) {
                 None => Err(format!("reference to unknown unit {}", o.out)),

@@ -161,11 +161,18 @@ Cargo has two build-directory layouts. Releases up to 1.99 use the classic one. 
 | New: `<scratch>/…/build/<pkg>/<hash>/out`, where `<hash>` is a run's directory | `{"out": <run unit>, "output": "out"}` |
 | The stub binary path (both layouts) | `{"out": <compile unit>, "output": "bin"}` |
 | A bin's uplifted copy, `<scratch>/[<triple>/]<profile>/<name><exe suffix>` (`CARGO_BIN_EXE_<name>`) | `{"out": <bin unit>, "output": "bin", "file": "<name><exe suffix>"}`: the one bin of that name, or the referring unit's package's |
-
-A bin or example that Cargo uplifts is stored under its uplifted name, so that is its `file` in every row, not rustc's `<crate name><-C extra-filename><exe suffix>`; the plan's `uplifted` maps it to rustc's name ([Plan format](../../reference/plan-format.md)).
-| `<skeleton>/<rel>` | `{"src": <workspace package>, "rel": <rel>}`, resolved at instantiation |
+| `<skeleton>/<rel>`, in a unit of a workspace package | `{"src": <the unit's package>, "rel": <rel>}`, resolved at instantiation |
+| `<skeleton>/<rel>`, in a unit of a registry or git crate | `{"empty": <rel>}` |
 | `<vendor dir>/<source>/<crate>/<rel>` | `{"crateSrc": <package id>, "rel": <rel>}` |
 | `/nix/store/…` | Literal; the containing store path becomes an input |
+
+A bin or example that Cargo uplifts is stored under its uplifted name, so that is its `file` in every row, not rustc's `<crate name><-C extra-filename><exe suffix>`; the plan's `uplifted` maps it to rustc's name ([Plan format](../../reference/plan-format.md)).
+
+A path in the repository always resolves in the unit's own source view, never in the view of the package whose directory holds the path. Such paths come from three places: Cargo runs the rustc of a workspace package in the workspace root, with a source path relative to it (`path_args`, `src/util/workspace.rs`); Cargo config's `[env]` with `relative = true` names a path relative to the config's directory, and Cargo sets it on every compile and build-script run, registry crates' included; and `build.rustflags` can name any path. Every view is rooted at the repository root, so the path keeps its place in it:
+
+- A member of a workspace whose root is also a package runs in its own view, which holds its own directory. The root package's view leaves out the members' directories.
+- A unit depends only on its own view. A config path into another package's directory resolves there only when the unit's package lists that path in [`extraSources`](../../reference/options/packages.md#packagesnameextrasources), as for `include_str!("../../assets/x")`.
+- A registry or git crate's unit has no view. Its repository paths point into one constant empty directory (`empty`), so the value keeps its shape, never changes with the repository, and the unit stays shared across repositories.
 
 Two rewrites go beyond paths:
 
