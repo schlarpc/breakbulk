@@ -12,6 +12,7 @@ use breakbulk_format::{
     Unit, UnitId, Variant, VariantMode, contains_sentinel,
 };
 
+use crate::describe;
 use crate::records::{Metadata, Package, Record, Target};
 use crate::rewrite::Rewriter;
 use crate::sentinel::{ArgSentinel, dep_sentinel, dylib_sentinel, env_sentinel, parse_pair};
@@ -349,6 +350,27 @@ struct RunRec<'a> {
     out_dir: String,
 }
 
+/// [`describe::compile`] of a compile record: the same text as
+/// [`describe::unit`] of the unit it becomes.
+fn describe_compile(c: &CompileRec<'_>) -> String {
+    describe::compile(
+        &c.id,
+        &c.package.name,
+        &c.package.version,
+        arg_value(&c.rec.args, "--crate-name")
+            .first()
+            .copied()
+            .unwrap_or_default(),
+        &c.types,
+        c.test,
+        c.platform,
+    )
+}
+
+fn describe_run(r: &RunRec<'_>) -> String {
+    describe::run(&r.id, &r.package.name, &r.package.version, r.platform)
+}
+
 /// Builds the plan from one or more traced invocations' records.
 pub struct Builder<'a> {
     ctx: &'a Context,
@@ -391,10 +413,12 @@ impl<'a> Builder<'a> {
                 "compile" => {
                     let c = b.compile_rec(rec)?;
                     if !seen.insert(c.id.clone()) {
+                        let other = b.compiles.iter().find(|o| o.id == c.id);
                         bail!(
-                            "two compiles have `-C metadata={}` ({}); unit keys must be unique within a plan",
-                            &c.id[2..],
-                            rec.file
+                            "{} and {} have the same `-C metadata`; unit keys must be unique \
+                             within a plan",
+                            other.map_or_else(|| c.id.clone(), describe_compile),
+                            describe_compile(&c)
                         );
                     }
                     b.compiles.push(c);
@@ -402,7 +426,7 @@ impl<'a> Builder<'a> {
                 "run" => {
                     let r = b.run_rec(rec)?;
                     if !seen.insert(r.id.clone()) {
-                        bail!("the build script run {} was traced twice", r.id);
+                        bail!("{} was traced twice", describe_run(&r));
                     }
                     b.run_by_tag
                         .insert(rec.tag.clone().expect("checked in run_rec"), b.runs.len());
@@ -429,7 +453,9 @@ impl<'a> Builder<'a> {
             }
         }
         for r in &b.runs {
-            let rel = b.out_dir_rel(r)?;
+            let rel = b
+                .out_dir_rel(r)
+                .map_err(|e| Error(format!("{}: {}", describe_run(r), e.0)))?;
             b.rw.run_dirs.insert(r.out_dir.clone(), (r.id.clone(), rel));
         }
         if let Some((dir, library)) = &ctx.std_vendor {
@@ -568,7 +594,7 @@ impl<'a> Builder<'a> {
                 "{}: rustc names `{}`'s executable `{rustc}`, not `{expected}` with the \
                  executable suffix `{suffix}` of {}'s traits; if the traits are wrong, \
                  correct `targets.\"{}\".traits.executableSuffix`",
-                c.rec.file,
+                describe_compile(c),
                 t.name,
                 self.ctx.target,
                 self.ctx.target
@@ -652,24 +678,30 @@ impl<'a> Builder<'a> {
         })
     }
 
-    fn run_id(&self, tag: &str, what: &dyn Fn() -> String) -> Result<&RunRec<'a>, Error> {
+    /// The run whose sentinels carry `tag`, found in `place` (an env
+    /// variable) or, with `None`, in the unit's arguments or env.
+    fn run_id(&self, tag: &str, place: Option<&str>) -> Result<&RunRec<'a>, Error> {
         self.run_by_tag
             .get(tag)
             .map(|&i| &self.runs[i])
             .ok_or_else(|| {
                 Error(format!(
-                    "{}: a sentinel names run `{tag}`, but no build script with that tag ran",
-                    what()
+                    "a sentinel{} names run `{tag}`, but no build script with that tag ran",
+                    place.map(|p| format!(" in {p}")).unwrap_or_default()
                 ))
             })
     }
 
-    fn shape_error(&self, unit: &str, kind: &str, seen: &str, args: &[String]) -> Error {
+    fn shape_error(&self, kind: &str, seen: &str, args: &[String]) -> Error {
         Error(format!(
-            "unit {unit}: a {kind} sentinel is in a shape the sentinel table does not allow \
-             (Cargo {}): {seen}\n  arguments: {}",
+            "a {kind} sentinel is in a shape the sentinel table does not allow (Cargo {}): \
+             {seen}{}",
             self.ctx.cargo_version,
-            args.join(" ")
+            if args.is_empty() {
+                String::new()
+            } else {
+                format!("\n  arguments: {}", args.join(" "))
+            }
         ))
     }
 
@@ -712,7 +744,7 @@ impl<'a> Builder<'a> {
     /// Split a dynamic-library path value: sentinel entries name runs; entries
     /// in the scratch directory (Cargo's `deps` and profile directories,
     /// which have no counterpart in breakbulk) are dropped; the rest is kept.
-    fn dylib_path(&self, unit: &str, value: &str) -> Result<(Vec<UnitId>, Option<String>), Error> {
+    fn dylib_path(&self, value: &str) -> Result<(Vec<UnitId>, Option<String>), Error> {
         let mut runs = Vec::new();
         let mut kept = Vec::new();
         let mut entries: Vec<&str> = value.split(':').filter(|e| !e.is_empty()).collect();
@@ -743,15 +775,15 @@ impl<'a> Builder<'a> {
         }
         for e in entries {
             if let Some((tag, dir)) = dylib_sentinel(e) {
-                let r = self.run_id(&tag, &|| format!("unit {unit}: {DYLIB_VAR}"))?;
+                let r = self.run_id(&tag, Some(DYLIB_VAR))?;
                 if dir != r.out_dir {
-                    return Err(self.shape_error(unit, "dynamic-library path", e, &[]));
+                    return Err(self.shape_error("dynamic-library path", e, &[]));
                 }
                 if !runs.contains(&r.id) {
                     runs.push(r.id.clone());
                 }
             } else if contains_sentinel(e) {
-                return Err(self.shape_error(unit, "dynamic-library path", e, &[]));
+                return Err(self.shape_error("dynamic-library path", e, &[]));
             } else if !self.rw.in_scratch(e) {
                 kept.push(e);
             }
@@ -761,7 +793,6 @@ impl<'a> Builder<'a> {
 
     fn rewrite_env(
         &self,
-        unit: &str,
         owner: &str,
         env: BTreeMap<String, String>,
     ) -> Result<(BTreeMap<String, Text>, Vec<UnitId>), Error> {
@@ -821,7 +852,7 @@ impl<'a> Builder<'a> {
                 v
             };
             let v = if k == DYLIB_VAR {
-                let (runs, rest) = self.dylib_path(unit, &v)?;
+                let (runs, rest) = self.dylib_path(&v)?;
                 dylib = runs;
                 match rest {
                     Some(r) => r,
@@ -833,7 +864,7 @@ impl<'a> Builder<'a> {
             let t = self
                 .rw
                 .text(&v, Some(owner))
-                .map_err(|e| Error(format!("unit {unit}: env `{k}`: {}", e.0)))?;
+                .map_err(|e| Error(format!("env `{k}`: {}", e.0)))?;
             out.insert(k, t);
         }
         Ok((out, dylib))
@@ -846,7 +877,6 @@ impl<'a> Builder<'a> {
     /// the invocation, which become one `searchPathsOf` splice.
     fn convert_args(
         &self,
-        id: &str,
         args: &[String],
         env: &BTreeMap<String, String>,
         owner: &str,
@@ -906,8 +936,7 @@ impl<'a> Builder<'a> {
             {
                 if from.trim_end_matches('/') != self.ctx.scratch.trim_end_matches('/') {
                     bail!(
-                        "unit {id}: Cargo's trim-paths remaps `{from}`, not the planner's build \
-                         directory {}",
+                        "Cargo's trim-paths remaps `{from}`, not the planner's build directory {}",
                         self.ctx.scratch
                     );
                 }
@@ -927,15 +956,18 @@ impl<'a> Builder<'a> {
                 && matches!(a, "--cfg" | "--check-cfg" | "-l" | "-L" | "-C")
                 && let Some(s) = parse_pair(a, n)
             {
-                let s = s.map_err(|seen| self.shape_error(id, a, &seen, args))?;
-                let r = self.run_id(s.tag(), &|| format!("unit {id}"))?;
+                let s = s.map_err(|seen| self.shape_error(a, &seen, args))?;
+                let r = self.run_id(s.tag(), None)?;
                 if let Some(p) = platform
                     && r.platform != p
                 {
                     return Err(self.shape_error(
-                        id,
                         a,
-                        &format!("`{a} {n}` from a {:?} run on a {p:?} unit", r.platform),
+                        &format!(
+                            "`{a} {n}` from {} on a {} unit",
+                            describe_run(r),
+                            describe::platform_name(p)
+                        ),
                         args,
                     ));
                 }
@@ -971,7 +1003,6 @@ impl<'a> Builder<'a> {
                     ArgSentinel::SearchIn(_, dir) => {
                         if dir != r.out_dir {
                             return Err(self.shape_error(
-                                id,
                                 "rustc-link-search",
                                 &format!("`-L {n}` is not inside the run's OUT_DIR {}", r.out_dir),
                                 args,
@@ -993,9 +1024,11 @@ impl<'a> Builder<'a> {
                             *sp = Splice::link_args(run.clone(), kinds);
                         } else if link_arg_at.contains_key(&run) {
                             return Err(self.shape_error(
-                                id,
                                 "rustc-link-arg",
-                                &format!("the link-arg sentinels of run {run} are not adjacent"),
+                                &format!(
+                                    "the link-arg sentinels of {} are not adjacent",
+                                    describe_run(r)
+                                ),
                                 args,
                             ));
                         } else {
@@ -1016,11 +1049,11 @@ impl<'a> Builder<'a> {
                 let t = self
                     .rw
                     .text(n, Some(owner))
-                    .map_err(|e| Error(format!("unit {id}: argument `-L {n}`: {}", e.0)))?;
+                    .map_err(|e| Error(format!("argument `-L {n}`: {}", e.0)))?;
                 let Text::Literal(l) = t else {
                     bail!(
-                        "unit {id}: `-L {n}` from a `links` override names a path breakbulk \
-                         rewrites; doctests do not support that yet"
+                        "`-L {n}` from a `links` override names a path breakbulk rewrites; \
+                         doctests do not support that yet"
                     );
                 };
                 let (_, _, lits) = search_paths.get_or_insert_with(|| {
@@ -1035,12 +1068,12 @@ impl<'a> Builder<'a> {
                 continue;
             }
             if contains_sentinel(a) {
-                return Err(self.shape_error(id, "unknown", &format!("`{a}`"), args));
+                return Err(self.shape_error("unknown", &format!("`{a}`"), args));
             }
             let t = self
                 .rw
                 .text(a, Some(owner))
-                .map_err(|e| Error(format!("unit {id}: argument `{a}`: {}", e.0)))?;
+                .map_err(|e| Error(format!("argument `{a}`: {}", e.0)))?;
             out.push(t.into());
             i += 1;
         }
@@ -1149,8 +1182,7 @@ impl<'a> Builder<'a> {
         let rel = match under(&r.out_dir, &self.ctx.scratch) {
             Some(rel) if !rel.is_empty() => rel,
             _ => bail!(
-                "run {}: OUT_DIR {} is not inside Cargo's target directory {}",
-                r.id,
+                "OUT_DIR {} is not inside Cargo's target directory {}",
                 r.out_dir,
                 self.ctx.scratch
             ),
@@ -1182,7 +1214,6 @@ impl<'a> Builder<'a> {
     #[allow(clippy::type_complexity)]
     fn convert_env(
         &self,
-        id: &str,
         rec_env: &BTreeMap<String, String>,
         owner: &str,
         args: &[String],
@@ -1192,31 +1223,29 @@ impl<'a> Builder<'a> {
         for (k, v) in rec_env {
             match env_sentinel(k, v) {
                 Some(Ok(tag)) => {
-                    let r = self.run_id(&tag, &|| format!("unit {id}"))?;
+                    let r = self.run_id(&tag, None)?;
                     env_splices.push(Splice::new(r.id.clone(), SpliceKind::RustcEnv));
                 }
-                Some(Err(seen)) => return Err(self.shape_error(id, "rustc-env", &seen, args)),
+                Some(Err(seen)) => return Err(self.shape_error("rustc-env", &seen, args)),
                 None => {
                     env.insert(k.clone(), v.clone());
                 }
             }
         }
         env_splices.sort();
-        let (env, dylib) = self.rewrite_env(id, owner, self.filter_env(&env, false))?;
+        let (env, dylib) = self.rewrite_env(owner, self.filter_env(&env, false))?;
         for (k, v) in &env {
             if contains_sentinel(k) {
-                return Err(self.shape_error(id, "env", &format!("`{k}={v:?}`"), args));
+                return Err(self.shape_error("env", &format!("`{k}={v:?}`"), args));
             }
         }
         Ok((env, env_splices, dylib))
     }
 
     fn compile_unit(&self, c: &CompileRec<'a>) -> Result<Unit, Error> {
-        let id = &c.id;
         let args = &c.rec.args;
-        let out = self.convert_args(id, args, &c.rec.env, &c.package.id, Some(c.platform))?;
-        let (mut env, env_splices, dylib) =
-            self.convert_env(id, &c.rec.env, &c.package.id, args)?;
+        let out = self.convert_args(args, &c.rec.env, &c.package.id, Some(c.platform))?;
+        let (mut env, env_splices, dylib) = self.convert_env(&c.rec.env, &c.package.id, args)?;
         // The clippy variant: `cargo clippy` passes clippy's own arguments
         // (`-- -D warnings`) to clippy-driver in `CLIPPY_ARGS`, which Cargo
         // inherits to every rustc it starts; keep it only where
@@ -1235,10 +1264,10 @@ impl<'a> Builder<'a> {
             .iter()
             .map(|p| self.rw.text(p, None))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| Error(format!("unit {id}: program: {}", e.0)))?;
+            .map_err(|e| Error(format!("program: {}", e.0)))?;
         let cwd = self
             .cwd(&c.rec.cwd, Some(&c.package.id))
-            .map_err(|e| Error(format!("unit {id}: cwd: {}", e.0)))?;
+            .map_err(|e| Error(format!("cwd: {}", e.0)))?;
         let edition = arg_value(args, "--edition")
             .first()
             .map_or("2015".to_owned(), |e| e.to_string());
@@ -1271,7 +1300,7 @@ impl<'a> Builder<'a> {
         let rec = r.rec;
         // The script: the stub's directory plus the compile output's name.
         let Some(program) = rec.program.first() else {
-            bail!("{}: run record without a program", rec.file);
+            bail!("the run record has no program ({})", rec.file);
         };
         let binary = rec
             .stub
@@ -1280,24 +1309,24 @@ impl<'a> Builder<'a> {
             .unwrap_or_else(|| file_name(program).to_owned());
         let script_path = format!("{}/{binary}", parent(program));
         let Some(script) = self.rw.outputs.get(&script_path) else {
-            bail!("run {id}: its build script {script_path} is no compile unit's output");
+            bail!("its build script {script_path} is no compile unit's output");
         };
         let mut env = BTreeMap::new();
         let mut metadata_from = BTreeSet::new();
         for (k, v) in &rec.env {
             if let Some((_links, tag)) = dep_sentinel(k, v) {
-                let up = self.run_id(tag, &|| format!("run {id}: {k}"))?;
+                let up = self.run_id(tag, Some(k))?;
                 if up.package.links.is_none() {
                     bail!(
-                        "run {id}: {k} names run {}, whose package declares no `links`",
-                        up.id
+                        "{k} names {}, whose package declares no `links`",
+                        describe_run(up)
                     );
                 }
                 metadata_from.insert(up.id.clone());
                 continue;
             }
             if contains_sentinel(k) || contains_sentinel(v) && k != DYLIB_VAR {
-                return Err(self.shape_error(id, "env", &format!("`{k}={v}`"), &[]));
+                return Err(self.shape_error("env", &format!("`{k}={v}`"), &[]));
             }
             env.insert(k.clone(), v.clone());
         }
@@ -1316,10 +1345,10 @@ impl<'a> Builder<'a> {
         if let Some(v) = env.get_mut(TRIM_PATHS_REMAP_VAR) {
             *v = self.without_build_dir_remap(v);
         }
-        let (env, dylib) = self.rewrite_env(id, &r.package.id, self.filter_env(&env, true))?;
+        let (env, dylib) = self.rewrite_env(&r.package.id, self.filter_env(&env, true))?;
         let cwd = self
             .cwd(&rec.cwd, Some(&r.package.id))
-            .map_err(|e| Error(format!("run {id}: cwd: {}", e.0)))?;
+            .map_err(|e| Error(format!("cwd: {}", e.0)))?;
         Ok(Unit::Run(RunUnit {
             package: r.package.id.clone(),
             platform: r.platform,
@@ -1495,8 +1524,11 @@ impl<'a> Builder<'a> {
     }
 
     /// The traced `rustdoc --test` commands, one per library, keyed
-    /// `d-<package name>`.
-    fn doctests(&self) -> Result<BTreeMap<String, Doctest>, Error> {
+    /// `d-<package name>`. Errors go to `errors`, by doctest.
+    fn doctests(
+        &self,
+        errors: &mut Vec<(String, String)>,
+    ) -> Result<BTreeMap<String, Doctest>, Error> {
         let mut out = BTreeMap::new();
         for rec in &self.rustdocs {
             if !rec.args.iter().any(|a| a == "--test") {
@@ -1504,50 +1536,61 @@ impl<'a> Builder<'a> {
             }
             let package = self.package_of(rec)?;
             let id = format!("d-{}", package.name);
-            let args = without_runtool(&rec.args);
-            let args = self.convert_args(&id, &args, &rec.env, &package.id, None)?;
-            let (env, env_splices, dylib) =
-                self.convert_env(&id, &rec.env, &package.id, &rec.args)?;
-            let program = rec
-                .program
-                .iter()
-                .map(|p| self.rw.text(p, None))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| Error(format!("{id}: program: {}", e.0)))?;
-            let cwd = self
-                .cwd(&rec.cwd, Some(&package.id))
-                .map_err(|e| Error(format!("{id}: cwd: {}", e.0)))?;
-            let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
-                .into_iter()
-                .map(str::to_owned)
-                .collect();
-            if types.is_empty() {
-                types.push("lib".into());
-            }
-            let doctest = Doctest {
-                package: package.id.clone(),
-                krate: CrateInfo {
-                    name: arg_value(&rec.args, "--crate-name")
-                        .first()
-                        .map(|s| s.to_string())
-                        .unwrap_or_default(),
-                    types,
-                    edition: arg_value(&rec.args, "--edition")
-                        .first()
-                        .map_or("2015".to_owned(), |e| e.to_string()),
-                },
-                program,
-                args,
-                env,
-                env_splices,
-                dylib_path_from: dylib,
-                cwd,
-            };
-            if out.insert(id.clone(), doctest).is_some() {
-                bail!("{id}: two `rustdoc --test` commands for one package");
+            let subject = describe::doctest(&id, &package.name, &package.version);
+            match self.doctest(rec, package) {
+                Ok(d) => {
+                    if out.insert(id, d).is_some() {
+                        errors.push((
+                            subject,
+                            "two `rustdoc --test` commands for one package".into(),
+                        ));
+                    }
+                }
+                Err(e) => errors.push((subject, e.0)),
             }
         }
         Ok(out)
+    }
+
+    fn doctest(&self, rec: &Record, package: &Package) -> Result<Doctest, Error> {
+        let args = without_runtool(&rec.args);
+        let args = self.convert_args(&args, &rec.env, &package.id, None)?;
+        let (env, env_splices, dylib) = self.convert_env(&rec.env, &package.id, &rec.args)?;
+        let program = rec
+            .program
+            .iter()
+            .map(|p| self.rw.text(p, None))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error(format!("program: {}", e.0)))?;
+        let cwd = self
+            .cwd(&rec.cwd, Some(&package.id))
+            .map_err(|e| Error(format!("cwd: {}", e.0)))?;
+        let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        if types.is_empty() {
+            types.push("lib".into());
+        }
+        Ok(Doctest {
+            package: package.id.clone(),
+            krate: CrateInfo {
+                name: arg_value(&rec.args, "--crate-name")
+                    .first()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+                types,
+                edition: arg_value(&rec.args, "--edition")
+                    .first()
+                    .map_or("2015".to_owned(), |e| e.to_string()),
+            },
+            program,
+            args,
+            env,
+            env_splices,
+            dylib_path_from: dylib,
+            cwd,
+        })
     }
 
     /// Whether Cargo's trim-paths is in effect: for every compile unit or
@@ -1589,7 +1632,7 @@ impl<'a> Builder<'a> {
                 Ok(u) => {
                     units.insert(c.id.clone(), u);
                 }
-                Err(e) => errors.push(e.0),
+                Err(e) => errors.push((describe_compile(c), e.0)),
             }
         }
         for r in &self.runs {
@@ -1597,11 +1640,12 @@ impl<'a> Builder<'a> {
                 Ok(u) => {
                     units.insert(r.id.clone(), u);
                 }
-                Err(e) => errors.push(e.0),
+                Err(e) => errors.push((describe_run(r), e.0)),
             }
         }
+        let doctests = self.doctests(&mut errors)?;
         if !errors.is_empty() {
-            bail!("{}", errors.join("\n"));
+            bail!("{}", describe::grouped(errors).join("\n"));
         }
         let mut plan = Plan {
             version: PLAN_VERSION,
@@ -1616,7 +1660,7 @@ impl<'a> Builder<'a> {
             trim_paths_default: self.ctx.trim_paths_default,
             units,
             roots: self.roots(),
-            doctests: self.doctests()?,
+            doctests,
             config_env: self.ctx.config_env.clone(),
             rust_src_remap: self.ctx.rust_src_remap.clone(),
             path_packages: if self.ctx.kind == PlanKind::Test {
@@ -1686,5 +1730,106 @@ mod trim_tests {
         assert!(names_path("x=/t/build/a-1/out/gen.rs", "/t/build/a-1/out"));
         assert!(names_path("/t/build/a-1/out:/y", "/t/build/a-1/out"));
         assert!(!names_path("/t/build/a-1/outer", "/t/build/a-1/out"));
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn context() -> Context {
+        Context {
+            scratch: "/s".into(),
+            skeleton: "/k".into(),
+            host: "x86_64-unknown-linux-gnu".into(),
+            target: "x86_64-unknown-linux-gnu".into(),
+            kind: PlanKind::Build,
+            variant: Variant {
+                profile: "dev".into(),
+                features: BTreeSet::new(),
+                mode: VariantMode::Build,
+            },
+            cargo_version: "1.99.0".into(),
+            rustc_version: "1.99.0".into(),
+            rustdoc: "rustdoc".into(),
+            cargo: "cargo".into(),
+            nightly: false,
+            executable_suffix: String::new(),
+            keep_workspace_wrapper: false,
+            config_env: BTreeSet::new(),
+            rust_src_remap: None,
+            trim_paths_default: false,
+            std_vendor: None,
+        }
+    }
+
+    fn package(name: &str) -> serde_json::Value {
+        json!({
+            "id": format!("path+file:///k/{name}#0.1.0"),
+            "name": name,
+            "version": "0.1.0",
+            "source": null,
+            "manifest_path": format!("/k/{name}/Cargo.toml"),
+            "targets": [{
+                "name": name,
+                "kind": ["lib"],
+                "crate_types": ["lib"],
+                "src_path": format!("/k/{name}/src/lib.rs"),
+            }],
+        })
+    }
+
+    fn compile(package: &str, hash: &str, extra: &[&str]) -> serde_json::Value {
+        let mut args = vec![
+            "--crate-name".to_owned(),
+            package.replace('-', "_"),
+            format!("{package}/src/lib.rs"),
+            "--crate-type".into(),
+            "lib".into(),
+            "-C".into(),
+            format!("metadata={hash}"),
+            "--out-dir".into(),
+            "/s/x86_64-unknown-linux-gnu/debug/deps".into(),
+        ];
+        args.extend(extra.iter().map(|s| s.to_string()));
+        json!({
+            "mode": "compile",
+            "program": ["rustc"],
+            "args": args,
+            "cwd": "/k",
+            "env": { "CARGO_MANIFEST_DIR": format!("/k/{package}") },
+        })
+    }
+
+    /// A unit is named by its package, crate, kind and platform, and one
+    /// cause is one line, whatever the number of units it concerns.
+    #[test]
+    fn errors_name_units_and_group_repeats() {
+        let metadata: Metadata = serde_json::from_value(json!({
+            "packages": [package("a"), package("b-c"), package("d")],
+            "workspace_members": [],
+            "workspace_root": "/k",
+        }))
+        .unwrap();
+        let records: Vec<Record> = serde_json::from_value(json!([
+            { "mode": "query", "program": ["rustc"], "args": ["-vV"], "cwd": "/k", "env": {} },
+            compile("a", "1111", &["--cfg", "__bb_abc_cfg"]),
+            compile("b-c", "2222", &["--cfg", "__bb_abc_cfg"]),
+            compile("d", "3333", &["--cfg", "__bb_def_cfg"]),
+        ]))
+        .unwrap();
+        let ctx = context();
+        let b = Builder::new(&ctx, &metadata, &records).unwrap();
+        let e = b.plan().unwrap_err().0;
+        assert_eq!(
+            e.lines().collect::<Vec<_>>(),
+            [
+                "unit c-1111 (a 0.1.0, lib, target), unit c-2222 (b-c 0.1.0, lib, target): a \
+                 sentinel names run `abc`, but no build script with that tag ran",
+                "unit c-3333 (d 0.1.0, lib, target): a sentinel names run `def`, but no build \
+                 script with that tag ran",
+            ]
+        );
     }
 }

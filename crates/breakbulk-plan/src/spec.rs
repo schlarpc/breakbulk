@@ -37,7 +37,7 @@ use breakbulk_format::{Arg, Plan, Platform, Text, Unit};
 use cargo_platform::{Cfg, CfgExpr};
 use serde::Deserialize;
 
-use crate::{Error, bail};
+use crate::{Error, bail, describe};
 
 /// The spec file the Nix side writes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -710,13 +710,17 @@ impl Prepared {
         };
         let mut problems = Vec::new();
         for (id, unit) in plan.units.iter_mut() {
+            let subject = describe::unit(id, unit);
             match unit {
                 Unit::Compile(c) if c.platform == Platform::Target => {
                     let lits: Vec<&str> = c.args.iter().filter_map(literal).collect();
                     if !contains_run(&lits, &self.spec.rustflags) {
-                        problems.push(format!(
-                            "{id} ({}): the spec's rustflags {:?} did not arrive",
-                            c.krate.name, self.spec.rustflags
+                        problems.push((
+                            subject.clone(),
+                            format!(
+                                "the spec's rustflags {:?} did not arrive",
+                                self.spec.rustflags
+                            ),
                         ));
                     }
                     let missing: Vec<&String> = self
@@ -725,18 +729,20 @@ impl Prepared {
                         .filter(|f| !lits.contains(&f.as_str()))
                         .collect();
                     if !missing.is_empty() {
-                        problems.push(format!(
-                            "{id} ({}): the project's rustflags {missing:?} did not arrive",
-                            c.krate.name
+                        problems.push((
+                            subject.clone(),
+                            format!("the project's rustflags {missing:?} did not arrive"),
                         ));
                     }
                     if let Some(l) = &self.spec.linker {
                         let got = linker_args(&c.args);
                         if got.len() != 1 || &got[0].2 != l {
-                            problems.push(format!(
-                                "{id} ({}): expected one `-C linker={l}`, found {:?}",
-                                c.krate.name,
-                                got.iter().map(|g| &g.2).collect::<Vec<_>>()
+                            problems.push((
+                                subject,
+                                format!(
+                                    "expected one `-C linker={l}`, found {:?}",
+                                    got.iter().map(|g| &g.2).collect::<Vec<_>>()
+                                ),
                             ));
                         }
                     }
@@ -752,12 +758,13 @@ impl Prepared {
                                 format!("linker={h}")
                             });
                         }
-                        _ => problems.push(format!(
-                            "host unit {id} ({}): expected exactly one `-C linker={t}` (the \
-                             target linker Cargo gives host units on a same-triple target), \
-                             found {:?}",
-                            c.krate.name,
-                            got.iter().map(|g| &g.2).collect::<Vec<_>>()
+                        _ => problems.push((
+                            subject,
+                            format!(
+                                "expected exactly one `-C linker={t}` (the target linker Cargo \
+                                 gives host units on a same-triple target), found {:?}",
+                                got.iter().map(|g| &g.2).collect::<Vec<_>>()
+                            ),
                         )),
                     }
                 }
@@ -768,8 +775,9 @@ impl Prepared {
                             r.env
                                 .insert("RUSTC_LINKER".into(), Text::Literal(h.clone()));
                         }
-                        other => problems.push(format!(
-                            "host run {id}: expected RUSTC_LINKER={t}, found {other:?}"
+                        other => problems.push((
+                            subject,
+                            format!("expected RUSTC_LINKER={t}, found {other:?}"),
                         )),
                     }
                 }
@@ -785,7 +793,7 @@ impl Prepared {
                     RustflagsKey::Build => "build.rustflags".to_owned(),
                     RustflagsKey::Target => format!("target.{}.rustflags", plan.target),
                 },
-                problems.join("\n  ")
+                describe::grouped(problems).join("\n  ")
             );
         }
         Ok(())

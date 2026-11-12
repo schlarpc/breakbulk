@@ -22,9 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use breakbulk_format::{
-    CompileUnit, Plan, Reference, Resolve, Unit, UnitId, render_doctest, render_unit,
-};
+use breakbulk_format::{Plan, Reference, Resolve, Unit, UnitId, render_doctest, render_unit};
 use breakbulk_unit::directives::{BuildOutput, MetadataFile, ParseContext, parse};
 use breakbulk_unit::doctest;
 use breakbulk_unit::run::run_env;
@@ -611,10 +609,7 @@ pub fn compare_with(
         }
     }
     let run_dirs: Vec<&str> = resolver.run_dirs.values().map(String::as_str).collect();
-    let name_of = |id: &UnitId| match &plan.units[id] {
-        Unit::Compile(CompileUnit { krate, .. }) => krate.name.clone(),
-        Unit::Run(r) => r.package.clone(),
-    };
+    let describe = |id: &UnitId| crate::describe::unit(id, &plan.units[id]);
 
     for id in planned.intersection(&real_ids) {
         let rendered = match render_unit(plan, id, &resolver) {
@@ -650,8 +645,8 @@ pub fn compare_with(
         };
         if got != want {
             report.problems.push(format!(
-                "{id} ({}): argv differs\n    real:   {}\n    traced: {}",
-                name_of(id),
+                "{}: argv differs\n    real:   {}\n    traced: {}",
+                describe(id),
                 want.join(" "),
                 got.join(" ")
             ));
@@ -669,8 +664,8 @@ pub fn compare_with(
                     );
                     if !d.is_empty() {
                         report.problems.push(format!(
-                            "{id} ({}): env differs\n{}",
-                            name_of(id),
+                            "{}: env differs\n{}",
+                            describe(id),
                             d.join("\n")
                         ));
                     }
@@ -723,8 +718,8 @@ pub fn compare_with(
             );
             if !d.is_empty() {
                 report.problems.push(format!(
-                    "{id} ({}): run env differs\n{}",
-                    name_of(id),
+                    "{}: run env differs\n{}",
+                    describe(id),
                     d.join("\n")
                 ));
             }

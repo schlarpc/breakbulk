@@ -7,10 +7,12 @@
 //! - [`graph`] turns records into units: identity, edges, sentinels, env.
 //! - [`rewrite`] turns recorded paths into references.
 //! - [`sentinel`] parses sentinel shapes.
+//! - [`describe`] names units in errors.
 //! - [`spec`] passes the toolchain spec's rustflags and linkers to Cargo,
 //!   confirms they arrived, and rewrites same-triple host linkers.
 
 pub mod build_std;
+pub mod describe;
 pub mod golden;
 pub mod graph;
 pub mod records;
