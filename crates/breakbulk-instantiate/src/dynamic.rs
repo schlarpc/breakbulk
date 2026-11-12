@@ -881,7 +881,9 @@ pub fn dynamic_plan(
     if !unpredicted.is_empty() {
         return err(format!(
             "the plan has doctests of {unpredicted:?}, which outer.json does not name; the \
-             Nix side predicted the doctests {:?}",
+             Nix side predicted the doctests {:?}. This is a bug in breakbulk's doctest \
+             prediction; list the packages in the workspace's `roots.doctests` option to \
+             work around it",
             outer.doctests.keys().collect::<Vec<_>>()
         ));
     }

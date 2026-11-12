@@ -77,7 +77,7 @@ else
     msvc msvc-post-link
     test-home test-closure doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist build-script-outputs manifest-dir nested-cargo
-    declared-paths run-files-ca-off
+    declared-paths run-files-ca-off roots-override
   )
 fi
 
@@ -455,6 +455,24 @@ case " ${fixtures[*]} " in
       echo "check variant: $(cat "$(real "$c")"/* 2>/dev/null | wc -l) entries" >&2
     else
       echo "FAIL: the check variant did not build" >&2
+      status=1
+    fi
+    ;;
+esac
+
+# Without `roots`, roots-override's build plan has a root that was not
+# predicted: the outer derivation fails, naming it.
+case " ${fixtures[*]} " in
+  *" roots-override "*)
+    say "roots-override without roots (dynamic-derivation mode)"
+    if mbuild --arg mode '"dynamic"' unpredicted >"$WORK/unpredicted.log" 2>&1; then
+      echo "FAIL: roots-override built without roots" >&2
+      status=1
+    elif grep -qF 'the plan has roots that were not predicted: tool/bin/tool' "$WORK/unpredicted.log"; then
+      echo "roots-override without roots: fails with the unpredicted root" >&2
+    else
+      tail -30 "$WORK/unpredicted.log" >&2
+      echo "FAIL: roots-override without roots failed otherwise" >&2
       status=1
     fi
     ;;

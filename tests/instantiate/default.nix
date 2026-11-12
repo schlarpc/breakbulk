@@ -19,8 +19,9 @@
 #                - tools, sources and env captures that cannot be built do
 #                  not stop instantiation: nothing but the plan and the
 #                  instantiate binary is realised before units.json is read;
-#                - stubs for predicted roots the plan lacks, and
-#                  predictedRoots over the fixture's manifests.
+#                - stubs for predicted roots the plan lacks,
+#                  predictedRoots over the fixture's manifests, and
+#                  planRoots with the `roots` option's names.
 {
   pkgs ? import (
     let
@@ -283,6 +284,49 @@ let
         variant = "dev";
         roots = [ (builtins.head predicted.roots) ];
       };
+    # The `roots` option's names replace the prediction; a predicted root
+    # keeps its required features and platform, an unpredicted one is on
+    # the target unless the entry says otherwise.
+    named-roots =
+      let
+        workspaceRoots = breakbulk.roots.workspaceRoots { root = ../unit-smoke/fixture; };
+        args = {
+          inherit workspaceRoots;
+          planKind = "build";
+          variant = "dev";
+        };
+      in
+      (breakbulk.planRoots (
+        args
+        // {
+          names = [
+            "smokeapp/bin/smokeapp"
+            "other/test/it"
+            {
+              name = "other/lib-test/other";
+              platform = "host";
+            }
+          ];
+        }
+      )).roots == [
+        (lib.findFirst (r: r.target == "smokeapp") null (breakbulk.predictedRoots args).roots)
+        {
+          package = "other";
+          target = "it";
+          kind = "test";
+          test = true;
+          requiredFeatures = null;
+          platform = "target";
+        }
+        {
+          package = "other";
+          target = "other";
+          kind = "lib";
+          test = true;
+          requiredFeatures = null;
+          platform = "host";
+        }
+      ];
     stubs =
       inst.roots."smokeapp/bin/admin-cli".breakbulkRoot.reason
       == "`admin-cli` was not built by Cargo in variant `dev`: required features `[cli]` not enabled"

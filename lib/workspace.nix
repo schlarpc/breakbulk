@@ -63,7 +63,7 @@
   envCapture,
   skeleton,
   instantiate,
-  predictedRoots,
+  planRoots,
   mkFetch,
   mkVendor,
   defaultTools,
@@ -106,6 +106,11 @@ pkgs:
   noDefaultFeatures ? false,
   allFeatures ? false,
   variant ? profile,
+  # The `roots` option: `{ build; test; bench; doctests; }`, each a list
+  # that replaces the prediction from the manifests, or null (or absent)
+  # to keep it. build, test, bench: root names (`<pkg>/<kind>/<target>`);
+  # doctests: the packages whose libraries `cargo test` doc-tests.
+  rootNames ? { },
   packageOverrides ? { },
   targetEnv ? { },
   runner ? null,
@@ -394,13 +399,17 @@ let
   # Dynamic-derivation mode: the outer derivation is named
   # `<ws>-<triple>-<variant>` for the build plan, with `-test`
   # for the test plan, since each plan has its own.
-  # The libraries `cargo test` doc-tests (roots.nix `doc`) among the
-  # selected members: in dynamic-derivation mode the test plan's outer
-  # derivation writes their doctests, with the test configuration IFD mode
+  # The libraries `cargo test` doc-tests (roots.nix `doc`, or
+  # `rootNames.doctests`) among the selected packages: in
+  # dynamic-derivation mode the test plan's outer derivation writes their
+  # doctests, with the test configuration IFD mode
   # gives them (testRuns.doctestConfig), so it must know them up front.
-  predictedDoctests = lib.filterAttrs (
-    n: p: p.roots.doc != [ ] && (testSelect == [ ] || lib.elem n testSelect)
-  ) wsRoots;
+  predictedDoctests = lib.filterAttrs (n: _: testSelect == [ ] || lib.elem n testSelect) (
+    if rootNames.doctests or null != null then
+      lib.genAttrs rootNames.doctests (_: { })
+    else
+      lib.filterAttrs (_: p: p.roots.doc != [ ]) wsRoots
+  );
   # The package settings a plan's units can read: those of the packages the
   # plan can contain, which are its selection and everything Cargo.lock
   # says they depend on (any kind, any feature: a superset of the plan).
@@ -491,10 +500,11 @@ let
         if checking then
           null
         else
-          predictedRoots {
+          planRoots {
             workspaceRoots = wsRoots;
             planKind = kind;
             inherit variant;
+            names = rootNames.${kind} or null;
           };
       name = "${name}-${kind}-units";
     };

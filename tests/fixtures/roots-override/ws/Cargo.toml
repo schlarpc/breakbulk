@@ -1,0 +1,11 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+# Its own workspace, not a member of breakbulk's. `tool` is a path
+# dependency outside it, so not a member.
+[workspace]
+
+[dependencies]
+tool = { path = "../tool" }

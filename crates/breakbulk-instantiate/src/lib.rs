@@ -933,7 +933,8 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
         };
         return err(format!(
             "the plan has roots that were not predicted: {}. This is a bug in breakbulk's \
-             target discovery; set the `roots` option to work around it.\n  \
+             target discovery; list the plan roots in the workspace's `roots` option \
+             (`roots.build`, `.test` or `.bench`, for this plan's kind) to work around it.\n  \
              plan roots:      {}\n  predicted roots: {}",
             list(&mut unpredicted.into_iter()),
             list(&mut planned.keys()),
@@ -948,7 +949,8 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
         if root.platform != p.platform {
             return err(format!(
                 "the root {} is planned for the {} platform, but was predicted for the {} \
-                 platform. This is a bug in breakbulk's target discovery.",
+                 platform. This is a bug in breakbulk's target discovery; list the root with \
+                 its platform in the workspace's `roots` option to work around it.",
                 describe_key(key),
                 keys::platform(root.platform),
                 keys::platform(p.platform),

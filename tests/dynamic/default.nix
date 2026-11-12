@@ -42,6 +42,9 @@
 #   checkVariant             (dynamic mode) a check variant's check of the
 #                            walking skeleton: every unit of both plans,
 #                            through the outer derivations' `units.drv`
+#   unpredicted              roots-override without its `roots` option:
+#                            a product whose plan has a root that was not
+#                            predicted (run.sh checks that it fails)
 #   prereqs.<fixture>, prereqs.tools
 #                            the plans and breakbulk's tools: with the
 #                            outputs upstream of the units, what run.sh
@@ -377,6 +380,10 @@ let
     pkgid-short = repository.pkgidShort;
     optional-dependency = repository.optionalDep;
     exclusive-features = repository.exclusive;
+    # Roots the prediction misses (a selected path package outside the
+    # workspace), listed in `roots`: products, test runs and the doctest.
+    # `unpredicted` is the same repository without `roots`.
+    roots-override = repository.rootsOverride;
 
     # tests/products
     post-link = products.postLink;
@@ -937,6 +944,7 @@ in
     )
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
+  unpredicted = repository.rootsPredicted.workspaces.main.packages.app;
   explain = lib.mapAttrs (
     _: repo:
     let

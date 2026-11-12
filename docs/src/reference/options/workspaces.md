@@ -365,20 +365,167 @@ string
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
-## `workspaces.<name>.roots`
+## `workspaces.<name>.roots.bench`
 
-Replace the predicted root names\. The escape hatch for a bug in
-breakbulk’s target auto-discovery\.
-
-Not implemented yet ([\#46](https://github\.com/schlarpc/breakbulk/issues/46)): setting it only gives an evaluation warning\.
+The roots of this workspace’s bench plans
+(` cargo bench --no-run `), in place of the roots breakbulk predicts
+from the manifests: the way around a bug in that
+prediction, which fails instantiation with “the plan has
+roots that were not predicted”\. ` null ` keeps the
+prediction\. Each entry is a root name as that error
+lists them, ` <package>/<kind>/<target> `, with ` -test `
+added to the kind of a test root other than a test
+target (` app/bin-test/app `), or ` { name; platform; } `
+for a root whose platform the prediction gets wrong
+(“planned for the host platform, but was predicted for
+the target platform”)\. ` platform ` is ` host ` for a
+target Cargo builds for the build machine (a proc
+macro’s unit tests), else ` target `; a bare name, or
+` platform = null `, takes the platform predicted for the
+root, or ` target ` when it is not predicted\. Both
+delivery modes use the list, for every target and
+variant\. A listed root that a plan lacks is a stub, as a
+predicted one is\.
 
 *Type:*
-null or raw value
+null or (list of (string matching the pattern (\[^/]+)/(lib|bin|cdylib|dylib|staticlib|example|test|bench|(lib|bin|cdylib|dylib|staticlib|example|bench)-test)/(\[^/]+) or (submodule)))
 
 *Default:*
 
 ```nix
 null
+```
+
+*Example:*
+
+```nix
+[
+  "app/bin/app"
+  "app/bin-test/app"
+  { name = "pm/lib-test/pm"; platform = "host"; }
+]
+
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.roots.build`
+
+The roots of this workspace’s build plans
+(` cargo build `), in place of the roots breakbulk predicts
+from the manifests: the way around a bug in that
+prediction, which fails instantiation with “the plan has
+roots that were not predicted”\. ` null ` keeps the
+prediction\. Each entry is a root name as that error
+lists them, ` <package>/<kind>/<target> `, with ` -test `
+added to the kind of a test root other than a test
+target (` app/bin-test/app `), or ` { name; platform; } `
+for a root whose platform the prediction gets wrong
+(“planned for the host platform, but was predicted for
+the target platform”)\. ` platform ` is ` host ` for a
+target Cargo builds for the build machine (a proc
+macro’s unit tests), else ` target `; a bare name, or
+` platform = null `, takes the platform predicted for the
+root, or ` target ` when it is not predicted\. Both
+delivery modes use the list, for every target and
+variant\. A listed root that a plan lacks is a stub, as a
+predicted one is\.
+
+*Type:*
+null or (list of (string matching the pattern (\[^/]+)/(lib|bin|cdylib|dylib|staticlib|example|test|bench|(lib|bin|cdylib|dylib|staticlib|example|bench)-test)/(\[^/]+) or (submodule)))
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+[
+  "app/bin/app"
+  "app/bin-test/app"
+  { name = "pm/lib-test/pm"; platform = "host"; }
+]
+
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.roots.doctests`
+
+The packages whose libraries ` cargo test ` doc-tests, in
+place of those breakbulk predicts from the manifests: the
+way around a bug in that prediction, which fails
+dynamic-derivation mode’s test plans with “the plan has
+doctests of …”\. ` null ` keeps the prediction\. Packages the
+test plan does not select are left out, as predicted ones
+are\. IFD mode takes the doctests from the plan and ignores
+this list\.
+
+*Type:*
+null or (list of string)
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+[
+  "mylib"
+]
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.roots.test`
+
+The roots of this workspace’s test plans
+(` cargo test --no-run `), in place of the roots breakbulk predicts
+from the manifests: the way around a bug in that
+prediction, which fails instantiation with “the plan has
+roots that were not predicted”\. ` null ` keeps the
+prediction\. Each entry is a root name as that error
+lists them, ` <package>/<kind>/<target> `, with ` -test `
+added to the kind of a test root other than a test
+target (` app/bin-test/app `), or ` { name; platform; } `
+for a root whose platform the prediction gets wrong
+(“planned for the host platform, but was predicted for
+the target platform”)\. ` platform ` is ` host ` for a
+target Cargo builds for the build machine (a proc
+macro’s unit tests), else ` target `; a bare name, or
+` platform = null `, takes the platform predicted for the
+root, or ` target ` when it is not predicted\. Both
+delivery modes use the list, for every target and
+variant\. A listed root that a plan lacks is a stub, as a
+predicted one is\.
+
+*Type:*
+null or (list of (string matching the pattern (\[^/]+)/(lib|bin|cdylib|dylib|staticlib|example|test|bench|(lib|bin|cdylib|dylib|staticlib|example|bench)-test)/(\[^/]+) or (submodule)))
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+[
+  "app/bin/app"
+  "app/bin-test/app"
+  { name = "pm/lib-test/pm"; platform = "host"; }
+]
+
 ```
 
 *Declared by:*

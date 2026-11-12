@@ -63,6 +63,18 @@ let
     path = ./.;
     filter = _: _: false;
   };
+
+  # breakbulk_format::plan::RootKind, as it serializes.
+  rootKinds = [
+    "lib"
+    "bin"
+    "cdylib"
+    "dylib"
+    "staticlib"
+    "example"
+    "test"
+    "bench"
+  ];
 in
 rec {
   instantiate =
@@ -330,6 +342,65 @@ rec {
         id: d: lib.nameValuePair (lib.removePrefix "d-" id) (drvAttrs d)
       ) (json.doctests or { });
     };
+
+  # A root name as instantiation names roots: `<package>/<kind>/<target>`,
+  # with `-test` added to the kind of test roots other than test targets
+  # (`root_name` in breakbulk-instantiate). Package and target names have
+  # no `/`.
+  rootNameRegex =
+    let
+      kinds = lib.concatStringsSep "|" rootKinds;
+    in
+    "([^/]+)/(${kinds}|(${lib.concatStringsSep "|" (lib.remove "test" rootKinds)})-test)/([^/]+)";
+
+  # A root's name (rootNameRegex) from its predicted form.
+  rootName =
+    r: "${r.package}/${if r.test && r.kind != "test" then "${r.kind}-test" else r.kind}/${r.target}";
+
+  # The roots of one plan kind, in the shape `instantiate` takes: `names`
+  # (the `roots` option's list for the kind) when given, else the
+  # prediction from the manifests. An entry of `names` is a root name or
+  # `{ name; platform; }`. A bare name, or a null platform, takes the
+  # platform the prediction gives that root, else `target`.
+  planRoots =
+    {
+      workspaceRoots,
+      planKind,
+      variant,
+      names ? null,
+    }:
+    let
+      predicted = predictedRoots { inherit workspaceRoots planKind variant; };
+      byName = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) r) predicted.roots);
+      named =
+        e:
+        let
+          n = if builtins.isString e then e else e.name;
+          m = builtins.match rootNameRegex n;
+          kind = builtins.elemAt m 1;
+          base = lib.removeSuffix "-test" kind;
+          p = byName.${n} or { };
+          given = if builtins.isAttrs e then e.platform or null else null;
+        in
+        if m == null then
+          throw "breakbulk: `${n}` is not a root name (`<package>/<kind>/<target>`, the kind one of ${lib.concatStringsSep ", " rootKinds}, with `-test` for test roots)"
+        else
+          {
+            package = builtins.elemAt m 0;
+            target = builtins.elemAt m 3;
+            kind = base;
+            test = kind == "test" || base != kind;
+            requiredFeatures = p.requiredFeatures or null;
+            platform = if given != null then given else p.platform or "target";
+          };
+    in
+    if names == null then
+      predicted
+    else
+      {
+        inherit variant;
+        roots = map named names;
+      };
 
   # The predicted roots of one plan kind ("build", "test" or "bench"), in the
   # shape `instantiate` takes, from roots.workspaceRoots.

@@ -14,6 +14,7 @@ let
   nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
   util = import ../util.nix { inherit lib; };
   manifest = import ../manifest.nix { inherit lib util; };
+  inherit (import ../instantiate.nix { inherit lib; }) rootNameRegex;
 
   # The exclude form, in each selection option's description.
   excludeFormDoc = ''
@@ -722,14 +723,84 @@ let
           '';
         };
 
-        roots = bt.notImplemented 46 (mkOption {
-          type = types.nullOr types.raw;
-          default = null;
-          description = ''
-            Replace the predicted root names. The escape hatch for a bug in
-            breakbulk's target auto-discovery.
-          '';
-        });
+        roots =
+          let
+            rootName = types.strMatching rootNameRegex;
+            rootEntry = types.either rootName (
+              types.submodule {
+                options = {
+                  name = mkOption {
+                    type = rootName;
+                    description = "The root's name.";
+                  };
+                  platform = mkOption {
+                    type = types.nullOr (
+                      types.enum [
+                        "host"
+                        "target"
+                      ]
+                    );
+                    default = null;
+                    description = "The platform Cargo builds the root for; `null`: as predicted.";
+                  };
+                };
+              }
+            );
+            rootList =
+              plan: command:
+              mkOption {
+                type = types.nullOr (types.listOf rootEntry);
+                default = null;
+                example = lib.literalExpression ''
+                  [
+                    "app/bin/app"
+                    "app/bin-test/app"
+                    { name = "pm/lib-test/pm"; platform = "host"; }
+                  ]
+                '';
+                description = ''
+                  The roots of this workspace's ${plan} plans
+                  (${command}), in place of the roots breakbulk predicts
+                  from the manifests: the way around a bug in that
+                  prediction, which fails instantiation with "the plan has
+                  roots that were not predicted". `null` keeps the
+                  prediction. Each entry is a root name as that error
+                  lists them, `<package>/<kind>/<target>`, with `-test`
+                  added to the kind of a test root other than a test
+                  target (`app/bin-test/app`), or `{ name; platform; }`
+                  for a root whose platform the prediction gets wrong
+                  ("planned for the host platform, but was predicted for
+                  the target platform"). `platform` is `host` for a
+                  target Cargo builds for the build machine (a proc
+                  macro's unit tests), else `target`; a bare name, or
+                  `platform = null`, takes the platform predicted for the
+                  root, or `target` when it is not predicted. Both
+                  delivery modes use the list, for every target and
+                  variant. A listed root that a plan lacks is a stub, as a
+                  predicted one is.
+                '';
+              };
+          in
+          {
+            build = rootList "build" "`cargo build`";
+            test = rootList "test" "`cargo test --no-run`";
+            bench = rootList "bench" "`cargo bench --no-run`";
+            doctests = mkOption {
+              type = types.nullOr (types.listOf types.str);
+              default = null;
+              example = [ "mylib" ];
+              description = ''
+                The packages whose libraries `cargo test` doc-tests, in
+                place of those breakbulk predicts from the manifests: the
+                way around a bug in that prediction, which fails
+                dynamic-derivation mode's test plans with "the plan has
+                doctests of …". `null` keeps the prediction. Packages the
+                test plan does not select are left out, as predicted ones
+                are. IFD mode takes the doctests from the plan and ignores
+                this list.
+              '';
+            };
+          };
 
         cargoTrimPaths = mkOption {
           type = types.nullOr types.bool;
@@ -988,7 +1059,6 @@ let
 
       config.warnings =
         bt.unimplementedWarnings "workspaces.${name}" options {
-          "46" = [ [ "roots" ] ];
           "6" = [
             [
               "docs"

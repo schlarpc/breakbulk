@@ -14,7 +14,8 @@
 #     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers;
 #     preset stage sets in breakbulk.stages.defaultStages)
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
-# breakbulk.predictedRoots { ... }. Dynamic-derivation mode:
+# breakbulk.predictedRoots { ... }, breakbulk.planRoots { ... } (the
+# prediction, or the `roots` option's names). Dynamic-derivation mode:
 # breakbulk.dynamic.{instantiate, mkTestRuns, mkBreakbulkDrv, available}
 # (lib/dynamic.nix).
 # Planning and the minimal end-to-end entry:
@@ -58,7 +59,7 @@ let
       roots
       ;
   };
-  inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots;
+  inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots planRoots;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix { inherit lib wasmBindgen targetTraits; };
   testRuns = import ./test-runs.nix {
@@ -173,7 +174,7 @@ let
       envCapture
       skeleton
       instantiate
-      predictedRoots
+      planRoots
       mkFetch
       mkVendor
       defaultTools
@@ -211,6 +212,7 @@ let
       mkRepository
       instantiate
       predictedRoots
+      planRoots
       util
       lockfile
       manifest

@@ -219,7 +219,7 @@ Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 - **Upstream.** cargo `src/ops/cargo_compile/unit_generator.rs`, `UnitGenerator::filter_default_targets`, `new_units` (`0.100.0`); spike A.
 - **Holds for.** The window (spike A); 1.99 (checks).
 - **Pinned by.** `roots-plans` (predicted roots equal what real `cargo build`, `test --no-run` and `bench --no-run` compile); `products-benches`.
-- **If it changes.** A root in the plan that was not predicted fails instantiation loudly; a predicted root Cargo stopped building becomes a "not built" stub.
+- **If it changes.** A root in the plan that was not predicted fails instantiation loudly; a predicted root Cargo stopped building becomes a "not built" stub. Until the prediction is fixed, the workspace's [`roots`](options/workspaces.md#workspacesnamerootsbuild) option lists the plan's roots in its place (`repository-roots-override`).
 
 ### T14. The clippy chain
 
@@ -811,7 +811,7 @@ Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 - **Upstream.** cargo `0.100.0` `src/workspace/parser/targets.rs` (function by function), `src/workspace/manifest.rs`, `Target::doctestable`.
 - **Holds for.** 1.99.
 - **Pinned by.** `roots-metadata-fixtures`, `roots-metadata-crates-io`, `roots-plans`.
-- **If it changes.** An unpredicted root fails instantiation loudly.
+- **If it changes.** An unpredicted root, or one predicted for the other platform, fails instantiation loudly, and so does an unpredicted doctest in dynamic-derivation mode. Until the prediction is fixed, the workspace's [`roots`](options/workspaces.md#workspacesnamerootsbuild) option (`roots.build`, `.test`, `.bench`, `.doctests`) replaces it (`repository-roots-override`, and `roots-override` in `nix run .#test-dynamic`).
 
 ### F7. build-std
 

@@ -347,6 +347,42 @@ let
     }
   ];
 
+  # --- roots-override ----------------------------------------------------------
+
+  # The variant selects `tool`, a path dependency outside the workspace:
+  # Cargo plans its bin, unit tests and doctest, but the prediction covers
+  # members only, so instantiation fails until `roots` lists them.
+  rootsSelection = {
+    workspaces.main = {
+      path = "ws";
+      variants.default = {
+        profile = "dev";
+        packages = [
+          "app"
+          "tool"
+        ];
+      };
+    };
+  };
+  rootsPredicted = mkRepo (fixtures + "/roots-override") [ rootsSelection ];
+  rootsOverride = mkRepo (fixtures + "/roots-override") [
+    rootsSelection
+    {
+      workspaces.main.roots = {
+        build = [
+          "app/bin/app"
+          "tool/bin/tool"
+        ];
+        test = [
+          "app/bin-test/app"
+          "tool/bin-test/tool"
+          { name = "tool/lib-test/tool"; }
+        ];
+        doctests = [ "tool" ];
+      };
+    }
+  ];
+
   # --- overrides and options ---------------------------------------------------
 
   # Evaluation only: the repository is never built.
@@ -589,6 +625,8 @@ in
       viewHintsFixed
       pkgidShort
       sources
+      rootsPredicted
+      rootsOverride
       ;
   };
 
@@ -1521,6 +1559,43 @@ in
       [ "$($app/bin/app)" = "gitdep 43" ]
       touch $out
     '';
+
+  # `roots` replaces the prediction: the repository builds tool's product,
+  # test runs and doctest, with no "not implemented" warning. Without it,
+  # instantiating the build plan fails, naming the unpredicted root and
+  # the option.
+  roots-override =
+    let
+      w = rootsOverride.workspaces.main;
+    in
+    assert lib.assertMsg (rootsOverride.warnings or [ ] == [ ]) "roots-override: warnings ${builtins.toJSON rootsOverride.warnings}";
+    assert lib.assertMsg (
+      lib.mapAttrs (_: lib.attrNames) w.tests == {
+        app = [ "bin-app" ];
+        tool = [
+          "bin-tool"
+          "lib"
+        ];
+      }
+    ) "roots-override: tests ${builtins.toJSON (lib.mapAttrs (_: lib.attrNames) w.tests)}";
+    pkgs.runCommand "roots-override"
+      {
+        app = w.packages.app;
+        tool = w.packages.tool;
+        toolLib = w.tests.tool.lib;
+        toolBin = w.tests.tool.bin-tool;
+        doctest = w.target.${native}.doctests.tool;
+        unpredicted = expectFailure "roots-unpredicted" (inst rootsPredicted).unitsJson.build [
+          "the plan has roots that were not predicted: tool/bin/tool"
+          "`roots` option"
+        ];
+      }
+      ''
+        [ "$($app/bin/app)" = "app: hello" ]
+        [ "$($tool/bin/tool)" = "tool: hello" ]
+        cat $unpredicted/log
+        touch $out
+      '';
 
   # The native target gets presets.linux unless another
   # preset is set, both through `preset` and by defining the target
