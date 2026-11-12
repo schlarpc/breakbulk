@@ -20,9 +20,13 @@
 #                            units/<i>/<kind>, every unit of each plan),
 #                            its repo.checks
 #                            (checks/<name>), for test-control `apps`,
-#                            a run of its test apps, and for
+#                            a run of its test apps, for
 #                            source-paths-dwo/-dwp `gdb`, gdb in a
-#                            dependency through the product's debug output
+#                            dependency through the product's debug
+#                            output, and for the fixtures of
+#                            `closureChecked`
+#                            closures/<i>/<pkg>/<binary>/closure, each
+#                            test run's input closure
 #   unitDrvs.<fixture>       a JSON file: "<i>/<kind>" -> unit id (or
 #                            `doctest:<pkg>`) -> .drv path (IFD mode)
 #   explain.<fixture>        whether repo.explainSharing finds every unit
@@ -235,6 +239,36 @@ let
             "data"
             "notes.md"
           ];
+        }
+      ];
+    };
+    # "run" views without content addressing: app's under libtest, with
+    # stripped copies (whose debug info would name app's whole view),
+    # util's (only its package directory) under nextest, from the unit's
+    # output. `closures` in build.<fixture> lists each run's input
+    # closure; run.sh compares them between the modes.
+    run-files-ca-off = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = ../test-options/fixture;
+      modules = [
+        {
+          inherit mode;
+          ca = false;
+        }
+        keepLogs
+        oneWs
+        {
+          packages.app.test = {
+            runFiles = [
+              "data"
+              "notes.md"
+            ];
+            stripForRun = true;
+          };
+          packages.util.test = {
+            runFiles = [ ];
+            runner = "nextest";
+          };
         }
       ];
     };
@@ -571,6 +605,67 @@ let
     "source-paths-dwp"
   ];
 
+  # Fixtures whose test runs' input closures `closures/` in build.<fixture>
+  # lists, with, per package, a file (relative to a source view's root)
+  # that a path of each of its runs' closures must hold (`present`) and
+  # one that none may (`absent`), or null.
+  closureChecked = {
+    run-files-ca-off = {
+      # The "run" view, not the package's whole view.
+      app = {
+        present = "app/data/input.txt";
+        absent = "app/src/lib.rs";
+      };
+      # nextest's metadata, and the unit's debug info, name the whole
+      # view, in both modes.
+      util = null;
+    };
+  };
+  # A test run's input closure, as its sandbox's store holds it: a
+  # derivation with every attribute of the run, as one string with their
+  # context (so with the same inputs), lists /nix/store in its own sandbox
+  # into `$out/closure`. In dynamic mode `$out/tools` lists the closure
+  # of the jq the run reads its spec with at build time (IFD mode's reads
+  # it at evaluation time), which run.sh lets only dynamic mode have.
+  closureOf =
+    guard: key: run:
+    pkgs.runCommand "closure-${lib.replaceStrings [ "/" ] [ "-" ] key}-${mode}"
+      (
+        { runAttrs = builtins.toJSON run.drvAttrs; }
+        // lib.optionalAttrs isDynamic {
+          exportReferencesGraph = [
+            "tools"
+            pkgs.jq
+          ];
+        }
+      )
+      ''
+        if [ -e /nix/var/nix ]; then
+          echo "listing a closure needs the sandbox" >&2
+          exit 1
+        fi
+        for p in /nix/store/*; do echo "$p"; done > $TMPDIR/closure
+        ${lib.optionalString (guard != null) ''
+          present=
+          while IFS= read -r p; do
+            if [ -e "$p/${guard.absent}" ]; then
+              echo "$p, in the closure of ${key}, holds ${guard.absent}" >&2
+              exit 1
+            fi
+            [ ! -e "$p/${guard.present}" ] || present=$p
+          done < $TMPDIR/closure
+          if [ -z "$present" ]; then
+            echo "nothing in the closure of ${key} holds ${guard.present}" >&2
+            exit 1
+          fi
+        ''}
+        mkdir $out
+        cp $TMPDIR/closure $out/closure
+        ${lib.optionalString isDynamic ''
+          grep '^/nix/store/' "$NIX_BUILD_TOP/tools" | grep -v '\.drv$' | sort -u > $out/tools
+        ''}
+      '';
+
   # Products differ between the modes (resolved at build time in dynamic
   # mode), so the units downstream of an embedded product do too: the
   # embedder and, through it, the host. Every other unit is identical.
@@ -653,6 +748,14 @@ let
             linkEach "$out/runs/${i.key}" (flat2 i.out.testRuns)
             + linkEach "$out/runs/${i.key}/bench" (flat2 (i.out.benchRuns or { }))
             + linkEach "$out/doctests/${i.key}" i.out.doctests
+            + lib.optionalString (closureChecked ? ${name}) (
+              linkEach "$out/closures/${i.key}" (
+                lib.mapAttrs (
+                  k: run:
+                  closureOf (closureChecked.${name}.${lib.head (lib.splitString "/" k)} or null) "${i.key}/${k}" run
+                ) (flat2 i.out.testRuns)
+              )
+            )
           else
             linkEach "$out/products/${i.key}" (
               lib.mapAttrs' (n: d: lib.nameValuePair "test-${lib.replaceStrings [ "/" ] [ "-" ] n}" d) (

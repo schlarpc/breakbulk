@@ -347,7 +347,7 @@ rec {
   # Identical contents give identical paths, so the test run (also
   # content-addressed) is not re-run. Only used when `ca` is on.
   # Dynamic-derivation mode makes the same copies at build time
-  # (lib/dynamic.nix `stableInfo`).
+  # (lib/dynamic.nix `runInfo`).
   stableSpec =
     {
       pkgs,

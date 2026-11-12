@@ -27,6 +27,10 @@
 #   - the test apps of test-control behave the same in both modes;
 #   - gdb, given a split-debuginfo product's debug output, shows a
 #     dependency's source and arguments in both modes;
+#   - with run-files-ca-off: each test run's input closure is the same in
+#     both modes, but for dynamic mode's run specs and the jq it reads
+#     them with, and does not hold the
+#     package's whole source view where it has a "run" view;
 #   - repo.explainSharing works in dynamic mode;
 #   - with test-cutoff and test-options: a test run whose inputs' contents
 #     an edit leaves unchanged is not re-run (`cutoff` in default.nix).
@@ -73,7 +77,7 @@ else
     msvc msvc-post-link
     test-home test-closure doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist build-script-outputs manifest-dir nested-cargo
-    declared-paths
+    declared-paths run-files-ca-off
   )
 fi
 
@@ -323,6 +327,56 @@ sys.exit(1 if bad or (linked and not a) else 0)
 EOF
     echo "FAIL: $f: different test outcomes" >&2
     status=1
+  fi
+  # Test-run input closures (`closures/` in build.<fixture>): the same
+  # paths in both modes, but for dynamic mode's run specs (`runInfo` in
+  # lib/dynamic.nix) and the jq it reads them with (`tools`, listed by
+  # the closure listing). A path of the same name with other bytes differs;
+  # one with the same bytes (a copy dynamic mode makes from the wrapper)
+  # is the same.
+  if [ -d "$(real "$ifd")/closures" ] || [ -d "$(real "$dyn")/closures" ]; then
+    if ! python3 - "$WORK/store" "$(real "$ifd")/closures" "$(real "$dyn")/closures" <<'EOF'; then
+import os, subprocess, sys
+store, ifd, dyn = sys.argv[1:]
+def closures(top):
+    # Each run's entry links a closure listing's output (an absolute
+    # /nix/store path, inside the private store).
+    out, tools = {}, set()
+    for d, ds, fs in os.walk(top):
+        for n in ds + fs:
+            p = os.path.join(d, n)
+            if os.path.islink(p):
+                listing = store + os.readlink(p)
+                out[os.path.relpath(p, top)] = open(os.path.join(listing, "closure")).read().split()
+                if os.path.exists(os.path.join(listing, "tools")):
+                    tools |= set(open(os.path.join(listing, "tools")).read().split())
+    return out, tools
+def name(p):
+    return p.rsplit("/", 1)[-1].split("-", 1)[1]
+def nar(p):
+    return subprocess.run(["nix", "hash", "path", store + p], check=True, capture_output=True, text=True).stdout.strip()
+(a, _), (b, tools) = closures(ifd), closures(dyn)
+bad = []
+if not a or set(a) != set(b):
+    bad.append(f"  runs: IFD {sorted(a)}, dynamic {sorted(b)}")
+for k in sorted(set(a) & set(b)):
+    x, y = set(a[k]), set(b[k])
+    byName = lambda s: {name(p): p for p in s}
+    nx, ny = byName(x - y), byName(y - x)
+    for n in sorted(set(nx) | set(ny)):
+        p, q = nx.get(n), ny.get(n)
+        if p and q and nar(p) == nar(q):
+            continue
+        if p is None and (n.endswith("-test-spec") or q in tools):
+            continue
+        bad.append(f"  {k}: IFD {p}, dynamic {q}")
+print(f"{len(a)} test-run closures: {'the same' if not bad else 'DIFFERENT'} in both modes", file=sys.stderr)
+print("\n".join(bad), file=sys.stderr)
+sys.exit(1 if bad else 0)
+EOF
+      echo "FAIL: $f: different test-run closures" >&2
+      status=1
+    fi
   fi
   # explainSharing in dynamic mode (through IFD mode's units.json).
   if [ "$(nixm eval --json -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "explain.$f")" = true ]; then
