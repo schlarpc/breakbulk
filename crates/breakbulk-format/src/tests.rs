@@ -894,7 +894,8 @@ fn transitive_crate_deps() {
     let mut example = compile(&mut p, "c-top").clone();
     example.test = true;
     assert!(!is_linking(&example));
-    p.units.insert("c-example".into(), Unit::Compile(example.clone()));
+    p.units
+        .insert("c-example".into(), Unit::Compile(example.clone()));
     let mut harness = example;
     harness.args.push(Arg::Literal("--test".into()));
     assert!(is_linking(&harness));

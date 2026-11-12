@@ -186,8 +186,7 @@ pub fn is_linking(c: &CompileUnit) -> bool {
     c.args
         .iter()
         .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
-        || c
-            .krate
+        || c.krate
             .types
             .iter()
             .any(|t| !matches!(t.as_str(), "lib" | "rlib"))
