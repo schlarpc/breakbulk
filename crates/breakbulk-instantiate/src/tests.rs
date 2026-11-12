@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use breakbulk_format::rendered::{RenderedUnit, derivation_output, package_name_version};
 use breakbulk_format::{
-    CompileUnit, Plan, Reference, Resolve, RootKind, RunUnit, Unit, UnitId, render_unit,
-    unit_env_value,
+    CompileUnit, Plan, Reference, Resolve, RootKind, Unit, UnitId, render_unit, unit_env_value,
 };
 
 use super::inputs::*;
@@ -73,7 +72,6 @@ fn smoke_inputs() -> Inputs {
             },
         },
         overrides: Overrides {
-            strict_sources: false,
             packages: BTreeMap::from([
                 (
                     "smokelib".into(),
@@ -82,7 +80,6 @@ fn smoke_inputs() -> Inputs {
                             env: ["SHARED".into(), "LIB_ONLY".into()].into(),
                             env_capture: true,
                         },
-                        strict_sources: Some(true),
                         ..Default::default()
                     },
                 ),
@@ -283,11 +280,6 @@ impl Resolve for RealPaths<'_> {
         }
         Ok(env)
     }
-    fn strict_sources(&self, _: &UnitId, run: &RunUnit) -> bool {
-        self.ov(&run.package)
-            .and_then(|(_, o)| o.strict_sources)
-            .unwrap_or(self.0.overrides.strict_sources)
-    }
 }
 
 #[test]
@@ -457,7 +449,6 @@ fn layers_and_overrides() {
     let RenderedUnit::Run(run) = unit(RUN) else {
         panic!()
     };
-    assert!(run.strict_sources);
     assert_eq!(run.env["RUSTC"], format!("{RUSTC}/bin/rustc"));
 }
 
@@ -579,21 +570,18 @@ fn joined_recorded_values_are_json_escaped() {
 #[test]
 fn versioned_override_wins() {
     let mut inputs = smoke_inputs();
-    inputs.overrides.packages.insert(
-        "smokelib@0.1.0".into(),
-        PackageOverride {
-            strict_sources: Some(false),
-            ..Default::default()
-        },
-    );
+    inputs
+        .overrides
+        .packages
+        .insert("smokelib@0.1.0".into(), PackageOverride::default());
     let out = instantiate(&inputs).unwrap();
-    let RenderedUnit::Run(run) =
-        serde_json::from_str(&attr(&out.units[RUN], "BREAKBULK_UNIT")).unwrap()
-    else {
-        panic!()
-    };
-    assert!(!run.strict_sources);
-    assert!(!run.env.contains_key("LIB_ONLY"));
+    for id in [LIB, RUN] {
+        let env = match serde_json::from_str(&attr(&out.units[id], "BREAKBULK_UNIT")).unwrap() {
+            RenderedUnit::Compile(c) => c.env,
+            RenderedUnit::Run(r) => r.env,
+        };
+        assert!(!env.contains_key("LIB_ONLY"), "{id}");
+    }
 }
 
 /// Gives compile unit `id` packed split debuginfo, as Cargo passes it for

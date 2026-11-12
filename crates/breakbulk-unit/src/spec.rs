@@ -552,9 +552,6 @@ pub struct RenderedRun {
     /// in its attributes) is remapped to, as with `remap`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_dir_remap: Option<String>,
-    /// Fail a successful run whose `rerun-if-changed` paths are missing
-    /// from the sandbox, instead of only warning.
-    pub strict_sources: bool,
     /// For a unit that is not a test unit: the package's test-only paths
     /// (its `tests/` directory, `test.sourceScope` entries inside it), left
     /// out of the source view it sees, as absolute paths in that view. Only

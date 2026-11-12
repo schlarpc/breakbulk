@@ -758,6 +758,38 @@ anything.
 
 It has no options.
 
+### `buildScriptPaths`
+
+Fails when a build script of the product's target declared a
+`rerun-if-changed` path that was not in its view when it ran.
+Such a script often skips work without saying so: it finds no
+file and reads nothing. The run lists the missing paths in its
+`flags` output (`missing-paths.json`). The message names each
+path, the package that declared it and the option to add it to:
+`extraSources` for a path in the repository, `inputs` (or
+`nativeInputs`) for one outside it. It ends with the `allow`
+setting for the paths and how to remove the check. Every
+product has it; it passes when no script declared a missing
+path. It reads the runs below the product's roots
+([Build-script runs](stage-functions.md#build-script-runs)):
+the runs of build scripts for the build machine, and runs that
+only tests depend on, are not checked; their build logs warn.
+
+#### `buildScriptPaths.allow`
+
+Missing paths the scripts do not need: a package name (every
+path its build script declares), or `{ package; path; }`,
+where `path` is a shell glob pattern matched against the path
+as the script printed it (default `*`). A registry crate
+that declares a path it never reads is allowed once here, for
+the product.
+
+*Type:* list of (string or (submodule))
+
+*Default:* `[ ]`
+
+*Example:* `[ "gdbstub" { package = "deno"; path = "../Cargo.lock"; } ]`
+
 ### `neededLibraries`
 
 Fails when an ELF file in the checked output names in `NEEDED`

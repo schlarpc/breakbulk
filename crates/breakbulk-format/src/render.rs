@@ -98,10 +98,6 @@ pub trait Resolve {
     fn test_only_paths(&self, _id: &UnitId, _unit: &Unit) -> Result<Vec<String>, Self::Error> {
         Ok(Vec::new())
     }
-    /// `strictSources` for a run's package.
-    fn strict_sources(&self, _id: &UnitId, _run: &RunUnit) -> bool {
-        false
-    }
     /// A list-like variable's `earlier` value followed by `later`, with
     /// `sep` between them ([`breakbulk_unit::env::append`]): an empty side
     /// is left out. A resolver whose values are placeholders, whose
@@ -443,7 +439,6 @@ pub fn render_unit_in<R: Resolve>(
                 // names, or Cargo's under trim-paths (`cargo_run_remap`).
                 remap,
                 out_dir_remap,
-                strict_sources: r.strict_sources(id, run),
                 test_only: r.test_only_paths(id, &unit)?,
                 seed: Some(id.to_string()),
             })

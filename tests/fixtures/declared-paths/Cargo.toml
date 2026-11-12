@@ -1,0 +1,10 @@
+# Build scripts that declare `rerun-if-changed` paths missing from their
+# view and run on without them, as deno's `cli/build.rs` does with
+# `../Cargo.lock`: `app` reads ../shared/version.txt when it is there (a
+# path in the repository, outside the package), `dep` probes a header
+# outside the repository. Both runs succeed; every product above them
+# fails its `buildScriptPaths` check, naming both paths with
+# `packages.app.extraSources` and `packages.dep.inputs`.
+[workspace]
+resolver = "2"
+members = ["app", "dep"]

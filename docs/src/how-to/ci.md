@@ -60,3 +60,39 @@ one `/`-separated segment, `**` across any number) and derivations:
 `nix build .#checks.x86_64-linux.clippy` then builds every clippy
 variant's check. A pattern that matches no check is an evaluation error,
 since it is most likely a typo.
+
+## Read a failed `--keep-going` build
+
+With `--keep-going`, Nix builds everything it can and reports every
+failure at the end. Most of the failures are only consequences: a check
+or product whose input failed reports that some of its dependencies
+failed. Look for the root failures, those whose own builder failed. Nix
+2.34 prints them so:
+
+```text
+error: Cannot build '/nix/store/…-mylib-sys-0.1.0-build-run.drv'.
+       Reason: builder failed with exit code 1.
+       Last 25 log lines:
+       > …
+       For full logs, run:
+         nix log /nix/store/…-mylib-sys-0.1.0-build-run.drv
+```
+
+A dependent's reason reads `1 dependency failed` instead; skip those.
+Older Nix versions print `builder for '…' failed` for a root failure and
+`dependencies of derivation '…' failed to build` for a dependent.
+
+`nix log <drv>` prints a root failure's whole log. A failed unit's
+error, with breakbulk's hints (the option to set, the path to add), is
+near its end. The `log-lines` setting (default 25) makes the tail in the
+summary longer.
+
+[nix-output-monitor](https://github.com/maralorn/nix-output-monitor)
+shows the failures as they happen: run `nom build` with the same
+arguments as `nix build`. Its tree shows each failed build (`⚠`, red)
+below the derivations that need it, so the lowest failed entry is a
+root failure.
+
+Checks fail without stopping the products: a product whose
+[`buildScriptPaths`](../reference/stage-helpers.md#buildscriptpaths)
+check fails still builds, and the check's log names every path to add.

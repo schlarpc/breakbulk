@@ -119,9 +119,6 @@ pub struct PlatformSpec {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Overrides {
-    /// The repository-wide `strictSources`.
-    #[serde(default)]
-    pub strict_sources: bool,
     /// Per package, keyed `name@version` or `name`; the versioned key wins.
     #[serde(default)]
     pub packages: BTreeMap<String, PackageOverride>,
@@ -134,8 +131,6 @@ pub struct PackageOverride {
     pub host: PlatformSpec,
     #[serde(default)]
     pub target: PlatformSpec,
-    #[serde(default)]
-    pub strict_sources: Option<bool>,
 }
 
 impl PackageOverride {

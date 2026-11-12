@@ -209,7 +209,7 @@ let
         description = ''
           Checks on this package's products, as `targets.<triple>.checks`.
           They are added to the target's checks and to the default checks
-          (`noSourceReferences`, `buildScriptFiles`). `null` removes a check
+          (`noSourceReferences`, `buildScriptFiles`, `buildScriptPaths`). `null` removes a check
           from this package only.
         '';
       };
@@ -436,12 +436,6 @@ let
             description = "cargo-nextest to run with (`null`: the test platform's `cargo-nextest`).";
           };
         };
-      };
-
-      strictSources = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
-        description = "Override the repository's `strictSources` for this package's build scripts.";
       };
     };
   };

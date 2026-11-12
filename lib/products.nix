@@ -29,9 +29,8 @@
 #                                  (or install, for `.pdb` and other
 #                                  debuginfo side files of the link units)
 #   products.<pkg>.checks.<name>   checks (`noSourceReferences` by default,
-#                                  and `buildScriptFiles` when a build
-#                                  script of the target can place files
-#                                  next to the binaries, #23)
+#                                  `buildScriptFiles` and
+#                                  `buildScriptPaths` on every product)
 #   products.<pkg>.roots."<kind>/<target>"   the raw roots (units or stubs)
 #   products.<pkg>.unbuilt         roots Cargo did not build, with reasons
 #
@@ -415,10 +414,16 @@ let
           checkSet = stages.merge (
             [
               # On every product (passing when no build script placed
-              # files): in dynamic mode whether there are runs is known only
-              # at build time, and both modes have the same checks.
+              # files or declared a missing path): in dynamic mode whether
+              # there are runs is known only at build time, and both modes
+              # have the same checks. `buildScriptPaths` reads only the
+              # runs, so it waits for `linked`, not for the stages.
               {
                 buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
+                buildScriptPaths = {
+                  on = "linked";
+                  run = stages.helpers.buildScriptPaths;
+                };
               }
               targetChecks
             ]

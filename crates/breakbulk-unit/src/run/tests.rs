@@ -30,7 +30,6 @@ fn unit(cwd: &Path) -> RenderedRun {
         seed: None,
         remap: vec![],
         out_dir_remap: None,
-        strict_sources: false,
     }
 }
 
@@ -404,9 +403,9 @@ fn failures_print_streamed_messages_first() {
 }
 
 #[test]
-fn missing_sources_warn_or_fail() {
-    let t = TempDir::new("strict");
-    let mut r = unit(t.path());
+fn missing_sources_warn_and_are_listed() {
+    let t = TempDir::new("missing");
+    let r = unit(t.path());
     let s = judge_with(
         &r,
         0,
@@ -424,12 +423,20 @@ fn missing_sources_warn_or_fail() {
         "{:?}",
         s.warnings
     );
-    r.strict_sources = true;
-    let e = judge_with(&r, 0, "cargo::rerun-if-changed=../shared/x.h\n").unwrap_err();
-    assert!(e.0.contains("`strictSources` is set"), "{e}");
+    // The same paths, each once, with the same hints, for the check.
+    let declared: Vec<&str> = s.missing.iter().map(|m| m.declared.as_str()).collect();
+    assert_eq!(declared, ["../shared/x.h", "/usr/include/z.h"]);
+    // `..` resolved: the path reads as its place in the repository.
+    let parent = t.path().parent().unwrap();
+    assert_eq!(
+        s.missing[0].path,
+        parent.join("shared/x.h").display().to_string()
+    );
+    assert!(s.warnings[0].ends_with(&s.missing[0].hint), "{:?}", s);
     // Present paths, and paths in OUT_DIR the script created, are fine.
     std::fs::write(t.path().join("present"), "").unwrap();
-    judge_with(&r, 0, "cargo::rerun-if-changed=present\n").unwrap();
+    let s = judge_with(&r, 0, "cargo::rerun-if-changed=present\n").unwrap();
+    assert!(s.missing.is_empty());
 }
 
 #[test]

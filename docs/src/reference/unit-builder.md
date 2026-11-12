@@ -158,8 +158,10 @@ name them.
      option to add it to, then the [failure hints](#failure-hints), and
      a hint for each test-only path the script's output names, as for
      compiles.
-   - On success, warn about missing paths, or fail when
-     [`strictSources`](options/repository.md#strictsources) is set.
+   - On success, warn about missing paths and list them in
+     `missing-paths.json`. The run does not fail: the
+     [`buildScriptPaths`](stage-helpers.md#buildscriptpaths) check of
+     each product above it does.
 7. Remove CMake's internal state (details below).
 
 ### Failure hints
@@ -220,6 +222,7 @@ they read `<out>/<OUT_DIR relative>/…`.
 | `directives.json` | always | Values grouped by kind, in printed order |
 | `metadata.json` | always | The package's name and version, its `links`, the `metadata` values (dependents' `DEP_*` when it has `links`) and the `OUT_DIR` path; see [Build-script runs](stage-functions.md#build-script-runs) |
 | `target-files.json` | the script wrote files into `$out` outside `OUT_DIR` | Their paths, relative to `$out` |
+| `missing-paths.json` | the script declared `rerun-if-changed` paths that are not in the sandbox | Each as `declared` (as printed), `path` (resolved against the package directory) and `hint` (the warning's text, naming the option to add it to) |
 
 When there are such target files, `directives.json` also names the copies
 of `<profile>` and `<profile>/deps` that hold them (`targetDirs`). Test

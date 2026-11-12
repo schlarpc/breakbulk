@@ -301,13 +301,16 @@ For tests:
   narrows a test run to the files its tests read, so editing any other
   file of the package does not re-run it.
 
-When a build script fails, or succeeds while it names a
-`rerun-if-changed` path that is missing from its sandbox, the message
-names the path and the option to add it to. So does a failing library or
-build script that reads a test-only path. Missing paths on success are
-warnings;
-[`strictSources`](../reference/options/repository.md#strictsources)
-makes them errors. A build script that probes for a file
+When a build script fails while it names a `rerun-if-changed` path that
+is missing from its sandbox, the message names the path and the option
+to add it to. So does a failing library or build script that reads a
+test-only path. A build script that succeeds without such a path often
+skipped work without saying so. The run then warns, and every product
+above it fails its
+[`buildScriptPaths`](../reference/stage-helpers.md#buildscriptpaths)
+check, which names each path, its package and the option to add it to.
+The product itself still builds. A path a script declares but does not
+need goes in the check's `allow`. A build script that probes for a file
 (`Path::exists()`) and takes another path when it is absent gets no
 message: it neither fails nor names the file. Such a file must be in
 `extraSources` too.

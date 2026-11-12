@@ -237,7 +237,6 @@ let
     extraSources = [ ];
     forHost = emptySide;
     forTarget = emptySide;
-    strictSources = null;
   };
   catFn = f: g: p: f p ++ g p;
   mergeSide = a: b: {
@@ -324,7 +323,7 @@ let
     if ls == [ ] then
       null
     else
-      lib.foldl' mergeOverride emptyOverride ls // { strictSources = pickSingle null [ "strictSources" ] ls; };
+      lib.foldl' mergeOverride emptyOverride ls;
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
@@ -840,13 +839,12 @@ let
               env = envStrings (o.env // o.forTarget.env);
               envCapture = capture "target" (catFn o.nativeInputs o.forTarget.nativeInputs) (catFn o.inputs o.forTarget.inputs);
             };
-            inherit (o) strictSources;
           };
           # Members always have a layer (`memberDefaults`); one that sets
           # nothing is left out, so instantiation's inputs do not change.
           empty = s: s.env == { } && s.envCapture == null;
         in
-        lib.optional (o != null && !(empty ov.host && empty ov.target && ov.strictSources == null)) (
+        lib.optional (o != null && !(empty ov.host && empty ov.target)) (
           lib.nameValuePair "${e.name}@${e.version}" ov
         )
       ) entries
@@ -960,7 +958,6 @@ let
       testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
       extraSources = extraSourcesOf wsName triple vName entries;
       packageOverrides = instOverrides wsName entries triple vName;
-      inherit (cfg) strictSources;
       name = "${wsName}-${triple}-${vName}";
       inherit delivery;
       shippedRemapScope = shippedRemapScopeOf wsName triple v;

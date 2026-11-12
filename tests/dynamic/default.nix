@@ -332,6 +332,10 @@ let
     own-view = repository.ownView;
     stamps = repository.stampsA;
     missing-input = repository.provided;
+    # The `buildScriptPaths` check reads the runs' missing-paths.json
+    # through the roots' breakbulk-root.json; `allowedListed` fails unless
+    # it found dep's path.
+    declared-paths = repository.declaredProvided;
     test-only = repository.testOnly;
     sources = repository.sources;
     pkgid-short = repository.pkgidShort;

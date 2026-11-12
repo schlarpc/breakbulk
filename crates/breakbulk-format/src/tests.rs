@@ -599,9 +599,6 @@ impl Resolve for Configured {
         }
         Ok(m)
     }
-    fn strict_sources(&self, _: &UnitId, _: &RunUnit) -> bool {
-        true
-    }
 }
 
 #[test]
@@ -641,7 +638,6 @@ fn render_configuration_hooks() {
     let RenderedUnit::Run(r) = render_unit(&p, &"r-ring".into(), &Configured).unwrap() else {
         panic!()
     };
-    assert!(r.strict_sources);
     assert!(!r.env.contains_key("OUT_DIR"));
     assert_eq!(r.env["SPEC"], "1");
 

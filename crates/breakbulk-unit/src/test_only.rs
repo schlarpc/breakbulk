@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::run::option_prefix;
 
 /// `p` with `.` and `..` components resolved lexically.
-fn normalize(p: &Path) -> PathBuf {
+pub(crate) fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {

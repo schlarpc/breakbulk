@@ -72,6 +72,7 @@ else
     msvc msvc-post-link
     test-home test-closure doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist build-script-outputs manifest-dir nested-cargo
+    declared-paths
   )
 fi
 

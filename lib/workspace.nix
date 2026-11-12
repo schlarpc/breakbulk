@@ -39,8 +39,7 @@
 #   noDefaultFeatures, allFeatures   passed to the planner
 #   variant = "<name>";        the variant's name in root stubs' messages
 #   packageOverrides."<name>@<version>" = { host = { env; envCapture; };
-#     target = { ... }; strictSources; }   as breakbulk.instantiate takes them
-#   strictSources = false;     the repository-wide default
+#     target = { ... }; }      as breakbulk.instantiate takes them
 #   targetEnv = { };           the target spec's env (target units only)
 # Path packages outside the workspace root (in the skeleton's closure) get
 # source views too, keyed by their directory like members.
@@ -108,7 +107,6 @@ pkgs:
   allFeatures ? false,
   variant ? profile,
   packageOverrides ? { },
-  strictSources ? false,
   targetEnv ? { },
   runner ? null,
   testSystem ? null,
@@ -464,7 +462,7 @@ let
       # `packages` (by name) and mkRepository's `packageOverrides` (by name
       # or name@version, already in instantiate's shape); the latter win.
       overrides = overridesFor kind;
-      inherit strictSources shippedRemapScope;
+      inherit shippedRemapScope;
       keepSourcePaths = sourcePaths == "keep";
       targetTraits = targetTraitsLib.forRust traits;
       inherit capabilities;

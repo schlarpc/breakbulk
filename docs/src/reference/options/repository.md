@@ -246,25 +246,6 @@ string
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-## `strictSources`
-
-Fail a build-script run that succeeds while declaring a
-` rerun-if-changed ` path missing from its sandbox\. When false, such
-paths are warnings that name the option to add them to\.
-` packages.<name>.strictSources ` overrides it per package\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-false
-```
-
-*Declared by:*
- - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
-
 ## `sysDefaults.enable`
 
 Define breakbulk’s curated settings for common ` -sys ` crates

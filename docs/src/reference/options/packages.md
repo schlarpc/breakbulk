@@ -37,7 +37,7 @@ attribute set of (submodule)
 
 Checks on this package’s products, as ` targets.<triple>.checks `\.
 They are added to the target’s checks and to the default checks
-(` noSourceReferences `, ` buildScriptFiles `)\. ` null ` removes a check
+(` noSourceReferences `, ` buildScriptFiles `, ` buildScriptPaths `)\. ` null ` removes a check
 from this package only\.
 
 *Type:*
@@ -408,22 +408,6 @@ attribute set of (null or raw value)
 
 ```nix
 { }
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.strictSources`
-
-Override the repository’s ` strictSources ` for this package’s build scripts\.
-
-*Type:*
-null or boolean
-
-*Default:*
-
-```nix
-null
 ```
 
 *Declared by:*

@@ -31,6 +31,11 @@ pub const METADATA_FILE: &str = "metadata.json";
 /// relative to the run's `out`, sorted.
 pub const TARGET_FILES_FILE: &str = "target-files.json";
 
+/// In a run's `flags`, when its script declared `rerun-if-changed` paths
+/// that are not in its view: each one with its hint
+/// ([`run::MissingPathEntry`] list as JSON), for the products' check.
+pub const MISSING_PATHS_FILE: &str = "missing-paths.json";
+
 /// A unit failure: the message is printed as `error: …` and the build fails.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error(pub String);

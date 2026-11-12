@@ -1586,6 +1586,111 @@ let
     ''
   );
 
+  # A check, not a failing run: the run's failure would block everything
+  # above it and name one path, where the check names every path below the
+  # product at once and the product still builds.
+  buildScriptPaths =
+    mkHelper
+      {
+        name = "buildScriptPaths";
+        kind = "check";
+        description = ''
+          Fails when a build script of the product's target declared a
+          `rerun-if-changed` path that was not in its view when it ran.
+          Such a script often skips work without saying so: it finds no
+          file and reads nothing. The run lists the missing paths in its
+          `flags` output (`missing-paths.json`). The message names each
+          path, the package that declared it and the option to add it to:
+          `extraSources` for a path in the repository, `inputs` (or
+          `nativeInputs`) for one outside it. It ends with the `allow`
+          setting for the paths and how to remove the check. Every
+          product has it; it passes when no script declared a missing
+          path. It reads the runs below the product's roots
+          ([Build-script runs](stage-functions.md#build-script-runs)):
+          the runs of build scripts for the build machine, and runs that
+          only tests depend on, are not checked; their build logs warn.
+        '';
+        options.allow = mkOption {
+          type = types.listOf (
+            types.either types.str (
+              types.submodule {
+                options = {
+                  package = mkOption {
+                    type = types.str;
+                    description = "The name of the package whose build script declares the path.";
+                  };
+                  path = mkOption {
+                    type = types.str;
+                    default = "*";
+                    description = "A shell glob pattern matched against the path as the script printed it. `*`: every path.";
+                  };
+                };
+              }
+            )
+          );
+          default = [ ];
+          example = literalExpression ''[ "gdbstub" { package = "deno"; path = "../Cargo.lock"; } ]'';
+          description = ''
+            Missing paths the scripts do not need: a package name (every
+            path its build script declares), or `{ package; path; }`,
+            where `path` is a shell glob pattern matched against the path
+            as the script printed it (default `*`). A registry crate
+            that declares a path it never reads is allowed once here, for
+            the product.
+          '';
+        };
+      }
+      (
+        cfg:
+        { product, pkgs, ... }:
+        let
+          jq = "${pkgs.buildPackages.jq}/bin/jq";
+          allow = map (a: if builtins.isString a then { package = a; path = "*"; } else a) cfg.allow;
+          checkName = product.checkName or "buildScriptPaths";
+        in
+        pkgs.runCommand "${product.name}-build-script-paths"
+          {
+            allowJson = builtins.toJSON allow;
+            removal = removeCheckLine "buildScriptPaths" product "is built correctly without them";
+          }
+          ''
+            set -euo pipefail
+            mkdir -p $out
+            : > $out/allowed
+            # package <TAB> version <TAB> declared <TAB> hint, one per missing path.
+            for f in ${buildScriptFlagsWords "buildScriptPaths" product pkgs}; do
+              [ -e "$f/missing-paths.json" ] || continue
+              ${jq} -r --slurpfile md "$f/metadata.json" \
+                '.[] | [$md[0].package, $md[0].version, .declared, .hint] | @tsv' "$f/missing-paths.json"
+            done | LC_ALL=C sort -u > missing
+            bad=()
+            allowItems=()
+            while IFS=$'\t' read -r package version declared hint; do
+              ok=0
+              while IFS=$'\t' read -r ap apath; do
+                # Unquoted: a glob pattern.
+                if [ "$package" = "$ap" ] && [[ $declared == $apath ]]; then ok=1; break; fi
+              done < <(${jq} -r '.[] | [.package, .path] | @tsv' <<< "$allowJson")
+              if [ "$ok" = 1 ]; then
+                echo "buildScriptPaths: ${product.name}: $package $version declares $declared, which is not in its view: allowed" >&2
+                printf '%s %s: %s\n' "$package" "$version" "$declared" >> $out/allowed
+              else
+                bad+=("$package $version: $hint")
+                allowItems+=("{ package = $(${jq} -n --arg s "$package" '$s'); path = $(${jq} -n --arg s "$declared" '$s'); }")
+              fi
+            done < missing
+            if [ ''${#bad[@]} -gt 0 ]; then
+              {
+                echo "buildScriptPaths: build scripts below ${product.name} declared rerun-if-changed paths that were not in their view, so they ran without them:"
+                printf '  %s\n' "''${bad[@]}"
+                echo "When a script does not need a path, allow it: packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.buildScriptPaths { allow = [ $(printf '%s ' "''${allowItems[@]}")]; };"
+                echo "$removal"
+              } >&2
+              exit 1
+            fi
+          ''
+      );
+
   # Paths are compared as strings, so they are not realised for the check.
   # Only toolchain paths found in the closure cost a scan for the
   # libraries the output loads.
@@ -1984,6 +2089,7 @@ in
     buildScriptFiles
     buildScriptPath
     buildScriptFilesIncluded
+    buildScriptPaths
     removeSourceReferences
     noSourceReferences
     neededLibraries

@@ -15,7 +15,10 @@
 //! 6. Check `rerun-if-changed` paths against the sandbox: on failure, hint at
 //!    each missing path, at failures of common crates ([`recognize`]) and
 //!    at the unset `rerun-if-env-changed` variables; on success, warn about
-//!    missing paths, or fail with `strictSources`.
+//!    missing paths and list them in `$flags/missing-paths.json`, which the
+//!    products' `buildScriptPaths` check reads. The run itself does not
+//!    fail on them: a check fails without blocking what is built above it,
+//!    and names every missing path below a product at once.
 //! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
 //!    ([`remove_cmake_state`]).
 
@@ -23,6 +26,8 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+
+use serde::{Deserialize, Serialize};
 
 use crate::compile::fresh_dir;
 use crate::directives::{
@@ -34,8 +39,8 @@ use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec
 use crate::splice::expand_dylib_path;
 use crate::test_only;
 use crate::{
-    DIRECTIVES_FILE, Error, METADATA_FILE, TARGET_FILES_FILE, io_err, read_directives,
-    read_metadata, write_json,
+    DIRECTIVES_FILE, Error, METADATA_FILE, MISSING_PATHS_FILE, TARGET_FILES_FILE, io_err,
+    read_directives, read_metadata, write_json,
 };
 
 /// The build script to execute: `script` itself, or the one file in it when
@@ -153,7 +158,9 @@ pub(crate) fn option_prefix(package: &str) -> String {
 pub struct MissingPath {
     /// As the script printed it.
     pub declared: String,
-    /// Resolved against the package directory.
+    /// Resolved against the package directory, `.` and `..` resolved
+    /// lexically, so that a path in the source view reads as its place in
+    /// the repository.
     pub path: PathBuf,
 }
 
@@ -169,6 +176,10 @@ pub fn missing_paths(out: &BuildOutput, cwd: &Path) -> Vec<MissingPath> {
             path: cwd.join(p),
         })
         .filter(|m| m.path.symlink_metadata().is_err())
+        .map(|m| MissingPath {
+            path: test_only::normalize(&m.path),
+            ..m
+        })
         .collect()
 }
 
@@ -181,6 +192,36 @@ pub fn unset_vars<'a>(out: &'a BuildOutput, env: &BTreeMap<String, String>) -> V
         .iter()
         .map(String::as_str)
         .filter(|v| !env.contains_key(*v) && seen.insert(*v))
+        .collect()
+}
+
+/// A missing `rerun-if-changed` path as `$flags/missing-paths.json` lists
+/// it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MissingPathEntry {
+    /// As the script printed it.
+    pub declared: String,
+    /// As [`MissingPath::path`].
+    pub path: String,
+    /// The option to add it to ([`path_hints`]).
+    pub hint: String,
+}
+
+/// The entries of `$flags/missing-paths.json`.
+pub fn missing_path_entries(
+    package: &str,
+    cwd: &Path,
+    missing: &[MissingPath],
+) -> Vec<MissingPathEntry> {
+    missing
+        .iter()
+        .zip(path_hints(package, cwd, missing))
+        .map(|(m, hint)| MissingPathEntry {
+            declared: m.declared.clone(),
+            path: m.path.display().to_string(),
+            hint,
+        })
         .collect()
 }
 
@@ -241,6 +282,8 @@ pub struct Success {
     pub output: BuildOutput,
     /// Warnings to print, including the sandbox check's.
     pub warnings: Vec<String>,
+    /// The declared `rerun-if-changed` paths missing from the sandbox.
+    pub missing: Vec<MissingPathEntry>,
 }
 
 /// A failed run, as Cargo reports it: the build script's messages, then
@@ -271,10 +314,9 @@ fn message_line(spec: &str, LogMessage { severity, message }: &LogMessage) -> St
     }
 }
 
-/// Cargo's error for a run that failed as a process (or, in breakbulk, for
-/// `strictSources`), with the script's stdout as Cargo shows it, then
-/// breakbulk's [`diagnostics`].
-fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Error {
+/// Cargo's error for a run that failed as a process, with the script's
+/// stdout as Cargo shows it, then breakbulk's [`diagnostics`].
+fn failure(f: &Finished<'_>, reason: String) -> Error {
     let descr = package_descr(&f.run.package);
     let mut msg =
         format!("failed to run custom build command for `{descr}`\n\nCaused by:\n  {reason}");
@@ -287,7 +329,7 @@ fn failure(f: &Finished<'_>, reason: String, parsed: Option<&BuildOutput>) -> Er
             msg.push('\n');
         }
     }
-    msg.push_str(&diagnostics(f, parsed));
+    msg.push_str(&diagnostics(f, None));
     Error(msg)
 }
 
@@ -384,7 +426,7 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Failure> {
         );
         return Err(Failure {
             messages: streamed_lines(),
-            error: failure(f, reason, None),
+            error: failure(f, reason),
         });
     }
     let descr = package_descr(&f.run.package);
@@ -401,22 +443,22 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Failure> {
         });
     }
     let cwd = Path::new(&f.run.cwd);
-    let missing = missing_paths(&output, cwd);
-    let hints = path_hints(&f.run.package, cwd, &missing);
-    if f.run.strict_sources && !hints.is_empty() {
-        let reason = format!(
-            "`strictSources` is set and the build script declared paths that are not in the sandbox:\n  {}",
-            hints.join("\n  ")
-        );
-        return Err(Failure::bare(failure(f, reason, Some(&output))));
-    }
+    let missing = missing_path_entries(&f.run.package, cwd, &missing_paths(&output, cwd));
     let mut warnings: Vec<String> = output
         .log_messages
         .iter()
         .map(|m| message_line(&spec, m))
         .collect();
-    warnings.extend(hints.into_iter().map(|h| format!("warning: {spec}: {h}")));
-    Ok(Success { output, warnings })
+    warnings.extend(
+        missing
+            .iter()
+            .map(|m| format!("warning: {spec}: {}", m.hint)),
+    );
+    Ok(Success {
+        output,
+        warnings,
+        missing,
+    })
 }
 
 /// Remove the `CMakeFiles` directory of every CMake build tree under `out`
@@ -556,6 +598,9 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     write_json(&flags.join(DIRECTIVES_FILE), &output)?;
     if !outside.is_empty() {
         write_json(&flags.join(TARGET_FILES_FILE), &outside)?;
+    }
+    if !success.missing.is_empty() {
+        write_json(&flags.join(MISSING_PATHS_FILE), &success.missing)?;
     }
     write_json(
         &flags.join(METADATA_FILE),

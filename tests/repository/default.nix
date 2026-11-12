@@ -298,6 +298,45 @@ let
     }
   ];
 
+  # --- declared-paths ----------------------------------------------------------
+
+  declaredPaths = modules: mkRepo (fixtures + "/declared-paths") ([ (oneWs ".") ] ++ modules);
+  declaredMissing = declaredPaths [ ];
+  # app's path in its view; dep's header allowed by package and path glob.
+  # `allowedListed` runs the check itself and fails unless the allowed
+  # path is in its output, so the passing check is not passing because it
+  # read no run (dynamic-derivation mode builds it too).
+  declaredProvided = declaredPaths [
+    (
+      let
+        check = breakbulk.stageHelpers.buildScriptPaths {
+          allow = [
+            {
+              package = "dep";
+              path = "/nonexistent/*";
+            }
+          ];
+        };
+      in
+      {
+        packages.app = {
+          extraSources = [ "shared" ];
+          checks.buildScriptPaths.run = check;
+          checks.allowedListed = {
+            on = "linked";
+            run =
+              { pkgs, ... }@args:
+              pkgs.runCommand "allowed-listed" { checked = check args; } ''
+                cat $checked/allowed
+                grep -qxF 'dep 0.1.0: /nonexistent/breakbulk-tool.h' $checked/allowed
+                touch $out
+              '';
+          };
+        };
+      }
+    )
+  ];
+
   # --- pkgid-short -------------------------------------------------------------
 
   pkgidShort = mkRepo (fixtures + "/pkgid-short") [
@@ -505,6 +544,8 @@ in
       exclusive
       missing
       provided
+      declaredMissing
+      declaredProvided
       overrideRepo
       testOnly
       pkgidShort
@@ -836,6 +877,57 @@ in
         cat $failure/log
         got=$($app/bin/app); echo "$got"
         [ "$got" = "app 3.1 vendored 7" ]
+        touch $out
+      '';
+
+  # Build scripts that declare missing `rerun-if-changed` paths and run
+  # on without them: the product builds, and its default
+  # `buildScriptPaths` check fails naming both paths, the option for each
+  # (`extraSources` for app's path in the repository, `inputs` for dep's
+  # header outside it), the `allow` setting for both and how to remove the
+  # check. With app's path in `extraSources` the script reads it and,
+  # with dep's header allowed, the check passes. A package name allows
+  # every path of its script; `null` removes the check.
+  declared-paths =
+    let
+      missingApp = declaredMissing.workspaces.main.packages.app;
+      providedApp = declaredProvided.workspaces.main.packages.app;
+      allowAll =
+        (declaredPaths [
+          {
+            packages.app.checks.buildScriptPaths.run = breakbulk.stageHelpers.buildScriptPaths {
+              allow = [
+                "app"
+                "dep"
+              ];
+            };
+          }
+        ]).workspaces.main.packages.app;
+      off = (declaredPaths [ { packages.app.checks.buildScriptPaths = null; } ]).workspaces.main.packages.app;
+    in
+    assert lib.assertMsg (!(off.checks ? buildScriptPaths)) "declared-paths: the check is not removable";
+    pkgs.runCommand "declared-paths"
+      {
+        inherit missingApp providedApp;
+        failure = pkgs.testers.testBuildFailure missingApp.checks.buildScriptPaths;
+        passing = providedApp.checks.buildScriptPaths;
+        listed = providedApp.checks.allowedListed;
+        allowed = allowAll.checks.buildScriptPaths;
+      }
+      ''
+        set -euo pipefail
+        [ "$($missingApp/bin/app)" = "app unknown absent" ]
+        [ "$($providedApp/bin/app)" = "app 1.2.3 absent" ]
+        log=$failure/testBuildFailure.log
+        cat $log
+        grep -qF 'buildScriptPaths: build scripts below app declared rerun-if-changed paths' $log
+        grep -qE '^  app 0\.1\.0: .*`rerun-if-changed=\.\./shared/version\.txt`.*`packages\.app\.extraSources`$' $log
+        # The path as its place in the view, `..` resolved.
+        grep -qE -- '-source/shared/version\.txt is not in the sandbox' $log
+        grep -qE '^  dep 0\.1\.0: .*`rerun-if-changed=/nonexistent/breakbulk-tool\.h`.*`packages\.dep\.inputs`' $log
+        grep -qF 'packages.app.checks.buildScriptPaths.run = breakbulk.stageHelpers.buildScriptPaths { allow = [ { package = "app"; path = "../shared/version.txt"; } { package = "dep"; path = "/nonexistent/breakbulk-tool.h"; } ]; };' $log
+        test "$(tail -n1 $log)" = 'or, when app is built correctly without them: packages.app.checks.buildScriptPaths = null;'
+        test "$(wc -l < $allowed/allowed)" = 2
         touch $out
       '';
 

@@ -96,11 +96,9 @@ rec {
       # overrides."<name>" or ."<name>@<version>" = {
       #   host = { env = { }; envCapture = null; };
       #   target = { env = { }; envCapture = null; };
-      #   strictSources = null;
       # }
       # with package-wide and per-triple settings already merged per platform.
       overrides ? { },
-      strictSources ? false,
       # { variant = "<name>"; roots = [ { package; target; kind; test;
       # requiredFeatures; } ]; } (see predictedRoots), or null to take the
       # plan's roots as they are.
@@ -156,12 +154,7 @@ rec {
       // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
       // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }));
       overridesFile = toFile "overrides.json" (toJSON {
-        inherit strictSources;
-        packages = lib.mapAttrs (
-          _: o:
-          lib.genAttrs platforms (p: platformJson (ovPlatform o p))
-          // lib.optionalAttrs ((o.strictSources or null) != null) { inherit (o) strictSources; }
-        ) overrides;
+        packages = lib.mapAttrs (_: o: lib.genAttrs platforms (p: platformJson (ovPlatform o p))) overrides;
       });
       rootsFile = toFile "roots.json" (toJSON roots);
 

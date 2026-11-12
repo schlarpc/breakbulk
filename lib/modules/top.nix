@@ -66,17 +66,6 @@ in
       '';
     };
 
-    strictSources = mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        Fail a build-script run that succeeds while declaring a
-        `rerun-if-changed` path missing from its sandbox. When false, such
-        paths are warnings that name the option to add them to.
-        `packages.<name>.strictSources` overrides it per package.
-      '';
-    };
-
     registries = mkOption {
       type = types.attrsOf (
         types.submodule {

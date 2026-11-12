@@ -91,6 +91,7 @@ breakbulk read from the script's output:
 | --- | --- |
 | `metadata.json` | `package` and `version`: the package's name and version. `links`: its `links` name, only when it has one. `metadata`: the `[key, value]` pairs of its `cargo::metadata=key=value` lines, in printed order. `out`: the path of its `OUT_DIR`. |
 | `directives.json` | Its other directives, and the copies of Cargo's `target/<profile>` that hold files the script placed next to the binaries (`targetDirs`; `buildScriptFiles` reads them). See [The `flags` output](unit-builder.md#the-flags-output). |
+| `missing-paths.json` | Only when the script declared `rerun-if-changed` paths that were not in its view: each one, with the option to add it to. `buildScriptPaths` reads it. |
 
 For wasmtime's C API crate, `metadata.json` reads:
 

@@ -19,9 +19,9 @@ use std::fmt;
 
 use breakbulk_format::rendered::{DEBUG_OUTPUT, derivation_output, package_name_version};
 use breakbulk_format::{
-    CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, TargetTraits,
-    Unit, UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in,
-    to_canonical_json, unit_env_value, validate,
+    CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, TargetTraits, Unit,
+    UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in, to_canonical_json,
+    unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -482,12 +482,6 @@ impl Resolve for Tokens<'_> {
         };
         let view = self.input(keys::src(dir));
         Ok(paths.iter().map(|p| format!("{view}/{p}")).collect())
-    }
-
-    fn strict_sources(&self, _id: &UnitId, run: &RunUnit) -> bool {
-        self.package_override(&run.package)
-            .and_then(|(_, o)| o.strict_sources)
-            .unwrap_or(self.inputs.overrides.strict_sources)
     }
 
     /// Values from the Nix side are tokens whose emptiness is unknown here,
