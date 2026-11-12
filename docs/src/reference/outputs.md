@@ -92,6 +92,7 @@ repo = {
   apps."<ws>/<triple>/<pkg>/test-<name>";  # every test app, for apps.<system>
   sources.<crate>;                       # fetched crate sources
   explainSharing;                        # why two plans' units differ
+  nixFeatures;                           # the Nix features this evaluation uses
   config; options; optionsDoc;           # the evaluated modules
 };
 ```
@@ -165,6 +166,29 @@ nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
 `repo.explainSharing { a; b; package; }` takes two plans (from `plans`)
 and optionally a package name, and lists the inputs that make its units
 (or every package's) differ between them.
+
+### `nixFeatures`
+
+`repo.nixFeatures` says which Nix features breakbulk uses in this
+evaluation, under Nix's own names. It is read-only: it shows what
+[`mode`](options/repository.md#mode) and
+[`ca`](options/repository.md#ca) came out as, which with `mode = "auto"`
+and `ca = null` depends on the evaluator. On a Nix without dynamic
+derivations, with both at their defaults, it is:
+
+```nix
+{ caDerivations = false; dynamicDerivations = false; importFromDerivation = true; }
+```
+
+- `importFromDerivation`: `mode` came out as `ifd`.
+- `dynamicDerivations`: `mode` came out as `dynamic`.
+- `caDerivations`: `ca` came out as on, so stages, checks and test runs
+  are content-addressed and an unchanged input does not re-run them
+  ([Content addressing at the edges](../explanation/caching.md#content-addressing-at-the-edges)).
+  When it is `false`,
+  [`test.runFiles`](options/packages.md#packagesnametestrunfiles) and
+  [`test.stripForRun`](options/packages.md#packagesnameteststripforrun)
+  do not save test runs.
 
 ### Not built yet
 

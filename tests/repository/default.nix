@@ -1795,6 +1795,55 @@ in
     ) "poisoned-settings: other members' derivations differ: ${builtins.toJSON got}";
     evalCheck "poisoned-settings" (builtins.toJSON got);
 
+  # `nixFeatures` is what `mode` and `ca` came out as: set, and at their
+  # defaults on this evaluator. Reading it plans nothing.
+  nix-features =
+    let
+      features =
+        settings:
+        (breakbulk.mkRepository {
+          inherit pkgs tools;
+          root = fixtures + "/multi-ws";
+          modules = [ settings ];
+        }).nixFeatures;
+      cases = [
+        {
+          settings = {
+            mode = "ifd";
+            ca = false;
+          };
+          want = {
+            caDerivations = false;
+            dynamicDerivations = false;
+            importFromDerivation = true;
+          };
+        }
+        {
+          settings = {
+            mode = "ifd";
+            ca = true;
+          };
+          want = {
+            caDerivations = true;
+            dynamicDerivations = false;
+            importFromDerivation = true;
+          };
+        }
+        {
+          settings = { };
+          want = {
+            caDerivations = builtins ? outputOf;
+            dynamicDerivations = breakbulk.dynamic.available;
+            importFromDerivation = !breakbulk.dynamic.available;
+          };
+        }
+      ];
+      bad = lib.filter (c: features c.settings != c.want) cases;
+    in
+    assert lib.assertMsg (bad == [ ])
+      "nix-features: wrong for ${builtins.toJSON (map (c: c // { got = features c.settings; }) bad)}";
+    evalCheck "nix-features" (builtins.toJSON (map (c: features c.settings) cases));
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }

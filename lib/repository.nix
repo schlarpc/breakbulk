@@ -26,6 +26,7 @@
 #   repo.explainSharing { a; b; package; }                why units differ
 #   repo.config, repo.options                             the evaluated modules
 #   repo.optionsDoc                                       nixosOptionsDoc of them
+#   repo.nixFeatures                                      the Nix features this evaluation uses
 #
 #   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
 #   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  test apps (`nix run`)
@@ -1735,6 +1736,11 @@ let
     sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
     inherit explainSharing warnings;
     inherit (eval) config options;
+    nixFeatures = {
+      importFromDerivation = delivery == "ifd";
+      dynamicDerivations = delivery == "dynamic";
+      caDerivations = breakbulkLib.stages.resolveCa cfg.ca;
+    };
     optionsDoc = pkgs.nixosOptionsDoc {
       options = removeAttrs eval.options [
         "_module"

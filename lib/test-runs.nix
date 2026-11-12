@@ -680,7 +680,7 @@ rec {
     }:
     let
       inherit (inst) units;
-      useCa = if ca == null then stages.caAuto else ca;
+      useCa = stages.resolveCa ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
       # The sysroot's target libraries only (`testLibs`), laid out as a

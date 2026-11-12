@@ -13,6 +13,9 @@ it on exactly when the evaluator has ` dynamic-derivations ` (which
 needs ` ca-derivations ` too), and off otherwise: Nix code cannot
 tell whether ` ca-derivations ` is on, and without it a
 content-addressed derivation is an error that cannot be caught\.
+` caDerivations ` in
+[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says which it
+came out as\.
 
 *Type:*
 null or boolean
@@ -164,7 +167,10 @@ older than the evaluator fails with Nix’s own “missing system
 features” error naming ` builder-rpc-v0 `; set ` ifd ` then\. Unit
 derivations are identical in both modes; products are not (they are
 resolved at build time in ` dynamic `), so teams that mix Nix versions
-should pin the mode\.
+should pin the mode\. ` importFromDerivation ` and
+` dynamicDerivations ` in
+[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) say which it
+came out as\.
 
 In ` ifd `, evaluating another system’s outputs builds its plans, which
 needs a builder for that system: ` nix flake check --all-systems ` and

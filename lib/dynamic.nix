@@ -439,7 +439,7 @@ let
       ...
     }:
     let
-      useCa = if ca == null then stages.caAuto else ca;
+      useCa = stages.resolveCa ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
       runnerList = if runner == null then [ ] else lib.toList runner;
       sysroot = testRuns.testLibs pkgs (tools.rustc-sysroot or null) target;

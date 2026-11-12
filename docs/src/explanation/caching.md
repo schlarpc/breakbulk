@@ -49,6 +49,8 @@ exactly when the evaluator has dynamic derivations (which need Nix's
 `ca-derivations` feature too), because Nix code cannot tell whether
 `ca-derivations` is on. Without CA, stages and test runs
 simply re-run when their input's derivation changes.
+`caDerivations` in [`repo.nixFeatures`](../reference/outputs.md#nixfeatures)
+says which it came out as.
 
 On a cache without realisations this degrades gracefully: units are still
 substituted; stages and test runs re-run.

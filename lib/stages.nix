@@ -98,6 +98,7 @@ let
   };
 
   caAuto = builtins ? outputOf;
+  resolveCa = ca: if ca == null then caAuto else ca;
 
   # The file a product's `linked` stage holds instead of
   # binaries when Cargo built none of them (dynamic-derivation mode, where
@@ -358,7 +359,7 @@ let
       defaultChecks ? true,
     }:
     let
-      useCa = if ca == null then caAuto else ca;
+      useCa = resolveCa ca;
       ordered = order { inherit name stages; };
       product = {
         inherit name sourcePaths toolchainPaths;
@@ -475,6 +476,7 @@ in
     explainOrder
     order
     caAuto
+    resolveCa
     caAttrs
     noBinariesMarker
     ;

@@ -828,7 +828,9 @@ unchanged, so with content addressing (` ca `) a byte-identical
 test binary is not re-run\. A test that reads a file not listed
 fails\. ` null `: the package’s whole source view (or its
 ` test.sourceScope ` view), as ` cargo test ` sees it\. Test apps
-keep the whole view\.
+keep the whole view\. ` caDerivations ` in
+[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says whether
+` ca ` is on\.
 
 *Type:*
 null or (list of string)
@@ -947,6 +949,9 @@ of every test binary that links it; the stripped copy does not
 change, and the test is not re-run\. Backtraces still name
 functions, but not files and lines\. The unstripped binary stays
 in ` tests.<pkg>.<binary> ` for debugging\. ` null `: off\.
+` caDerivations ` in
+[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says whether
+` ca ` is on\.
 
 *Type:*
 null or boolean
