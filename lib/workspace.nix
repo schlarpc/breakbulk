@@ -444,7 +444,7 @@ let
     acc: e:
     acc // { ${e.name} = (acc.${e.name} or [ ]) ++ map (d: lib.head (lib.splitString " " d)) e.dependencies; }
   ) { } entries;
-  reachableFrom = lib.genAttrs [ "build" "test" "bench" ] (
+  reachableFrom = lib.genAttrs [ "build" "test" "doc" "bench" ] (
     kind:
     let
       sel = if kind == "test" then testSelect else select;
