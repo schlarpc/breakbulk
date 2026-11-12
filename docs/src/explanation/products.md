@@ -152,6 +152,21 @@ breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; }`. To remove
 the check from a package, set `packages.<name>.checks.noSourceReferences =
 null`.
 
+Path remapping rewrites panic locations, `file!()` and debug information.
+It does not rewrite `env!` values. `CARGO_MANIFEST_DIR` is the package's
+source in the store, so a crate that keeps
+`concat!(env!("CARGO_MANIFEST_DIR"), "/", file)` in a string puts that
+source in the product's closure. This is the usual cause of a source
+reference, and the check's failure says so. When the program never reads
+the path, add the
+[`removeSourceReferences`](../reference/stage-helpers.md#removesourcereferences)
+stage to the package. It replaces the hash of every source path in the
+product's files with `e`s of the same length, as nixpkgs'
+`remove-references-to` does, and changes nothing else. breakbulk never
+adds it by itself: a program that opens `CARGO_MANIFEST_DIR/assets/…` at
+run time works only while the source is in its closure, and fails after
+the scrub. Such a program keeps the reference: remove the check instead.
+
 One catch for tests: the workspace libraries a test binary links are
 compiled once, for shipping, so their debug information names their
 sources. Editing any file of such a library, even a README, changes the

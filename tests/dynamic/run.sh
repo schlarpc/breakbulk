@@ -70,7 +70,7 @@ else
     windows-gnullvm-aarch64 windows-gnu windows-dll-staged linux-portable-native
     msvc msvc-post-link
     test-home test-closure doctest-false optional-dependency exclusive-features
-    cdylib-debug ui-dist build-script-outputs
+    cdylib-debug ui-dist build-script-outputs manifest-dir
   )
 fi
 

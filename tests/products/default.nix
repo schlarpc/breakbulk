@@ -48,6 +48,11 @@
 #                    sources named only by the archive (its objects' debug
 #                    info) are allowed; a stage adding a file that names
 #                    the same sources fails it
+#   manifest-dir     a bin keeping env!("CARGO_MANIFEST_DIR") in a string:
+#                    noSourceReferences fails, naming the cause and the
+#                    removeSourceReferences stage at its place; with that
+#                    stage only hash bytes change (to `e`), the check
+#                    passes and the product runs
 #   prefer-dynamic   -C prefer-dynamic: noSourceReferences allows the
 #                    sysroot that holds the libstd-*.so the binary loads
 #                    (nixpkgs' rustc), and fails on rust-overlay's rustc and
@@ -390,6 +395,18 @@ let
     ]
   );
   sourcePathsReadme =mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
+
+  # --- manifest-dir ------------------------------------------------------------
+
+  manifestDir = extra: mkRepo (fixtures + "/manifest-dir") ([ (oneWs "." "dev") ] ++ extra);
+  manifestDirRepo = manifestDir [
+    {
+      packages.app.stages.removeSourceReferences = {
+        after = "splitDebug";
+        run = helpers.removeSourceReferences;
+      };
+    }
+  ];
 
   # --- product-attributes ------------------------------------------------------
 
@@ -835,6 +852,7 @@ in
       sourcePaths
       sourcePathsReadme
       cdylibDebug
+      manifestDirRepo
       trimPathsRepo
       variantsRepo
       benchesRepo
@@ -2173,6 +2191,37 @@ in
         # where.txt names every source, the archive's too: none is allowed.
         grep -q 'references source' $failure/testBuildFailure.log
         if grep -q ': allowed$' $failure/testBuildFailure.log; then exit 1; fi
+        touch $out
+      '';
+
+  manifest-dir =
+    let
+      plain = (manifestDir [ ]).workspaces.main.packages.app;
+      scrubbed = manifestDirRepo.workspaces.main.packages.app;
+      fillerHash = lib.fixedWidthString 32 "e" "";
+    in
+    pkgs.runCommand "manifest-dir"
+      {
+        failure = pkgs.testers.testBuildFailure plain.checks.noSourceReferences;
+        passing = scrubbed.checks.noSourceReferences;
+      }
+      ''
+        set -euo pipefail
+        log=$failure/testBuildFailure.log
+        cat $log
+        grep -q 'references source' $log
+        grep -qF 'usually comes from env!("CARGO_MANIFEST_DIR") kept in a string' $log
+        grep -qxF 'When the program never reads that path, blank its hash: packages.app.stages.removeSourceReferences = { after = "splitDebug"; before = "install"; run = breakbulk.stageHelpers.removeSourceReferences; };' $log
+        test "$(tail -n1 $log)" = 'or, when app may reference them: packages.app.checks.noSourceReferences = null;'
+        # The stage changed only hash bytes, each to an `e` (octal 145).
+        before=${plain.stages.splitDebug}/app
+        after=${scrubbed.stages.removeSourceReferences}/app
+        test "$(stat -c %s $before)" = "$(stat -c %s $after)"
+        cmp -l $before $after > diff || true
+        test -s diff
+        if awk '$3 != 145' diff | grep -q .; then echo "bytes other than the hash changed" >&2; exit 1; fi
+        ${scrubbed}/bin/app | tee run.txt
+        grep -qx "assets: ${builtins.storeDir}/${fillerHash}-.*/assets" run.txt
         touch $out
       '';
 

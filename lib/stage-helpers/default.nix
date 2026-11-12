@@ -1005,6 +1005,113 @@ let
     ''
   );
 
+  # The store path a source lies in, not the source itself: a git crate's
+  # source is a directory inside its tree, and a closure and a reference
+  # scan know whole store paths only.
+  sourceStoreRoot =
+    s:
+    let
+      rel = lib.removePrefix "${builtins.storeDir}/" s;
+    in
+    if rel == s then s else "${builtins.storeDir}/${lib.head (lib.splitString "/" rel)}";
+  sourceStoreRoots = l: lib.unique (map (s: sourceStoreRoot (builtins.unsafeDiscardStringContext "${s}")) l);
+
+  # Where a stage goes that should run on the flat link output in this
+  # product: after its last stage before `install`, before `install` (when
+  # it has one). A check knows the order (`product.stageOrder`).
+  beforeInstallPosition =
+    product:
+    let
+      order = product.stageOrder or [ "install" ];
+      installAt = lib.lists.findFirstIndex (s: s == "install") null order;
+      before = if installAt == null then order else lib.take installAt order;
+    in
+    lib.optionalString (before != [ ]) "after = \"${lib.last before}\"; "
+    + lib.optionalString (lib.elem "install" order) "before = \"install\"; ";
+
+  # Not part of `install` or of any default: a program that opens the path
+  # at run time (`CARGO_MANIFEST_DIR/assets/…`) works only while the source
+  # is in its closure.
+  removeSourceReferences =
+    mkHelper
+      {
+        name = "removeSourceReferences";
+        description = ''
+          Replaces the hash of every source store path in the product's
+          files with `e`s of the same length, as nixpkgs'
+          `remove-references-to` does, and changes nothing else. The
+          product then no longer references its sources, and
+          `noSourceReferences` passes. The usual cause of such a
+          reference is `env!("CARGO_MANIFEST_DIR")` kept in a string:
+          rustc's path remapping rewrites panic locations, `file!()` and
+          debug information, not `env!` values.
+
+          Use it only when the program never reads the path: a program
+          that opens `CARGO_MANIFEST_DIR/assets/…` at run time finds it
+          only while the source is in its closure. It is never added on
+          its own; add it per package, where `noSourceReferences`'s
+          failure says (here, on Linux with `debugInfo = "split"`):
+
+          ```nix
+          packages.app.stages.removeSourceReferences = {
+            after = "splitDebug";
+            run = breakbulk.stageHelpers.removeSourceReferences;
+          };
+          ```
+
+          It edits bytes, so it breaks a code signature made before it
+          (the linker signs every binary for Apple's arm64 targets):
+          sign again after it.
+        '';
+        options.sources = mkOption {
+          type = types.nullOr (types.listOf storePathType);
+          default = null;
+          description = ''
+            The store paths whose hashes are replaced. `null`: the
+            product's `sourcePaths` (its source views and crate sources),
+            which `noSourceReferences` checks.
+          '';
+        };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
+          hashes = map (s: lib.substring 0 32 (lib.removePrefix "${builtins.storeDir}/" s)) (
+            lib.filter (lib.hasPrefix "${builtins.storeDir}/") (sourceStoreRoots sources)
+          );
+        in
+        pkgs.runCommand (stageName product "removeSourceReferences")
+          {
+            hashes = concatStringsSep "\n" hashes + "\n";
+            passAsFile = [ "hashes" ];
+          }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            copyIn "$out"
+            filler=${lib.fixedWidthString 32 "e" ""}
+            script=()
+            while IFS= read -r h; do
+              [ -n "$h" ] && script+=(-e "s|$h|$filler|g")
+            done < "$hashesPath"
+            [ ''${#script[@]} -gt 0 ] || exit 0
+            find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              # -a: a binary file is searched as text.
+              found=$(LC_ALL=C grep -aoFf "$hashesPath" "$f" | LC_ALL=C sort -u | tr '\n' ' ' || true)
+              [ -n "$found" ] || continue
+              echo "removeSourceReferences: ''${f#$out/}: $found"
+              LC_ALL=C sed -i "''${script[@]}" "$f"
+            done
+          ''
+      );
+
   # ---------------------------------------------------------------------
   # Build-script outputs
 
@@ -1248,15 +1355,7 @@ let
       ...
     }:
     let
-      # Where the stage goes in this product: after its last stage before
-      # `install`, before `install` (when it has one).
-      order = product.stageOrder or [ "install" ];
-      installAt = lib.lists.findFirstIndex (s: s == "install") null order;
-      before = if installAt == null then order else lib.take installAt order;
-      position =
-        lib.optionalString (before != [ ]) "after = \"${lib.last before}\"; "
-        + lib.optionalString (lib.elem "install" order) "before = \"install\"; ";
-      stanza = "packages.${product.name}.stages.buildScriptFiles = { ${position}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
+      stanza = "packages.${product.name}.stages.buildScriptFiles = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
       removal = removeCheckLine "buildScriptFiles" product "does not need them at run time";
     in
     pkgs.runCommand "${product.name}-build-script-files" { inherit stanza removal; } ''
@@ -1307,6 +1406,11 @@ let
       rust-src never are. A rust-overlay toolchain's joined sysroot
       brings its rustc and cargo components along, so such a binary
       still fails there.
+
+      When a source is referenced, the failure says that
+      `env!("CARGO_MANIFEST_DIR")` kept in a string is the usual cause,
+      and names the `removeSourceReferences` stage, at its place in the
+      product's stage order, besides narrowing and removing the check.
     '';
     options =
       let
@@ -1348,17 +1452,7 @@ let
       sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
       toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
       allowedIn = if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
-      # The store path each source lies in, not the source itself: a git
-      # crate's source is a directory inside its tree, and a closure lists
-      # whole store paths only.
-      storeRoot =
-        s:
-        let
-          rel = lib.removePrefix "${builtins.storeDir}/" s;
-        in
-        if rel == s then s else "${builtins.storeDir}/${lib.head (lib.splitString "/" rel)}";
-      strs = l: lib.unique (map (s: storeRoot (builtins.unsafeDiscardStringContext "${s}")) l);
-      listFile = name: l: builtins.toFile name (concatStringsSep "\n" (strs l) + "\n");
+      listFile = name: l: builtins.toFile name (concatStringsSep "\n" (sourceStoreRoots l) + "\n");
       checkName = product.checkName or "noSourceReferences";
     in
     pkgs.runCommand "${product.name}-no-source-references"
@@ -1371,11 +1465,13 @@ let
         binutils = pkgs.buildPackages.binutils-unwrapped;
         allowedIn = concatStringsSep "\n" allowedIn;
         narrowing = "packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };";
+        scrub = "packages.${product.name}.stages.removeSourceReferences = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.removeSourceReferences; };";
         removal = removeCheckLine "noSourceReferences" product "may reference them";
       }
       ''
         set -euo pipefail
         bad=0
+        badSource=0
         # The shared libraries the checked output's files load (computed
         # once, on first use).
         needed=
@@ -1418,6 +1514,7 @@ let
             fi
             echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references source $s" >&2
             bad=1
+            badSource=1
           fi
         done < "$sourcesList"
         while IFS= read -r s; do
@@ -1430,6 +1527,10 @@ let
         if [ "$bad" = 1 ]; then
           {
             echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in the breakbulk documentation: https://schlarpc.github.io/breakbulk/explanation/products.html#source-paths-and-debug-information"
+            if [ "$badSource" = 1 ]; then
+              echo "A source path in a product usually comes from env!(\"CARGO_MANIFEST_DIR\") kept in a string, which rustc's path remapping does not rewrite."
+              echo "When the program never reads that path, blank its hash: $scrub"
+            fi
             echo "A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic."
             echo "Check sources only: $narrowing"
             echo "$removal"
@@ -1678,6 +1779,7 @@ in
     buildScriptFiles
     buildScriptPath
     buildScriptFilesIncluded
+    removeSourceReferences
     noSourceReferences
     neededLibraries
     glibcLibraries

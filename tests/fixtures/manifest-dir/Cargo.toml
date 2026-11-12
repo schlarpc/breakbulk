@@ -1,0 +1,10 @@
+# A bin that keeps env!("CARGO_MANIFEST_DIR") in a string ("Source paths
+# and debug information" in docs/src/explanation/products.md). rustc's path
+# remapping does not rewrite env! values, so the product names its source
+# view: noSourceReferences fails, naming removeSourceReferences, and passes
+# once that stage blanks the hash; the program never reads the path, so it
+# still runs.
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"

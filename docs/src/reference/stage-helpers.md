@@ -413,6 +413,44 @@ The package to run instead of `patchelf` from the stage's `pkgs`.
 
 *Default:* `null`
 
+### `removeSourceReferences`
+
+Replaces the hash of every source store path in the product's
+files with `e`s of the same length, as nixpkgs'
+`remove-references-to` does, and changes nothing else. The
+product then no longer references its sources, and
+`noSourceReferences` passes. The usual cause of such a
+reference is `env!("CARGO_MANIFEST_DIR")` kept in a string:
+rustc's path remapping rewrites panic locations, `file!()` and
+debug information, not `env!` values.
+
+Use it only when the program never reads the path: a program
+that opens `CARGO_MANIFEST_DIR/assets/…` at run time finds it
+only while the source is in its closure. It is never added on
+its own; add it per package, where `noSourceReferences`'s
+failure says (here, on Linux with `debugInfo = "split"`):
+
+```nix
+packages.app.stages.removeSourceReferences = {
+  after = "splitDebug";
+  run = breakbulk.stageHelpers.removeSourceReferences;
+};
+```
+
+It edits bytes, so it breaks a code signature made before it
+(the linker signs every binary for Apple's arm64 targets):
+sign again after it.
+
+#### `removeSourceReferences.sources`
+
+The store paths whose hashes are replaced. `null`: the
+product's `sourcePaths` (its source views and crate sources),
+which `noSourceReferences` checks.
+
+*Type:* null or (list of (string or absolute path or package))
+
+*Default:* `null`
+
 ### `splitDebug`
 
 Moves the debug information of every ELF file into the stage's
@@ -589,6 +627,11 @@ whose `libstd-*.so` it loads; rustc's own component, cargo and
 rust-src never are. A rust-overlay toolchain's joined sysroot
 brings its rustc and cargo components along, so such a binary
 still fails there.
+
+When a source is referenced, the failure says that
+`env!("CARGO_MANIFEST_DIR")` kept in a string is the usual cause,
+and names the `removeSourceReferences` stage, at its place in the
+product's stage order, besides narrowing and removing the check.
 
 #### `noSourceReferences.sources`
 
