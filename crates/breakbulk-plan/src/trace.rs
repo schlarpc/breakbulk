@@ -440,9 +440,13 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .ok_or_else(|| Error("`rustc -vV` names no host".into()))?;
     let rust_src_remap = rust_src_remap(opts, &rustc_vv)?;
 
-    // cargo metadata, for the stubs and for the planner.
+    // cargo metadata, for the stubs and for the planner. It lists the
+    // packages of the resolve for the features it is given, so it gets all
+    // of them rather than the variant's: `cargo metadata` selects every
+    // member, and a bare feature name applies to each selected member that
+    // has it, which is not what the variant's `-p` selection means.
     let mut cmd = command(opts, &opts.cargo);
-    cmd.args(["metadata", "--format-version", "1"])
+    cmd.args(["metadata", "--format-version", "1", "--all-features"])
         .args(common_args(opts, &config));
     let mut meta_text = output(cmd, "cargo metadata")?;
     // -Zbuild-std: the standard library's packages too, for the stubs

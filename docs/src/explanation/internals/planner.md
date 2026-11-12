@@ -23,7 +23,8 @@ cargo build --frozen --offline <selection> \
 
 - `<selection>` is `--workspace`, or `-p` for each package in the target's `packages` list.
 - The vendor configuration is described under [Vendoring for planning](sources.md#vendoring-for-planning).
-- Before tracing, the planner writes the `cargo metadata` JSON to `$BREAKBULK_RECORD/metadata.json`. Stubs read it to learn their package's targets.
+- Before tracing, the planner writes the `cargo metadata` JSON to `$BREAKBULK_RECORD/metadata.json`. Stubs read it to learn their package's targets, and the planner looks up each traced compile's package in it by directory.
+- `cargo metadata` runs with `--all-features`, not the variant's feature flags. It lists only the packages of the resolve for the features it is given, so without them a variant whose features turn on an optional dependency would compile a package the metadata does not have. The variant's own flags would not do: `cargo metadata` selects every workspace member, and a bare feature name applies to each selected member that has it, which differs from what it means for a `-p` selection. With `--all-features` Cargo resolves only; mutually exclusive features that would not compile together still plan.
 - **Spec rustflags.** Cargo takes rustflags from exactly one source: the first of `CARGO_ENCODED_RUSTFLAGS`, `RUSTFLAGS`, `target.<triple>` together with `target.<cfg>`, and `build.rustflags`. Arrays concatenate only within one key. The planner therefore reads the project's `.cargo/config.toml` files (a documented format).
 
   If the project sets `build.rustflags` and no per-target rustflags, spec rustflags go under `build.rustflags`; otherwise under `target.<triple>.rustflags`.

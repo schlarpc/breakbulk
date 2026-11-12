@@ -39,6 +39,8 @@ repository-multi-ws-sharing
 repository-options-doc
 repository-overrides
 repository-required-features
+repository-optional-dependency
+repository-exclusive-features
 repository-stamps
 repository-stamps-invalidation
 repository-version-req

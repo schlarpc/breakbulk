@@ -228,6 +228,37 @@ let
   rfDefault = rf.workspaces.main.packages.rf;
   rfFull = rf.workspaces.main.target.${native}.variants.full;
 
+  # --- features that change the resolve ------------------------------------------
+
+  optionalDep = mkRepo (fixtures + "/optional-dependency") [
+    (oneWs ".")
+    {
+      workspaces.main.variants = {
+        fast = {
+          features = [ "fast" ];
+          profile = "dev";
+        };
+      }
+      // breakbulk.variants.featurePowerset {
+        features = [ "fast" ];
+        profile = "dev";
+        prefix = "fp";
+      };
+    }
+  ];
+  optionalDepVariants = optionalDep.workspaces.main.target.${native}.variants;
+
+  exclusive = mkRepo (fixtures + "/exclusive-features") [
+    (oneWs ".")
+    {
+      workspaces.main.variants.b = {
+        noDefaultFeatures = true;
+        features = [ "b" ];
+        profile = "dev";
+      };
+    }
+  ];
+
   # --- missing-input ---------------------------------------------------------
 
   mylib = pkgs.runCommand "mylib" { } ''
@@ -349,6 +380,8 @@ in
       outside
       stampsA
       rf
+      optionalDep
+      exclusive
       missing
       provided
       overrideRepo
@@ -561,6 +594,36 @@ in
         $plain/bin/plain
         [ "$($adminFull/bin/admin)" = "admin cli=true" ]
         $testFull/bin/needs-extra
+        touch $out
+      '';
+
+  # A variant whose feature turns on an optional dependency plans and
+  # builds it, by name and from featurePowerset.
+  optional-dependency =
+    pkgs.runCommand "optional-dependency"
+      {
+        plain = optionalDep.workspaces.main.packages.od;
+        fast = optionalDepVariants.fast.packages.od;
+        fpFast = optionalDepVariants.fp-fast.packages.od;
+      }
+      ''
+        [ "$($plain/bin/od)" = "od 42 fast=false" ]
+        [ "$($fast/bin/od)" = "od 42 fast=true" ]
+        [ "$($fpFast/bin/od)" = "od 42 fast=true" ]
+        touch $out
+      '';
+
+  # Mutually exclusive features: each variant enables one, and plans
+  # although every feature at once would not compile.
+  exclusive-features =
+    pkgs.runCommand "exclusive-features"
+      {
+        a = exclusive.workspaces.main.packages.ef;
+        b = exclusive.workspaces.main.target.${native}.variants.b.packages.ef;
+      }
+      ''
+        [ "$($a/bin/ef)" = "ef a" ]
+        [ "$($b/bin/ef)" = "ef b" ]
         touch $out
       '';
 

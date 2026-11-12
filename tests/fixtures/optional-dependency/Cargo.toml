@@ -1,0 +1,16 @@
+# A feature that turns on an optional dependency the default features leave
+# off: a variant with `fast` compiles `itoa`, a package the resolve for the
+# default features does not have.
+[package]
+name = "od"
+version = "0.1.0"
+edition = "2024"
+
+# Its own workspace, not a member of breakbulk's.
+[workspace]
+
+[features]
+fast = ["dep:itoa"]
+
+[dependencies]
+itoa = { version = "=1.0.11", optional = true }

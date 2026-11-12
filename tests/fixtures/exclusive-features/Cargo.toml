@@ -1,0 +1,6 @@
+# Two mutually exclusive features: `ef` fails to compile with both. A
+# variant enables one; the planner's `cargo metadata` still resolves with
+# every feature on.
+[workspace]
+resolver = "2"
+members = ["ef"]
