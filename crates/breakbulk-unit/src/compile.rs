@@ -9,9 +9,9 @@
 //! 5. Point `--out-dir` at `$TMPDIR/out` and run the program.
 //! 6. Print the `rendered` text of rustc's JSON diagnostics; drop artifact
 //!    notifications.
-//! 7. Move the listed outputs to their derivation outputs, and debuginfo
-//!    side files to `debug` when the unit has it; discard the rest
-//!    (dep-info).
+//! 7. Move the listed outputs to their derivation outputs (a bin under
+//!    Cargo's uplifted name, `uplifted`), and debuginfo side files to
+//!    `debug` when the unit has it; discard the rest (dep-info).
 //! 8. For a library, write its own manifest into its `rmeta` output.
 //!
 //! The plan carries no `--out-dir`, no `-L dependency=` and no
@@ -275,13 +275,16 @@ pub fn run_rustc(
 /// (`split-debuginfo=packed`), `.dwo` (`unpacked`).
 pub const DEBUG_SIDE_FILES: &[&str] = &[".pdb", ".dwp", ".dwo"];
 
-/// Move each listed output file into its derivation output. Every output
-/// named in `outputs` is created, even if it lists no files. When the unit
-/// has a `debug` output (it lists no files), unlisted debuginfo side files
-/// ([`DEBUG_SIDE_FILES`]) go there, under rustc's names. Other unlisted
-/// files, dep-info aside, are reported and left behind.
+/// Move each listed output file into its derivation output, under the
+/// listed name; rustc's name for it is its entry in `uplifted`, if any.
+/// Every output named in `outputs` is created, even if it lists no files.
+/// When the unit has a `debug` output (it lists no files), unlisted
+/// debuginfo side files ([`DEBUG_SIDE_FILES`]) go there, under rustc's
+/// names. Other unlisted files, dep-info aside, are reported and left
+/// behind.
 pub fn collect_outputs(
     outputs: &BTreeMap<String, Vec<String>>,
+    uplifted: &BTreeMap<String, String>,
     from: &Path,
     dest: impl Fn(&str) -> Result<PathBuf, Error>,
 ) -> Result<(), Error> {
@@ -290,7 +293,8 @@ pub fn collect_outputs(
         let dir = dest(derivation_output(output))?;
         std::fs::create_dir_all(&dir).map_err(|e| io_err("creating", &dir, e))?;
         for f in files {
-            let src = from.join(f);
+            let written = uplifted.get(f).unwrap_or(f);
+            let src = from.join(written);
             if src.symlink_metadata().is_err() {
                 let mut found: Vec<String> = std::fs::read_dir(from)
                     .into_iter()
@@ -300,12 +304,12 @@ pub fn collect_outputs(
                     .collect();
                 found.sort();
                 return Err(Error(format!(
-                    "rustc did not write `{f}` (output `{output}`); it wrote: {}",
+                    "rustc did not write `{written}` (output `{output}`); it wrote: {}",
                     found.join(", ")
                 )));
             }
             move_file(&src, &dir.join(f))?;
-            listed.insert(f.as_str());
+            listed.insert(written.as_str());
         }
     }
     let debug = if outputs.contains_key(DEBUG_OUTPUT) {
@@ -395,7 +399,7 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     run_rustc(&inv, &c.krate.name, &|text| {
         test_only::hints(&c.package, text, &c.test_only, &c.remap, Path::new(&c.cwd))
     })?;
-    collect_outputs(&c.outputs, &dirs.out, |o| outer.output(o))?;
+    collect_outputs(&c.outputs, &c.uplifted, &dirs.out, |o| outer.output(o))?;
     if c.outputs.contains_key("rmeta") {
         let dir = outer.output("rmeta")?;
         if let Some(m) = own_manifest(c, &dir, &below) {

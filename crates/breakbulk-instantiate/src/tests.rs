@@ -28,11 +28,11 @@ fn smoke_plan() -> Plan {
     Plan::from_json(&text).unwrap()
 }
 
-/// The traits' `debugArtifacts` of an ELF target (lib/target-traits.nix),
-/// as `toolchains.json` carries them.
+/// The traits of an ELF target (lib/target-traits.nix `forRust`), as
+/// `toolchains.json` carries them.
 fn elf_traits() -> breakbulk_format::TargetTraits {
     serde_json::from_str(
-        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}]}"#,
+        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}],"executableSuffix":""}"#,
     )
     .unwrap()
 }

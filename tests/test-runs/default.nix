@@ -32,7 +32,12 @@
 #                           test run's derivation only (drv paths compared)
 #   test-control-bin-exe    CARGO_BIN_EXE_ctl in the integration test's
 #                           compile env names the test plan's `ctl` bin unit
-#                           (not a test harness), and that unit runs
+#                           (not a test harness), and that unit runs; bin
+#                           units store their files under Cargo's uplifted
+#                           names (`ctl-extra`, not rustc's
+#                           `ctl_extra-<hash>`), which argv[0] and
+#                           current_exe() give; the harness keeps rustc's
+#                           hashed name
 #   test-control-app        the test apps run outside a test run, as `nix
 #                           run` runs a derivation: the network binary with
 #                           a filter, and the env binary against a checkout
@@ -236,6 +241,9 @@ let
               inherit (pkgs) rustc cargo;
             }).capabilities
         } \
+        --target-traits ${
+          breakbulk.targetTraits.forRustFile (breakbulk.targetTraits.resolve { triple = target; })
+        } \
         --forbid $NIX_BUILD_TOP --forbid $HOME \
         --out $out/plan.json
     '';
@@ -363,6 +371,7 @@ let
         done
         grep -q 'test runs_the_bin ... ok' $binExe/log
         grep -q 'test bin_exe_at_run_time ... ok' $binExe/log
+        grep -q 'test bin_has_its_cargo_name ... ok' $binExe/log
         grep -q 'running 0 tests' $bin/log
         grep -q '`needs_feat` was skipped: not built by Cargo' $stub
         grep -q 'running 0 tests' $doctest/log
@@ -451,7 +460,10 @@ let
     '';
 
   # CARGO_BIN_EXE_ctl names the bin unit of the test plan, which is the
-  # plain `ctl` bin (no --test), and that unit's file runs.
+  # plain `ctl` bin (no --test), and that unit's file runs. The unit
+  # stores each bin under Cargo's uplifted name, without rustc's hash:
+  # `ctl-extra` (crate name `ctl_extra`) sees that name as argv[0] and as
+  # current_exe().
   testControlBinExe =
     let
       plan = readPlan ctl "test";
@@ -469,16 +481,43 @@ let
         && lib.length ref == 1;
       binDrv = ctl.units.test.${piece.out};
       buildBin = ctl.roots."ctl/bin/ctl";
+      extra = lib.head it.env."CARGO_BIN_EXE_ctl-extra";
+      extraUnit = plan.units.${extra.out};
+      names = [
+        piece.file
+        extra.file
+        (lib.head binUnit.outputs.bin)
+        (lib.head extraUnit.outputs.bin)
+      ];
+      # The test harness keeps rustc's hashed name, as under Cargo.
+      harness = lib.head it.outputs.bin;
     in
     assert lib.assertMsg isPlainBin
       "CARGO_BIN_EXE_ctl does not name the plain ctl bin unit: ${builtins.toJSON ref}";
+    assert lib.assertMsg (
+      names == [
+        "ctl"
+        "ctl-extra"
+        "ctl"
+        "ctl-extra"
+      ]
+      && lib.attrNames (extraUnit.uplifted or { }) == [ "ctl-extra" ]
+      && lib.hasPrefix "ctl_extra-" extraUnit.uplifted.ctl-extra
+      && lib.hasPrefix "ctl-" (binUnit.uplifted.ctl or "")
+    ) "the bin units do not store their files under Cargo's uplifted names: ${builtins.toJSON names}";
+    assert lib.assertMsg (
+      lib.hasPrefix "bin_exe-" harness && !(it ? uplifted)
+    ) "the test harness is not under rustc's name: ${harness}";
     pkgs.runCommand "test-runs-test-control-bin-exe"
       {
         bin = "${binDrv.out}/${piece.file}";
+        extra = "${ctl.units.test.${extra.out}.out}/${extra.file}";
         sameAsBuildPlan = lib.boolToString (binDrv.drvPath == buildBin.drvPath);
       }
       ''
         [ "$($bin)" = "ctl says hi 42" ]
+        # argv[0] and current_exe(), as the unit's file name.
+        [ "$($extra)" = "$(printf 'ctl-extra\nctl-extra')" ]
         echo "the test plan's ctl bin unit is the build plan's: $sameAsBuildPlan" | tee $out
       '';
 

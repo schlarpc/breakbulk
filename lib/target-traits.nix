@@ -556,6 +556,12 @@ let
       "linux"
     else
       null;
+
+  # The part of the traits breakbulk's Rust programs read
+  # (`toolchains.json`'s `targetTraits`, breakbulk-plan's
+  # `--target-traits`; breakbulk-format `TargetTraits`), and it as a file.
+  forRust = t: { inherit (t) debugArtifacts executableSuffix; };
+  forRustFile = t: builtins.toFile "breakbulk-target-traits.json" (builtins.toJSON (forRust t));
 in
 {
   inherit
@@ -565,9 +571,7 @@ in
     nativeTriple
     nativeDefaultPreset
     fieldNames
+    forRust
+    forRustFile
     ;
-
-  # The part of the traits breakbulk's Rust programs read
-  # (`toolchains.json`'s `targetTraits`, breakbulk-format `TargetTraits`).
-  forRust = t: { inherit (t) debugArtifacts; };
 }

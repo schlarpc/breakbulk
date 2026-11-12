@@ -415,12 +415,12 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 ### U8. Uplifted bins
 
-- **Assumption.** `CARGO_BIN_EXE_<name>` names the bin's uplifted copy, `<artifact dir>/<name>`, and only bins of the test's own package.
-- **Where.** `crates/breakbulk-plan/src/rewrite.rs`: `uplifted_bins`, `Rewriter::path`; `graph.rs`: `register_uplifted_bins`.
-- **Upstream.** cargo `0.100.0` `src/compiler/artifact.rs`, `get_env` (`bin_link_for_target`, `unit.pkg.manifest().targets()`).
+- **Assumption.** `CARGO_BIN_EXE_<name>` names the bin's uplifted copy, `<artifact dir>/<name><exe suffix>`, and only bins of the test's own package. Cargo uplifts a bin, and an example (to `examples/`), built as itself rather than as a test, under its target name with rustc's executable suffix; rustc writes it as `<crate name><-C extra-filename><exe suffix>`. A bin unit stores its file under the uplifted name.
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::uplift`, `register_uplifted_bins`; `rewrite.rs`: `uplifted_bins`, `Rewriter::path`; `crates/breakbulk-unit/src/compile.rs`: `collect_outputs` (the plan's `uplifted`).
+- **Upstream.** cargo `0.100.0` `src/compiler/artifact.rs`, `get_env` (`bin_link_for_target`, `unit.pkg.manifest().targets()`); `src/compiler/build_runner/compilation_files.rs`, `uplift_to`; `src/compiler/build_context/target_info.rs`, `FileType::output_filename` and `uplift_filename` (a bin keeps its hyphens). rustc `compiler/rustc_session/src/output.rs`, `filename_for_input` (`CrateType::Executable`). Checked for this page.
 - **Holds for.** 1.99.
-- **Pinned by.** `test-runs-test-control-bin-exe`; `loose-ends-names` (two packages with a bin of the same name). Rust: `rewrite::tests::uplifted_bin_of_the_owners_package`.
-- **If it changes.** The path is no unit's output and planning fails loudly.
+- **Pinned by.** `test-runs-test-control-bin-exe` (the file name, `argv[0]` and `current_exe()` of `ctl-extra`, whose crate name is `ctl_extra`); `test-runs-test-control` (the same from the integration test); `loose-ends-names` (two packages with a bin of the same name). Rust: `rewrite::tests::uplifted_bin_of_the_owners_package`, `compile::tests::uplifted_bin_is_stored_under_its_cargo_name`, `golden::tests::bin_exe_compared_by_file_name`.
+- **If it changes.** A path that is no unit's output fails planning loudly; rustc names that do not end in the traits' executable suffix fail planning; a different uplifted name fails the fixture's name assertions.
 
 ### U9. `-Zembed-metadata=no` on nightly
 

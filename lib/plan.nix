@@ -18,6 +18,7 @@
 #     packages = [ ];        # -p selection; [ ] means --workspace
 #     configs = [ ];         # extra --config files or values (toolchain spec)
 #     capabilities = null;   # the toolchain's capabilities (null: toolchainFacts')
+#     traits = <built-in>;   # the target's traits (lib/target-traits.nix)
 #     trimPaths = "auto";    # Cargo's trim-paths: "auto", "on" or "off"
 #   };
 #   "${plan}/plan.json"
@@ -28,7 +29,11 @@
 # breakbulk-plan fails when the skeleton is elsewhere and a path crate lies
 # outside the workspace root, because Cargo would then hash its absolute
 # path into `-C metadata`.
-{ lib, toolchainFacts }:
+{
+  lib,
+  toolchainFacts,
+  targetTraits,
+}:
 {
   mkPlan =
     pkgs:
@@ -62,6 +67,9 @@
       # Cargo's trim-paths: "auto" (on when the toolchain
       # has it, unless the project declares it), "on" or "off".
       trimPaths ? "auto",
+      # The target's traits (`targetTraits.resolve`): the executable
+      # suffix of the names bins are stored under.
+      traits ? targetTraits.resolve { triple = target; },
     }:
     let
       caps =
@@ -94,6 +102,8 @@
         "${vendor.dir}"
         "--capabilities"
         (toolchainFacts.capabilitiesFile caps)
+        "--target-traits"
+        (targetTraits.forRustFile traits)
       ]
       ++ lib.optionals (mode != "build") [
         "--mode"

@@ -155,7 +155,11 @@ let
       mkTools nixpkgs.legacyPackages.${system}
     else
       mkTools pkgs;
-  inherit (import ./plan.nix { inherit lib toolchainFacts; }) mkPlan mkCargoEnv mkBuildTarget;
+  inherit (import ./plan.nix { inherit lib toolchainFacts targetTraits; })
+    mkPlan
+    mkCargoEnv
+    mkBuildTarget
+    ;
 
   mkWorkspace = import ./workspace.nix {
     inherit

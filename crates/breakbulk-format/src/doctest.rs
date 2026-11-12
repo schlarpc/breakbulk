@@ -116,6 +116,7 @@ pub fn render_doctest<R: Resolve>(
             .collect::<Result<_, _>>()?,
         cwd: c.cwd.render(r)?,
         outputs: Default::default(),
+        uplifted: Default::default(),
         deps: deps
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))

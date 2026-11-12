@@ -48,10 +48,11 @@
 #
 # `linked` is one directory holding every built root's files, as
 # symlinks, under Cargo's uplifted names: a bin under its target name and
-# a staticlib under its library name (the `-C extra-filename` hash
-# removed, the extension kept), a cdylib or dylib under rustc's name,
-# which has no hash. `install` lays them out by root kind (`rootFiles`):
-# bin/, lib/, or the traits' `sharedLibraryDir`. A package whose roots were all
+# executable suffix, as its unit stores it; a staticlib under its library
+# name (rustc's `-C extra-filename` hash removed, the extension kept); a
+# cdylib or dylib under rustc's name, which has no hash. `install` lays
+# them out by root kind (`rootFiles`): bin/, lib/, or the traits'
+# `sharedLibraryDir`. A package whose roots were all
 # skipped (required features) is the first root's stub, which fails with
 # the reason.
 #
@@ -173,26 +174,15 @@ let
           + lib.optionalString dyn ''
             linked=$((linked + 1))
           ''
-          + (
-            if bin then
-              ''
-                for f in ${src}/*; do
-                  b=''${f##*/}
-                  stem=''${b%%.*}
-                  link "$f" ${target}"''${b#"$stem"}"
-                done
-              ''
-            else
-              ''
-                for f in ${src}/*; do
-                  b=''${f##*/}
-                  case "$b" in
-                    ${staticPrefix}${target}-*${staticSuffix}) link "$f" ${staticPrefix}${target}${staticSuffix} ;;
-                    *) link "$f" "$b" ;;
-                  esac
-                done
-              ''
-          )
+          + ''
+            for f in ${src}/*; do
+              b=''${f##*/}
+              case "$b" in
+                ${staticPrefix}${target}-*${staticSuffix}) link "$f" ${staticPrefix}${target}${staticSuffix} ;;
+                *) link "$f" "$b" ;;
+              esac
+            done
+          ''
           + concatMapStrings (dbg: ''
             if [ -d ${dbg} ]; then
               for f in ${dbg}/*; do

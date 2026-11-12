@@ -82,6 +82,10 @@ pub struct Options {
     /// `toolchainFacts`). Planning needs it; the dev shell's
     /// `--cargo-env-only` does not.
     pub capabilities: Option<breakbulk_format::Capabilities>,
+    /// The target's traits (`--target-traits`, the Nix library's
+    /// `targetTraits.forRust`): the executable suffix of the names bins
+    /// are stored under. Planning needs them.
+    pub target_traits: Option<breakbulk_format::TargetTraits>,
 }
 
 /// What one trace produced.
@@ -114,6 +118,14 @@ impl Trace {
             rustdoc: opts.rustdoc.clone(),
             cargo: opts.cargo.clone(),
             nightly: capabilities(opts)?.nightly,
+            executable_suffix: opts
+                .target_traits
+                .as_ref()
+                .ok_or_else(|| {
+                    Error("planning needs the target's traits (--target-traits)".into())
+                })?
+                .executable_suffix
+                .clone(),
             keep_workspace_wrapper: opts.mode == VariantMode::Clippy,
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),

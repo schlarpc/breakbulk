@@ -390,6 +390,7 @@ mod tests {
                 dylib_path_from: vec![],
                 cwd: "/src".into(),
                 outputs: BTreeMap::new(),
+                uplifted: BTreeMap::new(),
                 deps: vec![],
                 dep_manifests: vec![],
                 link_manifest_crates: false,

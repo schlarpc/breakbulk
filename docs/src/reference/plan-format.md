@@ -7,7 +7,7 @@ it depends on (`…` marks elided values):
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "kind": "build",
   "cargo": "1.96.1",
   "rustc": "1.96.1 (…)",
@@ -69,6 +69,7 @@ it depends on (`…` marks elided values):
   - `{ "splice": R, "kind": "rustc-link-arg", "kinds": [ … ] }`: run R's link arguments whose kind is in `kinds`, in printed order across kinds. A `rustc-link-arg-bin` entry carries its bin name (`"rustc-link-arg-bin=app"`). One splice per run covers every link-arg kind, because Cargo keeps one ordered list of link arguments per run; one splice per kind would reorder them.
   - `{ "searchPathsOf": [R, …] }` (only in `rustdoc --test`): the search paths of every listed run, deduplicated and sorted by value.
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
+- **`outputs`** maps each output of a compile unit (`rmeta`, `rlib`, `bin`) to the files it holds. **`uplifted`** (omitted when empty) maps a file of `outputs` to the name rustc writes it under. A bin, or an example, that Cargo uplifts is stored under its uplifted name, the target name and the target's `executableSuffix` (`my-app`, from rustc's `my_app-<hash>`), so `CARGO_BIN_EXE_<name>` names a file with the name it has under Cargo. Test and bench executables keep rustc's names, as under Cargo.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`test`** (compile units; omitted when false) marks a test unit: a compile Cargo builds with the package's dev-dependencies, decided from its Cargo target: a `--test` compile, a test or bench target with or without the libtest harness, or an example. Test units see the package's test view ([Source views](../explanation/internals/sources.md#source-views)), are named `<pkg>-<version>-test[-<crate>]`, remap every path scope, and take their dependencies' `rlib`s.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.

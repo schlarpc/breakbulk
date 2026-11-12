@@ -248,6 +248,27 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
                         }
                     }
                 }
+                let listed: BTreeSet<&String> = c.outputs.values().flatten().collect();
+                let mut written = BTreeSet::new();
+                for (stored, rustc) in &c.uplifted {
+                    if !listed.contains(stored) {
+                        err(
+                            id_,
+                            format!("uplifted names `{stored}`, which no output lists"),
+                        );
+                    }
+                    if rustc.is_empty() || rustc.contains('/') || rustc == stored {
+                        err(
+                            id_,
+                            format!("uplifted gives `{stored}` the invalid rustc name `{rustc}`"),
+                        );
+                    } else if listed.contains(rustc) || !written.insert(rustc) {
+                        err(
+                            id_,
+                            format!("uplifted's rustc name `{rustc}` names another file"),
+                        );
+                    }
+                }
             }
             Unit::Run(r) => {
                 match &r.script {

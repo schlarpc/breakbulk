@@ -12,7 +12,7 @@ const APP: &str = "path+file:///build/skeleton/app#0.1.0";
 fn example_json() -> String {
     format!(
         r#"{{
-  "version": 2,
+  "version": 3,
   "kind": "build",
   "cargo": "1.96.1", "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
   "target": "wasm32-unknown-unknown",
@@ -78,7 +78,8 @@ fn example_json() -> String {
       "env": {{}},
       "envSplices": [],
       "cwd": {{ "src": "{APP}", "rel": "" }},
-      "outputs": {{ "bin": ["app-1"] }}
+      "outputs": {{ "bin": ["app.wasm"] }},
+      "uplifted": {{ "app.wasm": "app-1.wasm" }}
     }}
   }},
   "roots": [{{ "package": "{APP}", "target": "app", "kind": "bin", "unit": "c-app", "test": false }}]
@@ -265,8 +266,8 @@ fn schema_is_strict() {
         1,
     );
     assert!(Plan::from_json(&json).is_err());
-    let json = example_json().replacen(r#""version": 2"#, r#""version": 3"#, 1);
-    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(3))));
+    let json = example_json().replacen(r#""version": 3"#, r#""version": 4"#, 1);
+    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(4))));
 }
 
 #[test]
@@ -331,6 +332,29 @@ fn reference_outputs_and_files() {
     assert_error(&p, "output `rlib` has no file `libother.rlib`");
     assert_error(&p, "reference to run unit r-ring must be output `out`");
     assert_error(&p, "`rel` must be relative");
+}
+
+#[test]
+fn uplifted_names_listed_files() {
+    let mut p = example();
+    let c = compile(&mut p, "c-app");
+    c.uplifted.insert("app".into(), "app-1".into());
+    c.uplifted.insert("app.wasm".into(), "app.wasm".into());
+    let e = errors(&p);
+    assert_eq!(e.len(), 2, "{e:#?}");
+    assert_error(&p, "uplifted names `app`, which no output lists");
+    assert_error(
+        &p,
+        "uplifted gives `app.wasm` the invalid rustc name `app.wasm`",
+    );
+    let c = compile(&mut p, "c-app");
+    c.uplifted.clear();
+    c.outputs
+        .get_mut("bin")
+        .unwrap()
+        .insert("app-1.wasm".into());
+    c.uplifted.insert("app.wasm".into(), "app-1.wasm".into());
+    assert_error(&p, "uplifted's rustc name `app-1.wasm` names another file");
 }
 
 #[test]
@@ -1345,6 +1369,7 @@ fn debuginfo_side_files() {
             per_object: false,
             directory: true,
         }],
+        executable_suffix: String::new(),
     };
     assert!(wt(&split, &bin, &packed_only));
     assert!(!wt(
@@ -1354,17 +1379,20 @@ fn debuginfo_side_files() {
     ));
 }
 
-/// The traits' `debugArtifacts` of an ELF target (lib/target-traits.nix).
+/// The traits of an ELF target (lib/target-traits.nix `forRust`).
 fn elf_traits() -> TargetTraits {
     serde_json::from_str(
-        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}]}"#,
+        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}],"executableSuffix":""}"#,
     )
     .unwrap()
 }
 
-/// The traits' `debugArtifacts` of an msvc target.
+/// The traits of an msvc target.
 fn msvc_traits() -> TargetTraits {
-    serde_json::from_str(r#"{"debugArtifacts":[{"suffix":".pdb","when":"always"}]}"#).unwrap()
+    serde_json::from_str(
+        r#"{"debugArtifacts":[{"suffix":".pdb","when":"always"}],"executableSuffix":".exe"}"#,
+    )
+    .unwrap()
 }
 
 #[test]

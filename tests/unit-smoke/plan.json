@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "kind": "build",
   "cargo": "1.99.0",
   "rustc": "1.99.0",
@@ -134,7 +134,8 @@
       },
       "envSplices": [],
       "cwd": { "src": "path+file:///build/skeleton/smokeapp#0.1.0", "rel": "" },
-      "outputs": { "bin": ["smokeapp-b0ba845afe70cf35"] }
+      "outputs": { "bin": ["smokeapp"] },
+      "uplifted": { "smokeapp": "smokeapp-b0ba845afe70cf35" }
     }
   },
   "roots": [

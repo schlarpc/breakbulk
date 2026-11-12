@@ -159,6 +159,9 @@ Cargo has two build-directory layouts. Releases up to 1.99 use the classic one. 
 | New: `<scratch>/…/build/<pkg>/<hash>/out/<file>`, where `<hash>` is a compile unit's directory | `{"out": <compile unit>, "output": "rmeta" or "rlib" or "bin", "file": <name>}` |
 | New: `<scratch>/…/build/<pkg>/<hash>/out`, where `<hash>` is a run's directory | `{"out": <run unit>, "output": "out"}` |
 | The stub binary path (both layouts) | `{"out": <compile unit>, "output": "bin"}` |
+| A bin's uplifted copy, `<scratch>/[<triple>/]<profile>/<name><exe suffix>` (`CARGO_BIN_EXE_<name>`) | `{"out": <bin unit>, "output": "bin", "file": "<name><exe suffix>"}`: the one bin of that name, or the referring unit's package's |
+
+A bin or example that Cargo uplifts is stored under its uplifted name, so that is its `file` in every row, not rustc's `<crate name><-C extra-filename><exe suffix>`; the plan's `uplifted` maps it to rustc's name ([Plan format](../../reference/plan-format.md)).
 | `<skeleton>/<rel>` | `{"src": <workspace package>, "rel": <rel>}`, resolved at instantiation |
 | `<vendor dir>/<source>/<crate>/<rel>` | `{"crateSrc": <package id>, "rel": <rel>}` |
 | `/nix/store/…` | Literal; the containing store path becomes an input |

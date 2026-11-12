@@ -24,6 +24,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         dylib_path_from: vec![],
         cwd: "/nix/store/x-src".into(),
         outputs: BTreeMap::from([("bin".into(), vec!["app-1".into()])]),
+        uplifted: BTreeMap::new(),
         deps: vec![],
         dep_manifests: vec![],
         link_manifest_crates: false,
@@ -255,7 +256,7 @@ fn outputs_are_moved() {
     ]);
     let root = t.path().to_owned();
     let dest = |o: &str| Ok(root.join(format!("drv-{o}")));
-    collect_outputs(&outputs, &from, dest).unwrap();
+    collect_outputs(&outputs, &BTreeMap::new(), &from, dest).unwrap();
     assert_eq!(
         std::fs::read_to_string(t.path().join("drv-rmeta/libx-1.rmeta")).unwrap(),
         "libx-1.rmeta"
@@ -270,14 +271,43 @@ fn outputs_are_moved() {
     ]);
     let root2 = t.path().join("second");
     let dest = |o: &str| Ok(root2.join(o));
-    collect_outputs(&outputs, &from, dest).unwrap();
+    collect_outputs(&outputs, &BTreeMap::new(), &from, dest).unwrap();
     assert!(t.path().join("second/out/stray.o").exists());
     assert!(t.path().join("second/rmeta").is_dir());
 
     let outputs = BTreeMap::from([("bin".to_owned(), vec!["app-1".to_owned()])]);
-    let e = collect_outputs(&outputs, &from, |o| Ok(t.path().join(o))).unwrap_err();
+    let e =
+        collect_outputs(&outputs, &BTreeMap::new(), &from, |o| Ok(t.path().join(o))).unwrap_err();
     assert!(e.0.contains("did not write `app-1`"), "{e}");
     assert!(e.0.contains("x-1.d"), "{e}");
+}
+
+#[test]
+fn uplifted_bin_is_stored_under_its_cargo_name() {
+    let t = TempDir::new("uplifted");
+    let from = t.path().join("out");
+    std::fs::create_dir_all(&from).unwrap();
+    for f in ["my_app-1", "my_app-1.dwp", "my_app-1.d"] {
+        std::fs::write(from.join(f), f).unwrap();
+    }
+    let outputs = BTreeMap::from([
+        ("bin".to_owned(), vec!["my-app".to_owned()]),
+        ("debug".to_owned(), vec![]),
+    ]);
+    let uplifted = BTreeMap::from([("my-app".to_owned(), "my_app-1".to_owned())]);
+    let root = t.path().join("drv");
+    collect_outputs(&outputs, &uplifted, &from, |o: &str| Ok(root.join(o))).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("out/my-app")).unwrap(),
+        "my_app-1"
+    );
+    assert!(!root.join("out/my_app-1").exists());
+    // Side files keep rustc's names; the bin is not reported as unlisted.
+    assert!(root.join("debug/my_app-1.dwp").exists());
+    assert!(!from.join("my_app-1").exists());
+
+    let e = collect_outputs(&outputs, &uplifted, &from, |o: &str| Ok(root.join(o))).unwrap_err();
+    assert!(e.0.contains("did not write `my_app-1`"), "{e}");
 }
 
 #[test]
@@ -301,7 +331,7 @@ fn debug_side_files_go_to_debug() {
     ]);
     let root = t.path().join("drv");
     let dest = |o: &str| Ok(root.join(o));
-    collect_outputs(&outputs, &from, dest).unwrap();
+    collect_outputs(&outputs, &BTreeMap::new(), &from, dest).unwrap();
     assert!(root.join("out/app.exe").exists());
     let mut debug: Vec<String> = std::fs::read_dir(root.join("debug"))
         .unwrap()
@@ -318,7 +348,13 @@ fn debug_side_files_go_to_debug() {
     std::fs::write(from.join("lib.pdb"), "").unwrap();
     let outputs = BTreeMap::from([("bin".to_owned(), vec!["x.o".to_owned()])]);
     let root = t.path().join("drv2");
-    collect_outputs(&outputs, &from, |o: &str| Ok(root.join(o))).unwrap();
+    collect_outputs(
+        &outputs,
+        &BTreeMap::new(),
+        &from,
+        |o: &str| Ok(root.join(o)),
+    )
+    .unwrap();
     assert!(!root.join("debug").exists());
     assert!(from.join("lib.pdb").exists());
 }

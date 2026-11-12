@@ -330,8 +330,8 @@ fn smoke() {
             .is_file()
     );
 
-    // The binary runs.
-    let app = out_path("c-a6654c0a89d81026", "out").join("smokeapp-b0ba845afe70cf35");
+    // The binary runs, stored under Cargo's uplifted name.
+    let app = out_path("c-a6654c0a89d81026", "out").join("smokeapp");
     let output = Command::new(&app).output().unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_eq!(

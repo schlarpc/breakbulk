@@ -380,10 +380,14 @@ pub struct RenderedCompile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<String>,
     pub cwd: String,
-    /// Output name (`rmeta`, `rlib`, `bin`) to the file names rustc writes
-    /// for it. `bin` files go to the derivation output `out`; every other
-    /// name is its own derivation output.
+    /// Output name (`rmeta`, `rlib`, `bin`) to the file names it holds.
+    /// `bin` files go to the derivation output `out`; every other name is
+    /// its own derivation output.
     pub outputs: BTreeMap<String, Vec<String>>,
+    /// Files of `outputs` that rustc writes under another name: the name
+    /// in `outputs` to rustc's (a bin stored under Cargo's uplifted name).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub uplifted: BTreeMap<String, String>,
     /// Crate files (`.rmeta`, `.rlib` or a proc macro's shared library)
     /// that `breakbulk-unit` symlinks into one directory, passed as the only
     /// `-L dependency=`: the files the arguments name, and for a unit that

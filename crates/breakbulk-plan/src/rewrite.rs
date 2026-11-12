@@ -40,9 +40,10 @@ pub struct Rewriter {
     /// target directory, which is where it sits inside the run's `out`
     /// (#23).
     pub run_dirs: BTreeMap<String, (String, String)>,
-    /// Bin outputs by (platform, target name), with their package ids, for
-    /// the uplifted copies (`<profile dir>/<name>`) that
-    /// `CARGO_BIN_EXE_<name>` names. Two packages can have a bin of the same
+    /// Bin outputs by (platform, file name), with their package ids, for
+    /// the uplifted copies (`<profile dir>/<name><suffix>`) that
+    /// `CARGO_BIN_EXE_<name>` names, whose file name the bin units store
+    /// their files under. Two packages can have a bin of the same
     /// name (Cargo warns about the collision): then the owner's own bin is
     /// meant, because Cargo sets `CARGO_BIN_EXE_*` only for the bins of the
     /// test's own package (`artifact.rs`, `get_env`).
@@ -355,7 +356,7 @@ mod tests {
         let out = |u: &str| OutRef {
             out: u.into(),
             output: "bin".into(),
-            file: Some("tool-1".into()),
+            file: Some("tool".into()),
         };
         let t = "x86_64-unknown-linux-gnu";
         let mut r = Rewriter {

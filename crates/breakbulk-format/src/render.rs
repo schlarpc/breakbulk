@@ -378,6 +378,7 @@ pub fn render_unit_in<R: Resolve>(
                             .then(|| (breakbulk_unit::spec::DEBUG_OUTPUT.to_owned(), Vec::new())),
                     )
                     .collect(),
+                uplifted: c.uplifted.clone(),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,
                 link_manifest_crates: deps.link_manifest_crates,

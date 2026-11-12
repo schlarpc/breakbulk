@@ -60,8 +60,9 @@ set up the same home in their own derivation
    of the unit's `testOnly` paths (test-only paths its source view leaves
    out), add a hint naming the option that keeps the path.
 7. Move outputs into place (details below): `.rmeta` to `$rmeta`, `.rlib`
-   to `$rlib`, binaries and cdylibs to `$out`, debuginfo side files to
-   `$debug`. Discard dep-info.
+   to `$rlib`, binaries and cdylibs to `$out` (a bin under the name the
+   plan's `uplifted` gives it), debuginfo side files to `$debug`. Discard
+   dep-info.
 
 ### The dependency directory
 

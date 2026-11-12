@@ -360,9 +360,11 @@ pub fn compare(plan: &Plan, log: &str, target: &Path, metadata: &Metadata) -> Re
 /// - In the dynamic-library path, Cargo's `deps` and profile directories
 ///   (inside `target`, but not inside any run's `OUT_DIR`), which have no
 ///   counterpart in breakbulk; a path left empty is dropped.
-/// - `CARGO_TARGET_TMPDIR`, which the plan points at a fixed directory, and
-///   `CARGO_BIN_EXE_*`, which name the bin's linked output rather than
-///   Cargo's uplifted copy: only their presence is compared.
+/// - `CARGO_TARGET_TMPDIR`, which the plan points at a fixed directory:
+///   only its presence is compared.
+/// - `CARGO_BIN_EXE_*`, which name the bin unit's output rather than
+///   Cargo's uplifted copy: only the file name is compared, which the unit
+///   stores under the uplifted name.
 /// - `CARGO`, with symlinks resolved: Cargo sets it to its own executable
 ///   as the OS reports it, and the planner keeps the toolchain path it was
 ///   given when that is the same file (a symlink tree such as rust-overlay's
@@ -399,8 +401,11 @@ fn normal_env(
             // Classic layout: Cargo's OUT_DIR does not exist. New layout
             // (nightly 1.101): it exists, empty.
             "(a directory that does not exist)".to_owned()
-        } else if k == "CARGO_TARGET_TMPDIR" || k.starts_with("CARGO_BIN_EXE_") {
+        } else if k == "CARGO_TARGET_TMPDIR" {
             "(a path)".to_owned()
+        } else if k.starts_with("CARGO_BIN_EXE_") {
+            let name = Path::new(v).file_name().unwrap_or_default();
+            format!("(a path to {})", name.to_string_lossy())
         } else if k == "CARGO" {
             std::fs::canonicalize(v).map_or_else(|_| v.clone(), |p| p.display().to_string())
         } else {
@@ -930,9 +935,18 @@ mod tests {
     }
 
     #[test]
+    fn bin_exe_compared_by_file_name() {
+        let env = |v: &str| BTreeMap::from([("CARGO_BIN_EXE_app".to_owned(), v.to_owned())]);
+        let t = Path::new("/t");
+        let real = normal_env(&env("/t/x86_64-unknown-linux-gnu/debug/app"), t, &[]);
+        assert_eq!(real, normal_env(&env("/t/x/debug/deps/app"), t, &[]));
+        assert_ne!(real, normal_env(&env("/t/x/debug/deps/app-0123"), t, &[]));
+    }
+
+    #[test]
     fn trim_paths_forms() {
         let mut plan: Plan = serde_json::from_value(serde_json::json!({
-            "version": 2, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
+            "version": 3, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
             "host": "h", "target": "t",
             "variant": { "profile": "dev", "features": [], "mode": "build" },
             "skeletonRoot": "/build/skeleton", "trimPaths": true, "trimPathsDefault": true,

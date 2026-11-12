@@ -38,6 +38,8 @@ pub struct Context {
     pub cargo: String,
     /// Cargo's `nightly_features_allowed`.
     pub nightly: bool,
+    /// The target's executable suffix (its traits' `executableSuffix`).
+    pub executable_suffix: String,
     /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
     pub keep_workspace_wrapper: bool,
     /// The variables the project's `[env]` table sets on Cargo's
@@ -321,8 +323,22 @@ struct CompileRec<'a> {
     platform: Platform,
     package: &'a Package,
     outputs: BTreeMap<String, BTreeSet<String>>,
+    /// [`CompileUnit::uplifted`]: a stored file name to rustc's.
+    uplifted: BTreeMap<String, String>,
+    /// Whether Cargo uplifts the compile's executable ([`Builder::uplift`]).
+    uplifts: bool,
     types: Vec<String>,
     test: bool,
+}
+
+impl CompileRec<'_> {
+    /// The name the unit stores a file rustc writes under.
+    fn stored<'s>(&'s self, rustc: &'s str) -> &'s str {
+        self.uplifted
+            .iter()
+            .find(|(_, r)| *r == rustc)
+            .map_or(rustc, |(s, _)| s)
+    }
 }
 
 struct RunRec<'a> {
@@ -406,7 +422,7 @@ impl<'a> Builder<'a> {
                         OutRef {
                             out: c.id.clone(),
                             output: name.into(),
-                            file: Some(file_name(&o.path).into()),
+                            file: Some(c.stored(file_name(&o.path)).into()),
                         },
                     );
                 }
@@ -493,24 +509,72 @@ impl<'a> Builder<'a> {
         if types.is_empty() {
             types.push("bin".into());
         }
-        let mut outputs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for o in &rec.outputs {
-            if let Some(name) = output_name(&o.emit, &o.path, &types) {
-                outputs
-                    .entry(name.into())
-                    .or_default()
-                    .insert(file_name(&o.path).into());
-            }
-        }
-        Ok(CompileRec {
+        let mut c = CompileRec {
             id: format!("c-{hash}"),
             rec,
             platform: self.platform_of(&out_dir),
             package: self.package_of(rec)?,
-            outputs,
-            types,
+            outputs: BTreeMap::new(),
+            uplifted: BTreeMap::new(),
+            uplifts: false,
             test: rec.args.iter().any(|a| a == "--test"),
-        })
+            types,
+        };
+        if let Some((rustc, stored)) = self.uplift(&c)? {
+            c.uplifts = true;
+            if rustc != stored {
+                c.uplifted.insert(stored, rustc);
+            }
+        }
+        for o in &rec.outputs {
+            if let Some(name) = output_name(&o.emit, &o.path, &c.types) {
+                let file = c.stored(file_name(&o.path)).to_owned();
+                c.outputs.entry(name.into()).or_default().insert(file);
+            }
+        }
+        Ok(c)
+    }
+
+    /// A compile whose executable Cargo uplifts (cargo
+    /// `CompilationFiles::uplift_to`): a bin, or an example, built as
+    /// itself rather than as a test, for the target. Returns rustc's file
+    /// name, `<crate name><-C extra-filename><suffix>`, and the uplifted
+    /// one, `<target name><suffix>`, which the unit stores it under. Cargo
+    /// takes the suffix from rustc; here it is the traits', and the two
+    /// must agree, as `install` places files by the traits' names.
+    fn uplift(&self, c: &CompileRec<'a>) -> Result<Option<(String, String)>, Error> {
+        if c.test || c.platform != Platform::Target || c.types != ["bin"] {
+            return Ok(None);
+        }
+        let Some(t) = self.target_of(c) else {
+            return Ok(None);
+        };
+        if !t.has_kind("bin") && !t.has_kind("example") {
+            return Ok(None);
+        }
+        let Some(o) = c.rec.outputs.iter().find(|o| o.emit == "link") else {
+            return Ok(None);
+        };
+        let rustc = file_name(&o.path);
+        let crate_name = arg_value(&c.rec.args, "--crate-name")
+            .first()
+            .copied()
+            .unwrap_or_default();
+        let extra = codegen_value(&c.rec.args, "extra-filename").unwrap_or_default();
+        let suffix = &self.ctx.executable_suffix;
+        let expected = format!("{crate_name}{extra}{suffix}");
+        if rustc != expected {
+            bail!(
+                "{}: rustc names `{}`'s executable `{rustc}`, not `{expected}` with the \
+                 executable suffix `{suffix}` of {}'s traits; if the traits are wrong, \
+                 correct `targets.\"{}\".traits.executableSuffix`",
+                c.rec.file,
+                t.name,
+                self.ctx.target,
+                self.ctx.target
+            );
+        }
+        Ok(Some((rustc.to_owned(), format!("{}{suffix}", t.name))))
     }
 
     fn run_rec(&self, rec: &'a Record) -> Result<RunRec<'a>, Error> {
@@ -530,26 +594,25 @@ impl<'a> Builder<'a> {
         })
     }
 
-    /// Bins are also copied ("uplifted") to `<profile dir>/<target name>`,
-    /// which is what `CARGO_BIN_EXE_<name>` names. Map such a path to the
-    /// bin's output: the one bin compile of that name, or the one of the
-    /// referring unit's package (see [`crate::rewrite::Rewriter::uplifted_bins`]).
+    /// Bins are also linked ("uplifted") to `<profile dir>/<target
+    /// name><suffix>`, which is what `CARGO_BIN_EXE_<name>` names, and the
+    /// unit stores the file under that name ([`Builder::uplift`]). Map
+    /// such a path to the bin's output: the one bin compile of that name,
+    /// or the one of the referring unit's package (see
+    /// [`crate::rewrite::Rewriter::uplifted_bins`]).
     fn register_uplifted_bins(&mut self) {
         let mut by_name: BTreeMap<(Platform, String), Vec<(String, OutRef)>> = BTreeMap::new();
         for c in &self.compiles {
-            if c.test || !c.types.iter().any(|t| t == "bin") {
-                continue;
-            }
-            let Some(t) = self.target_of(c) else { continue };
-            if !t.has_kind("bin") {
+            if !c.uplifts || !self.target_of(c).is_some_and(|t| t.has_kind("bin")) {
                 continue;
             }
             for o in &c.rec.outputs {
                 if let Some(r) = self.rw.outputs.get(&o.path)
                     && r.output == "bin"
+                    && let Some(file) = &r.file
                 {
                     by_name
-                        .entry((c.platform, t.name.clone()))
+                        .entry((c.platform, file.clone()))
                         .or_default()
                         .push((c.package.id.clone(), r.clone()));
                 }
@@ -1199,6 +1262,7 @@ impl<'a> Builder<'a> {
             dylib_path_from: dylib,
             cwd,
             outputs: c.outputs.clone(),
+            uplifted: c.uplifted.clone(),
         }))
     }
 

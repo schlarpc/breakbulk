@@ -9,7 +9,7 @@ pub use breakbulk_unit::spec::{
 };
 
 /// The only plan format version this crate reads and writes.
-pub const PLAN_VERSION: u32 = 2;
+pub const PLAN_VERSION: u32 = 3;
 
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
 /// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`).
@@ -300,6 +300,7 @@ impl Doctest {
             dylib_path_from: self.dylib_path_from.clone(),
             cwd: self.cwd.clone(),
             outputs: BTreeMap::new(),
+            uplifted: BTreeMap::new(),
         }
     }
 }
@@ -362,6 +363,13 @@ pub struct CompileUnit {
     pub cwd: Cwd,
     /// Output name to file names.
     pub outputs: BTreeMap<String, BTreeSet<String>>,
+    /// Files of `outputs` that rustc writes under another name: the name
+    /// in `outputs` to rustc's. A bin or example Cargo uplifts is stored
+    /// under its uplifted name (`app`, not rustc's `app-<hash>`), so the
+    /// path a test gets in `CARGO_BIN_EXE_<name>` is a file of that name,
+    /// for `argv[0]` and `current_exe()`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub uplifted: BTreeMap<String, String>,
 }
 
 impl CompileUnit {
@@ -420,6 +428,7 @@ impl CompileUnit {
                         .filter(|a| a.per_object || !per_object_only)
                         .cloned()
                         .collect(),
+                    executable_suffix: traits.executable_suffix.clone(),
                 },
             )
     }
@@ -440,13 +449,25 @@ pub struct TargetTraits {
     /// `debugArtifacts`): `.pdb` on msvc, `.dwp`/`.dwo` on ELF, `.dSYM` on
     /// Apple targets. Empty: none (wasm, a target with no split debuginfo).
     pub debug_artifacts: Vec<DebugArtifact>,
+    /// The suffix of an executable's file name (the traits'
+    /// `executableSuffix`): `""`, `.exe`, `.wasm`. The planner stores a
+    /// bin under Cargo's uplifted name, the target name and this suffix.
+    pub executable_suffix: String,
 }
 
 impl TargetTraits {
-    /// A target whose links write no debuginfo side files.
+    /// A target whose links write no debuginfo side files and whose
+    /// executables have no suffix.
     pub const NONE: &'static TargetTraits = &TargetTraits {
         debug_artifacts: Vec::new(),
+        executable_suffix: String::new(),
     };
+
+    /// Read a JSON file of the traits (the planner's `--target-traits`).
+    pub fn read(path: &str) -> Result<TargetTraits, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+    }
 }
 
 /// One kind of debuginfo side file (the traits' `debugArtifacts` entries).

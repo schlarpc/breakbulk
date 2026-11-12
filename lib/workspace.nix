@@ -282,6 +282,7 @@ let
         allFeatures
         spec
         trimPaths
+        traits
         ;
       packages = if kind == "test" then testSelect else select;
       inherit (toolchain) cargo rustc;
