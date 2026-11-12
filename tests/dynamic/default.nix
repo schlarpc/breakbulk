@@ -379,6 +379,7 @@ let
     sources = repository.sources;
     # With the options its hints name, so that everything builds.
     view-hints = repository.viewHintsFixed;
+    snapshots = repository.snapshots;
     pkgid-short = repository.pkgidShort;
     optional-dependency = repository.optionalDep;
     exclusive-features = repository.exclusive;

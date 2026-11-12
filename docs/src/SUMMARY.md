@@ -13,6 +13,7 @@
 - [Build for another target](how-to/targets.md)
 - [Wrap or package a binary](how-to/wrap-package.md)
 - [Rebuild less when unrelated files change](how-to/filter-source.md)
+- [Run snapshot tests](how-to/snapshot-tests.md)
 - [Format with treefmt](how-to/treefmt.md)
 - [Enter the dev shell with direnv](how-to/direnv.md)
 - [Use a binary cache](how-to/binary-cache.md)

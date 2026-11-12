@@ -10,7 +10,10 @@ configuration rebuilds it and everything that depends on it. The members
 do not see those files.
 
 Members in subdirectories (`crates/foo`) need nothing on this page,
-unless they hold files their build does not read.
+unless they hold files their build does not read. Their tests also see
+the workspace's root `Cargo.toml`, for snapshot-test libraries
+([Run snapshot tests](snapshot-tests.md)), so an edit to it re-runs
+every member's tests.
 
 The views and the steps that make them are explained in
 [Fetching and source views](../explanation/internals/sources.md#source-views).

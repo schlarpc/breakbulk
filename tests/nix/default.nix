@@ -317,12 +317,19 @@ let
         packages.bin-dirs.extraSources = [ "shared/bin" ];
         # A "run" view with no file of the package.
         packages.virtual-sub.test.runFiles = [ ];
+        packages.normalized.test.workspaceManifest = false;
       };
     in
     assert lib.assertMsg (views.bin-dirs.runDir == null) "source-views: bin-dirs' runs have a view of their own";
+    assert lib.assertMsg (
+      "${views.normalized.src}" == "${views.normalized.testSrc}"
+    ) "source-views: normalized's test view differs from its build view";
     pkgs.runCommand "source-views" { } ''
       r=${views.virtual-sub.runDir}
       test -d $r && test -z "$(ls -A $r)"         # the package directory, empty
+      test -f $r/../Cargo.toml                    # the workspace manifest, still
+      t=${views.bin-dirs.testSrc}
+      test -f $t/Cargo.toml && test ! -e $t/Cargo.lock
       v=${views.virtual-sub.src}
       test -f $v/virtual-sub/src/main.rs
       test -f $v/virtual-sub/nested/Cargo.toml    # non-member package dir kept

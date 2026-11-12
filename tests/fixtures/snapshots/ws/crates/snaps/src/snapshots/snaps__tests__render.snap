@@ -1,0 +1,7 @@
+---
+source: crates/snaps/src/lib.rs
+expression: "super::render()"
+---
+1. first
+2. second
+3. third

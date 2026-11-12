@@ -150,6 +150,7 @@ let
     roots-override = [ repository.repos.rootsOverride ];
     same-triple = [ presetFixtures.repos.sameTriple ];
     same-workspace-products = [ products.repos.sameWsRepo ];
+    snapshots = [ repository.repos.snapshots ];
     source-paths = [ products.repos.sourcePaths ];
     sources = [ repository.repos.sources ];
     stamps = [ repository.repos.stampsA ];

@@ -364,7 +364,8 @@ function does not take; the extra one’s name says to add ` ... `\.
 
 The functions run after the built-in steps (the package
 directory, then ` extraSources `, ` test.sourceScope `,
-` test.scopeTestsDir ` and ` test.runFiles `), each on the result
+` test.scopeTestsDir `, ` test.runFiles ` and
+` test.workspaceManifest `), each on the result
 of the one before\. Lists concatenate in [layer
 order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order):
 a ` memberDefaults ` function runs before a ` packages.<name> `
@@ -1010,6 +1011,31 @@ in ` tests.<pkg>.<binary> ` for debugging\. ` null `: off\.
 ` caDerivations ` in
 [` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says whether
 ` ca ` is on\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.workspaceManifest`
+
+Whether this package’s test units and test runs see the
+workspace’s root ` Cargo.toml ` (not ` Cargo.lock `)\. Snapshot-test
+libraries (snapbox, expect-test) look for the topmost
+directory above the package with a ` Cargo.toml ` and resolve
+their snapshot paths there\. Its cost: an edit to the root
+manifest rebuilds this package’s test units and re-runs its
+tests\. Other units never see it\. Set ` false ` (in
+` memberDefaults ` for every member) when no test needs it\. See
+[Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md)\. ` null `:
+` true `\. A built-in step of [` sources `](\#packagesnamesources), after ` runFiles `\.
 
 *Type:*
 null or boolean

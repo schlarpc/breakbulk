@@ -1,0 +1,9 @@
+# Snapshot tests (tests/repository `snapshots`): a workspace in a
+# subdirectory of the repository, with an explicit member list. `snaps`
+# has one test per snapshot library; each library looks for this file
+# to resolve its snapshot paths. `other` is only here so that `cargo
+# metadata` in snaps' view fails, as in any workspace with more than one
+# member.
+[workspace]
+resolver = "2"
+members = ["crates/snaps", "crates/other"]

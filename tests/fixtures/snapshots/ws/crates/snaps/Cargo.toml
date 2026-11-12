@@ -1,0 +1,9 @@
+[package]
+name = "snaps"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+expect-test = "1"
+insta = { version = "1", default-features = false }
+snapbox = { version = "1", default-features = false }

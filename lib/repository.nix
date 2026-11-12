@@ -412,6 +412,7 @@ let
         // {
           includeIgnored = single false [ "includeIgnored" ];
           scopeTestsDir = single null [ "scopeTestsDir" ];
+          workspaceManifest = single null [ "workspaceManifest" ];
           runner = single null [ "runner" ];
           stripForRun = single null [ "stripForRun" ];
           keepLog = single null [ "keepLog" ];

@@ -536,6 +536,47 @@ let
     ];
   sources = sourcesRepo null;
 
+  # --- snapshots -----------------------------------------------------------------
+
+  # docs/src/how-to/snapshot-tests.md: insta's root setting, and the
+  # snapshots under src/ kept out of the "build" view by pattern.
+  # snapbox and expect-test need nothing.
+  snapshotsModule =
+    { lib, ... }:
+    {
+      packages.snaps.test.env = {
+        INSTA_WORKSPACE_ROOT = "../..";
+        INSTA_UPDATE = "no";
+      };
+      packages.snaps.sources = [
+        (
+          {
+            default,
+            kind,
+            root,
+            packageDir,
+            ...
+          }:
+          let
+            snaps = lib.fileset.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}/src");
+          in
+          if kind == "build" then lib.fileset.difference default snaps else default
+        )
+      ];
+      # The checks read the runs' output.
+      workspaces.main.memberDefaults.test.keepLog = true;
+    };
+  snapshotsRepo =
+    edit: modules:
+    mkRepo (if edit == null then fixtures + "/snapshots" else edited "snapshots" edit) (
+      [
+        (oneWs "ws")
+        snapshotsModule
+      ]
+      ++ modules
+    );
+  snapshots = snapshotsRepo null [ ];
+
   inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
 
   # --- view-hints ----------------------------------------------------------------
@@ -627,6 +668,7 @@ in
       sources
       rootsPredicted
       rootsOverride
+      snapshots
       ;
   };
 
@@ -1235,6 +1277,50 @@ in
       }
       ''
         cat $lib/log $chosen/log $run/log $testCompile/log $testRun/log $doctest/log $libToTests/log
+        touch $out
+      '';
+
+  # Snapshot tests (`snapshotsModule`), in a workspace at `ws/`: snapbox
+  # and expect-test find their files through the workspace's root
+  # Cargo.toml in the test view, insta through INSTA_WORKSPACE_ROOT; all
+  # three pass. The root manifest is in no "build" view: an edit to it
+  # changes only the members' test units, and none with
+  # `test.workspaceManifest = false`. An edit to the snapshot under src/
+  # changes only snaps' test compiles, which share one view.
+  snapshots =
+    let
+      changedBy = edit: modules: changedUnits (snapshotsRepo null modules) (snapshotsRepo edit modules);
+      rootEdit = "echo '# A comment.' >> ws/Cargo.toml";
+      got = {
+        root = changedBy rootEdit [ ];
+        rootOff = changedBy rootEdit [ { workspaces.main.memberDefaults.test.workspaceManifest = false; } ];
+        snapshot = changedBy "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [ ];
+      };
+      want = rec {
+        root = [
+          "other-0.1.0-test"
+          "snaps-0.1.0-test"
+          "snaps-0.1.0-test-expect"
+          "snaps-0.1.0-test-snapbox"
+        ];
+        rootOff = [ ];
+        snapshot = lib.tail root;
+      };
+      i = inst snapshots;
+      runs = i.testRuns.snaps;
+    in
+    assert lib.assertMsg (got == want) "snapshots: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    pkgs.runCommand "snapshots"
+      {
+        view = i.sources.workspace."ws/crates/snaps";
+        lib = runs."lib/snaps";
+        inherit (runs) snapbox expect;
+      }
+      ''
+        [ ! -e $view/ws/Cargo.toml ] && [ ! -e $view/ws/crates/snaps/src/snapshots ]
+        grep -q 'test tests::render ... ok' $lib/log
+        grep -q 'test render ... ok' $snapbox/log
+        grep -q 'test render ... ok' $expect/log
         touch $out
       '';
 

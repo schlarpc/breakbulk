@@ -110,16 +110,19 @@ rec {
     lib.unique (lib.optional (tests != null) tests ++ scopeInside { inherit root pkgDir sourceScope; });
 
   # The built-in steps of one package, in order, from its settings
-  # (`extraSources` and `test`, as `packages.<name>` has them).
+  # (`extraSources` and `test`, as `packages.<name>` has them). `wsDir`:
+  # the directory of the package's workspace, relative to the root.
   defaultSteps =
     {
       root,
       pkgDir,
+      wsDir ? "",
       memberDirs ? [ ],
       settings ? { },
     }:
     let
       at = manifest.at root;
+      wsManifest = test.workspaceManifest or null != false;
       extra = map (pathOf root "extraSources") (settings.extraSources or [ ]);
       test = settings.test or { };
       scope = test.sourceScope or [ ];
@@ -154,6 +157,17 @@ rec {
           default
         else
           fs.unions (map (p: at (util.joinRel pkgDir p)) runFiles)
+      )
+      # test.workspaceManifest. After runFiles, because expect-test
+      # searches upwards from the run's CARGO_MANIFEST_DIR. Not the
+      # lockfile: no snapshot library reads it, and an edit to it would
+      # re-run every member's tests.
+      (
+        { default, kind, ... }:
+        if (kind == "test" || kind == "run") && wsManifest then
+          fs.union default (at (util.joinRel wsDir "Cargo.toml"))
+        else
+          default
       )
     ];
 
@@ -216,12 +230,23 @@ rec {
       root,
       name,
       pkgDir,
+      wsDir ? "",
       memberDirs ? [ ],
       settings ? { },
       tested ? true,
     }:
     let
-      steps = defaultSteps { inherit root pkgDir memberDirs settings; } ++ settings.sources or [ ];
+      steps =
+        defaultSteps {
+          inherit
+            root
+            pkgDir
+            wsDir
+            memberDirs
+            settings
+            ;
+        }
+        ++ settings.sources or [ ];
       view =
         kind:
         realize {
@@ -316,7 +341,7 @@ rec {
             inherit dir;
           }
           // packageViews {
-            inherit root;
+            inherit root wsDir;
             inherit (info) name;
             pkgDir = dir;
             memberDirs = ws.members;
