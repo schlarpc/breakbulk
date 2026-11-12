@@ -14,12 +14,8 @@ needs ` ca-derivations ` too), and off otherwise: Nix code cannot
 tell whether ` ca-derivations ` is on, and without it a
 content-addressed derivation is an error that cannot be caught\.
 
-
-
 *Type:*
 null or boolean
-
-
 
 *Default:*
 
@@ -30,11 +26,7 @@ null
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `checkGroups`
-
-
 
 Named groups of checks, each an aggregate check in ` repo.checks `
 (and the flake’s ` checks `) that builds what it holds as one
@@ -45,20 +37,14 @@ matches no check is an error, as is a name that is already a
 check, a prefix group (every proper prefix of a check name is
 one) or ` all `\.
 
-
-
 *Type:*
 attribute set of list of (string or package)
-
-
 
 *Default:*
 
 ```nix
 { }
 ```
-
-
 
 *Example:*
 
@@ -74,11 +60,7 @@ attribute set of list of (string or package)
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `gitHashes`
-
-
 
 NAR hashes of git sources, keyed by the full ` Cargo.lock ` source
 string\. Optional: with a hash, the fetch is fixed-output and a
@@ -86,20 +68,14 @@ binary cache can serve it; without one, every fresh machine clones
 the source during evaluation\. The hash is that of the fetched tree
 (` builtins.fetchGit `’s ` narHash `), not crane’s ` outputHashes `\.
 
-
-
 *Type:*
 attribute set of string
-
-
 
 *Default:*
 
 ```nix
 { }
 ```
-
-
 
 *Example:*
 
@@ -112,30 +88,20 @@ attribute set of string
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `gitSubdirs`
-
-
 
 Where a crate lives inside a git source, keyed by source string or
 URL, then by crate name\. Skips the walk over the tree’s
 ` Cargo.toml ` files\.
 
-
-
 *Type:*
 attribute set of attribute set of string
-
-
 
 *Default:*
 
 ```nix
 { }
 ```
-
-
 
 *Example:*
 
@@ -150,21 +116,13 @@ attribute set of attribute set of string
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `gitSubmodules`
-
-
 
 Per git URL: whether to fetch submodules\. Cargo checks out
 submodules of git dependencies, so the default is true\.
 
-
-
 *Type:*
 attribute set of boolean
-
-
 
 *Default:*
 
@@ -175,21 +133,13 @@ attribute set of boolean
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `gitTrees`
-
-
 
 Use a local tree instead of fetching a git source\. Keyed by the
 ` Cargo.lock ` source string or by URL\.
 
-
-
 *Type:*
 attribute set of absolute path
-
-
 
 *Default:*
 
@@ -200,11 +150,7 @@ attribute set of absolute path
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `mode`
-
-
 
 How unit derivations reach Nix\. ` ifd `: breakbulk-instantiate writes
 units\.json, which Nix imports (import-from-derivation)\. ` dynamic `:
@@ -228,12 +174,8 @@ outputs (“Required system”)\. Plain ` nix flake check ` and ` nix flake show
 only the systems you can build on (the common ` nix-systems/default `
 includes darwin)\.
 
-
-
 *Type:*
 one of “auto”, “ifd”, “dynamic”
-
-
 
 *Default:*
 
@@ -244,20 +186,12 @@ one of “auto”, “ifd”, “dynamic”
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `registries`
-
-
 
 Alternative registries, by name\.
 
-
-
 *Type:*
 attribute set of (submodule)
-
-
 
 *Default:*
 
@@ -268,11 +202,7 @@ attribute set of (submodule)
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `registries.<name>.dl`
-
-
 
 Download URL template, as in the registry’s ` config.json `
 (` {crate} `, ` {version} `, ` {prefix} `, ` {lowerprefix} `,
@@ -280,12 +210,8 @@ Download URL template, as in the registry’s ` config.json `
 and reading ` config.json ` would need a fetch during
 evaluation\.
 
-
-
 *Type:*
 string
-
-
 
 *Example:*
 
@@ -296,22 +222,14 @@ string
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `registries.<name>.index`
-
-
 
 The registry’s index URL as it appears in ` Cargo.lock `
 (with or without the ` registry+ ` prefix; sparse registries
 keep ` sparse+ `)\.
 
-
-
 *Type:*
 string
-
-
 
 *Example:*
 
@@ -322,23 +240,15 @@ string
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `strictSources`
-
-
 
 Fail a build-script run that succeeds while declaring a
 ` rerun-if-changed ` path missing from its sandbox\. When false, such
 paths are warnings that name the option to add them to\.
 ` packages.<name>.strictSources ` overrides it per package\.
 
-
-
 *Type:*
 boolean
-
-
 
 *Default:*
 
@@ -349,22 +259,14 @@ false
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `sysDefaults.enable`
-
-
 
 Define breakbulk’s curated settings for common ` -sys ` crates
 (seeded from nixpkgs’ ` defaultCrateOverrides `) in
 ` sysDefaults.packages `\.
 
-
-
 *Type:*
 boolean
-
-
 
 *Default:*
 
@@ -375,11 +277,7 @@ true
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-
-
 ## `sysDefaults.packages`
-
-
 
 Default settings for a package, by crate name: a function of the
 package’s lockfile entry (` { name, version, ... } `) that returns
@@ -397,20 +295,14 @@ The curated entries are defined at ` mkDefault ` priority, so a
 plain definition replaces one: ` null ` turns it off, a function
 replaces it\. They are: ` alsa-sys `, ` atk-sys `, ` aws-lc-sys `, ` cairo-rs `, ` cairo-sys-rs `, ` capnp-rpc `, ` cargo `, ` curl-sys `, ` dbus `, ` evdev-sys `, ` expat-sys `, ` foundationdb `, ` foundationdb-sys `, ` freetype-sys `, ` fuser `, ` gdk-pixbuf `, ` gdk-pixbuf-sys `, ` gdk-sys `, ` gdk4-sys `, ` gdkx11-sys `, ` gio-sys `, ` glib-sys `, ` gobject-sys `, ` graphene-sys `, ` gsk4-sys `, ` gtk-sys `, ` gtk4-sys `, ` javascriptcore-rs-sys `, ` libdbus-sys `, ` libgit2-sys `, ` libseat-sys `, ` libsqlite3-sys `, ` libssh2-sys `, ` libudev-sys `, ` libz-sys `, ` nettle-sys `, ` openssl `, ` openssl-sys `, ` opentelemetry-proto `, ` pam-sys `, ` pango-sys `, ` pangocairo-sys `, ` pq-sys `, ` prost-wkt-types `, ` rdkafka-sys `, ` rink `, ` sequoia-guide `, ` sequoia-ipc `, ` sequoia-openpgp `, ` sequoia-openpgp-ffi `, ` sequoia-sq `, ` sequoia-store `, ` sequoia-tool `, ` servo-fontconfig-sys `, ` soup3-sys `, ` thrussh-libsodium `, ` tonic-reflection `, ` webkit2gtk-sys `, ` xcb `, ` zstd-sys `\.
 
-
-
 *Type:*
 attribute set of (null or (function that evaluates to a(n) (submodule)))
-
-
 
 *Default:*
 
 ```nix
 { }
 ```
-
-
 
 *Example:*
 
@@ -424,6 +316,3 @@ attribute set of (null or (function that evaluates to a(n) (submodule)))
 
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
-
-
-
