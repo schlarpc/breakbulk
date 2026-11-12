@@ -842,10 +842,15 @@ list of string
 
 Environment for the package’s doctest run, over ` test.env `\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 

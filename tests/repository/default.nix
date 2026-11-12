@@ -1760,9 +1760,14 @@ in
             env.POISON = poison "${at}test.env";
             path = [ (poison "an element of ${at}test.path") ];
             postRun = poison "${at}test.postRun";
-            binaries.app = {
-              env.POISON = poison "${at}test.binaries.app.env";
-              postRun = poison "${at}test.binaries.app.postRun";
+            binaries."bin/app" = {
+              env.POISON = poison "${at}test.binaries.\"bin/app\".env";
+              postRun = poison "${at}test.binaries.\"bin/app\".postRun";
+            };
+            doctest = {
+              env.POISON = poison "${at}test.doctest.env";
+              args = [ (poison "an element of ${at}test.doctest.args") ];
+              postRun = poison "${at}test.doctest.postRun";
             };
             nextest = {
               package = poison "${at}test.nextest.package";
