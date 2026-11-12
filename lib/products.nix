@@ -434,6 +434,8 @@ let
               toolchainPaths
               defaultChecks
               ;
+            # `product` attributes; docs/src/reference/stage-functions.md
+            # lists each (checked by products-product-attributes).
             info = lib.optionalAttrs (lockfile != null) { inherit lockfile; } // {
               inherit buildScriptFlags;
               # A staticlib's objects keep their debug information with real

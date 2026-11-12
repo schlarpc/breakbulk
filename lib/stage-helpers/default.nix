@@ -9,7 +9,20 @@
 # A helper is a function of one attribute set. Called with the stage
 # arguments (`{ input, product, target, pkgs }`, recognised by `input`) it
 # builds the stage; called with anything else it returns the same helper
-# with those options set. Unknown options are an evaluation error.
+# with those options set. Options are module-system declarations
+# (`mkOption`), checked with `lib.evalModules`; their descriptions are
+# docs/src/reference/stage-helpers.md (`nix run .#update-docs-options`).
+#
+# A new helper:
+#
+#   myHelper = mkHelper {
+#     name = "myHelper";
+#     description = "What the stage does (Markdown).";
+#     kind = "stage";            # or "check": used as `checks.<name>.run`
+#     options.level = mkOption { type = types.int; default = 1; description = "…"; };
+#   } (cfg: { input, product, pkgs, ... }: <derivation>);
+#
+# and its name in the attribute set at the end of this file.
 #
 # Conventions shared by all helpers:
 # - `input` is a derivation whose output is a directory (the raw link output
@@ -36,27 +49,91 @@ let
     isAttrs
     isDerivation
     mapAttrsToList
+    mkOption
+    literalExpression
+    types
     ;
 
+  # A helper is an attribute set that can be called (`__functor`), so that
+  # it carries its declaration: `name`, `description`, `kind` and
+  # `options`, the evaluated option tree (as a module system's `options`),
+  # from which the reference page is generated.
   mkHelper =
-    helperName: defaults: impl:
+    {
+      name,
+      description,
+      kind ? "stage",
+      options ? { },
+    }:
+    impl:
     let
+      known = attrNames options;
+      # The options sit under the helper's name, so that the module
+      # system's errors name `<helper>.<option>`.
+      evalWith =
+        given:
+        lib.evalModules {
+          modules = [
+            { options.${name} = options; }
+            {
+              _file = "breakbulk.stageHelpers.${name} { … }";
+              config.${name} = given;
+            }
+          ];
+        };
+      declared = (evalWith { }).options.${name};
       make =
-        cfg: arg:
-        if arg ? input then
-          impl cfg arg
-        else
-          let
-            unknown = attrNames (removeAttrs arg (attrNames defaults));
-          in
-          if unknown != [ ] then
-            throw "breakbulk stage helper `${helperName}`: unknown option(s) ${concatStringsSep ", " unknown}; known options: ${
-              if defaults == { } then "(none)" else concatStringsSep ", " (attrNames defaults)
-            }"
-          else
-            make (cfg // arg);
+        given:
+        let
+          cfg = (evalWith given).config.${name};
+          # Every option forced, so that a wrong type fails even when this
+          # use of the helper does not read the option.
+          checked = lib.foldl' (acc: n: builtins.seq cfg.${n} acc) cfg known;
+        in
+        {
+          inherit name description kind;
+          options = declared;
+          __functor =
+            _: arg:
+            if arg ? input then
+              impl checked arg
+            else
+              let
+                unknown = attrNames (removeAttrs arg known);
+              in
+              if unknown != [ ] then
+                throw "breakbulk stage helper `${name}`: unknown option(s) ${concatStringsSep ", " unknown}; known options: ${
+                  if known == [ ] then "(none)" else concatStringsSep ", " known
+                }"
+              else
+                make (given // arg);
+        };
     in
-    make defaults;
+    assert lib.assertMsg (lib.elem kind [
+      "stage"
+      "check"
+    ]) "breakbulk stage helper `${name}`: kind must be \"stage\" or \"check\", not ${builtins.toJSON kind}";
+    make { };
+
+  # An option that replaces the nixpkgs package a helper runs.
+  toolOption =
+    attr:
+    mkOption {
+      type = types.nullOr types.package;
+      default = null;
+      description = "The package to run instead of `${attr}` from the stage's `pkgs`.";
+    };
+  toolOf =
+    cfgValue: pkgs: attr:
+    if cfgValue != null then cfgValue else pkgs.${attr};
+
+  # A store path as a string, a path or a derivation. `str` comes first:
+  # `package` would turn a store-path string into a derivation.
+  storePathType = types.oneOf [
+    types.str
+    types.path
+    types.package
+  ];
 
   # The traits of a stage's target (lib/target-traits.nix): `target.traits`
   # when the product has them (mkRepository passes them, with the user's
@@ -119,13 +196,32 @@ let
 
   stageName = product: helper: "${product.name}-${helper}";
 
-  binutilsOf =
-    cfg: pkgs: if cfg.binutils != null then cfg.binutils else pkgs.binutils-unwrapped-all-targets;
+  binutilsOf = cfg: pkgs: toolOf cfg.binutils pkgs "binutils-unwrapped-all-targets";
 
   # ---------------------------------------------------------------------
   # ELF
 
-  splitDebug = mkHelper "splitDebug" { binutils = null; llvm = null; } (
+  splitDebug = mkHelper {
+    name = "splitDebug";
+    description = ''
+      Moves the debug information of every ELF file into the stage's
+      `debug` output, at `lib/debug/.build-id/<xx>/<rest>.debug` (from
+      the file's GNU build ID), where gdb and debuginfod look for it.
+      The file keeps its symbol table and gets a `.gnu_debuglink`.
+      A file without debug information is left as it is; one with debug
+      information but no build ID fails the stage.
+
+      The `.dwo` files a binary names (`split-debuginfo = "unpacked"`)
+      are packed into `<binary>.dwp` with `llvm-dwp`; a `<binary>.dwp`
+      (`"packed"`) moves next to the `.debug` file, where gdb finds it,
+      with a symlink at its place in the install layout.
+      `targets.<triple>.debugInfo = "split"` inserts this stage.
+    '';
+    options = {
+      binutils = toolOption "binutils-unwrapped-all-targets";
+      llvm = toolOption "llvm";
+    };
+  } (
     cfg:
     {
       input,
@@ -142,7 +238,7 @@ let
         ];
         nativeBuildInputs = [
           (binutilsOf cfg pkgs)
-          (if cfg.llvm != null then cfg.llvm else pkgs.llvm)
+          (toolOf cfg.llvm pkgs "llvm")
         ];
       }
       ''
@@ -223,10 +319,22 @@ let
   );
 
   strip =
-    mkHelper "strip"
+    mkHelper
       {
-        all = false;
-        binutils = null;
+        name = "strip";
+        description = ''
+          Runs `strip` on every ELF file: `--strip-debug`, or
+          `--strip-all` with `all`. `targets.<triple>.debugInfo = "strip"`
+          inserts this stage.
+        '';
+        options = {
+          all = mkOption {
+            type = types.bool;
+            default = false;
+            description = "Also remove the symbol tables (`--strip-all`), not only the debug information.";
+          };
+          binutils = toolOption "binutils-unwrapped-all-targets";
+        };
       }
       (
         cfg:
@@ -249,10 +357,26 @@ let
       );
 
   patchelfRpath =
-    mkHelper "patchelfRpath"
+    mkHelper
       {
-        libs = [ ];
-        patchelf = null;
+        name = "patchelfRpath";
+        description = ''
+          Adds run paths to every dynamically linked ELF file, so that it
+          finds shared libraries loaded at run time (`dlopen`, or a
+          library a build script placed next to it). Nothing shrinks the
+          run paths afterwards.
+        '';
+        options = {
+          libs = mkOption {
+            type = types.nonEmptyListOf storePathType;
+            example = literalExpression "[ pkgs.vulkan-loader \"$ORIGIN/../lib\" ]";
+            description = ''
+              The run paths to add, in order. A package or a path adds its
+              `lib` directory; a string is added as it is.
+            '';
+          };
+          patchelf = toolOption "patchelf";
+        };
       }
       (
         cfg:
@@ -265,12 +389,10 @@ let
         let
           dirOf' = l: if isDerivation l || builtins.isPath l then "${l}/lib" else toString l;
           rpath = concatStringsSep ":" (map dirOf' cfg.libs);
-          patchelf = if cfg.patchelf != null then cfg.patchelf else pkgs.patchelf;
         in
-        if cfg.libs == [ ] then
-          throw "breakbulk stage helper `patchelfRpath`: `libs` is empty"
-        else
-          pkgs.runCommand (stageName product "patchelfRpath") { nativeBuildInputs = [ patchelf ]; } ''
+        pkgs.runCommand (stageName product "patchelfRpath")
+          { nativeBuildInputs = [ (toolOf cfg.patchelf pkgs "patchelf") ]; }
+          ''
             set -euo pipefail
             ${copyIn input}
             ${isElfFn}
@@ -299,11 +421,60 @@ let
   '';
 
   bindgen =
-    mkHelper "bindgen"
+    mkHelper
       {
-        target = "web";
-        wasmBindgen = null;
-        extraArgs = [ ];
+        name = "bindgen";
+        description = ''
+          Runs `wasm-bindgen` on the input's single `.wasm` file and
+          writes its JavaScript glue and processed module to `pkg/`,
+          which `install` keeps. The `wasmWeb` preset's first stage.
+        '';
+        options = {
+          target = mkOption {
+            type = types.str;
+            default = "web";
+            example = "nodejs";
+            description = ''
+              wasm-bindgen's `--target`: the kind of JavaScript to
+              generate (`web`, `bundler`, `nodejs`, `deno`,
+              `no-modules`, `module`, `experimental-nodejs-module`).
+            '';
+          };
+          wasmBindgen = mkOption {
+            type = types.nullOr types.package;
+            default = null;
+            example = literalExpression "pkgs.wasm-bindgen-cli_0_2_100";
+            description = ''
+              The wasm-bindgen CLI. It must be the version of the
+              `wasm-bindgen` crate the module was built with.
+
+              `null` finds it from the product's Cargo.lock
+              (`product.lockfile`, or `product.lockEntries` for a
+              product made with `mkProduct` that passes parsed entries):
+
+              1. The version, X.Y.Z, is the lockfile's `wasm-bindgen`
+                 package from a registry. Evaluation fails when the
+                 lockfile has none, several versions, or one from git or
+                 a path.
+              2. nixpkgs' `wasm-bindgen-cli_X_Y_Z` from the stage's
+                 `pkgs`, when it has that attribute.
+              3. Otherwise wasm-bindgen-cli X.Y.Z from crates.io, built
+                 with the stage's `pkgs.rustPlatform`, when breakbulk's
+                 table `lib/wasm-bindgen-hashes.nix` has its hashes.
+              4. Otherwise evaluation fails, naming the version. Pass
+                 the CLI here, for example
+                 `breakbulk.wasmBindgen.forVersion { inherit pkgs;
+                 version = "X.Y.Z"; hashes."X.Y.Z" = { hash = …;
+                 cargoHash = …; }; }`.
+            '';
+          };
+          extraArgs = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            example = [ "--no-typescript" ];
+            description = "More arguments for `wasm-bindgen`, before the input file.";
+          };
+        };
       }
       (
         cfg:
@@ -343,24 +514,41 @@ let
         ''
       );
 
-  # `features`: the wasm features wasm-opt may assume, as `--enable-<f>`.
-  # The default is what rustc enables on wasm32-unknown-unknown since 1.87
-  # (its CARGO_CFG_TARGET_FEATURE); wasm-opt's own default is the MVP, and
-  # it rejects a Rust module using memory.copy ("memory.copy operations
-  # require bulk memory operations").
   wasmOpt =
-    mkHelper "wasmOpt"
+    mkHelper
       {
-        flags = [ "-Oz" ];
-        features = [
-          "bulk-memory"
-          "multivalue"
-          "mutable-globals"
-          "nontrapping-float-to-int"
-          "reference-types"
-          "sign-ext"
-        ];
-        binaryen = null;
+        name = "wasmOpt";
+        description = ''
+          Runs binaryen's `wasm-opt` on every `.wasm` file, in place. In
+          the `wasmWeb` and `wasmComponent` presets.
+        '';
+        options = {
+          flags = mkOption {
+            type = types.listOf types.str;
+            default = [ "-Oz" ];
+            example = [ "-O3" ];
+            description = "The optimisation arguments for `wasm-opt`.";
+          };
+          features = mkOption {
+            type = types.listOf types.str;
+            default = [
+              "bulk-memory"
+              "multivalue"
+              "mutable-globals"
+              "nontrapping-float-to-int"
+              "reference-types"
+              "sign-ext"
+            ];
+            description = ''
+              The wasm features `wasm-opt` may assume, each passed as
+              `--enable-<feature>`. The default is what rustc enables on
+              `wasm32-unknown-unknown` since 1.87. wasm-opt's own default
+              is the MVP, which rejects a Rust module that uses
+              `memory.copy`.
+            '';
+          };
+          binaryen = toolOption "binaryen";
+        };
       }
       (
         cfg:
@@ -371,7 +559,7 @@ let
           ...
         }:
         pkgs.runCommand (stageName product "wasmOpt")
-          { nativeBuildInputs = [ (if cfg.binaryen != null then cfg.binaryen else pkgs.binaryen) ]; }
+          { nativeBuildInputs = [ (toolOf cfg.binaryen pkgs "binaryen") ]; }
           ''
             set -euo pipefail
             ${copyIn input}
@@ -410,15 +598,109 @@ let
           flag
           x
         ]) values
-      ) metadata
+      ) (lib.filterAttrs (k: v: k != "_module" && v != null) metadata)
     );
 
+  # A `metadata` field that `wasm-tools metadata add` writes as a custom
+  # section of one string.
+  metadataString =
+    what:
+    mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "${what} `null` adds none.";
+    };
+  # A producers-section field: tool names to versions.
+  metadataProducers =
+    what: example:
+    mkOption {
+      type = types.attrsOf types.str;
+      default = { };
+      inherit example;
+      description = "${what}, by name, as `NAME=VERSION` in the producers section.";
+    };
+
   componentize =
-    mkHelper "componentize"
+    mkHelper
       {
-        adapter = null;
-        metadata = { };
-        wasmTools = null;
+        name = "componentize";
+        description = ''
+          Makes a WebAssembly component from the input's single core
+          module with `wasm-tools component new`, then adds `metadata`
+          with `wasm-tools metadata add`. The module keeps its file name.
+          The `wasmComponent` preset's last stage before `install`.
+        '';
+        options = {
+          adapter = mkOption {
+            type = types.nullOr (
+              types.oneOf [
+                types.package
+                types.path
+                (types.submodule {
+                  options = {
+                    name = mkOption {
+                      type = types.str;
+                      description = "The import module the adapter implements.";
+                    };
+                    module = mkOption {
+                      type = types.either types.package types.path;
+                      description = "The adapter module file.";
+                    };
+                  };
+                })
+              ]
+            );
+            default = null;
+            example = literalExpression "{ name = \"wasi_snapshot_preview1\"; module = ./wasi_snapshot_preview1.reactor.wasm; }";
+            description = ''
+              An adapter module (`--adapt`) that implements imports of
+              the core module not bound to WIT interfaces, such as
+              `wasi_snapshot_preview1`. Either a module file, whose file
+              name wasm-tools takes as the import module's name, or
+              `{ name; module; }`, where `name` is the import module it
+              implements.
+            '';
+          };
+          metadata = mkOption {
+            type = types.submodule {
+              freeformType = types.attrsOf (
+                types.oneOf [
+                  types.str
+                  (types.listOf types.str)
+                  (types.attrsOf types.str)
+                ]
+              );
+              options = {
+                name = metadataString "The component's name, in the names section.";
+                language = metadataProducers "Source languages" { Rust = "1.99.0"; };
+                processedBy = metadataProducers "Tools that processed the component" { breakbulk = "0.1.0"; };
+                sdk = metadataProducers "SDKs" { wasi-sdk = "25"; };
+                authors = metadataString "The people or organisation responsible.";
+                description = metadataString "A description.";
+                licenses = metadataString "The licenses, as an SPDX expression.";
+                source = metadataString "A URL of the source code.";
+                homepage = metadataString "A URL with more information.";
+                revision = metadataString "The source control revision.";
+                version = metadataString "The version of the packaged software.";
+              };
+            };
+            default = { };
+            example = {
+              name = "comp";
+              processedBy.breakbulk = "0.1.0";
+              licenses = "MIT OR Apache-2.0";
+            };
+            description = ''
+              Metadata for `wasm-tools metadata add`. Each field is the
+              flag of its name in kebab case (`processedBy` is
+              `--processed-by`): a string or a list of strings is passed
+              once per value, an attribute set as `NAME=VERSION` per
+              entry. Fields not listed here are passed the same way, for
+              flags of later wasm-tools versions.
+            '';
+          };
+          wasmTools = toolOption "wasm-tools";
+        };
       }
       (
         cfg:
@@ -445,7 +727,7 @@ let
           meta = metadataArgs cfg.metadata;
         in
         pkgs.runCommand (stageName product "componentize")
-          { nativeBuildInputs = [ (if cfg.wasmTools != null then cfg.wasmTools else pkgs.wasm-tools) ]; }
+          { nativeBuildInputs = [ (toolOf cfg.wasmTools pkgs "wasm-tools") ]; }
           ''
             set -euo pipefail
             ${copyIn input}
@@ -472,10 +754,25 @@ let
   zipEpoch = "315532800";
 
   deterministicZip =
-    mkHelper "deterministicZip"
+    mkHelper
       {
-        name = null;
-        zip = null;
+        name = "deterministicZip";
+        description = ''
+          Packs the input's files into one zip file whose bytes depend
+          only on the files' contents, names and execute bits: entries
+          in byte order of their paths, every time 1980-01-01 00:00 UTC,
+          modes 0644 or 0755, no owners, extra timestamps or directory
+          entries. The output is a directory holding the zip file.
+        '';
+        options = {
+          name = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "app-linux-x86_64.zip";
+            description = "The zip file's name. `null`: `<product name>.zip`.";
+          };
+          zip = toolOption "zip";
+        };
       }
       (
         cfg:
@@ -489,7 +786,7 @@ let
           fileName = if cfg.name != null then cfg.name else "${product.name}.zip";
         in
         pkgs.runCommand (stageName product "zip")
-          { nativeBuildInputs = [ (if cfg.zip != null then cfg.zip else pkgs.zip) ]; }
+          { nativeBuildInputs = [ (toolOf cfg.zip pkgs "zip") ]; }
           ''
             set -euo pipefail
             ${copyIn input}
@@ -510,25 +807,34 @@ let
           ''
       );
 
-  # Final layout. A root's file (`product.rootFiles`, file name to root
-  # kind, from mkProducts) goes by its kind: a bin to bin/, a staticlib to
-  # lib/, a cdylib or dylib to the traits' `sharedLibraryDir` (bin/ on
-  # Windows and Cygwin, where DLLs are found beside the executable; lib/
-  # elsewhere). Other files (renamed or added by a stage, import
-  # libraries, debug side files) go by suffix, from the traits: static
-  # libraries and `.rlib` to lib/, shared libraries to `sharedLibraryDir`,
-  # executables to bin/; where executables have no suffix, an executable
-  # file goes to bin/. A suffix that both executables and shared libraries
-  # have (`.wasm`) decides nothing. A debug side file (`.pdb`) goes next to
-  # the file of the same stem, else to bin/; anything else stays at the
-  # top. Top-level directories are copied unchanged, so a stage that
-  # already produced bin/, share/ or pkg/ (bindgen) keeps it.
-  # The link units' debuginfo side files (`product.linkedDebug`: `.pdb`,
-  # `.dwp`, `.dwo`) go to a `debug` output in the same layout, so `.pdb`
-  # sits in `$debug/bin` as the `.exe` does in `$out/bin`; only when no
-  # earlier stage split debug information (`product.debugSplit`), whose
-  # `debug` output holds them instead, and not for wasm.
-  install = mkHelper "install" { } (
+  install = mkHelper {
+    name = "install";
+    description = ''
+      Lays the flat link output out as an installed tree. Every product
+      has this stage unless `install = null` removes it.
+
+      A root's file (`product.rootFiles`) goes by its kind: a bin to
+      `bin/`, a staticlib to `lib/`, a cdylib or dylib to the target
+      traits' `sharedLibraryDir` (`bin/` on Windows and Cygwin, where
+      DLLs are found beside the executable; `lib/` elsewhere). Other
+      files (renamed or added by a stage, import libraries) go by the
+      traits' suffixes: static libraries and `.rlib` to `lib/`, shared
+      libraries to `sharedLibraryDir`, executables to `bin/`. Where
+      executables have no suffix, an executable file goes to `bin/`. A
+      suffix that executables and shared libraries share (`.wasm`)
+      decides nothing. A debug side file (`.pdb`) goes next to the file
+      of the same stem, else to `bin/`. Anything else stays at the top.
+      Top-level directories are copied as they are, so `bindgen`'s
+      `pkg/` and a stage's `share/` are kept.
+
+      The link units' debuginfo side files (`product.linkedDebug`:
+      `.pdb`, `.dwp`, `.dwo`) go to a `debug` output in the same layout,
+      so a `.pdb` sits in `$debug/bin` as its `.exe` does in `$out/bin`.
+      Not when an earlier stage split debug information
+      (`product.debugSplit`), whose `debug` output holds them, and not
+      for wasm.
+    '';
+  } (
     _cfg:
     {
       input,
@@ -659,15 +965,21 @@ let
         }
       '';
 
-  # #23: copy the files the target's build scripts placed next to
-  # the binaries (as in Cargo's `target/<profile>`: shared libraries that
-  # sdl2-sys `bundled` or ort-sys `copy-dylibs` copy there, Tauri's
-  # external binaries and resources) into the product, beside its own
-  # files, so `install` lays them out with them (a DLL next to the .exe in
-  # bin/, a `.so` in lib/; on Linux the binary then needs a runpath to
-  # find it, e.g. `patchelfRpath`). Symlinks are resolved. A name the
-  # product already has is an error.
-  buildScriptFiles = mkHelper "buildScriptFiles" { } (
+  buildScriptFiles = mkHelper {
+    name = "buildScriptFiles";
+    description = ''
+      Copies the files the build scripts of the product's target
+      placed next to the binaries (Cargo's `target/<profile>`, where
+      `cargo run` and a Windows loader find them: shared libraries that
+      sdl2-sys `bundled` or ort-sys `copy-dylibs` copy there, Tauri's
+      external binaries and resources) into the product, beside its own
+      files. `install` then lays them out with them: a DLL next to the
+      `.exe` in `bin/`, a `.so` in `lib/`, where on Linux the binary
+      needs a run path to find it (`patchelfRpath`). Symlinks are
+      resolved. A file name the product already has fails the stage.
+      Run it before `install`.
+    '';
+  } (
     _cfg:
     {
       input,
@@ -705,31 +1017,20 @@ let
       product.checkName or helperName
     } = null;";
 
-  # Fails when the closure of the checked output (by default the product's
-  # main output) contains any of `sources` (store paths; default: the
-  # product's `sourcePaths`) or of `toolchain` (default: the product's
-  # `toolchainPaths`: rustc, its sysroot, cargo, rust-src; a std panic
-  # location that names rust-src, or an embedded `CARGO`, makes the whole
-  # toolchain a runtime dependency). Only `${input}` is checked, so a
-  # separate `debug` output is exempt. Paths are compared as strings, so
-  # they are not realised for the check.
-  #
-  # One toolchain reference is allowed: a toolchain path
-  # that holds a shared library the checked output itself loads. The
-  # needed libraries are read from the output's files (ELF `NEEDED`, PE
-  # imports), and a toolchain path is allowed when one of them is a file in
-  # its `lib`, `bin` or `lib/rustlib/<target>/{lib,bin}`. So a binary linked
-  # with `-C prefer-dynamic` may reference the sysroot whose `libstd-*.so`
-  # it loads, while rustc's own component, cargo and rust-src, which hold
-  # no such library, never are. (A rust-overlay toolchain's joined sysroot
-  # brings its rustc and cargo components along, so such a binary still
-  # fails there.) Only toolchain paths found in the closure cost a scan.
-  # The default `buildScriptFiles` check (#23), on products of targets
-  # whose build plan has build-script runs: fails when a build script
-  # placed files next to the binaries (Cargo's `target/<profile>`, where
-  # `cargo run` and a Windows loader find them) and the product holds no
-  # file of that name, naming the files and the two ways out.
-  buildScriptFilesIncluded = mkHelper "buildScriptFilesIncluded" { } (
+  buildScriptFilesIncluded = mkHelper {
+    name = "buildScriptFilesIncluded";
+    kind = "check";
+    description = ''
+      Fails when a build script of the product's target placed files
+      next to the binaries (Cargo's `target/<profile>`, where `cargo run`
+      and a Windows loader find them) and the product holds no file of
+      that name. The message names the files, the `buildScriptFiles`
+      stage that includes them, at its place in this product's stage
+      order, and how to remove the check. Every product has it as the
+      check `buildScriptFiles`; it passes when no build script placed
+      anything.
+    '';
+  } (
     _cfg:
     {
       input,
@@ -773,7 +1074,60 @@ let
     ''
   );
 
-  noSourceReferences = mkHelper "noSourceReferences" { sources = null; toolchain = null; sourcesAllowedIn = null; } (
+  # Paths are compared as strings, so they are not realised for the check.
+  # Only toolchain paths found in the closure cost a scan for the
+  # libraries the output loads.
+  noSourceReferences = mkHelper {
+    name = "noSourceReferences";
+    kind = "check";
+    description = ''
+      Fails when the closure of the checked output (by default the
+      product's main output) contains a source path or a Rust toolchain
+      path: a std panic location that names rust-src, or an embedded
+      `CARGO`, makes the whole toolchain a run-time dependency. A
+      separate `debug` output is not checked. Every product has this
+      check unless it is removed.
+
+      A source named only by files matching `sourcesAllowedIn` is
+      allowed. One toolchain reference is allowed: a toolchain path
+      holding a shared library the checked output loads (read from its
+      files' ELF `NEEDED` entries and PE imports, looked up in the
+      path's `lib`, `bin` and `lib/rustlib/<target>/{lib,bin}`). So a
+      binary linked with `-C prefer-dynamic` may reference the sysroot
+      whose `libstd-*.so` it loads; rustc's own component, cargo and
+      rust-src never are. A rust-overlay toolchain's joined sysroot
+      brings its rustc and cargo components along, so such a binary
+      still fails there.
+    '';
+    options =
+      let
+        paths =
+          what: default:
+          mkOption {
+            type = types.nullOr (types.listOf storePathType);
+            default = null;
+            description = "The ${what} store paths. `null`: ${default}.";
+          };
+      in
+      {
+        sources = paths "source" "the product's `sourcePaths` (its source views and crate sources)";
+        toolchain =
+          paths "Rust toolchain"
+            "the product's `toolchainPaths` (rustc, its sysroot, cargo, rust-src). `[ ]` checks sources only";
+        sourcesAllowedIn = mkOption {
+          type = types.nullOr (types.listOf types.str);
+          default = null;
+          example = [ "libapp-*.a" ];
+          description = ''
+            File name globs (in any directory) whose own references to
+            sources are allowed; a source another file names still
+            fails. `null`: the product's `sourcesAllowedIn` (each
+            staticlib root's archive, whose objects keep their debug
+            information for the final link).
+          '';
+        };
+      };
+  } (
     cfg:
     {
       input,
@@ -784,8 +1138,6 @@ let
     let
       sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
       toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
-      # File name globs (any directory) whose own references to sources
-      # are allowed: a source is still an error when another file names it.
       allowedIn = if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
       # The store path each source lies in, not the source itself: a git
       # crate's source is a directory inside its tree, and a closure lists
@@ -916,18 +1268,44 @@ let
     "libstdc++.so.6"
   ];
 
-  # A check: every ELF file in its input may name in NEEDED (the shared
-  # libraries the dynamic loader loads for it) only `allowed`, shell glob
-  # patterns of sonames; any other library fails the check, naming the
-  # file, the library and `why`. Like auditwheel's policy check, it reads
-  # the files, not their store-path references, so it holds for a
-  # library found anywhere at run time.
+  # Like auditwheel's policy check, it reads the files, not their
+  # store-path references, so it holds for a library found anywhere at
+  # run time.
   neededLibraries =
-    mkHelper "neededLibraries"
+    mkHelper
       {
-        allowed = glibcLibraries;
-        why = "";
-        binutils = null;
+        name = "neededLibraries";
+        kind = "check";
+        description = ''
+          Fails when an ELF file in the checked output names in `NEEDED`
+          (the shared libraries the dynamic loader loads for it) a
+          library that `allowed` does not match, naming the file, the
+          library and `why`. It reads the files, as auditwheel reads a
+          wheel, so it holds wherever the library is found at run time.
+          `linuxPortable`'s `portableLibraries` check.
+        '';
+        options = {
+          allowed = mkOption {
+            type = types.listOf types.str;
+            default = glibcLibraries;
+            defaultText = literalExpression "breakbulk.stageHelpers.glibcLibraries";
+            example = literalExpression "breakbulk.stageHelpers.glibcLibraries ++ breakbulk.stageHelpers.gccRuntimeLibraries ++ [ \"libz.so.1\" ]";
+            description = ''
+              Shell glob patterns of the sonames a file may need.
+              `breakbulk.stageHelpers.glibcLibraries` lists glibc's own
+              libraries in every release since 2.17 and its dynamic
+              loaders; `gccRuntimeLibraries` lists `libgcc_s.so.1` and
+              `libstdc++.so.6`, which manylinux's policy also allows.
+            '';
+          };
+          why = mkOption {
+            type = types.str;
+            default = "";
+            example = "a portable Linux binary loads only glibc's libraries";
+            description = "Why other libraries are not allowed, for the failure message.";
+          };
+          binutils = toolOption "binutils-unwrapped-all-targets";
+        };
       }
       (
         cfg:
@@ -973,23 +1351,42 @@ let
             touch $out/needed
           ''
       );
-  # A check: no file in its input names a Nix store path,
-  # anywhere in its bytes: a program for other systems must not look for a
-  # file in a store that is not there (a statically linked OpenSSL's
-  # OPENSSLDIR, an rpath, an embedded tool path). Unlike Nix's reference
-  # scan, which sees only the hashes of the build's inputs, it matches any
-  # `<storeDir>/<32 characters>-<name>` string, so it also finds paths
-  # outside the closure and paths whose hash `remove-references-to`
-  # replaced with `eee…`. `allow` takes shell glob patterns matched against
-  # each whole path found (`/nix/store/<hash>-<name>…`, cut at the first
-  # character that cannot be in a store path name), such as
-  # "*-openssl-*-etc"; a derivation or store path matches itself and what
-  # lies below it. It fails naming every file and path.
+  # Not Nix's reference scan, which sees only the hashes of the build's
+  # inputs: this also finds paths outside the closure and paths whose
+  # hash `remove-references-to` replaced with `eee…`.
   noStorePaths =
-    mkHelper "noStorePaths"
+    mkHelper
       {
-        allow = [ ];
-        why = "";
+        name = "noStorePaths";
+        kind = "check";
+        description = ''
+          Fails when a file in the checked output names a Nix store
+          path anywhere in its bytes (any `<storeDir>/<32
+          characters>-<name>` string), naming every file and path. A
+          program for other systems must not look for a file in a store
+          that is not there: a statically linked OpenSSL's `OPENSSLDIR`,
+          a run path, an embedded tool path. `linuxPortable`'s
+          `portableNoStorePaths` check.
+        '';
+        options = {
+          allow = mkOption {
+            type = types.listOf storePathType;
+            default = [ ];
+            example = [ "*-openssl-*-etc" ];
+            description = ''
+              The store paths a file may name: shell glob patterns
+              matched against each whole path found
+              (`/nix/store/<hash>-<name>…`, cut at the first character
+              that cannot be in a store path name), or derivations and
+              store paths, each matching itself and what lies below it.
+            '';
+          };
+          why = mkOption {
+            type = types.str;
+            default = "";
+            description = "Why store paths are not allowed, for the failure message.";
+          };
+        };
       }
       (
         cfg:
@@ -1049,6 +1446,10 @@ let
       );
 in
 {
+  # Whether a value is a helper made by mkHelper (the attribute set also
+  # holds plain values, such as glibcLibraries).
+  isHelper = v: isAttrs v && v ? __functor && v ? kind && v ? options;
+
   inherit
     mkHelper
     noStorePaths

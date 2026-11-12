@@ -53,18 +53,23 @@ The debug outputs are tested with debuggers, not only for presence (`products-so
 
 ## Stage helpers
 
+The helpers are in `lib/stage-helpers/default.nix`. Each is made with `mkHelper` from a name, a description, a kind (`stage` or `check`) and option declarations (`mkOption`). The result is an attribute set with a `__functor`, so it is a function that also carries its declaration. Called with options, it checks them with `lib.evalModules` (under the helper's name, so an error names `<helper>.<option>`) and returns the helper with those options set; called with the stage arguments (recognised by `input`), it builds the stage. [Stage helpers](../../reference/stage-helpers.md) is generated from the declarations (`docs/stage-helpers.nix`; `nix run .#update-docs-options`, checked by `docs-options-fresh`); [Stage and check functions](../../reference/stage-functions.md) lists what a stage gets.
+
 | Helper | Does |
 | --- | --- |
-| `splitDebug` | Reads the GNU build ID, writes `$debug/lib/debug/.build-id/<xx>/<rest>.debug` with `objcopy --only-keep-debug`, then strips debug info and adds a debuglink. A packed `<bin>.dwp` (`split-debuginfo = "packed"`) moves next to that file, where gdb looks for it (`<debug file's directory>/<binary name>.dwp`; gdb 17.2 `gdb/dwarf2/read.c`, `open_and_init_dwp_file`), with a symlink at its install-layout place |
-| `strip` | `strip --strip-debug` (or `--strip-all` when asked) |
-| `patchelfRpath { libs }` | Adds rpaths for libraries loaded at runtime, after any rpath shrinking |
-| `bindgen { target ? "web" }` | Lockfile-matched `wasm-bindgen` |
-| `wasmOpt { flags ? [ "-Oz" ] }` | `wasm-opt` on a core module |
-| `componentize { adapter ? null; metadata ? { } }` | `wasm-tools component new`, then `wasm-tools metadata add` |
-| `deterministicZip` | Sorted entries, fixed timestamps, no extra attributes |
-| `install` | Final layout; the link units' debuginfo side files (`.pdb`) in a `debug` output in the same layout, when no earlier stage split debug information |
-| `neededLibraries { allowed ? glibcLibraries; why ? "" }` | A check: every ELF file's `NEEDED` entries must match `allowed` (shell globs of sonames), as auditwheel checks a wheel; `linuxPortable`'s `portableLibraries` (with `gccRuntimeLibraries`, `libgcc_s.so.1` and `libstdc++.so.6`) |
-| `noStorePaths { allow ? [ ]; why ? "" }` | A check: no file names a Nix store path anywhere in its bytes (`<storeDir>/<32 characters>-<name>…`, so also paths outside the closure and hashes `remove-references-to` replaced with `eee…`); `allow` takes shell globs matched against each whole path found, or store paths (matching themselves and what lies below them); `linuxPortable`'s `portableNoStorePaths` |
+| [`splitDebug`](../../reference/stage-helpers.md#splitdebug) | Reads the GNU build ID, writes `$debug/lib/debug/.build-id/<xx>/<rest>.debug` with `objcopy --only-keep-debug`, then strips debug info and adds a debuglink. A packed `<bin>.dwp` (`split-debuginfo = "packed"`) moves next to that file, where gdb looks for it (`<debug file's directory>/<binary name>.dwp`; gdb 17.2 `gdb/dwarf2/read.c`, `open_and_init_dwp_file`), with a symlink at its install-layout place |
+| [`strip`](../../reference/stage-helpers.md#strip) | `strip --strip-debug` (or `--strip-all` when asked) |
+| [`patchelfRpath`](../../reference/stage-helpers.md#patchelfrpath) | Adds rpaths for libraries loaded at runtime, after any rpath shrinking |
+| [`bindgen`](../../reference/stage-helpers.md#bindgen) | Lockfile-matched `wasm-bindgen` ([where the CLI comes from](../../reference/stage-helpers.md#bindgenwasmbindgen)) |
+| [`wasmOpt`](../../reference/stage-helpers.md#wasmopt) | `wasm-opt` on a core module |
+| [`componentize`](../../reference/stage-helpers.md#componentize) | `wasm-tools component new`, then `wasm-tools metadata add` |
+| [`deterministicZip`](../../reference/stage-helpers.md#deterministiczip) | Sorted entries, fixed timestamps, no extra attributes |
+| [`install`](../../reference/stage-helpers.md#install) | Final layout; the link units' debuginfo side files (`.pdb`) in a `debug` output in the same layout, when no earlier stage split debug information |
+| [`buildScriptFiles`](../../reference/stage-helpers.md#buildscriptfiles) | Copies the files build scripts placed next to the binaries into the product |
+| [`buildScriptFilesIncluded`](../../reference/stage-helpers.md#buildscriptfilesincluded) | A check, every product's `buildScriptFiles`: fails when a build script placed files the product does not include |
+| [`noSourceReferences`](../../reference/stage-helpers.md#nosourcereferences) | A check, on every product: no source or toolchain path in the main output's closure (above) |
+| [`neededLibraries`](../../reference/stage-helpers.md#neededlibraries) | A check: every ELF file's `NEEDED` entries must match `allowed` (shell globs of sonames), as auditwheel checks a wheel; `linuxPortable`'s `portableLibraries` (with `gccRuntimeLibraries`, `libgcc_s.so.1` and `libstdc++.so.6`) |
+| [`noStorePaths`](../../reference/stage-helpers.md#nostorepaths) | A check: no file names a Nix store path anywhere in its bytes (`<storeDir>/<32 characters>-<name>…`, so also paths outside the closure and hashes `remove-references-to` replaced with `eee…`); `linuxPortable`'s `portableNoStorePaths` |
 
 ## Tests
 

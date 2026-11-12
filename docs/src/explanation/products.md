@@ -104,10 +104,12 @@ stage's binary, so the product would carry both copies. More in
 Typical checks: ISA level, DLL import closure, PE headers, signature
 verification, "no interpreter, no needed libraries".
 
-breakbulk ships stage helpers: `splitDebug`, `strip`, `patchelfRpath`,
-`bindgen`, `wasmOpt`, `componentize`, `deterministicZip`. Your own stages
-are ordinary derivations: container images, boot images, distribution
-packages, signing, metadata stamps.
+breakbulk ships [stage helpers](../reference/stage-helpers.md):
+`splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt`,
+`componentize`, `deterministicZip` and more. Your own stages are
+ordinary derivations: container images, boot images, distribution
+packages, signing, metadata stamps. What a stage function gets is in
+[Stage and check functions](../reference/stage-functions.md).
 
 Details: [Products, stages and tests (internals)](internals/products.md).
 

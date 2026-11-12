@@ -74,6 +74,15 @@ let
     }).error or "";
   has = lib.hasInfix;
 
+  helperNames = lib.attrNames (lib.filterAttrs (_: H.isHelper) H);
+  # Stage arguments for helpers evaluated, not built.
+  helperArgs = {
+    input = pkgs.emptyDirectory;
+    product.name = "p";
+    target = { };
+    inherit pkgs;
+  };
+
   evalTests = {
     # The stage `debugInfo = "split"` inserts (lib/products.nix).
     testDebugSplitChain = {
@@ -545,12 +554,81 @@ let
       expected = [ ];
     };
     testHelperConfigured = {
-      expr = builtins.isFunction (H.wasmOpt { flags = [ "-O3" ]; });
+      expr = lib.isFunction (H.wasmOpt { flags = [ "-O3" ]; });
       expected = true;
     };
     testHelperUnknownOption = {
       expr = (builtins.tryEval (H.wasmOpt { flag = [ "-O3" ]; })).success;
       expected = false;
+    };
+    # Options are checked when the stage is made, also those this use of
+    # the helper does not read.
+    testHelperWrongType = {
+      expr = map (h: (builtins.tryEval (h helperArgs).drvPath).success) [
+        (H.wasmOpt { flags = "-O3"; })
+        (H.wasmOpt { flags = [ 3 ]; })
+        (H.splitDebug { llvm = "llvm"; })
+        (H.componentize { metadata.name = 3; })
+        H.patchelfRpath
+      ];
+      expected = [
+        false
+        false
+        false
+        false
+        false
+      ];
+    };
+    # Configuring again sets the given options over the earlier ones.
+    testHelperReconfigured = {
+      expr =
+        lib.hasInfix "wasm-opt -O1 \"$f\""
+          (H.wasmOpt { flags = [ "-O1" ]; } { features = [ ]; } helperArgs).buildCommand;
+      expected = true;
+    };
+    testHelperComponentizeMetadata = {
+      expr =
+        lib.hasInfix "wasm-tools metadata add --licenses MIT --name comp --processed-by 'breakbulk=0.1.0' --x-custom a --x-custom b "
+          (H.componentize {
+            metadata = {
+              name = "comp";
+              processedBy.breakbulk = "0.1.0";
+              licenses = "MIT";
+              xCustom = [
+                "a"
+                "b"
+              ];
+            };
+          } helperArgs).buildCommand;
+      expected = true;
+    };
+    # Every helper the library exports declares a kind and describes
+    # itself and each option (the generated reference lists them).
+    testHelperDeclarations = {
+      expr = lib.filter (
+        n:
+        let
+          h = H.${n};
+          opts = lib.optionAttrSetToDocList h.options;
+        in
+        !(
+          lib.elem h.kind [
+            "stage"
+            "check"
+          ]
+          && h.description != ""
+          && lib.all (o: o.internal || (o.description or null) != null && o.type != "unspecified") opts
+        )
+      ) helperNames;
+      expected = [ ];
+    };
+    testHelperNames = {
+      expr = lib.all (n: lib.elem n helperNames) [
+        "bindgen"
+        "install"
+        "noSourceReferences"
+      ];
+      expected = true;
     };
   };
   evalFailures = lib.debug.runTests evalTests;

@@ -33,6 +33,9 @@
 #                    gdb's backtrace and source lines as above
 #   source-paths-dwo5 the same with DWARF 5 (`-C dwarf-version=5`), which
 #                    binutils' dwp packs into an empty .dwp
+#   product-attributes   the `product` a stage and a check get has the
+#                    attributes docs/src/reference/stage-functions.md
+#                    lists for each (evaluation only)
 #   cdylib-debug-packed   a bin whose dependency is also a cdylib, with
 #                    split-debuginfo = "packed": the bin's `linked` debug
 #                    output holds app.dwp only, not the dependency's own
@@ -377,6 +380,56 @@ let
     ]
   );
   sourcePathsReadme =mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
+
+  # --- product-attributes ------------------------------------------------------
+
+  # A stage and a check that record the names of the `product` they get.
+  probe =
+    {
+      input,
+      product,
+      pkgs,
+      ...
+    }:
+    pkgs.runCommand "${product.name}-probe" { passthru.productNames = lib.attrNames product; } ''
+      cp -RL --no-preserve=mode,ownership ${input} $out
+    '';
+  probeRepo = mkRepo (fixtures + "/source-paths") (
+    spModules
+    ++ [
+      {
+        targets.${native} = {
+          stages.probe = {
+            after = "install";
+            run = probe;
+          };
+          checks.probe.run = probe;
+        };
+      }
+    ]
+  );
+  # The `product` attributes docs/src/reference/stage-functions.md lists
+  # for stages and for checks: its table's rows, by their "Given to".
+  documentedProduct =
+    let
+      page = builtins.readFile ../../docs/src/reference/stage-functions.md;
+      section = lib.last (lib.splitString "\n## `product`\n" page);
+      rows = lib.concatMap (
+        l:
+        let
+          m = builtins.match "[|] `([A-Za-z]+)` [|] ([a-z ]+) [|].*" l;
+        in
+        lib.optional (m != null) {
+          name = lib.elemAt m 0;
+          givenTo = lib.elemAt m 1;
+        }
+      ) (lib.splitString "\n" section);
+      namesFor = what: lib.sort lib.lessThan (map (r: r.name) (lib.filter (r: lib.hasInfix what r.givenTo) rows));
+    in
+    {
+      stages = namesFor "stages";
+      checks = namesFor "checks";
+    };
   spApp = sourcePaths.workspaces.main.packages.app;
 
   # --- cdylib-debug --------------------------------------------------------------
@@ -1575,6 +1628,23 @@ in
         mkdir -p $out
         cp gdb.txt $out/
       '';
+
+  # The `product` a stage and a check get has exactly the attributes the
+  # reference documents, on a product whose `linked` stage has a `debug`
+  # output (`split-debuginfo = "packed"`), so every optional one is there.
+  product-attributes =
+    let
+      p = probeRepo.workspaces.main.target.${native}.variants.packed.packages.app;
+      actual = {
+        stages = lib.sort lib.lessThan p.stages.probe.productNames;
+        checks = lib.sort lib.lessThan p.checks.probe.productNames;
+      };
+    in
+    assert lib.assertMsg (lib.length documentedProduct.stages > 5)
+      "product-attributes: no `product` table found in docs/src/reference/stage-functions.md";
+    assert lib.assertMsg (actual == documentedProduct)
+      "product-attributes: docs/src/reference/stage-functions.md documents ${builtins.toJSON documentedProduct}, but a product has ${builtins.toJSON actual}";
+    evalCheck "product-attributes" (builtins.toJSON actual);
 
   source-paths-dwo = dwoCheck "source-paths-dwo" sourcePaths 4;
   source-paths-dwo5 = dwoCheck "source-paths-dwo5" sourcePathsDwarf5 5;

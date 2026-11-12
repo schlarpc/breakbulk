@@ -26,6 +26,8 @@
   - [Targets](reference/options/targets.md)
   - [Packages](reference/options/packages.md)
 - [Outputs and entry points](reference/outputs.md)
+- [Stage and check functions](reference/stage-functions.md)
+- [Stage helpers](reference/stage-helpers.md)
 - [Presets](reference/presets.md)
 - [Cargo and rustc assumptions](reference/assumptions.md)
 - [Plan format](reference/plan-format.md)

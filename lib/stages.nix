@@ -33,7 +33,10 @@
 #     previous stage's output, `product` is `{ name; sourcePaths; toolchainPaths; } // info`,
 #     plus `linkedDebug` (the `debug` output of `linked`, when it has one:
 #     the link units' debuginfo side files) and `debugSplit` (whether an
-#     earlier stage has a `debug` output).
+#     earlier stage has a `debug` output). Every attribute a product of
+#     mkRepository has is documented in
+#     docs/src/reference/stage-functions.md, which the
+#     `products-product-attributes` check compares with a real product.
 #   - A stage set to `null` (e.g. `lib.mkForce null` in the module system)
 #     is removed. Constraints that name a removed stage are dropped.
 #   - `install` (helpers.install) is added unless the set has `install`;

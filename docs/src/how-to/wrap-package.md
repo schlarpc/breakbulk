@@ -73,9 +73,10 @@ packages.app.stages.rpath = {
 
 A stage that names neither `install` nor a stage after it runs before
 `install`, as here. An unknown option fails at evaluation, listing the
-helper's options. The helpers and their options are listed in [Products,
-stages and tests (internals)](../explanation/internals/products.md#stage-helpers);
-a generated reference is planned (#79).
+helper's options; a value of the wrong type fails naming the option.
+The helpers and their options are listed in [Stage
+helpers](../reference/stage-helpers.md). To write your own stage, see
+[Stage and check functions](../reference/stage-functions.md).
 
 ## Debug information
 

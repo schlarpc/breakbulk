@@ -26,6 +26,7 @@
           inherit pkgs;
           root = ./tests/fixtures/walking-skeleton;
         }).optionsDoc.optionsCommonMark;
+        inherit (self.lib) stageHelpers;
       };
     in
     {
@@ -66,8 +67,9 @@
       # cannot run it: stock Nix has no builder-rpc-v0.
       #   nix run .#test-dynamic -- [fixture ...]
       apps = forAllSystems (pkgs: {
-        # Regenerate docs/src/reference/options from the modules (checked
-        # by docs-options-fresh). Run from the checkout's root.
+        # Regenerate docs/src/reference/options from the modules and
+        # docs/src/reference/stage-helpers.md from the stage helpers
+        # (checked by docs-options-fresh). Run from the checkout's root.
         update-docs-options = {
           type = "app";
           program = toString (docsFor pkgs).updateOptions;
@@ -165,7 +167,8 @@
         // {
           # Every internal link and fragment of the documentation site.
           docs-site-links = (docsFor pkgs).links;
-          # The committed options pages are what the modules generate.
+          # The committed options pages are what the modules generate, and
+          # the stage helpers page what the helpers generate.
           docs-options-fresh = (docsFor pkgs).optionsFresh;
 
           # Every fixture is in `nix run .#test-rebuild`'s catalog or
