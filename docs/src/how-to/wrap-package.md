@@ -60,6 +60,23 @@ The stage helpers expect the flat link output. Run them before `install`.
 A check sees the bytes of the stage it is on. `checks.<name>.on =
 "install"` sees the installed layout without your wrapper.
 
+## Call a stage helper
+
+A helper is a stage's `run`. Call it with its options first; one with
+no options you need (`deterministicZip`) is used as is:
+
+```nix
+packages.app.stages.rpath = {
+  run = breakbulk.stageHelpers.patchelfRpath { libs = [ pkgs.vulkan-loader ]; };
+};
+```
+
+A stage that names neither `install` nor a stage after it runs before
+`install`, as here. An unknown option fails at evaluation, listing the
+helper's options. The helpers and their options are listed in [Products,
+stages and tests (internals)](../explanation/internals/products.md#stage-helpers);
+a generated reference is planned (#79).
+
 ## Debug information
 
 A stage after `install` with no `debug` output keeps the product's

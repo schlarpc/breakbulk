@@ -261,6 +261,9 @@ divide the cores between runs.
 **Doctests** get one derivation per library, which runs `rustdoc --test`.
 rustdoc compiles and runs the examples in one process, so doctests have
 no cutoff: they re-run whenever the library or anything below it changes.
+`test.args` reach rustdoc too, as `--test-args`, so a doctest is skipped
+by its name (`--skip "src/lib.rs - net::connect"`); per-binary
+`test.binaries.<binary>.args` do not.
 
 **Benches** come only from a bench variant (`cargo bench --no-run`, bench
 profile), which gives optimized bench binaries to run outside Nix.

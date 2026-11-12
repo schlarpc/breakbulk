@@ -29,10 +29,30 @@ The preset is named for what you want; the target triple picks how:
 
 - Your own machine's triple gets `linux` without any setting (or
   `linuxStatic` when `pkgs` is a musl package set).
-- A target whose linker rustc chooses itself (UEFI, bare metal) needs no
-  preset.
-- Any other target without a preset fails at evaluation, naming
-  `targets.<triple>.linker`.
+- A target whose linker rustc chooses itself needs no preset (below).
+- Any other target needs a preset, or at least
+  [`targets.<triple>.linker`](options/targets.md#targetsnamelinker).
+  Without one, Cargo uses rustc's default linker for the triple, usually
+  `cc`, which does not link for another architecture.
+
+These targets build with no preset. rustc's target spec names its own
+`rust-lld`, and the product has only the `install` stage:
+
+| Triple | Product |
+| --- | --- |
+| `x86_64-unknown-uefi`, `aarch64-unknown-uefi` | a `.efi` program, its PDB in the `debug` output |
+| bare metal (`x86_64-unknown-none`, …) | an ELF program |
+| `wasm32-wasip1` | a core module, with the WASI libc that ships with rustc |
+| `wasm32-unknown-unknown` | a core module, without wasm-bindgen or `wasm-opt` |
+
+```nix
+targets.wasm32-wasip1 = { };
+```
+
+Such a target has no C compiler and no test runner. A crate with C code
+needs [`cc`](options/targets.md#targetsnamecc) for the target, and test
+runs need a [`runner`](options/targets.md#targetsnamerunner) (wasmtime
+for `wasm32-wasip1`).
 
 ## Arguments
 

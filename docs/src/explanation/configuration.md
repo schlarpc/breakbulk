@@ -293,7 +293,10 @@ names the path and the option to add it to. So does a failing library or
 build script that reads a test-only path. Missing paths on success are
 warnings;
 [`strictSources`](../reference/options/repository.md#strictsources)
-makes them errors.
+makes them errors. A build script that probes for a file
+(`Path::exists()`) and takes another path when it is absent gets no
+message: it neither fails nor names the file. Such a file must be in
+`extraSources` too.
 
 Registry crates are under `repo.sources.<crate>`, for steps that need a
 file from inside a dependency (a bundled SDK, JS glue shipped in a

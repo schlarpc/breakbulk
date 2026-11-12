@@ -45,3 +45,8 @@ modules = [{
 
 They appear at their original relative paths, so the crate's paths work
 unchanged, and only that package's units depend on them.
+
+A build script that checks whether a file exists (`Path::exists()`) and
+does something else when it does not gets no warning for a missing file:
+it does not fail, and it names no `rerun-if-changed` path. Read the build
+script, and add such files to `extraSources` too.

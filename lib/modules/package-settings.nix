@@ -174,7 +174,13 @@ let
             "--skip"
             "net::"
           ];
-          description = "libtest arguments for every test binary of this package.";
+          description = ''
+            libtest arguments for every test binary of this package, and
+            for its doctests: each is passed to `rustdoc --test` as
+            `--test-args`, so `[ "--skip" "src/lib.rs - net" ]` skips a
+            doctest by name. `test.binaries.<binary>.args` do not reach
+            doctests.
+          '';
         };
         includeIgnored = mkOption {
           type = types.bool;
