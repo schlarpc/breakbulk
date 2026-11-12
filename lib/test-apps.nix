@@ -27,7 +27,8 @@
 # package's directory with the same dynamic-library path, `rustc-env`
 # values, `CARGO_*` runtime variables, `test.env`,
 # `test.binaries.<binary>.env` and `test.path` as its test run, under the
-# target's runner, and creates
+# runner of its platform (the build machine's for a proc macro's unit
+# tests), and creates
 # `/tmp/breakbulk-target-tmp`. With `checkout`, `CARGO_MANIFEST_DIR` and
 # `CARGO_MANIFEST_PATH` name the checkout, so tests that read files through
 # them see the working tree; values compiled in with `env!` still name the
@@ -76,7 +77,7 @@
             mkdir -p /tmp/breakbulk-target-tmp
             files=(${spec.unitOut}/*)
             cd ${lib.escapeShellArg dir}
-            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
+            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs spec.runner} "''${files[0]}" "$@"
           '';
         in
         script;

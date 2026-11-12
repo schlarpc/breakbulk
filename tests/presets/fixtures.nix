@@ -12,9 +12,10 @@
 #   static-pkgconfig-musl-*   a musl product links a library found with
 #                     pkg-config (both .a and .so present) statically
 #   cross-doctests-aarch64  in a test plan for aarch64 under qemu-user, a
-#                     proc macro's doctest is the host's (no --target) and
-#                     runs without the target's runner; a library's
-#                     doctest runs under it
+#                     proc macro's doctest and unit tests (libtest and
+#                     nextest runs, and the test app) are the host's (no
+#                     --target) and run without the target's runner; a
+#                     library's doctest and integration test run under it
 #   presets-eval      evaluation-time assertions on preset values (and the
 #                     linker choice, lib/presets/linker.nix)
 #   linker-kind-mold-*  `targets.<native>.linkerKind = "mold"`: the product
@@ -465,9 +466,10 @@ let
   # --- cross doctests (aarch64) ------------------------------------------------
   #
   # The cross-doctests fixture for aarch64-unknown-linux-gnu, whose runner
-  # is qemu-user: the proc macro's doctest is a host unit (no `--target`)
-  # and runs on the build machine, not under qemu, which cannot run it;
-  # the library's doctest is a target unit and runs under qemu.
+  # is qemu-user: the proc macros' doctest and unit tests are host units
+  # (no `--target`) and run on the build machine, not under qemu, which
+  # cannot run them; the library's doctest and integration test are target
+  # units and run under qemu.
 
   crossDoctests = mkRepo (fixtures + "/cross-doctests") [
     {
@@ -480,6 +482,7 @@ let
         variants.default.profile = "dev";
         memberDefaults.test.keepLog = true;
       };
+      packages.pmn.test.runner = "nextest";
       targets.${a64}.preset = presets.linux;
     }
   ];
@@ -490,12 +493,21 @@ let
       plan = planOf inst "test";
       unitOf = d: builtins.fromJSON (unitText d);
       hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).compile.args);
+      platformOf = name: inst.tests.${name}.breakbulkRoot.platform;
       checks = {
         "a runner" = t.runner != null;
         "pmd's doctest is the host's" = plan.doctests.d-pmd.platform == "host" && !hasTarget t.doctests.pmd;
         "user's doctest is the target's" =
           plan.doctests.d-user.platform == "target" && hasTarget t.doctests.user;
-        "no test binaries" = t.testRuns == { };
+        "the proc macros' unit tests are the host's" =
+          platformOf "pmd/lib-test/pmd" == "host" && platformOf "pmn/lib-test/pmn" == "host";
+        "user's integration test is the target's" = platformOf "user/test/under_runner" == "target";
+        "the test binaries" =
+          lib.mapAttrs (_: lib.attrNames) t.testRuns == {
+            pmd = [ "lib/pmd" ];
+            pmn = [ "lib/pmn" ];
+            user = [ "under_runner" ];
+          };
       };
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in
@@ -504,13 +516,30 @@ let
       {
         pmd = t.doctests.pmd;
         user = t.doctests.user;
+        pmdTest = t.testRuns.pmd."lib/pmd";
+        pmnTest = t.testRuns.pmn."lib/pmn";
+        userTest = t.testRuns.user.under_runner;
+        pmdApp = lib.getExe t.testApps.pmd."lib/pmd";
       }
       ''
-        grep -q 'pmd/src/lib.rs - (line 3) ... ok' $pmd/log
+        grep -q 'pmd/src/lib.rs - (line 4) ... ok' $pmd/log
         grep -q 'user/src/lib.rs - (line 4) ... ok' $user/log
+        grep -q 'test tests::runs_on_the_host ... ok' $pmdTest/log
+        grep -q 'PASS .* pmn tests::runs_on_the_host_under_nextest' $pmnTest/log
+        grep -q 'test seven_under_the_runner ... ok' $userTest/log
+        # The test app runs the host binary without the runner too.
+        if grep -q qemu "$pmdApp"; then
+          echo "pmd's test app runs under the target's runner" >&2
+          exit 1
+        fi
+        "$pmdApp" 2>&1 | tee app.log
+        grep -q 'test tests::runs_on_the_host ... ok' app.log
         mkdir -p $out
         cp $pmd/log $out/pmd.log
         cp $user/log $out/user.log
+        cp $pmdTest/log $out/pmd-test.log
+        cp $pmnTest/log $out/pmn-test.log
+        cp $userTest/log $out/user-test.log
       '';
 
   # --- msvc ---------------------------------------------------------------------

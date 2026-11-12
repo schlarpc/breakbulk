@@ -796,6 +796,7 @@ fn stub(inputs: &Inputs, prefix: &str, p: &PredictedRoot, variant: &str) -> Resu
         target: p.target.clone(),
         kind: p.kind,
         test: p.test,
+        platform: p.platform,
         what: RootWhat::Stub {
             reason,
             stub: Drv { attrs },
@@ -848,11 +849,16 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
             }
             _ => None,
         };
+        let unit = plan
+            .units
+            .get(&r.unit)
+            .ok_or_else(|| Error(format!("the root unit {} is not in the plan", r.unit)))?;
         Ok(RootOut {
             package: key.0.clone(),
             target: key.2.clone(),
             kind: key.1,
             test: key.3,
+            platform: platform(unit),
             what: RootWhat::Unit {
                 unit: r.unit.clone(),
                 output: root_output(plan, r, &inputs.toolchains.target_traits)?,
@@ -914,6 +920,15 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
             Some(r) => from_plan(key, r)?,
             None => stub(inputs, prefix, p, &predicted.variant)?,
         };
+        if root.platform != p.platform {
+            return err(format!(
+                "the root {} is planned for the {} platform, but was predicted for the {} \
+                 platform. This is a bug in breakbulk's target discovery.",
+                describe_key(key),
+                keys::platform(root.platform),
+                keys::platform(p.platform),
+            ));
+        }
         out.insert(describe_key(key), root);
     }
     Ok(out)

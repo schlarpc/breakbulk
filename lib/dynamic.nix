@@ -304,6 +304,9 @@ let
               target
               kind
               test
+              # The prediction's, which instantiation checks against the
+              # plan: test runs pick their system by it at evaluation time.
+              platform
               ;
             unit = "<dynamic>";
             reason = null;
@@ -429,6 +432,16 @@ let
         inherit runner;
       },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
+      # As testRuns.mkTestRuns's: the host triple's settings.
+      host ? testRuns.defaultHost {
+        inherit
+          pkgs
+          target
+          runner
+          testSystem
+          dylibPath
+          ;
+      },
       packages ? { },
       # As testRuns.mkTestRuns's: the package directories of "run" views.
       runDirs ? { },
@@ -440,10 +453,22 @@ let
     let
       useCa = stages.resolveCa ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
-      runnerList = if runner == null then [ ] else lib.toList runner;
-      sysroot = testRuns.testLibs pkgs (tools.rustc-sysroot or null) target;
-      extraLibs = lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib";
-      jq = "${testPkgs.jq}/bin/jq";
+      # The predicted platform picks the run's system, so it must be known
+      # at evaluation time; instantiation checks it against the plan.
+      platforms = testRuns.testPlatforms {
+        inherit pkgs tools host;
+        target = {
+          triple = target;
+          inherit
+            runner
+            testSystem
+            dylibPath
+            testPkgs
+            ;
+        };
+      };
+      platformOf = r: platforms.${r.breakbulkRoot.platform};
+      jqOf = p: "${p.testPkgs.jq}/bin/jq";
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
 
@@ -461,7 +486,7 @@ let
             src = "\"$wrapper\"/root/*";
             attrs = { inherit (r.breakbulkRoot) wrapper; };
             prelude = ''
-              if [ "$(${jq} -r '.reason // ""' "$wrapper/breakbulk-root.json")" ]; then
+              if [ "$(${pkgs.jq}/bin/jq -r '.reason // ""' "$wrapper/breakbulk-root.json")" ]; then
                 mkdir -p $out
                 exit 0
               fi
@@ -527,9 +552,9 @@ let
               jq '{reason}' "$info" > $out/breakbulk-root.json
               exit 0
             fi
-            ${lib.optionalString (dylibPath != null) ''
+            ${lib.optionalString ((platformOf r).dylibPath != null) ''
               mapfile -t __bb_flags < <(jq -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
-              ${testRuns.copyDylibsScript dylibPath.sep}
+              ${testRuns.copyDylibsScript (platformOf r).dylibPath.sep}
             ''}
             mapfile -t envFlags < <(jq -r '.testSpec.envFlags[] | . + "/directives.json"' "$info")
             if [ ''${#envFlags[@]} -gt 0 ]; then
@@ -553,9 +578,9 @@ let
 
       # What both runners share: the skip check, the environment, the test
       # configuration's env and PATH.
-      prelude = cfg: key: ''
+      prelude = p: cfg: key: ''
         info=${if useCa then "$spec" else "$wrapper"}/breakbulk-root.json
-        reason=$(${jq} -r '.reason // ""' "$info")
+        reason=$(${jqOf p} -r '.reason // ""' "$info")
         if [ -n "$reason" ]; then
           # As IFD mode's test stub: the reason, in a file.
           printf 'skipped: %s\n' "$reason"
@@ -564,8 +589,9 @@ let
         fi
         ${testRuns.homeScript}
         ${envFromInfo {
-          inherit jq dylibPath;
-          extra = extraLibs;
+          jq = jqOf p;
+          inherit (p) dylibPath;
+          extra = lib.optional (p.libDir != null) p.libDir;
           stable = useCa;
         }}
         ${testRuns.configScript cfg key}
@@ -575,30 +601,21 @@ let
       '';
 
       # As testRuns.mkTestRuns's nextestRun, with the metadata from the
-      # wrapper (TestSpec's `nextest`); `"@LIBDIR@"` becomes the sysroot's
-      # target library directory, as test-runs.nix's nextestSpec fills it in.
+      # wrapper (TestSpec's `nextest`); `"@LIBDIR@"` becomes the sysroot
+      # library directory of the binary's platform, as test-runs.nix's
+      # nextestSpec fills it in.
       nextestScript =
-        b: cfg: args: bin:
+        p: b: cfg: args: bin:
         let
-          nextest = if cfg.nextest.package != null then cfg.nextest.package else testPkgs.cargo-nextest;
-          runnerVar = util.cargoTargetEnvVar target "RUNNER";
-          libdir = toJSON (
-            if sysroot != null then
-              {
-                status = "available";
-                path = "${sysroot}/lib/rustlib/${target}/lib";
-              }
-            else
-              {
-                status = "unavailable";
-                reason = "breakbulk";
-              }
-          );
+          jq = jqOf p;
+          nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
+          runnerVar = util.cargoTargetEnvVar p.triple "RUNNER";
+          libdir = toJSON (testRuns.nextestLibdir p.libDir);
         in
         ''
           ${lib.optionalString (
-            runnerList != [ ]
-          ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
+            p.runner != [ ]
+          ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " p.runner)}"}
           ${testRuns.nextestThreadsScript}
           ws=$TMPDIR/nextest-ws
           mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
@@ -634,12 +651,12 @@ let
           }}
         '';
 
-      libtestScript = b: cfg: args: bin: ''
+      libtestScript = p: b: cfg: args: bin: ''
         mkdir -p /tmp/breakbulk-target-tmp $out
         files=(${bin})
         cd "$CARGO_MANIFEST_DIR"
         set +e
-        env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+        env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
         status=''${PIPESTATUS[0]}
         set -e
         if [ "$status" -ne 0 ]; then
@@ -656,6 +673,7 @@ let
         r:
         let
           b = r.breakbulkRoot;
+          p = platformOf r;
           key = testRuns.binaryKey b;
           n = storeName "${b.package}-${key}";
           cfg = testRuns.testConfig packages b.package;
@@ -676,7 +694,7 @@ let
             else
               { inherit (b) wrapper; };
         in
-        testPkgs.runCommand "${name}-${n}-run"
+        p.testPkgs.runCommand "${name}-${n}-run"
           (
             {
               passthru = {
@@ -692,13 +710,13 @@ let
             // caAttrs
           )
           (
-            prelude cfg key
+            prelude p cfg key
             + narrowScript b.package
             + (
               if cfg.runner == "nextest" then
-                nextestScript b cfg args binGlob
+                nextestScript p b cfg args binGlob
               else if cfg.runner == "libtest" then
-                libtestScript b cfg args binGlob
+                libtestScript p b cfg args binGlob
               else
                 throw "breakbulk: packages.${b.package}.test.runner must be \"libtest\" or \"nextest\", not ${toJSON cfg.runner}"
             )
@@ -734,8 +752,7 @@ let
       roots = lib.mapAttrs (
         _: rs: lib.listToAttrs (map (r: lib.nameValuePair (testRuns.binaryKey r.breakbulkRoot) r) rs)
       ) byPackage;
-      inherit extraLibs dylibPath;
-      runner = runnerList;
+      inherit platforms;
     };
 
   # Test apps over mkTestRuns's result, as testApps.mkTestApps in IFD mode,
@@ -760,6 +777,7 @@ let
         r:
         let
           b = r.breakbulkRoot;
+          p = t.platforms.${b.platform};
           n = storeName "${b.package}-${testRunsLib.binaryKey b}";
           cfg = testRunsLib.testConfig packages b.package;
           checkoutDir = lib.removeSuffix "/" (toString checkout);
@@ -773,8 +791,8 @@ let
             fi
             ${envFromInfo {
               inherit jq;
-              inherit (t) dylibPath;
-              extra = t.extraLibs;
+              inherit (p) dylibPath;
+              extra = lib.optional (p.libDir != null) p.libDir;
             }}
             ${
               if checkout == null then
@@ -795,7 +813,7 @@ let
             mkdir -p /tmp/breakbulk-target-tmp
             files=(${b.wrapper}/root/*)
             cd "$dir"
-            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
+            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" "$@"
           '';
         in
         script;

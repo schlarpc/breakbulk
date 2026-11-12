@@ -240,6 +240,15 @@ rec {
       doctest = t.doctest or defaults.doctest;
       harness = t.harness or true;
       requiredFeatures = get2 t "required-features" "required_features";
+      # Whether Cargo builds it for the build machine (`Target::for_host`,
+      # as `configure` sets it on every kind): `proc-macro`, else a
+      # `proc-macro` crate type.
+      forHost =
+        let
+          pm = get2 t "proc-macro" "proc_macro";
+          ct = get2 t "crate-type" "crate_type";
+        in
+        if pm != null then pm else ct != null && lib.elem "proc-macro" ct;
     };
 
   # normalize_build
@@ -373,6 +382,7 @@ rec {
         doctest = false;
         harness = true;
         requiredFeatures = null;
+        forHost = true;
       }) (buildScripts { inherit root pkgDir pkg; });
 
       targets = lib.optional hasLib libT ++ bins ++ examples ++ tests ++ benches ++ builds;
@@ -388,7 +398,13 @@ rec {
     targets:
     let
       root = mode: t: {
-        inherit (t) kind name crateTypes requiredFeatures;
+        inherit (t)
+          kind
+          name
+          crateTypes
+          requiredFeatures
+          forHost
+          ;
         inherit mode;
       };
       isLib = t: t.kind == "lib";

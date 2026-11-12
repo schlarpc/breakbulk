@@ -79,6 +79,7 @@ let
         target = "smokeapp";
         kind = "bin";
         test = false;
+        platform = "target";
         requiredFeatures = null;
       }
       {
@@ -86,6 +87,7 @@ let
         target = "admin-cli";
         kind = "bin";
         test = false;
+        platform = "target";
         requiredFeatures = [ "cli" ];
       }
       {
@@ -93,6 +95,7 @@ let
         target = "it";
         kind = "test";
         test = true;
+        platform = "target";
         requiredFeatures = null;
       }
     ];

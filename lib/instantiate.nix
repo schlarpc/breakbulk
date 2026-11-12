@@ -100,7 +100,7 @@ rec {
       # with package-wide and per-triple settings already merged per platform.
       overrides ? { },
       # { variant = "<name>"; roots = [ { package; target; kind; test;
-      # requiredFeatures; } ]; } (see predictedRoots), or null to take the
+      # platform; requiredFeatures; } ]; } (see predictedRoots), or null to take the
       # plan's roots as they are.
       roots ? null,
       # The `--remap-path-scope` of non-test target compile units, for targets
@@ -280,6 +280,10 @@ rec {
               target
               kind
               test
+              # "host" or "target": the root unit's (lib/test-runs.nix
+              # `testPlatforms` picks a test binary's runner, system and
+              # libraries by it).
+              platform
               ;
             unit = r.unit or null;
             reason = r.reason or null;
@@ -342,6 +346,9 @@ rec {
             target = r.name;
             requiredFeatures = r.requiredFeatures;
             test = r.mode != "build";
+            # Cargo builds a target for the build machine (a proc macro's
+            # unit tests) as a host unit (`CompileKind::for_target`).
+            platform = if r.forHost then "host" else "target";
           };
         in
         if r.kind == "lib" then

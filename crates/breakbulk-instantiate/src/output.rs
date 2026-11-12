@@ -30,7 +30,7 @@
 
 use std::collections::BTreeMap;
 
-use breakbulk_format::RootKind;
+use breakbulk_format::{Platform, RootKind};
 use serde::Serialize;
 
 /// The version of the `units.json` format.
@@ -105,6 +105,9 @@ pub struct RootOut {
     pub target: String,
     pub kind: RootKind,
     pub test: bool,
+    /// The platform of the root unit (a stub: the predicted one), which
+    /// picks a test binary's runner, system and libraries.
+    pub platform: Platform,
     #[serde(flatten)]
     pub what: RootWhat,
     /// For a test binary the plan has: what its test run and test app need
@@ -141,10 +144,10 @@ pub struct RootTestSpec {
 }
 
 /// [`crate::dynamic::Nextest`] with each document as compact JSON text.
-/// Placeholders left: `"@LIBDIR@"` (the whole JSON value of the target's
-/// sysroot library directory), which the Nix side fills in at evaluation
-/// time, and `@BINARY@`, `@TARGET@` and `@WS@`, which the test run fills in
-/// at build time.
+/// Placeholders left: `"@LIBDIR@"` (the whole JSON value of the sysroot
+/// library directory of the binary's platform), which the Nix side fills
+/// in at evaluation time, and `@BINARY@`, `@TARGET@` and `@WS@`, which the
+/// test run fills in at build time.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootNextest {

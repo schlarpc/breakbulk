@@ -161,6 +161,11 @@ pub struct PredictedRoot {
     pub target: String,
     pub kind: RootKind,
     pub test: bool,
+    /// The platform Cargo builds it for: `host` for a target built for the
+    /// build machine (a proc macro's unit tests), else `target`. Test runs
+    /// in dynamic-derivation mode choose their runner and system by it at
+    /// evaluation time, so a planned root of another platform is an error.
+    pub platform: Platform,
     /// The target's `required-features`, for the stub message.
     #[serde(default)]
     pub required_features: Option<Vec<String>>,

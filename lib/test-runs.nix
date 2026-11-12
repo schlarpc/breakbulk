@@ -16,6 +16,9 @@
 #                         # the variable the test process finds shared
 #                         # libraries through (`dylibPathOf`)
 #     testPkgs = <pkgs for testSystem>;
+#     host = <defaultHost>;  # the same settings for the build machine's
+#                         # triple, which a host unit's test (a proc macro's
+#                         # unit tests) runs with (`testPlatforms`)
 #     packages = { };     # packages.<name>.test, as in the module options
 #     ca = null;          # null: automatic (stages.caAuto); true; false
 #     coverage = false;   # coverage variants: each run keeps its profiles
@@ -31,6 +34,7 @@
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
 #                             every enabled run and doctest
 #   t.specs.<pkg>.<binary>    what a run needs (lib/test-apps.nix uses it)
+#   t.platforms               how each platform's tests run (`testPlatforms`)
 #
 # Binary names within a package: an integration test by its name (`it`);
 # the library's unit tests as `lib/<lib name>`; a bin's as `bin/<bin name>`;
@@ -42,8 +46,9 @@
 # `src/cargo/core/compiler/compilation.rs`):
 #
 #   - the binary (a content-addressed copy when `ca`, so that a
-#     byte-identical binary is not re-run) runs under the target's runner,
-#     in the package directory of its source view, with `test.args`,
+#     byte-identical binary is not re-run) runs under its platform's runner
+#     (`testPlatforms`: a host unit's is the build machine's, not the
+#     target's), in the package directory of its source view, with `test.args`,
 #     `test.binaries.<binary>.args` and `--include-ignored` when
 #     `test.includeIgnored`;
 #   - its environment: a fresh, empty `HOME` in `$TMPDIR` (`homeScript`),
@@ -57,7 +62,7 @@
 #     none of these set it. Cargo applies `[env]` last but never over a
 #     variable it set itself (`apply_env_config`), so `[env]` loses to all
 #     of Cargo's own;
-#   - the dynamic-library path (the target's variable, `dylibPathOf`:
+#   - the dynamic-library path (its platform's variable, `dylibPathOf`:
 #     LD_LIBRARY_PATH on Linux, WINEPATH under wine, none for wasm) holds,
 #     sorted as Cargo sorts paths, the
 #     search paths printed by the runs of the test's platform in its
@@ -67,7 +72,7 @@
 #     `DEP_*` metadata from (Cargo: inside the target's output directory;
 #     the same rule as for compiles, runs and doctests,
 #     `LibraryPath::for_dylib_path` in breakbulk-unit), then the sysroot's
-#     target library directory;
+#     library directory of its platform's triple;
 #   - `/tmp/breakbulk-target-tmp`, the planner's `CARGO_TARGET_TMPDIR`, is
 #     created first;
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
@@ -201,15 +206,14 @@ rec {
   # the root's test spec as breakbulk-instantiate computes it for both
   # delivery modes (`test_spec` in crates/breakbulk-instantiate/src/
   # dynamic.rs; dynamic mode reads the same from breakbulk-root.json), and
-  # what only this side knows: the sysroot and the target's dylib variable.
+  # what only this side knows: its platform's runner, sysroot library
+  # directory and dylib variable.
   runSpec =
     {
       units,
-      sysroot ? null,
-      target,
+      # The root's platform, as testPlatforms gives it.
+      platform,
       root,
-      # dylibPathOf's result for the target.
-      dylibPath,
     }:
     let
       t =
@@ -228,12 +232,13 @@ rec {
       sourceDir =
         t.env.CARGO_MANIFEST_DIR
           or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
+      inherit (platform) runner;
       dylib = {
         flags = t.dylibFlags;
-        extra = lib.optional (sysroot != null) "${sysroot}/lib/rustlib/${target}/lib";
+        extra = lib.optional (platform.libDir != null) platform.libDir;
       }
       # The variable and separator, when not LD_LIBRARY_PATH and `:`.
-      // lib.optionalAttrs (dylibPath != linuxDylib) { path = dylibPath; };
+      // lib.optionalAttrs (platform.dylibPath != linuxDylib) { path = platform.dylibPath; };
     };
 
   linuxDylib = {
@@ -472,33 +477,22 @@ rec {
   # What nextest's reuse-build mode reads for one test binary: the
   # metadata breakbulk-instantiate synthesizes (`nextest_for` in
   # crates/breakbulk-instantiate/src/dynamic.rs, which says why each field
-  # is what it is), with the target's sysroot library directory
-  # (`"@LIBDIR@"`) filled in here. With a "run" view (`spec` narrowed),
-  # the tested package's manifest is in the narrowed view, as in dynamic
-  # mode. `@BINARY@`, `@TARGET@` and `@WS@` are filled in by the test run.
+  # is what it is), with the sysroot library directory of the binary's
+  # platform (`"@LIBDIR@"`, `nextestLibdir`) filled in here. With a
+  # "run" view (`spec` narrowed), the tested package's manifest is in
+  # the narrowed view, as in dynamic mode. `@BINARY@`, `@TARGET@` and
+  # `@WS@` are filled in by the test run.
   nextestSpec =
     {
       root,
       spec,
-      target,
-      sysroot ? null,
+      # testPlatforms' `libDir` of the binary's platform.
+      libDir ? null,
     }:
     let
       n = root.testSpec.nextest;
       orig = root.testSpec.env.CARGO_MANIFEST_DIR;
-      # The sysroot's target library directory, which the run's
-      # dynamic-library path already ends with; without it nextest warns.
-      libdir =
-        if sysroot != null then
-          {
-            status = "available";
-            path = "${sysroot}/lib/rustlib/${target}/lib";
-          }
-        else
-          {
-            status = "unavailable";
-            reason = "breakbulk";
-          };
+      libdir = nextestLibdir libDir;
     in
     {
       inherit (n) binaryId;
@@ -510,6 +504,22 @@ rec {
             n.cargoMetadata;
       binaries = replaceStrings [ "\"@LIBDIR@\"" ] [ (toJSON libdir) ] n.binaries;
     };
+
+  # nextest's `libdir` entry for a sysroot library directory (or null),
+  # which the run's dynamic-library path already ends with; without it
+  # nextest warns.
+  nextestLibdir =
+    libDir:
+    if libDir != null then
+      {
+        status = "available";
+        path = libDir;
+      }
+    else
+      {
+        status = "unavailable";
+        reason = "breakbulk";
+      };
 
   binaryConfig =
     cfg: binary:
@@ -611,14 +621,93 @@ rec {
   nextestThreadsFlag = "--tool-config-file breakbulk:$TMPDIR/breakbulk-nextest.toml";
 
   # The runner of each platform's test processes, `{ host; target; }`
-  # (lists), from the target's runner (null or a list): Cargo picks it by
-  # the unit's compile kind (`Compilation::target_runner`). A host unit (a
-  # proc macro) is built for the build machine, so it runs there directly,
-  # never under the target's runner.
-  runnersByPlatform = runner: {
-    host = [ ];
-    target = if runner == null then [ ] else lib.toList runner;
-  };
+  # (lists), from the target's runner and the host's (`defaultHost`; null
+  # or a list): Cargo picks it by the unit's compile kind
+  # (`Compilation::target_runner`). A host unit (a proc macro) is built for
+  # the build machine, so it never runs under the target's runner.
+  runnersByPlatform =
+    {
+      runner ? null,
+      hostRunner ? null,
+    }:
+    let
+      toRunner = r: if r == null then [ ] else lib.toList r;
+    in
+    {
+      host = toRunner hostRunner;
+      target = toRunner runner;
+    };
+
+  # The test settings of the build machine's triple, `{ triple; runner;
+  # testSystem; dylibPath; }`, when the caller gives none: Cargo looks up a
+  # host unit's runner under the host triple (`target.<host>.runner`, with
+  # the default `target-applies-to-host`), so in a native plan they are the
+  # target's own; otherwise no runner, the build machine, and the variable
+  # of the host triple's traits. mkRepository passes the native target's.
+  defaultHost =
+    {
+      pkgs,
+      target,
+      runner ? null,
+      testSystem ? null,
+      dylibPath ? null,
+    }:
+    let
+      triple = targetTraits.nativeTriple pkgs;
+    in
+    if triple == target then
+      { inherit triple runner testSystem dylibPath; }
+    else
+      {
+        inherit triple;
+        runner = null;
+        testSystem = null;
+        dylibPath = dylibPathOf { traits = targetTraits.resolve { inherit triple; }; };
+      };
+
+  # How the test processes of each platform run, `{ host; target; }`, from
+  # each platform's settings (`{ triple; runner; testSystem; dylibPath; }`,
+  # `testPkgs` optional). Cargo runs a test unit with its compile kind's
+  # runner (`target_runner(unit.kind)`), library directories and sysroot
+  # library directory (`fill_env`, `sysroot_target_libdir[&kind]`); a host
+  # unit (a proc macro's unit tests) is built for the build machine, so it
+  # gets the host's, never `testSystem` or the target's runner. Each entry:
+  #
+  #   triple
+  #   runner      a list (runnersByPlatform)
+  #   testPkgs    the package set its runs build with (runners.testPkgsFor)
+  #   dylibPath   { var; sep; } or null (dylibPathOf)
+  #   libDir      the sysroot's library directory for the triple, in a
+  #               copy holding its shared libraries only (testLibs), or null
+  testPlatforms =
+    {
+      pkgs,
+      tools,
+      target,
+      host,
+    }:
+    let
+      runnerLists = runnersByPlatform {
+        inherit (target) runner;
+        hostRunner = host.runner;
+      };
+      sysroot = tools.rustc-sysroot or null;
+      one =
+        name: s:
+        let
+          libs = testLibs pkgs sysroot s.triple;
+        in
+        {
+          inherit (s) triple dylibPath;
+          runner = runnerLists.${name};
+          testPkgs = s.testPkgs or (runners.testPkgsFor { inherit pkgs; inherit (s) testSystem; });
+          libDir = if libs == null then null else "${libs}/lib/rustlib/${s.triple}/lib";
+        };
+    in
+    {
+      host = one "host" host;
+      target = one "target" target;
+    };
 
   # The attributes a package's doctest derivation gets from its test
   # configuration: the runners (`runnersByPlatform`), `test.args` and
@@ -632,6 +721,7 @@ rec {
       pkgs,
       packages,
       runner ? null,
+      hostRunner ? null,
     }:
     pkg:
     let
@@ -652,7 +742,7 @@ rec {
             + "export PATH=${lib.makeBinPath pkgs.stdenv.initialPath}\${PATH:+:$PATH}\n"
             + lib.concatStringsSep "\n" snippets
           )}";
-      BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform runner);
+      BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform { inherit runner hostRunner; });
       BREAKBULK_TEST_ARGS = toJSON (
         cfg.args ++ cfg.doctest.args ++ lib.optional cfg.includeIgnored "--include-ignored"
       );
@@ -683,6 +773,15 @@ rec {
       traits ? targetTraits.resolve { triple = target; },
       dylibPath ? dylibPathOf { inherit traits runner; },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
+      host ? defaultHost {
+        inherit
+          pkgs
+          target
+          runner
+          testSystem
+          dylibPath
+          ;
+      },
       packages ? { },
       # runDirs.<package> = the package directory of its "run" view, or
       # null for the test binary's own view (lib/workspace.nix).
@@ -695,10 +794,19 @@ rec {
       inherit (inst) units;
       useCa = stages.resolveCa ca;
       caAttrs = lib.optionalAttrs useCa stages.caAttrs;
-      runnerList = if runner == null then [ ] else lib.toList runner;
-      # The sysroot's target libraries only (`testLibs`), laid out as a
-      # sysroot.
-      sysroot = testLibs pkgs (tools.rustc-sysroot or null) target;
+      platforms = testPlatforms {
+        inherit pkgs tools host;
+        target = {
+          triple = target;
+          inherit
+            runner
+            testSystem
+            dylibPath
+            testPkgs
+            ;
+        };
+      };
+      platformOf = r: platforms.${r.breakbulkRoot.platform};
 
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
@@ -706,12 +814,8 @@ rec {
       spec =
         r:
         runSpec {
-          inherit
-            units
-            sysroot
-            target
-            dylibPath
-            ;
+          inherit units;
+          platform = platformOf r;
           root = r.breakbulkRoot;
         };
 
@@ -737,15 +841,17 @@ rec {
       nextestRun =
         r: s: cfg: args: bin:
         let
+          p = platformOf r;
           nx = nextestSpec {
-            inherit sysroot target;
+            inherit (p) libDir;
             spec = s;
             root = r.breakbulkRoot;
           };
-          nextest = if cfg.nextest.package != null then cfg.nextest.package else testPkgs.cargo-nextest;
-          runnerVar = util.cargoTargetEnvVar target "RUNNER";
+          nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
+          # nextest picks a binary's runner by its build platform's triple.
+          runnerVar = util.cargoTargetEnvVar p.triple "RUNNER";
         in
-        testPkgs.runCommand "${name}-${s.name}-run"
+        p.testPkgs.runCommand "${name}-${s.name}-run"
           (
             {
               passthru = {
@@ -768,14 +874,14 @@ rec {
             ${homeScript}
             ${envScript {
               spec = s;
-              jq = "${testPkgs.jq}/bin/jq";
+              jq = "${p.testPkgs.jq}/bin/jq";
             }}
             ${configScript cfg s.binary}
             ${threadsScript}
             ${nextestThreadsScript}
             ${lib.optionalString (
-              runnerList != [ ]
-            ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " runnerList)}"}
+              s.runner != [ ]
+            ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " s.runner)}"}
             ${coverageEnvScript coverage}
             ws=$TMPDIR/nextest-ws
             log=${logFile}
@@ -825,6 +931,7 @@ rec {
               narrowed;
           args = testArgs cfg s.binary;
           bin = binaryOf s cfg;
+          inherit (platformOf r) testPkgs;
         in
         if cfg.runner == "nextest" then
           nextestRun r s cfg args bin
@@ -857,7 +964,7 @@ rec {
               files=(${bin}/*)
               cd ${lib.escapeShellArg s.sourceDir}
               set +e
-              env "''${__bb_env[@]}" ${lib.escapeShellArgs runnerList} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+              env "''${__bb_env[@]}" ${lib.escapeShellArgs s.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
               status=''${PIPESTATUS[0]}
               set -e
               if [ "$status" -ne 0 ]; then
@@ -889,7 +996,14 @@ rec {
       ) byPackage;
 
       doctests = lib.mapAttrs (
-        pkg: attrs: derivation (attrs // doctestConfig { inherit pkgs packages runner; } pkg)
+        pkg: attrs:
+        derivation (
+          attrs
+          // doctestConfig {
+            inherit pkgs packages runner;
+            hostRunner = host.runner;
+          } pkg
+        )
       ) (inst.doctestAttrs or { });
 
       checks =
@@ -910,7 +1024,7 @@ rec {
         checks
         specs
         testPkgs
+        platforms
         ;
-      runner = runnerList;
     };
 }

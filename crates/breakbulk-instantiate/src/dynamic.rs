@@ -201,8 +201,8 @@ pub struct TestSpec {
 /// binary. Placeholders the test run replaces: `@BINARY@`
 /// (the binary), `@TARGET@` (a scratch target directory), `@WS@` (a
 /// scratch workspace root), and the string `"@LIBDIR@"` (the whole JSON
-/// value of the target's sysroot library directory, which only the Nix
-/// side knows).
+/// value of the sysroot library directory of the binary's platform, which
+/// only the Nix side knows).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Nextest {
@@ -533,8 +533,14 @@ pub fn nextest_for(
         _ => format!("{pkg_name}::{kind}/{root_target}"),
     };
     let platform = |triple: &str| json!({ "triple": triple, "target-features": "unknown" });
+    // The Nix side knows the sysroot library directory of the binary's
+    // own platform only.
+    let own = match unit.platform {
+        Platform::Host => &plan.host,
+        Platform::Target => &plan.target,
+    };
     let libdir = |triple: &str| {
-        if triple == plan.target {
+        if triple == own {
             J::String("@LIBDIR@".into())
         } else {
             json!({ "status": "unavailable", "reason": "breakbulk" })

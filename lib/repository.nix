@@ -970,6 +970,17 @@ let
       clippyOption = "workspaces.${wsName}.toolchain.clippy";
       bench = v.benches;
       inherit (s) runner testSystem testDylibPath;
+      # Host units' tests run with the native target's settings, as Cargo
+      # gives them `target.<host>.runner`.
+      hostTest =
+        let
+          h = specFor wsName nativeTriple;
+        in
+        {
+          triple = nativeTriple;
+          inherit (h) runner testSystem;
+          dylibPath = h.testDylibPath;
+        };
     }
     // s.mkWorkspace
     // {

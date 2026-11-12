@@ -919,6 +919,7 @@ fn proot(target: &str, kind: RootKind, test: bool, rf: Option<&[&str]>) -> Predi
         target: target.into(),
         kind,
         test,
+        platform: Platform::Target,
         required_features: rf.map(|f| f.iter().map(|s| s.to_string()).collect()),
     }
 }
@@ -996,6 +997,22 @@ fn unpredicted_root_is_an_error() {
     let e = instantiate(&inputs).unwrap_err().0;
     assert!(
         e.contains("predicted roots: smokeapp/bin-test/smokeapp"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_root_predicted_for_another_platform_is_an_error() {
+    let mut inputs = smoke_inputs();
+    let mut r = proot("smokeapp", RootKind::Bin, false, None);
+    r.platform = Platform::Host;
+    inputs.roots = predicted(vec![r]);
+    let e = instantiate(&inputs).unwrap_err().0;
+    assert!(
+        e.contains(
+            "the root smokeapp/bin/smokeapp is planned for the target platform, \
+             but was predicted for the host platform"
+        ),
         "{e}"
     );
 }

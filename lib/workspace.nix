@@ -131,6 +131,19 @@ pkgs:
   # How test processes find shared libraries ({ var; sep; } or null;
   # lib/test-runs.nix dylibPathOf): mkRepository passes the runner's.
   testDylibPath ? testRuns.dylibPathOf { inherit traits runner; },
+  # The test settings of the build machine's triple, { triple; runner;
+  # testSystem; dylibPath; }, which host units' tests (a proc macro's) run
+  # with (lib/test-runs.nix testPlatforms): mkRepository passes the native
+  # target's.
+  hostTest ? testRuns.defaultHost {
+    inherit
+      pkgs
+      target
+      runner
+      testSystem
+      ;
+    dylibPath = testDylibPath;
+  },
   # Variants (lib/variants.nix): `mode` is build, check, clippy or
   # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
   # matching rustc; `clippyOption`, the option that set it, is named when
@@ -425,7 +438,11 @@ let
           outerName = if kind == "build" then name else "${name}-${kind}";
           doctests = lib.optionalAttrs (kind == "test" && !checking) (
             lib.mapAttrs (
-              pkg: _: testRuns.doctestConfig { inherit pkgs packages runner; } pkg
+              pkg: _:
+              testRuns.doctestConfig {
+                inherit pkgs packages runner;
+                hostRunner = hostTest.runner;
+              } pkg
             ) predictedDoctests
           );
         }
@@ -521,6 +538,7 @@ let
       traits
       ;
     dylibPath = testDylibPath;
+    host = hostTest;
     inst = tested;
     coverage = mode == "coverage";
     tools = unitTools;
@@ -614,6 +632,7 @@ in
           traits
           ;
         dylibPath = testDylibPath;
+        host = hostTest;
         name = "${name}-bench";
         packages = lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots))) (
           pkg: {

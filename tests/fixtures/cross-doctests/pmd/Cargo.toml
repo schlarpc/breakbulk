@@ -5,4 +5,3 @@ edition.workspace = true
 
 [lib]
 proc-macro = true
-test = false

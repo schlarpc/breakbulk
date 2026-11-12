@@ -7,6 +7,10 @@ name = "pmd"
 version = "0.1.0"
 
 [[package]]
+name = "pmn"
+version = "0.1.0"
+
+[[package]]
 name = "user"
 version = "0.1.0"
 dependencies = [

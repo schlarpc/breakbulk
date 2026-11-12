@@ -1,10 +1,11 @@
-# Doctests of a cross test plan with a runner: `pmd`, a proc macro with no
-# unit tests, has a doctest that Cargo builds and runs for the host, so
-# not under the target's runner; `user`'s doctest uses it and runs for the
-# target, under the runner.
+# Tests of a cross test plan with a runner. `pmd` and `pmn` are proc
+# macros: Cargo builds their unit tests and `pmd`'s doctest for the host
+# and runs them there, not under the target's runner (`pmn`'s through
+# nextest). `user`'s doctest and integration test use `pmd` and run for
+# the target, under the runner.
 [workspace]
 resolver = "2"
-members = ["pmd", "user"]
+members = ["pmd", "pmn", "user"]
 
 [workspace.package]
 version = "0.1.0"
