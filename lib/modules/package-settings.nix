@@ -61,7 +61,8 @@ let
     };
   };
 
-  # Every setting but the per-triple layer, which has these same options.
+  # Every setting but the per-triple and per-variant layers, which have
+  # these same options.
   common = {
     key = "breakbulk/modules/package-settings.nix#common";
     _file = ./package-settings.nix;
@@ -355,6 +356,34 @@ let
       };
     };
   };
+  target = mkOption {
+    type = types.attrsOf (types.submodule common);
+    default = { };
+    # The same options as the package level, documented there.
+    visible = "shallow";
+    example = lib.literalExpression ''
+      {
+        x86_64-pc-windows-msvc.forTarget.env.FFMPEG_DIR = ffmpegWin;
+        x86_64-pc-windows-msvc.stages.sign = { after = "install"; run = sign; };
+      }
+    '';
+    description = ''
+      Settings for this package on one target triple, with every option
+      of the package level (`env`, `forHost`, `forTarget`, `stages`,
+      `test`, …). They apply to the plans for that triple, on top of the
+      package-level settings of the same definition: `env` still means
+      both ${sides} (the build-script compile of a plan for this triple
+      included), `forTarget.env` the target side only.
+    '';
+  };
+
+  # A variant's layer: every setting, and its own per-triple layer.
+  variantLayer = {
+    key = "breakbulk/modules/package-settings.nix#variant";
+    _file = ./package-settings.nix;
+    imports = [ common ];
+    options = { inherit target; };
+  };
 in
 {
   inherit common;
@@ -364,25 +393,33 @@ in
     key = "breakbulk/modules/package-settings.nix#settings";
     _file = ./package-settings.nix;
     imports = [ common ];
-    options.target = mkOption {
-      type = types.attrsOf (types.submodule common);
-      default = { };
-      # The same options as the package level, documented there.
-      visible = "shallow";
-      example = lib.literalExpression ''
-        {
-          x86_64-pc-windows-msvc.forTarget.env.FFMPEG_DIR = ffmpegWin;
-          x86_64-pc-windows-msvc.stages.sign = { after = "install"; run = sign; };
-        }
-      '';
-      description = ''
-        Settings for this package on one target triple, with every option
-        of the package level (`env`, `forHost`, `forTarget`, `stages`,
-        `test`, …). They apply to the plans for that triple, on top of the
-        package-level settings of the same definition: `env` still means
-        both ${sides} (the build-script compile of a plan for this triple
-        included), `forTarget.env` the target side only.
-      '';
+    options = {
+      inherit target;
+      variant = mkOption {
+        type = types.attrsOf (types.submodule variantLayer);
+        default = { };
+        # The same options as the package level, documented there.
+        visible = "shallow";
+        example = lib.literalExpression ''
+          {
+            coverage.test.env.RUST_LOG = "debug";
+            full.inputs = p: [ p.openssl ];
+            full.target.x86_64-pc-windows-msvc.forTarget.env.OPENSSL_DIR = opensslWin;
+          }
+        '';
+        description = ''
+          Settings for this package in the plans of one variant
+          (`workspaces.<ws>.variants.<v>`), with every option of the
+          package level, `target.<triple>` included. They apply on top of
+          the package-level settings and their `target.<triple>` layer of
+          the same definition, and leave the units of other variants
+          unchanged: a lint setting for a `clippy` variant does not
+          rebuild the release variant. A variant layer's
+          `target.<triple>` applies to that variant on that triple only.
+          The layer applies in every workspace that has a variant of that
+          name; a name that no workspace has is an evaluation warning.
+        '';
+      };
     };
   };
 }

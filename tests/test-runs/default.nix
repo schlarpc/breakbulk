@@ -88,8 +88,9 @@
 #                           XDG_CACHE_HOME unset; with `test.env.HOME =
 #                           "/homeless-shelter"` both fail
 #   test-binary-keys        `test.binaries` keys: unknown ones (in
-#                           `packages.<name>`, its `target.<triple>` layer
-#                           and `memberDefaults`) fail evaluation with a
+#                           `packages.<name>`, its `target.<triple>` and
+#                           `variant.<v>` layers and `memberDefaults`)
+#                           fail evaluation with a
 #                           message naming the valid keys; a key for the
 #                           required-features test, which only one variant
 #                           builds, is accepted and reaches that run
@@ -1131,12 +1132,14 @@ let
             net.enable = false;
           };
           packages.ctl.target.${native}.test.binaries.needs-feat.enable = false;
+          packages.ctl.variant.extra.target.${native}.test.binaries.net-x.enable = false;
           workspaces.main.memberDefaults.test.binaries.bin.enable = false;
         }
       ];
       want = [
         "breakbulk: packages.ctl.test.binaries (set in `/checks/keys.nix'): `ctl`, `lib` name no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
         "breakbulk: packages.ctl.target.${native}.test.binaries (set in `/checks/keys.nix'): `needs-feat` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
+        "breakbulk: packages.ctl.variant.extra.target.${native}.test.binaries (set in `/checks/keys.nix'): `net-x` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
         "breakbulk: workspaces.main.memberDefaults.test.binaries (set in `/checks/keys.nix'): `bin` names no test binary of any member of workspaces.main; the test binaries are ${ctlKeys}"
       ];
     in

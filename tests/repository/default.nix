@@ -316,6 +316,7 @@ let
       workspaces.b = {
         path = "b";
         variants.default.profile = "dev";
+        memberDefaults.variant.not-a-variant-of-b.env.X = "1";
       };
       packages = {
         "itoa@^1".env.ITOA_CARET = "1";
@@ -323,7 +324,17 @@ let
           version = ">=2";
           env.ITOA_TWO = "1";
         };
-        libc.env.LIBC = "plain";
+        libc = {
+          env.LIBC = "plain";
+          # The variant layer, and its own target layer.
+          variant.default = {
+            forTarget.env.LIBC_VARIANT = "1";
+            target.${native}.forHost.env.LIBC_VARIANT_HOST = "1";
+          };
+          variant.not-a-variant.env.X = "1";
+        };
+        # A variant layer's sources reach the package's source view.
+        app-b.variant.default.extraSources = [ "c" ];
         "libc@=0.2.191".env.LIBC = "exact";
         not-in-any-lockfile.env.X = "1";
         shared.nativeInputs = p: [ p.pkg-config ];
@@ -898,6 +909,18 @@ in
       && !(lib.hasInfix "bb_target_mark" units."libc-0.2.191-build-script".drvAttrs.BREAKBULK_UNIT)
     ) "overrides: target rustflags placement";
     assert lib.assertMsg (!(has "openssl-sys")) "overrides: a curated default warned";
+    assert lib.assertMsg (
+      libc.LIBC_VARIANT or null == "1"
+      && !((envOf "libc-0.2.191-build-script") ? LIBC_VARIANT)
+      && (envOf "libc-0.2.191-build-script").LIBC_VARIANT_HOST or null == "1"
+      && !(libc ? LIBC_VARIANT_HOST)
+    ) "overrides: variant layer env placement";
+    assert lib.assertMsg ((builtins.readDir (inst' overrideRepo "b").sources.workspace.b) ? c)
+      "overrides: the variant layer's extraSources are not in b's view";
+    assert lib.assertMsg (
+      has "`packages.libc.variant.not-a-variant` names no variant of any workspace"
+      && has "`workspaces.b.memberDefaults.variant.not-a-variant-of-b` names no variant of workspaces.b (default)"
+    ) "overrides: no warning for a variant layer that names no variant: ${builtins.toJSON ws}";
     evalCheck "overrides" (builtins.toJSON ws);
 
   # Version requirements, against the semver crate's rules.

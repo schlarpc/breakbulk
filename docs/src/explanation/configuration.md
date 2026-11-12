@@ -141,16 +141,23 @@ A setting can be narrowed to some versions of the package
 ([`version`](../reference/options/packages.md#packagesnameversion)), to
 one side ([`forHost`](../reference/options/packages.md#packagesnameforhostenv)
 or [`forTarget`](../reference/options/packages.md#packagesnamefortargetenv),
-below), or to one target triple
-([`target.<triple>`](../reference/options/packages.md#packagesnametarget),
-which takes every package option, `forHost` and `forTarget` included):
+below), to one target triple
+([`target.<triple>`](../reference/options/packages.md#packagesnametarget)),
+or to the plans of one variant
+([`variant.<v>`](../reference/options/packages.md#packagesnamevariant)).
+`target.<triple>` and `variant.<v>` take every package option, `forHost`
+and `forTarget` included, and `variant.<v>` also takes `target.<triple>`:
 
 ```nix
 packages.castaway.forTarget.env.CASTAWAY_GIT_REV = rev;  # every triple, target side
 packages.ffmpeg-sys-next.target.x86_64-pc-windows-msvc.forTarget.env.FFMPEG_DIR = ffmpeg;
 packages.foo.target.x86_64-pc-windows-msvc.forHost.env.X = "1";  # one triple, host side
 packages.bar.target.x86_64-pc-windows-msvc.env.Y = "1";  # one triple, both sides
+packages.baz.variant.coverage.test.env.RUST_LOG = "debug";  # one variant
 ```
+
+A setting for one variant changes only that variant's units. The other
+variants' units stay the same, so they are not rebuilt.
 
 ### Host and target sides
 
@@ -188,7 +195,9 @@ packages.legacy.test.runner = "libtest";  # the package's own value wins
 ```
 
 Members are the workspace's path packages. A unit's package settings are
-these layers, lowest first, each followed by its own `target.<triple>`:
+these layers, lowest first. Each is followed by its own
+`target.<triple>`, `variant.<v>` and `variant.<v>.target.<triple>`, for
+the unit's triple and variant:
 
 | Layer | Applies to |
 | --- | --- |

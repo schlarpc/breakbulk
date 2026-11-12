@@ -834,15 +834,20 @@ let
       # merge with it instead of replacing it.
       config.variants = lib.mkIf (config.defaultVariant == "default") { default = { }; };
 
-      config.warnings = bt.unimplementedWarnings "workspaces.${name}" options {
-        "46" = [ [ "roots" ] ];
-        "6" = [
-          [
-            "docs"
-            "noDeps"
-          ]
-        ];
-      };
+      config.warnings =
+        bt.unimplementedWarnings "workspaces.${name}" options {
+          "46" = [ [ "roots" ] ];
+          "6" = [
+            [
+              "docs"
+              "noDeps"
+            ]
+          ];
+        }
+        ++ map (
+          v:
+          "breakbulk: `workspaces.${name}.memberDefaults.variant.${lib.strings.escapeNixIdentifier v}` names no variant of workspaces.${name} (${lib.concatStringsSep ", " (lib.attrNames config.variants)}); it has no effect."
+        ) (lib.filter (v: !(config.variants ? ${v})) (lib.attrNames config.memberDefaults.variant));
     };
 in
 {

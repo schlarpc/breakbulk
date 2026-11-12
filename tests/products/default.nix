@@ -63,7 +63,9 @@
 #                    the powerset's products have their features, and its
 #                    variants' test runs are not in repo.checks (the
 #                    coverage variant's are); the check
-#                    and clippy variants' unit checks build
+#                    and clippy variants' unit checks build;
+#                    `packages.lib-a.variant.clippy` reaches the clippy
+#                    variant's lib-a units and no other variant's units
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
 #                    and `targets.<t>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
@@ -582,7 +584,11 @@ let
 
   # --- variants ------------------------------------------------------------------
 
-  variantsModules = [
+  variantsModules = variantsBase ++ [
+    # One member's units in one variant's plans only.
+    { packages.lib-a.variant.clippy.env.LINT_ONLY = "1"; }
+  ];
+  variantsBase = [
     {
       workspaces.main = {
         path = "ws";
@@ -628,6 +634,7 @@ let
     }
   ];
   variantsRepo = mkRepo (fixtures + "/variants") variantsModules;
+  variantsBaseRepo = mkRepo (fixtures + "/variants") variantsBase;
   vt = variantsRepo.workspaces.main.target.${native};
 
   # Coverage with an upstream toolchain (see variants-coverage).
@@ -986,6 +993,27 @@ in
       # differs from the build variant's (sanity check for the comparison).
       libDiffers = (d "default" "build")."hostdep-0.1.0-lib" != (d "check" "build")."hostdep-0.1.0-lib";
       fpNames = lib.attrNames (lib.filterAttrs (n: _: lib.hasPrefix "fp-" n) vt.variants);
+      # `packages.lib-a.variant.clippy`: the clippy variant's units of
+      # lib-a have it, no other variant's units change.
+      envOf =
+        vName: k: n:
+        (builtins.fromJSON (
+          builtins.unsafeDiscardStringContext (unitsOf variantsRepo vName k).${n}.drvAttrs.BREAKBULK_UNIT
+        )).env;
+      namesWith = prefix: lib.filter (lib.hasPrefix prefix) (lib.attrNames (d "clippy" "build"));
+      variantLayer = {
+        clippyHasIt =
+          namesWith "lib-a-" != [ ] && lib.all (n: (envOf "clippy" "build" n) ? LINT_ONLY) (namesWith "lib-a-");
+        appLacksIt = lib.all (n: !((envOf "clippy" "build" n) ? LINT_ONLY)) (namesWith "app-");
+        othersUnchanged = lib.all (
+          vName:
+          lib.all (k: drvsOf variantsRepo vName k == drvsOf variantsBaseRepo vName k) [
+            "build"
+            "test"
+          ]
+        ) (lib.filter (v: v != "clippy") (lib.attrNames vt.variants));
+        clippyChanged = drvsOf variantsRepo "clippy" "build" != drvsOf variantsBaseRepo "clippy" "build";
+      };
       # Build vs coverage, both plans: units by platform, compared by
       # derivation path.
       platformOf =
@@ -1007,6 +1035,8 @@ in
         unitsBy "default" "host"
       );
     in
+    assert lib.assertMsg (lib.all lib.id (lib.attrValues variantLayer))
+      "variants: packages.lib-a.variant.clippy: ${builtins.toJSON variantLayer}";
     assert lib.assertMsg (sharedTarget == [ ])
       "variants: target units shared between build and coverage: ${
         builtins.toJSON (map (u: u.name) sharedTarget)

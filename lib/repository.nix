@@ -245,16 +245,18 @@ let
       strictSources = if b.strictSources != null then b.strictSources else a.strictSources;
     };
 
-  # The package settings of one lockfile entry of workspace `wsName` on
-  # `triple`, as a list of `packages.<name>`-shaped layers, lowest first:
-  # the curated defaults (`sysDefaults.packages`), the workspace's
-  # `memberDefaults` for its path packages, then each matching `packages`
-  # key; each followed by its own `target.<triple>`.
+  # The package settings of one lockfile entry of workspace `wsName` in
+  # the plans of variant `vName` on `triple`, as a list of
+  # `packages.<name>`-shaped layers, lowest first: the curated defaults
+  # (`sysDefaults.packages`), the workspace's `memberDefaults` for its path
+  # packages, then each matching `packages` key; each followed by its own
+  # `target.<triple>`, `variant.<v>` and `variant.<v>.target.<triple>`.
   layersFor =
-    wsName: triple: e:
+    wsName: triple: vName: e:
     let
       sys = cfg.sysDefaults.packages.${e.name} or null;
-      withTriple = l: [ l ] ++ lib.optional (l.target ? ${triple}) l.target.${triple};
+      onTriple = l: [ l ] ++ lib.optional (l.target ? ${triple}) l.target.${triple};
+      withTriple = l: onTriple l ++ lib.optionals (l.variant ? ${vName}) (onTriple l.variant.${vName});
       # The curated defaults name nixpkgs libraries: on a target without
       # a package set, only its host units (the build machine's set) get
       # them.
@@ -278,9 +280,9 @@ let
 
   # The merged override for one lockfile entry, or null.
   overrideFor =
-    wsName: triple: e:
+    wsName: triple: vName: e:
     let
-      ls = layersFor wsName triple e;
+      ls = layersFor wsName triple vName e;
     in
     if ls == [ ] then null else lib.foldl' mergeOverride emptyOverride ls;
 
@@ -288,21 +290,21 @@ let
 
   # The layers of a workspace's path package `pkg`.
   memberLayers =
-    wsName: triple: pkg:
+    wsName: triple: vName: pkg:
     let
       e = lib.findFirst (e: e.name == pkg && e.source or null == null) null locks.${wsName};
     in
-    if e == null then [ ] else layersFor wsName triple e;
+    if e == null then [ ] else layersFor wsName triple vName e;
 
   # Product settings for mkProducts: each layer's stages and checks.
   productConfig =
-    wsName: triple: pkg:
-    map (o: { inherit (o) stages checks; }) (memberLayers wsName triple pkg);
+    wsName: triple: vName: pkg:
+    map (o: { inherit (o) stages checks; }) (memberLayers wsName triple vName pkg);
 
   # The layers' `test` settings merged, for mkTestRuns:
   # `{ <pkg> = { test = …; }; }` for the workspace's path packages.
   testConfigs =
-    wsName: triple:
+    wsName: triple: vName:
     let
       members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
       joinLines = a: b: if a == "" then b else if b == "" then a else a + "\n" + b;
@@ -393,7 +395,7 @@ let
         };
     in
     lib.genAttrs members (pkg: {
-      test = withDefaults (lib.foldl' (acc: l: mergeTest acc l.test) empty (memberLayers wsName triple pkg));
+      test = withDefaults (lib.foldl' (acc: l: mergeTest acc l.test) empty (memberLayers wsName triple vName pkg));
     });
 
   # --- test binary keys --------------------------------------------------------
@@ -460,17 +462,23 @@ let
       }";
     };
 
-  # A setting and its `target.<triple>` layers, each with its path.
-  withTargetLayers =
+  # A setting and its `target.<triple>`, `variant.<v>` and
+  # `variant.<v>.target.<triple>` layers, each with its path.
+  withLayers =
     path: v:
-    [ { inherit path v; } ]
-    ++ lib.mapAttrsToList (t: tv: {
-      path = path ++ [
-        "target"
-        t
-      ];
-      v = tv;
-    }) v.target;
+    let
+      sub =
+        name: l:
+        lib.mapAttrsToList (n: v: {
+          path = l.path ++ [
+            name
+            n
+          ];
+          inherit v;
+        }) l.v.${name};
+      withTriples = l: [ l ] ++ sub "target" l;
+    in
+    withTriples { inherit path v; } ++ lib.concatMap withTriples (sub "variant" { inherit path v; });
   layerName = lib.concatMapStringsSep "." lib.strings.escapeNixIdentifier;
 
   binaryKeyAssertions = lib.concatLists (
@@ -501,7 +509,7 @@ let
               }
             ) (lib.filter (overrideMatches k) pathPackages)
           )
-        ) (withTargetLayers [ k ] cfg.packages.${k})
+        ) (withLayers [ k ] cfg.packages.${k})
       ) (lib.attrNames cfg.packages)
       # `memberDefaults`: the keys of any of the path packages.
       ++ lib.concatMap (
@@ -519,7 +527,7 @@ let
           );
           owner = "any member of workspaces.${wsName}";
         })
-      ) (withTargetLayers [ wsName "memberDefaults" ] ws.memberDefaults)
+      ) (withLayers [ wsName "memberDefaults" ] ws.memberDefaults)
     ) cfg.workspaces
   );
   # --- target specs, per workspace -------------------------------------------
@@ -723,12 +731,12 @@ let
   # instantiate's overrides for one workspace on one target, keyed
   # "<name>@<version>".
   instOverrides =
-    wsName: entries: triple:
+    wsName: entries: triple: vName:
     lib.listToAttrs (
       lib.concatMap (
         e:
         let
-          o = overrideFor wsName triple e;
+          o = overrideFor wsName triple vName e;
           capture =
             platform: nativeInputs: inputs:
             let
@@ -794,11 +802,11 @@ let
 
   # extraSources by package name, from every matching override.
   extraSourcesOf =
-    wsName: triple: entries:
+    wsName: triple: vName: entries:
     lib.foldl' (
       acc: e:
       let
-        o = overrideFor wsName triple e;
+        o = overrideFor wsName triple vName e;
       in
       if o == null || o.extraSources == [ ] then
         acc
@@ -895,15 +903,15 @@ let
       variant = vName;
       select = if sel == null then [ ] else sel;
       testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
-      extraSources = extraSourcesOf wsName triple entries;
-      packageOverrides = instOverrides wsName entries triple;
+      extraSources = extraSourcesOf wsName triple vName entries;
+      packageOverrides = instOverrides wsName entries triple vName;
       inherit (cfg) strictSources;
       name = "${wsName}-${triple}-${vName}";
       inherit delivery;
       shippedRemapScope = shippedRemapScopeOf wsName triple v;
       inherit (v) cargoTrimPaths sourcePaths;
       traits = traitsOf wsName triple;
-      packages = testConfigs wsName triple;
+      packages = testConfigs wsName triple vName;
       inherit (cfg) ca;
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
@@ -945,7 +953,7 @@ let
   # One product per package: its build-plan roots through the target's
   # stages (lib/products.nix).
   productsOf =
-    wsName: ws: triple: v: inst: sel:
+    wsName: ws: triple: vName: v: inst: sel:
     products.mkProducts (
       stageSetArgs wsName triple
       // {
@@ -954,7 +962,7 @@ let
       defaultChecks = v.sourcePaths == "hide";
       select = sel;
       targetChecks = targetField wsName triple "checks" { };
-      packageConfig = productConfig wsName triple;
+      packageConfig = productConfig wsName triple vName;
       inherit (cfg) ca;
       lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
       }
@@ -1096,7 +1104,7 @@ let
                 let
                   psel = productSelOf wsName triple v;
                 in
-                if psel == false then { } else productsOf wsName ws triple v inst psel;
+                if psel == false then { } else productsOf wsName ws triple vName v inst psel;
               tests = ifTests (testsOf inst tSel);
               testRuns = ifTests (selectPkgs tSel inst.testRuns);
               # testRuns named as `tests` names test binaries, for repo.checks.
@@ -1205,7 +1213,9 @@ let
         packages = lib.filter (p: p.override != null) (
           map (e: {
             id = "${e.name}@${e.version}";
-            override = overrideFor wsName (if ws.devShell.target == null then nativeTriple else ws.devShell.target) e;
+            override = overrideFor wsName (
+              if ws.devShell.target == null then nativeTriple else ws.devShell.target
+            ) ws.defaultVariant e;
           }) locks.${wsName}
         );
         shellEnv = ws.devShell.env;

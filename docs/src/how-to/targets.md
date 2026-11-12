@@ -204,6 +204,43 @@ other layers' lists.
 each run selects one package (`-p`), and Cargo rejects a feature that
 the selected package does not have.
 
+## Package settings per target or variant
+
+A package's settings
+([`packages.<name>`](../reference/options/packages.md)) can apply to
+one triple only, with
+[`target.<triple>`](../reference/options/packages.md#packagesnametarget),
+or to one variant's plans only, with
+[`variant.<v>`](../reference/options/packages.md#packagesnamevariant).
+Both take every package option:
+
+```nix
+packages.openssl-sys.target.x86_64-pc-windows-msvc.forTarget.env.OPENSSL_DIR = opensslWin;
+packages.app = {
+  # Lint settings for the clippy variant only: the other variants'
+  # units do not change, so they are not rebuilt.
+  variant.clippy.env.APP_LINT = "1";
+  # A library that only the `full` variant needs, on one triple.
+  variant.full.target.x86_64-unknown-linux-gnu.inputs = p: [ p.openssl ];
+};
+```
+
+A variant layer applies in every workspace that has a variant of that
+name. A name that no workspace has is an evaluation warning.
+
+The layers of one `packages.<name>` apply in this order:
+
+| Order | Layer |
+| --- | --- |
+| 1 | `packages.<name>` |
+| 2 | `packages.<name>.target.<triple>` |
+| 3 | `packages.<name>.variant.<v>` |
+| 4 | `packages.<name>.variant.<v>.target.<triple>` |
+
+`workspaces.<ws>.memberDefaults` and `sysDefaults.packages` have the
+same layers, under those of `packages.<name>`
+([layer order](../explanation/configuration.md#shared-settings-and-layer-order)).
+
 ## Windows (MSVC)
 
 The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
