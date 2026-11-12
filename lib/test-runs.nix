@@ -24,8 +24,8 @@
 #   };
 #
 #   t.runs.<pkg>.<binary>     one test-run derivation per test binary
-#   t.doctests.<pkg>          one doctest derivation per library, with the
-#                             runner, `test.args`, `test.includeIgnored`,
+#   t.doctests.<pkg>          one doctest derivation per library, with its
+#                             platform's runner, `test.args`, `test.includeIgnored`,
 #                             `test.env`, `test.path` and `test.doctest`
 #                             (not per-binary settings)
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
@@ -608,8 +608,18 @@ rec {
   '';
   nextestThreadsFlag = "--tool-config-file breakbulk:$TMPDIR/breakbulk-nextest.toml";
 
+  # The runner of each platform's test processes, `{ host; target; }`
+  # (lists), from the target's runner (null or a list): Cargo picks it by
+  # the unit's compile kind (`Compilation::target_runner`). A host unit (a
+  # proc macro) is built for the build machine, so it runs there directly,
+  # never under the target's runner.
+  runnersByPlatform = runner: {
+    host = [ ];
+    target = if runner == null then [ ] else lib.toList runner;
+  };
+
   # The attributes a package's doctest derivation gets from its test
-  # configuration: the runner (a list), `test.args` and
+  # configuration: the runners (`runnersByPlatform`), `test.args` and
   # `test.doctest.args` with `--include-ignored` when
   # `test.includeIgnored`, and `test.env`, `test.doctest.env` and
   # `test.path` as PATH. Dynamic-derivation mode passes the same strings to
@@ -640,7 +650,7 @@ rec {
             + "export PATH=${lib.makeBinPath pkgs.stdenv.initialPath}\${PATH:+:$PATH}\n"
             + lib.concatStringsSep "\n" snippets
           )}";
-      BREAKBULK_TEST_RUNNER = toJSON (if runner == null then [ ] else lib.toList runner);
+      BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform runner);
       BREAKBULK_TEST_ARGS = toJSON (
         cfg.args ++ cfg.doctest.args ++ lib.optional cfg.includeIgnored "--include-ignored"
       );

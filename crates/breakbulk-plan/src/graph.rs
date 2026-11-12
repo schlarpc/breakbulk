@@ -1572,8 +1572,18 @@ impl<'a> Builder<'a> {
         if types.is_empty() {
             types.push("lib".into());
         }
+        // A doctest has no output to read its platform from
+        // (`platform_of`). Cargo passes `--target` exactly for
+        // target-kind units (`CompileKind::add_target_arg`), and the
+        // planner always plans with one.
+        let platform = if arg_value(&rec.args, "--target").is_empty() {
+            Platform::Host
+        } else {
+            Platform::Target
+        };
         Ok(Doctest {
             package: package.id.clone(),
+            platform,
             krate: CrateInfo {
                 name: arg_value(&rec.args, "--crate-name")
                     .first()

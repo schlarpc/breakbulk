@@ -648,6 +648,7 @@ fn with_doctest(mut inputs: Inputs) -> Inputs {
         breakbulk_format::Doctest {
             package: c.package,
             krate: c.krate,
+            platform: c.platform,
             program: c.program,
             args: c.args,
             env: c.env,

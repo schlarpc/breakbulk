@@ -1,0 +1,10 @@
+[package]
+name = "user"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+test = false
+
+[dependencies]
+pmd = { path = "../pmd" }

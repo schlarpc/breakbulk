@@ -280,6 +280,10 @@ pub struct Doctest {
     pub package: String,
     #[serde(rename = "crate")]
     pub krate: CrateInfo,
+    /// The library's compile kind: `host` for a proc macro, whose doctest
+    /// Cargo builds and runs for the host (no `--target`, the host's runner
+    /// and linker).
+    pub platform: Platform,
     pub program: Vec<Text>,
     pub args: Vec<Arg>,
     pub env: BTreeMap<String, Text>,
@@ -297,7 +301,7 @@ impl Doctest {
         CompileUnit {
             package: self.package.clone(),
             krate: self.krate.clone(),
-            platform: Platform::Target,
+            platform: self.platform,
             test: true,
             program: self.program.clone(),
             args: self

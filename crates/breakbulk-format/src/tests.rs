@@ -1290,6 +1290,7 @@ fn doctests_validate_like_compiles() {
     let mut d = Doctest {
         package: compile(&mut p, "c-ring").package.clone(),
         krate: compile(&mut p, "c-ring").krate.clone(),
+        platform: Platform::Target,
         program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
         args: vec![
             Arg::Literal("--test".into()),

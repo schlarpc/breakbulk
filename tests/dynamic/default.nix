@@ -377,6 +377,7 @@ let
     static-glibc = presetFixtures.glibcStatic;
     static-pkgconfig = presetFixtures.staticPkgconfig;
     sys-native-aarch64 = presetFixtures.sysNativeCross;
+    cross-doctests-aarch64 = presetFixtures.crossDoctests;
     cross-lto = presetFixtures.crossLto;
     cross-lto-off = presetFixtures.crossLtoOff;
     wasm-browser = presetFixtures.wasmBrowser;

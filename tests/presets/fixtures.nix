@@ -11,6 +11,10 @@
 #                     qemu-user)
 #   static-pkgconfig-musl-*   a musl product links a library found with
 #                     pkg-config (both .a and .so present) statically
+#   cross-doctests-aarch64  in a test plan for aarch64 under qemu-user, a
+#                     proc macro's doctest is the host's (no --target) and
+#                     runs without the target's runner; a library's
+#                     doctest runs under it
 #   presets-eval      evaluation-time assertions on preset values (and the
 #                     linker choice, lib/presets/linker.nix)
 #   presets-per-workspace  two workspaces on different Rust releases get
@@ -388,6 +392,57 @@ let
             grep -qx "openssl=3+ cm=42 bg=7 plain-saw=none" $out
           '';
     };
+
+  # --- cross doctests (aarch64) ------------------------------------------------
+  #
+  # The cross-doctests fixture for aarch64-unknown-linux-gnu, whose runner
+  # is qemu-user: the proc macro's doctest is a host unit (no `--target`)
+  # and runs on the build machine, not under qemu, which cannot run it;
+  # the library's doctest is a target unit and runs under qemu.
+
+  crossDoctests = mkRepo (fixtures + "/cross-doctests") [
+    {
+      workspaces.main = {
+        toolchain = {
+          rustc = crossRust;
+          cargo = crossRust;
+        };
+        targets.${a64} = { };
+        variants.default.profile = "dev";
+        memberDefaults.test.keepLog = true;
+      };
+      targets.${a64}.preset = presets.linux;
+    }
+  ];
+  crossDoctestsCheck =
+    let
+      t = crossDoctests.workspaces.main.target.${a64};
+      inst = crossDoctests.workspaces.main.instances.${a64}.default;
+      plan = planOf inst "test";
+      unitOf = d: builtins.fromJSON (unitText d);
+      hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).compile.args);
+      checks = {
+        "a runner" = t.runner != null;
+        "pmd's doctest is the host's" = plan.doctests.d-pmd.platform == "host" && !hasTarget t.doctests.pmd;
+        "user's doctest is the target's" =
+          plan.doctests.d-user.platform == "target" && hasTarget t.doctests.user;
+        "no test binaries" = t.testRuns == { };
+      };
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
+    in
+    assert lib.assertMsg (failed == [ ]) "cross-doctests-aarch64: ${lib.concatStringsSep ", " failed}";
+    pkgs.runCommand "cross-doctests-aarch64"
+      {
+        pmd = t.doctests.pmd;
+        user = t.doctests.user;
+      }
+      ''
+        grep -q 'pmd/src/lib.rs - (line 3) ... ok' $pmd/log
+        grep -q 'user/src/lib.rs - (line 4) ... ok' $user/log
+        mkdir -p $out
+        cp $pmd/log $out/pmd.log
+        cp $user/log $out/user.log
+      '';
 
   # --- msvc ---------------------------------------------------------------------
   #
@@ -1239,6 +1294,7 @@ in
       musl
       glibcStatic
       sysNativeCross
+      crossDoctests
       msvc
       msvcPostLink
       crossLto
@@ -1285,6 +1341,7 @@ in
     }
   )
   // sysNativeCrossChecks
+  // { cross-doctests-aarch64 = crossDoctestsCheck; }
   // msvcChecks
   // lib.optionalAttrs (xwinPkgs != null) { msvc-debug-outputs = msvcDebugOutputsEval; }
   // wasmBrowserChecks

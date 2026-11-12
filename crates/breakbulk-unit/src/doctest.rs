@@ -17,9 +17,13 @@
 //!
 //! Configuration from the derivation's environment, all optional:
 //!
-//! - [`RUNNER_VAR`]: a JSON array, the target's runner and its arguments.
-//!   Passed as Cargo does, `--test-runtool R --test-runtool-arg A …` right
-//!   after `--target T`.
+//! - [`RUNNERS_VAR`]: a JSON object, the runner (a program and its
+//!   arguments) of each platform, `host` and `target`. The doctest uses its
+//!   own platform's, as Cargo picks the runner by the unit's compile kind
+//!   (`Compilation::target_runner`): a proc macro's doctest is built and
+//!   run for the host. Passed as Cargo does, `--test-runtool R
+//!   --test-runtool-arg A …` right after `--test-run-directory D` and, for
+//!   the target, `--target T`.
 //! - [`TEST_ARGS_VAR`]: a JSON array of libtest arguments, each passed as
 //!   `--test-args A` after the `-L` list, where Cargo puts them.
 //! - [`TEST_ENV_VAR`]: a JSON object of variables merged over the command's
@@ -49,11 +53,11 @@ use crate::compile::{Invocation, check_args, fresh_dir, link_deps};
 use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, capture_layer, layered_on, merge_layer};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{RenderedArg, RenderedCompile};
+use crate::spec::{Platform, RenderedArg, RenderedCompile};
 use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
 use crate::{Error, io_err, read_directives};
 
-pub const RUNNER_VAR: &str = "BREAKBULK_TEST_RUNNER";
+pub const RUNNERS_VAR: &str = "BREAKBULK_TEST_RUNNERS";
 pub const TEST_ARGS_VAR: &str = "BREAKBULK_TEST_ARGS";
 pub const TEST_ENV_VAR: &str = "BREAKBULK_TEST_ENV";
 
@@ -92,7 +96,8 @@ pub enum DoctestKind {
 /// The configuration a doctest derivation adds to the traced command.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TestConfig {
-    pub runner: Vec<String>,
+    /// Each platform's runner; a platform without one runs directly.
+    pub runners: BTreeMap<Platform, Vec<String>>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub post_run: Option<String>,
@@ -110,7 +115,7 @@ impl TestConfig {
             }
         }
         Ok(TestConfig {
-            runner: parse(outer, RUNNER_VAR)?,
+            runners: parse(outer, RUNNERS_VAR)?,
             args: parse(outer, TEST_ARGS_VAR)?,
             env: parse(outer, TEST_ENV_VAR)?,
             post_run: outer
@@ -165,9 +170,9 @@ fn load_directives(d: &RenderedDoctest) -> Result<BTreeMap<String, BuildOutput>,
         .collect()
 }
 
-/// The full command: the traced arguments with the runner after
-/// `--target T`, the `-L` list and the test arguments at the traced
-/// position, and the dependency directory last.
+/// The full command: the traced arguments with the doctest's platform's
+/// runner where Cargo puts it, the `-L` list and the test arguments at the
+/// traced position, and the dependency directory last.
 pub fn invocation(
     d: &RenderedDoctest,
     outer: &Outer,
@@ -202,18 +207,28 @@ pub fn invocation(
     let mut before = expand_args(before, lookup)?;
     let after = expand_args(after, lookup)?;
 
-    let mut runtool = Vec::new();
-    if let Some((tool, args)) = config.runner.split_first() {
-        runtool.extend(["--test-runtool".to_owned(), tool.clone()]);
+    let runner = config
+        .runners
+        .get(&c.platform)
+        .map_or(&[][..], Vec::as_slice);
+    if let Some((tool, args)) = runner.split_first() {
+        let mut runtool = vec!["--test-runtool".to_owned(), tool.clone()];
         for a in args {
             runtool.extend(["--test-runtool-arg".to_owned(), a.clone()]);
         }
+        // Cargo: `--test-run-directory D`, then `--target T` for a target
+        // unit (`add_target_arg`), then the runner.
+        let after = |flag: &str| {
+            before
+                .iter()
+                .position(|a| a == flag)
+                .map(|i| (i + 2).min(before.len()))
+        };
+        let at = after("--target")
+            .or_else(|| after("--test-run-directory"))
+            .unwrap_or(before.len());
+        before.splice(at..at, runtool);
     }
-    let at = before
-        .iter()
-        .position(|a| a == "--target")
-        .map_or(before.len(), |i| (i + 2).min(before.len()));
-    before.splice(at..at, runtool);
 
     let mut argv = c.program.clone();
     argv.extend(before);
@@ -356,7 +371,7 @@ pub fn main() -> ExitCode {
 mod tests {
     use super::*;
     use crate::directives::LibraryPath;
-    use crate::spec::{CrateInfo, Platform, Splice, SpliceKind};
+    use crate::spec::{CrateInfo, Splice, SpliceKind};
 
     fn out(paths: &[&str]) -> BuildOutput {
         BuildOutput {
@@ -454,7 +469,10 @@ mod tests {
             &["/f/a", "/f/b"],
         );
         let config = TestConfig {
-            runner: vec!["wine".into(), "--quiet".into()],
+            runners: BTreeMap::from([
+                (Platform::Target, vec!["wine".into(), "--quiet".into()]),
+                (Platform::Host, vec!["/host/runner".into()]),
+            ]),
             args: vec!["--skip".into(), "net".into()],
             env: BTreeMap::from([
                 ("PATH".into(), "/tools/bin".into()),
@@ -500,6 +518,73 @@ mod tests {
         assert_eq!(inv.env["PATH"], "/tools/bin");
         assert_eq!(inv.env["RUST_TEST_THREADS"], "3");
         assert_eq!(inv.cwd, Path::new("/src"));
+    }
+
+    #[test]
+    fn a_host_doctest_gets_the_hosts_runner_after_the_run_directory() {
+        let mut d = doctest(
+            vec![
+                lit("--test"),
+                lit("src/lib.rs"),
+                lit("--test-run-directory"),
+                lit("/src"),
+                lit("--extern"),
+                lit("c=/s/libc.so"),
+            ],
+            4,
+            &[],
+        );
+        d.compile.platform = Platform::Host;
+        let dirs = BTreeMap::from([("/f/a".to_owned(), out(&[]))]);
+        let target_only = TestConfig {
+            runners: BTreeMap::from([(Platform::Target, vec!["qemu-aarch64".into()])]),
+            ..TestConfig::default()
+        };
+        let inv = invocation(&d, &Outer::default(), &dirs, &target_only, Path::new("/d")).unwrap();
+        assert!(
+            !inv.argv.iter().any(|a| a.starts_with("--test-runtool")),
+            "{:?}",
+            inv.argv
+        );
+        let both = TestConfig {
+            runners: BTreeMap::from([
+                (Platform::Target, vec!["qemu-aarch64".into()]),
+                (Platform::Host, vec!["/host/runner".into(), "-v".into()]),
+            ]),
+            ..TestConfig::default()
+        };
+        let inv = invocation(&d, &Outer::default(), &dirs, &both, Path::new("/d")).unwrap();
+        assert_eq!(
+            inv.argv,
+            [
+                "/s/rustdoc",
+                "--test",
+                "src/lib.rs",
+                "--test-run-directory",
+                "/src",
+                "--test-runtool",
+                "/host/runner",
+                "--test-runtool-arg",
+                "-v",
+                "--extern",
+                "c=/s/libc.so",
+                "-L",
+                "dependency=/d",
+            ]
+        );
+        let outer = Outer {
+            vars: BTreeMap::from([(
+                RUNNERS_VAR.into(),
+                r#"{"host": ["/h"], "target": ["/t", "-x"]}"#.into(),
+            )]),
+        };
+        assert_eq!(
+            TestConfig::from_outer(&outer).unwrap().runners,
+            BTreeMap::from([
+                (Platform::Host, vec!["/h".to_owned()]),
+                (Platform::Target, vec!["/t".to_owned(), "-x".to_owned()]),
+            ])
+        );
     }
 
     #[test]

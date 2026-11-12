@@ -1,0 +1,11 @@
+# Doctests of a cross test plan with a runner: `pmd`, a proc macro with no
+# unit tests, has a doctest that Cargo builds and runs for the host, so
+# not under the target's runner; `user`'s doctest uses it and runs for the
+# target, under the runner.
+[workspace]
+resolver = "2"
+members = ["pmd", "user"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

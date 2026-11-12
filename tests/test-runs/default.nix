@@ -659,16 +659,18 @@ let
       {
         quick = ctlRunner.testRuns.ctl.ignored;
         unit = doctestsWs.doctests.helper.drvAttrs.BREAKBULK_UNIT;
-        testRunner = builtins.toJSON [
-          "${failingRunner}"
-          "--flag"
-        ];
+        testRunner = builtins.toJSON {
+          target = [
+            "${failingRunner}"
+            "--flag"
+          ];
+        };
       }
       ''
         grep -q '^runner: ignored-' $quick/log
         grep -q 'test quick ... ok' $quick/log
         result=$out
-        if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_RUNNER="$testRunner" out=$TMPDIR/o \
+        if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_RUNNERS="$testRunner" out=$TMPDIR/o \
             ${tools.breakbulk-unit}/bin/breakbulk-unit doctest 2> err; then
           cat err
           echo "the doctest succeeded under a failing runner" >&2

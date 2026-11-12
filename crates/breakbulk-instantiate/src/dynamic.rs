@@ -77,7 +77,7 @@ pub struct Outer {
 /// configuration (`doctestConfig` in `lib/test-runs.nix`), each the value of
 /// [`doctest_key`] in `values.json`.
 pub const DOCTEST_CONFIG: [&str; 4] = [
-    "BREAKBULK_TEST_RUNNER",
+    "BREAKBULK_TEST_RUNNERS",
     "BREAKBULK_TEST_ARGS",
     "BREAKBULK_TEST_ENV",
     "BREAKBULK_TEST_POST_RUN",
