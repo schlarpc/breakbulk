@@ -22,8 +22,8 @@ use breakbulk_format::rendered::{
 };
 use breakbulk_format::{
     CompileUnit, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind, SrcRef,
-    TargetDebuginfo, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs, render_doctest,
-    render_unit_in, to_canonical_json, unit_env_value, validate,
+    TargetDebuginfo, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs,
+    render_doctest, render_unit_in, to_canonical_json, unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
