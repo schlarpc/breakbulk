@@ -77,6 +77,10 @@ pub struct Plan {
     /// `binary()` and `deps()` filtersets see what they would under Cargo.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub path_packages: BTreeMap<String, PathPackage>,
+    /// The debuginfo side files the target's links write, from the
+    /// planning rustc's target spec. Required, so that no plan silently
+    /// gives its units another target's `debug` outputs.
+    pub target_debuginfo: TargetDebuginfo,
 }
 
 /// A path package of a test plan ([`Plan::path_packages`]).
@@ -445,10 +449,10 @@ pub struct CompileUnit {
 impl CompileUnit {
     /// Whether the unit gets a `debug` derivation output for the
     /// debuginfo side files rustc writes, by
-    /// [`writes_debuginfo_side_files`] on a target with these `traits`:
+    /// [`writes_debuginfo_side_files`] on a target with this `debuginfo`:
     /// - a target-platform unit with a `bin` output (bins, tests,
-    ///   examples, benches, cdylibs, dylibs, staticlibs): any of the
-    ///   traits' artifacts;
+    ///   examples, benches, cdylibs, dylibs, staticlibs): any of its
+    ///   artifacts;
     /// - a target-platform library with an `rlib` output: only the
     ///   per-object ones (`.dwo` with `-C split-debuginfo=unpacked`), which
     ///   rustc writes beside each object file it compiles, linked or not.
@@ -459,31 +463,31 @@ impl CompileUnit {
     /// command line; host units (build scripts, proc macros) only run
     /// during the build, so theirs are discarded, and a metadata-only
     /// library (`check`) compiles no objects.
-    pub fn has_debug_output(&self, traits: &TargetTraits) -> bool {
+    pub fn has_debug_output(&self, debuginfo: &TargetDebuginfo) -> bool {
         if self.outputs.contains_key("bin") {
-            self.writes_side_files(traits, false)
+            self.writes_side_files(debuginfo, false)
         } else {
-            self.writes_per_object_debug_files(traits)
+            self.writes_per_object_debug_files(debuginfo)
         }
     }
 
-    /// Whether the unit writes the traits' per-object debuginfo side files
-    /// (`.dwo` with `-C split-debuginfo=unpacked`): a target-platform unit
-    /// that compiles objects (a `bin` or `rlib` output), with arguments
-    /// that make one of those artifacts apply. These are the side files a
-    /// binary linked from the unit's objects names, and so the only ones a
-    /// product takes from the units below its root
+    /// Whether the unit writes the target's per-object debuginfo side
+    /// files (`.dwo` with `-C split-debuginfo=unpacked`): a target-platform
+    /// unit that compiles objects (a `bin` or `rlib` output), with
+    /// arguments that make one of those artifacts apply. These are the
+    /// side files a binary linked from the unit's objects names, and so the
+    /// only ones a product takes from the units below its root
     /// ([`crate::deps::debug_units_below`]); a per-output artifact (a
     /// `.dwp`, msvc's `.pdb`) of a unit below belongs to that unit's own
     /// linked output (a cdylib), which the product does not ship.
-    pub fn writes_per_object_debug_files(&self, traits: &TargetTraits) -> bool {
+    pub fn writes_per_object_debug_files(&self, debuginfo: &TargetDebuginfo) -> bool {
         (self.outputs.contains_key("bin") || self.outputs.contains_key("rlib"))
-            && self.writes_side_files(traits, true)
+            && self.writes_side_files(debuginfo, true)
     }
 
     /// [`writes_debuginfo_side_files`] for a target-platform unit, with
-    /// only the traits' per-object artifacts when `per_object_only`.
-    fn writes_side_files(&self, traits: &TargetTraits, per_object_only: bool) -> bool {
+    /// only the per-object artifacts when `per_object_only`.
+    fn writes_side_files(&self, debuginfo: &TargetDebuginfo, per_object_only: bool) -> bool {
         self.platform == Platform::Target
             && writes_debuginfo_side_files(
                 self.args.iter().map(|a| match a {
@@ -491,56 +495,61 @@ impl CompileUnit {
                     _ => None,
                 }),
                 &self.krate.types,
-                &TargetTraits {
-                    debug_artifacts: traits
-                        .debug_artifacts
+                &TargetDebuginfo {
+                    split_default: debuginfo.split_default,
+                    artifacts: debuginfo
+                        .artifacts
                         .iter()
                         .filter(|a| a.per_object || !per_object_only)
                         .cloned()
                         .collect(),
-                    executable_suffix: traits.executable_suffix.clone(),
                 },
             )
     }
 }
 
-/// What breakbulk's Rust programs need to know about the target platform.
-/// The Nix library decides it from its target traits (`lib/target-traits.nix`,
-/// `forRust`; "Target traits" in
-/// `docs/src/explanation/internals/toolchains.md`) and passes it in
-/// `toolchains.json` as `targetTraits`, so no program re-derives a platform
-/// fact from the spelling of a triple, and a target the user declared
-/// traits for behaves as declared.
+/// The debuginfo side files rustc's links write for the plan's target,
+/// which `--print file-names` does not name. The planner reads them from
+/// its rustc's target spec (`rustc --print target-spec-json`), so a
+/// custom target (`--target foo.json`) is described by its own spec, and
+/// instantiation decides from them which units get a `debug` output.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct TargetTraits {
-    /// The debuginfo files rustc's link writes beside a linked output,
-    /// which `--print file-names` does not name (the traits'
-    /// `debugArtifacts`): `.pdb` on msvc, `.dwp`/`.dwo` on ELF, `.dSYM` on
-    /// Apple targets. Empty: none (wasm, a target with no split debuginfo).
-    pub debug_artifacts: Vec<DebugArtifact>,
-    /// The suffix of an executable's file name (the traits'
-    /// `executableSuffix`): `""`, `.exe`, `.wasm`. The planner stores a
-    /// bin under Cargo's uplifted name, the target name and this suffix.
-    pub executable_suffix: String,
+pub struct TargetDebuginfo {
+    /// The `-C split-debuginfo` rustc uses when the arguments give none
+    /// (the spec's `split-debuginfo`; rustc_session's
+    /// `Session::split_debuginfo`): `packed` on msvc and Apple targets,
+    /// `off` elsewhere.
+    pub split_default: SplitDebuginfo,
+    /// `.pdb` on msvc and UEFI, `.dwp`/`.dwo` on the ELF targets whose
+    /// spec supports split debuginfo, `.dSYM` on Apple targets. Empty:
+    /// none (wasm, most bare-metal targets).
+    pub artifacts: Vec<DebugArtifact>,
 }
 
-impl TargetTraits {
-    /// A target whose links write no debuginfo side files and whose
-    /// executables have no suffix.
-    pub const NONE: &'static TargetTraits = &TargetTraits {
-        debug_artifacts: Vec::new(),
-        executable_suffix: String::new(),
-    };
+/// A `-C split-debuginfo` value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SplitDebuginfo {
+    #[default]
+    Off,
+    Packed,
+    Unpacked,
+}
 
-    /// Read a JSON file of the traits (the planner's `--target-traits`).
-    pub fn read(path: &str) -> Result<TargetTraits, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))?;
-        serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+impl SplitDebuginfo {
+    /// The value as rustc spells it, or `None` for one it does not take.
+    pub fn parse(s: &str) -> Option<SplitDebuginfo> {
+        match s {
+            "off" => Some(SplitDebuginfo::Off),
+            "packed" => Some(SplitDebuginfo::Packed),
+            "unpacked" => Some(SplitDebuginfo::Unpacked),
+            _ => None,
+        }
     }
 }
 
-/// One kind of debuginfo side file (the traits' `debugArtifacts` entries).
+/// One kind of debuginfo side file ([`TargetDebuginfo::artifacts`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DebugArtifact {
@@ -561,40 +570,42 @@ pub struct DebugArtifact {
 #[serde(rename_all = "kebab-case")]
 pub enum DebugArtifactWhen {
     /// For every crate the linker produces (`bin`, `cdylib`, `dylib`,
-    /// `--test`), whatever `-C debuginfo` and `-C strip` say: on
-    /// `*-windows-msvc`, rustc passes `/DEBUG` to the MSVC-style linker
-    /// unconditionally (rustc_codegen_ssa back/linker.rs,
-    /// `MsvcLinker::debuginfo` ignores its `strip` argument; 1.95 through
-    /// master, and an msvc release build with `-C strip=debuginfo` was seen
-    /// to write a 1.2 MB PDB).
+    /// `--test`), whatever `-C debuginfo` and `-C strip` say: rustc passes
+    /// `/DEBUG` to an MSVC-style linker unconditionally (rustc_codegen_ssa
+    /// back/linker.rs, `MsvcLinker::debuginfo` ignores its `strip`
+    /// argument; 1.95 through master, and an msvc release build with
+    /// `-C strip=debuginfo` was seen to write a 1.2 MB PDB).
     Always,
-    /// With debuginfo on and `-C split-debuginfo=packed`.
+    /// With debuginfo on and `-C split-debuginfo` packed.
     SplitPacked,
-    /// With debuginfo on and `-C split-debuginfo=unpacked`.
+    /// With debuginfo on and `-C split-debuginfo` unpacked.
     SplitUnpacked,
 }
 
 /// Whether rustc, given these command-line arguments (`None` for an
 /// argument that is not a literal: a build script's splices cannot set
 /// codegen options) for a crate of these types, writes debuginfo side files
-/// next to its linked output, on a target with these traits: whether any of
-/// the traits' [`DebugArtifact`]s applies.
+/// next to its linked output, on a target with this `debuginfo`: whether
+/// any of its [`DebugArtifact`]s applies.
 ///
 /// - [`DebugArtifactWhen::Always`] applies to every crate type the linker
 ///   produces (`bin`, `cdylib`, `dylib`, and `--test`). A staticlib is
 ///   archived, not linked.
 /// - [`DebugArtifactWhen::SplitPacked`] and
 ///   [`DebugArtifactWhen::SplitUnpacked`] apply when the effective
-///   `-C split-debuginfo` is that value and debuginfo is on. Cargo passes
-///   `-C split-debuginfo` only together with `-C debuginfo` (cargo
-///   src/compiler/mod.rs, `build_base_args`), but rustflags can add
-///   either. As in rustc (rustc_session config.rs `select_debuginfo`), a
-///   `-g` after the last `-C debuginfo` means full debuginfo, and the last
-///   `-C` of an option wins.
+///   `-C split-debuginfo` is that value and debuginfo is on: the last
+///   `-C split-debuginfo` given, else the target's
+///   [`TargetDebuginfo::split_default`] (rustc_session's
+///   `Session::split_debuginfo`). Cargo passes `-C split-debuginfo` only
+///   together with `-C debuginfo` (cargo src/compiler/mod.rs,
+///   `build_base_args`), but rustflags can add either. As in rustc
+///   (rustc_session config.rs `select_debuginfo`), a `-g` after the last
+///   `-C debuginfo` means full debuginfo, and the last `-C` of an option
+///   wins.
 pub fn writes_debuginfo_side_files<'a>(
     args: impl IntoIterator<Item = Option<&'a str>>,
     crate_types: &[String],
-    traits: &TargetTraits,
+    debuginfo: &TargetDebuginfo,
 ) -> bool {
     let mut debuginfo_on = false;
     let mut split = None;
@@ -618,18 +629,19 @@ pub fn writes_debuginfo_side_files<'a>(
         };
         match codegen.and_then(|c| c.split_once('=')) {
             Some(("debuginfo", v)) => debuginfo_on = !matches!(v, "0" | "none"),
-            Some(("split-debuginfo", v)) => split = Some(v),
+            Some(("split-debuginfo", v)) => split = SplitDebuginfo::parse(v),
             _ => {}
         }
     }
+    let split = split.unwrap_or(debuginfo.split_default);
     let links = test
         || crate_types
             .iter()
             .any(|t| matches!(t.as_str(), "bin" | "cdylib" | "dylib"));
-    traits.debug_artifacts.iter().any(|a| match a.when {
+    debuginfo.artifacts.iter().any(|a| match a.when {
         DebugArtifactWhen::Always => links,
-        DebugArtifactWhen::SplitPacked => debuginfo_on && split == Some("packed"),
-        DebugArtifactWhen::SplitUnpacked => debuginfo_on && split == Some("unpacked"),
+        DebugArtifactWhen::SplitPacked => debuginfo_on && split == SplitDebuginfo::Packed,
+        DebugArtifactWhen::SplitUnpacked => debuginfo_on && split == SplitDebuginfo::Unpacked,
     })
 }
 

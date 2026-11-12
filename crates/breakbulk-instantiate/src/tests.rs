@@ -27,15 +27,6 @@ fn smoke_plan() -> Plan {
     Plan::from_json(&text).unwrap()
 }
 
-/// The traits of an ELF target (lib/target-traits.nix `forRust`), as
-/// `toolchains.json` carries them.
-fn elf_traits() -> breakbulk_format::TargetTraits {
-    serde_json::from_str(
-        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}],"executableSuffix":""}"#,
-    )
-    .unwrap()
-}
-
 fn smoke_inputs() -> Inputs {
     Inputs {
         plan: smoke_plan(),
@@ -65,7 +56,6 @@ fn smoke_inputs() -> Inputs {
             },
             shipped_remap_scope: None,
             keep_source_paths: false,
-            target_traits: elf_traits(),
             capabilities: breakbulk_format::Capabilities {
                 remap_path_scope: true,
                 trim_paths: false,
@@ -177,9 +167,6 @@ impl RealPaths<'_> {
 
 impl Resolve for RealPaths<'_> {
     type Error = String;
-    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
-        &self.0.toolchains.target_traits
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         let (base, rel) = match r {
             Reference::Src(s) => (

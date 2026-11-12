@@ -673,10 +673,10 @@ fn wrapper(
     // output, and of the libraries below a product root that have one
     // (`.dwo` with `split-debuginfo=unpacked`), for the
     // product's `linked` stage: one path per line.
-    let traits = &inputs.toolchains.target_traits;
+    let debuginfo = &inputs.plan.target_debuginfo;
     let debug = match &info.unit {
         Some(u) => {
-            let own = matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(traits));
+            let own = matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(debuginfo));
             own.then(|| u.clone())
                 .into_iter()
                 .chain(root.debug_units.iter().cloned())
@@ -828,7 +828,7 @@ fn all_units(
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
-        for o in unit_outputs(unit, &inputs.toolchains.target_traits) {
+        for o in unit_outputs(unit, &inputs.plan.target_debuginfo) {
             list.push_str(&tokens.unit(id, &o));
             list.push('\n');
         }

@@ -125,9 +125,6 @@ rec {
       shippedRemapScope ? null,
       # `sourcePaths = "keep"`: no remaps of breakbulk's own.
       keepSourcePaths ? false,
-      # The target's traits as breakbulk-instantiate reads them
-      # (`breakbulk.targetTraits.forRust`, lib/target-traits.nix).
-      targetTraits,
       # The toolchain's capabilities (`breakbulk.toolchainFacts.of`'s
       # `capabilities`): whether rustc takes `--remap-path-scope`.
       capabilities,
@@ -163,7 +160,7 @@ rec {
         // lib.optionalAttrs (custom != [ ]) { inherit custom; }
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
-        inherit system storeDir targetTraits;
+        inherit system storeDir;
         inherit capabilities;
         tools = lib.mapAttrs (_: noCtx) tools;
         host = platformJson host;

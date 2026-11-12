@@ -8,6 +8,7 @@
 //! - [`rewrite`] turns recorded paths into references.
 //! - [`sentinel`] parses sentinel shapes.
 //! - [`describe`] names units in errors.
+//! - [`target_spec`] reads what the plan takes from rustc's target spec.
 //! - [`spec`] passes the toolchain spec's rustflags and linkers to Cargo,
 //!   confirms they arrived, and rewrites same-triple host linkers.
 
@@ -19,6 +20,7 @@ pub mod records;
 pub mod rewrite;
 pub mod sentinel;
 pub mod spec;
+pub mod target_spec;
 pub mod trace;
 pub mod trim_paths;
 

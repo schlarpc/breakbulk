@@ -412,22 +412,18 @@ pub fn runs_of(
 }
 
 /// The compile units among [`units_below`] `id` that write per-object
-/// debuginfo side files on a target with these traits
+/// debuginfo side files on the plan's target
 /// ([`CompileUnit::writes_per_object_debug_files`]): the libraries whose
 /// `.dwo` files a binary linked from them names
 /// (`split-debuginfo=unpacked`). Not every unit below with a `debug`
 /// output: a library that also links a cdylib has one with `packed` (its
 /// `.dwp`) and on msvc (its `.pdb`), whose contents the root's own link
 /// already holds.
-pub fn debug_units_below(
-    plan: &Plan,
-    id: &UnitId,
-    traits: &crate::TargetTraits,
-) -> BTreeSet<UnitId> {
+pub fn debug_units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
     units_below(plan, id)
         .into_iter()
         .filter(|u| {
-            matches!(plan.units.get(u), Some(Unit::Compile(c)) if c.writes_per_object_debug_files(traits))
+            matches!(plan.units.get(u), Some(Unit::Compile(c)) if c.writes_per_object_debug_files(&plan.target_debuginfo))
         })
         .collect()
 }

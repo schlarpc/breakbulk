@@ -1069,7 +1069,7 @@ let
   # $out/bin/<target><exe suffix> (stubs as they are): a bench by its name,
   # the lib harness in bench mode as `lib`, a bin's as `bin-<name>`.
   benchesOf =
-    traits: inst: sel:
+    inst: sel:
     let
       byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.benches);
       nameOf =
@@ -1083,15 +1083,7 @@ let
           "lib"
         else
           "${b.kind}-${b.target}";
-      install =
-        r:
-        if r.breakbulkRoot.unit == null then
-          r
-        else
-          pkgs.runCommand r.breakbulkRoot.target { } ''
-            files=(${r}/*)
-            install -D -m755 "''${files[0]}" $out/bin/${r.breakbulkRoot.target}${traits.executableSuffix}
-          '';
+      install = r: if r.breakbulkRoot.unit == null then r else inst.installExecutable r;
     in
     lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (
       selectPkgs sel byPkg
@@ -1198,7 +1190,7 @@ let
               enabledDoctests = ifTests (
                 lib.filterAttrs (pkg: _: inst.checks ? "doctest/${pkg}") (selectPkgs tSel inst.doctests)
               );
-              benches = benchesOf (traitsOf wsName triple) inst sel;
+              benches = benchesOf inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
               # `cargo doc` of the variant's packages (lib/workspace.nix).

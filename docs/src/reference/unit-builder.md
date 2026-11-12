@@ -142,7 +142,7 @@ name them.
   `.dwo` files, and moved, under rustc's names, to the unit's `debug`
   output.
 - Units without a `debug` output discard them with a warning: host units,
-  libraries outside the `.dwo` case, and any unit the target's traits say
+  libraries outside the `.dwo` case, and any unit the plan's target spec says
   writes none.
 
 ## `run` (build scripts)

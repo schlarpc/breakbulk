@@ -84,9 +84,6 @@ impl Tokens<'_> {
 
 impl Resolve for Tokens<'_> {
     type Error = String;
-    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
-        breakbulk_format::TargetTraits::NONE
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Ok(match r {
             Reference::Src(s) if s.rel.is_empty() => BB_SRC.to_owned(),
@@ -151,14 +148,14 @@ struct UnitDrv {
     unit: String,
 }
 
-fn derivation_outputs(u: &Unit) -> Vec<String> {
+fn derivation_outputs(plan: &Plan, u: &Unit) -> Vec<String> {
     match u {
         Unit::Compile(c) => c
             .outputs
             .keys()
             .map(|o| derivation_output(o).to_owned())
             .chain(
-                c.has_debug_output(breakbulk_format::TargetTraits::NONE)
+                c.has_debug_output(&plan.target_debuginfo)
                     .then(|| "debug".to_owned()),
             )
             .collect(),
@@ -189,7 +186,7 @@ fn render(plan: &Plan) -> BTreeMap<String, UnitDrv> {
                 }
             }
             let drv = UnitDrv {
-                outputs: derivation_outputs(u),
+                outputs: derivation_outputs(plan, u),
                 refs: refs.into_iter().collect(),
                 unit,
             };

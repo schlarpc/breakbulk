@@ -8,7 +8,7 @@
 //!   [--clippy-driver PATH [--clippy-option NAME]] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--cargo-config FILE] [--spec FILE] --capabilities FILE \
-//!   --target-traits FILE [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]… --out plan.json \
+//!   [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]… --out plan.json \
 //!   [--cargo-env cargo-env.json]
 //!
 //! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
@@ -33,10 +33,6 @@
 //! (`breakbulk_format::Capabilities`, the Nix library's `toolchainFacts`):
 //! whether Cargo has `trim-paths` and allows unstable features.
 //!
-//! `--target-traits` is the target's traits as JSON
-//! (`breakbulk_format::TargetTraits`, the Nix library's
-//! `targetTraits.forRust`).
-//!
 //! `--cargo-config` is the variant's own Cargo configuration
 //! (`variants.<v>.cargoConfig`), a TOML file: Cargo gets it with
 //! `--config`, and the planner's reader of the project's config loads it
@@ -57,7 +53,7 @@ fn usage() -> ! {
          [--clippy-arg A]... \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
-         [--config X]... [--cargo-config FILE] [--spec FILE] --capabilities FILE --target-traits FILE \
+         [--config X]... [--cargo-config FILE] [--spec FILE] --capabilities FILE \
          [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
          --target TRIPLE [--spec FILE] [--capabilities FILE --profile P... [--trim-paths auto|on|off]] \
@@ -98,7 +94,6 @@ fn main() -> ExitCode {
         trim_paths_default: false,
         std_vendor: None,
         capabilities: None,
-        target_traits: None,
     };
     let mut out = None;
     // Every `--profile`: `--cargo-env-only` exports trim-paths for each
@@ -169,13 +164,6 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             },
-            "--target-traits" => match breakbulk_format::TargetTraits::read(&val()) {
-                Ok(t) => opts.target_traits = Some(t),
-                Err(e) => {
-                    eprintln!("breakbulk-plan: --target-traits: {e}");
-                    return ExitCode::FAILURE;
-                }
-            },
             "--out" => out = Some(val()),
             "--cargo-env" => cargo_env_out = Some(val()),
             "--cargo-env-only" => cargo_env_only = true,
@@ -204,7 +192,7 @@ fn main() -> ExitCode {
         usage();
     }
     let Some(out) = out else { usage() };
-    if opts.capabilities.is_none() || opts.target_traits.is_none() {
+    if opts.capabilities.is_none() {
         usage();
     }
     match breakbulk_plan::plan_with_cargo_env(&opts) {

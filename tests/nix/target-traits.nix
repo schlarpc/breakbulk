@@ -11,7 +11,11 @@
 #   target-traits-rustc  `parse` against `rustc --print cfg --target <t>`
 #                        for every built-in target of nixpkgs' rustc (IFD):
 #                        each name it knows has rustc's vendor, os, env
-#                        and families (and abi, where the name spells one)
+#                        and families (and abi, where the name spells one);
+#                        its file-name traits are `--print file-names`',
+#                        and objectFormat, isApple, isWasm, isMsvc/isUefi
+#                        (an MSVC-style linker) and debugArtifacts are
+#                        what `--print all-target-specs-json` says
 #   linker-kind-rustc    the default Linux linker kind against the linker
 #                        flavor of rustc's own target specs, for several
 #                        rust-lang releases and nixpkgs' rustc
@@ -151,6 +155,91 @@ let
   fileNameResults = map checkFileNames fileNameRows;
   fileNameMismatches = lib.filter builtins.isString fileNameResults;
   fileNamesKnown = lib.count (x: x == true) fileNameResults;
+
+  # The fields rustc's target specs state, against
+  # `--print all-target-specs-json` (every built-in target, whether
+  # nixpkgs' LLVM has its backend or not). A key a spec leaves out has
+  # rustc's default (rustc_target spec/json.rs writes only the others).
+  rustcSpecs = builtins.fromJSON (
+    builtins.readFile (
+      pkgs.runCommand "rustc-target-specs" { nativeBuildInputs = [ pkgs.rustc ]; } ''
+        RUSTC_BOOTSTRAP=1 rustc -Z unstable-options --print all-target-specs-json > $out
+      ''
+    )
+  );
+  checkSpec =
+    triple: spec:
+    let
+      t = r triple;
+      s = k: d: spec.${k} or d;
+      supported = s "supported-split-debuginfo" [ "off" ];
+      # rustc_codegen_ssa back/link.rs: the side files of an MSVC-style
+      # link, dsymutil, thorin and split DWARF (as breakbulk-plan's
+      # target_spec.rs reads them).
+      msvcLinker = lib.elem (s "linker-flavor" "gcc") [
+        "msvc"
+        "msvc-lld"
+      ];
+      artifacts =
+        lib.optional msvcLinker {
+          suffix = ".pdb";
+          when = "always";
+        }
+        ++ lib.optional (lib.elem "packed" supported && s "is-like-darwin" false) {
+          suffix = ".dSYM";
+          when = "split-packed";
+          directory = true;
+        }
+        ++ lib.optional (
+          lib.elem "packed" supported && !(s "is-like-darwin" false) && !(s "is-like-windows" false)
+        ) {
+          suffix = ".dwp";
+          when = "split-packed";
+        }
+        ++ lib.optional (lib.elem "unpacked" supported && s "debuginfo-kind" "dwarf" == "dwarf") {
+          suffix = ".dwo";
+          when = "split-unpacked";
+          perObject = true;
+        };
+      expect = {
+        # rustc writes wasm for every `is-like-wasm` target, whatever
+        # `binary-format` says (WALI's is elf).
+        objectFormat =
+          if s "is-like-wasm" false then
+            "wasm"
+          else
+            {
+              elf = "elf";
+              coff = "pe";
+              mach-o = "macho";
+              xcoff = "xcoff";
+            }
+            .${s "binary-format" "elf"};
+        isApple = s "is-like-darwin" false;
+        isWasm = s "is-like-wasm" false;
+        isMsvcOrUefi = msvcLinker;
+        debugArtifacts = artifacts;
+      };
+      ours = {
+        inherit (t) objectFormat isApple isWasm;
+        isMsvcOrUefi = t.isMsvc || t.isUefi;
+        inherit (t) debugArtifacts;
+      };
+      wrong = lib.filter (f: ours.${f} != expect.${f}) (lib.attrNames expect);
+    in
+    if tt.parse triple == null then
+      null
+    else if wrong == [ ] then
+      true
+    else
+      "${triple}: ${
+        lib.concatMapStringsSep ", " (
+          f: "${f} is ${builtins.toJSON ours.${f}}, rustc's spec says ${builtins.toJSON expect.${f}}"
+        ) wrong
+      }";
+  specResults = lib.mapAttrsToList checkSpec rustcSpecs;
+  specMismatches = lib.filter builtins.isString specResults;
+  specsKnown = lib.count (x: x == true) specResults;
 in
 {
   target-traits = runTests "target-traits" {
@@ -747,8 +836,12 @@ in
     assert lib.assertMsg (fileNameMismatches == [ ])
       "target-traits-rustc: file-name traits disagree with rustc --print file-names:\n${lib.concatStringsSep "\n" fileNameMismatches}";
     assert lib.assertMsg (fileNamesKnown == known) "target-traits-rustc: file names checked for ${toString fileNamesKnown} targets, cfg for ${toString known}";
+    assert lib.assertMsg (specMismatches == [ ])
+      "target-traits-rustc: traits disagree with rustc --print all-target-specs-json:\n${lib.concatStringsSep "\n" specMismatches}";
+    # Every target `--print cfg` was checked for has a spec checked too.
+    assert lib.assertMsg (specsKnown >= known) "target-traits-rustc: specs checked for ${toString specsKnown} targets, cfg for ${toString known}";
     pkgs.runCommand "target-traits-rustc" { } ''
-      echo "${toString known} of ${toString (lib.length rows)} rustc targets parsed, all agreeing with rustc --print cfg and --print file-names" > $out
+      echo "${toString known} of ${toString (lib.length rows)} rustc targets parsed, all agreeing with rustc --print cfg and --print file-names; ${toString specsKnown} target specs agreeing with --print all-target-specs-json" > $out
     '';
 
   # The default Linux linker kind (lib/presets/linker.nix, `rustcPicksLld`)

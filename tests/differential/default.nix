@@ -108,9 +108,6 @@ let
               breakbulk.toolchainFacts.capabilitiesFile
                 (breakbulk.toolchainFacts.of { inherit pkgs rustc cargo; }).capabilities
             } \
-            --target-traits ${
-              breakbulk.targetTraits.forRustFile (breakbulk.targetTraits.resolve { triple = target; })
-            } \
             --forbid $NIX_BUILD_TOP --forbid $HOME \
             --out $out/plan-$kind.json
         done

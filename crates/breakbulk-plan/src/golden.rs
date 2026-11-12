@@ -268,11 +268,6 @@ struct Real<'a> {
 
 impl Resolve for Real<'_> {
     type Error = String;
-    /// Golden comparisons diff argv and env, never a unit's outputs, so the
-    /// `debug` output the traits decide does not matter here.
-    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
-        breakbulk_format::TargetTraits::NONE
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         let join = |base: &str, rel: &str| {
             if rel.is_empty() {
@@ -987,7 +982,8 @@ mod tests {
             "host": "h", "target": "t",
             "variant": { "profile": "dev", "features": [], "mode": "build" },
             "skeletonRoot": "/build/skeleton", "trimPaths": true, "trimPathsDefault": true,
-            "units": {}, "roots": []
+            "units": {}, "roots": [],
+            "targetDebuginfo": { "splitDefault": "off", "artifacts": [] }
         }))
         .unwrap();
         let t = Path::new("/tmp/t");

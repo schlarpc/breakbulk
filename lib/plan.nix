@@ -20,7 +20,6 @@
 #     configs = [ ];         # extra --config files or values (toolchain spec)
 #     cargoConfig = null;    # the variant's Cargo config file (TOML), or null
 #     capabilities = null;   # the toolchain's capabilities (null: toolchainFacts')
-#     traits = <built-in>;   # the target's traits (lib/target-traits.nix)
 #     trimPaths = "auto";    # Cargo's trim-paths: "auto", "on" or "off"
 #   };
 #   "${plan}/plan.json"
@@ -34,7 +33,6 @@
 {
   lib,
   toolchainFacts,
-  targetTraits,
 }:
 {
   mkPlan =
@@ -74,9 +72,6 @@
       # Cargo's trim-paths: "auto" (on when the toolchain
       # has it, unless the project declares it), "on" or "off".
       trimPaths ? "auto",
-      # The target's traits (`targetTraits.resolve`): the executable
-      # suffix of the names bins are stored under.
-      traits ? targetTraits.resolve { triple = target; },
     }:
     let
       caps =
@@ -109,8 +104,6 @@
         "${vendor.dir}"
         "--capabilities"
         (toolchainFacts.capabilitiesFile caps)
-        "--target-traits"
-        (targetTraits.forRustFile traits)
       ]
       ++ lib.optional (kind == "doc" && noDeps) "--no-deps"
       ++ lib.optionals (mode != "build") [

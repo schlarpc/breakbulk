@@ -1011,6 +1011,38 @@ in
         grep -qF 'package.forced-target' $failure/testBuildFailure.log
         touch $out
       '';
+    # A custom target (a `.json` spec, here x86_64 Linux with an `.elf`
+    # executable suffix and only packed split debuginfo) and no traits:
+    # the plan takes the bin's stored name and the debuginfo side files
+    # from the spec, as the planner's rustc reads it. Planning only; the
+    # spec has no standard library to build against.
+    custom-target-plan =
+      let
+        board = mk "walking-skeleton" {
+          inherit toolchain;
+          target = "${./my-board.json}";
+          configs = [
+            "unstable.json-target-spec=true"
+            "build.rustflags=[\"-Zunstable-options\"]"
+          ];
+        };
+        p = readPlan board "build";
+        bins = lib.concatMap (u: lib.attrNames (u.uplifted or { })) (lib.attrValues p.units);
+        expected = {
+          splitDefault = "off";
+          artifacts = [
+            {
+              suffix = ".dwp";
+              when = "split-packed";
+            }
+          ];
+        };
+      in
+      assert lib.assertMsg (
+        p.targetDebuginfo == expected
+      ) "custom-target-plan: targetDebuginfo is ${builtins.toJSON p.targetDebuginfo}";
+      assert lib.assertMsg (bins == [ "walking-skeleton.elf" ]) "custom-target-plan: stored bins ${builtins.toJSON bins}";
+      pkgs.runCommand "custom-target-plan-check" { } "touch $out";
     walking-skeleton-nightly =
       pkgs.runCommand "walking-skeleton-nightly-check"
         {

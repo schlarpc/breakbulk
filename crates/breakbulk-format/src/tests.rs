@@ -18,6 +18,7 @@ fn example_json() -> String {
   "target": "wasm32-unknown-unknown",
   "variant": {{ "profile": "release", "features": ["b", "a"], "mode": "build" }},
   "skeletonRoot": "/build/skeleton", "trimPaths": false,
+  "targetDebuginfo": {{ "splitDefault": "off", "artifacts": [] }},
   "units": {{
     "c-ring": {{
       "kind": "compile",
@@ -534,9 +535,6 @@ struct Fake;
 
 impl Resolve for Fake {
     type Error = String;
-    fn target_traits(&self) -> &TargetTraits {
-        TargetTraits::NONE
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Ok(match r {
             Reference::Src(s) => format!("/nix/store/src-app/{}", s.rel),
@@ -574,9 +572,6 @@ struct Configured;
 
 impl Resolve for Configured {
     type Error = String;
-    fn target_traits(&self) -> &TargetTraits {
-        TargetTraits::NONE
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
     }
@@ -760,9 +755,6 @@ struct Keep;
 
 impl Resolve for Keep {
     type Error = String;
-    fn target_traits(&self) -> &TargetTraits {
-        TargetTraits::NONE
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
     }
@@ -920,9 +912,6 @@ struct Weak;
 
 impl Resolve for Weak {
     type Error = String;
-    fn target_traits(&self) -> &TargetTraits {
-        TargetTraits::NONE
-    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Fake.reference(r)
     }
@@ -1389,14 +1378,15 @@ fn debuginfo_side_files() {
     let bin = ["bin".to_owned()];
     let lib = ["lib".to_owned()];
     let staticlib = ["staticlib".to_owned()];
-    let msvc = &msvc_traits();
-    let other = &elf_traits();
-    let wt = |args: &[&str], types: &[String], t: &TargetTraits| {
+    let msvc = &msvc_debuginfo();
+    let other = &elf_debuginfo();
+    let wt = |args: &[&str], types: &[String], t: &TargetDebuginfo| {
         writes_debuginfo_side_files(args.iter().map(|a| Some(*a)), types, t)
     };
     let w = |args: &[&str], types: &[String]| wt(args, types, other);
     // msvc (the linker always writes a PDB): one for every linked crate,
-    // debuginfo or not. The traits decide, not the `--target` spelling.
+    // debuginfo or not. The target spec decides, not the `--target`
+    // spelling.
     let target = ["--target", "x86_64-pc-windows-msvc"];
     assert!(wt(&[], &bin, msvc));
     assert!(wt(&["-C", "strip=debuginfo"], &bin, msvc));
@@ -1464,15 +1454,15 @@ fn debuginfo_side_files() {
     // A target with no debug artifacts (wasm) never, whatever the flags;
     // one with only a packed artifact not for unpacked.
     let split = ["-C", "debuginfo=2", "-C", "split-debuginfo=packed"];
-    assert!(!wt(&split, &bin, TargetTraits::NONE));
-    let packed_only = TargetTraits {
-        debug_artifacts: vec![DebugArtifact {
+    assert!(!wt(&split, &bin, &TargetDebuginfo::default()));
+    let mut packed_only = TargetDebuginfo {
+        split_default: SplitDebuginfo::Off,
+        artifacts: vec![DebugArtifact {
             suffix: ".dSYM".into(),
             when: DebugArtifactWhen::SplitPacked,
             per_object: false,
             directory: true,
         }],
-        executable_suffix: String::new(),
     };
     assert!(wt(&split, &bin, &packed_only));
     assert!(!wt(
@@ -1480,20 +1470,32 @@ fn debuginfo_side_files() {
         &bin,
         &packed_only
     ));
+    // Without `-C split-debuginfo`, the target's default applies (Apple
+    // targets: packed).
+    assert!(!wt(&["-C", "debuginfo=2"], &bin, &packed_only));
+    packed_only.split_default = SplitDebuginfo::Packed;
+    assert!(wt(&["-C", "debuginfo=2"], &bin, &packed_only));
+    assert!(!wt(&["-C", "debuginfo=0"], &bin, &packed_only));
+    assert!(!wt(
+        &["-C", "debuginfo=2", "-C", "split-debuginfo=off"],
+        &bin,
+        &packed_only
+    ));
 }
 
-/// The traits of an ELF target (lib/target-traits.nix `forRust`).
-fn elf_traits() -> TargetTraits {
+/// The debuginfo of an ELF target that supports split debuginfo, as
+/// `plan.json` carries it.
+fn elf_debuginfo() -> TargetDebuginfo {
     serde_json::from_str(
-        r#"{"debugArtifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}],"executableSuffix":""}"#,
+        r#"{"splitDefault":"off","artifacts":[{"suffix":".dwp","when":"split-packed"},{"suffix":".dwo","when":"split-unpacked","perObject":true}]}"#,
     )
     .unwrap()
 }
 
-/// The traits of an msvc target.
-fn msvc_traits() -> TargetTraits {
+/// The debuginfo of an msvc target.
+fn msvc_debuginfo() -> TargetDebuginfo {
     serde_json::from_str(
-        r#"{"debugArtifacts":[{"suffix":".pdb","when":"always"}],"executableSuffix":".exe"}"#,
+        r#"{"splitDefault":"packed","artifacts":[{"suffix":".pdb","when":"always"}]}"#,
     )
     .unwrap()
 }
@@ -1507,7 +1509,7 @@ fn debug_output_only_where_side_files() {
     };
     let mut p = example();
     // c-app: a target bin with no debuginfo flags.
-    let elf = &elf_traits();
+    let elf = &elf_debuginfo();
     assert!(!compile(&mut p, "c-app").has_debug_output(elf));
     compile(&mut p, "c-app").args.extend(lit(&[
         "-C",
@@ -1517,7 +1519,7 @@ fn debug_output_only_where_side_files() {
     ]));
     assert!(compile(&mut p, "c-app").has_debug_output(elf));
     // Host units never: their side files are discarded.
-    let msvc = &msvc_traits();
+    let msvc = &msvc_debuginfo();
     assert!(compile(&mut p, "c-app").has_debug_output(msvc));
     let c = compile(&mut p, "c-ring-build");
     assert!(!c.has_debug_output(msvc));
@@ -1546,8 +1548,12 @@ fn per_object_debug_files_only_with_unpacked() {
             .map(|s| Arg::Literal((*s).into()))
             .collect::<Vec<_>>()
     };
-    let (elf, msvc) = (&elf_traits(), &msvc_traits());
-    let below = |p: &Plan, traits| crate::deps::debug_units_below(p, &"c-ring".into(), traits);
+    let (elf, msvc) = (&elf_debuginfo(), &msvc_debuginfo());
+    let below = |p: &Plan, d: &TargetDebuginfo| {
+        let mut p = p.clone();
+        p.target_debuginfo = d.clone();
+        crate::deps::debug_units_below(&p, &"c-ring".into())
+    };
     let mut p = example();
     // A library that also links a cdylib: a `debug` output for its `.dwp`
     // (packed) or `.pdb` (msvc), neither of them per-object, so not a

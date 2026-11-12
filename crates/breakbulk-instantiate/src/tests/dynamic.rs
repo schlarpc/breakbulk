@@ -238,7 +238,7 @@ fn units_output_depends_on_every_unit_output() {
         .unwrap();
     assert_eq!(u.name, "ws-x86_64-unknown-linux-gnu-dev-units");
     for (id, unit) in &inputs.plan.units {
-        for o in unit_outputs(unit, &inputs.toolchains.target_traits) {
+        for o in unit_outputs(unit, &inputs.plan.target_debuginfo) {
             assert!(u.input_drvs[&drv_of(id)].contains(&o), "{id} {o}");
             assert!(u.env["units"].contains(&unit_path(id, &o)));
         }

@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
+Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 
 ## Summary
 
@@ -92,6 +92,7 @@ Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 | [G1](#g1-target-trait-base-fields-are-rustcs-cfg) | Target-trait base fields are rustc's cfg | yes |
 | [G2](#g2-file-name-traits-are-rustcs-target-spec) | File-name traits are rustc's target spec | yes |
 | [G3](#g3-the-dynamic-library-variable-per-os) | The dynamic-library variable per OS | yes (Linux) |
+| [G4](#g4-object-format-and-linker-traits-are-rustcs-target-spec) | Object format and linker traits are rustc's target spec | yes |
 | [F1](#f1-cargolock-layout) | `Cargo.lock` layout | yes |
 | [F2](#f2-package-id-spelling) | Package id spelling | yes |
 | [F3](#f3-directory-sources-and-source-replacement) | Directory sources and source replacement | yes |
@@ -566,11 +567,11 @@ Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 
 ### X2. Which debuginfo side files a link writes
 
-- **Assumption.** On `*-windows-msvc` rustc passes `/DEBUG` to the linker for every linked crate whatever `-C debuginfo` and `-C strip` say, so a `.pdb` is always written; on ELF, with debuginfo on, `-C split-debuginfo=packed` writes one `.dwp` per linked output and `unpacked` one `.dwo` per object, for an rlib too (with `packed` an rlib keeps its DWARF objects inside); the last `-C debuginfo` wins and `-g` means full; Cargo passes `-C split-debuginfo` only with `-C debuginfo`, and tolerates the side files' absence during the trace. (Apple's `.dSYM` is unverified; Darwin is not supported yet, #13.)
-- **Where.** `crates/breakbulk-format/src/plan.rs`: `writes_debuginfo_side_files`, `DebugArtifactWhen`; `lib/target-traits.nix`: `debugArtifacts`; `crates/breakbulk-unit/src/compile.rs`: `DEBUG_SIDE_FILES`, `collect_outputs`.
-- **Upstream.** rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo` (1.95 through master); rustc_session `config.rs`, `select_debuginfo`; cargo `src/compiler/mod.rs`, `build_base_args`; spike A, surprise S9.
+- **Assumption.** On `*-windows-msvc` rustc passes `/DEBUG` to the linker for every linked crate whatever `-C debuginfo` and `-C strip` say, so a `.pdb` is always written (UEFI's MSVC-style link too); on an ELF target whose rustc spec supports split debuginfo (`supported-split-debuginfo`), with debuginfo on, `-C split-debuginfo=packed` writes one `.dwp` per linked output and `unpacked` one `.dwo` per object, for an rlib too (with `packed` an rlib keeps its DWARF objects inside); the last `-C debuginfo` wins and `-g` means full; Cargo passes `-C split-debuginfo` only with `-C debuginfo`, and tolerates the side files' absence during the trace. (Apple's `.dSYM` is unverified; Darwin is not supported yet, #13.)
+- **Where.** `crates/breakbulk-plan/src/target_spec.rs`: `debuginfo` (which artifacts a target's spec implies); `crates/breakbulk-format/src/plan.rs`: `writes_debuginfo_side_files`, `DebugArtifactWhen`; `lib/target-traits.nix`: `debugArtifacts` (install's side-file globs); `crates/breakbulk-unit/src/compile.rs`: `DEBUG_SIDE_FILES`, `collect_outputs`.
+- **Upstream.** rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo` (1.95 through master), `back/link.rs`, `link_natively` (dsymutil, thorin) and `preserve_objects_for_their_debuginfo`; rustc_session `session.rs`, `split_debuginfo` (the target's default) and the `SplitDebugInfoUnstablePlatform` check; rustc_session `config.rs`, `select_debuginfo`; rustc_target `spec/json.rs`, `Target::to_json` (only non-default options printed); cargo `src/compiler/mod.rs`, `build_base_args`; spike A, surprise S9.
 - **Holds for.** 1.99 (msvc, ELF); the window for the trace.
-- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product), `products-cdylib-debug-packed`, `products-cdylib-debug-unpacked` (only those reach it, not a cdylib dependency's own `.dwp`). Rust: `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files`, `tests::per_object_debug_files_only_with_unpacked` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
+- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product), `products-cdylib-debug-packed`, `products-cdylib-debug-unpacked` (only those reach it, not a cdylib dependency's own `.dwp`). `target-traits-rustc` (the traits' `debugArtifacts` against the same reading of `--print all-target-specs-json`). Rust: `target_spec::tests::built_in_targets` (plan), `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files`, `tests::per_object_debug_files_only_with_unpacked` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
 - **If it changes.** A unit without a `debug` output discards side files with a warning, or one with it has an empty output; the checks fail.
 
 ### X3. Names of uplifted side files
@@ -733,7 +734,7 @@ Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 ### G2. File-name traits are rustc's target spec
 
 - **Assumption.** `executableSuffix`, `sharedLibraryPrefix`/`Suffix` and `staticLibraryPrefix`/`Suffix` equal rustc's target-spec `exe_suffix`, `dll_prefix`/`dll_suffix` and `staticlib_prefix`/`staticlib_suffix`.
-- **Where.** `lib/target-traits.nix`: derived fields; used by `install`, test binary names.
+- **Where.** `lib/target-traits.nix`: derived fields; used by `install`'s globs and the root file names of `mkProducts`. The planner takes the executable suffix from its rustc's target spec, and the installed executables (`packages`, `tests`, `benches`) from their own file names.
 - **Upstream.** `rustc --print file-names --crate-type <t> --target <t>`.
 - **Holds for.** nixpkgs rustc 1.99, all 248 known targets.
 - **Pinned by.** `target-traits-rustc`.
@@ -747,6 +748,15 @@ Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 - **Holds for.** Linux, by check. Windows targets always run under wine, whose variable (`WINEPATH`) the runner declares; Apple is not supported yet (#13).
 - **Pinned by.** `test-runs-test-control`, `test-runs-dylib-rule` (Linux); `windows-dll-test`, `windows-dll-needs-dll` (the runner's own variable).
 - **If it changes.** Tests cannot load their build scripts' libraries.
+
+### G4. Object format and linker traits are rustc's target spec
+
+- **Assumption.** `objectFormat` is the spec's `binary-format` (`coff` as `pe`, `mach-o` as `macho`; `wasm` for every `is-like-wasm` target, whose `binary-format` may say `elf`, as WALI's does); `isApple` is `is-like-darwin`; `isWasm` is `is-like-wasm`; `isMsvc` or `isUefi` holds exactly where the `linker-flavor` is `msvc` or `msvc-lld`; `debugArtifacts` is what the planner reads from the spec (X2).
+- **Where.** `lib/target-traits.nix`: derived fields; read at evaluation time by the presets, the linker and runner choice, and the debug stages.
+- **Upstream.** `rustc -Z unstable-options --print all-target-specs-json` (with `RUSTC_BOOTSTRAP=1`); rustc_target `spec/json.rs` prints only non-default options.
+- **Holds for.** nixpkgs rustc 1.99, 255 known targets.
+- **Pinned by.** `target-traits-rustc`.
+- **If it changes.** A preset, linker or debug stage is chosen for the wrong platform; the check fails on the next rustc bump.
 
 ### L11. Where rustc links with its bundled lld
 

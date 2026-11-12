@@ -8,6 +8,13 @@
   "variant": { "profile": "dev", "features": [], "mode": "build" },
   "skeletonRoot": "/build/skeleton",
   "trimPaths": false,
+  "targetDebuginfo": {
+    "splitDefault": "off",
+    "artifacts": [
+      { "suffix": ".dwp", "when": "split-packed" },
+      { "suffix": ".dwo", "when": "split-unpacked", "perObject": true }
+    ]
+  },
   "units": {
     "c-138fecd4c9176bd0": {
       "kind": "compile",

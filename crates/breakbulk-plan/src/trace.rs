@@ -94,10 +94,6 @@ pub struct Options {
     /// `toolchainFacts`). Planning needs it; the dev shell's
     /// `--cargo-env-only` does not.
     pub capabilities: Option<breakbulk_format::Capabilities>,
-    /// The target's traits (`--target-traits`, the Nix library's
-    /// `targetTraits.forRust`): the executable suffix of the names bins
-    /// are stored under. Planning needs them.
-    pub target_traits: Option<breakbulk_format::TargetTraits>,
 }
 
 /// What one trace produced.
@@ -109,6 +105,8 @@ pub struct Trace {
     pub host: String,
     /// [`breakbulk_format::plan::Plan::rust_src_remap`].
     pub rust_src_remap: Option<(String, String)>,
+    /// The target's spec, as rustc reads it.
+    pub target_spec: crate::target_spec::TargetSpec,
 }
 
 impl Trace {
@@ -130,14 +128,8 @@ impl Trace {
             rustdoc: opts.rustdoc.clone(),
             cargo: opts.cargo.clone(),
             nightly: capabilities(opts)?.nightly,
-            executable_suffix: opts
-                .target_traits
-                .as_ref()
-                .ok_or_else(|| {
-                    Error("planning needs the target's traits (--target-traits)".into())
-                })?
-                .executable_suffix
-                .clone(),
+            executable_suffix: self.target_spec.exe_suffix.clone(),
+            target_debuginfo: self.target_spec.debuginfo.clone(),
             keep_workspace_wrapper: runs_clippy(opts),
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
@@ -462,6 +454,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .map(|h| h.trim().to_owned())
         .ok_or_else(|| Error("`rustc -vV` names no host".into()))?;
     let rust_src_remap = rust_src_remap(opts, &rustc_vv)?;
+    let target_spec = target_spec(opts)?;
 
     let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
     // Plain `cargo test`, not `cargo test --no-run` and then `cargo test
@@ -607,7 +600,32 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         rustc_version,
         host,
         rust_src_remap,
+        target_spec,
     })
+}
+
+/// The target's spec (`rustc --print target-spec-json`), asked where
+/// Cargo runs, so that a custom target's relative `.json` path names the
+/// same file. The print is unstable, so this one command gets
+/// `RUSTC_BOOTSTRAP=1`; Cargo's processes do not, as build scripts would
+/// see it and the units would record it.
+fn target_spec(opts: &Options) -> Result<crate::target_spec::TargetSpec, Error> {
+    let json = output(
+        {
+            let mut c = command(opts, &opts.rustc);
+            c.env("RUSTC_BOOTSTRAP", "1").args([
+                "-Z",
+                "unstable-options",
+                "--print",
+                "target-spec-json",
+                "--target",
+                &opts.target,
+            ]);
+            c
+        },
+        "rustc --print target-spec-json",
+    )?;
+    crate::target_spec::TargetSpec::from_json(&json)
 }
 
 /// The toolchain's capabilities, which planning needs.
@@ -639,9 +657,11 @@ pub fn with_trim_paths(opts: &Options) -> Options {
 /// (the shim's `TEST_RUNNER`).
 const TEST_RUNNER: &str = "breakbulk-test-runner";
 
-/// The `target.<key>` table Cargo reads a target's configuration from: a
-/// JSON target spec's file stem (cargo `CompileTarget::short_name`).
-fn target_config_key(target: &str) -> &str {
+/// Cargo's short name for a target (cargo `CompileTarget::short_name`): the
+/// key of the `target.<key>` table it reads the target's configuration from,
+/// and the name of its directory in the target directory. For a
+/// JSON target spec, the file's stem.
+pub fn target_config_key(target: &str) -> &str {
     match target.strip_suffix(".json") {
         Some(path) => path.rsplit('/').next().unwrap_or(path),
         None => target,

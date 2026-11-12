@@ -39,8 +39,10 @@ pub struct Context {
     pub cargo: String,
     /// Cargo's `nightly_features_allowed`.
     pub nightly: bool,
-    /// The target's executable suffix (its traits' `executableSuffix`).
+    /// The target's executable suffix (its spec's `exe-suffix`).
     pub executable_suffix: String,
+    /// [`Plan::target_debuginfo`].
+    pub target_debuginfo: breakbulk_format::TargetDebuginfo,
     /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
     pub keep_workspace_wrapper: bool,
     /// The variables the project's `[env]` table sets on Cargo's
@@ -569,9 +571,13 @@ impl<'a> Builder<'a> {
         )
     }
 
+    /// Target units are those under the target's directory, which Cargo
+    /// names by the target's short name (a `.json` spec's stem).
     fn platform_of(&self, path: &str) -> Platform {
         match under(path, &self.ctx.scratch).and_then(|r| r.split('/').next()) {
-            Some(first) if first == self.ctx.target => Platform::Target,
+            Some(first) if first == crate::trace::target_config_key(&self.ctx.target) => {
+                Platform::Target
+            }
             _ => Platform::Host,
         }
     }
@@ -637,9 +643,9 @@ impl<'a> Builder<'a> {
     /// `CompilationFiles::uplift_to`): a bin, or an example, built as
     /// itself rather than as a test, for the target. Returns rustc's file
     /// name, `<crate name><-C extra-filename><suffix>`, and the uplifted
-    /// one, `<target name><suffix>`, which the unit stores it under. Cargo
-    /// takes the suffix from rustc; here it is the traits', and the two
-    /// must agree, as `install` places files by the traits' names.
+    /// one, `<target name><suffix>`, which the unit stores it under. The
+    /// suffix is the target spec's `exe-suffix`, which Cargo takes from
+    /// rustc too (`--print file-names`).
     fn uplift(&self, c: &CompileRec<'a>) -> Result<Option<(String, String)>, Error> {
         if c.test || c.platform != Platform::Target || c.types != ["bin"] {
             return Ok(None);
@@ -664,11 +670,9 @@ impl<'a> Builder<'a> {
         if rustc != expected {
             bail!(
                 "{}: rustc names `{}`'s executable `{rustc}`, not `{expected}` with the \
-                 executable suffix `{suffix}` of {}'s traits; if the traits are wrong, \
-                 correct `targets.\"{}\".traits.executableSuffix`",
+                 executable suffix `{suffix}` of {}'s target spec",
                 describe_compile(c),
                 t.name,
-                self.ctx.target,
                 self.ctx.target
             );
         }
@@ -1855,6 +1859,7 @@ impl<'a> Builder<'a> {
             } else {
                 BTreeMap::new()
             },
+            target_debuginfo: self.ctx.target_debuginfo.clone(),
         };
         plan.normalize();
         Ok(plan)
@@ -1990,6 +1995,7 @@ mod error_tests {
             cargo: "cargo".into(),
             nightly: false,
             executable_suffix: String::new(),
+            target_debuginfo: Default::default(),
             keep_workspace_wrapper: false,
             config_env: BTreeSet::new(),
             rust_src_remap: None,

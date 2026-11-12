@@ -109,6 +109,17 @@ Checked end to end with fenix's stable `rustc` and `cargo` (1.99.1), its stable 
 
 The planner receives them as `--capabilities <file>` (`trimPaths`: whether Cargo can take trim-paths at all, see [trim-paths](#trim-paths); `nightly`: the plan's `nightlyFeaturesAllowed` for build-script runs) and breakbulk-instantiate as `toolchains.json`'s `capabilities` (`remapPathScope`: whether shipped units get a scope); both parse breakbulk-format's `Capabilities`, every field required. No Rust program reads a Rust or Cargo version to decide a feature. The dev shell's trim-paths export reads the same `trimPaths` (`breakbulk-plan --cargo-env-only --capabilities <file>`). `breakbulk-unit` keeps its own check of a package's `rust-version` against 1.77 (the `cargo::` syntax): that is the package's declared version, not the toolchain's.
 
+## Target facts from rustc
+
+The planner runs the real rustc for the target already, so it takes from rustc the target facts that matter only at plan or build time, rather than from the [target traits](toolchains.md#target-traits). It runs `rustc -Z unstable-options --print target-spec-json --target <t>` once, in the directory it runs Cargo in, so a custom target's relative `.json` path names the same file. The print is unstable, so that one command gets `RUSTC_BOOTSTRAP=1`; Cargo and the build scripts it starts do not, because the scripts would see the variable and the units would record it.
+
+A key the spec leaves out has rustc's default: rustc writes only the options that differ from `TargetOptions::default()` (rustc_target `spec/json.rs`, `Target::to_json`). From the spec the planner takes:
+
+- `exe-suffix`: the suffix of the name a bin or example is stored under (its target name and the suffix, as Cargo uplifts it). Cargo takes the same suffix from rustc's `--print file-names`. The planner fails when rustc's file name for the bin is not `<crate name><-C extra-filename><suffix>`.
+- The plan's `targetDebuginfo` ([Plan format](../../reference/plan-format.md)): the target's default `split-debuginfo`, and the side files its links write, as rustc_codegen_ssa `back/link.rs` writes them. An MSVC-style linker (`linker-flavor` `msvc` or `msvc-lld`) always writes a `.pdb` (`back/linker.rs`, `MsvcLinker::debuginfo`). With `packed` split debuginfo, a Darwin-like target (`is-like-darwin`) gets a `.dSYM` from dsymutil, a Windows-like one nothing more, and any other a `.dwp` from thorin. With `unpacked`, a target whose `debuginfo-kind` is `dwarf` keeps a `.dwo` per object. Only the kinds in `supported-split-debuginfo` count, because stable rustc rejects the others (rustc_session `session.rs`, `SplitDebugInfoUnstablePlatform`).
+
+So a custom target gets the right `debug` outputs from its own spec, with no `traits` declared for them. The evaluation-time choices (presets, linker, stages) still read the traits, which must not need a build to evaluate.
+
 ## Fixed skeleton location
 
 Cargo hashes the absolute path of a path crate that lies outside the workspace root into its `-C metadata`, unless `trim-paths` is in effect. The planner therefore places the skeleton at one canonical absolute path inside the sandbox and records it in the plan header. When a workspace has path dependencies outside its root, `trim-paths` is not in effect after the planner's second trace, and the canonical path is not available (non-default `sandbox-build-dir`, an unsandboxed build, macOS), planning fails with a message naming the crates affected. Otherwise the location does not matter and no check is made.

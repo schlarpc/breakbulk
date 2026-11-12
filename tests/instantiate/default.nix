@@ -117,9 +117,6 @@ let
     host.envCapture = smoke.capture;
     target.envCapture = smoke.capture;
     roots = predicted;
-    targetTraits = breakbulk.targetTraits.forRust (
-      breakbulk.targetTraits.resolve { triple = "x86_64-unknown-linux-gnu"; }
-    );
     # No `--remap-path-scope`, as in unit-smoke's direct rendering, which
     # gives no unit a scope (host units would otherwise get one).
     capabilities =

@@ -22,7 +22,7 @@ use breakbulk_format::rendered::{
 };
 use breakbulk_format::{
     CompileUnit, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind, SrcRef,
-    TargetTraits, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs, render_doctest,
+    TargetDebuginfo, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs, render_doctest,
     render_unit_in, to_canonical_json, unit_env_value, validate,
 };
 
@@ -308,10 +308,6 @@ pub fn workspace_dir<'p>(plan: &Plan, id: &'p str) -> Option<&'p str> {
 
 impl Resolve for Tokens<'_> {
     type Error = Error;
-
-    fn target_traits(&self) -> &breakbulk_format::TargetTraits {
-        &self.inputs.toolchains.target_traits
-    }
 
     fn reference(&self, r: &Reference) -> Result<String, Error> {
         let (base, rel) = match r {
@@ -622,9 +618,9 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
 }
 
 /// A unit derivation's outputs: sorted, then `debug` last, so that it is
-/// never the default (first) output. `traits` are the target's
-/// (`toolchains.json`'s `targetTraits`).
-pub fn unit_outputs(unit: &Unit, traits: &TargetTraits) -> Vec<String> {
+/// never the default (first) output. `debuginfo` is the plan's
+/// ([`Plan::target_debuginfo`]).
+pub fn unit_outputs(unit: &Unit, debuginfo: &TargetDebuginfo) -> Vec<String> {
     match unit {
         Unit::Compile(c) => c
             .outputs
@@ -632,7 +628,10 @@ pub fn unit_outputs(unit: &Unit, traits: &TargetTraits) -> Vec<String> {
             .map(|o| derivation_output(o).to_owned())
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .chain(c.has_debug_output(traits).then(|| DEBUG_OUTPUT.to_owned()))
+            .chain(
+                c.has_debug_output(debuginfo)
+                    .then(|| DEBUG_OUTPUT.to_owned()),
+            )
             .collect(),
         Unit::Run(_) => vec!["flags".into(), "out".into()],
     }
@@ -671,7 +670,7 @@ fn instantiate_unit(
     );
     attrs.insert(
         "outputs".into(),
-        Value::Strings(unit_outputs(unit, &inputs.toolchains.target_traits)),
+        Value::Strings(unit_outputs(unit, &inputs.plan.target_debuginfo)),
     );
     attrs.insert(
         "BREAKBULK_UNIT".into(),
@@ -793,11 +792,11 @@ fn plan_root_key(r: &Root) -> RootKey {
     (package, r.kind, r.target.clone(), r.test)
 }
 
-fn root_output(plan: &Plan, r: &Root, traits: &TargetTraits) -> Result<String, Error> {
+fn root_output(plan: &Plan, r: &Root) -> Result<String, Error> {
     let Some(unit) = plan.units.get(&r.unit) else {
         return err(format!("root {} names unknown unit {}", r.target, r.unit));
     };
-    let outs = unit_outputs(unit, traits);
+    let outs = unit_outputs(unit, &plan.target_debuginfo);
     outs.iter()
         .find(|o| *o == "out")
         .or(outs.first())
@@ -927,7 +926,7 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
             platform: platform(unit),
             what: RootWhat::Unit {
                 unit: r.unit.clone(),
-                output: root_output(plan, r, &inputs.toolchains.target_traits)?,
+                output: root_output(plan, r)?,
             },
             test_spec,
             build_script_runs: if key.3 {
@@ -940,13 +939,9 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
             debug_units: if key.3 {
                 Vec::new()
             } else {
-                breakbulk_format::deps::debug_units_below(
-                    plan,
-                    &r.unit,
-                    &inputs.toolchains.target_traits,
-                )
-                .into_iter()
-                .collect()
+                breakbulk_format::deps::debug_units_below(plan, &r.unit)
+                    .into_iter()
+                    .collect()
             },
         })
     };

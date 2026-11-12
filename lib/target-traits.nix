@@ -13,7 +13,9 @@
 # `target_family`), plus `arch`, the triple's first component (not
 # `target_arch`: `i686` and `armv7` stay as spelled, because tool and SDK
 # names use that spelling). A test checks it against
-# `rustc --print cfg --target <t>` for every built-in target
+# `rustc --print cfg --target <t>`, and the derived fields rustc's
+# target specs also state against `--print file-names` and
+# `--print all-target-specs-json`, for every built-in target
 # (`target-traits-rustc` in tests/nix). It returns null for a name it does
 # not know (a custom target, a `.json` target spec, a target outside the
 # OS table below).
@@ -42,7 +44,9 @@
 #                          for (issue #27)
 #   isWindows isMsvc isMingw          os windows; env msvc; env gnu
 #   isApple isWasm isWasi isBareMetal isUefi
-#   objectFormat           "elf" | "pe" | "macho" | "wasm"
+#   objectFormat           "elf" | "pe" | "macho" | "wasm" | "xcoff" (AIX):
+#                          rustc's target-spec `binary-format` ("wasm"
+#                          for every wasm architecture)
 #   executableSuffix       rustc's target-spec `exe_suffix`: "" | ".exe" |
 #                          ".efi" | ".wasm" | ".js" | ".ptx" | ".elf" (avr)
 #   sharedLibraryPrefix sharedLibrarySuffix   `dll_prefix`, `dll_suffix`
@@ -71,9 +75,12 @@
 #                          debuginfo on and that -C split-debuginfo).
 #                          `perObject`: one per object file (`.dwo`), not
 #                          per output; `directory`: a directory (`.dSYM`).
-#                          breakbulk-format's `writes_debuginfo_side_files`
-#                          evaluates `when` against the traced flags to
-#                          decide whether a unit gets a `debug` output
+#                          `install` places side files by it. Whether a
+#                          unit gets a `debug` output is not decided from
+#                          it: the planner reads the same list from its
+#                          rustc's target spec into the plan
+#                          (`targetDebuginfo`), so a custom target needs
+#                          no traits for it
 #   dylibPathVar dylibPathSep         the variable a process of this
 #                          platform finds shared libraries through, run
 #                          natively (Cargo's `dylib_path_envvar`): PATH on
@@ -359,8 +366,19 @@ let
           "pe"
         else if isWasm then
           "wasm"
+        else if b.os == "aix" then
+          "xcoff"
         else
           "elf";
+      # rustc's specs allow `-C split-debuginfo` other than off
+      # (`supported-split-debuginfo`) on Linux-kernel userlands
+      # (rustc_target spec/base/linux.rs), except the riscv ones, which
+      # override it, and unikraft's and WALI's, whose bases are their own.
+      splitsDebuginfo =
+        (b.os == "linux" || b.os == "android")
+        && !isWasm
+        && !hasPrefix "riscv" b.arch
+        && b.vendor != "unikraft";
     in
     b
     // {
@@ -443,7 +461,7 @@ let
               when = "always";
             }
           ]
-        else if objectFormat == "macho" then
+        else if isApple then
           # From rustc's dsymutil run with split-debuginfo=packed. Not
           # verified: breakbulk has no Darwin builders yet.
           [
@@ -453,7 +471,7 @@ let
               directory = true;
             }
           ]
-        else if objectFormat == "elf" then
+        else if splitsDebuginfo then
           [
             # packed: one per linked output (rustc runs thorin).
             {
@@ -557,11 +575,6 @@ let
     else
       null;
 
-  # The part of the traits breakbulk's Rust programs read
-  # (`toolchains.json`'s `targetTraits`, breakbulk-plan's
-  # `--target-traits`; breakbulk-format `TargetTraits`), and it as a file.
-  forRust = t: { inherit (t) debugArtifacts executableSuffix; };
-  forRustFile = t: builtins.toFile "breakbulk-target-traits.json" (builtins.toJSON (forRust t));
 in
 {
   inherit
@@ -571,7 +584,5 @@ in
     nativeTriple
     nativeDefaultPreset
     fieldNames
-    forRust
-    forRustFile
     ;
 }

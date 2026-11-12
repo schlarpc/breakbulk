@@ -27,6 +27,7 @@
 #                              e.g. "c/cdylib/c" for a library's cdylib
 #   ws.tests."<pkg>/<kind>/<target>"   test-plan roots
 #   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target><exe suffix>
+#   ws.installExecutable root  a root installed as $out/bin/<target><exe suffix>
 #   ws.plans.{build,test,doc}  the plan derivations ($out/plan.json)
 #   ws.cargoEnv                the dev shell's cargo-env.json (no planning)
 #   ws.units.{build,test,doc}  every unit derivation, by unit id
@@ -327,7 +328,6 @@ let
         allFeatures
         spec
         trimPaths
-        traits
         ;
       packages = if kind == "test" then testSelect else select;
       profile = if kind == "test" && !checking then testProfile else profile;
@@ -527,7 +527,6 @@ let
       overrides = overridesFor kind;
       inherit shippedRemapScope;
       keepSourcePaths = sourcePaths == "keep";
-      targetTraits = targetTraitsLib.forRust traits;
       inherit capabilities;
       roots =
         if checking || kind == "doc" then
@@ -546,16 +545,17 @@ let
   benched = inst "bench";
   documented = inst "doc";
 
-  # Put a root unit's single linked file at $out/<dir>/<name>. Products and
-  # their stages are in lib/repository.nix; this is only enough to run things.
-  # A root's executable name: its target name with the target's executable
-  # suffix (traits.executableSuffix: `.exe` on Windows, `.wasm` for wasm), as
-  # Cargo uplifts it.
-  exeName = r: "${r.breakbulkRoot.target}${traits.executableSuffix}";
-
-  install =
-    dir: fileName: r:
-    pkgs.runCommand fileName { } ''
+  # Put a root unit's single linked file at $out/bin/<target name><suffix>,
+  # as Cargo uplifts an executable. Products and their stages are in
+  # lib/repository.nix; this is only enough to run things. The suffix
+  # (`.exe`, `.wasm`) is the file's own: everything from its first `.`,
+  # since rustc's names (`<crate name>-<hash><suffix>`, a bin's
+  # `<target name><suffix>`) have none before it (rustc takes only
+  # alphanumerics and `_` in a crate name, and Cargo's crate name is the
+  # target name with `-` as `_`).
+  installExecutable =
+    r:
+    pkgs.runCommand r.breakbulkRoot.target { } ''
       ${
         # Dynamic-derivation mode: a test binary Cargo did not build is its
         # stub's output (a file with the reason), as in IFD mode.
@@ -570,7 +570,10 @@ let
         echo "expected one file in ${r}, found: ''${files[*]}" >&2
         exit 1
       fi
-      install -D -m755 "''${files[0]}" $out/${dir}/${fileName}
+      b=''${files[0]##*/}
+      suffix=
+      case "$b" in *.*) suffix=".''${b#*.}" ;; esac
+      install -D -m755 "''${files[0]}" "$out/bin/"${lib.escapeShellArg r.breakbulkRoot.target}"$suffix"
     '';
 
   tr = (if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
@@ -706,7 +709,7 @@ in
         tools = unitTools;
       }).runs;
   packages = lib.mapAttrs' (
-    _: r: lib.nameValuePair r.breakbulkRoot.target (install "bin" (exeName r) r)
+    _: r: lib.nameValuePair r.breakbulkRoot.target (installExecutable r)
   ) bins;
   testRuns = tr.runs;
   testApps = (if isDynamic then dynamic.mkTestApps else testApps.mkTestApps) {
@@ -719,8 +722,9 @@ in
     testRuns = tr;
   };
   inherit (tr) doctests checks;
-  # Test binaries by root name, installed as $out/bin/<target>.
+  # Test binaries by root name, installed as $out/bin/<target><suffix>.
   testBins = lib.mapAttrs (
-    _: r: if r.breakbulkRoot.unit == null then r else install "bin" (exeName r) r
+    _: r: if r.breakbulkRoot.unit == null then r else installExecutable r
   ) tested.roots;
+  inherit installExecutable;
 }

@@ -2427,8 +2427,6 @@ in
                 rustc = rust;
                 cargo = rust;
               }).capabilities
-          }             --target-traits ${
-            breakbulk.targetTraits.forRustFile (breakbulk.targetTraits.resolve { triple = native; })
           }             --scratch $NIX_BUILD_TOP/scratch --forbid $NIX_BUILD_TOP --forbid $HOME             --out $out/plan.json 2> $out/log || true
           cat $out/log
         '';
