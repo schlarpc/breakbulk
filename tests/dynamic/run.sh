@@ -66,6 +66,7 @@ else
     variants-coverage benches stdpaths git-multi-workspace git-revisions
     build-std build-std-deps same-triple static-musl static-glibc
     static-pkgconfig cross-lto cross-lto-off uefi sys-native-aarch64 cross-doctests-aarch64
+    static-glibc-nonpie static-glibc-nonpie-nixpkgs linker-kind-mold
     wasm-browser wasm-component wasip2 riscv64 linux-portable
     windows-gnullvm-aarch64 windows-gnu windows-dll-staged linux-portable-native
     msvc msvc-post-link

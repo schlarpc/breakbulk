@@ -10,7 +10,12 @@
 #                  with an empty environment: the linker found libfoo through
 #                  foo-sys's capture and recorded an rpath to it. app's unit
 #                  test, mid's unit test harness and mid's doctest link and
-#                  pass too. Host units get no target capture.
+#                  pass too. Host units get no target capture. nixpkgs'
+#                  rustc: GNU ld through the wrapped cc.
+#   runs-lld       the same with rust-overlay's rustc 1.99, which links
+#                  x86_64-unknown-linux-gnu with lld: nixpkgs' lld behind
+#                  the cc and its ld-wrapper, which records the rpath (only
+#                  with rust-overlay in `pkgs`, as the flake's checks have).
 #   invalidation   changing foo-sys's input (the library, built with another
 #                  answer) changes foo-sys's own units and those of the
 #                  packages that depend on it (as any change to foo-sys's
@@ -41,8 +46,8 @@ let
       $CC -shared -fPIC -DANSWER=${toString answer} -o $out/lib/libfoo.so ${./foo.c}
     '';
 
-  mkRepo =
-    lib':
+  mkRepoWith =
+    extra: lib':
     breakbulk.mkRepository {
       inherit pkgs tools;
       root = ./fixture;
@@ -55,9 +60,18 @@ let
           };
           packages.foo-sys.inputs = [ lib' ];
         }
+        extra
       ];
     };
+  mkRepo = mkRepoWith { };
   repo = mkRepo (libfoo 42);
+  lldRust = pkgs.rust-bin.stable."1.99.0".minimal;
+  lldRepo = mkRepoWith {
+    workspaces.main.toolchain = {
+      rustc = lldRust;
+      cargo = lldRust;
+    };
+  } (libfoo 42);
   changedRepo = mkRepo (libfoo 43);
   ws = repo.workspaces.main;
   instOf = r: r.workspaces.main.instances.${native}.default;
@@ -100,13 +114,13 @@ let
         )
       )
     );
-in
-{
-  inherit repo;
 
-  runs =
+  # `comment`: a shell test on the bin's `.comment` (comment.txt).
+  runsOf =
+    name: r: comment:
     let
-      units = rendered repo;
+      ws = r.workspaces.main;
+      units = rendered r;
       linkCaps = n: units.${n}.linkCaptures or [ ];
       app = ws.packages.app;
       t = ws.testRuns;
@@ -123,7 +137,7 @@ in
     assert lib.assertMsg (lib.all (n: linkCaps n == [ ]) (
       lib.filter (lib.hasInfix "build-script") (lib.attrNames units)
     )) "native-link: a build-script compile got a link capture";
-    pkgs.runCommand "native-link-runs"
+    pkgs.runCommand name
       {
         nativeBuildInputs = [ pkgs.binutils ];
         inherit app;
@@ -138,12 +152,21 @@ in
         grep -qx 'the answer is 42' out
         readelf -d "$bin" | grep -E 'R(UN)?PATH' | tee rpath
         grep -q "$foo/lib" rpath
+        readelf -p .comment "$bin" | tee comment.txt
+        ${comment}
         grep -q 'test tests::links_and_runs ... ok' $appTest/log
         grep -q 'running 0 tests' $midTest/log
         grep -q 'test result: ok. 1 passed' $midDoctest/log
         mkdir -p $out
-        cp out rpath $out/
+        cp out rpath comment.txt $out/
       '';
+in
+{
+  inherit repo;
+
+  runs = runsOf "native-link-runs" repo ''
+    if grep -qE 'LLD|mold' comment.txt; then echo "not linked by GNU ld"; exit 1; fi
+  '';
 
   invalidation =
     let
@@ -169,4 +192,11 @@ in
       mkdir -p $out
       echo ${lib.escapeShellArg (builtins.toJSON got)} > $out/changed
     '';
+}
+// lib.optionalAttrs (pkgs ? rust-bin) {
+  runs-lld = runsOf "native-link-runs-lld" lldRepo ''
+    grep -q 'Linker: LLD' comment.txt
+    # Not rustc's own rust-lld, which names its LLVM checkout.
+    if grep -q llvm-project comment.txt; then echo "linked by rust-lld"; exit 1; fi
+  '';
 }

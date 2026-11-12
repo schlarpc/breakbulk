@@ -79,6 +79,8 @@
   # overrideAttrs after breakbulk's own; an entry replaces the one in
   # `defaultRebuildOverrides` below, and `null` drops it.
   rebuildOverrides ? { },
+  linkerKind ? null,
+  rustc ? null,
   ...
 }:
 let
@@ -289,6 +291,7 @@ in
   # rustc adds on x86_64; zig links with its own lld.
   linker = mkDefault (chooseLinker {
     inherit pkgs triple;
+    kind = linkerKind;
     flavor = "zig";
     zig = {
       cc = zigCc;
@@ -331,5 +334,12 @@ in
       && triple == nativeTriple pkgs;
   }).runner;
   testSystem = mkDefault null;
-  host = hostSpec pkgs;
+  host = hostSpec {
+    inherit
+      pkgs
+      rustc
+      triple
+      linkerKind
+      ;
+  };
 }

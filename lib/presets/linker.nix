@@ -1,25 +1,48 @@
 # The linker choice ("Linker selection" in docs/src/explanation/targets.md):
 # one function,
 # called by every preset and by the host spec, from the target triple, the
-# LTO mode and the preset's flavor to a linker. `targets.<t>.linker` (or
+# Rust toolchain, the LTO mode and the preset's flavor to a linker.
+# `targets.<t>.linkerKind` picks another kind; `targets.<t>.linker` (or
 # `host.linker`) overrides it like any preset field.
 #
-#   linkerKind { triple; traits ? <built-in>; lto ? false; flavor ? null; }
+#   linkerKind { triple; traits ? <built-in>; lto ? false; flavor ? null;
+#                kind ? null; rustc ? null; staticNonPie ? false; }
 #                                                        -> a kind name
-#   chooseLinker { pkgs; triple; traits; lto; flavor; … } -> a linker path
+#   chooseLinker { pkgs; triple; traits; lto; flavor; kind; rustc; … }
+#                                                        -> a linker path
 #
 # `linkerKind` is the decision, a pure function of the target's traits
 # (lib/target-traits.nix; a user's `targets.<triple>.traits` included),
-# the LTO mode and the flavor:
+# what rustc itself would do (`rustc`, from `rustcFacts`), the LTO mode
+# and the flavor:
 #
-#   kind                 when (traits)                   linker
+#   kind                 default when (traits)           linker
 #   zig                  flavor = "zig"                  `zig cc -target <arch>-linux-gnu.<glibc>`
 #   lld-link             isMsvc                          lld-link (wrapped: reproducible PDBs)
 #   wasm-component-ld    isWasm, os wasi, env p2         rustc's wasm-component-ld over wasm-ld
 #   wasm-ld              other isWasm                    wasm-ld
 #   mingw-lld            isMingw (windows-gnu, -gnullvm) the MinGW C driver with -fuse-ld=lld
 #   clang-lld            isLinux with lto                clang with -fuse-ld=lld
-#   mold                 isLinux                         the wrapped cc with -fuse-ld=mold
+#   lld                  isLinux, rustc picks lld        the wrapped cc with -fuse-ld=lld
+#   cc                   other isLinux                   the wrapped cc with its own default (GNU ld)
+#   mold                 never (`kind = "mold"`)         the wrapped cc with -fuse-ld=mold
+#
+# `kind` (`targets.<triple>.linkerKind`) replaces the default; a kind that
+# cannot link for the target's traits, the LTO mode, the flavor or a
+# non-PIE static executable is an evaluation error naming both.
+#
+# rustc's own choice on Linux (`rustcPicksLld`), read from rustc's source
+# (rustc_target `spec/base/linux_gnu.rs`, `targets/x86_64_unknown_linux_gnu.rs`;
+# bootstrap `core/config`, `build_steps/compile.rs`): a rustc built with
+# its bundled lld as a default links through the C driver with
+# `-fuse-ld=lld` and its own `rust-lld` (linker flavor gnu-lld-cc).
+# Bootstrap turns that on only for a compiler whose host is
+# x86_64-unknown-linux-gnu, built with its own LLVM: rust-lang's builds
+# (rustup, rust-overlay, fenix), not nixpkgs' (`--disable-lld`, nixpkgs'
+# LLVM). Such a compiler uses it for
+#   x86_64-unknown-linux-gnu   on nightly from 1.80, on every channel from 1.90
+#   every `-linux-gnu*` target from 1.92 (the base linux_gnu spec)
+# and the C driver's default linker everywhere else (musl included).
 #
 # `isLinux` is a Linux userland; Android (the Linux kernel, its own
 # userland) has no rule and fails with a message naming issue #27.
@@ -30,17 +53,23 @@
 # rustc's target spec names the linker flavor itself (wasm, msvc), the
 # linker keeps the name that selects that flavor.
 #
-# Linux ELF links go through nixpkgs' wrapped cc, so the wrapper's rpath,
-# NIX_LDFLAGS and hardening handling apply. rustc (1.90 and later) links
-# x86_64-unknown-linux-gnu with its bundled rust-lld by default: it passes
+# Linux ELF links go through nixpkgs' wrapped cc, and the linker it runs
+# through bintools-wrapper's ld-wrapper, so the wrapper's rpath,
+# NIX_LDFLAGS and hardening handling apply. rustc's own lld default passes
 # `-B<sysroot>/lib/rustlib/<host>/bin/gcc-ld -fuse-ld=lld` to the C driver
 # (checked with rustc 1.95 and 1.99, `--print link-args`), which bypasses
 # the Nix linker wrapper. The stable opt-out, `-C linker-features=-lld`, is
 # a rustflag, and rustflags never reach host units, so every C-driver
-# linker here (mold, clang-lld, mingw-lld, zig) drops those two arguments
-# instead (also inside an `@file` response file), for host and target
-# units alike.
-{ lib, targetTraits }:
+# linker here (cc, lld, mold, clang-lld, mingw-lld, zig) drops those two
+# arguments instead (also inside an `@file` response file), for host and
+# target units alike.
+{
+  lib,
+  util,
+  targetTraits,
+  toolchainFacts,
+  llvmVersions,
+}:
 let
   # A C compiler driver wrapper that drops rustc's self-contained-lld
   # arguments and adds `flag`. Runs on `p`'s build platform.
@@ -68,6 +97,47 @@ let
       exec ${exe} ${flag} "''${args[@]}"
     ''}/bin/${name}";
 
+  # A wrapped C compiler with lld from `llvm` as `ld.lld` in its bintools,
+  # behind bintools-wrapper's ld-wrapper like the bintools' own `ld`. A
+  # plain symlink (as stdenvAdapters.useMoldLinker adds mold, whose package
+  # is wrapped already) would skip the wrapper: no rpaths. The unprefixed
+  # name is for a cross compiler, as useMoldLinker adds it.
+  withLld =
+    p: cc: llvm:
+    let
+      prefix = cc.bintools.targetPrefix;
+    in
+    cc.override {
+      bintools = cc.bintools.override {
+        extraBuildCommands = ''
+          wrap ${prefix}ld.lld ${p.path}/pkgs/build-support/bintools-wrapper/ld-wrapper.sh ${llvm.lld}/bin/ld.lld
+        ''
+        + lib.optionalString (prefix != "") ''
+          ln -s ${prefix}ld.lld $out/bin/ld.lld
+        '';
+      };
+    };
+
+  # nixpkgs' wrapped cc for `p`'s platform and its default linker (GNU ld).
+  # Not named `cc-ld`: rustc takes a linker whose name ends in `-ld` for a
+  # bare ld and passes it ld's arguments, not the C driver's
+  # (rustc_target spec/mod.rs, `infer_linker_hints`).
+  ccLinker =
+    p:
+    let
+      cc = p.stdenv.cc;
+      prefix = cc.targetPrefix;
+    in
+    driverWrapper p "${prefix}cc-default" "${cc}/bin/${prefix}cc" "";
+
+  # nixpkgs' wrapped cc for `p`'s platform with lld from `llvm`.
+  ccLldLinker =
+    p: llvm:
+    let
+      prefix = p.stdenv.cc.targetPrefix;
+    in
+    driverWrapper p "${prefix}cc-lld" "${withLld p p.stdenv.cc llvm}/bin/${prefix}cc" "-fuse-ld=lld";
+
   # nixpkgs' wrapped cc for `p`'s platform, with mold in its bintools
   # (stdenvAdapters.useMoldLinker), and `-fuse-ld=mold`.
   moldLinker =
@@ -81,21 +151,13 @@ let
   # clang linking with lld from `llvm`, for cross-language LTO
   # (`-Clinker-plugin-lto`), where the linker must read rustc's LLVM bitcode.
   # nixpkgs' clang wrapper has GNU binutils as its bintools, so
-  # `-fuse-ld=lld` finds no `ld.lld`; lld goes into its bintools the way
-  # useMoldLinker adds mold.
+  # `-fuse-ld=lld` finds no `ld.lld` without `withLld`.
   lldLinker =
     p: llvm:
     let
       prefix = llvm.clang.targetPrefix;
-      cc = llvm.clang.override {
-        bintools = llvm.clang.bintools.override {
-          extraBuildCommands = ''
-            ln -s ${llvm.lld}/bin/ld.lld $out/bin/${prefix}ld.lld
-          '';
-        };
-      };
     in
-    driverWrapper p "${prefix}clang-lld" "${cc}/bin/${prefix}clang" "-fuse-ld=lld";
+    driverWrapper p "${prefix}clang-lld" "${withLld p llvm.clang llvm}/bin/${prefix}clang" "-fuse-ld=lld";
 
   # lld-link, wrapped so the PDB, and so the .exe, are reproducible
   # (./lld-link-stable.sh).
@@ -173,12 +235,38 @@ let
   # self-contained-lld arguments.
   zigLinker = pkgs: zig: driverWrapper pkgs "zig-cc-link-${zig.target}" zig.cc "";
 
-  linkerKind =
+  # What each kind links for (./linker-kinds.nix).
+  linkerKinds = import ./linker-kinds.nix { inherit lib; };
+  inherit (linkerKinds) kinds;
+  kindNames = linkerKinds.names;
+
+  # rustc's own linker on a Linux target: true where its target spec links
+  # with its bundled lld (see the table at the top), for
+  # `rustc = { version; bundledLld; host; }` (`rustcFacts`).
+  rustcPicksLld =
     {
       triple,
-      traits ? targetTraits.resolve { inherit triple; },
-      lto ? false,
-      flavor ? null,
+      traits,
+      rustc,
+    }:
+    let
+      v = rustc.version;
+      at = gate: util.rustVersion.atLeast gate v;
+      nightly = lib.hasInfix "-nightly" v || lib.hasInfix "-dev" v;
+    in
+    rustc.bundledLld
+    && rustc.host == "x86_64-unknown-linux-gnu"
+    && traits.isLinux
+    && traits.env == "gnu"
+    && (at "1.92" || (triple == "x86_64-unknown-linux-gnu" && (at "1.90" || (nightly && at "1.80"))));
+
+  defaultKind =
+    {
+      triple,
+      traits,
+      lto,
+      flavor,
+      rustc,
     }:
     let
       t = traits;
@@ -196,11 +284,78 @@ let
     else if t.isMingw then
       "mingw-lld"
     else if t.isLinux then
-      (if lto then "clang-lld" else "mold")
+      (
+        if lto then
+          "clang-lld"
+        else if rustc == null then
+          throw "breakbulk.presets.chooseLinker: the default linker for `${triple}` is the one rustc picks, which depends on its release and build; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
+        else if rustcPicksLld { inherit triple traits rustc; } then
+          "lld"
+        else
+          "cc"
+      )
     else if t.os == "android" then
       throw "breakbulk.presets.chooseLinker: no linker rule for the Android target `${triple}`: Android has the Linux kernel but its own userland (bionic, the NDK's linker), which breakbulk has no preset for yet (issue #27); set `targets.${triple}.linker`"
     else
       throw "breakbulk.presets.chooseLinker: no linker rule for `${triple}`; set `targets.${triple}.linker`";
+
+  linkerKind =
+    {
+      triple,
+      traits ? targetTraits.resolve { inherit triple; },
+      lto ? false,
+      flavor ? null,
+      # The kind asked for (`targets.<triple>.linkerKind`); null: the default.
+      kind ? null,
+      # { version; bundledLld; host; } (`rustcFacts`), for the Linux default.
+      rustc ? null,
+      # The link makes non-PIE static glibc executables
+      # (linuxStatic's `relocationModel = "static"`).
+      staticNonPie ? false,
+    }:
+    let
+      asked = "`linkerKind = \"${kind}\"`";
+      k = kinds.${kind};
+    in
+    if kind == null then
+      defaultKind {
+        inherit
+          triple
+          traits
+          lto
+          flavor
+          rustc
+          ;
+      }
+    else if kind == "zig" then
+      throw "breakbulk.presets.chooseLinker: ${asked}: zig links only for presets.linuxPortable, whose `backend = \"zig\"` sets it with the C compiler and glibc"
+    else if !(kinds ? ${kind}) then
+      throw "breakbulk.presets.chooseLinker: unknown linker kind `${kind}` for `${triple}`; known: ${lib.concatStringsSep ", " kindNames}"
+    else if !(k.on traits) then
+      throw "breakbulk.presets.chooseLinker: ${asked} links for ${k.what} targets, not for `${triple}`"
+    else if flavor == "zig" then
+      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with linuxPortable's `backend = \"zig\"`, which links with `zig cc` against its old glibc"
+    else if lto && !(k.bitcode or false) then
+      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (`clang-lld`)"
+    else if staticNonPie && kind == "mold" then
+      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `relocationModel = \"static\"`: mold links non-PIE static glibc Rust executables that crash at startup"
+    else
+      kind;
+
+  # What `linkerKind` needs to know about `rustc`, a Rust toolchain
+  # running on `pkgs`' build platform.
+  rustcFacts =
+    { pkgs, rustc }:
+    let
+      f = toolchainFacts.of {
+        pkgs = pkgs.buildPackages;
+        inherit rustc;
+      };
+    in
+    {
+      inherit (f) version bundledLld;
+      host = targetTraits.nativeTriple pkgs.buildPackages;
+    };
 
   needs =
     kind: what: v:
@@ -219,43 +374,63 @@ let
       lto ? false,
       # null (from the traits) or "zig".
       flavor ? null,
-      # The package set whose C toolchain drives the link (mold, clang-lld,
-      # mingw-lld); default: pkgs.
+      # The kind asked for (`targets.<triple>.linkerKind`); null: the default.
+      kind ? null,
+      # The Rust toolchain (rustc) that links: its release and build
+      # decide the Linux default, and its LLVM the lld kinds' lld.
+      rustc ? null,
+      staticNonPie ? false,
+      # The package set whose C toolchain drives the link (cc, lld, mold,
+      # clang-lld, mingw-lld); default: pkgs.
       packageSet ? pkgs,
-      # LLVM packages matching rustc (clang-lld, lld-link, wasm-ld,
-      # wasm-component-ld).
-      llvm ? null,
+      # LLVM packages matching rustc (lld, clang-lld, lld-link, wasm-ld,
+      # wasm-component-ld); default: from `rustc`.
+      llvm ?
+        if rustc == null then
+          null
+        else
+          llvmVersions.packagesFor {
+            pkgs = packageSet.buildPackages;
+            inherit rustc;
+          },
       # mingw-lld: the lld package.
       lld ? pkgs.buildPackages.lld,
       # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-gnu.<glibc>"; }.
       zig ? null,
     }:
     let
-      kind = linkerKind {
+      k = linkerKind {
         inherit
           triple
           traits
           lto
           flavor
+          kind
+          staticNonPie
           ;
+        rustc = if rustc == null then null else rustcFacts { inherit pkgs rustc; };
       };
       bp = pkgs.buildPackages;
     in
     {
+      cc = ccLinker packageSet;
+      lld = ccLldLinker packageSet (needs k "rustc or llvm" llvm);
       mold = moldLinker packageSet;
-      clang-lld = lldLinker packageSet (needs kind "llvm" llvm);
-      lld-link = lldLinkLinker bp (needs kind "llvm" llvm);
-      wasm-ld = "${(needs kind "llvm" llvm).lld}/bin/wasm-ld";
-      wasm-component-ld = componentLinker bp "${(needs kind "llvm" llvm).lld}/bin/wasm-ld";
+      clang-lld = lldLinker packageSet (needs k "llvm" llvm);
+      lld-link = lldLinkLinker bp (needs k "llvm" llvm);
+      wasm-ld = "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
+      wasm-component-ld = componentLinker bp "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
       mingw-lld = mingwLinker pkgs packageSet lld;
-      zig = zigLinker pkgs (needs kind "zig" zig);
+      zig = zigLinker pkgs (needs k "zig" zig);
     }
-    .${kind};
+    .${k};
 in
 {
   inherit
     chooseLinker
     linkerKind
+    kindNames
+    rustcFacts
     driverWrapper
     moldLinker
     lldLinker

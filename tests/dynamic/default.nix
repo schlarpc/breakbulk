@@ -392,6 +392,9 @@ let
     same-triple = presetFixtures.sameTriple;
     static-musl = presetFixtures.musl;
     static-glibc = presetFixtures.glibcStatic;
+    static-glibc-nonpie = presetFixtures.glibcNonPie;
+    static-glibc-nonpie-nixpkgs = presetFixtures.glibcNonPieNixpkgs;
+    linker-kind-mold = presetFixtures.moldKind;
     static-pkgconfig = presetFixtures.staticPkgconfig;
     sys-native-aarch64 = presetFixtures.sysNativeCross;
     cross-doctests-aarch64 = presetFixtures.crossDoctests;

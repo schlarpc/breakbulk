@@ -6,6 +6,12 @@
 #   facts.llvmMajor      23 (rustc.llvmPackages, else lib/llvm-versions.nix's
 #                        table, else `rustc -vV`)
 #   facts.wasiSdkVersion "33" (lib/wasi-sdk.nix's table)
+#   facts.bundledLld     true: rustc is a rust-lang build (rustup,
+#                        rust-overlay, fenix), which ships its own lld and
+#                        links some Linux targets with it by default
+#                        (lib/presets/linker.nix, `rustcPicksLld`); false
+#                        for nixpkgs' rustc (`rustc.llvmPackages`), built
+#                        with `--disable-lld` against nixpkgs' LLVM
 #   facts.capabilities   { remapPathScope; trimPaths; nightly; } (below)
 #
 # Each fact comes from the toolchain's attributes and breakbulk's tables
@@ -175,6 +181,7 @@ let
         else
           probed.llvmMajor;
       wasiSdkVersion = wasiSdk.versionFor version;
+      bundledLld = !(rustc ? llvmPackages);
       capabilities =
         if unknown != [ ] then
           throw "breakbulk.toolchainFacts: unknown capabilities ${lib.concatStringsSep ", " unknown}; known: ${lib.concatStringsSep ", " capabilityNames}"

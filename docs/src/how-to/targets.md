@@ -89,6 +89,20 @@ A target whose linker rustc chooses itself (UEFI, bare metal) needs no
 preset: `workspaces.default.targets.x86_64-unknown-uefi = { };` is
 enough.
 
+## Another linker
+
+A preset links with the linker rustc itself would use: lld or GNU ld on
+Linux, through nixpkgs' C compiler. To use another one, such as mold,
+set the target's
+[`linkerKind`](../reference/options/targets.md#targetsnamelinkerkind):
+
+```nix
+targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
+```
+
+On your own machine's triple, build scripts and proc macros link with it
+too. [Presets](../reference/presets.md#linkers) lists the kinds.
+
 ## The outputs
 
 Every target's products are under `target.<triple>`:

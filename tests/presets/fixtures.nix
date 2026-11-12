@@ -17,6 +17,12 @@
 #                     doctest runs under it
 #   presets-eval      evaluation-time assertions on preset values (and the
 #                     linker choice, lib/presets/linker.nix)
+#   linker-kind-mold-*  `targets.<native>.linkerKind = "mold"`: the product
+#                     and the build script are linked by mold
+#   static-glibc-nonpie-*  linuxStatic { relocationModel = "static"; } with
+#                     the default linker (lld for rust-overlay's rustc, GNU
+#                     ld for nixpkgs'): a non-PIE static executable that
+#                     runs
 #   presets-per-workspace  two workspaces on different Rust releases get
 #                     their own LLVM tools and wasi-sdk from one preset
 #   debug-outputs     a plain Linux release plan: no unit and no `linked`
@@ -90,11 +96,14 @@ let
       ];
 
   # ELF checks on one file: `expect` is "static" (no PT_INTERP, no
-  # DT_NEEDED) or "dynamic" (a PT_INTERP). Every ELF the Linux presets link,
-  # host or target, is linked by mold (never rustup's rust-lld): mold
-  # records itself in `.comment`.
+  # DT_NEEDED) or "dynamic" (a PT_INTERP); `linker` the kind that linked
+  # it, from `.comment`: "lld" (`Linker: LLD 23.1.3`, nixpkgs' lld through
+  # the wrapped cc), "mold", or "cc" (GNU ld, which records nothing, so
+  # neither of the others). rustc's own rust-lld records where its LLVM was
+  # built (`Linker: LLD 23.1.1 (/checkout/src/llvm-project/llvm …)`), so
+  # that fails every kind (assumption L1).
   elfCheck =
-    name: expect: file:
+    name: expect: linker: file:
     pkgs.runCommand name { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; } ''
       f=${file}
       readelf -lW "$f" > ph.txt
@@ -113,8 +122,24 @@ let
           ''
       }
       readelf -p .comment "$f" > comment.txt
-      grep -q mold comment.txt || { echo "$f was not linked by mold:"; cat comment.txt; exit 1; }
-      if grep -q LLD comment.txt; then echo "$f mentions LLD:"; cat comment.txt; exit 1; fi
+      cat comment.txt
+      if grep -q llvm-project comment.txt; then echo "$f was linked by rustc's own rust-lld"; exit 1; fi
+      ${
+        {
+          lld = ''
+            grep -q 'Linker: LLD' comment.txt || { echo "$f was not linked by lld"; exit 1; }
+            if grep -q mold comment.txt; then echo "$f mentions mold"; exit 1; fi
+          '';
+          mold = ''
+            grep -q mold comment.txt || { echo "$f was not linked by mold"; exit 1; }
+            if grep -q LLD comment.txt; then echo "$f mentions LLD"; exit 1; fi
+          '';
+          cc = ''
+            if grep -qE 'LLD|mold' comment.txt; then echo "$f was not linked by GNU ld"; exit 1; fi
+          '';
+        }
+        .${linker}
+      }
       mkdir -p $out
       cp ph.txt dyn.txt comment.txt $out/
     '';
@@ -262,6 +287,45 @@ let
       targets.${native}.preset = presets.linuxStatic;
     }
   ];
+  # Non-PIE static glibc with the default linker: rustc 1.99 from
+  # rust-overlay (lld), and nixpkgs' rustc (GNU ld).
+  glibcNonPieWith =
+    ws:
+    mkRepo (fixtures + "/static") [
+      {
+        workspaces.main = ws;
+        targets.${native}.preset = presets.linuxStatic { relocationModel = "static"; };
+      }
+    ];
+  glibcNonPie = glibcNonPieWith staticWs;
+  glibcNonPieNixpkgs = glibcNonPieWith {
+    path = ".";
+    variants.default.profile = "release";
+  };
+  nonPieChecks =
+    prefix: repo: linker:
+    let
+      app = "${repo.workspaces.main.target.${native}.packages.app}/bin/app";
+    in
+    {
+      "${prefix}-product" = elfCheck "${prefix}-product" "static" linker app;
+      "${prefix}-run" = pkgs.runCommand "${prefix}-run" { nativeBuildInputs = [ pkgs.binutils ]; } ''
+        readelf -hW ${app} | grep -q 'Type:.*EXEC' || { echo "not a non-PIE executable"; exit 1; }
+        ${app} | tee $out
+        grep -q "static ok: mix(6,7)=45" $out
+      '';
+    };
+
+  # `linkerKind = "mold"` on the native triple: target and host units.
+  moldKind = mkRepo (fixtures + "/static") [
+    {
+      workspaces.main = staticWs;
+      targets.${native} = {
+        preset = presets.linux;
+        linkerKind = "mold";
+      };
+    }
+  ];
 
   # A unit has a `debug` output only when rustc writes
   # debuginfo side files (breakbulk-format
@@ -329,15 +393,16 @@ let
     assert lib.length ids == 1;
     inst.units.build.${lib.head ids}.out;
 
+  # `linkers`: { product; buildScript; } kinds (elfCheck).
   staticChecks =
-    prefix: repo: triple:
+    prefix: repo: triple: linkers:
     let
       t = repo.workspaces.main.target.${triple};
       inst = repo.workspaces.main.instances.${triple}.default;
     in
     {
-      "${prefix}-product" = elfCheck "${prefix}-product" "static" "${t.packages.app}/bin/app";
-      "${prefix}-build-script" = elfCheck "${prefix}-build-script" "dynamic" (
+      "${prefix}-product" = elfCheck "${prefix}-product" "static" linkers.product "${t.packages.app}/bin/app";
+      "${prefix}-build-script" = elfCheck "${prefix}-build-script" "dynamic" linkers.buildScript (
         oneFile (buildScriptOf inst)
       );
       "${prefix}-test" = t.testRuns.app."bin/app";
@@ -388,6 +453,10 @@ let
         pkgs.runCommand "sys-native-aarch64" { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; }
           ''
             readelf -hW ${t.packages.app}/bin/app | grep -q 'Machine:.*AArch64'
+            # rust-overlay's 1.99 links every -gnu target with lld.
+            readelf -p .comment ${t.packages.app}/bin/app > comment.txt
+            grep -q 'Linker: LLD' comment.txt
+            if grep -q llvm-project comment.txt; then echo "linked by rustc's own rust-lld"; exit 1; fi
             ${lib.escapeShellArgs t.runner} ${t.packages.app}/bin/app | tee $out
             grep -qx "openssl=3+ cm=42 bg=7 plain-saw=none" $out
           '';
@@ -855,13 +924,15 @@ let
         llvm-nm $control/bin/cross-lto > plain-syms.txt
         grep -q ' T cross_lto_mix$' plain-syms.txt
         caller $control/bin/cross-lto plain.txt
-        grep -qE '^ +[0-9a-f]+:\s+(call|jmp).*<cross_lto_mix' plain.txt
+        # Linked by lld, the call goes through the GOT (`call *…(%rip)`),
+        # so the line does not name the callee.
+        grep -qE '^ +[0-9a-f]+:\s+(call|jmp)' plain.txt
         [ "$($control/bin/cross-lto)" = "$($bin)" ]
         # Reproducible: the bitcode archive and the LTO-linked binary
         # rebuild byte for byte.
         [ "$run" != "$run2" ] && [ "$binUnit" != "$binUnit2" ]
         cmp "$lib" "$(find -L $run2 -name libmix.a)"
-        cmp $binUnit/cross_lto-* $binUnit2/cross_lto-*
+        cmp $binUnit/cross-lto $binUnit2/cross-lto
         mkdir -p $out
         cp members.txt lto.txt plain.txt $out/
       '';
@@ -1194,13 +1265,21 @@ let
       gnu = presets.linux {
         inherit pkgs;
         triple = native;
+        rustc = staticRust;
       };
       cross = presets.linux {
         inherit pkgs;
         triple = "aarch64-unknown-linux-gnu";
+        rustc = staticRust;
       };
       bound = presets.windows { crtStatic = true; };
       llvm = breakbulk.llvmVersions;
+      # What linkerKind reads of a rust-lang rustc on x86_64 Linux.
+      rustcAt = version: {
+        inherit version;
+        bundledLld = true;
+        host = "x86_64-unknown-linux-gnu";
+      };
       checks = {
         partial = lib.isFunction bound && lib.functionArgs bound ? toolchain;
         nativeRunner = gnu.runner.content == null;
@@ -1252,6 +1331,7 @@ let
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
         sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
+        hostLinkerIsLld = lib.hasSuffix "cc-lld" (discard gnu.host.linker.content);
         # The Rust to wasi-sdk table (lib/wasi-sdk.nix): an
         # unknown Rust release fails evaluation, naming the file.
         wasiSdkTable =
@@ -1272,20 +1352,123 @@ let
           let
             k = triple: args: presets.linkerKind ({ inherit triple; } // args);
           in
-          k native { } == "mold"
-          && k "aarch64-unknown-linux-musl" { } == "mold"
-          && k "riscv64gc-unknown-linux-gnu" { } == "mold"
-          && k native { lto = true; } == "clang-lld"
-          && k native { flavor = "zig"; } == "zig"
-          && k "x86_64-pc-windows-msvc" { } == "lld-link"
-          && k "aarch64-pc-windows-msvc" { lto = true; } == "lld-link"
-          && k "x86_64-pc-windows-gnu" { } == "mingw-lld"
-          && k "x86_64-pc-windows-gnullvm" { } == "mingw-lld"
-          && k "wasm32-unknown-unknown" { } == "wasm-ld"
-          && k "wasm32-wasip1" { } == "wasm-ld"
-          && k "wasm32-wasip2" { } == "wasm-component-ld"
-          && fails (k "aarch64-apple-darwin" { })
-          && fails (k native { flavor = "gold"; });
+          (
+            k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.90.0"; } == "lld"
+            && k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.89.0"; } == "cc"
+            && k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.89.0-nightly"; } == "lld"
+            && k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.79.0-nightly"; } == "cc"
+            && k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.89.0-beta.3"; } == "cc"
+            && k "aarch64-unknown-linux-gnu" { rustc = rustcAt "1.91.1"; } == "cc"
+            && k "aarch64-unknown-linux-gnu" { rustc = rustcAt "1.92.0"; } == "lld"
+            && k "riscv64gc-unknown-linux-gnu" { rustc = rustcAt "1.99.0"; } == "lld"
+            && k "armv7-unknown-linux-gnueabihf" { rustc = rustcAt "1.99.0"; } == "lld"
+            && k "x86_64-unknown-linux-musl" { rustc = rustcAt "1.99.0"; } == "cc"
+            && k "aarch64-unknown-linux-musl" { rustc = rustcAt "1.99.0"; } == "cc"
+            # nixpkgs' rustc, and a rust-lang rustc on another host.
+            && k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.99.0" // { bundledLld = false; }; } == "cc"
+            && k "x86_64-unknown-linux-gnu" {
+              rustc = rustcAt "1.99.0" // {
+                host = "aarch64-unknown-linux-gnu";
+              };
+            } == "cc"
+            && k "aarch64-unknown-linux-gnu" {
+              rustc = rustcAt "1.99.0" // {
+                host = "aarch64-unknown-linux-gnu";
+              };
+            } == "cc"
+            # From the toolchains themselves.
+            && (presets.rustcFacts {
+              inherit pkgs;
+              rustc = pkgs.rustc;
+            }).bundledLld == false
+            && (presets.rustcFacts {
+              inherit pkgs;
+              rustc = staticRust;
+            }).bundledLld
+            && fails (k native { })
+            && k native { lto = true; } == "clang-lld"
+            && k native { flavor = "zig"; } == "zig"
+            && k "x86_64-pc-windows-msvc" { } == "lld-link"
+            && k "aarch64-pc-windows-msvc" { lto = true; } == "lld-link"
+            && k "x86_64-pc-windows-gnu" { } == "mingw-lld"
+            && k "x86_64-pc-windows-gnullvm" { } == "mingw-lld"
+            && k "wasm32-unknown-unknown" { } == "wasm-ld"
+            && k "wasm32-wasip1" { } == "wasm-ld"
+            && k "wasm32-wasip2" { } == "wasm-component-ld"
+            && fails (k "aarch64-apple-darwin" { })
+            && fails (k native { flavor = "gold"; })
+          );
+        # `kind` (`targets.<triple>.linkerKind`) replaces the default, and
+        # an impossible combination fails, naming both.
+        linkerKindChoice =
+          let
+            k = triple: args: presets.linkerKind ({ inherit triple; } // args);
+          in
+          k native { kind = "mold"; } == "mold"
+          && k "aarch64-unknown-linux-musl" { kind = "lld"; } == "lld"
+          && k native {
+            kind = "clang-lld";
+            lto = true;
+          } == "clang-lld"
+          && k native {
+            kind = "cc";
+            rustc = rustcAt "1.99.0";
+          } == "cc"
+          && fails (k native { kind = "lld-link"; })
+          && fails (k "x86_64-pc-windows-msvc" { kind = "mold"; })
+          && fails (k native { kind = "zig"; })
+          && fails (k native { kind = "gold"; })
+          && fails (
+            k native {
+              kind = "mold";
+              lto = true;
+            }
+          )
+          && fails (
+            k native {
+              kind = "mold";
+              flavor = "zig";
+            }
+          )
+          && fails (
+            k native {
+              kind = "mold";
+              staticNonPie = true;
+            }
+          )
+          && k native {
+            kind = "lld";
+            staticNonPie = true;
+          } == "lld"
+          && lib.hasSuffix "cc-mold" (discard (presets.linux {
+            inherit pkgs;
+            triple = native;
+            linkerKind = "mold";
+          }).linker.content)
+          && lib.hasSuffix "cc-mold" (discard (presets.linux {
+            inherit pkgs;
+            triple = native;
+            linkerKind = "mold";
+          }).host.linker.content)
+          # Another triple's kind stays on its own units.
+          && lib.hasSuffix "cc-lld" (discard (presets.linux {
+            inherit pkgs;
+            triple = "aarch64-unknown-linux-gnu";
+            rustc = staticRust;
+            linkerKind = "mold";
+          }).host.linker.content)
+          && fails (presets.linux {
+            inherit pkgs;
+            triple = native;
+            crossLanguageLto = true;
+            llvmMajor = 23;
+            linkerKind = "mold";
+          }).linker.content
+          && fails (presets.linuxStatic {
+            inherit pkgs;
+            relocationModel = "static";
+            linkerKind = "mold";
+          }).linker.content;
         # `crtStatic = true` adds the flag (the option once shadowed the
         # flag list, and the preset failed with "expected a list but found
         # a Boolean"; found in the field trials).
@@ -1323,6 +1506,9 @@ in
       msvcPostLink
       crossLto
       crossLtoOff
+      moldKind
+      glibcNonPie
+      glibcNonPieNixpkgs
       wasmBrowser
       wasmComponent
       staticPkgconfig
@@ -1341,14 +1527,34 @@ in
       grep -qx "marker=target-only shared=target shared-in-build-script=host" $out
     '';
     same-triple-test = sameTriple.workspaces.main.target.${native}.testRuns.app."bin/app";
-    # The marker linker execs plain cc, so only the host side is mold.
-    same-triple-build-script = elfCheck "same-triple-build-script" "dynamic" (
+    # nixpkgs' rustc: GNU ld for the host side (the target side is the
+    # marker linker, plain cc).
+    same-triple-build-script = elfCheck "same-triple-build-script" "dynamic" "cc" (
       oneFile (buildScriptOf stInst)
     );
+    linker-kind-mold-product =
+      elfCheck "linker-kind-mold-product" "dynamic" "mold"
+        "${moldKind.workspaces.main.target.${native}.packages.app}/bin/app";
+    linker-kind-mold-build-script = elfCheck "linker-kind-mold-build-script" "dynamic" "mold" (
+      oneFile (buildScriptOf moldKind.workspaces.main.instances.${native}.default)
+    );
   }
-  // staticChecks "static-glibc" glibcStatic native
-  // staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl"
-  // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl"
+  # rust-overlay's 1.99 on x86_64-unknown-linux-gnu links -gnu targets with
+  # lld, musl ones with GNU ld.
+  // staticChecks "static-glibc" glibcStatic native {
+    product = "lld";
+    buildScript = "lld";
+  }
+  // staticChecks "static-musl-x86_64" musl "x86_64-unknown-linux-musl" {
+    product = "cc";
+    buildScript = "lld";
+  }
+  // staticChecks "static-musl-aarch64" musl "aarch64-unknown-linux-musl" {
+    product = "cc";
+    buildScript = "lld";
+  }
+  // nonPieChecks "static-glibc-nonpie" glibcNonPie "lld"
+  // nonPieChecks "static-glibc-nonpie-nixpkgs" glibcNonPieNixpkgs "cc"
   # musl links a pkg-config library statically: the preset's
   # PKG_CONFIG_ALL_STATIC (lib/presets staticLinking) makes pkg-config-rs
   # pick libbbfoo.a over libbbfoo.so.
@@ -1357,7 +1563,7 @@ in
       t = staticPkgconfig.workspaces.main.target."x86_64-unknown-linux-musl";
     in
     {
-      static-pkgconfig-musl-product = elfCheck "static-pkgconfig-musl-product" "static" "${t.packages.app}/bin/app";
+      static-pkgconfig-musl-product = elfCheck "static-pkgconfig-musl-product" "static" "cc" "${t.packages.app}/bin/app";
       static-pkgconfig-musl-run = pkgs.runCommand "static-pkgconfig-musl-run" { } ''
         ${t.packages.app}/bin/app | tee $out
         grep -qx "bbfoo says 42" $out

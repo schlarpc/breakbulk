@@ -195,8 +195,7 @@
           # nixpkgs, so a consumer whose nixpkgs builds them differently
           # (here: another rustPlatform) gets the same tools, and its units
           # use them. `mkTools` with each consumer's nixpkgs gives different
-          # tools (the check is not vacuous). Whole units still differ here:
-          # nixpkgs builds mold with rustPlatform, and units link with it.
+          # tools (the check is not vacuous).
           default-tools =
             let
               inherit (nixpkgs) lib;

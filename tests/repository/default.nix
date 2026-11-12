@@ -1000,7 +1000,7 @@ in
       linkerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}_LINKER";
       linker = shell.${linkerVar} or shell.env.${linkerVar} or "";
     in
-    assert lib.assertMsg (lib.hasSuffix "cc-mold" linker) "devshell-broken-manifest: no linker in the shell (${linker})";
+    assert lib.assertMsg (lib.hasSuffix "cc-default" linker) "devshell-broken-manifest: no linker in the shell (${linker})";
     pkgs.runCommand "devshell-broken-manifest" { inherit (shell) shellHook; inherit linker; } ''
       export HOME=$TMPDIR
       eval "$shellHook"
@@ -1194,7 +1194,7 @@ in
   # preset is set, both through `preset` and by defining the target
   # directly from a preset (no doubled rustflags, no conflicting linker);
   # `preset = null` turns it off. The default reaches the plan: units carry
-  # the mold linker wrapper.
+  # the linker wrapper of nixpkgs' rustc's choice, the cc's own linker.
   native-preset =
     let
       t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).workspaces.main.target.${native}.spec;
@@ -1207,12 +1207,12 @@ in
       isStatic = x: lib.elem "target-feature=+crt-static" x.rustflags;
       unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (mwInst "a").units.build);
       checks = {
-        # linux: mold, and no static-linking rustflags.
-        defaultIsLinuxGnu = lib.hasSuffix "cc-mold" (linkerOf dflt) && dflt.rustflags == [ ];
+        # linux: the cc's own linker, and no static-linking rustflags.
+        defaultIsLinuxGnu = lib.hasSuffix "cc-default" (linkerOf dflt) && dflt.rustflags == [ ];
         offIsEmpty = off.linker == null && off.rustflags == [ ] && off.packageSet == null;
         directKeepsOwn = isStatic direct && direct.rustflags == static.rustflags;
         optionKeepsOwn = isStatic viaOption && viaOption.rustflags == static.rustflags;
-        planUsesMold = lib.hasInfix "cc-mold" unitText;
+        planUsesWrapper = lib.hasInfix "cc-default" unitText;
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
     in
@@ -1240,7 +1240,7 @@ in
       checks = {
         nativeIsMusl = mNative == "${mp.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-musl";
         targetsHasNative = repo.config.targets ? ${mNative};
-        defaultIsLinuxMusl = lib.hasSuffix "cc-mold" (builtins.unsafeDiscardStringContext (toString spec.linker));
+        defaultIsLinuxMusl = lib.hasSuffix "cc-default" (builtins.unsafeDiscardStringContext (toString spec.linker));
         crtStatic = lib.elem "target-feature=+crt-static" spec.rustflags;
         pkgConfigStatic = (spec.env.PKG_CONFIG_ALL_STATIC or null) == "1";
         muslCc = lib.hasPrefix (builtins.unsafeDiscardStringContext (toString mp.stdenv.cc)) (ccOf spec);

@@ -6,6 +6,8 @@
 #                            vendor config)
 #   target-traits, target-traits-rustc   lib/target-traits.nix (see
 #                            ./target-traits.nix)
+#   linker-kind-rustc        the default Linux linker kind against rustc's
+#                            own target specs (./target-traits.nix)
 #   llvm-versions            lib/llvm-versions.nix against `rustc -vV`
 #   wasi-sdk-table           lib/wasi-sdk.nix against rustc's wasip2 libc.a
 #   roots-metadata-fixtures  predicted targets == `cargo metadata` for fixtures
@@ -370,7 +372,11 @@ in
 {
   lib-unit = import ./unit.nix { inherit pkgs bb runTests; };
 
-  inherit (import ./target-traits.nix { inherit pkgs bb runTests; }) target-traits target-traits-rustc;
+  inherit (import ./target-traits.nix { inherit pkgs bb runTests; })
+    target-traits
+    target-traits-rustc
+    linker-kind-rustc
+    ;
 
   # #36 (assumption L3): every row of lib/wasi-sdk.nix against the
   # toolchains: the table's wasi-sysroot `libc.a` equals the self-contained

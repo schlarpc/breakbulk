@@ -9,7 +9,7 @@
 #                     wasi-libc Rust bundles (lib/wasi-sdk.nix); tests under
 #                     wasmtime
 #   riscv64-*         riscv64gc-unknown-linux-gnu via linux (nixpkgs cross,
-#                     mold), openssl-sys and zstd-sys from the cross env
+#                     lld: rustc 1.99 links -gnu targets with it), openssl-sys and zstd-sys from the cross env
 #                     capture; product and tests under qemu-riscv64
 #   windows-gnu-*     x86_64-pc-windows-gnu (mingw gcc, msvcrt) and
 #   windows-gnullvm-* x86_64-pc-windows-gnullvm (LLVM mingw, ucrt), lld,
@@ -202,14 +202,17 @@ let
       t = riscv64Repo.workspaces.main.target.${rv};
     in
     {
-      # A RISC-V ELF linked by mold, against the riscv64 OpenSSL, running
-      # under qemu-riscv64.
+      # A RISC-V ELF linked by lld through the cross cc, as rust-lang's
+      # rustc 1.99 links it with its own lld, against the riscv64 OpenSSL,
+      # running under qemu-riscv64.
       riscv64-run =
         pkgs.runCommand "riscv64-run" { nativeBuildInputs = [ pkgs.buildPackages.binutils ]; }
           ''
             f=${t.packages.app}/bin/app
             readelf -hW $f | grep -q 'Machine:.*RISC-V'
-            readelf -p .comment $f | grep -q mold
+            readelf -p .comment $f > comment.txt
+            grep -q 'Linker: LLD' comment.txt
+            if grep -q llvm-project comment.txt; then echo "linked by rustc's own rust-lld"; exit 1; fi
             readelf -dW $f | grep NEEDED | tee needed.txt
             grep -q libcrypto.so needed.txt; grep -q libzstd.so needed.txt
             ${lib.escapeShellArgs t.runner} $f | tee out.txt

@@ -222,7 +222,7 @@ let
 
   # --- devshell ---------------------------------------------------------------
 
-  # The walking skeleton with the linux preset (a mold linker wrapper)
+  # The walking skeleton with the linux preset (a linker wrapper)
   # and extra spec rustflags; the default variant (release).
   shellRepo = breakbulk.mkRepository {
     inherit pkgs tools;

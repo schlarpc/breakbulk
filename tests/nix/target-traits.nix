@@ -12,6 +12,9 @@
 #                        for every built-in target of nixpkgs' rustc (IFD):
 #                        each name it knows has rustc's vendor, os, env
 #                        and families (and abi, where the name spells one)
+#   linker-kind-rustc    the default Linux linker kind against the linker
+#                        flavor of rustc's own target specs, for several
+#                        rust-lang releases and nixpkgs' rustc
 {
   pkgs,
   bb,
@@ -382,19 +385,28 @@ in
         }
       ];
     };
-    # The linker kinds of the targets presets cover, from traits alone.
+    # The linker kinds of the targets presets cover, from traits and a
+    # rust-lang rustc 1.99 on x86_64 Linux.
     testLinkerKinds = {
-      expr = map (t: bb.presets.linkerKind { triple = t; }) [
-        "x86_64-unknown-linux-gnu"
-        "aarch64-unknown-linux-musl"
-        "x86_64-pc-windows-msvc"
-        "wasm32-wasip2"
-        "wasm32-unknown-unknown"
-        "x86_64-pc-windows-gnullvm"
-      ];
+      expr =
+        let
+          rustc = {
+            version = "1.99.0";
+            bundledLld = true;
+            host = "x86_64-unknown-linux-gnu";
+          };
+        in
+        map (t: bb.presets.linkerKind { triple = t; inherit rustc; }) [
+          "x86_64-unknown-linux-gnu"
+          "aarch64-unknown-linux-musl"
+          "x86_64-pc-windows-msvc"
+          "wasm32-wasip2"
+          "wasm32-unknown-unknown"
+          "x86_64-pc-windows-gnullvm"
+        ];
       expected = [
-        "mold"
-        "mold"
+        "lld"
+        "cc"
         "lld-link"
         "wasm-component-ld"
         "wasm-ld"
@@ -501,6 +513,7 @@ in
           (f (removeAttrs rust [ "version" ]))
           (f (rust // { version = "2026-10-15"; }))
           (f pkgs.rustc).llvmMajor
+          (f pkgs.rustc).bundledLld
         ];
       expected = [
         {
@@ -508,20 +521,24 @@ in
           majorMinor = "1.97";
           llvmMajor = 22;
           wasiSdkVersion = "33";
+          bundledLld = true;
         }
         {
           version = "1.97.0";
           majorMinor = "1.97";
           llvmMajor = 22;
           wasiSdkVersion = "33";
+          bundledLld = true;
         }
         {
           version = "1.97.0";
           majorMinor = "1.97";
           llvmMajor = 22;
           wasiSdkVersion = "33";
+          bundledLld = true;
         }
         (lib.toInt (lib.versions.major pkgs.rustc.llvmPackages.llvm.version))
+        false
       ];
     };
     # Toolchain capabilities (lib/toolchain-facts.nix): from the rustc and
@@ -692,6 +709,11 @@ in
         linker = bb.presets.linkerKind {
           triple = "my-board";
           traits = board;
+          rustc = {
+            version = "1.99.0";
+            bundledLld = true;
+            host = "x86_64-unknown-linux-gnu";
+          };
         };
         scope = bb.products.shippedRemapScope {
           triple = "my-board";
@@ -708,7 +730,7 @@ in
           isLinux = true;
           debugInfo = "split";
         };
-        linker = "mold";
+        linker = "cc";
         scope = "macro,diagnostics";
         nativeVar = "MY_LIBS";
         nativeOs = "linux";
@@ -727,5 +749,53 @@ in
     assert lib.assertMsg (fileNamesKnown == known) "target-traits-rustc: file names checked for ${toString fileNamesKnown} targets, cfg for ${toString known}";
     pkgs.runCommand "target-traits-rustc" { } ''
       echo "${toString known} of ${toString (lib.length rows)} rustc targets parsed, all agreeing with rustc --print cfg and --print file-names" > $out
+    '';
+
+  # The default Linux linker kind (lib/presets/linker.nix, `rustcPicksLld`)
+  # against the linker flavor of rustc's own target spec (`--print
+  # target-spec-json`; `gnu-lld-cc` is its bundled lld through the C
+  # driver), for rust-lang's builds on both sides of 1.90 and 1.92, the
+  # current nightly, and nixpkgs' rustc.
+  linker-kind-rustc =
+    let
+      toolchains = {
+        "1.89" = pkgs.rust-bin.stable."1.89.0".minimal;
+        "1.90" = pkgs.rust-bin.stable."1.90.0".minimal;
+        "1.91" = pkgs.rust-bin.stable."1.91.0".minimal;
+        "1.92" = pkgs.rust-bin.stable."1.92.0".minimal;
+        "1.99" = pkgs.rust-bin.stable."1.99.0".minimal;
+        nightly = pkgs.rust-bin.nightly.latest.minimal;
+        nixpkgs = pkgs.rustc;
+      };
+      targets = [
+        "x86_64-unknown-linux-gnu"
+        "aarch64-unknown-linux-gnu"
+        "riscv64gc-unknown-linux-gnu"
+        "i686-unknown-linux-gnu"
+        "armv7-unknown-linux-gnueabihf"
+        "x86_64-unknown-linux-musl"
+        "aarch64-unknown-linux-musl"
+      ];
+      kind =
+        rustc: triple:
+        bb.presets.linkerKind {
+          inherit triple;
+          rustc = bb.presets.rustcFacts { inherit pkgs rustc; };
+        };
+      rows = lib.concatLists (
+        lib.mapAttrsToList (name: rustc: map (t: "${name} ${rustc} ${t} ${kind rustc t}") targets) toolchains
+      );
+    in
+    pkgs.runCommand "linker-kind-rustc" { rows = lib.concatStringsSep "\n" rows; } ''
+      while read -r name rustc triple kind; do
+        flavor=$(RUSTC_BOOTSTRAP=1 $rustc/bin/rustc -Z unstable-options --print target-spec-json --target "$triple" |
+          sed -n 's/^ *"linker-flavor": *"\([^"]*\)".*/\1/p')
+        if [ "$flavor" = gnu-lld-cc ]; then want=lld; else want=cc; fi
+        echo "$name $triple: rustc $flavor, linkerKind $kind" | tee -a $out
+        [ "$kind" = "$want" ] || {
+          echo "linker-kind-rustc: $name $triple: rustc's spec says $flavor, linkerKind $kind" >&2
+          exit 1
+        }
+      done <<< "$rows"
     '';
 }

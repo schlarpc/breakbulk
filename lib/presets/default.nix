@@ -22,7 +22,8 @@
 # given that workspace's toolchain (`toolchain`, see mkPreset), so presets
 # that need rustc's LLVM or wasi-sdk version follow each workspace's rustc.
 # Calling a preset directly (`presets.windows { inherit pkgs triple sdk;
-# … }`) has no workspace: pass `rustc` there.
+# … }`) has no workspace: pass `rustc` there (or `linkerKind`, for a Linux
+# preset whose default linker follows rustc's).
 #
 # Every preset sets the host spec (`host.linker`, `host.env`) from
 # `pkgs.buildPackages`, so host units (build scripts, proc macros and their
@@ -30,14 +31,17 @@
 # never reach them: target env is added only to target units at
 # instantiation, never through Cargo's `[env]`.
 #
-# Presets that use LLVM tools (windows for msvc, wasm, linux with crossLanguageLto)
-# need the LLVM matching rustc: the workspace's `rustc` by default, or one
+# Presets that use LLVM tools (windows for msvc, wasm, the Linux presets
+# with crossLanguageLto or the lld linker kind) need the LLVM matching
+# rustc: the workspace's `rustc` by default, or one
 # passed as `rustc` (its version is looked up in breakbulk.llvmVersions,
 # read from `rustc -vV` (IFD) when the table does not cover it, or nixpkgs'
 # rustc.llvmPackages is used), `llvmMajor`, or `llvmPackages`.
 {
   lib,
+  util,
   targetTraits,
+  toolchainFacts,
   llvmVersions,
   runners,
   wasmBindgen,
@@ -52,6 +56,9 @@ let
   # `traits` are the target's traits (lib/target-traits.nix), which a
   # target passes with the user's `targets.<triple>.traits` merged in; a
   # preset called without them uses the built-in traits of its triple.
+  #
+  # `linkerKind` is the target's `targets.<triple>.linkerKind`, which a
+  # target passes like `traits`.
   #
   # `toolchain` is the workspace's toolchain (`workspaces.<ws>.toolchain`),
   # which a target passes when it applies the preset for one workspace
@@ -80,6 +87,7 @@ let
         ) {
           toolchain = true;
           traits = true;
+          linkerKind = true;
         };
     in
     go { };
@@ -124,23 +132,45 @@ let
       };
 
   # The linker choice (./linker.nix): one function for every preset.
-  linkers = import ./linker.nix { inherit lib targetTraits; };
+  linkers = import ./linker.nix {
+    inherit
+      lib
+      util
+      targetTraits
+      toolchainFacts
+      llvmVersions
+      ;
+  };
   inherit (linkers) chooseLinker;
 
   # The test runner choice (./runner.nix): one function for every preset.
   runnerChoice = import ./runner.nix { inherit lib runners wasmBindgen; };
   inherit (runnerChoice) chooseRunner;
 
-  # The host spec every preset sets: the build machine's linker. On a
-  # native build host and target linkers are the same derivation, so host
-  # units are identical whatever the target.
-  hostSpec = pkgs: {
-    linker = mkDefault (chooseLinker {
-      pkgs = pkgs.buildPackages;
-      triple = nativeTriple pkgs.buildPackages;
-    });
-    env = { };
-  };
+  # The host spec every preset sets: the build machine's linker, for the
+  # workspace's rustc. A target on the build machine's own triple (`triple`)
+  # gives its `linkerKind` to host units too; otherwise the host linker is
+  # the same derivation for every target, so host units are identical
+  # whatever the target.
+  hostSpec =
+    {
+      pkgs,
+      rustc ? null,
+      triple ? null,
+      linkerKind ? null,
+    }:
+    let
+      host = nativeTriple pkgs.buildPackages;
+    in
+    {
+      linker = mkDefault (chooseLinker {
+        pkgs = pkgs.buildPackages;
+        triple = host;
+        inherit rustc;
+        kind = if triple == host then linkerKind else null;
+      });
+      env = { };
+    };
 
   defaultEnv = lib.mapAttrs (_: mkDefault);
 
@@ -150,6 +180,7 @@ let
       pkgs,
       triple,
       traits ? targetTraits.resolve { inherit triple; },
+      linkerKind ? null,
       rustc ? null,
       llvmMajor ? null,
       llvmPackages ? null,
@@ -170,15 +201,24 @@ let
           pkgs
           triple
           traits
+          rustc
           llvm
           ;
+        kind = linkerKind;
       });
       # Unwrapped: a wrapped compiler can silently emit host objects.
       cc = mkDefault "${clang}/bin/clang";
       cxx = mkDefault "${clang}/bin/clang++";
       ar = mkDefault "${llvm.llvm}/bin/llvm-ar";
       testSystem = mkDefault null;
-      host = hostSpec pkgs;
+      host = hostSpec {
+        inherit
+          pkgs
+          rustc
+          triple
+          linkerKind
+          ;
+      };
     };
 
   linuxGnuWith =
@@ -188,6 +228,7 @@ let
       triple ? throw "breakbulk.presets: give the target `triple`",
       traits ? targetTraits.resolve { inherit triple; },
       packageSet ? targetPkgsFor pkgs triple,
+      linkerKind ? null,
       crossLanguageLto ? false,
       nativeBuilder ? false,
       rustc ? null,
@@ -199,14 +240,12 @@ let
       tp = packageSet;
       cc = tp.stdenv.cc;
       prefix = cc.targetPrefix;
-      llvm =
-        if crossLanguageLto then
-          llvmVersions.packagesFor {
-            pkgs = tp.buildPackages;
-            inherit rustc llvmMajor llvmPackages;
-          }
-        else
-          null;
+      # The LLVM matching rustc: for crossLanguageLto's C toolchain, and the
+      # linker kinds with lld.
+      llvm = llvmVersions.packagesFor {
+        pkgs = tp.buildPackages;
+        inherit rustc llvmMajor llvmPackages;
+      };
       # Natively when the build machine runs the target's programs; else
       # on a native builder when nativeBuilder (testSystem), else under
       # qemu-user.
@@ -227,8 +266,10 @@ let
           pkgs
           triple
           traits
+          rustc
           llvm
           ;
+        kind = linkerKind;
         lto = crossLanguageLto;
         packageSet = tp;
       });
@@ -257,7 +298,14 @@ let
       env = defaultEnv st.env;
       runner = mkDefault r.runner;
       testSystem = mkDefault r.testSystem;
-      host = hostSpec pkgs;
+      host = hostSpec {
+        inherit
+          pkgs
+          rustc
+          triple
+          linkerKind
+          ;
+      };
     };
 
   # Static linking, one rule for every preset: `+crt-static` in the target
@@ -298,9 +346,10 @@ let
   # The presets' implementations, one per mechanism; the public presets
   # below pick one from the target's traits.
   impl = {
-    # Linux, dynamically linked, native or cross (nixpkgs cross toolchains). Linker: mold
-    # through the wrapped cc; with crossLanguageLto, clang + lld from the LLVM
-    # matching rustc and `-C linker-plugin-lto`. Tests: native when the build
+    # Linux, dynamically linked, native or cross (nixpkgs cross toolchains).
+    # Linker: the one rustc picks (./linker.nix), through the wrapped cc;
+    # with crossLanguageLto, clang + lld from the LLVM matching rustc and
+    # `-C linker-plugin-lto`. Tests: native when the build
     # machine can run them; else on a native builder when nativeBuilder
     # (testSystem), else under qemu-user.
     linux = mkPreset (linuxGnuWith { });
@@ -329,11 +378,16 @@ let
         traits ? targetTraits.resolve { inherit triple; },
         staticLibDirs ? [ ],
         # null: rustc's default (pic), which with +crt-static gives a
-        # static-pie executable. Not "static" (non-PIE) by default: mold
-        # 3.0.0 links Rust non-PIE static glibc executables that crash at
-        # startup in `_dl_get_origin` (bfd and lld do not; C programs are
-        # unaffected).
+        # static-pie executable, as `cargo build` does. "static" (non-PIE)
+        # works with the cc and lld linker kinds; mold 3.0.0 links Rust
+        # non-PIE static glibc executables that crash at startup in
+        # `_dl_get_origin` (C programs are unaffected), so chooseLinker
+        # rejects that pair.
         relocationModel ? null,
+        linkerKind ? null,
+        rustc ? null,
+        llvmMajor ? null,
+        llvmPackages ? null,
         ...
       }:
       let
@@ -347,7 +401,20 @@ let
       in
       {
         packageSet = mkDefault pkgs;
-        linker = mkDefault (chooseLinker { inherit pkgs triple traits; });
+        linker = mkDefault (chooseLinker {
+          inherit
+            pkgs
+            triple
+            traits
+            rustc
+            ;
+          kind = linkerKind;
+          staticNonPie = relocationModel == "static";
+          llvm = llvmVersions.packagesFor {
+            pkgs = pkgs.buildPackages;
+            inherit rustc llvmMajor llvmPackages;
+          };
+        });
         cc = mkDefault "${cc}/bin/cc";
         cxx = mkDefault "${cc}/bin/c++";
         ar = mkDefault "${cc.bintools}/bin/ar";
@@ -364,7 +431,14 @@ let
         env = defaultEnv st.env;
         runner = mkDefault null;
         testSystem = mkDefault null;
-        host = hostSpec pkgs;
+        host = hostSpec {
+          inherit
+            pkgs
+            rustc
+            triple
+            linkerKind
+            ;
+        };
       }
     );
 
@@ -385,6 +459,7 @@ let
         sdk ? throw "breakbulk.presets.windows: the msvc target ${triple} needs `sdk` (breakbulk.xwinSdk { … })",
         crtStatic ? false,
         extraSdks ? [ ],
+        linkerKind ? null,
         rustc ? null,
         llvmMajor ? null,
         llvmPackages ? null,
@@ -416,8 +491,10 @@ let
             pkgs
             triple
             traits
+            rustc
             llvm
             ;
+          kind = linkerKind;
         });
         cc = mkDefault "${clang}/bin/clang-cl";
         cxx = mkDefault "${clang}/bin/clang-cl";
@@ -447,7 +524,14 @@ let
           canExecute = false;
         }).runner;
         testSystem = mkDefault null;
-        host = hostSpec pkgs;
+        host = hostSpec {
+          inherit
+            pkgs
+            rustc
+            triple
+            linkerKind
+            ;
+        };
       }
     );
 
@@ -569,9 +653,12 @@ in
     ;
   inherit (linkers)
     linkerKind
+    rustcFacts
     moldLinker
     lldLinker
     ;
+  # The kinds `targets.<triple>.linkerKind` may name.
+  linkerKindNames = linkers.kindNames;
   inherit (runnerChoice) runnerKind;
 
   # Presets are named for what they are for; the mechanism follows from
@@ -581,7 +668,8 @@ in
   # triple).
 
   # Linux, dynamically linked, native or cross (nixpkgs cross toolchains,
-  # glibc or musl from the triple). Linker: mold through the wrapped cc;
+  # glibc or musl from the triple). Linker: the one rustc picks, through
+  # the wrapped cc (`linkerKind` for another);
   # with crossLanguageLto, clang + lld from the LLVM matching rustc and
   # `-C linker-plugin-lto`. Tests: native when the build machine can run
   # them; else on a native builder when nativeBuilder (testSystem), else

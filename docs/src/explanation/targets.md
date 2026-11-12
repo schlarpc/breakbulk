@@ -3,8 +3,8 @@
 A target is not a special case in breakbulk. Each one is a toolchain
 spec, usually from a [preset](../reference/presets.md), chosen by the
 target triple. For example, `x86_64-unknown-linux-musl` with
-`presets.linuxStatic` gives nixpkgs' musl cross toolchain, mold as the
-linker, and qemu (or a native builder) to run the tests.
+`presets.linuxStatic` gives nixpkgs' musl cross toolchain, its C
+compiler as the linker, and qemu (or a native builder) to run the tests.
 
 To set a target up, see [Build for another target](../how-to/targets.md).
 This page explains what each kind of target gets, and why.
@@ -13,11 +13,11 @@ This page explains what each kind of target gets, and why.
 
 | Target | Toolchain | Linker | Tests run on |
 | --- | --- | --- | --- |
-| `x86_64-unknown-linux-gnu` | yours | mold | the build machine |
-| `aarch64-unknown-linux-gnu` | yours + nixpkgs cross | mold | an aarch64 builder, else qemu-user |
-| `riscv64gc-unknown-linux-gnu` | yours + nixpkgs cross | mold | qemu-user |
-| `{x86_64,aarch64}-unknown-linux-musl` | yours + nixpkgs musl cross | mold | a native builder, else qemu-user |
-| your own triple, static glibc | yours + static archives | mold | the build machine |
+| `x86_64-unknown-linux-gnu` | yours | rustc's choice: lld or GNU ld | the build machine |
+| `aarch64-unknown-linux-gnu` | yours + nixpkgs cross | rustc's choice: lld or GNU ld | an aarch64 builder, else qemu-user |
+| `riscv64gc-unknown-linux-gnu` | yours + nixpkgs cross | rustc's choice: lld or GNU ld | qemu-user |
+| `{x86_64,aarch64}-unknown-linux-musl` | yours + nixpkgs musl cross | GNU ld | a native builder, else qemu-user |
+| your own triple, static glibc | yours + static archives | rustc's choice: lld or GNU ld | the build machine |
 | your own triple, old glibc (`linuxPortable`) | yours + `zig cc` | zig | the build machine's `ld.so` |
 | `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine (x86_64); none (aarch64) |
 | `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
@@ -74,23 +74,52 @@ of stable, plus the current nightly.
 
 ## Linker selection
 
-A preset picks the linker from the target's traits. One function makes
-the choice for every preset
-(`presets.linkerKind`, used by `presets.chooseLinker`).
+A preset picks the linker from the target's traits and your rustc. One
+function makes the choice for every preset
+(`presets.linkerKind`, used by `presets.chooseLinker`). The default is
+the linker rustc itself would use for the triple and Rust release, so a
+product links as with `cargo build`. Only the program differs: nixpkgs'
+build of it, through nixpkgs' wrapped C compiler, never rustc's own
+`rust-lld` (below).
+
+| Target | Linker kind | Linker |
+| --- | --- | --- |
+| Linux, where rustc links with its bundled lld | `lld` | nixpkgs' lld for rustc's LLVM release, through the wrapped C compiler (`-fuse-ld=lld`) |
+| other Linux targets | `cc` | the wrapped C compiler's own default: GNU ld |
+| Linux, with cross-language LTO | `clang-lld` | clang with lld; C code compiled to bitcode by the same clang |
+| Windows MSVC | `lld-link` | `lld-link`, wrapped so that PDBs are reproducible |
+| Windows MinGW (`-gnu`, `-gnullvm`) | `mingw-lld` | the MinGW C driver with lld |
+| wasm | `wasm-ld`, `wasm-component-ld` | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |
+| `linuxPortable` | `zig` | zig's own linker (`zig cc`) |
+| anything else | | none: the preset fails at evaluation and names `targets.<triple>.linker` |
+
+rustc links with its bundled lld only where its build turns that on. The
+rust-lang builds (rustup, rust-overlay, fenix) for an x86\_64 Linux build
+machine do it for `x86_64-unknown-linux-gnu` from Rust 1.90 (on nightly
+from 1.80), and for every `-linux-gnu` target from Rust 1.92. musl
+targets, rust-lang's builds for other build machines, and nixpkgs' rustc
+(built without lld) use the C compiler's default linker.
+
+[`targets.<triple>.linkerKind`](../reference/options/targets.md#targetsnamelinkerkind)
+switches to another kind, `mold` for example, for the target's units and,
+on your own machine's triple, for build scripts and proc macros too. A
+kind that cannot work with the target or the preset's settings is an
+evaluation error: mold with `crossLanguageLto` (it does not read LLVM
+bitcode), or mold with `linuxStatic`'s `relocationModel = "static"`
+(mold 3.0.0 links non-PIE static glibc Rust programs that crash at
+startup).
 [`targets.<triple>.linker`](../reference/options/targets.md#targetsnamelinker)
 and
 [`host.linker`](../reference/options/targets.md#targetsnamehostlinker)
-override it.
+override both with a program of your own.
 
-| Target | Linker |
-| --- | --- |
-| Linux | **mold**, through nixpkgs' wrapped C compiler |
-| Linux, with cross-language LTO | clang with lld; C code compiled to bitcode by the same clang |
-| Windows MSVC | `lld-link`, wrapped so that PDBs are reproducible |
-| Windows MinGW (`-gnu`, `-gnullvm`) | the MinGW C driver with lld |
-| wasm | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |
-| `linuxPortable` | zig's own linker (`zig cc`) |
-| anything else | none: the preset fails at evaluation and names `targets.<triple>.linker` |
+The linker shows in the product. It records itself in the ELF
+`.comment` section (`Linker: LLD 23.1.3`, `mold 3.0.0`; GNU ld records
+nothing). Linkers lay out sections differently, so sizes differ too:
+a large program linked with mold had a 3.9 MB larger symbol table than
+with lld, and loaded sections about 1 MB smaller. To reproduce a build
+made elsewhere byte for byte, use the same linker kind and the same
+LLVM release.
 
 On Linux the link goes through nixpkgs' wrapper, so its rpath handling,
 `NIX_LDFLAGS` and hardening flags apply. That works because each unit's
@@ -104,12 +133,13 @@ the table.
 
 ### Never rustc's own `rust-lld`
 
-Since about Rust 1.90, rustc links `x86_64-unknown-linux-gnu` with its
-bundled `rust-lld` by default. That bypasses the Nix linker wrapper.
-rustc's opt-out is a rustflag, and rustflags never reach build scripts.
-So every C-driver linker breakbulk uses (mold, clang with lld, MinGW,
-zig) drops the two arguments rustc adds for it (`-fuse-ld=lld` and
-`-B…/gcc-ld`).
+Where rustc links with its bundled lld, it runs the C compiler with
+`-fuse-ld=lld` and `-B…/gcc-ld`, which picks its own `rust-lld`. That
+bypasses the Nix linker wrapper. rustc's opt-out is a rustflag, and
+rustflags never reach build scripts. So every C-driver linker breakbulk
+uses (GNU ld, lld, mold, clang with lld, MinGW, zig) drops those two
+arguments, and the `lld` kind adds `-fuse-ld=lld` back with nixpkgs'
+lld behind the wrapper.
 
 The exceptions are targets without a preset, such as UEFI and bare metal
 (`x86_64-unknown-none`): nixpkgs has no linker wrapper for them, so they
@@ -162,7 +192,9 @@ The `windows` preset packages the usual MSVC cross setup:
 - **musl** targets use nixpkgs' musl cross toolchain with `crt-static`.
   The link uses Rust's own crt, `libc.a` and libunwind (nixpkgs' musl has
   no `libunwind.a`); C code compiles against nixpkgs' musl headers.
-- **Static glibc** builds are static-pie.
+- **Static glibc** builds are static-pie, as `cargo build` makes them
+  with `+crt-static`. `relocationModel = "static"` makes them non-PIE;
+  that works with the `lld` and `cc` linker kinds, not with mold.
 - A static build of your own triple still names that triple as the
   target. So the static settings (rustflags, static `pkg-config`, static
   archive paths) reach only target units, and build scripts and proc

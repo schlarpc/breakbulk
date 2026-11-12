@@ -32,6 +32,8 @@
     else
       throw "breakbulk.presets.windows: `${triple}` is not a windows-gnu or windows-gnullvm triple",
   crtStatic ? true,
+  linkerKind ? null,
+  rustc ? null,
   lld ? pkgs.buildPackages.lld,
   wine ? pkgs.wineWow64Packages.minimal,
   ...
@@ -47,8 +49,10 @@ let
       pkgs
       triple
       traits
+      rustc
       lld
       ;
+    kind = linkerKind;
     packageSet = tp;
   };
 in
@@ -73,5 +77,12 @@ in
     canExecute = false;
   }).runner;
   testSystem = mkDefault null;
-  host = hostSpec pkgs;
+  host = hostSpec {
+    inherit
+      pkgs
+      rustc
+      triple
+      linkerKind
+      ;
+  };
 }

@@ -60,6 +60,8 @@ for `wasm32-wasip1`).
 | --- | --- |
 | `linux`, `linuxStatic` | `nativeBuilder`: run tests on a native builder for the target (see `testSystem`) instead of under qemu |
 | `linux` | `crossLanguageLto`: LTO across Rust and C; clang and lld from rustc's LLVM, C compiled to bitcode (`-flto=thin`) |
+| `linuxStatic` (glibc) | `staticLibDirs`: directories of static archives to link, `relocationModel`: `"static"` for a non-PIE executable (default: static-pie, rustc's own) |
+| all | `linkerKind`: the [linker kind](#linkers), as `targets.<triple>.linkerKind` sets it |
 | `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `rebuildInputs`: nixpkgs libraries to rebuild against that glibc (`[ "openssl" ]`) |
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |
@@ -70,3 +72,56 @@ The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
 unfree; [Build for another target](../how-to/targets.md#windows-msvc)
 shows how to get them. [Targets and
 toolchains](../explanation/targets.md) explains what each preset sets up.
+
+## Linkers
+
+By default a preset links with the linker rustc itself would use for the
+triple and the workspace's Rust release, always through nixpkgs' tools
+and never with rustc's bundled `rust-lld`.
+[`targets.<triple>.linkerKind`](options/targets.md#targetsnamelinkerkind)
+picks another kind. It applies to the target's units, and to build
+scripts and proc macros when the triple is your own machine's.
+
+```nix
+targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
+```
+
+| Kind | Default for | The linker, and where it comes from |
+| --- | --- | --- |
+| `lld` | Linux targets that rustc links with its bundled lld | nixpkgs' wrapped C compiler with `-fuse-ld=lld`; lld from `llvmPackages_<major>`, rustc's LLVM major release |
+| `cc` | other Linux targets (musl, and any with nixpkgs' rustc) | nixpkgs' wrapped C compiler with its default linker, GNU ld |
+| `mold` | none | nixpkgs' wrapped C compiler with `-fuse-ld=mold`; nixpkgs' mold |
+| `clang-lld` | `linux { crossLanguageLto = true; }` | clang and lld from `llvmPackages_<major>`, rustc's LLVM major release |
+| `lld-link` | Windows MSVC | `lld-link` from `llvmPackages_<major>`, wrapped so that PDBs are reproducible |
+| `mingw-lld` | Windows MinGW | the MinGW C compiler with nixpkgs' default lld |
+| `wasm-ld` | wasm, except `wasm32-wasip2` | `wasm-ld` from `llvmPackages_<major>`, not rustc's `rust-lld` |
+| `wasm-component-ld` | `wasm32-wasip2` | rustc's own `wasm-component-ld`, with `wasm-ld` from `llvmPackages_<major>` under it |
+
+`linuxPortable` links with `zig cc`, which its `backend` sets; it takes
+no other kind.
+
+rustc links with its bundled lld where its build turns that on: the
+rust-lang builds (rustup, rust-overlay, fenix) for an x86\_64 Linux build
+machine, for `x86_64-unknown-linux-gnu` from Rust 1.90 (on nightly from
+1.80) and for every `-linux-gnu` target from Rust 1.92. nixpkgs' rustc
+is built without lld.
+
+`rustc.llvmPackages` names the LLVM of nixpkgs' rustc. For other
+toolchains the LLVM major release comes from a table of Rust releases, or
+from `rustc -vV`. The lld is then nixpkgs' build of upstream LLVM with
+that major release, not Rust's LLVM fork: its output is close to
+`rust-lld`'s, but not byte-identical. To reproduce a build made with
+`rust-lld` byte for byte, set
+[`targets.<triple>.linker`](options/targets.md#targetsnamelinker).
+
+A kind that cannot work is an evaluation error that names both sides:
+a kind for another kind of target (`mold` for Windows), `mold` with
+`crossLanguageLto` (cross-language LTO needs a linker that reads LLVM
+bitcode, `clang-lld`), and `mold` with `relocationModel = "static"`
+(mold 3.0.0 links non-PIE static glibc Rust programs that crash at
+startup; `lld` and `cc` do not).
+
+mold and lld lay out a program differently. The linker records itself in
+the ELF `.comment` section (`Linker: LLD 23.1.3`, `mold 3.0.0`), and a
+large program linked with mold had a 3.9 MB larger symbol table and
+about 1 MB smaller loaded sections than with lld.

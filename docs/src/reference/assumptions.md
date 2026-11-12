@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
+Status of the 80 entries: all 80 pinned; [Gaps](#gaps) is empty.
 
 ## Summary
 
@@ -88,6 +88,7 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 | [L8](#l8-windows-gnu-link-specs) | windows-gnu link specs | yes |
 | [L9](#l9-wasm32-default-target-features) | wasm32 default target features | yes |
 | [L10](#l10-toolchain-capabilities-from-versions-and-probes) | Toolchain capabilities from versions and probes | yes |
+| [L11](#l11-where-rustc-links-with-its-bundled-lld) | Where rustc links with its bundled lld | yes |
 | [G1](#g1-target-trait-base-fields-are-rustcs-cfg) | Target-trait base fields are rustc's cfg | yes |
 | [G2](#g2-file-name-traits-are-rustcs-target-spec) | File-name traits are rustc's target spec | yes |
 | [G3](#g3-the-dynamic-library-variable-per-os) | The dynamic-library variable per OS | yes (Linux) |
@@ -632,11 +633,11 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 ### L1. rustc's self-contained lld arguments
 
-- **Assumption.** From about 1.90, rustc links `x86_64-unknown-linux-gnu` with its bundled `rust-lld` by passing exactly `-B<sysroot>/lib/rustlib/<host>/bin/gcc-ld` and `-fuse-ld=lld` to the C driver (also inside an `@file`), and the stable opt-out is a rustflag (`-C linker-features=-lld`) that cannot reach build scripts.
-- **Where.** `lib/presets/linker.nix`: `driverWrapper` (drops both, for mold, clang-lld, mingw-lld and zig).
+- **Assumption.** Where rustc links with its bundled `rust-lld` ([L11](#l11-where-rustc-links-with-its-bundled-lld)), it passes exactly `-B<sysroot>/lib/rustlib/<host>/bin/gcc-ld` and `-fuse-ld=lld` to the C driver (also inside an `@file`), and the stable opt-out is a rustflag (`-C linker-features=-lld`) that cannot reach build scripts. `rust-lld` names its LLVM checkout in `.comment` (`Linker: LLD 23.1.1 (/checkout/src/llvm-project/llvm …)`); nixpkgs' lld does not.
+- **Where.** `lib/presets/linker.nix`: `driverWrapper` (drops both, for cc, lld, mold, clang-lld, mingw-lld and zig).
 - **Upstream.** `rustc --print link-args`, checked with 1.95 and 1.99.
 - **Holds for.** 1.95, 1.99.
-- **Pinned by.** `static-glibc-product`, `static-glibc-build-script`, `same-triple-build-script`, `static-musl-x86_64-product` (every ELF's `.comment` names mold and not LLD).
+- **Pinned by.** `static-glibc-product`, `static-glibc-build-script`, `static-musl-x86_64-build-script`, `native-link-runs-lld`, `sys-native-aarch64`, `riscv64-run` (rustc 1.99 from rust-overlay picks lld; every ELF's `.comment` names an LLD without `llvm-project`).
 - **If it changes.** Links bypass the Nix linker wrapper (no rpaths, no hardening); the checks fail.
 
 ### L2. `wasm32-wasip2` linking
@@ -688,9 +689,9 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 - **Assumption.** On a `-gnu` target, `-C target-feature=+crt-static` with rustc's default relocation model (pic) links a static-pie executable.
 - **Where.** `lib/presets/default.nix`: `impl.staticGlibc` (`relocationModel`).
-- **Upstream.** rustc_target's linux-gnu specs (static-pie support); observed with the preset and mold 3.0.0 (field names not re-read for this page).
+- **Upstream.** rustc_target's linux-gnu specs (static-pie support); observed with the preset and lld 23 (field names not re-read for this page). With `-C relocation-model=static` the executable is non-PIE (`EXEC`): it runs when linked by lld or GNU ld, and crashes at startup when linked by mold 3.0.0, which `chooseLinker` rejects (`staticNonPie`).
 - **Holds for.** 1.99.
-- **Pinned by.** `static-glibc-product` (no `INTERP`, no `NEEDED`), `static-glibc-run`, `static-glibc-test`.
+- **Pinned by.** `static-glibc-product` (no `INTERP`, no `NEEDED`), `static-glibc-run`, `static-glibc-test`; `static-glibc-nonpie-run`, `static-glibc-nonpie-nixpkgs-run` (non-PIE, lld and GNU ld); `presets-eval` (`linkerKindChoice`: mold with `relocationModel = "static"` fails).
 - **If it changes.** Products are dynamic or crash at start; the checks fail.
 
 ### L8. windows-gnu link specs
@@ -746,6 +747,15 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 - **Holds for.** Linux, by check. Windows targets always run under wine, whose variable (`WINEPATH`) the runner declares; Apple is not supported yet (#13).
 - **Pinned by.** `test-runs-test-control`, `test-runs-dylib-rule` (Linux); `windows-dll-test`, `windows-dll-needs-dll` (the runner's own variable).
 - **If it changes.** Tests cannot load their build scripts' libraries.
+
+### L11. Where rustc links with its bundled lld
+
+- **Assumption.** A rustc links a target with its bundled lld (linker flavor `gnu-lld-cc`, self-contained linker) only when it is a rust-lang build (rustup, rust-overlay, fenix) whose host is `x86_64-unknown-linux-gnu`, and then for `x86_64-unknown-linux-gnu` from 1.90 (nightly from 1.80) and for every target on the base linux-gnu spec (`*-linux-gnu*`, not musl) from 1.92. nixpkgs' rustc (`--disable-lld`, nixpkgs' LLVM) never does. breakbulk's default Linux linker kind follows it: `lld` there, `cc` elsewhere.
+- **Where.** `lib/presets/linker.nix`: `rustcPicksLld`, `defaultKind`; `lib/toolchain-facts.nix`: `bundledLld`.
+- **Upstream.** rust-lang/rust `compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs` (1.80 to 1.91: `CFG_USE_SELF_CONTAINED_LINKER`) and `spec/base/linux_gnu.rs` (1.92 on: `CFG_DEFAULT_LINKER_SELF_CONTAINED_LLD_CC`); `src/bootstrap/src/core/config/toml/rust.rs` (1.89: on for the dev and nightly channels only; 1.90: every channel, host `x86_64-unknown-linux-gnu`, not with an external `llvm-config`), `core/config/toml/target.rs`, `default_linux_linker_overrides`, and `build_steps/compile.rs` (1.95); nixpkgs `pkgs/development/compilers/rust/rustc.nix` (`--disable-lld`). Checked for this page.
+- **Holds for.** 1.89 to nightly 1.101, by check.
+- **Pinned by.** `linker-kind-rustc`: the kind for seven Linux targets against `rustc --print target-spec-json` of rust-overlay's 1.89, 1.90, 1.91, 1.92, 1.99 and current nightly, and nixpkgs' rustc; `presets-eval` (`linkerKinds`, the version rule).
+- **If it changes.** Products link with another linker than `cargo build` uses, with a different layout and `.comment`; `linker-kind-rustc` fails.
 
 ## Fetching, vendoring and root prediction
 

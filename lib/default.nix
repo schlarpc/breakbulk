@@ -101,7 +101,9 @@ let
   presets = import ./presets {
     inherit
       lib
+      util
       targetTraits
+      toolchainFacts
       llvmVersions
       runners
       wasmBindgen

@@ -20,14 +20,15 @@ let
 
   # On Linux the native target gets `presets.linux`
   # (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`) unless another
-  # preset is set, so the native linker is nixpkgs' wrapped cc with mold,
-  # as on every other target, instead of rustc's bundled rust-lld. A target
+  # preset is set, so the native linker is nixpkgs' wrapped cc, as on every
+  # other target, instead of rustc's bundled rust-lld. A target
   # defined directly from a preset (`targets.<t> =
   # breakbulk.presets.linuxPortable { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
   nativeTriple = targetTraits.nativeTriple pkgs;
   nativePreset = targetTraits.nativeDefaultPreset pkgs;
   bt = import ./types.nix { inherit lib; };
+  linkerKinds = import ../presets/linker-kinds.nix { inherit lib; };
   tool = types.nullOr (
     types.oneOf [
       types.str
@@ -75,7 +76,9 @@ let
   # A preset that takes `toolchain` (every `breakbulk.presets.*` does)
   # gets this workspace's, so it picks LLVM tools and the wasi-sdk for the
   # workspace's rustc unless the preset was given `rustc` itself; one that
-  # takes `traits` (every `breakbulk.presets.*` does) gets the target's.
+  # takes `traits` or `linkerKind` (every `breakbulk.presets.*` does) gets
+  # the target's.
+  takesLinkerKind = config.preset != null && lib.functionArgs config.preset ? linkerKind;
   applied =
     if config.preset == null then
       { }
@@ -89,6 +92,7 @@ let
           toolchain = breakbulkToolchain;
         }
         // lib.optionalAttrs (lib.functionArgs config.preset ? traits) { inherit traits; }
+        // lib.optionalAttrs (takesLinkerKind && config.linkerKind != null) { inherit (config) linkerKind; }
       );
 
   # One definition: a function, or a preset with options bound (a functor,
@@ -187,7 +191,30 @@ in
     linker = mkOption {
       type = tool;
       default = null;
-      description = "The linker for this target's units (`target.<triple>.linker` in Cargo config). A store path.";
+      description = ''
+        The linker for this target's units (`target.<triple>.linker` in
+        Cargo config). A store path. The preset sets it from
+        `linkerKind`; a value here wins over both.
+      '';
+    };
+    linkerKind = mkOption {
+      type = types.nullOr (types.enum linkerKinds.names);
+      default = null;
+      example = "mold";
+      description = ''
+        Which kind of linker the preset builds for this target's units,
+        and for host units (build scripts, proc macros) when this is the
+        build machine's own triple. `null`: the linker rustc itself picks
+        for the triple and Rust release, always through nixpkgs' wrapped
+        C compiler: `lld` on Linux where rustc links with its bundled
+        lld, `cc` (the C compiler's default, GNU ld) on other Linux
+        targets; `lld-link`, `wasm-ld`, `wasm-component-ld` or
+        `mingw-lld` on Windows and wasm. A kind that cannot link for this
+        target, or with the preset's other settings (`mold` with
+        `crossLanguageLto`), is an evaluation error. It needs a `preset`
+        here; a target defined directly from a preset takes `linkerKind`
+        as the preset's argument.
+      '';
     };
     cc = mkOption {
       type = tool;
@@ -385,7 +412,15 @@ in
     };
   };
 
-  config = lib.foldl' lib.recursiveUpdate { } (
-    map (p: lib.setAttrByPath p (fromPreset p)) presetFields
-  );
+  config = lib.mkMerge [
+    (lib.foldl' lib.recursiveUpdate { } (map (p: lib.setAttrByPath p (fromPreset p)) presetFields))
+    # Between the preset's defaults and a user's `linker`, which still wins.
+    {
+      linker = lib.mkIf (config.linkerKind != null && !takesLinkerKind) (
+        lib.mkOverride 999 (
+          throw "breakbulk: `targets.${name}.linkerKind` needs a `preset` on the target that takes `linkerKind` (every `breakbulk.presets.*` does); a target defined directly from a preset takes it as the preset's argument"
+        )
+      );
+    }
+  ];
 }
