@@ -235,6 +235,8 @@ in
         macros (host units) do not see it.
         List-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, …) are
         appended to the env capture's value.
+
+        ${bt.envNote}
       '';
     };
     runner = mkOption {
@@ -293,7 +295,11 @@ in
       env = mkOption {
         type = bt.envAttrs;
         default = { };
-        description = "Environment added to host units of this target's plans only ([sides](../../explanation/configuration.md#host-and-target-sides)).";
+        description = ''
+          Environment added to host units of this target's plans only ([sides](../../explanation/configuration.md#host-and-target-sides)).
+
+          ${bt.envNote}
+        '';
       };
     };
     stages = mkOption {

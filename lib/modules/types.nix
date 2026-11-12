@@ -12,17 +12,54 @@ rec {
     description = "Cargo version requirement";
   };
 
+  # A list whose definitions concatenate without evaluating their elements,
+  # so that its length is known before its values are: an element can be a
+  # product of the plan that reads the list. Each element is checked
+  # against `elemType` when it is read. Not `types.listOf`, which evaluates
+  # every element to drop those under `mkIf false`.
+  lazyListOf =
+    elemType:
+    lib.mkOptionType {
+      name = "lazyListOf";
+      description = "list of ${
+        types.optionDescriptionPhrase (class: class == "noun" || class == "composite") elemType
+      }";
+      descriptionClass = "composite";
+      check = builtins.isList;
+      merge =
+        loc: defs:
+        lib.concatLists (
+          lib.imap1 (
+            n: def:
+            lib.imap1 (
+              m: value:
+              (lib.mergeDefinitions (loc ++ [ "[definition ${toString n}-entry ${toString m}]" ]) elemType [
+                {
+                  inherit (def) file;
+                  inherit value;
+                }
+              ]).mergedValue
+            ) def.value
+          ) defs
+        );
+      emptyValue.value = [ ];
+      getSubOptions = prefix: elemType.getSubOptions (prefix ++ [ "*" ]);
+      getSubModules = elemType.getSubModules;
+      substSubModules = m: lazyListOf (elemType.substSubModules m);
+      nestedTypes.elemType = elemType;
+    };
+
   # A list of packages, or a function from a package set to one. The
   # function form (`p: [ p.openssl ]`) is called with the package set that
   # matches each platform, rather than taking separate host and target
   # lists, which are easy to mix up; a plain list is used as given.
   # Several definitions concatenate, whatever form each one has.
-  inputs = types.coercedTo (types.listOf types.package) (l: _: l) (
-    types.functionTo (types.listOf types.package)
+  inputs = types.coercedTo (lazyListOf types.package) (l: _: l) (
+    types.functionTo (lazyListOf types.package)
   );
 
   # An environment value: a string, or anything that turns into one (a
-  # path, a derivation such as another workspace's product, a number or a
+  # path, a derivation such as another package's product, a number or a
   # boolean). Derivations reach instantiation by reference.
   envValue = types.oneOf [
     types.str
@@ -32,7 +69,11 @@ rec {
     types.bool
   ];
 
-  envAttrs = types.attrsOf envValue;
+  # Lazy, so that the variables' names are known without their values: a
+  # value can be a product of the plan whose instantiation lists the
+  # names. Not `types.attrsOf`, which evaluates every value to drop those
+  # under `mkIf false`.
+  envAttrs = types.lazyAttrsOf envValue;
 
   # An env value as the string a unit sees. Booleans as "1" and "" (as
   # derivation attributes are).
@@ -45,12 +86,26 @@ rec {
     else
       v;
 
+  # What `envAttrs` and `inputs` being lazy means for `lib.mkIf`, for the
+  # texts of their options.
+  envNote = ''
+    The variables' names are read before their values, so `lib.mkIf`
+    goes around the whole set (`env = lib.mkIf cond { FOO = "x"; }`): on
+    one value (`env.FOO = lib.mkIf false "x"`) it does not remove the
+    variable, and reading it is an error.
+  '';
+  inputsNote = ''
+    The list's length is read before its elements, so `lib.mkIf` goes
+    around the whole list or function: on one element it does not remove
+    the element, and reading it is an error.
+  '';
+
   mkEnv =
     description:
     mkOption {
       type = envAttrs;
       default = { };
-      inherit description;
+      description = description + "\n\n" + envNote;
     };
 
   mkInputs =
@@ -59,7 +114,7 @@ rec {
       type = inputs;
       default = [ ];
       example = lib.literalExpression "p: [ p.openssl ]";
-      inherit description;
+      description = description + "\n\n" + inputsNote;
     };
 
   # A package selection by what it leaves out: `{ exclude = [ … ]; }`,

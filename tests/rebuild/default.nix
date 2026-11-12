@@ -135,6 +135,7 @@ let
     required-features = [ repository.repos.rf ];
     riscv64 = [ extraTargets.repos.riscv64Repo ];
     same-triple = [ presetFixtures.repos.sameTriple ];
+    same-workspace-products = [ products.repos.sameWsRepo ];
     source-paths = [ products.repos.sourcePaths ];
     stamps = [ repository.repos.stampsA ];
     static = [
@@ -157,6 +158,7 @@ let
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];
     # The `strict` clippy variant fails on lib-a by design.
+    ui-dist = [ products.repos.uiDistRepo ];
     variants = [
       {
         source = products.repos.variantsRepo;

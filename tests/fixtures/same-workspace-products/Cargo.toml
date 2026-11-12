@@ -1,0 +1,12 @@
+# Products of one plan used by another member of it: `app`'s build script
+# runs `tool` (`packages.app.nativeInputs`), `app` links `shared`'s cdylib
+# (`packages.app.inputs`) and embeds `tool`'s binary
+# (`packages.app.env.TOOL_BIN`).
+[workspace]
+resolver = "2"
+members = ["app", "tool", "shared"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false

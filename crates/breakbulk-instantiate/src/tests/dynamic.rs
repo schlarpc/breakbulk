@@ -166,7 +166,7 @@ fn resolved_units_equal_nix_substitution() {
         };
         assert_eq!(&r.outputs, outs);
         assert_eq!(r.env["outputs"], outs.join(" "));
-        assert!(!r.env.contains_key("passAsFile"));
+        assert_eq!(r.env["passAsFile"], "");
         // The builder's context: the breakbulk-unit derivation.
         assert!(r.input_drvs[&drv_of("tool:breakbulk-unit")].contains("out"));
     }

@@ -84,13 +84,19 @@ attribute set of (null or raw value)
 
 Environment for every unit of this package, on both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides)
 (compiles and build-script runs)\. Values may be derivations,
-including another workspace’s products; they are passed by
-reference\.
+including the products of other packages, in this workspace or
+another, on any target; they are passed by reference, and only
+this package’s units read them\.
+
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
 
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 
@@ -149,10 +155,15 @@ list of (absolute path or string)
 
 Environment for this package’s host units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 
@@ -172,6 +183,10 @@ attribute set of (string or absolute path or package or signed integer or boolea
 
 
 Libraries for this package’s host units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
+
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
 
 
 
@@ -205,6 +220,10 @@ p: [ p.openssl ]
 
 Build-machine tools for this package’s host units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
+
 
 
 *Type:*
@@ -237,10 +256,15 @@ p: [ p.openssl ]
 
 Environment for this package’s target units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 
@@ -260,6 +284,10 @@ attribute set of (string or absolute path or package or signed integer or boolea
 
 
 Libraries for this package’s target units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
+
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
 
 
 
@@ -292,6 +320,10 @@ p: [ p.openssl ]
 
 
 Build-machine tools for this package’s target units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
+
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
 
 
 
@@ -327,11 +359,16 @@ Libraries for the platform being built (` openssl `), for this
 package’s units on both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides)\. A function of a package set
 (` p: [ p.openssl ] `), called with the build machine’s set for host
 units and with the target’s set for target units; or a list used
-as given\. Their library search paths (` NIX_LDFLAGS `, not compiler
+as given\. Elements may be the products of other packages, as in
+` env `\. Their library search paths (` NIX_LDFLAGS `, not compiler
 flags or ` PATH `) also reach the link steps of the packages that
 link this one (bins, tests, cdylibs, doctests of dependents), on
 the same platform, so a ` -sys ` crate may print ` rustc-link-lib `
 without a search path; binaries get an rpath to the library\.
+
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
 
 
 
@@ -365,7 +402,12 @@ p: [ p.openssl ]
 
 Tools that run on the build machine (` pkg-config `, ` cmake `,
 ` protoc `), for this package’s units on both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides)\. A function of
-the build platform’s package set, or a list\.
+the build platform’s package set, or a list\. Elements may be the
+products of other packages, as in ` env `\.
+
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
 
 
 
@@ -656,10 +698,15 @@ list of string
 
 Environment for this test binary’s run, over ` test.env `\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 
@@ -846,10 +893,15 @@ a fresh, empty ` HOME ` in their temporary directory by default;
 ` HOME = "/homeless-shelter" ` makes a test that writes to its home
 fail, as compiles and build-script runs do\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 

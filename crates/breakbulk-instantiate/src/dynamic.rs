@@ -1037,8 +1037,8 @@ fn substitute(
 
 /// Resolve one derivation as `derivation (drvAttrs d)` does in
 /// `lib/instantiate.nix`: substitute every part, collect string context
-/// into input derivations and sources, and move `BREAKBULK_UNIT` to
-/// `passAsFile` when it is long.
+/// into input derivations and sources, and give a unit `passAsFile`: empty,
+/// or `BREAKBULK_UNIT` when that is long.
 pub fn resolve(
     d: &Drv,
     values: &Values,
@@ -1079,11 +1079,13 @@ pub fn resolve(
         }
         env.insert(k.clone(), s);
     }
-    if env
-        .get("BREAKBULK_UNIT")
-        .is_some_and(|u| u.len() > pass_as_file_above)
-    {
-        env.insert("passAsFile".into(), "BREAKBULK_UNIT".into());
+    if let Some(u) = env.get("BREAKBULK_UNIT") {
+        let pass = if u.len() > pass_as_file_above {
+            "BREAKBULK_UNIT"
+        } else {
+            ""
+        };
+        env.insert("passAsFile".into(), pass.into());
     }
     let take = |k: &str| {
         env.get(k)

@@ -1730,6 +1730,66 @@ in
         touch $out
       '';
 
+  # Instantiating a plan needs only the names of package settings; their
+  # values reach a unit's derivation when it is substituted. Here every
+  # value-carrying setting of `app` (package level and `target.<triple>`,
+  # both sides, test settings, stages, checks) and the workspace's
+  # `devShell.env` throw when read, and the products of the other members
+  # of the same plan still evaluate, to the same derivations as without
+  # these settings. An option that takes a value belongs in `settings` too.
+  # Not the other members' test runs: a test run's library path names the
+  # output of every build-script run in the plan, as Cargo's does, `app`'s
+  # included, and that output's path depends on `app`'s env and inputs.
+  poisoned-settings =
+    let
+      poison = what: throw "poisoned-settings: ${what} was read";
+      side = at: {
+        env.POISON = poison "${at}env";
+        inputs = _: [ (poison "an element of ${at}inputs") ];
+        nativeInputs = _: [ (poison "an element of ${at}nativeInputs") ];
+      };
+      settings =
+        at:
+        side at
+        // {
+          forHost = side "${at}forHost.";
+          forTarget = side "${at}forTarget.";
+          stages.poison = poison "${at}stages";
+          checks.poison = poison "${at}checks";
+          test = {
+            env.POISON = poison "${at}test.env";
+            path = [ (poison "an element of ${at}test.path") ];
+            postRun = poison "${at}test.postRun";
+            binaries.app = {
+              env.POISON = poison "${at}test.binaries.app.env";
+              postRun = poison "${at}test.binaries.app.postRun";
+            };
+            nextest = {
+              package = poison "${at}test.nextest.package";
+              configFile = poison "${at}test.nextest.configFile";
+            };
+          };
+        };
+      fixture = fixtures + "/same-workspace-products";
+      poisoned = mkRepo fixture [
+        (oneWs ".")
+        {
+          packages.app = settings "packages.app." // {
+            target.${native} = settings "packages.app.target.${native}.";
+          };
+          workspaces.main.devShell.env.POISON = poison "devShell.env";
+        }
+      ];
+      clean = mkRepo fixture [ (oneWs ".") ];
+      drv = d: builtins.unsafeDiscardStringContext d.drvPath;
+      drvsOf = repo: lib.genAttrs [ "tool" "shared" ] (p: drv repo.workspaces.main.packages.${p});
+      got = drvsOf poisoned;
+    in
+    assert lib.assertMsg (
+      got == drvsOf clean
+    ) "poisoned-settings: other members' derivations differ: ${builtins.toJSON got}";
+    evalCheck "poisoned-settings" (builtins.toJSON got);
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }

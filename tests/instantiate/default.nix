@@ -267,7 +267,9 @@ let
       appView.unitsJson.drvPath == inst.unitsJson.drvPath && changed inst appView == [ "c-a6654c0a89d81026" ];
     nothing-else-realised = builtins.deepSeq (drvPaths unbuildable) true;
     builder = inst.units.c-a6654c0a89d81026.builder == "${smoke.breakbulk-unit}/bin/breakbulk-unit";
-    no-pass-as-file = !(inst.units.c-a6654c0a89d81026.drvAttrs ? passAsFile);
+    # A short unit text stays in the environment; the attribute is there
+    # all the same.
+    no-pass-as-file = inst.units.c-a6654c0a89d81026.drvAttrs.passAsFile == [ ];
     # The fixture's own prediction for the build plan is the one root above.
     predicted-from-manifests =
       (breakbulk.predictedRoots {

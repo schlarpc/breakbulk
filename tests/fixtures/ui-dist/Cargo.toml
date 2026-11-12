@@ -1,0 +1,11 @@
+# The first example of docs/src/explanation/configuration.md: `app` embeds
+# the wasm product of `ui`, a member of the same workspace, built for
+# wasm32 (`packages.app.env.UI_DIST`).
+[workspace]
+resolver = "2"
+members = ["app", "ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false

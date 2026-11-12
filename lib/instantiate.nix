@@ -228,13 +228,21 @@ rec {
 
       value = v: if isAttrs v then lib.concatMapStrings part v.parts else v;
 
+      # A unit always has `passAsFile`, empty when its text is short: were
+      # the attribute present only for long texts, the names of a unit's
+      # attributes, and so selecting any of its outputs, would need its
+      # substituted text, which can name a product of this same plan.
       drvAttrs =
         d:
         let
           attrs = lib.mapAttrs (_: value) d.attrs;
-          big = attrs ? BREAKBULK_UNIT && stringLength attrs.BREAKBULK_UNIT > json.passAsFileAbove;
         in
-        attrs // lib.optionalAttrs big { passAsFile = [ "BREAKBULK_UNIT" ]; };
+        attrs
+        // lib.optionalAttrs (d.attrs ? BREAKBULK_UNIT) {
+          passAsFile = lib.optional (
+            stringLength attrs.BREAKBULK_UNIT > json.passAsFileAbove
+          ) "BREAKBULK_UNIT";
+        };
       mkDrv = d: derivation (drvAttrs d);
 
       testSpec = t: {

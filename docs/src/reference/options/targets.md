@@ -279,10 +279,15 @@ macros (host units) do not see it\.
 List-like variables (` PATH `, ` NIX_CFLAGS_COMPILE `, …) are
 appended to the env capture’s value\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 
@@ -303,10 +308,15 @@ attribute set of (string or absolute path or package or signed integer or boolea
 
 Environment added to host units of this target’s plans only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
 
 
 *Type:*
-attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
 
 
 

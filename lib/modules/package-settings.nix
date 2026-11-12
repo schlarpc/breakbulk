@@ -69,20 +69,23 @@ let
       env = bt.mkEnv ''
         Environment for every unit of this package, on both ${sides}
         (compiles and build-script runs). Values may be derivations,
-        including another workspace's products; they are passed by
-        reference.
+        including the products of other packages, in this workspace or
+        another, on any target; they are passed by reference, and only
+        this package's units read them.
       '';
       nativeInputs = bt.mkInputs ''
         Tools that run on the build machine (`pkg-config`, `cmake`,
         `protoc`), for this package's units on both ${sides}. A function of
-        the build platform's package set, or a list.
+        the build platform's package set, or a list. Elements may be the
+        products of other packages, as in `env`.
       '';
       inputs = bt.mkInputs ''
         Libraries for the platform being built (`openssl`), for this
         package's units on both ${sides}. A function of a package set
         (`p: [ p.openssl ]`), called with the build machine's set for host
         units and with the target's set for target units; or a list used
-        as given. Their library search paths (`NIX_LDFLAGS`, not compiler
+        as given. Elements may be the products of other packages, as in
+        `env`. Their library search paths (`NIX_LDFLAGS`, not compiler
         flags or `PATH`) also reach the link steps of the packages that
         link this one (bins, tests, cdylibs, doctests of dependents), on
         the same platform, so a `-sys` crate may print `rustc-link-lib`

@@ -101,6 +101,15 @@
 #                    extracted payload runs
 #   embed-invalidation   editing the payload changes only the embedding
 #                    chain's units (embedder and host), not `other`'s
+#   ui-dist          the first example of the configuration page: `app`
+#                    embeds (`packages.app.env.UI_DIST`) the wasmWeb
+#                    product of `ui`, a member of the same workspace; the
+#                    app carries the wasm and its JS glue
+#   same-workspace-products   products of the plan that uses them: `app`'s
+#                    build script runs `tool` (`nativeInputs`), `app` links
+#                    `shared`'s cdylib (`inputs`) and embeds `tool`'s
+#                    binary (`env`); the app runs with an empty
+#                    environment and the embedded binary runs
 #   trim-paths       Cargo's trim-paths, with rust-overlay's nightly (Cargo
 #                    1.101): workspace `set` sets it in its dev profile, so
 #                    its plan keeps Cargo's remaps and scope (the planner
@@ -626,6 +635,49 @@ let
       )
     );
 
+  # The first example of docs/src/explanation/configuration.md, with a
+  # toolchain that has the wasm target, a fixed GIT_REV and without the
+  # parts this fixture has nothing for (openssl-sys, the clippy variant).
+  uiDistRepo = mkRepo (fixtures + "/ui-dist") [
+    (
+      { repo, ... }:
+      {
+        workspaces.default.toolchain = {
+          rustc = wasmRust;
+          cargo = wasmRust;
+        };
+        workspaces.default.targets = {
+          ${native} = { };
+          wasm32-unknown-unknown.packages = [ "ui" ];
+        };
+        targets.wasm32-unknown-unknown.preset = breakbulk.presets.wasmWeb;
+
+        packages.app.env.GIT_REV = "dirty";
+        packages.app.env.UI_DIST = repo.workspaces.default.target.wasm32-unknown-unknown.packages.ui;
+      }
+    )
+  ];
+  wasmRust = overlayRust.override { targets = [ "wasm32-unknown-unknown" ]; };
+
+  # Products of one plan as another member's `env`, `inputs` and
+  # `nativeInputs`.
+  sameWsRepo = mkRepo (fixtures + "/same-workspace-products") [
+    (oneWs "." "dev")
+    (
+      { repo, ... }:
+      let
+        p = repo.workspaces.main.packages;
+      in
+      {
+        packages.app = {
+          env.TOOL_BIN = "${p.tool}/bin/tool";
+          nativeInputs = _: [ p.tool ];
+          inputs = _: [ p.shared ];
+        };
+      }
+    )
+  ];
+
   # The stdpaths fixture on a toolchain with rust-src (see rust-src).
   rustSrcRepo =
     let
@@ -673,11 +725,31 @@ in
       variantsRepo
       benchesRepo
       embed
+      uiDistRepo
+      sameWsRepo
       coverageRepo
       rustSrcRepo
       ;
     trimCc = trimCcRepo { };
   };
+
+  ui-dist = pkgs.runCommand "ui-dist" { app = uiDistRepo.workspaces.default.packages.app; } ''
+    $app/bin/app | tee $out
+    grep -q '^app dirty embeds [0-9]* bytes of wasm, magic true, glue exports greet: true$' $out
+  '';
+
+  same-workspace-products =
+    pkgs.runCommand "same-workspace-products" { app = sameWsRepo.workspaces.main.packages.app; }
+      ''
+        set -euo pipefail
+        # An empty environment: `shared` is found through the rpath.
+        env -i $app/bin/app $TMPDIR/tool | tee $out
+        grep -qx 'build script ran: tool says hi' $out
+        grep -qx 'shared says 42' $out
+        grep -q '^embeds [0-9]* bytes, elf true$' $out
+        chmod +x $TMPDIR/tool
+        [ "$($TMPDIR/tool)" = "tool says hi" ]
+      '';
 
   embed =
     let

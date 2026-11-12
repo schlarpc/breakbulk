@@ -308,10 +308,23 @@ Details: [Fetching and source views](internals/sources.md).
 
 ## Products as inputs
 
-A package's `env` or `inputs` can name any product, even one built for
-another target: `UI_DIST` in the example above is a wasm build. Products
-are passed by reference, so only the unit that embeds the product, and
-its dependents, wait for it. The rest of the build starts at once.
+A package's `env`, `inputs` or `nativeInputs` can name the product of
+another package: in another workspace, for another target, or in the
+same plan. `UI_DIST` in the example above is a wasm build of a member of
+the same workspace. Products are passed by reference, so only the unit
+that embeds the product, and its dependents, wait for it. The rest of
+the build starts at once.
+
+A plan is instantiated from the names of these settings only: which
+variables `env` sets, and whether `inputs` and `nativeInputs` are empty.
+A value is read when the derivation of a unit that uses it is made. For
+this reason, `lib.mkIf` goes around a whole `env` set or `inputs` list,
+not around one value in it.
+
+A product that needs itself, directly or through other products, is an
+infinite recursion. Determinate Nix evaluates in parallel, and there such
+an evaluation can hang with no output. Run it again with
+`--option eval-cores 1` to see the error.
 
 ## Variants
 
