@@ -1,0 +1,4 @@
+[package]
+name = "checked"
+version.workspace = true
+edition.workspace = true

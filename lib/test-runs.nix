@@ -26,10 +26,10 @@
 #   t.runs.<pkg>.<binary>     one test-run derivation per test binary
 #   t.doctests.<pkg>          one doctest derivation per library, with the
 #                             runner, `test.args`, `test.includeIgnored`,
-#                             `test.env` and `test.path` (not per-binary
-#                             settings)
+#                             `test.env`, `test.path` and `test.doctest`
+#                             (not per-binary settings)
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
-#                             every enabled run and every doctest
+#                             every enabled run and doctest
 #   t.specs.<pkg>.<binary>    what a run needs (lib/test-apps.nix uses it)
 #
 # Binary names within a package: an integration test by its name (`it`);
@@ -452,6 +452,13 @@ rec {
     }
     // t
     // {
+      doctest = {
+        args = [ ];
+        env = { };
+        postRun = "";
+        enable = true;
+      }
+      // lib.filterAttrs (_: v: v != null) (t.doctest or { });
       nextest = {
         profile = "default";
         configFile = null;
@@ -534,17 +541,20 @@ rec {
   '';
 
   # What runs after a passing run, in order: breakbulk's own (coverage),
-  # the package's `test.postRun`, the binary's, then `keepLog`'s copy.
-  # Doctests have no binary.
+  # the package's `test.postRun`, the binary's (`binary`: its key) or,
+  # without a binary, the doctest run's, then `keepLog`'s copy.
   postRunSnippets =
     {
       cfg,
       binary ? null,
       coverage ? false,
     }:
+    let
+      own = if binary == null then cfg.doctest else binaryConfig cfg binary;
+    in
     lib.optional coverage coverageCollect
     ++ lib.optional (cfg.postRun != "") cfg.postRun
-    ++ lib.optional (binary != null && (binaryConfig cfg binary).postRun != "") (binaryConfig cfg binary).postRun
+    ++ lib.optional (own.postRun != "") own.postRun
     ++ lib.optional cfg.keepLog ''cp "$log" "$out/log"'';
 
   # The snippets in a subshell, so that a snippet's `cd` or `exit` stays
@@ -598,8 +608,9 @@ rec {
   nextestThreadsFlag = "--tool-config-file breakbulk:$TMPDIR/breakbulk-nextest.toml";
 
   # The attributes a package's doctest derivation gets from its test
-  # configuration: the runner (a list), `test.args` with
-  # `--include-ignored` when `test.includeIgnored`, and `test.env` with
+  # configuration: the runner (a list), `test.args` and
+  # `test.doctest.args` with `--include-ignored` when
+  # `test.includeIgnored`, and `test.env`, `test.doctest.env` and
   # `test.path` as PATH. Dynamic-derivation mode passes the same strings to
   # its outer derivation (lib/dynamic.nix), so both modes write the same
   # doctest derivation.
@@ -629,11 +640,19 @@ rec {
             + lib.concatStringsSep "\n" snippets
           )}";
       BREAKBULK_TEST_RUNNER = toJSON (if runner == null then [ ] else lib.toList runner);
-      BREAKBULK_TEST_ARGS = toJSON (cfg.args ++ lib.optional cfg.includeIgnored "--include-ignored");
+      BREAKBULK_TEST_ARGS = toJSON (
+        cfg.args ++ cfg.doctest.args ++ lib.optional cfg.includeIgnored "--include-ignored"
+      );
       BREAKBULK_TEST_ENV = toJSON (
-        cfg.env // lib.optionalAttrs (cfg.path != [ ]) { PATH = lib.makeBinPath cfg.path; }
+        cfg.env
+        // cfg.doctest.env
+        // lib.optionalAttrs (cfg.path != [ ]) { PATH = lib.makeBinPath cfg.path; }
       );
     };
+
+  # Whether a package's doctest run is in the check set
+  # (`test.doctest.enable`).
+  doctestEnabled = packages: pkg: (testConfig packages pkg).doctest.enable;
 
   # libtest arguments of one binary.
   testArgs =
@@ -873,7 +892,9 @@ rec {
             lib.filterAttrs (b: _: (binaryConfig (testConfig packages pkg) b).enable) bs
           )
         ) runs
-        // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) doctests;
+        // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) (
+          lib.filterAttrs (pkg: _: doctestEnabled packages pkg) doctests
+        );
     in
     {
       inherit

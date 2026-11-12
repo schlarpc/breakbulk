@@ -630,7 +630,7 @@ true
 
 
 
-libtest arguments for this test binary\.
+libtest arguments for this test binary’s run, after ` test.args `\.
 
 
 
@@ -678,7 +678,146 @@ attribute set of (string or absolute path or package or signed integer or boolea
 
 
 
-A shell snippet run after this binary’s passing run, after the package’s ` test.postRun ` (see there)\.
+A shell snippet run after this test binary’s run passes, after the package’s ` test.postRun ` (see there)\.
+
+
+
+*Type:*
+strings concatenated with “\\n”
+
+
+
+*Default:*
+
+```nix
+""
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.doctest`
+
+
+
+Settings for the package’s doctest run (` doctests.<pkg> `, check
+` <ws>/<triple>/<pkg>/doctest `), as ` test.binaries.<key> ` has
+for a test binary’s\.
+
+
+
+*Type:*
+submodule
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  enable = false;
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.doctest.enable`
+
+
+
+Whether the package’s doctest run is part of ` repo.checks ` and
+the check groups\. A doctest compiles and runs in one rustdoc
+process, so with ` false ` the checks build nothing of it; it
+stays buildable as ` doctests.<pkg> `\. A layer’s value wins over
+the layers below it: ` memberDefaults.test.doctest.enable = false ` with ` true ` for a few packages runs only theirs\. For a
+library whose manifest sets ` doctest = false `, there is no
+doctest run to enable\. ` null `: ` true `\.
+
+
+
+*Type:*
+null or boolean
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.doctest.args`
+
+
+
+libtest arguments for the package’s doctest run, after ` test.args `\.
+
+
+
+*Type:*
+list of string
+
+
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.doctest.env`
+
+
+
+Environment for the package’s doctest run, over ` test.env `\.
+
+
+
+*Type:*
+attribute set of (string or absolute path or package or signed integer or boolean)
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+
+
+## `packages.<name>.test.doctest.postRun`
+
+
+
+A shell snippet run after the package’s doctest run passes, after the package’s ` test.postRun ` (see there)\.
 
 
 
@@ -901,11 +1040,11 @@ run of this package, after the tests: ` $log ` is the run’s raw
 output and ` $out ` the run’s output directory, empty otherwise\.
 With ` test.runner = "nextest" `, ` $nextestDir ` is nextest’s
 store (JUnit reports)\. The package’s snippet runs first, then
-the binary’s (` test.binaries.<binary>.postRun `), then
-` keepLog `’s\. Whatever a snippet puts in ` $out ` decides whether
-the run is reproducible: breakbulk keeps ` $out ` empty so that
-` nix build --rebuild ` of a passing run succeeds, and the output
-stays in the build log (` nix log `)\.
+the binary’s (` test.binaries.<binary>.postRun `) or the doctest
+run’s (` test.doctest.postRun `), then ` keepLog `’s\. Whatever a
+snippet puts in ` $out ` decides whether the run is
+reproducible: breakbulk keeps ` $out ` empty so that ` nix build --rebuild ` of a passing run succeeds, and the output stays in
+the build log (` nix log `)\.
 
 
 

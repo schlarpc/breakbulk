@@ -121,7 +121,10 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 The first four rows come from every build or coverage variant with
 [`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)
 (the default for hand-written variants, not for the feature-matrix
-helpers'). A product whose roots Cargo all skipped is left out.
+helpers'). A product whose roots Cargo all skipped is left out, and so
+is a test run or doctest turned off with
+[`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable)
+or [`test.doctest.enable`](options/packages.md#packagesnametestdoctestenable).
 
 Groups are checks too, each an aggregate (a `linkFarm` of the checks it
 holds) that builds them as one installable

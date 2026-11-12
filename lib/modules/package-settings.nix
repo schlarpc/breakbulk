@@ -16,23 +16,47 @@ let
     inputs = bt.mkInputs "Libraries for this package's ${name} units only (${sides}).";
   };
 
+  # The settings of one run over the package's: a test binary's or the
+  # doctest run's.
+  runSettings = what: {
+    args = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = "libtest arguments for ${what}, after `test.args`.";
+    };
+    env = bt.mkEnv "Environment for ${what}, over `test.env`.";
+    postRun = mkOption {
+      type = types.lines;
+      default = "";
+      description = "A shell snippet run after ${what} passes, after the package's `test.postRun` (see there).";
+    };
+  };
+
   testBinary = {
-    options = {
-      args = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        description = "libtest arguments for this test binary.";
-      };
-      env = bt.mkEnv "Environment for this test binary's run, over `test.env`.";
-      postRun = mkOption {
-        type = types.lines;
-        default = "";
-        description = "A shell snippet run after this binary's passing run, after the package's `test.postRun` (see there).";
-      };
+    options = runSettings "this test binary's run" // {
       enable = mkOption {
         type = types.bool;
         default = true;
         description = "Whether this binary's test run is part of `repo.checks` (it is built either way).";
+      };
+    };
+  };
+
+  doctest = {
+    options = runSettings "the package's doctest run" // {
+      enable = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = ''
+          Whether the package's doctest run is part of `repo.checks` and
+          the check groups. A doctest compiles and runs in one rustdoc
+          process, so with `false` the checks build nothing of it; it
+          stays buildable as `doctests.<pkg>`. A layer's value wins over
+          the layers below it: `memberDefaults.test.doctest.enable =
+          false` with `true` for a few packages runs only theirs. For a
+          library whose manifest sets `doctest = false`, there is no
+          doctest run to enable. `null`: `true`.
+        '';
       };
     };
   };
@@ -202,11 +226,12 @@ let
             output and `$out` the run's output directory, empty otherwise.
             With `test.runner = "nextest"`, `$nextestDir` is nextest's
             store (JUnit reports). The package's snippet runs first, then
-            the binary's (`test.binaries.<binary>.postRun`), then
-            `keepLog`'s. Whatever a snippet puts in `$out` decides whether
-            the run is reproducible: breakbulk keeps `$out` empty so that
-            `nix build --rebuild` of a passing run succeeds, and the output
-            stays in the build log (`nix log`).
+            the binary's (`test.binaries.<binary>.postRun`) or the doctest
+            run's (`test.doctest.postRun`), then `keepLog`'s. Whatever a
+            snippet puts in `$out` decides whether the run is
+            reproducible: breakbulk keeps `$out` empty so that `nix build
+            --rebuild` of a passing run succeeds, and the output stays in
+            the build log (`nix log`).
           '';
         };
         keepLog = mkOption {
@@ -251,6 +276,20 @@ let
             variants build (`required-features`) has its key on all of
             them. Under `memberDefaults`, a key must name a test binary of
             some member.
+          '';
+        };
+        doctest = mkOption {
+          type = types.submodule doctest;
+          default = { };
+          example = lib.literalExpression ''
+            {
+              enable = false;
+            }
+          '';
+          description = ''
+            Settings for the package's doctest run (`doctests.<pkg>`, check
+            `<ws>/<triple>/<pkg>/doctest`), as `test.binaries.<key>` has
+            for a test binary's.
           '';
         };
         runner = mkOption {

@@ -306,6 +306,16 @@ no cutoff: they re-run whenever the library or anything below it changes.
 by its name (`--skip "src/lib.rs - net::connect"`); per-binary
 `test.binaries.<binary>.args` do not.
 
+- [`test.doctest`](../reference/options/packages.md#packagesnametestdoctest)
+  gives a package's doctest run its own `args`, `env` and `postRun`,
+  over the package's `test.args`, `test.env` and `test.postRun`, as
+  `test.binaries.<key>` does for a test binary.
+- `test.doctest.enable = false` leaves the doctest run out of
+  `repo.checks` and the check groups. As there is no separate compile,
+  the checks then build nothing of it; `doctests.<pkg>` still builds it.
+  A project whose CI runs the doctests of a few crates only sets
+  `memberDefaults.test.doctest.enable = false` and `true` for those.
+
 **Benches** come only from a bench variant (`cargo bench --no-run`, bench
 profile), which gives optimized bench binaries to run outside Nix.
 `cargo test --no-run` builds no benches.

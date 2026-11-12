@@ -44,8 +44,8 @@
 #
 # repo.checks: for each build or coverage variant with `checks = true`,
 # `<pkg>/build` (the product), `<pkg>/<check>` (its checks),
-# `<pkg>/test-<name>` (enabled test runs) and `<pkg>/doctest`, under
-# `<ws>/<triple>/` for the default variant and
+# `<pkg>/test-<name>` and `<pkg>/doctest` (enabled test runs and
+# doctests), under `<ws>/<triple>/` for the default variant and
 # `<ws>/<triple>/variant-<v>/` for the others; check and clippy variants
 # as `<ws>/<triple>/variant-<v>/check`. Every proper prefix of those names,
 # `all` and each of `checkGroups` is also a check: an aggregate of the
@@ -344,6 +344,12 @@ let
           a.binaries
           b.binaries
         ];
+        doctest = {
+          args = a.doctest.args ++ b.doctest.args;
+          env = a.doctest.env // envStrings b.doctest.env;
+          postRun = joinLines a.doctest.postRun b.doctest.postRun;
+          enable = if b.doctest.enable != null then b.doctest.enable else a.doctest.enable;
+        };
       };
       empty = {
         env = { };
@@ -353,6 +359,12 @@ let
         sourceScope = [ ];
         scopeTestsDir = null;
         binaries = { };
+        doctest = {
+          args = [ ];
+          env = { };
+          postRun = "";
+          enable = null;
+        };
         runFiles = null;
         runner = null;
         stripForRun = null;
@@ -1090,6 +1102,10 @@ let
               namedTestRuns = ifTests (namedRuns inst tSel);
               testApps = ifTests (selectPkgs tSel inst.testApps);
               doctests = ifTests (selectPkgs tSel inst.doctests);
+              # Those in repo.checks (`test.doctest.enable`).
+              enabledDoctests = ifTests (
+                lib.filterAttrs (pkg: _: inst.checks ? "doctest/${pkg}") (selectPkgs tSel inst.doctests)
+              );
               benches = benchesOf (traitsOf wsName triple) inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
               namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
@@ -1261,7 +1277,7 @@ let
             lib.concatMapAttrs (
               pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
             ) v.namedTestRuns
-            // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.doctests
+            // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
           )
         )
       ) t.variants

@@ -717,7 +717,9 @@ let
             lib.filterAttrs (b: _: (testRuns.binaryConfig (testRuns.testConfig packages pkg) b).enable) bs
           )
         ) runs
-        // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) doctests;
+        // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) (
+          lib.filterAttrs (pkg: _: testRuns.doctestEnabled packages pkg) doctests
+        );
     in
     {
       inherit

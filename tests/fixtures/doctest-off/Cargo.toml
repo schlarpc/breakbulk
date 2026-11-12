@@ -1,0 +1,10 @@
+# Doctest settings (`test.doctest`): `unchecked` has a doctest that fails,
+# which its settings leave out of the checks; `checked` has doctests that
+# pass only with their own arguments and environment.
+[workspace]
+resolver = "2"
+members = ["checked", "unchecked"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

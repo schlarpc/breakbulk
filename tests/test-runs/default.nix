@@ -80,6 +80,13 @@
 #                           message naming the valid keys; a key for the
 #                           required-features test, which only one variant
 #                           builds, is accepted and reaches that run
+#   doctest-settings        over the `doctest-off` fixture:
+#                           `memberDefaults.test.doctest.enable = false`
+#                           leaves the failing doctest out of repo.checks
+#                           (`all` builds) with the check groups unchanged,
+#                           and `doctests.<pkg>` stays; a package's `true`
+#                           wins over it, and its doctest `args`, `env` and
+#                           `postRun` reach its doctest run
 #
 # `workspaces` exposes the mkWorkspace results for debugging; `repos` the
 # mkRepository results that tests/dynamic builds in both modes.
@@ -1001,6 +1008,71 @@ let
     pkgs.runCommand "test-runs-test-binary-keys" { } ''
       echo ok > $out
     '';
+
+  # --- doctest settings ------------------------------------------------------
+
+  doctestRepo =
+    modules:
+    breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/doctest-off";
+      modules = [ { workspaces.main.variants.default.profile = "dev"; } ] ++ modules ++ extraModules;
+    };
+  # Off for every member, back on for `checked`, which needs its own
+  # arguments and environment.
+  doctestOffRepo = doctestRepo [
+    {
+      workspaces.main.memberDefaults.test = {
+        doctest.enable = false;
+        keepLog = true;
+      };
+      packages.checked.test = {
+        postRun = ''echo package >> "$out/order"'';
+        doctest = {
+          enable = true;
+          args = [
+            "--skip"
+            "skipped_by_args"
+          ];
+          env.DOCTEST_ENV = "yes";
+          postRun = ''echo doctest >> "$out/order"'';
+        };
+      };
+    }
+  ];
+  doctestSettings =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      p = "main/${native}";
+      c = doctestOffRepo.checks;
+      base = (doctestRepo [ ]).checks;
+      isGroup = cs: n: cs.${n}.breakbulkCheckGroup or false;
+      groups = cs: lib.filter (isGroup cs) (lib.attrNames cs);
+      leaves = cs: lib.filter (n: !(isGroup cs n)) (lib.attrNames cs);
+      t = doctestOffRepo.workspaces.main.target.${native};
+    in
+    assert lib.assertMsg (
+      leaves base == lib.sort lib.lessThan (leaves c ++ [ "${p}/unchecked/doctest" ])
+      && c ? "${p}/checked/doctest"
+    ) "doctest-settings: checks ${toString (leaves c)}, without the settings ${toString (leaves base)}";
+    assert lib.assertMsg (groups c == groups base)
+      "doctest-settings: groups ${toString (groups c)}, without the settings ${toString (groups base)}";
+    assert lib.assertMsg (
+      lib.attrNames c.all.passthru.entries == leaves c
+    ) "doctest-settings: all holds ${toString (lib.attrNames c.all.passthru.entries)}";
+    assert lib.assertMsg (t.doctests ? unchecked) "doctest-settings: doctests.unchecked is gone";
+    pkgs.runCommand "test-runs-doctest-settings"
+      {
+        all = c.all;
+        checked = t.doctests.checked;
+      }
+      ''
+        cat $checked/log
+        grep -q 'checked/src/lib.rs - one (line 3) ... ok' $checked/log
+        ! grep -q 'skipped_by_args (line' $checked/log
+        [ "$(cat $checked/order)" = "$(printf 'package\ndoctest')" ]
+        mkdir -p $out
+      '';
 in
 {
   workspaces = {
@@ -1012,6 +1084,7 @@ in
   };
   post-run = postRun;
   inherit home;
+  doctest-settings = doctestSettings;
   test-binary-keys = testBinaryKeys;
   test-threads = testThreads;
   dylib-rule = dylibRule;

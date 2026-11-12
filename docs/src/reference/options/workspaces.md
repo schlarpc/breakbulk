@@ -935,8 +935,6 @@ pkgs.cargo
 
 ## `workspaces.<name>.toolchain.clippy`
 
-
-
 clippy (with ` bin/clippy-driver `), for ` clippy ` variants\.
 It must be built for the same rustc: planning compares
 ` clippy-driver --rustc --print sysroot ` with rustc’s and

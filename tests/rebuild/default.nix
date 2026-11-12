@@ -108,6 +108,7 @@ let
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
     doctests = [ dynamic.repos.doctests ];
+    doctest-off = [ (plain "doctest-off" [ ]) ];
     embed = [ products.repos.embed ];
     exclusive-features = [ repository.repos.exclusive ];
     feature-unification = [ (plain "feature-unification" [ (withToolchain pkgs.rust-bin.nightly.latest.minimal) ]) ];

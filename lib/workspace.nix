@@ -51,7 +51,8 @@
 #
 # Test options (set by mkRepository's module options): `runner` (null or a
 # list), `testSystem`, `packages.<name>.test` (env, path, args,
-# includeIgnored, binaries.<binary>.{args,env,enable}), `ca` (null: automatic),
+# includeIgnored, binaries.<binary>.{args,env,enable},
+# doctest.{args,env,postRun,enable}), `ca` (null: automatic),
 # `checkout` (the user's checkout of the repository root, for test apps).
 {
   lib,
