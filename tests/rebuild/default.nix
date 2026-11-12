@@ -100,6 +100,7 @@ let
     build-script-outputs = [ products.repos.buildScriptOutputs ];
     build-std = [ buildStd.repos.bare ];
     build-std-deps = [ buildStd.repos.hosted ];
+    cargo-config = [ dynamic.repos.cargo-config ];
     cdylib-debug = [ products.repos.cdylibDebug ];
     # Its clippy units fail by design (disallowed methods): the default
     # variant only.
