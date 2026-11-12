@@ -123,6 +123,82 @@ let
     };
   };
 
+  # The keys of a variant's `cargoConfig` that breakbulk sets itself, with
+  # what to use instead. The planner's own `--config` file comes before
+  # the variant's (crates/breakbulk-plan/src/trace.rs, `run`), so one of
+  # its keys there would win and break planning (rustc, the wrapper, the
+  # target directory, the test runner); the toolchain spec's comes after
+  # (spec.rs, `config_text`), and would replace a linker silently; the
+  # planner passes `--target` and `--profile`; vendoring replaces every
+  # source.
+  ownedCargoConfigKeys =
+    cfg:
+    let
+      fixed = [
+        {
+          path = [ "build" "rustc" ];
+          use = "set `workspaces.<ws>.toolchain.rustc`";
+        }
+        {
+          path = [ "build" "rustdoc" ];
+          use = "set `workspaces.<ws>.toolchain.rustc`";
+        }
+        {
+          path = [ "build" "rustc-wrapper" ];
+          use = "the planner records every compile through its own wrapper";
+        }
+        {
+          path = [ "build" "rustc-workspace-wrapper" ];
+          use = "use a clippy variant (`mode = \"clippy\"`)";
+        }
+        {
+          path = [ "build" "target-dir" ];
+          use = "every unit has its own output";
+        }
+        {
+          path = [ "build" "build-dir" ];
+          use = "every unit has its own output";
+        }
+        {
+          path = [ "build" "target" ];
+          use = "set `workspaces.<ws>.targets`";
+        }
+        {
+          path = [ "build" "profile" ];
+          use = "set the variant's `profile` and `testProfile`";
+        }
+        {
+          path = [ "source" ];
+          use = "crates come from Cargo.lock, vendored";
+        }
+        {
+          path = [ "host" "linker" ];
+          use = "set `targets.<triple>.host.linker`";
+        }
+        {
+          path = [ "host" "runner" ];
+          use = "set `targets.<triple>.runner`";
+        }
+      ];
+      perTarget = lib.concatMap (
+        key:
+        let
+          t = cfg.target.${key};
+        in
+        lib.optionals (builtins.isAttrs t) (
+          lib.optional (t ? linker) {
+            path = [ "target" key "linker" ];
+            use = "set `targets.<triple>.linker`";
+          }
+          ++ lib.optional (t ? runner) {
+            path = [ "target" key "runner" ];
+            use = "set `targets.<triple>.runner`";
+          }
+        )
+      ) (lib.attrNames (if builtins.isAttrs (cfg.target or null) then cfg.target else { }));
+    in
+    lib.filter (k: lib.hasAttrByPath k.path cfg) fixed ++ perTarget;
+
   # `ws`: the workspace's config, for defaults a variant inherits;
   # `wsName`, its name, for messages.
   variant =
@@ -175,6 +251,10 @@ let
           message = "breakbulk: ${at}.target${bt.setIn options.target}: ${lib.concatStringsSep ", " unplannedLayers} not among the targets this variant is planned for (${lib.concatStringsSep ", " planned})";
         }
       ]
+      ++ map (k: {
+        assertion = false;
+        message = "breakbulk: ${at}.cargoConfig${bt.setIn options.cargoConfig}: `${lib.concatStringsSep "." k.path}` is set by breakbulk itself; ${k.use}";
+      }) (ownedCargoConfigKeys config.cargoConfig)
       ++ lib.optionals (builtins.isAttrs config.packages) (
         map (m: {
           assertion = false;
@@ -210,6 +290,44 @@ let
             shares none. Check and clippy variants ignore it: they trace
             one Cargo command with `profile`, as `cargo check` and `cargo
             clippy` do.
+          '';
+        };
+        cargoConfig = mkOption {
+          type = bt.cargoConfig;
+          default = { };
+          example = lib.literalExpression ''
+            {
+              profile.release = {
+                panic = "abort";
+                strip = "debuginfo";
+              };
+            }
+          '';
+          description = ''
+            Cargo configuration for this variant's plans, as the content
+            of a config file: what `--config` or `CARGO_*` variables set
+            for one CI job. It is written to one TOML file that the
+            planner passes to Cargo as `--config <file>`, over the
+            project's own `.cargo/config.toml` files: a value replaces
+            theirs, and an array (`build.rustflags`) is appended to
+            theirs. breakbulk's own reader of the project's config
+            (`build.rustflags`, `target.<triple>.rustflags`, `[env]`)
+            reads it last, the same way. It applies to every plan of the
+            variant, so a `profile.<name>` table reaches only the plans
+            of that profile (`profile`, `testProfile`). The dev shell does
+            not apply it.
+
+            Keys that breakbulk sets itself are an evaluation error:
+            `build.rustc`, `build.rustdoc`, `build.rustc-wrapper`,
+            `build.rustc-workspace-wrapper`, `build.target-dir`,
+            `build.build-dir`, `build.target`, `build.profile`,
+            `target.<key>.linker`, `target.<key>.runner`, `host.linker`,
+            `host.runner` and `source`.
+
+            When the project can be edited, a named profile in its
+            `Cargo.toml` (`[profile.dist]` with `inherits = "release"`,
+            and `profile = "dist"` here) does the same for profile
+            settings, and local Cargo sees it too.
           '';
         };
         features = mkOption {
@@ -304,7 +422,7 @@ let
           description = ''
             This variant's settings on one of its targets: any option of
             the variant (`features`, `noDefaultFeatures`, `profile`,
-            `testProfile`, `allTargets`, `clippyArgs`, `packages`, `benches`, `checks`, …)
+            `testProfile`, `cargoConfig`, `allTargets`, `clippyArgs`, `packages`, `benches`, `checks`, …)
             except `targets`. They apply over the variant's own settings
             and the target's `variantDefaults`
             (`workspaces.<ws>.targets.<triple>.variantDefaults`): lists

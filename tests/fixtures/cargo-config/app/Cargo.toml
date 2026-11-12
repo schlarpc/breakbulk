@@ -1,0 +1,10 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dep = { path = "../dep" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(from_cargo_config)", "cfg(from_spec)"] }

@@ -7,7 +7,9 @@
 //! shim as rustc wrapper and rustdoc, and the scratch target and build
 //! directories. `--config` has the highest precedence, so the project's
 //! config cannot redirect any of them. The project's own config files apply
-//! as they do locally; nothing from the user's home is visible.
+//! as they do locally; nothing from the user's home is visible. The
+//! variant's `cargoConfig` follows as a second `--config` file (the Nix
+//! library rejects the keys the generated file and the toolchain spec set).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -62,6 +64,13 @@ pub struct Options {
     /// Extra `--config` values (files or `key=value`): source replacement,
     /// the toolchain spec's rustflags and linkers.
     pub configs: Vec<String>,
+    /// The variant's own Cargo configuration (`cargoConfig`), a TOML file:
+    /// passed with `--config` before `configs`, so that the spec's
+    /// rustflags follow its own, and read by [`ProjectConfig::of`] as the
+    /// project's highest layer.
+    ///
+    /// [`ProjectConfig::of`]: crate::spec::ProjectConfig::of
+    pub cargo_config: Option<String>,
     /// A writable directory for Cargo's target directory and the records.
     pub scratch: String,
     /// Paths no literal in the plan may contain (besides the scratch
@@ -101,7 +110,7 @@ pub struct Trace {
 
 impl Trace {
     pub fn context(&self, opts: &Options) -> Result<Context, Error> {
-        let project = crate::spec::ProjectConfig::read(&workspace_dir(opts), None)?;
+        let project = crate::spec::ProjectConfig::of(opts)?;
         Ok(Context {
             scratch: target_dir(opts),
             skeleton: opts.skeleton.trim_end_matches('/').to_owned(),
@@ -260,7 +269,7 @@ fn check_clippy_driver(opts: &Options, driver: &str) -> Result<(), Error> {
 /// directory with the standard library's vendored dependencies
 /// ([`crate::build_std`]).
 pub fn std_vendor(opts: &Options) -> Result<Option<crate::build_std::StdVendor>, Error> {
-    let project = crate::spec::ProjectConfig::read(&workspace_dir(opts), None)?;
+    let project = crate::spec::ProjectConfig::of(opts)?;
     if !crate::build_std::uses_build_std(&project.files)? {
         return Ok(None);
     }
@@ -324,7 +333,7 @@ fn common_args(opts: &Options, config: &Path) -> Vec<String> {
     let mut a = vec!["--frozen".to_owned(), "--offline".to_owned()];
     a.push("--config".into());
     a.push(config.display().to_string());
-    for c in &opts.configs {
+    for c in opts.cargo_config.iter().chain(&opts.configs) {
         a.push("--config".into());
         a.push(c.clone());
     }

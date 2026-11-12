@@ -362,6 +362,7 @@ let
       ];
     };
     variants-coverage = products.coverageRepo;
+    cargo-config = products.cargoConfigRepo;
     benches = products.benchesRepo;
     stdpaths = products.rustSrcRepo;
     cdylib-debug = products.cdylibDebug;

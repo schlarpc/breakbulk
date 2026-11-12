@@ -174,6 +174,26 @@ impl ProjectConfig {
         Ok(cfg)
     }
 
+    /// [`read`](Self::read) for the planner's workspace, then the variant's
+    /// `--cargo-config` file as the highest layer. Cargo merges a
+    /// `--config` file over the discovered files as it merges a deeper
+    /// file over a shallower one: a string replaces, arrays concatenate
+    /// with the file's values last (cargo `GlobalContext::merge_cli_args`,
+    /// `ConfigValue::merge` with `force`), its `include`s first
+    /// (`load_includes`).
+    pub fn of(opts: &crate::trace::Options) -> Result<ProjectConfig, Error> {
+        ProjectConfig::read(&crate::trace::workspace_dir(opts), None)?
+            .with_cli(opts.cargo_config.as_deref().map(Path::new))
+    }
+
+    /// This config with a `--config` file over it (see [`of`](Self::of)).
+    fn with_cli(mut self, file: Option<&Path>) -> Result<ProjectConfig, Error> {
+        if let Some(f) = file {
+            self.load(f, &mut Vec::new())?;
+        }
+        Ok(self)
+    }
+
     fn load(&mut self, path: &Path, seen: &mut Vec<PathBuf>) -> Result<(), Error> {
         if seen.iter().any(|s| s == path) {
             bail!("config `include` cycle at {}", path.display());
@@ -595,16 +615,17 @@ pub struct Prepared {
     pub config: PathBuf,
 }
 
-/// Choose the key, write the `--config` file into `scratch`.
+/// Choose the key for the project's config `project` (read in `cwd`),
+/// write the `--config` file into `scratch`.
 pub fn prepare(
     spec: Spec,
+    project: &ProjectConfig,
     cwd: &Path,
     rustc: &str,
     target: &str,
     host: &str,
     scratch: &Path,
 ) -> Result<Prepared, Error> {
-    let project = ProjectConfig::read(cwd, None)?;
     let mut seen: BTreeMap<Vec<String>, Vec<Cfg>> = BTreeMap::new();
     let mut query = |flags: &[String]| -> Result<Vec<Cfg>, Error> {
         if let Some(c) = seen.get(flags) {
@@ -614,7 +635,7 @@ pub fn prepare(
         seen.insert(flags.to_vec(), c.clone());
         Ok(c)
     };
-    let (key, project_flags) = RustflagsKey::choose(&project, &spec.rustflags, target, &mut query)?;
+    let (key, project_flags) = RustflagsKey::choose(project, &spec.rustflags, target, &mut query)?;
     let config = scratch.join("breakbulk-spec.toml");
     std::fs::write(&config, config_text(&spec, key, target, host))
         .map_err(|e| Error(format!("writing {}: {e}", config.display())))?;
@@ -655,14 +676,19 @@ pub fn prepare_for(opts: &crate::trace::Options) -> Result<Option<Prepared>, Err
     let scratch = Path::new(&opts.scratch);
     std::fs::create_dir_all(scratch)
         .map_err(|e| Error(format!("creating {}: {e}", scratch.display())))?;
-    let root = Path::new(&opts.skeleton);
-    let cwd = if opts.workspace.is_empty() {
-        root.to_owned()
-    } else {
-        root.join(&opts.workspace)
-    };
+    let cwd = crate::trace::workspace_dir(opts);
+    let project = ProjectConfig::of(opts)?;
     let host = host_triple(&opts.rustc)?;
-    prepare(spec, &cwd, &opts.rustc, &opts.target, &host, scratch).map(Some)
+    prepare(
+        spec,
+        &project,
+        &cwd,
+        &opts.rustc,
+        &opts.target,
+        &host,
+        scratch,
+    )
+    .map(Some)
 }
 
 fn literal(a: &Arg) -> Option<&str> {
@@ -950,6 +976,51 @@ mod tests {
         assert_eq!(
             c.applied_env(&cargo_env).into_iter().collect::<Vec<_>>(),
             ["FORCED", "HOME", "PLAIN", "REL"]
+        );
+    }
+
+    /// The variant's `--cargo-config` file is the highest layer: its arrays
+    /// follow the files', its strings replace theirs, its `[env]` adds to
+    /// theirs, and its `build.rustflags` move the spec's flags under
+    /// `build.rustflags`, as Cargo then reads them.
+    #[test]
+    fn cli_config_layer() {
+        let t = "x86_64-unknown-linux-gnu";
+        let d = dir(&[
+            (
+                "ws/.cargo/config.toml",
+                "[build]\nrustflags = [\"-Cproject\"]\ntarget = \"a\"\n[env]\nPROJECT = \"p\"\n",
+            ),
+            (
+                "variant.toml",
+                "\"build\" = { \"rustflags\" = [\"--cfg\", \"variant\"], \"target\" = \"b\" }\n\
+                 \"env\" = { \"VARIANT\" = { \"value\" = \"v\", \"force\" = true } }\n",
+            ),
+            ("bare/.keep", ""),
+        ]);
+        let cli = d.join("variant.toml");
+        let c = read(&d, "ws").with_cli(Some(&cli)).unwrap();
+        assert_eq!(
+            c.build_rustflags,
+            Some(vec!["-Cproject".into(), "--cfg".into(), "variant".into()])
+        );
+        assert_eq!(c.build_target, Some(vec!["b".into()]));
+        assert_eq!(
+            c.env,
+            BTreeMap::from([("PROJECT".into(), false), ("VARIANT".into(), true)])
+        );
+        assert_eq!(c.files.last(), Some(&cli));
+
+        // A project without rustflags: the spec's flags go under
+        // `build.rustflags` only because the variant's file sets it.
+        assert_eq!(
+            choose(&read(&d, "bare"), t).unwrap().0,
+            RustflagsKey::Target
+        );
+        let c = read(&d, "bare").with_cli(Some(&cli)).unwrap();
+        assert_eq!(
+            choose(&c, t).unwrap(),
+            (RustflagsKey::Build, vec!["--cfg".into(), "variant".into()])
         );
     }
 

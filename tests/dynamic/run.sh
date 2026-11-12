@@ -63,7 +63,7 @@ else
     sys-native feature-unification clippy-conf test-cutoff
     multi-ws outside-reads own-view stamps missing-input test-only sources pkgid-short
     post-link source-paths trim-paths trim-paths-cc variants
-    variants-coverage benches stdpaths git-multi-workspace git-revisions
+    variants-coverage cargo-config benches stdpaths git-multi-workspace git-revisions
     build-std build-std-deps same-triple static-musl static-glibc
     static-pkgconfig cross-lto cross-lto-off uefi sys-native-aarch64 cross-doctests-aarch64
     static-glibc-nonpie static-glibc-nonpie-nixpkgs linker-kind-mold

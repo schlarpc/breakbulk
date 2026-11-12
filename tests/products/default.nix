@@ -77,6 +77,11 @@
 #                    the release build plan; `testProfile = "release"`
 #                    shares every common unit; check variants keep
 #                    `profile`
+#   variants-cargo-config   `cargoConfig` (cargo-config): `panic =
+#                    "abort"` on the variant's build-plan target units
+#                    only; its `[env]` variable and `build.rustflags` reach
+#                    product and test run beside the target's rustflags
+#                    (both readers saw the file); owned keys are refused
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
 #                    and `targets.<t>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
@@ -689,6 +694,36 @@ let
   variantsBaseRepo = mkRepo (fixtures + "/variants") variantsBase;
   vt = variantsRepo.workspaces.main.target.${native};
 
+  # `cargoConfig` (see variants-cargo-config): the target's own rustflags
+  # make the planner choose where the toolchain spec's flags go, which the
+  # variant's `build.rustflags` changes.
+  cargoConfigModules = [
+    {
+      workspaces.main = {
+        path = ".";
+        variants = {
+          default.profile = "release";
+          dist = {
+            profile = "release";
+            cargoConfig = {
+              profile.release.panic = "abort";
+              env.FROM_CARGO_CONFIG = "dist";
+              build.rustflags = [
+                "--cfg"
+                "from_cargo_config"
+              ];
+            };
+          };
+        };
+      };
+      targets.${native}.rustflags = [
+        "--cfg"
+        "from_spec"
+      ];
+    }
+  ];
+  cargoConfigRepo = mkRepo (fixtures + "/cargo-config") cargoConfigModules;
+
   # Coverage with an upstream toolchain (see variants-coverage).
   overlayRust = pkgs.rust-bin.stable."1.99.0".minimal;
   coverageRepo = mkRepo (fixtures + "/variants") [
@@ -968,6 +1003,7 @@ in
       buildScriptOutputs
       nestedCargo
       nestedCargoFlags
+      cargoConfigRepo
       ;
     trimCc = trimCcRepo { };
   };
@@ -1394,6 +1430,82 @@ in
     pkgs.runCommand "variants-test-profile" { run = variantsRepo.checks."main/${native}/lib-a/test-lib"; } ''
       echo "$run" > $out
     '';
+
+  # `cargoConfig`: `dist`'s `profile.release.panic = "abort"` reaches its
+  # build plan's target units (`-C panic=abort`), not its host units nor
+  # its test plan (`test` profile; Cargo builds tests and build scripts
+  # unwinding), nor the default variant; its product aborts on a panic.
+  # Its `[env]` variable and `build.rustflags` reach the product and its
+  # test run beside the target's own rustflags, which the planner then
+  # passes under `build.rustflags` (its reader saw the variant's). Keys
+  # breakbulk sets are refused, from the variant and from a target's
+  # `variantDefaults`.
+  variants-cargo-config =
+    let
+      w = cargoConfigRepo.workspaces.main;
+      t = w.target.${native};
+      rendered =
+        vName: kind:
+        lib.mapAttrs (_: u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)) (
+          lib.filterAttrs (_: u: u ? drvAttrs) (unitsOf cargoConfigRepo vName kind)
+        );
+      compiles = vName: kind: lib.filterAttrs (_: u: u.kind == "compile") (rendered vName kind);
+      abortsIn =
+        vName: kind:
+        lib.sort lib.lessThan (
+          lib.attrNames (
+            lib.filterAttrs (_: u: lib.hasInfix "panic=abort" (builtins.toJSON u.args)) (compiles vName kind)
+          )
+        );
+      targetCompiles =
+        vName: kind:
+        lib.sort lib.lessThan (lib.attrNames (lib.filterAttrs (_: u: u.platform == "target") (compiles vName kind)));
+      planCmd = vName: w.instances.${native}.${vName}.plans.build.drvAttrs.buildCommand;
+      refused =
+        modules:
+        !(builtins.tryEval (
+          builtins.deepSeq (mkRepo (fixtures + "/cargo-config") (cargoConfigModules ++ modules))
+          .workspaces.main.plans true
+        )).success;
+      bad = lib.attrNames (
+        lib.filterAttrs (_: ok: !ok) {
+          distAborts = abortsIn "dist" "build" == targetCompiles "dist" "build" && abortsIn "dist" "build" != [ ];
+          hostUnwinds = lib.length (lib.attrNames (compiles "dist" "build")) > lib.length (abortsIn "dist" "build");
+          testsUnwind = abortsIn "dist" "test" == [ ];
+          defaultUnwinds = abortsIn "default" "build" == [ ];
+          # Only `dist`'s planner gets a file.
+          distFile = lib.hasInfix "--cargo-config" (planCmd "dist") && !(lib.hasInfix "--cargo-config" (planCmd "default"));
+          ownedKey = refused [ { workspaces.main.variants.dist.cargoConfig.build.rustc = "/bin/false"; } ];
+          ownedTargetKey = refused [
+            { targets.${native}.variantDefaults.cargoConfig.target.${native}.linker = "/bin/false"; }
+          ];
+          ownedSource = refused [ { workspaces.main.variants.dist.target.${native}.cargoConfig.source.crates-io.replace-with = "x"; } ];
+        }
+      );
+    in
+    assert lib.assertMsg (bad == [ ]) "variants-cargo-config: failed ${toString bad}: aborts ${
+      builtins.toJSON {
+        dist = abortsIn "dist" "build";
+        target = targetCompiles "dist" "build";
+      }
+    }";
+    pkgs.runCommand "variants-cargo-config"
+      {
+        dist = t.variants.dist.packages.app;
+        default = t.packages.app;
+        distTest = cargoConfigRepo.checks."main/${native}/variant-dist/app/test-bin-app";
+        defaultTest = cargoConfigRepo.checks."main/${native}/app/test-bin-app";
+      }
+      ''
+        set -euo pipefail
+        [ "$($dist/bin/app)" = "env=dist cfg=true spec=true dep=7" ]
+        [ "$($default/bin/app)" = "env=none cfg=false spec=true dep=7" ]
+        rc=0; $default/bin/app panic || rc=$?
+        [ $rc = 101 ]
+        rc=0; $dist/bin/app panic || rc=$?
+        [ $rc = 134 ]
+        echo "$distTest $defaultTest" > $out
+      '';
 
   variants-clippy-toolchain =
     let

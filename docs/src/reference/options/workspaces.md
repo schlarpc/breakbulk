@@ -1170,6 +1170,67 @@ false
 
 
 
+## `workspaces.<name>.variants.<name>.cargoConfig`
+
+
+
+Cargo configuration for this variant’s plans, as the content
+of a config file: what ` --config ` or ` CARGO_* ` variables set
+for one CI job\. It is written to one TOML file that the
+planner passes to Cargo as ` --config <file> `, over the
+project’s own ` .cargo/config.toml ` files: a value replaces
+theirs, and an array (` build.rustflags `) is appended to
+theirs\. breakbulk’s own reader of the project’s config
+(` build.rustflags `, ` target.<triple>.rustflags `, ` [env] `)
+reads it last, the same way\. It applies to every plan of the
+variant, so a ` profile.<name> ` table reaches only the plans
+of that profile (` profile `, ` testProfile `)\. The dev shell does
+not apply it\.
+
+Keys that breakbulk sets itself are an evaluation error:
+` build.rustc `, ` build.rustdoc `, ` build.rustc-wrapper `,
+` build.rustc-workspace-wrapper `, ` build.target-dir `,
+` build.build-dir `, ` build.target `, ` build.profile `,
+` target.<key>.linker `, ` target.<key>.runner `, ` host.linker `,
+` host.runner ` and ` source `\.
+
+When the project can be edited, a named profile in its
+` Cargo.toml ` (` [profile.dist] ` with ` inherits = "release" `,
+and ` profile = "dist" ` here) does the same for profile
+settings, and local Cargo sees it too\.
+
+
+
+*Type:*
+attribute set of (Cargo config value)
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  profile.release = {
+    panic = "abort";
+    strip = "debuginfo";
+  };
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+
+
 ## `workspaces.<name>.variants.<name>.cargoTrimPaths`
 
 
@@ -1406,7 +1467,7 @@ workspaces.<ws>.sourcePaths
 
 This variant’s settings on one of its targets: any option of
 the variant (` features `, ` noDefaultFeatures `, ` profile `,
-` testProfile `, ` allTargets `, ` clippyArgs `, ` packages `, ` benches `, ` checks `, …)
+` testProfile `, ` cargoConfig `, ` allTargets `, ` clippyArgs `, ` packages `, ` benches `, ` checks `, …)
 except ` targets `\. They merge over the variant’s own settings
 and the target’s ` variantDefaults `
 (` workspaces.<ws>.targets.<triple>.variantDefaults `), in that

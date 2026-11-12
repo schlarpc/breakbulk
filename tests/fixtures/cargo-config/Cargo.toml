@@ -1,0 +1,11 @@
+# `variants.<v>.cargoConfig`: the `dist` variant sets
+# `profile.release.panic`, an `[env]` variable and `build.rustflags`
+# (tests/products, `variants-cargo-config`). `dep` has a build script, a
+# host unit, which Cargo always builds with `panic=unwind`.
+[workspace]
+resolver = "2"
+members = ["app", "dep"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

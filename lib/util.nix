@@ -311,6 +311,16 @@ rec {
     in
     concatStringsSep "" (lib.mapAttrsToList (k: v: "${key k} = ${value v}\n") attrs);
 
+  # The store paths a string names (`/nix/store/<hash>-<name>`, up to the
+  # first `/`, space, `=`, `:`, `;` or `"`), each with the string's
+  # context: the inputs of what passes the string on without its context
+  # (the planner's spec and `cargoConfig` files).
+  storePathsIn =
+    s:
+    lib.concatMap (p: if isList p then [ (lib.addContextFrom s (lib.head p)) ] else [ ]) (
+      split "(${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[^/ =:;\"]+)" s
+    );
+
   # A short, stable identifier for a string, for directory and source names.
   shortHash = s: substring 0 16 (sha256 s);
 

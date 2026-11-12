@@ -66,7 +66,8 @@ pub fn cargo_env(opts: &trace::Options, profiles: &[String]) -> Result<spec::Car
         .map(|p| p.cargo_env())
         .unwrap_or_default();
     if let Some(caps) = &opts.capabilities {
-        let declared = trim_paths::declared(&trace::workspace_dir(opts));
+        let declared =
+            trim_paths::declared(&trace::workspace_dir(opts), opts.cargo_config.as_deref());
         env.warnings.extend(declared.warnings.iter().cloned());
         if trim_paths::decide(opts.trim_paths, caps.trim_paths, &declared)? {
             for p in profiles {
@@ -81,7 +82,7 @@ pub fn cargo_env(opts: &trace::Options, profiles: &[String]) -> Result<spec::Car
 /// config files by Cargo's rules, as written; `None` when unset. The Nix
 /// library reads it to choose a workspace's default target.
 pub fn build_target(opts: &trace::Options) -> Result<Option<Vec<String>>, Error> {
-    Ok(spec::ProjectConfig::read(&trace::workspace_dir(opts), None)?.build_target)
+    Ok(spec::ProjectConfig::of(opts)?.build_target)
 }
 
 /// `CARGO_PROFILE_<P>_TRIM_PATHS`: the profile name uppercased, `-` as `_`.
@@ -110,7 +111,10 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
     // otherwise), when the toolchain has it (its capabilities). One trace
     // either way.
     let capabilities = trace::capabilities(opts)?;
-    let declared = trim_paths::declared(&trace::workspace_dir(&traced));
+    let declared = trim_paths::declared(
+        &trace::workspace_dir(&traced),
+        traced.cargo_config.as_deref(),
+    );
     for w in &declared.warnings {
         eprintln!("breakbulk-plan: warning: {w}");
     }

@@ -7,7 +7,7 @@
 //!   --kind build|test|bench [--mode build|check|clippy|coverage] \
 //!   [--clippy-driver PATH [--clippy-option NAME]] [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
-//!   [--config FILE-OR-VALUE]… [--spec FILE] --capabilities FILE \
+//!   [--config FILE-OR-VALUE]… [--cargo-config FILE] [--spec FILE] --capabilities FILE \
 //!   --target-traits FILE [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]… --out plan.json \
 //!   [--cargo-env cargo-env.json]
 //!
@@ -36,6 +36,11 @@
 //! `--target-traits` is the target's traits as JSON
 //! (`breakbulk_format::TargetTraits`, the Nix library's
 //! `targetTraits.forRust`).
+//!
+//! `--cargo-config` is the variant's own Cargo configuration
+//! (`variants.<v>.cargoConfig`), a TOML file: Cargo gets it with
+//! `--config`, and the planner's reader of the project's config loads it
+//! last, over the project's files.
 
 use std::process::ExitCode;
 
@@ -50,7 +55,7 @@ fn usage() -> ! {
          [--clippy-arg A]... \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
-         [--config X]... [--spec FILE] --capabilities FILE --target-traits FILE \
+         [--config X]... [--cargo-config FILE] [--spec FILE] --capabilities FILE --target-traits FILE \
          [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
          --target TRIPLE [--spec FILE] [--capabilities FILE --profile P... [--trim-paths auto|on|off]] \
@@ -82,6 +87,7 @@ fn main() -> ExitCode {
         no_default_features: false,
         packages: Vec::new(),
         configs: Vec::new(),
+        cargo_config: None,
         scratch: String::new(),
         forbidden: Vec::new(),
         spec: None,
@@ -143,6 +149,7 @@ fn main() -> ExitCode {
             "--no-default-features" => opts.no_default_features = true,
             "-p" | "--package" => opts.packages.push(val()),
             "--config" => opts.configs.push(val()),
+            "--cargo-config" => opts.cargo_config = Some(val()),
             "--scratch" => opts.scratch = val(),
             "--forbid" => opts.forbidden.push(val()),
             "--spec" => opts.spec = Some(val()),

@@ -420,3 +420,59 @@ A variant's settings can differ per target: a target's `variantDefaults`
 applies to every variant on it, and `variants.<v>.target.<triple>` to one
 variant. See [Different features per
 target](../how-to/targets.md#different-features-per-target).
+
+### Cargo configuration per variant
+
+A release job often sets Cargo settings for itself, with `--config` or
+`CARGO_PROFILE_*` variables. When you can edit the project, a named
+profile is the better way: `[profile.dist]` with `inherits = "release"`
+in `Cargo.toml`, and `variants.dist.profile = "dist"`. Local Cargo then
+builds the same thing. When the project keeps such settings out of its
+manifests, give the variant
+[`cargoConfig`](../reference/options/workspaces.md#workspacesnamevariantsnamecargoconfig),
+the content of a Cargo config file:
+
+```nix
+variants.dist.cargoConfig.profile.release = {
+  panic = "abort";
+  strip = "debuginfo";
+};
+```
+
+breakbulk writes it to one TOML file, and the planner passes it to Cargo
+as `--config <file>`. Cargo merges a `--config` file over the project's
+`.cargo/config.toml` files: its value replaces theirs, its arrays (such as
+`build.rustflags`) are appended to theirs, and tables merge. breakbulk's
+own reader of the project's config reads the file last in the same way.
+That reader decides where the target's rustflags go and which `[env]`
+variables the units get, so it agrees with Cargo.
+
+- Keys that breakbulk sets itself are an evaluation error: the
+  toolchain, the wrapper, the target and build directories, `build.target`
+  and `build.profile`, linkers and runners, and `source`. The option's
+  text lists them, with what to set instead.
+- The file applies to every plan of the variant, but a `profile.<name>`
+  table changes only the plans of that profile. `profile.release` reaches
+  the products and not the tests, which use `testProfile` (`test`); set
+  `profile.test` for them. Cargo builds tests and build scripts with
+  `panic = "unwind"` whatever the profile says.
+- Relative paths in the file, and `[env]` values with `relative = true`,
+  do not resolve against your project: Cargo resolves them against the
+  directory above the file's, a store directory. Use absolute paths.
+- The dev shell does not apply it.
+
+Cargo's debug settings come before the target's
+[`debugInfo`](../reference/options/targets.md#targetsnamedebuginfo):
+
+- `profile.<p>.debug` decides how much debug information rustc writes.
+  `debugInfo` decides what happens to it afterwards (a `debug` output,
+  kept, or stripped) and which source paths in it are hidden.
+- `profile.<p>.strip` makes the link itself remove it (`-C strip`).
+  `splitDebug` then finds none and leaves the file as it is, and the
+  `debug` output stays empty. Cargo does the same without being asked
+  when no crate of a binary has debug information (`release` without
+  `debug`): an unset `strip` becomes `debuginfo`.
+- `profile.<p>.trim-paths` in `cargoConfig` is the project setting
+  trim-paths itself: the planner does not turn it on, and Cargo's own
+  remap scope applies to every output, debug information included. See
+  [Cargo's trim-paths](products.md#cargos-trim-paths).

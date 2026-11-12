@@ -89,6 +89,10 @@ pkgs:
   features ? [ ],
   fetchArgs ? { },
   configs ? [ ],
+  # The variant's Cargo configuration, as the content of a config file
+  # (`variants.<v>.cargoConfig`): both plans' Cargo gets it as one
+  # `--config` file. Store paths in it reach the units that name them.
+  cargoConfig ? { },
   # extraSources.<package name> = [ "<path from the repository root>" ]
   extraSources ? { },
   # packages.<name> = { nativeInputs; inputs; env; test; sources; }: see
@@ -253,6 +257,20 @@ let
     else
       "off";
 
+  # Written here rather than by `pkgs.formats.toml`, a derivation that
+  # planning would wait for. Without context, as the spec's file:
+  # planning never runs what it names, and the units that name a store
+  # path get it as a tool (`cargoConfigTools`).
+  cargoConfigText = util.toTOML cargoConfig;
+  cargoConfigFile =
+    if cargoConfig == { } then
+      null
+    else
+      builtins.toFile "breakbulk-cargo-config.toml" (builtins.unsafeDiscardStringContext cargoConfigText);
+  cargoConfigTools = lib.listToAttrs (
+    lib.imap0 (i: p: lib.nameValuePair "cargo-config-${toString i}" p) (util.storePathsIn cargoConfigText)
+  );
+
   plans = lib.genAttrs ([ "build" "test" ] ++ lib.optional bench "bench") (
     kind:
     mkPlan pkgs {
@@ -276,6 +294,7 @@ let
         ;
       packages = if kind == "test" then testSelect else select;
       profile = if kind == "test" && !checking then testProfile else profile;
+      cargoConfig = cargoConfigFile;
       inherit (toolchain) cargo rustc;
       inherit capabilities;
       skeleton = skel;
@@ -340,6 +359,7 @@ let
     )
   )
   // specTools
+  // cargoConfigTools
   // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
   # The Rust toolchain's own store paths (rustc, its sysroot, cargo, and a

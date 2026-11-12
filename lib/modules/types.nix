@@ -129,6 +129,26 @@ rec {
     };
   };
 
+  # The content of a Cargo config file: tables of booleans, integers,
+  # strings and arrays (Cargo's config has no floats or dates). Tables
+  # merge and arrays concatenate between definitions; a single value set
+  # twice needs `lib.mkForce`.
+  cargoConfig =
+    let
+      value =
+        types.oneOf [
+          types.bool
+          types.int
+          types.str
+          (types.listOf value)
+          (types.attrsOf value)
+        ]
+        // {
+          description = "Cargo config value";
+        };
+    in
+    types.attrsOf value;
+
   # A list of packages, or the exclude form.
   packageList = types.either (types.listOf types.str) excludeSelection;
 

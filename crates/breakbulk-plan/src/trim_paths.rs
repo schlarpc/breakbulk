@@ -5,7 +5,8 @@
 //! the planner passes one only when the project declares none. It does not
 //! copy Cargo's profile merging: it reads the workspace root's
 //! `Cargo.toml` and the project's `.cargo/config.toml` (or `.cargo/config`)
-//! files from the workspace directory up, and any `trim-paths` key under
+//! files from the workspace directory up and the variant's `cargoConfig`
+//! file, and any `trim-paths` key under
 //! `[profile]` in any of them (a profile, its `build-override`, or a
 //! `package.<spec>` override, whatever the profile and value) counts as
 //! declared. A file that does not parse is a warning and counts as
@@ -53,8 +54,9 @@ pub struct Declared {
 
 /// The files the rule reads, for the workspace directory `ws_dir`: its
 /// `Cargo.toml`, then every `.cargo/config.toml` and `.cargo/config` from
-/// `ws_dir` up to `/` (both when both exist).
-pub fn files(ws_dir: &Path) -> Vec<PathBuf> {
+/// `ws_dir` up to `/` (both when both exist), then the variant's
+/// `--cargo-config` file: a setting there is the project's own too.
+pub fn files(ws_dir: &Path, cargo_config: Option<&str>) -> Vec<PathBuf> {
     let mut files = vec![ws_dir.join("Cargo.toml")];
     for d in ws_dir.ancestors() {
         for name in ["config.toml", "config"] {
@@ -64,13 +66,14 @@ pub fn files(ws_dir: &Path) -> Vec<PathBuf> {
             }
         }
     }
+    files.extend(cargo_config.map(PathBuf::from));
     files
 }
 
 /// Read [`files`] for `trim-paths` keys.
-pub fn declared(ws_dir: &Path) -> Declared {
+pub fn declared(ws_dir: &Path, cargo_config: Option<&str>) -> Declared {
     let mut d = Declared::default();
-    for f in files(ws_dir) {
+    for f in files(ws_dir, cargo_config) {
         let text = match std::fs::read_to_string(&f) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -184,7 +187,7 @@ mod tests {
                 ),
             ],
         );
-        let got = declared(&d.join("ws"));
+        let got = declared(&d.join("ws"), None);
         assert!(got.warnings.is_empty(), "{got:?}");
         let keys: Vec<&str> = got
             .places
@@ -211,10 +214,10 @@ mod tests {
                 ("ws/Cargo.toml", "[package\nname = "),
             ],
         );
-        let root = declared(&d);
+        let root = declared(&d, None);
         assert_eq!(root, Declared::default());
         // A broken manifest: a warning, and nothing declared.
-        let broken = declared(&d.join("ws"));
+        let broken = declared(&d.join("ws"), None);
         assert!(broken.places.is_empty());
         assert_eq!(broken.warnings.len(), 1, "{broken:?}");
         assert!(broken.warnings[0].contains("not valid TOML"));
@@ -223,7 +226,30 @@ mod tests {
             &d,
             &[("Cargo.toml", "[package.metadata]\ntrim-paths = 1\n")],
         );
-        assert!(declared(&d).places.is_empty());
+        assert!(declared(&d, None).places.is_empty());
+    }
+
+    #[test]
+    fn variant_cargo_config_counts() {
+        let d = scratch("cargo-config");
+        write(
+            &d,
+            &[
+                ("ws/Cargo.toml", "[workspace]\n"),
+                (
+                    "variant.toml",
+                    "\"profile\" = { \"release\" = { \"trim-paths\" = \"object\" } }\n",
+                ),
+            ],
+        );
+        let file = d.join("variant.toml").display().to_string();
+        assert!(declared(&d.join("ws"), None).places.is_empty());
+        let got = declared(&d.join("ws"), Some(&file));
+        assert_eq!(
+            got.places,
+            [format!("{file}: profile.release.trim-paths")],
+            "{got:?}"
+        );
     }
 
     #[test]

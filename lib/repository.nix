@@ -705,11 +705,7 @@ let
   # and linkers, through `--config`), the env of each platform's units, the
   # store paths the plan will name, the target capture's package set, and
   # the runner.
-  storePathsIn =
-    s:
-    lib.concatMap (
-      p: if builtins.isList p then [ (lib.addContextFrom s (lib.head p)) ] else [ ]
-    ) (builtins.split "(${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[^/ =:;\"]+)" s);
+  inherit (util) storePathsIn;
   specFor =
     wsName: triple:
     let
@@ -954,6 +950,7 @@ let
       inherit (v)
         profile
         testProfile
+        cargoConfig
         features
         noDefaultFeatures
         allFeatures

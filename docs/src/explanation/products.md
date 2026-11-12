@@ -183,8 +183,10 @@ Cargo 1.101 and later breakbulk turns it on, uses Cargo's remaps instead
 of its own, and keeps the per-kind scopes above, unless the project sets
 `trim-paths` itself:
 
-- any `trim-paths` under `[profile]` in the workspace root's `Cargo.toml`
-  or the project's Cargo config leaves the choice to the project;
+- any `trim-paths` under `[profile]` in the workspace root's `Cargo.toml`,
+  the project's Cargo config or the variant's
+  [`cargoConfig`](../reference/options/workspaces.md#workspacesnamevariantsnamecargoconfig)
+  leaves the choice to the project;
 - [`workspaces.<ws>.cargoTrimPaths`](../reference/options/workspaces.md#workspacesnamecargotrimpaths)
   forces it on or off;
 - [`sourcePaths = "keep"`](../reference/options/workspaces.md#workspacesnamesourcepaths)
