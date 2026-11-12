@@ -360,13 +360,11 @@ let
               args = x.args ++ y.args;
               env = x.env // envStrings y.env;
               postRun = joinLines x.postRun y.postRun;
-              enable = x.enable && y.enable;
             })
             {
               args = [ ];
               env = { };
               postRun = "";
-              enable = true;
             }
         ) [
           a.binaries
@@ -409,6 +407,15 @@ let
           doctest = t.doctest // {
             enable = pickSingle null [ "enable" ] (map (l: l.test.doctest) ls);
           };
+          binaries = lib.mapAttrs (
+            k: b:
+            b
+            // {
+              enable = pickSingle null [ "enable" ] (
+                map (l: l.test.binaries.${k}) (lib.filter (l: l.test.binaries ? ${k}) ls)
+              );
+            }
+          ) t.binaries;
         };
       # nextest reads `.config/nextest.toml` under the Cargo workspace root.
       nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";

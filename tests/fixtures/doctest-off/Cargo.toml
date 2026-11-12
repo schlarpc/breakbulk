@@ -1,6 +1,8 @@
 # Doctest settings (`test.doctest`): `unchecked` has a doctest that fails,
 # which its settings leave out of the checks; `checked` has doctests that
-# pass only with their own arguments and environment.
+# pass only with their own arguments and environment. Both have an
+# integration test of the same name, `smoke`, for settings that turn one
+# key off for every member and back on for one.
 [workspace]
 resolver = "2"
 members = ["checked", "unchecked"]

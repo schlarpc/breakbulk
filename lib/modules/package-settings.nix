@@ -54,9 +54,16 @@ let
     imports = [ priorityOf ];
     options = runSettings "this test binary's run" // {
       enable = mkOption {
-        type = types.bool;
-        default = true;
-        description = "Whether this binary's test run is part of `repo.checks` (it is built either way).";
+        type = types.nullOr types.bool;
+        default = null;
+        description = ''
+          Whether this binary's test run is part of `repo.checks` and the
+          check groups; the binary is built either way. A more specific
+          layer's value wins over the layers it refines
+          ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
+          `memberDefaults.test.binaries.<key>.enable = false` with `true`
+          for a few packages runs only theirs. `null`: `true`.
+        '';
       };
     };
   };

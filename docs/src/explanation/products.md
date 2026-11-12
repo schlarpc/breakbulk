@@ -317,6 +317,8 @@ by its name (`--skip "src/lib.rs - net::connect"`); per-binary
   the checks then build nothing of it; `doctests.<pkg>` still builds it.
   A project whose CI runs the doctests of a few crates only sets
   `memberDefaults.test.doctest.enable = false` and `true` for those.
+  [`test.binaries.<key>.enable`](../reference/options/packages.md#packagesnametestbinariesnameenable)
+  does the same for one test binary.
 
 **Benches** come only from a bench variant (`cargo bench --no-run`, bench
 profile), which gives optimized bench binaries to run outside Nix.

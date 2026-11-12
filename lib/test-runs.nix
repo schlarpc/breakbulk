@@ -517,7 +517,8 @@ rec {
       postRun = "";
       enable = true;
     }
-    // (cfg.binaries.${binary} or { });
+    # Options left `null` take the defaults.
+    // lib.filterAttrs (_: v: v != null) (cfg.binaries.${binary} or { });
 
   # A run's raw output, besides the build log: `$log` in `test.postRun`.
   logFile = "$TMPDIR/breakbulk-test.log";

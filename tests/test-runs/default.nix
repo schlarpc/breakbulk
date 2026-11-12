@@ -101,6 +101,11 @@
 #                           and `doctests.<pkg>` stays; a package's `true`
 #                           wins over it, and its doctest `args`, `env` and
 #                           `postRun` reach its doctest run
+#   binary-enable           over the same fixture:
+#                           `memberDefaults.test.binaries.smoke.enable =
+#                           false` with `true` for `checked`: only
+#                           checked's smoke run is in repo.checks, and
+#                           both runs stay buildable
 #
 # `workspaces` exposes the mkWorkspace results for debugging; `repos` the
 # mkRepository results that tests/dynamic builds in both modes.
@@ -1220,6 +1225,25 @@ let
         [ "$(cat $checked/order)" = "$(printf 'package\ndoctest')" ]
         mkdir -p $out
       '';
+  # Off for every member, back on for `checked`.
+  binaryEnable =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      p = "main/${native}";
+      repo = doctestRepo [
+        {
+          workspaces.main.memberDefaults.test.binaries.smoke.enable = false;
+          packages.checked.test.binaries.smoke.enable = true;
+        }
+      ];
+      smoke = lib.filter (lib.hasSuffix "/test-smoke") (lib.attrNames repo.checks);
+      runs = repo.workspaces.main.target.${native}.testRuns;
+    in
+    assert lib.assertMsg (smoke == [ "${p}/checked/test-smoke" ]) "binary-enable: smoke runs in repo.checks: ${toString smoke}";
+    assert lib.assertMsg (runs.checked ? smoke && runs.unchecked ? smoke) "binary-enable: a smoke run is gone";
+    pkgs.runCommand "test-runs-binary-enable" { run = repo.checks."${p}/checked/test-smoke"; } ''
+      touch $out
+    '';
 in
 {
   workspaces = {
@@ -1232,6 +1256,7 @@ in
   post-run = postRun;
   inherit home;
   doctest-settings = doctestSettings;
+  binary-enable = binaryEnable;
   test-binary-keys = testBinaryKeys;
   test-threads = testThreads;
   dylib-rule = dylibRule;

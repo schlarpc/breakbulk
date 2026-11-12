@@ -648,19 +648,24 @@ attribute set of (submodule)
 
 
 
-Whether this binary’s test run is part of ` repo.checks ` (it is built either way)\.
+Whether this binary’s test run is part of ` repo.checks ` and the
+check groups; the binary is built either way\. A more specific
+layer’s value wins over the layers it refines
+([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)):
+` memberDefaults.test.binaries.<key>.enable = false ` with ` true `
+for a few packages runs only theirs\. ` null `: ` true `\.
 
 
 
 *Type:*
-boolean
+null or boolean
 
 
 
 *Default:*
 
 ```nix
-true
+null
 ```
 
 *Declared by:*
