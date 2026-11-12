@@ -859,8 +859,6 @@ null
 
 ## `workspaces.<name>.toolchain.capabilities.remapPathScope`
 
-
-
 rustc takes ` --remap-path-scope ` (default: rustc 1\.95 or later)\.
 Without it, every unit remaps every path scope, so debug info names
 no real source paths even where it is split off\.
@@ -935,6 +933,8 @@ pkgs.cargo
 
 ## `workspaces.<name>.toolchain.clippy`
 
+
+
 clippy (with ` bin/clippy-driver `), for ` clippy ` variants\.
 It must be built for the same rustc: planning compares
 ` clippy-driver --rustc --print sysroot ` with rustc’s and
@@ -987,6 +987,8 @@ pkgs.rustc
 
 
 ## `workspaces.<name>.toolchain.rustfmt`
+
+
 
 rustfmt (with ` bin/rustfmt ` and ` bin/cargo-fmt `), for the
 ` fmt ` check\. Formatting differs between rustfmt releases,
