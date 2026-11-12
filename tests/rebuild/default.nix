@@ -99,6 +99,7 @@ let
     build-dep-leak = [ (plain "build-dep-leak" [ ]) ];
     build-std = [ buildStd.repos.bare ];
     build-std-deps = [ buildStd.repos.hosted ];
+    cdylib-debug = [ products.repos.cdylibDebug ];
     # Its clippy units fail by design (disallowed methods): the default
     # variant only.
     clippy-conf = [ (plainAt "ws" "clippy-conf" [ ]) ];
@@ -108,6 +109,7 @@ let
     directives = [ dynamic.repos.directives ];
     doctests = [ dynamic.repos.doctests ];
     embed = [ products.repos.embed ];
+    exclusive-features = [ repository.repos.exclusive ];
     feature-unification = [ (plain "feature-unification" [ (withToolchain pkgs.rust-bin.nightly.latest.minimal) ]) ];
     git-multi-workspace = [ (import ../git-multi-workspace args).ws ];
     git-revisions = [ (import ../git-revisions args).repos.repository ];
@@ -117,6 +119,7 @@ let
     msvc = [ presetFixtures.repos.msvc ];
     multi-ws = [ repository.repos.multiWs ];
     nextest = [ dynamic.repos.nextest ];
+    optional-dependency = [ repository.repos.optionalDep ];
     out-dir-walk = [ dynamic.repos.out-dir-walk ];
     outside-reads = [ repository.repos.outside ];
     pkgid-short = [
@@ -148,6 +151,7 @@ let
     test-control = [ dynamic.repos.test-control ];
     test-cutoff = [ (plain "test-cutoff" [ ]) ];
     test-home = [ dynamic.repos.test-home ];
+    test-threads = [ dynamic.repos.test-threads ];
     test-only = [ repository.repos.testOnly ];
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];
