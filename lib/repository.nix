@@ -387,7 +387,7 @@ let
   }
   // specialArgs;
   evalTargetSpec =
-    ws: triple:
+    wsName: ws: triple:
     let
       repoDef = cfg.targets.${triple} or null;
       wsDef = ws.targets.${triple} or null;
@@ -407,17 +407,33 @@ let
           "variantDefaults"
         ]
       );
+      selections = {
+        packages = e.config.packages or null;
+        tests = e.config.tests or true;
+        products = e.config.products or true;
+      };
     in
     {
       inherit (e) config;
-      packages = e.config.packages or null;
-      tests = e.config.tests or true;
-      products = e.config.products or true;
       present = repoDef != null || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions);
-    };
+      selectionErrors = lib.concatLists (
+        lib.mapAttrsToList (
+          o: s:
+          lib.optionals (builtins.isAttrs s) (
+            map (m: "breakbulk: workspaces.${wsName}.targets.${triple}.${o}.exclude${bt.setIn e.options.${o}}: ${m}") (excludeOf ws s).errors
+          )
+        ) selections
+      );
+    }
+    // lib.mapAttrs (_: resolveSelection ws) selections;
   targetSpecs = lib.mapAttrs (
-    _: ws: lib.genAttrs (lib.unique (lib.attrNames ws.targets ++ [ nativeTriple ])) (evalTargetSpec ws)
+    wsName: ws: lib.genAttrs (lib.unique (lib.attrNames ws.targets ++ [ nativeTriple ])) (evalTargetSpec wsName ws)
   ) cfg.workspaces;
+  # The exclude form of a package selection (`{ exclude = [ … ]; }`) against
+  # the workspace's members, and any selection with it resolved to the
+  # members it leaves.
+  excludeOf = ws: s: manifest.excludeMembers (lib.attrNames ws.members) s.exclude;
+  resolveSelection = ws: s: if builtins.isAttrs s then (excludeOf ws s).selected else s;
   # The spec's values, or null when the workspace has none for the triple.
   targetCfgOf =
     wsName: triple:
@@ -645,7 +661,9 @@ let
 
   # The packages a variant plans on a target (null: the whole workspace):
   # the variant's own selection, else the target's.
-  selOf = wsName: triple: v: if v.packages != null then v.packages else selectionOf wsName triple;
+  selOf =
+    wsName: triple: v:
+    if v.packages != null then resolveSelection cfg.workspaces.${wsName} v.packages else selectionOf wsName triple;
   # The test plan's selection: false (no test outputs on this target), a
   # list (`workspaces.<ws>.targets.<t>.tests`), or the variant's selection.
   testSelOf =
@@ -1185,14 +1203,7 @@ let
     let
       wsDir = wsDirOf ws;
       at = manifest.at root;
-      described = manifest.workspace { inherit root wsDir; };
-      names = map (
-        dir:
-        (manifest.packageInfo {
-          inherit root dir;
-          wsManifest = described.manifest;
-        }).name
-      ) described.members;
+      names = lib.attrNames ws.members;
       above =
         rel:
         if rel == "" then
@@ -1249,8 +1260,14 @@ let
   cellAssertions = lib.concatMap (lib.concatMap (lib.concatMap (v: v.assertions))) (
     map (lib.mapAttrsToList (_: lib.attrValues)) (lib.attrValues variantCells)
   );
+  # A target's exclude forms are checked here: its selections are not
+  # options of the workspace module, which cannot read them.
+  selectionErrors = lib.concatMap (lib.concatMap (s: s.selectionErrors)) (
+    map lib.attrValues (lib.attrValues targetSpecs)
+  );
   failedAssertions = lib.unique (
     map (a: a.message) (lib.filter (a: !a.assertion) (cfg.assertions ++ cellAssertions))
+    ++ selectionErrors
   );
   # `mode = "auto"`: dynamic-derivation mode when the evaluator has
   # `builtins.outputOf` and is Nix 2.36 or later (lib/dynamic.nix).

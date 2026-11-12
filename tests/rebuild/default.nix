@@ -163,6 +163,7 @@ let
       }
     ];
     walking-skeleton = [ dynamic.repos.walking-skeleton ];
+    workspace-members = [ (plain "workspace-members" [ ]) ];
     wasip2 = [ extraTargets.repos.wasip2Repo ];
     wasm-browser = [ presetFixtures.repos.wasmBrowser ];
     wasm-component = [ presetFixtures.repos.wasmComponent ];

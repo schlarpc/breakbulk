@@ -1521,6 +1521,102 @@ in
     assert lib.assertMsg (!(fails badVersion.config.packages.foo.env)) "option-assertions: the version's type error reached another option";
     evalCheck "option-assertions" (builtins.toJSON got);
 
+  # `workspaces.<ws>.members` is what `cargo metadata` lists (glob
+  # `members`, `[workspace] exclude`, a path dependency), and the exclude
+  # form of each selection option selects what `--workspace --exclude`
+  # does: both compared with Cargo in the check. A module reads `members`
+  # from `config` for its selection. An entry that matches no member, or is
+  # not a valid pattern, fails the repository.
+  workspace-members =
+    let
+      file = "/checks/members.nix";
+      repoWith =
+        m:
+        mkRepo (fixtures + "/workspace-members") [
+          (oneWs ".")
+          {
+            _file = file;
+            workspaces.main = m;
+          }
+        ];
+      t = r: r.workspaces.main.target.${native};
+      testPkgs = r: lib.attrNames (t r).tests;
+      # The exclude lists compared with `cargo tree --workspace --exclude`.
+      cargoCases = {
+        globs = [
+          "core-*"
+          "helper"
+        ];
+        class = [ "[a-c]*" ];
+      };
+      viaTests = lib.mapAttrs (_: ex: testPkgs (repoWith { targets.${native}.tests.exclude = ex; })) cargoCases;
+      viaPackages = testPkgs (repoWith { targets.${native}.packages.exclude = [ "[a-c]*" ]; });
+      viaVariant = testPkgs (repoWith { variants.default.packages.exclude = [ "ws-util" ]; });
+      products = lib.attrNames (t (repoWith { targets.${native}.products.exclude = [ "app" ]; })).packages;
+      fromConfig = mkRepo (fixtures + "/workspace-members") [
+        (oneWs ".")
+        (
+          { config, ... }:
+          {
+            workspaces.main.targets.${native}.tests = lib.subtractLists [ "app" ] (
+              lib.attrNames config.workspaces.main.members
+            );
+          }
+        )
+      ];
+      members = lib.mapAttrs (_: m: { inherit (m) name path; }) fromConfig.config.workspaces.main.members;
+      failed = r: map (a: a.message) (lib.filter (a: !a.assertion) r.config.assertions);
+      fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
+      all = "app, core-a, core-b, helper, ws-util";
+    in
+    assert lib.assertMsg (viaPackages == [ "helper" "ws-util" ]) "workspace-members: packages.exclude: ${toString viaPackages}";
+    assert lib.assertMsg (viaVariant == [ "app" "core-a" "core-b" "helper" ]) "workspace-members: variant packages.exclude: ${toString viaVariant}";
+    assert lib.assertMsg (products == [ "core-a" "core-b" "ws-util" ]) "workspace-members: products.exclude: ${toString products}";
+    assert lib.assertMsg (testPkgs fromConfig == [ "core-a" "core-b" "helper" "ws-util" ]) "workspace-members: from config: ${toString (testPkgs fromConfig)}";
+    assert lib.assertMsg (
+      failed (repoWith { variants.default.packages.exclude = [ "nope" ]; }) == [
+        "breakbulk: workspaces.main.variants.default.packages.exclude (set in `${file}'): `nope` matches no member (${all})"
+      ]
+    ) "workspace-members: variant message";
+    assert lib.assertMsg (fails (repoWith { targets.${native}.tests.exclude = [ "zz*" ]; }).workspaces) "workspace-members: an unmatched pattern was accepted";
+    assert lib.assertMsg (fails (repoWith { targets.${native}.products.exclude = [ "core**" ]; }).checks) "workspace-members: an invalid pattern was accepted";
+    assert lib.assertMsg (fails (repoWith { targets.${native}.packages.exclude = [ "nope" ]; }).workspaces) "workspace-members: an unmatched name was accepted";
+    pkgs.runCommand "workspace-members"
+      {
+        nativeBuildInputs = [
+          pkgs.cargo
+          pkgs.jq
+        ];
+        src = fixtures + "/workspace-members";
+        members = builtins.toJSON members;
+        cases = builtins.toJSON (
+          lib.mapAttrs (n: ex: {
+            inherit ex;
+            got = viaTests.${n};
+          }) cargoCases
+        );
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode $src ws
+        cd ws
+        cargo metadata --no-deps --offline --format-version 1 \
+          | jq -S --arg root "$PWD/" '.packages | map({ key: .name, value: { name, path: (.manifest_path | ltrimstr($root) | rtrimstr("Cargo.toml") | rtrimstr("/") | if . == "" then "." else . end) } }) | from_entries' > want.json
+        printf '%s' "$members" | jq -S . > got.json
+        diff -u want.json got.json
+        for c in $(printf '%s' "$cases" | jq -r 'keys[]'); do
+          args=()
+          while IFS= read -r e; do args+=(--exclude "$e"); done < <(printf '%s' "$cases" | jq -r --arg c "$c" '.[$c].ex[]')
+          cargo tree --offline --workspace "''${args[@]}" --depth 0 --prefix none --format '{p}' \
+            | awk 'NF { print $1 }' | sort > want
+          printf '%s' "$cases" | jq -r --arg c "$c" '.[$c].got[]' | sort > got
+          echo "$c: ''${args[*]}"
+          diff -u want got
+        done
+        mkdir -p $out
+        cp want.json $out/members.json
+      '';
+
   # `targets.<t>.stdenv` replaces the target
   # captures' stdenv (base and per-package), `host.stdenv` the host
   # captures'; unset, both are the package set's. The capture then records

@@ -104,6 +104,48 @@ the one the project's `.cargo/config.toml` names in `build.target`. Set
 `defaultTarget` to choose another. See [Outputs](../reference/outputs.md)
 for everything under `target.<triple>`.
 
+## Some packages only
+
+A target plans every member of the workspace. Three options of
+`workspaces.<ws>.targets.<triple>` narrow that:
+[`packages`](../reference/options/workspaces.md#workspacesnametargetsnamepackages)
+(both plans),
+[`tests`](../reference/options/workspaces.md#workspacesnametargetsnametests)
+(test binaries, runs and doctests) and
+[`products`](../reference/options/workspaces.md#workspacesnametargetsnameproducts).
+Each takes a list of packages, or the packages to leave out:
+
+```nix
+workspaces.default.targets = {
+  # cargo test --workspace --exclude uap-bench --exclude 'fuzz-*'
+  x86_64-unknown-linux-gnu.tests.exclude = [ "uap-bench" "fuzz-*" ];
+  wasm32-unknown-unknown.packages = [ "ui" ];
+};
+```
+
+`{ exclude = [ … ]; }` selects what `--workspace --exclude` selects, so
+you can copy the `--exclude` list from your CI. An entry is a package
+name or a glob pattern as Cargo takes it (`*`, `?`, `[…]`, `[!…]`). An
+entry that matches no member is an error; Cargo only warns. A variant's
+[`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)
+takes the same forms.
+
+For any other selection, compute a list from
+[`workspaces.<ws>.members`](../reference/options/workspaces.md#workspacesnamemembers),
+the name and directory of each member:
+
+```nix
+{ config, lib, ... }:
+let
+  members = config.workspaces.default.members;
+in
+{
+  # The packages under crates/wasm/.
+  workspaces.default.targets.wasm32-unknown-unknown.packages =
+    lib.attrNames (lib.filterAttrs (_: m: lib.hasPrefix "crates/wasm/" m.path) members);
+}
+```
+
 ## Different features per target
 
 When you control the crate, prefer `cfg` and target-specific

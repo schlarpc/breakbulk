@@ -62,6 +62,21 @@ rec {
       inherit description;
     };
 
+  # A package selection by what it leaves out: `{ exclude = [ … ]; }`,
+  # the workspace's members but those (lib/manifest.nix excludeMembers).
+  excludeSelection = types.submodule {
+    options.exclude = mkOption {
+      type = types.listOf types.str;
+      description = ''
+        Members to leave out, as `cargo … --workspace --exclude`: package
+        names, or glob patterns (`*`, `?`, `[…]`, `[!…]`).
+      '';
+    };
+  };
+
+  # A list of packages, or the exclude form.
+  packageList = types.either (types.listOf types.str) excludeSelection;
+
   # A stage or check definition. Kept as raw values
   # so `lib.mkForce null` can remove one.
   stages = types.attrsOf (types.nullOr types.raw);

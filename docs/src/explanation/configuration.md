@@ -56,7 +56,8 @@ leaves out test binaries, runs, apps and doctests, and the test plan is
 not traced.
 [`products = false`](../reference/options/workspaces.md#workspacesnametargetsnameproducts)
 leaves out products and their checks, and the build plan is not traced.
-Either also takes a list of packages.
+Either also takes a list of packages, or the members to leave out
+(`{ exclude = [ … ]; }`, see [Build for another target](../how-to/targets.md#some-packages-only)).
 
 ### Sharing between workspaces
 

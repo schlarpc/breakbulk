@@ -174,6 +174,70 @@ rec {
       members = lib.sort (a: b: a < b) (attrNames (lib.filterAttrs (_: isPkg: isPkg) found));
     };
 
+  # The member packages of the workspace at `wsDir`, by name:
+  # { <name> = { name; path; }; }, `path` relative to root ("." for root
+  # itself). Two members with one name are an error, as in Cargo.
+  memberPackages =
+    { root, wsDir ? "" }:
+    let
+      described = workspace { inherit root wsDir; };
+      members = map (dir: {
+        name =
+          (packageInfo {
+            inherit root dir;
+            wsManifest = described.manifest;
+          }).name;
+        path = if dir == "" then "." else dir;
+      }) described.members;
+      byName = lib.groupBy (m: m.name) members;
+      dups = lib.filterAttrs (_: ms: lib.length ms > 1) byName;
+    in
+    if dups != { } then
+      throw "breakbulk: ${util.joinRel wsDir "Cargo.toml"}: two packages named `${lib.head (attrNames dups)}` in this workspace (${
+        lib.concatMapStringsSep ", " (m: m.path) dups.${lib.head (attrNames dups)}
+      })"
+    else
+      lib.mapAttrs (_: lib.head) byName;
+
+  # The members `cargo … --workspace --exclude <entry>…` selects
+  # (cargo src/ops/cargo_compile/packages.rs, `Packages::OptOut`): an entry
+  # with `*`, `?`, `[` or `]` is a glob pattern (util.packagePattern), any
+  # other a package name. `names`: the members' names. Returns
+  # { selected = [ <name> … ] (sorted); errors = [ <message> … ]; }, a
+  # message for each entry that is not a valid pattern or matches no
+  # member. Cargo only warns about an entry that matches nothing; here it
+  # is an error, since a stale entry would silently select its package
+  # again. So an entry counts as matched when it matches any member, not
+  # (as in Cargo's bookkeeping) only a member no earlier entry excluded.
+  excludeMembers =
+    names: entries:
+    let
+      matcher =
+        e:
+        if util.hasGlobChars e then
+          util.packagePattern e
+        else
+          {
+            error = null;
+            matches = n: n == e;
+          };
+      ms = map (e: { inherit e; m = matcher e; }) entries;
+      excluded = n: lib.any (x: x.m.matches n) ms;
+      sorted = lib.sort (a: b: a < b) names;
+    in
+    {
+      selected = filter (n: !(excluded n)) sorted;
+      errors = lib.concatMap (
+        x:
+        if x.m.error != null then
+          [ "`${x.e}` is not a valid package pattern (${x.m.error})" ]
+        else if !(lib.any x.m.matches names) then
+          [ "`${x.e}` matches no member (${lib.concatStringsSep ", " sorted})" ]
+        else
+          [ ]
+      ) ms;
+    };
+
   # Package-level fields with workspace inheritance applied for the fields
   # that discovery needs (name, version, edition).
   packageInfo =

@@ -258,6 +258,82 @@ runTests "lib-unit" {
     expected = [ "shared/util" ];
   };
 
+  # Package patterns as Cargo's `-p` and `--exclude` take them (the glob
+  # crate's `Pattern`).
+  testPackagePattern = {
+    expr =
+      let
+        m = p: n: (util.packagePattern p).matches n;
+      in
+      [
+        (m "core-*" "core-a")
+        (m "core-*" "core")
+        (m "*" "")
+        (m "c?re" "core")
+        (m "c?re" "cre")
+        (m "[a-c]*" "build")
+        (m "[a-c]*" "doc")
+        (m "[!a-c]*" "doc")
+        (m "[!a-c]*" "app")
+        (m "[]x]" "]")
+        (m "[!]]" "x")
+        (m "x-[a-]" "x--")
+        (m "**" "anything")
+        (m "**/core" "core")
+        (m "**/c*" "core")
+        (m "*/core" "core")
+        (m "Core" "core")
+        (m "a]" "a]")
+      ];
+    expected = [ true false true true false true false true false true true true true true true false false true ];
+  };
+  testPackagePatternErrors = {
+    expr = map (p: (util.packagePattern p).error) [
+      "core**"
+      "**core"
+      "a/***"
+      "[ab"
+      "[!]"
+      "[]"
+      "ok*"
+    ];
+    expected = [
+      "near position 3: recursive wildcards must form a single path component"
+      "near position 2: recursive wildcards must form a single path component"
+      "near position 4: wildcards are either regular `*` or recursive `**`"
+      "near position 0: invalid range pattern"
+      "near position 0: invalid range pattern"
+      "near position 0: invalid range pattern"
+      null
+    ];
+  };
+  testExcludeMembers = {
+    expr = bb.manifest.excludeMembers [ "core-b" "app" "core-a" "helper" ] [
+      "core-*"
+      "helper"
+      "nope"
+      "zz*"
+      "x**"
+    ];
+    expected = {
+      selected = [ "app" ];
+      errors = [
+        "`nope` matches no member (app, core-a, core-b, helper)"
+        "`zz*` matches no member (app, core-a, core-b, helper)"
+        "`x**` is not a valid package pattern (near position 0: recursive wildcards must form a single path component)"
+      ];
+    };
+  };
+  # An entry matches when it matches any member, even one an earlier entry
+  # already excludes (Cargo would report `core-*` as unmatched here).
+  testExcludeMembersOverlap = {
+    expr = bb.manifest.excludeMembers [ "core-a" "app" ] [ "core-a" "core-*" ];
+    expected = {
+      selected = [ "app" ];
+      errors = [ ];
+    };
+  };
+
   # --- TOML writer --------------------------------------------------------------
   testTomlRoundTrip = {
     expr =
@@ -295,6 +371,16 @@ runTests "lib-unit" {
       "virtual-sub"
       "virtual-sub/inner"
     ];
+  };
+  testMemberPackages = {
+    expr = bb.manifest.memberPackages { root = ../fixtures/workspace-members; };
+    expected = {
+      app = { name = "app"; path = "."; };
+      core-a = { name = "core-a"; path = "crates/core-a"; };
+      core-b = { name = "core-b"; path = "crates/core-b"; };
+      helper = { name = "helper"; path = "libs/helper"; };
+      ws-util = { name = "ws-util"; path = "crates/util"; };
+    };
   };
 
   # --- plan roots -------------------------------------------------------------------

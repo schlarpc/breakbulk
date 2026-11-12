@@ -119,6 +119,126 @@ rec {
 
   hasGlobChars = s: match ".*[][*?].*" s != null;
 
+  # A package pattern of `cargo … -p` and `--exclude` (an entry with `*`,
+  # `?`, `[` or `]`), parsed and matched against package names as the
+  # `glob` crate's `Pattern::new` and `Pattern::matches` do (glob 0.3.3,
+  # default options: case-sensitive). `{ error = null; matches = name:
+  # bool; }`, or `error` the reason the pattern is invalid. Package names
+  # hold no `/`, so a `**` (valid only as a whole path component) matches
+  # either nothing or the rest of the name.
+  packagePattern =
+    pat:
+    let
+      cs = lib.stringToCharacters pat;
+      n = length cs;
+      at = i: builtins.elemAt cs i;
+      closeFrom = i: if i >= n then null else if at i == "]" then i else closeFrom (i + 1);
+      # The character specifiers in [from, to): `a-z` ranges and single
+      # characters.
+      specs =
+        from: to:
+        if from >= to then
+          [ ]
+        else if from + 3 <= to && at (from + 1) == "-" then
+          [ { lo = at from; hi = at (from + 2); } ] ++ specs (from + 3) to
+        else
+          [ { lo = at from; hi = at from; } ] ++ specs (from + 1) to;
+      stars = i: if i < n && at i == "*" then 1 + stars (i + 1) else 0;
+      fail = pos: msg: {
+        error = "near position ${toString pos}: ${msg}";
+        tokens = [ ];
+      };
+      recursive = "recursive wildcards must form a single path component";
+      parse =
+        i: toks:
+        if i >= n then
+          {
+            error = null;
+            tokens = toks;
+          }
+        else
+          let
+            c = at i;
+          in
+          if c == "?" then
+            parse (i + 1) (toks ++ [ { t = "one"; } ])
+          else if c == "*" then
+            let
+              count = stars i;
+              j = i + count;
+            in
+            if count > 2 then
+              fail (i + 2) "wildcards are either regular `*` or recursive `**`"
+            else if count == 1 then
+              parse j (toks ++ [ { t = "seq"; } ])
+            else if i != 0 && at (i - 1) != "/" then
+              fail (i - 1) recursive
+            else if j < n && at j == "/" then
+              parse (j + 1) (toks ++ [ { t = "rec"; } ])
+            else if j == n then
+              parse j (toks ++ [ { t = "rec"; } ])
+            else
+              fail j recursive
+          else if c == "[" then
+            let
+              negated = i + 4 <= n && at (i + 1) == "!" && closeFrom (i + 3) != null;
+              plain = i + 3 <= n && at (i + 1) != "!" && closeFrom (i + 2) != null;
+            in
+            if negated then
+              let
+                k = closeFrom (i + 3);
+              in
+              parse (k + 1) (toks ++ [ { t = "except"; specs = specs (i + 2) k; } ])
+            else if plain then
+              let
+                k = closeFrom (i + 2);
+              in
+              parse (k + 1) (toks ++ [ { t = "within"; specs = specs (i + 1) k; } ])
+            else
+              fail i "invalid range pattern"
+          else
+            parse (i + 1) (toks ++ [ { t = "char"; inherit c; } ]);
+      parsed = parse 0 [ ];
+      toks = parsed.tokens;
+      nt = length toks;
+      inSpecs = ss: c: lib.any (s: c >= s.lo && c <= s.hi) ss;
+      one =
+        tok: c:
+        if tok.t == "one" then
+          true
+        else if tok.t == "within" then
+          inSpecs tok.specs c
+        else if tok.t == "except" then
+          !(inSpecs tok.specs c)
+        else
+          tok.c == c;
+      matches =
+        name:
+        let
+          ns = lib.stringToCharacters name;
+          m = length ns;
+          go =
+            ti: ni:
+            if ti == nt then
+              ni == m
+            else
+              let
+                tok = builtins.elemAt toks ti;
+              in
+              if tok.t == "seq" then
+                lib.any (k: go (ti + 1) k) (lib.range ni m)
+              else if tok.t == "rec" then
+                go (ti + 1) ni || go (ti + 1) m
+              else
+                ni < m && one tok (builtins.elemAt ns ni) && go (ti + 1) (ni + 1);
+        in
+        parsed.error == null && go 0 0;
+    in
+    {
+      inherit (parsed) error;
+      inherit matches;
+    };
+
   # Expand a glob relative to `root` (a path). Returns normalized relative
   # strings of existing entries. Supports `*`, `?`, `[..]` per component and
   # `**` as "any number of directories".

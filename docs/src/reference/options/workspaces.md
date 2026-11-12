@@ -370,6 +370,90 @@ submodule
 
 
 
+## `workspaces.<name>.members`
+
+
+
+The workspace’s member packages, by name: read it, do not set
+it\. They are found as Cargo finds them: the root package, the
+directories ` [workspace] members ` names (globs included) but
+not those under ` [workspace] exclude `, and the path
+dependencies of members inside the workspace directory\. It is
+read from the manifests alone, so a module can compute a
+selection from ` config.workspaces.<ws>.members `:
+
+```nix
+{ config, lib, ... }:
+{
+  workspaces.default.targets.x86_64-unknown-linux-gnu.tests =
+    lib.filter (lib.hasPrefix "core-")
+      (lib.attrNames config.workspaces.default.members);
+}
+```
+
+The selection options also take ` { exclude = [ … ]; } `: every
+member but those\.
+
+
+
+*Type:*
+attribute set of (submodule) *(read only)*
+
+
+
+*Default:*
+the workspace’s members, by name
+
+
+
+*Example:*
+
+```nix
+{
+  app = { name = "app"; path = "."; };
+  core = { name = "core"; path = "crates/core"; };
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+
+
+## `workspaces.<name>.members.<name>.name`
+
+
+
+The package’s name\.
+
+
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+
+
+## `workspaces.<name>.members.<name>.path`
+
+
+
+The package’s directory, relative to the repository
+root as ` workspaces.<ws>.path ` is (` . ` for the root)\.
+
+
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+
+
 ## `workspaces.<name>.path`
 
 
@@ -508,11 +592,16 @@ attribute set of module
 
 The packages to plan for this target, each traced with ` -p `, in
 the build and the test plan\. ` null ` traces ` --workspace `\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
 
 
 
 *Type:*
-null or (list of string)
+null or (list of string) or (submodule)
 
 
 
@@ -520,6 +609,14 @@ null or (list of string)
 
 ```nix
 null
+```
+
+
+
+*Example:*
+
+```nix
+{ exclude = [ "xtask" ]; }
 ```
 
 *Declared by:*
@@ -538,11 +635,16 @@ build plan is not traced, and the target has no ` packages.<pkg> `
 and no product checks; test binaries, test runs, test apps,
 doctests and benches are unchanged\. A list of packages: products
 for those packages only\. ` true `: every package the variant plans\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
 
 
 
 *Type:*
-boolean or list of string
+boolean or (list of string) or (submodule)
 
 
 
@@ -576,11 +678,16 @@ traced, except for a check or clippy variant with ` allTargets `\. A
 list of packages: the test plan is ` cargo test --no-run -p <pkg> … `
 for those packages only, and only their tests are run\. ` true `: the
 variant’s or target’s package selection\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
 
 
 
 *Type:*
-boolean or list of string
+boolean or (list of string) or (submodule)
 
 
 
@@ -595,9 +702,7 @@ true
 *Example:*
 
 ```nix
-[
-  "my-lib"
-]
+{ exclude = [ "*-bench" ]; }
 ```
 
 *Declared by:*
@@ -885,8 +990,6 @@ pkgs.rustc
 
 ## `workspaces.<name>.toolchain.rustfmt`
 
-
-
 rustfmt (with ` bin/rustfmt ` and ` bin/cargo-fmt `), for the
 ` fmt ` check\. Formatting differs between rustfmt releases,
 and ` rustfmt.toml ` options can need a nightly one, so it
@@ -951,11 +1054,16 @@ place of the target’s ` packages ` (` workspaces.<ws>.targets.<triple>.package
 ` null `: the target’s selection\. Features then name the
 selected package’s own features, as with ` cargo build -p <pkg> --features <f> `; ` breakbulk.variants.packageFeaturePowerset `
 makes such variants\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
 
 
 
 *Type:*
-null or (list of string)
+null or (list of string) or (submodule)
 
 
 
@@ -1005,6 +1113,8 @@ false
 
 
 ## `workspaces.<name>.variants.<name>.allTargets`
+
+
 
 For ` check ` and ` clippy ` variants: also check every target,
 as ` cargo check --all-targets ` does (tests, examples, benches

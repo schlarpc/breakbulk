@@ -12,6 +12,18 @@ let
   bt = import ./types.nix { inherit lib; };
   settings = (import ./package-settings.nix { inherit lib; }).settings;
   nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
+  util = import ../util.nix { inherit lib; };
+  manifest = import ../manifest.nix { inherit lib util; };
+
+  # The exclude form, in each selection option's description.
+  excludeFormDoc = ''
+    `{ exclude = [ … ]; }`: every member
+    ([`members`](#workspacesnamemembers)) but those, as `--workspace
+    --exclude <entry>…` selects; each is traced with `-p`. An entry is a
+    package name, or a glob pattern as Cargo takes it (`*`, `?`, `[…]`,
+    `[!…]`). An entry that matches no member is an error (Cargo only
+    warns).
+  '';
 
   # `workspaces.<ws>.toolchain.capabilities.<name>` (lib/toolchain-facts.nix).
   capabilityDocs = {
@@ -38,17 +50,22 @@ let
     key = "breakbulk/modules/workspaces.nix#workspaceTarget";
     _file = ./workspaces.nix;
     options.packages = mkOption {
-      type = types.nullOr (types.listOf types.str);
+      type = types.nullOr bt.packageList;
       default = null;
+      example = lib.literalExpression ''{ exclude = [ "xtask" ]; }'';
       description = ''
         The packages to plan for this target, each traced with `-p`, in
         the build and the test plan. `null` traces `--workspace`.
+        ${excludeFormDoc}
       '';
     };
     options.tests = mkOption {
-      type = types.either types.bool (types.listOf types.str);
+      type = types.oneOf [
+        types.bool
+        bt.packageList
+      ];
       default = true;
-      example = [ "my-lib" ];
+      example = lib.literalExpression ''{ exclude = [ "*-bench" ]; }'';
       description = ''
         Test binaries, test runs, test apps and doctests on this target.
         `false`: none (a target that is only built, such as a wasm
@@ -57,10 +74,14 @@ let
         list of packages: the test plan is `cargo test --no-run -p <pkg> …`
         for those packages only, and only their tests are run. `true`: the
         variant's or target's package selection.
+        ${excludeFormDoc}
       '';
     };
     options.products = mkOption {
-      type = types.either types.bool (types.listOf types.str);
+      type = types.oneOf [
+        types.bool
+        bt.packageList
+      ];
       default = true;
       example = false;
       description = ''
@@ -71,6 +92,7 @@ let
         and no product checks; test binaries, test runs, test apps,
         doctests and benches are unchanged. A list of packages: products
         for those packages only. `true`: every package the variant plans.
+        ${excludeFormDoc}
       '';
     };
     options.variantDefaults = mkOption {
@@ -143,7 +165,13 @@ let
           assertion = unplannedLayers == [ ];
           message = "breakbulk: ${at}.target${bt.setIn options.target}: ${lib.concatStringsSep ", " unplannedLayers} not among the targets this variant is planned for (${lib.concatStringsSep ", " planned})";
         }
-      ];
+      ]
+      ++ lib.optionals (builtins.isAttrs config.packages) (
+        map (m: {
+          assertion = false;
+          message = "breakbulk: ${at}.packages.exclude${bt.setIn options.packages}: ${m}";
+        }) (manifest.excludeMembers (lib.attrNames ws.members) config.packages.exclude).errors
+      );
 
       options = {
         assertions = bt.assertionsOption;
@@ -267,7 +295,7 @@ let
           '';
         };
         packages = mkOption {
-          type = types.nullOr (types.listOf types.str);
+          type = types.nullOr bt.packageList;
           default = null;
           example = [ "my-lib" ];
           description = ''
@@ -277,6 +305,7 @@ let
             selected package's own features, as with `cargo build -p
             <pkg> --features <f>`; `breakbulk.variants.packageFeaturePowerset`
             makes such variants.
+            ${excludeFormDoc}
           '';
         };
         checks = mkOption {
@@ -343,6 +372,59 @@ let
           description = ''
             The workspace root, relative to the repository root. Its
             `Cargo.lock` is used.
+          '';
+        };
+
+        members = mkOption {
+          type = types.attrsOf (
+            types.submodule {
+              options = {
+                name = mkOption {
+                  type = types.str;
+                  description = "The package's name.";
+                };
+                path = mkOption {
+                  type = types.str;
+                  description = ''
+                    The package's directory, relative to the repository
+                    root as `workspaces.<ws>.path` is (`.` for the root).
+                  '';
+                };
+              };
+            }
+          );
+          readOnly = true;
+          default = manifest.memberPackages {
+            inherit root;
+            wsDir = util.normalizeRel config.path;
+          };
+          defaultText = lib.literalMD "the workspace's members, by name";
+          example = lib.literalExpression ''
+            {
+              app = { name = "app"; path = "."; };
+              core = { name = "core"; path = "crates/core"; };
+            }
+          '';
+          description = ''
+            The workspace's member packages, by name: read it, do not set
+            it. They are found as Cargo finds them: the root package, the
+            directories `[workspace] members` names (globs included) but
+            not those under `[workspace] exclude`, and the path
+            dependencies of members inside the workspace directory. It is
+            read from the manifests alone, so a module can compute a
+            selection from `config.workspaces.<ws>.members`:
+
+            ```nix
+            { config, lib, ... }:
+            {
+              workspaces.default.targets.x86_64-unknown-linux-gnu.tests =
+                lib.filter (lib.hasPrefix "core-")
+                  (lib.attrNames config.workspaces.default.members);
+            }
+            ```
+
+            The selection options also take `{ exclude = [ … ]; }`: every
+            member but those.
           '';
         };
 
