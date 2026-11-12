@@ -57,11 +57,11 @@ pub fn plan(opts: &trace::Options) -> Result<Plan, Error> {
 /// [`plan_with_cargo_env`]'s.
 ///
 /// With the toolchain's capabilities, it also exports
-/// `CARGO_PROFILE_<P>_TRIM_PATHS=all` when the planner would turn
-/// trim-paths on for `opts.profile`, by the same file-reading rule
+/// `CARGO_PROFILE_<P>_TRIM_PATHS=all` for each of `profiles` when the
+/// planner would turn trim-paths on, by the same file-reading rule
 /// ([`trim_paths::decide`]): the variable, like the planner's
 /// `--config`, overrides the project's setting.
-pub fn cargo_env(opts: &trace::Options) -> Result<spec::CargoEnv, Error> {
+pub fn cargo_env(opts: &trace::Options, profiles: &[String]) -> Result<spec::CargoEnv, Error> {
     let mut env = spec::prepare_for(opts)?
         .map(|p| p.cargo_env())
         .unwrap_or_default();
@@ -69,7 +69,9 @@ pub fn cargo_env(opts: &trace::Options) -> Result<spec::CargoEnv, Error> {
         let declared = trim_paths::declared(&trace::workspace_dir(opts));
         env.warnings.extend(declared.warnings.iter().cloned());
         if trim_paths::decide(opts.trim_paths, caps.trim_paths, &declared)? {
-            env.env.insert(trim_paths_var(&opts.profile), "all".into());
+            for p in profiles {
+                env.env.insert(trim_paths_var(p), "all".into());
+            }
         }
     }
     Ok(env)

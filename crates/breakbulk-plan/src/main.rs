@@ -12,7 +12,7 @@
 //!   [--cargo-env cargo-env.json]
 //!
 //! breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
-//!   --target TRIPLE [--spec FILE] [--capabilities FILE --profile P [--trim-paths auto|on|off]] \
+//!   --target TRIPLE [--spec FILE] [--capabilities FILE --profile P… [--trim-paths auto|on|off]] \
 //!   --scratch DIR --cargo-env cargo-env.json
 //!
 //! breakbulk-plan --build-target-only --skeleton DIR [--workspace REL] --out FILE
@@ -20,7 +20,7 @@
 //!
 //! `--cargo-env-only` writes only the dev shell's `cargo-env.json`, from the
 //! project's Cargo config files and rustc, without running Cargo; with
-//! `--capabilities`, also the trim-paths variable for `--profile`, by the
+//! `--capabilities`, also the trim-paths variable for each `--profile`, by the
 //! planner's rule from the workspace root's `Cargo.toml` and the config
 //! files, read as TOML rather than by running Cargo, so the dev shell still
 //! opens while a manifest is broken.
@@ -53,7 +53,7 @@ fn usage() -> ! {
          [--config X]... [--spec FILE] --capabilities FILE --target-traits FILE \
          [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
-         --target TRIPLE [--spec FILE] [--capabilities FILE --profile P [--trim-paths auto|on|off]] \
+         --target TRIPLE [--spec FILE] [--capabilities FILE --profile P... [--trim-paths auto|on|off]] \
          --scratch DIR --cargo-env FILE\n       \
          breakbulk-plan --build-target-only --skeleton DIR [--workspace REL] --out FILE"
     );
@@ -92,6 +92,9 @@ fn main() -> ExitCode {
         target_traits: None,
     };
     let mut out = None;
+    // Every `--profile`: `--cargo-env-only` exports trim-paths for each
+    // (the build plan's and the test plan's); planning takes the last.
+    let mut profiles = Vec::new();
     let mut cargo_env_out: Option<String> = None;
     let mut cargo_env_only = false;
     let mut build_target_only = false;
@@ -126,7 +129,10 @@ fn main() -> ExitCode {
             "--clippy-option" => opts.clippy_option = Some(val()),
             "--clippy-arg" => opts.clippy_args.push(val()),
             "--target" => opts.target = val(),
-            "--profile" => opts.profile = val(),
+            "--profile" => {
+                opts.profile = val();
+                profiles.push(opts.profile.clone());
+            }
             "--features" => opts.features.extend(
                 val()
                     .split([',', ' '])
@@ -166,7 +172,7 @@ fn main() -> ExitCode {
         }
     }
     if cargo_env_only {
-        return write_cargo_env_only(&opts, cargo_env_out);
+        return write_cargo_env_only(&opts, &profiles, cargo_env_out);
     }
     if build_target_only {
         return write_build_target_only(&opts, out);
@@ -234,7 +240,7 @@ fn write_build_target_only(opts: &Options, out: Option<String>) -> ExitCode {
     }
 }
 
-fn write_cargo_env_only(opts: &Options, out: Option<String>) -> ExitCode {
+fn write_cargo_env_only(opts: &Options, profiles: &[String], out: Option<String>) -> ExitCode {
     let Some(out) = out else { usage() };
     if [&opts.rustc, &opts.skeleton, &opts.target, &opts.scratch]
         .iter()
@@ -242,7 +248,7 @@ fn write_cargo_env_only(opts: &Options, out: Option<String>) -> ExitCode {
     {
         usage();
     }
-    match breakbulk_plan::cargo_env(opts) {
+    match breakbulk_plan::cargo_env(opts, profiles) {
         Ok(cargo_env) => {
             let text = serde_json::to_string(&cargo_env).expect("strings serialize");
             if let Err(e) = std::fs::write(&out, text) {

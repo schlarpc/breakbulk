@@ -367,16 +367,34 @@ Cargo builds:
 | build and check or clippy | build scripts, proc macros and their dependencies | other dependencies, which Cargo compiles in check mode |
 | check and clippy | all dependencies | workspace members |
 | build and coverage | host units | target units, which carry the instrumentation flag |
-| build and test plans | units whose features dev-dependencies do not change | units whose features they change |
+| build and test plans, with `testProfile` set to the variant's `profile` | units whose features dev-dependencies do not change | units whose features they change |
+| build and test plans, with the default `testProfile` (`test`) | nothing, unless the `test` profile has the build profile's settings | everything |
 | profiles with the same settings (`release`, `bench`, a profile that only inherits `release`) | everything: a unit depends on a profile's settings, not its name | nothing |
 | profiles with different settings | nothing | everything |
+
+A build or coverage variant has two profiles. Its
+[`profile`](../reference/options/workspaces.md#workspacesnamevariantsnameprofile)
+(default `release`) builds the products.
+Its [`testProfile`](../reference/options/workspaces.md#workspacesnamevariantsnametestprofile)
+(default `test`) builds the test binaries and doctests, as plain
+`cargo test` does. Cargo's `test` profile inherits `dev`: debug
+assertions and overflow checks are on, nothing is optimized, and the
+project's `[profile.test]` applies over it. So a test that needs debug
+assertions passes, and a fat-LTO release profile does not slow down every
+test link. To test what you ship, set `testProfile = "release"` (the
+variant's `profile`): the test plan then shares its dependencies with the
+build plan, and a cold build compiles each of them once instead of once
+per profile. Both options can differ per target, as every variant option
+can (below).
 
 Check and clippy variants check every target, as
 `cargo check --all-targets` does, unless
 [`allTargets`](../reference/options/workspaces.md#workspacesnamevariantsnamealltargets)
-is off (for a gate that runs plain `cargo check`). Give them the same
-profile as your build variant to share build scripts and proc macros;
-Cargo's own `clippy` uses the dev profile.
+is off (for a gate that runs plain `cargo check`). They trace one Cargo
+command with one profile, `profile`, for both plans, and ignore
+`testProfile`. Give them the same profile as your build variant to
+share build scripts and proc macros; Cargo's own `clippy` uses the dev
+profile.
 
 Clippy units find `clippy.toml` as `cargo clippy` does: clippy-driver
 gets `CLIPPY_CONF_DIR` pointing at the member's directory in a small tree

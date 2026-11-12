@@ -71,6 +71,12 @@
 #                    and clippy variants' unit checks build;
 #                    `packages.lib-a.variant.clippy` reaches the clippy
 #                    variant's lib-a units and no other variant's units
+#   variants-test-profile   `testProfile`: the default test plan is
+#                    `--profile test`, where a test that needs debug
+#                    assertions passes, and shares no dependency unit with
+#                    the release build plan; `testProfile = "release"`
+#                    shares every common unit; check variants keep
+#                    `profile`
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
 #                    and `targets.<t>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
@@ -86,7 +92,8 @@
 #                    target; a single value in the variant's target layer
 #                    wins over the variant and `variantDefaults` without
 #                    mkForce, priorities still count (`checks` on one
-#                    target only); invalid layers fail evaluation
+#                    target only); `testProfile` per target (check
+#                    variants keep `profile`); invalid layers fail evaluation
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
 #   variants-clippy-conf   clippy units find `clippy.toml` above the
@@ -633,6 +640,13 @@ let
         variants = {
           default.profile = "release";
           custom.profile = "release-custom";
+          # Tests built as the products are: lib-a's `debug_assertions_on`
+          # fails there, so its runs stay out of repo.checks.
+          release-tests = {
+            profile = "release";
+            testProfile = "release";
+            checks = false;
+          };
           check = {
             mode = "check";
             profile = "release";
@@ -1337,6 +1351,50 @@ in
       cp $check/units $out
     '';
 
+  # `testProfile`: a build variant's test plan is `--profile test` by
+  # default, where lib-a's `debug_assertions_on` passes, and shares no
+  # dependency unit with the build plan (`release`); `release-tests`
+  # (`testProfile = "release"`) shares every unit the two plans have in
+  # common. A check variant's test plan keeps its `profile`.
+  variants-test-profile =
+    let
+      d = drvsOf variantsRepo;
+      i = variantsRepo.workspaces.main.instances.${native};
+      common = vName: lib.filter (n: (d vName "build") ? ${n}) (lib.attrNames (d vName "test"));
+      same = vName: lib.filter (n: (d vName "build").${n} == (d vName "test").${n}) (common vName);
+      deps = lib.filter (n: lib.hasPrefix "pm-" n || lib.hasPrefix "hostdep-" n);
+      profiles = lib.mapAttrs (_: v: lib.mapAttrs (_: p: p.profile) v.plans) {
+        inherit (i) default release-tests check;
+      };
+    in
+    assert lib.assertMsg (
+      profiles == {
+        default = {
+          build = "release";
+          test = "test";
+        };
+        release-tests = {
+          build = "release";
+          test = "release";
+        };
+        check = {
+          build = "release";
+          test = "release";
+        };
+      }
+    ) "variants-test-profile: plan profiles ${builtins.toJSON profiles}";
+    assert lib.assertMsg (
+      deps (common "default") != [ ] && deps (same "default") == [ ]
+    ) "variants-test-profile: dependency units shared between the release build plan and the test-profile test plan: ${builtins.toJSON (same "default")}";
+    assert lib.assertMsg (
+      lib.length (deps (common "release-tests")) >= 3 && same "release-tests" == common "release-tests"
+    ) "variants-test-profile: release-tests' plans differ in ${
+      builtins.toJSON (lib.subtractLists (same "release-tests") (common "release-tests"))
+    }";
+    pkgs.runCommand "variants-test-profile" { run = variantsRepo.checks."main/${native}/lib-a/test-lib"; } ''
+      echo "$run" > $out
+    '';
+
   variants-clippy-toolchain =
     let
       withClippy = overlayRust.override { extensions = [ "clippy" ]; };
@@ -1680,7 +1738,10 @@ in
                 };
                 targets = {
                   ${native} = { };
-                  ${wasm}.variantDefaults.features = [ "lib-a/y" ];
+                  ${wasm}.variantDefaults = {
+                    features = [ "lib-a/y" ];
+                    testProfile = "release";
+                  };
                 };
               }
               extra
@@ -1696,6 +1757,7 @@ in
             target.${wasm} = {
               features = lib.mkForce [ ];
               noDefaultFeatures = true;
+              testProfile = lib.mkForce "dev";
             };
           };
           gate = {
@@ -1714,6 +1776,11 @@ in
         };
       };
       w = repo.workspaces.main;
+      # The package runs are check variants: their test plans keep
+      # `profile`.
+      hackProfiles = lib.mapAttrs (_: _: "release") (
+        lib.filterAttrs (n: _: lib.hasPrefix "hack-" n) w.instances.${native}
+      );
       planCmd = triple: vName: kind: w.instances.${triple}.${vName}.plans.${kind}.drvAttrs.buildCommand;
       has = triple: vName: s: lib.hasInfix " ${s} " (planCmd triple vName "build");
       unitsOf = triple: lib.length w.target.${triple}.variants.gate.check.units;
@@ -1742,6 +1809,23 @@ in
             && has wasm "hack-lib-a.no-default-features" "--no-default-features";
           # `allTargets = false` on wasm only: the build plan's units there,
           # both plans' natively.
+          # `testProfile` from wasm's defaults, and `own`'s layer over it;
+          # the check variant keeps `profile`.
+          testProfiles =
+            lib.mapAttrs (_: t: lib.mapAttrs (_: i: i.plans.test.profile) t) w.instances == {
+              ${native} = {
+                default = "test";
+                own = "test";
+                gate = "release";
+              }
+              // hackProfiles;
+              ${wasm} = {
+                default = "release";
+                own = "dev";
+                gate = "release";
+              }
+              // hackProfiles;
+            };
           gateWasm = unitsOf wasm == planUnits wasm "build";
           gateNative = unitsOf native == planUnits native "build" + planUnits native "test";
           # A build variant cannot take `allTargets = false`, on one

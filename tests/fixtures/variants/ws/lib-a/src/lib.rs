@@ -20,4 +20,11 @@ mod tests {
         assert!(super::describe().contains("host=7"));
         assert!(super::is_empty_list(&[]));
     }
+
+    /// Passes in Cargo's `test` profile, as under plain `cargo test`, and
+    /// fails in `release`.
+    #[test]
+    fn debug_assertions_on() {
+        assert!(cfg!(debug_assertions), "built without debug assertions");
+    }
 }

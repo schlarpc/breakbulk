@@ -169,14 +169,15 @@
   # The dev shell's `cargo-env.json`: the native toolchain spec as Cargo
   # environment configuration, as the planner passes it with `--config`
   # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), and
-  # CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner would turn Cargo's
+  # CARGO_PROFILE_<P>_TRIM_PATHS=all for each of `profiles` (the build and
+  # the test plan's) when the planner would turn Cargo's
   # trim-paths on (the same rule, from the workspace root's
   # Cargo.toml and the config files, read as TOML; a file that does not
   # parse is a warning; the toolchain's `trimPaths` capability). Computed
   # apart from the plan, from those files and `rustc --print cfg` only, so
   # the dev shell still opens while a manifest is broken and planning fails.
   #
-  #   breakbulk.mkCargoEnv pkgs { configSkeleton; wsDir; rustc; tools; target; spec; capabilities; profile; trimPaths; }
+  #   breakbulk.mkCargoEnv pkgs { configSkeleton; wsDir; rustc; tools; target; spec; capabilities; profiles; trimPaths; }
   #   "''${drv}/cargo-env.json"
   mkCargoEnv =
     pkgs:
@@ -190,10 +191,10 @@
       spec ? null,
       name ? "breakbulk-cargo-env",
       # With the toolchain's capabilities (lib/toolchain-facts.nix): the
-      # trim-paths variable for `profile` (mkPlan's `trimPaths`). Without:
-      # none.
+      # trim-paths variable for each of `profiles` (mkPlan's `trimPaths`).
+      # Without: none.
       capabilities ? null,
-      profile ? "dev",
+      profiles ? [ "dev" ],
       trimPaths ? "auto",
     }:
     let
@@ -209,11 +210,15 @@
       ++ lib.optionals (capabilities != null) [
         "--capabilities"
         (toolchainFacts.capabilitiesFile capabilities)
-        "--profile"
-        profile
         "--trim-paths"
         trimPaths
       ]
+      ++ lib.optionals (capabilities != null) (
+        lib.concatMap (p: [
+          "--profile"
+          p
+        ]) profiles
+      )
       ++ lib.optionals (spec != null) [
         "--spec"
         (builtins.toFile "breakbulk-spec.json" (builtins.unsafeDiscardStringContext (builtins.toJSON spec)))

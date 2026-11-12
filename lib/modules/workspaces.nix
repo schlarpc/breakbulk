@@ -188,9 +188,28 @@ let
           type = types.str;
           default = "release";
           description = ''
-            The Cargo profile (`--profile`). Units are shared between
-            variants whose profiles have the same settings, whatever their
-            names.
+            The Cargo profile (`--profile`) of the build plan, and of the
+            bench plan. A check or clippy variant's test plan uses it too.
+            Units are shared between variants whose profiles have the same
+            settings, whatever their names.
+          '';
+        };
+        testProfile = mkOption {
+          type = types.str;
+          default = "test";
+          example = "release";
+          description = ''
+            The Cargo profile of a build or coverage variant's test plan
+            (test binaries, test runs, doctests). The default, `test`, is
+            what plain `cargo test` uses: Cargo's `test` profile inherits
+            `dev` (debug assertions on, no optimization), with the
+            project's `[profile.test]` over it. Set it to the variant's
+            `profile` (`"release"`) to build tests as the products are
+            built: the test plan then shares its dependency units with the
+            build plan, while with two profiles of different settings it
+            shares none. Check and clippy variants ignore it: they trace
+            one Cargo command with `profile`, as `cargo check` and `cargo
+            clippy` do.
           '';
         };
         features = mkOption {
@@ -285,7 +304,7 @@ let
           description = ''
             This variant's settings on one of its targets: any option of
             the variant (`features`, `noDefaultFeatures`, `profile`,
-            `allTargets`, `clippyArgs`, `packages`, `benches`, `checks`, …)
+            `testProfile`, `allTargets`, `clippyArgs`, `packages`, `benches`, `checks`, …)
             except `targets`. They apply over the variant's own settings
             and the target's `variantDefaults`
             (`workspaces.<ws>.targets.<triple>.variantDefaults`): lists

@@ -209,6 +209,15 @@ use it. Each test binary also gets:
   environment and runner but runs on your machine: the way out for network
   tests, debuggers and running a single test.
 
+**Profile.** Tests are built in Cargo's `test` profile, as plain
+`cargo test` builds them: it inherits `dev` (debug assertions on, no
+optimization), with your `[profile.test]` over it. The products keep
+the variant's `profile` (`release`). To build tests with the products'
+profile, set the variant's
+[`testProfile`](../reference/options/workspaces.md#workspacesnamevariantsnametestprofile)
+(`testProfile = "release"`); the tests then share their dependencies
+with the products. See [Variants](configuration.md#variants).
+
 More behavior:
 
 - `CARGO_BIN_EXE_*` points at the right binaries, and nextest

@@ -11,6 +11,7 @@
 #     # (lib/toolchain-facts.nix); null values are ignored
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
+#     testProfile = "test";            # the test plan's (default: profile)
 #     features = [ ];
 #     # Per-package overrides (what mkRepository's `packages.<name>` becomes):
 #     # they reach only that package's units, on both platforms.
@@ -82,6 +83,9 @@ pkgs:
   toolchain ? { inherit (pkgs) rustc cargo; },
   target ? targetTraitsLib.nativeTriple pkgs,
   profile ? "dev",
+  # The test plan's profile; check and clippy variants trace their test
+  # plan (`cargo check --all-targets`) with `profile`.
+  testProfile ? profile,
   features ? [ ],
   fetchArgs ? { },
   configs ? [ ],
@@ -261,7 +265,6 @@ let
         tools
         kind
         target
-        profile
         features
         configs
         wsDir
@@ -272,6 +275,7 @@ let
         traits
         ;
       packages = if kind == "test" then testSelect else select;
+      profile = if kind == "test" && !checking then testProfile else profile;
       inherit (toolchain) cargo rustc;
       inherit capabilities;
       skeleton = skel;
@@ -525,10 +529,10 @@ in
       tools
       target
       spec
-      profile
       trimPaths
       capabilities
       ;
+    profiles = lib.unique ([ profile ] ++ lib.optional (!checking) testProfile);
     inherit (toolchain) rustc;
     name = "${name}-cargo-env";
   };

@@ -16,7 +16,8 @@
 #    whichever key the planner's `--config` used. Cargo appends these lists
 #    to the project's own, as it appends `--config` lists.
 #  - CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner turns Cargo's
-#    trim-paths on for the default variant's profile P (Cargo 1.101 and
+#    trim-paths on, for each profile P of the default variant's build and
+#    test plans (Cargo 1.101 and
 #    later, unless the project declares trim-paths or cargoTrimPaths says
 #    otherwise), so local `-C metadata` matches the plan's. It comes from
 #    the same `cargo-env.json`, by the planner's own file-reading rule, so

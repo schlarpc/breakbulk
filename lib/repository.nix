@@ -953,6 +953,7 @@ let
       target = triple;
       inherit (v)
         profile
+        testProfile
         features
         noDefaultFeatures
         allFeatures
