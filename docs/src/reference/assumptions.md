@@ -232,7 +232,7 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 ### T15. Test units are told by target kind
 
 - **Assumption.** Cargo builds a unit with the package's dev-dependencies when its target is a test or an example, or its mode is a test mode (`cargo test`, `cargo bench`, `cargo check --all-targets` for tests and benches). In a test mode it passes no `--crate-type`, and `--test` only when the target has the libtest harness, so a `harness = false` test or bench is a plain bin without `--test`.
-- **Where.** `crates/breakbulk-plan/src/graph.rs`: `is_test_unit` (a compile unit's `test`); `crates/breakbulk-instantiate/src/lib.rs`: the test view, `unit_name`, `remap_scope`; `crates/breakbulk-format/src/render.rs`: `is_linking`.
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `is_test_unit` (a compile unit's `test`); `crates/breakbulk-instantiate/src/lib.rs`: the test view, `unit_name`, `remap_scope`.
 - **Upstream.** cargo `0.100.0` `src/compiler/unit_dependencies.rs`: `State::deps` (non-transitive dependencies only for test and example targets or a test mode); `src/compiler/mod.rs`: `build_base_args` (`--crate-type` only outside a test mode, `--test` only with `unit.target.harness()`). Checked for this page.
 - **Holds for.** 1.99.
 - **Pinned by.** `repository-test-only` (an integration test without the harness and an example read `tests/`); `repository-test-only-variants` (the same in a clippy variant, and a bench without the harness reads a `test.sourceScope` path in the clippy and bench variants).

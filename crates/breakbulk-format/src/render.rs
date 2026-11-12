@@ -176,17 +176,21 @@ pub(crate) fn flags<R: Resolve>(
 }
 
 /// Whether a compile unit links: its own output needs the `rlib`s of its
-/// whole dependency graph, not only their metadata. Test units count as
-/// linking whatever their crate types: a doctest's are its library's, and
-/// an example built as a library only gains `rlib`s it does not need.
+/// whole dependency graph, not only their metadata. That is a `--test`
+/// compile (a doctest's `rustdoc --test` too) or a crate type other than
+/// `lib` and `rlib`, Cargo's `requires_upstream_objects`. Not the unit's
+/// `test`: an example is a test unit, and one built as an `rlib` needs
+/// only metadata. Cargo's other test-mode compiles pass no crate type,
+/// which is a `bin`.
 pub fn is_linking(c: &CompileUnit) -> bool {
-    c.test
-        || c.krate.types.iter().any(|t| {
-            matches!(
-                t.as_str(),
-                "bin" | "dylib" | "cdylib" | "staticlib" | "proc-macro"
-            )
-        })
+    c.args
+        .iter()
+        .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
+        || c
+            .krate
+            .types
+            .iter()
+            .any(|t| !matches!(t.as_str(), "lib" | "rlib"))
 }
 
 /// The packages a linking unit links, other than its own:

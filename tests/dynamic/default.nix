@@ -270,6 +270,7 @@ let
     dev-dep-features = mkRepo "dev-dep-features" [ oneWs ];
     build-dep-leak = mkRepo "build-dep-leak" [ oneWs ];
     bin-exe-not-built = mkRepo "bin-exe-not-built" [ oneWs ];
+    rlib-example = mkRepo "rlib-example" [ oneWs ];
     sys-native = mkRepo "sys-native" [
       oneWs
       {

@@ -1,0 +1,7 @@
+[package]
+name = "mid"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+leaf = { path = "../leaf" }

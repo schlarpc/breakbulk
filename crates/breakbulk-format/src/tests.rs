@@ -856,6 +856,28 @@ fn transitive_crate_deps() {
         ]
     );
     assert!(files("c-leaf").is_empty());
+    // A test unit that does not link (an rlib example) needs metadata only;
+    // a `--test` compile of a library links.
+    let mut p = p;
+    let mut example = compile(&mut p, "c-top").clone();
+    example.test = true;
+    assert!(!is_linking(&example));
+    p.units.insert("c-example".into(), Unit::Compile(example.clone()));
+    let mut harness = example;
+    harness.args.push(Arg::Literal("--test".into()));
+    assert!(is_linking(&harness));
+    p.units.insert("c-harness".into(), Unit::Compile(harness));
+    let files = |id: &str| -> Vec<String> {
+        crate_deps(&p, &id.into())
+            .into_iter()
+            .map(|o| o.file.unwrap())
+            .collect()
+    };
+    assert_eq!(files("c-example"), files("c-top"));
+    assert_eq!(
+        files("c-harness"),
+        ["libleaf-1.rlib", "libmid-1.rmeta", "libpm-1.so"]
+    );
     // The rendered unit carries them as paths.
     let RenderedUnit::Compile(c) = render_unit(&p, &"c-bin".into(), &Fake).unwrap() else {
         panic!()

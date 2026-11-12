@@ -86,8 +86,12 @@ argv short.
   graph's input edges and references grow with its edges, not with the sum
   of its closures (the [scale
   spike](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/scale.md)).
-- **Units that link name every `rlib`.** Bins, tests, proc macros,
-  cdylibs, build scripts and doctests still list every `rlib` as an input.
+- **Units that link name every `rlib`.** A unit links when it compiles
+  with `--test` or has a crate type other than `lib` and `rlib`, as Cargo
+  decides which dependencies need only metadata: bins, tests, examples
+  built as bins, proc macros, cdylibs, dylibs, staticlibs, build scripts
+  and doctests. They list every `rlib` as an input. An example built as an
+  `rlib` does not link, and names only `rmeta` like a library.
   An `rlib` output cannot carry a manifest: Nix records references only to
   paths in the builder's input closure, and a library compile has only
   `rmeta` inputs. `rlib` outputs carry no references, so fetching an

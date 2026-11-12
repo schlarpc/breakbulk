@@ -1,0 +1,11 @@
+# An example built as an rlib (`crate-type = ["rlib"]`): it does not link,
+# so its unit takes its dependencies' rmeta, as Cargo gives it, and not
+# their rlibs. plug's other example is a bin and takes every rlib. Chain:
+# plug -> mid -> leaf.
+[workspace]
+resolver = "2"
+members = ["leaf", "mid", "plug"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

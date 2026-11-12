@@ -1,0 +1,11 @@
+[package]
+name = "plug"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mid = { path = "../mid" }
+
+[[example]]
+name = "plugin"
+crate-type = ["rlib"]

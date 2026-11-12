@@ -59,8 +59,8 @@ else
     walking-skeleton directives embed config-env doctests test-control
     test-options test-threads required-features all-required nextest out-dir-walk
     source-paths-dwo source-paths-dwp
-    crate-types dev-dep-features build-dep-leak bin-exe-not-built sys-native
-    feature-unification clippy-conf test-cutoff
+    crate-types dev-dep-features build-dep-leak bin-exe-not-built rlib-example
+    sys-native feature-unification clippy-conf test-cutoff
     multi-ws outside-reads stamps missing-input test-only pkgid-short
     post-link source-paths trim-paths trim-paths-cc variants
     variants-coverage benches stdpaths git-multi-workspace git-revisions

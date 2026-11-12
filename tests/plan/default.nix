@@ -778,6 +778,67 @@ in
       cp log $out/
     '';
 
+  # An example built as an rlib does not link: its unit's inputs are its
+  # dependencies' rmeta outputs (what lies below comes from their
+  # manifests), as Cargo gives it only metadata. The bin example links and
+  # takes every rlib.
+  rlib-example =
+    let
+      ws = mk "rlib-example" { };
+      units = lib.attrValues ws.units.test;
+      byDrv = lib.listToAttrs (
+        map (u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) units
+      );
+      spec = u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT);
+      unitOf =
+        name:
+        lib.findSingle (u: (spec u).crate.name or null == name) (throw "rlib-example: no unit ${name}")
+          (throw "rlib-example: several units ${name}")
+          units;
+      # The unit outputs a unit's spec names, as "<unit name>:<output>".
+      inputs =
+        name:
+        lib.sort lib.lessThan (
+          lib.concatLists (
+            lib.mapAttrsToList (
+              drv: c: lib.optionals (byDrv ? ${drv}) (map (o: "${byDrv.${drv}}:${o}") (c.outputs or [ ]))
+            ) (builtins.getContext (unitOf name).drvAttrs.BREAKBULK_UNIT)
+          )
+        );
+      plugin = inputs "plugin";
+      runner = inputs "runner";
+    in
+    assert lib.assertMsg (
+      plugin == [
+        "mid-0.1.0-lib:rmeta"
+        "plug-0.1.0-lib:rmeta"
+      ]
+    ) "rlib-example: the rlib example's inputs are ${builtins.toJSON plugin}";
+    assert lib.assertMsg (
+      runner == [
+        "leaf-0.1.0-lib:rlib"
+        "mid-0.1.0-lib:rlib"
+        "plug-0.1.0-lib:rlib"
+      ]
+    ) "rlib-example: the bin example's inputs are ${builtins.toJSON runner}";
+    pkgs.runCommand "rlib-example-check"
+      {
+        plugin = (unitOf "plugin").rlib;
+        runner = (unitOf "runner").out;
+        golden = golden {
+          fixture = "rlib-example";
+          inherit ws;
+          kind = "test";
+        };
+      }
+      ''
+        ls $plugin/libplugin-*.rlib
+        [ "$($runner/runner)" = "runner 42" ]
+        mkdir -p $out
+        echo ${lib.escapeShellArg (builtins.toJSON { inherit plugin runner; })} > $out/report
+        cat $golden/report >> $out/report
+      '';
+
   # A cargo wrapped like rust-overlay's (which exports LD_LIBRARY_PATH for
   # libsecret): Cargo appends its own process's value to every dynamic
   # library path it sets, and that value is the planner's, so it must not
