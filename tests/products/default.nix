@@ -107,6 +107,15 @@
 #                    root's (`own`); an edit to the root file changes
 #                    only clippy units, and a `CLIPPY_CONF_DIR` in `env`
 #                    replaces breakbulk's
+#   variants-clippy-host   a member that is both a dependency and a
+#                    build-dependency (clippy-host), with a `--cfg` in the
+#                    project's `build.rustflags`: the cfg reaches the
+#                    target copy only (the product prints both copies'
+#                    values); the clippy variant (`-D warnings`) fails the
+#                    host copy on an unused variable, and
+#                    `packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS`
+#                    lets it pass, leaving the target copy and the default
+#                    variant's units unchanged
 #   variants-clippy-toolchain   with rust-overlay's 1.99 as rustc and
 #                    cargo, `toolchain.clippy` defaults to that toolchain
 #                    and the clippy plan builds; nixpkgs' clippy (another
@@ -1048,6 +1057,41 @@ let
       cp -r target/doc $out
       rm $out/.lock
     '';
+
+  # --- clippy-host ---------------------------------------------------------------
+
+  # The clippy variant of docs/src/how-to/ci.md, and its setting for the
+  # host copy of `runtime`.
+  clippyHostModules = [
+    {
+      workspaces.main = {
+        path = ".";
+        variants = {
+          default.profile = "dev";
+          clippy = {
+            mode = "clippy";
+            profile = "dev";
+            clippyArgs = [
+              "-D"
+              "warnings"
+            ];
+          };
+        };
+      };
+    }
+  ];
+  clippyHostFix = {
+    packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS =
+      lib.concatMapStrings (a: a + "__CLIPPY_HACKERY__")
+        [
+          "-D"
+          "warnings"
+          "-A"
+          "unused_variables"
+        ];
+  };
+  clippyHost = mkRepo (fixtures + "/clippy-host") clippyHostModules;
+  clippyHostFixed = mkRepo (fixtures + "/clippy-host") (clippyHostModules ++ [ clippyHostFix ]);
 in
 {
   modules.variants = variantsModules;
@@ -1074,6 +1118,7 @@ in
       cargoConfigRepo
       docsNoDeps
       docsDeps
+      clippyHostFixed
       ;
     trimCc = trimCcRepo { };
   };
@@ -1856,6 +1901,50 @@ in
           echo "a member with its own clippy.toml saw the root's" >&2
           exit 1
         fi
+        touch $out
+      '';
+
+  # The example of docs/src/how-to/ci.md (a member compiled for both
+  # sides, linted twice).
+  variants-clippy-host =
+    let
+      unitsIn = repo: vName: lib.attrValues repo.workspaces.main.instances.${native}.${vName}.units.build;
+      platformOf = u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
+      runtimeLibs = repo: vName: lib.filter (u: u.name == "runtime-0.1.0-lib") (unitsIn repo vName);
+      runtimeLib =
+        repo: vName: platform:
+        lib.findFirst (u: platformOf u == platform) (throw "no ${platform} runtime lib in ${vName}") (
+          runtimeLibs repo vName
+        );
+      drvs = repo: vName: lib.sort lib.lessThan (map (u: u.drvPath) (unitsIn repo vName));
+    in
+    assert lib.assertMsg (
+      lib.sort lib.lessThan (map platformOf (runtimeLibs clippyHost "clippy")) == [
+        "host"
+        "target"
+      ]
+    ) "variants-clippy-host: runtime is not compiled once per side";
+    assert lib.assertMsg (
+      drvs clippyHost "default" == drvs clippyHostFixed "default"
+    ) "variants-clippy-host: the clippy variant's package setting changed the default variant's units";
+    assert lib.assertMsg (
+      (runtimeLib clippyHost "clippy" "target").drvPath == (runtimeLib clippyHostFixed "clippy" "target").drvPath
+    ) "variants-clippy-host: the forHost setting changed the target copy";
+    pkgs.runCommand "variants-clippy-host"
+      {
+        # The project's rustflags reach the target copy only.
+        app = clippyHost.workspaces.main.packages.app;
+        failure = expectFailure "runtime-host-clippy" (runtimeLib clippyHost "clippy" "host") [
+          "unused variable: `n`"
+          "-D unused-variables"
+        ];
+        target = runtimeLib clippyHost "clippy" "target";
+        fixed = clippyHostFixed.workspaces.main.target.${native}.variants.clippy.check;
+      }
+      ''
+        set -euo pipefail
+        [ "$($app/bin/app)" = "host=1 target=2" ]
+        cat $failure/log
         touch $out
       '';
 

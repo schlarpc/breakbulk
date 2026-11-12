@@ -61,6 +61,38 @@ one `/`-separated segment, `**` across any number) and derivations:
 variant's check. A pattern that matches no check is an evaluation error,
 since it is most likely a typo.
 
+## A clippy check fails where `cargo clippy` passes
+
+A clippy variant lints a workspace member twice when the member is also
+a build-dependency: once for the target, and once for the build
+machine. The host copy does not get the project's rustflags, so it is
+linted without a `--cfg` the project sets
+([Cargo with `--target`](../explanation/trade-offs.md#cargo-with---target)).
+Code that only the cfg uses then gives warnings, which `-D warnings`
+turns into errors. The failed unit is the member's library on the host
+side; its log has no `--target` in the clippy-driver command line.
+
+Give that member's host units their own clippy arguments, in the clippy
+variant only:
+
+```nix
+workspaces.main.variants.clippy = {
+  mode = "clippy";
+  clippyArgs = [ "-D" "warnings" ];
+};
+# `runtime` is a dependency and a build-dependency of `app`.
+packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS =
+  lib.concatMapStrings (a: a + "__CLIPPY_HACKERY__") [
+    "-D" "warnings"
+    "-A" "unused_variables"
+  ];
+```
+
+`CLIPPY_ARGS` is how clippy-driver gets its arguments, each followed by
+`__CLIPPY_HACKERY__`. The value replaces `clippyArgs` for the host copy
+only. The target copy is still linted with `clippyArgs`, and no other
+variant's units rebuild.
+
 ## Read a failed `--keep-going` build
 
 With `--keep-going`, Nix builds everything it can and reports every

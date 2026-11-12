@@ -1,0 +1,12 @@
+# A workspace member that is both a dependency and a build-dependency,
+# with a cfg in the project's rustflags (deno's `deno_runtime` and
+# `--cfg tokio_unstable`). breakbulk always plans with `--target`, so
+# the host copy of `runtime` compiles without the cfg. In a clippy
+# variant with `-D warnings` it fails, where plain `cargo clippy` passes.
+[workspace]
+resolver = "2"
+members = ["app", "runtime"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

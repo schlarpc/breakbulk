@@ -1129,7 +1129,9 @@ true
 
 Clippy’s own arguments, as in ` cargo clippy -- ARGS `
 (` CLIPPY_ARGS `), for a ` clippy ` variant\. They reach only the
-units clippy-driver compiles (workspace members)\.
+units clippy-driver compiles (workspace members), on both
+sides\. A ` CLIPPY_ARGS ` in a package’s ` env ` replaces them for
+that package’s units\.
 
 *Type:*
 list of string
@@ -1178,10 +1180,16 @@ unit and is in ` repo.checks `\. ` clippy `: as ` check `, with
 clippy-driver as ` RUSTC_WORKSPACE_WRAPPER ` (workspace members
 only, so dependencies are shared with ` check `), and the
 ` clippy.toml ` files of each member’s directory and its parents
-up to the repository root (` CLIPPY_CONF_DIR `)\. ` coverage `:
-` build ` with ` -C instrument-coverage ` on target units\.
-Use the same profile as the build variant to share host units;
-Cargo’s own ` clippy ` uses the dev profile\.
+up to the repository root (` CLIPPY_CONF_DIR `)\. A member that
+is also a build-dependency is linted twice, and its host copy
+without the project’s rustflags, so with ` -D warnings ` it can
+fail where ` cargo clippy ` passes; give its host units their
+own ` CLIPPY_ARGS ` with
+` packages.<name>.variant.<v>.forHost.env ` (see [Run the checks
+in CI](\.\./\.\./how-to/ci\.md\#a-clippy-check-fails-where-cargo-clippy-passes))\.
+` coverage `: ` build ` with ` -C instrument-coverage ` on target
+units\. Use the same profile as the build variant to share host
+units; Cargo’s own ` clippy ` uses the dev profile\.
 
 *Type:*
 one of “build”, “check”, “clippy”, “coverage”

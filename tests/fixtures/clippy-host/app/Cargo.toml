@@ -1,0 +1,10 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+runtime = { path = "../runtime" }
+
+[build-dependencies]
+runtime = { path = "../runtime" }

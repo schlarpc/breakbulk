@@ -3,6 +3,61 @@
 breakbulk gives up some things to get per-crate sharing with Cargo's exact
 behavior. This page lists them, with the issues that track each.
 
+## Cargo with `--target`
+
+breakbulk always plans with `--target`, also for the build machine's own
+triple ([C3](../reference/assumptions.md#c3---target-host-keeps-rustflags-off-host-units)).
+The static presets need this: their flags must not reach build scripts.
+A project that you develop with plain `cargo build`, `cargo test` and
+`cargo clippy` then sees three differences:
+
+- **The project's rustflags reach target units only.** `build.rustflags`
+  and `target.<triple>.rustflags` (and `targets.<triple>.rustflags`) do
+  not reach build scripts, proc macros or their dependencies. Plain Cargo
+  and crane's defaults give these flags to them too. nixpkgs'
+  `buildRustPackage` also passes `--target`, so it behaves as breakbulk
+  does.
+- **A crate that is both a normal dependency and a build-dependency
+  compiles twice**, once for each [side](configuration.md#host-and-target-sides).
+  The host copy has no project rustflags, so it does not see a `--cfg`
+  that the project sets.
+- **A clippy variant lints such a workspace member twice.** The host copy
+  is linted without the project's `--cfg` flags. Code that only the cfg
+  uses then gives warnings, such as an unused variable, and with
+  `-D warnings` the clippy check fails where `cargo clippy` passes.
+
+The [dev shell](configuration.md#the-dev-shell) sets
+`CARGO_BUILD_TARGET`, so `cargo clippy` in the shell shows the same
+failure.
+
+To lint the host copy with other clippy arguments, set `CLIPPY_ARGS`
+for its host units in the clippy variant only. Clippy reads its
+arguments from this variable, each one followed by `__CLIPPY_HACKERY__`:
+
+```nix
+packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS =
+  lib.concatMapStrings (a: a + "__CLIPPY_HACKERY__") [
+    "-D" "warnings"
+    "-A" "unused_variables"
+  ];
+```
+
+This value replaces the variant's
+[`clippyArgs`](../reference/options/workspaces.md#workspacesnamevariantsnameclippyargs)
+for the package's host units only: its host library and, if it has
+one, its build script's compile. The target copy and the other
+variants' units do not change.
+
+Do not add the project's `--cfg` to the clippy arguments instead.
+Clippy arguments reach workspace members only, so the host copy's
+dependencies still compile without the cfg, and code that needs the cfg
+on both sides can fail to compile.
+
+Nothing gives a host unit a rustc flag, such as the project's `--cfg`
+([#110](https://github.com/schlarpc/breakbulk/issues/110)). A build
+script, or a crate it depends on, that does not compile without such a
+flag builds under plain Cargo and fails under breakbulk.
+
 ## Costs
 
 - **Per-derivation overhead.** Every unit is a Nix build: sandbox setup,

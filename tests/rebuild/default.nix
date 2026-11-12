@@ -105,6 +105,8 @@ let
     # Its clippy units fail by design (disallowed methods): the default
     # variant only.
     clippy-conf = [ (plainAt "ws" "clippy-conf" [ ]) ];
+    # With the setting that lets the host copy's clippy unit pass.
+    clippy-host = [ products.repos.clippyHostFixed ];
     crate-types = [ (plain "crate-types" [ ]) ];
     cross-doctests = [ dynamic.repos.cross-doctests-aarch64 ];
     cross-lto = [ presetFixtures.repos.crossLto ];
