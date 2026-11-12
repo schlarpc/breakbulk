@@ -145,6 +145,7 @@ let
         }
       ])
     ];
+    port-from-crane = [ products.repos.portFromCrane ];
     post-link = [ products.repos.postLink ];
     required-features = [ repository.repos.rf ];
     riscv64 = [ extraTargets.repos.riscv64Repo ];

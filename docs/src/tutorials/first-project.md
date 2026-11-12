@@ -126,6 +126,8 @@ direnv](../how-to/direnv.md).
 
 ## Next steps
 
+- To move an existing project from crane, with several workspaces or
+  toolchains, see [Port a crane flake](../how-to/port-from-crane.md).
 - Every setting is a module option. See the
   [module options](../reference/options.md).
 - To build for another target, choose a [preset](../reference/presets.md).

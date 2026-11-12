@@ -8,6 +8,7 @@
 
 # How-to guides
 
+- [Port a crane flake](how-to/port-from-crane.md)
 - [Add a native library](how-to/native-library.md)
 - [A build script runs Cargo](how-to/nested-cargo.md)
 - [Build for another target](how-to/targets.md)

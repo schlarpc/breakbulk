@@ -1,0 +1,14 @@
+# The repository of docs/src/how-to/port-from-crane.md's worked example,
+# the shape of a crane flake with several workspaces:
+# - this root workspace (crates/*), the host;
+# - components/greet, its own workspace: a wasm component, tested natively;
+# - tools/squares, its own workspace on a nightly: a code generator;
+# - `server` embeds the component and runs the generator in its build
+#   script, both named by env.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

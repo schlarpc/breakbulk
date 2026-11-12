@@ -107,6 +107,14 @@
 #                    root's (`own`); an edit to the root file changes
 #                    only clippy units, and a `CLIPPY_CONF_DIR` in `env`
 #                    replaces breakbulk's
+#   port-from-crane  the worked example of the porting how-to, its module
+#                    read from the page: a host workspace, a wasm component
+#                    workspace (built on wasm32, tested natively) and a
+#                    nightly workspace, each with its own lockfile and
+#                    rust-toolchain.toml; the server embeds the component
+#                    and its build script runs the nightly generator, both
+#                    through `forTarget.env`; the server runs, and the
+#                    checks the page names exist and pass
 #   variants-clippy-host   a member that is both a dependency and a
 #                    build-dependency (clippy-host), with a `--cfg` in the
 #                    project's `build.rustflags`: the cfg reaches the
@@ -1090,6 +1098,21 @@ let
           "unused_variables"
         ];
   };
+  # --- port-from-crane -----------------------------------------------------------
+
+  # The module of docs/src/how-to/port-from-crane.md, read from the page.
+  portFromCrane =
+    let
+      page = builtins.readFile ../../docs/src/how-to/port-from-crane.md;
+      blocks = lib.filter builtins.isList (builtins.split "```nix\n(# nix/rust.nix\n[^`]*)```" page);
+    in
+    assert lib.assertMsg (
+      lib.length blocks == 1
+    ) "port-from-crane: no `# nix/rust.nix` block in docs/src/how-to/port-from-crane.md";
+    mkRepo (fixtures + "/port-from-crane") [
+      (import (builtins.toFile "rust.nix" (lib.head (lib.head blocks))))
+    ];
+
   clippyHost = mkRepo (fixtures + "/clippy-host") clippyHostModules;
   clippyHostFixed = mkRepo (fixtures + "/clippy-host") (clippyHostModules ++ [ clippyHostFix ]);
 in
@@ -1119,6 +1142,7 @@ in
       docsNoDeps
       docsDeps
       clippyHostFixed
+      portFromCrane
       ;
     trimCc = trimCcRepo { };
   };
@@ -1902,6 +1926,42 @@ in
           exit 1
         fi
         touch $out
+      '';
+
+  # The worked example of docs/src/how-to/port-from-crane.md, with the
+  # module read from the page.
+  port-from-crane =
+    let
+      r = portFromCrane;
+      names = lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) r.checks);
+      expected = [
+        "greet/wasm32-unknown-unknown/greet/build"
+        "greet/${native}/greet/test-lib"
+        "host/fmt"
+        "host/${native}/server/build"
+        "host/${native}/server/test-bin-server"
+        "host/${native}/variant-clippy/check"
+        "squares/${native}/squares/build"
+      ];
+      missing = lib.subtractLists names expected;
+      # Built for wasm32 only, tested natively only.
+      unexpected = lib.filter (
+        n: lib.hasPrefix "greet/wasm32-unknown-unknown/greet/test-" n || lib.hasPrefix "greet/${native}/greet/build" n
+      ) names;
+    in
+    assert lib.assertMsg (missing == [ ] && unexpected == [ ])
+      "port-from-crane: checks missing ${toString missing}, unexpected ${toString unexpected}";
+    pkgs.runCommand "port-from-crane"
+      {
+        server = r.workspaces.host.packages.server;
+        component = r.workspaces.greet.target.wasm32-unknown-unknown.packages.greet;
+        checks = map (n: r.checks.${n}) expected;
+      }
+      ''
+        set -euo pipefail
+        [ -f $component/lib/greet.wasm ]
+        $server/bin/server | tee $out
+        [ "$(cat $out)" = "component true, squares [0, 1, 4, 9, 16]" ]
       '';
 
   # The example of docs/src/how-to/ci.md (a member compiled for both
