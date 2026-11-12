@@ -376,6 +376,35 @@ let
   predictedDoctests = lib.filterAttrs (
     n: p: p.roots.doc != [ ] && (testSelect == [ ] || lib.elem n testSelect)
   ) wsRoots;
+  # The package settings a plan's units can read: those of the packages the
+  # plan can contain, which are its selection and everything Cargo.lock
+  # says they depend on (any kind, any feature: a superset of the plan).
+  # Not every package's: in dynamic-derivation mode the outer derivation
+  # takes every value it is given as an input, so another package's
+  # `env.X = <a product of this target>` would make the plan depend on
+  # itself. A name Cargo.lock does not have (the standard library's
+  # crates under -Zbuild-std) is kept.
+  lockDeps = lib.foldl' (
+    acc: e:
+    acc // { ${e.name} = (acc.${e.name} or [ ]) ++ map (d: lib.head (lib.splitString " " d)) e.dependencies; }
+  ) { } entries;
+  overridesFor =
+    kind:
+    let
+      all = overrides // packageOverrides;
+      sel = if kind == "test" then testSelect else select;
+      reachable = lib.listToAttrs (
+        map (x: lib.nameValuePair x.key true) (
+          builtins.genericClosure {
+            startSet = map (n: { key = n; }) sel;
+            operator = x: map (n: { key = n; }) (lockDeps.${x.key} or [ ]);
+          }
+        )
+      );
+      keep = k: let n = lib.head (lib.splitString "@" k); in reachable ? ${n} || !(lockDeps ? ${n});
+    in
+    if sel == [ ] then all else lib.filterAttrs (k: _: keep k) all;
+
   instantiateWith =
     kind: args:
     if isDynamic then
@@ -423,7 +452,7 @@ let
       };
       # `packages` (by name) and mkRepository's `packageOverrides` (by name
       # or name@version, already in instantiate's shape); the latter win.
-      overrides = overrides // packageOverrides;
+      overrides = overridesFor kind;
       inherit strictSources shippedRemapScope;
       keepSourcePaths = sourcePaths == "keep";
       targetTraits = targetTraitsLib.forRust traits;

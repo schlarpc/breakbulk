@@ -321,6 +321,17 @@ A value is read when the derivation of a unit that uses it is made. For
 this reason, `lib.mkIf` goes around a whole `env` set or `inputs` list,
 not around one value in it.
 
+A plan takes the settings of the packages it can contain: its selected
+packages and what they depend on in `Cargo.lock`. Another package's
+settings do not reach it, so a product of the wasm target in the example
+does not depend on `app`'s `env`.
+
+In dynamic-derivation mode, one derivation makes the derivations of all
+units of a plan, and it takes every setting it is given as an input. So
+a product of the same plan, as in the third form, is an infinite
+recursion there (#126). Products of another target or another workspace
+work in both modes.
+
 A product that needs itself, directly or through other products, is an
 infinite recursion. Determinate Nix evaluates in parallel, and there such
 an evaluation can hang with no output. Run it again with
