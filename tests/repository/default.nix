@@ -649,11 +649,12 @@ in
       '';
 
   # `tests/` and in-package `test.sourceScope` paths are test-only: editing
-  # them changes only proto's test harnesses (and its test runs), not its
+  # them changes only proto's test units (and its test runs), not its
   # library or app; `scopeTestsDir = false` keeps `tests/` in every view,
   # set on the package, in `memberDefaults` or per triple (`target.<t>`),
   # and a package's `true` overrides `memberDefaults`' `false`. The
-  # integration test reads both at its paths.
+  # integration tests, with and without the libtest harness, read both at
+  # their paths; the example reads `tests/`.
   test-only =
     let
       runOf = repo: (inst repo).testRuns.proto.read.drvPath;
@@ -661,7 +662,9 @@ in
       testdataEdit = testOnlyRepo editTestdata [ ];
       testUnits = [
         "proto-0.1.0-test"
+        "proto-0.1.0-test-datadriven"
         "proto-0.1.0-test-read"
+        "proto-0.1.0-test-reads_tests"
       ];
       changedWith = m: changedUnits (testOnlyRepo null [ m ]) (testOnlyRepo addFixture [ m ]);
       optOuts = {
@@ -690,12 +693,58 @@ in
     pkgs.runCommand "test-only"
       {
         read = (inst testOnly).testRuns.proto.read;
+        datadriven = (inst testOnly).testRuns.proto.datadriven;
+        example = (inst testOnly).testBins."proto/example/reads_tests";
         app = testOnly.workspaces.main.packages.app;
       }
       ''
         grep -q 'test reads_fixtures ... ok' $read/log
+        grep -q 'datadriven: ok' $datadriven/log
+        [ "$($example/bin/reads_tests)" = 42 ]
         [ "$($app/bin/app)" = 42 ]
         touch $out
+      '';
+
+  # The same test units where Cargo passes no `--test`: in the clippy
+  # variant (`cargo check --all-targets`, which checks the integration test
+  # and the bench without the libtest harness, and the example), and in the
+  # bench variant (the bench reads `testdata/`, in `test.sourceScope`).
+  test-only-variants =
+    let
+      repo = testOnlyRepo null [
+        {
+          workspaces.main.variants = {
+            clippy = {
+              mode = "clippy";
+              profile = "dev";
+            };
+            bench = {
+              profile = "bench";
+              benches = true;
+            };
+          };
+        }
+      ];
+      i = repo.workspaces.main.instances.${native};
+      t = repo.workspaces.main.target.${native};
+      clippyTest = lib.attrNames (unitsNamed i.clippy "test");
+      benchUnits = lib.attrNames (unitsNamed i.bench "bench");
+    in
+    assert lib.assertMsg (lib.all (n: lib.elem n clippyTest) [
+      "proto-0.1.0-test-datadriven"
+      "proto-0.1.0-test-unharnessed"
+      "proto-0.1.0-test-reads_tests"
+    ]) "test-only-variants: clippy test-plan units ${builtins.toJSON clippyTest}";
+    assert lib.assertMsg (lib.elem "proto-0.1.0-test-unharnessed" benchUnits)
+      "test-only-variants: bench-plan units ${builtins.toJSON benchUnits}";
+    pkgs.runCommand "test-only-variants"
+      {
+        clippy = t.variants.clippy.check;
+        bench = t.variants.bench.benches.proto.unharnessed;
+      }
+      ''
+        [ "$($bench/bin/unharnessed)" = "unharnessed: ok" ]
+        cp $clippy/units $out
       '';
 
   # A library that reads a test-only path at compile time fails with a hint

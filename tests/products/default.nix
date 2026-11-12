@@ -769,7 +769,7 @@ in
         "bench"
       ];
       kinds = plan: map (r: r.kind) plan.roots;
-      critUnit = (unitsOf benchesRepo "bench" "bench")."bencher-0.1.0-bin-crit" or null;
+      critUnit = (unitsOf benchesRepo "bench" "bench")."bencher-0.1.0-test-crit" or null;
       critArgs = lib.filter builtins.isString (
         (builtins.fromJSON (builtins.unsafeDiscardStringContext critUnit.drvAttrs.BREAKBULK_UNIT)).args
       );

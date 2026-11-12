@@ -176,17 +176,17 @@ pub(crate) fn flags<R: Resolve>(
 }
 
 /// Whether a compile unit links: its own output needs the `rlib`s of its
-/// whole dependency graph, not only their metadata.
+/// whole dependency graph, not only their metadata. Test units count as
+/// linking whatever their crate types: a doctest's are its library's, and
+/// an example built as a library only gains `rlib`s it does not need.
 pub fn is_linking(c: &CompileUnit) -> bool {
-    c.krate.types.iter().any(|t| {
-        matches!(
-            t.as_str(),
-            "bin" | "dylib" | "cdylib" | "staticlib" | "proc-macro"
-        )
-    }) || c
-        .args
-        .iter()
-        .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
+    c.test
+        || c.krate.types.iter().any(|t| {
+            matches!(
+                t.as_str(),
+                "bin" | "dylib" | "cdylib" | "staticlib" | "proc-macro"
+            )
+        })
 }
 
 /// The packages a linking unit links, other than its own:

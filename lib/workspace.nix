@@ -408,7 +408,9 @@ let
           testOnly
           ;
       }
-      // lib.optionalAttrs (kind == "test") { inherit workspaceTest; };
+      # The build plan has no test units; the bench plan's benches and
+      # harnesses in bench mode are.
+      // lib.optionalAttrs (kind != "build") { inherit workspaceTest; };
       tools = unitTools;
       host = {
         envCapture = captures.host;

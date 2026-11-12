@@ -74,7 +74,7 @@ changes only those units:
 
 | Edit | Rebuilds |
 | --- | --- |
-| a fixture in `tests/` | the package's test harnesses, doctest and test runs |
+| a fixture in `tests/` | the package's test units (integration tests, benches, test harnesses, examples), doctest and test runs |
 | a path in [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope) | the same |
 | any other file of the package | the package and everything that depends on it |
 

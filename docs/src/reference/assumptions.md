@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 78 entries: all 78 pinned; [Gaps](#gaps) is empty.
+Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 ## Summary
 
@@ -35,6 +35,7 @@ Status of the 78 entries: all 78 pinned; [Gaps](#gaps) is empty.
 | [T12](#t12-verbosity-changes-argv) | Verbosity changes argv | yes |
 | [T13](#t13-which-targets-each-command-builds) | Which targets each command builds | yes |
 | [T14](#t14-the-clippy-chain) | The clippy chain | yes |
+| [T15](#t15-test-units-are-told-by-target-kind) | Test units are told by target kind | yes |
 | [S1](#s1-sentinel-placement-and-shapes) | Sentinel placement and shapes | yes |
 | [S2](#s2-sentinels-change-no-unit-identity) | Sentinels change no unit identity | yes |
 | [S3](#s3-link-arg-kinds-cargo-accepts-per-package) | Link-arg kinds Cargo accepts per package | yes |
@@ -227,6 +228,15 @@ Status of the 78 entries: all 78 pinned; [Gaps](#gaps) is empty.
 - **Holds for.** 1.99.
 - **Pinned by.** `products-variants` (dependencies shared between check and clippy, members not); `products-variants-clippy-strict` (a lint argument fails the member); `products-variants-clippy-conf` (a root and a member's own `clippy.toml`).
 - **If it changes.** Clippy units lose their arguments or config, or dependencies stop being shared; these checks fail.
+
+### T15. Test units are told by target kind
+
+- **Assumption.** Cargo builds a unit with the package's dev-dependencies when its target is a test or an example, or its mode is a test mode (`cargo test`, `cargo bench`, `cargo check --all-targets` for tests and benches). In a test mode it passes no `--crate-type`, and `--test` only when the target has the libtest harness, so a `harness = false` test or bench is a plain bin without `--test`.
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `is_test_unit` (a compile unit's `test`); `crates/breakbulk-instantiate/src/lib.rs`: the test view, `unit_name`, `remap_scope`; `crates/breakbulk-format/src/render.rs`: `is_linking`.
+- **Upstream.** cargo `0.100.0` `src/compiler/unit_dependencies.rs`: `State::deps` (non-transitive dependencies only for test and example targets or a test mode); `src/compiler/mod.rs`: `build_base_args` (`--crate-type` only outside a test mode, `--test` only with `unit.target.harness()`). Checked for this page.
+- **Holds for.** 1.99.
+- **Pinned by.** `repository-test-only` (an integration test without the harness and an example read `tests/`); `repository-test-only-variants` (the same in a clippy variant, and a bench without the harness reads a `test.sourceScope` path in the clippy and bench variants).
+- **If it changes.** A test unit gets the normal view and fails to find its crate root or a fixture, with the hint at `test.scopeTestsDir`; these checks fail.
 
 ## Sentinels and the placement of build-script output
 

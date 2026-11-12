@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn trim_paths_forms() {
         let mut plan: Plan = serde_json::from_value(serde_json::json!({
-            "version": 1, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
+            "version": 2, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
             "host": "h", "target": "t",
             "variant": { "profile": "dev", "features": [], "mode": "build" },
             "skeletonRoot": "/build/skeleton", "trimPaths": true, "trimPathsDefault": true,

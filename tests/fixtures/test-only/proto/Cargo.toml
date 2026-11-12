@@ -2,3 +2,14 @@
 name = "proto"
 version.workspace = true
 edition.workspace = true
+
+# Without the libtest harness (as datatest-stable and libtest-mimic use):
+# Cargo compiles it without `--test`, and its crate root is in `tests/`.
+[[test]]
+name = "datadriven"
+harness = false
+
+# Criterion-style.
+[[bench]]
+name = "unharnessed"
+harness = false

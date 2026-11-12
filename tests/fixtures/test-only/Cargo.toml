@@ -1,7 +1,8 @@
 # Test-only paths: `proto/tests` (Cargo builds it only as integration
 # tests) and `proto/testdata` (in `test.sourceScope` in the checks) are
-# left out of the view of proto's library and kept for its test units.
-# `app` depends on proto.
+# left out of the view of proto's library and kept for its test units:
+# its lib harness, an integration test with and one without the libtest
+# harness, a bench without it, and an example. `app` depends on proto.
 [workspace]
 resolver = "2"
 members = ["proto", "app"]

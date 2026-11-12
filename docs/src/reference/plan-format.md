@@ -7,7 +7,7 @@ it depends on (`…` marks elided values):
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "kind": "build",
   "cargo": "1.96.1",
   "rustc": "1.96.1 (…)",
@@ -70,6 +70,7 @@ it depends on (`…` marks elided values):
   - `{ "searchPathsOf": [R, …] }` (only in `rustdoc --test`): the search paths of every listed run, deduplicated and sorted by value.
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
+- **`test`** (compile units; omitted when false) marks a test unit: a compile Cargo builds with the package's dev-dependencies, decided from its Cargo target: a `--test` compile, a test or bench target with or without the libtest harness, or an example. Test units see the package's test view ([Source views](../explanation/internals/sources.md#source-views)), are named `<pkg>-<version>-test[-<crate>]`, remap every path scope, and take their dependencies' `rlib`s.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
 - **`trimPaths`** and **`trimPathsDefault`** (omitted when false): see [trim-paths](../explanation/internals/planner.md#trim-paths).
 - **`pathPackages`** (test plans only): each path package under the skeleton that the plan compiles, keyed by package id, as `cargo metadata` describes it. `targets` lists every Cargo target (`name`, `kind`, `crateTypes`, and `srcPath` relative to `skeletonRoot`), built or not. `dependencies` lists the edges to the other listed packages, from the resolve of `cargo metadata --all-features` (so an edge can be an optional dependency the variant leaves off), each with its `kinds` (`{ "kind": null | "dev" | "build", "target": <cfg> | null }`). nextest test runs read them (see [Tests](../explanation/internals/products.md)).

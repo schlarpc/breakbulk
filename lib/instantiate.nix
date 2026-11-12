@@ -63,7 +63,8 @@ rec {
       plan,
       # sources.workspace."<dir relative to the repository root>" = source view
       # sources.workspaceTest."<dir>" = the wider view of that package's test
-      #   units (`test.sourceScope`): its `--test` compiles and doctests
+      #   units (`test.sourceScope`): the compile units plan.json marks
+      #   `test`, and doctests
       # sources.clippyConf."<dir>" = a member's clippy config tree
       #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
       # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]

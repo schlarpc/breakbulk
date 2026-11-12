@@ -19,9 +19,9 @@ use std::fmt;
 
 use breakbulk_format::rendered::{DEBUG_OUTPUT, derivation_output, package_name_version};
 use breakbulk_format::{
-    Arg, CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit,
-    TargetTraits, Unit, UnitId, ValidationOptions, merge_layer_with, render_doctest,
-    render_unit_in, to_canonical_json, unit_env_value, validate,
+    CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, RunUnit, TargetTraits,
+    Unit, UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in,
+    to_canonical_json, unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -375,10 +375,10 @@ impl Resolve for Tokens<'_> {
     }
 
     fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
-        // Test harnesses remap every scope; so does everything with a rustc
+        // Test units remap every scope; so does everything with a rustc
         // that has no `--remap-path-scope` (toolchains.json's
         // `capabilities`).
-        if !self.inputs.toolchains.capabilities.remap_path_scope || is_test_compile(unit) {
+        if !self.inputs.toolchains.capabilities.remap_path_scope || unit.test {
             return None;
         }
         match unit.platform {
@@ -570,15 +570,11 @@ fn store_name(s: &str) -> String {
 /// instrumented.
 const HOST_REMAP_SCOPE: &str = "macro,diagnostics";
 
-fn is_test_compile(c: &CompileUnit) -> bool {
-    c.args
-        .iter()
-        .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
-}
-
 /// `<package>-<version>-<kind>`: `ring-0.17.14-lib`, `ring-0.17.14-build-script`,
-/// `ring-0.17.14-build-run`, `app-0.1.0-bin`; a bin or test whose crate is
-/// not named after the package adds the crate name (`app-0.1.0-bin-admin_cli`).
+/// `ring-0.17.14-build-run`, `app-0.1.0-bin`, `app-0.1.0-test` (any test
+/// unit: harnesses, unharnessed tests and benches, examples); a bin or test
+/// whose crate is not named after the package adds the crate name
+/// (`app-0.1.0-bin-admin_cli`).
 pub fn unit_name(id: &str, unit: &Unit) -> String {
     let (pkg, version) = package_name_version(unit.package()).unwrap_or((id, "0"));
     let kind = match unit {
@@ -587,7 +583,7 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
             let krate = &c.krate.name;
             let kind = if krate.starts_with("build_script_") {
                 "build-script"
-            } else if is_test_compile(c) {
+            } else if c.test {
                 "test"
             } else if c.krate.types.iter().any(|t| t == "bin") {
                 "bin"
@@ -630,7 +626,7 @@ fn instantiate_unit(
     let unit = &inputs.plan.units[id];
     let mut tokens = Tokens::new(inputs, prefix);
     if let Unit::Compile(c) = unit
-        && is_test_compile(c)
+        && c.test
     {
         tokens.test_package = Some(c.package.clone());
     }

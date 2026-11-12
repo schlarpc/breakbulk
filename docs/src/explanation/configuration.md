@@ -275,9 +275,10 @@ outside them changes nothing for the package.
 
 For tests:
 
-- the package's `tests/` directory is test-only: only its test units (test
-  compiles, doctests and test runs) see it, so a fixture edit there re-runs
-  the package's tests and rebuilds nothing else.
+- the package's `tests/` directory is test-only: only its test units
+  (integration tests and benches with or without the libtest harness, test
+  harnesses, examples, doctests and test runs) see it, so a fixture edit
+  there re-runs the package's tests and rebuilds nothing else.
   [`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
   turns that off for code that reads `tests/` at compile time;
 - [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)

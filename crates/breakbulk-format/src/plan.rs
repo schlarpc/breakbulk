@@ -9,7 +9,7 @@ pub use breakbulk_unit::spec::{
 };
 
 /// The only plan format version this crate reads and writes.
-pub const PLAN_VERSION: u32 = 1;
+pub const PLAN_VERSION: u32 = 2;
 
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
 /// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`).
@@ -287,6 +287,7 @@ impl Doctest {
             package: self.package.clone(),
             krate: self.krate.clone(),
             platform: Platform::Target,
+            test: true,
             program: self.program.clone(),
             args: self
                 .args
@@ -336,6 +337,15 @@ pub struct CompileUnit {
     #[serde(rename = "crate")]
     pub krate: CrateInfo,
     pub platform: Platform,
+    /// Whether this is a test unit: one Cargo builds with the package's
+    /// dev-dependencies, from its Cargo target rather than its arguments.
+    /// That is a `--test` compile (a lib, bin, test or bench harness), a
+    /// test or bench target with or without the libtest harness
+    /// (`harness = false` compiles a plain bin, without `--test`), or an
+    /// example. Test units see the package's test view ("Source views" in
+    /// `docs/src/explanation/internals/sources.md`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub test: bool,
     /// The program and wrapper chain, e.g. `[clippy-driver, rustc]`.
     pub program: Vec<Text>,
     pub args: Vec<Arg>,

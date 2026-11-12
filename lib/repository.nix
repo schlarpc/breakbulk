@@ -1517,7 +1517,7 @@ let
     in
     if at != null then lib.head at else lib.last (lib.splitString "/" (lib.removeSuffix "/" url));
 
-  isTestUnit = u: lib.elem "--test" (lib.filter builtins.isString (u.args or [ ]));
+  isTestUnit = u: u.test or false;
   unitLabel =
     u:
     if u.kind == "run" then

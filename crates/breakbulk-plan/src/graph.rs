@@ -542,6 +542,19 @@ impl<'a> Builder<'a> {
         self.rw.target_triple = self.ctx.target.clone();
     }
 
+    /// Whether a compile is a test unit ([`CompileUnit::test`]): one Cargo
+    /// builds with dev-dependencies (`unit_dependencies.rs`: the target is
+    /// a test or an example, or the mode is a test mode, as it is for every
+    /// bench a plan builds). Not `--test` alone: a test mode passes it only
+    /// to a target with the libtest harness, so an unharnessed test or
+    /// bench compiles as a plain bin.
+    fn is_test_unit(&self, c: &CompileRec<'a>) -> bool {
+        c.test
+            || self
+                .target_of(c)
+                .is_some_and(|t| t.has_kind("test") || t.has_kind("bench") || t.has_kind("example"))
+    }
+
     /// The `cargo metadata` target a compile builds: matched by source path
     /// and crate name.
     fn target_of(&self, c: &CompileRec<'a>) -> Option<&'a Target> {
@@ -1161,6 +1174,7 @@ impl<'a> Builder<'a> {
                 edition,
             },
             platform: c.platform,
+            test: self.is_test_unit(c),
             program,
             args: out,
             env,

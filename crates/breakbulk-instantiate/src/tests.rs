@@ -219,11 +219,7 @@ impl Resolve for RealPaths<'_> {
         self.0.toolchains.keep_source_paths
     }
     fn remap_scope(&self, _: &UnitId, c: &CompileUnit) -> Option<String> {
-        let test = c
-            .args
-            .iter()
-            .any(|a| matches!(a, breakbulk_format::Arg::Literal(s) if s == "--test"));
-        if test || !self.0.toolchains.capabilities.remap_path_scope {
+        if c.test || !self.0.toolchains.capabilities.remap_path_scope {
             return None;
         }
         match c.platform {
@@ -716,16 +712,16 @@ fn unit_name_for_other_crates() {
     let Unit::Compile(c) = plan.units.get_mut(APP).unwrap() else {
         panic!()
     };
-    c.args.push(breakbulk_format::Arg::Literal("--test".into()));
+    c.test = true;
     assert_eq!(
         unit_name(APP, &plan.units[APP]),
         "smokeapp-0.1.0-test-admin_cli"
     );
 }
 
-/// `test.sourceScope`: a package's test units (here smokeapp's bin, made a
-/// test harness) name its test view; its other units, and other packages'
-/// units, keep the normal views.
+/// `test.sourceScope`: a package's test units (here smokeapp's bin, recorded
+/// as a test unit without `--test`, as an unharnessed test is) name its test
+/// view; its other units, and other packages' units, keep the normal views.
 #[test]
 fn test_units_use_the_test_view() {
     let inputs_of = |test_view: bool| {
@@ -733,7 +729,7 @@ fn test_units_use_the_test_view() {
         let Unit::Compile(c) = inputs.plan.units.get_mut(APP).unwrap() else {
             panic!()
         };
-        c.args.push(breakbulk_format::Arg::Literal("--test".into()));
+        c.test = true;
         if test_view {
             inputs.sources.workspace_test = ["smokeapp".into()].into();
         }
@@ -807,7 +803,7 @@ fn test_only_paths_reach_non_test_units() {
     let Unit::Compile(c) = inputs.plan.units.get_mut(APP).unwrap() else {
         panic!()
     };
-    c.args.push(breakbulk_format::Arg::Literal("--test".into()));
+    c.test = true;
     inputs.sources.workspace_test = ["smokeapp".into()].into();
     inputs.sources.test_only = BTreeMap::from([
         ("smokeapp".into(), vec!["smokeapp/tests".into()]),
