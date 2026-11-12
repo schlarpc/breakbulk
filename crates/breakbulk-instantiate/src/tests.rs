@@ -673,6 +673,33 @@ fn names_and_outputs() {
             Vec::new()
         )
     );
+    // A library that also links a cdylib has `debug` with packed too (its
+    // `.dwp`), but the bin's root does not list it: the bin's own `.dwp`
+    // holds what it needs of the library.
+    let cdylib_debug = |kind: &str| {
+        let mut inputs = smoke_inputs();
+        let Some(Unit::Compile(c)) = inputs.plan.units.get_mut(LIB) else {
+            panic!()
+        };
+        c.krate.types = vec!["lib".into(), "cdylib".into()];
+        c.outputs
+            .insert("bin".into(), ["libsmokelib.so".into()].into());
+        split_debuginfo_as(&mut inputs, APP, kind);
+        split_debuginfo_as(&mut inputs, LIB, kind);
+        let out = instantiate(&inputs).unwrap();
+        (
+            out.units[LIB].attrs["outputs"].clone(),
+            out.roots["smokeapp/bin/smokeapp"].debug_units.clone(),
+        )
+    };
+    let with_debug = Value::Strings(vec![
+        "out".into(),
+        "rlib".into(),
+        "rmeta".into(),
+        "debug".into(),
+    ]);
+    assert_eq!(cdylib_debug("packed"), (with_debug.clone(), Vec::new()));
+    assert_eq!(cdylib_debug("unpacked"), (with_debug, vec![LIB.to_owned()]));
 }
 
 #[test]

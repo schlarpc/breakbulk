@@ -1409,6 +1409,54 @@ fn debug_output_only_where_side_files() {
 }
 
 #[test]
+fn per_object_debug_files_only_with_unpacked() {
+    let lit = |a: &[&str]| {
+        a.iter()
+            .map(|s| Arg::Literal((*s).into()))
+            .collect::<Vec<_>>()
+    };
+    let (elf, msvc) = (&elf_traits(), &msvc_traits());
+    let below = |p: &Plan, traits| crate::deps::debug_units_below(p, &"c-ring".into(), traits);
+    let mut p = example();
+    // A library that also links a cdylib: a `debug` output for its `.dwp`
+    // (packed) or `.pdb` (msvc), neither of them per-object, so not a
+    // debug unit below the library that uses it.
+    let c = compile(&mut p, "c-cfgif");
+    c.krate.types = vec!["lib".into(), "cdylib".into()];
+    c.outputs
+        .insert("bin".into(), ["libcfg_if.so".into()].into());
+    c.args
+        .extend(lit(&["-C", "debuginfo=2", "-C", "split-debuginfo=packed"]));
+    assert!(c.has_debug_output(elf));
+    assert!(!c.writes_per_object_debug_files(elf));
+    assert!(c.has_debug_output(msvc));
+    assert!(!c.writes_per_object_debug_files(msvc));
+    assert_eq!(below(&p, elf), BTreeSet::new());
+    assert_eq!(below(&p, msvc), BTreeSet::new());
+    // With unpacked, its `.dwo` files.
+    compile(&mut p, "c-cfgif")
+        .args
+        .extend(lit(&["-C", "split-debuginfo=unpacked"]));
+    assert_eq!(below(&p, elf), BTreeSet::from(["c-cfgif".to_owned()]));
+    assert_eq!(below(&p, msvc), BTreeSet::new());
+    // A plain library alike; a metadata-only one never.
+    let c = compile(&mut p, "c-cfgif");
+    c.outputs.remove("bin");
+    assert!(c.writes_per_object_debug_files(elf));
+    c.outputs.remove("rlib");
+    assert!(!c.writes_per_object_debug_files(elf));
+    // Host units never.
+    let c = compile(&mut p, "c-ring-build");
+    c.args.extend(lit(&[
+        "-C",
+        "debuginfo=2",
+        "-C",
+        "split-debuginfo=unpacked",
+    ]));
+    assert!(!c.writes_per_object_debug_files(elf));
+}
+
+#[test]
 fn units_below_follow_every_route() {
     let p = example();
     // ring's lib reaches cfg-if by `--extern`, its run by splices and

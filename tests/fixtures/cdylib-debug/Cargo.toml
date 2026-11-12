@@ -1,0 +1,20 @@
+# Split debug info with a dependency that is also a cdylib
+# (products-cdylib-debug-packed, products-cdylib-debug-unpacked): `plugin`'s
+# unit links its own shared library, so with `packed` it writes a `.dwp` of
+# its own. The product `app` takes only its own `.dwp` (packed), or its own
+# and `plugin`'s `.dwo` files (unpacked).
+[workspace]
+resolver = "2"
+members = ["app", "plugin"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[profile.packed]
+inherits = "dev"
+split-debuginfo = "packed"
+
+[profile.unpacked]
+inherits = "dev"
+split-debuginfo = "unpacked"

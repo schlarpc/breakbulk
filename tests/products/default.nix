@@ -33,6 +33,12 @@
 #                    gdb's backtrace and source lines as above
 #   source-paths-dwo5 the same with DWARF 5 (`-C dwarf-version=5`), which
 #                    binutils' dwp packs into an empty .dwp
+#   cdylib-debug-packed   a bin whose dependency is also a cdylib, with
+#                    split-debuginfo = "packed": the bin's `linked` debug
+#                    output holds app.dwp only, not the dependency's own
+#                    libplugin.so.dwp, which stays in its product
+#   cdylib-debug-unpacked the same with "unpacked": the `.dwo` files of
+#                    the bin and of the dependency, and nothing else
 #   source-paths-readme   editing dep's README changes its test binary's
 #                    derivation but not its bytes
 #   staticlib-sources   crate-types' staticlib passes noSourceReferences:
@@ -364,6 +370,38 @@ let
   sourcePathsReadme =mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
   spApp = sourcePaths.workspaces.main.packages.app;
 
+  # --- cdylib-debug --------------------------------------------------------------
+
+  cdylibDebug = mkRepo (fixtures + "/cdylib-debug") spModules;
+
+  # The `kind` variant's app and plugin: the app runs, and the file names in
+  # app's `linked` debug output, one per line, sorted, are in $names.
+  cdylibDebugCheck =
+    kind: script:
+    let
+      ps = cdylibDebug.workspaces.main.target.${native}.variants.${kind}.packages;
+    in
+    pkgs.runCommand "cdylib-debug-${kind}"
+      {
+        nativeBuildInputs = [ pkgs.binutils-unwrapped ];
+        app = ps.app;
+        debug = ps.app.debug;
+        linkedDebug = ps.app.stages.linked.debug;
+        pluginLinkedDebug = ps.plugin.stages.linked.debug;
+      }
+      ''
+        set -euo pipefail
+        $app/bin/app > run.txt
+        grep -qxF 'plugin says 42' run.txt
+        ls $linkedDebug | sort > names
+        cat names
+        ${script}
+        # splitDebug packed app's DWARF into app.dwp.
+        test -f $debug/bin/app.dwp
+        readelf -S -W $debug/bin/app.dwp | grep -q '\.debug_info\.dwo'
+        touch $out
+      '';
+
   # --- trim-paths ----------------------------------------------------------------
 
   trimRust = pkgs.rust-bin.nightly.latest.minimal;
@@ -630,6 +668,7 @@ in
       postLink
       sourcePaths
       sourcePathsReadme
+      cdylibDebug
       trimPathsRepo
       variantsRepo
       benchesRepo
@@ -1467,6 +1506,20 @@ in
 
   source-paths-dwo = dwoCheck "source-paths-dwo" sourcePaths 4;
   source-paths-dwo5 = dwoCheck "source-paths-dwo5" sourcePathsDwarf5 5;
+
+  # plugin's unit links a cdylib and writes its own libplugin.so.dwp, which
+  # stays in plugin's product: app's linked debug output holds app.dwp only.
+  cdylib-debug-packed = cdylibDebugCheck "packed" ''
+    test "$(cat names)" = app.dwp
+    test -f $pluginLinkedDebug/libplugin.so.dwp
+  '';
+
+  # The `.dwo` files of app and of plugin, and nothing else.
+  cdylib-debug-unpacked = cdylibDebugCheck "unpacked" ''
+    grep -qE '^app[-.].*\.dwo$' names
+    grep -qE '^plugin[-.].*\.dwo$' names
+    test -z "$(grep -vE '^(app|plugin)[-.].*\.dwo$' names)"
+  '';
 
   trim-paths =
     let

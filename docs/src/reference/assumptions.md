@@ -559,7 +559,7 @@ Status of the 78 entries: all 78 pinned; [Gaps](#gaps) is empty.
 - **Where.** `crates/breakbulk-format/src/plan.rs`: `writes_debuginfo_side_files`, `DebugArtifactWhen`; `lib/target-traits.nix`: `debugArtifacts`; `crates/breakbulk-unit/src/compile.rs`: `DEBUG_SIDE_FILES`, `collect_outputs`.
 - **Upstream.** rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo` (1.95 through master); rustc_session `config.rs`, `select_debuginfo`; cargo `src/compiler/mod.rs`, `build_base_args`; spike A, surprise S9.
 - **Holds for.** 1.99 (msvc, ELF); the window for the trace.
-- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product). Rust: `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
+- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product), `products-cdylib-debug-packed`, `products-cdylib-debug-unpacked` (only those reach it, not a cdylib dependency's own `.dwp`). Rust: `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files`, `tests::per_object_debug_files_only_with_unpacked` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
 - **If it changes.** A unit without a `debug` output discards side files with a warning, or one with it has an empty output; the checks fail.
 
 ### X3. Names of uplifted side files

@@ -372,13 +372,30 @@ impl CompileUnit {
     /// during the build, so theirs are discarded, and a metadata-only
     /// library (`check`) compiles no objects.
     pub fn has_debug_output(&self, traits: &TargetTraits) -> bool {
-        let per_object_only = if self.outputs.contains_key("bin") {
-            false
-        } else if self.outputs.contains_key("rlib") {
-            true
+        if self.outputs.contains_key("bin") {
+            self.writes_side_files(traits, false)
         } else {
-            return false;
-        };
+            self.writes_per_object_debug_files(traits)
+        }
+    }
+
+    /// Whether the unit writes the traits' per-object debuginfo side files
+    /// (`.dwo` with `-C split-debuginfo=unpacked`): a target-platform unit
+    /// that compiles objects (a `bin` or `rlib` output), with arguments
+    /// that make one of those artifacts apply. These are the side files a
+    /// binary linked from the unit's objects names, and so the only ones a
+    /// product takes from the units below its root
+    /// ([`crate::deps::debug_units_below`]); a per-output artifact (a
+    /// `.dwp`, msvc's `.pdb`) of a unit below belongs to that unit's own
+    /// linked output (a cdylib), which the product does not ship.
+    pub fn writes_per_object_debug_files(&self, traits: &TargetTraits) -> bool {
+        (self.outputs.contains_key("bin") || self.outputs.contains_key("rlib"))
+            && self.writes_side_files(traits, true)
+    }
+
+    /// [`writes_debuginfo_side_files`] for a target-platform unit, with
+    /// only the traits' per-object artifacts when `per_object_only`.
+    fn writes_side_files(&self, traits: &TargetTraits, per_object_only: bool) -> bool {
         self.platform == Platform::Target
             && writes_debuginfo_side_files(
                 self.args.iter().map(|a| match a {
