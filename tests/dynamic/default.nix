@@ -62,7 +62,7 @@
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
   mode ? "auto",
   # `cutoff`'s edit: a number other than 1, new on each run.sh run, so
-  # that the edited fixtures are new to the store.
+  # that the edited fixtures and settings are new to the store.
   cutoffEdit ? "2",
 }:
 let
@@ -754,10 +754,11 @@ let
   # are test runs before and after an edit (`cutoffEdit`) that changes
   # nothing the `kept` run reads; run.sh builds `after` after `before` and
   # checks `kept` is not re-run.
-  #   test-cutoff    beta's function body: beta's build script is rebuilt
-  #                  and re-run, so alpha's test (`kept`) gets new
-  #                  input-addressed paths; beta's own run (`changed`,
-  #                  in beta's source view) is re-run
+  #   test-cutoff    BETA_SUB in beta's env, which decides only what
+  #                  beta's build script writes into a subdirectory of its
+  #                  OUT_DIR: the run is re-run and alpha's test binary
+  #                  relinked, so alpha's test (`kept`) gets new
+  #                  input-addressed paths with the same contents
   #   test-options   util's README and app's notes.md, with
   #                  test.stripForRun and test.runFiles = [ "data" ] as in
   #                  tests/test-options: app's test binary changes (util's
@@ -784,15 +785,9 @@ let
           ]
           ++ modules;
         }).workspaces.main.instances.${native}.default.testRuns;
-      cutoffRuns =
-        root:
-        let
-          runs = runsOf root [ ];
-        in
-        {
-          kept = runs.alpha."lib/alpha";
-          changed = runs.beta."lib/beta";
-        };
+      cutoffRuns = sub: {
+        kept = (runsOf cutoffFixture [ { packages.beta.env.BETA_SUB = sub; } ]).alpha."lib/alpha";
+      };
       options = [
         {
           workspaces.main.memberDefaults.test.stripForRun = true;
@@ -805,13 +800,8 @@ let
     in
     {
       test-cutoff = {
-        before = cutoffRuns cutoffFixture;
-        after = cutoffRuns (
-          edited "test-cutoff" cutoffFixture ''
-            sed -i 's/^    1$/    ${cutoffEdit}/' beta/src/lib.rs
-            grep -q '^    ${cutoffEdit}$' beta/src/lib.rs
-          ''
-        );
+        before = cutoffRuns "1";
+        after = cutoffRuns cutoffEdit;
       };
       test-options = {
         before = optionsRuns optionsFixture;

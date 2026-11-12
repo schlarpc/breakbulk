@@ -1,8 +1,8 @@
 # Stable test-run inputs for content-addressed cutoff, over
 # tests/fixtures/test-cutoff: `alpha` has a test and a build script that
-# sets `rustc-env`; `beta`, unrelated, has a build script whose OUT_DIR is a
-# search path (so it is on every test's dynamic-library path, as Cargo
-# does) and holds a subdirectory.
+# sets `rustc-env`, and depends on `beta`, whose build script's OUT_DIR is
+# a search path (so it is on the dynamic-library path of alpha's test,
+# which has beta's run in its closure) and holds a subdirectory.
 #
 #   nix build -f tests/test-cutoff stable-inputs
 #   tests/test-cutoff/run.sh        content-addressed, in a private store
@@ -15,10 +15,16 @@
 #                   ALPHA_STAMP comes from the copied `rustc-env` values.
 #                   With `ca` off, test runs do not use the stable inputs.
 #   runs.before, runs.after
-#                   the test runs, before and after an edit to beta's
-#                   source (which rebuilds beta's build script but changes
-#                   nothing alpha's test reads); run.sh builds them with
+#                   the test runs, before and after a change to BETA_SUB in
+#                   beta's env, which only decides what beta's build script
+#                   writes into the subdirectory. beta's run, beta's
+#                   library and alpha's test binary are rebuilt, but
+#                   nothing alpha's test reads changes (the binary is
+#                   byte-identical, and the copies hold the run's files,
+#                   not subdirectories); run.sh builds them with
 #                   `ca = true` and checks alpha's test run is not re-run.
+#                   A source edit would not do: the source view's path is
+#                   in beta's debug info, so alpha's binary would change.
 {
   pkgs ? import (
     let
@@ -39,25 +45,16 @@ let
   tools = breakbulk.mkTools pkgs;
 
   mk =
-    root:
+    sub:
     breakbulk.mkWorkspace pkgs {
-      inherit root tools ca;
+      inherit tools ca;
+      root = fixture;
       name = "test-cutoff";
+      packageOverrides."beta@0.1.0".target.env.BETA_SUB = sub;
     };
 
-  # A copy of the fixture with beta's function body changed.
-  editedRoot =
-    let
-      drv = pkgs.runCommand "test-cutoff-edited" { } ''
-        cp -r --no-preserve=mode ${fixture} $out
-        sed -i 's/^    1$/    2/' $out/beta/src/lib.rs
-        grep -q '^    2$' $out/beta/src/lib.rs
-      '';
-    in
-    builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
-
-  before = mk fixture;
-  after = mk editedRoot;
+  before = mk "1";
+  after = mk "2";
   runsOf = ws: {
     alpha = ws.testRuns.alpha."lib/alpha";
     beta = ws.testRuns.beta."lib/beta";

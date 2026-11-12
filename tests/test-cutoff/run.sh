@@ -15,9 +15,8 @@
 #      then after it;
 #   3. checks: alpha's test run is not re-run after the edit (its output
 #      path is the same and no `alpha-lib-alpha-run` derivation was built),
-#      beta's is (it runs in beta's source view, which changed: not
-#      vacuous), and the dynamic-library copy was rebuilt (its inputs
-#      changed).
+#      while the copies of its test binary and of the dynamic-library path
+#      were rebuilt (their inputs changed: not vacuous).
 #
 # Environment: WORK (default $TMPDIR/breakbulk-test-cutoff; its store is
 # recreated on each run, and read-only: `chmod -R u+w "$WORK"` before
@@ -75,10 +74,8 @@ sed 's/^/  /' "$WORK/after.built" >&2
 if grep -q 'alpha-lib-alpha-run\.drv' "$WORK/after.built"; then
   fail "alpha's test run was re-run"
 fi
-# beta's test runs in beta's source view, which the edit changed, so it
-# is re-run (its log, the output, is the same bytes).
-grep -q 'beta-lib-beta-run\.drv' "$WORK/after.built" \
-  || fail "beta's test run was not re-run (vacuous: its working directory changed)"
+grep -q 'alpha-lib-alpha-bin\.drv' "$WORK/after.built" \
+  || fail "alpha's test binary was not copied again (vacuous: beta's library changed)"
 grep -q 'test-cutoff-test-dylibs\.drv' "$WORK/after.built" \
   || fail "the dynamic-library copy was not rebuilt (vacuous: beta's run changed)"
-say "ok: alpha's test run was not re-run; beta's was"
+say "ok: alpha's test run was not re-run"

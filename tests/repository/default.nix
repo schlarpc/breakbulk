@@ -2127,10 +2127,9 @@ in
   # both sides, test settings, stages, checks) and the workspace's
   # `devShell.env` throw when read, and the products of the other members
   # of the same plan still evaluate, to the same derivations as without
-  # these settings. An option that takes a value belongs in `settings` too.
-  # Not the other members' test runs: a test run's library path names the
-  # output of every build-script run in the plan, as Cargo's does, `app`'s
-  # included, and that output's path depends on `app`'s env and inputs.
+  # these settings, and so do their test runs, whose library paths name
+  # only the build-script runs below them (not `app`'s). An option that
+  # takes a value belongs in `settings` too.
   poisoned-settings =
     let
       poison = what: throw "poisoned-settings: ${what} was read";
@@ -2178,7 +2177,13 @@ in
       ];
       clean = mkRepo fixture [ (oneWs ".") ];
       drv = d: builtins.unsafeDiscardStringContext d.drvPath;
-      drvsOf = repo: lib.genAttrs [ "tool" "shared" ] (p: drv repo.workspaces.main.packages.${p});
+      drvsOf =
+        repo:
+        lib.genAttrs [ "tool" "shared" ] (p: drv repo.workspaces.main.packages.${p})
+        // {
+          tool-test = drv repo.workspaces.main.testRuns.tool."bin/tool";
+          shared-test = drv repo.workspaces.main.testRuns.shared."lib/shared";
+        };
       got = drvsOf poisoned;
     in
     assert lib.assertMsg (

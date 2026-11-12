@@ -342,7 +342,6 @@ for c in test-cutoff test-options; do
   say "$c: test-run cutoff in dynamic-derivation mode (edit $edit)"
   cbuild() { mbuild --arg mode '"dynamic"' --argstr cutoffEdit "$edit" "$@"; }
   attrs=(kept)
-  [ "$c" = test-cutoff ] && attrs+=(changed)
   ok=1
   if ! cbuild "${attrs[@]/#/cutoff.$c.before.}" >"$WORK/cutoff-before.out" 2>"$WORK/cutoff-before.log"; then
     tail -30 "$WORK/cutoff-before.log" >&2
@@ -372,10 +371,8 @@ for c in test-cutoff test-options; do
     fi
     case $c in
       test-cutoff)
-        # beta's test runs in beta's source view, which the edit changed.
-        changedName=$(basename "$(drv before.changed)" | cut -d- -f2-)
-        grep -qF "$changedName" "$WORK/cutoff-after.built" || {
-          echo "beta's test run was not re-run (vacuous)" >&2
+        grep -q 'alpha-lib-alpha-bin\.drv' "$WORK/cutoff-after.built" || {
+          echo "alpha's test binary was not copied again (vacuous)" >&2
           ok=0
         }
         ;;
