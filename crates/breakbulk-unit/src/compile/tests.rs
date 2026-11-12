@@ -33,7 +33,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         remap_scope: None,
         env_capture: None,
         link_captures: Vec::new(),
-        test_only: Vec::new(),
+        view: None,
         seed: None,
     }
 }

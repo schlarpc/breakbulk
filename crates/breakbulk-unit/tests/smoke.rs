@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use breakbulk_format::rendered::derivation_output;
+use breakbulk_format::rendered::{SourceView, Widen, derivation_output};
 use breakbulk_format::{
     CompileUnit, Plan, Reference, Resolve, Unit, UnitId, ValidationOptions, render_unit,
     unit_env_value, validate,
@@ -123,6 +123,21 @@ impl Resolve for Tokens<'_> {
     }
     fn env_capture(&self, _: &UnitId, _: &Unit) -> Result<Option<String>, String> {
         Ok(Some(BB_CAPTURE.into()))
+    }
+    // Both packages are path packages under the skeleton root, as
+    // instantiation's `source_view` finds them.
+    fn source_view(&self, _: &UnitId, u: &Unit) -> Result<Option<SourceView>, String> {
+        let root = format!("path+file://{}/", self.plan.skeleton_root);
+        let Some(dir) = u.package().strip_prefix(&root) else {
+            return Ok(None);
+        };
+        Ok(Some(SourceView {
+            root: BB_SRC.into(),
+            package_dir: dir.split(['#', '?']).next().unwrap_or(dir).to_owned(),
+            widen: Widen::ExtraSources,
+            test_only: Vec::new(),
+            custom: false,
+        }))
     }
 }
 

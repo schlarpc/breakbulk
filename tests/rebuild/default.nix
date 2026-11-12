@@ -176,6 +176,8 @@ let
         except.variants = [ "strict" ];
       }
     ];
+    # With the options its hints name; the fixture fails by design without.
+    view-hints = [ repository.repos.viewHintsFixed ];
     walking-skeleton = [ dynamic.repos.walking-skeleton ];
     workspace-members = [ (plain "workspace-members" [ ]) ];
     wasip2 = [ extraTargets.repos.wasip2Repo ];

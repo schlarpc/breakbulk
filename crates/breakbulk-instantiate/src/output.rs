@@ -140,6 +140,10 @@ pub struct RootTestSpec {
     pub env_flags: Vec<Value>,
     pub dylib_flags: Vec<Value>,
     pub package_dir: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub test_only: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub custom: bool,
     pub nextest: RootNextest,
 }
 

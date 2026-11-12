@@ -8,7 +8,12 @@
 //! then counted rather than listed; every other unset variable goes on one
 //! line.
 //!
-//! The table is not user-extensible: recognizers run inside the unit
+//! Two general rules follow, for any crate: a line that says a program was
+//! not found and names a known tool ([`TOOLS`]) suggests the package that
+//! provides it, and a line that shows the script downloading
+//! ([`NETWORK`]) says the sandbox has no network.
+//!
+//! The tables are not user-extensible: recognizers run inside the unit
 //! builder, so a user table would be an input of every run unit.
 
 use std::collections::BTreeSet;
@@ -135,13 +140,17 @@ const RECOGNIZERS: &[Recognizer] = &[
     },
     // bindgen's `Unable to find libclang` panic (with the `runtime` feature)
     // and clang-sys's own search error, which it wraps; both print
-    // clang-sys's `llvm-config` warning first when it is missing.
+    // clang-sys's `llvm-config` warning first when it is missing. bindgen
+    // can panic before it declares any variable, and the error text is
+    // its own, so it is a fingerprint too.
     Recognizer {
         crate_name: "bindgen/clang-sys",
         fingerprint: &[
             Evidence::Var("BINDGEN_EXTRA_CLANG_ARGS*"),
             Evidence::Var("LIBCLANG_PATH"),
             Evidence::Line("*could not execute `llvm-config` one or more times*"),
+            Evidence::Line("*Unable to find libclang*"),
+            Evidence::Line("*couldn't find any valid shared libraries matching:*`LIBCLANG_PATH`*"),
         ],
         errors: &[
             (
@@ -194,6 +203,106 @@ const RECOGNIZERS: &[Recognizer] = &[
     },
 ];
 
+/// What a line says when a program was not found: Rust's `io::Error`
+/// (`Debug` and `Display`), C's `strerror`, bash and dash.
+const NOT_FOUND: &[&str] = &[
+    "NotFound",
+    "os error 2",
+    "No such file or directory",
+    "command not found",
+    ": not found",
+];
+
+/// Programs build scripts run, by the name they run, and the nixpkgs
+/// attribute that provides each.
+const TOOLS: &[(&str, &str)] = &[
+    ("autoconf", "autoconf"),
+    ("autoreconf", "autoconf"),
+    ("automake", "automake"),
+    ("bison", "bison"),
+    ("clang", "clang"),
+    ("cmake", "cmake"),
+    ("curl", "curl"),
+    ("flex", "flex"),
+    ("gcc", "gcc"),
+    ("git", "git"),
+    ("glslc", "shaderc"),
+    ("go", "go"),
+    ("gperf", "gperf"),
+    ("libtool", "libtool"),
+    ("m4", "m4"),
+    ("make", "gnumake"),
+    ("meson", "meson"),
+    ("nasm", "nasm"),
+    ("ninja", "ninja"),
+    ("node", "nodejs"),
+    ("npm", "nodejs"),
+    ("patch", "patch"),
+    ("perl", "perl"),
+    ("pkg-config", "pkg-config"),
+    ("protoc", "protobuf"),
+    ("python", "python3"),
+    ("python3", "python3"),
+    ("swig", "swig"),
+    ("tar", "gnutar"),
+    ("unzip", "unzip"),
+    ("wget", "wget"),
+    ("yasm", "yasm"),
+];
+
+/// The tool of [`TOOLS`] a not-found line names, with its attribute: as a
+/// whole word, quoted, at the end of a path, or before a `:` (as shells
+/// name it). A bare word is not enough: "make sure", "go to".
+fn named_tool(line: &str) -> Option<(&'static str, &'static str)> {
+    if !NOT_FOUND.iter().any(|m| line.contains(m)) {
+        return None;
+    }
+    let name_char = |c: char| c.is_ascii_alphanumeric() || "-_.+".contains(c);
+    TOOLS.iter().copied().find(|(tool, _)| {
+        line.match_indices(tool).any(|(i, _)| {
+            let before = line[..i].chars().next_back();
+            let after = line[i + tool.len()..].chars().next();
+            !before.is_some_and(name_char)
+                && !after.is_some_and(name_char)
+                && (before.is_some_and(|c| "`'\"/".contains(c))
+                    || after.is_some_and(|c| "`'\":".contains(c)))
+        })
+    })
+}
+
+/// Lowercased text of lines that show a build script downloading or
+/// failing to reach the network.
+const NETWORK: &[&str] = &[
+    "downloading http",
+    "failed to download",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "name or service not known",
+    "failed to lookup address information",
+    "dns error",
+    "network is unreachable",
+    "urlopen error",
+];
+
+/// Whether `line` shows the script downloading: [`NETWORK`], or `curl` or
+/// `wget` as a word outside a `cargo:` directive (`rustc-link-lib=curl`).
+fn downloads(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    if NETWORK.iter().any(|n| lower.contains(n)) {
+        return true;
+    }
+    if lower.starts_with("cargo:") {
+        return false;
+    }
+    let name_char = |c: char| c.is_ascii_alphanumeric() || "-_".contains(c);
+    ["curl", "wget"].iter().any(|t| {
+        lower.match_indices(t).any(|(i, _)| {
+            !lower[..i].chars().next_back().is_some_and(name_char)
+                && !lower[i + t.len()..].chars().next().is_some_and(name_char)
+        })
+    })
+}
+
 /// Matches `pattern` against `text`, returning the `{}` capture (empty
 /// without one), or `None`.
 fn glob(pattern: &str, text: &str) -> Option<String> {
@@ -239,8 +348,9 @@ fn quote(line: &str) -> String {
     }
 }
 
-/// The hints for a failed run: one per recognized failure, then the unset
-/// `unset` variables (in the order declared), summarized for each
+/// The hints for a failed run: one per recognized failure, then one per
+/// tool not found and one for a download (the general rules), then the
+/// unset `unset` variables (in the order declared), summarized for each
 /// recognizer that fired and listed on one line otherwise.
 ///
 /// `declared` are the run's `rerun-if-env-changed` variables, `lines` its
@@ -254,6 +364,15 @@ pub fn hints<'a>(
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     let mut covered = BTreeSet::new();
+    let mut recognized = BTreeSet::new();
+    let mut push = |out: &mut Vec<String>, hint: String, line: &str| {
+        if seen.insert(hint.clone()) {
+            out.push(format!(
+                "{hint}\n      (the build script printed: {})",
+                quote(line)
+            ));
+        }
+    };
     for r in RECOGNIZERS {
         let ran = r.fingerprint.iter().any(|e| match e {
             Evidence::Var(p) => declared.iter().any(|v| var_matches(p, v)),
@@ -272,13 +391,12 @@ pub fn hints<'a>(
                 continue;
             };
             fired = true;
-            let hint = hint.replace("{0}", &cap).replace("{opt}", opt);
-            if seen.insert(hint.clone()) {
-                out.push(format!(
-                    "{hint}\n      (the build script printed: {})",
-                    quote(line)
-                ));
-            }
+            recognized.insert(line);
+            push(
+                &mut out,
+                hint.replace("{0}", &cap).replace("{opt}", opt),
+                line,
+            );
         }
         if !fired {
             continue;
@@ -289,20 +407,56 @@ pub fn hints<'a>(
             .filter(|v| !covered.contains(v) && r.covers.iter().any(|p| var_matches(p, v)))
             .collect();
         if !mine.is_empty() {
-            let families = r
+            // Only the patterns that matched, each variable counted under
+            // its first: listing all of them reads as a list of the
+            // variables, longer than the count.
+            let first = |v: &&str| r.covers.iter().find(|p| var_matches(p, v));
+            let matched: BTreeSet<&&str> = mine.iter().filter_map(first).collect();
+            let patterns = r
                 .covers
                 .iter()
+                .filter(|p| matched.contains(p))
                 .map(|p| format!("`{p}`"))
                 .collect::<Vec<_>>()
                 .join(", ");
             let n = mine.len();
-            let s = if n == 1 { "" } else { "s" };
+            let (s, they) = if n == 1 {
+                ("", "it is")
+            } else {
+                ("s", "they are")
+            };
             out.push(format!(
-                "({n} unset variable{s} of the `{}` crate omitted ({families}); they are normally left unset)",
+                "({n} unset variable{s} of the `{}` crate omitted, matching {patterns}; \
+                 {they} normally left unset)",
                 r.crate_name
             ));
             covered.extend(mine);
         }
+    }
+    for line in lines.clone().map(str::trim) {
+        if recognized.contains(line) {
+            continue;
+        }
+        if let Some((tool, attr)) = named_tool(line) {
+            push(
+                &mut out,
+                format!(
+                    "`{tool}` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.{attr} ];`"
+                ),
+                line,
+            );
+        }
+    }
+    if let Some(line) = lines.clone().map(str::trim).find(|l| downloads(l)) {
+        push(
+            &mut out,
+            format!(
+                "the build script seems to download; the sandbox has no network. If the crate \
+                 can use a local copy, pass it in, usually through a variable it reads \
+                 (`{opt}.env.<NAME>`, a `fetchurl` path)"
+            ),
+            line,
+        );
     }
     let rest: Vec<&str> = unset
         .iter()

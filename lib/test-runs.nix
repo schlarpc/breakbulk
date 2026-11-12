@@ -80,7 +80,8 @@
 #     varying order, and `nix build --rebuild` compares every output. `$out`
 #     is an empty directory, unless a `test.postRun` snippet (or `keepLog`)
 #     puts something there after a passing run (`postRunScript`);
-#   - the run fails when the binary does.
+#   - the run fails when the binary does, then prints a hint for each path
+#     its output names that its source view lacks (`hintScript`).
 #
 # With `test.runner = "nextest"`, the same environment is set up, then
 # cargo-nextest runs the one binary in its reuse-build mode from the
@@ -229,6 +230,9 @@ rec {
       inherit (t) env configEnv envFlags;
       # The package directory, relative to the repository root.
       inherit (t) packageDir;
+      # Its test-only paths, relative to the repository root (`hintScript`).
+      testOnly = t.testOnly or [ ];
+      custom = t.custom or false;
       sourceDir =
         t.env.CARGO_MANIFEST_DIR
           or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
@@ -552,6 +556,39 @@ rec {
       cp "$f" "$out/profraw/''${b%-*}-$(sha256sum "$f" | cut -c1-32).profraw"
     done
   '';
+
+  # The option that adds a path to a test run's view: `test.runFiles` when
+  # the run is narrowed to it, else the option of the "test" kind, also
+  # when a `sources` function chose the run's files.
+  hintWiden = cfg: if cfg.runFiles or null == null then "test.sourceScope" else "test.runFiles";
+
+  # Shell lines (bash, `$log` set) for a failed run: a hint for each path
+  # the log names that the run's source view lacks
+  # (`breakbulk-unit test-run-hints`, which finds the view from
+  # `CARGO_MANIFEST_DIR`). `spec` is a shell word expanding to its JSON.
+  # Nothing without breakbulk-unit in `tools` (built with `pkgs`), and
+  # nothing when the run builds on another system (`testPkgs`, a
+  # `testSystem`), where that breakbulk-unit cannot run.
+  hintScript =
+    {
+      tools,
+      pkgs,
+      testPkgs,
+    }:
+    spec:
+    lib.optionalString (
+      tools ? breakbulk-unit && testPkgs.stdenv.buildPlatform.system == pkgs.stdenv.buildPlatform.system
+    ) ''
+      ${tools.breakbulk-unit} test-run-hints ${spec} "$log" || true
+    '';
+
+  # The JSON `hintScript` takes, for a run spec.
+  hintSpec =
+    spec: cfg:
+    lib.escapeShellArg (toJSON {
+      inherit (spec) package packageDir testOnly custom;
+      widen = hintWiden cfg;
+    });
 
   # What runs after a passing run, in order: breakbulk's own (coverage),
   # the package's `test.postRun`, the binary's (`binary`: its key) or,
@@ -905,6 +942,7 @@ rec {
             set -e
             if [ "$status" -ne 0 ]; then
               echo "test binary ${s.package} ${s.binary} failed under nextest (exit status $status)" >&2
+              ${hintScript { inherit tools pkgs; inherit (p) testPkgs; } (hintSpec s cfg)}
               exit "$status"
             fi
             nextestDir=$ws/target/nextest
@@ -969,6 +1007,7 @@ rec {
               set -e
               if [ "$status" -ne 0 ]; then
                 echo "test binary ${s.package} ${s.binary} failed (exit status $status)" >&2
+                ${hintScript { inherit tools pkgs testPkgs; } (hintSpec s cfg)}
                 exit "$status"
               fi
               ${postRunScript {

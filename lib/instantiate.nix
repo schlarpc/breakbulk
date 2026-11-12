@@ -81,8 +81,10 @@ rec {
       #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
       # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
       #   the paths left out of that package's normal view
-      #   (sourceViews.testOnlyPaths), for a hint when a non-test unit
-      #   misses one
+      #   (sourceViews.testOnlyPaths), for a hint when a unit or test run
+      #   fails reading one
+      # sources.custom = [ "<dir>" ... ]: the packages whose `sources`
+      #   functions choose their views' files, for the same hints
       # sources.crates."<Cargo package id>" = fetched crate source
       sources ? { },
       # Tool name to a store path or a path inside one. Must include
@@ -123,6 +125,7 @@ rec {
       workspaceTest = sources.workspaceTest or { };
       clippyConf = sources.clippyConf or { };
       testOnly = sources.testOnly or { };
+      custom = sources.custom or [ ];
       crates = sources.crates or { };
       spec = p: { env = { }; envCapture = null; } // p;
       platformSpec = { inherit host target; };
@@ -143,6 +146,7 @@ rec {
         // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
         // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
         // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
+        // lib.optionalAttrs (custom != [ ]) { inherit custom; }
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir targetTraits;
@@ -259,6 +263,8 @@ rec {
         envFlags = map value t.envFlags;
         dylibFlags = map value t.dylibFlags;
         inherit (t) packageDir;
+        testOnly = t.testOnly or [ ];
+        custom = t.custom or false;
         nextest = {
           inherit (t.nextest) binaryId;
           cargoMetadata = value t.nextest.cargoMetadata;

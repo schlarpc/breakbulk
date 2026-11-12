@@ -301,12 +301,16 @@ For tests:
   narrows a test run to the files its tests read, so editing any other
   file of the package does not re-run it.
 
-When a build script fails while it names a `rerun-if-changed` path that
-is missing from its sandbox, the message names the path and the option
-to add it to. So does a failing library or build script that reads a
-test-only path. A build script that succeeds without such a path often
-skipped work without saying so. The run then warns, and every product
-above it fails its
+When a unit fails and its output names a repository path that its source
+view lacks, the message names the path and the option that adds it:
+`extraSources` for a library, bin or build script, `test.sourceScope`
+for a test, a doctest or a test run, and `test.scopeTestsDir` for a
+test-only path that non-test code reads
+([Missing paths](../reference/unit-builder.md#missing-paths)). So does a
+build script that fails while it names a `rerun-if-changed` path that is
+missing from its sandbox. A build script that succeeds without such a
+path often skipped work without saying so. The run then warns, and every
+product above it fails its
 [`buildScriptPaths`](../reference/stage-helpers.md#buildscriptpaths)
 check, which names each path, its package and the option to add it to.
 The product itself still builds. A path a script declares but does not

@@ -1,0 +1,4 @@
+[package]
+name = "test-reads"
+version.workspace = true
+edition.workspace = true

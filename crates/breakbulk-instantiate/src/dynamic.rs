@@ -191,8 +191,17 @@ pub struct TestSpec {
     pub dylib_flags: Vec<String>,
     /// The package's directory relative to the repository root (the source
     /// view's root), for test apps run in a checkout; None when
-    /// `CARGO_MANIFEST_DIR` is not in a source view.
+    /// `CARGO_MANIFEST_DIR` is not in a source view. Also for the hints of
+    /// a failed run (`breakbulk-unit test-run-hints`).
     pub package_dir: Option<String>,
+    /// The package's test-only paths, relative to the repository root, for
+    /// those hints: as a rendered unit's `view.testOnly`, without store
+    /// paths, which a content-addressed run must not depend on.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub test_only: Vec<String>,
+    /// As a rendered unit's `view.custom`, for those hints.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub custom: bool,
     /// What nextest's reuse-build mode reads to run this binary.
     pub nextest: Nextest,
 }
@@ -291,12 +300,15 @@ pub(crate) fn test_spec(
         }),
         _ => None,
     };
+    let dir = workspace_dir(plan, &c.package);
     Ok(TestSpec {
         env,
         config_env,
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
         package_dir,
+        test_only: dir.map(|d| tokens.test_only(d)).unwrap_or_default(),
+        custom: dir.is_some_and(|d| tokens.inputs.sources.custom.contains(d)),
         nextest: nextest(tokens, plan, c, kind, target)?,
     })
 }

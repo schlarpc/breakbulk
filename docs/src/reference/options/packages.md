@@ -89,7 +89,9 @@ Files and directories outside the package directory that its
 units read (` include_str!("../../wit/x.wit") `, a sibling assets
 directory, patches), at their original relative paths\. Strings
 are relative to the repository root\. A built-in step of
-[` sources `](\#packagesnamesources): added for every kind of unit\.
+[` sources `](\#packagesnamesources): added for every kind of unit\. A library, bin or
+build script that fails naming a path outside its source view
+ends with a hint naming the path and this option\.
 
 *Type:*
 list of (absolute path or string)
@@ -941,8 +943,10 @@ a fixture edit there rebuilds no library, bin or product\. Set
 it to ` false ` when the library, a bin or the build script
 reads from ` tests/ ` at compile time
 (` include_str!("../tests/…") `, a build script that generates
-tests from fixtures); such a unit fails with a hint naming
-this option\. ` null `: ` true `\. A built-in step of [` sources `](\#packagesnamesources)\.
+tests from fixtures), or when the library builds a path into
+` tests/ ` from ` CARGO_MANIFEST_DIR ` that the tests read; such a
+unit or test run fails with a hint naming this option\. ` null `:
+` true `\. A built-in step of [` sources `](\#packagesnamesources)\.
 
 *Type:*
 null or boolean
@@ -969,7 +973,9 @@ inside the package is also removed from the view of its other
 units (the library, bins, build script)\. Either way, editing
 it rebuilds only this package’s test units and re-runs its
 tests\. The package’s ` tests/ ` directory is in this scope too
-(` scopeTestsDir `)\. A built-in step of [` sources `](\#packagesnamesources)\.
+(` scopeTestsDir `)\. A built-in step of [` sources `](\#packagesnamesources)\. A test
+unit or test run that fails naming a path outside its source
+view ends with a hint naming the path and this option\.
 
 *Type:*
 list of (absolute path or string)

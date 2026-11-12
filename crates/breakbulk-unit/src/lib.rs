@@ -13,9 +13,9 @@ pub mod process;
 pub mod run;
 pub mod spec;
 pub mod splice;
-pub mod test_only;
 #[cfg(test)]
 pub(crate) mod test_util;
+pub mod view_hints;
 
 use std::fmt;
 

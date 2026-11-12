@@ -642,6 +642,7 @@ let
           set -e
           if [ "$status" -ne 0 ]; then
             echo "test binary ${b.package} ${testRuns.binaryKey b} failed under nextest (exit status $status)" >&2
+            ${hint p b cfg}
             exit "$status"
           fi
           nextestDir=$ws/target/nextest
@@ -650,6 +651,14 @@ let
             binary = testRuns.binaryKey b;
           }}
         '';
+
+      # testRuns.hintScript, with the spec read from `$info`.
+      hint =
+        p: b: cfg:
+        testRuns.hintScript {
+          inherit tools pkgs;
+          inherit (p) testPkgs;
+        } ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), custom: (.custom // false), $widen}' "$info")"'';
 
       libtestScript = p: b: cfg: args: bin: ''
         mkdir -p /tmp/breakbulk-target-tmp $out
@@ -661,6 +670,7 @@ let
         set -e
         if [ "$status" -ne 0 ]; then
           echo "test binary ${b.package} ${testRuns.binaryKey b} failed (exit status $status)" >&2
+          ${hint p b cfg}
           exit "$status"
         fi
         ${testRuns.postRunScript {

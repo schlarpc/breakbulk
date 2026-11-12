@@ -81,8 +81,10 @@ changes only those units:
 | any other file of the package | the package and everything that depends on it |
 
 The cost is a second source view for such a package. Non-test code that
-reads a test-only path at compile time (`include_str!("../tests/…")`)
-fails with a hint;
+reads a test-only path fails with a hint: at compile time
+(`include_str!("../tests/…")`), or at run time, when a library builds a
+path into `tests/` from `CARGO_MANIFEST_DIR` and the package's test
+reads it. That path is in the library's view, which has no `tests/`.
 [`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
 puts `tests/` back into every view.
 

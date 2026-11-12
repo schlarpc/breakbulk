@@ -338,6 +338,8 @@ let
     declared-paths = repository.declaredProvided;
     test-only = repository.testOnly;
     sources = repository.sources;
+    # With the options its hints name, so that everything builds.
+    view-hints = repository.viewHintsFixed;
     pkgid-short = repository.pkgidShort;
     optional-dependency = repository.optionalDep;
     exclusive-features = repository.exclusive;

@@ -17,11 +17,13 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use breakbulk_format::rendered::{DEBUG_OUTPUT, derivation_output, package_name_version};
+use breakbulk_format::rendered::{
+    DEBUG_OUTPUT, SourceView, Widen, derivation_output, package_name_version,
+};
 use breakbulk_format::{
-    CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, TargetTraits, Unit,
-    UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in, to_canonical_json,
-    unit_env_value, validate,
+    CompileUnit, Graph, Plan, Platform, Reference, Resolve, Root, RootKind, SrcRef, TargetTraits,
+    Unit, UnitId, ValidationOptions, merge_layer_with, render_doctest, render_unit_in,
+    to_canonical_json, unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -164,6 +166,17 @@ impl<'a> Tokens<'a> {
 
     fn input(&self, key: String) -> String {
         self.token(Ref::Input { key, json: false })
+    }
+
+    /// The test-only paths of the package at `dir`, relative to the
+    /// repository root.
+    pub(crate) fn test_only(&self, dir: &str) -> Vec<String> {
+        self.inputs
+            .sources
+            .test_only
+            .get(dir)
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn json_input(&self, key: String) -> String {
@@ -470,18 +483,28 @@ impl Resolve for Tokens<'_> {
         }))
     }
 
-    fn test_only_paths(&self, _id: &UnitId, unit: &Unit) -> Result<Vec<String>, Error> {
-        if self.test_package.is_some() {
-            return Ok(Vec::new());
-        }
+    fn source_view(&self, _id: &UnitId, unit: &Unit) -> Result<Option<SourceView>, Error> {
         let Some(dir) = workspace_dir(&self.inputs.plan, unit.package()) else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
-        let Some(paths) = self.inputs.sources.test_only.get(dir) else {
-            return Ok(Vec::new());
-        };
-        let view = self.input(keys::src(dir));
-        Ok(paths.iter().map(|p| format!("{view}/{p}")).collect())
+        if !self.inputs.sources.workspace.contains(dir) {
+            return Ok(None);
+        }
+        let root = self.reference(&Reference::Src(SrcRef {
+            src: unit.package().to_owned(),
+            rel: String::new(),
+        }))?;
+        Ok(Some(SourceView {
+            root,
+            package_dir: dir.to_owned(),
+            widen: if self.test_package.is_some() {
+                Widen::TestSourceScope
+            } else {
+                Widen::ExtraSources
+            },
+            test_only: self.test_only(dir),
+            custom: self.inputs.sources.custom.contains(dir),
+        }))
     }
 
     /// Values from the Nix side are tokens whose emptiness is unknown here,
@@ -840,6 +863,8 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
                     env_flags: list(&s.env_flags)?,
                     dylib_flags: list(&s.dylib_flags)?,
                     package_dir: s.package_dir,
+                    test_only: s.test_only,
+                    custom: s.custom,
                     nextest: output::RootNextest {
                         binary_id: s.nextest.binary_id,
                         cargo_metadata: v(&s.nextest.cargo_metadata.to_string())?,

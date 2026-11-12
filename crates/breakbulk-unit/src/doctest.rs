@@ -40,7 +40,8 @@
 //! to [`LOG_FILE`] in `$TMPDIR`, not `$out`: the output holds timings and
 //! lines in a varying order, and `nix build --rebuild` compares `$out`,
 //! which stays empty unless the post-run program fills it. The derivation
-//! fails when rustdoc exits non-zero.
+//! fails when rustdoc exits non-zero, with a hint for each path the log
+//! names that the source view lacks ([`crate::view_hints`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
@@ -55,7 +56,7 @@ use crate::env::{CFlags, Outer, capture_layer, layered_on, merge_layer};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{Platform, RenderedArg, RenderedCompile};
 use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
-use crate::{Error, io_err, read_directives};
+use crate::{Error, io_err, read_directives, view_hints};
 
 pub const RUNNERS_VAR: &str = "BREAKBULK_TEST_RUNNERS";
 pub const TEST_ARGS_VAR: &str = "BREAKBULK_TEST_ARGS";
@@ -308,11 +309,18 @@ pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
     let log = outer.tmpdir().join(LOG_FILE);
     let status = run_logged(&inv, &log)?;
     if !status.success() {
-        return Err(Error(format!(
+        let mut msg = format!(
             "doctests of `{}` failed ({})",
             d.compile.krate.name,
             describe_status(&status)
-        )));
+        );
+        let text = String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
+        let c = &d.compile;
+        for h in view_hints::hints(&c.package, &text, c.view.as_ref(), &c.remap, &inv.cwd) {
+            msg.push_str("\nhint: ");
+            msg.push_str(&h);
+        }
+        return Err(Error(msg));
     }
     if let Some(program) = &config.post_run {
         post_run(program, outer, &log, &out)?;
@@ -414,7 +422,7 @@ mod tests {
                 remap_scope: None,
                 env_capture: None,
                 link_captures: Vec::new(),
-                test_only: Vec::new(),
+                view: None,
                 seed: None,
             },
             search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),

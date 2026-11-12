@@ -44,6 +44,7 @@ fn smoke_inputs() -> Inputs {
             workspace_test: Default::default(),
             clippy_conf: Default::default(),
             test_only: Default::default(),
+            custom: Default::default(),
             crates: Default::default(),
         },
         toolchains: Toolchains {
@@ -279,6 +280,29 @@ impl Resolve for RealPaths<'_> {
             breakbulk_format::merge_layer_with(self, &mut env, layer)?;
         }
         Ok(env)
+    }
+    // The smoke plan has no test units and no test views.
+    fn source_view(
+        &self,
+        _: &UnitId,
+        u: &Unit,
+    ) -> Result<Option<breakbulk_format::rendered::SourceView>, String> {
+        let Some(dir) = workspace_dir(&self.0.plan, u.package()) else {
+            return Ok(None);
+        };
+        Ok(Some(breakbulk_format::rendered::SourceView {
+            root: input_value(&keys::src(dir)),
+            package_dir: dir.to_owned(),
+            widen: breakbulk_format::rendered::Widen::ExtraSources,
+            test_only: self
+                .0
+                .sources
+                .test_only
+                .get(dir)
+                .cloned()
+                .unwrap_or_default(),
+            custom: self.0.sources.custom.contains(dir),
+        }))
     }
 }
 
@@ -786,10 +810,11 @@ fn clippy_units_get_the_config_tree() {
     }
 }
 
-/// Test-only paths reach the package's non-test units (for the hint) as
-/// paths in their source view, and not its test units.
+/// Every unit of a repository package carries its source view, for the
+/// hints: the view's root, the option that widens it (by unit kind) and
+/// the package's test-only paths.
 #[test]
-fn test_only_paths_reach_non_test_units() {
+fn source_views_reach_units() {
     let mut inputs = smoke_inputs();
     let Unit::Compile(c) = inputs.plan.units.get_mut(APP).unwrap() else {
         panic!()
@@ -800,6 +825,7 @@ fn test_only_paths_reach_non_test_units() {
         ("smokeapp".into(), vec!["smokeapp/tests".into()]),
         ("smokelib".into(), vec!["smokelib/tests".into()]),
     ]);
+    inputs.sources.custom = ["smokeapp".into()].into();
     let out = instantiate(&inputs).unwrap();
     let text = |id: &str| {
         let Value::Parts { parts } = &out.units[id].attrs["BREAKBULK_UNIT"] else {
@@ -815,11 +841,19 @@ fn test_only_paths_reach_non_test_units() {
             .collect::<String>()
     };
     assert!(
-        text(LIB).contains(r#""testOnly":["<src:smokelib>/smokelib/tests"]"#),
+        text(LIB).contains(
+            r#""view":{"packageDir":"smokelib","root":"<src:smokelib>","testOnly":["smokelib/tests"],"widen":"extraSources"}"#
+        ),
         "{}",
         text(LIB)
     );
-    assert!(!text(APP).contains("testOnly"), "{}", text(APP));
+    assert!(
+        text(APP).contains(
+            r#""view":{"custom":true,"packageDir":"smokeapp","root":"<test-src:smokeapp>","testOnly":["smokeapp/tests"],"widen":"test.sourceScope"}"#
+        ),
+        "{}",
+        text(APP)
+    );
 }
 
 #[test]

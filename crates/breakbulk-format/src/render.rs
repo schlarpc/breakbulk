@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{append, list_separator};
-use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUnit};
+use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, SourceView};
 
 use crate::deps::Graph;
 use crate::normalize::normalize_unit;
@@ -92,11 +92,11 @@ pub trait Resolve {
     ) -> Result<Option<String>, Self::Error> {
         Ok(None)
     }
-    /// For a unit that is not a test unit: its package's test-only paths,
-    /// which its source view leaves out, as absolute paths for the hint
-    /// when it fails reading one (`RenderedCompile::test_only`).
-    fn test_only_paths(&self, _id: &UnitId, _unit: &Unit) -> Result<Vec<String>, Self::Error> {
-        Ok(Vec::new())
+    /// For a unit (or doctest) of a repository package: the source view it
+    /// sees, for the hints when it fails naming a path the view lacks
+    /// (`RenderedCompile::view`).
+    fn source_view(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<SourceView>, Self::Error> {
+        Ok(None)
     }
     /// A list-like variable's `earlier` value followed by `later`, with
     /// `sep` between them ([`breakbulk_unit::env::append`]): an empty side
@@ -387,7 +387,7 @@ pub fn render_unit_in<R: Resolve>(
                 remap_scope,
                 env_capture,
                 link_captures,
-                test_only: r.test_only_paths(id, &unit)?,
+                view: r.source_view(id, &unit)?,
                 seed: Some(id.to_string()),
             })
         }
@@ -439,7 +439,7 @@ pub fn render_unit_in<R: Resolve>(
                 // names, or Cargo's under trim-paths (`cargo_run_remap`).
                 remap,
                 out_dir_remap,
-                test_only: r.test_only_paths(id, &unit)?,
+                view: r.source_view(id, &unit)?,
                 seed: Some(id.to_string()),
             })
         }

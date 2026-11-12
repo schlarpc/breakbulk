@@ -432,12 +432,11 @@ pub struct RenderedCompile {
     /// a `-sys` crate below names with `rustc-link-lib` alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_captures: Vec<String>,
-    /// For a unit that is not a test unit: the package's test-only paths
-    /// (its `tests/` directory, `test.sourceScope` entries inside it), left
-    /// out of the source view it sees, as absolute paths in that view. Only
-    /// for the hint when the unit fails naming one ([`crate::test_only`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub test_only: Vec<String>,
+    /// For a unit of a repository package: its source view, only for the
+    /// hints when the unit fails naming a path the view lacks
+    /// ([`crate::view_hints`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<SourceView>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change
@@ -447,6 +446,59 @@ pub struct RenderedCompile {
     /// it; `None` adds no seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+}
+
+/// The source view a unit of a repository package sees, for the hints
+/// when it fails naming a path the view lacks ([`crate::view_hints`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SourceView {
+    /// The view's root, which stands for the repository root.
+    pub root: String,
+    /// The package directory, relative to the repository root (empty for
+    /// the root).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub package_dir: String,
+    /// The option that adds a path to this view.
+    pub widen: Widen,
+    /// The package's test-only paths (its `tests/` directory, the
+    /// `test.sourceScope` entries inside it), relative to the repository
+    /// root, which the view of its non-test units leaves out. Every unit
+    /// carries them: a path into that view (a library's
+    /// `CARGO_MANIFEST_DIR`, a build script's `rustc-env`) can reach a
+    /// test unit too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_only: Vec<String>,
+    /// Whether the package's `sources` functions chose the view's files:
+    /// then even a path in the package directory can be left out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub custom: bool,
+}
+
+/// The option that adds a path to a unit's source view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Widen {
+    /// The view of a package's non-test units.
+    #[serde(rename = "extraSources")]
+    ExtraSources,
+    /// The view of its test units: test compiles, doctests, test runs.
+    #[serde(rename = "test.sourceScope")]
+    TestSourceScope,
+    /// The narrowed view of its test runs, whose paths are relative to the
+    /// package directory.
+    #[serde(rename = "test.runFiles")]
+    TestRunFiles,
+}
+
+impl Widen {
+    /// The option, under `packages.<name>`.
+    pub fn option(self) -> &'static str {
+        match self {
+            Widen::ExtraSources => "extraSources",
+            Widen::TestSourceScope => "test.sourceScope",
+            Widen::TestRunFiles => "test.runFiles",
+        }
+    }
 }
 
 /// The name and version in a Cargo package id spec, as `cargo metadata`
@@ -552,12 +604,9 @@ pub struct RenderedRun {
     /// in its attributes) is remapped to, as with `remap`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_dir_remap: Option<String>,
-    /// For a unit that is not a test unit: the package's test-only paths
-    /// (its `tests/` directory, `test.sourceScope` entries inside it), left
-    /// out of the source view it sees, as absolute paths in that view. Only
-    /// for the hint when the unit fails naming one ([`crate::test_only`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub test_only: Vec<String>,
+    /// As for compile units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<SourceView>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change

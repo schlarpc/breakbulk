@@ -1,0 +1,4 @@
+[package]
+name = "lib-reads"
+version.workspace = true
+edition.workspace = true

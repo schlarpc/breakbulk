@@ -232,6 +232,9 @@ let
   # Test-only paths by directory (instantiate's `sources.testOnly`), for
   # the hint when a non-test unit misses one.
   testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
+  # Directories of the packages whose `sources` functions choose files
+  # (instantiate's `sources.custom`), for the same hints.
+  custom = lib.attrNames (lib.filterAttrs (_: v: v.custom) allViews);
 
   # Clippy variants: each member's clippy config tree, by directory
   # (instantiate's `sources.clippyConf`).
@@ -462,6 +465,7 @@ let
           crates
           clippyConf
           testOnly
+          custom
           ;
       }
       # The build plan has no test units; the bench plan's benches and

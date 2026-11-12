@@ -146,7 +146,9 @@ let
           units read (`include_str!("../../wit/x.wit")`, a sibling assets
           directory, patches), at their original relative paths. Strings
           are relative to the repository root. A built-in step of
-          ${pipeline}: added for every kind of unit.
+          ${pipeline}: added for every kind of unit. A library, bin or
+          build script that fails naming a path outside its source view
+          ends with a hint naming the path and this option.
         '';
       };
       sources = mkOption {
@@ -242,7 +244,9 @@ let
             units (the library, bins, build script). Either way, editing
             it rebuilds only this package's test units and re-runs its
             tests. The package's `tests/` directory is in this scope too
-            (`scopeTestsDir`). A built-in step of ${pipeline}.
+            (`scopeTestsDir`). A built-in step of ${pipeline}. A test
+            unit or test run that fails naming a path outside its source
+            view ends with a hint naming the path and this option.
           '';
         };
         scopeTestsDir = mkOption {
@@ -257,8 +261,10 @@ let
             it to `false` when the library, a bin or the build script
             reads from `tests/` at compile time
             (`include_str!("../tests/…")`, a build script that generates
-            tests from fixtures); such a unit fails with a hint naming
-            this option. `null`: `true`. A built-in step of ${pipeline}.
+            tests from fixtures), or when the library builds a path into
+            `tests/` from `CARGO_MANIFEST_DIR` that the tests read; such a
+            unit or test run fails with a hint naming this option. `null`:
+            `true`. A built-in step of ${pipeline}.
           '';
         };
         runFiles = mkOption {

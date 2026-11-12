@@ -26,7 +26,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         }],
         nightly_features_allowed: false,
         env_capture: None,
-        test_only: Vec::new(),
+        view: None,
         seed: None,
         remap: vec![],
         out_dir_remap: None,
@@ -212,8 +212,8 @@ fn pkg_config_missing_gets_one_hint_and_a_summary() {
     );
     assert!(
         e.0.contains(
-            "hint: (17 unset variables of the `pkg-config` crate omitted \
-             (`PKG_CONFIG*`, `*_NO_PKG_CONFIG`); they are normally left unset)"
+            "hint: (17 unset variables of the `pkg-config` crate omitted, \
+             matching `PKG_CONFIG*`, `*_NO_PKG_CONFIG`; they are normally left unset)"
         ),
         "{e}"
     );
@@ -314,9 +314,12 @@ fn recognized_failures() {
                   It is also available at https://github.com/protocolbuffers/protobuf/releases  For \
                   more information: https://docs.rs/prost-build/#sourcing-protoc\" }\n";
     assert!(hint("", protoc).contains("p.protobuf"));
-    assert!(
-        !hint("", &protoc.replace("docs.rs/prost-build", "example.com")).contains("p.protobuf")
-    );
+    // Without it, only the general not-found rule would see the message,
+    // which needs the `NotFound`.
+    let unrecognized = protoc
+        .replace("docs.rs/prost-build", "example.com")
+        .replace("kind: NotFound, ", "");
+    assert!(!hint("", &unrecognized).contains("p.protobuf"));
     // cmake-rs.
     let h = hint(
         "CMAKE_x86_64-unknown-linux-gnu = None\nHOST_CMAKE = None\nCMAKE = None\n",
@@ -327,6 +330,163 @@ fn recognized_failures() {
         h.contains("`packages.foo-sys.nativeInputs = p: [ p.cmake ];`"),
         "{h}"
     );
+}
+
+/// The hint lines of a run that failed with `stdout` and `stderr`.
+fn hint_lines(stdout: &str, stderr: &str) -> Vec<String> {
+    let t = TempDir::new("hints");
+    let e = judge_with_stderr(&unit(t.path()), 101 << 8, stdout, stderr).unwrap_err();
+    e.0.lines()
+        .filter(|l| l.starts_with("hint: "))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn bindgen_without_its_declarations() {
+    // libsqlite3-sys and libnghttp2 under deno: bindgen panics before it
+    // prints any `rerun-if-env-changed`.
+    let h = hint_lines(
+        "",
+        "thread 'main' panicked at bindgen/lib.rs:604:27:\nUnable to find libclang: \"couldn't find \
+         any valid shared libraries matching: ['libclang.so', 'libclang-*.so'], set the \
+         `LIBCLANG_PATH` environment variable to a path where one of these files can be found \
+         (invalid: [])\"\n",
+    );
+    assert_eq!(
+        h,
+        ["hint: libclang is not in the sandbox; add \
+          `packages.foo-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];`"]
+    );
+}
+
+#[test]
+fn omitted_variables_name_only_the_patterns_that_matched() {
+    let h = hint_lines(
+        "cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS\n\
+         cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64-unknown-linux-gnu\n\
+         cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_gnu\n",
+        "Unable to find libclang: \"couldn't find any valid shared libraries\"\n",
+    );
+    assert_eq!(
+        h[1],
+        "hint: (3 unset variables of the `bindgen/clang-sys` crate omitted, matching \
+         `BINDGEN_EXTRA_CLANG_ARGS*`; they are normally left unset)"
+    );
+    let h = hint_lines(
+        "cargo:rerun-if-env-changed=LIBCLANG_PATH\n",
+        "Unable to find libclang\n",
+    );
+    assert!(
+        h[1].starts_with("hint: (1 unset variable of the `bindgen/clang-sys` crate omitted, matching `LIBCLANG_PATH`; it is"),
+        "{h:?}"
+    );
+}
+
+#[test]
+fn a_tool_not_found() {
+    // wasmtime: a build script spawning cmake itself.
+    let h = hint_lines(
+        "",
+        "thread 'main' panicked at build.rs:10:5:\nfailed to spawn `cmake`: Os { code: 2, kind: NotFound, message: \"No such file or directory\" }\n",
+    );
+    assert_eq!(
+        h,
+        ["hint: `cmake` is not in the sandbox; add it with \
+          `packages.foo-sys.nativeInputs = p: [ p.cmake ];`"]
+    );
+    for (line, attr) in [
+        ("sh: 1: nasm: not found", "nasm"),
+        ("/bin/sh: line 1: make: command not found", "gnumake"),
+        (
+            "FileNotFoundError: [Errno 2] No such file or directory: 'git'",
+            "git",
+        ),
+        (
+            "/usr/bin/env: 'python3': No such file or directory",
+            "python3",
+        ),
+        (
+            "error: could not run \"/usr/bin/protoc\": No such file or directory",
+            "protobuf",
+        ),
+    ] {
+        let h = hint_lines("", &format!("{line}\n"));
+        assert!(
+            h.first()
+                .is_some_and(|h| h.ends_with(&format!("p.{attr} ];`"))),
+            "{line}: {h:?}"
+        );
+    }
+    // A tool's name as a word, or without a not-found marker, is not enough.
+    for line in [
+        "No such file or directory; make sure the SDK is installed",
+        "failed to run `cmake`: exit status 1",
+        "No such file or directory: 'cmake-build/config.h'",
+    ] {
+        assert!(hint_lines("", &format!("{line}\n")).is_empty(), "{line}");
+    }
+}
+
+#[test]
+fn downloads_have_no_network() {
+    // v8 under deno: a Python downloader, then curl, which is missing.
+    let h = hint_lines(
+        "Downloading https://github.com/denoland/rusty_v8/releases/download/v137.2.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz\n",
+        "Python downloader failed, trying with curl.\nthread 'main' panicked at build.rs:617:8:\n\
+         called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: \"No such file or directory\" }\n",
+    );
+    assert_eq!(h.len(), 1, "{h:?}");
+    assert!(h[0].contains("the sandbox has no network"), "{h:?}");
+    assert!(h[0].contains("`packages.foo-sys.env.<NAME>`"), "{h:?}");
+    for line in [
+        "curl: (6) Could not resolve host: example.com",
+        "error sending request: dns error: failed to lookup address information: Temporary failure in name resolution",
+        "<urlopen error [Errno -3] Temporary failure in name resolution>",
+    ] {
+        let h = hint_lines("", &format!("{line}\n"));
+        assert!(h.iter().any(|h| h.contains("no network")), "{line}: {h:?}");
+    }
+    // A library named curl is not a download.
+    assert!(hint_lines("cargo:rustc-link-lib=curl\n", "error: linking failed\n").is_empty());
+}
+
+#[test]
+fn script_output_naming_a_path_outside_the_view() {
+    let t = TempDir::new("view");
+    let root = t.path().join("source");
+    std::fs::create_dir_all(root.join("crates/foo-sys")).unwrap();
+    let mut r = unit(&root.join("crates/foo-sys"));
+    r.view = Some(crate::spec::SourceView {
+        root: root.display().to_string(),
+        package_dir: "crates/foo-sys".into(),
+        widen: crate::spec::Widen::ExtraSources,
+        test_only: Vec::new(),
+        custom: false,
+    });
+    let e = judge_with_stderr(
+        &r,
+        101 << 8,
+        "cargo:rerun-if-changed=../../vendor/foo.c\n",
+        &format!(
+            "Missing symbols list {}/crates/foo-sys/../../ext/napi/symbols.json: Os {{ code: 2 }}\n",
+            root.display()
+        ),
+    )
+    .unwrap_err();
+    assert!(
+        e.0.contains(
+            "hint: `ext/napi/symbols.json` is not in this unit's source view; if it is in the \
+             repository, add it to `packages.foo-sys.extraSources`"
+        ),
+        "{e}"
+    );
+    // The declared path has its own hint only.
+    assert!(
+        e.0.contains("rerun-if-changed=../../vendor/foo.c`, but"),
+        "{e}"
+    );
+    assert!(!e.0.contains("`vendor/foo.c` is not in"), "{e}");
 }
 
 #[test]

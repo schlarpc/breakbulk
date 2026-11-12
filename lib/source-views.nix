@@ -242,6 +242,9 @@ rec {
     in
     {
       inherit src;
+      # Whether `sources` functions choose files: then the failure hints
+      # count paths in the package directory too.
+      custom = settings.sources or [ ] != [ ];
       testOnly = testOnlyPaths {
         inherit root pkgDir;
         sourceScope = settings.test.sourceScope or [ ];

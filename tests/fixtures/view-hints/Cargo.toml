@@ -1,0 +1,17 @@
+# Each package reads `shared/data.txt`, which no option adds to its source
+# view, from one kind of unit, and fails there with a hint naming the
+# option that would add it: `lib-reads` from its library (rustc),
+# `script-reads` from its build script, `test-reads` from an integration
+# test's compile, `run-reads` from a test run, `doc-reads` from a doctest.
+# `lib-to-tests` is a library that hands its tests a path into its own
+# `tests/`, built from `CARGO_MANIFEST_DIR` in the library's view, which
+# leaves `tests/` out: its test run fails with the `scopeTestsDir` hint.
+# `chosen-reads` reads `data.txt` in its own directory, which the checks'
+# `sources` function leaves out of its "build" view.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

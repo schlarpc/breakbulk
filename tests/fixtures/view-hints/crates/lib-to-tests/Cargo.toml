@@ -1,0 +1,4 @@
+[package]
+name = "lib-to-tests"
+version.workspace = true
+edition.workspace = true

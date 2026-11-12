@@ -1,0 +1,4 @@
+[package]
+name = "chosen-reads"
+version.workspace = true
+edition.workspace = true

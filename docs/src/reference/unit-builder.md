@@ -57,9 +57,9 @@ set up the same home in their own derivation
    its [working directory](#working-directory).
 6. Parse rustc's JSON diagnostics from stderr, print each `rendered`
    field, and drop artifact notifications. Without this, build logs are
-   unreadable JSON. If rustc fails and its output names a path under one
-   of the unit's `testOnly` paths (test-only paths its source view leaves
-   out), add a hint naming the option that keeps the path.
+   unreadable JSON. If rustc fails, add a hint for each path its output
+   names that the unit's source view lacks
+   ([Missing paths](#missing-paths)).
 7. Move outputs into place (details below): `.rmeta` to `$rmeta`, `.rlib`
    to `$rlib`, binaries and cdylibs to `$out` (a bin under the name the
    plan's `uplifted` gives it), debuginfo side files to `$debug`. Discard
@@ -156,8 +156,8 @@ name them.
 6. Check every `rerun-if-changed` path against the sandbox.
    - On failure, add a hint for each missing path, naming the package
      option to add it to, then the [failure hints](#failure-hints), and
-     a hint for each test-only path the script's output names, as for
-     compiles.
+     a hint for each other path the script's output names that its
+     source view lacks, as for compiles ([Missing paths](#missing-paths)).
    - On success, warn about missing paths and list them in
      `missing-paths.json`. The run does not fail: the
      [`buildScriptPaths`](stage-helpers.md#buildscriptpaths) check of
@@ -179,21 +179,81 @@ it matched:
 | `pkg-config` | `The pkg-config command could not be found.` | declares `PKG_CONFIG*` or `*_NO_PKG_CONFIG` | `nativeInputs = p: [ p.pkg-config ];` |
 | `pkg-config` | ``The system library `X` … was not found`` | as above | add the package that provides `X` to `inputs` |
 | `cc` | `failed to find tool "X"` | declares `CC*`, `CFLAGS*` or `CXX*` | add the package that provides `X` to `nativeInputs` |
-| `bindgen`, `clang-sys` | `Unable to find libclang` | declares `BINDGEN_EXTRA_CLANG_ARGS*` or `LIBCLANG_PATH`, or clang-sys's `llvm-config` warning | `nativeInputs = p: [ p.rustPlatform.bindgenHook ];` |
+| `bindgen`, `clang-sys` | `Unable to find libclang` | declares `BINDGEN_EXTRA_CLANG_ARGS*` or `LIBCLANG_PATH`, clang-sys's `llvm-config` warning, or the error itself (bindgen can fail before it declares anything) | `nativeInputs = p: [ p.rustPlatform.bindgenHook ];` |
 | `openssl-sys` | `Could not find directory of OpenSSL installation` | declares `*OPENSSL_*` | `inputs = p: [ p.openssl ];` and `nativeInputs = p: [ p.pkg-config ];` |
 | `prost-build` | ``Could not find `protoc` `` | its `docs.rs/prost-build` link | `nativeInputs = p: [ p.protobuf ];` |
 | `cmake` | ``is `cmake` not installed?`` | its `CMAKE… = …` lines | `nativeInputs = p: [ p.cmake ];` |
 
+Two general rules follow, for any crate. Each quotes the line it matched:
+
+- **A tool not found.** A line that says a program was not found
+  (`NotFound`, `os error 2`, `No such file or directory`,
+  `command not found`, `: not found`) and names a known tool gets
+  `nativeInputs = p: [ p.<package> ];`. The tool must be quoted, end a
+  path, or come before a `:`, as in ``failed to spawn `cmake` `` or
+  `sh: 1: nasm: not found`. The tools: `autoconf`, `autoreconf`,
+  `automake`, `bison`, `clang`, `cmake`, `curl`, `flex`, `gcc`, `git`,
+  `glslc` (`shaderc`), `go`, `gperf`, `libtool`, `m4`, `make` (`gnumake`),
+  `meson`, `nasm`, `ninja`, `node` and `npm` (`nodejs`), `patch`, `perl`,
+  `pkg-config`, `protoc` (`protobuf`), `python` and `python3` (`python3`),
+  `swig`, `tar` (`gnutar`), `unzip`, `wget`, `yasm`. Other wordings, and
+  messages that name no tool, get no hint.
+- **A download.** A line that shows the script downloading
+  (`Downloading http…`, `curl` or `wget` as a word, `Could not resolve
+  host`, `Temporary failure in name resolution`, `dns error`, and the
+  like) gets one hint: the sandbox has no network, so give the crate a
+  local copy, usually through a variable it reads
+  (`packages.<name>.env.<NAME>`, a `fetchurl` path).
+
 Unset `rerun-if-env-changed` variables come last:
 
-- Those of a crate whose failure was recognized are counted, not listed
-  ("17 unset variables of the `pkg-config` crate omitted"). They are
+- Those of a crate whose failure was recognized are counted, not listed,
+  with the patterns they match ("17 unset variables of the `pkg-config`
+  crate omitted, matching `PKG_CONFIG*`, `*_NO_PKG_CONFIG`"). They are
   normally left unset.
 - The rest go on one line, with the `packages.<name>.env` option to set
   them.
 
-The table is built into `breakbulk-unit` and is not configurable: a user
-table would be an input of every build-script run.
+The tables are built into `breakbulk-unit` and are not configurable: a
+user table would be an input of every build-script run.
+
+### Missing paths
+
+A unit of a repository package sees only its package's source view. When
+a compile, a build-script run, a doctest or a test run fails, its output
+is searched for paths: absolute, relative to the working directory, or
+as the remap names them (`crates/x/src/../../docs/a.md` in a rustc
+diagnostic). A source location (`src/lib.rs:3:5`) is not searched: it
+names a file that was read. A hint is added, naming the path relative to
+the repository root, for each path that does not exist and is
+
+- under one of the package's test-only paths, in a view that leaves it
+  out: [`test.scopeTestsDir = false`](options/packages.md#packagesnametestscopetestsdir)
+  for `tests/`, or a move from
+  [`test.sourceScope`](options/packages.md#packagesnametestsourcescope)
+  to [`extraSources`](options/packages.md#packagesnameextrasources). The
+  path can come from another view: a library builds a path into its
+  `tests/` from `CARGO_MANIFEST_DIR`, and its test run reads it;
+- otherwise inside the unit's view. The option is
+  [`extraSources`](options/packages.md#packagesnameextrasources) for a
+  library, bin or build script, and
+  [`test.sourceScope`](options/packages.md#packagesnametestsourcescope)
+  for a test compile, a doctest or a test run. A test run narrowed by
+  [`test.runFiles`](options/packages.md#packagesnametestrunfiles) names
+  that option, with the path relative to the package directory. Paths in
+  the package directory count only for such a run and for a package with
+  [`sources`](options/packages.md#packagesnamesources) functions: the
+  built-in steps keep the whole directory otherwise, so a file missing
+  there is missing from the repository too. breakbulk cannot tell which
+  function left a path out, so the hint names the option for the unit's
+  kind.
+
+The unit cannot see the repository, so the hint says "if it is in the
+repository". A message without a path (`filetests: No such file or
+directory`) gets no hint. At most 10 paths are named; the rest are
+counted. Test runs get their hints from `breakbulk-unit test-run-hints`,
+run after a failed test with the run's log; it finds the view from the
+run's `CARGO_MANIFEST_DIR`.
 
 ### `OUT_DIR` and the target directory
 

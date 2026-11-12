@@ -1,0 +1,4 @@
+[package]
+name = "doc-reads"
+version.workspace = true
+edition.workspace = true

@@ -30,6 +30,19 @@ modules = [{
 They appear at their original relative paths, so the crate's paths work
 unchanged, and only that package's units depend on them.
 
+To find them, build: a unit that fails reading a path outside its view
+(rustc's ``couldn't read `…` ``, a proc macro's or build script's error
+with the path) ends with a hint naming the path and the option, as in
+
+```text
+hint: `docs/partials/rules.html` is not in this unit's source view; if it is in the repository, add it to `packages.app.extraSources`
+```
+
+A test, doctest or test run names
+[`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
+instead, which adds the path for the package's tests only. A message
+without a path gets no hint.
+
 The same applies to a path from Cargo config, such as an `[env]` entry
 with `relative = true`:
 

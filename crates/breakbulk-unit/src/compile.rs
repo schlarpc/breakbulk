@@ -29,7 +29,7 @@ use crate::env::{CFlags, Outer, capture_layer, layered};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{DEBUG_OUTPUT, RenderedArg, RenderedCompile, SpliceKind, derivation_output};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
-use crate::{Error, io_err, manifest, read_directives, test_only};
+use crate::{Error, io_err, manifest, read_directives, view_hints};
 
 /// The directories a compile works in, under `$TMPDIR`.
 #[derive(Clone, Debug)]
@@ -397,7 +397,13 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     link_deps(&all_deps(c, &below), &dirs.deps)?;
     fresh_dir(&dirs.out)?;
     run_rustc(&inv, &c.krate.name, &|text| {
-        test_only::hints(&c.package, text, &c.test_only, &c.remap, Path::new(&c.cwd))
+        view_hints::hints(
+            &c.package,
+            text,
+            c.view.as_ref(),
+            &c.remap,
+            Path::new(&c.cwd),
+        )
     })?;
     collect_outputs(&c.outputs, &c.uplifted, &dirs.out, |o| outer.output(o))?;
     if c.outputs.contains_key("rmeta") {

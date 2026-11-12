@@ -13,12 +13,13 @@
 //!    stderr, which is streamed as the script runs, so a panic is not buried
 //!    under stdout and hints.
 //! 6. Check `rerun-if-changed` paths against the sandbox: on failure, hint at
-//!    each missing path, at failures of common crates ([`recognize`]) and
-//!    at the unset `rerun-if-env-changed` variables; on success, warn about
-//!    missing paths and list them in `$flags/missing-paths.json`, which the
-//!    products' `buildScriptPaths` check reads. The run itself does not
-//!    fail on them: a check fails without blocking what is built above it,
-//!    and names every missing path below a product at once.
+//!    each missing path, at failures of common crates ([`recognize`]), at
+//!    the unset `rerun-if-env-changed` variables and at paths the output
+//!    names that the source view lacks ([`view_hints`]); on success, warn
+//!    about missing paths and list them in `$flags/missing-paths.json`,
+//!    which the products' `buildScriptPaths` check reads. The run itself
+//!    does not fail on them: a check fails without blocking what is built
+//!    above it, and names every missing path below a product at once.
 //! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
 //!    ([`remove_cmake_state`]).
 
@@ -37,7 +38,7 @@ use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
 use crate::splice::expand_dylib_path;
-use crate::test_only;
+use crate::view_hints;
 use crate::{
     DIRECTIVES_FILE, Error, METADATA_FILE, MISSING_PATHS_FILE, TARGET_FILES_FILE, io_err,
     read_directives, read_metadata, write_json,
@@ -177,7 +178,7 @@ pub fn missing_paths(out: &BuildOutput, cwd: &Path) -> Vec<MissingPath> {
         })
         .filter(|m| m.path.symlink_metadata().is_err())
         .map(|m| MissingPath {
-            path: test_only::normalize(&m.path),
+            path: view_hints::normalize(&m.path),
             ..m
         })
         .collect()
@@ -350,30 +351,39 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
     let cwd = Path::new(&f.run.cwd);
     let stdout = String::from_utf8_lossy(f.stdout);
     let stderr = String::from_utf8_lossy(f.stderr_tail);
-    let mut hints = Vec::new();
-    if let Some(p) = parsed {
-        let lines = stdout.lines().chain(stderr.lines());
-        hints.extend(path_hints(&f.run.package, cwd, &missing_paths(p, cwd)));
-        hints.extend(recognize::hints(
-            &option_prefix(&f.run.package),
-            &p.rerun_if_env_changed,
-            &unset_vars(p, f.env),
-            lines,
-        ));
-    }
-    // The script's output, or the paths it declared, naming a test-only path.
-    let mut text = format!("{stdout}\n{stderr}");
-    for m in parsed.map(|p| missing_paths(p, cwd)).unwrap_or_default() {
-        text.push('\n');
-        text.push_str(&m.path.display().to_string());
-    }
-    hints.extend(test_only::hints(
-        &f.run.package,
-        &text,
-        &f.run.test_only,
-        &f.run.remap,
-        cwd,
+    let missing = parsed.map(|p| missing_paths(p, cwd)).unwrap_or_default();
+    let mut hints = path_hints(&f.run.package, cwd, &missing);
+    hints.extend(recognize::hints(
+        &option_prefix(&f.run.package),
+        parsed.map_or(&[][..], |p| &p.rerun_if_env_changed),
+        &parsed.map(|p| unset_vars(p, f.env)).unwrap_or_default(),
+        stdout.lines().chain(stderr.lines()),
     ));
+    // Paths the script's output names, and the declared ones, that its view
+    // lacks; a declared path missing from the view has its hint already,
+    // unless it is test-only.
+    if let Some(view) = &f.run.view {
+        let mut text = format!("{stdout}\n{stderr}");
+        for m in &missing {
+            text.push('\n');
+            text.push_str(&m.path.display().to_string());
+        }
+        let declared: Vec<PathBuf> = missing
+            .iter()
+            .map(|m| view_hints::normalize(&m.path))
+            .collect();
+        let found: Vec<view_hints::Found> =
+            view_hints::find(&text, view, &f.run.remap, cwd, &|p| {
+                p.symlink_metadata().is_ok()
+            })
+            .into_iter()
+            .filter(|found| {
+                matches!(found, view_hints::Found::TestOnly { .. })
+                    || !declared.iter().any(|d| d == found.path())
+            })
+            .collect();
+        hints.extend(view_hints::hint_lines(&f.run.package, view, &found));
+    }
     for h in hints {
         msg.push_str("\nhint: ");
         msg.push_str(&h);

@@ -1,0 +1,4 @@
+[package]
+name = "run-reads"
+version.workspace = true
+edition.workspace = true

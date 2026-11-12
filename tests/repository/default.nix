@@ -502,6 +502,43 @@ let
 
   inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
 
+  # --- view-hints ----------------------------------------------------------------
+
+  viewHints = mkRepo (fixtures + "/view-hints") [
+    (oneWs ".")
+    {
+      packages.chosen-reads.sources = [
+        (
+          {
+            default,
+            kind,
+            root,
+            packageDir,
+            ...
+          }:
+          if kind == "build" then
+            lib.fileset.difference default (root + "/${packageDir}/data.txt")
+          else
+            default
+        )
+      ];
+    }
+  ];
+  # With the options the hints name.
+  viewHintsFixed = mkRepo (fixtures + "/view-hints") [
+    (oneWs ".")
+    {
+      packages = {
+        lib-reads.extraSources = [ "shared" ];
+        script-reads.extraSources = [ "shared" ];
+        test-reads.test.sourceScope = [ "shared" ];
+        run-reads.test.sourceScope = [ "shared" ];
+        doc-reads.test.sourceScope = [ "shared" ];
+        lib-to-tests.test.scopeTestsDir = false;
+      };
+    }
+  ];
+
   # --- host units across debugInfo ---------------------------------------------
 
   # One workspace with build scripts and a proc macro, planned for a target
@@ -548,6 +585,8 @@ in
       declaredProvided
       overrideRepo
       testOnly
+      viewHints
+      viewHintsFixed
       pkgidShort
       sources
       ;
@@ -1109,6 +1148,55 @@ in
         grep -q 'test reads_run_data ... ok' $cliRun/log
         grep -q 'test tests::matches_snapshot ... ok' $lintRun/log
         [ "$($app/bin/cli)" = 42 ]
+        touch $out
+      '';
+
+  # A unit of each kind that fails reading a path its source view lacks
+  # names the path and the option that adds it; with those options set,
+  # each builds.
+  view-hints =
+    let
+      i = inst viewHints;
+      fixed = inst viewHintsFixed;
+      build = unitsNamed i "build";
+      test = unitsNamed i "test";
+      missing = "`shared/data.txt` is not in this unit's source view; if it is in the repository, add it to";
+    in
+    pkgs.runCommand "view-hints"
+      {
+        lib = expectFailure "view-hints-lib" build."lib-reads-0.1.0-lib" [
+          "${missing} `packages.lib-reads.extraSources`"
+        ];
+        # A `sources` function left the file out: the option for the kind.
+        chosen = expectFailure "view-hints-chosen" build."chosen-reads-0.1.0-lib" [
+          "`crates/chosen-reads/data.txt` is not in this unit's source view; if it is in the repository, add it to `packages.chosen-reads.extraSources`"
+        ];
+        run = expectFailure "view-hints-run" build."script-reads-0.1.0-build-run" [
+          "${missing} `packages.script-reads.extraSources`"
+        ];
+        testCompile = expectFailure "view-hints-test" test."test-reads-0.1.0-test-reads" [
+          "${missing} `packages.test-reads.test.sourceScope`"
+        ];
+        testRun = expectFailure "view-hints-test-run" i.testRuns.run-reads.reads [
+          "${missing} `packages.run-reads.test.sourceScope`"
+        ];
+        doctest = expectFailure "view-hints-doctest" i.doctests.doc-reads [
+          "${missing} `packages.doc-reads.test.sourceScope`"
+        ];
+        libToTests = expectFailure "view-hints-lib-to-tests" i.testRuns.lib-to-tests.fixture [
+          "`crates/lib-to-tests/tests/fixtures/input.txt` is in the package's `tests/` directory"
+          "`packages.lib-to-tests.test.scopeTestsDir = false`"
+        ];
+        fixedLib = (unitsNamed fixed "build")."lib-reads-0.1.0-lib";
+        fixedRun = (unitsNamed fixed "build")."script-reads-0.1.0-build-run";
+        fixedTestRun = fixed.testRuns.run-reads.reads;
+        fixedDoctest = fixed.doctests.doc-reads;
+        fixedLibToTests = fixed.testRuns.lib-to-tests.fixture;
+        # The test run built the integration test that failed to compile.
+        fixedTestCompile = fixed.testRuns.test-reads.reads;
+      }
+      ''
+        cat $lib/log $chosen/log $run/log $testCompile/log $testRun/log $doctest/log $libToTests/log
         touch $out
       '';
 
