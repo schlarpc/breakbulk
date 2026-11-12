@@ -224,7 +224,34 @@ let
         binaries = mkOption {
           type = types.attrsOf (types.submodule testBinary);
           default = { };
-          description = "Per test binary settings.";
+          example = lib.literalExpression ''
+            {
+              net.args = [ "--skip" "needs_network" ];
+              "lib/my_crate".env.RUST_LOG = "debug";
+              "bin/my-tool".enable = false;
+            }
+          '';
+          description = ''
+            Settings for one test binary of this package, by its key (and
+            the name of its check, `<ws>/<triple>/<pkg>/…`):
+
+            - an integration test (`[[test]]`, `tests/cli.rs`): its name,
+              `cli` (check `test-cli`);
+            - the library's unit tests: `lib/` and the library's crate
+              name, `lib/my_crate` (check `test-lib`);
+            - a bin's unit tests: `bin/` and the bin's name, `bin/my-tool`
+              (check `test-bin-my-tool`);
+            - an example or bench with `test = true`: `example/<name>`,
+              `bench/<name>` (check `test-example-<name>`,
+              `test-bench-<name>`).
+
+            A key that names no test binary of the package is an evaluation
+            error listing the package's keys. The keys come from the
+            package's manifest, so a test binary that only some targets or
+            variants build (`required-features`) has its key on all of
+            them. Under `memberDefaults`, a key must name a test binary of
+            some member.
+          '';
         };
         runner = mkOption {
           type = types.nullOr (

@@ -98,7 +98,7 @@ let
   root = util.rootPath args.root;
 
   eval = lib.evalModules {
-    modules = bbModules ++ userModules;
+    modules = bbModules ++ userModules ++ [ projectAssertions ];
     # Module arguments: `pkgs`; `root` (the repository root, a path), for
     # reading project files; `repo` (the result, below), for products used
     # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk);
@@ -112,6 +112,15 @@ let
     // specialArgs;
   };
   cfg = eval.config;
+
+  # Checks of the options against the project's files (lockfiles,
+  # manifests), which the modules do not read. A module rather than a
+  # list `guard` adds, so that `repo.config.assertions` holds them with
+  # the modules' own.
+  projectAssertions = {
+    _file = ./repository.nix;
+    config.assertions = binaryKeyAssertions;
+  };
 
   # The project's `build.target` for a workspace path, by the planner's
   # config-file rule (breakbulk-plan --build-target-only; IFD), as a list
@@ -373,6 +382,133 @@ let
     lib.genAttrs members (pkg: {
       test = withDefaults (lib.foldl' (acc: l: mergeTest acc l.test) empty (memberLayers wsName triple pkg));
     });
+
+  # --- test binary keys --------------------------------------------------------
+  #
+  # The keys of `test.binaries` (lib/test-runs.nix `binaryKey`), by
+  # workspace and package, from the test roots predicted from the
+  # manifests. Every plan of a workspace has exactly those roots, whatever
+  # its target, variant or package selection (Cargo's skipped ones, such as
+  # an unmet `required-features`, as stubs; a root the plan has and the
+  # manifests do not is an instantiation error), so one check covers them
+  # all, at evaluation, without planning, in both delivery modes.
+  testBinaryKeys = lib.mapAttrs (
+    _: ws:
+    let
+      predicted = breakbulkLib.predictedRoots {
+        workspaceRoots = breakbulkLib.roots.workspaceRoots {
+          inherit root;
+          wsDir = wsDirOf ws;
+        };
+        planKind = "test";
+        variant = "";
+      };
+    in
+    lib.mapAttrs (_: rs: lib.sort lib.lessThan (map breakbulkLib.testRuns.binaryKey rs)) (
+      lib.groupBy (r: r.package) (lib.filter (r: r.test) predicted.roots)
+    )
+  ) cfg.workspaces;
+
+  # A `test.binaries` key that names no test binary is an error: the
+  # settings are looked up by key, so a misspelt one would leave enabled
+  # what the user turned off. `option` is the module option holding the
+  # setting (for the files that set a key), `path` the setting's path
+  # within it, `name` its name in messages, `owner` what `known` are the
+  # test binaries of.
+  unknownBinaryKeys =
+    {
+      option,
+      path,
+      name,
+      keys,
+      known,
+      owner,
+    }:
+    let
+      unknown = lib.filter (k: !(lib.elem k known)) keys;
+      files = lib.unique (
+        lib.concatMap (
+          k:
+          map (d: d.file) (
+            lib.filter (
+              d: lib.hasAttrByPath (path ++ [ "test" "binaries" k ]) d.value
+            ) option.definitionsWithLocations
+          )
+        ) unknown
+      );
+      quoted = ks: lib.concatMapStringsSep ", " (k: "`${k}`") ks;
+    in
+    lib.optional (unknown != [ ]) {
+      assertion = false;
+      message = "breakbulk: ${name}.test.binaries${bt.setIn { inherit files; }}: ${quoted unknown} ${
+        if lib.length unknown == 1 then "names" else "name"
+      } no test binary of ${owner}; ${
+        if known == [ ] then "it has none" else "the test binaries are ${quoted known}"
+      }";
+    };
+
+  # A setting and its `target.<triple>` layers, each with its path.
+  withTargetLayers =
+    path: v:
+    [ { inherit path v; } ]
+    ++ lib.mapAttrsToList (t: tv: {
+      path = path ++ [
+        "target"
+        t
+      ];
+      v = tv;
+    }) v.target;
+  layerName = lib.concatMapStringsSep "." lib.strings.escapeNixIdentifier;
+
+  binaryKeyAssertions = lib.concatLists (
+    lib.mapAttrsToList (
+      wsName: ws:
+      let
+        known = testBinaryKeys.${wsName};
+        pathPackages = lib.filter (e: e.source or null == null) locks.${wsName};
+      in
+      # `packages.<name>`: the keys of each package it applies to.
+      lib.concatMap (
+        k:
+        lib.concatMap (
+          l:
+          let
+            keys = lib.attrNames l.v.test.binaries;
+          in
+          lib.optionals (keys != [ ]) (
+            lib.concatMap (
+              e:
+              unknownBinaryKeys {
+                option = eval.options.packages;
+                inherit (l) path;
+                name = "packages.${layerName l.path}";
+                inherit keys;
+                known = known.${e.name} or [ ];
+                owner = "`${e.name}` in workspaces.${wsName}";
+              }
+            ) (lib.filter (overrideMatches k) pathPackages)
+          )
+        ) (withTargetLayers [ k ] cfg.packages.${k})
+      ) (lib.attrNames cfg.packages)
+      # `memberDefaults`: the keys of any of the path packages.
+      ++ lib.concatMap (
+        l:
+        let
+          keys = lib.attrNames l.v.test.binaries;
+        in
+        lib.optionals (keys != [ ]) (unknownBinaryKeys {
+          option = eval.options.workspaces;
+          inherit (l) path;
+          name = "workspaces.${layerName l.path}";
+          inherit keys;
+          known = lib.sort lib.lessThan (
+            lib.unique (lib.concatMap (e: known.${e.name} or [ ]) pathPackages)
+          );
+          owner = "any member of workspaces.${wsName}";
+        })
+      ) (withTargetLayers [ wsName "memberDefaults" ] ws.memberDefaults)
+    ) cfg.workspaces
+  );
   # --- target specs, per workspace -------------------------------------------
   #
   # The spec of one workspace on one triple: the repository-wide

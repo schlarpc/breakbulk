@@ -206,8 +206,11 @@ More behavior:
 - Tests that cannot run in the sandbox (network, devices) are skipped
   with libtest's own filters
   ([`test.args`](../reference/options/packages.md#packagesnametestargs)),
-  per package or per test binary. Changing a skip list re-runs only the
-  affected test runs.
+  per package or per test binary
+  ([`test.binaries.<key>`](../reference/options/packages.md#packagesnametestbinaries),
+  which says how a binary's key is spelled; a key that names no test
+  binary is an error). Changing a skip list re-runs only the affected
+  test runs.
 
 **Home directory.** A test run and a doctest run get a fresh, empty,
 writable `HOME` inside the run's own temporary directory, as a test has a

@@ -74,6 +74,12 @@
 #                           fresh, empty home in $TMPDIR with
 #                           XDG_CACHE_HOME unset; with `test.env.HOME =
 #                           "/homeless-shelter"` both fail
+#   test-binary-keys        `test.binaries` keys: unknown ones (in
+#                           `packages.<name>`, its `target.<triple>` layer
+#                           and `memberDefaults`) fail evaluation with a
+#                           message naming the valid keys; a key for the
+#                           required-features test, which only one variant
+#                           builds, is accepted and reaches that run
 #
 # `workspaces` exposes the mkWorkspace results for debugging; `repos` the
 # mkRepository results that tests/dynamic builds in both modes.
@@ -929,6 +935,72 @@ let
         grep -q 'cannot create /homeless-shelter/.config/th' err
         mkdir -p $result
       '';
+
+  # --- test binary keys ------------------------------------------------------
+
+  keysRepo =
+    modules:
+    breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/test-control";
+      modules = [
+        {
+          workspaces.main.variants = {
+            default.profile = "dev";
+            extra = {
+              profile = "dev";
+              features = [ "extra" ];
+            };
+          };
+        }
+      ]
+      ++ modules;
+    };
+  testBinaryKeys =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      failed = r: map (a: a.message) (lib.filter (a: !a.assertion) r.config.assertions);
+      ctlKeys = "`bin/ctl`, `bin_exe`, `env`, `ignored`, `lib/ctl`, `needs_feat`, `net`";
+      # `needs_feat` needs the `extra` feature: only the `extra` variant
+      # builds it.
+      good = keysRepo [
+        {
+          packages.ctl.test.binaries.needs_feat.args = [ "--exact" ];
+          packages.ctl.target.${native}.test.binaries."lib/ctl".enable = false;
+          workspaces.main.memberDefaults.test.binaries.net.enable = false;
+        }
+      ];
+      variants = good.workspaces.main.target.${native}.variants;
+      bad = keysRepo [
+        {
+          _file = "/checks/keys.nix";
+          packages.ctl.test.binaries = {
+            lib.enable = false;
+            ctl.enable = false;
+            net.enable = false;
+          };
+          packages.ctl.target.${native}.test.binaries.needs-feat.enable = false;
+          workspaces.main.memberDefaults.test.binaries.bin.enable = false;
+        }
+      ];
+      want = [
+        "breakbulk: packages.ctl.test.binaries (set in `/checks/keys.nix'): `ctl`, `lib` name no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
+        "breakbulk: packages.ctl.target.${native}.test.binaries (set in `/checks/keys.nix'): `needs-feat` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
+        "breakbulk: workspaces.main.memberDefaults.test.binaries (set in `/checks/keys.nix'): `bin` names no test binary of any member of workspaces.main; the test binaries are ${ctlKeys}"
+      ];
+    in
+    assert lib.assertMsg (failed good == [ ]) "test-binary-keys: valid keys rejected: ${builtins.toJSON (failed good)}";
+    assert lib.assertMsg (
+      variants.default.testRuns.ctl.needs_feat.breakbulkRoot.unit == null
+      && variants.extra.testRuns.ctl.needs_feat.passthru.breakbulkTest.args == [ "--exact" ]
+    ) "test-binary-keys: needs_feat should be a stub in default and a run with its args in extra";
+    assert lib.assertMsg (failed bad == want) "test-binary-keys: got ${builtins.toJSON (failed bad)}";
+    assert lib.assertMsg (
+      !(builtins.tryEval (lib.attrNames bad.checks)).success
+    ) "test-binary-keys: repo.checks read despite an unknown key";
+    pkgs.runCommand "test-runs-test-binary-keys" { } ''
+      echo ok > $out
+    '';
 in
 {
   workspaces = {
@@ -940,6 +1012,7 @@ in
   };
   post-run = postRun;
   inherit home;
+  test-binary-keys = testBinaryKeys;
   test-threads = testThreads;
   dylib-rule = dylibRule;
   inherit nextest;
