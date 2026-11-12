@@ -430,9 +430,8 @@ let
       },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
       packages ? { },
-      # As testRuns.mkTestRuns's: the package directories of `test.runFiles`
-      # views.
-      runFilesDirs ? { },
+      # As testRuns.mkTestRuns's: the package directories of "run" views.
+      runDirs ? { },
       ca ? null,
       coverage ? false,
       name ? "breakbulk",
@@ -469,21 +468,18 @@ let
             '';
           };
 
-      runFilesDir =
-        pkg:
-        runFilesDirs.${pkg}
-          or (throw "breakbulk: packages.${pkg}.test.runFiles is set, but the package has no source view");
+      runDir = pkg: runDirs.${pkg} or null;
 
-      # `test.runFiles`: the run's working directory and runtime
-      # CARGO_MANIFEST_DIR are the package directory of the narrowed view,
-      # set after the wrapper's environment. With `ca`, `stableInfo` has
-      # narrowed them already.
+      # A "run" view: the run's working directory and runtime
+      # CARGO_MANIFEST_DIR are its package directory, set after the
+      # wrapper's environment. With `ca`, `stableInfo` has narrowed them
+      # already.
       narrowScript =
-        pkg: cfg:
-        lib.optionalString (cfg.runFiles != null && !useCa) (
-          let
-            dir = runFilesDir pkg;
-          in
+        pkg:
+        let
+          dir = runDir pkg;
+        in
+        lib.optionalString (dir != null && !useCa) (
           ''
             __bb_orig_manifest_dir=$CARGO_MANIFEST_DIR
             export CARGO_MANIFEST_DIR=${lib.escapeShellArg dir}
@@ -498,7 +494,7 @@ let
       # whole source view), so a run reading it would re-run after an edit
       # to any of those packages. `out` holds `breakbulk-root.json` with `reason` and
       # `testSpec` only, its `flags` lists empty, narrowed to the
-      # `test.runFiles` view, and without nextest's metadata for a libtest
+      # "run" view, and without nextest's metadata for a libtest
       # run (it names the whole view); and `rustc-env/directives.json`,
       # the `rustc-env` values. `dylibs` holds the dynamic-library path's
       # copies, as stableSpec's `test-dylibs`. The name is not per binary,
@@ -516,7 +512,11 @@ let
                 "dylibs"
               ];
               nativeBuildInputs = [ pkgs.jq ];
-              narrowDir = if cfg.runFiles == null then "" else runFilesDir r.breakbulkRoot.package;
+              narrowDir =
+                let
+                  d = runDir r.breakbulkRoot.package;
+                in
+                if d == null then "" else d;
               keepNextest = cfg.runner == "nextest";
             }
           )
@@ -693,7 +693,7 @@ let
           )
           (
             prelude cfg key
-            + narrowScript b.package cfg
+            + narrowScript b.package
             + (
               if cfg.runner == "nextest" then
                 nextestScript b cfg args binGlob

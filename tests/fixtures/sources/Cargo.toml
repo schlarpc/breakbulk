@@ -1,0 +1,17 @@
+# Source-view functions (`packages.<name>.sources`; tests/repository
+# `sources`). `cli` is the root package: its view would hold every file
+# here but `lint/`, and a function keeps only what it compiles from. Its
+# integration test reads `data/` at run time, from the directory Cargo
+# runs it in. `lint` keeps a snapshot under `src/` that only its unit
+# tests read.
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lint = { path = "lint" }
+
+[workspace]
+resolver = "2"
+members = ["lint"]

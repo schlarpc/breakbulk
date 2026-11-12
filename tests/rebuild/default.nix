@@ -140,6 +140,7 @@ let
     same-triple = [ presetFixtures.repos.sameTriple ];
     same-workspace-products = [ products.repos.sameWsRepo ];
     source-paths = [ products.repos.sourcePaths ];
+    sources = [ repository.repos.sources ];
     stamps = [ repository.repos.stampsA ];
     static = [
       presetFixtures.repos.musl

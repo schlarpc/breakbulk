@@ -87,7 +87,9 @@ pkgs:
   configs ? [ ],
   # extraSources.<package name> = [ "<path from the repository root>" ]
   extraSources ? { },
-  # packages.<name> = { nativeInputs; inputs; env; test; }: see above.
+  # packages.<name> = { nativeInputs; inputs; env; test; sources; }: see
+  # above; `sources` is the package's list of source-view functions
+  # (lib/source-views.nix).
   packages ? { },
   tools ? defaultTools pkgs,
   name ? "breakbulk",
@@ -178,9 +180,12 @@ let
   crates = lib.listToAttrs (
     map (e: lib.nameValuePair (crateId e) (fetch.crateSource e).path) (lockfile.remoteEntries entries)
   );
+  # Each package's settings for its views: `extraSources` and those of
+  # `packages.<name>` (`test`, `sources`).
+  viewSettings = name: (packages.${name} or { }) // { extraSources = extraSources.${name} or [ ]; };
   views = sourceViews.workspaceViews {
-    inherit root wsDir extraSources;
-    test = lib.mapAttrs (_: p: p.test or { }) packages;
+    inherit root wsDir;
+    packages = lib.genAttrs (lib.attrNames packages ++ lib.attrNames extraSources) viewSettings;
   };
   # Path packages Cargo loads from outside the workspace root.
   closureDirs = skel.passthru.description.packages;
@@ -193,19 +198,18 @@ let
     # Not tested, so no test view; test-only paths still stay out.
     sourceViews.packageViews {
       inherit root;
+      name = pkgName;
       pkgDir = dir;
       memberDirs = closureDirs;
-      extraSources = extraSources.${pkgName} or [ ];
-      test = packages.${pkgName}.test or { };
+      settings = viewSettings pkgName;
+      tested = false;
     }
   );
   allViews = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v) views // outsideViews;
   workspace = lib.mapAttrs (_: v: v.src) allViews;
-  # Members with test-only paths or `test.sourceScope`: the view of their
-  # test units, by directory (instantiate's `sources.workspaceTest`).
-  workspaceTest = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.testSrc) (
-    lib.filterAttrs (_: v: v.testSrc != null) views
-  );
+  # The members' views of their test units, by directory (instantiate's
+  # `sources.workspaceTest`).
+  workspaceTest = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.testSrc) views;
   # Test-only paths by directory (instantiate's `sources.testOnly`), for
   # the hint when a non-test unit misses one.
   testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
@@ -216,30 +220,10 @@ let
     lib.genAttrs memberDirs (dir: sourceViews.clippyConfTree { inherit root; pkgDir = dir; })
   );
 
-  # Members with `test.runFiles`: the package directory of a
-  # view of the repository root holding only those paths (relative to the
-  # package directory, at their usual places), by package name. Test runs
-  # use it as their working directory and runtime CARGO_MANIFEST_DIR. A
-  # listed path that does not exist is an evaluation error; `[ ]` gives an
-  # empty package directory.
-  runFilesDirs = lib.concatMapAttrs (
-    pkgName: v:
-    let
-      files = packages.${pkgName}.test.runFiles or null;
-      at = rel: if rel == "" then root else root + "/${rel}";
-      view =
-        if files == [ ] then
-          pkgs.runCommand "${name}-${pkgName}-run-files" { } "mkdir -p $out${lib.optionalString (v.dir != "") "/${v.dir}"}"
-        else
-          lib.fileset.toSource {
-            inherit root;
-            fileset = lib.fileset.unions (map (p: at (util.joinRel v.dir p)) files);
-          };
-    in
-    lib.optionalAttrs (files != null) {
-      ${pkgName} = if v.dir == "" then "${view}" else "${view}/${v.dir}";
-    }
-  ) views;
+  # The package directory of each member's "run" view, by package name, or
+  # null when its test runs read their test binary's own view. Test runs
+  # use it as their working directory and runtime CARGO_MANIFEST_DIR.
+  runDirs = lib.mapAttrs (_: v: v.runDir) views;
 
   # What the toolchain can do (lib/toolchain-facts.nix), with the
   # toolchain's own overrides: the one place the planner's and
@@ -509,7 +493,7 @@ let
       runner
       testSystem
       packages
-      runFilesDirs
+      runDirs
       ca
       name
       traits
@@ -603,7 +587,7 @@ in
           target
           runner
           testSystem
-          runFilesDirs
+          runDirs
           ca
           traits
           ;

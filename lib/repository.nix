@@ -341,10 +341,11 @@ let
     wsName: triple: vName: pkg:
     map (o: { inherit (o) stages checks; }) (memberLayers wsName triple vName pkg);
 
-  # The layers' `test` settings merged, for mkTestRuns:
-  # `{ <pkg> = { test = …; }; }` for the workspace's path packages. Lists,
-  # env and snippets combine; single values are `pickSingle`'s.
-  testConfigs =
+  # The layers' `test` and `sources` settings merged, for mkWorkspace's
+  # `packages`: `{ <pkg> = { test = …; sources = …; }; }` for the
+  # workspace's path packages. Lists, env and snippets combine, in layer
+  # order; single values are `pickSingle`'s.
+  memberConfigs =
     wsName: triple: vName:
     let
       members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
@@ -442,9 +443,16 @@ let
           };
         };
     in
-    lib.genAttrs members (pkg: {
-      test = withDefaults (merged (memberLayers wsName triple vName pkg));
-    });
+    lib.genAttrs members (
+      pkg:
+      let
+        ls = memberLayers wsName triple vName pkg;
+      in
+      {
+        test = withDefaults (merged ls);
+        sources = lib.concatMap (l: l.sources) ls;
+      }
+    );
 
   # --- test binary keys --------------------------------------------------------
   #
@@ -960,7 +968,7 @@ let
       shippedRemapScope = shippedRemapScopeOf wsName triple v;
       inherit (v) cargoTrimPaths sourcePaths;
       traits = traitsOf wsName triple;
-      packages = testConfigs wsName triple vName;
+      packages = memberConfigs wsName triple vName;
       inherit (cfg) ca;
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;

@@ -10,6 +10,18 @@ let
   # Which units are on which side.
   sides = "[sides](../../explanation/configuration.md#host-and-target-sides)";
 
+  # The source-view pipeline that `extraSources` and the `test` source
+  # options are steps of.
+  pipeline = "[`sources`](#packagesnamesources)";
+
+  sourcesFunction = lib.mkOptionType {
+    name = "sourcesFunction";
+    description = "function from { default, kind, root, packageDir, ... } to a file set";
+    descriptionClass = "noun";
+    check = builtins.isFunction;
+    merge = lib.options.mergeOneOption;
+  };
+
   side = name: {
     env = bt.mkEnv "Environment for this package's ${name} units only (${sides}).";
     nativeInputs = bt.mkInputs "Build-machine tools for this package's ${name} units only (${sides}).";
@@ -133,7 +145,52 @@ let
           Files and directories outside the package directory that its
           units read (`include_str!("../../wit/x.wit")`, a sibling assets
           directory, patches), at their original relative paths. Strings
-          are relative to the repository root.
+          are relative to the repository root. A built-in step of
+          ${pipeline}: added for every kind of unit.
+        '';
+      };
+      sources = mkOption {
+        type = types.listOf sourcesFunction;
+        default = [ ];
+        example = lib.literalExpression ''
+          [
+            ({ default, kind, root, ... }:
+              if kind == "run"
+              then lib.fileset.union default (root + "/crates/linter/resources/fixtures")
+              else default)
+          ]
+        '';
+        description = ''
+          Functions that choose the files of this package's source views.
+          Each gets an attribute set and returns a `lib.fileset` value
+          inside the repository root:
+
+          - `default`: the files chosen so far.
+          - `kind`: `"build"` (non-test compiles, build scripts and their
+            runs), `"test"` (test compiles and doctests) or `"run"` (test
+            runs). More kinds may be added: return `default` for a kind
+            you do not know.
+          - `root`: the repository root, a path.
+          - `packageDir`: the package directory, relative to `root` (`""`
+            for a package at the root).
+
+          A function must take `...`. breakbulk passes one more argument,
+          so that a function without `...` fails on its first use, not
+          when breakbulk adds an argument. The error names an argument the
+          function does not take; the extra one's name says to add `...`.
+
+          The functions run after the built-in steps (the package
+          directory, then `extraSources`, `test.sourceScope`,
+          `test.scopeTestsDir` and `test.runFiles`), each on the result
+          of the one before. Lists concatenate in [layer
+          order](../../explanation/configuration.md#shared-settings-and-layer-order):
+          a `memberDefaults` function runs before a `packages.<name>`
+          one, and a `variant.<v>` function after the level it refines.
+          Within one layer, `lib.mkBefore` and `lib.mkAfter` order them.
+          See [Fetching and source
+          views](../../explanation/internals/sources.md#source-views) and
+          [Rebuild less when unrelated files
+          change](../../how-to/filter-source.md).
         '';
       };
 
@@ -185,7 +242,7 @@ let
             units (the library, bins, build script). Either way, editing
             it rebuilds only this package's test units and re-runs its
             tests. The package's `tests/` directory is in this scope too
-            (`scopeTestsDir`).
+            (`scopeTestsDir`). A built-in step of ${pipeline}.
           '';
         };
         scopeTestsDir = mkOption {
@@ -201,7 +258,7 @@ let
             reads from `tests/` at compile time
             (`include_str!("../tests/…")`, a build script that generates
             tests from fixtures); such a unit fails with a hint naming
-            this option. `null`: `true`.
+            this option. `null`: `true`. A built-in step of ${pipeline}.
           '';
         };
         runFiles = mkOption {
@@ -216,9 +273,11 @@ let
             file of the package then leaves the test run's own inputs
             unchanged, so with content addressing (`ca`) a byte-identical
             test binary is not re-run. A test that reads a file not listed
-            fails. `null`: the package's whole source view (or its
-            `test.sourceScope` view), as `cargo test` sees it. Test apps
-            keep the whole view. `caDerivations` in
+            fails. `null`: the view of the package's test compiles, as
+            `cargo test` sees it. Test apps keep that view. A built-in
+            step of ${pipeline}, for kind `"run"`: a later function can
+            still add files, such as another package's fixtures.
+            `caDerivations` in
             [`repo.nixFeatures`](../outputs.md#nixfeatures) says whether
             `ca` is on.
           '';

@@ -420,9 +420,9 @@ rec {
         ''}
       '';
 
-  # `test.runFiles`: a spec whose working directory and
-  # runtime CARGO_MANIFEST_DIR are `dir`, the package directory of a view
-  # holding only the listed files (lib/workspace.nix `runFilesDirs`).
+  # A spec whose working directory and runtime CARGO_MANIFEST_DIR are
+  # `dir`, the package directory of the package's "run" view
+  # (lib/workspace.nix `runDirs`), as `test.runFiles` narrows it.
   narrowSpec =
     dir: spec:
     spec
@@ -449,7 +449,6 @@ rec {
       binaries = { };
       runner = "libtest";
       stripForRun = false;
-      runFiles = null;
       postRun = "";
       keepLog = false;
     }
@@ -474,7 +473,7 @@ rec {
   # metadata breakbulk-instantiate synthesizes (`nextest_for` in
   # crates/breakbulk-instantiate/src/dynamic.rs, which says why each field
   # is what it is), with the target's sysroot library directory
-  # (`"@LIBDIR@"`) filled in here. With `test.runFiles` (`spec` narrowed),
+  # (`"@LIBDIR@"`) filled in here. With a "run" view (`spec` narrowed),
   # the tested package's manifest is in the narrowed view, as in dynamic
   # mode. `@BINARY@`, `@TARGET@` and `@WS@` are filled in by the test run.
   nextestSpec =
@@ -685,9 +684,9 @@ rec {
       dylibPath ? dylibPathOf { inherit traits runner; },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
       packages ? { },
-      # runFilesDirs.<package> = the package directory of its `test.runFiles`
-      # view, for packages that set it (lib/workspace.nix).
-      runFilesDirs ? { },
+      # runDirs.<package> = the package directory of its "run" view, or
+      # null for the test binary's own view (lib/workspace.nix).
+      runDirs ? { },
       ca ? null,
       coverage ? false,
       name ? "breakbulk",
@@ -814,14 +813,8 @@ rec {
         let
           cfg = testConfig packages r.breakbulkRoot.package;
           base = spec r;
-          narrowed =
-            if cfg.runFiles == null then
-              base
-            else
-              narrowSpec (
-                runFilesDirs.${base.package}
-                  or (throw "breakbulk: packages.${base.package}.test.runFiles is set, but the package has no source view")
-              ) base;
+          runDir = runDirs.${base.package} or null;
+          narrowed = if runDir == null then base else narrowSpec runDir base;
           s =
             if useCa then
               stableSpec {

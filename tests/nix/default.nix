@@ -18,6 +18,8 @@
 #   skeleton                 `cargo metadata` over the skeleton == over the
 #                            real tree
 #   source-views             file lists of source views
+#   sources-sentinel         a `sources` function without `...` fails with
+#                            the message that says to add it
 #   vendor-collision         crates.io + git crates (network at evaluation
 #                            for git), offline `cargo build` against the
 #                            vendor directory with unchanged `-C metadata`
@@ -312,10 +314,15 @@ let
     let
       views = bb.sourceViews.workspaceViews {
         root = rootsLayouts;
-        extraSources.bin-dirs = [ "shared/bin" ];
+        packages.bin-dirs.extraSources = [ "shared/bin" ];
+        # A "run" view with no file of the package.
+        packages.virtual-sub.test.runFiles = [ ];
       };
     in
+    assert lib.assertMsg (views.bin-dirs.runDir == null) "source-views: bin-dirs' runs have a view of their own";
     pkgs.runCommand "source-views" { } ''
+      r=${views.virtual-sub.runDir}
+      test -d $r && test -z "$(ls -A $r)"         # the package directory, empty
       v=${views.virtual-sub.src}
       test -f $v/virtual-sub/src/main.rs
       test -f $v/virtual-sub/nested/Cargo.toml    # non-member package dir kept
@@ -328,6 +335,60 @@ let
       test "$(cd $b && find . -name Cargo.toml)" = "./crates/bin-dirs/Cargo.toml"
       touch $out
     '';
+
+  # A source-view function without `...` fails on its first call. One
+  # that takes every other argument gets an error that names only the
+  # extra one, which says to add `...`. builtins.tryEval does not catch a
+  # call with an unexpected argument, so nested evaluations check the
+  # messages; the same function with `...` evaluates.
+  sourcesSentinelCheck =
+    let
+      expr = fn: ''
+        let
+          lib = import ${pkgs.path}/lib;
+          util = import ${../../lib/util.nix} { inherit lib; };
+          manifest = import ${../../lib/manifest.nix} { inherit lib util; };
+          sourceViews = import ${../../lib/source-views.nix} { inherit lib util manifest; };
+        in
+        builtins.seq (sourceViews.viewFileset {
+          root = /. + builtins.getEnv "ROOT";
+          name = "p";
+          pkgDir = "p";
+          kind = "build";
+          steps = [ (${fn}) ];
+        }) "evaluated"
+      '';
+    in
+    pkgs.runCommand "sources-sentinel"
+      {
+        nativeBuildInputs = [ pkgs.nix ];
+        without = expr "{ default, kind, root, packageDir }: default";
+        fewer = expr "{ default, kind }: default";
+        withDots = expr "{ default, kind, ... }: default";
+        passAsFile = [
+          "without"
+          "fewer"
+          "withDots"
+        ];
+      }
+      ''
+        export NIX_CONF_DIR=$TMPDIR/etc NIX_STATE_DIR=$TMPDIR/var/nix NIX_STORE_DIR=$TMPDIR/store
+        export NIX_LOCALSTATE_DIR=$TMPDIR/var NIX_LOG_DIR=$TMPDIR/var/log/nix
+        export ROOT=$TMPDIR/root
+        mkdir -p $ROOT/p && touch $ROOT/p/Cargo.toml
+        nix-store --init
+        [ "$(nix-instantiate --eval $withDotsPath)" = '"evaluated"' ]
+        for f in $withoutPath $fewerPath; do
+          if nix-instantiate --eval $f 2> err; then
+            echo "a function without ... evaluated" >&2
+            exit 1
+          fi
+          grep -F 'called with unexpected argument' err
+        done
+        nix-instantiate --eval $withoutPath 2> err || true
+        grep -F ${lib.escapeShellArg "unexpected argument '\"${bb.sourceViews.sentinel}\"'"} err
+        touch $out
+      '';
 
   # --- vendoring -------------------------------------------------------------
 
@@ -467,6 +528,8 @@ in
   skeleton = skeletonCheck;
 
   source-views = sourceViewsCheck;
+
+  sources-sentinel = sourcesSentinelCheck;
 
   vendor-collision = vendorBuild {
     name = "vendor-collision";

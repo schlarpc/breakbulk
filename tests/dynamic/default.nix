@@ -333,6 +333,7 @@ let
     stamps = repository.stampsA;
     missing-input = repository.provided;
     test-only = repository.testOnly;
+    sources = repository.sources;
     pkgid-short = repository.pkgidShort;
     optional-dependency = repository.optionalDep;
     exclusive-features = repository.exclusive;

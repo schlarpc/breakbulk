@@ -88,7 +88,8 @@ lazy attribute set of (string or absolute path or package or signed integer or b
 Files and directories outside the package directory that its
 units read (` include_str!("../../wit/x.wit") `, a sibling assets
 directory, patches), at their original relative paths\. Strings
-are relative to the repository root\.
+are relative to the repository root\. A built-in step of
+[` sources `](\#packagesnamesources): added for every kind of unit\.
 
 *Type:*
 list of (absolute path or string)
@@ -338,6 +339,63 @@ null
 
 *Declared by:*
  - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)
+
+## `packages.<name>.sources`
+
+Functions that choose the files of this package’s source views\.
+Each gets an attribute set and returns a ` lib.fileset ` value
+inside the repository root:
+
+ - ` default `: the files chosen so far\.
+ - ` kind `: ` "build" ` (non-test compiles, build scripts and their
+   runs), ` "test" ` (test compiles and doctests) or ` "run" ` (test
+   runs)\. More kinds may be added: return ` default ` for a kind
+   you do not know\.
+ - ` root `: the repository root, a path\.
+ - ` packageDir `: the package directory, relative to ` root ` (` "" `
+   for a package at the root)\.
+
+A function must take ` ... `\. breakbulk passes one more argument,
+so that a function without ` ... ` fails on its first use, not
+when breakbulk adds an argument\. The error names an argument the
+function does not take; the extra one’s name says to add ` ... `\.
+
+The functions run after the built-in steps (the package
+directory, then ` extraSources `, ` test.sourceScope `,
+` test.scopeTestsDir ` and ` test.runFiles `), each on the result
+of the one before\. Lists concatenate in [layer
+order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order):
+a ` memberDefaults ` function runs before a ` packages.<name> `
+one, and a ` variant.<v> ` function after the level it refines\.
+Within one layer, ` lib.mkBefore ` and ` lib.mkAfter ` order them\.
+See [Fetching and source
+views](\.\./\.\./explanation/internals/sources\.md\#source-views) and
+[Rebuild less when unrelated files
+change](\.\./\.\./how-to/filter-source\.md)\.
+
+*Type:*
+list of function from { default, kind, root, packageDir, \.\.\. } to a file set
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  ({ default, kind, root, ... }:
+    if kind == "run"
+    then lib.fileset.union default (root + "/crates/linter/resources/fixtures")
+    else default)
+]
+
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
 ## `packages.<name>.stages`
 
@@ -834,9 +892,11 @@ usual places; ` [ ] ` gives an empty directory\. Editing any other
 file of the package then leaves the test run’s own inputs
 unchanged, so with content addressing (` ca `) a byte-identical
 test binary is not re-run\. A test that reads a file not listed
-fails\. ` null `: the package’s whole source view (or its
-` test.sourceScope ` view), as ` cargo test ` sees it\. Test apps
-keep the whole view\. ` caDerivations ` in
+fails\. ` null `: the view of the package’s test compiles, as
+` cargo test ` sees it\. Test apps keep that view\. A built-in
+step of [` sources `](\#packagesnamesources), for kind ` "run" `: a later function can
+still add files, such as another package’s fixtures\.
+` caDerivations ` in
 [` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says whether
 ` ca ` is on\.
 
@@ -898,7 +958,7 @@ it to ` false ` when the library, a bin or the build script
 reads from ` tests/ ` at compile time
 (` include_str!("../tests/…") `, a build script that generates
 tests from fixtures); such a unit fails with a hint naming
-this option\. ` null `: ` true `\.
+this option\. ` null `: ` true `\. A built-in step of [` sources `](\#packagesnamesources)\.
 
 *Type:*
 null or boolean
@@ -925,7 +985,7 @@ inside the package is also removed from the view of its other
 units (the library, bins, build script)\. Either way, editing
 it rebuilds only this package’s test units and re-runs its
 tests\. The package’s ` tests/ ` directory is in this scope too
-(` scopeTestsDir `)\.
+(` scopeTestsDir `)\. A built-in step of [` sources `](\#packagesnamesources)\.
 
 *Type:*
 list of (absolute path or string)

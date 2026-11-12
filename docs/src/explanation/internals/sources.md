@@ -45,15 +45,45 @@ Git crates that use workspace inheritance get the original `[workspace]` table a
 
 ## Source views
 
-A workspace package's source is `lib.fileset.toSource { root = <repository root>; fileset = …; }`. Because the root is the repository root, relative paths outside the crate resolve unchanged. Every path in the repository that a unit names (its working directory, a config `[env]` path) resolves in the unit's own view ([Path rewriting](planner.md#path-rewriting)).
+A workspace package's source is a view of the repository root: a `lib.fileset` value copied to the store with the repository root as its root. Because the root is the repository root, relative paths outside the crate resolve unchanged. Every path in the repository that a unit names (its working directory, a config `[env]` path) resolves in the unit's own view ([Path rewriting](planner.md#path-rewriting)).
 
-- **Default fileset:** the package directory, minus `target/`, `.git`, `result*`, any nested directories that belong to other workspace members, and the package's test-only paths: its `tests/` directory (unless [`test.scopeTestsDir`](../../reference/options/packages.md#packagesnametestscopetestsdir) is off) and the [`test.sourceScope`](../../reference/options/packages.md#packagesnametestsourcescope) entries inside it.
-- **Root package:** in a workspace whose root `Cargo.toml` is also a package, that package's directory is the repository root (or the workspace's directory), so its view holds everything there except the other members' directories. Each member's units run in the member's own view, which holds the member's directory, never in the root package's.
-- **Plus:** the package's [`extraSources`](../../reference/options/packages.md#packagesnameextrasources), at their original relative paths.
-- **Test units** get a second view: the package directory (still without other members' directories) without the test-only removals, plus `test.sourceScope`. A test unit is a compile Cargo builds with the package's dev-dependencies (a `--test` compile; an integration test or bench, with or without the libtest harness; an example), a doctest, or a test run. The planner records it on each compile unit (`test` in [`plan.json`](../../reference/plan-format.md)) from the unit's Cargo target, not from `--test`: Cargo compiles a `harness = false` test or bench as a plain bin, without `--test`, and such a test's own crate root is in `tests/`. Examples are test units because an example that reads `tests/data/…` works under Cargo; test and check plans build them, build plans never do, so their wider view rebuilds no product. A package with no test-only paths and no `sourceScope` has one view.
-- **Non-test units** carry their package's test-only paths in the rendered unit (`testOnly`), only so that a failure naming one (a missing `include_str!` file) ends with a hint at the option.
-- **Test runs** with [`test.runFiles`](../../reference/options/packages.md#packagesnametestrunfiles) run in a narrower view instead: `lib.fileset.toSource` of only the listed paths (relative to the package directory, at their places in the repository), or an empty package directory for `[ ]`. A listed path that does not exist is an evaluation error.
+### Three kinds of unit
+
+A package has one view for each kind of unit:
+
+| Kind | Units |
+| --- | --- |
+| `"build"` | non-test compiles, build scripts and their runs |
+| `"test"` | test compiles and doctests |
+| `"run"` | test runs |
+
+A test compile is a compile Cargo builds with the package's dev-dependencies: a `--test` compile, an integration test or bench (with or without the libtest harness), or an example. The planner records it on each compile unit (`test` in [`plan.json`](../../reference/plan-format.md)) from the unit's Cargo target, not from `--test`: Cargo compiles a `harness = false` test or bench as a plain bin, without `--test`, and such a test's own crate root is in `tests/`. Examples are test compiles because an example that reads `tests/data/…` works under Cargo; test and check plans build them, build plans never do, so their wider view rebuilds no product.
+
+A doctest compiles and runs in one rustdoc process. It has kind `"test"`, and nothing is run-only for it.
+
+### The pipeline
+
+Each view is the result of a list of steps. A step is a function from `{ default, kind, root, packageDir, ... }` to a file set. It gets the previous step's result as `default`; the first step gets the empty set. The built-in steps come first, in this order:
+
+1. **The package directory**, minus `target/`, `.git`, `result*` and any nested directories that belong to other workspace members.
+2. **[`extraSources`](../../reference/options/packages.md#packagesnameextrasources)** are added, for every kind, at their original relative paths.
+3. **[`test.sourceScope`](../../reference/options/packages.md#packagesnametestsourcescope)** entries are added for `"test"` and `"run"`. For `"build"`, the entries inside the package are removed.
+4. **[`test.scopeTestsDir`](../../reference/options/packages.md#packagesnametestscopetestsdir)**: for `"build"`, the package's `tests/` directory is removed, unless the option is `false`.
+5. **[`test.runFiles`](../../reference/options/packages.md#packagesnametestrunfiles)**: for `"run"`, when set, the result is only the listed paths (relative to the package directory). A listed path that does not exist is an evaluation error.
+
+Then the package's [`sources`](../../reference/options/packages.md#packagesnamesources) functions run, in [layer order](../configuration.md#shared-settings-and-layer-order). So the four options are shorthand for common steps. A function can do what they cannot: add files for `"run"` only, select files by a pattern (`lib.fileset.fileFilter`), or leave files out of `"build"`. A `sources` function must take `...`. breakbulk passes one extra argument, so that a function without `...` fails on its first call, not later when breakbulk adds an argument.
+
+The view always holds the package directory, also when no file in it is chosen (`runFiles = [ ]`), because the package directory is the unit's working directory.
+
+- **Root package:** in a workspace whose root `Cargo.toml` is also a package, that package's directory is the repository root (or the workspace's directory). So its view holds everything there except the other members' directories, unless a `sources` function narrows it. Each member's units run in the member's own view, which holds the member's directory, never in the root package's.
+- **Test runs** read the `"test"` view, as their test binary does, unless the `"run"` view holds other files. Then the run's working directory and runtime `CARGO_MANIFEST_DIR` are the package directory of the `"run"` view.
+- **Non-test units** carry the paths that `test.sourceScope` and `test.scopeTestsDir` leave out of `"build"` in the rendered unit (`testOnly`), only so that a failure naming one (a missing `include_str!` file) ends with a hint at the option. breakbulk does not know which paths a function left out, so such a failure gets no hint.
 - **Registry and git crates** have no view. A repository path in one of their units (Cargo sets config `[env]` on every compile) points into one constant empty directory instead.
+
+### Limits
+
+- A path a test builds at compile time (`concat!(env!("CARGO_MANIFEST_DIR"), "/data/x")`, `include_str!`) is a path in the view the test was compiled in. Files added for `"run"` only are not there. Such a test needs the files for `"test"` too.
+- A function cannot add a product of the build (a derivation output) to a view. A view holds repository files only.
 
 ## The planning skeleton
 

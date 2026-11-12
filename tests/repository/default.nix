@@ -374,6 +374,93 @@ let
   includeFrom = file: "echo 'pub const DATA: &str = include_str!(\"../${file}\");' >> proto/src/lib.rs";
   protoLib = repo: (unitsNamed (inst repo) "build")."proto-0.1.0-lib";
 
+  # --- sources -------------------------------------------------------------------
+
+  # The fixture's source-view functions. `cli`, the root package, keeps
+  # only what it compiles from, and its runs add `data/`. `lint` leaves
+  # its snapshots, README and manifest out of its "build" view. lint's
+  # run view takes one function from each of three layers, which give
+  # `data/input.txt` and `data/other.txt` only when they run in layer
+  # order.
+  sourcesModule =
+    { lib, ... }:
+    let
+      fs = lib.fileset;
+      onRun = f: { default, kind, ... }@a: if kind == "run" then f a else default;
+    in
+    {
+      packages.cli.sources = [
+        (
+          { default, root, ... }:
+          fs.intersection default (
+            fs.unions [
+              (root + "/Cargo.toml")
+              (root + "/src")
+              (root + "/tests")
+            ]
+          )
+        )
+        (onRun ({ default, root, ... }: fs.union default (root + "/data")))
+      ];
+      packages.lint.sources = [
+        (
+          {
+            default,
+            kind,
+            root,
+            packageDir,
+            ...
+          }:
+          if kind == "build" then
+            fs.difference default (fs.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}/src"))
+          else
+            default
+        )
+        (
+          {
+            default,
+            kind,
+            root,
+            packageDir,
+            ...
+          }:
+          if kind == "build" then
+            fs.difference default (
+              fs.unions [
+                (root + "/${packageDir}/README.md")
+                (root + "/${packageDir}/Cargo.toml")
+              ]
+            )
+          else
+            default
+        )
+        (onRun (
+          { default, root, ... }:
+          fs.difference default (
+            fs.unions [
+              (root + "/data/unused.txt")
+              (root + "/data/other.txt")
+            ]
+          )
+        ))
+      ];
+      packages.lint.variant.default.sources = [
+        (onRun ({ default, root, ... }: fs.union default (root + "/data/other.txt")))
+      ];
+      workspaces.main.memberDefaults.sources = [
+        (onRun ({ default, root, ... }: fs.union default (root + "/data")))
+      ];
+      # The checks read the runs' output.
+      workspaces.main.memberDefaults.test.keepLog = true;
+    };
+  sourcesRepo =
+    edit:
+    mkRepo (if edit == null then fixtures + "/sources" else edited "sources" edit) [
+      (oneWs ".")
+      sourcesModule
+    ];
+  sources = sourcesRepo null;
+
   inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
 
   # --- host units across debugInfo ---------------------------------------------
@@ -421,6 +508,7 @@ in
       overrideRepo
       testOnly
       pkgidShort
+      sources
       ;
   };
 
@@ -867,6 +955,70 @@ in
     cat $tests/log $scope/log
     touch $out
   '';
+
+  # `packages.<name>.sources` (`sourcesModule`): an edit to a file only
+  # lint's unit tests read (a snapshot, its README, a comment in its
+  # manifest) changes only lint's test harness; an edit to run-only data
+  # or to a root file cli leaves out changes no unit; the data edit
+  # changes cli's test run. Each view holds what the functions chose, the
+  # layers' functions in order, and every unit builds and passes.
+  sources =
+    let
+      lintTest = [ "lint-0.1.0-test" ];
+      changedBy = edit: changedUnits sources (sourcesRepo edit);
+      cases = {
+        snapshot = [
+          "echo >> lint/src/snapshots/answer.snap"
+          lintTest
+        ];
+        readme = [
+          "echo More. >> lint/README.md"
+          lintTest
+        ];
+        manifest = [
+          "echo '# A comment.' >> lint/Cargo.toml"
+          lintTest
+        ];
+        data = [
+          "echo >> data/input.txt"
+          [ ]
+        ];
+        notes = [
+          "echo More. >> notes.md"
+          [ ]
+        ];
+      };
+      got = lib.mapAttrs (_: c: changedBy (lib.head c)) cases;
+      wrong = lib.filterAttrs (n: g: g != lib.last cases.${n}) got;
+      i = inst sources;
+      runOf = repo: (inst repo).testRuns.cli.data;
+      lintRun = i.testRuns.lint."lib/lint";
+    in
+    assert lib.assertMsg (wrong == { }) "sources: changed units ${builtins.toJSON wrong}";
+    assert lib.assertMsg (
+      (runOf sources).drvPath != (runOf (sourcesRepo (lib.head cases.data))).drvPath
+    ) "sources: the data edit left cli's test run unchanged";
+    pkgs.runCommand "sources"
+      {
+        cliView = i.sources.workspace."";
+        lintView = i.sources.workspace.lint;
+        cliRun = runOf sources;
+        cliDir = (runOf sources).passthru.breakbulkTest.sourceDir;
+        inherit lintRun;
+        lintDir = lintRun.passthru.breakbulkTest.sourceDir;
+        app = sources.workspaces.main.packages.cli;
+      }
+      ''
+        [ "$(cd $cliView && find . -type f | sort | tr '\n' ' ')" = "./Cargo.toml ./src/main.rs " ]
+        [ "$(cd $lintView && find . -type f | sort | tr '\n' ' ')" = "./lint/src/lib.rs " ]
+        [ -f $cliDir/data/input.txt ] && [ ! -e $cliDir/notes.md ]
+        [ -f $lintDir/../data/input.txt ] && [ -f $lintDir/../data/other.txt ] && [ ! -e $lintDir/../data/unused.txt ]
+        [ -f $lintDir/src/snapshots/answer.snap ]
+        grep -q 'test reads_run_data ... ok' $cliRun/log
+        grep -q 'test tests::matches_snapshot ... ok' $lintRun/log
+        [ "$($app/bin/cli)" = 42 ]
+        touch $out
+      '';
 
   # Override keys: name, name@requirement, the version option; merging
   # order (versioned last); warnings for unmatched and unimplemented
