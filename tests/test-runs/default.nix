@@ -1,6 +1,7 @@
 # Test runs, doctests and test apps (lib/test-runs.nix, lib/test-apps.nix)
-# over the `doctests` and `test-control` fixtures, through mkWorkspace (IFD
-# mode, native target). Wired into the flake's checks as `test-runs-*`.
+# over the `doctests`, `doctest-false` and `test-control` fixtures, through
+# mkWorkspace (IFD mode, native target). Wired into the flake's checks as
+# `test-runs-*`.
 #
 #   nix build -f tests/test-runs doctests
 #
@@ -10,6 +11,11 @@
 #                           should_panic, compile_fail, no_run, ignore,
 #                           rustc-env and rustc-cfg from a build script, an
 #                           edition-2024 crate with merged doctests)
+#   doctest-false             over the `doctest-false` fixture, traced by the
+#                           planner directly: a build-script stub compiled
+#                           by the first traced invocation and run by the
+#                           second writes its run record to the second's
+#                           record directory
 #   test-control            every enabled test run passes; the skip list
 #                           kept the network test out; #[ignore] tests are
 #                           reported ignored; the required-features test is
@@ -190,6 +196,54 @@ let
         mkdir -p $out
         cp got $out/
       '';
+
+  # --- doctest-false -----------------------------------------------------------
+
+  # The planner run directly on the `doctest-false` fixture, keeping its
+  # scratch directory (with one record directory per traced invocation).
+  doctestFalseTrace =
+    pkgs.runCommand "doctest-false-trace" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      sk=$NIX_BUILD_TOP/skeleton
+      cp -r --no-preserve=mode ${fixtures + "/doctest-false"} $sk
+      ${tools.breakbulk-plan}/bin/breakbulk-plan \
+        --cargo ${pkgs.cargo}/bin/cargo --rustc ${pkgs.rustc}/bin/rustc \
+        --rustdoc ${pkgs.rustc}/bin/rustdoc --shim ${tools.breakbulk-shim}/bin/breakbulk-shim \
+        --skeleton $sk --canonical-root /build/skeleton \
+        --kind test --target ${pkgs.stdenv.hostPlatform.rust.rustcTarget} --profile dev \
+        --scratch $NIX_BUILD_TOP/scratch \
+        --capabilities ${
+          breakbulk.toolchainFacts.capabilitiesFile
+            (breakbulk.toolchainFacts.of { inherit pkgs; inherit (pkgs) rustc cargo; }).capabilities
+        } \
+        --forbid $NIX_BUILD_TOP --forbid $HOME \
+        --out $TMPDIR/plan.json
+      mkdir -p $out
+      cp -r $NIX_BUILD_TOP/scratch/record-* $out/
+    '';
+
+  # `d`'s build script is compiled by the first traced invocation and run
+  # again by the second (which builds `d` for the host): each run record is
+  # in the record directory of the invocation that ran the stub. Planning
+  # succeeding is not enough: without the second run there is nothing to
+  # check, so the check also requires a run in `record-1` of a build script
+  # compiled in `record-0`.
+  doctestFalse = pkgs.runCommand "test-runs-doctest-false" { nativeBuildInputs = [ pkgs.jq ]; } ''
+    t=${doctestFalseTrace}
+    for f in $t/record-*/run-*.json; do
+      got=$(jq -r .env.BREAKBULK_RECORD "$f")
+      echo "$f: run by $got"
+      [ "$(basename "$got")" = "$(basename "$(dirname "$f")")" ]
+    done
+    ran=$(jq -r 'select(.env.CARGO_PKG_NAME == "d") | .tag' $t/record-1/run-*.json)
+    [ -n "$ran" ]
+    grep -l '"build_script_build"' $t/record-0/compile-*.json
+    if grep -l '"build_script_build"' $t/record-1/compile-*.json; then
+      echo "the second invocation compiled the build script again" >&2
+      exit 1
+    fi
+    mkdir -p $out
+    echo "$ran" > $out/runs
+  '';
 
   # --- test-control -----------------------------------------------------------
 
@@ -1093,6 +1147,7 @@ in
   nextest-workspace-default = nextestWorkspaceDefault;
   runner = testRunner;
   inherit doctests;
+  doctest-false = doctestFalse;
   test-control = testControl;
   test-control-stable-dylibs = testControlStableDylibs;
   test-control-include-ignored = testControlIncludeIgnored;

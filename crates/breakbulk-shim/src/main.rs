@@ -17,7 +17,7 @@
 //! real rustdoc in `$BREAKBULK_RUSTDOC`.
 //!
 //! Environment:
-//! - `BREAKBULK_RECORD`: directory for records (required for compile and rustdoc).
+//! - `BREAKBULK_RECORD`: directory for records (required for compile, rustdoc and stubs).
 //! - `BREAKBULK_RUSTDOC`: the real rustdoc (rustdoc mode).
 //! - `BREAKBULK_METADATA`: `cargo metadata` JSON for stubs (default `$BREAKBULK_RECORD/metadata.json`).
 
@@ -135,8 +135,9 @@ fn wrapper_mode(argv: Vec<String>) -> Result<ExitCode, Error> {
 }
 
 fn real_main() -> Result<ExitCode, Error> {
-    if let Some((marker_path, marker)) = stub::detect() {
-        stub::run(&marker_path, &marker)?;
+    if let Some(marker) = stub::detect() {
+        let dir = record_dir().map_err(|e| Error::new(format!("build-script stub: {}", e.0)))?;
+        stub::run(&dir, &marker)?;
         return Ok(ExitCode::SUCCESS);
     }
     let mut it = std::env::args_os();

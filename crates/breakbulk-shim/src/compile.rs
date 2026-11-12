@@ -182,7 +182,7 @@ pub fn run(
         if o.emit == "dep-info" {
             std::fs::write(&o.path, dep_info(&outs, &input)).map_err(|e| Error::io(&o.path, e))?;
         } else if o.emit == "link" && build_script {
-            stub::install(&o.path, record_dir, rustc, a)?;
+            stub::install(&o.path, rustc, a)?;
         } else {
             std::fs::write(&o.path, b"").map_err(|e| Error::io(&o.path, e))?;
         }

@@ -1,0 +1,4 @@
+[package]
+name = "d"
+version.workspace = true
+edition.workspace = true

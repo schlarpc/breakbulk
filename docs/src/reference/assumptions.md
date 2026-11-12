@@ -186,12 +186,12 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 ### T10. Build-script compiles and the stub
 
-- **Assumption.** A build-script compile has crate name `build_script_*` and crate type `bin`; Cargo runs that binary from its compile's output directory (classic layout: a hard link beside it; new layout: `…/out/build_script_build`) with `OUT_DIR` naming the run's hash, and gives it `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_LINKS` and `CARGO_PKG_RUST_VERSION`.
+- **Assumption.** A build-script compile has crate name `build_script_*` and crate type `bin`; Cargo runs that binary from its compile's output directory (classic layout: a hard link beside it; new layout: `…/out/build_script_build`) with `OUT_DIR` naming the run's hash, and gives it `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_LINKS` and `CARGO_PKG_RUST_VERSION`, on top of Cargo's own environment, so the stub sees the `BREAKBULK_RECORD` of the invocation running it.
 - **Where.** `crates/breakbulk-shim/src/compile.rs`: `is_build_script`; `stub.rs`: `install`, `detect` (marker beside the executable), `run_tag`, `run`.
-- **Upstream.** Spike A ("The shim", surprise S5 for the new layout).
+- **Upstream.** Spike A ("The shim", surprise S5 for the new layout). cargo `0.100.0` (commit `5f94df478`, Cargo 1.99) `src/compiler/custom_build.rs`, `build_work`: the build script's process starts from Cargo's environment and removes only `RUSTC_WORKSPACE_WRAPPER` and `RUSTFLAGS` (`RUSTC_WRAPPER` is set to the wrapper).
 - **Holds for.** The window.
-- **Pinned by.** `plan-walking-skeleton`, `plan-walking-skeleton-nightly`, `plan-directives*`. Rust: `stub::tests::tags`.
-- **If it changes.** The stub does not recognize itself or finds no run tag; tracing fails.
+- **Pinned by.** `plan-walking-skeleton`, `plan-walking-skeleton-nightly`, `plan-directives*`; `test-runs-doctest-false` (a stub compiled by one traced invocation and run by the next records its run in the next one's directory). Rust: `stub::tests::tags`; the shim's `tests/stub.rs` (the record goes to `BREAKBULK_RECORD` at run time; a stub without it fails).
+- **If it changes.** The stub does not recognize itself or finds no run tag, or finds no `BREAKBULK_RECORD`; tracing fails.
 
 ### T11. `RUSTDOC` and `cargo test --doc`
 

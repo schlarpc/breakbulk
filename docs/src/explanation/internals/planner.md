@@ -129,9 +129,11 @@ The record of the `rustc -vV` query carries Cargo's own process environment. It 
 2. Ask the real rustc for output names: the same arguments plus `--print=file-names` (it does not compile, and it does not resolve `--extern` paths). Add the `.rmeta` and `.d` names that `--emit` implies. The query names every link output for every crate type, `--emit` set and `--test`, but not debuginfo side files (`.dwp`, `.dwo`; by the same logic `.pdb` and `.dSYM`, not tested). Cargo tolerates their absence during the trace.
 3. Create each output as an empty file. Write the dep-info file as `<output>: <input file>`, because Cargo parses it after every compile.
 4. When the arguments contain `--json=…artifacts…` and `--emit` includes `metadata`, print one `{"$message_type":"artifact","artifact":"<path>","emit":"<kind>"}` line per output on stderr, as rustc does. Cargo waits for the metadata notification before starting pipelined dependents.
-5. For a build-script compile (crate name `build_script_build`), copy the shim binary to the output path and write `breakbulk-stub.json` next to it, naming the record directory, the `cargo metadata` file and the compile unit.
+5. For a build-script compile (crate name `build_script_build`), copy the shim binary to the output path and write `breakbulk-stub.json` next to it, naming the compile unit.
 
 When Cargo runs a stub, the stub records argv, cwd and the full env Cargo gave it, including `TARGET`, `HOST`, `PROFILE`, `OPT_LEVEL`, `DEBUG`, `CARGO_CFG_*`, `CARGO_FEATURE_*`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_MANIFEST_LINKS`, `OUT_DIR` and any `DEP_*` sentinels from upstream stubs. It finds its package in the `cargo metadata` JSON (`$BREAKBULK_METADATA`, default `$BREAKBULK_RECORD/metadata.json`) by `CARGO_MANIFEST_DIR`, to learn the package's targets.
+
+The stub writes its record to `$BREAKBULK_RECORD` as Cargo gives it when it runs the stub, not to a directory named at compile time: a stub one traced invocation compiled can run again in a later one, and the planner reads each invocation's record directory when that invocation ends. Cargo passes its own environment on to build scripts (it removes only `RUSTC_WORKSPACE_WRAPPER` and `RUSTFLAGS`, and sets `RUSTC_WRAPPER`), so the variable is always there under a traced Cargo; a stub started without it fails.
 
 ## Unit identity and graph edges
 

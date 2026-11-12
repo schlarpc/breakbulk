@@ -1,0 +1,12 @@
+# A proc macro with `test = false` and `doctest = false` whose only use of
+# `d` is a dev-dependency, and a library `d` with a build script and one
+# doctest. `cargo test` doc-tests `d` alone and builds nothing of `pm`, so
+# `d` is built for the target only; `cargo test --doc` also doc-tests `pm`,
+# building `d` for the host, which runs `d`'s build script a second time.
+[workspace]
+resolver = "2"
+members = ["pm", "d"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

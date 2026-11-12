@@ -107,6 +107,7 @@ let
     cross-lto = [ presetFixtures.repos.crossLto ];
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
+    doctest-false = [ (plain "doctest-false" [ ]) ];
     doctests = [ dynamic.repos.doctests ];
     doctest-off = [ (plain "doctest-off" [ ]) ];
     embed = [ products.repos.embed ];

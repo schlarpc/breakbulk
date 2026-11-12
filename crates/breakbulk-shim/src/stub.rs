@@ -17,7 +17,11 @@ pub const MARKER: &str = "breakbulk-stub.json";
 pub const METADATA_ENV: &str = "BREAKBULK_METADATA";
 
 /// Copies the shim to the build script's output path and writes the marker.
-pub fn install(path: &Path, record_dir: &Path, rustc: &str, a: &RustcArgs) -> Result<(), Error> {
+///
+/// The marker names no record directory: a stub compiled by one traced Cargo
+/// invocation may run in a later one, and its record belongs to the
+/// invocation that runs it, so [`run`] takes it from `BREAKBULK_RECORD`.
+pub fn install(path: &Path, rustc: &str, a: &RustcArgs) -> Result<(), Error> {
     let me = std::env::current_exe().map_err(|e| Error::new(format!("current_exe: {e}")))?;
     std::fs::copy(&me, path).map_err(|e| Error::io(path, e))?;
     #[cfg(unix)]
@@ -26,13 +30,8 @@ pub fn install(path: &Path, record_dir: &Path, rustc: &str, a: &RustcArgs) -> Re
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| Error::io(path, e))?;
     }
-    let metadata = std::env::var_os(METADATA_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| record_dir.join("metadata.json"));
     let marker = json!({
         "version": record::RECORD_VERSION,
-        "record": record_dir.to_string_lossy(),
-        "metadata": metadata.to_string_lossy(),
         "rustc": rustc,
         "compile": {
             "crateName": a.crate_name,
@@ -50,7 +49,7 @@ pub fn install(path: &Path, record_dir: &Path, rustc: &str, a: &RustcArgs) -> Re
 }
 
 /// Returns the marker if the running executable is an installed stub.
-pub fn detect() -> Option<(PathBuf, Value)> {
+pub fn detect() -> Option<Value> {
     let mut candidates = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         candidates.push(exe);
@@ -64,7 +63,7 @@ pub fn detect() -> Option<(PathBuf, Value)> {
         if let Ok(bytes) = std::fs::read(&m)
             && let Ok(v) = serde_json::from_slice(&bytes)
         {
-            return Some((m, v));
+            return Some(v);
         }
     }
     None
@@ -228,13 +227,9 @@ pub fn line(key: &str, value: &str, old_syntax: bool) -> String {
     }
 }
 
-/// Runs stub mode.
-pub fn run(marker_path: &Path, marker: &Value) -> Result<(), Error> {
-    let record_dir = PathBuf::from(
-        marker["record"]
-            .as_str()
-            .ok_or_else(|| Error::new(format!("{}: no record dir", marker_path.display())))?,
-    );
+/// Runs stub mode: records the run in `record_dir` (`$BREAKBULK_RECORD` of
+/// the Cargo running the stub).
+pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
     let out_dir = PathBuf::from(
         std::env::var_os("OUT_DIR")
             .ok_or_else(|| Error::new("build-script stub: OUT_DIR not set"))?,
@@ -246,7 +241,9 @@ pub fn run(marker_path: &Path, marker: &Value) -> Result<(), Error> {
         ))
     })?;
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default());
-    let meta_path = PathBuf::from(marker["metadata"].as_str().unwrap_or_default());
+    let meta_path = std::env::var_os(METADATA_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| record_dir.join("metadata.json"));
     let meta: Value = std::fs::read(&meta_path)
         .map_err(|e| Error::io(&meta_path, e))
         .and_then(|b| {
@@ -273,7 +270,7 @@ pub fn run(marker_path: &Path, marker: &Value) -> Result<(), Error> {
     rec.insert("tag".into(), json!(tag));
     rec.insert("stub".into(), marker.clone());
     rec.insert("printed".into(), json!(lines));
-    record::write(&record_dir, "run", &tag, rec)
+    record::write(record_dir, "run", &tag, rec)
         .map_err(|e| Error::new(format!("writing record: {e}")))?;
 
     for l in &lines {
