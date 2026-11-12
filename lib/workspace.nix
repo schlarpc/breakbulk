@@ -215,6 +215,7 @@ let
   views = sourceViews.workspaceViews {
     inherit root wsDir;
     packages = lib.genAttrs (lib.attrNames packages ++ lib.attrNames extraSources) viewSettings;
+    runCommand = pkgs.runCommandLocal;
   };
   # Path packages Cargo loads from outside the workspace root.
   closureDirs = skel.passthru.description.packages;
@@ -232,13 +233,27 @@ let
       memberDirs = closureDirs;
       settings = viewSettings pkgName;
       tested = false;
+      runCommand = pkgs.runCommandLocal;
+    }
+    // {
+      name = pkgName;
     }
   );
-  allViews = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v) views // outsideViews;
-  workspace = lib.mapAttrs (_: v: v.src) allViews;
-  # The members' views of their test units, by directory (instantiate's
-  # `sources.workspaceTest`).
-  workspaceTest = lib.mapAttrs' (_: v: lib.nameValuePair v.dir v.testSrc) views;
+  allViews = lib.mapAttrs' (n: v: lib.nameValuePair v.dir (v // { name = n; })) views // outsideViews;
+  # The views a plan's units can read, by directory (instantiate's
+  # `sources.workspace`), and the members' views of their test units
+  # (`sources.workspaceTest`): those of the packages the plan can contain
+  # (`canContain`), for the reason `overridesFor` gives: a view can name a
+  # product (`sourceOverlay`).
+  viewsFor =
+    kind:
+    let
+      keep = lib.filterAttrs (_: v: canContain kind v.name) allViews;
+    in
+    {
+      workspace = lib.mapAttrs (_: v: v.src) keep;
+      workspaceTest = lib.mapAttrs (_: v: v.testSrc) (lib.filterAttrs (_: v: v ? testSrc) keep);
+    };
   # Test-only paths by directory (instantiate's `sources.testOnly`), for
   # the hint when a non-test unit misses one.
   testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
@@ -429,22 +444,32 @@ let
     acc: e:
     acc // { ${e.name} = (acc.${e.name} or [ ]) ++ map (d: lib.head (lib.splitString " " d)) e.dependencies; }
   ) { } entries;
-  overridesFor =
+  reachableFrom = lib.genAttrs [ "build" "test" "bench" ] (
     kind:
     let
-      all = overrides // packageOverrides;
       sel = if kind == "test" then testSelect else select;
-      reachable = lib.listToAttrs (
+    in
+    if sel == [ ] then
+      null
+    else
+      lib.listToAttrs (
         map (x: lib.nameValuePair x.key true) (
           builtins.genericClosure {
             startSet = map (n: { key = n; }) sel;
             operator = x: map (n: { key = n; }) (lockDeps.${x.key} or [ ]);
           }
         )
-      );
-      keep = k: let n = lib.head (lib.splitString "@" k); in reachable ? ${n} || !(lockDeps ? ${n});
+      )
+  );
+  canContain =
+    kind: n:
+    let
+      r = reachableFrom.${kind};
     in
-    if sel == [ ] then all else lib.filterAttrs (k: _: keep k) all;
+    r == null || r ? ${n} || !(lockDeps ? ${n});
+  overridesFor =
+    kind:
+    lib.filterAttrs (k: _: canContain kind (lib.head (lib.splitString "@" k))) (overrides // packageOverrides);
 
   instantiateWith =
     kind: args:
@@ -477,8 +502,8 @@ let
       inherit system;
       plan = "${plans.${kind}}/plan.json";
       sources = {
+        inherit (viewsFor kind) workspace;
         inherit
-          workspace
           crates
           clippyConf
           testOnly
@@ -487,7 +512,7 @@ let
       }
       # The build and doc plans have no test units; the bench plan's
       # benches and harnesses in bench mode are.
-      // lib.optionalAttrs (kind == "test" || kind == "bench") { inherit workspaceTest; };
+      // lib.optionalAttrs (kind == "test" || kind == "bench") { inherit (viewsFor kind) workspaceTest; };
       tools = unitTools;
       host = {
         envCapture = captures.host;
@@ -595,7 +620,10 @@ in
     inherit (toolchain) rustc;
     name = "${name}-cargo-env";
   };
-  sources = { inherit workspace crates; };
+  sources = {
+    workspace = lib.mapAttrs (_: v: v.src) allViews;
+    inherit crates;
+  };
   roots = built.roots;
   tests = tested.roots;
   units = {

@@ -1,0 +1,9 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+assets = { path = "../assets" }
+other = { path = "../other" }

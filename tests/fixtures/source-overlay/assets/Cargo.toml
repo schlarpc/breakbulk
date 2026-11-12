@@ -1,0 +1,10 @@
+[package]
+name = "assets"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# debug-embed: embed in the dev profile too, instead of reading the
+# folder at run time.
+rust-embed = { version = "8", default-features = false, features = ["debug-embed"] }

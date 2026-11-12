@@ -1,0 +1,13 @@
+# `packages.<name>.sourceOverlay` (tests/products `source-overlay`):
+# `assets` embeds the files under its `ui/dist` with rust-embed, and the
+# test module places another repository's wasm product (ui-dist's `ui`)
+# there. `server` serves the embedded files; `other` does not depend on
+# `assets`, so it must not reference the product.
+[workspace]
+resolver = "2"
+members = ["assets", "server", "other"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false

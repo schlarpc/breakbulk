@@ -342,8 +342,8 @@ let
     wsName: triple: vName: pkg:
     map (o: { inherit (o) stages checks; }) (memberLayers wsName triple vName pkg);
 
-  # The layers' `test` and `sources` settings merged, for mkWorkspace's
-  # `packages`: `{ <pkg> = { test = …; sources = …; }; }` for the
+  # The layers' `test`, `sources` and `sourceOverlay` settings merged, for
+  # mkWorkspace's `packages`: `{ <pkg> = { test = …; sources = …; }; }` for the
   # workspace's path packages. Lists, env and snippets combine, in layer
   # order; single values are `pickSingle`'s.
   memberConfigs =
@@ -453,6 +453,8 @@ let
       {
         test = withDefaults (merged ls);
         sources = lib.concatMap (l: l.sources) ls;
+        # Later layers win per path, as for env.
+        sourceOverlay = lib.foldl' (acc: l: acc // l.sourceOverlay) { } ls;
       }
     );
 

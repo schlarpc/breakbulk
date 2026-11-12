@@ -342,6 +342,45 @@ null
 *Declared by:*
  - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)
 
+## `packages.<name>.sourceOverlay`
+
+Products to place in this package’s source views, by path
+relative to the package directory: for crates that read files
+at a fixed path next to their sources (` rust-embed `’s
+` #[folder = "ui/dist"] `, ` include_dir! `, ` include_bytes! `)
+rather than through an environment variable\. Each value is a
+derivation (the product of another package, in this workspace
+or another, as in ` env `), a path, or a string such as
+` "${product}/share/ui" `\. It appears in every view of the
+package (its build, test and run units) as a symbolic link to
+the value, which replaces whatever the repository has at that
+path\. The value is passed by reference: only this package’s
+units depend on it, and planning and instantiation do not\.
+Workspace packages only: registry and git crates have no view\.
+See [Fetching and source
+views](\.\./\.\./explanation/internals/sources\.md\#products-in-a-view)\.
+
+*Type:*
+lazy attribute set of (package or absolute path or string)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  "ui/dist" = repo.workspaces.ui.target.wasm32-unknown-unknown.packages.ui;
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.sources`
 
 Functions that choose the files of this package’s source views\.

@@ -130,6 +130,14 @@
 #                    embeds (`packages.app.env.UI_DIST`) the wasmWeb
 #                    product of `ui`, a member of the same workspace; the
 #                    app carries the wasm and its JS glue
+#   source-overlay   `packages.assets.sourceOverlay."ui/dist"` places
+#                    ui-dist's wasm product (another repository's) where
+#                    rust-embed reads it, replacing the repository's
+#                    placeholder; `server` serves the embedded files and
+#                    assets' unit test sees them; the workspace's
+#                    instantiation and `other`'s units do not depend on
+#                    the product, the units of assets and of its
+#                    dependent `server` do
 #   same-workspace-products   products of the plan that uses them: `app`'s
 #                    build script runs `tool` (`nativeInputs`), `app` links
 #                    `shared`'s cdylib (`inputs`) and embeds `tool`'s
@@ -806,6 +814,18 @@ let
   ];
   wasmRust = overlayRust.override { targets = [ "wasm32-unknown-unknown" ]; };
 
+  # The wasm product of ui-dist's `ui`, at the path rust-embed reads in
+  # `assets`.
+  uiProduct = uiDistRepo.workspaces.default.target.wasm32-unknown-unknown.packages.ui;
+  sourceOverlayRepo = mkRepo (fixtures + "/source-overlay") [
+    (oneWs "." "dev")
+    {
+      packages.assets.sourceOverlay."ui/dist" = uiProduct;
+      # The check reads the test run's output.
+      packages.assets.test.keepLog = true;
+    }
+  ];
+
   # Products of one plan as another member's `env`, `inputs` and
   # `nativeInputs`.
   sameWsRepo = mkRepo (fixtures + "/same-workspace-products") [
@@ -1044,6 +1064,7 @@ in
       benchesRepo
       embed
       uiDistRepo
+      sourceOverlayRepo
       sameWsRepo
       coverageRepo
       rustSrcRepo
@@ -1171,6 +1192,52 @@ in
     $app/bin/app | tee $out
     grep -q '^app dirty embeds [0-9]* bytes of wasm, magic true, glue exports greet: true$' $out
   '';
+
+  source-overlay =
+    let
+      i = sourceOverlayRepo.workspaces.main.instances.${native}.default;
+      units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
+      member = u: lib.any (p: lib.hasPrefix p u.name) [ "assets-" "server-" "other-" ];
+    in
+    pkgs.runCommand "source-overlay"
+      {
+        server = sourceOverlayRepo.workspaces.main.packages.server;
+        serverChecks = lib.attrValues sourceOverlayRepo.workspaces.main.packages.server.checks;
+        assetsTest = i.testRuns.assets."lib/assets";
+        uiDrv = builtins.unsafeDiscardStringContext uiProduct.drvPath;
+        # The closures of the workspace's instantiation (both plans) and
+        # of each member unit's derivation.
+        exportReferencesGraph = [
+          "instBuild"
+          (drvOnly i.unitsJson.build)
+          "instTest"
+          (drvOnly i.unitsJson.test)
+        ]
+        ++ lib.concatMap (u: [
+          "unit-${u.name}"
+          (drvOnly u)
+        ]) (lib.filter member units);
+      }
+      ''
+        set -euo pipefail
+        for g in instBuild instTest; do
+          if grep -qxF "$uiDrv" $g; then
+            echo "$g depends on the product $uiDrv" >&2
+            exit 1
+          fi
+        done
+        [ "$(grep -lxF "$uiDrv" unit-* | sort | tr '\n' ' ')" = \
+          "unit-assets-0.1.0-lib unit-assets-0.1.0-test unit-server-0.1.0-bin unit-server-0.1.0-test " ]
+        $server/bin/server | tee files.txt
+        grep -qx pkg/ui_bg.wasm files.txt
+        grep -qx pkg/ui.js files.txt
+        ! grep -q placeholder files.txt
+        [ "$($server/bin/server pkg/ui_bg.wasm | head -c 4 | od -An -c | tr -d ' ')" = '\0asm' ]
+        $server/bin/server pkg/ui.js | grep -q greet
+        ! $server/bin/server missing.txt
+        grep -q 'test tests::has_the_wasm ... ok' $assetsTest/log
+        touch $out
+      '';
 
   same-workspace-products =
     pkgs.runCommand "same-workspace-products" { app = sameWsRepo.workspaces.main.packages.app; }

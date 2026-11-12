@@ -151,6 +151,38 @@ let
           ends with a hint naming the path and this option.
         '';
       };
+      sourceOverlay = mkOption {
+        type = types.lazyAttrsOf (
+          types.oneOf [
+            types.package
+            types.path
+            types.str
+          ]
+        );
+        default = { };
+        example = lib.literalExpression ''
+          {
+            "ui/dist" = repo.workspaces.ui.target.wasm32-unknown-unknown.packages.ui;
+          }
+        '';
+        description = ''
+          Products to place in this package's source views, by path
+          relative to the package directory: for crates that read files
+          at a fixed path next to their sources (`rust-embed`'s
+          `#[folder = "ui/dist"]`, `include_dir!`, `include_bytes!`)
+          rather than through an environment variable. Each value is a
+          derivation (the product of another package, in this workspace
+          or another, as in `env`), a path, or a string such as
+          `"''${product}/share/ui"`. It appears in every view of the
+          package (its build, test and run units) as a symbolic link to
+          the value, which replaces whatever the repository has at that
+          path. The value is passed by reference: only this package's
+          units depend on it, and planning and instantiation do not.
+          Workspace packages only: registry and git crates have no view.
+          See [Fetching and source
+          views](../../explanation/internals/sources.md#products-in-a-view).
+        '';
+      };
       sources = mkOption {
         type = types.listOf sourcesFunction;
         default = [ ];

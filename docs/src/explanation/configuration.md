@@ -335,7 +335,12 @@ that embeds the product, and its dependents, wait for it. The rest of
 the build starts at once.
 
 This needs a package that reads the product from where you put it,
-usually an environment variable. A build script that builds the other
+usually an environment variable. A crate that reads files at a fixed
+path next to its sources (rust-embed's `#[folder = "ui/dist"]`) gets the
+product at that path in its source view with
+[`sourceOverlay`](../reference/options/packages.md#packagesnamesourceoverlay)
+([Products in a view](internals/sources.md#products-in-a-view)).
+A build script that builds the other
 package with Cargo itself is a different case:
 [A build script runs Cargo](../how-to/nested-cargo.md).
 

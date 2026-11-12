@@ -84,7 +84,23 @@ The view always holds the package directory, also when no file in it is chosen (
 ### Limits
 
 - A path a test builds at compile time (`concat!(env!("CARGO_MANIFEST_DIR"), "/data/x")`, `include_str!`) is a path in the view the test was compiled in. Files added for `"run"` only are not there. Such a test needs the files for `"test"` too.
-- A function cannot add a product of the build (a derivation output) to a view. A view holds repository files only.
+- A function cannot add a product of the build (a derivation output) to a view: a file set holds repository files only. [Products in a view](#products-in-a-view) do that.
+
+### Products in a view
+
+Some crates read files at a fixed path next to their sources, not through an environment variable: rust-embed's `#[folder = "ui/dist"]`, `include_dir!`, `include_bytes!("../dist/app.wasm")`. [`sourceOverlay`](../../reference/options/packages.md#packagesnamesourceoverlay) places a product (or any derivation or path) at such a path, relative to the package directory:
+
+```nix
+packages.assets.sourceOverlay."ui/dist" =
+  repo.workspaces.ui.target.wasm32-unknown-unknown.packages.ui;
+```
+
+It is a layer on top of the pipeline, not a step of it. A file set is made of files that exist when Nix evaluates; a derivation output exists only once it is built, so a step that took one would make every evaluation build it (import from derivation). Instead, each of the package's three views, once realized, is copied by a small derivation that puts a symbolic link to each value at its path, replacing whatever the view has there.
+
+- **Only this package's units** get the overlaid views. Its dependents depend on the product through its outputs, as with [`env`](../../reference/options/packages.md#packagesnameenv).
+- **Instantiation does not depend on the product.** `breakbulk-instantiate` sees each view by key only (`src:<dir>`), and Nix substitutes the value afterwards, so planning and instantiating the host workspace never build the product.
+- **A link, not a copy.** The product is passed by reference. A crate that canonicalizes paths (rust-embed does) sees the product's own store path.
+- **A plan gets the views of the packages it can contain**, as it gets their settings: in dynamic-derivation mode the outer derivation depends on every view it is given, so another member's overlay of a product of this plan would make the plan depend on itself. A product of the same plan as the package that embeds it is the dynamic-mode limit of `env` too (#126).
 
 ## The planning skeleton
 

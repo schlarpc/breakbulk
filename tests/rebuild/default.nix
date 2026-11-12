@@ -151,6 +151,7 @@ let
     same-triple = [ presetFixtures.repos.sameTriple ];
     same-workspace-products = [ products.repos.sameWsRepo ];
     snapshots = [ repository.repos.snapshots ];
+    source-overlay = [ products.repos.sourceOverlayRepo ];
     source-paths = [ products.repos.sourcePaths ];
     sources = [ repository.repos.sources ];
     stamps = [ repository.repos.stampsA ];

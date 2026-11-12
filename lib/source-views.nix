@@ -219,12 +219,66 @@ rec {
         path: type: files.filter path type || (type == "directory" && (path == dir || lib.hasPrefix "${path}/" dir));
     };
 
+  # `view` with each `sourceOverlay` entry in place: a symbolic link at
+  # the entry's path (relative to the package directory) to its value,
+  # replacing what the view has there. Not a step of the pipeline: a file
+  # set holds files of the evaluation's file system, and a derivation
+  # output exists only once built, so a step that took one would make
+  # every evaluation build it (import from derivation). Here the product
+  # is only a reference in a derivation of its own, which instantiation
+  # names by key and never reads. A link, not a copy: the view stays a
+  # copy of the repository plus references, and canonical paths (as
+  # rust-embed takes them) name the product itself.
+  overlay =
+    {
+      runCommand,
+      name,
+      pkgDir,
+      entries,
+      view,
+    }:
+    let
+      places = map (
+        rel:
+        let
+          p = util.joinRel pkgDir rel;
+        in
+        if util.normalizeRel rel == "" then
+          throw "breakbulk: packages.${name}.sourceOverlay: \"${rel}\" is the package directory itself"
+        else if p == ".." || lib.hasPrefix "../" p then
+          throw "breakbulk: packages.${name}.sourceOverlay: \"${rel}\" leaves the repository root"
+        else
+          {
+            inherit p rel;
+            value = entries.${rel};
+          }
+      ) (attrNames entries);
+      nested = lib.filter (a: lib.any (b: a.p != b.p && util.isUnder b.p a.p) places) places;
+    in
+    if entries == { } then
+      view
+    else if nested != [ ] then
+      throw "breakbulk: packages.${name}.sourceOverlay: \"${(lib.head nested).rel}\" is inside another entry's path"
+    else
+      runCommand "source" { } (
+        ''
+          cp -r ${view} $out
+          chmod -R u+w $out
+        ''
+        + lib.concatMapStrings (e: ''
+          rm -rf $out/${lib.escapeShellArg e.p}
+          mkdir -p "$(dirname $out/${lib.escapeShellArg e.p})"
+          ln -s ${lib.escapeShellArg "${e.value}"} $out/${lib.escapeShellArg e.p}
+        '') places
+      );
+
   # A package's views, rooted at the repository root (`<view>/<pkgDir>`
   # is the package directory): `src` for its "build" units; for a package
   # that is `tested`, `testSrc` for its "test" units and `runDir`, the
   # package directory of its "run" view, or null when that view is
-  # `testSrc`. `settings`: `extraSources`, `test` and `sources`, as
-  # `packages.<name>` has them.
+  # `testSrc`. `settings`: `extraSources`, `test`, `sources` and
+  # `sourceOverlay`, as `packages.<name>` has them. `runCommand`: for a
+  # package with a `sourceOverlay`.
   packageViews =
     {
       root,
@@ -234,6 +288,7 @@ rec {
       memberDirs ? [ ],
       settings ? { },
       tested ? true,
+      runCommand ? null,
     }:
     let
       steps =
@@ -261,9 +316,17 @@ rec {
               ;
           };
         };
-      src = view "build";
-      testSrc = view "test";
-      run = view "run";
+      realized = lib.genAttrs [ "build" "test" "run" ] view;
+      overlaid =
+        kind:
+        overlay {
+          inherit runCommand name pkgDir;
+          entries = settings.sourceOverlay or { };
+          view = realized.${kind};
+        };
+      src = overlaid "build";
+      testSrc = overlaid "test";
+      run = overlaid "run";
     in
     {
       inherit src;
@@ -281,7 +344,7 @@ rec {
       # Compared by store path, so that a run reads its test binary's own
       # view unless a step chose other files for runs.
       runDir =
-        if "${run}" == "${testSrc}" then
+        if "${realized.run}" == "${realized.test}" then
           null
         else if pkgDir == "" then
           "${run}"
@@ -318,11 +381,13 @@ rec {
 
   # Views for every member of a workspace, keyed by package name
   # (`packageViews`, plus `dir`). `packages.<package name>`: its settings.
+  # `runCommand`: as packageViews takes it.
   workspaceViews =
     {
       root,
       wsDir ? "",
       packages ? { },
+      runCommand ? null,
     }:
     let
       ws = manifest.workspace { inherit root wsDir; };
@@ -341,7 +406,7 @@ rec {
             inherit dir;
           }
           // packageViews {
-            inherit root wsDir;
+            inherit root wsDir runCommand;
             inherit (info) name;
             pkgDir = dir;
             memberDirs = ws.members;

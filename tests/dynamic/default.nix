@@ -431,6 +431,8 @@ let
     # and with dependencies (dev). Their docs are compared as products.
     docs = products.docsNoDeps;
     docs-deps = products.docsDeps;
+    # Another repository's wasm product at a path in `assets`' views.
+    source-overlay = products.sourceOverlayRepo;
     # Products of the same plan in a package's env and inputs: an infinite
     # recursion in dynamic mode (#126), so not in run.sh's default list.
     same-workspace-products = products.sameWsRepo;
@@ -687,6 +689,8 @@ let
     embed = "^(embedder|host)-";
     # `app`'s env names the wasm target's `ui`.
     ui-dist = "^app-";
+    # `assets`' views link the product; `server` links `assets`.
+    source-overlay = "^(assets|server)-";
   };
 
   # The fixtures whose doc plans are compared: every variant of them gets
