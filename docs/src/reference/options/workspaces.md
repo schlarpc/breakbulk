@@ -654,8 +654,6 @@ null
 
 ## `workspaces.<name>.toolchain.capabilities.remapPathScope`
 
-
-
 rustc takes ` --remap-path-scope ` (default: rustc 1\.95 or later)\.
 Without it, every unit remaps every path scope, so debug info names
 no real source paths even where it is split off\.
