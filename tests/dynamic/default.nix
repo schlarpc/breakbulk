@@ -347,6 +347,8 @@ let
     # whose clippy unit fails by design in both modes, and without the
     # coverage variant: nixpkgs' rustc builds instrumented binaries that
     # crash at exit (variants-coverage has it on rust-overlay's rustc).
+    # Nor `release-tests`, whose lib-a test run fails by design (it needs
+    # debug assertions; products-variants-test-profile compares units).
     variants = breakbulk.mkRepository {
       inherit pkgs tools;
       root = fixtures + "/variants";
@@ -357,6 +359,7 @@ let
           workspaces.main.variants = {
             strict.clippyArgs = lib.mkForce [ ];
             coverage.targets = [ ];
+            release-tests.targets = [ ];
           };
         }
       ];
