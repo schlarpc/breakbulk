@@ -108,6 +108,7 @@ let
     crate-types = [ (plain "crate-types" [ ]) ];
     cross-doctests = [ dynamic.repos.cross-doctests-aarch64 ];
     cross-lto = [ presetFixtures.repos.crossLto ];
+    declared-paths = [ dynamic.repos.declared-paths ];
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
     doctest-false = [ (plain "doctest-false" [ ]) ];
