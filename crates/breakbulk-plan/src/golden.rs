@@ -746,7 +746,9 @@ pub fn compare_with(
 /// the one a real `cargo test -vv` ran (`doc_log`), keyed by
 /// `CARGO_PKG_NAME`. The `-L` list of every run's search paths is rebuilt
 /// with `breakbulk-unit`'s own [`doctest::search_paths`] and the env with its
-/// dynamic-library path rule.
+/// dynamic-library path rule, from the traced runs (Cargo's whole-build
+/// set). The rendered doctest keeps only its closure's runs of those
+/// ([`breakbulk_format::closure_runs`]): each must be a traced one.
 #[allow(clippy::too_many_arguments)]
 fn compare_doctests(
     plan: &Plan,
@@ -792,10 +794,46 @@ fn compare_doctests(
                 continue;
             }
         };
+        let traced = &plan.doctests[id.as_str()];
+        let flags_of = |runs: &mut dyn Iterator<Item = &UnitId>| -> Result<Vec<String>, String> {
+            runs.map(|u| resolver.flags(u)).collect()
+        };
+        let traced_runs = flags_of(
+            &mut traced
+                .args
+                .iter()
+                .filter_map(|a| match a {
+                    breakbulk_format::Arg::SearchPaths(s) => Some(s.search_paths_of.iter()),
+                    _ => None,
+                })
+                .flatten(),
+        );
+        let traced_dylib = flags_of(&mut traced.dylib_path_from.iter());
+        let (traced_runs, traced_dylib) = match (traced_runs, traced_dylib) {
+            (Ok(r), Ok(d)) => (r, d),
+            (Err(e), _) | (_, Err(e)) => {
+                report.problems.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
+        for (what, rendered, all) in [
+            ("-L list", &d.search_paths_of, &traced_runs),
+            (
+                "dynamic-library path",
+                &d.compile.dylib_path_from,
+                &traced_dylib,
+            ),
+        ] {
+            if let Some(f) = rendered.iter().find(|f| !all.contains(f)) {
+                report.problems.push(format!(
+                    "{id}: the rendered {what} names {f}, which the trace does not"
+                ));
+            }
+        }
         let (before, after) = d.compile.args.split_at(d.search_paths_at);
         let got = (|| -> Result<Vec<String>, String> {
             let mut a = expand_args(before, lookup).map_err(|e| e.0)?;
-            for p in doctest::search_paths(&d.search_paths_of, &d.search_paths_literals, lookup)
+            for p in doctest::search_paths(&traced_runs, &d.search_paths_literals, lookup)
                 .map_err(|e| e.0)?
             {
                 a.extend(["-L".to_owned(), p]);
@@ -866,7 +904,7 @@ fn compare_doctests(
         if opts.env {
             let env =
                 expand_env(&d.compile.env, &d.compile.env_splices, lookup).and_then(|mut e| {
-                    prepend_dylib_path(&mut e, &d.compile.dylib_path_from, lookup)?;
+                    prepend_dylib_path(&mut e, &traced_dylib, lookup)?;
                     Ok(e)
                 });
             match env {

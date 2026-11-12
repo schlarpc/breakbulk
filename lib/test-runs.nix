@@ -60,11 +60,14 @@
 #   - the dynamic-library path (the target's variable, `dylibPathOf`:
 #     LD_LIBRARY_PATH on Linux, WINEPATH under wine, none for wasm) holds,
 #     sorted as Cargo sorts paths, the
-#     search paths printed by any run of the test's platform that lie inside
-#     the printing run's `out` or the `out` of a run it received `DEP_*`
-#     metadata from (Cargo: inside the target's output directory; the same
-#     rule as for compiles, runs and doctests, `LibraryPath::for_dylib_path`
-#     in breakbulk-unit), then the sysroot's target library directory;
+#     search paths printed by the runs of the test's platform in its
+#     closure (the units its binary depends on, the bins named in
+#     `CARGO_BIN_EXE_<name>` included; Cargo: every run of the build) that
+#     lie inside the printing run's `out` or the `out` of a run it received
+#     `DEP_*` metadata from (Cargo: inside the target's output directory;
+#     the same rule as for compiles, runs and doctests,
+#     `LibraryPath::for_dylib_path` in breakbulk-unit), then the sysroot's
+#     target library directory;
 #   - `/tmp/breakbulk-target-tmp`, the planner's `CARGO_TARGET_TMPDIR`, is
 #     created first;
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
@@ -318,11 +321,11 @@ rec {
   mergeRustcEnvJq = "{env: (map(.env) | add)}";
 
   # Stable inputs for content-addressed test runs. A run spec
-  # names the `flags` of every build-script run of its platform
-  # (the dynamic-library path, as Cargo builds it) and the `flags` of its
+  # names the `flags` of the build-script runs of its platform in its
+  # closure (the dynamic-library path) and the `flags` of its
   # package's build script (`rustc-env`). Those are input-addressed, so an
-  # edit to any package with a build script gives them new paths and
-  # re-runs every test, even when nothing they hold changed. This returns
+  # edit to a package with a build script below the test gives them new
+  # paths and re-runs the test, even when nothing they hold changed. This returns
   # the spec with both replaced by small content-addressed copies:
   #
   #   - `<name>-test-dylibs`: `dylib/<NNNN>/` per dynamic-library path entry,

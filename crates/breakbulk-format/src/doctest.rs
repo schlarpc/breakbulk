@@ -5,16 +5,21 @@ use breakbulk_unit::doctest::{DoctestKind, RenderedDoctest};
 use breakbulk_unit::spec::{RenderedArg, RenderedCompile};
 
 use crate::normalize::{normalize_arg, normalize_text};
-use crate::plan::{Arg, Plan, Reference, Text, Unit};
+use crate::plan::{Arg, Doctest, Plan, Platform, Reference, Text, Unit};
 use std::collections::BTreeSet;
 
-use crate::deps::doctest_deps;
+use crate::deps::{doctest_deps, runs_of, units_below_unit};
 use crate::render::{Resolve, env, flags, link_packages, splice, text};
 
 /// Render doctest `id` (`d-<package>`) of `plan`. The doctest is rendered as
 /// a linking compile unit with no outputs and no remapping (rustdoc keeps
 /// nothing it writes); its `searchPathsOf` splice becomes the list of runs'
 /// `flags` outputs and its position in the arguments.
+///
+/// The traced `-L` list and dynamic-library path name every run of the
+/// invocation (Cargo's whole-build `native_dirs`). Rendered, they keep only
+/// the runs in the doctest's own closure ([`closure_runs`]), so a run the
+/// library does not depend on is not an input.
 ///
 /// # Panics
 ///
@@ -48,6 +53,7 @@ pub fn render_doctest<R: Resolve>(
         .iter()
         .position(|a| matches!(a, Arg::SearchPaths(_)))
         .unwrap_or(d.args.len());
+    let (search_runs, dylib_runs) = closure_runs(plan, &d);
     let mut runs: Vec<String> = d
         .args
         .iter()
@@ -56,9 +62,11 @@ pub fn render_doctest<R: Resolve>(
             _ => None,
         })
         .flatten()
+        .filter(|u| search_runs.contains(u))
         .collect();
     runs.sort();
     runs.dedup();
+    d.dylib_path_from.retain(|u| dylib_runs.contains(u));
     let mut literals: Vec<String> = d
         .args
         .iter()
@@ -139,4 +147,21 @@ pub fn render_doctest<R: Resolve>(
         search_paths_literals: literals,
         search_paths_at: at,
     })
+}
+
+/// The runs a doctest depends on: those of its platform, for its `-L`
+/// list, and the host's, for its dynamic-library path (the proc macros
+/// rustdoc loads). Cargo links a unit against the search paths of its
+/// closure's build scripts only (`add_native_deps`, over
+/// `build_scripts.to_link`), so the closure finds every library the
+/// examples link. The traced `dylibPathFrom` names every host run, so it
+/// is not followed.
+pub fn closure_runs(plan: &Plan, d: &Doctest) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut c = d.as_compile();
+    c.dylib_path_from.clear();
+    let below = units_below_unit(plan, &Unit::Compile(c));
+    (
+        runs_of(plan, below.clone(), d.platform),
+        runs_of(plan, below, Platform::Host),
+    )
 }

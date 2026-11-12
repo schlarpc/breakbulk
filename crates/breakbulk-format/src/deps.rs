@@ -331,6 +331,17 @@ pub fn doctest_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
 /// splices, `envSplices`, `dylibPathFrom` and `metadataFrom`. Ids that are
 /// not units of the plan (doctests, stubs) are left out. Without `id`.
 pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
+    let Some(unit) = plan.units.get(id) else {
+        return BTreeSet::new();
+    };
+    let mut seen = units_below_unit(plan, unit);
+    seen.remove(id);
+    seen
+}
+
+/// [`units_below`] a unit that need not be in the plan (a doctest's
+/// [`crate::Doctest::as_compile`]).
+pub fn units_below_unit(plan: &Plan, unit: &Unit) -> BTreeSet<UnitId> {
     fn direct(unit: &Unit) -> Vec<UnitId> {
         let mut out = Vec::new();
         crate::plan::for_each_reference(unit, &mut |r, _| {
@@ -358,7 +369,8 @@ pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
         out
     }
     let mut seen = BTreeSet::new();
-    let mut stack = vec![id.clone()];
+    let mut stack = direct(unit);
+    stack.retain(|d| plan.units.contains_key(d) && seen.insert(d.clone()));
     while let Some(u) = stack.pop() {
         let Some(unit) = plan.units.get(&u) else {
             continue;
@@ -369,8 +381,19 @@ pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
             }
         }
     }
-    seen.remove(id);
     seen
+}
+
+/// The runs of `platform` among `units`.
+pub fn runs_of(
+    plan: &Plan,
+    units: BTreeSet<UnitId>,
+    platform: crate::Platform,
+) -> BTreeSet<UnitId> {
+    units
+        .into_iter()
+        .filter(|u| matches!(plan.units.get(u), Some(Unit::Run(r)) if r.platform == platform))
+        .collect()
 }
 
 /// The compile units among [`units_below`] `id` that write per-object
@@ -398,8 +421,5 @@ pub fn debug_units_below(
 /// whose copies of Cargo's `<profile>` directory sit next to `id`'s output
 /// (#23).
 pub fn target_runs_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
-    units_below(plan, id)
-        .into_iter()
-        .filter(|u| matches!(plan.units.get(u), Some(Unit::Run(r)) if r.platform == crate::Platform::Target))
-        .collect()
+    runs_of(plan, units_below(plan, id), crate::Platform::Target)
 }

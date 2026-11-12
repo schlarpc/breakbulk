@@ -1,0 +1,13 @@
+# Test runs take the build-script runs in their own closure only:
+# `greeter`'s build script builds a shared library into its OUT_DIR, which
+# its bin loads by name at run time; its integration test starts the bin
+# (CARGO_BIN_EXE_greeter), so the library must be on the test's
+# dynamic-library path. `quiet`'s test depends on no build script, so its
+# test run has no build-script run as an input.
+[workspace]
+resolver = "2"
+members = ["greeter", "quiet"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

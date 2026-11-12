@@ -287,11 +287,11 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 ### S6. Doctest search paths
 
-- **Assumption.** `rustdoc --test` gets one `-L` per entry of a set of every run's search paths in the invocation (both platforms, both classes) and every `links` override's, sorted by path component and without duplicates, and no `-l`.
-- **Where.** `crates/breakbulk-plan/src/graph.rs`: `doctest_native_block`, `convert_args` (`searchPathsOf`); `crates/breakbulk-unit/src/doctest.rs`: `search_paths`.
-- **Upstream.** cargo `src/ops/cargo_test.rs`, `run_doc_tests`; `Compilation::native_dirs`, a `BTreeSet<PathBuf>`; spike A, surprise S8.
+- **Assumption.** `rustdoc --test` gets one `-L` per entry of a set of every run's search paths in the invocation (both platforms, both classes) and every `links` override's, sorted by path component and without duplicates, and no `-l`. A unit is linked against the search paths of the build scripts in its own closure only, so breakbulk keeps, of the traced runs, those of the doctest's platform in its closure.
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `doctest_native_block`, `convert_args` (`searchPathsOf`); `crates/breakbulk-format/src/doctest.rs`: `closure_runs`; `crates/breakbulk-unit/src/doctest.rs`: `search_paths`.
+- **Upstream.** cargo `src/ops/cargo_test.rs`, `run_doc_tests`; `Compilation::native_dirs`, a `BTreeSet<PathBuf>`; `src/compiler/mod.rs`, `add_native_deps` (`-L` from `build_scripts.to_link`); `src/compiler/custom_build.rs`, `build_map` (`to_link`: the unit's own package's scripts and those of its linkable dependencies, transitively; proc macros' and build dependencies' go to `plugins`); spike A, surprise S8.
 - **Holds for.** The window.
-- **Pinned by.** `differential*` (doctest argv rebuilt with `breakbulk-unit`'s code and compared). Rust: `doctest::tests::search_paths_sort_by_component_and_dedup`.
+- **Pinned by.** `differential*` (doctest argv rebuilt with `breakbulk-unit`'s code from the traced runs and compared; the rendered list names only traced runs). Rust: `doctest::tests::search_paths_sort_by_component_and_dedup`, `tests::doctests_keep_only_their_closures_runs`.
 - **If it changes.** Doctest `-L` lists differ from Cargo's; the differential checks fail.
 
 ### S7. `DEP_*` metadata
@@ -332,7 +332,7 @@ Status of the 79 entries: all 79 pinned; [Gaps](#gaps) is empty.
 
 ### S11. Dynamic-library paths
 
-- **Assumption.** Cargo sets the build machine's dynamic-library variable: on a compile, the search paths of its host plugin dependencies' runs (proc macros, build dependencies with build scripts), appended after the inherited value; on a run, those of its build dependencies' runs; on a test process, those of every run of the test's platform; on `rustdoc --test`, those of every host run, sorted, before the inherited value; build scripts also get the sysroot's library directory. It keeps only paths lexically inside the platform's artifact directory; breakbulk keeps paths inside the printing run's `out` or a `DEP_*` upstream's `out` instead.
+- **Assumption.** Cargo sets the build machine's dynamic-library variable: on a compile, the search paths of its host plugin dependencies' runs (proc macros, build dependencies with build scripts), appended after the inherited value; on a run, those of its build dependencies' runs; on a test process, those of every run of the test's platform; on `rustdoc --test`, those of every host run, sorted, before the inherited value; build scripts also get the sysroot's library directory. It keeps only paths lexically inside the platform's artifact directory; breakbulk keeps paths inside the printing run's `out` or a `DEP_*` upstream's `out` instead. For a test process and a doctest, breakbulk takes only the runs in the unit's closure (see [S6](#s6-doctest-search-paths)).
 - **Where.** `crates/breakbulk-unit/src/directives.rs`: `LibraryPath::for_dylib_path`; `splice.rs`: `expand_dylib_path`, `prepend_dylib_path`; `crates/breakbulk-plan/src/graph.rs`: `dylib_path`; `lib/test-runs.nix`: `dylibJq`; `lib/workspace.nix`: `unitTools` (`rustc-sysroot`).
 - **Upstream.** cargo `0.100.0` `src/compiler/mod.rs`: `add_plugin_deps`, `filter_dynamic_search_path`; `src/compiler/compilation.rs`: `fill_env`; [research-coverage-and-libpath.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/research-coverage-and-libpath.md) section 2 (and a survey of 1207 crates for the substitute rule).
 - **Holds for.** The window.

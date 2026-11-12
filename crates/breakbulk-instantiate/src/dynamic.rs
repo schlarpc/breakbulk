@@ -181,9 +181,13 @@ pub struct TestSpec {
     pub config_env: BTreeMap<String, String>,
     /// `flags` outputs of the runs whose `rustc-env` values the process gets.
     pub env_flags: Vec<String>,
-    /// `flags` of every run of the unit's platform, for the dynamic-library
-    /// path. Each run's `directives.json` says which of its search paths go
-    /// on it (`LibraryPath::for_dylib_path` in breakbulk-unit).
+    /// `flags` of the runs of the unit's platform that it depends on
+    /// (`deps::units_below`, the bins it names in `CARGO_BIN_EXE_<name>`
+    /// included), for the dynamic-library path. Not every run of the plan,
+    /// as Cargo's shared `target/<profile>` gives: a library the test was
+    /// linked against was found through its own closure's runs. Each run's
+    /// `directives.json` says which of its search paths go on it
+    /// (`LibraryPath::for_dylib_path` in breakbulk-unit).
     pub dylib_flags: Vec<String>,
     /// The package's directory relative to the repository root (the source
     /// view's root), for test apps run in a checkout; None when
@@ -275,12 +279,11 @@ pub(crate) fn test_spec(
         .iter()
         .map(|s| tokens.unit(&s.splice, "flags"))
         .collect();
-    let runs: Vec<&String> = plan
-        .units
-        .iter()
-        .filter(|(_, u)| matches!(u, Unit::Run(r) if r.platform == c.platform))
-        .map(|(id, _)| id)
-        .collect();
+    let runs = breakbulk_format::deps::runs_of(
+        plan,
+        breakbulk_format::deps::units_below(plan, &unit.to_owned()),
+        c.platform,
+    );
     let package_dir = match c.env.get("CARGO_MANIFEST_DIR") {
         Some(Text::Concat(pieces)) => pieces.iter().find_map(|p| match p {
             Piece::Ref(Reference::Src(s)) => Some(s.rel.clone()),

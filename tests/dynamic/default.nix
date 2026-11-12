@@ -415,6 +415,10 @@ let
     # tests/test-runs' home: a test and a doctest writing under $HOME and
     # the user cache directory pass with no setting.
     test-home = (import ../test-runs testArgs).repos.home;
+    # tests/test-runs' test-closure: a test run takes only the build-script
+    # runs below it; a test starting its package's bin finds the library
+    # the build script built.
+    test-closure = (import ../test-runs testArgs).repos.test-closure;
     # Doctests as plain `cargo test` selects them (`doctest = false`).
     doctest-false = mkRepo "doctest-false" [ oneWs ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.

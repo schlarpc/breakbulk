@@ -1556,3 +1556,54 @@ fn units_below_follow_every_route() {
     // Nothing is below the app, which depends on nothing here.
     assert!(crate::deps::units_below(&p, &"c-app".into()).is_empty());
 }
+
+#[test]
+fn doctests_keep_only_their_closures_runs() {
+    let mut p = example();
+    // As traced: Cargo's `-L` list and dynamic-library path name every run.
+    let doctest = |p: &mut Plan, of: &str, args: Vec<Arg>| Doctest {
+        package: compile(p, of).package.clone(),
+        krate: compile(p, of).krate.clone(),
+        platform: Platform::Target,
+        program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
+        args: [
+            vec![
+                Arg::Literal("--test".into()),
+                Arg::SearchPaths(SearchPathsSplice {
+                    search_paths_of: vec!["r-ring".into()],
+                    literals: vec![],
+                }),
+            ],
+            args,
+        ]
+        .concat(),
+        env: BTreeMap::new(),
+        env_splices: vec![],
+        dylib_path_from: vec!["r-ring".into()],
+        cwd: compile(p, of).cwd.clone(),
+    };
+    // ring's doctest links ring, whose run is below it.
+    let ring = doctest(
+        &mut p,
+        "c-ring",
+        vec![Arg::Concat(vec![
+            Piece::Literal("ring=".into()),
+            Piece::Ref(Reference::Out(OutRef {
+                out: "c-ring".into(),
+                output: "rlib".into(),
+                file: Some("libring-1.rlib".into()),
+            })),
+        ])],
+    );
+    // app's does not: the run is no input of it.
+    let app = doctest(&mut p, "c-app", vec![]);
+    p.doctests.insert("d-ring".into(), ring);
+    p.doctests.insert("d-app".into(), app);
+    let r = render_doctest(&p, "d-ring", &Fake).unwrap();
+    assert_eq!(r.search_paths_of, ["/nix/store/r-ring-flags"]);
+    // The traced dynamic-library path names host runs; r-ring is not one.
+    assert!(r.compile.dylib_path_from.is_empty());
+    let a = render_doctest(&p, "d-app", &Fake).unwrap();
+    assert!(a.search_paths_of.is_empty());
+    assert!(a.compile.dylib_path_from.is_empty());
+}

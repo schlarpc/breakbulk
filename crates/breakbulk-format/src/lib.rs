@@ -17,7 +17,7 @@ mod validate;
 pub use canonical::{CanonicalError, to_canonical_json};
 pub use capabilities::Capabilities;
 pub use deps::{Graph, crate_deps, crate_deps_of};
-pub use doctest::render_doctest;
+pub use doctest::{closure_runs, render_doctest};
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;
 pub use render::{

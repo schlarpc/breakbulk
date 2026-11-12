@@ -494,16 +494,16 @@ let
       # With `ca`: what a run reads from its wrapper, in content-addressed
       # outputs, as testRuns.stableSpec makes them in IFD mode. The
       # wrapper's breakbulk-root.json names input-addressed paths (the
-      # `flags` of every build-script run, the package's whole source view),
-      # so a run reading it would re-run after an edit to any package with a
-      # build script. `out` holds `breakbulk-root.json` with `reason` and
+      # `flags` of the build-script runs below the test, the package's
+      # whole source view), so a run reading it would re-run after an edit
+      # to any of those packages. `out` holds `breakbulk-root.json` with `reason` and
       # `testSpec` only, its `flags` lists empty, narrowed to the
       # `test.runFiles` view, and without nextest's metadata for a libtest
       # run (it names the whole view); and `rustc-env/directives.json`,
       # the `rustc-env` values. `dylibs` holds the dynamic-library path's
-      # copies, as stableSpec's `test-dylibs`. It is the same for every
-      # test binary of the platform, and the name is not per binary, so
-      # its content-addressed path is too and the copies are stored once.
+      # copies, as stableSpec's `test-dylibs`. The name is not per binary,
+      # so test binaries whose copies have the same contents share its
+      # content-addressed path, and the copies are stored once.
       stableInfo =
         r: cfg:
         pkgs.runCommand "${name}-test-spec"

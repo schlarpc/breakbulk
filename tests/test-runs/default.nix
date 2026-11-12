@@ -87,6 +87,12 @@
 #                           fresh, empty home in $TMPDIR with
 #                           XDG_CACHE_HOME unset; with `test.env.HOME =
 #                           "/homeless-shelter"` both fail
+#   test-closure            over the `test-closure` fixture: a test run and
+#                           a doctest depend on no build-script run outside
+#                           their closure (`quiet`'s on nothing of
+#                           `greeter`); `greeter`'s test starts its bin,
+#                           which loads the shared library its build script
+#                           built, and passes
 #   test-binary-keys        `test.binaries` keys: unknown ones (in
 #                           `packages.<name>`, its `target.<triple>` and
 #                           `variant.<v>` layers and `memberDefaults`)
@@ -1095,6 +1101,60 @@ let
         mkdir -p $result
       '';
 
+  # --- test closure ------------------------------------------------------------
+
+  testClosureRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/test-closure";
+    modules = [
+      {
+        workspaces.main = {
+          variants.default.profile = "dev";
+          memberDefaults.test.keepLog = true;
+        };
+      }
+    ]
+    ++ extraModules;
+  };
+  # A test run and a doctest take only the build-script runs below them:
+  # nothing of `greeter` is in the closure of `quiet`'s test run or
+  # doctest derivation, and `greeter`'s test, which starts its bin, finds
+  # the library the build script built.
+  testClosure =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      t = testClosureRepo.workspaces.main.target.${native};
+      quiet = t.testRuns.quiet."lib/quiet";
+      spec = quiet.passthru.breakbulkTest;
+    in
+    assert lib.assertMsg (
+      spec.dylib.flags == [ ] && (spec.dylib.stable or null) == null && spec.envFlags == [ ]
+    ) "test-closure: quiet's test run names build-script runs";
+    pkgs.runCommand "test-runs-test-closure"
+      {
+        exportReferencesGraph = [
+          "quiet-run"
+          quiet.drvPath
+          "quiet-doctest"
+          t.doctests.quiet.drvPath
+        ];
+        greeter = t.testRuns.greeter.runs_bin;
+        quietRun = quiet;
+        quietDoctest = t.doctests.quiet;
+      }
+      ''
+        for g in quiet-run quiet-doctest; do
+          if grep greeter $g; then
+            echo "$g depends on greeter" >&2
+            exit 1
+          fi
+        done
+        grep -q 'test runs_bin ... ok' $greeter/log
+        grep -q 'test tests::adds ... ok' $quietRun/log
+        grep -q 'quiet/src/lib.rs - (line 3) ... ok' $quietDoctest/log
+        mkdir -p $out
+      '';
+
   # --- test binary keys ------------------------------------------------------
 
   keysRepo =
@@ -1254,7 +1314,9 @@ in
   repos = {
     test-threads = testThreadsRepo;
     home = homeRepo;
+    test-closure = testClosureRepo;
   };
+  test-closure = testClosure;
   post-run = postRun;
   inherit home;
   doctest-settings = doctestSettings;

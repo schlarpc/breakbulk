@@ -69,7 +69,7 @@ else
     wasm-browser wasm-component wasip2 riscv64 linux-portable
     windows-gnullvm-aarch64 windows-gnu windows-dll-staged linux-portable-native
     msvc msvc-post-link
-    test-home doctest-false optional-dependency exclusive-features
+    test-home test-closure doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist
   )
 fi
