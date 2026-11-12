@@ -1686,14 +1686,17 @@ in
       profiles == {
         default = {
           build = "release";
+          doc = "release";
           test = "test";
         };
         release-tests = {
           build = "release";
+          doc = "release";
           test = "release";
         };
         check = {
           build = "release";
+          doc = "release";
           test = "release";
         };
       }
