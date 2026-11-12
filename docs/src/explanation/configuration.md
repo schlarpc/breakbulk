@@ -245,7 +245,8 @@ The shell sets these variables, in this order. A later value replaces
 an earlier one.
 
 1. Each package's `env`, `forHost.env` and `forTarget.env`, for every
-   package in `Cargo.lock` order. Without them, code such as
+   package in `Cargo.lock` order, with its layers for the target and the
+   default variant. Without them, code such as
    `include_bytes!(env!("X"))` does not compile in the shell.
 2. The target's `env`.
 3. The Cargo env config for the target: its linker and rustflags, and

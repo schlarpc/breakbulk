@@ -723,8 +723,9 @@ let
             `build.target` (or Cargo's host default) applies.
 
             The shell also merges every package's `env`, `forHost.env` and
-            `forTarget.env`. Set `devShell.env` to change or remove any of
-            these variables.
+            `forTarget.env`, as the default variant's plans on this target
+            see them. Set `devShell.env` to change or remove any of these
+            variables.
           '';
         };
 
@@ -741,8 +742,9 @@ let
             Variables for the dev shell, applied last, over everything the
             shell sets. The shell sets, in this order:
 
-            1. each package's `env`, `forHost.env` and `forTarget.env`, for
-               every package in `Cargo.lock` order;
+            1. each package's `env`, `forHost.env` and `forTarget.env`
+               (its layers for `devShell.target` and the default
+               variant), for every package in `Cargo.lock` order;
             2. the `env` of `devShell.target`;
             3. the Cargo env config for `devShell.target`: its linker,
                its rustflags, and trim-paths when the planner turns it on;
