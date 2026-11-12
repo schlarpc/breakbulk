@@ -40,8 +40,10 @@ perSystem = { ... }: {
 
 `root` defaults to the flake's `self`. Per system it sets
 `breakbulk.repo` (the `mkRepository` result) and adds `repo.checks` to
-`checks`, the default target's products to `packages`, and each
-workspace's dev shell to `devShells`.
+`checks`, the default target's products to `packages`, `repo.apps` to
+`apps`, and each workspace's dev shell to `devShells`. Each of these
+has a switch under `breakbulk`, `true` by default: `exposeChecks`,
+`exposePackages`, `exposeApps`, `exposeDevShells`.
 
 ## The result
 
@@ -54,20 +56,32 @@ repo = {
     # Shortcuts for the default target (defaultTarget) and variant:
     packages.<pkg>;          # a product: the build after the default stages
     tests.<pkg>.<test>;      # a test binary
+    testRuns.<pkg>.<binary>; # a test run
     devShell;                # a shell matching the planner's Cargo invocation
     toolchain = { rustc; cargo; clippy; rustfmt; };   # resolved
 
     target.<triple> = {
-      packages.<pkg>;        # products for this target
-      tests.<pkg>.<test>;    # test binaries, e.g. for VM tests
-      testRuns.<pkg>.<test>; # derivations that run them
-      testApps.<pkg>.<test>; # the same, runnable outside the sandbox
-      doctests.<pkg>;        # each library's doctests
-      benches.<pkg>.<bench>; # bench binaries, from a bench variant
-      variants.<v> = { packages; tests; };
+      variants.<v> = {
+        packages.<pkg>;              # products for this target
+        tests.<pkg>.<test>;          # test binaries, e.g. for VM tests
+        testRuns.<pkg>.<binary>;     # derivations that run them
+        namedTestRuns.<pkg>.<test>;  # the same, named as in tests; .enabled
+        testApps.<pkg>.<binary>;     # the same, for nix run outside the sandbox
+        doctests.<pkg>;              # each library's doctests
+        benches.<pkg>.<bench>;       # bench binaries, in a bench variant
+        benchRuns.<pkg>.<binary>;    # each bench run once in test mode
+        namedBenchRuns.<pkg>.<bench>;  # the same, named as in benches; .enabled
+        check;                       # check and clippy variants only
+      };
+      # The default variant's, as above:
+      packages; tests; testRuns; namedTestRuns; testApps; doctests;
+      # The bench variant's (the default variant, or the only one with benches):
+      benches; benchRuns; namedBenchRuns;
+      runner;                # the runner (a list), or null
+      testSystem;            # the system test runs build on, or null
       spec;                  # the resolved target spec
       traits;                # the target's traits
-      canRunTests;           # false: no runner; runs not in checks
+      canRunTests;           # false: no runner; its runs not in checks, its apps not in apps
     };
 
     plans.<triple>.<v> = { build; test; };   # plan.json, for debugging
@@ -75,6 +89,7 @@ repo = {
 
   checks."<ws>/<triple>/<pkg>/<name>";   # everything to check, for checks.<system>
   checks.all; checks."<prefix>";         # groups: every check, everything under a prefix
+  apps."<ws>/<triple>/<pkg>/test-<name>";  # every test app, for apps.<system>
   sources.<crate>;                       # fetched crate sources
   explainSharing;                        # why two plans' units differ
   config; options; optionsDoc;           # the evaluated modules
@@ -120,6 +135,27 @@ holds) that builds them as one installable
 They add about one name per distinct prefix to `nix flake check`'s list,
 and build nothing the checks themselves do not. A group has
 `breakbulkCheckGroup = true`, which tells it from a leaf check.
+
+### Test apps and `apps`
+
+A test app (`testApps.<pkg>.<binary>`) is a derivation whose
+`meta.mainProgram` runs the test binary with its test run's working
+directory, environment and runner, on your machine, so `nix run` takes
+it at its attribute path. `<binary>` is the test binary's key, as in
+`testRuns`: an integration test by its name, the others as
+`<kind>/<name>` (`lib/<crate>`, `bin/<name>`).
+
+`repo.apps` has every test app of every build or coverage variant, in
+the shape of a flake's `apps` output (`{ type = "app"; program; meta; }`),
+for `apps.<system> = repo.apps;`. Each is named as its test run's check
+in the table above (`…/<pkg>/test-<name>`,
+`…/variant-<v>/<pkg>/test-<name>`), also when the variant has
+`checks = false` or the run is disabled. A target with
+`canRunTests = false` has none.
+
+```
+nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
+```
 
 ### `explainSharing`
 

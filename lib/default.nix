@@ -34,7 +34,7 @@
 # Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
-#   breakbulk.testApps.mkTestApps { ... } (runnable apps)
+#   breakbulk.testApps.mkTestApps { ... } (test apps, for `nix run`)
 {
   lib,
   # breakbulk's own locked nixpkgs (the flake's `nixpkgs` input), or null

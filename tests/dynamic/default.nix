@@ -441,15 +441,17 @@ let
         );
       ws = mkCtl { };
       wsCheckout = mkCtl { checkout = "/build/checkout"; };
+      # What `nix run` runs for a derivation.
+      program = drv: "${drv.outPath}/bin/${drv.meta.mainProgram}";
     in
     pkgs.runCommand "test-control-apps-${mode}"
       (
         {
-          net = ws.testApps.ctl.net.program;
-          envApp = wsCheckout.testApps.ctl.env.program;
+          net = program ws.testApps.ctl.net;
+          envApp = program wsCheckout.testApps.ctl.env;
         }
         # IFD mode has no app for a test binary Cargo did not build.
-        // lib.optionalAttrs isDynamic { skipped = ws.testApps.ctl.needs_feat.program; }
+        // lib.optionalAttrs isDynamic { skipped = program ws.testApps.ctl.needs_feat; }
       )
       ''
         $net --skip needs_network | tee net.log

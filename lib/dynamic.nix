@@ -796,10 +796,7 @@ let
             exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
           '';
         in
-        {
-          type = "app";
-          program = "${script}/bin/${name}-${n}";
-        };
+        script;
     in
     lib.mapAttrs (_: lib.mapAttrs (_: app)) t.roots;
 in

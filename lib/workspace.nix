@@ -44,7 +44,7 @@
 # Path packages outside the workspace root (in the skeleton's closure) get
 # source views too, keyed by their directory like members.
 #   ws.testRuns.<pkg>.<binary> test-run derivations (lib/test-runs.nix)
-#   ws.testApps.<pkg>.<binary> runnable apps (lib/test-apps.nix)
+#   ws.testApps.<pkg>.<binary> test apps, for `nix run` (lib/test-apps.nix)
 #   ws.doctests.<pkg>          doctest derivations
 #   ws.checks."test/<pkg>/<binary>", ."doctest/<pkg>"
 #                              enabled test runs and doctests, flat

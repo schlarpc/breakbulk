@@ -40,6 +40,7 @@ Create `flake.nix` next to `Cargo.toml`:
     {
       packages.${system}.default = repo.workspaces.default.packages.app;
       checks.${system} = repo.checks;
+      apps.${system} = repo.apps;
       devShells.${system}.default = repo.workspaces.default.devShell;
     };
 }
@@ -100,6 +101,14 @@ nix flake check
 
 `repo.checks` builds every product and runs every test binary, each in its
 own derivation.
+
+To run one test binary on your machine instead, outside the sandbox, use
+its app from `repo.apps`. It is named as its check; arguments after `--`
+go to the test binary:
+
+```sh
+nix run .#default/x86_64-unknown-linux-gnu/app/test-bin-app -- adds
+```
 
 ## 5. Use the development shell
 

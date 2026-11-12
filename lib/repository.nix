@@ -21,13 +21,14 @@
 #   repo.workspaces.<ws>.toolchain.{rustc,cargo,clippy,rustfmt}   resolved
 #   repo.workspaces.<ws>.instances.<triple>.<v>           the mkWorkspace results
 #   repo.checks."<ws>/<triple>/<pkg>/<name>"              flattened
+#   repo.apps."<ws>/<triple>/<pkg>/test-<name>"           every test app, flake app shape
 #   repo.sources.<crate> / ."<crate>@<version>"           fetched crate sources
 #   repo.explainSharing { a; b; package; }                why units differ
 #   repo.config, repo.options                             the evaluated modules
 #   repo.optionsDoc                                       nixosOptionsDoc of them
 #
 #   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
-#   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  runnable apps
+#   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  test apps (`nix run`)
 #   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
 #   repo.workspaces.<ws>.target.<triple>.spec          the resolved target spec
 #   repo.workspaces.<ws>.target.<triple>.traits        the target's traits
@@ -1085,11 +1086,7 @@ let
         vName: v:
         let
           vc = variantCells.${wsName}.${triple}.${vName};
-          prefix =
-            if vName == cfg.workspaces.${wsName}.defaultVariant then
-              "${wsName}/${triple}"
-            else
-              "${wsName}/${triple}/variant-${vName}";
+          prefix = variantPrefix wsName triple vName;
         in
         lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
           lib.concatMapAttrs (
@@ -1127,6 +1124,56 @@ let
   // lib.concatMapAttrs (
     wsName: ws: lib.optionalAttrs ws.fmt.enable { "${wsName}/fmt" = fmtCheck wsName ws; }
   ) cfg.workspaces;
+
+  # Where a variant's checks are named: `<ws>/<triple>` for the default
+  # variant, `<ws>/<triple>/variant-<v>` for the others.
+  variantPrefix =
+    wsName: triple: vName:
+    if vName == cfg.workspaces.${wsName}.defaultVariant then
+      "${wsName}/${triple}"
+    else
+      "${wsName}/${triple}/variant-${vName}";
+
+  # repo.apps: every test app of every build or coverage variant, in a
+  # flake's `apps` shape, named as its test run's check
+  # (`<prefix>/<pkg>/test-<name>`). Unlike repo.checks, it does not ask
+  # for `checks = true` or an enabled run: the sandbox's skip lists and
+  # disabled runs are what a test app is for. A target that cannot run
+  # tests here (`canRunTests`) has none, as its apps would only fail.
+  apps = lib.concatMapAttrs (
+    wsName: w:
+    lib.concatMapAttrs (
+      triple: t:
+      lib.optionalAttrs t.canRunTests (
+        lib.concatMapAttrs (
+          vName: v:
+          let
+            vc = variantCells.${wsName}.${triple}.${vName};
+            prefix = variantPrefix wsName triple vName;
+            # Named over the test runs' binaries, not the apps': IFD mode
+            # has no app for a binary Cargo did not build, and a name
+            # depends on the names it collides with.
+            named = namedRuns' false (lib.mapAttrs (
+              pkg: lib.mapAttrs (k: _: v.testApps.${pkg}.${k} or null)
+            ) v.testRuns) (_: _: false) null;
+          in
+          lib.optionalAttrs (vc.mode == "build" || vc.mode == "coverage") (
+            lib.concatMapAttrs (
+              pkg: as:
+              lib.mapAttrs' (
+                n: drv:
+                lib.nameValuePair "${prefix}/${pkg}/test-${n}" {
+                  type = "app";
+                  program = "${drv}/bin/${drv.meta.mainProgram}";
+                  meta.description = "Test binary ${n} of ${pkg} on ${triple}, variant ${vName}, outside the sandbox";
+                }
+              ) (lib.filterAttrs (_: drv: drv != null) (removeAttrs as [ "enabled" ]))
+            ) named
+          )
+        ) t.variants
+      )
+    ) w.target
+  ) workspaces;
 
   # `workspaces.<ws>.fmt`: `cargo fmt --check -p <member>…` over the
   # workspace directory (minus `target/`, `.git` and `result*` at its top)
@@ -1515,6 +1562,7 @@ let
           user = cfg.checkGroups;
         }
     );
+    apps = guard apps;
     sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
     inherit explainSharing warnings;
     inherit (eval) config options;

@@ -25,9 +25,14 @@
 #   test-control-bin-exe    CARGO_BIN_EXE_ctl in the integration test's
 #                           compile env names the test plan's `ctl` bin unit
 #                           (not a test harness), and that unit runs
-#   test-control-app        the test apps run outside a test run: the
-#                           network binary with a filter, and the env
-#                           binary against a checkout at /build/checkout
+#   test-control-app        the test apps run outside a test run, as `nix
+#                           run` runs a derivation: the network binary with
+#                           a filter, and the env binary against a checkout
+#                           at /build/checkout
+#   test-control-repo-apps  repo.apps: every test app of every build
+#                           variant (a disabled run's and a `checks =
+#                           false` variant's too), named as its test run's
+#                           check, in the flake app shape; two of them run
 #   runner                  test runs start the binary through the runner;
 #                           doctests pass it as --test-runtool(-arg)
 #   nextest                 `test.runner = "nextest"` over the nextest
@@ -366,15 +371,19 @@ let
     packages.ctl.test = ctlTest;
     checkout = "/build/checkout";
   };
+  # The program `nix run` runs for a derivation (src/nix/app.cc: `outPath`,
+  # `/bin/`, `meta.mainProgram`); a check cannot call `nix run` itself.
+  nixRunProgram =
+    drv:
+    assert lib.assertMsg (lib.isDerivation drv) "a test app is not a derivation";
+    "${drv.outPath}/bin/${drv.meta.mainProgram}";
   testControlApp =
     pkgs.runCommand "test-runs-test-control-app"
       {
-        net = ctl.testApps.ctl.net.program;
-        envApp = ctlCheckout.testApps.ctl.env.program;
-        type = ctl.testApps.ctl.net.type;
+        net = nixRunProgram ctl.testApps.ctl.net;
+        envApp = nixRunProgram ctlCheckout.testApps.ctl.env;
       }
       ''
-        [ "$type" = app ]
         $net --skip needs_network | tee net.log
         grep -q 'test offline_ok ... ok' net.log
         cp -r --no-preserve=mode ${fixtures + "/test-control"} /build/checkout
@@ -385,6 +394,84 @@ let
         grep -q 'test result: ok. 4 passed' env.log
         mkdir -p $out
         cp net.log env.log $out/
+      '';
+
+  # repo.apps over the same fixture through mkRepository: every test app
+  # of every build variant, named as its test run's check, a disabled run's
+  # and a `checks = false` variant's included; each in the flake app shape,
+  # its program the one `nix run` runs for the variant's test app.
+  ctlRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/test-control";
+    modules = [
+      {
+        workspaces.main = {
+          path = ".";
+          variants.default.profile = "dev";
+          variants.unchecked = {
+            profile = "dev";
+            checks = false;
+          };
+        };
+        packages.ctl.test = ctlTest // {
+          binaries = ctlTest.binaries // {
+            ignored.enable = false;
+          };
+        };
+      }
+    ];
+  };
+  testControlRepoApps =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      apps = ctlRepo.apps;
+      tests = [
+        "bin-ctl"
+        "bin_exe"
+        "env"
+        "ignored"
+        "lib"
+        "net"
+      ];
+      want = lib.concatMap (p: map (t: "main/${native}/${p}ctl/test-${t}") tests) [
+        ""
+        "variant-unchecked/"
+      ];
+      checkNames = lib.filter (n: lib.hasInfix "/test-" n) (lib.attrNames ctlRepo.checks);
+      discard = builtins.unsafeDiscardStringContext;
+      net = apps."main/${native}/ctl/test-net";
+      variantNet = ctlRepo.workspaces.main.target.${native}.variants.default.testApps.ctl.net;
+    in
+    assert lib.assertMsg (lib.attrNames apps == lib.sort lib.lessThan want)
+      "test-control-repo-apps: apps ${toString (lib.attrNames apps)}";
+    # IFD mode has no app for a binary Cargo did not build (needs_feat).
+    assert lib.assertMsg (
+      checkNames == [
+        "main/${native}/ctl/test-bin-ctl"
+        "main/${native}/ctl/test-bin_exe"
+        "main/${native}/ctl/test-env"
+        "main/${native}/ctl/test-lib"
+        "main/${native}/ctl/test-needs_feat"
+        "main/${native}/ctl/test-net"
+      ]
+    ) "test-control-repo-apps: test-run checks ${toString checkNames}";
+    assert lib.assertMsg (lib.all (
+      a: a.type == "app" && lib.isString a.program && lib.isString a.meta.description
+    ) (lib.attrValues apps)) "test-control-repo-apps: an app is not in the flake app shape";
+    assert lib.assertMsg (discard net.program == discard (nixRunProgram variantNet))
+      "test-control-repo-apps: ${net.program} is not the variant's test app";
+    pkgs.runCommand "test-runs-test-control-repo-apps"
+      {
+        net = net.program;
+        ignored = apps."main/${native}/variant-unchecked/ctl/test-ignored".program;
+      }
+      ''
+        $net --skip needs_network | tee net.log
+        grep -q 'test offline_ok ... ok' net.log
+        $ignored | tee ignored.log
+        grep -q 'test slow ... ignored, slow' ignored.log
+        mkdir -p $out
+        cp net.log ignored.log $out/
       '';
 
   # A runner that announces itself, then runs the program. Test runs start
@@ -866,4 +953,5 @@ in
   test-control-skip-list = testControlSkipList;
   test-control-bin-exe = testControlBinExe;
   test-control-app = testControlApp;
+  test-control-repo-apps = testControlRepoApps;
 }

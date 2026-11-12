@@ -272,6 +272,30 @@ divide the cores between runs.
   `NEXTEST_TEST_THREADS` in `test.env` or `test.binaries.<binary>.env`
   wins over both.
 
+**Running a test app.** A test app is a derivation whose
+`meta.mainProgram` is the app's script, so `nix run` takes it at its
+attribute path, wherever a flake output puts it. Arguments after `--` go
+to the test binary:
+
+```
+nix run .#<…>.testApps.<pkg>.<binary> -- --exact net::fetches --nocapture
+```
+
+`repo.apps` has every test app in the shape of a flake's `apps` output,
+named as its test run's [check](../reference/outputs.md#checks)
+(`<ws>/<triple>/<pkg>/test-<name>`). It includes the test binaries whose
+runs are disabled, or whose tests the sandbox skips, which are the main
+reason to run a test app. With `apps.${system} = repo.apps;` in the
+flake (the flake-parts module adds it), `nix flake show` lists them, and:
+
+```
+nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
+```
+
+`nix run` splits an attribute path at `.` only, so `/` needs no quoting.
+A name with a `.` in it (from a workspace named `api.v2`, say) is
+quoted: `nix run '.#"api.v2/…/test-e2e"'`.
+
 **Doctests** get one derivation per library, which runs `rustdoc --test`.
 rustdoc compiles and runs the examples in one process, so doctests have
 no cutoff: they re-run whenever the library or anything below it changes.

@@ -21,6 +21,7 @@
 #  - packages."<pkg>" for each product of the default variant on the
 #    workspace's default target (`defaultTarget`)
 #    ("<ws>-<pkg>" when two workspaces have a package of that name);
+#  - apps."<ws>/<triple>/<pkg>/test-<name>": repo.apps, every test app;
 #  - devShells."<ws>" for each workspace, and devShells.default when there
 #    is exactly one.
 breakbulkLib:
@@ -81,6 +82,11 @@ in
           default = true;
           description = "Add every workspace's products on its default target (`workspaces.<ws>.defaultTarget`) to the flake's packages.";
         };
+        exposeApps = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Add repo.apps (every test app, named as its test run's check) to the flake's apps.";
+        };
         exposeDevShells = mkOption {
           type = types.bool;
           default = true;
@@ -97,6 +103,7 @@ in
         packages = lib.mkIf cfg.exposePackages (
           lib.listToAttrs (map (x: lib.nameValuePair (pkgName x) repo.workspaces.${x.ws}.packages.${x.p}) allPkgs)
         );
+        apps = lib.mkIf cfg.exposeApps repo.apps;
         devShells = lib.mkIf cfg.exposeDevShells (
           lib.genAttrs wsNames (ws: repo.workspaces.${ws}.devShell)
           // lib.optionalAttrs (lib.length wsNames == 1) {

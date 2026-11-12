@@ -1,4 +1,4 @@
-# Test apps: every test binary as a runnable flake app, with its test run's
+# Test apps: every test binary as a runnable program, with its test run's
 # working directory, environment and runner, run on the user's machine ("Tests"
 # in docs/src/explanation/internals/products.md). The escape hatch for tests
 # that cannot run in the sandbox (network, devices), and the way to rerun one
@@ -13,9 +13,15 @@
 #     packages = { };    # packages.<name>.test (only `env` and `path` apply)
 #     name = "breakbulk";
 #   };
-#   apps.<pkg>.<binary> = { type = "app"; program = "…/bin/<name>"; }
+#   apps.<pkg>.<binary>   a derivation: the script, bin/<name>, as
+#                         meta.mainProgram
 #
-#   nix run .#<app> -- --exact net::fetches --nocapture
+#   nix run .#<attribute path to the app> -- --exact net::fetches --nocapture
+#
+# A derivation, not the flake app shape (`{ type = "app"; program; }`):
+# `nix run` takes that shape only under a flake's `apps` output, and a
+# derivation with `meta.mainProgram` anywhere (Nix's src/nix/app.cc).
+# repo.apps gives them in the app shape for `apps`.
 #
 # The app runs the test binary (not a content-addressed copy) in the
 # package's directory with the same dynamic-library path, `rustc-env`
@@ -73,10 +79,7 @@
             exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs t.runner} "''${files[0]}" "$@"
           '';
         in
-        {
-          type = "app";
-          program = "${script}/bin/${name}-${spec.name}";
-        };
+        script;
     in
     lib.mapAttrs (_: lib.mapAttrs (_: app)) t.specs;
 }
