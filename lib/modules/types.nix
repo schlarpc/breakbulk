@@ -162,6 +162,126 @@ rec {
       o.highestPrio < 1500
     ) paths;
 
+  # Whether an option type keeps one definition's value, where several
+  # definitions at one priority conflict, rather than combining them
+  # (lists concatenate, attribute sets and modules merge).
+  singleValued =
+    t:
+    if t.name == "nullOr" then
+      singleValued t.nestedTypes.elemType
+    else if t.name == "either" then
+      singleValued t.nestedTypes.left && singleValued t.nestedTypes.right
+    else
+      lib.elem t.name [
+        "str"
+        "nonEmptyStr"
+        "singleLineStr"
+        "bool"
+        "enum"
+        "int"
+        "float"
+        "path"
+        "package"
+        "raw"
+      ];
+
+  # Layer `rank` (1, 2, …) of settings that refine a module evaluation
+  # (`extendModules`): `module` with the definitions of the single-valued
+  # options it sets (`isSingle`, by option name) moved up by `rank / 4` in
+  # priority, so that among definitions of equal priority the
+  # higher-ranked layer's wins instead of conflicting. A fraction keeps
+  # the order of any two integer priorities: `mkForce` and `mkDefault`
+  # still win and lose as written. Not `mkOverride` around the whole
+  # module: a list at a lower priority would then be dropped, not
+  # concatenated.
+  layer =
+    rank: isSingle:
+    let
+      shift = rank / 4.0;
+      leaf =
+        prio: v:
+        let
+          t = v._type or null;
+        in
+        if t == "if" then
+          v // { content = leaf prio v.content; }
+        else if t == "merge" then
+          v // { contents = map (leaf prio) v.contents; }
+        else if t == "override" then
+          v // { priority = v.priority - shift; }
+        else
+          lib.mkOverride (prio - shift) v;
+      # A module's `config`. An `mkOverride` around several options goes
+      # down to each, as the module system pushes it down.
+      config =
+        prio: c:
+        let
+          t = c._type or null;
+        in
+        if t == "if" then
+          c // { content = config prio c.content; }
+        else if t == "merge" then
+          c // { contents = map (config prio) c.contents; }
+        else if t == "override" then
+          config c.priority c.content
+        else
+          lib.mapAttrs (
+            n: v:
+            if isSingle n then
+              leaf prio v
+            else if prio == lib.modules.defaultOverridePriority then
+              v
+            else
+              lib.mkOverride prio v
+          ) c;
+      reserved = [
+        "_class"
+        "_file"
+        "key"
+        "disabledModules"
+        "freeformType"
+      ];
+      module =
+        m:
+        if builtins.isPath m || builtins.isString m then
+          # Keyed as the module system keys a file, so that a file also
+          # imported elsewhere is still imported once.
+          {
+            key = toString m;
+            _file = m;
+            imports = [ (module (import m)) ];
+          }
+        else if lib.isFunction m then
+          lib.setFunctionArgs (args: module (m args)) (lib.functionArgs m)
+        else
+          let
+            explicit = m ? config || m ? options;
+          in
+          builtins.intersectAttrs (lib.genAttrs (
+            reserved
+            ++ lib.optionals explicit [
+              "options"
+              "meta"
+            ]
+          ) (_: null)) m
+          // {
+            imports = map module (m.require or [ ] ++ m.imports or [ ]);
+            config = config lib.modules.defaultOverridePriority (
+              if explicit then
+                m.config or { }
+              else
+                removeAttrs m (
+                  reserved
+                  ++ [
+                    "require"
+                    "imports"
+                  ]
+                )
+            );
+          };
+    in
+    module;
+
   # An internal option collecting warnings from a submodule.
   warningsOption = mkOption {
     type = types.listOf types.str;

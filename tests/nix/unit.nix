@@ -82,6 +82,49 @@ let
     entries = lib.filter (e: e.parsed.kind == "registry") a;
     registries.my.index = "sparse+https://my.registry/index/";
   };
+
+  # Layered settings (lib/modules/types.nix `layer`): a base evaluation
+  # extended with layers 1 and 2, as a variant's settings on a target.
+  bt = import ../../lib/modules/types.nix { inherit lib; };
+  layered =
+    base: layers:
+    let
+      e = lib.evalModules {
+        modules = [
+          (
+            { options, ... }:
+            {
+              options = {
+                profile = lib.mkOption {
+                  type = lib.types.str;
+                  default = "release";
+                };
+                flag = lib.mkOption {
+                  type = lib.types.nullOr lib.types.bool;
+                  default = null;
+                };
+                features = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [ ];
+                };
+                isSingle = lib.mkOption {
+                  type = lib.types.raw;
+                  default = n: options ? ${n} && bt.singleValued options.${n}.type;
+                };
+              };
+            }
+          )
+          base
+        ];
+      };
+      c = (e.extendModules { modules = lib.imap1 (r: bt.layer r e.config.isSingle) layers; }).config;
+    in
+    {
+      inherit (c) profile flag features;
+    };
+  layerFile = builtins.toFile "layer.nix" ''
+    { lib, ... }: { profile = lib.mkForce "file"; features = [ "f" ]; }
+  '';
 in
 runTests "lib-unit" {
   # --- lockfile ----------------------------------------------------------
@@ -683,6 +726,99 @@ runTests "lib-unit" {
       true
     ];
   };
+  # A later layer's single value wins without mkForce; lists concatenate.
+  testLayerPlain = {
+    expr = layered {
+      profile = "base";
+      features = [ "b" ];
+    } [
+      {
+        profile = "one";
+        features = [ "1" ];
+      }
+      {
+        profile = "two";
+        flag = true;
+      }
+    ];
+    expected = {
+      profile = "two";
+      flag = true;
+      features = [
+        "1"
+        "b"
+      ];
+    };
+  };
+  # Priorities count across layers: mkForce below wins, mkDefault above
+  # loses; among equal explicit priorities the later layer wins.
+  testLayerPriorities = {
+    expr = layered { profile = lib.mkForce "base"; } [
+      { profile = "one"; }
+      {
+        flag = lib.mkDefault true;
+        profile = lib.mkForce "two";
+      }
+    ];
+    expected = {
+      profile = "two";
+      flag = true;
+      features = [ ];
+    };
+  };
+  testLayerDefaultLoses = {
+    expr = (layered { flag = false; } [ { flag = lib.mkDefault true; } ]).flag;
+    expected = false;
+  };
+  # Function modules (reading config), mkIf, mkMerge, an mkOverride
+  # around several options, `config` and `imports`, and files.
+  testLayerForms = {
+    expr = map (l: layered { profile = "base"; } [ l ]) [
+      (
+        { config, ... }:
+        {
+          flag = lib.mkIf (config.profile == "base") true;
+          features = [ config.profile ];
+        }
+      )
+      {
+        config = lib.mkMerge [
+          (lib.mkIf false { profile = "no"; })
+          { profile = "merged"; }
+        ];
+      }
+      {
+        config = lib.mkDefault {
+          profile = "default";
+          features = [ "d" ];
+        };
+      }
+      { imports = [ layerFile ]; }
+    ];
+    expected = [
+      {
+        profile = "base";
+        flag = true;
+        features = [ "base" ];
+      }
+      {
+        profile = "merged";
+        flag = null;
+        features = [ ];
+      }
+      {
+        profile = "base";
+        flag = null;
+        features = [ "d" ];
+      }
+      {
+        profile = "file";
+        flag = null;
+        features = [ "f" ];
+      }
+    ];
+  };
+
   testCheckGroupPrefixes = {
     expr = bb.checkGroups.properPrefixes "a/b/c/d";
     expected = [

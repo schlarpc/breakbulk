@@ -242,8 +242,35 @@ let
       extraSources = a.extraSources ++ b.extraSources;
       forHost = mergeSide a.forHost b.forHost;
       forTarget = mergeSide a.forTarget b.forTarget;
-      strictSources = if b.strictSources != null then b.strictSources else a.strictSources;
     };
+
+  # A single-valued setting at `path` across settings blocks, lowest layer
+  # first: the definition of the highest priority (`priorityOf`), and of
+  # those the last, most specific layer's; `default` without blocks. As if
+  # the blocks were one module with each layer's priorities moved up a
+  # little, as variant layers are (`layer` in lib/modules/types.nix).
+  pickSingle =
+    default: path: blocks:
+    (lib.foldl'
+      (
+        acc: b:
+        let
+          p = b.priorityOf path;
+        in
+        if p <= acc.prio then
+          {
+            prio = p;
+            value = lib.getAttrFromPath path b;
+          }
+        else
+          acc
+      )
+      {
+        prio = 9999;
+        value = default;
+      }
+      blocks
+    ).value;
 
   # The package settings of one lockfile entry of workspace `wsName` in
   # the plans of variant `vName` on `triple`, as a list of
@@ -284,7 +311,10 @@ let
     let
       ls = layersFor wsName triple vName e;
     in
-    if ls == [ ] then null else lib.foldl' mergeOverride emptyOverride ls;
+    if ls == [ ] then
+      null
+    else
+      lib.foldl' mergeOverride emptyOverride ls // { strictSources = pickSingle null [ "strictSources" ] ls; };
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
@@ -302,7 +332,8 @@ let
     map (o: { inherit (o) stages checks; }) (memberLayers wsName triple vName pkg);
 
   # The layers' `test` settings merged, for mkTestRuns:
-  # `{ <pkg> = { test = …; }; }` for the workspace's path packages.
+  # `{ <pkg> = { test = …; }; }` for the workspace's path packages. Lists,
+  # env and snippets combine; single values are `pickSingle`'s.
   testConfigs =
     wsName: triple: vName:
     let
@@ -312,13 +343,8 @@ let
         env = a.env // envStrings b.env;
         path = a.path ++ b.path;
         args = a.args ++ b.args;
-        includeIgnored = a.includeIgnored || b.includeIgnored;
         sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
-        scopeTestsDir = if b.scopeTestsDir != null then b.scopeTestsDir else a.scopeTestsDir;
-        runner = if b.runner != null then b.runner else a.runner;
-        stripForRun = if b.stripForRun != null then b.stripForRun else a.stripForRun;
         postRun = joinLines a.postRun b.postRun;
-        keepLog = if b.keepLog != null then b.keepLog else a.keepLog;
         # Several matching keys: the union of their lists.
         runFiles =
           if b.runFiles == null then
@@ -327,7 +353,6 @@ let
             b.runFiles
           else
             lib.unique (a.runFiles ++ b.runFiles);
-        nextest = lib.mapAttrs (k: v: if b.nextest.${k} != null then b.nextest.${k} else v) a.nextest;
         binaries = lib.zipAttrsWith (
           _:
           lib.foldl'
@@ -351,34 +376,40 @@ let
           args = a.doctest.args ++ b.doctest.args;
           env = a.doctest.env // envStrings b.doctest.env;
           postRun = joinLines a.doctest.postRun b.doctest.postRun;
-          enable = if b.doctest.enable != null then b.doctest.enable else a.doctest.enable;
         };
       };
       empty = {
         env = { };
         path = [ ];
         args = [ ];
-        includeIgnored = false;
         sourceScope = [ ];
-        scopeTestsDir = null;
         binaries = { };
         doctest = {
           args = [ ];
           env = { };
           postRun = "";
-          enable = null;
         };
         runFiles = null;
-        runner = null;
-        stripForRun = null;
         postRun = "";
-        keepLog = null;
-        nextest = {
-          profile = null;
-          configFile = null;
-          package = null;
-        };
       };
+      merged =
+        ls:
+        let
+          t = lib.foldl' (acc: l: mergeTest acc l.test) empty ls;
+          single = default: path: pickSingle default ([ "test" ] ++ path) ls;
+        in
+        t
+        // {
+          includeIgnored = single false [ "includeIgnored" ];
+          scopeTestsDir = single null [ "scopeTestsDir" ];
+          runner = single null [ "runner" ];
+          stripForRun = single null [ "stripForRun" ];
+          keepLog = single null [ "keepLog" ];
+          nextest = lib.genAttrs [ "profile" "configFile" "package" ] (n: single null [ "nextest" n ]);
+          doctest = t.doctest // {
+            enable = pickSingle null [ "enable" ] (map (l: l.test.doctest) ls);
+          };
+        };
       # nextest reads `.config/nextest.toml` under the Cargo workspace root.
       nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";
       withDefaults =
@@ -395,7 +426,7 @@ let
         };
     in
     lib.genAttrs members (pkg: {
-      test = withDefaults (lib.foldl' (acc: l: mergeTest acc l.test) empty (memberLayers wsName triple vName pkg));
+      test = withDefaults (merged (memberLayers wsName triple vName pkg));
     });
 
   # --- test binary keys --------------------------------------------------------

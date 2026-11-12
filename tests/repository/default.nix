@@ -1379,6 +1379,38 @@ in
       "member-defaults: unit env placement";
     evalCheck "member-defaults" script;
 
+  # Single values across package layers: a more specific layer wins
+  # without mkForce; mkForce in a lower layer wins over a plain value in a
+  # higher one, mkDefault in a higher layer loses to a plain value in a
+  # lower one.
+  package-layer-priorities =
+    let
+      repo = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "b")
+        {
+          workspaces.main.memberDefaults.test = {
+            runner = lib.mkForce "nextest";
+            keepLog = false;
+          };
+          packages.app-b = {
+            test.runner = "libtest";
+            test.includeIgnored = true;
+            target.${native}.test.includeIgnored = false;
+            variant.default.test.keepLog = lib.mkDefault true;
+          };
+        }
+      ];
+      run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
+      checks = {
+        targetLayerWins = !(lib.elem "--include-ignored" run.passthru.breakbulkTest.args);
+        forcedLowerWins = run.drvAttrs ? nextestCargoMetadata;
+        defaultHigherLoses = !(lib.hasInfix ''"$out/log"'' run.drvAttrs.buildCommand);
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "package-layer-priorities: failed ${toString bad}";
+    evalCheck "package-layer-priorities" (builtins.toJSON checks);
+
   # `forHost`/`forTarget` sides and the package-shaped `target.<triple>`
   # layer. libc has a build script: its compile is a host unit, its run
   # and lib are target units. `target.<other triple>` reaches nothing

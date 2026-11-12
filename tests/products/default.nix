@@ -78,7 +78,10 @@
 #                    1.99): a feature on one target only, a variant's
 #                    layer replacing the defaults, a package run keeping
 #                    its own features, `allTargets = false` on one
-#                    target; invalid layers fail evaluation
+#                    target; a single value in the variant's target layer
+#                    wins over the variant and `variantDefaults` without
+#                    mkForce, priorities still count (`checks` on one
+#                    target only); invalid layers fail evaluation
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
 #   variants-clippy-conf   clippy units find `clippy.toml` above the
@@ -1548,14 +1551,55 @@ in
               target.${wasm}.profile = "dev";
             };
           };
-          # A single value set in the variant and its layer conflicts
-          # without mkForce.
-          conflicts = fails {
-            variants.default = {
-              profile = "release";
-              target.${wasm}.profile = "dev";
-            };
-          };
+          # A single value: the variant's target layer wins over the
+          # variant and `variantDefaults` without mkForce; mkForce in the
+          # variant wins over a plain value in the layer, a plain value in
+          # the variant over mkDefault in the layer.
+          layerWins =
+            let
+              r = repoWith {
+                variants.default = {
+                  profile = "release";
+                  target.${wasm}.profile = "dev";
+                };
+                targets.${wasm}.variantDefaults.profile = "bench";
+              };
+              p = t: r.workspaces.main.instances.${t}.default.plans.build.drvAttrs.buildCommand;
+            in
+            lib.hasInfix " --profile dev " (p wasm) && lib.hasInfix " --profile release " (p native);
+          forcedWins =
+            let
+              r = repoWith {
+                variants.default = {
+                  profile = lib.mkForce "release";
+                  target.${wasm}.profile = "dev";
+                };
+              };
+            in
+            lib.hasInfix " --profile release " r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+          mkDefaultLoses =
+            let
+              r = repoWith {
+                variants.default = {
+                  profile = "release";
+                  target.${wasm}.profile = lib.mkDefault "dev";
+                };
+              };
+            in
+            lib.hasInfix " --profile release " r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+          # The example of the docs: test runs and products in repo.checks
+          # on wasm only.
+          checksOnOneTarget =
+            let
+              names = lib.attrNames (repoWith {
+                variants.default = {
+                  profile = "release";
+                  checks = false;
+                  target.${wasm}.checks = true;
+                };
+              }).checks;
+            in
+            lib.elem "main/${wasm}/app/build" names && !(lib.any (lib.hasPrefix "main/${native}/app/") names);
         }
       );
     in

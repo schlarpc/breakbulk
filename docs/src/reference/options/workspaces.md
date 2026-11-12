@@ -253,11 +253,13 @@ false
 
 Settings for every member of this workspace (the path packages
 of its ` Cargo.lock `), with the options of
-[` packages.<name> `](packages\.md)\. They are the lowest layer
-under the package’s own ` packages.<name> ` settings: lists
-concatenate, ` env ` attributes merge, and the package’s own value
-wins for single values (` test.runner `)\. Dependencies from a
-registry or git do not get them\.
+[` packages.<name> `](packages\.md)\. They are a layer under the
+package’s own ` packages.<name> ` settings: lists concatenate,
+` env ` attributes merge, and the package’s own value wins for
+single values (` test.runner `) unless this one has a higher
+priority (` lib.mkForce `)
+([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order))\.
+Dependencies from a registry or git do not get them\.
 
 *Type:*
 submodule
@@ -541,10 +543,13 @@ true
 Settings for every variant planned on this target: any option of
 ` variants.<v> `, for facts about the target (“msvc needs the
 ` windows ` feature”, “wasm has no default features”)\. For each
-variant on this target they merge over the variant’s own settings,
-and its ` variants.<v>.target.<triple> ` merges over them, by module
-rules: lists concatenate, and a single value set to different values
-in two of these places needs ` lib.mkForce ` on the one that wins\.
+variant on this target they apply over the variant’s own settings,
+and its ` variants.<v>.target.<triple> ` over them: lists
+concatenate, and a single value set in two of these places takes
+the later one’s, without ` lib.mkForce `\. Priorities still count
+across them: ` lib.mkForce ` in the variant wins over a plain value
+here, ` lib.mkDefault ` here loses to a plain value in the variant
+([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
 
 Variants made by ` breakbulk.variants.packageFeaturePowerset ` keep
 their own ` features `, ` noDefaultFeatures ` and ` allFeatures ` over
@@ -1040,12 +1045,14 @@ workspaces.<ws>.sourcePaths
 This variant’s settings on one of its targets: any option of
 the variant (` features `, ` noDefaultFeatures `, ` profile `,
 ` allTargets `, ` clippyArgs `, ` packages `, ` benches `, ` checks `, …)
-except ` targets `\. They merge over the variant’s own settings
+except ` targets `\. They apply over the variant’s own settings
 and the target’s ` variantDefaults `
-(` workspaces.<ws>.targets.<triple>.variantDefaults `), in that
-order, by module rules: lists concatenate, and a single
-value set to different values in two of these places needs
-` lib.mkForce ` on the one that wins\. Only targets the variant is planned for are allowed\.
+(` workspaces.<ws>.targets.<triple>.variantDefaults `): lists
+concatenate, and a single value set here wins over theirs
+without ` lib.mkForce `, unless one of theirs has a higher
+priority (` lib.mkForce `)
+([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
+Only targets the variant is planned for are allowed\.
 
 *Type:*
 attribute set of module

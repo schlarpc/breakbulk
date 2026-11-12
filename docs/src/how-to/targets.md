@@ -184,9 +184,14 @@ workspaces.default.variants.minimal = {
   # Not even the target's `windows` feature.
   target.x86_64-pc-windows-msvc.features = lib.mkForce [ ];
 };
+workspaces.default.variants.default = {
+  # Test runs in repo.checks on wasm only.
+  checks = false;
+  target.wasm32-unknown-unknown.checks = true;
+};
 ```
 
-The layers merge in this order, by module rules:
+The layers apply in this order:
 
 | Order | Layer |
 | --- | --- |
@@ -195,14 +200,15 @@ The layers merge in this order, by module rules:
 | 3 | `variants.<v>.target.<triple>` |
 
 Lists such as `features` concatenate. A single value, such as `profile`
-or `noDefaultFeatures`, set to different values in two layers is an
-error unless one uses `lib.mkForce`. `lib.mkForce` on a list replaces the
-other layers' lists.
+or `checks`, set in two layers takes the later layer's value. To replace
+the other layers' lists, use `lib.mkForce` on a list. See [Layers and
+priorities](#layers-and-priorities).
 
 `breakbulk.variants.packageFeaturePowerset` runs keep their own
 `features`, `noDefaultFeatures` and `allFeatures` over `variantDefaults`:
 each run selects one package (`-p`), and Cargo rejects a feature that
-the selected package does not have.
+the selected package does not have
+([priorities](#layers-and-priorities)).
 
 ## Package settings per target or variant
 
@@ -240,6 +246,36 @@ The layers of one `packages.<name>` apply in this order:
 `workspaces.<ws>.memberDefaults` and `sysDefaults.packages` have the
 same layers, under those of `packages.<name>`
 ([layer order](../explanation/configuration.md#shared-settings-and-layer-order)).
+Lists concatenate and `env` merges. A single value, such as
+`test.runner`, set in two layers takes the later layer's value.
+
+## Layers and priorities
+
+In both kinds of layers, a more specific layer wins over the layers it
+refines. You do not need `lib.mkForce` for that. The module system's
+priorities still apply between layers:
+
+- A value with a higher priority wins, whatever its layer.
+  `lib.mkForce` (priority 50) in `variants.<v>` wins over a plain value
+  in `variants.<v>.target.<triple>`.
+- `lib.mkDefault` (priority 1000) loses to a plain value in any layer.
+- Between values of the same priority, the later layer wins.
+
+For variant layers, breakbulk does this by changing priorities. In
+`targets.<triple>.variantDefaults`, a single value's priority number is
+lowered by 0.25. In `variants.<v>.target.<triple>`, it is lowered by 0.5.
+So a plain value is 100 in `variants.<v>`, 99.75 in `variantDefaults`
+and 99.5 in `variants.<v>.target.<triple>`, and `lib.mkOverride 99` in
+any layer wins over all three. Lists keep their priority, so that they
+still concatenate.
+
+Package layers are separate settings blocks. breakbulk compares their
+single values by the same rule.
+
+`breakbulk.variants.packageFeaturePowerset` gives each run's
+`features`, `noDefaultFeatures` and `allFeatures` priority 90, so they
+win over `variantDefaults`. To change them in the run's own
+`target.<triple>`, use `lib.mkForce`.
 
 ## Windows (MSVC)
 

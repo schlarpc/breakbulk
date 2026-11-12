@@ -16,6 +16,24 @@ let
     inputs = bt.mkInputs "Libraries for this package's ${name} units only (${sides}).";
   };
 
+  # `priorityOf [ "test" "runner" ]`: the priority of an option's
+  # definitions in this settings block (`highestPrio`: 1500 for the
+  # default alone). Each layer is a block of its own, and module priorities
+  # hold only within one; lib/repository.nix compares the layers' single
+  # values by these.
+  priorityOf =
+    { options, ... }:
+    {
+      options.priorityOf = mkOption {
+        type = types.raw;
+        internal = true;
+        visible = false;
+        readOnly = true;
+        description = "The priority of an option's definitions in this block, by its path.";
+      };
+      config.priorityOf = path: (lib.getAttrFromPath path options).highestPrio;
+    };
+
   # The settings of one run over the package's: a test binary's or the
   # doctest run's.
   runSettings = what: {
@@ -33,6 +51,7 @@ let
   };
 
   testBinary = {
+    imports = [ priorityOf ];
     options = runSettings "this test binary's run" // {
       enable = mkOption {
         type = types.bool;
@@ -43,6 +62,7 @@ let
   };
 
   doctest = {
+    imports = [ priorityOf ];
     options = runSettings "the package's doctest run" // {
       enable = mkOption {
         type = types.nullOr types.bool;
@@ -51,9 +71,11 @@ let
           Whether the package's doctest run is part of `repo.checks` and
           the check groups. A doctest compiles and runs in one rustdoc
           process, so with `false` the checks build nothing of it; it
-          stays buildable as `doctests.<pkg>`. A layer's value wins over
-          the layers below it: `memberDefaults.test.doctest.enable =
-          false` with `true` for a few packages runs only theirs. For a
+          stays buildable as `doctests.<pkg>`. A more specific layer's
+          value wins over the layers it refines
+          ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
+          `memberDefaults.test.doctest.enable = false` with `true` for a
+          few packages runs only theirs. For a
           library whose manifest sets `doctest = false`, there is no
           doctest run to enable. `null`: `true`.
         '';
@@ -66,6 +88,7 @@ let
   common = {
     key = "breakbulk/modules/package-settings.nix#common";
     _file = ./package-settings.nix;
+    imports = [ priorityOf ];
     options = {
       env = bt.mkEnv ''
         Environment for every unit of this package, on both ${sides}

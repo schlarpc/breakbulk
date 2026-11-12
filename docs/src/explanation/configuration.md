@@ -206,9 +206,11 @@ the unit's triple and variant:
 | `packages.<name>` | that package, in every workspace |
 
 Lists concatenate, `env` merges, and a single value (`test.runner`) is
-the highest layer's that sets one. Variant layers
-(`variantDefaults`, `variants.<v>.target.<triple>`) differ: there two
-single values conflict unless one uses `lib.mkForce`.
+the highest layer's that sets one. Priorities still count across layers:
+`lib.mkForce` in a lower layer wins over a plain value in a higher one.
+Variant layers (`variantDefaults`, `variants.<v>.target.<triple>`)
+follow the same rule ([layers and
+priorities](../how-to/targets.md#layers-and-priorities)).
 
 breakbulk ships settings for common `-sys` crates, from nixpkgs'
 `defaultCrateOverrides` ([`sysDefaults.packages`](../reference/options/repository.md#sysdefaultspackages)),
