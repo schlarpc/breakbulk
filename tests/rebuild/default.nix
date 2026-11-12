@@ -105,6 +105,7 @@ let
     # variant only.
     clippy-conf = [ (plainAt "ws" "clippy-conf" [ ]) ];
     crate-types = [ (plain "crate-types" [ ]) ];
+    cross-doctests = [ dynamic.repos.cross-doctests-aarch64 ];
     cross-lto = [ presetFixtures.repos.crossLto ];
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
@@ -118,9 +119,11 @@ let
     git-revisions = [ (import ../git-revisions args).repos.repository ];
     linux-portable = [ extraTargets.repos.zigRepo ];
     linux-portable-native = [ extraTargets.repos.zigNativeRepo ];
+    manifest-dir = [ dynamic.repos.manifest-dir ];
     missing-input = [ repository.repos.provided ];
     msvc = [ presetFixtures.repos.msvc ];
     multi-ws = [ repository.repos.multiWs ];
+    nested-cargo = [ dynamic.repos.nested-cargo ];
     nextest = [ dynamic.repos.nextest ];
     optional-dependency = [ repository.repos.optionalDep ];
     out-dir-walk = [ dynamic.repos.out-dir-walk ];
@@ -137,6 +140,7 @@ let
     post-link = [ products.repos.postLink ];
     required-features = [ repository.repos.rf ];
     riscv64 = [ extraTargets.repos.riscv64Repo ];
+    rlib-example = [ dynamic.repos.rlib-example ];
     same-triple = [ presetFixtures.repos.sameTriple ];
     same-workspace-products = [ products.repos.sameWsRepo ];
     source-paths = [ products.repos.sourcePaths ];
@@ -154,6 +158,7 @@ let
       ])
     ];
     sys-native = [ presetFixtures.repos.sysNativeCross ];
+    test-closure = [ dynamic.repos.test-closure ];
     test-control = [ dynamic.repos.test-control ];
     test-cutoff = [ (plain "test-cutoff" [ ]) ];
     test-home = [ dynamic.repos.test-home ];
