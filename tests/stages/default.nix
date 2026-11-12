@@ -42,6 +42,14 @@
 #                       running; with a built root, stages run
 #   stages-wasm-component  a core module through wasmOpt -> componentize
 #                       with metadata; the component imports nothing
+#   stages-build-script-path  buildScriptPath and the build-script lookups
+#                       over stand-in runs (a `links` package, two versions
+#                       of one package), with the runs listed as in IFD mode
+#                       and through a `breakbulk-root.json` as in dynamic
+#                       mode: the copies, an ambiguous package failing
+#                       with its versions, a missing key or links name
+#                       failing with what there is; options of both forms
+#                       or of neither fail evaluation
 #
 # Reproducibility of the zip stage across real rebuilds is checked by hand
 # with `nix build --rebuild .#checks.x86_64-linux.stages-zip.zip` (the
@@ -1483,4 +1491,237 @@ in
       wasm-tools print ${opt}/m.wasm | grep -q memory.copy
       touch $out
     '';
+
+  # Stand-in build-script runs: an `out` holding the OUT_DIR at a nested
+  # path, as a run's does, and a `flags` with its `metadata.json`.
+  stages-build-script-path =
+    let
+      fakeRun =
+        {
+          package,
+          version,
+          links ? null,
+          # `[ key value ]` pairs; `@OUT_DIR@` stands for the OUT_DIR.
+          metadata ? [ ],
+          script,
+        }:
+        pkgs.runCommand "${package}-${version}-build-run"
+          {
+            outputs = [
+              "out"
+              "flags"
+            ];
+            nativeBuildInputs = [ pkgs.jq ];
+            runInfo = builtins.toJSON {
+              inherit
+                package
+                version
+                links
+                metadata
+                ;
+            };
+          }
+          ''
+            OUT_DIR=$out/release/build/${package}-0123/out
+            mkdir -p "$OUT_DIR" $flags
+            ${script}
+            jq -c --arg o "$OUT_DIR" '
+              .metadata |= map(map(sub("@OUT_DIR@"; $o)))
+              | .out = $o
+              | if .links == null then del(.links) else . end' <<< "$runInfo" > $flags/metadata.json
+          '';
+      hdr = fakeRun {
+        package = "hdr-sys";
+        version = "0.1.0";
+        links = "hdr";
+        metadata = [
+          [
+            "include"
+            "/nowhere"
+          ]
+          [
+            "include"
+            "@OUT_DIR@/include"
+          ]
+          [
+            "version"
+            "3"
+          ]
+        ];
+        script = ''
+          mkdir -p "$OUT_DIR/include"
+          echo '#define HDR 3' > "$OUT_DIR/include/hdr.h"
+        '';
+      };
+      dup =
+        version:
+        fakeRun {
+          package = "dup";
+          inherit version;
+          script = "echo ${version} > $OUT_DIR/v.txt";
+        };
+      runs = [
+        hdr
+        (dup "0.1.0")
+        (dup "0.2.0")
+      ];
+      ifdFlags = map (r: r.flags) runs;
+      rootInfo = pkgs.writeText "breakbulk-root.json" (
+        builtins.toJSON { buildScriptFlags = map (r: "${r.flags}") runs; }
+      );
+      productOf =
+        buildScriptFlags: stages:
+        S.mkProduct {
+          name = "app";
+          linked = pkgs.runCommand "app-linked" { } "mkdir $out; echo app > $out/app";
+          inherit pkgs stages;
+          info = { inherit buildScriptFlags; };
+          defaultChecks = false;
+        };
+      # A stage reading the runs with the lookups, as a user's would.
+      lookups =
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }@args:
+        pkgs.runCommand "app-lookups" { } ''
+          set -euo pipefail
+          ${H.buildScriptLookups args}
+          cp -RL ${input} $out
+          chmod -R u+w $out
+          dir=$(buildScriptOutDir dup 0.2.0)
+          cp "$dir/v.txt" $out/dup-v.txt
+          buildScriptMetadata hdr version > $out/hdr-version
+          buildScriptRuns > $out/runs
+        '';
+      stages = {
+        headers = {
+          before = "install";
+          run = H.buildScriptPath {
+            links = "hdr";
+            key = "include";
+            to = "include";
+          };
+        };
+        dupData = {
+          after = "headers";
+          before = "install";
+          run = H.buildScriptPath {
+            package = "dup";
+            version = "0.1.0";
+            from = "v.txt";
+            to = "share/dup/v.txt";
+          };
+        };
+        lookups = {
+          after = "install";
+          run = lookups;
+        };
+      };
+      ifd = productOf ifdFlags stages;
+      dynamic = productOf { rootInfo = [ "${rootInfo}" ]; } stages;
+      failing =
+        name: run:
+        pkgs.testers.testBuildFailure (
+          (productOf ifdFlags {
+            ${name} = {
+              before = "install";
+              inherit run;
+            };
+          }).stages.${name}
+        );
+      evalFails =
+        opts:
+        !(builtins.tryEval
+          (builtins.seq (H.buildScriptPath opts {
+            input = pkgs.emptyDirectory;
+            product = {
+              name = "app";
+              buildScriptFlags = [ ];
+            };
+            inherit pkgs;
+          }).drvPath null
+          )
+        ).success;
+    in
+    assert lib.assertMsg (evalFails {
+      links = "hdr";
+      to = "include";
+    }) "buildScriptPath: `links` without `key` evaluates";
+    assert lib.assertMsg (evalFails {
+      links = "hdr";
+      key = "include";
+      from = "include";
+      to = "include";
+    }) "buildScriptPath: options of both forms evaluate";
+    assert lib.assertMsg (evalFails {
+      package = "dup";
+      to = "x";
+    }) "buildScriptPath: `package` without `from` evaluates";
+    assert lib.assertMsg (evalFails {
+      package = "dup";
+      from = "v.txt";
+      to = "../x";
+    }) "buildScriptPath: a `to` outside the product evaluates";
+    pkgs.runCommand "stages-build-script-path"
+      {
+        ambiguous = failing "dupData" (
+          H.buildScriptPath {
+            package = "dup";
+            from = "v.txt";
+            to = "v.txt";
+          }
+        );
+        noKey = failing "headers" (
+          H.buildScriptPath {
+            links = "hdr";
+            key = "lib";
+            to = "lib";
+          }
+        );
+        noLinks = failing "headers" (
+          H.buildScriptPath {
+            links = "z";
+            key = "include";
+            to = "include";
+          }
+        );
+        noPackage = failing "dupData" (
+          H.buildScriptPath {
+            package = "nope";
+            from = ".";
+            to = "x";
+          }
+        );
+        taken = failing "dupData" (
+          H.buildScriptPath {
+            package = "dup";
+            version = "0.2.0";
+            from = "v.txt";
+            to = "app";
+          }
+        );
+      }
+      ''
+        set -euo pipefail
+        for p in ${ifd} ${dynamic}; do
+          grep -qF '#define HDR 3' $p/include/hdr.h
+          [ "$(cat $p/share/dup/v.txt)" = 0.1.0 ]
+          [ "$(cat $p/dup-v.txt)" = 0.2.0 ]
+          [ "$(cat $p/hdr-version)" = 3 ]
+          [ "$(wc -l < $p/runs)" = 3 ]
+          [ -f $p/app ]
+        done
+        cmp ${ifd}/include/hdr.h ${dynamic}/include/hdr.h
+        grep -qF 'app depends on several build-script runs of dup: dup 0.1.0 (OUT_DIR ' $ambiguous/testBuildFailure.log
+        grep -qF 'dup 0.2.0 (OUT_DIR ' $ambiguous/testBuildFailure.log
+        grep -qF 'name one by its version' $ambiguous/testBuildFailure.log
+        grep -qF 'the build script of hdr-sys 0.1.0 (links = "hdr") printed no metadata key "lib"; its keys: include, version' $noKey/testBuildFailure.log
+        grep -qF 'app depends on no build-script run with links = "z"; the links names below it: hdr' $noLinks/testBuildFailure.log
+        grep -qF 'app depends on no build-script run of nope; the runs below it are of: dup 0.1.0, dup 0.2.0, hdr-sys 0.1.0' $noPackage/testBuildFailure.log
+        grep -qF 'buildScriptPath: app already has app' $taken/testBuildFailure.log
+        touch $out
+      '';
 }

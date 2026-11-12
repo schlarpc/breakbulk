@@ -1,0 +1,16 @@
+# Build-script outputs a product installs, as wasmtime's C API crate's
+# headers (`OUT_DIR/include`, published as `links` metadata `include`).
+#
+#  - hdr-sys (`links = "hdr"`) writes a header into OUT_DIR/include and
+#    prints `cargo::metadata=include=<that directory>`.
+#  - gen has no `links`; its build script writes OUT_DIR/data/gen.txt.
+#  - app depends on both; its product takes the header by the `links`
+#    metadata and the data file by package and path in OUT_DIR
+#    (`stageHelpers.buildScriptPath`).
+[workspace]
+resolver = "2"
+members = ["app", "gen", "hdr-sys"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

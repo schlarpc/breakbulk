@@ -364,6 +364,9 @@ let
     benches = products.benchesRepo;
     stdpaths = products.rustSrcRepo;
     cdylib-debug = products.cdylibDebug;
+    # A product installs a header published as `links` metadata and a
+    # file in another package's OUT_DIR, read at build time.
+    build-script-outputs = products.buildScriptOutputs;
     # A product of another target of the same workspace in a package's
     # env.
     ui-dist = products.uiDistRepo;

@@ -22,9 +22,8 @@ use std::fmt;
 /// The file in a run's `flags` output holding its parsed directives
 /// ([`directives::BuildOutput`] as JSON).
 pub const DIRECTIVES_FILE: &str = "directives.json";
-/// The file in a run's `flags` output holding its `links` metadata
-/// ([`directives::MetadataFile`] as JSON), present when the package declares
-/// `links`.
+/// The file in a run's `flags` output naming its package, its `OUT_DIR`
+/// and its `links` metadata ([`directives::MetadataFile`] as JSON).
 pub const METADATA_FILE: &str = "metadata.json";
 
 /// In a run's `flags`, when its script wrote files outside `OUT_DIR` (into

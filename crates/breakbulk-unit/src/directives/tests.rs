@@ -620,9 +620,11 @@ fn envify_and_metadata_env() {
     assert_eq!(envify("ring_core-0.17"), "RING_CORE_0.17");
     assert_eq!(envify("straße"), "STRASSE");
     let m = MetadataFile {
-        links: "openssl".into(),
+        package: "openssl-sys".into(),
+        version: "0.9.0".into(),
+        links: Some("openssl".into()),
         metadata: kv(&[("include", "/i"), ("version-number", "30000")]),
-        out: None,
+        out: "/o".into(),
     };
     assert_eq!(
         m.env(),

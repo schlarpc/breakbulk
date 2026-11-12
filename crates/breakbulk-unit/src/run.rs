@@ -3,8 +3,8 @@
 //! 1. Set up the environment contract, with `OUT_DIR=$out` (writable, empty).
 //! 2. Add `DEP_<LINKS>_<KEY>` from each `metadataFrom` run's `metadata.json`.
 //! 3. Run the script with the package source as the working directory.
-//! 4. Parse stdout into `$flags/directives.json`, and `$flags/metadata.json`
-//!    when the package declares `links`.
+//! 4. Parse stdout into `$flags/directives.json`, and write
+//!    `$flags/metadata.json` (package, `links` metadata, `OUT_DIR`).
 //! 5. Fail on a non-zero exit, on death by signal (naming the signal), on a
 //!    directive Cargo rejects, and on an `error` directive by Cargo's rule
 //!    (only lines starting exactly with `cargo::error=`; decision log #8),
@@ -471,6 +471,12 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     fresh_dir(&out)?;
     fresh_dir(&flags)?;
     let out_dir = prepare_out_dir(&out, &r.out_dir)?;
+    let (package, version) = package_name_version(&r.package).ok_or_else(|| {
+        Error(format!(
+            "cannot read a name and version from package id `{}`",
+            r.package
+        ))
+    })?;
 
     let metadata = r
         .metadata_from
@@ -515,10 +521,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .join()
         .map_err(|_| Error("copying the build script's stderr failed".into()))?;
 
-    let upstream_out_dirs: Vec<PathBuf> = metadata
-        .iter()
-        .filter_map(|m| m.out.as_deref().map(PathBuf::from))
-        .collect();
+    let upstream_out_dirs: Vec<PathBuf> = metadata.iter().map(|m| PathBuf::from(&m.out)).collect();
     let judged = judge(&Finished {
         run: r,
         argv: &argv,
@@ -554,16 +557,16 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     if !outside.is_empty() {
         write_json(&flags.join(TARGET_FILES_FILE), &outside)?;
     }
-    if let Some(links) = &r.links {
-        write_json(
-            &flags.join(METADATA_FILE),
-            &MetadataFile {
-                links: links.clone(),
-                metadata: output.metadata.clone(),
-                out: Some(out_dir.display().to_string()),
-            },
-        )?;
-    }
+    write_json(
+        &flags.join(METADATA_FILE),
+        &MetadataFile {
+            package: package.to_owned(),
+            version: version.to_owned(),
+            links: r.links.clone(),
+            metadata: output.metadata.clone(),
+            out: out_dir.display().to_string(),
+        },
+    )?;
     Ok(())
 }
 

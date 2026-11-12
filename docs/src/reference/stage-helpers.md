@@ -98,6 +98,92 @@ Run it before `install`.
 
 It has no options.
 
+### `buildScriptPath`
+
+Copies a file or directory that a build script of the
+product's target made into the product, at `to`. Name it one
+of two ways:
+
+- `links` and `key`: the path a script publishes as `links`
+  metadata (`cargo::metadata=<key>=<path>`), which a
+  dependent's build script sees as `DEP_<LINKS>_<KEY>`. Cargo
+  defines this interface, so prefer it where the script has
+  one. wasmtime's C API publishes its headers so:
+  `{ links = "wasmtime-c-api"; key = "include"; to = "include"; }`.
+- `package` and `from`: a path in the `OUT_DIR` of the
+  package's build-script run, for a script without `links`.
+  When the product's roots depend on two versions of the
+  package, `version` says which; without it the stage fails
+  naming them.
+
+The run is one of those the product's roots depend on
+([Build-script runs](stage-functions.md#build-script-runs)).
+Symlinks are resolved. A path the product already has fails
+the stage. `install` keeps a top-level directory as it is, so
+the stage can run before `install` or after it.
+
+#### `buildScriptPath.from`
+
+The path relative to the run's `OUT_DIR`; `.` is the whole directory.
+
+*Type:* null or relative path without `..`
+
+*Default:* `null`
+
+*Example:* `"include"`
+
+#### `buildScriptPath.key`
+
+The metadata key whose value is the path, as the script
+prints it. When it prints the key more than once, the last
+value counts, as for `DEP_<LINKS>_<KEY>`.
+
+*Type:* null or string
+
+*Default:* `null`
+
+*Example:* `"include"`
+
+#### `buildScriptPath.links`
+
+The `links` name of the package whose build script publishes the path. Set `key` with it.
+
+*Type:* null or string
+
+*Default:* `null`
+
+*Example:* `"wasmtime-c-api"`
+
+#### `buildScriptPath.package`
+
+The name of the package whose build script made the path. Set `from` with it.
+
+*Type:* null or string
+
+*Default:* `null`
+
+*Example:* `"wasmtime-c-api-impl"`
+
+#### `buildScriptPath.to`
+
+Where the path goes, relative to the top of the product.
+
+*Type:* relative path without `..`
+
+*Default:* none; the option must be set
+
+*Example:* `"include"`
+
+#### `buildScriptPath.version`
+
+The version of `package`. `null`: the one version the product's roots depend on.
+
+*Type:* null or string
+
+*Default:* `null`
+
+*Example:* `"50.0.1"`
+
 ### `componentize`
 
 Makes a WebAssembly component from the input's single core

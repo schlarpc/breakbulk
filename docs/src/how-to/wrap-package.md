@@ -78,6 +78,28 @@ The helpers and their options are listed in [Stage
 helpers](../reference/stage-helpers.md). To write your own stage, see
 [Stage and check functions](../reference/stage-functions.md).
 
+## Ship a file a build script made
+
+A dependency's build script can make files the product should ship,
+such as C headers in its `OUT_DIR`. `buildScriptPath` copies one into
+the product. Name the file by the `links` metadata the script publishes
+for dependents, where it has some:
+
+```nix
+packages.wasmtime-c-api.stages.headers = {
+  after = "install";
+  run = breakbulk.stageHelpers.buildScriptPath {
+    links = "wasmtime-c-api"; key = "include"; to = "include";
+  };
+};
+```
+
+Otherwise name the package and the path in its `OUT_DIR`:
+`{ package = "gen"; from = "data"; to = "share/gen"; }`. When the product
+depends on two versions of the package, add `version`. To read the runs
+in your own stage, see [Build-script
+runs](../reference/stage-functions.md#build-script-runs).
+
 ## Debug information
 
 A stage after `install` with no `debug` output keeps the product's

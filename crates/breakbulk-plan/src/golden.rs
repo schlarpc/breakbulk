@@ -26,7 +26,7 @@ use breakbulk_format::{Plan, Reference, Resolve, Unit, UnitId, render_doctest, r
 use breakbulk_unit::directives::{BuildOutput, MetadataFile, ParseContext, parse};
 use breakbulk_unit::doctest;
 use breakbulk_unit::run::run_env;
-use breakbulk_unit::spec::RenderedUnit;
+use breakbulk_unit::spec::{RenderedUnit, package_name_version};
 use breakbulk_unit::splice::{
     DYLIB_PATH_VAR, expand_args, expand_dylib_path, expand_env, prepend_dylib_path,
 };
@@ -700,10 +700,13 @@ pub fn compare_with(
                     let Unit::Run(u) = plan.units.get(m)? else {
                         return None;
                     };
+                    let (package, version) = package_name_version(&u.package)?;
                     Some(MetadataFile {
-                        links: u.links.clone()?,
+                        package: package.to_owned(),
+                        version: version.to_owned(),
+                        links: Some(u.links.clone()?),
                         metadata: outputs.get(m)?.metadata.clone(),
-                        out: resolver.run_dirs.get(m).cloned(),
+                        out: resolver.run_dirs.get(m).cloned().unwrap_or_default(),
                     })
                 })
                 .collect();

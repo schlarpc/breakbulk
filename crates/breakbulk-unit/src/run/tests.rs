@@ -439,20 +439,33 @@ fn dep_env_and_out_dir() {
     r2.env.insert("OUT_DIR".into(), "/stale".into());
     let md = [
         MetadataFile {
-            links: "z".into(),
+            package: "z-sys".into(),
+            version: "0.1.0".into(),
+            links: Some("z".into()),
             metadata: vec![("include".into(), "/z/inc".into())],
-            out: None,
+            out: "/z-out".into(),
         },
         MetadataFile {
-            links: "open-ssl".into(),
+            package: "openssl-sys".into(),
+            version: "0.9.0".into(),
+            links: Some("open-ssl".into()),
             metadata: vec![("version-number".into(), "30".into())],
-            out: None,
+            out: "/ssl-out".into(),
+        },
+        // No `links`: nothing for dependents.
+        MetadataFile {
+            package: "plain".into(),
+            version: "1.0.0".into(),
+            links: None,
+            metadata: vec![("ignored".into(), "x".into())],
+            out: "/plain-out".into(),
         },
     ];
     let env = run_env(&r2, Path::new("/nix/store/o-out"), &md);
     assert_eq!(env["OUT_DIR"], "/nix/store/o-out");
     assert_eq!(env["DEP_Z_INCLUDE"], "/z/inc");
     assert_eq!(env["DEP_OPEN_SSL_VERSION_NUMBER"], "30");
+    assert!(!env.keys().any(|k| k.starts_with("DEP_PLAIN")), "{env:?}");
     assert_eq!(env["TARGET"], "x86_64-unknown-linux-gnu");
 }
 
@@ -493,9 +506,11 @@ fn run_mode_end_to_end() {
     crate::write_json(
         &up.join(METADATA_FILE),
         &MetadataFile {
-            links: "up".into(),
+            package: "up".into(),
+            version: "0.1.0".into(),
+            links: Some("up".into()),
             metadata: vec![("key".into(), "v".into())],
-            out: Some("/up-out".into()),
+            out: "/up-out".into(),
         },
     )
     .unwrap();
@@ -528,8 +543,21 @@ fn run_mode_end_to_end() {
     assert!(d.library_paths[0].in_out_dir);
     assert!(!d.library_paths[1].in_out_dir);
     let m = crate::read_metadata(&flags).unwrap();
-    assert_eq!(m.links, "foo");
+    assert_eq!(
+        (m.package.as_str(), m.version.as_str()),
+        ("foo-sys", "1.2.3")
+    );
+    assert_eq!(m.links.as_deref(), Some("foo"));
     assert_eq!(m.metadata, [("root".into(), out.display().to_string())]);
+    assert_eq!(m.out, out.display().to_string());
+
+    // A package without `links` writes one too, naming its package.
+    r.links = None;
+    run(&r, &outer).unwrap();
+    let m = crate::read_metadata(&flags).unwrap();
+    assert_eq!((m.package.as_str(), m.links), ("foo-sys", None));
+    assert_eq!(m.out, out.display().to_string());
+    r.links = Some("foo".into());
 
     // The script's exit status is reported.
     std::fs::write(&script, "#!/bin/sh\nkill -ABRT $$\n").unwrap();

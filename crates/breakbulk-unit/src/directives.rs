@@ -573,20 +573,34 @@ pub fn metadata_env(links: &str, metadata: &[(String, String)]) -> Vec<(String, 
         .collect()
 }
 
-/// `$flags/metadata.json`: what a run with `links` passes to dependents.
+/// `$flags/metadata.json`, written by every run: which package it belongs
+/// to, where its `OUT_DIR` is, and what a run with `links` passes to
+/// dependents. Product stages read it to find a run
+/// (docs/src/reference/stage-functions.md).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataFile {
-    pub links: String,
+    /// The package's name and version, as in its `Cargo.toml`.
+    pub package: String,
+    pub version: String,
+    /// The package's `links`, when it declares one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<String>,
+    /// The `metadata` directives, in printed order. Dependents get them
+    /// only when the package declares `links`.
     pub metadata: Vec<(String, String)>,
     /// The run's `OUT_DIR`, for dependents' [`LibraryPath::in_build_dir`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub out: Option<String>,
+    pub out: String,
 }
 
 impl MetadataFile {
+    /// The `DEP_<LINKS>_<KEY>` variables of a dependent run; none without
+    /// `links`.
     pub fn env(&self) -> Vec<(String, String)> {
-        metadata_env(&self.links, &self.metadata)
+        match &self.links {
+            Some(links) => metadata_env(links, &self.metadata),
+            None => Vec::new(),
+        }
     }
 }
 

@@ -218,7 +218,7 @@ they read `<out>/<OUT_DIR relative>/…`.
 | File | Written when | Contents |
 | --- | --- | --- |
 | `directives.json` | always | Values grouped by kind, in printed order |
-| `metadata.json` | the package declares `links` | The `metadata` values, for dependents' `DEP_*` |
+| `metadata.json` | always | The package's name and version, its `links`, the `metadata` values (dependents' `DEP_*` when it has `links`) and the `OUT_DIR` path; see [Build-script runs](stage-functions.md#build-script-runs) |
 | `target-files.json` | the script wrote files into `$out` outside `OUT_DIR` | Their paths, relative to `$out` |
 
 When there are such target files, `directives.json` also names the copies

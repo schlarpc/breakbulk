@@ -931,39 +931,40 @@ let
       ''
   );
 
+  # The `flags` outputs of the build-script runs of the product's target
+  # that its roots depend on, as shell words: `product.buildScriptFlags`
+  # is a list of them (IFD mode), or `{ rootInfo; }`, the roots'
+  # `breakbulk-root.json` files that list them (dynamic-derivation mode,
+  # known at build time).
+  buildScriptFlagsWords =
+    helperName: product: pkgs:
+    let
+      flags = product.buildScriptFlags or null;
+    in
+    if flags == null then
+      throw "breakbulk stage helper `${helperName}`: this product does not know its target's build-script runs (`product.buildScriptFlags`; #23)"
+    else if builtins.isList flags then
+      lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}") flags
+    else
+      "$(${pkgs.buildPackages.jq}/bin/jq -r '(.buildScriptFlags // [])[]' ${lib.escapeShellArgs flags.rootInfo} | sort -u)";
+
   # Shell lines defining `placedFiles`, which prints, one per line, the
   # files the target's build scripts placed next to the binaries: the
   # regular files and symlinks directly in each `<profile>` copy a run's
   # `directives.json` names (`targetDirs`, the entries not ending in
   # `/deps`; #23). Cargo's `target/<profile>` holds them beside the bins,
   # where `cargo run` and a Windows loader find them.
-  placedFilesFn =
-    helperName: product: pkgs:
-    let
-      flags = product.buildScriptFlags or null;
-      # A list of `flags` outputs (IFD mode), or `{ rootInfo; }`, the
-      # roots' `breakbulk-root.json` files that list them
-      # (`buildScriptFlags`; dynamic-derivation mode, known at build time).
-      flagsList =
-        if builtins.isList flags then
-          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}") flags
-        else
-          "$(${pkgs.buildPackages.jq}/bin/jq -r '(.buildScriptFlags // [])[]' ${lib.escapeShellArgs flags.rootInfo} | sort -u)";
-    in
-    if flags == null then
-      throw "breakbulk stage helper `${helperName}`: this product does not know its target's build-script runs (`product.buildScriptFlags`; #23)"
-    else
-      ''
-        placedFiles() {
-          local f d
-          for f in ${flagsList}; do
-            f=$f/directives.json
-            ${pkgs.buildPackages.jq}/bin/jq -r '(.targetDirs // [])[] | select(endswith("/deps") | not)' "$f"
-          done | while IFS= read -r d; do
-            find "$d" -mindepth 1 -maxdepth 1 \( -type f -o -type l \)
-          done | sort -u
-        }
-      '';
+  placedFilesFn = helperName: product: pkgs: ''
+    placedFiles() {
+      local f d
+      for f in ${buildScriptFlagsWords helperName product pkgs}; do
+        f=$f/directives.json
+        ${pkgs.buildPackages.jq}/bin/jq -r '(.targetDirs // [])[] | select(endswith("/deps") | not)' "$f"
+      done | while IFS= read -r d; do
+        find "$d" -mindepth 1 -maxdepth 1 \( -type f -o -type l \)
+      done | sort -u
+    }
+  '';
 
   buildScriptFiles = mkHelper {
     name = "buildScriptFiles";
@@ -1003,6 +1004,214 @@ let
       done
     ''
   );
+
+  # ---------------------------------------------------------------------
+  # Build-script outputs
+
+  # Shell lines defining the lookups of docs/src/reference/stage-functions.md
+  # ("Build-script runs") over the runs `buildScriptFlagsWords` names.
+  # They check at build time in both modes: in dynamic-derivation mode the
+  # runs are known only then.
+  buildScriptLookupsFn =
+    helperName: product: pkgs:
+    let
+      jq = "${pkgs.buildPackages.jq}/bin/jq";
+      p = product.name;
+    in
+    ''
+      buildScriptRuns() {
+        local f
+        for f in ${buildScriptFlagsWords helperName product pkgs}; do
+          ${jq} -c --arg flags "$f" '. + { flags: $flags }' "$f/metadata.json"
+        done
+      }
+      buildScriptOutDir() {
+        local runs n
+        if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+          echo "buildScriptOutDir: usage: buildScriptOutDir <package> [<version>]" >&2
+          return 1
+        fi
+        runs=$(buildScriptRuns | ${jq} -sc --arg p "$1" --arg v "''${2-}" \
+          'map(select(.package == $p and ($v == "" or .version == $v)))') || return 1
+        n=$(${jq} length <<< "$runs")
+        if [ "$n" = 1 ]; then
+          ${jq} -r '.[0].out' <<< "$runs"
+          return 0
+        elif [ "$n" = 0 ]; then
+          echo "buildScriptOutDir: ${p} depends on no build-script run of $1''${2:+ $2}; the runs below it are of: $(buildScriptRuns | ${jq} -sr '[.[] | "\(.package) \(.version)"] | unique | if . == [] then "none" else join(", ") end')" >&2
+        else
+          echo "buildScriptOutDir: ${p} depends on several build-script runs of $1: $(${jq} -r '[.[] | "\(.package) \(.version) (OUT_DIR \(.out))"] | join(", ")' <<< "$runs"); name one by its version" >&2
+        fi
+        return 1
+      }
+      buildScriptMetadata() {
+        local runs n
+        if [ $# -ne 2 ]; then
+          echo "buildScriptMetadata: usage: buildScriptMetadata <links> <key>" >&2
+          return 1
+        fi
+        runs=$(buildScriptRuns | ${jq} -sc --arg l "$1" 'map(select(.links == $l))') || return 1
+        n=$(${jq} length <<< "$runs")
+        if [ "$n" = 0 ]; then
+          echo "buildScriptMetadata: ${p} depends on no build-script run with links = \"$1\"; the links names below it: $(buildScriptRuns | ${jq} -sr '[.[] | .links // empty] | unique | if . == [] then "none" else join(", ") end')" >&2
+          return 1
+        elif [ "$n" != 1 ]; then
+          echo "buildScriptMetadata: ${p} depends on several build-script runs with links = \"$1\": $(${jq} -r '[.[] | "\(.package) \(.version)"] | join(", ")' <<< "$runs")" >&2
+          return 1
+        fi
+        if ! ${jq} -e --arg k "$2" 'any(.[0].metadata[]; .[0] == $k)' <<< "$runs" > /dev/null; then
+          echo "buildScriptMetadata: the build script of $(${jq} -r '.[0] | "\(.package) \(.version)"' <<< "$runs") (links = \"$1\") printed no metadata key \"$2\"; its keys: $(${jq} -r '[.[0].metadata[][0]] | unique | if . == [] then "none" else join(", ") end' <<< "$runs")" >&2
+          return 1
+        fi
+        ${jq} -r --arg k "$2" '[.[0].metadata[] | select(.[0] == $k)] | last | .[1]' <<< "$runs"
+      }
+    '';
+
+  # A path relative to a directory, inside it.
+  relativePathType =
+    types.addCheck types.str (
+      s: s != "" && !(lib.hasPrefix "/" s) && !(lib.elem ".." (lib.splitString "/" s))
+    )
+    // {
+      description = "relative path without `..`";
+    };
+
+  buildScriptPath =
+    mkHelper
+      {
+        name = "buildScriptPath";
+        description = ''
+          Copies a file or directory that a build script of the
+          product's target made into the product, at `to`. Name it one
+          of two ways:
+
+          - `links` and `key`: the path a script publishes as `links`
+            metadata (`cargo::metadata=<key>=<path>`), which a
+            dependent's build script sees as `DEP_<LINKS>_<KEY>`. Cargo
+            defines this interface, so prefer it where the script has
+            one. wasmtime's C API publishes its headers so:
+            `{ links = "wasmtime-c-api"; key = "include"; to = "include"; }`.
+          - `package` and `from`: a path in the `OUT_DIR` of the
+            package's build-script run, for a script without `links`.
+            When the product's roots depend on two versions of the
+            package, `version` says which; without it the stage fails
+            naming them.
+
+          The run is one of those the product's roots depend on
+          ([Build-script runs](stage-functions.md#build-script-runs)).
+          Symlinks are resolved. A path the product already has fails
+          the stage. `install` keeps a top-level directory as it is, so
+          the stage can run before `install` or after it.
+        '';
+        options = {
+          links = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "wasmtime-c-api";
+            description = "The `links` name of the package whose build script publishes the path. Set `key` with it.";
+          };
+          key = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "include";
+            description = ''
+              The metadata key whose value is the path, as the script
+              prints it. When it prints the key more than once, the last
+              value counts, as for `DEP_<LINKS>_<KEY>`.
+            '';
+          };
+          package = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "wasmtime-c-api-impl";
+            description = "The name of the package whose build script made the path. Set `from` with it.";
+          };
+          version = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "50.0.1";
+            description = "The version of `package`. `null`: the one version the product's roots depend on.";
+          };
+          from = mkOption {
+            type = types.nullOr relativePathType;
+            default = null;
+            example = "include";
+            description = "The path relative to the run's `OUT_DIR`; `.` is the whole directory.";
+          };
+          to = mkOption {
+            type = relativePathType;
+            example = "include";
+            description = "Where the path goes, relative to the top of the product.";
+          };
+        };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          byLinks = cfg.links != null || cfg.key != null;
+          byPackage = cfg.package != null || cfg.version != null || cfg.from != null;
+          complete =
+            if byLinks then
+              cfg.links != null && cfg.key != null && !byPackage
+            else
+              cfg.package != null && cfg.from != null;
+          lookup =
+            if byLinks then
+              "buildScriptMetadata ${
+                escapeShellArgs [
+                  cfg.links
+                  cfg.key
+                ]
+              }"
+            else
+              "buildScriptOutDir ${
+                escapeShellArgs ([ cfg.package ] ++ lib.optional (cfg.version != null) cfg.version)
+              }";
+        in
+        if !complete then
+          throw "breakbulk stage helper `buildScriptPath` (product `${product.name}`): set `links` and `key`, or `package` and `from` (with `version` when needed), and not options of both"
+        else
+          pkgs.runCommand (stageName product "buildScriptPath") { } ''
+            set -euo pipefail
+            ${copyIn input}
+            ${buildScriptLookupsFn "buildScriptPath" product pkgs}
+            copyIn "$out"
+            src=$(${lookup})
+            ${
+              if byLinks then
+                ''
+                  case $src in
+                    /*) ;;
+                    *)
+                      echo "buildScriptPath: ${product.name}: the value of links metadata \"${cfg.key}\" is not an absolute path: $src" >&2
+                      exit 1
+                      ;;
+                  esac
+                ''
+              else
+                "src=$src/${escapeShellArg cfg.from}"
+            }
+            if [ ! -e "$src" ]; then
+              echo "buildScriptPath: ${product.name}: $src does not exist" >&2
+              exit 1
+            fi
+            dest=$out/${escapeShellArg cfg.to}
+            if [ -e "$dest" ] || [ -L "$dest" ]; then
+              echo "buildScriptPath: ${product.name} already has ${cfg.to}; the build script also made $src" >&2
+              exit 1
+            fi
+            mkdir -p "$(dirname "$dest")"
+            cp -RL --no-preserve=ownership "$src" "$dest"
+            chmod -R u+w "$dest"
+            echo "buildScriptPath: ${product.name}: ${cfg.to} (from $src)"
+          ''
+      );
 
   # ---------------------------------------------------------------------
   # Checks
@@ -1450,6 +1659,11 @@ in
   # holds plain values, such as glibcLibraries).
   isHelper = v: isAttrs v && v ? __functor && v ? kind && v ? options;
 
+  # The shell functions with which a stage script reads the build-script
+  # runs below its product, from the stage arguments
+  # (docs/src/reference/stage-functions.md, "Build-script runs").
+  buildScriptLookups = { product, pkgs, ... }: buildScriptLookupsFn "buildScriptLookups" product pkgs;
+
   inherit
     mkHelper
     noStorePaths
@@ -1462,6 +1676,7 @@ in
     deterministicZip
     install
     buildScriptFiles
+    buildScriptPath
     buildScriptFilesIncluded
     noSourceReferences
     neededLibraries

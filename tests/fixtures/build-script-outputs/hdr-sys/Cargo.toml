@@ -1,0 +1,5 @@
+[package]
+name = "hdr-sys"
+version.workspace = true
+edition.workspace = true
+links = "hdr"

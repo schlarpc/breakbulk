@@ -58,7 +58,7 @@ attributes:
 | `lockfile` | stages and checks | The workspace's `Cargo.lock`, a path. `bindgen` reads the wasm-bindgen version from it. |
 | `rootFiles` | stages and checks | Each root's file name in `linked`, mapped to its kind: `bin`, `staticlib`, `cdylib` or `dylib`. `install` lays the files out by kind. |
 | `sourcesAllowedIn` | stages and checks | File name globs whose own references to sources `noSourceReferences` allows: each staticlib root's archive name in `linked`. |
-| `buildScriptFlags` | stages and checks | The `flags` outputs of the build-script runs of the product's target that its roots depend on. Their `directives.json` names where the scripts placed files (`buildScriptFiles`). A list in IFD mode. In dynamic-derivation mode `{ rootInfo; }`: the roots' `breakbulk-root.json` files, which list the outputs at build time. |
+| `buildScriptFlags` | stages and checks | The `flags` outputs of the build-script runs of the product's target that its roots depend on ([below](#build-script-runs)). A list in IFD mode. In dynamic-derivation mode `{ rootInfo; }`: the roots' `breakbulk-root.json` files, which list the outputs at build time. |
 | `linkedDebug` | stages and checks | The `debug` output of `linked`: the link units' debuginfo side files (`.pdb`, `.dwp`, `.dwo`). Only when `linked` has a `debug` output, which it always has in dynamic-derivation mode. |
 | `debugSplit` | stages | Whether an earlier stage has a `debug` output. |
 | `stageOrder` | checks | The stage names after `linked`, in order. |
@@ -72,3 +72,62 @@ and the attributes of its `info` argument. `bindgen` also reads
 (`breakbulk.lockfile.read`), when there is no `lockfile`. Its stages get
 the `target` its caller passes, `{ }` by default; the helpers then use
 the traits of the platform `pkgs` builds for.
+
+## Build-script runs
+
+A stage can read the build-script runs of the product's target that its
+roots depend on, directly or through other packages:
+`product.buildScriptFlags`. The runs of build scripts for the build
+machine (those of proc macros and build dependencies) are not among
+them.
+
+Each run has two outputs. `out` holds the script's `OUT_DIR`, at a
+nested path that copies Cargo's target directory. `flags` holds what
+breakbulk read from the script's output:
+
+| File | Contents |
+| --- | --- |
+| `metadata.json` | `package` and `version`: the package's name and version. `links`: its `links` name, only when it has one. `metadata`: the `[key, value]` pairs of its `cargo::metadata=key=value` lines, in printed order. `out`: the path of its `OUT_DIR`. |
+| `directives.json` | Its other directives, and the copies of Cargo's `target/<profile>` that hold files the script placed next to the binaries (`targetDirs`; `buildScriptFiles` reads them). See [The `flags` output](unit-builder.md#the-flags-output). |
+
+For wasmtime's C API crate, `metadata.json` reads:
+
+```json
+{"package":"wasmtime-c-api-impl","version":"50.0.1","links":"wasmtime-c-api",
+ "metadata":[["include","/nix/store/…-wasmtime-c-api-impl-50.0.1-build-run/…/out/include"]],
+ "out":"/nix/store/…-wasmtime-c-api-impl-50.0.1-build-run/…/out"}
+```
+
+`breakbulk.stageHelpers.buildScriptLookups` takes the stage arguments
+and returns bash lines that define three shell functions. They read
+the runs when the stage builds, so they work the same in both delivery
+modes.
+
+| Function | Prints |
+| --- | --- |
+| `buildScriptRuns` | Each run's `metadata.json` as one line of JSON, with `flags` added: the path of the run's `flags` output. |
+| `buildScriptOutDir <package> [<version>]` | The `OUT_DIR` of the package's run. It fails when the roots depend on no run of the package, naming the packages that have runs. It fails when they depend on more than one version of it and no version is given, naming the versions. |
+| `buildScriptMetadata <links> <key>` | The value of `key` in the metadata of the run whose package has that `links` name: what a dependent's build script sees as `DEP_<LINKS>_<KEY>`. When the script printed the key more than once, the last value counts. It fails naming the `links` names, or the run's keys, when there is no such run or key. |
+
+Assign a result to a variable before you use it. Then a failing lookup
+fails the stage, as with `set -e`. In `cp "$(buildScriptOutDir gen)/x" …`
+the failure is lost.
+
+```nix
+packages.app.stages.headers = {
+  after = "install";
+  run = { input, pkgs, ... }@args:
+    pkgs.runCommand "app-headers" { } ''
+      set -euo pipefail
+      ${breakbulk.stageHelpers.buildScriptLookups args}
+      cp -RL ${input} $out
+      chmod -R u+w $out
+      include=$(buildScriptMetadata wasmtime-c-api include)
+      cp -RL "$include" $out/include
+    '';
+};
+```
+
+The [`buildScriptPath`](stage-helpers.md#buildscriptpath) helper makes
+this stage from its options. A product made with `breakbulk.mkProduct`
+directly has the runs when its `info` has `buildScriptFlags`.

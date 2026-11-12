@@ -97,6 +97,7 @@ let
     benches = [ products.repos.benchesRepo ];
     bin-exe-not-built = [ (plain "bin-exe-not-built" [ ]) ];
     build-dep-leak = [ (plain "build-dep-leak" [ ]) ];
+    build-script-outputs = [ products.repos.buildScriptOutputs ];
     build-std = [ buildStd.repos.bare ];
     build-std-deps = [ buildStd.repos.hosted ];
     cdylib-debug = [ products.repos.cdylibDebug ];

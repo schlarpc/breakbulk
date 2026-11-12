@@ -144,6 +144,11 @@
 #                    "keep"`: no remaps at all and no noSourceReferences
 #                    check; trim-paths set for one package only (a profile
 #                    override) fails planning naming the packages on and off
+#   build-script-outputs   a product installs a dependency's build-script
+#                    outputs: a header published as `links` metadata
+#                    (`include`) and a file in another package's OUT_DIR
+#                    (`buildScriptPath`); the runs' metadata.json name
+#                    their packages, versions and `links`
 #   benches          a libtest-harness bench and a Criterion bench come
 #                    from the bench variant only (`cargo bench --no-run`,
 #                    bench profile, opt-level 3); the test plan has none;
@@ -775,6 +780,52 @@ let
       };
     }
   ];
+
+  # app's product takes hdr-sys's header by its `links` metadata and gen's
+  # data file by package and path in OUT_DIR, after `install`; `runs`
+  # records what the runs' metadata.json say, without store paths, so
+  # that both delivery modes write the same bytes.
+  buildScriptOutputs = mkRepo (fixtures + "/build-script-outputs") [
+    (oneWs "." "dev")
+    {
+      packages.app.stages = {
+        headers = {
+          after = "install";
+          run = helpers.buildScriptPath {
+            links = "hdr";
+            key = "include";
+            to = "include";
+          };
+        };
+        data = {
+          after = "headers";
+          run = helpers.buildScriptPath {
+            package = "gen";
+            from = "data";
+            to = "share/gen";
+          };
+        };
+        runs = {
+          after = "data";
+          run =
+            {
+              input,
+              pkgs,
+              ...
+            }@args:
+            pkgs.runCommand "app-runs" { nativeBuildInputs = [ pkgs.jq ]; } ''
+              set -euo pipefail
+              ${helpers.buildScriptLookups args}
+              cp -RL ${input} $out
+              chmod -R u+w $out
+              buildScriptRuns | jq -cS '{ package, version, links, keys: [.metadata[][0]] }' \
+                | LC_ALL=C sort > $out/share/runs.json
+              buildScriptMetadata hdr answer > $out/share/answer
+            '';
+        };
+      };
+    }
+  ];
 in
 {
   modules.variants = variantsModules;
@@ -792,9 +843,26 @@ in
       sameWsRepo
       coverageRepo
       rustSrcRepo
+      buildScriptOutputs
       ;
     trimCc = trimCcRepo { };
   };
+
+  build-script-outputs =
+    pkgs.runCommand "build-script-outputs" { app = buildScriptOutputs.workspaces.main.packages.app; }
+      ''
+        set -euo pipefail
+        [ "$($app/bin/app)" = '42 gen.txt' ]
+        grep -qx '#define HDR_ANSWER 42' $app/include/hdr.h
+        grep -qx generated $app/share/gen/gen.txt
+        [ "$(cat $app/share/answer)" = 42 ]
+        cat $app/share/runs.json
+        diff $app/share/runs.json - <<'EOF'
+        {"keys":["include","answer"],"links":"hdr","package":"hdr-sys","version":"0.1.0"}
+        {"keys":[],"links":null,"package":"gen","version":"0.1.0"}
+        EOF
+        touch $out
+      '';
 
   ui-dist = pkgs.runCommand "ui-dist" { app = uiDistRepo.workspaces.default.packages.app; } ''
     $app/bin/app | tee $out
