@@ -198,6 +198,7 @@ let
       root = ../loose-ends/fixtures/config-env;
       modules = [
         { inherit mode; }
+        keepLogs
         oneWs
         # As tests/loose-ends: the tests compare a source path the library
         # embedded at compile time with the test run's, one view for both.
@@ -226,6 +227,7 @@ let
       root = ../test-options/fixture;
       modules = [
         { inherit mode; }
+        keepLogs
         oneWs
         {
           workspaces.main.memberDefaults.test.stripForRun = true;
@@ -314,6 +316,7 @@ let
       root = fixtures + "/git-multi-workspace/consumer";
       modules = [
         { inherit mode; }
+        keepLogs
         oneWs
         { gitTrees."file:///build/gitdep" = fixtures + "/git-multi-workspace/repo"; }
       ];
@@ -329,6 +332,8 @@ let
     missing-input = repository.provided;
     test-only = repository.testOnly;
     pkgid-short = repository.pkgidShort;
+    optional-dependency = repository.optionalDep;
+    exclusive-features = repository.exclusive;
 
     # tests/products
     post-link = products.postLink;
@@ -344,6 +349,7 @@ let
       root = fixtures + "/variants";
       modules = productTests.modules.variants ++ [
         { inherit mode; }
+        keepLogs
         {
           workspaces.main.variants = {
             strict.clippyArgs = lib.mkForce [ ];
@@ -355,6 +361,13 @@ let
     variants-coverage = products.coverageRepo;
     benches = products.benchesRepo;
     stdpaths = products.rustSrcRepo;
+    cdylib-debug = products.cdylibDebug;
+    # A product of another target of the same workspace in a package's
+    # env.
+    ui-dist = products.uiDistRepo;
+    # Products of the same plan in a package's env and inputs: an infinite
+    # recursion in dynamic mode (#126), so not in run.sh's default list.
+    same-workspace-products = products.sameWsRepo;
 
     # tests/presets
     same-triple = presetFixtures.sameTriple;
@@ -399,6 +412,8 @@ let
     # tests/test-runs' home: a test and a doctest writing under $HOME and
     # the user cache directory pass with no setting.
     test-home = (import ../test-runs testArgs).repos.home;
+    # Doctests as plain `cargo test` selects them (`doctest = false`).
+    doctest-false = mkRepo "doctest-false" [ oneWs ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
     nextest = mkRepo "nextest" [
       oneWs
@@ -523,6 +538,8 @@ let
   # embedder and, through it, the host. Every other unit is identical.
   mayDiffer = {
     embed = "^(embedder|host)-";
+    # `app`'s env names the wasm target's `ui`.
+    ui-dist = "^app-";
   };
 
   # Every workspace, target and variant of a repository: `key` is

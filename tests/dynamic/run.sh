@@ -69,6 +69,8 @@ else
     wasm-browser wasm-component wasip2 riscv64 linux-portable
     windows-gnullvm-aarch64 windows-gnu windows-dll-staged linux-portable-native
     msvc msvc-post-link
+    test-home doctest-false optional-dependency exclusive-features
+    cdylib-debug ui-dist
   )
 fi
 
@@ -129,13 +131,23 @@ def taint(p):
         tainted[p] = True  # cycles cannot happen; guard anyway
         tainted[p] = p in unit or any(taint(q) for q in inputs(drvs[p])[0] if q in drvs)
     return tainted[p]
+import subprocess
+# `nix derivation show` leaves out the path of a fixed output; the store
+# knows it. Without them Nix master re-fetches every fixed output, and
+# some (the Windows SDK) can no longer be fetched.
+unnamed = []
 for p, d in drvs.items():
     if not taint(p):
         for o in d.get("outputs", {}).values():
             if o.get("path"):
                 print(full(o["path"]))
+            elif "hash" in o:
+                unnamed.append(p)
     for s in inputs(d)[1]:
         print(s)
+if unnamed:
+    sys.stdout.flush()
+    subprocess.run(["nix-store", "-q", "--outputs", *sorted(set(unnamed))], check=True)
 ' "$units" | sort -u
   )
   for p in "${up[@]}"; do
