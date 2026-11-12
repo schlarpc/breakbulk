@@ -912,9 +912,9 @@ in
     # project's config. Cargo builds `shared` once per selected package's
     # feature set (a: fa, b: fb, shared itself: none) instead of once with
     # fa+fb; the plan has the same units (golden, both plans), and each
-    # product sees its own set. `cargo test --doc --workspace` fails on
-    # the bin-only members in this mode; the planner then traces the
-    # doctests of `shared` alone, as `cargo test` runs them.
+    # product sees its own set. The doctest of `shared` is traced, although
+    # `cargo test --doc --workspace` would fail on the bin-only members in
+    # this mode.
     feature-unification =
       let
         build = sharedFeatures "build";

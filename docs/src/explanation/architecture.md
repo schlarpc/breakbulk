@@ -39,7 +39,7 @@ package's source view.
 ## 2. Plan
 
 breakbulk runs your Cargo, not a reimplementation of it. It runs
-`cargo build` (and `cargo test --no-run` for tests) over a *skeleton* of
+`cargo build` (and `cargo test` for tests and doctests) over a *skeleton* of
 the workspace: the manifests, the lockfile and Cargo config, with empty
 source files. A wrapper stands in for rustc:
 

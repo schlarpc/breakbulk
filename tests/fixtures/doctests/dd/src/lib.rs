@@ -1,4 +1,4 @@
-//! Doctests that breakbulk runs as `cargo test --doc` does.
+//! Doctests that breakbulk runs as `cargo test` does.
 //!
 //! ```
 //! // A dev-dependency is visible to doctests.

@@ -7,15 +7,17 @@
 #
 #   doctests                every doctest derivation passes, and the set of
 #                           `test … ok|ignored` lines equals plain
-#                           `cargo test --doc`'s (dev-dependency,
+#                           `cargo test`'s (dev-dependency,
 #                           should_panic, compile_fail, no_run, ignore,
 #                           rustc-env and rustc-cfg from a build script, an
 #                           edition-2024 crate with merged doctests)
-#   doctest-false             over the `doctest-false` fixture, traced by the
-#                           planner directly: a build-script stub compiled
-#                           by the first traced invocation and run by the
-#                           second writes its run record to the second's
-#                           record directory
+#   doctest-false             doctests as plain `cargo test` selects them:
+#                           none for a library with `doctest = false`, so
+#                           nothing builds its dev-dependency for the host,
+#                           and the other doctests' `-L` list names only the
+#                           runs `cargo test` has; a proc macro's test and
+#                           doctest run for the host; the same plan for a
+#                           cross target (the host's runner)
 #   test-control            every enabled test run passes; the skip list
 #                           kept the network test out; #[ignore] tests are
 #                           reported ignored; the required-features test is
@@ -146,9 +148,9 @@ let
     ];
   };
 
-  # Plain `cargo test --doc` over the same sources.
+  # Plain `cargo test` over the same sources (which have no other tests).
   cargoDoctests =
-    pkgs.runCommandCC "doctests-cargo-test-doc"
+    pkgs.runCommandCC "doctests-cargo-test"
       {
         nativeBuildInputs = [
           pkgs.cargo
@@ -159,7 +161,7 @@ let
         export CARGO_HOME=$TMPDIR/cargo-home
         cp -r --no-preserve=mode ${fixtures + "/doctests"} ws
         cd ws
-        cargo test --doc --offline --frozen --workspace 2>&1 | tee $TMPDIR/log
+        cargo test --offline --frozen --workspace 2>&1 | tee $TMPDIR/log
         mkdir -p $out
         cp $TMPDIR/log $out/log
       '';
@@ -199,51 +201,100 @@ let
 
   # --- doctest-false -----------------------------------------------------------
 
-  # The planner run directly on the `doctest-false` fixture, keeping its
-  # scratch directory (with one record directory per traced invocation).
-  doctestFalseTrace =
-    pkgs.runCommand "doctest-false-trace" { nativeBuildInputs = [ pkgs.jq ]; } ''
+  doctestFalseWs = mk "doctest-false" {
+    packages = keepLog [
+      "d"
+      "pmt"
+    ];
+  };
+
+  # The planner run directly on the `doctest-false` fixture for another
+  # target than the host: `pmt`'s tests run for the host, through the
+  # host's runner.
+  doctestFalseCross =
+    let
+      target =
+        if pkgs.stdenv.hostPlatform.isAarch64 then
+          "x86_64-unknown-linux-gnu"
+        else
+          "aarch64-unknown-linux-gnu";
+    in
+    pkgs.runCommand "doctest-false-plan-${target}" { } ''
       sk=$NIX_BUILD_TOP/skeleton
       cp -r --no-preserve=mode ${fixtures + "/doctest-false"} $sk
+      mkdir -p $out
       ${tools.breakbulk-plan}/bin/breakbulk-plan \
         --cargo ${pkgs.cargo}/bin/cargo --rustc ${pkgs.rustc}/bin/rustc \
         --rustdoc ${pkgs.rustc}/bin/rustdoc --shim ${tools.breakbulk-shim}/bin/breakbulk-shim \
         --skeleton $sk --canonical-root /build/skeleton \
-        --kind test --target ${pkgs.stdenv.hostPlatform.rust.rustcTarget} --profile dev \
+        --kind test --target ${target} --profile dev \
         --scratch $NIX_BUILD_TOP/scratch \
         --capabilities ${
           breakbulk.toolchainFacts.capabilitiesFile
-            (breakbulk.toolchainFacts.of { inherit pkgs; inherit (pkgs) rustc cargo; }).capabilities
+            (breakbulk.toolchainFacts.of {
+              inherit pkgs;
+              inherit (pkgs) rustc cargo;
+            }).capabilities
         } \
         --forbid $NIX_BUILD_TOP --forbid $HOME \
-        --out $TMPDIR/plan.json
-      mkdir -p $out
-      cp -r $NIX_BUILD_TOP/scratch/record-* $out/
+        --out $out/plan.json
     '';
 
-  # `d`'s build script is compiled by the first traced invocation and run
-  # again by the second (which builds `d` for the host): each run record is
-  # in the record directory of the invocation that ran the stub. Planning
-  # succeeding is not enough: without the second run there is nothing to
-  # check, so the check also requires a run in `record-1` of a build script
-  # compiled in `record-0`.
-  doctestFalse = pkgs.runCommand "test-runs-doctest-false" { nativeBuildInputs = [ pkgs.jq ]; } ''
-    t=${doctestFalseTrace}
-    for f in $t/record-*/run-*.json; do
-      got=$(jq -r .env.BREAKBULK_RECORD "$f")
-      echo "$f: run by $got"
-      [ "$(basename "$got")" = "$(basename "$(dirname "$f")")" ]
-    done
-    ran=$(jq -r 'select(.env.CARGO_PKG_NAME == "d") | .tag' $t/record-1/run-*.json)
-    [ -n "$ran" ]
-    grep -l '"build_script_build"' $t/record-0/compile-*.json
-    if grep -l '"build_script_build"' $t/record-1/compile-*.json; then
-      echo "the second invocation compiled the build script again" >&2
-      exit 1
-    fi
-    mkdir -p $out
-    echo "$ran" > $out/runs
-  '';
+  # Doctests as plain `cargo test` selects them: `pm` (`doctest = false`,
+  # its doctest does not compile) gets none, so nothing builds `d` for the
+  # host, and the doctests' `-L` list names `d`'s target run only, as
+  # Cargo's does. `pmt`'s test and doctest run for the host and pass. The
+  # same for a cross target, where the host's runner differs from the
+  # target's.
+  doctestFalse =
+    let
+      plan = readPlan doctestFalseWs "test";
+      cross = builtins.fromJSON (
+        builtins.unsafeDiscardStringContext (builtins.readFile "${doctestFalseCross}/plan.json")
+      );
+      runsOf = p: lib.attrNames (lib.filterAttrs (_: u: u.kind == "run") p.units);
+      searchPathsOf =
+        p:
+        lib.mapAttrs (
+          _: d: lib.concatMap (a: a.searchPathsOf or [ ]) (lib.filter builtins.isAttrs d.args)
+        ) p.doctests;
+      checks = p: {
+        "doctests of d and pmt only" = lib.attrNames p.doctests == [
+          "d-d"
+          "d-pmt"
+        ];
+        "one run of d, for the target" =
+          map (r: p.units.${r}.platform) (runsOf p) == [ "target" ]
+          && lib.hasPrefix "r-d-" (lib.head (runsOf p));
+        "every doctest's search paths are that run's" = lib.all (v: v == runsOf p) (
+          lib.attrValues (searchPathsOf p)
+        );
+        "no runtool in a doctest" = lib.all (
+          d: !lib.any (a: a == "--test-runtool" || a == "--test-runtool-arg") d.args
+        ) (lib.attrValues p.doctests);
+      };
+      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) (checks plan))
+        ++ map (n: "cross: ${n}") (lib.attrNames (lib.filterAttrs (_: ok: !ok) (checks cross)));
+    in
+    assert lib.assertMsg (failed == [ ]) "doctest-false: ${lib.concatStringsSep ", " failed}";
+    assert lib.assertMsg (
+      lib.attrNames doctestFalseWs.doctests == [
+        "d"
+        "pmt"
+      ]
+    ) "doctest-false: doctest derivations ${toString (lib.attrNames doctestFalseWs.doctests)}";
+    pkgs.runCommand "test-runs-doctest-false"
+      {
+        d = doctestFalseWs.doctests.d;
+        pmt = doctestFalseWs.doctests.pmt;
+        pmtTest = doctestFalseWs.testRuns.pmt."lib/pmt";
+      }
+      ''
+        grep -q 'd/src/lib.rs - double (line 3) ... ok' $d/log
+        grep -q 'pmt/src/lib.rs - (line 3) ... ok' $pmt/log
+        grep -q 'test tests::host_test ... ok' $pmtTest/log
+        mkdir -p $out
+      '';
 
   # --- test-control -----------------------------------------------------------
 

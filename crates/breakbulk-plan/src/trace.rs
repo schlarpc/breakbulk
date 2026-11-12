@@ -35,7 +35,7 @@ pub struct Options {
     pub canonical_root: Option<String>,
     pub kind: PlanKind,
     /// What the variant compiles: `build` and `coverage` trace `cargo
-    /// build` / `cargo test --no-run` / `cargo bench --no-run`; `check` and
+    /// build` / `cargo test` / `cargo bench --no-run`; `check` and
     /// `clippy` trace `cargo check` (build plan) and `cargo check
     /// --all-targets` (test plan). Coverage's `-C instrument-coverage`
     /// comes in through `configs` like any spec rustflag.
@@ -387,22 +387,14 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         mkdir(&scratch.join(d))?;
     }
     let rustdoc_link = scratch.join("bin/rustdoc");
-    if rustdoc_link.symlink_metadata().is_err() {
-        std::os::unix::fs::symlink(&opts.shim, &rustdoc_link)
-            .map_err(|e| Error(format!("linking {}: {e}", rustdoc_link.display())))?;
+    let runner_link = scratch.join(format!("bin/{TEST_RUNNER}"));
+    for link in [&rustdoc_link, &runner_link] {
+        if link.symlink_metadata().is_err() {
+            std::os::unix::fs::symlink(&opts.shim, link)
+                .map_err(|e| Error(format!("linking {}: {e}", link.display())))?;
+        }
     }
     let target = target_dir(opts);
-    let config = scratch.join("breakbulk-config.toml");
-    let config_text = format!(
-        "[build]\nrustc = {}\nrustc-wrapper = {}\nrustdoc = {}\ntarget-dir = {}\nbuild-dir = {}\n",
-        toml_str(&opts.rustc),
-        toml_str(&opts.shim),
-        toml_str(&rustdoc_link.display().to_string()),
-        toml_str(&target),
-        toml_str(&target),
-    );
-    std::fs::write(&config, config_text)
-        .map_err(|e| Error(format!("writing {}: {e}", config.display())))?;
 
     let cargo_version = output(
         {
@@ -439,6 +431,48 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .map(|h| h.trim().to_owned())
         .ok_or_else(|| Error("`rustc -vV` names no host".into()))?;
     let rust_src_remap = rust_src_remap(opts, &rustc_vv)?;
+
+    let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
+    // Plain `cargo test`, not `cargo test --no-run` and then `cargo test
+    // --doc`: `--no-run` stops before the doctests, and `--doc` doc-tests
+    // other libraries than `cargo test` does (also those with `doctest =
+    // false`), whose dependencies' build-script runs then reach every
+    // doctest's `-L` list. Cargo starts each test binary through the
+    // runner, which does nothing, and then asks rustdoc for the doctests.
+    let sub: &[&str] = match opts.kind {
+        PlanKind::Build if checking => &["check"],
+        PlanKind::Test if checking => &["check", "--all-targets"],
+        PlanKind::Bench if checking => {
+            bail!("a bench plan needs a build or coverage variant, not check or clippy")
+        }
+        PlanKind::Build => &["build"],
+        PlanKind::Test => &["test"],
+        PlanKind::Bench => &["bench", "--no-run"],
+    };
+    let config = scratch.join("breakbulk-config.toml");
+    let mut config_text = format!(
+        "[build]\nrustc = {}\nrustc-wrapper = {}\nrustdoc = {}\ntarget-dir = {}\nbuild-dir = {}\n",
+        toml_str(&opts.rustc),
+        toml_str(&opts.shim),
+        toml_str(&rustdoc_link.display().to_string()),
+        toml_str(&target),
+        toml_str(&target),
+    );
+    if sub == ["test"] {
+        // Cargo looks the runner up per compile kind: proc macros' tests
+        // run for the host.
+        let mut keys = vec![target_config_key(&opts.target), host.as_str()];
+        keys.dedup();
+        for key in keys {
+            config_text.push_str(&format!(
+                "[target.{}]\nrunner = [{}]\n",
+                toml_str(key),
+                toml_str(&runner_link.display().to_string())
+            ));
+        }
+    }
+    std::fs::write(&config, config_text)
+        .map_err(|e| Error(format!("writing {}: {e}", config.display())))?;
 
     // cargo metadata, for the stubs and for the planner. It lists the
     // packages of the resolve for the features it is given, so it gets all
@@ -486,94 +520,50 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .map_err(|e| Error(format!("writing {}: {e}", meta_path.display())))?;
     let metadata = Metadata::read(&meta_path)?;
 
-    let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
     if opts.mode == VariantMode::Clippy {
         let Some(driver) = &opts.clippy_driver else {
             bail!("the clippy variant needs --clippy-driver");
         };
         check_clippy_driver(opts, driver)?;
     }
-    let invocations: Vec<Vec<&str>> = match opts.kind {
-        PlanKind::Build if checking => vec![vec!["check"]],
-        PlanKind::Test if checking => vec![vec!["check", "--all-targets"]],
-        PlanKind::Bench if checking => {
-            bail!("a bench plan needs a build or coverage variant, not check or clippy")
+    let record = scratch.join("record");
+    if record.exists() {
+        std::fs::remove_dir_all(&record)
+            .map_err(|e| Error(format!("removing {}: {e}", record.display())))?;
+    }
+    mkdir(&record)?;
+    let mut cmd = command(opts, &opts.cargo);
+    cmd.args(sub)
+        .args(common_args(opts, &config))
+        .args(selection_args(opts))
+        .env("BREAKBULK_RECORD", &record);
+    if let Some(driver) = &opts.clippy_driver
+        && opts.mode == VariantMode::Clippy
+    {
+        cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
+        if !opts.clippy_args.is_empty() {
+            let joined: String = opts
+                .clippy_args
+                .iter()
+                .map(|a| format!("{a}__CLIPPY_HACKERY__"))
+                .collect();
+            cmd.env("CLIPPY_ARGS", joined);
         }
-        PlanKind::Build => vec![vec!["build"]],
-        PlanKind::Test => {
-            let mut v = vec![vec!["test", "--no-run"]];
-            if !doctest_packages(opts, &metadata).is_empty() {
-                v.push(vec!["test", "--doc"]);
-            }
-            v
-        }
-        PlanKind::Bench => vec![vec!["bench", "--no-run"]],
-    };
-    let mut records = Vec::new();
-    for (n, sub) in invocations.iter().enumerate() {
-        let record = scratch.join(format!("record-{n}"));
-        let run = |selection: Vec<String>| -> Result<(), Error> {
-            if record.exists() {
-                std::fs::remove_dir_all(&record)
-                    .map_err(|e| Error(format!("removing {}: {e}", record.display())))?;
-            }
-            mkdir(&record)?;
-            let mut cmd = command(opts, &opts.cargo);
-            cmd.args(sub)
-                .args(common_args(opts, &config))
-                .args(selection)
-                .env("BREAKBULK_RECORD", &record);
-            if let Some(driver) = &opts.clippy_driver
-                && opts.mode == VariantMode::Clippy
-            {
-                cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
-                if !opts.clippy_args.is_empty() {
-                    let joined: String = opts
-                        .clippy_args
-                        .iter()
-                        .map(|a| format!("{a}__CLIPPY_HACKERY__"))
-                        .collect();
-                    cmd.env("CLIPPY_ARGS", joined);
-                }
-            }
-            output(cmd, &format!("cargo {}", sub.join(" "))).map(|_| ())
-        };
-        match run(selection_args(opts)) {
-            // Nightly `resolver.feature-unification = "package"` makes each
-            // selected package its own group of root units (cargo
-            // `src/ops/resolve.rs`, `FeatureUnification::Package`), and
-            // `--doc` fails a group without a library
-            // (`cargo_compile/unit_generator.rs`): a workspace with a
-            // bin-only member fails here, although `cargo test` runs its
-            // doctests. In the other modes the selection is one group,
-            // which has a library (`doctest_packages`), so this error means
-            // package mode; there, selecting only the packages with
-            // doctests gives the same groups.
-            Err(e)
-                if sub.as_slice() == ["test", "--doc"]
-                    && e.0.contains("no library targets found in package") =>
-            {
-                let mut selection: Vec<String> = doctest_packages(opts, &metadata)
-                    .into_iter()
-                    .flat_map(|p| ["-p".to_owned(), p.to_owned()])
-                    .collect();
-                selection.extend(build_args(opts));
-                run(selection)?
-            }
-            r => r?,
-        }
-        let recs = read_records(&record)?;
-        // With the rustc-info cache off, every invocation asks; one that
-        // did not means Cargo ignored `CARGO_CACHE_RUSTC_INFO=0`
-        // (assumption T2 in `docs/src/reference/assumptions.md`).
-        if !recs.iter().any(|r| r.mode == "query" && r.args == ["-vV"]) {
-            bail!(
-                "`cargo {}` sent no `rustc -vV` through the shim although its \
-                 rustc-info cache is off (CARGO_CACHE_RUSTC_INFO=0)",
-                sub.join(" ")
-            );
-        }
-        records.extend(recs);
+    }
+    output(cmd, &format!("cargo {}", sub.join(" ")))?;
+    let records = read_records(&record)?;
+    // With the rustc-info cache off, every invocation asks; one that did
+    // not means Cargo ignored `CARGO_CACHE_RUSTC_INFO=0` (assumption T2 in
+    // `docs/src/reference/assumptions.md`).
+    if !records
+        .iter()
+        .any(|r| r.mode == "query" && r.args == ["-vV"])
+    {
+        bail!(
+            "`cargo {}` sent no `rustc -vV` through the shim although its \
+             rustc-info cache is off (CARGO_CACHE_RUSTC_INFO=0)",
+            sub.join(" ")
+        );
     }
     Ok(Trace {
         records,
@@ -610,23 +600,30 @@ pub fn with_trim_paths(opts: &Options) -> Options {
     o
 }
 
-/// The selected members with a doctestable library. `cargo test --doc` has
-/// nothing to do without one (Cargo fails `--doc` when no library is
-/// selected).
-fn doctest_packages<'a>(opts: &Options, m: &'a Metadata) -> Vec<&'a str> {
-    m.packages
-        .iter()
-        .filter(|p| m.workspace_members.contains(&p.id))
-        .filter(|p| opts.packages.is_empty() || opts.packages.contains(&p.name))
-        .filter(|p| {
-            p.targets.iter().any(|t| {
-                t.is_lib()
-                    && t.doctest
-                    && t.crate_types
-                        .iter()
-                        .any(|c| matches!(c.as_str(), "lib" | "rlib" | "proc-macro"))
-            })
-        })
-        .map(|p| p.name.as_str())
-        .collect()
+/// The file name of the shim as the test runner of a traced `cargo test`
+/// (the shim's `TEST_RUNNER`).
+const TEST_RUNNER: &str = "breakbulk-test-runner";
+
+/// The `target.<key>` table Cargo reads a target's configuration from: a
+/// JSON target spec's file stem (cargo `CompileTarget::short_name`).
+fn target_config_key(target: &str) -> &str {
+    match target.strip_suffix(".json") {
+        Some(path) => path.rsplit('/').next().unwrap_or(path),
+        None => target,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_keys() {
+        assert_eq!(
+            target_config_key("x86_64-unknown-linux-gnu"),
+            "x86_64-unknown-linux-gnu"
+        );
+        assert_eq!(target_config_key("/specs/my-target.json"), "my-target");
+        assert_eq!(target_config_key("my-target.json"), "my-target");
+    }
 }

@@ -675,7 +675,7 @@ Test binaries, test runs, test apps and doctests on this target\.
 ` false `: none (a target that is only built, such as a wasm
 component whose tests run natively); the test plan is then not
 traced, except for a check or clippy variant with ` allTargets `\. A
-list of packages: the test plan is ` cargo test --no-run -p <pkg> … `
+list of packages: the test plan is ` cargo test -p <pkg> … `
 for those packages only, and only their tests are run\. ` true `: the
 variant’s or target’s package selection\.
 ` { exclude = [ … ]; } `: every member
@@ -1295,7 +1295,7 @@ list of string
 
 
 What the variant compiles\. ` build `: products and test binaries
-(` cargo build `, ` cargo test --no-run `)\. ` check `: ` cargo check `
+(` cargo build `, ` cargo test `)\. ` check `: ` cargo check `
 and ` cargo check --all-targets `, metadata only, no products or
 test runs; ` target.<triple>.variants.<v>.check ` builds every
 unit and is in ` repo.checks `\. ` clippy `: as ` check `, with

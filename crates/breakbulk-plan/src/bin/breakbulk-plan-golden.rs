@@ -11,7 +11,7 @@
 //! With `--env` (and a `-vv` log), env is compared too: every compile's and
 //! every build-script run's. `--negative-control` expands with a naive rule
 //! (no search-path ordering) and should exit non-zero on inputs that
-//! exercise it. `--doc-log` (a `cargo test --doc -v` log, with a test plan)
+//! exercise it. `--doc-log` (a `cargo test -vv` log, with a test plan)
 //! also compares every traced `rustdoc --test`.
 
 use std::path::PathBuf;

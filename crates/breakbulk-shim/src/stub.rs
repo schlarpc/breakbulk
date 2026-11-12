@@ -17,10 +17,9 @@ pub const MARKER: &str = "breakbulk-stub.json";
 pub const METADATA_ENV: &str = "BREAKBULK_METADATA";
 
 /// Copies the shim to the build script's output path and writes the marker.
-///
-/// The marker names no record directory: a stub compiled by one traced Cargo
-/// invocation may run in a later one, and its record belongs to the
-/// invocation that runs it, so [`run`] takes it from `BREAKBULK_RECORD`.
+/// The marker names no record directory: a Cargo invocation other than the
+/// one that compiled the stub may run it, and the run's record belongs to
+/// that invocation ([`run`] takes it from `BREAKBULK_RECORD`).
 pub fn install(path: &Path, rustc: &str, a: &RustcArgs) -> Result<(), Error> {
     let me = std::env::current_exe().map_err(|e| Error::new(format!("current_exe: {e}")))?;
     std::fs::copy(&me, path).map_err(|e| Error::io(path, e))?;

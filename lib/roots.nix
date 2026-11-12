@@ -402,7 +402,7 @@ rec {
         filter (t: t.test || isExample t) ordinary
       );
       bench = map (root "bench") (filter (t: t.bench) ordinary);
-      # `cargo test --doc` covers the library when doctest = true and its
+      # `cargo test` doc-tests the library when doctest = true and its
       # crate types can be doctested (Target::doctestable: lib, rlib, proc-macro).
       doc = map (root "doctest") (
         filter (

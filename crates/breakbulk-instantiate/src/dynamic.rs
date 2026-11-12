@@ -716,7 +716,7 @@ fn doctest(
             String::new(),
             format!(
                 "`{package}` has no doctests in this plan: Cargo did not run `rustdoc --test` \
-                 for it (`cargo test --doc` covers only the selected workspace members)"
+                 for it (`cargo test` doc-tests only the selected workspace members)"
             ),
         ),
     };

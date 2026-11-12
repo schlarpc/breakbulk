@@ -7,6 +7,7 @@
 //! | Mode | Detected by | Action |
 //! | --- | --- | --- |
 //! | Build-script stub | `breakbulk-stub.json` beside the running executable | record env, print sentinels |
+//! | Test runner | the executable's file name is `breakbulk-test-runner` | exit 0 |
 //! | Rustdoc | the executable's file name contains `rustdoc` | queries go to the real rustdoc; otherwise record, exit 0 |
 //! | Query | `-vV`, `-V`, `--version`, any `--print`, or `-` as input | record (env = Cargo's own env), then `exec` the real rustc |
 //! | Compile | `--crate-name` and an input file | record, fake outputs |
@@ -15,6 +16,8 @@
 //! As `RUSTDOC` it must be started through a path whose file name contains
 //! `rustdoc` (the planner makes a `rustdoc` symlink to the shim), and finds the
 //! real rustdoc in `$BREAKBULK_RUSTDOC`.
+//! As the runner of a traced `cargo test` it is started through a
+//! `breakbulk-test-runner` symlink, with a faked test binary to run.
 //!
 //! Environment:
 //! - `BREAKBULK_RECORD`: directory for records (required for compile, rustdoc and stubs).
@@ -33,6 +36,8 @@ use std::process::{Command, ExitCode};
 
 pub const RECORD_ENV: &str = "BREAKBULK_RECORD";
 pub const RUSTDOC_ENV: &str = "BREAKBULK_RUSTDOC";
+/// The file name the planner starts the shim by as the test runner.
+pub const TEST_RUNNER: &str = "breakbulk-test-runner";
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -79,6 +84,10 @@ fn exec(program: &[String], args: &[String]) -> Result<ExitCode, Error> {
 fn split_chain(argv: &[String]) -> (Vec<String>, Vec<String>) {
     let n = argv.iter().take_while(|a| !a.starts_with('-')).count();
     (argv[..n].to_vec(), argv[n..].to_vec())
+}
+
+fn is_test_runner(argv0: &OsString) -> bool {
+    Path::new(argv0).file_name() == Some(TEST_RUNNER.as_ref())
 }
 
 fn is_rustdoc_invocation(argv0: &OsString) -> bool {
@@ -142,6 +151,10 @@ fn real_main() -> Result<ExitCode, Error> {
     }
     let mut it = std::env::args_os();
     let argv0 = it.next().unwrap_or_default();
+    // The test binaries are empty files: running them would fail.
+    if is_test_runner(&argv0) {
+        return Ok(ExitCode::SUCCESS);
+    }
     let rest: Vec<String> = it.map(|a| a.to_string_lossy().into_owned()).collect();
     if is_rustdoc_invocation(&argv0) {
         return rustdoc_mode(rest);

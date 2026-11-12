@@ -260,7 +260,7 @@ pub struct SearchPathsSplice {
     pub literals: Vec<String>,
 }
 
-/// A traced `rustdoc --test` of one library, from `cargo test --doc`. Run
+/// A traced `rustdoc --test` of one library, from `cargo test`. Run
 /// by the doctest derivation, which compiles and runs the examples in
 /// one process. Its shape is a compile unit's, without outputs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

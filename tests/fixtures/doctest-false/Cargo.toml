@@ -1,11 +1,14 @@
-# A proc macro with `test = false` and `doctest = false` whose only use of
-# `d` is a dev-dependency, and a library `d` with a build script and one
-# doctest. `cargo test` doc-tests `d` alone and builds nothing of `pm`, so
-# `d` is built for the target only; `cargo test --doc` also doc-tests `pm`,
-# building `d` for the host, which runs `d`'s build script a second time.
+# Doctests as `cargo test` selects them: a proc macro `pm` with `test =
+# false` and `doctest = false` whose only use of `d` is a dev-dependency,
+# a library `d` with a build script and a doctest, and a proc macro `pmt`
+# with a unit test and a doctest, both run for the host. `cargo test`
+# doc-tests `d` and `pmt` and builds nothing of `pm`, so `d` is built for
+# the target only; `cargo test --doc` would also doc-test `pm` (whose
+# doctest does not compile), building `d` for the host and running its
+# build script a second time.
 [workspace]
 resolver = "2"
-members = ["pm", "d"]
+members = ["pm", "pmt", "d"]
 
 [workspace.package]
 version = "0.1.0"

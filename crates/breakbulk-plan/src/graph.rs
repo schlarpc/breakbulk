@@ -284,6 +284,23 @@ fn doctest_native_block(args: &[String]) -> Option<(usize, usize)> {
     Some((from, to))
 }
 
+/// A traced `rustdoc --test` without the trace's own runner: Cargo passes it
+/// as `--test-runtool R` and `--test-runtool-arg A` pairs, and
+/// `breakbulk-unit` adds the configured one at build time.
+fn without_runtool(args: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if matches!(args[i].as_str(), "--test-runtool" | "--test-runtool-arg") {
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    out
+}
+
 /// `cargo metadata`'s description of a package's targets, for run units.
 fn package_targets(p: &Package) -> Vec<PackageTarget> {
     let mut v: Vec<PackageTarget> = p
@@ -324,7 +341,7 @@ pub struct Builder<'a> {
     compiles: Vec<CompileRec<'a>>,
     runs: Vec<RunRec<'a>>,
     run_by_tag: BTreeMap<String, usize>,
-    /// `rustdoc` records (from `cargo test --doc`).
+    /// `rustdoc` records (the doctests of `cargo test`).
     rustdocs: Vec<&'a Record>,
     rw: Rewriter,
 }
@@ -1423,7 +1440,8 @@ impl<'a> Builder<'a> {
             }
             let package = self.package_of(rec)?;
             let id = format!("d-{}", package.name);
-            let args = self.convert_args(&id, &rec.args, &rec.env, &package.id, None)?;
+            let args = without_runtool(&rec.args);
+            let args = self.convert_args(&id, &args, &rec.env, &package.id, None)?;
             let (env, env_splices, dylib) =
                 self.convert_env(&id, &rec.env, &package.id, &rec.args)?;
             let program = rec
@@ -1564,6 +1582,25 @@ pub fn output_name(emit: &str, path: &str, types: &[String]) -> Option<&'static 
 #[cfg(test)]
 mod trim_tests {
     use super::*;
+
+    #[test]
+    fn runtool_removed() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            without_runtool(&a(&[
+                "--test",
+                "--target",
+                "t",
+                "--test-runtool",
+                "/s/bin/breakbulk-test-runner",
+                "--test-runtool-arg",
+                "x",
+                "-L",
+                "/l",
+            ])),
+            a(&["--test", "--target", "t", "-L", "/l"])
+        );
+    }
 
     #[test]
     fn cargo_trim_paths_detected() {

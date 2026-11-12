@@ -1,6 +1,7 @@
 //! The build-script stub writes its run record to the `BREAKBULK_RECORD` of
-//! the Cargo that runs it, not to the one of the Cargo that compiled it: a
-//! later traced invocation may run a stub an earlier one compiled.
+//! the Cargo that runs it, not to the one of the Cargo that compiled it
+//! (another Cargo invocation over the same target directory may run a
+//! stub without compiling it again).
 //!
 //! The stub is installed through the shim's own compile mode, with `true`
 //! as the "rustc" (the shim asks it for file names; the link output's path

@@ -11,9 +11,9 @@
 #
 #   1. breakbulk-plan traces the build plan and the test plan, its stubs
 #      printing sentinels where the real scripts print values;
-#   2. real `cargo build -vv`, `cargo test --no-run -vv` and
-#      `cargo test --doc -vv` build the same sources at the same location
-#      (/build/skeleton), running the real build scripts;
+#   2. real `cargo build -vv`, `cargo test --no-run -vv` and `cargo test
+#      -vv` build the same sources at the same location (/build/skeleton),
+#      running the real build scripts, tests and doctests;
 #   3. breakbulk-plan-golden --env renders each plan into the real build's
 #      layout, expands every splice with breakbulk-unit's own code (argv,
 #      rustc-env, DEP_* metadata, dynamic-library paths, the doctests' -L
@@ -125,9 +125,10 @@ let
           > $out/build.stdout 2> $out/build.log || { cat $out/build.log; exit 1; }
         cargo test --no-run "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-test\"" \
           > $out/test.stdout 2> $out/test.log || { cat $out/test.log; exit 1; }
-        # Doctests, over the test build: compiles and runs every
-        # `rustdoc --test` (the test plan traced them without running).
-        cargo test --doc "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-test\"" \
+        # Tests and doctests, over the test build: runs the tests, then
+        # compiles and runs every `rustdoc --test` (the test plan traced
+        # them without running).
+        cargo test "''${common[@]}" --config "build.target-dir=\"$TMPDIR/t-test\"" \
           > $out/doc.stdout 2> $out/doc.log || { cat $out/doc.stdout $out/doc.log; exit 1; }
         docs_build=()
         docs_test=(--doc-log $out/doc.log)

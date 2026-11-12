@@ -14,16 +14,17 @@ cargo build --frozen --offline <selection> \
   --target <triple> --profile <profile> [--features …] \
   --config <generated source-replacement file, one directory per source> \
   --config '<spec rustflags and linkers, see below>'
-# test plan: the same, with `cargo test --no-run`, then `cargo test --doc` for doctests
+# test plan: the same, with `cargo test` and a test runner that does nothing
 # bench variant: `cargo bench --no-run` with the bench profile
 # env: RUSTC_WRAPPER=breakbulk-shim  RUSTDOC=<dir>/rustdoc (a symlink to breakbulk-shim)
 #      BREAKBULK_RUSTDOC=<real rustdoc>  CARGO_TARGET_DIR=<scratch>  BREAKBULK_RECORD=<record dir>
+#      BREAKBULK_METADATA=<scratch>/metadata.json
 #      CARGO_CACHE_RUSTC_INFO=0
 ```
 
 - `<selection>` is `--workspace`, or `-p` for each package in the target's `packages` list.
 - The vendor configuration is described under [Vendoring for planning](sources.md#vendoring-for-planning).
-- Before tracing, the planner writes the `cargo metadata` JSON to `$BREAKBULK_RECORD/metadata.json`. Stubs read it to learn their package's targets, and the planner looks up each traced compile's package in it by directory.
+- Before tracing, the planner writes the `cargo metadata` JSON to `$BREAKBULK_METADATA`. Stubs read it to learn their package's targets, and the planner looks up each traced compile's package in it by directory.
 - `cargo metadata` runs with `--all-features`, not the variant's feature flags. It lists only the packages of the resolve for the features it is given, so without them a variant whose features turn on an optional dependency would compile a package the metadata does not have. The variant's own flags would not do: `cargo metadata` selects every workspace member, and a bare feature name applies to each selected member that has it, which differs from what it means for a `-p` selection. With `--all-features` Cargo resolves only; mutually exclusive features that would not compile together still plan.
 - **Spec rustflags.** Cargo takes rustflags from exactly one source: the first of `CARGO_ENCODED_RUSTFLAGS`, `RUSTFLAGS`, `target.<triple>` together with `target.<cfg>`, and `build.rustflags`. Arrays concatenate only within one key. The planner therefore reads the project's `.cargo/config.toml` files (a documented format).
 
@@ -38,9 +39,10 @@ cargo build --frozen --offline <selection> \
 - `CARGO_CACHE_RUSTC_INFO=0` turns off Cargo's rustc-info cache (`<build dir>/.rustc_info.json`), so every Cargo invocation sends `rustc -vV` through the shim, whose record is Cargo's own environment, the baseline that env filtering subtracts. The planner fails when an invocation recorded no `-vV`. The variable reaches every process Cargo starts and is subtracted with the rest of the baseline.
 - The planner never sets `CARGO_INCREMENTAL` and never passes it through from its own environment, because the incremental setting is part of every unit's `-C metadata`. The `-C incremental=…` argument is stripped from argv instead (see [Env filtering](#env-filtering)).
 - The planner runs Cargo without `-v`. Verbosity changes argv: with `-vv`, non-local crates get `--cap-lints warn` instead of `--cap-lints allow`.
-- No runner is configured while tracing. With a runner, Cargo adds `--test-runtool` to `rustdoc --test`.
 - The clippy variant adds `RUSTC_WORKSPACE_WRAPPER=clippy-driver`. Cargo then calls `breakbulk-shim clippy-driver rustc …` for workspace members only. This chain is parsed but not yet tested. clippy-driver is a rustc with its own sysroot compiled in, so before tracing, the planner checks that `clippy-driver --rustc --print sysroot` equals `rustc --print sysroot`. A clippy built for another rustc (nixpkgs' `clippy` beside a rust-overlay toolchain, even of the same release) would otherwise put that rustc's sysroot into the traced units, which instantiation rejects as an undeclared input. The error names [`workspaces.<ws>.toolchain.clippy`](../../reference/options/workspaces.md#workspacesnametoolchainclippy) (`--clippy-option`); that option defaults to `pkgs.clippy` with nixpkgs' rustc and to `rustc` itself otherwise.
-- Doctests: `cargo test --no-run` skips them, because rustdoc compiles doctests at run time. After the faked build, the test plan runs `cargo test --doc`; the shim, acting as `RUSTDOC`, records one `rustdoc --test` command per library (proc macros included) and exits successfully. Cargo runs nothing else in that mode.
+- **Tests and doctests.** The test plan traces one plain `cargo test`, because rustdoc compiles doctests at run time: `cargo test --no-run` stops before them. The generated config sets `target.<triple>.runner` for the target and for the host (Cargo looks the runner up per compile kind, and proc macros' tests run for the host) to a `breakbulk-test-runner` symlink to the shim, which exits 0 without running the (empty, faked) test binary. Cargo then calls `rustdoc --test` for each library that `cargo test` doc-tests: those with `doctest` on and a `lib`, `rlib` or `proc-macro` crate type. The shim, acting as `RUSTDOC`, records each and exits successfully. Because of the runner, Cargo adds `--test-runtool <runner>` (and a `--test-runtool-arg` per argument) where `--target` ends (a proc macro's doctest, built for the host, has no `--target`: after `--test-run-directory`); the planner removes them from the recorded command, and `breakbulk-unit` adds the configured runner after `--target` at build time.
+
+  `cargo test --doc` is not used: it doc-tests every doctestable library, also those with `doctest = false` (cargo `src/ops/cargo_compile/unit_generator.rs`, `create_proposals`: the `CompileFilter::Default` arm checks `doctested() && doctestable()`, the `CompileFilter::Only` arm only `doctestable()`), and those libraries' dependencies, built for them alone, add build-script runs to every doctest's `-L` list. Each doctest gets one `-L` for every search path of every build-script run in the whole `cargo test` (`run_doc_tests`, from `Compilation::native_dirs`), so every doctest depends on every run of the test plan, as test runs do.
 - Documentation (not built yet, [#6](https://github.com/schlarpc/breakbulk/issues/6)): `cargo doc` is traced the same way, with the shim recording each `rustdoc` command.
 - One target per plan. A traced compile with a `--target` other than the plan's target and the host fails planning, naming the package (#39). Nightly `package.forced-target` (`per-package-target`) causes this, since it overrides `--target`. `package.default-target` is harmless, because `--target` overrides it.
 
@@ -115,6 +117,7 @@ The shim decides its mode from how it was started and from its arguments, checke
 | Mode | Detected by | Action |
 | --- | --- | --- |
 | Build-script stub | `breakbulk-stub.json` in the directory of the running executable | Record argv, cwd and the full env; print sentinel directives; exit 0 |
+| Test runner | The executable's file name is `breakbulk-test-runner` (the planner's symlink to the shim, set as the runner of a traced `cargo test`) | Exit 0 without running the test binary |
 | Rustdoc | The executable's file name contains `rustdoc`. The planner sets `RUSTDOC` to a `rustdoc` symlink to the shim, because Cargo starts `RUSTDOC` with the same env it gives `RUSTC_WRAPPER`. | For queries, `exec` `$BREAKBULK_RUSTDOC`; otherwise record and exit 0 without output |
 | Query | `-vV`, `-V`, `--version`, any `--print`, or `-` as the input; or no `--crate-name` or no input file | Record, then `exec` the real rustc unchanged |
 | Compile | `--crate-name` plus an input file | Record, then fake the outputs |
@@ -133,7 +136,7 @@ The record of the `rustc -vV` query carries Cargo's own process environment. It 
 
 When Cargo runs a stub, the stub records argv, cwd and the full env Cargo gave it, including `TARGET`, `HOST`, `PROFILE`, `OPT_LEVEL`, `DEBUG`, `CARGO_CFG_*`, `CARGO_FEATURE_*`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_MANIFEST_LINKS`, `OUT_DIR` and any `DEP_*` sentinels from upstream stubs. It finds its package in the `cargo metadata` JSON (`$BREAKBULK_METADATA`, default `$BREAKBULK_RECORD/metadata.json`) by `CARGO_MANIFEST_DIR`, to learn the package's targets.
 
-The stub writes its record to `$BREAKBULK_RECORD` as Cargo gives it when it runs the stub, not to a directory named at compile time: a stub one traced invocation compiled can run again in a later one, and the planner reads each invocation's record directory when that invocation ends. Cargo passes its own environment on to build scripts (it removes only `RUSTC_WORKSPACE_WRAPPER` and `RUSTFLAGS`, and sets `RUSTC_WRAPPER`), so the variable is always there under a traced Cargo; a stub started without it fails.
+The stub writes its record to `$BREAKBULK_RECORD` as Cargo gives it when it runs the stub, not to a directory named at compile time, so a Cargo invocation over the same target directory that runs the stub without compiling it again gets the record. Cargo passes its own environment on to build scripts (it removes only `RUSTC_WORKSPACE_WRAPPER` and `RUSTFLAGS`, and sets `RUSTC_WRAPPER`), so the variable is always there under a traced Cargo; a stub started without it fails.
 
 ## Unit identity and graph edges
 

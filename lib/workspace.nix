@@ -368,7 +368,7 @@ let
   # Dynamic-derivation mode: the outer derivation is named
   # `<ws>-<triple>-<variant>` for the build plan, with `-test`
   # for the test plan, since each plan has its own.
-  # The libraries `cargo test --doc` covers (roots.nix `doc`) among the
+  # The libraries `cargo test` doc-tests (roots.nix `doc`) among the
   # selected members: in dynamic-derivation mode the test plan's outer
   # derivation writes their doctests, with the test configuration IFD mode
   # gives them (testRuns.doctestConfig), so it must know them up front.

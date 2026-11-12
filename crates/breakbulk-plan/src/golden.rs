@@ -742,7 +742,7 @@ pub fn compare_with(
 }
 
 /// The doctest half of [`compare_with`]: each traced `rustdoc --test` against
-/// the one a real `cargo test --doc -vv` ran (`doc_log`), keyed by
+/// the one a real `cargo test -vv` ran (`doc_log`), keyed by
 /// `CARGO_PKG_NAME`. The `-L` list of every run's search paths is rebuilt
 /// with `breakbulk-unit`'s own [`doctest::search_paths`] and the env with its
 /// dynamic-library path rule.
@@ -773,14 +773,14 @@ fn compare_doctests(
     let planned: BTreeSet<&String> = plan.doctests.keys().collect();
     let real_ids: BTreeSet<&String> = real.keys().collect();
     for id in planned.difference(&real_ids) {
-        report.problems.push(format!(
-            "{id}: in the plan, not in the real `cargo test --doc`"
-        ));
+        report
+            .problems
+            .push(format!("{id}: in the plan, not in the real `cargo test`"));
     }
     for id in real_ids.difference(&planned) {
-        report.problems.push(format!(
-            "{id}: in the real `cargo test --doc`, not in the plan"
-        ));
+        report
+            .problems
+            .push(format!("{id}: in the real `cargo test`, not in the plan"));
     }
     let lookup = |f: &str| outputs.get(f);
     for id in planned.intersection(&real_ids) {
