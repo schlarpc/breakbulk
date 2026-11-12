@@ -100,7 +100,12 @@ let
       };
 
       test = {
-        env = bt.mkEnv "Environment for this package's test runs.";
+        env = bt.mkEnv ''
+          Environment for this package's test runs and doctests. They get
+          a fresh, empty `HOME` in their temporary directory by default;
+          `HOME = "/homeless-shelter"` makes a test that writes to its home
+          fail, as compiles and build-script runs do.
+        '';
         path = mkOption {
           type = types.listOf types.package;
           default = [ ];

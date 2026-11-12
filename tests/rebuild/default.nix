@@ -147,6 +147,7 @@ let
     sys-native = [ presetFixtures.repos.sysNativeCross ];
     test-control = [ dynamic.repos.test-control ];
     test-cutoff = [ (plain "test-cutoff" [ ]) ];
+    test-home = [ dynamic.repos.test-home ];
     test-only = [ repository.repos.testOnly ];
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];

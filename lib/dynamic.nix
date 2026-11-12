@@ -562,6 +562,7 @@ let
           printf '%s\n' "$reason" > $out
           exit 0
         fi
+        ${testRuns.homeScript}
         ${envFromInfo {
           inherit jq dylibPath;
           extra = extraLibs;

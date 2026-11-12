@@ -6,7 +6,9 @@
 //!
 //! 1. A fixed base: `HOME=/homeless-shelter`, `LC_ALL=C`, `TZ=UTC`,
 //!    `SOURCE_DATE_EPOCH=315532800` (nixpkgs' default), plus [`PASSED_BASE`]
-//!    copied from the builder's environment when Nix set them.
+//!    copied from the builder's environment when Nix set them. A test
+//!    process (a doctest) gets a fresh, empty, writable `HOME` in the
+//!    build's temporary directory instead ([`Outer::test_base`]).
 //! 2. The env capture (`env.json`) for the unit's package and platform.
 //! 3. to 5. The unit's rendered `env`: Cargo's recorded env, then the toolchain
 //!    spec's env, then the package override's env, merged at instantiation
@@ -247,6 +249,26 @@ impl Outer {
         }
     }
 
+    /// The home directory of a test process: `home` in the build's
+    /// temporary directory, which nothing else uses and which goes away
+    /// with the build.
+    pub fn test_home(&self) -> PathBuf {
+        self.tmpdir().join("home")
+    }
+
+    /// Layer 1 of a test process: [`Outer::base`] with `HOME` at
+    /// [`Outer::test_home`]. Tests write to their home (caches, config
+    /// files) as they do under `cargo test`, where it is the user's; an
+    /// empty one reads nothing of the user's. `XDG_*` stay unset, so tools
+    /// fall back to directories under `HOME`. Compiles and build-script
+    /// runs keep `/homeless-shelter`, so a build that writes to its home
+    /// fails.
+    pub fn test_base(&self) -> BTreeMap<String, String> {
+        let mut env = self.base();
+        env.insert("HOME".into(), self.test_home().display().to_string());
+        env
+    }
+
     /// Layer 1.
     pub fn base(&self) -> BTreeMap<String, String> {
         let mut env: BTreeMap<String, String> = FIXED_BASE
@@ -323,7 +345,19 @@ pub fn layered(
     unit_env: &BTreeMap<String, String>,
     cflags: &CFlags,
 ) -> BTreeMap<String, String> {
-    let mut env = outer.base();
+    layered_on(outer.base(), outer, capture, unit_env, cflags)
+}
+
+/// [`layered`] over another layer 1 (`base`), such as
+/// [`Outer::test_base`].
+pub fn layered_on(
+    base: BTreeMap<String, String>,
+    outer: &Outer,
+    capture: Option<&BTreeMap<String, String>>,
+    unit_env: &BTreeMap<String, String>,
+    cflags: &CFlags,
+) -> BTreeMap<String, String> {
+    let mut env = base;
     if let Some(c) = capture {
         merge_layer(&mut env, c.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     }

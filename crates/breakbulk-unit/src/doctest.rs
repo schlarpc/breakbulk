@@ -30,8 +30,9 @@
 //!   package's `test.postRun` snippets, `test.keepLog`'s copy), in
 //!   `$TMPDIR`, with `log` and `out` set.
 //!
-//! `RUST_TEST_THREADS` is set to the job count ([`Outer::jobs`]) unless the
-//! test env sets it. The combined stdout and stderr go to the build log and
+//! The doctests get a fresh, empty `HOME` in `$TMPDIR`
+//! ([`Outer::test_base`]), and `RUST_TEST_THREADS` is set to the job count
+//! ([`Outer::jobs`]); the test env overrides either. The combined stdout and stderr go to the build log and
 //! to [`LOG_FILE`] in `$TMPDIR`, not `$out`: the output holds timings and
 //! lines in a varying order, and `nix build --rebuild` compares `$out`,
 //! which stays empty unless the post-run program fills it. The derivation
@@ -46,7 +47,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compile::{Invocation, check_args, fresh_dir, link_deps};
 use crate::directives::BuildOutput;
-use crate::env::{CFlags, Outer, capture_layer, layered, merge_layer};
+use crate::env::{CFlags, Outer, capture_layer, layered_on, merge_layer};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{RenderedArg, RenderedCompile};
 use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
@@ -231,7 +232,13 @@ pub fn invocation(
     let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
     prepend_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
-    let mut env = layered(outer, capture.as_ref(), &unit_env, &CFlags::default());
+    let mut env = layered_on(
+        outer.test_base(),
+        outer,
+        capture.as_ref(),
+        &unit_env,
+        &CFlags::default(),
+    );
     env.insert("RUST_TEST_THREADS".into(), outer.jobs().to_string());
     merge_layer(&mut env, config.env.clone());
     Ok(Invocation {
@@ -279,6 +286,8 @@ pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
     let directives = load_directives(d)?;
     let inv = invocation(d, outer, &directives, &config, &deps)?;
     link_deps(&d.compile.deps, &deps)?;
+    let home = outer.test_home();
+    std::fs::create_dir_all(&home).map_err(|e| io_err("creating", &home, e))?;
     let out = outer.output("out")?;
     fresh_dir(&out)?;
     let log = outer.tmpdir().join(LOG_FILE);
@@ -490,6 +499,26 @@ mod tests {
         assert_eq!(inv.env["PATH"], "/tools/bin");
         assert_eq!(inv.env["RUST_TEST_THREADS"], "3");
         assert_eq!(inv.cwd, Path::new("/src"));
+    }
+
+    #[test]
+    fn home_is_fresh_unless_the_test_env_sets_it() {
+        let d = doctest(vec![lit("--test")], 1, &[]);
+        let dirs = BTreeMap::from([("/f/a".to_owned(), out(&[]))]);
+        let outer = Outer {
+            vars: BTreeMap::from([
+                ("TMPDIR".into(), "/build".into()),
+                ("HOME".into(), "/homeless-shelter".into()),
+            ]),
+        };
+        let inv = invocation(&d, &outer, &dirs, &TestConfig::default(), Path::new("/d")).unwrap();
+        assert_eq!(inv.env["HOME"], "/build/home");
+        let config = TestConfig {
+            env: BTreeMap::from([("HOME".into(), "/homeless-shelter".into())]),
+            ..TestConfig::default()
+        };
+        let inv = invocation(&d, &outer, &dirs, &config, Path::new("/d")).unwrap();
+        assert_eq!(inv.env["HOME"], "/homeless-shelter");
     }
 
     #[test]

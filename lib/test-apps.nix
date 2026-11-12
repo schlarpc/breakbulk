@@ -29,7 +29,8 @@
 #
 # Unlike the test run, it passes only its own command-line arguments: no
 # `test.args` skip list (the point is to run what the sandbox skips), no
-# `--include-ignored`, and no `RUST_TEST_THREADS`.
+# `--include-ignored`, and no `RUST_TEST_THREADS`; and it keeps the user's
+# `HOME`, as `cargo test` does.
 { lib, testRunsLib }:
 {
   mkTestApps =

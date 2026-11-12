@@ -203,11 +203,25 @@ More behavior:
   still has an attribute. Building that product fails with the reason;
   its test run succeeds and logs that it was skipped, as `cargo test`
   does.
-- Tests that cannot run in the sandbox (network, a writable home,
-  devices) are skipped with libtest's own filters
+- Tests that cannot run in the sandbox (network, devices) are skipped
+  with libtest's own filters
   ([`test.args`](../reference/options/packages.md#packagesnametestargs)),
   per package or per test binary. Changing a skip list re-runs only the
   affected test runs.
+
+**Home directory.** A test run and a doctest run get a fresh, empty,
+writable `HOME` inside the run's own temporary directory, as a test has a
+writable home under `cargo test`. Tests that keep a cache or a config
+file there work without any setting. Nothing of your own home is read,
+and nothing written there outlives the run. The `XDG_*` variables stay
+unset, so tools fall back to `$HOME/.cache` and the like.
+
+- Compiles and build-script runs keep Nix's `HOME=/homeless-shelter`,
+  which does not exist: a build script that writes to its home fails.
+- For the same strictness in a package's tests, set
+  `HOME = "/homeless-shelter"` in its
+  [`test.env`](../reference/options/packages.md#packagesnametestenv).
+- Test apps run on your machine with your own `HOME`.
 
 **Test output.** A test run's output goes to the build log only: see it
 with `nix log <run>` or `nix build -L`. The run's own output (`$out`) is

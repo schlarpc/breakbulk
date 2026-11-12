@@ -50,6 +50,32 @@ fn nothing_leaks_from_the_builder() {
 }
 
 #[test]
+fn test_processes_get_a_home_in_tmpdir() {
+    let o = outer(&[("TMPDIR", "/build"), ("HOME", "/home/me")]);
+    let base = o.test_base();
+    assert_eq!(base["HOME"], "/build/home");
+    assert_eq!(o.test_home(), PathBuf::from("/build/home"));
+    assert!(!base.keys().any(|k| k.starts_with("XDG_")));
+    // Only the home differs from a build step's base, and later layers
+    // still win over it.
+    let mut build = o.base();
+    build.insert("HOME".into(), "/build/home".into());
+    assert_eq!(base, build);
+    let env = layered_on(
+        o.test_base(),
+        &o,
+        None,
+        &map(&[("HOME", "/elsewhere")]),
+        &none(),
+    );
+    assert_eq!(env["HOME"], "/elsewhere");
+    assert_eq!(
+        layered(&o, None, &BTreeMap::new(), &none())["HOME"],
+        "/homeless-shelter"
+    );
+}
+
+#[test]
 fn later_layers_win() {
     let o = outer(&[("TMPDIR", "/build")]);
     let capture = map(&[("CC", "gcc"), ("TZ", "Europe/Paris")]);

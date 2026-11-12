@@ -16,13 +16,21 @@ later layers append.
 
 | Layer | Contents |
 | --- | --- |
-| 1. Fixed base | `HOME=/homeless-shelter`, `TMPDIR`, `NIX_BUILD_CORES`, `LC_ALL=C`, `TZ=UTC` |
+| 1. Fixed base | `HOME=/homeless-shelter` (doctests: `HOME=$TMPDIR/home`, a fresh, empty directory), `TMPDIR`, `NIX_BUILD_CORES`, `NIX_BUILD_TOP`, `NIX_STORE`, `LC_ALL=C`, `TZ=UTC`, `SOURCE_DATE_EPOCH=315532800` |
 | 2. Env capture | The capture for the unit's package and platform, or the platform's base capture. A unit that links then adds the library search flags of the captures of the other packages it links ([Environment capture](../explanation/internals/env-capture.md)). |
 | 3. Cargo's env | Cargo's recorded env, after filtering |
 | 4. Toolchain spec | The spec's env for the unit's platform |
 | 5. Package override | The package's `env` for the unit's platform |
 
 Nothing from the planner's environment reaches a unit.
+
+`HOME` does not exist in compiles and build-script runs, so a build that
+writes to its home fails. Doctests are tests, so they get a writable home
+as under `cargo test`. No `XDG_*` variable is set, so tools fall back to
+directories under `HOME`. The package's `test.env` goes over all layers
+of a doctest and can set `HOME` back to `/homeless-shelter`. Test runs
+set up the same home in their own derivation
+([Tests](../explanation/products.md#tests)).
 
 ## `compile`
 

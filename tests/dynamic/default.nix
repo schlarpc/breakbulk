@@ -396,6 +396,9 @@ let
     # `test.binaries.<bin>.env` and `[env]` wins over the default, under
     # libtest and nextest.
     test-threads = (import ../test-runs testArgs).repos.test-threads;
+    # tests/test-runs' home: a test and a doctest writing under $HOME and
+    # the user cache directory pass with no setting.
+    test-home = (import ../test-runs testArgs).repos.home;
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
     nextest = mkRepo "nextest" [
       oneWs

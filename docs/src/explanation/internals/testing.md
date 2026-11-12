@@ -46,6 +46,7 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 | `doctests` | Doctests using a dev-dependency, one `should_panic`, an edition-2024 crate | linux-gnu, aarch64 | Doctests run; cross doctests run under the runner or skip with a reason |
 | `test-control` | Tests that need network, `#[ignore]` tests, a skip list per binary | linux-gnu | Skipped tests do not run; changing a skip list re-runs only that test run; the test app runs the network test outside the sandbox |
 | `test-threads` | A test that fails unless `RUST_TEST_THREADS` is 1; a second workspace whose `[env]` sets it | linux-gnu | The test passes with the value from `test.env`, `test.binaries.<bin>.env` and `[env]`, under libtest and nextest, in IFD and dynamic mode; with nothing set, the default is `$NIX_BUILD_CORES`; a nextest profile's `test-threads` wins over the default (`test-runs-test-threads`) |
+| `test-home` | A test and a doctest that write under `$HOME` and the user cache directory | linux-gnu | Both pass with no setting, in a fresh, empty home in `$TMPDIR` with `XDG_CACHE_HOME` unset; with `test.env.HOME = "/homeless-shelter"` both fail (`test-runs-home`) |
 | `benches` | A libtest bench and a Criterion bench | linux-gnu | Bench binaries come from the bench variant only, built with the bench profile; the test plan has none; smoke checks pass with `--test` |
 
 ## Determinism and dogfooding

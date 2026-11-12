@@ -46,7 +46,8 @@
 #     in the package directory of its source view, with `test.args`,
 #     `test.binaries.<binary>.args` and `--include-ignored` when
 #     `test.includeIgnored`;
-#   - its environment: the dynamic-library path, then the project's
+#   - its environment: a fresh, empty `HOME` in `$TMPDIR` (`homeScript`),
+#     then the dynamic-library path, then the project's
 #     `[env]` config variables (the plan's `configEnv`, with the values
 #     Cargo gave the test unit), then the package's build script
 #     `rustc-env` values, then `CARGO`, `CARGO_MANIFEST_DIR`,
@@ -571,6 +572,16 @@ rec {
     )
     + lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}\n";
 
+  # A test process's home: fresh, empty and writable, as a test's home is
+  # under `cargo test`, without reading the user's (doctests get the same
+  # from breakbulk-unit, `Outer::test_base`). It comes before the other
+  # layers so that `[env]` and `test.env` can replace it. `XDG_*` stay
+  # unset, so tools fall back to directories under it.
+  homeScript = ''
+    export HOME=$TMPDIR/home
+    mkdir -p "$HOME"
+  '';
+
   # Only a default: the variable may already hold a value from `[env]` or
   # the test configuration, which wins.
   threadsScript = ''
@@ -722,6 +733,7 @@ rec {
             // caAttrs
           )
           ''
+            ${homeScript}
             ${envScript {
               spec = s;
               jq = "${testPkgs.jq}/bin/jq";
@@ -806,6 +818,7 @@ rec {
               // caAttrs
             )
             ''
+              ${homeScript}
               ${envScript {
                 spec = s;
                 jq = "${testPkgs.jq}/bin/jq";

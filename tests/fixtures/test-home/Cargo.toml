@@ -1,0 +1,8 @@
+# Test runs' home directory. The `home` test and the library's doctest
+# write under $HOME and under the user cache directory. With TH_EXPECT_NIX
+# set, both first check that the home is a fresh, empty directory in
+# $TMPDIR and that XDG_CACHE_HOME is unset.
+[package]
+name = "th"
+version = "0.1.0"
+edition = "2021"

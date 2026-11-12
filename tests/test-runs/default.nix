@@ -63,6 +63,12 @@
 #                           `keepLog`'s copy run in that order after a
 #                           passing run and see `$log`; the doctest run
 #                           gets the package's snippet and `keepLog`
+#   home                    over the `test-home` fixture: a test and a
+#                           doctest that write under $HOME and the user
+#                           cache directory pass with no setting, in a
+#                           fresh, empty home in $TMPDIR with
+#                           XDG_CACHE_HOME unset; with `test.env.HOME =
+#                           "/homeless-shelter"` both fail
 #
 # `workspaces` exposes the mkWorkspace results for debugging; `repos` the
 # mkRepository results that tests/dynamic builds in both modes.
@@ -783,6 +789,59 @@ let
         grep -q 'test result: ok' $doctest/log
         mkdir -p $out
       '';
+
+  # --- home ------------------------------------------------------------------
+
+  # TH_EXPECT_NIX makes the fixture check that its home is fresh, empty and
+  # in $TMPDIR; HOME itself is not set.
+  homeRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/test-home";
+    modules = [
+      {
+        workspaces.main.variants.default.profile = "dev";
+        packages.th.test = {
+          keepLog = true;
+          env.TH_EXPECT_NIX = "1";
+        };
+      }
+    ]
+    ++ extraModules;
+  };
+  # The doctest derivation has no `overrideAttrs` for testBuildFailure, so
+  # the strict doctest is run by hand, as in `runner`, with the
+  # derivation's own test env.
+  home =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      t = homeRepo.workspaces.main.target.${native};
+      strict = mk "test-home" { packages.th.test.env.HOME = "/homeless-shelter"; };
+    in
+    pkgs.runCommand "test-runs-home"
+      {
+        run = t.testRuns.th.home;
+        doctest = t.doctests.th;
+        strictRun = pkgs.testers.testBuildFailure strict.testRuns.th.home;
+        unit = strict.doctests.th.drvAttrs.BREAKBULK_UNIT;
+        testEnv = strict.doctests.th.drvAttrs.BREAKBULK_TEST_ENV;
+      }
+      ''
+        grep -q 'test writes_home_and_cache ... ok' $run/log
+        grep -Eq 'write_home_and_cache \(line [0-9]+\) \.\.\. ok' $doctest/log
+        cat $strictRun/testBuildFailure.log
+        grep -q 'cannot create /homeless-shelter/.config/th' $strictRun/testBuildFailure.log
+        result=$out
+        if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_ENV="$testEnv" out=$TMPDIR/o \
+            ${tools.breakbulk-unit}/bin/breakbulk-unit doctest 2> err; then
+          cat err
+          echo "the doctest succeeded with HOME=/homeless-shelter" >&2
+          exit 1
+        fi
+        cat err
+        grep -Eq 'write_home_and_cache \(line [0-9]+\) \.\.\. FAILED' err
+        grep -q 'cannot create /homeless-shelter/.config/th' err
+        mkdir -p $result
+      '';
 in
 {
   workspaces = {
@@ -790,8 +849,10 @@ in
   };
   repos = {
     test-threads = testThreadsRepo;
+    home = homeRepo;
   };
   post-run = postRun;
+  inherit home;
   test-threads = testThreads;
   dylib-rule = dylibRule;
   inherit nextest;
