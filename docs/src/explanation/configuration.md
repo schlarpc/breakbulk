@@ -327,6 +327,11 @@ the same workspace. Products are passed by reference, so only the unit
 that embeds the product, and its dependents, wait for it. The rest of
 the build starts at once.
 
+This needs a package that reads the product from where you put it,
+usually an environment variable. A build script that builds the other
+package with Cargo itself is a different case:
+[A build script runs Cargo](../how-to/nested-cargo.md).
+
 A plan is instantiated from the names of these settings only: which
 variables `env` sets, and whether `inputs` and `nativeInputs` are empty.
 A value is read when the derivation of a unit that uses it is made. For

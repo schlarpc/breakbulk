@@ -375,6 +375,18 @@ let
     # Products of the same plan in a package's env and inputs: an infinite
     # recursion in dynamic mode (#126), so not in run.sh's default list.
     same-workspace-products = products.sameWsRepo;
+    # A build script that runs Cargo, with the workspace's vendor directory
+    # as CARGO_HOME; without noSourceReferences, which fails on its product
+    # by design.
+    nested-cargo = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/nested-cargo";
+      modules = productTests.modules.nestedCargo ++ [
+        { inherit mode; }
+        keepLogs
+        { packages.outer.checks.noSourceReferences = null; }
+      ];
+    };
 
     # tests/presets
     same-triple = presetFixtures.sameTriple;

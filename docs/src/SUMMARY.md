@@ -9,6 +9,7 @@
 # How-to guides
 
 - [Add a native library](how-to/native-library.md)
+- [A build script runs Cargo](how-to/nested-cargo.md)
 - [Build for another target](how-to/targets.md)
 - [Wrap or package a binary](how-to/wrap-package.md)
 - [Rebuild less when unrelated files change](how-to/filter-source.md)

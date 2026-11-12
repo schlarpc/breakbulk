@@ -1,0 +1,10 @@
+[package]
+name = "inner"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+itoa = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "allow" }

@@ -123,6 +123,19 @@
 #                    `shared`'s cdylib (`inputs`) and embeds `tool`'s
 #                    binary (`env`); the app runs with an empty
 #                    environment and the embedded binary runs
+#   nested-cargo     a build script that runs Cargo (`outer`'s builds the
+#                    member `inner`, which has a registry dependency), with
+#                    the workspace as `extraSources` and
+#                    `repo.workspaces.<ws>.vendor.cargoHome` as CARGO_HOME:
+#                    the product embeds the nested build's binary, which
+#                    runs; noSourceReferences fails on the product, naming
+#                    a source view; inner's test runs `cargo run -p inner`
+#                    with the same CARGO_HOME in `test.env` and the rest of
+#                    the workspace in `test.sourceScope`
+#   nested-cargo-rustflags   the same with linuxStatic and a `--cfg` in the
+#                    target's rustflags: the nested Cargo reads both from
+#                    the run's CARGO_ENCODED_RUSTFLAGS (the inner binary is
+#                    static and sees the cfg)
 #   trim-paths       Cargo's trim-paths, with rust-overlay's nightly (Cargo
 #                    1.101): workspace `set` sets it in its dev profile, so
 #                    its plan keeps Cargo's remaps and scope (the planner
@@ -778,6 +791,82 @@ let
       }
     ];
 
+  # --- nested-cargo --------------------------------------------------------------
+
+  # The settings of docs/src/how-to/nested-cargo.md.
+  nestedCargoModules = [
+    (oneWs "." "dev")
+    (
+      { repo, pkgs, ... }:
+      {
+        packages.outer = {
+          extraSources = [
+            "Cargo.toml"
+            "Cargo.lock"
+            "inner"
+          ];
+          forTarget.env.CARGO_HOME = repo.workspaces.main.vendor.cargoHome;
+        };
+        # inner's test runs `cargo run -p inner`.
+        packages.inner.test = {
+          sourceScope = [
+            "Cargo.toml"
+            "Cargo.lock"
+            "outer"
+          ];
+          env = {
+            CARGO_HOME = repo.workspaces.main.vendor.cargoHome;
+            CARGO_TARGET_DIR = "/tmp/nested-target";
+          };
+          # Without the dynamic-library path: it holds a copy of nixpkgs'
+          # librustc_driver, from which rustc would take the copy's
+          # directory as its sysroot.
+          path = [
+            (pkgs.writeShellScriptBin "rustc" ''
+              unset LD_LIBRARY_PATH
+              exec ${repo.workspaces.main.toolchain.rustc}/bin/rustc "$@"
+            '')
+            pkgs.stdenv.cc
+          ];
+        };
+      }
+    )
+  ];
+  nestedCargo = mkRepo (fixtures + "/nested-cargo") nestedCargoModules;
+  nestedCargoFlags = mkRepo (fixtures + "/nested-cargo") (
+    nestedCargoModules
+    ++ [
+      {
+        targets.${native} = {
+          preset = breakbulk.presets.linuxStatic;
+          rustflags = [
+            "--cfg"
+            "nested_cfg"
+          ];
+        };
+      }
+    ]
+  );
+  # Runs the product, and the inner binary it embeds, which is static or
+  # not.
+  nestedCargoRun =
+    name: product: expect: static:
+    pkgs.runCommand name
+      {
+        inherit product;
+        nativeBuildInputs = [ pkgs.binutils-unwrapped ];
+      }
+      ''
+        set -euo pipefail
+        $product/bin/outer $TMPDIR/inner | tee $out
+        grep -q '^outer embeds [0-9]* bytes, magic 7f454c46$' $out
+        chmod +x $TMPDIR/inner
+        $TMPDIR/inner | tee -a $out
+        grep -qxF ${lib.escapeShellArg expect} $out
+        readelf -l $TMPDIR/inner > $TMPDIR/headers
+        ${if static then "! " else ""}grep -q 'Requesting program interpreter' $TMPDIR/headers
+      '';
+
   # --- benches -------------------------------------------------------------------
 
   benchesRepo = mkRepo (fixtures + "/benches") [
@@ -846,6 +935,7 @@ let
 in
 {
   modules.variants = variantsModules;
+  modules.nestedCargo = nestedCargoModules;
   repos = {
     inherit
       postLink
@@ -862,6 +952,8 @@ in
       coverageRepo
       rustSrcRepo
       buildScriptOutputs
+      nestedCargo
+      nestedCargoFlags
       ;
     trimCc = trimCcRepo { };
   };
@@ -977,6 +1069,31 @@ in
       ]
     ) "embed-invalidation: changed units ${builtins.toJSON changed}";
     evalCheck "embed-invalidation" (builtins.toJSON changed);
+
+  nested-cargo =
+    let
+      p = nestedCargo.workspaces.main.packages.outer;
+      view = builtins.unsafeDiscardStringContext "${(inst nestedCargo).sources.workspace.outer}";
+    in
+    pkgs.runCommand "nested-cargo"
+      {
+        run = nestedCargoRun "nested-cargo-run" p "inner says 42, nested_cfg false" false;
+        failure = pkgs.testers.testBuildFailure p.checks.noSourceReferences;
+        testRun = nestedCargo.workspaces.main.testRuns.inner.nested;
+      }
+      ''
+        set -euo pipefail
+        cat $run
+        # The nested build's paths are not remapped: the embedded binary
+        # names the source view the build script ran in.
+        cat $failure/testBuildFailure.log
+        grep -qF ${lib.escapeShellArg view} $failure/testBuildFailure.log
+        touch $out
+      '';
+
+  nested-cargo-rustflags =
+    nestedCargoRun "nested-cargo-rustflags" nestedCargoFlags.workspaces.main.packages.outer
+      "inner says 42, nested_cfg true" true;
 
   benches =
     let

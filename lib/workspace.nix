@@ -145,6 +145,9 @@ pkgs:
   targetPackageSet ? pkgs,
   targetStdenv ? null,
   hostStdenv ? null,
+  # The workspace's vendor directory (mkVendor); mkRepository passes one per
+  # workspace, so its targets and variants do not each evaluate it again.
+  vendor ? null,
 }:
 let
   wsDir = util.normalizeRel path;
@@ -152,7 +155,7 @@ let
 
   fetch = mkFetch pkgs fetchArgs;
   entries = lockfile.read (root + "/${util.joinRel wsDir "Cargo.lock"}");
-  vendor = mkVendor pkgs { inherit fetch entries; };
+  vendored = if vendor != null then vendor else mkVendor pkgs { inherit fetch entries; };
   skel = skeleton.mkSkeleton pkgs { inherit root wsDir; };
 
   # Cargo's package id for a lockfile entry: the source (for git, with its
@@ -265,12 +268,12 @@ let
   plans = lib.genAttrs ([ "build" "test" ] ++ lib.optional bench "bench") (
     kind:
     mkPlan pkgs {
+      vendor = vendored;
       inherit
         mode
         clippyDriver
         clippyOption
         clippyArgs
-        vendor
         tools
         kind
         target
@@ -520,9 +523,9 @@ let
   bins = lib.filterAttrs (_: r: r.breakbulkRoot.kind == "bin" && !r.breakbulkRoot.test) built.roots;
 in
 {
+  vendor = vendored;
   inherit
     plans
-    vendor
     tools
     captures
     overrides

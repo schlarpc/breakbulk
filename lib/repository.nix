@@ -20,6 +20,8 @@
 #   repo.workspaces.<ws>.devShell
 #   repo.workspaces.<ws>.toolchain.{rustc,cargo,clippy,rustfmt}   resolved
 #   repo.workspaces.<ws>.instances.<triple>.<v>           the mkWorkspace results
+#   repo.workspaces.<ws>.vendor.{dir,configFile,cargoHome}  the locked
+#                                                         dependencies, vendored
 #   repo.checks."<ws>/<triple>/<pkg>/<name>"              flattened
 #   repo.apps."<ws>/<triple>/<pkg>/test-<name>"           every test app, flake app shape
 #   repo.sources.<crate> / ."<crate>@<version>"           fetched crate sources
@@ -63,6 +65,7 @@
   manifest,
   envCapture,
   mkFetch,
+  mkVendor,
   defaultTools,
   mkWorkspace,
   dynamic,
@@ -168,6 +171,13 @@ let
     else
       throw "breakbulk: workspaces.${wsName}: ${util.joinRel (wsDirOf ws) "Cargo.lock"} does not exist; run `cargo generate-lockfile` and commit it";
   locks = lib.mapAttrs lockOf cfg.workspaces;
+  vendors = lib.mapAttrs (
+    wsName: _:
+    mkVendor pkgs {
+      inherit fetch;
+      entries = locks.${wsName};
+    }
+  ) cfg.workspaces;
   allEntries = lib.concatLists (lib.attrValues locks);
 
   # --- per-package overrides -------------------------------------------------
@@ -927,6 +937,7 @@ let
     mkWorkspace pkgs (
       {
       inherit root tools fetchArgs;
+      vendor = vendors.${wsName};
       path = ws.path;
       toolchain = {
         inherit (ws.toolchain) rustc cargo capabilities;
@@ -1246,6 +1257,7 @@ let
     in
     {
       inherit instances;
+      vendor = vendors.${wsName};
       # The resolved toolchain (rustc, cargo, clippy, rustfmt), for wiring
       # the same programs elsewhere (treefmt's rustfmt).
       inherit (ws) toolchain;

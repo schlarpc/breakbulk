@@ -1,0 +1,9 @@
+# `outer`'s build script builds `inner` with Cargo, which breakbulk cannot
+# see into (docs/src/how-to/nested-cargo.md); `outer` embeds the result.
+[workspace]
+resolver = "2"
+members = ["outer", "inner"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

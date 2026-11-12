@@ -193,6 +193,7 @@ let
       manifest
       envCapture
       mkFetch
+      mkVendor
       defaultTools
       mkWorkspace
       dynamic

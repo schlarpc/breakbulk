@@ -85,6 +85,7 @@ repo = {
     };
 
     plans.<triple>.<v> = { build; test; };   # plan.json, for debugging
+    vendor = { dir; configFile; cargoHome; };  # Cargo.lock's dependencies, for Cargo offline
   };
 
   checks."<ws>/<triple>/<pkg>/<name>";   # everything to check, for checks.<system>
@@ -160,6 +161,31 @@ in the table above (`…/<pkg>/test-<name>`,
 ```
 nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
 ```
+
+### `vendor`
+
+`workspaces.<ws>.vendor` holds every dependency in the workspace's
+`Cargo.lock` that is not a path dependency, unpacked, one directory per
+source. It is the directory the planner uses. Use it for
+anything that runs Cargo in a derivation, offline, against the locked
+dependencies: a build script or a test that runs Cargo
+([A build script runs Cargo](../how-to/nested-cargo.md)), or your own
+derivation.
+
+- `dir`: the vendor directory.
+- `configFile`: Cargo configuration that replaces each source of the
+  lockfile (crates.io, other registries, git repositories) with its
+  directory in `dir`. Pass it as `cargo --config <file>`.
+- `cargoHome`: a directory to use as `CARGO_HOME`. Its `config.toml` is
+  `configFile` with `net.offline = true`. The sandbox's `HOME` does not
+  exist, so a Cargo in a derivation needs a `CARGO_HOME` anyway.
+
+It depends only on `Cargo.lock` and the fetch settings
+([`registries`](options/repository.md#registries),
+[`gitHashes`](options/repository.md#githashes), …), not
+on any plan or package setting. So a package setting can name the
+vendor directory of its own workspace without an infinite recursion, in
+both delivery modes.
 
 ### `explainSharing`
 

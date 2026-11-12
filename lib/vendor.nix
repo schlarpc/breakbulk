@@ -316,6 +316,19 @@ in
       # Pass to cargo as `--config <file>`: an inline `--config` value may
       # hold only one dotted key (cargo src/context/mod.rs, toml_dotted_keys).
       configFile = pkgs.writeText "breakbulk-source-replacement.toml" config;
+      # A CARGO_HOME for a Cargo in a derivation. Offline, so a dependency
+      # missing from the lockfile fails naming itself, not as a download.
+      # A read-only store path will do: Cargo takes the package-cache lock
+      # it cannot create there as best effort (cargo
+      # src/util/cache_lock.rs, `maybe_readonly`).
+      cargoHome = pkgs.writeTextDir "config.toml" (
+        config
+        + ''
+
+          [net]
+          offline = true
+        ''
+      );
       # For the planner's path rewriting: vendor-relative crate directory ->
       # package id and the crate source store path.
       crates = lib.listToAttrs (
