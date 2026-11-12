@@ -168,7 +168,7 @@ run time works only while the source is in its closure, and fails after
 the scrub. Such a program keeps the reference: remove the check instead.
 
 One catch for tests: the workspace libraries a test binary links are
-compiled once, for shipping, so their debug information names their
+compiled as shipped libraries are, so their debug information names their
 sources. Editing any file of such a library, even a README, changes the
 test binary. [`test.stripForRun`](../reference/options/packages.md#packagesnameteststripforrun)
 (off by default) runs a debug-stripped copy instead, which does not
