@@ -661,7 +661,8 @@ rec {
   # (lists), from the target's runner and the host's (`defaultHost`; null
   # or a list): Cargo picks it by the unit's compile kind
   # (`Compilation::target_runner`). A host unit (a proc macro) is built for
-  # the build machine, so it never runs under the target's runner.
+  # the build machine, so it gets the build machine's triple's runner: none
+  # in a cross plan, the target's own in a native plan.
   runnersByPlatform =
     {
       runner ? null,
