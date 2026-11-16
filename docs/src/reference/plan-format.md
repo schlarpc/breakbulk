@@ -2,6 +2,8 @@
 
 `plan.json` is a versioned, deterministic description of one (workspace, target, variant, plan kind): every unit, with arguments split into literals, references and splice points. It contains no store paths for sources, so it changes only when manifests, the lockfile, config or the toolchain change.
 
+`version` changes only when an existing field changes meaning or is removed or renamed. An added field leaves it as it is, so a reader should ignore fields it does not know. `units.json`, which instantiation writes, follows the same rule for its own `version`.
+
 This abridged example shows one library compile and the build-script run
 it depends on (`…` marks elided values):
 
