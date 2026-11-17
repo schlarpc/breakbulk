@@ -904,14 +904,8 @@ let
             CARGO_HOME = repo.workspaces.main.vendor.cargoHome;
             CARGO_TARGET_DIR = "/tmp/nested-target";
           };
-          # Without the dynamic-library path: it holds a copy of nixpkgs'
-          # librustc_driver, from which rustc would take the copy's
-          # directory as its sysroot.
           path = [
-            (pkgs.writeShellScriptBin "rustc" ''
-              unset LD_LIBRARY_PATH
-              exec ${repo.workspaces.main.toolchain.rustc}/bin/rustc "$@"
-            '')
+            repo.workspaces.main.toolchain.rustc
             pkgs.stdenv.cc
           ];
         };

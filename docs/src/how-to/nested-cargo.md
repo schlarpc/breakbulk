@@ -191,13 +191,7 @@ in
       CARGO_HOME = ws.vendor.cargoHome;
       CARGO_TARGET_DIR = "/tmp/nested-target";
     };
-    path = [
-      (pkgs.writeShellScriptBin "rustc" ''
-        unset LD_LIBRARY_PATH
-        exec ${ws.toolchain.rustc}/bin/rustc "$@"
-      '')
-      pkgs.stdenv.cc
-    ];
+    path = [ ws.toolchain.rustc pkgs.stdenv.cc ];
   };
 }
 ```
@@ -214,13 +208,6 @@ in
   linking are not on the test run's `PATH`, so
   [`test.path`](../reference/options/packages.md#packagesnametestpath) adds
   them.
-- With nixpkgs' `rustc`, the wrapper above is needed. A test run's
-  dynamic-library path holds a copy of the toolchain's target libraries,
-  and with nixpkgs' `rustc` this includes `librustc_driver`. A `rustc`
-  that loads that copy takes the copy's directory as its sysroot, and
-  fails with "can't find crate for `core`". A rust-overlay toolchain
-  keeps `librustc_driver` elsewhere, unless it has the `rustc-dev`
-  component.
 
 The costs are the same as for a build script: the test runs again after
 any edit to these paths, and its nested build is shared with nothing.

@@ -754,8 +754,10 @@ let
 
   # --- test-libs --------------------------------------------------------------
 
-  # A test run depends on the sysroot's target libraries only
-  # (a small copy), not on the whole Rust toolchain.
+  # A test run depends on a small copy of the sysroot's standard library
+  # only, not on the whole Rust toolchain, and the copy holds no compiler
+  # library (nixpkgs' sysroot has librustc_driver and rustc-dev's proc
+  # macros next to libstd).
   testLibs =
     let
       t = namesRepo.workspaces.main.target.${native};
@@ -776,6 +778,11 @@ let
       }
       ''
         ls $libs/lib/rustlib/${native}/lib/libstd-*.so
+        ls ${sysroot}/lib/rustlib/${native}/lib/librustc_driver-*.so
+        other=$(ls $libs/lib/rustlib/${native}/lib | grep -v '^libstd-.*\.so$' || true)
+        if [ -n "$other" ]; then
+          echo "the test libraries hold more than libstd: $other" >&2; exit 1
+        fi
         if grep -qxF "$sysroot" $closure/store-paths; then
           echo "the test libraries reference the sysroot" >&2; exit 1
         fi

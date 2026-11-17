@@ -182,12 +182,17 @@ rec {
     exportDylib
     ;
 
-  # What test runs read from the Rust toolchain, the shared
-  # libraries of the sysroot's target library directory (`libstd-*.so`, for
-  # binaries linked with `-C prefer-dynamic` and the like), copied into a
-  # small derivation laid out as a sysroot (`lib/rustlib/<target>/lib`).
+  # What test runs read from the Rust toolchain: the standard library's
+  # shared library in the sysroot's target library directory (`libstd-*.so`,
+  # for binaries linked with `-C prefer-dynamic` and the like), copied into
+  # a small derivation laid out as a sysroot (`lib/rustlib/<target>/lib`).
   # Depending on the whole sysroot instead (over 1 GB) would make every
-  # test run on a fresh machine fetch the toolchain. `null` without one.
+  # test run on a fresh machine fetch the toolchain. The compiler's own
+  # libraries there (`librustc_driver-*`, rustc-dev's proc macros) stay
+  # out: with the driver on the dynamic-library path, a rustc the test
+  # starts loads the copy and takes the copy as its sysroot. A
+  # `rustc_private` test binary finds the driver through its RUNPATH
+  # instead. `null` without a sysroot.
   testLibs =
     pkgs: sysroot: target:
     if sysroot == null then
@@ -198,7 +203,7 @@ rec {
         mkdir -p "$out/$dir"
         for f in ${sysroot}/$dir/*; do
           case "''${f##*/}" in
-            *.so|*.so.*|*.dylib|*.dll) cp -L "$f" "$out/$dir/" ;;
+            libstd-*.so|libstd-*.dylib|std-*.dll) cp -L "$f" "$out/$dir/" ;;
           esac
         done
       '';
