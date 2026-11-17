@@ -67,7 +67,7 @@ for `wasm32-wasip1`).
 | `linux` | `crossLanguageLto`: LTO across Rust and C; clang and lld from rustc's LLVM, C compiled to bitcode (`-flto=thin`) |
 | `linuxStatic` (glibc) | `staticLibDirs`: directories of static archives to link, `relocationModel`: `"static"` for a non-PIE executable (default: static-pie, rustc's own) |
 | all | `linkerKind`: the [linker kind](#linkers), as `targets.<triple>.linkerKind` sets it |
-| `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `rebuildInputs`: nixpkgs libraries to rebuild against that glibc (`[ "openssl" ]`) |
+| `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `overlays`: nixpkgs overlays for the package set that builds library inputs against that glibc |
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |
 | `darwin` | `sdk`: the macOS SDK, a package or a version for `breakbulk.lib.appleSdk` (required on Linux), `sdkVersion`: its version when the package has no `version`, `deploymentTarget`: the oldest macOS to run on (default: rustc's, `11.0` on arm64, `10.12` on x86\_64), `nativeBuilder`: run tests on a Mac builder |

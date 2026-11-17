@@ -7,3 +7,4 @@ publish = false
 [dependencies]
 openssl-sys = "0.9"
 libz-sys = { version = "1", default-features = false, features = ["libc"] }
+curl-sys = "0.4"

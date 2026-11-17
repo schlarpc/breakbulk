@@ -760,7 +760,7 @@ in
 
   # Linux programs that run on other distributions:
   # `linuxPortable { glibc = "2.17"; systemLibraries = [ ]; backend =
-  # "zig"; rebuildInputs = [ ]; }` (./linux-portable.nix).
+  # "zig"; overlays = [ ]; }` (./linux-portable.nix).
   inherit (impl) linuxPortable;
 
   # Windows: msvc through xwin for a `-msvc` triple (`sdk`, `extraSdks`,

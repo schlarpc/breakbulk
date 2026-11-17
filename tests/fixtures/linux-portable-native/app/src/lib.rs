@@ -22,8 +22,21 @@ pub fn adler32(data: &[u8]) -> u64 {
     unsafe { libz_sys::adler32(1, data.as_ptr(), data.len() as _) as u64 }
 }
 
+/// libcurl's version string, which names the libraries it was built with
+/// (nghttp2, zstd, … for nixpkgs' curl; curl-sys's own build has none).
+pub fn curl_version() -> String {
+    let p = unsafe { curl_sys::curl_version() };
+    unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn curl_from_nixpkgs() {
+        let v = super::curl_version();
+        assert!(v.contains("nghttp2/") && v.contains("zstd/"), "{v}");
+    }
+
     #[test]
     fn sha256() {
         assert_eq!(

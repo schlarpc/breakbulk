@@ -246,9 +246,42 @@ let
       ]
     );
 
-  # zig links with its own lld; the wrapper only drops rustc's
-  # self-contained-lld arguments.
-  zigLinker = pkgs: zig: driverWrapper pkgs "zig-cc-link-${zig.target}" zig.cc "";
+  # zig links with its own lld; the wrapper drops rustc's
+  # self-contained-lld arguments, and the inner script makes a library
+  # that another library's pkg-config file names without a path (libidn2's
+  # `Libs.private: -lunistring`, which pkg-config-rs passes as a plain
+  # `-l` when it finds no archive on the paths pkg-config printed) link as
+  # with GNU ld behind nixpkgs' cc-wrapper:
+  #  - the `-L` directories of the env capture's NIX_LDFLAGS are added, as
+  #    cc-wrapper adds them;
+  #  - rustc's `-Wl,-Bdynamic` becomes `-Wl,-search_paths_first`: GNU ld's
+  #    -Bdynamic takes an archive where a directory has no shared library,
+  #    zig's does not (`lib_search_strategy = .no_fallback`, zig 0.17.0
+  #    src/main.zig), while -search_paths_first does.
+  zigLinker =
+    pkgs: zig:
+    driverWrapper pkgs "zig-cc-link-${zig.target}" (pkgs.buildPackages.writeShellScript
+      "zig-cc-search-path"
+      ''
+        dynamic=-Wl,-Bdynamic
+        args=()
+        for a in "$@"; do
+          if [[ $a == @* && -f ''${a#@} ]]; then
+            # driverWrapper's own copy of rustc's response file.
+            ${pkgs.buildPackages.gnused}/bin/sed -i "s/^$dynamic\$/-Wl,-search_paths_first/" "''${a#@}"
+            args+=("$a")
+          elif [[ $a == "$dynamic" ]]; then
+            args+=(-Wl,-search_paths_first)
+          else
+            args+=("$a")
+          fi
+        done
+        for f in ''${NIX_LDFLAGS-}; do
+          [[ $f == -L* ]] && args+=("$f")
+        done
+        exec ${zig.cc} "''${args[@]}"
+      ''
+    ) "";
 
   # The toolchain's own rust-lld. rustc puts its lib/rustlib/<host>/bin
   # first on the linker's PATH (rustc_codegen_ssa back/linker.rs,

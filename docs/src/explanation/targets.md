@@ -265,8 +265,9 @@ like Python's manylinux wheels:
   loads only glibc's libraries, GCC's runtime (`libgcc_s.so.1`,
   `libstdc++.so.6`) and the system libraries you name
   (`systemLibraries`, such as `libGL.so.1`).
-- Native library inputs must be rebuilt as static libraries
-  (`rebuildInputs`), and `pkg-config` runs in static mode.
+- Native library inputs come from the preset's own nixpkgs package set,
+  which builds them, and the libraries they need, as static libraries
+  with that `zig cc`. `pkg-config` runs in static mode.
 - Two checks run on every product: one reads each binary's `NEEDED`
   entries, as auditwheel does, and fails on any other library; the other
   fails on any Nix store path in the product's files, which would not

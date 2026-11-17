@@ -43,12 +43,14 @@
 #                     libstdc++ (a g++-built program passes)
 #   linux-portable-container-eval   evaluation only: the container runner
 #                     below leaves the test binary's derivation unchanged
-#   linux-portable-native-glibc   HEAVY (builds OpenSSL and zlib with zig
-#                     cc, ~5 min): linuxPortable's rebuildInputs, static
-#                     libraries only; openssl-sys and libz-sys link them
-#                     statically (static pkg-config), so the product needs
-#                     no library but glibc's and GLIBC_2.17 at most
-#                     (objdump -T); `portableLibraries` passes
+#   linux-portable-native-glibc   HEAVY (builds OpenSSL, libcurl and its
+#                     libraries with zig cc): linuxPortable's package set,
+#                     static libraries only; openssl-sys, libz-sys and
+#                     curl-sys link them statically (static pkg-config),
+#                     with libcurl's own libraries from the same set, so
+#                     the product needs no library but glibc's and
+#                     GLIBC_2.17 at most (objdump -T); `portableLibraries`
+#                     and `portableNoStorePaths` pass
 #
 # Not flake checks: `containerChecks`, built by
 # `nix run .#test-linux-portable-container` (network: the CentOS 7.9 image
@@ -679,33 +681,29 @@ let
     }
     // zigNativeContainerChecks;
 
-  # Native libraries rebuilt with zig cc against glibc 2.17 (decisions
-  # 102, 122): openssl-sys and libz-sys find them through breakbulk's
-  # sysDefaults (pkg-config, `inputs = p: [ p.openssl … ]`), called with
-  # the preset's package set. The rebuilds are static libraries only and
-  # pkg-config runs in static mode, so the product links them statically
-  # and needs nothing at run time but glibc's libraries.
-  zigNativePreset = presets.linuxPortable {
-    glibc = "2.17";
-    rebuildInputs = [
-      "openssl"
-      "zlib"
-    ];
-  };
+  # Native libraries from the preset's package set, nixpkgs cross-built
+  # with zig cc against glibc 2.17 as static libraries: openssl-sys,
+  # libz-sys and curl-sys find them through breakbulk's sysDefaults
+  # (pkg-config, `inputs = p: [ p.openssl … ]`), and libcurl's own
+  # libraries come from the same set. pkg-config runs in static mode, so
+  # the product links them all statically and needs nothing at run time
+  # but glibc's libraries.
+  zigNativePreset = presets.linuxPortable { glibc = "2.17"; };
   zigNativeLibs =
     let
       set = (zigNativePreset { inherit pkgs; }).packageSet.content;
+      dependsOn = p: d: lib.elem d.drvPath (map (i: i.drvPath) p.propagatedBuildInputs);
     in
     {
-      inherit (set.breakbulkZigRebuilt) openssl zlib;
-      # The package set hands out the rebuilt packages, nixpkgs' otherwise
-      # (any other derivation with an evaluation warning; checked by hand:
-      # reading `set.curl` warns "a package input uses nixpkgs' `curl`…").
+      inherit (set) openssl zlib curl;
+      # Tools stay nixpkgs' own; libcurl's library dependencies are the
+      # set's (propagated, as pkgsStatic propagates every build input).
       check =
-        set.openssl == set.breakbulkZigRebuilt.openssl
+        set.stdenv.hostPlatform.isStatic
         && set.openssl.drvPath != pkgs.openssl.drvPath
-        && set ? lib
-        && set.stdenv == pkgs.stdenv;
+        && set.buildPackages.perl.drvPath == pkgs.perl.drvPath
+        && dependsOn set.curl set.openssl
+        && dependsOn set.curl set.zlib;
     };
   zigNativeRepo = mkRepo (fixtures + "/linux-portable-native") [
     {
@@ -720,13 +718,13 @@ let
     let
       t = zigNativeRepo.workspaces.main.target.${native};
       bin = "${t.packages.app}/bin/app";
-      inherit (zigNativeLibs) openssl zlib;
+      inherit (zigNativeLibs) openssl zlib curl;
     in
-    assert lib.assertMsg zigNativeLibs.check "zig: rebuildInputs package set";
+    assert lib.assertMsg zigNativeLibs.check "zig: linuxPortable package set";
     {
-      # HEAVY: builds OpenSSL with zig cc (about 5 minutes on 4 cores).
-      # OpenSSL and zlib are archives only, linked into the product, which
-      # needs GLIBC_2.17 at most and no library but glibc's.
+      # HEAVY: builds OpenSSL, libcurl and its libraries with zig cc.
+      # OpenSSL, zlib and libcurl are archives only, linked into the
+      # product, which needs GLIBC_2.17 at most and no library but glibc's.
       linux-portable-native-glibc =
         pkgs.runCommand "linux-portable-native-glibc"
           {
@@ -736,19 +734,24 @@ let
             mkdir -p $out
             test -f ${lib.getLib openssl}/lib/libcrypto.a
             test -f ${lib.getLib zlib}/lib/libz.a
+            test -f ${lib.getLib curl}/lib/libcurl.a
+            # nixpkgs' libcurl, built with nghttp2 (curl-sys's fallback,
+            # its bundled curl, is built without it here).
+            grep -q 'nghttp2/' ${bin}
             v=$(objdump -T ${bin} | { grep -o 'GLIBC_[0-9.]*' || true; } | sort -uV | tail -n1)
             echo "${bin}: $v" | tee $out/versions.txt
             newest=$(printf '%s\n' "$v" GLIBC_2.17 | sort -V | tail -n1)
             [ "$newest" = GLIBC_2.17 ] || { echo "${bin} needs $v"; exit 1; }
             readelf -dW ${bin} | grep NEEDED | tee $out/needed.txt
-            if grep -E 'libssl|libcrypto|libz' $out/needed.txt; then
-              echo "the product loads OpenSSL or zlib at run time" >&2
+            if grep -E 'libssl|libcrypto|libz|libcurl' $out/needed.txt; then
+              echo "the product loads OpenSSL, zlib or libcurl at run time" >&2
               exit 1
             fi
           '';
       linux-portable-native-libraries = t.packages.app.checks.portableLibraries;
-      # OpenSSL's compiled-in directories are system paths
-      # (the rebuild's OPENSSLDIR), so the product names no store path.
+      # OpenSSL's compiled-in directories and libpsl's list are system
+      # paths (the package set's overlay), so the product names no store
+      # path.
       linux-portable-native-no-store-paths = t.packages.app.checks.portableNoStorePaths;
     };
   zigNativeContainerChecks =
@@ -762,6 +765,7 @@ let
         mkdir -p $out
         ${centos7Runner} ${bin} | tee $out/out.txt
         grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
+        grep -q "^curl: libcurl/8\..* nghttp2/" $out/out.txt
       '';
       linux-portable-native-centos7-test = t.testRuns.app."lib/app";
     };

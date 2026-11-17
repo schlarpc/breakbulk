@@ -15,8 +15,9 @@
 # statically, and only glibc's own libraries (and GCC's runtime
 # libraries, libgcc_s.so.1 and libstdc++.so.6, as manylinux allows, and
 # the `systemLibraries` the user names, such as libGL.so.1, which the
-# target system has) are loaded at run time. `rebuildInputs` are rebuilt as static libraries
-# only, pkg-config runs in static mode for target units
+# target system has) are loaded at run time. The package set builds
+# library inputs as static libraries only (`packageSet` below),
+# pkg-config runs in static mode for target units
 # (PKG_CONFIG_ALL_STATIC), and every product gets the check
 # `portableLibraries` (stageHelpers.neededLibraries), which reads each ELF
 # file's NEEDED entries, as auditwheel does for Python wheels, and fails on
@@ -60,25 +61,10 @@
   # Extra `zig cc` invocations' flags to warm the cache with, e.g.
   # [ "-lc++" ] for C++ code.
   warmFlags ? [ ],
-  # Names of nixpkgs packages to rebuild with `zig cc` against `glibc`
-  # e.g. [ "openssl" "zlib" ]: `packages.<name>.inputs`
-  # functions get these from the target's package set instead of nixpkgs'
-  # builds, which need nixpkgs' newer glibc. Each is
-  # `pkgs.<name>.override { stdenv = makeStaticLibraries zigStdenv; … }`
-  # (static libraries only, as pkgsStatic builds them; `static = true` and
-  # `shared = false` where the package takes them), with the other rebuilt
-  # packages passed for the arguments it takes, and its test phases off
-  # (test programs ask for the FHS loader, which the sandbox lacks); a
-  # rebuild that still installs a shared library fails. Opt-in: the
-  # rebuilds are not in any binary cache (openssl takes about 5 minutes on
-  # 4 cores), and only C libraries whose own library dependencies are
-  # listed too, or have none, are correct. Every other library input still
-  # comes from nixpkgs and gets an evaluation warning.
-  rebuildInputs ? [ ],
-  # Per-package changes to a rebuild, `<name> = old: { … }`, applied with
-  # overrideAttrs after breakbulk's own; an entry replaces the one in
-  # `defaultRebuildOverrides` below, and `null` drops it.
-  rebuildOverrides ? { },
+  # nixpkgs overlays for the target's package set's own packages (its
+  # `crossOverlays`, after breakbulk's, which sets OpenSSL's directories),
+  # e.g. to change how a library is configured.
+  overlays ? [ ],
   linkerKind ? null,
   rustc ? null,
   ...
@@ -95,6 +81,18 @@ let
       traits.arch;
   zigArch = { riscv64gc = "riscv64"; }.${rustArch} or rustArch;
   zigTarget = "${zigArch}-linux-gnu.${glibc}";
+  # The package set's platform, the target's GNU triple with the vendor
+  # `none` (as in ARM's aarch64-none-linux-gnu toolchains). Not the Rust
+  # triple itself: for the build machine's own triple, the cross tools'
+  # prefix (`x86_64-unknown-linux-gnu-gcc`) is also the name of the build
+  # machine's unwrapped gcc, which a package's `depsBuildBuild` compiler
+  # puts first on PATH, and configure scripts given the same `--build` and
+  # `--host` do not treat the build as a cross build.
+  nixpkgsConfig = "${zigArch}-none-linux-${lib.last (lib.splitString "-" triple)}";
+  # Whether the build machine runs the target's programs (through its own
+  # loader: zig links the FHS one).
+  canExecute =
+    pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform && triple == nativeTriple pkgs;
 
   # The warmed global cache: an executable and a shared library linked with
   # the libraries rustc's linux-gnu spec passes.
@@ -144,16 +142,54 @@ let
   zigCxx = zigTool "zig-cxx-${zigTarget}" "c++ -target ${zigTarget}";
   zigAr = zigTool "zig-ar" "ar";
 
-  # A nixpkgs stdenv whose C compiler is `zig cc` for `zigTarget`, behind
-  # nixpkgs' cc-wrapper with no libc (zig brings its own glibc stubs and
-  # headers), so setup hooks, NIX_CFLAGS_COMPILE and NIX_LDFLAGS work as
-  # usual. The wrapped compiler claims not to be clang: for clang the
-  # wrapper adds nixpkgs gcc's libstdc++ (`--gcc-toolchain`, `-cxx-isystem`)
-  # and passes arguments in a response file with backslash-escaped commas,
-  # which zig's parser keeps, so `-Wl,-soname,…` and `-Wl,-rpath,…` were
-  # dropped (zig 0.17.0, nixpkgs cc-wrapper `use_response_file_by_default`).
-  zigStdenv =
+  # The target's package set: nixpkgs for a static variant of the target
+  # platform (`isStatic`, as pkgsStatic), cross-built from the build
+  # machine, with the stdenv replaced by one around `zig cc` for `glibc`.
+  # A library input's own library dependencies come from the same set
+  # through nixpkgs' splicing, and tools (`nativeBuildInputs`, a package's
+  # `nativeInputs`) from `buildPackages`, nixpkgs' own builds.
+  packageSet = import pkgs.path {
+    localSystem = pkgs.stdenv.buildPlatform;
+    crossSystem = {
+      config = nixpkgsConfig;
+      isStatic = true;
+    };
+    inherit (pkgs) overlays;
+    crossOverlays = [ defaultOverlay ] ++ overlays;
+    config = pkgs.config // {
+      replaceCrossStdenv = zigCrossStdenv;
+    };
+  };
+
+  # nixpkgs' cross stdenv for this platform with `zig cc` as its compiler,
+  # behind nixpkgs' cc-wrapper with no libc (zig brings its own glibc stubs
+  # and headers), so setup hooks, NIX_CFLAGS_COMPILE and pkg-config work as
+  # usual. Not nixpkgs' `baseStdenv`: for a static glibc platform that is
+  # makeStatic's, which links programs with `-static` against nixpkgs'
+  # `glibc.static`. Only makeStaticLibraries (`--disable-shared`,
+  # BUILD_SHARED_LIBS=OFF, meson's default_library=static) and
+  # propagateBuildInputs are kept, as pkgsStatic has them.
+  #
+  # When the build machine runs the target, nixpkgs says so to meson and
+  # CMake (no exe wrapper; `env` as the emulator), which run the programs
+  # they link; those ask for the FHS loader, which
+  # the sandbox lacks, so the stdenv's compiler links executables with the
+  # build machine's loader (`cc-ldflags`, read only when linking). Archives
+  # have no loader, and products are linked by the target units' own
+  # `zig cc`, never this one. Test phases stay off: they would run
+  # against the build machine's glibc, not `glibc`, and nothing links a
+  # package's tests into a product.
+  #
+  # The wrapped compiler claims not to be clang: for clang the wrapper adds
+  # nixpkgs gcc's libstdc++ (`--gcc-toolchain`, `-cxx-isystem`) and passes
+  # arguments in a response file with backslash-escaped commas, which zig's
+  # parser keeps, so `-Wl,-soname,…` and `-Wl,-rpath,…` were dropped (zig
+  # 0.17.0, nixpkgs cc-wrapper `use_response_file_by_default`).
+  zigCrossStdenv =
+    { buildPackages, baseStdenv }:
     let
+      # cc-wrapper's and bintools-wrapper's `targetPrefix`.
+      prefix = baseStdenv.hostPlatform.config + "-";
       unwrapped =
         bp.runCommand "zig-cc-${zigTarget}"
           {
@@ -164,126 +200,123 @@ let
             };
           }
           ''
-            mkdir -p $out/bin $out/lib
-            ln -s ${zigCc} $out/bin/cc
-            ln -s ${zigCxx} $out/bin/c++
-            ln -s ${zigCc} $out/bin/gcc
-            ln -s ${zigCxx} $out/bin/g++
+            # The wrapper adds `-L` and `-B` for this cross compiler's
+            # library directory; zig warns when it is missing.
+            mkdir -p $out/bin $out/${baseStdenv.hostPlatform.config}/lib
+            ln -s ${zigCc} $out/bin/${prefix}cc
+            ln -s ${zigCxx} $out/bin/${prefix}c++
+            ln -s ${zigCc} $out/bin/${prefix}gcc
+            ln -s ${zigCxx} $out/bin/${prefix}g++
           '';
       llvmBin = "${bp.llvmPackages.bintools-unwrapped}/bin";
-      bintools = bp.wrapBintoolsWith {
+      bintools = buildPackages.wrapBintoolsWith {
         bintools = bp.runCommand "zig-bintools-${zigTarget}" { } ''
           mkdir -p $out/bin
-          ln -s ${zigAr} $out/bin/ar
+          ln -s ${zigAr} $out/bin/${prefix}ar
           for t in nm objcopy objdump ranlib readelf strip size strings; do
-            ln -s ${llvmBin}/llvm-$t $out/bin/$t
+            ln -s ${llvmBin}/llvm-$t $out/bin/${prefix}$t
           done
-          ln -s ${llvmBin}/ld.lld $out/bin/ld
+          ln -s ${llvmBin}/ld.lld $out/bin/${prefix}ld
         '';
         libc = null;
       };
-    in
-    pkgs.overrideCC pkgs.stdenv (
-      bp.wrapCCWith {
-        cc = unwrapped;
-        libc = null;
-        inherit bintools;
-      }
-    );
-
-  # The arguments nixpkgs packages take for a static-only build.
-  staticArgs = {
-    static = true;
-    shared = false;
-    enableStatic = true;
-    enableShared = false;
-  };
-
-  # Rebuilds whose compiled-in paths would name the store (the
-  # `portableNoStorePaths` check finds them). nixpkgs' static OpenSSL
-  # configures OPENSSLDIR as its `etc` output (ENGINESDIR below it) and
-  # MODULESDIR as `$out/lib/ossl-modules`; all three are compiled into
-  # libcrypto from make variables (`-DOPENSSLDIR="\"$(OPENSSLDIR)\""`,
-  # OpenSSL 3.5.9 Configurations/unix-Makefile.tmpl). They are set for the
-  # build only (`buildFlags`), so `make install` still installs into the
-  # store; on the target system OpenSSL reads /etc/ssl/openssl.cnf, as on
-  # Arch, Alpine or openSUSE, with engines in /etc/ssl/engines-3.
-  defaultRebuildOverrides = {
-    openssl = old: {
-      buildFlags = (old.buildFlags or [ ]) ++ [
-        "OPENSSLDIR=/etc/ssl"
-        "MODULESDIR=/usr/lib/ossl-modules"
-      ];
-    };
-  };
-  overridesFor =
-    n:
-    let
-      o = (defaultRebuildOverrides // rebuildOverrides).${n} or null;
-    in
-    if o == null then _: { } else o;
-
-  rebuilt = lib.fix (
-    self:
-    lib.genAttrs rebuildInputs (
-      n:
-      let
-        p = pkgs.${n} or (throw "breakbulk.presets.linuxPortable: rebuildInputs: nixpkgs has no package `${n}`");
-        deps = lib.intersectAttrs (lib.functionArgs p.override) (removeAttrs self [ n ]);
-      in
-      ((p.override (
-        {
-          stdenv = pkgs.stdenvAdapters.makeStaticLibraries zigStdenv;
-        }
-        // lib.intersectAttrs (lib.functionArgs p.override) staticArgs
-        // deps
-      )).overrideAttrs
-        (old: {
-          doCheck = false;
-          doInstallCheck = false;
-          # Static libraries only: a shared one would be linked in place of
-          # the archive and loaded from the store at run time.
-          postFixup = (old.postFixup or "") + ''
-            for o in $outputs; do
-              found=$(find "''${!o}" \( -name '*.so' -o -name '*.so.*' \) -print -quit)
-              if [ -n "$found" ]; then
-                echo "breakbulk.presets.linuxPortable: rebuildInputs builds static libraries only, but ${n} installed $found" >&2
-                exit 1
-              fi
-            done
+      adapters = buildPackages.stdenvAdapters;
+      plain = buildPackages.stdenv.override (old: {
+        inherit (baseStdenv) buildPlatform hostPlatform targetPlatform;
+        overrides = _: _: { };
+        extraBuildInputs = [ ];
+        allowedRequisites = null;
+        cc = buildPackages.wrapCCWith {
+          cc = unwrapped;
+          libc = null;
+          inherit bintools;
+          extraBuildCommands = lib.optionalString canExecute ''
+            echo "--dynamic-linker=${bp.stdenv.cc.bintools.dynamicLinker}" >> $out/nix-support/cc-ldflags
           '';
-        })
-      ).overrideAttrs
-        (overridesFor n)
-    )
-  );
+        };
+        hasCC = true;
+      });
+    in
+    lib.pipe plain [
+      adapters.makeStaticLibraries
+      adapters.propagateBuildInputs
+      # Test phases off (above), and their hooks too: a hook may name a
+      # check input, which would then be built anyway (nghttp2's preCheck
+      # names tzdata).
+      (adapters.overrideMkDerivationArgs (_: {
+        doCheck = false;
+        doInstallCheck = false;
+        preCheck = "";
+        postCheck = "";
+        preInstallCheck = "";
+        postInstallCheck = "";
+      }))
+    ];
 
-  # The target's package set: nixpkgs, with the rebuilt packages in place
-  # and a warning on any other package a package's `inputs` takes, since
-  # it was built against nixpkgs' glibc. Tools (`nativeInputs`) come from
-  # `buildPackages`, which is nixpkgs' own and never warns.
-  isDrv = v: builtins.isAttrs v && (v.type or null) == "derivation";
-  quiet = [
-    "stdenv"
-    "stdenvNoCC"
-  ];
-  packageSet =
-    if rebuildInputs != [ ] && triple != nativeTriple pkgs then
-      throw "breakbulk.presets.linuxPortable: rebuildInputs needs the native triple (${nativeTriple pkgs}), not ${triple}"
-    else
-      builtins.mapAttrs (
-        n: v:
-        rebuilt.${n} or (
-          if lib.elem n quiet || !(isDrv v) then
-            v
-          else
-            lib.warn "breakbulk.presets.linuxPortable: a package input uses nixpkgs' `${n}`, which needs nixpkgs' glibc, not ${glibc}; rebuild it with `presets.linuxPortable { rebuildInputs = [ \"${n}\" ]; }` or use the crate's vendored C code" v
-        )
-      ) pkgs
-      // {
-        inherit zigStdenv;
-        breakbulkZigRebuilt = rebuilt;
-      };
+  # Packages that nixpkgs builds for a static platform in ways this one
+  # cannot take. The `portableLibraries` and `portableNoStorePaths` checks
+  # find what slips through on another package.
+  defaultOverlay =
+    final: prev:
+    let
+      pslSystemFile = "/usr/share/publicsuffix/public_suffix_list.dat";
+      # bash builds its helper programs with the build machine's gcc, whose
+      # default C standard (C23, gcc 15 and later) its configure script
+      # assumes the target's compiler has too; nixpkgs passes `-std=c23`
+      # only when the compiler is clang, which this one does not claim to
+      # be (above).
+      c23 =
+        p:
+        p.overrideAttrs (old: {
+          env = old.env // {
+            NIX_CFLAGS_COMPILE = old.env.NIX_CFLAGS_COMPILE + " -std=c23";
+          };
+        });
+    in
+    {
+      bash = c23 prev.bash;
+      bashNonInteractive = c23 prev.bashNonInteractive;
+      # nixpkgs' libiconv on a glibc platform is glibc's iconv.h, copied
+      # from a glibc built for this platform, which zig cc cannot build and
+      # which would be a newer glibc anyway; zig's own glibc headers and
+      # stubs have iconv, so the package is empty.
+      libiconv = final.runCommand "zig-glibc-iconv" { } "mkdir -p $out";
+      # `static` (default: isStatic) links its programs with `-static`,
+      # which glibc cannot do; its library is static either way.
+      libev = prev.libev.override { static = false; };
+      # libpsl compiles in two paths of the list, both store paths in
+      # nixpkgs (the `portableNoStorePaths` check finds them): the one
+      # `psl_latest()` reads (`--with-psl-distfile`, `-DPSL_DISTFILE`), and
+      # the one the built-in list was made from, which psl_latest() and
+      # psl_builtin_outdated() also read (`--with-psl-file`, written into
+      # suffixes_dafsa.h as `_psl_filename` by src/psl-make-dafsa; libpsl
+      # 0.21.5). On the target system both are where Debian and Fedora
+      # install the list; the built-in list is still made from nixpkgs'.
+      libpsl = prev.libpsl.overrideAttrs (old: {
+        configureFlags = map (
+          f: if lib.hasPrefix "--with-psl-distfile=" f then "--with-psl-distfile=${pslSystemFile}" else f
+        ) old.configureFlags;
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace src/psl-make-dafsa \
+            --replace-fail "bytes(psl_input_file, **codecs)" "b'${pslSystemFile}'"
+        '';
+      });
+      # nixpkgs' static OpenSSL configures OPENSSLDIR as its `etc` output
+      # (ENGINESDIR below it) and MODULESDIR as `$out/lib/ossl-modules`,
+      # store paths the `portableNoStorePaths` check finds; all three are
+      # compiled into libcrypto from make variables
+      # (`-DOPENSSLDIR="\"$(OPENSSLDIR)\""`, OpenSSL 3.5.9
+      # Configurations/unix-Makefile.tmpl). They are set for the build only
+      # (`buildFlags`), so `make install` still installs into the store; on
+      # the target system OpenSSL reads /etc/ssl/openssl.cnf, as on Arch,
+      # Alpine or openSUSE, with engines in /etc/ssl/engines-3.
+      openssl = prev.openssl.overrideAttrs (old: {
+        buildFlags = (old.buildFlags or [ ]) ++ [
+          "OPENSSLDIR=/etc/ssl"
+          "MODULESDIR=/usr/lib/ossl-modules"
+        ];
+      });
+    };
 in
 {
   packageSet = mkDefault packageSet;
@@ -309,7 +342,7 @@ in
   checks.portableLibraries = {
     run = stageHelpers.neededLibraries {
       allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
-      why = "linuxPortable links everything Nix provides statically (rebuildInputs builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
+      why = "linuxPortable links everything Nix provides statically (its package set builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
     };
   };
   # No Nix store path anywhere in a product's files: on
@@ -329,9 +362,7 @@ in
     inherit pkgs;
     traits = null;
     flavor = "zig";
-    canExecute =
-      pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform
-      && triple == nativeTriple pkgs;
+    inherit canExecute;
   }).runner;
   testSystem = mkDefault null;
   host = hostSpec {

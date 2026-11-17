@@ -6,4 +6,5 @@ fn main() {
         app::zlib_version(),
         app::adler32(b"Wikipedia"),
     );
+    println!("curl: {}", app::curl_version());
 }
