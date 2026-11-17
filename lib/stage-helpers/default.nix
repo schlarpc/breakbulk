@@ -329,6 +329,7 @@ let
           # Packed, or named by no file (an rlib member the link left
           # out).
           find "$debug" -name '*.dwo' -type f -delete
+          find "$debug" -mindepth 1 -type d -empty -delete
         ''}
       ''
   );
@@ -474,6 +475,7 @@ let
               mkdir -p "$debug"
               placeDebug "$debug"
               find "$debug" -name '*.dwo' -type f -delete
+              find "$debug" -mindepth 1 -type d -empty -delete
             ''}
           ''
       );

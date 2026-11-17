@@ -5,9 +5,10 @@
 #   nix build -f tests/products post-link
 #
 #   debug-info       `targets.<t>.debugInfo` (split, keep, strip) inserts
-#                    the stage and sets the units' remap scope; removing
-#                    that stage or adding `splitDebug` against it, at
-#                    target or package level, fails evaluation
+#                    its stages (packDwo before splitDebug, packDwo alone,
+#                    strip) and sets the units' remap scope; removing
+#                    splitDebug or strip, or adding `splitDebug` against
+#                    it, at target or package level, fails evaluation
 #   post-link        stage order from target and package stages; a stage
 #                    removed with mkForce null; a check on `linked` sees
 #                    unstripped bytes; checks in repo.checks
@@ -28,11 +29,25 @@
 #                    it; gdb's backtrace and source lines as above
 #   source-paths-dwo the same with split-debuginfo = "unpacked": the
 #                    libraries' `.dwo` files reach the `linked` stage's
-#                    debug output with the bin's, and splitDebug packs the
+#                    debug output with the bin's, and packDwo packs the
 #                    ones the binary names into app.dwp;
 #                    gdb's backtrace and source lines as above
 #   source-paths-dwo5 the same with DWARF 5 (`-C dwarf-version=5`), which
 #                    binutils' dwp packs into an empty .dwp
+#   staticlib-dwp    crate-types' staticlib, calling a dependency, with
+#                    split-debuginfo = "unpacked": the debug output holds
+#                    lib/<archive>.dwp with the units of both crates; a C
+#                    program linked against the archive, with
+#                    `llvm-dwp <archive>.dwp -o <program>.dwp`, has gdb
+#                    give a source line of the dependency's function, and
+#                    not without it
+#   debug-info-keep  `debugInfo = "keep"` and "unpacked": packDwo ships
+#                    bin/app.dwp and no `.dwo`; gdb reads the dependency's
+#                    arguments with the `.dwp` beside the binary, and not
+#                    without it
+#   debug-info-strip `debugInfo = "strip"` and "unpacked": no `.dwo` ships
+#   pack-dwo-removed `packages.app.stages.packDwo = null` ships the loose
+#                    `.dwo` files beside splitDebug's debug file
 #   product-attributes   the `product` a stage and a check get has the
 #                    attributes docs/src/reference/stage-functions.md
 #                    lists for each (evaluation only)
@@ -589,9 +604,9 @@ let
     grep -qF 'panic!("boom {n}");' gdb.txt
   '';
 
-  # The `unpacked` variant's app through splitDebug, with every split unit
-  # at DWARF `version`: the `.dwo` files reach the linked stage, splitDebug
-  # packs them into app.dwp, and gdb reads the dependency's arguments from
+  # The `unpacked` variant's app through packDwo and splitDebug, with
+  # every split unit at DWARF `version`: the `.dwo` files reach the linked
+  # stage, packDwo packs them into app.dwp, and gdb reads the dependency's arguments from
   # it, and not without it.
   dwoCheck =
     name: repo: version:
@@ -625,9 +640,9 @@ let
           | sed -n 's/^ *Version: *//p' | sort -u > versions.txt
         cat versions.txt
         test "$(cat versions.txt)" = ${toString version}
-        # splitDebug packed them into app.dwp next to the separate debug
-        # file, as rustc's own .dwp is with `packed`, and dropped the loose
-        # ones.
+        # packDwo packed them into app.dwp and dropped the loose ones;
+        # splitDebug moved it next to the separate debug file, as rustc's
+        # own .dwp is with `packed`.
         id=$(readelf -n $app/bin/app | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
         test -f $debug/lib/debug/.build-id/''${id:0:2}/app.dwp
         readelf -S -W $debug/lib/debug/.build-id/''${id:0:2}/app.dwp | grep -q '\.debug_info\.dwo'
@@ -646,6 +661,28 @@ let
         cat nodwp.txt
         ! grep -qF 'dep::boom (n=7)' nodwp.txt
       '';
+
+  # crate-types with split-debuginfo = "unpacked" as its only profile, and
+  # `stat` (the staticlib) calling its new dependency `both`.
+  staticlibUnpacked = mkRepo (edited "crate-types" ''
+    printf '\n[profile.unpacked]\ninherits = "dev"\nsplit-debuginfo = "unpacked"\n' >> Cargo.toml
+    printf '\n[dependencies]\nboth = { path = "../both" }\n' >> stat/Cargo.toml
+    printf 'dependencies = [\n "both",\n]\n' >> Cargo.lock
+    cat > stat/src/lib.rs <<'EOF'
+    #[unsafe(no_mangle)]
+    pub extern "C" fn stat_answer() -> u32 {
+        both::both_answer() / 6
+    }
+    EOF
+  '') [ (oneWs "." "unpacked") ];
+
+  # source-paths' `unpacked` variant on a target whose debugInfo is `v`,
+  # and with `extra` modules.
+  unpackedApp =
+    v: extra:
+    (mkRepo (fixtures + "/source-paths") (
+      spModules ++ [ { targets.${native}.debugInfo = v; } ] ++ extra
+    )).workspaces.main.target.${native}.variants.unpacked.packages.app;
 
   # cc-rs 1.11.1 compiling C under Cargo's trim-paths.
   trimCcRepo =
@@ -2455,6 +2492,7 @@ in
     assert lib.assertMsg (bad == { }) "source-paths: remap scopes ${builtins.toJSON scopes}";
     assert lib.assertMsg (
       spApp.stageOrder == [
+        "packDwo"
         "splitDebug"
         "install"
       ]
@@ -2545,6 +2583,136 @@ in
 
   source-paths-dwo = dwoCheck "source-paths-dwo" sourcePaths 4;
   source-paths-dwo5 = dwoCheck "source-paths-dwo5" sourcePathsDwarf5 5;
+
+  # A staticlib built with split-debuginfo = "unpacked" keeps its skeleton
+  # units and ships `lib/<archive>.dwp`, with the units of the crate and
+  # of its dependency. A C program linked against the archive gets the
+  # DWARF through the documented recipe (`llvm-dwp <archive>.dwp … -o
+  # <program>.dwp`), and not without it.
+  staticlib-dwp =
+    let
+      stat = staticlibUnpacked.workspaces.main.packages.stat;
+    in
+    pkgs.runCommandCC "staticlib-dwp"
+      {
+        nativeBuildInputs = [
+          pkgs.gdb
+          pkgs.llvm
+          pkgs.binutils-unwrapped
+        ];
+        inherit stat;
+        debug = stat.debug;
+      }
+      ''
+        set -euo pipefail
+        find $debug
+        a=$(cd $stat/lib && echo libstat*.a)
+        test -f $debug/lib/$a.dwp
+        test -z "$(find $debug -name '*.dwo')"
+        llvm-dwarfdump --debug-info $debug/lib/$a.dwp > units.txt
+        grep -F '("stat/src/lib.rs/@/' units.txt
+        grep -F '("both/src/lib.rs/@/' units.txt
+        # The archive keeps the skeleton units that name the .dwo files.
+        readelf --debug-dump=info --dwarf-depth=1 $stat/lib/$a > skeletons.txt 2>/dev/null
+        grep -qE 'DW_AT_(GNU_)?dwo_name' skeletons.txt
+        cat > main.c <<'EOF'
+        #include <stdio.h>
+        unsigned int stat_answer(void);
+        int main(void) { printf("c %u\n", stat_answer()); return 0; }
+        EOF
+        mkdir bin
+        cc main.c $stat/lib/$a -lpthread -ldl -lm -o bin/cuser
+        [ "$(bin/cuser)" = "c 7" ]
+        llvm-dwp $debug/lib/$a.dwp -o bin/cuser.dwp
+        query() {
+          gdb -batch -nx -ex 'info line both::both_answer' -ex 'info scope stat::stat_answer' bin/cuser > "$1" 2>&1 || true
+          cat "$1"
+        }
+        query gdb.txt
+        grep -E '^Line [0-9]+ of "both/src/lib.rs"' gdb.txt
+        # Negative control: without cuser.dwp, gdb has no full DWARF.
+        rm bin/cuser.dwp
+        query nodwp.txt
+        ! grep -E '^Line [0-9]+ of "both/src/lib.rs"' nodwp.txt
+        touch $out
+      '';
+
+  # `debugInfo = "keep"` with split-debuginfo = "unpacked": packDwo packs
+  # the `.dwo` files into `bin/app.dwp` and ships none loose; gdb, on the
+  # binary with the `.dwp` beside it (a profile with both outputs), reads
+  # the dependency's arguments from it, and not without it.
+  debug-info-keep =
+    let
+      p = unpackedApp "keep" [ ];
+    in
+    pkgs.runCommand "debug-info-keep"
+      {
+        nativeBuildInputs = [ pkgs.gdb ];
+        app = p;
+        debug = p.debug;
+        linkedDebug = p.stages.linked.debug;
+      }
+      ''
+        set -euo pipefail
+        ls $linkedDebug | grep -qE '^dep[-.].*\.dwo$'
+        find $debug
+        test -f $debug/bin/app.dwp
+        test -z "$(find $debug -name '*.dwo')"
+        mkdir -p env/bin
+        ln -s $app/bin/app env/bin/app
+        ln -s $debug/bin/app.dwp env/bin/app.dwp
+        trace() {
+          gdb -batch -nx -ex 'break dep::boom' -ex run -ex bt env/bin/app > "$1" 2>&1 || true
+          cat "$1"
+        }
+        trace gdb.txt
+        grep -qF 'dep::boom (n=7)' gdb.txt
+        rm env/bin/app.dwp
+        trace nodwp.txt
+        ! grep -qF 'dep::boom (n=7)' nodwp.txt
+        touch $out
+      '';
+
+  # `debugInfo = "strip"` with split-debuginfo = "unpacked": no `.dwo`
+  # ships, as the skeleton units that name them are stripped.
+  debug-info-strip =
+    let
+      p = unpackedApp "strip" [ ];
+    in
+    pkgs.runCommand "debug-info-strip"
+      {
+        app = p;
+        debug = p.debug;
+        linkedDebug = p.stages.linked.debug;
+      }
+      ''
+        set -euo pipefail
+        ls $linkedDebug | grep -qE '^dep[-.].*\.dwo$'
+        test -z "$(find -L $app $debug -name '*.dwo')"
+        touch $out
+      '';
+
+  # `packages.app.stages.packDwo = null` ships the loose `.dwo` files
+  # again, next to splitDebug's separate debug file.
+  pack-dwo-removed =
+    let
+      p = unpackedApp "split" [ { packages.app.stages.packDwo = lib.mkForce null; } ];
+    in
+    assert lib.assertMsg (
+      p.stageOrder == [
+        "splitDebug"
+        "install"
+      ]
+    ) "pack-dwo-removed: ${builtins.toJSON p.stageOrder}";
+    pkgs.runCommand "pack-dwo-removed" { debug = p.debug; } ''
+      set -euo pipefail
+      find $debug
+      ls $debug/bin | grep -qE '^app[-.].*\.dwo$'
+      ls $debug/bin | grep -qE '^dep[-.].*\.dwo$'
+      test ! -e $debug/bin/app.dwp
+      ls $debug/lib/debug/.build-id/*/*.debug
+      touch $out
+    '';
 
   # plugin's unit links a cdylib and writes its own libplugin.so.dwp, which
   # stays in plugin's product: app's linked debug output holds app.dwp only.
@@ -3014,11 +3182,12 @@ in
       '';
 
   # What happens to debug info is a target property,
-  # `targets.<t>.debugInfo`. It inserts the stage (splitDebug for "split",
-  # strip for "strip", none for "keep") and sets the units' remap scope and
-  # build ID; neither the target's nor a package's `stages` may remove that
-  # stage or add `splitDebug` where it inserts none (an evaluation error
-  # naming `debugInfo`), but they may override its attributes.
+  # `targets.<t>.debugInfo`. It inserts its stages (packDwo then splitDebug
+  # for "split", strip for "strip", packDwo for "keep") and sets the units'
+  # remap scope and build ID; neither the target's nor a package's `stages`
+  # may remove splitDebug or strip or add `splitDebug` where it inserts
+  # none (an evaluation error naming `debugInfo`), but they may override
+  # their attributes.
   debug-info =
     let
       mk = extra: mkRepo (fixtures + "/post-link") ([ (oneWs "." "dev") ] ++ extra);
