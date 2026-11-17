@@ -218,6 +218,21 @@ let
     }; it has no effect."
   ) (lib.filter (k: !(lib.any (overrideMatches k) allEntries)) (lib.attrNames cfg.packages));
 
+  # `sourceOverlay` in any layer of a key that matches a registry or git
+  # crate: such crates have no source view to place it in.
+  overlayWarnings = lib.concatMap (
+    k:
+    let
+      o = cfg.packages.${k};
+      layers = [ o ] ++ lib.attrValues o.target ++ lib.concatMap (v: [ v ] ++ lib.attrValues v.target) (lib.attrValues o.variant);
+      fetched = lib.unique (
+        map (e: "${e.name} ${e.version}") (lib.filter (e: e.source or null != null && overrideMatches k e) allEntries)
+      );
+    in
+    lib.optional (lib.any (l: l.sourceOverlay != { }) layers && fetched != [ ])
+      "breakbulk: `packages.${lib.strings.escapeNixIdentifier k}.sourceOverlay` has no effect on ${lib.concatStringsSep ", " fetched}: registry and git crates have no source view; it applies to workspace packages only."
+  ) (lib.attrNames cfg.packages);
+
   # Unversioned keys first, so a versioned override wins over a plain one.
   orderedKeys = lib.sort (
     a: b:
@@ -1542,7 +1557,7 @@ let
 
   # --- warnings and mode -----------------------------------------------------
 
-  warnings = cfg.warnings ++ unmatchedWarnings;
+  warnings = cfg.warnings ++ unmatchedWarnings ++ overlayWarnings;
   warned = x: lib.foldr (w: acc: lib.warn w acc) x warnings;
   # The modules' `assertions` (lib/modules/types.nix): any false one fails
   # whatever the repository is read for, with every such message.

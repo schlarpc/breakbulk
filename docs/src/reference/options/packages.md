@@ -356,7 +356,8 @@ package (its build, test and run units) as a symbolic link to
 the value, which replaces whatever the repository has at that
 path\. The value is passed by reference: only this package’s
 units depend on it, and planning and instantiation do not\.
-Workspace packages only: registry and git crates have no view\.
+Workspace packages only: registry and git crates have no view,
+and setting it for one is an evaluation warning\.
 See [Fetching and source
 views](\.\./\.\./explanation/internals/sources\.md\#products-in-a-view)\.
 

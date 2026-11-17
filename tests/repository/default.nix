@@ -407,6 +407,8 @@ let
             target.${native}.forHost.env.LIBC_VARIANT_HOST = "1";
           };
           variant.not-a-variant.env.X = "1";
+          # A registry crate has no source view: a warning.
+          target.${native}.sourceOverlay."ui/dist" = "/nowhere";
         };
         # A variant layer's sources reach the package's source view.
         app-b.variant.default.extraSources = [ "c" ];
@@ -1358,6 +1360,7 @@ in
       "overrides: target env placement";
     assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package") "overrides: no unmatched warning: ${builtins.toJSON ws}";
     assert lib.assertMsg (has "`packages.itoa` matches no package") "overrides: itoa >=2 should match nothing";
+    assert lib.assertMsg (has "`packages.libc.sourceOverlay` has no effect on libc 0.2.191") "overrides: no sourceOverlay warning: ${builtins.toJSON ws}";
     assert lib.assertMsg (has "packages.app-b.pipelining") "overrides: no warning for pipelining (not implemented)";
     # targets.<triple>.rustflags reach target units only.
     assert lib.assertMsg (
