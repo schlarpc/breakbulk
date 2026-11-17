@@ -139,8 +139,8 @@ are not in the plan's output list, because `--print=file-names` does not
 name them.
 
 - They are collected by scanning `$TMPDIR/out` for `.pdb`, `.dwp` and
-  `.dwo` files, and moved, under rustc's names, to the unit's `debug`
-  output.
+  `.dwo` files and `.dSYM` directories, and moved, under rustc's names,
+  to the unit's `debug` output.
 - Units without a `debug` output discard them with a warning: host units,
   libraries outside the `.dwo` case, and any unit the plan's target spec says
   writes none.

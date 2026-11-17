@@ -286,12 +286,16 @@ pub fn run_diagnosed(
 /// (`split-debuginfo=packed`), `.dwo` (`unpacked`).
 pub const DEBUG_SIDE_FILES: &[&str] = &[".pdb", ".dwp", ".dwo"];
 
+/// Debuginfo side directories, as [`DEBUG_SIDE_FILES`]: the `.dSYM`
+/// bundle dsymutil writes on Apple targets with `split-debuginfo=packed`.
+pub const DEBUG_SIDE_DIRS: &[&str] = &[".dSYM"];
+
 /// Move each listed output file into its derivation output, under the
 /// listed name; rustc's name for it is its entry in `uplifted`, if any.
 /// Every output named in `outputs` is created, even if it lists no files.
 /// When the unit has a `debug` output (it lists no files), unlisted
-/// debuginfo side files ([`DEBUG_SIDE_FILES`]) go there, under rustc's
-/// names. Other unlisted files, dep-info aside, are reported and left
+/// debuginfo side files and directories ([`DEBUG_SIDE_FILES`],
+/// [`DEBUG_SIDE_DIRS`]) go there, under rustc's names. Other unlisted files, dep-info aside, are reported and left
 /// behind.
 pub fn collect_outputs(
     outputs: &BTreeMap<String, Vec<String>>,
@@ -338,15 +342,34 @@ pub fn collect_outputs(
         if listed.contains(name.as_str()) || name.ends_with(".d") {
             continue;
         }
-        let side = DEBUG_SIDE_FILES.iter().any(|x| name.ends_with(x));
+        let path = from.join(&name);
+        let side_file = DEBUG_SIDE_FILES.iter().any(|x| name.ends_with(x)) && path.is_file();
+        let side_dir = DEBUG_SIDE_DIRS.iter().any(|x| name.ends_with(x)) && path.is_dir();
         match &debug {
-            Some(dir) if side && from.join(&name).is_file() => {
-                move_file(&from.join(&name), &dir.join(&name))?;
-            }
+            Some(dir) if side_file => move_file(&path, &dir.join(&name))?,
+            Some(dir) if side_dir => move_dir(&path, &dir.join(&name))?,
             _ => eprintln!("warning: discarding unlisted rustc output `{name}`"),
         }
     }
     Ok(())
+}
+
+/// [`move_file`] for a directory tree of files and directories.
+fn move_dir(src: &Path, dst: &Path) -> Result<(), Error> {
+    if std::fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dst).map_err(|e| io_err("creating", dst, e))?;
+    for e in std::fs::read_dir(src).map_err(|e| io_err("reading", src, e))? {
+        let e = e.map_err(|e| io_err("reading", src, e))?;
+        let (from, to) = (e.path(), dst.join(e.file_name()));
+        if from.is_dir() {
+            move_dir(&from, &to)?;
+        } else {
+            move_file(&from, &to)?;
+        }
+    }
+    std::fs::remove_dir(src).map_err(|e| io_err("removing", src, e))
 }
 
 /// Rename, or copy and remove when the two paths are on different file

@@ -345,6 +345,28 @@ fn debug_side_files_go_to_debug() {
         "other unlisted files stay behind"
     );
 
+    // An Apple `.dSYM` bundle is a directory, moved whole.
+    let dwarf = from.join("app-1.dSYM/Contents/Resources/DWARF");
+    std::fs::create_dir_all(&dwarf).unwrap();
+    std::fs::write(dwarf.join("app-1"), "dwarf").unwrap();
+    std::fs::write(from.join("app-1.dSYM/Contents/Info.plist"), "plist").unwrap();
+    let outputs = BTreeMap::from([("debug".to_owned(), vec![])]);
+    let root = t.path().join("drv-dsym");
+    collect_outputs(
+        &outputs,
+        &BTreeMap::new(),
+        &from,
+        |o: &str| Ok(root.join(o)),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("debug/app-1.dSYM/Contents/Resources/DWARF/app-1"))
+            .unwrap(),
+        "dwarf"
+    );
+    assert!(root.join("debug/app-1.dSYM/Contents/Info.plist").is_file());
+    assert!(!from.join("app-1.dSYM").exists());
+
     // Without a `debug` output, side files are discarded as before.
     std::fs::write(from.join("lib.pdb"), "").unwrap();
     let outputs = BTreeMap::from([("bin".to_owned(), vec!["x.o".to_owned()])]);
