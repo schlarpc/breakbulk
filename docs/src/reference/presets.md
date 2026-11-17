@@ -24,11 +24,16 @@ The preset is named for what you want; the target triple picks how:
 | `windows` | a Windows program | `*-pc-windows-msvc` (MSVC), `*-pc-windows-gnu` and `*-gnullvm` (MinGW) |
 | `wasmWeb` | wasm for browsers and Node, through wasm-bindgen | `wasm32-unknown-unknown` |
 | `wasmComponent` | a WebAssembly component | `wasm32-unknown-unknown`, `wasm32-wasip2` |
+| `uefi` | a `.efi` program, its PDB in the `debug` output | `*-unknown-uefi` (`x86_64`, `aarch64`, `i686`) |
 
 ## Defaults
 
-- Your own machine's triple gets `linux` without any setting (or
-  `linuxStatic` when `pkgs` is a musl package set).
+- A target gets a preset without any setting when that preset needs no
+  arguments. Your own machine's triple gets `linux` (or `linuxStatic`
+  when `pkgs` is a musl package set), and a UEFI triple gets `uefi`.
+  Options set on the target override the preset's, as with any preset;
+  `preset = null` turns it off. Windows MSVC has no default: its preset
+  needs the SDK.
 - A target whose linker rustc chooses itself needs no preset (below).
 - Any other target needs a preset, or at least
   [`targets.<triple>.linker`](options/targets.md#targetsnamelinker).
@@ -40,7 +45,6 @@ These targets build with no preset. rustc's target spec names its own
 
 | Triple | Product |
 | --- | --- |
-| `x86_64-unknown-uefi`, `aarch64-unknown-uefi` | a `.efi` program, its PDB in the `debug` output |
 | bare metal (`x86_64-unknown-none`, …) | an ELF program |
 | `wasm32-wasip1` | a core module, with the WASI libc that ships with rustc |
 | `wasm32-unknown-unknown` | a core module, without wasm-bindgen or `wasm-opt` |
@@ -92,7 +96,7 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `cc` | other Linux targets (musl, and any with nixpkgs' rustc) | nixpkgs' wrapped C compiler with its default linker, GNU ld |
 | `mold` | none | nixpkgs' wrapped C compiler with `-fuse-ld=mold`; nixpkgs' mold |
 | `clang-lld` | `linux { crossLanguageLto = true; }` | clang and lld from `llvmPackages_<major>`, rustc's LLVM major release |
-| `lld-link` | Windows MSVC | `lld-link` from `llvmPackages_<major>`, wrapped so that PDBs are reproducible |
+| `lld-link` | Windows MSVC, UEFI | `lld-link` from `llvmPackages_<major>`, wrapped so that PDBs are reproducible |
 | `mingw-lld` | Windows MinGW | the MinGW C compiler with nixpkgs' default lld |
 | `wasm-ld` | wasm, except `wasm32-wasip2` | `wasm-ld` from `llvmPackages_<major>`, not rustc's `rust-lld` |
 | `wasm-component-ld` | `wasm32-wasip2` | rustc's own `wasm-component-ld`, with `wasm-ld` from `llvmPackages_<major>` under it |

@@ -38,7 +38,7 @@ A preset applied through [`preset`](../../reference/options/targets.md#targetsna
 
 So two workspaces on different Rust releases that build the same triple get the LLVM tools (`lib/llvm-versions.nix`) and wasi-sdk (`lib/wasi-sdk.nix`) of their own compiler, from one repository-wide preset. A workspace's own entry merges with the repository's as two definitions of the same options do; a target with neither a repository-wide entry nor any spec field in the workspace has no spec, as before.
 
-The resolved spec is `repo.workspaces.<ws>.target.<triple>.spec`. When the `pkgs` given to `mkRepository` is a Linux package set, the native target gets `linux` (glibc) or `linuxStatic` (musl, e.g. `pkgs.pkgsMusl`) unless another preset is set; the choice is `nativeDefaultPreset` in `lib/target-traits.nix` and follows `pkgs.stdenv.hostPlatform`, not the machine running the evaluation.
+The resolved spec is `repo.workspaces.<ws>.target.<triple>.spec`. A target whose preset needs no arguments gets it unless another preset is set, with or without an entry: when the `pkgs` given to `mkRepository` is a Linux package set, the native target gets `linux` (glibc) or `linuxStatic` (musl, e.g. `pkgs.pkgsMusl`), following `pkgs.stdenv.hostPlatform`, not the machine running the evaluation; a UEFI target gets `uefi`. The choice is `defaultPreset { pkgs; triple; traits; }` in `lib/target-traits.nix`; msvc has none, since its preset needs an SDK.
 
 Another preset is set either through `targets.<native>.preset` or by defining the target directly from a preset (every preset's value carries an internal marker for this); `preset = null` turns it off. Every preset also sets the host spec from `pkgs.buildPackages`, so host units always get the build machine's tools.
 

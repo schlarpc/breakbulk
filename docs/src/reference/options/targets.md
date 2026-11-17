@@ -10,12 +10,13 @@ Toolchain specs per target triple, for every workspace that builds
 the triple (` workspaces.<ws>.targets `)\. Each workspace’s spec is
 these definitions together with its own
 ` workspaces.<ws>.targets.<triple> `, evaluated with that workspace’s
-toolchain, so a preset uses each workspace’s rustc\. When the ` pkgs `
-given to mkRepository is Linux, the native triple always has an
-entry, with ` presets.linux ` (glibc) or ` presets.linuxStatic ` (musl)
-by default\. Any other triple with no entry here or
-in the workspace uses an empty spec (the toolchain as Cargo finds
-it)\.
+toolchain, so a preset uses each workspace’s rustc\. A triple whose
+preset needs no arguments gets it without an entry here, and with
+entries that set other fields: the native triple, when the ` pkgs `
+given to mkRepository is Linux, gets ` presets.linux ` (glibc) or
+` presets.linuxStatic ` (musl), and a UEFI triple ` presets.uefi `\.
+Any other triple with no entry here or in the workspace uses an
+empty spec (the toolchain as Cargo finds it)\.
 
 *Type:*
 attribute set of module
@@ -318,7 +319,7 @@ for the triple and Rust release, always through nixpkgs’ wrapped
 C compiler: ` lld ` on Linux where rustc links with its bundled
 lld, ` cc ` (the C compiler’s default, GNU ld) on other Linux
 targets; ` lld-link `, ` wasm-ld `, ` wasm-component-ld ` or
-` mingw-lld ` on Windows and wasm\. A kind that cannot link for this
+` mingw-lld ` on Windows, UEFI and wasm\. A kind that cannot link for this
 target, or with the preset’s other settings (` mold ` with
 ` crossLanguageLto `), is an evaluation error\. It needs a ` preset `
 here; a target defined directly from a preset takes ` linkerKind `
@@ -356,17 +357,18 @@ fields set here override the preset’s (lists concatenate; use
 ` breakbulk.presets.<name> { inherit pkgs; triple = …; } ` gives
 the same fields, except that the preset then sees no workspace
 toolchain (pass ` rustc ` there)\. Set ` null ` to use no preset on
-the native target (rustc’s own linker choice and the C toolchain
-Cargo finds)\.
+a target that has a default one (rustc’s own linker choice and
+the C toolchain Cargo finds)\.
 
 *Type:*
 null or breakbulk preset (function)
 
 *Default:*
-for the native triple, unless the target is defined directly from
-a preset: ` breakbulk.presets.linux ` when the ` pkgs ` given to
+unless the target is defined directly from a preset: for the
+native triple, ` breakbulk.presets.linux ` when the ` pkgs ` given to
 mkRepository is Linux with glibc, ` breakbulk.presets.linuxStatic `
-when it is Linux with musl (` pkgs.pkgsMusl `); ` null ` otherwise
+when it is Linux with musl (` pkgs.pkgsMusl `); for a UEFI triple,
+` breakbulk.presets.uefi `; ` null ` otherwise
 
 *Example:*
 

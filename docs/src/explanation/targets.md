@@ -24,6 +24,7 @@ This page explains what each kind of target gets, and why.
 | `aarch64-pc-windows-gnullvm` | yours + nixpkgs LLVM mingw-w64 cross | lld, through the MinGW C driver | none |
 | `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), headless Chromium or Firefox, or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
+| `{x86_64,aarch64}-unknown-uefi` | yours, with the target | lld-link | none |
 | `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none: no `test` crate, so test binaries do not compile |
 
 For a preset's target, "none" means nothing on the build machine runs the target's programs.
@@ -87,7 +88,7 @@ build of it, through nixpkgs' wrapped C compiler, never rustc's own
 | Linux, where rustc links with its bundled lld | `lld` | nixpkgs' lld for rustc's LLVM release, through the wrapped C compiler (`-fuse-ld=lld`) |
 | other Linux targets | `cc` | the wrapped C compiler's own default: GNU ld |
 | Linux, with cross-language LTO | `clang-lld` | clang with lld; C code compiled to bitcode by the same clang |
-| Windows MSVC | `lld-link` | `lld-link`, wrapped so that PDBs are reproducible |
+| Windows MSVC, UEFI | `lld-link` | `lld-link`, wrapped so that PDBs are reproducible |
 | Windows MinGW (`-gnu`, `-gnullvm`) | `mingw-lld` | the MinGW C driver with lld |
 | wasm | `wasm-ld`, `wasm-component-ld` | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |
 | `linuxPortable` | `zig` | zig's own linker (`zig cc`) |
@@ -141,9 +142,13 @@ uses (GNU ld, lld, mold, clang with lld, MinGW, zig) drops those two
 arguments, and the `lld` kind adds `-fuse-ld=lld` back with nixpkgs'
 lld behind the wrapper.
 
-The exceptions are targets without a preset, such as UEFI and bare metal
-(`x86_64-unknown-none`): nixpkgs has no linker wrapper for them, so they
-use the linker rustc's own target spec names.
+The exception is bare metal (`x86_64-unknown-none`), which has no
+preset: nixpkgs has no linker wrapper for it, so it uses the linker
+rustc's own target spec names. UEFI targets get the `uefi` preset without
+any setting. rustc's own linker there is `rust-lld` as `lld-link`, which
+puts the name of rustc's random temporary directory in the PDB, so the
+`.efi` would differ on every build; the preset uses the same wrapped
+`lld-link` as Windows MSVC.
 
 ## Windows msvc
 

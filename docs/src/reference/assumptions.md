@@ -588,9 +588,9 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 - **Assumption.** rustc links from a randomly named directory `<out-dir>/rustcXXXXXX` next to the output and passes files in it (`symbols.o`, extracted objects) by absolute path; a response file holds one argument per line, quoted when needed.
 - **Where.** `lib/presets/lld-link-stable.sh` (copies those inputs to a fixed path so the PDB, and so the `.exe`, are reproducible); `lib/presets/linker.nix`: `lldLinkLinker`.
 - **Upstream.** rustc 1.99.1 `compiler/rustc_codegen_ssa/src/back/link.rs` (`TempDirBuilder::new().prefix("rustc")`); [spikes/msvc.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/msvc.md), "Determinism".
-- **Holds for.** 1.99 (rust-overlay), the msvc fixture's toolchain.
-- **Pinned by.** `msvc-x86_64-relink` (HEAVY: the Windows SDK): the msvc fixture's bin unit, with debug info, linked by hand twice with the same output paths gives byte-identical `.exe` and `.pdb`, and the wrapper copied at least one `rustcXXXXXX` input (`symbols.o`); with plain lld-link in the wrapper's place, the two links differ (negative control).
-- **If it changes.** msvc `.exe` and `.pdb` are no longer reproducible; `msvc-x86_64-relink` fails (a renamed directory leaves the wrapper nothing to copy).
+- **Holds for.** 1.99 (rust-overlay), the msvc and uefi fixtures' toolchains.
+- **Pinned by.** `msvc-x86_64-relink` (HEAVY: the Windows SDK): the msvc fixture's bin unit, with debug info, linked by hand twice with the same output paths gives byte-identical `.exe` and `.pdb`, and the wrapper copied at least one `rustcXXXXXX` input (`symbols.o`); with plain lld-link in the wrapper's place, the two links differ (negative control). `nix run .#test-rebuild -- uefi`: both UEFI triples' `.efi` and `.pdb` rebuild byte-identical with the `uefi` preset.
+- **If it changes.** msvc `.exe`, UEFI `.efi` and their `.pdb` are no longer reproducible; `msvc-x86_64-relink` fails (a renamed directory leaves the wrapper nothing to copy).
 
 ### X5. Sysroot layout
 
