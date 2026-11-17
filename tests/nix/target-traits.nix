@@ -629,12 +629,14 @@ in
           (f (rust // { version = "2026-10-15"; }))
           (f pkgs.rustc).llvmMajor
           (f pkgs.rustc).bundledLld
+          (f pkgs.rustc).llvmVersion
         ];
       expected = [
         {
           version = "1.97.0";
           majorMinor = "1.97";
           llvmMajor = 22;
+          llvmVersion = "22.1.6";
           wasiSdkVersion = "33";
           bundledLld = true;
         }
@@ -642,6 +644,7 @@ in
           version = "1.97.0";
           majorMinor = "1.97";
           llvmMajor = 22;
+          llvmVersion = "22.1.6";
           wasiSdkVersion = "33";
           bundledLld = true;
         }
@@ -649,11 +652,13 @@ in
           version = "1.97.0";
           majorMinor = "1.97";
           llvmMajor = 22;
+          llvmVersion = "22.1.6";
           wasiSdkVersion = "33";
           bundledLld = true;
         }
         (lib.toInt (lib.versions.major pkgs.rustc.llvmPackages.llvm.version))
         false
+        pkgs.rustc.llvmPackages.llvm.version
       ];
     };
     # Toolchain capabilities (lib/toolchain-facts.nix): from the rustc and

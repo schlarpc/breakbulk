@@ -5,6 +5,8 @@
 #   facts.majorMinor     "1.99"
 #   facts.llvmMajor      23 (rustc.llvmPackages, else lib/llvm-versions.nix's
 #                        table, else `rustc -vV`)
+#   facts.llvmVersion    "23.1.1" (rustc.llvmPackages, else `rustc -vV`;
+#                        the table has majors only)
 #   facts.wasiSdkVersion "33" (lib/wasi-sdk.nix's table)
 #   facts.bundledLld     true: rustc is a rust-lang build (rustup,
 #                        rust-overlay, fenix), which ships its own lld and
@@ -89,8 +91,9 @@ let
     in
     if builtins.isString v && builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+(-.*)?" v != null then v else null;
 
-  # `rustc -vV`'s release and LLVM major, and whether it takes
-  # `--remap-path-scope`, as { release; llvmMajor; remapPathScope; }.
+  # `rustc -vV`'s release, LLVM version and major, and whether it takes
+  # `--remap-path-scope`, as { release; llvmVersion; llvmMajor;
+  # remapPathScope; }.
   probe =
     {
       pkgs,
@@ -107,7 +110,8 @@ let
           ''
             ${rustc}/bin/rustc -vV > vv
             release=$(sed -n 's/^release: \(.*\)$/\1/p' vv)
-            llvm=$(sed -n 's/^LLVM version: \([0-9][0-9]*\)\..*/\1/p' vv)
+            llvmVersion=$(sed -n 's/^LLVM version: \([0-9][0-9.]*\).*/\1/p' vv)
+            llvm=''${llvmVersion%%.*}
             if [ -z "$release" ] || [ -z "$llvm" ]; then
               echo "breakbulk.toolchainFacts: \`${rustc}/bin/rustc -vV\` names no release or no LLVM version:" >&2
               cat vv >&2
@@ -118,7 +122,7 @@ let
             else
               scope=false
             fi
-            printf '{"release":"%s","llvmMajor":%s,"remapPathScope":%s}' "$release" "$llvm" "$scope" > $out
+            printf '{"release":"%s","llvmVersion":"%s","llvmMajor":%s,"remapPathScope":%s}' "$release" "$llvmVersion" "$llvm" "$scope" > $out
           '';
     in
     builtins.fromJSON (featureGates.readOutput nixFeatures "probing `${rustc}/bin/rustc -vV` (lib/toolchain-facts.nix)" out);
@@ -207,6 +211,7 @@ let
           fromTable
         else
           probed.llvmMajor;
+      llvmVersion = if rustc ? llvmPackages then rustc.llvmPackages.llvm.version else probed.llvmVersion;
       wasiSdkVersion = wasiSdk.versionFor version;
       bundledLld = !(rustc ? llvmPackages);
       capabilities =
