@@ -121,6 +121,7 @@ let
     ];
     doctest-off = [ (plain "doctest-off" [ ]) ];
     embed = [ products.repos.embed ];
+    env-repository-path = [ repository.repos.envRepoPathFixed ];
     exclusive-features = [ repository.repos.exclusive ];
     feature-unification = [ (plain "feature-unification" [ (withToolchain pkgs.rust-bin.nightly.latest.minimal) ]) ];
     git-multi-workspace = [ (import ../git-multi-workspace args).ws ];

@@ -137,6 +137,7 @@ pub fn render_doctest<R: Resolve>(
         env_capture,
         link_captures,
         view: r.source_view(&id, &unit)?,
+        repository_paths: Vec::new(),
         // rustdoc compiles no C; the doctest adds no C flags.
         seed: None,
     };

@@ -27,6 +27,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         nightly_features_allowed: false,
         env_capture: None,
         view: None,
+        repository_paths: Vec::new(),
         seed: None,
         remap: vec![],
         out_dir_remap: None,

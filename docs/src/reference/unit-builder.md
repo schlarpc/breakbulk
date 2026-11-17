@@ -263,6 +263,25 @@ view from the run's `CARGO_MANIFEST_DIR`. It is not part of
 `breakbulk-unit`, so with `ca` on a `breakbulk-unit` change does not
 re-run every test run.
 
+### Repository paths in registry and git crates
+
+A registry or git crate has no source view: a repository path that
+Cargo config gives its units (`[env]` with `relative = true`, or
+`build.rustflags`) points into an empty directory. The rendered unit
+lists such paths (`repositoryPaths`). When the unit fails, each gets a
+hint, whatever the failure's message says:
+
+- in a variable: set it with
+  [`packages.<name>.env`](options/packages.md#packagesnameenv), which
+  replaces Cargo's value (`packages.openssl-sys.env.OPENSSL_DIR =
+  ./vendor/openssl;`, the path relative to the repository root). A
+  variable that the package's `env` or the toolchain spec's already sets
+  is not listed;
+- in a rustc argument, or one in `CARGO_ENCODED_RUSTFLAGS`: the hint
+  names the path and the argument (with the flag before it,
+  `-L native=vendor/lib`). No option replaces an argument for one
+  package.
+
 ### `OUT_DIR` and the target directory
 
 `OUT_DIR` is at the path the traced Cargo gave it relative to its target

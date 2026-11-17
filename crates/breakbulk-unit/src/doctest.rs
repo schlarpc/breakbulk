@@ -423,6 +423,7 @@ mod tests {
                 env_capture: None,
                 link_captures: Vec::new(),
                 view: None,
+                repository_paths: Vec::new(),
                 seed: None,
             },
             search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),

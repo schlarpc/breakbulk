@@ -397,6 +397,8 @@ let
     view-hints = repository.viewHintsFixed;
     snapshots = repository.snapshots;
     pkgid-short = repository.pkgidShort;
+    # With the setting its hint names.
+    env-repository-path = repository.envRepoPathFixed;
     optional-dependency = repository.optionalDep;
     exclusive-features = repository.exclusive;
     # Roots the prediction misses (a selected path package outside the

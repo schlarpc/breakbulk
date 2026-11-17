@@ -437,6 +437,11 @@ pub struct RenderedCompile {
     /// ([`crate::view_hints`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<SourceView>,
+    /// For a unit of a registry or git package: the repository paths its
+    /// env values and arguments name, only for a hint when the unit fails
+    /// ([`crate::repository_paths`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repository_paths: Vec<RepositoryPath>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change
@@ -449,6 +454,29 @@ pub struct RenderedCompile {
 }
 
 pub use breakbulk_hints::{SourceView, Widen, package_name_version};
+
+/// A repository path in a unit of a package outside the repository: Cargo
+/// config `[env]` with `relative = true`, or `build.rustflags`. Such a
+/// unit has no source view, so the path points into an empty directory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RepositoryPath {
+    /// The path, relative to the repository root (empty for the root).
+    pub path: String,
+    /// The env variable whose value holds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+    /// Whether that value is the path alone, which a package's `env` can
+    /// replace with the same directory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub whole: bool,
+    /// The rustc argument that holds it, with the flag before it when the
+    /// flag is a separate argument (`-L native=vendor/lib`), and the path
+    /// relative to the repository root. Also an argument inside
+    /// `CARGO_ENCODED_RUSTFLAGS`, which then is `env`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arg: Option<String>,
+}
 
 /// Cargo's description of a package in messages (`PackageId`'s `Display`):
 /// `name vX.Y.Z`, followed by the source for packages not from crates.io.
@@ -542,6 +570,9 @@ pub struct RenderedRun {
     /// As for compile units.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<SourceView>,
+    /// As for compile units.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repository_paths: Vec<RepositoryPath>,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change

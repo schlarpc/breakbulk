@@ -12,6 +12,7 @@ pub mod doctest;
 pub mod env;
 pub mod manifest;
 pub mod process;
+pub mod repository_paths;
 pub mod run;
 pub mod spec;
 pub mod splice;

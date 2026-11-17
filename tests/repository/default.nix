@@ -402,6 +402,22 @@ let
     }
   ];
 
+  # --- env-repository-path -----------------------------------------------------
+
+  envRepoPathModule = {
+    gitTrees."https://example.invalid/me/envdep" = fixtures + "/env-repository-path/envdep";
+  };
+  envRepoPath = mkRepo (fixtures + "/env-repository-path") [
+    (oneWs "app")
+    envRepoPathModule
+  ];
+  # With the setting the hint names.
+  envRepoPathFixed = mkRepo (fixtures + "/env-repository-path") [
+    (oneWs "app")
+    envRepoPathModule
+    { packages.envdep.env.ENVDEP_DIR = fixtures + "/env-repository-path/app/vendor/envdep"; }
+  ];
+
   # --- roots-override ----------------------------------------------------------
 
   # The variant selects `tool`, a path dependency outside the workspace:
@@ -723,6 +739,8 @@ in
       viewHints
       viewHintsFixed
       pkgidShort
+      envRepoPath
+      envRepoPathFixed
       sources
       rootsPredicted
       rootsOverride
@@ -1664,6 +1682,24 @@ in
       [ "$($app/bin/app)" = "gitdep 43" ]
       touch $out
     '';
+
+  # A git crate's build script reads a repository path from Cargo config
+  # `[env]`: the run fails, and the hint names the package's `env` setting
+  # with that path; with it set, the product builds.
+  env-repository-path =
+    pkgs.runCommand "env-repository-path"
+      {
+        run = expectFailure "env-repository-path-run" (unitsNamed (inst envRepoPath) "build")."envdep-0.1.0-build-run" [
+          "`envdep` was given the repository path `app/vendor/envdep` in `ENVDEP_DIR` (from Cargo config `[env]`)"
+          "set `packages.envdep.env.ENVDEP_DIR = ./app/vendor/envdep;`"
+        ];
+        app = envRepoPathFixed.workspaces.main.packages.app;
+      }
+      ''
+        cat $run/log
+        [ "$($app/bin/app)" = 42 ]
+        touch $out
+      '';
 
   # `roots` replaces the prediction: the repository builds tool's product,
   # test runs and doctest, with no "not implemented" warning. Without it,

@@ -34,6 +34,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         env_capture: None,
         link_captures: Vec::new(),
         view: None,
+        repository_paths: Vec::new(),
         seed: None,
     }
 }

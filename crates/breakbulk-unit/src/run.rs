@@ -373,6 +373,10 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
             .collect();
         hints.extend(view_hints::hint_lines(&f.run.package, view, &found));
     }
+    hints.extend(crate::repository_paths::hints(
+        &f.run.package,
+        &f.run.repository_paths,
+    ));
     for h in hints {
         msg.push_str("\nhint: ");
         msg.push_str(&h);

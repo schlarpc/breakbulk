@@ -1,0 +1,2 @@
+[env]
+ENVDEP_DIR = { value = "vendor/envdep", relative = true }

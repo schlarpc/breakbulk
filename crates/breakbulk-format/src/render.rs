@@ -3,13 +3,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{append, list_separator};
-use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, SourceView};
+use breakbulk_unit::spec::{
+    RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, RepositoryPath, SourceView,
+};
 
 use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
-    Arg, CompileUnit, CrateSrcRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, Text, Unit,
-    UnitId, VariantMode, for_each_reference,
+    Arg, CompileUnit, CrateSrcRef, EmptyRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, Text,
+    Unit, UnitId, VariantMode, for_each_reference,
 };
 use crate::{CanonicalError, Splice, to_canonical_json};
 
@@ -240,6 +242,137 @@ pub fn remap_bases(plan: &Plan, unit: &Unit) -> BTreeSet<Reference> {
     bases
 }
 
+/// `pieces` with each `empty` reference as its path relative to the
+/// repository root, and those paths. `None` without such a reference.
+fn with_repository_paths(pieces: &[Piece]) -> Option<(String, Vec<String>)> {
+    let mut text = String::new();
+    let mut rels = Vec::new();
+    for p in pieces {
+        match p {
+            Piece::Literal(s) => text.push_str(s),
+            Piece::Ref(Reference::Empty(EmptyRef { rel })) => {
+                text.push_str(if rel.is_empty() { "." } else { rel });
+                rels.push(rel.clone());
+            }
+            // Other references never come with an `empty` one in a unit:
+            // only a unit without a source view has `empty` references.
+            Piece::Ref(_) => text.push('…'),
+        }
+    }
+    (!rels.is_empty()).then_some((text, rels))
+}
+
+/// The arguments in `args` (each its text, as [`with_repository_paths`]
+/// gives it, or `None`) that name repository paths, each with the flag
+/// before it when that is a separate argument (`-L`, `native=vendor/lib`).
+fn repository_args(args: &[(String, Option<Vec<String>>)]) -> Vec<RepositoryPath> {
+    let mut out = Vec::new();
+    for (i, (text, rels)) in args.iter().enumerate() {
+        let Some(rels) = rels else { continue };
+        let arg = match i.checked_sub(1).map(|j| &args[j].0) {
+            Some(flag) if flag.starts_with('-') && !text.starts_with('-') => {
+                format!("{flag} {text}")
+            }
+            _ => text.clone(),
+        };
+        out.extend(rels.iter().map(|rel| RepositoryPath {
+            path: rel.clone(),
+            env: None,
+            whole: false,
+            arg: Some(arg.clone()),
+        }));
+    }
+    out
+}
+
+/// The repository paths a unit's env values (Cargo config `[env]` with
+/// `relative = true`, or `CARGO_ENCODED_RUSTFLAGS`) and arguments
+/// (`build.rustflags`) name, for a unit without a source view, where they
+/// are `empty` references. Not a variable that `overlay` (layers 4 and 5)
+/// replaces: a package's `env` is the way to give the unit that path.
+fn repository_paths(
+    env: &BTreeMap<String, Text>,
+    args: &[Arg],
+    overlay: &BTreeMap<String, String>,
+) -> Vec<RepositoryPath> {
+    let mut out = Vec::new();
+    for (k, v) in env {
+        let Text::Concat(pieces) = v else { continue };
+        if overlay.contains_key(k) && list_separator(k).is_none() {
+            continue;
+        }
+        if k == "CARGO_ENCODED_RUSTFLAGS" {
+            // One argument per `\x1f`-separated part: the parts of each
+            // piece, with an `empty` reference inside one part.
+            let mut parts: Vec<Vec<Piece>> = vec![Vec::new()];
+            for p in pieces {
+                match p {
+                    Piece::Literal(s) => {
+                        for (i, seg) in s.split('\x1f').enumerate() {
+                            if i > 0 {
+                                parts.push(Vec::new());
+                            }
+                            if !seg.is_empty() {
+                                parts.last_mut().unwrap().push(Piece::Literal(seg.into()));
+                            }
+                        }
+                    }
+                    r => parts.last_mut().unwrap().push(r.clone()),
+                }
+            }
+            let args: Vec<_> = parts
+                .iter()
+                .map(|p| match with_repository_paths(p) {
+                    Some((t, rels)) => (t, Some(rels)),
+                    None => (text_of_literals(p), None),
+                })
+                .collect();
+            out.extend(repository_args(&args).into_iter().map(|r| RepositoryPath {
+                env: Some(k.clone()),
+                ..r
+            }));
+            continue;
+        }
+        if let Some((_, rels)) = with_repository_paths(pieces) {
+            let whole = match pieces.as_slice() {
+                [Piece::Ref(Reference::Empty(_))] => true,
+                [Piece::Ref(Reference::Empty(_)), Piece::Literal(s)] => s == "/",
+                _ => false,
+            };
+            out.extend(rels.into_iter().map(|rel| RepositoryPath {
+                path: rel,
+                env: Some(k.clone()),
+                whole,
+                arg: None,
+            }));
+        }
+    }
+    let args: Vec<_> = args
+        .iter()
+        .map(|a| match a {
+            Arg::Literal(s) => (s.clone(), None),
+            Arg::Concat(p) => match with_repository_paths(p) {
+                Some((t, rels)) => (t, Some(rels)),
+                None => (text_of_literals(p), None),
+            },
+            Arg::Splice(_) | Arg::SearchPaths(_) => (String::new(), None),
+        })
+        .collect();
+    out.extend(repository_args(&args));
+    out
+}
+
+/// The literal parts of `pieces`, for the flag before an argument.
+fn text_of_literals(pieces: &[Piece]) -> String {
+    pieces
+        .iter()
+        .map(|p| match p {
+            Piece::Literal(s) => s.as_str(),
+            Piece::Ref(_) => "…",
+        })
+        .collect()
+}
+
 /// Render unit `id` of `plan`: every reference becomes a path, every splice
 /// names its run's `flags` directory, and the configuration-dependent parts
 /// (env layers, remapping, dependency files) are filled in. The unit is
@@ -284,6 +417,7 @@ pub fn render_unit_in<R: Resolve>(
                     file: None,
                 })
             };
+            let repository_paths = repository_paths(&c.env, &c.args, &overlay);
             let mut env = env(&c.env, r)?;
             // A wrapper chain in a clippy plan is clippy-driver over rustc.
             if plan.variant.mode == VariantMode::Clippy
@@ -384,6 +518,7 @@ pub fn render_unit_in<R: Resolve>(
                 env_capture,
                 link_captures,
                 view: r.source_view(id, &unit)?,
+                repository_paths,
                 seed: Some(id.to_string()),
             })
         }
@@ -393,6 +528,7 @@ pub fn render_unit_in<R: Resolve>(
             // resolving, so the resolver never sees the self-reference.
             let mut recorded = run.env.clone();
             recorded.remove("OUT_DIR");
+            let repository_paths = repository_paths(&recorded, &[], &overlay);
             let mut env = env(&recorded, r)?;
             merge_layer_with(r, &mut env, overlay)?;
             let (remap, out_dir_remap) = if r.keep_source_paths() {
@@ -436,6 +572,7 @@ pub fn render_unit_in<R: Resolve>(
                 remap,
                 out_dir_remap,
                 view: r.source_view(id, &unit)?,
+                repository_paths,
                 seed: Some(id.to_string()),
             })
         }
@@ -518,4 +655,63 @@ fn cargo_run_remap<R: Resolve>(id: &UnitId, run: &RunUnit, r: &R) -> Result<RunR
 /// The `BREAKBULK_UNIT` value: canonical JSON of a rendered unit.
 pub fn unit_env_value(unit: &RenderedUnit) -> Result<String, CanonicalError> {
     to_canonical_json(unit)
+}
+
+#[cfg(test)]
+mod repository_path_tests {
+    use super::*;
+
+    fn empty(rel: &str) -> Piece {
+        Piece::Ref(Reference::Empty(EmptyRef { rel: rel.into() }))
+    }
+
+    #[test]
+    fn env_values_and_arguments() {
+        let env = BTreeMap::from([
+            (
+                "OPENSSL_DIR".to_owned(),
+                Text::Concat(vec![empty("vendor/openssl")]),
+            ),
+            (
+                "ASSETS".to_owned(),
+                Text::Concat(vec![empty("assets"), Piece::Literal("/logo.svg".into())]),
+            ),
+            (
+                "CARGO_ENCODED_RUSTFLAGS".to_owned(),
+                Text::Concat(vec![
+                    Piece::Literal("-Copt-level=1\x1f-L\x1fnative=".into()),
+                    empty("vendor/lib"),
+                ]),
+            ),
+            ("REPLACED".to_owned(), Text::Concat(vec![empty("x")])),
+            ("PLAIN".to_owned(), Text::Literal("1".into())),
+        ]);
+        let args = [
+            Arg::Literal("-L".into()),
+            Arg::Concat(vec![Piece::Literal("native=".into()), empty("vendor/lib")]),
+            Arg::Concat(vec![Piece::Literal("-Lnative=".into()), empty("other")]),
+        ];
+        let overlay = BTreeMap::from([("REPLACED".to_owned(), "/nix/store/x".to_owned())]);
+        let p = |path: &str, env: Option<&str>, whole: bool, arg: Option<&str>| RepositoryPath {
+            path: path.into(),
+            env: env.map(Into::into),
+            whole,
+            arg: arg.map(Into::into),
+        };
+        assert_eq!(
+            repository_paths(&env, &args, &overlay),
+            [
+                p("assets", Some("ASSETS"), false, None),
+                p(
+                    "vendor/lib",
+                    Some("CARGO_ENCODED_RUSTFLAGS"),
+                    false,
+                    Some("-L native=vendor/lib")
+                ),
+                p("vendor/openssl", Some("OPENSSL_DIR"), true, None),
+                p("vendor/lib", None, false, Some("-L native=vendor/lib")),
+                p("other", None, false, Some("-Lnative=other")),
+            ]
+        );
+    }
 }

@@ -107,6 +107,7 @@ fn render_doc<R: Resolve>(
         env_capture,
         link_captures: Vec::new(),
         view: None,
+        repository_paths: Vec::new(),
         seed: None,
     })
 }

@@ -60,8 +60,30 @@ crate that reads the files through it
 (`include_str!(concat!(env!("ASSETS_DIR"), "/logo.svg"))`) lists the
 directory in its `extraSources`, also when the directory belongs to
 another package. Crates that never read it need nothing, and do not
-depend on it. Registry and git crates see such a path in an empty
-directory.
+depend on it.
+
+Registry and git crates do not see the repository: they see such a path
+in an empty directory. When one reads it (openssl-sys's build script
+reading `OPENSSL_DIR`, say), give that package the directory itself with
+[`env`](../reference/options/packages.md#packagesnameenv), which takes
+the place of Cargo's value:
+
+```nix
+packages.openssl-sys.env.OPENSSL_DIR = ./vendor/openssl;
+```
+
+A unit of such a crate that fails while a value from `[env]` names a
+repository path prints that setting:
+
+```text
+hint: `openssl-sys` was given the repository path `vendor/openssl` in `OPENSSL_DIR` (from Cargo config `[env]`); registry and git crates do not see the repository: set `packages.openssl-sys.env.OPENSSL_DIR = ./vendor/openssl;`
+```
+
+The path is relative to the repository root. A repository path in
+`build.rustflags` (`-L native=vendor/lib`) reaches registry and git
+crates the same way, but no option replaces a rustc argument for one
+package: the hint names the path and the flag. Use a path outside the
+repository there.
 
 A build script that checks whether a file exists (`Path::exists()`) and
 does something else when it does not gets no warning for a missing file:
