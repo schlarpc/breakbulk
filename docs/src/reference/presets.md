@@ -22,6 +22,7 @@ The preset is named for what you want; the target triple picks how:
 | `linuxStatic` | a self-contained static Linux program | `*-linux-musl` (musl), or your own `-gnu` triple (static-pie glibc) |
 | `linuxPortable` | a program for any Linux with glibc at least a given version | your own `-gnu` triple |
 | `windows` | a Windows program | `*-pc-windows-msvc` (MSVC), `*-pc-windows-gnu` and `*-gnullvm` (MinGW) |
+| `darwin` | a macOS program, built on Linux | `aarch64-apple-darwin`, `x86_64-apple-darwin` |
 | `wasmWeb` | wasm for browsers and Node, through wasm-bindgen | `wasm32-unknown-unknown` |
 | `wasmComponent` | a WebAssembly component | `wasm32-unknown-unknown`, `wasm32-wasip2` |
 | `uefi` | a `.efi` program, its PDB in the `debug` output | `*-unknown-uefi` (`x86_64`, `aarch64`, `i686`) |
@@ -69,19 +70,24 @@ for `wasm32-wasip1`).
 | `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `rebuildInputs`: nixpkgs libraries to rebuild against that glibc (`[ "openssl" ]`) |
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |
+| `darwin` | `sdk`: the macOS SDK, a package or a version for `breakbulk.lib.appleSdk` (required on Linux), `sdkVersion`: its version when the package has no `version`, `deploymentTarget`: the oldest macOS to run on (default: rustc's, `11.0` on arm64, `10.12` on x86\_64), `nativeBuilder`: run tests on a Mac builder |
 | `wasmWeb` | `browser`: where tests run, `"node"` (default), `"chromium"` or `"firefox"` (headless) |
 | `wasmComponent` | `withC`: compile C code for the component |
 
 The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
 unfree; [Build for another target](../how-to/targets.md#windows-msvc)
-shows how to get them. [Targets and
+shows how to get them. The `darwin` preset needs Apple's macOS SDK, which
+is unfree too and which breakbulk never fetches on its own on Linux
+([macOS](../how-to/targets.md#macos)). [Targets and
 toolchains](../explanation/targets.md) explains what each preset sets up.
 
 ## Linkers
 
 By default a preset links with the linker rustc itself would use for the
-triple and the workspace's Rust release, always through nixpkgs' tools
-and never with rustc's bundled `rust-lld`.
+triple and the workspace's Rust release, through nixpkgs' tools and not
+with rustc's bundled `rust-lld`. macOS from Linux is the exception:
+rustc's own linker there is Apple's, which does not run on Linux, so the
+default is `rust-lld` when the toolchain ships it.
 [`targets.<triple>.linkerKind`](options/targets.md#targetsnamelinkerkind)
 picks another kind. It applies to the target's units, and to build
 scripts and proc macros when the triple is your own machine's.
@@ -100,6 +106,8 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `mingw-lld` | Windows MinGW | the MinGW C compiler with nixpkgs' default lld |
 | `wasm-ld` | wasm, except `wasm32-wasip2` | `wasm-ld` from `llvmPackages_<major>`, not rustc's `rust-lld` |
 | `wasm-component-ld` | `wasm32-wasip2` | rustc's own `wasm-component-ld`, with `wasm-ld` from `llvmPackages_<major>` under it |
+| `rust-lld` | macOS on a Linux machine, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld` as `ld64.lld`, whose LLVM is rustc's |
+| `ld64.lld` | macOS on a Linux machine, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld64.lld` from `llvmPackages_<major>` |
 
 `linuxPortable` links with `zig cc`, which its `backend` sets; it takes
 no other kind.
@@ -117,6 +125,21 @@ that major release, not Rust's LLVM fork: its output is close to
 `rust-lld`'s, but not byte-identical. To reproduce a build made with
 `rust-lld` byte for byte, set
 [`targets.<triple>.linker`](options/targets.md#targetsnamelinker).
+
+On macOS the SDK has its own say. Each SDK version lists what its
+linker must support, and a linker that lacks it is an evaluation error,
+never a quiet switch to the other kind:
+
+| SDK | The linker must | Which LLD does |
+| --- | --- | --- |
+| 14.4, 15.5, 26.5 | nothing more | any |
+| 27.0 and later | read the `arm64e.x1` CPU subtype in the SDK's `.tbd` stub files | LLD 23.1.3 and later (Rust 1.100), and nixpkgs' lld of every major, which carries the fix as a patch |
+
+So Rust 1.99's `rust-lld` (LLD 23.1.1) cannot link against SDK 27.0. The
+error names the SDK, the requirement and the linker's LLD version, and
+the ways out: an older SDK, a newer toolchain, or `linkerKind =
+"ld64.lld"`. Cross-language LTO needs the linker's LLVM to be rustc's,
+which `rust-lld`'s always is.
 
 A kind that cannot work is an evaluation error that names both sides:
 a kind for another kind of target (`mold` for Windows), `mold` with

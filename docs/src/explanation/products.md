@@ -32,7 +32,7 @@ path remapping and build ID depend on it.
 | Windows (MSVC) | `keep` | none: PDBs are already separate files; `install` puts them in the `debug` output |
 | wasm for browsers | `keep` | `bindgen` → `wasmOpt` |
 | wasm components | `keep` | `wasmOpt` → `componentize` |
-| macOS (not yet, [#13](https://github.com/schlarpc/breakbulk/issues/13)) | to decide (`.dSYM` via `dsymutil`) | `dsymutil` → `strip` → `adhocSign` |
+| macOS | `split` | `splitDebug` (the `.dSYM` to the `debug` output, `llvm-strip -S`) → `install` → `adhocSign` |
 
 `"strip"` inserts `strip` instead. `packDwo` packs split DWARF objects
 (see [Split DWARF](#split-dwarf)); it does

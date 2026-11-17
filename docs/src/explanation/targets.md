@@ -22,6 +22,7 @@ This page explains what each kind of target gets, and why.
 | `{x86_64,aarch64}-pc-windows-msvc` | yours + xwin SDK (unfree) | lld-link | wine (x86_64); none (aarch64) |
 | `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
 | `aarch64-pc-windows-gnullvm` | yours + nixpkgs LLVM mingw-w64 cross | lld, through the MinGW C driver | none |
+| `{aarch64,x86_64}-apple-darwin`, on Linux | yours + Apple's macOS SDK (unfree, yours to pass) + nixpkgs' clang | `rust-lld` (or nixpkgs' `ld64.lld`) | none, or a Mac builder (`nativeBuilder`) |
 | `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), headless Chromium or Firefox, or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
 | `{x86_64,aarch64}-unknown-uefi` | yours, with the target | lld-link | none |
@@ -35,8 +36,8 @@ Setting either option gives the target a runner and puts its runs back
 (`target.<triple>.canRunTests` says which applies).
 
 "Yours" means the toolchain you give the workspace (see below). macOS
-targets do not work yet
-([#13](https://github.com/schlarpc/breakbulk/issues/13)).
+targets build on Linux machines; building them on a Mac does not work
+yet ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
 
 wasm tests run in Node by default. With `browser = "chromium"` or
 `"firefox"`, every test runs in that headless browser, inside the Nix
@@ -91,6 +92,8 @@ build of it, through nixpkgs' wrapped C compiler, never rustc's own
 | Windows MSVC, UEFI | `lld-link` | `lld-link`, wrapped so that PDBs are reproducible |
 | Windows MinGW (`-gnu`, `-gnullvm`) | `mingw-lld` | the MinGW C driver with lld |
 | wasm | `wasm-ld`, `wasm-component-ld` | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |
+| macOS, on Linux, toolchain with `rust-lld` | `rust-lld` | the toolchain's own `rust-lld` as `ld64.lld` |
+| macOS, on Linux, other toolchains | `ld64.lld` | nixpkgs' `ld64.lld` for rustc's LLVM release |
 | `linuxPortable` | `zig` | zig's own linker (`zig cc`) |
 | anything else | | none: the preset fails at evaluation and names `targets.<triple>.linker` |
 
@@ -149,6 +152,9 @@ any setting. rustc's own linker there is `rust-lld` as `lld-link`, which
 puts the name of rustc's random temporary directory in the PDB, so the
 `.efi` would differ on every build; the preset uses the same wrapped
 `lld-link` as Windows MSVC.
+macOS on Linux is another exception: there is no C driver to bypass,
+rustc runs the linker directly, and `rust-lld` is the one linker whose
+LLVM is always rustc's.
 
 ## Windows msvc
 
@@ -164,6 +170,49 @@ The `windows` preset packages the usual MSVC cross setup:
 - wine as the test runner.
 
 `extraSdks` adds further SDKs, such as the Windows Driver Kit.
+
+## macOS
+
+On a Linux machine, the `darwin` preset builds macOS programs without a
+Mac. nixpkgs has no Linux-to-macOS cross toolchain (its `cctools` does
+not build for a Linux host), so the pieces come from elsewhere:
+
+- **The SDK.** Apple's macOS SDK, which you pass as `sdk`. It is required
+  on Linux, and breakbulk never fetches it there by default: Apple's
+  agreement allows it only on Apple-branded computers.
+  `breakbulk.lib.appleSdk` is nixpkgs' own download of it, marked unfree.
+  rustc reads it from `SDKROOT` and gives it to the linker
+  (`-syslibroot`), so a program can link Apple's frameworks
+  (`CoreFoundation`, …).
+- **The linker.** rustc links directly with an `ld64.lld`: the
+  toolchain's own `rust-lld`, or nixpkgs' lld for a toolchain without one.
+  The linker signs every arm64 binary ad hoc.
+- **C code.** Unwrapped clang from rustc's LLVM release, with
+  `--target=<triple> -isysroot <SDK>`. cc-rs adds the deployment
+  target.
+- **Deployment target.** rustc's default (macOS 11.0 on arm64, 10.12 on
+  x86\_64), which cc-rs follows. `deploymentTarget` sets
+  `MACOSX_DEPLOYMENT_TARGET` for rustc and C compilers alike.
+- **Debug information.** In a macOS program, the debug information stays
+  in the object files, and the binary keeps only a map of them, unless
+  dsymutil gathers it into a `.dSYM` bundle. Cargo's default on Apple
+  targets is `split-debuginfo = "unpacked"`, which skips dsymutil. The
+  preset passes `-C split-debuginfo=packed` instead, so rustc runs LLVM's
+  `dsymutil` at the link, and the unit keeps the `.dSYM`. `debugInfo` is
+  `"split"` by default, as on Linux: the `splitDebug` stage moves the
+  `.dSYM` to the `debug` output and removes the map, which names build
+  paths.
+- **Signing.** The `adhocSign` stage signs every executable and dylib
+  again, with `rcodesign`, after `install`, so it comes last. It sets each
+  file's identifier to its file name: `llvm-strip` and the linker sign
+  with the name of the file they write, which in a stage can be a
+  temporary one.
+- **Tests.** Nothing on Linux runs macOS programs. Test binaries build;
+  their runs need a Mac builder (`nativeBuilder`, which sets
+  `testSystem`).
+
+breakbulk's own checks inspect the products on Linux; none runs them on a Mac
+yet ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
 
 ## wasm
 

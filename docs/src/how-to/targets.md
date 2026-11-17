@@ -346,3 +346,46 @@ To fill in the versions and the hash:
 Tests run under wine. See [Targets and
 toolchains](../explanation/targets.md#windows-msvc) for what the preset
 sets up.
+
+## macOS
+
+On a Linux machine, `presets.darwin` builds `aarch64-apple-darwin` and
+`x86_64-apple-darwin` programs. It needs Apple's macOS SDK, and you have
+to pass it yourself. Apple's
+[Xcode and Apple SDKs Agreement](https://www.apple.com/legal/sla/docs/xcode.pdf)
+allows the SDK only on Apple-branded computers. So breakbulk never
+downloads it on Linux by default, and without `sdk` the preset fails at
+evaluation. Whether to use the SDK there is your own decision.
+
+`breakbulk.lib.appleSdk` gives you the same download of the SDK that
+nixpkgs uses on a Mac, marked unfree:
+
+```nix
+let
+  sdk = breakbulk.lib.appleSdk {
+    pkgs = import nixpkgs {
+      inherit system;
+      config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "macOS-SDK";
+    };
+    version = "14.4";
+  };
+in
+modules = [{
+  workspaces.default.targets.aarch64-apple-darwin = { };
+  targets.aarch64-apple-darwin.preset = breakbulk.lib.presets.darwin { inherit sdk; };
+}];
+```
+
+`version` is one that nixpkgs pins (14.4, 15.5, 26.5 or 27.0 at the time
+of writing). `sdk` can also be your own package of an SDK directory; give
+`sdkVersion` with it when it has no `version` attribute. The toolchain
+needs the target (`targets = [ "aarch64-apple-darwin" ]` in
+rust-overlay).
+
+Each product is signed ad hoc, as macOS on Apple silicon requires, and
+its debug information is a `.dSYM` bundle in the `debug` output, next to
+where the file lands (`bin/app.dSYM`). Nothing on Linux runs macOS
+programs, so test binaries build but do not run unless
+`nativeBuilder = true` sends them to a Mac builder. See [Targets and
+toolchains](../explanation/targets.md#macos) for what the preset sets
+up.

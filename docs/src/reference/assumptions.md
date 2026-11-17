@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
+Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 
 ## Summary
 
@@ -63,6 +63,7 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 | [C3](#c3---target-host-keeps-rustflags-off-host-units) | `--target <host>` keeps rustflags off host units | yes |
 | [C4](#c4-linkers-on-every-unit-and-on-same-triple-host-units) | Linkers on every unit, and on same-triple host units | yes |
 | [C5](#c5-cargos-environment-configuration-for-the-dev-shell) | Cargo's environment configuration for the dev shell | yes |
+| [C6](#c6-apple-links-from-linux) | Apple links from Linux | yes |
 | [P1](#p1-trim-paths-availability-and-default) | trim-paths availability and default | yes |
 | [P2](#p2-trim-paths-detection-and-remap-forms) | trim-paths detection and remap forms | yes |
 | [P3](#p3-trim-paths-hashes-outside-path-crates-without-their-path) | trim-paths hashes outside path crates without their path | yes |
@@ -489,6 +490,15 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 - **Pinned by.** `loose-ends-devshell` (a local build in the shell gives the plan's `-C metadata` values); `loose-ends-devshell-trim-paths`. Rust: `spec::tests::cargo_env_for_the_dev_shell`.
 - **If it changes.** Local builds in the dev shell stop matching the plan; the checks fail.
 
+### C6. Apple links from Linux
+
+- **Assumption.** rustc calls a linker named `rust-lld` or `lld` on an Apple target as lld with `-flavor darwin` and nothing infers that flavor from the name `ld64.lld`; it passes `SDKROOT` as `-syslibroot` to such a linker; lld's Mach-O writer zeroes object modification times in the debug map unless `ZERO_AR_DATE=0`; cc-rs passes `-isysroot` only for Xcode's clang or a target other than macOS, so the preset's CFLAGS give it.
+- **Where.** `lib/presets/linker.nix`: `rustLldLinker`, `ld64LldLinker`, `linkerFeatures`; `lib/presets/darwin.nix`.
+- **Upstream.** rustc_target `spec/mod.rs`, `infer_linker_hints`; rustc_codegen_ssa `back/linker.rs`, `get_linker` (`Command::lld`), `back/link.rs`, `add_apple_sdk`, `get_apple_sdk_root` (1.99.1; checked for this page); lld `MachO/Driver.cpp`, `Config.h` (`zeroModTime = true`; LLVM 21.1.8); cc 1.11.1 `src/lib.rs`, `add_default_flags`, `apple_sdk_root_inner`.
+- **Holds for.** rust-overlay 1.99.0 with LLD 23.1.1, nixpkgs' lld 23.1.3; SDK 14.4.
+- **Pinned by.** `darwin-aarch64` (products link against the SDK, `with-c` compiles C against its headers, `framework` links CoreFoundation), `darwin-x86_64`, `darwin-eval` (the linker's path and kind).
+- **If it changes.** rustc calls the linker as a C compiler and the link fails, or C code compiles for the build machine; the checks fail.
+
 ## trim-paths and path remapping
 
 ### P1. trim-paths availability and default
@@ -567,11 +577,11 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 
 ### X2. Which debuginfo side files a link writes
 
-- **Assumption.** On `*-windows-msvc` rustc passes `/DEBUG` to the linker for every linked crate whatever `-C debuginfo` and `-C strip` say, so a `.pdb` is always written (UEFI's MSVC-style link too); on an ELF target whose rustc spec supports split debuginfo (`supported-split-debuginfo`), with debuginfo on, `-C split-debuginfo=packed` writes one `.dwp` per linked output and `unpacked` one `.dwo` per object, for an rlib too (with `packed` an rlib keeps its DWARF objects inside); the last `-C debuginfo` wins and `-g` means full; Cargo passes `-C split-debuginfo` only with `-C debuginfo`, and tolerates the side files' absence during the trace. (Apple's `.dSYM` is unverified; Darwin is not supported yet, #13.)
+- **Assumption.** On `*-windows-msvc` rustc passes `/DEBUG` to the linker for every linked crate whatever `-C debuginfo` and `-C strip` say, so a `.pdb` is always written (UEFI's MSVC-style link too); on an ELF target whose rustc spec supports split debuginfo (`supported-split-debuginfo`), with debuginfo on, `-C split-debuginfo=packed` writes one `.dwp` per linked output and `unpacked` one `.dwo` per object, for an rlib too (with `packed` an rlib keeps its DWARF objects inside); the last `-C debuginfo` wins and `-g` means full; Cargo passes `-C split-debuginfo` only with `-C debuginfo`, and tolerates the side files' absence during the trace. On an Apple target, with debuginfo on and `packed`, rustc runs `dsymutil` from `PATH` after the link, which writes a `<output>.dSYM` directory; Cargo passes `unpacked` there whenever debuginfo is on, which a later `-C split-debuginfo=packed` in the rustflags overrides.
 - **Where.** `crates/breakbulk-plan/src/target_spec.rs`: `debuginfo` (which artifacts a target's spec implies); `crates/breakbulk-format/src/plan.rs`: `writes_debuginfo_side_files`, `DebugArtifactWhen`; `lib/target-traits.nix`: `debugArtifacts` (install's side-file globs); `crates/breakbulk-unit/src/compile.rs`: `DEBUG_SIDE_FILES`, `collect_outputs`.
 - **Upstream.** rustc_codegen_ssa `back/linker.rs`, `MsvcLinker::debuginfo` (1.95 through master), `back/link.rs`, `link_natively` (dsymutil, thorin) and `preserve_objects_for_their_debuginfo`; rustc_session `session.rs`, `split_debuginfo` (the target's default) and the `SplitDebugInfoUnstablePlatform` check; rustc_session `config.rs`, `select_debuginfo`; rustc_target `spec/json.rs`, `Target::to_json` (only non-default options printed); cargo `src/compiler/mod.rs`, `build_base_args`; spike A, surprise S9.
-- **Holds for.** 1.99 (msvc, ELF); the window for the trace.
-- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product), `products-cdylib-debug-packed`, `products-cdylib-debug-unpacked` (only those reach it, not a cdylib dependency's own `.dwp`). `target-traits-rustc` (the traits' `debugArtifacts` against the same reading of `--print all-target-specs-json`). Rust: `target_spec::tests::built_in_targets` (plan), `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files`, `tests::per_object_debug_files_only_with_unpacked` (format), `compile::tests::debug_side_files_go_to_debug` (unit).
+- **Holds for.** 1.99 (msvc, ELF, Apple cross-built from Linux); the window for the trace.
+- **Pinned by.** `debug-outputs`, `msvc-debug-outputs`, `msvc-x86_64-pdb`, `products-source-paths-dwp`, `products-source-paths-dwo` (the libraries' `.dwo` files reach the product), `products-cdylib-debug-packed`, `products-cdylib-debug-unpacked` (only those reach it, not a cdylib dependency's own `.dwp`). `target-traits-rustc` (the traits' `debugArtifacts` against the same reading of `--print all-target-specs-json`). Rust: `target_spec::tests::built_in_targets` (plan), `tests::debuginfo_side_files`, `tests::debug_output_only_where_side_files`, `tests::per_object_debug_files_only_with_unpacked` (format), `compile::tests::debug_side_files_go_to_debug` (unit); `darwin-aarch64`, `darwin-x86_64` (the `.dSYM` of each Apple product, with its UUID).
 - **If it changes.** A unit without a `debug` output discards side files with a warning, or one with it has an empty output; the checks fail.
 
 ### X3. Names of uplifted side files
@@ -745,7 +755,7 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 - **Assumption.** A process running natively on the target finds shared libraries through `LD_LIBRARY_PATH` on Linux and most Unix, `PATH` on Windows and `DYLD_FALLBACK_LIBRARY_PATH` on Apple, as Cargo's `dylib_path_envvar` says.
 - **Where.** `lib/target-traits.nix`: `dylibPathVar`, `dylibPathSep`; `lib/test-runs.nix`: `dylibPathOf`.
 - **Upstream.** cargo-util `paths::dylib_path_envvar`.
-- **Holds for.** Linux, by check. Windows targets always run under wine, whose variable (`WINEPATH`) the runner declares; Apple is not supported yet (#13).
+- **Holds for.** Linux, by check. Windows targets always run under wine, whose variable (`WINEPATH`) the runner declares; Apple test binaries run only on a Mac builder, which none of the checks has (#13).
 - **Pinned by.** `test-runs-test-control`, `test-runs-dylib-rule` (Linux); `windows-dll-test`, `windows-dll-needs-dll` (the runner's own variable).
 - **If it changes.** Tests cannot load their build scripts' libraries.
 
