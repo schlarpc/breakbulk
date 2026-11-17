@@ -25,8 +25,9 @@
 #   p.stages.<name>    every stage, `linked` included
 #   p.stageOrder       stage names in order, without `linked`
 #   p.debug            the `debug` output of the last stage that has one
-#                      (splitDebug; install, for the link units' `.pdb` and
-#                      other debuginfo side files when nothing split before)
+#                      (packDwo, splitDebug or strip; install, for the
+#                      link units' `.pdb` and other debuginfo side files
+#                      when no earlier stage has one)
 #   p.checks.<name>    every check, `noSourceReferences` included
 #
 # Stage modules are `{ after ? null; before ? null; run; }`:
@@ -35,8 +36,9 @@
 #   - `run = { input, product, target, pkgs }: <derivation>`; `input` is the
 #     previous stage's output, `product` is `{ name; sourcePaths; toolchainPaths; } // info`,
 #     plus `linkedDebug` (the `debug` output of `linked`, when it has one:
-#     the link units' debuginfo side files) and `debugSplit` (whether an
-#     earlier stage has a `debug` output). Every attribute a product of
+#     the link units' debuginfo side files), `earlierDebug` (the `debug`
+#     output of the last earlier stage that has one, or null) and
+#     `debugSplit` (whether there is one). Every attribute a product of
 #     mkRepository has is documented in
 #     docs/src/reference/stage-functions.md, which the
 #     `products-product-attributes` check compares with a real product.
@@ -181,8 +183,8 @@ let
       );
 
   # Default stage chains per preset (`stagePreset`), as data. Debug
-  # handling is not among them: mkRepository puts the stage of the
-  # target's `debugInfo` (`splitDebug`, `strip`) first (lib/products.nix).
+  # handling is not among them: mkRepository puts the stages of the
+  # target's `debugInfo` (`packDwo`, `splitDebug`, `strip`) first (lib/products.nix).
   defaultStageNames = {
     wasmWeb = [
       "bindgen"
@@ -380,9 +382,9 @@ let
                 guard pkgs acc.last (
                   ordered.live.${s}.run {
                     input = acc.last;
-                    # `debugSplit`: an earlier stage has a `debug` output.
                     product = product // {
-                      debugSplit = acc.split;
+                      earlierDebug = acc.debug;
+                      debugSplit = acc.debug != null;
                     };
                     inherit target pkgs;
                   }
@@ -391,7 +393,7 @@ let
             in
             {
               last = drv;
-              split = acc.split || elem "debug" (drv.outputs or [ ]);
+              debug = if elem "debug" (drv.outputs or [ ]) then drv.debug else acc.debug;
               stages = acc.stages // {
                 ${s} = drv;
               };
@@ -399,7 +401,7 @@ let
           )
           {
             last = linked;
-            split = false;
+            debug = null;
             stages = {
               inherit linked;
             };
@@ -408,9 +410,8 @@ let
 
       final = built.last;
 
-      # The last stage that split debug information.
-      splitters = filter (s: elem "debug" (built.stages.${s}.outputs or [ ])) ordered.order;
-      debug = if splitters == [ ] then null else built.stages.${lib.last splitters}.debug;
+      # The `debug` output of the last stage that has one.
+      inherit (built) debug;
 
       allChecks =
         lib.optionalAttrs defaultChecks {

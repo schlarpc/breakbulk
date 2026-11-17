@@ -3079,10 +3079,14 @@ in
       ok =
         report.orders == [
           [
+            "packDwo"
             "splitDebug"
             "install"
           ]
-          [ "install" ]
+          [
+            "packDwo"
+            "install"
+          ]
           [
             "strip"
             "install"
@@ -3094,6 +3098,7 @@ in
         && report.packageAdds
         && report.wasmSplit
         && report.override == [
+          "packDwo"
           "splitDebug"
           "install"
         ]
@@ -3119,6 +3124,7 @@ in
     in
     assert lib.assertMsg (
       plServer.stageOrder == [
+        "packDwo"
         "splitDebug"
         "stamp"
         "sign"
@@ -3127,6 +3133,7 @@ in
     ) "post-link: server stages ${builtins.toJSON plServer.stageOrder}";
     assert lib.assertMsg (
       plTool.stageOrder == [
+        "packDwo"
         "splitDebug"
         "strip"
         "install"

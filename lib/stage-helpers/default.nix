@@ -159,16 +159,24 @@ let
     }
   '';
 
-  # The debuginfo side files of the product's link units
-  # (`.pdb` on msvc, `.dwp`/`.dwo` with `split-debuginfo`), as the `linked`
-  # stage's `debug` output holds them, go into a stage's `debug` output in
-  # the install layout: next to where their binary lands (Windows: bin/;
-  # elsewhere `*.so.dwp` under lib/, the rest under bin/).
-  # `product.linkedDebug` is that output, when the product has one.
+  # The debug files so far go into a stage's `debug` output ("$1") in the
+  # install layout: an earlier stage's `debug` output
+  # (`product.earlierDebug`) as it is, else the debuginfo side files of
+  # the product's link units (`.pdb` on msvc, `.dwp`/`.dwo` with
+  # `split-debuginfo`), from the `linked` stage's `debug` output
+  # (`product.linkedDebug`, when the product has one), next to where
+  # their binary lands (Windows: bin/; elsewhere `*.so.dwp` under lib/,
+  # the rest under bin/).
   placeDebugFn = product: target: pkgs: ''
     placeDebug() {
       ${
-        if (product.linkedDebug or null) == null then
+        if (product.earlierDebug or null) != null then
+          ''
+            mkdir -p "$1"
+            cp -R --no-preserve=ownership ${product.earlierDebug}/. "$1"/
+            chmod -R u+w "$1"
+          ''
+        else if (product.linkedDebug or null) == null then
           "return 0"
         else
           ''
@@ -192,7 +200,12 @@ let
 
   isElfFn = ''
     isElf() { [ "$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; }
+    isAr() { [ "$(head -c7 "$1")" = '!<arch>' ]; }
   '';
+
+  # Whether a stage that writes the debug files so far (`placeDebug`)
+  # has any: its `debug` output is declared only then.
+  hasDebugFiles = product: (product.earlierDebug or null) != null || (product.linkedDebug or null) != null;
 
   stageName = product: helper: "${product.name}-${helper}";
 
@@ -200,6 +213,125 @@ let
 
   # ---------------------------------------------------------------------
   # ELF
+
+  packDwo = mkHelper {
+    name = "packDwo";
+    description = ''
+      Packs the `.dwo` files that each ELF file and each `ar` archive
+      names (`split-debuginfo = "unpacked"`) into `<file>.dwp` in the
+      stage's `debug` output, with `llvm-dwp`, and drops the loose `.dwo`
+      files. The `.dwp` goes under `bin/` or `lib/`, where the file
+      lands in the install layout: `bin/app.dwp`, `lib/libfoo.so.dwp`,
+      `lib/libfoo.a.dwp`. A file that already has a `<file>.dwp`
+      (`"packed"`) keeps it. The output files are unchanged.
+
+      The skeleton units name their `.dwo` files by rustc's absolute
+      build path, which gdb opens as given and nowhere else, so loose
+      `.dwo` files are of no use to a debugger. gdb finds `<binary>.dwp`
+      next to the binary or next to its separate debug file
+      (`splitDebug` moves it there). An archive's `.dwp` is for the
+      program that links the archive: pack it with that program's own
+      `.dwo` files into `<program>.dwp`.
+
+      `targets.<triple>.debugInfo` inserts this stage on ELF targets:
+      before `splitDebug` with `"split"`, alone with `"keep"`. It is an
+      ordinary stage: configure it, replace it, or remove it with `null`
+      to ship the loose `.dwo` files.
+    '';
+    options = {
+      binutils = toolOption "binutils-unwrapped-all-targets";
+      llvm = toolOption "llvm";
+    };
+  } (
+    cfg:
+    {
+      input,
+      product,
+      pkgs,
+      target ? { },
+      ...
+    }:
+    let
+      t = traitsOf target pkgs;
+      debug = hasDebugFiles product;
+      # Where a file of the flat link output lands in the install layout
+      # (as `install` places it), for its `.dwp`.
+      libGlob = lib.concatMapStringsSep "|" (x: "*${escapeShellArg x}") (
+        lib.unique (
+          lib.filter (x: x != "") [
+            t.staticLibrarySuffix
+            t.sharedLibrarySuffix
+          ]
+        )
+      );
+    in
+    pkgs.runCommand (stageName product "packDwo")
+      (
+        {
+          nativeBuildInputs = [
+            (binutilsOf cfg pkgs)
+            (toolOf cfg.llvm pkgs "llvm")
+          ];
+        }
+        // lib.optionalAttrs debug {
+          outputs = [
+            "out"
+            "debug"
+          ];
+        }
+      )
+      ''
+        set -euo pipefail
+        ${copyIn input}
+        ${isElfFn}
+        ${placeDebugFn product target pkgs}
+        copyIn "$out"
+        ${lib.optionalString debug ''
+          mkdir -p "$debug"
+          placeDebug "$debug"
+          find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+            isElf "$f" || isAr "$f" || continue
+            b=''${f##*/}
+            rel=''${f#$out/}
+            if [ "$rel" != "$b" ]; then
+              # After `install`: the file's own directory.
+              d=''${rel%/*}
+            else
+              case "$b" in
+                ${lib.optionalString (libGlob != "") "${libGlob}) d=lib ;;"}
+                *.so.*) d=lib ;;
+                *) d=bin ;;
+              esac
+            fi
+            if [ -e "$debug/$d/$b.dwp" ]; then
+              continue
+            fi
+            # readelf walks an archive's members. Not binutils' dwp for
+            # packing: it reads only DWARF 4's DW_AT_GNU_dwo_id, so from
+            # DWARF 5 units it writes a .dwp with no units in it, and
+            # succeeds.
+            dwos=()
+            while IFS= read -r n; do
+              n=''${n##*/}
+              for dd in bin lib; do
+                if [ -f "$debug/$dd/$n" ]; then
+                  dwos+=("$debug/$dd/$n")
+                  break
+                fi
+              done
+            done < <(readelf --debug-dump=info,no-follow-links --dwarf-depth=1 "$f" 2>/dev/null | sed -n 's/^.*DW_AT_\(GNU_\)\{0,1\}dwo_name *: .*: //p' | LC_ALL=C sort -u)
+            if [ ''${#dwos[@]} -gt 0 ]; then
+              echo "packDwo: $rel: packing ''${#dwos[@]} .dwo files into $d/$b.dwp"
+              mkdir -p "$debug/$d"
+              llvm-dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
+            fi
+          done
+          # Packed, or named by no file (an rlib member the link left
+          # out).
+          find "$debug" -name '*.dwo' -type f -delete
+        ''}
+      ''
+  );
 
   splitDebug = mkHelper {
     name = "splitDebug";
@@ -211,15 +343,15 @@ let
       A file without debug information is left as it is; one with debug
       information but no build ID fails the stage.
 
-      The `.dwo` files a binary names (`split-debuginfo = "unpacked"`)
-      are packed into `<binary>.dwp` with `llvm-dwp`; a `<binary>.dwp`
-      (`"packed"`) moves next to the `.debug` file, where gdb finds it,
-      with a symlink at its place in the install layout.
-      `targets.<triple>.debugInfo = "split"` inserts this stage.
+      A `<binary>.dwp` (`split-debuginfo = "packed"`, or `packDwo`'s)
+      moves next to the `.debug` file, where gdb finds it, with a symlink
+      at its place in the install layout. The other debug files so far
+      (an earlier stage's `debug` output, else the link units') are kept.
+      `targets.<triple>.debugInfo = "split"` inserts this stage, after
+      `packDwo`.
     '';
     options = {
       binutils = toolOption "binutils-unwrapped-all-targets";
-      llvm = toolOption "llvm";
     };
   } (
     cfg:
@@ -236,10 +368,7 @@ let
           "out"
           "debug"
         ];
-        nativeBuildInputs = [
-          (binutilsOf cfg pkgs)
-          (toolOf cfg.llvm pkgs "llvm")
-        ];
+        nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
       }
       ''
         set -euo pipefail
@@ -272,35 +401,7 @@ let
           objcopy --strip-debug "$f"
           objcopy --add-gnu-debuglink="$dbg" "$f"
           b=''${f##*/}
-          # With split-debuginfo = "unpacked", the binary's skeleton units
-          # name their `.dwo` files (its own and its libraries', decision
-          # 126) by rustc's absolute build path, which gdb opens as given
-          # and nowhere else (gdb 17.2, gdb/dwarf2/read.c, open_dwo_file).
-          # llvm-dwp packs the ones it names into `<binary>.dwp`, which
-          # gdb finds as below. Not binutils' dwp: it reads only DWARF 4's
-          # DW_AT_GNU_dwo_id, so from DWARF 5 units it writes a .dwp with
-          # no units in it, and succeeds.
-          dwos=()
-          while IFS= read -r n; do
-            n=''${n##*/}
-            for d in bin lib; do
-              if [ -f "$debug/$d/$n" ]; then
-                dwos+=("$debug/$d/$n")
-                break
-              fi
-            done
-          done < <(readelf --debug-dump=info,no-follow-links --dwarf-depth=1 "$dbg" 2>/dev/null | sed -n 's/^.*DW_AT_\(GNU_\)\{0,1\}dwo_name *: .*: //p' | LC_ALL=C sort -u)
-          if [ ''${#dwos[@]} -gt 0 ] && [ ! -e "$debug/bin/$b.dwp" ] && [ ! -e "$debug/lib/$b.dwp" ]; then
-            case "$b" in
-              *.so|*.so.*) d=lib ;;
-              *) d=bin ;;
-            esac
-            echo "splitDebug: ''${f#$out/}: packing ''${#dwos[@]} .dwo files into $b.dwp"
-            mkdir -p "$debug/$d"
-            llvm-dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
-          fi
-          # With split-debuginfo = "packed", the DWARF objects are in
-          # `<binary>.dwp`. gdb looks for it next to the separate debug file
+          # gdb looks for `<binary>.dwp` next to the separate debug file
           # it found, under the binary's name (gdb 17.2,
           # gdb/dwarf2/read.c, open_and_init_dwp_file), so it moves there;
           # its install-layout place keeps a relative symlink.
@@ -311,10 +412,6 @@ let
             fi
           done
         done
-        # The `.dwo` files are in the `.dwp` files now, or no binary names
-        # them (an rlib member the link left out); gdb reads neither
-        # through their absolute names.
-        find "$debug" -name '*.dwo' -type f -delete
       ''
   );
 
@@ -324,8 +421,11 @@ let
         name = "strip";
         description = ''
           Runs `strip` on every ELF file: `--strip-debug`, or
-          `--strip-all` with `all`. `targets.<triple>.debugInfo = "strip"`
-          inserts this stage.
+          `--strip-all` with `all`. It also drops the `.dwo` files from
+          the debug files so far (`split-debuginfo = "unpacked"`): the
+          skeleton units that name them are gone. When there are debug
+          files, what is left of them is the stage's `debug` output.
+          `targets.<triple>.debugInfo = "strip"` inserts this stage.
         '';
         options = {
           all = mkOption {
@@ -342,18 +442,40 @@ let
           input,
           product,
           pkgs,
+          target ? { },
           ...
         }:
-        pkgs.runCommand (stageName product "strip") { nativeBuildInputs = [ (binutilsOf cfg pkgs) ]; } ''
-          set -euo pipefail
-          ${copyIn input}
-          ${isElfFn}
-          copyIn "$out"
-          find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-            isElf "$f" || continue
-            strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
-          done
-        ''
+        let
+          debug = hasDebugFiles product;
+        in
+        pkgs.runCommand (stageName product "strip")
+          (
+            {
+              nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
+            }
+            // lib.optionalAttrs debug {
+              outputs = [
+                "out"
+                "debug"
+              ];
+            }
+          )
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            ${isElfFn}
+            ${placeDebugFn product target pkgs}
+            copyIn "$out"
+            find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              isElf "$f" || continue
+              strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
+            done
+            ${lib.optionalString debug ''
+              mkdir -p "$debug"
+              placeDebug "$debug"
+              find "$debug" -name '*.dwo' -type f -delete
+            ''}
+          ''
       );
 
   patchelfRpath =
@@ -2077,6 +2199,7 @@ in
   inherit
     mkHelper
     noStorePaths
+    packDwo
     splitDebug
     strip
     patchelfRpath

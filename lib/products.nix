@@ -37,13 +37,13 @@
 #
 # The stage set of a product is, merged in this order (later wins per
 # attribute; `null` removes a stage): the target's stage set
-# (`targetStageSet`: the stage `debugInfo` inserts, the preset's default
+# (`targetStageSet`: the stages `debugInfo` inserts, the preset's default
 # stages, then the target's `stages`), and for each matching
 # `packages.<name>` (unversioned keys first) its `stages` then its
 # `target.<triple>.stages`. Checks merge the same way over the default
 # `noSourceReferences`. What happens to debug info is the target's
-# decision (`debugInfo`): a stage set that removes the stage
-# it inserts, or adds `splitDebug` where it inserts none, is an
+# decision (`debugInfo`): a stage set that removes the `splitDebug` or
+# `strip` it inserts, or adds `splitDebug` where it inserts none, is an
 # evaluation error.
 #
 # `linked` is one directory holding every built root's files, as
@@ -215,16 +215,19 @@ let
 
   # What happens to a target's debug info is one property of
   # the target, `targets.<triple>.debugInfo` (default: the traits'
-  # `debugInfo`), and three things follow from it: the stage it puts first
-  # in every product's chain (`splitDebug` for "split", `strip` for
-  # "strip", none for "keep"), the remap scope of the target's units
+  # `debugInfo`), and three things follow from it: the stages it puts
+  # first in every product's chain (`packDwo` then `splitDebug` for
+  # "split", `strip` for "strip", `packDwo` for "keep"; `packDwo` on ELF
+  # targets only), the remap scope of the target's units
   # (`shippedRemapScope`: debug info keeps real store paths only when it is
   # split off) and the GNU build ID of its links (`NIX_SET_BUILD_ID`, which
   # splitDebug needs). The units are shared by every package of the target,
-  # so neither the target's nor a package's `stages` may remove that stage,
-  # or add `splitDebug` where the target does not split: either is an
-  # evaluation error naming `debugInfo`.
-  # Overriding the inserted stage's attributes (`run`, `after`) is allowed.
+  # so neither the target's nor a package's `stages` may remove
+  # `splitDebug` or `strip`, or add `splitDebug` where the target does not
+  # split: either is an evaluation error naming `debugInfo`. `packDwo`
+  # changes no unit and leaves no source path in the product, so it is an
+  # ordinary stage: `null` removes it.
+  # Overriding the inserted stages' attributes (`run`, `after`) is allowed.
   #
   # `targetStageSet`'s arguments: { triple; traits; stagePreset; debugInfo;
   # targetStages; }.
@@ -251,16 +254,20 @@ let
     else
       v;
 
-  # The stage `debugInfo` puts in every product's chain, by name, or null.
+  # The stage `debugInfo` puts in every product's chain that no stage set
+  # may remove, by name, or null.
   debugStageName = v: { split = "splitDebug"; strip = "strip"; keep = null; }.${v};
 
-  # The stage itself: first after `linked`.
+  # The chain `debugInfo` puts first after `linked`: packing the `.dwo`
+  # files where they would ship (`packDwo`, an ordinary stage), then the
+  # stage above. `packDwo` reads ELF skeleton units, so a non-ELF target,
+  # which can only keep, gets none.
   debugStages =
-    v:
-    let
-      n = debugStageName v;
-    in
-    if n == null then { } else stages.chain [ n ];
+    v: traits:
+    stages.chain (
+      lib.optional (v != "strip" && traits.objectFormat == "elf") "packDwo"
+      ++ lib.optional (debugStageName v != null) (debugStageName v)
+    );
 
   # A stage set (`where` names it in messages) may not remove the target's
   # debug stage or add `splitDebug` where the target does not split.
@@ -288,6 +295,7 @@ let
   targetStageSet =
     {
       triple,
+      traits ? targetTraits.resolve { inherit triple; },
       stagePreset ? null,
       targetStages ? { },
       ...
@@ -296,7 +304,7 @@ let
       v = debugInfoOf args;
     in
     stages.merge [
-      (debugStages v)
+      (debugStages v traits)
       (presetStages stagePreset)
       (checkDebugStages {
         inherit triple;

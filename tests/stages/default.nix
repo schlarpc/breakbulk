@@ -601,7 +601,7 @@ let
       expr = map (h: (builtins.tryEval (h helperArgs).drvPath).success) [
         (H.wasmOpt { flags = "-O3"; })
         (H.wasmOpt { flags = [ 3 ]; })
-        (H.splitDebug { llvm = "llvm"; })
+        (H.packDwo { llvm = "llvm"; })
         (H.componentize { metadata.name = 3; })
         H.patchelfRpath
       ];
@@ -1480,7 +1480,7 @@ in
 
   # A dynamic-mode product whose roots Cargo all skipped. Its
   # `linked` holds only the no-binaries marker, and every stage and check
-  # (splitDebug, a stage and a check that would fail, a stage with
+  # (packDwo, splitDebug, a stage and a check that would fail, a stage with
   # structured attributes, a stage and a check written as bare `derivation`
   # calls, noSourceReferences) passes the marker on to
   # each output without running. A product with a built root runs its
@@ -1549,7 +1549,7 @@ in
           triple = "x86_64-unknown-linux-gnu";
           targetStages = {
             boom = {
-              before = "splitDebug";
+              before = "packDwo";
               run = fails "boom";
             };
             structured = {
