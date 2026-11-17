@@ -79,7 +79,14 @@
             ${testRunsLib.appRunScript {
               inherit pkgs;
               dir = lib.escapeShellArg dir;
-              command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs spec.runner} "''${files[0]}" "$@"'';
+              command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${
+                testRunsLib.launchWords {
+                  inherit pkgs;
+                  inherit (spec) runner;
+                  wrapper = testRunsLib.wrapperOf pkgs cfg spec.binary;
+                  sourceRoot = testRunsLib.sourceRootOf spec checkout;
+                }
+              } "''${files[0]}" "$@"'';
             }}
           '';
         in

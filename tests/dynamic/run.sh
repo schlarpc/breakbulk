@@ -25,7 +25,8 @@
 #   - every test run and doctest succeeded in both modes, with the same
 #     test outcomes (libtest's `test … ok` lines, nextest's status lines
 #     without timings), and both modes have the same repo.checks, all built;
-#   - the test apps of test-control behave the same in both modes;
+#   - the test apps of test-control and test-wrapper behave the same in
+#     both modes;
 #   - gdb, given a split-debuginfo product's debug output, shows a
 #     dependency's source and arguments in both modes;
 #   - with run-files-ca-off: each test run's input closure is the same in
@@ -78,7 +79,7 @@ else
     wasm-browser wasm-component wasip2 riscv64 linux-portable
     windows-gnullvm-aarch64 windows-gnu windows-dll-staged linux-portable-native
     msvc msvc-post-link
-    test-home test-closure doctest-false optional-dependency exclusive-features
+    test-home test-closure test-wrapper doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist build-script-outputs manifest-dir nested-cargo rustc-private
     declared-paths run-files-ca-off roots-override docs docs-deps source-overlay
   )

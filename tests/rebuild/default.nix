@@ -176,6 +176,7 @@ let
     test-cutoff = [ (plain "test-cutoff" [ ]) ];
     test-home = [ dynamic.repos.test-home ];
     test-threads = [ dynamic.repos.test-threads ];
+    test-wrapper = [ dynamic.repos.test-wrapper ];
     test-only = [ repository.repos.testOnly ];
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];

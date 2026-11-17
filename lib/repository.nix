@@ -491,6 +491,7 @@ let
           workspaceManifest = single null [ "workspaceManifest" ];
           runner = single null [ "runner" ];
           stripForRun = single null [ "stripForRun" ];
+          wrapper = single null [ "wrapper" ];
           keepLog = single null [ "keepLog" ];
           nextest = lib.genAttrs [ "profile" "configFile" "package" ] (n: single null [ "nextest" n ]);
           env = envStrings (pickAttrs [ "test" "env" ] ls);
@@ -512,6 +513,7 @@ let
             // {
               env = envStrings (pickAttrs [ "env" ] bs);
               enable = pickSingle true [ "enable" ] bs;
+              wrapper = pickSingle null [ "wrapper" ] bs;
             }
           ) t.binaries;
         };

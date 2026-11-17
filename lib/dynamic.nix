@@ -648,13 +648,16 @@ let
         let
           jq = jqOf p;
           nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
-          runnerVar = util.cargoTargetEnvVar p.triple "RUNNER";
           libdir = toJSON (testRuns.nextestLibdir p.libDir);
+          wrapper = testRuns.wrapperOf p.testPkgs cfg (testRuns.binaryKey b);
         in
         ''
-          ${lib.optionalString (
-            p.runner != [ ]
-          ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " p.runner)}"}
+          ${lib.optionalString (wrapper != null) (testRuns.sourceRootExport jq null)}
+          ${testRuns.nextestRunnerScript {
+            pkgs = p.testPkgs;
+            inherit (p) triple runner;
+            inherit wrapper;
+          }}
           ${testRuns.nextestThreadsScript}
           ws=$TMPDIR/nextest-ws
           mkdir -p $out $ws/target
@@ -702,14 +705,24 @@ let
 
       libtestScript =
         p: b: cfg: args: bin:
+        let
+          wrapper = testRuns.wrapperOf p.testPkgs cfg (testRuns.binaryKey b);
+        in
         ''
           mkdir -p $out
           files=(${bin})
+          ${lib.optionalString (wrapper != null) (testRuns.sourceRootExport (jqOf p) null)}
           ${testRuns.workdirScript p.testPkgs}
           __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
           cd "$__bb_wd"
           set +e
-          env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+          env "''${__bb_env[@]}" ${
+            testRuns.launchWords {
+              pkgs = p.testPkgs;
+              inherit (p) runner;
+              inherit wrapper;
+            }
+          } "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
           status=''${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
@@ -824,6 +837,7 @@ let
           p = t.platforms.${b.platform};
           n = storeName "${b.package}-${testRunsLib.binaryKey b}";
           cfg = testRunsLib.testConfig packages b.package;
+          wrapper = testRunsLib.wrapperOf pkgs cfg (testRunsLib.binaryKey b);
           checkoutDir = lib.removeSuffix "/" (toString checkout);
           script = pkgs.writeShellScriptBin "${name}-${n}" ''
             set -euo pipefail
@@ -854,11 +868,17 @@ let
                 ''
             }
             ${testRunsLib.configScript cfg (testRunsLib.binaryKey b)}
+            ${lib.optionalString (wrapper != null) (testRunsLib.sourceRootExport jq checkout)}
             files=(${b.wrapper}/root/*)
             ${testRunsLib.appRunScript {
               inherit pkgs;
               dir = ''"$dir"'';
-              command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" "$@"'';
+              command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${
+                testRunsLib.launchWords {
+                  inherit pkgs wrapper;
+                  inherit (p) runner;
+                }
+              } "''${files[0]}" "$@"'';
             }}
           '';
         in

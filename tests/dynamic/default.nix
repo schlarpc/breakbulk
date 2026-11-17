@@ -21,8 +21,8 @@
 #                            products/<i>/doc (the docs); in dynamic mode also
 #                            units/<i>/<kind>, every unit of each plan),
 #                            its repo.checks
-#                            (checks/<name>), for test-control `apps`,
-#                            a run of its test apps, for
+#                            (checks/<name>), for test-control and
+#                            test-wrapper `apps`, a run of test apps, for
 #                            source-paths-dwo/-dwp `gdb`, gdb in a
 #                            dependency through the product's debug
 #                            output, and for the fixtures of
@@ -514,6 +514,10 @@ let
     # runs below it; a test starting its package's bin finds the library
     # the build script built.
     test-closure = (import ../test-runs testArgs).repos.test-closure;
+    # tests/test-runs' test-wrapper: wrappers.cargoTargetLayout moves the
+    # test binary under target/debug/deps, where it finds the repository;
+    # its test app is `apps` in build.test-wrapper.
+    test-wrapper = (import ../test-runs testArgs).repos.test-wrapper;
     # Doctests as plain `cargo test` selects them (`doctest = false`).
     doctest-false = mkRepo "doctest-false" [ oneWs ];
     # nextest runs, from the metadata the wrappers carry in dynamic mode.
@@ -606,6 +610,19 @@ let
         ''}
         mkdir -p $out
         grep -h '^test .* \.\.\. ' net.log env.log | sort > $out/tests
+      '';
+
+  # The test-wrapper fixture's integration test as a test app, under
+  # wrappers.cargoTargetLayout and in its private working directory.
+  wrapperApps =
+    repo:
+    pkgs.runCommand "test-wrapper-apps-${mode}"
+      { app = repo.apps."main/${native}/locate/test-locate".program; }
+      ''
+        $app | tee app.log
+        grep -q 'test result: ok. 3 passed' app.log
+        mkdir -p $out
+        grep -h '^test .* \.\.\. ' app.log | sort > $out/tests
       '';
 
   # gdb on the source-paths product with only its debug output's
@@ -832,6 +849,9 @@ let
       )
       + lib.optionalString (name == "test-control") ''
         ln -s ${ctlApps} $out/apps
+      ''
+      + lib.optionalString (name == "test-wrapper") ''
+        ln -s ${wrapperApps repo} $out/apps
       ''
       + lib.optionalString (lib.elem name gdbChecked) ''
         ln -s ${gdbCheck name repo} $out/gdb

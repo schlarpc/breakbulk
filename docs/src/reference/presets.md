@@ -125,3 +125,25 @@ mold and lld lay out a program differently. The linker records itself in
 the ELF `.comment` section (`Linker: LLD 23.1.3`, `mold 3.0.0`), and a
 large program linked with mold had a 3.9 MB larger symbol table and
 about 1 MB smaller loaded sections than with lld.
+
+## Test wrappers
+
+`breakbulk.lib.wrappers` has ready-made values for
+[`test.wrapper`](options/packages.md#packagesnametestwrapper) (see
+[Tests](../explanation/products.md#tests)). Each takes its options and
+returns a function of a package set, which breakbulk calls with the
+package set of the machine that runs the test.
+
+**`cargoTargetLayout { profile ? "debug"; }`** starts the test binary
+from where Cargo puts it, for tests that find the repository by walking
+up from `std::env::current_exe()` to `target`. In a fresh directory in
+`$TMPDIR`, it links each entry of the run's source view
+(`BREAKBULK_SOURCE_ROOT`) and copies the binary into
+`target/<profile>/deps/`, then starts the copy. It is a copy because
+`current_exe()` resolves symbolic links. The working directory stays the
+package directory. The directory is removed when the test exits.
+
+```nix
+workspaces.main.memberDefaults.test.wrapper =
+  breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; };
+```

@@ -344,6 +344,10 @@ binaries that use the variable, this differs from `cargo test`:
 - A checked-in `target/` directory of the package is hidden by the
   `target` entry.
 
+If a project hits one of these, a
+[test wrapper](../reference/options/packages.md#packagesnametestwrapper)
+can set up the run differently.
+
 **Test output.** A test run's output goes to the build log only: see it
 with `nix log <run>` or `nix build -L`. The run's own output (`$out`) is
 an empty directory. The output holds timings and, with more than one
@@ -416,6 +420,40 @@ nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
 `nix run` splits an attribute path at `.` only, so `/` needs no quoting.
 A name with a `.` in it (from a workspace named `api.v2`, say) is
 quoted: `nix run '.#"api.v2/…/test-e2e"'`.
+
+**Test wrappers.** Some tests find files from the test binary's own
+path: they walk up from `std::env::current_exe()` to a directory named
+`target` and take its parent as the repository root. Under Cargo the binary is in
+`target/debug/deps/`. Under breakbulk it runs from its own store path, so
+such a helper finds nothing.
+[`test.wrapper`](../reference/options/packages.md#packagesnametestwrapper)
+(per package, in `memberDefaults`, or per binary under
+`test.binaries.<key>.wrapper`) is a program that starts the test binary,
+as Cargo's `target.<triple>.runner` does. Test runs and test apps both
+use it.
+
+- It is called as `<wrapper> <binary> <args…>`, in the package
+  directory (or the private directory above, when the binary uses
+  `CARGO_TARGET_TMPDIR`).
+- `BREAKBULK_SOURCE_ROOT` is the root of the run's source view (for a
+  test app with `checkout`, the checkout).
+- `BREAKBULK_NEXT` is a program that starts a binary under the target's
+  runner (wine, an emulator), or directly when there is none. The
+  wrapper ends with `exec "$BREAKBULK_NEXT" <binary> <args…>`, where the
+  binary may be a moved copy. The wrapper itself runs on the machine that
+  runs the test, outside the runner, so `current_exe()` names the copy.
+- Under `test.runner = "nextest"`, nextest starts the wrapper as the
+  target's runner, for the listing as well as for each test.
+- Doctests do not use it: rustdoc runs them from its own temporary
+  directory.
+
+[`breakbulk.lib.wrappers.cargoTargetLayout`](../reference/presets.md#test-wrappers)
+is the ready-made wrapper for the case above:
+
+```nix
+workspaces.main.memberDefaults.test.wrapper =
+  breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; };
+```
 
 **Doctests** get one derivation per library, which runs `rustdoc --test`.
 rustdoc compiles and runs the examples in one process, so doctests have

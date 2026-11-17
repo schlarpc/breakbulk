@@ -635,6 +635,40 @@ strings concatenated with “\\n”
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
+## `packages.<name>.test.binaries.<name>.wrapper`
+
+A program that starts this test binary, in its test runs and test apps:
+Cargo’s runner protocol, ` <wrapper> <binary> <args…> `, in the
+package directory, with ` BREAKBULK_SOURCE_ROOT ` (the root of the
+run’s source view, or of the checkout for a test app with
+` checkout `) and ` BREAKBULK_NEXT ` (a program that starts the binary
+under the target’s runner, or directly without one) in its
+environment\. It ends with ` exec "$BREAKBULK_NEXT" <binary> <args…> `, the binary possibly moved\. It runs outside the target’s
+runner, on the machine that runs the test\. A program, or a
+function from the package set of that machine to one\.
+With ` test.runner = "nextest" `, nextest starts it as the target’s
+runner, for listing as for each test\. Doctests do not use it\.
+[` breakbulk.lib.wrappers `](\.\./presets\.md\#test-wrappers) has ready-made
+ones\. Over ` test.wrapper `\. ` null `: none\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; }
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.test.doctest`
 
 Settings for the package’s doctest run (` doctests.<pkg> `, check
@@ -1080,6 +1114,40 @@ null or boolean
 
 ```nix
 null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.wrapper`
+
+A program that starts each test binary of this package, in its test runs and test apps:
+Cargo’s runner protocol, ` <wrapper> <binary> <args…> `, in the
+package directory, with ` BREAKBULK_SOURCE_ROOT ` (the root of the
+run’s source view, or of the checkout for a test app with
+` checkout `) and ` BREAKBULK_NEXT ` (a program that starts the binary
+under the target’s runner, or directly without one) in its
+environment\. It ends with ` exec "$BREAKBULK_NEXT" <binary> <args…> `, the binary possibly moved\. It runs outside the target’s
+runner, on the machine that runs the test\. A program, or a
+function from the package set of that machine to one\.
+With ` test.runner = "nextest" `, nextest starts it as the target’s
+runner, for listing as for each test\. Doctests do not use it\.
+[` breakbulk.lib.wrappers `](\.\./presets\.md\#test-wrappers) has ready-made
+ones\. ` null `: none\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; }
 ```
 
 *Declared by:*

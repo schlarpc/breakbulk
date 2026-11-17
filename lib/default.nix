@@ -36,7 +36,8 @@
 # Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
-#   breakbulk.testApps.mkTestApps { ... } (test apps, for `nix run`)
+#   breakbulk.testApps.mkTestApps { ... } (test apps, for `nix run`),
+#   breakbulk.wrappers.<name> { … } (ready-made test wrappers, lib/wrappers.nix)
 {
   lib,
   # breakbulk's own locked nixpkgs (the flake's `nixpkgs` input), or null
@@ -118,6 +119,7 @@ let
       ;
   };
   runners = import ./runners.nix { inherit lib; };
+  wrappers = import ./wrappers.nix { inherit lib; };
   presets = import ./presets {
     inherit
       lib
@@ -270,6 +272,7 @@ let
       stages
       testRuns
       testApps
+      wrappers
       products
       variants
       ;

@@ -93,9 +93,34 @@ let
     };
   };
 
+  wrapperOption =
+    what: extra:
+    mkOption {
+      type = types.nullOr types.raw;
+      default = null;
+      example = lib.literalExpression "breakbulk.lib.wrappers.cargoTargetLayout { profile = \"debug\"; }";
+      description = ''
+        A program that starts ${what}, in its test runs and test apps:
+        Cargo's runner protocol, `<wrapper> <binary> <args…>`, in the
+        package directory, with `BREAKBULK_SOURCE_ROOT` (the root of the
+        run's source view, or of the checkout for a test app with
+        `checkout`) and `BREAKBULK_NEXT` (a program that starts the binary
+        under the target's runner, or directly without one) in its
+        environment. It ends with `exec "$BREAKBULK_NEXT" <binary>
+        <args…>`, the binary possibly moved. It runs outside the target's
+        runner, on the machine that runs the test. A program, or a
+        function from the package set of that machine to one.
+        With `test.runner = "nextest"`, nextest starts it as the target's
+        runner, for listing as for each test. Doctests do not use it.
+        [`breakbulk.lib.wrappers`](../presets.md#test-wrappers) has ready-made
+        ones. ${extra}`null`: none.
+      '';
+    };
+
   testBinary = {
     imports = [ priorityOf ];
     options = runSettings "this test binary's run" // {
+      wrapper = wrapperOption "this test binary" "Over `test.wrapper`. ";
       enable = mkOption {
         type = types.bool;
         default = true;
@@ -367,6 +392,7 @@ let
             `true`. A built-in step of ${pipeline}, after `runFiles`.
           '';
         };
+        wrapper = wrapperOption "each test binary of this package" "";
         stripForRun = mkOption {
           type = types.nullOr types.bool;
           default = null;

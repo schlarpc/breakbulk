@@ -1,0 +1,11 @@
+# Test wrappers (`packages.<name>.test.wrapper`). `locate` finds the
+# repository root from its test binary's own path, as deno's
+# `test_util::root_path()` does: it walks up from `current_exe()` to a
+# directory named `target`. Under breakbulk that holds only with
+# `breakbulk.lib.wrappers.cargoTargetLayout`, and with the marker file at
+# the root in the test view (`test.sourceScope`). The integration test also
+# writes under CARGO_TARGET_TMPDIR, so its run gets a private working
+# directory as well as the wrapper.
+[workspace]
+members = ["crates/locate"]
+resolver = "2"

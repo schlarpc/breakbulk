@@ -91,6 +91,17 @@
 #                           fresh, empty home in $TMPDIR with
 #                           XDG_CACHE_HOME unset; with `test.env.HOME =
 #                           "/homeless-shelter"` both fail
+#   test-wrapper            over the `test-wrapper` fixture, whose tests
+#                           find the repository from current_exe():
+#                           with wrappers.cargoTargetLayout from
+#                           memberDefaults, the unit and integration tests
+#                           pass (the latter also in its private working
+#                           directory for CARGO_TARGET_TMPDIR), and so does
+#                           its test app, which leaves nothing behind;
+#                           under nextest too; under a runner, the runner
+#                           starts the moved binary; with the wrapper on
+#                           one binary only (`test.binaries.<key>`), the
+#                           other fails
 #   test-closure            over the `test-closure` fixture: a test run and
 #                           a doctest depend on no build-script run outside
 #                           their closure (`quiet`'s on nothing of
@@ -1071,6 +1082,93 @@ let
         mkdir -p $out
       '';
 
+  # --- test wrappers -----------------------------------------------------------
+
+  # The test-wrapper fixture finds the repository from current_exe(), which
+  # holds only under wrappers.cargoTargetLayout.
+  layout = breakbulk.wrappers.cargoTargetLayout { profile = "debug"; };
+  testWrapperRepo = breakbulk.mkRepository {
+    inherit pkgs tools;
+    root = fixtures + "/test-wrapper";
+    modules = [
+      {
+        workspaces.main.variants.default.profile = "dev";
+        workspaces.main.memberDefaults.test = {
+          keepLog = true;
+          wrapper = layout;
+        };
+        packages.locate.test.sourceScope = [ "repo-marker.txt" ];
+      }
+    ]
+    ++ extraModules;
+  };
+  # A runner that prints the path it was given, then runs it.
+  pathRunner = pkgs.writeShellScript "path-runner" ''
+    echo "runner: $1" >&2
+    exec "$@"
+  '';
+  wrapperWs =
+    test:
+    mk "test-wrapper" {
+      packages.locate.test = {
+        keepLog = true;
+        sourceScope = [ "repo-marker.txt" ];
+      }
+      // test;
+    };
+  testWrapper =
+    let
+      native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+      t = testWrapperRepo.workspaces.main.target.${native};
+      withRunner = mk "test-wrapper" {
+        packages.locate.test = {
+          keepLog = true;
+          sourceScope = [ "repo-marker.txt" ];
+          wrapper = layout;
+        };
+        runner = [ pathRunner ];
+      };
+      nx = wrapperWs {
+        runner = "nextest";
+        wrapper = layout;
+      };
+      # Only the library's unit tests get the wrapper; the integration
+      # test, without it, cannot find the repository.
+      perBinary = wrapperWs { binaries."lib/locate".wrapper = layout; };
+    in
+    pkgs.runCommand "test-runs-test-wrapper"
+      {
+        lib_ = t.testRuns.locate."lib/locate";
+        it = t.testRuns.locate.locate;
+        app = nixRunProgram t.testApps.locate.locate;
+        runnerRun = withRunner.testRuns.locate.locate;
+        nxLib = nx.testRuns.locate."lib/locate";
+        nxIt = nx.testRuns.locate.locate;
+        perBinaryLib = perBinary.testRuns.locate."lib/locate";
+        perBinaryIt = pkgs.testers.testBuildFailure perBinary.testRuns.locate.locate;
+      }
+      ''
+        grep -q 'test tests::finds_the_repository ... ok' $lib_/log
+        for t in finds_the_repository_from_current_exe runs_in_the_package_directory target_tmpdir_is_writable; do
+          grep -q "test $t ... ok" $it/log
+          grep -q "PASS .* locate::locate $t" $nxIt/log
+        done
+        grep -q 'PASS .* tests::finds_the_repository' $nxLib/log
+        # The wrapper is outermost: the runner starts the moved binary.
+        grep -q '^runner: /build/breakbulk-repo\.[^/]*/target/debug/deps/locate-' $runnerRun/log
+        grep -q 'test target_tmpdir_is_writable ... ok' $runnerRun/log
+        grep -q 'test tests::finds_the_repository ... ok' $perBinaryLib/log
+        grep -q 'test finds_the_repository_from_current_exe ... FAILED' $perBinaryIt/testBuildFailure.log
+        grep -q 'test target_tmpdir_is_writable ... ok' $perBinaryIt/testBuildFailure.log
+        $app | tee app.log
+        grep -q 'test result: ok. 3 passed' app.log
+        if [ -n "$(find /build -maxdepth 1 -name 'breakbulk-r*.*')" ]; then
+          echo "the test app left a directory behind" >&2
+          exit 1
+        fi
+        mkdir -p $out
+      '';
+
   # --- home ------------------------------------------------------------------
 
   # TH_EXPECT_NIX makes the fixture check that its home is fresh, empty and
@@ -1356,7 +1454,9 @@ in
     test-threads = testThreadsRepo;
     home = homeRepo;
     test-closure = testClosureRepo;
+    test-wrapper = testWrapperRepo;
   };
+  test-wrapper = testWrapper;
   test-closure = testClosure;
   post-run = postRun;
   inherit home;

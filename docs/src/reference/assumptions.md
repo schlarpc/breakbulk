@@ -439,7 +439,7 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 - **Where.** `crates/breakbulk-plan/src/graph.rs`: `TARGET_TMPDIR` (the relative `target/tmp`), `rewrite_env`; `lib/test-runs.nix` `workdirScript` (a private working directory with it writable, for binaries that contain the string).
 - **Upstream.** The Cargo book (environment variables for crates); cargo `src/compiler/mod.rs`.
 - **Holds for.** The window.
-- **Pinned by.** `test-runs-test-control` (the run, and a copy of the binary run in a scratch directory), `test-runs-test-control-app` (two runs of a test app at once). Checked by hand with the test-control fixture's `env` test run: it passes with `sandbox = false`.
+- **Pinned by.** `test-runs-test-control` (the run, and a copy of the binary run in a scratch directory), `test-runs-test-control-app` (two runs of a test app at once), `test-runs-test-wrapper` (with a test wrapper). Checked by hand with the test-control fixture's `env` test run: it passes with `sandbox = false`.
 - **If it changes.** A test that writes there fails.
 
 ## Rustflags, linkers and config

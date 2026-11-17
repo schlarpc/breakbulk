@@ -77,6 +77,9 @@
 #   - a binary that contains the planner's relative `CARGO_TARGET_TMPDIR`
 #     runs in a private copy of the package directory made of symbolic
 #     links, with a real, writable `target/tmp` (`workdirScript`);
+#   - with a test wrapper (`test.wrapper`, `test.binaries.<binary>.wrapper`),
+#     the wrapper starts the binary, and the runner runs inside it
+#     (`launchWords`);
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
 #     `$out`: it holds timings and, with several test threads, lines in a
 #     varying order, and `nix build --rebuild` compares every output. `$out`
@@ -466,6 +469,7 @@ rec {
       binaries = { };
       runner = "libtest";
       stripForRun = false;
+      wrapper = null;
       postRun = "";
       keepLog = false;
     }
@@ -549,9 +553,120 @@ rec {
       env = { };
       postRun = "";
       enable = true;
+      wrapper = null;
     }
     # Options left `null` take the defaults.
     // lib.filterAttrs (_: v: v != null) (cfg.binaries.${binary} or { });
+
+  # The test wrapper of one binary (`test.binaries.<binary>.wrapper`, else
+  # `test.wrapper`) as a program on `pkgs`' system, or null. A function is
+  # called with `pkgs` (`wrappers.cargoTargetLayout`'s result is one); a
+  # derivation with `meta.mainProgram` names that program.
+  wrapperOf =
+    pkgs: cfg: binary:
+    let
+      b = (binaryConfig cfg binary).wrapper;
+      w = if b != null then b else cfg.wrapper;
+      v = if builtins.isFunction w then w pkgs else w;
+    in
+    if v == null then
+      null
+    else if lib.isDerivation v && v.meta ? mainProgram then
+      lib.getExe v
+    else
+      toString v;
+
+  # BREAKBULK_NEXT: the program a test wrapper hands the binary and its
+  # arguments to, which starts it under `runner` (a list, possibly empty).
+  nextScript =
+    pkgs: runner:
+    pkgs.writeShellScript "breakbulk-test-next" ''
+      exec ${lib.escapeShellArgs runner} "$@"
+    '';
+
+  # The words (shell) that start a test binary given after them: under a
+  # test wrapper (`wrapperOf`, or null), the wrapper with BREAKBULK_NEXT
+  # and, when known (`sourceRoot`, a shell word, or null),
+  # BREAKBULK_SOURCE_ROOT, as `env` assignments; else the runner. The
+  # wrapper is outermost, so it runs on the machine that runs the test,
+  # and `current_exe()` under an emulator names what the wrapper started.
+  launchWords =
+    {
+      pkgs,
+      runner,
+      wrapper,
+      sourceRoot ? null,
+    }:
+    if wrapper == null then
+      lib.escapeShellArgs runner
+    else
+      "BREAKBULK_NEXT=${nextScript pkgs runner} "
+      + lib.optionalString (sourceRoot != null) "BREAKBULK_SOURCE_ROOT=${sourceRoot} "
+      + lib.escapeShellArg wrapper;
+
+  # Shell lines that give nextest the runner of the binary's platform
+  # (`triple`): nextest picks a binary's runner by its build platform's
+  # triple. Under a test wrapper, the wrapper is that runner, with the
+  # variables of `launchWords` exported, so nextest starts it as Cargo's
+  # runner protocol says, for listing and for each test. Not nextest's
+  # own wrapper scripts: they need the experimental `wrapper-scripts`
+  # feature, which only the project's main configuration file can turn on
+  # (nextest 0.9.146, nextest_version.rs: tool configs cannot, and no
+  # environment variable does).
+  nextestRunnerScript =
+    {
+      pkgs,
+      triple,
+      runner,
+      wrapper,
+      sourceRoot ? null,
+    }:
+    let
+      var = util.cargoTargetEnvVar triple "RUNNER";
+    in
+    if wrapper != null then
+      ''
+        export BREAKBULK_NEXT=${nextScript pkgs runner}
+        ${lib.optionalString (sourceRoot != null) "export BREAKBULK_SOURCE_ROOT=${sourceRoot}"}
+        export ${var}=${lib.escapeShellArg wrapper}
+      ''
+    else
+      lib.optionalString (runner != [ ]) "export ${var}=${lib.escapeShellArg (lib.concatStringsSep " " runner)}";
+
+  # The root of a run's source view, as a shell word, or null when its
+  # package directory is not inside one: the root of `checkout` (a string,
+  # or null for the spec's own view).
+  sourceRootOf =
+    spec: checkout:
+    if spec.packageDir == null then
+      null
+    else if checkout != null then
+      lib.escapeShellArg (lib.removeSuffix "/" (toString checkout))
+    else if spec.packageDir == "" then
+      lib.escapeShellArg spec.sourceDir
+    else
+      lib.escapeShellArg (lib.removeSuffix "/${spec.packageDir}" spec.sourceDir);
+
+  # The same for dynamic mode: shell lines that export
+  # BREAKBULK_SOURCE_ROOT from `breakbulk-root.json` (`$info`; `jq`, the
+  # jq executable), when known; `checkout` as in sourceRootOf.
+  sourceRootExport =
+    jq: checkout:
+    let
+      filter = ''
+        .testSpec
+        | if .packageDir == null then empty
+          elif $checkout != "" then $checkout
+          elif .packageDir == "" then .env.CARGO_MANIFEST_DIR
+          else .packageDir as $p | .env.CARGO_MANIFEST_DIR | rtrimstr("/" + $p)
+          end
+      '';
+      c = if checkout == null then "" else lib.removeSuffix "/" (toString checkout);
+    in
+    ''
+      __bb_root=$(${jq} -r --arg checkout ${lib.escapeShellArg c} ${lib.escapeShellArg filter} "$info")
+      if [ -n "$__bb_root" ]; then export BREAKBULK_SOURCE_ROOT=$__bb_root; fi
+    '';
 
   # A run's raw output, besides the build log: `$log` in `test.postRun`.
   logFile = "$TMPDIR/breakbulk-test.log";
@@ -952,8 +1067,6 @@ rec {
             root = r.breakbulkRoot;
           };
           nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
-          # nextest picks a binary's runner by its build platform's triple.
-          runnerVar = util.cargoTargetEnvVar p.triple "RUNNER";
         in
         p.testPkgs.runCommand "${name}-${s.name}-run"
           (
@@ -983,9 +1096,13 @@ rec {
             ${configScript cfg s.binary}
             ${threadsScript}
             ${nextestThreadsScript}
-            ${lib.optionalString (
-              s.runner != [ ]
-            ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " s.runner)}"}
+            ${nextestRunnerScript {
+              pkgs = p.testPkgs;
+              inherit (p) triple;
+              inherit (s) runner;
+              wrapper = wrapperOf p.testPkgs cfg s.binary;
+              sourceRoot = sourceRootOf s null;
+            }}
             ${coverageEnvScript coverage}
             ws=$TMPDIR/nextest-ws
             log=${logFile}
@@ -1075,7 +1192,14 @@ rec {
               __bb_workdir "''${files[0]}" ${lib.escapeShellArg s.sourceDir}
               cd "$__bb_wd"
               set +e
-              env "''${__bb_env[@]}" ${lib.escapeShellArgs s.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+              env "''${__bb_env[@]}" ${
+                launchWords {
+                  pkgs = testPkgs;
+                  inherit (s) runner;
+                  wrapper = wrapperOf testPkgs cfg s.binary;
+                  sourceRoot = sourceRootOf s null;
+                }
+              } "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
               status=''${PIPESTATUS[0]}
               set -e
               if [ "$status" -ne 0 ]; then
