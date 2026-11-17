@@ -2207,7 +2207,12 @@ in
           hackInChecks = repo.checks ? "main/${native}/variant-hack-lib-a.y/check";
           muslVariants = lib.attrNames m.variants == [ "musl-check" ];
           muslEmpty = m.packages == { } && m.tests == { } && m.testRuns == { } && m.doctests == { };
-          muslChecks = under "main/${musl}/" == [ "main/${musl}/variant-musl-check/check" ];
+          muslChecks =
+            under "main/${musl}/" == [
+              "main/${musl}/variant-musl-check/buildScriptPaths/build"
+              "main/${musl}/variant-musl-check/buildScriptPaths/test"
+              "main/${musl}/variant-musl-check/check"
+            ];
           # `tests = [ "lib-a" ]`: the test plan is `-p lib-a`, the build
           # plan stays `--workspace`.
           testsNarrowed = lib.attrNames n.tests == [ "lib-a" ] && lib.attrNames n.testRuns == [ "lib-a" ];
@@ -2290,7 +2295,9 @@ in
       leaves = r: lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) r.checks);
       nativeChecks = lib.filter (lib.hasPrefix "main/${native}/") (leaves repo);
       wasmChecks = lib.filter (lib.hasPrefix "main/${wasm}/") (leaves repo);
-      isRun = n: lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n;
+      # The test plan's buildScriptPaths check comes with the test runs.
+      isRun =
+        n: lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n || lib.hasSuffix "/buildScriptPaths/test" n;
       t = repo.workspaces.main.target;
     in
     assert lib.assertMsg (t.${native}.packages == { }) "products-tests-only: native products ${toString (lib.attrNames t.${native}.packages)}";

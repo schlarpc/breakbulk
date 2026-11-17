@@ -376,7 +376,7 @@ let
       allRuns = derivation {
         name = "${outerName}-runs";
         inherit system;
-        runs = builtins.outputOf outer.${runsOutput}.outPath "out";
+        runs = outputOf "runs" runsOutput;
         builder = tools.shell;
         args = [
           "-c"
