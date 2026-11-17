@@ -7,8 +7,18 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "dep",
+ "devdep",
+ "tool",
 ]
 
 [[package]]
 name = "dep"
+version = "0.1.0"
+
+[[package]]
+name = "devdep"
+version = "0.1.0"
+
+[[package]]
+name = "tool"
 version = "0.1.0"

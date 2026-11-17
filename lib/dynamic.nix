@@ -44,6 +44,11 @@
 #   i.allUnits                  a derivation that depends on every output
 #                                of every unit of the plan (the outer
 #                                derivation's `units.drv` output)
+#   i.buildScriptRuns            { runsFile; }: a file listing the `flags`
+#                                output of every build-script run of the
+#                                plan (the outer derivation's `runs.drv`
+#                                output), read at build time; IFD mode's
+#                                is the list of those outputs
 #   i.units                      an error: units are not known at
 #                                evaluation time
 #   i.ifdUnits                   the same units through IFD mode (importing
@@ -232,6 +237,8 @@ let
       # A derivation on every output of every unit; root outputs always have
       # a `.` before `.drv`, so they cannot be named like it.
       unitsOutput = "units.drv";
+      # A derivation on the `flags` output of every build-script run.
+      runsOutput = "runs.drv";
       # Likewise the docs derivation's wrapper.
       docsOutput = "docs.drv";
 
@@ -259,6 +266,7 @@ let
                 name = outerName;
                 inherit outputs;
                 units = unitsOutput;
+                runs = runsOutput;
                 doctests = doctestOutputs;
               }
               // lib.optionalAttrs docs { docs = docsOutput; }
@@ -269,7 +277,13 @@ let
           if dupes != [ ] then
             throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
           else
-            outputList ++ lib.attrValues doctestOutputs ++ [ unitsOutput ] ++ lib.optional docs docsOutput;
+            outputList
+            ++ lib.attrValues doctestOutputs
+            ++ [
+              unitsOutput
+              runsOutput
+            ]
+            ++ lib.optional docs docsOutput;
         BREAKBULK_INPUTS = context;
         requiredSystemFeatures = [ "builder-rpc-v0" ];
       };
@@ -293,6 +307,20 @@ let
         args = [
           "-c"
           ''${coreutils}/bin/ln -s "$units" "$out"''
+        ];
+      };
+
+      # Building it builds every build-script run of the plan, on both
+      # platforms, and nothing else (`$out/runs` lists their `flags`
+      # outputs): what the plan's `buildScriptPaths` check reads.
+      allRuns = derivation {
+        name = "${outerName}-runs";
+        inherit system;
+        runs = builtins.outputOf outer.${runsOutput}.outPath "out";
+        builder = tools.shell;
+        args = [
+          "-c"
+          ''${coreutils}/bin/ln -s "$runs" "$out"''
         ];
       };
 
@@ -388,6 +416,9 @@ let
     in
     {
       inherit outer allUnits;
+      buildScriptRuns = {
+        runsFile = "${allRuns}/runs";
+      };
       inherit (base) files inputs;
       delivery = "dynamic";
       roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) predicted);

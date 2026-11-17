@@ -300,42 +300,97 @@ let
 
   # --- declared-paths ----------------------------------------------------------
 
-  declaredPaths = modules: mkRepo (fixtures + "/declared-paths") ([ (oneWs ".") ] ++ modules);
+  # app selected: tool's script runs only for the build machine (app's
+  # build-dependency) and devdep's only in the test plan (its
+  # dev-dependency).
+  declaredPaths =
+    modules:
+    mkRepo (fixtures + "/declared-paths") (
+      [
+        (oneWs ".")
+        { workspaces.main.variants.default.packages = [ "app" ]; }
+      ]
+      ++ modules
+    );
   declaredMissing = declaredPaths [ ];
-  # app's path in its view; dep's header allowed by package and path glob.
-  # `allowedListed` runs the check itself and fails unless the allowed
-  # path is in its output, so the passing check is not passing because it
-  # read no run (dynamic-derivation mode builds it too).
+  # app's path in its view; the other headers allowed: dep's by a path
+  # glob, tool's by `*`, devdep's by its path.
   declaredProvided = declaredPaths [
-    (
-      let
-        check = breakbulk.stageHelpers.buildScriptPaths {
-          allow = [
-            {
-              package = "dep";
-              path = "/nonexistent/*";
-            }
-          ];
-        };
-      in
-      {
-        packages.app = {
-          extraSources = [ "shared" ];
-          checks.buildScriptPaths.run = check;
-          checks.allowedListed = {
-            on = "linked";
-            run =
-              { pkgs, ... }@args:
-              pkgs.runCommand "allowed-listed" { checked = check args; } ''
-                cat $checked/allowed
-                grep -qxF 'dep 0.1.0: /nonexistent/breakbulk-tool.h' $checked/allowed
-                touch $out
-              '';
-          };
-        };
-      }
-    )
+    {
+      packages.app.extraSources = [ "shared" ];
+      packages.dep.buildScriptPaths.allow = [ "/nonexistent/*" ];
+      packages.tool.buildScriptPaths.allow = [ "*" ];
+      packages.devdep.buildScriptPaths.allow = [ "/nonexistent/breakbulk-dev-dep.h" ];
+    }
   ];
+  # The test of `declared-paths`, over both repositories, for
+  # tests/dynamic to build in dynamic-derivation mode too.
+  declaredPathsTest =
+    let
+      missing = declaredMissing.workspaces.main.target.${native};
+      provided = declaredProvided.workspaces.main.target.${native};
+    in
+    assert lib.assertMsg (
+      !(missing.packages.app.checks ? buildScriptPaths)
+    ) "declared-paths: the product still has a buildScriptPaths check";
+    assert lib.assertMsg (
+      lib.attrNames missing.buildScriptPaths == [
+        "build"
+        "test"
+      ]
+    ) "declared-paths: expected a check per plan, got ${toString (lib.attrNames missing.buildScriptPaths)}";
+    assert lib.assertMsg (
+      declaredMissing.checks ? "main/${native}/buildScriptPaths/build"
+      && declaredMissing.checks ? "main/${native}/buildScriptPaths/test"
+    ) "declared-paths: the plan checks are not in repo.checks";
+    pkgs.runCommand "declared-paths"
+      {
+        missingApp = missing.packages.app;
+        providedApp = provided.packages.app;
+        buildFailure = pkgs.testers.testBuildFailure missing.buildScriptPaths.build;
+        testFailure = pkgs.testers.testBuildFailure missing.buildScriptPaths.test;
+        buildPassing = provided.buildScriptPaths.build;
+        testPassing = provided.buildScriptPaths.test;
+        inherit native;
+      }
+      ''
+        set -euo pipefail
+        [ "$($missingApp/bin/app)" = "app unknown absent" ]
+        [ "$($providedApp/bin/app)" = "app 1.2.3 absent" ]
+
+        log=$buildFailure/testBuildFailure.log
+        cat $log
+        grep -qF 'buildScriptPaths: build scripts of the build plan of workspace main' $log
+        grep -qE "^  app 0\.1\.0 \(for $native\): .*\`rerun-if-changed=\.\./shared/version\.txt\`.*\`packages\.app\.extraSources\`$" $log
+        # The path as its place in the view, `..` resolved.
+        grep -qE -- '-source/shared/version\.txt is not in the sandbox' $log
+        grep -qE "^  dep 0\.1\.0 \(for $native\): .*\`rerun-if-changed=/nonexistent/breakbulk-tool\.h\`.*\`packages\.dep\.inputs\`" $log
+        # A build-dependency's run, for the build machine.
+        grep -qE '^  tool 0\.1\.0 \(for the build machine\): .*`rerun-if-changed=/nonexistent/breakbulk-build-dep\.h`.*`packages\.tool\.' $log
+        ! grep -q devdep $log
+        grep -qxF '  packages.app.buildScriptPaths.allow = [ "../shared/version.txt" ];' $log
+        grep -qxF '  packages.dep.buildScriptPaths.allow = [ "/nonexistent/breakbulk-tool.h" ];' $log
+        grep -qxF '  packages.tool.buildScriptPaths.allow = [ "/nonexistent/breakbulk-build-dep.h" ];' $log
+
+        log=$testFailure/testBuildFailure.log
+        cat $log
+        grep -qF 'buildScriptPaths: build scripts of the test plan of workspace main' $log
+        # A dev-dependency's run, only in the test plan.
+        grep -qE "^  devdep 0\.1\.0 \(for $native\): .*\`rerun-if-changed=/nonexistent/breakbulk-dev-dep\.h\`.*\`packages\.devdep\.inputs\`" $log
+        grep -qE '^  tool 0\.1\.0 \(for the build machine\): ' $log
+        grep -qxF '  packages.devdep.buildScriptPaths.allow = [ "/nonexistent/breakbulk-dev-dep.h" ];' $log
+
+        # Passing because the paths are allowed, not because no run was read.
+        cat $buildPassing/allowed $testPassing/allowed
+        sort $buildPassing/allowed | diff - <(printf '%s\n' \
+          "dep 0.1.0 (for $native): /nonexistent/breakbulk-tool.h" \
+          "tool 0.1.0 (for the build machine): /nonexistent/breakbulk-build-dep.h")
+        sort $testPassing/allowed | diff - <(printf '%s\n' \
+          "dep 0.1.0 (for $native): /nonexistent/breakbulk-tool.h" \
+          "devdep 0.1.0 (for $native): /nonexistent/breakbulk-dev-dep.h" \
+          "tool 0.1.0 (for the build machine): /nonexistent/breakbulk-build-dep.h")
+        touch $out
+      '';
 
   # --- pkgid-short -------------------------------------------------------------
 
@@ -662,6 +717,7 @@ in
       provided
       declaredMissing
       declaredProvided
+      declaredPathsTest
       overrideRepo
       testOnly
       viewHints
@@ -1002,55 +1058,15 @@ in
       '';
 
   # Build scripts that declare missing `rerun-if-changed` paths and run
-  # on without them: the product builds, and its default
-  # `buildScriptPaths` check fails naming both paths, the option for each
-  # (`extraSources` for app's path in the repository, `inputs` for dep's
-  # header outside it), the `allow` setting for both and how to remove the
-  # check. With app's path in `extraSources` the script reads it and,
-  # with dep's header allowed, the check passes. A package name allows
-  # every path of its script; `null` removes the check.
-  declared-paths =
-    let
-      missingApp = declaredMissing.workspaces.main.packages.app;
-      providedApp = declaredProvided.workspaces.main.packages.app;
-      allowAll =
-        (declaredPaths [
-          {
-            packages.app.checks.buildScriptPaths.run = breakbulk.stageHelpers.buildScriptPaths {
-              allow = [
-                "app"
-                "dep"
-              ];
-            };
-          }
-        ]).workspaces.main.packages.app;
-      off = (declaredPaths [ { packages.app.checks.buildScriptPaths = null; } ]).workspaces.main.packages.app;
-    in
-    assert lib.assertMsg (!(off.checks ? buildScriptPaths)) "declared-paths: the check is not removable";
-    pkgs.runCommand "declared-paths"
-      {
-        inherit missingApp providedApp;
-        failure = pkgs.testers.testBuildFailure missingApp.checks.buildScriptPaths;
-        passing = providedApp.checks.buildScriptPaths;
-        listed = providedApp.checks.allowedListed;
-        allowed = allowAll.checks.buildScriptPaths;
-      }
-      ''
-        set -euo pipefail
-        [ "$($missingApp/bin/app)" = "app unknown absent" ]
-        [ "$($providedApp/bin/app)" = "app 1.2.3 absent" ]
-        log=$failure/testBuildFailure.log
-        cat $log
-        grep -qF 'buildScriptPaths: build scripts below app declared rerun-if-changed paths' $log
-        grep -qE '^  app 0\.1\.0: .*`rerun-if-changed=\.\./shared/version\.txt`.*`packages\.app\.extraSources`$' $log
-        # The path as its place in the view, `..` resolved.
-        grep -qE -- '-source/shared/version\.txt is not in the sandbox' $log
-        grep -qE '^  dep 0\.1\.0: .*`rerun-if-changed=/nonexistent/breakbulk-tool\.h`.*`packages\.dep\.inputs`' $log
-        grep -qF 'packages.app.checks.buildScriptPaths.run = breakbulk.stageHelpers.buildScriptPaths { allow = [ { package = "app"; path = "../shared/version.txt"; } { package = "dep"; path = "/nonexistent/breakbulk-tool.h"; } ]; };' $log
-        test "$(tail -n1 $log)" = 'or, when app is built correctly without them: packages.app.checks.buildScriptPaths = null;'
-        test "$(wc -l < $allowed/allowed)" = 2
-        touch $out
-      '';
+  # on without them: the product builds, and the build plan's
+  # `buildScriptPaths` check fails naming each path with its package, the
+  # run's platform and the option to add it to (`extraSources` for app's
+  # path in the repository, `inputs` for the headers outside it), and the
+  # `allow` setting for each. The build-dependency's run is for the build
+  # machine; the dev-dependency's is only in the test plan, whose check
+  # fails naming it. With app's path in `extraSources` and the headers
+  # allowed, both checks pass.
+  declared-paths = declaredPathsTest;
 
   # `tests/` and in-package `test.sourceScope` paths are test-only: editing
   # them changes only proto's test units (and its test runs), not its

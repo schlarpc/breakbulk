@@ -36,6 +36,9 @@
 #   - repo.explainSharing works in dynamic mode;
 #   - walking-skeleton and doctests, in both modes with `ca` off and on,
 #     build with only the Nix features their repo.nixFeatures lists;
+#   - with declared-paths: the plans' `buildScriptPaths` checks fail
+#     naming a build-dependency's and a dev-dependency's missing paths, and
+#     pass with them allowed (`declaredPaths` in default.nix);
 #   - with test-cutoff and test-options: a test run whose inputs' contents
 #     an edit leaves unchanged is not re-run (`cutoff` in default.nix).
 #
@@ -515,6 +518,21 @@ case " ${fixtures[*]} " in
     else
       tail -30 "$WORK/unpredicted.log" >&2
       echo "FAIL: roots-override without roots failed otherwise" >&2
+      status=1
+    fi
+    ;;
+esac
+
+# The plans' `buildScriptPaths` checks, failing and passing, read the runs
+# through `runs.drv`.
+case " ${fixtures[*]} " in
+  *" declared-paths "*)
+    say "declared-paths checks (dynamic-derivation mode)"
+    if mbuild --arg mode '"dynamic"' -L declaredPaths >"$WORK/declared-paths.log" 2>&1; then
+      echo "declared-paths: the plans' checks fail and pass as in IFD mode" >&2
+    else
+      tail -40 "$WORK/declared-paths.log" >&2
+      echo "FAIL: declared-paths checks in dynamic-derivation mode" >&2
       status=1
     fi
     ;;

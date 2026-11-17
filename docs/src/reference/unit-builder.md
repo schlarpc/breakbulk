@@ -166,8 +166,8 @@ name them.
      source view lacks, as for compiles ([Missing paths](#missing-paths)).
    - On success, warn about missing paths and list them in
      `missing-paths.json`. The run does not fail: the
-     [`buildScriptPaths`](stage-helpers.md#buildscriptpaths) check of
-     each product above it does.
+     [`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths)
+     check of its plan does.
 7. Remove CMake's internal state (details below).
 
 ### Failure hints
@@ -286,7 +286,7 @@ they read `<out>/<OUT_DIR relative>/…`.
 | File | Written when | Contents |
 | --- | --- | --- |
 | `directives.json` | always | Values grouped by kind, in printed order |
-| `metadata.json` | always | The package's name and version, its `links`, the `metadata` values (dependents' `DEP_*` when it has `links`) and the `OUT_DIR` path; see [Build-script runs](stage-functions.md#build-script-runs) |
+| `metadata.json` | always | The package's name and version, the platform the run was for, its `links`, the `metadata` values (dependents' `DEP_*` when it has `links`) and the `OUT_DIR` path; see [Build-script runs](stage-functions.md#build-script-runs) |
 | `target-files.json` | the script wrote files into `$out` outside `OUT_DIR` | Their paths, relative to `$out` |
 | `missing-paths.json` | the script declared `rerun-if-changed` paths that are not in the sandbox | Each as `declared` (as printed), `path` (resolved against the package directory) and `hint` (the warning's text, naming the option to add it to) |
 

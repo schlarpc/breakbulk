@@ -47,6 +47,11 @@
 #   checkVariant             (dynamic mode) a check variant's check of the
 #                            walking skeleton: every unit of both plans,
 #                            through the outer derivations' `units.drv`
+#   declaredPaths            tests/repository's declared-paths test: the
+#                            plans' `buildScriptPaths` checks fail naming
+#                            the build-dependency's and the
+#                            dev-dependency's paths, and pass with them
+#                            allowed (run.sh builds it in dynamic mode)
 #   unpredicted              roots-override without its `roots` option:
 #                            a product whose plan has a root that was not
 #                            predicted (run.sh checks that it fails)
@@ -382,9 +387,9 @@ let
     own-view = repository.ownView;
     stamps = repository.stampsA;
     missing-input = repository.provided;
-    # The `buildScriptPaths` check reads the runs' missing-paths.json
-    # through the roots' breakbulk-root.json; `allowedListed` fails unless
-    # it found dep's path.
+    # The plans' `buildScriptPaths` checks (in repo.checks) read the
+    # runs' missing-paths.json through the outer derivations' `runs.drv`;
+    # `declaredPaths` checks their failures.
     declared-paths = repository.declaredProvided;
     test-only = repository.testOnly;
     sources = repository.sources;
@@ -915,7 +920,13 @@ let
     lib.mapAttrs (
       name: repo:
       pkgs.writeText "dynamic-prereqs-${name}" (
-        lib.concatStringsSep "\n" (plansOf name ([ repo ] ++ lib.optional (name == "walking-skeleton") lintRepo))
+        lib.concatStringsSep "\n" (
+          plansOf name (
+            [ repo ]
+            ++ lib.optional (name == "walking-skeleton") lintRepo
+            ++ lib.optional (name == "declared-paths") repository.declaredMissing
+          )
+        )
       )
     ) repos
     // {
@@ -1018,6 +1029,7 @@ in
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
   unpredicted = repository.rootsPredicted.workspaces.main.packages.app;
+  declaredPaths = repository.declaredPathsTest;
   explain = lib.mapAttrs (
     name: repo:
     let

@@ -33,11 +33,44 @@ attribute set of (submodule)
 *Declared by:*
  - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)
 
+## `packages.<name>.buildScriptPaths.allow`
+
+` rerun-if-changed ` paths this package’s build script declares
+and does not need, as shell glob patterns matched against the
+path as the script printed it (` "*" `: every path)\. The
+[` buildScriptPaths `](\.\./\.\./explanation/configuration\.md\#missing-build-script-paths)
+check of each plan fails when a build-script run declared a path
+that was not in its view, unless the run’s package allows it
+here\. It applies to the package’s runs on both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides)\. A path
+the script reads goes in ` extraSources ` (in the repository) or
+` inputs ` (outside it) instead\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  "../Cargo.lock"
+  "/usr/include/*"
+]
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.checks`
 
 Checks on this package’s products, as ` targets.<triple>.checks `\.
 They are added to the target’s checks and to the default checks
-(` noSourceReferences `, ` buildScriptFiles `, ` buildScriptPaths `)\. ` null ` removes a check
+(` noSourceReferences `, ` buildScriptFiles `)\. ` null ` removes a check
 from this package only\.
 
 *Type:*

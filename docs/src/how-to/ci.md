@@ -125,6 +125,7 @@ arguments as `nix build`. Its tree shows each failed build (`⚠`, red)
 below the derivations that need it, so the lowest failed entry is a
 root failure.
 
-Checks fail without stopping the products: a product whose
-[`buildScriptPaths`](../reference/stage-helpers.md#buildscriptpaths)
-check fails still builds, and the check's log names every path to add.
+Checks fail without stopping the products: when a plan's
+[`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths)
+check fails, its products still build, and the check's log names every
+path to add.

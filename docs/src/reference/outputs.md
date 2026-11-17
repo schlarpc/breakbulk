@@ -72,10 +72,12 @@ repo = {
         benchRuns.<pkg>.<binary>;    # each bench run once in test mode
         namedBenchRuns.<pkg>.<bench>;  # the same, named as in benches; .enabled
         docs;                        # `cargo doc`'s folder
+        buildScriptPaths.<plan>;     # each plan's check (build, test)
         check;                       # check and clippy variants only
       };
       # The default variant's, as above:
       packages; tests; testRuns; namedTestRuns; testApps; doctests; docs;
+      buildScriptPaths;
       # The bench variant's (the default variant, or the only one with benches):
       benches; benchRuns; namedBenchRuns;
       runner;                # the runner (a list), or null
@@ -131,15 +133,22 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 | product check | `…/<pkg>/<check>` | `…/variant-<v>/<pkg>/<check>` |
 | test run | `…/<pkg>/test-<name>` | `…/variant-<v>/<pkg>/test-<name>` |
 | doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
+| plan check | `…/buildScriptPaths/<plan>` | `…/variant-<v>/buildScriptPaths/<plan>` |
 | check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
 
-The first four rows come from every build or coverage variant with
+The first five rows come from every build or coverage variant with
 [`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)
 (the default for hand-written variants, not for the feature-matrix
 helpers'). A product whose roots Cargo all skipped is left out, and so
 is a test run or doctest turned off with
 [`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable)
 or [`test.doctest.enable`](options/packages.md#packagesnametestdoctestenable).
+A plan check is
+[`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths)
+of the build plan (`<plan>` is `build`), unless the target has no
+products, and of the test plan (`test`), unless it has no tests. Check
+and clippy variants have the plan checks of the plans their `check`
+builds.
 
 Groups are checks too, each an aggregate (a `linkFarm` of the checks it
 holds) that builds them as one installable

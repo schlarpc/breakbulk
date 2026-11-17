@@ -90,6 +90,7 @@ let
       featureGates
       ;
   };
+  buildScriptPaths = import ./build-script-paths.nix { inherit lib; };
   variants = import ./variants.nix { inherit lib util manifest; };
   testApps = import ./test-apps.nix {
     inherit lib;
@@ -223,6 +224,7 @@ let
       mkWorkspace
       dynamic
       products
+      buildScriptPaths
       presets
       targetTraits
       toolchainFacts

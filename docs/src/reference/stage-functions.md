@@ -90,14 +90,14 @@ breakbulk read from the script's output:
 
 | File | Contents |
 | --- | --- |
-| `metadata.json` | `package` and `version`: the package's name and version. `links`: its `links` name, only when it has one. `metadata`: the `[key, value]` pairs of its `cargo::metadata=key=value` lines, in printed order. `out`: the path of its `OUT_DIR`. |
+| `metadata.json` | `package` and `version`: the package's name and version. `platform`: `host` for a run for the build machine (a build dependency's, a proc macro's or one of their dependencies'), `target` otherwise. `links`: its `links` name, only when it has one. `metadata`: the `[key, value]` pairs of its `cargo::metadata=key=value` lines, in printed order. `out`: the path of its `OUT_DIR`. |
 | `directives.json` | Its other directives, and the copies of Cargo's `target/<profile>` that hold files the script placed next to the binaries (`targetDirs`; `buildScriptFiles` reads them). See [The `flags` output](unit-builder.md#the-flags-output). |
-| `missing-paths.json` | Only when the script declared `rerun-if-changed` paths that were not in its view: each one, with the option to add it to. `buildScriptPaths` reads it. |
+| `missing-paths.json` | Only when the script declared `rerun-if-changed` paths that were not in its view: each one, with the option to add it to. The plan's [`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths) check reads it. |
 
 For wasmtime's C API crate, `metadata.json` reads:
 
 ```json
-{"package":"wasmtime-c-api-impl","version":"50.0.1","links":"wasmtime-c-api",
+{"package":"wasmtime-c-api-impl","version":"50.0.1","platform":"target","links":"wasmtime-c-api",
  "metadata":[["include","/nix/store/…-wasmtime-c-api-impl-50.0.1-build-run/…/out/include"]],
  "out":"/nix/store/…-wasmtime-c-api-impl-50.0.1-build-run/…/out"}
 ```

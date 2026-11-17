@@ -5,3 +5,9 @@ edition = "2021"
 
 [dependencies]
 dep = { path = "../dep" }
+
+[build-dependencies]
+tool = { path = "../tool" }
+
+[dev-dependencies]
+devdep = { path = "../devdep" }

@@ -322,6 +322,11 @@ rec {
     in
     {
       inherit units unitsJson;
+      # The `flags` output of every build-script run of the plan, on both
+      # platforms (`buildScriptRuns` in lib/dynamic.nix).
+      buildScriptRuns = lib.concatLists (
+        lib.mapAttrsToList (id: d: lib.optional (lib.elem "flags" d.attrs.outputs) units.${id}.flags) json.units
+      );
       # For dynamic-derivation mode (lib/dynamic.nix), which runs the same
       # instantiation inside its outer derivation: the files given to
       # breakbulk-instantiate, and every input key's value with its context.

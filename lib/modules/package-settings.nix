@@ -207,6 +207,25 @@ let
           ends with a hint naming the path and this option.
         '';
       };
+      buildScriptPaths.allow = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [
+          "../Cargo.lock"
+          "/usr/include/*"
+        ];
+        description = ''
+          `rerun-if-changed` paths this package's build script declares
+          and does not need, as shell glob patterns matched against the
+          path as the script printed it (`"*"`: every path). The
+          [`buildScriptPaths`](../../explanation/configuration.md#missing-build-script-paths)
+          check of each plan fails when a build-script run declared a path
+          that was not in its view, unless the run's package allows it
+          here. It applies to the package's runs on both ${sides}. A path
+          the script reads goes in `extraSources` (in the repository) or
+          `inputs` (outside it) instead.
+        '';
+      };
       sourceOverlay = mkOption {
         type = types.lazyAttrsOf (
           types.oneOf [
@@ -301,7 +320,7 @@ let
         description = ''
           Checks on this package's products, as `targets.<triple>.checks`.
           They are added to the target's checks and to the default checks
-          (`noSourceReferences`, `buildScriptFiles`, `buildScriptPaths`). `null` removes a check
+          (`noSourceReferences`, `buildScriptFiles`). `null` removes a check
           from this package only.
         '';
       };

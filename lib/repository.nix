@@ -35,6 +35,10 @@
 #   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
 #   repo.workspaces.<ws>.target.<triple>.docs          `cargo doc`'s folder
 #                                                      (also per variant)
+#   repo.workspaces.<ws>.target.<triple>.buildScriptPaths.{build,test}
+#                                                      the plans' checks of
+#                                                      missing build-script
+#                                                      paths (also per variant)
 #   repo.workspaces.<ws>.target.<triple>.spec          the resolved target spec
 #   repo.workspaces.<ws>.target.<triple>.traits        the target's traits
 #
@@ -50,9 +54,11 @@
 # repo.checks: for each build or coverage variant with `checks = true`,
 # `<pkg>/build` (the product), `<pkg>/<check>` (its checks),
 # `<pkg>/test-<name>` and `<pkg>/doctest` (enabled test runs and
-# doctests), under `<ws>/<triple>/` for the default variant and
-# `<ws>/<triple>/variant-<v>/` for the others; check and clippy variants
-# as `<ws>/<triple>/variant-<v>/check`. Every proper prefix of those names,
+# doctests), `buildScriptPaths/{build,test}` (the plans' checks), under
+# `<ws>/<triple>/` for the default variant and `<ws>/<triple>/variant-<v>/`
+# for the others; check and clippy variants as
+# `<ws>/<triple>/variant-<v>/check` and `…/buildScriptPaths/<plan>`.
+# Every proper prefix of those names,
 # `all` and each of `checkGroups` is also a check: an aggregate of the
 # checks it selects (lib/check-groups.nix).
 #
@@ -72,6 +78,7 @@
   mkWorkspace,
   dynamic,
   products,
+  buildScriptPaths,
   variantsLib,
   presets,
   targetTraits,
@@ -274,6 +281,7 @@ let
   };
   emptyOverride = emptySide // {
     extraSources = [ ];
+    buildScriptPaths.allow = [ ];
     forHost = emptySide;
     forTarget = emptySide;
   };
@@ -288,6 +296,7 @@ let
     mergeSide a b
     // {
       extraSources = a.extraSources ++ b.extraSources;
+      buildScriptPaths.allow = a.buildScriptPaths.allow ++ b.buildScriptPaths.allow;
       forHost = mergeSide a.forHost b.forHost;
       forTarget = mergeSide a.forTarget b.forTarget;
     };
@@ -962,6 +971,31 @@ let
         acc // { ${e.name} = lib.unique ((acc.${e.name} or [ ]) ++ o.extraSources); }
     ) { } entries;
 
+  # The `buildScriptPaths` check of one plan (lib/build-script-paths.nix),
+  # with each lockfile entry's `buildScriptPaths.allow`.
+  planPathsCheck =
+    wsName: triple: vName: inst: kind:
+    buildScriptPaths.mkCheck {
+      inherit pkgs;
+      name = "${wsName}-${triple}-${vName}-${kind}-build-script-paths";
+      plan = "the ${kind} plan of workspace ${wsName}, target ${triple}, variant ${vName}";
+      targetName = triple;
+      runs = inst.buildScriptRuns.${kind};
+      allow = lib.concatMap (
+        e:
+        let
+          o = overrideFor wsName triple vName e;
+        in
+        lib.optionals (o != null) (
+          map (path: {
+            package = e.name;
+            inherit (e) version;
+            inherit path;
+          }) (lib.unique o.buildScriptPaths.allow)
+        )
+      ) locks.${wsName};
+    };
+
   # --- workspaces --------------------------------------------------------------
 
   # The packages a variant plans on a target (null: the whole workspace):
@@ -1273,6 +1307,18 @@ let
                   psel = productSelOf wsName triple v;
                 in
                 if psel == false then { } else productsOf wsName ws triple vName v inst psel;
+              # The `buildScriptPaths` check of each plan the variant
+              # builds: the build plan (unless products are off), and the
+              # test plan when there are test outputs; a check or clippy
+              # variant's plans are those its `check` builds.
+              buildScriptPaths =
+                let
+                  checking = v.mode == "check" || v.mode == "clippy";
+                  kinds =
+                    lib.optional (checking || productSelOf wsName triple v != false) "build"
+                    ++ lib.optional (if checking then v.allTargets else testsOn) "test";
+                in
+                lib.genAttrs kinds (kind: planPathsCheck wsName triple vName inst kind);
               tests = ifTests (testsOf inst tSel);
               testRuns = ifTests (selectPkgs tSel inst.testRuns);
               # testRuns named as `tests` names test binaries, for repo.checks.
@@ -1319,6 +1365,7 @@ let
               testApps = { };
               doctests = { };
               docs = null;
+              buildScriptPaths = { };
             };
           cells = variantCells.${wsName}.${triple};
           benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) cells);
@@ -1350,6 +1397,7 @@ let
             testApps
             doctests
             docs
+            buildScriptPaths
             ;
           # The target spec's runner (a list: program and arguments, or
           # null) and test system, as test runs use them.
@@ -1434,8 +1482,9 @@ let
   # coverage variant with `checks = true` (the default variant's under the
   # target, the others' under `variant-<v>/`): its products that built
   # something (`<pkg>/build`) and their checks, every enabled test run
-  # (`<pkg>/test-<name>`, named as in `tests`) and doctest; check and
-  # clippy variants' `check`.
+  # (`<pkg>/test-<name>`, named as in `tests`) and doctest, and the
+  # plans' `buildScriptPaths/<plan>`; check and clippy variants' `check`
+  # and `buildScriptPaths/<plan>`.
   checks = lib.concatMapAttrs (
     wsName: w:
     lib.concatMapAttrs (
@@ -1461,6 +1510,7 @@ let
               // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
             )
           ) v.packages
+          // lib.mapAttrs' (kind: c: lib.nameValuePair "${prefix}/buildScriptPaths/${kind}" c) v.buildScriptPaths
           // lib.optionalAttrs t.canRunTests (
             lib.concatMapAttrs (
               pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
@@ -1475,7 +1525,15 @@ let
         ) t.namedBenchRuns
       )
       // lib.concatMapAttrs (
-        vName: v: lib.optionalAttrs (v ? check) { "${wsName}/${triple}/variant-${vName}/check" = v.check; }
+        vName: v:
+        lib.optionalAttrs (v ? check) (
+          {
+            "${wsName}/${triple}/variant-${vName}/check" = v.check;
+          }
+          // lib.mapAttrs' (
+            kind: c: lib.nameValuePair "${wsName}/${triple}/variant-${vName}/buildScriptPaths/${kind}" c
+          ) v.buildScriptPaths
+        )
       ) t.variants
     ) w.target
   ) workspaces

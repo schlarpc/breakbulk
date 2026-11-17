@@ -313,15 +313,37 @@ test-only path that non-test code reads
 ([Missing paths](../reference/unit-builder.md#missing-paths)). So does a
 build script that fails while it names a `rerun-if-changed` path that is
 missing from its sandbox. A build script that succeeds without such a
-path often skipped work without saying so. The run then warns, and every
-product above it fails its
-[`buildScriptPaths`](../reference/stage-helpers.md#buildscriptpaths)
-check, which names each path, its package and the option to add it to.
-The product itself still builds. A path a script declares but does not
-need goes in the check's `allow`. A build script that probes for a file
-(`Path::exists()`) and takes another path when it is absent gets no
-message: it neither fails nor names the file. Such a file must be in
-`extraSources` too.
+path is the subject of the next section. A build script that probes
+for a file (`Path::exists()`) and takes another path when it is absent
+gets no message: it neither fails nor names the file. Such a file must
+be in `extraSources` too.
+
+### Missing build-script paths
+
+A build script that succeeds while a `rerun-if-changed` path it
+declared is missing from its view often skipped work without saying
+so. The run warns in its build log. Each plan also has a
+`buildScriptPaths` check, in `repo.checks` as
+`<ws>/<triple>/buildScriptPaths/build` and `…/test`
+([`checks`](../reference/outputs.md#checks)). It reads every
+build-script run of the plan: the runs for the target, the runs for the
+build machine (build dependencies, proc macros and their dependencies),
+and the runs only tests depend on (dev-dependencies). It fails naming
+each missing path, the package, the platform the run was for and the
+option to add the path to: `extraSources` for a path in the
+repository, `inputs` (or `nativeInputs`) for one outside it. The
+products and test runs still build.
+
+A path a script declares but does not need goes in that package's
+[`buildScriptPaths.allow`](../reference/options/packages.md#packagesnamebuildscriptpathsallow),
+a list of shell glob patterns over the path as the script printed it;
+the failure prints the setting for every path it names, and `"*"`
+allows every path of the package. For example, when deno's
+`cli/build.rs` need not see `../Cargo.lock`:
+
+```nix
+packages.deno.buildScriptPaths.allow = [ "../Cargo.lock" ];
+```
 
 Registry crates are under `repo.sources.<crate>`, for steps that need a
 file from inside a dependency (a bundled SDK, JS glue shipped in a

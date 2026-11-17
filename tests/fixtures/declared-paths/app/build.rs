@@ -5,4 +5,5 @@ fn main() {
         .map(|v| v.trim().to_owned())
         .unwrap_or_else(|_| "unknown".to_owned());
     println!("cargo::rustc-env=SHARED_VERSION={version}");
+    println!("cargo::rustc-env=HOST_TOOL={}", tool::TOOL);
 }

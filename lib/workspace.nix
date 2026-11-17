@@ -31,6 +31,8 @@
 #   ws.plans.{build,test,doc}  the plan derivations ($out/plan.json)
 #   ws.cargoEnv                the dev shell's cargo-env.json (no planning)
 #   ws.units.{build,test,doc}  every unit derivation, by unit id
+#   ws.buildScriptRuns.{build,test}   the `flags` outputs of every
+#                              build-script run of the plan
 #   ws.docs                    the doc plan's docs (`cargo doc`'s folder);
 #                              `docsNoDeps = true` (the default) traces
 #                              `cargo doc --no-deps`
@@ -650,6 +652,13 @@ in
     doc = documented.unitsJson;
   }
   // lib.optionalAttrs bench { bench = benched.unitsJson; };
+  # The `flags` outputs of every build-script run of the build and test
+  # plans, on both platforms: a list (IFD mode), or `{ runsFile; }`, a
+  # file listing them at build time (lib/dynamic.nix).
+  buildScriptRuns = {
+    build = built.buildScriptRuns;
+    test = tested.buildScriptRuns;
+  };
   inherit delivery capabilities;
   # Dynamic-derivation mode: the outer derivations, by plan kind.
   outer = lib.optionalAttrs isDynamic (

@@ -2,9 +2,12 @@
 # view and run on without them, as deno's `cli/build.rs` does with
 # `../Cargo.lock`: `app` reads ../shared/version.txt when it is there (a
 # path in the repository, outside the package), `dep` probes a header
-# outside the repository. Both runs succeed; every product above them
-# fails its `buildScriptPaths` check, naming both paths with
-# `packages.app.extraSources` and `packages.dep.inputs`.
+# outside the repository. `tool`, a build-dependency of `app`, and
+# `devdep`, a dev-dependency of it, probe headers outside the repository
+# too: with `app` selected, tool's script runs only for the build machine
+# and devdep's only in the test plan. Every run succeeds; the build plan's
+# `buildScriptPaths` check fails naming app's, dep's and tool's paths, the
+# test plan's devdep's as well.
 [workspace]
 resolver = "2"
-members = ["app", "dep"]
+members = ["app", "dep", "tool", "devdep"]
