@@ -51,10 +51,12 @@
 # --optional-deps). Names: `<prefix>-<pkg>`, `<prefix>-<pkg>.all-features`,
 # `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. As
 # with featurePowerset, each has `checks = false` unless the arguments say
-# otherwise. Each run's `features`, `noDefaultFeatures` and `allFeatures`
-# win over a target's `variantDefaults` (`mkOverride 90`), which name
-# workspace features a `-p <pkg>` run may not have; the variant's own
-# `target.<triple>` layer can still replace them with `mkForce`.
+# otherwise. A run's `features`, `noDefaultFeatures` and `allFeatures` are
+# plain definitions: `features` given here or set elsewhere is added to the
+# run's, and a target's `variantDefaults` apply as to any variant. Of those
+# defaults' features, a run keeps the ones its package accepts
+# (`variants.<v>.packages`); a `variantDefaults` `noDefaultFeatures = true`
+# turns the run's default features off.
 #
 #   breakbulk.variants.unitsCheck { pkgs; name; units = [ … ]; }
 #
@@ -71,13 +73,6 @@ let
   # All subsets of a list, in order, smallest first; each subset keeps the
   # list's order.
   subsets = l: lib.foldr (x: acc: acc ++ map (s: [ x ] ++ s) acc) [ [ ] ] l;
-
-  # A package run's own feature selection, over a target's
-  # `variantDefaults`: those name the workspace's features, which Cargo
-  # rejects for a `-p <pkg>` run whose package lacks them (`does not
-  # contain this feature`). Not `mkForce`, so that the variant's own
-  # `target.<triple>` layer can still replace it with `mkForce`.
-  runOwn = lib.mkOverride 90;
 
   # A store-name-safe spelling of a feature (`pkg/feat` → `pkg_feat`).
   safe = lib.replaceStrings [ "/" ":" " " ] [ "_" "_" "_" ];
@@ -262,15 +257,13 @@ let
                   checks = false;
                 }
                 // settings
-                // lib.mapAttrs (_: runOwn) (
-                  {
-                    features = [ ];
-                    noDefaultFeatures = false;
-                    allFeatures = false;
-                  }
-                  // r.settings
-                )
                 // {
+                  noDefaultFeatures = false;
+                  allFeatures = false;
+                }
+                // r.settings
+                // {
+                  features = settings.features or [ ] ++ r.settings.features or [ ];
                   packages = [ p.name ];
                 }
               )

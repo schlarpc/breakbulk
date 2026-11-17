@@ -92,8 +92,9 @@
 #   variants-per-target   `targets.<t>.variantDefaults` and
 #                    `variants.<v>.target.<t>` (wasm32 with rust-overlay's
 #                    1.99): a feature on one target only, a variant's
-#                    layer replacing the defaults, a package run keeping
-#                    its own features, `allTargets = false` on one
+#                    layer replacing the defaults, a package run taking
+#                    the defaults' features its package accepts and a
+#                    user's own, `allTargets = false` on one
 #                    target; a single value in the variant's target layer
 #                    wins over the variant and `variantDefaults` without
 #                    mkForce, priorities still count (`checks` on one
@@ -2179,8 +2180,9 @@ in
   # Per-target variant settings: castaway's shape (one `default` variant,
   # a feature only on another target, through that target's
   # `variantDefaults`), a variant replacing the defaults in its own target
-  # layer, a package run keeping its own features over the defaults, and
-  # `allTargets = false` on one target only. wasm32 stands in for msvc,
+  # layer, a package run taking only the defaults' features its package
+  # accepts and a plain `features` of the user's, and `allTargets = false`
+  # on one target only. wasm32 stands in for msvc,
   # with a rust-overlay toolchain that has its std.
   # A target only built (wasm32, `tests = false`) next to one only tested
   # (native, `products = false`): repo.checks has the native test runs and
@@ -2254,8 +2256,12 @@ in
                 };
                 targets = {
                   ${native} = { };
+                  # `extra` is app's feature, not lib-a's.
                   ${wasm}.variantDefaults = {
-                    features = [ "lib-a/y" ];
+                    features = [
+                      "lib-a/y"
+                      "extra"
+                    ];
                     testProfile = "release";
                   };
                 };
@@ -2265,31 +2271,37 @@ in
           }
         ];
       repo = repoWith {
-        variants = {
-          default.profile = "release";
-          own = {
-            profile = "release";
-            features = [ "lib-a/x" ];
-            target.${wasm} = {
-              features = lib.mkForce [ ];
-              noDefaultFeatures = true;
-              testProfile = lib.mkForce "dev";
-            };
-          };
-          gate = {
-            mode = "check";
-            profile = "release";
-            target.${wasm}.allTargets = false;
-          };
-        }
-        // breakbulk.variants.packageFeaturePowerset {
-          root = fixtures + "/variants";
-          path = "ws";
-          packages = [ "lib-a" ];
-          eachFeature = true;
-          mode = "check";
-          profile = "release";
-        };
+        variants = lib.mkMerge [
+          (
+            {
+              default.profile = "release";
+              own = {
+                profile = "release";
+                features = [ "lib-a/x" ];
+                target.${wasm} = {
+                  features = lib.mkForce [ ];
+                  noDefaultFeatures = true;
+                  testProfile = lib.mkForce "dev";
+                };
+              };
+              gate = {
+                mode = "check";
+                profile = "release";
+                target.${wasm}.allTargets = false;
+              };
+            }
+            // breakbulk.variants.packageFeaturePowerset {
+              root = fixtures + "/variants";
+              path = "ws";
+              packages = [ "lib-a" ];
+              eachFeature = true;
+              mode = "check";
+              profile = "release";
+            }
+          )
+          # A plain definition next to the generated one.
+          { "hack-lib-a.x".features = [ "y" ]; }
+        ];
       };
       w = repo.workspaces.main;
       # The package runs are check variants: their test plans keep
@@ -2312,16 +2324,24 @@ in
         lib.filterAttrs (_: ok: !ok) {
           # The default variant: lib-a/y on wasm only.
           defaultNative = !(has native "default" "--features");
-          defaultWasm = has wasm "default" "--features lib-a/y";
+          defaultWasm = has wasm "default" "--features lib-a/y" && has wasm "default" "--features extra";
           # `own`: its feature natively; on wasm its layer replaces both.
           ownNative = has native "own" "--features lib-a/x" && !(has native "own" "--no-default-features");
           ownWasm = !(has wasm "own" "--features") && has wasm "own" "--no-default-features";
-          # A `-p lib-a` run keeps exactly its own features on wasm.
+          # A `-p lib-a` run: its own features, the user's, and of the
+          # defaults only lib-a's.
           hackWasm =
             has wasm "hack-lib-a.x" "--features x"
-            && !(lib.hasInfix "lib-a/y" (planCmd wasm "hack-lib-a.x" "build"));
+            && has wasm "hack-lib-a.x" "--features y"
+            && has wasm "hack-lib-a.x" "--features lib-a/y"
+            && !(lib.hasInfix "extra" (planCmd wasm "hack-lib-a.x" "build"));
+          hackNative =
+            has native "hack-lib-a.x" "--features x"
+            && has native "hack-lib-a.x" "--features y"
+            && !(lib.hasInfix "lib-a/y" (planCmd native "hack-lib-a.x" "build"));
           hackNoDefault =
-            !(has wasm "hack-lib-a.no-default-features" "--features")
+            has wasm "hack-lib-a.no-default-features" "--features lib-a/y"
+            && !(lib.hasInfix "extra" (planCmd wasm "hack-lib-a.no-default-features" "build"))
             && has wasm "hack-lib-a.no-default-features" "--no-default-features";
           # `allTargets = false` on wasm only: the build plan's units there,
           # both plans' natively.

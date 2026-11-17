@@ -6,3 +6,8 @@ edition.workspace = true
 [dependencies]
 lib-a = { path = "../lib-a", default-features = false }
 pm = { path = "../../deps/pm" }
+
+# Not lib-a's: a target's `variantDefaults` naming it reaches app's runs
+# and the workspace's, not a `-p lib-a` run's.
+[features]
+extra = []

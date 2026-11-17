@@ -218,11 +218,19 @@ or `checks`, set in two layers takes the later layer's value. To replace
 the other layers' lists, use `lib.mkForce` on a list. See [Layers and
 priorities](#layers-and-priorities).
 
-`breakbulk.variants.packageFeaturePowerset` runs keep their own
-`features`, `noDefaultFeatures` and `allFeatures` over `variantDefaults`:
-each run selects one package (`-p`), and Cargo rejects a feature that
-the selected package does not have
-([priorities](#layers-and-priorities)).
+A variant that selects packages
+([`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)),
+such as each `breakbulk.variants.packageFeaturePowerset` run, gets only
+the `variantDefaults` features that one of its packages accepts. Cargo
+runs it with `-p <pkg>`, and then accepts only the package's own
+features and optional dependencies, `<pkg>/<feature>` and
+`<dependency>/<feature>`. For example, with `variantDefaults.features =
+[ "windows" "app/gui" ]`, a run of `core` gets `windows` if `core` has
+that feature, and never `app/gui` unless `app` is a dependency of
+`core`. The variant's own features are not filtered: Cargo reports a
+wrong one. `variantDefaults.noDefaultFeatures = true` applies to every
+run, so a run with default features becomes the same as its
+`no-default-features` run on that target.
 
 ## Package settings per target or variant
 
@@ -289,11 +297,6 @@ stage of `stages` and each check of `checks`. A `lib.mkForce` around a
 whole set (`env = lib.mkForce { FOO = "a"; }`) counts for each variable
 in it. Stages and checks of equal priority from several layers still
 merge their fields, as without priorities.
-
-`breakbulk.variants.packageFeaturePowerset` gives each run's
-`features`, `noDefaultFeatures` and `allFeatures` priority 90, so they
-win over `variantDefaults`. To change them in the run's own
-`target.<triple>`, use `lib.mkForce`.
 
 ## Windows (MSVC)
 

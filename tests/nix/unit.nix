@@ -86,8 +86,10 @@ let
   # Layered settings (lib/modules/types.nix `layer`): a base evaluation
   # extended with layers 1 and 2, as a variant's settings on a target.
   bt = import ../../lib/modules/types.nix { inherit lib; };
-  layered =
-    base: layers:
+  layered = layeredWith (_: v: v);
+  # `value`: each layer's rewrite of its values (`layer`'s third argument).
+  layeredWith =
+    value: base: layers:
     let
       e = lib.evalModules {
         modules = [
@@ -117,7 +119,7 @@ let
           base
         ];
       };
-      c = (e.extendModules { modules = lib.imap1 (r: bt.layer r e.config.isSingle) layers; }).config;
+      c = (e.extendModules { modules = lib.imap1 (r: bt.layer r e.config.isSingle value) layers; }).config;
     in
     {
       inherit (c) profile flag features;
@@ -521,9 +523,11 @@ runTests "lib-unit" {
   # cargo-hack's per-package matrix (field-trial gap 10). Expected sets are
   # what `cargo hack check --workspace --feature-powerset` and
   # `--each-feature --print-command-list` (cargo-hack 0.6.45) print for the
-  # variants fixture: app has no features (one plain run); lib-a has
-  # default = [x], x, y and no optional dependencies (no --all-features in
-  # the powerset; `default+x` is left out, since default enables x).
+  # variants fixture (cargo-hack 0.6.46 for app's `extra`): app has one
+  # feature, `extra`, and no optional dependencies (no --all-features);
+  # lib-a has default = [x], x, y and no optional dependencies (no
+  # --all-features in the powerset; `default+x` is left out, since default
+  # enables x).
   testPackageFeaturePowerset =
     let
       ws = {
@@ -531,15 +535,11 @@ runTests "lib-unit" {
         path = "ws";
         mode = "check";
       };
-      # A run's own feature settings are `mkOverride 90` definitions, so
-      # a target's variantDefaults do not change them.
-      own = d: assert d._type == "override" && d.priority == 90; d.content;
       shape = lib.mapAttrs (
         _: v: {
-          inherit (v) packages mode;
-          features = own v.features;
-          all = own v.allFeatures;
-          noDefault = own v.noDefaultFeatures;
+          inherit (v) packages mode features;
+          all = v.allFeatures;
+          noDefault = v.noDefaultFeatures;
         }
       );
       lib-a = features: noDefault: all: {
@@ -548,11 +548,18 @@ runTests "lib-unit" {
         inherit features noDefault all;
       };
       app = {
-        hack-app = {
+        "hack-app.no-default-features" = {
           packages = [ "app" ];
           mode = "check";
           features = [ ];
-          noDefault = false;
+          noDefault = true;
+          all = false;
+        };
+        "hack-app.extra" = {
+          packages = [ "app" ];
+          mode = "check";
+          features = [ "extra" ];
+          noDefault = true;
           all = false;
         };
       };
@@ -818,6 +825,103 @@ runTests "lib-unit" {
       }
     ];
   };
+
+  # A layer's rewrite reaches its values under mkIf, mkMerge, mkOverride
+  # and mkOrder, and not the base's.
+  testLayerValues =
+    let
+      value = n: v: if n == "features" then lib.filter (f: f != "drop") v else v + "!";
+      on = l: layeredWith value { features = [ "drop" ]; } [ l ];
+    in
+    {
+      expr = map on [
+        {
+          profile = "one";
+          features = [
+            "drop"
+            "keep"
+          ];
+        }
+        {
+          profile = lib.mkIf true (lib.mkForce "forced");
+          features = lib.mkMerge [
+            (lib.mkIf true [
+              "drop"
+              "if"
+            ])
+            (lib.mkBefore [ "before" ])
+          ];
+        }
+        { features = lib.mkForce [ "drop" ]; }
+      ];
+      expected = [
+        {
+          profile = "one!";
+          flag = null;
+          features = [
+            "keep"
+            "drop"
+          ];
+        }
+        {
+          profile = "forced!";
+          flag = null;
+          features = [
+            "before"
+            "if"
+            "drop"
+          ];
+        }
+        {
+          profile = "release";
+          flag = null;
+          features = [ ];
+        }
+      ];
+    };
+
+  # Cargo's `Workspace::collect_matching_features` for one member.
+  testAcceptsCliFeature =
+    let
+      m = {
+        package.name = "core";
+        features.fast = [ ];
+        dependencies = {
+          serde = "1";
+          json = {
+            package = "serde_json";
+            optional = true;
+          };
+        };
+        target."cfg(windows)".dev-dependencies.winapi = "0.3";
+      };
+    in
+    {
+      expr = lib.filter (bb.manifest.acceptsCliFeature m) [
+        "fast"
+        "json"
+        "core/fast"
+        "core?/json"
+        "serde/derive"
+        "json?/std"
+        "winapi/everything"
+        "dep:json"
+        "slow"
+        "core/slow"
+        "app/fast"
+        "serde_json/std"
+      ];
+      expected = [
+        "fast"
+        "json"
+        "core/fast"
+        "core?/json"
+        "serde/derive"
+        "json?/std"
+        "winapi/everything"
+        "dep:json"
+      ];
+    };
 
   testCheckGroupPrefixes = {
     expr = bb.checkGroups.properPrefixes "a/b/c/d";

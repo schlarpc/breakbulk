@@ -707,9 +707,13 @@ across them: ` lib.mkForce ` in the variant wins over a plain value
 here, ` lib.mkDefault ` here loses to a plain value in the variant
 ([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
 
-Variants made by ` breakbulk.variants.packageFeaturePowerset ` keep
-their own ` features `, ` noDefaultFeatures ` and ` allFeatures ` over
-these: Cargo rejects a feature that no selected package has\.
+A variant that selects packages (` variants.<v>.packages `, such as
+those ` breakbulk.variants.packageFeaturePowerset ` makes) takes
+only the ` features ` here that one of those packages accepts, by
+Cargo’s rule for ` -p <pkg> --features `: one of its own features
+or optional dependencies, ` <pkg>/<feature> `, or
+` <dependency>/<feature> `\. Cargo rejects any other, and these
+apply to every variant on the target\.
 
 *Type:*
 module

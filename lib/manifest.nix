@@ -238,6 +238,34 @@ rec {
       ) ms;
     };
 
+  # Whether a `cargo … -p <pkg> --features <feature>` run accepts
+  # `feature` (one feature, as `--features` splits them) for the member
+  # whose manifest is `m` (cargo src/workspace/workspace.rs,
+  # `Workspace::collect_matching_features`): one of the package's
+  # `[features]` or optional dependencies, `<pkg>/<that>`, or
+  # `<dep>/<anything>` for any dependency (`<dep>?/…` too), named as the
+  # manifest's dependency tables key it. `dep:<name>` counts as accepted:
+  # Cargo rejects it on the command line with its own message.
+  acceptsCliFeature =
+    m: feature:
+    let
+      tables = dependencyTables m;
+      deps = concatLists (map attrNames tables);
+      optional = concatLists (
+        map (t: attrNames (lib.filterAttrs (_: d: isAttrs d && d.optional or false) t)) tables
+      );
+      own = f: (m.features or { }) ? ${f} || lib.elem f optional;
+      parts = lib.splitString "/" feature;
+      depName = lib.removeSuffix "?" (lib.head parts);
+      depFeature = lib.concatStringsSep "/" (lib.tail parts);
+    in
+    if lib.hasPrefix "dep:" feature && lib.length parts == 1 then
+      true
+    else if lib.length parts == 1 then
+      own feature
+    else
+      lib.elem depName deps || (depName == (m.package.name or null) && own depFeature);
+
   # Package-level fields with workspace inheritance applied for the fields
   # that discovery needs (name, version, edition).
   packageInfo =

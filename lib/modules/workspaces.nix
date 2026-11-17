@@ -124,9 +124,13 @@ let
         here, `lib.mkDefault` here loses to a plain value in the variant
         ([layers and priorities](../../how-to/targets.md#layers-and-priorities)).
 
-        Variants made by `breakbulk.variants.packageFeaturePowerset` keep
-        their own `features`, `noDefaultFeatures` and `allFeatures` over
-        these: Cargo rejects a feature that no selected package has.
+        A variant that selects packages (`variants.<v>.packages`, such as
+        those `breakbulk.variants.packageFeaturePowerset` makes) takes
+        only the `features` here that one of those packages accepts, by
+        Cargo's rule for `-p <pkg> --features`: one of its own features
+        or optional dependencies, `<pkg>/<feature>`, or
+        `<dependency>/<feature>`. Cargo rejects any other, and these
+        apply to every variant on the target.
       '';
     };
   };
@@ -233,13 +237,40 @@ let
         defaults: triple:
         let
           layer = rank: bt.layer rank (n: options ? ${n} && bt.singleValued options.${n}.type);
+          cell =
+            (extendModules {
+              modules = [
+                (layer 1 (n: v: if n == "features" then defaultFeatures v else v) defaults)
+              ]
+              ++ lib.optional (config.target ? ${triple}) (layer 2 (_: v: v) config.target.${triple});
+            }).config;
+          # `variantDefaults` name features for any variant on the target;
+          # a variant that selects packages runs `-p <pkg>…`, and Cargo
+          # rejects a feature none of those packages accept. Only these
+          # are left out: a variant's own wrong feature still fails in
+          # Cargo.
+          selected =
+            if builtins.isList cell.packages then
+              cell.packages
+            else
+              (manifest.excludeMembers (lib.attrNames ws.members) cell.packages.exclude).selected;
+          manifests = map (p: manifest.readManifest root ws.members.${p}.path) (
+            lib.filter (p: ws.members ? ${p}) selected
+          );
+          accepted = f: lib.any (m: manifest.acceptsCliFeature m f) manifests;
+          # Split as Cargo splits `--features` values.
+          defaultFeatures =
+            v:
+            if cell.packages == null then
+              v
+            else
+              lib.filter accepted (
+                lib.concatMap (s: lib.filter (f: f != "") (lib.splitString "," s)) (
+                  lib.concatMap (s: lib.filter builtins.isString (builtins.split "[[:space:]]+" s)) v
+                )
+              );
         in
-        (extendModules {
-          modules = [
-            (layer 1 defaults)
-          ]
-          ++ lib.optional (config.target ? ${triple}) (layer 2 config.target.${triple});
-        }).config;
+        cell;
 
       config.assertions = [
         {

@@ -213,24 +213,41 @@ rec {
   # the order of any two integer priorities: `mkForce` and `mkDefault`
   # still win and lose as written. Not `mkOverride` around the whole
   # module: a list at a lower priority would then be dropped, not
-  # concatenated.
+  # concatenated. `value name v` rewrites each value the layer gives
+  # option `name`, under its mkIf, mkMerge, mkOverride and mkOrder.
   layer =
-    rank: isSingle:
+    rank: isSingle: value:
     let
       shift = rank / 4.0;
+      # `f` on each value under a definition's properties.
+      under =
+        f: v:
+        let
+          t = v._type or null;
+        in
+        if t == "if" || t == "override" || t == "order" then
+          v // { content = under f v.content; }
+        else if t == "merge" then
+          v // { contents = map (under f) v.contents; }
+        else
+          f v;
       leaf =
-        prio: v:
+        prio: f: v:
         let
           t = v._type or null;
         in
         if t == "if" then
-          v // { content = leaf prio v.content; }
+          v // { content = leaf prio f v.content; }
         else if t == "merge" then
-          v // { contents = map (leaf prio) v.contents; }
+          v // { contents = map (leaf prio f) v.contents; }
         else if t == "override" then
-          v // { priority = v.priority - shift; }
+          v
+          // {
+            priority = v.priority - shift;
+            content = under f v.content;
+          }
         else
-          lib.mkOverride (prio - shift) v;
+          lib.mkOverride (prio - shift) (under f v);
       # A module's `config`. An `mkOverride` around several options goes
       # down to each, as the module system pushes it down.
       config =
@@ -248,11 +265,11 @@ rec {
           lib.mapAttrs (
             n: v:
             if isSingle n then
-              leaf prio v
+              leaf prio (value n) v
             else if prio == lib.modules.defaultOverridePriority then
-              v
+              under (value n) v
             else
-              lib.mkOverride prio v
+              lib.mkOverride prio (under (value n) v)
           ) c;
       reserved = [
         "_class"
