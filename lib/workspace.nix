@@ -412,6 +412,15 @@ let
   // cargoConfigTools
   // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
 
+  # Test runs also get breakbulk-hints, for their hints after a failure.
+  # Not in `unitTools`, which instantiation reads: a breakbulk-hints change
+  # would then re-instantiate every plan.
+  testRunTools =
+    unitTools
+    // lib.optionalAttrs (tools ? breakbulk-hints) {
+      breakbulk-hints = "${tools.breakbulk-hints}/bin/breakbulk-hints";
+    };
+
   # The Rust toolchain's own store paths (rustc, its sysroot, cargo, and a
   # rust-overlay toolchain's components, rust-src among them), which no
   # product should reference: products' noSourceReferences looks for them.
@@ -603,7 +612,7 @@ let
     host = hostTest;
     inst = tested;
     coverage = mode == "coverage";
-    tools = unitTools;
+    tools = testRunTools;
   };
 
   bins = lib.filterAttrs (_: r: r.breakbulkRoot.kind == "bin" && !r.breakbulkRoot.test) built.roots;
@@ -725,7 +734,7 @@ in
           }
         );
         inst = benched;
-        tools = unitTools;
+        tools = testRunTools;
       }).runs;
   packages = lib.mapAttrs' (
     _: r: lib.nameValuePair r.breakbulkRoot.target (installExecutable r)

@@ -580,10 +580,16 @@ in
       same = n: real.${n}.drvPath == other.${n}.drvPath;
       checks = {
         "breakbulk-unit unchanged" = same "breakbulk-unit";
+        "breakbulk-hints unchanged" = same "breakbulk-hints";
         "breakbulk-shim unchanged" = same "breakbulk-shim";
         "breakbulk-plan changed" = !same "breakbulk-plan";
         "breakbulk-instantiate changed" = !same "breakbulk-instantiate";
-        "breakbulk-unit's source has only itself" = real.breakbulk-unit.crates == [ "breakbulk-unit" ];
+        "breakbulk-unit's source has only itself and breakbulk-hints" =
+          real.breakbulk-unit.crates == [
+            "breakbulk-hints"
+            "breakbulk-unit"
+          ];
+        "breakbulk-hints's source has only itself" = real.breakbulk-hints.crates == [ "breakbulk-hints" ];
       };
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in

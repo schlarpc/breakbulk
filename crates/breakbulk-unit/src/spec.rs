@@ -448,72 +448,7 @@ pub struct RenderedCompile {
     pub seed: Option<String>,
 }
 
-/// The source view a unit of a repository package sees, for the hints
-/// when it fails naming a path the view lacks ([`crate::view_hints`]).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SourceView {
-    /// The view's root, which stands for the repository root.
-    pub root: String,
-    /// The package directory, relative to the repository root (empty for
-    /// the root).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub package_dir: String,
-    /// The option that adds a path to this view.
-    pub widen: Widen,
-    /// The package's test-only paths (its `tests/` directory, the
-    /// `test.sourceScope` entries inside it), relative to the repository
-    /// root, which the view of its non-test units leaves out. Every unit
-    /// carries them: a path into that view (a library's
-    /// `CARGO_MANIFEST_DIR`, a build script's `rustc-env`) can reach a
-    /// test unit too.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub test_only: Vec<String>,
-    /// Whether the package's `sources` functions chose the view's files:
-    /// then even a path in the package directory can be left out.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub custom: bool,
-}
-
-/// The option that adds a path to a unit's source view.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Widen {
-    /// The view of a package's non-test units.
-    #[serde(rename = "extraSources")]
-    ExtraSources,
-    /// The view of its test units: test compiles, doctests, test runs.
-    #[serde(rename = "test.sourceScope")]
-    TestSourceScope,
-    /// The narrowed view of its test runs, whose paths are relative to the
-    /// package directory.
-    #[serde(rename = "test.runFiles")]
-    TestRunFiles,
-}
-
-impl Widen {
-    /// The option, under `packages.<name>`.
-    pub fn option(self) -> &'static str {
-        match self {
-            Widen::ExtraSources => "extraSources",
-            Widen::TestSourceScope => "test.sourceScope",
-            Widen::TestRunFiles => "test.runFiles",
-        }
-    }
-}
-
-/// The name and version in a Cargo package id spec, as `cargo metadata`
-/// writes them: `registry+https://…#ring@0.17.14`, or `path+file:///…/app#0.1.0`
-/// where the name is the URL's last path segment. Returns `None` for other
-/// shapes.
-pub fn package_name_version(id: &str) -> Option<(&str, &str)> {
-    let (url, frag) = id.rsplit_once('#')?;
-    if let Some((name, version)) = frag.split_once('@') {
-        return Some((name, version));
-    }
-    let path = url.split(['?', '#']).next()?;
-    let name = path.trim_end_matches('/').rsplit('/').next()?;
-    (!name.is_empty() && !frag.is_empty()).then_some((name, frag))
-}
+pub use breakbulk_hints::{SourceView, Widen, package_name_version};
 
 /// Cargo's description of a package in messages (`PackageId`'s `Display`):
 /// `name vX.Y.Z`, followed by the source for packages not from crates.io.

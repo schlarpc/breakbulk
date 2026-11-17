@@ -141,18 +141,7 @@ pub fn run_cflags(r: &RenderedRun, out: &Path) -> CFlags {
     }
 }
 
-/// The `packages.<name>` option prefix for hints.
-pub(crate) fn option_prefix(package: &str) -> String {
-    let name = package_name_version(package).map_or(package, |(n, _)| n);
-    if name
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
-        format!("packages.{name}")
-    } else {
-        format!("packages.\"{name}\"")
-    }
-}
+pub(crate) use breakbulk_hints::option_prefix;
 
 /// A `rerun-if-changed` path that is not in the sandbox.
 #[derive(Clone, Debug, PartialEq, Eq)]

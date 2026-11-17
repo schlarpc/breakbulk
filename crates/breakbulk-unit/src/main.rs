@@ -4,9 +4,6 @@
 //! with `passAsFile`, from the file named by `BREAKBULK_UNITPath`) and runs it
 //! in `compile` or `run` mode according to its `kind`. Output paths come from
 //! the variables Nix names after the derivation's outputs.
-//!
-//! `breakbulk-unit test-run-hints SPEC LOG` prints the hints for a failed
-//! test run's log ([`breakbulk_unit::view_hints::test_run_main`]).
 
 use std::process::ExitCode;
 
@@ -14,8 +11,7 @@ use breakbulk_unit::Error;
 use breakbulk_unit::env::Outer;
 use breakbulk_unit::spec::RenderedUnit;
 
-const USAGE: &str = "usage: breakbulk-unit unit|doctest|docs\n       \
-    breakbulk-unit test-run-hints SPEC LOG\n\n\
+const USAGE: &str = "usage: breakbulk-unit unit|doctest|docs\n\n\
     Builds the unit (or runs the doctests, or writes the documentation) described by \
     $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath).";
 
@@ -38,9 +34,6 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args == ["doctest"] {
         return breakbulk_unit::doctest::main();
-    }
-    if args.first().map(String::as_str) == Some("test-run-hints") {
-        return breakbulk_unit::view_hints::test_run_main(&args[1..]);
     }
     if args == ["docs"] {
         return breakbulk_unit::docs::main();

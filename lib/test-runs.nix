@@ -696,11 +696,12 @@ rec {
 
   # Shell lines (bash, `$log` set) for a failed run: a hint for each path
   # the log names that the run's source view lacks
-  # (`breakbulk-unit test-run-hints`, which finds the view from
-  # `CARGO_MANIFEST_DIR`). `spec` is a shell word expanding to its JSON.
-  # Nothing without breakbulk-unit in `tools` (built with `pkgs`), and
+  # (`breakbulk-hints`, which finds the view from `CARGO_MANIFEST_DIR`).
+  # `spec` is a shell word expanding to its JSON. Not breakbulk-unit: with
+  # `ca` on, every breakbulk-unit change would re-run every test run.
+  # Nothing without breakbulk-hints in `tools` (built with `pkgs`), and
   # nothing when the run builds on another system (`testPkgs`, a
-  # `testSystem`), where that breakbulk-unit cannot run.
+  # `testSystem`), where that breakbulk-hints cannot run.
   hintScript =
     {
       tools,
@@ -709,9 +710,9 @@ rec {
     }:
     spec:
     lib.optionalString (
-      tools ? breakbulk-unit && testPkgs.stdenv.buildPlatform.system == pkgs.stdenv.buildPlatform.system
+      tools ? breakbulk-hints && testPkgs.stdenv.buildPlatform.system == pkgs.stdenv.buildPlatform.system
     ) ''
-      ${tools.breakbulk-unit} test-run-hints ${spec} "$log" || true
+      ${tools.breakbulk-hints} ${spec} "$log" || true
     '';
 
   # The JSON `hintScript` takes, for a run spec.

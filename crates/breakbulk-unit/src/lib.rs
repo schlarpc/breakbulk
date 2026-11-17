@@ -1,7 +1,8 @@
 //! Library half of `breakbulk-unit`, the builder of every unit.
 //!
-//! Kept small and nearly dependency-free (only `serde` and `serde_json`):
-//! any change here changes every unit derivation.
+//! Kept small and nearly dependency-free (only `serde`, `serde_json` and
+//! breakbulk's own `breakbulk-hints`): any change here changes every unit
+//! derivation.
 
 pub mod compile;
 pub mod diag;
@@ -16,7 +17,7 @@ pub mod spec;
 pub mod splice;
 #[cfg(test)]
 pub(crate) mod test_util;
-pub mod view_hints;
+pub use breakbulk_hints as view_hints;
 
 use std::fmt;
 

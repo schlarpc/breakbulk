@@ -326,12 +326,18 @@
           # Stable test-run inputs for content-addressed cutoff (decision
           # 61), built input-addressed; the CA check itself needs
           # ca-derivations: tests/test-cutoff/run.sh (private store).
-          // {
-            test-cutoff-stable-inputs = (import ./tests/test-cutoff {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }).stable-inputs;
-          }
+          // (
+            let
+              t = import ./tests/test-cutoff {
+                inherit pkgs;
+                breakbulk = self.lib;
+              };
+            in
+            {
+              test-cutoff-stable-inputs = t.stable-inputs;
+              test-cutoff-run-inputs = t.run-inputs;
+            }
+          )
           # Test runs, doctests and test apps over the doctests and
           # test-control fixtures (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-runs-${n}" v) (

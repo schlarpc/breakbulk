@@ -154,6 +154,7 @@ let
           (root + "/crates/breakbulk-instantiate")
           (root + "/crates/breakbulk-format")
           (root + "/crates/breakbulk-unit")
+          (root + "/crates/breakbulk-hints")
           (root + "/crates/breakbulk-drv/Cargo.toml")
           (root + "/crates/breakbulk-drv/Cargo.lock")
           (root + "/crates/breakbulk-drv/src")

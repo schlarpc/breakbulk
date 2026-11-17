@@ -13,7 +13,9 @@
 #      everything upstream can be substituted;
 #   2. the private store builds them with `ca = true`: before the edit,
 #      then after it;
-#   3. checks: alpha's test run is not re-run after the edit (its output
+#   3. checks: alpha's test run has breakbulk-hints and not breakbulk-unit
+#      among its inputs (`run-inputs`, with `ca = true`);
+#      alpha's test run is not re-run after the edit (its output
 #      path is the same and no `alpha-lib-alpha-run` derivation was built),
 #      while the copies of its test binary and of the dynamic-library path
 #      were rebuilt (their inputs changed: not vacuous).
@@ -62,6 +64,10 @@ for s in before after; do
     fail "building $s"
   }
 done
+say "private store, ca = true: the test run's inputs"
+private build --no-link --impure -f "$REPO/tests/test-cutoff" --arg ca true run-inputs \
+  || fail "alpha's test run's inputs (run-inputs)"
+
 mapfile -t b < "$WORK/before.out"
 mapfile -t a < "$WORK/after.out"
 printf 'before: %s\nafter:  %s\n' "${b[*]}" "${a[*]}" >&2

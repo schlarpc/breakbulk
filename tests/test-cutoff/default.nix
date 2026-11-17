@@ -25,6 +25,10 @@
 #                   `ca = true` and checks alpha's test run is not re-run.
 #                   A source edit would not do: the source view's path is
 #                   in beta's debug info, so alpha's binary would change.
+#   run-inputs      (flake check; run.sh with `ca = true`) alpha's test run
+#                   has breakbulk-hints among its inputs (for its hints
+#                   after a failure) and not breakbulk-unit, so a
+#                   breakbulk-unit change leaves it cut off.
 {
   pkgs ? import (
     let
@@ -63,6 +67,14 @@ let
   # alpha's test with the stable inputs, input-addressed.
   plainRun = (runsOf before).alpha;
   plainSpec = plainRun.passthru.breakbulkTest;
+  # The names of the derivations a derivation's attributes refer to.
+  inputNames =
+    drv:
+    map (p: builtins.unsafeDiscardStringContext (baseNameOf p)) (
+      lib.attrNames (builtins.getContext (builtins.toJSON drv.drvAttrs))
+    );
+  hasTool = n: lib.any (i: builtins.match "[a-z0-9]{32}-${n}-[0-9.]+\\.drv" i != null);
+
   stable = breakbulk.testRuns.stableSpec {
     inherit pkgs;
     spec = plainSpec;
@@ -75,6 +87,19 @@ in
     before = runsOf before;
     after = runsOf after;
   };
+
+  run-inputs =
+    let
+      names = inputNames (runsOf before).alpha;
+    in
+    assert lib.assertMsg (hasTool "breakbulk-hints" names)
+      "test-cutoff: alpha's test run has no breakbulk-hints input: ${toString names}";
+    assert lib.assertMsg (
+      !hasTool "breakbulk-unit" names
+    ) "test-cutoff: alpha's test run has breakbulk-unit as an input";
+    pkgs.runCommand "test-cutoff-run-inputs" { } ''
+      echo ${lib.escapeShellArg (toString names)} > $out
+    '';
 
   stable-inputs =
     assert lib.assertMsg (

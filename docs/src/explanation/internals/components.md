@@ -28,9 +28,10 @@ The skeleton and toolchain spec feed planning; the source map, toolchains and en
 | `breakbulk-instantiate` | Rust binary: templates unit derivations as JSON for IFD; also the library that `breakbulk-drv` uses |
 | `breakbulk-drv` | Rust binary: the dynamic-derivation-mode outer builder; writes the same derivations into the store through `builder-rpc-v0` with harmonia |
 | `breakbulk-unit` | Rust binary: the builder of every unit |
+| `breakbulk-hints` | Rust library and binary: hints for a unit that fails reading a path its source view lacks; the binary prints them for a failed test run |
 | `lib/` (Nix) | `mkRepository`, modules, presets, fetchers, env capture, stage helpers |
 
-The first four binaries live in one Cargo workspace. `breakbulk-drv` has its own workspace and lockfile (`crates/breakbulk-drv/`, excluded from the main workspace), so that its dependencies (harmonia, tokio) never change the other binaries' inputs. `breakbulk-unit` stays small and nearly dependency-free, because it is an input of every unit and any change to it rebuilds everything. `breakbulk-shim` and `breakbulk-plan` only affect the plan derivations.
+The binaries other than `breakbulk-drv` live in one Cargo workspace. `breakbulk-drv` has its own workspace and lockfile (`crates/breakbulk-drv/`, excluded from the main workspace), so that its dependencies (harmonia, tokio) never change the other binaries' inputs. `breakbulk-unit` stays small and nearly dependency-free, because it is an input of every unit and any change to it rebuilds everything. `breakbulk-hints` is its own crate so that test runs, which call it, do not depend on `breakbulk-unit`: with content addressing a `breakbulk-unit` change then leaves test runs that read the same files cut off. `breakbulk-shim` and `breakbulk-plan` only affect the plan derivations.
 
 `mkRepository` builds these binaries with breakbulk's own flake-locked nixpkgs for the build platform (`defaultTools` in `lib/default.nix`), not with the project's `pkgs`, so they are the same store paths in every project at a given breakbulk version. To build them with the project's nixpkgs instead, set `inputs.breakbulk.inputs.nixpkgs.follows = "nixpkgs"` or pass `tools = breakbulk.mkTools pkgs`. `import ./lib` without the flake has no locked nixpkgs and uses `mkTools pkgs`.
 

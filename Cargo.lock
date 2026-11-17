@@ -12,6 +12,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "breakbulk-hints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "breakbulk-instantiate"
 version = "0.1.0"
 dependencies = [
@@ -44,6 +52,7 @@ name = "breakbulk-unit"
 version = "0.1.0"
 dependencies = [
  "breakbulk-format",
+ "breakbulk-hints",
  "serde",
  "serde_json",
 ]

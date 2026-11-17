@@ -20,18 +20,101 @@
 //!
 //! Only the path decides, not who printed it, so one rule covers rustc,
 //! proc macros and test output. A message without a path gets no hint.
+//!
+//! A crate of its own, with a binary for test runs (`breakbulk-hints SPEC
+//! LOG`, [`main`]), rather than a mode of `breakbulk-unit`: a test run that
+//! calls it then has no `breakbulk-unit` among its inputs, so with content
+//! addressing a `breakbulk-unit` change leaves test runs cut off.
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::run::option_prefix;
-use crate::spec::{SourceView, Widen};
+/// The source view a unit of a repository package sees, for the hints
+/// when it fails naming a path the view lacks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SourceView {
+    /// The view's root, which stands for the repository root.
+    pub root: String,
+    /// The package directory, relative to the repository root (empty for
+    /// the root).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub package_dir: String,
+    /// The option that adds a path to this view.
+    pub widen: Widen,
+    /// The package's test-only paths (its `tests/` directory, the
+    /// `test.sourceScope` entries inside it), relative to the repository
+    /// root, which the view of its non-test units leaves out. Every unit
+    /// carries them: a path into that view (a library's
+    /// `CARGO_MANIFEST_DIR`, a build script's `rustc-env`) can reach a
+    /// test unit too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_only: Vec<String>,
+    /// Whether the package's `sources` functions chose the view's files:
+    /// then even a path in the package directory can be left out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub custom: bool,
+}
+
+/// The option that adds a path to a unit's source view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Widen {
+    /// The view of a package's non-test units.
+    #[serde(rename = "extraSources")]
+    ExtraSources,
+    /// The view of its test units: test compiles, doctests, test runs.
+    #[serde(rename = "test.sourceScope")]
+    TestSourceScope,
+    /// The narrowed view of its test runs, whose paths are relative to the
+    /// package directory.
+    #[serde(rename = "test.runFiles")]
+    TestRunFiles,
+}
+
+impl Widen {
+    /// The option, under `packages.<name>`.
+    pub fn option(self) -> &'static str {
+        match self {
+            Widen::ExtraSources => "extraSources",
+            Widen::TestSourceScope => "test.sourceScope",
+            Widen::TestRunFiles => "test.runFiles",
+        }
+    }
+}
+
+/// The name and version in a Cargo package id spec, as `cargo metadata`
+/// writes them: `registry+https://…#ring@0.17.14`, or `path+file:///…/app#0.1.0`
+/// where the name is the URL's last path segment. Returns `None` for other
+/// shapes.
+pub fn package_name_version(id: &str) -> Option<(&str, &str)> {
+    let (url, frag) = id.rsplit_once('#')?;
+    if let Some((name, version)) = frag.split_once('@') {
+        return Some((name, version));
+    }
+    let path = url.split(['?', '#']).next()?;
+    let name = path.trim_end_matches('/').rsplit('/').next()?;
+    (!name.is_empty() && !frag.is_empty()).then_some((name, frag))
+}
+
+/// A package's options, `packages.<name>`, quoted when the name needs it.
+/// `package` is a Cargo package id spec or a bare name.
+pub fn option_prefix(package: &str) -> String {
+    let name = package_name_version(package).map_or(package, |(n, _)| n);
+    if name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        format!("packages.{name}")
+    } else {
+        format!("packages.\"{name}\"")
+    }
+}
 
 /// `p` with `.` and `..` components resolved lexically.
-pub(crate) fn normalize(p: &Path) -> PathBuf {
+pub fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
@@ -266,7 +349,7 @@ pub fn hints(
     hint_lines(package, view, &found)
 }
 
-/// What `breakbulk-unit test-run-hints` gets from a test run: its package,
+/// What `breakbulk-hints` gets from a test run: its package,
 /// and its source view without the root, which is the run's
 /// `CARGO_MANIFEST_DIR` without `package_dir`.
 #[derive(Clone, Debug, Deserialize)]
@@ -301,18 +384,18 @@ impl TestRun {
     }
 }
 
-/// `breakbulk-unit test-run-hints SPEC LOG`: after a failed test run, print
+/// `breakbulk-hints SPEC LOG`: after a failed test run, print
 /// the hints for its log (`SPEC` is a [`TestRun`] as JSON). Prints nothing
 /// it cannot work out, and always succeeds: the run's own failure stands.
-pub fn test_run_main(args: &[String]) -> ExitCode {
+pub fn main(args: &[String]) -> ExitCode {
     let [spec, log] = args else {
-        eprintln!("usage: breakbulk-unit test-run-hints SPEC LOG");
+        eprintln!("usage: breakbulk-hints SPEC LOG");
         return ExitCode::from(2);
     };
     let spec: TestRun = match serde_json::from_str(spec) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("breakbulk-unit test-run-hints: {e}");
+            eprintln!("breakbulk-hints: {e}");
             return ExitCode::SUCCESS;
         }
     };

@@ -257,9 +257,11 @@ the repository root, for each path that does not exist and is
 The unit cannot see the repository, so the hint says "if it is in the
 repository". A message without a path (`filetests: No such file or
 directory`) gets no hint. At most 10 paths are named; the rest are
-counted. Test runs get their hints from `breakbulk-unit test-run-hints`,
-run after a failed test with the run's log; it finds the view from the
-run's `CARGO_MANIFEST_DIR`.
+counted. Test runs get their hints from `breakbulk-hints`, a separate
+small binary run after a failed test with the run's log; it finds the
+view from the run's `CARGO_MANIFEST_DIR`. It is not part of
+`breakbulk-unit`, so with `ca` on a `breakbulk-unit` change does not
+re-run every test run.
 
 ### `OUT_DIR` and the target directory
 

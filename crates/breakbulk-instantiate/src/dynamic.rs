@@ -203,7 +203,7 @@ pub struct TestSpec {
     /// The package's directory relative to the repository root (the source
     /// view's root), for test apps run in a checkout; None when
     /// `CARGO_MANIFEST_DIR` is not in a source view. Also for the hints of
-    /// a failed run (`breakbulk-unit test-run-hints`).
+    /// a failed run (`breakbulk-hints`).
     pub package_dir: Option<String>,
     /// The package's test-only paths, relative to the repository root, for
     /// those hints: as a rendered unit's `view.testOnly`, without store
