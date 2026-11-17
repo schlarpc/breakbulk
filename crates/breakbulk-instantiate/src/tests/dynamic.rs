@@ -91,6 +91,8 @@ fn outer(names: &[&str]) -> Outer {
         runs: Some("runs.drv".into()),
         doctests: BTreeMap::new(),
         docs: None,
+        leave: BTreeSet::new(),
+        submit: None,
     }
 }
 
@@ -836,6 +838,65 @@ fn every_root_needs_an_output() {
     );
     let e = dynamic_plan(&inputs, &units, &o).unwrap_err().0;
     assert!(e.contains("same output name"), "{e}");
+}
+
+/// Two outer derivations of one plan: the first leaves `smokeapp` (whose
+/// settings would use its products), the second writes every unit and
+/// submits `smokeapp`'s roots only.
+#[test]
+fn leave_and_submit() {
+    let inputs = with_doctest(dyn_inputs());
+    let units = instantiate(&inputs).unwrap();
+    let app_units: BTreeSet<&String> = inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| u.package().contains("smokeapp"))
+        .map(|(id, _)| id)
+        .collect();
+    assert!(app_units.contains(&APP.to_owned()));
+
+    let mut first = outer(&[]);
+    first.leave.insert("smokeapp".into());
+    first
+        .doctests
+        .insert("smokelib".into(), "smokelib.doctest.drv".into());
+    let plan = dynamic_plan(&inputs, &units, &first).unwrap();
+    let keys: BTreeSet<&str> = plan.nodes.iter().map(|n| n.key.as_str()).collect();
+    for id in inputs.plan.units.keys() {
+        assert_eq!(keys.contains(id.as_str()), !app_units.contains(id), "{id}");
+    }
+    assert!(!keys.iter().any(|k| k.contains("smokeapp/")), "{keys:?}");
+    assert!(keys.contains("wrapper:smokelib.doctest"), "{keys:?}");
+    // The units output lists the units this one writes.
+    let all = plan
+        .nodes
+        .iter()
+        .find(|n| n.key == "wrapper:*units")
+        .unwrap();
+    let list = format!("{:?}", all.drv.attrs["units"]);
+    assert!(list.contains(LIB) && !list.contains(APP), "{list}");
+
+    // Leaving a package that another one depends on is an error.
+    let mut wrong = outer(&ROOTS);
+    wrong.leave.insert("smokelib".into());
+    let e = dynamic_plan(&inputs, &units, &wrong).unwrap_err().0;
+    assert!(e.contains("leaves to another outer derivation"), "{e}");
+
+    let mut second = outer(&ROOTS);
+    second.submit = Some(BTreeSet::from(["smokeapp".to_owned()]));
+    second
+        .doctests
+        .insert("smokeapp".into(), "smokeapp.doctest.drv".into());
+    let plan = dynamic_plan(&inputs, &units, &second).unwrap();
+    let keys: BTreeSet<&str> = plan.nodes.iter().map(|n| n.key.as_str()).collect();
+    for id in inputs.plan.units.keys() {
+        assert!(keys.contains(id.as_str()), "{id}");
+    }
+    for r in ROOTS {
+        assert!(keys.contains(format!("wrapper:{r}").as_str()), "{keys:?}");
+    }
+    assert!(!keys.contains("wrapper:smokelib.doctest"), "{keys:?}");
 }
 
 #[test]

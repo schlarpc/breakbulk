@@ -37,6 +37,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use breakbulk_format::rendered::package_name_version;
 use breakbulk_format::{
     CompileUnit, Piece, Plan, Platform, Reference, Resolve, RootKind, SrcRef, Text, Unit,
     to_canonical_json,
@@ -82,6 +83,26 @@ pub struct Outer {
     /// (`docs.drv`), whose `root` links the docs derivation's output.
     #[serde(default)]
     pub docs: Option<String>,
+    /// Packages (by name) whose units this outer derivation does not write,
+    /// nor their roots and doctests, nor the docs: another outer derivation
+    /// of the same plan writes them, with settings this one must not take
+    /// (settings that use this one's products). A unit of another package
+    /// that depends on one of them is an error.
+    #[serde(default)]
+    pub leave: BTreeSet<String>,
+    /// The packages whose roots and doctests this outer derivation
+    /// submits; None: every package's. It still writes every unit they
+    /// depend on: it cannot read another outer derivation's.
+    #[serde(default)]
+    pub submit: Option<BTreeSet<String>>,
+}
+
+impl Outer {
+    /// Whether this outer derivation submits the roots and doctest of
+    /// package `name`.
+    fn submits(&self, name: &str) -> bool {
+        !self.leave.contains(name) && self.submit.as_ref().is_none_or(|s| s.contains(name))
+    }
 }
 
 /// The attributes a doctest derivation gets from the package's test
@@ -830,10 +851,14 @@ fn all_units(
     prefix: &str,
     outer: &Outer,
     output_name: &str,
+    left: &BTreeSet<String>,
 ) -> Result<Drv, Error> {
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
+        if left.contains(id) {
+            continue;
+        }
         for o in unit_outputs(unit, &inputs.plan.target_debuginfo) {
             list.push_str(&tokens.unit(id, &o));
             list.push('\n');
@@ -852,11 +877,19 @@ fn all_units(
 /// The derivation that depends on the `flags` output of every build-script
 /// run of the plan; `$out/runs` lists them. Not `$out/units`: that one
 /// builds every compile of the plan too.
-fn all_runs(inputs: &Inputs, prefix: &str, outer: &Outer, output_name: &str) -> Result<Drv, Error> {
+fn all_runs(
+    inputs: &Inputs,
+    prefix: &str,
+    outer: &Outer,
+    output_name: &str,
+    left: &BTreeSet<String>,
+) -> Result<Drv, Error> {
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
-        if let Unit::Run(_) = unit {
+        if let Unit::Run(_) = unit
+            && !left.contains(id)
+        {
             list.push_str(&tokens.unit(id, "flags"));
             list.push('\n');
         }
@@ -871,6 +904,23 @@ fn all_runs(inputs: &Inputs, prefix: &str, outer: &Outer, output_name: &str) -> 
     )
 }
 
+/// The ids of the units of the packages outer.json leaves to another outer
+/// derivation.
+fn left_units(inputs: &Inputs, outer: &Outer) -> BTreeSet<String> {
+    if outer.leave.is_empty() {
+        return BTreeSet::new();
+    }
+    inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| {
+            package_name_version(u.package()).is_some_and(|(n, _)| outer.leave.contains(n))
+        })
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
 /// The derivations to write, units first in dependency order, then each
 /// root's stub (if any) and wrapper.
 pub fn dynamic_plan(
@@ -879,12 +929,32 @@ pub fn dynamic_plan(
     outer: &Outer,
 ) -> Result<DynamicPlan, Error> {
     let prefix = token_prefix(inputs);
-    let mut drvs: BTreeMap<String, Drv> = units.units.clone();
+    let left = left_units(inputs, outer);
+    let mut drvs: BTreeMap<String, Drv> = units
+        .units
+        .iter()
+        .filter(|(id, _)| !left.contains(*id))
+        .map(|(id, d)| (id.clone(), d.clone()))
+        .collect();
+    for (id, d) in &drvs {
+        if let Some(dep) = refs(d).find(|r| left.contains(*r)) {
+            return err(format!(
+                "the unit {id} depends on {dep}, whose package outer.json leaves to another \
+                 outer derivation; every package that depends on a package left must be left \
+                 too"
+            ));
+        }
+    }
     let mut wrappers = Vec::new();
-    let missing: Vec<&String> = units
+    let roots: BTreeMap<&String, &RootOut> = units
         .roots
+        .iter()
+        .filter(|(_, r)| outer.submits(&r.package))
+        .collect();
+    let missing: Vec<&String> = roots
         .keys()
-        .filter(|r| !outer.outputs.contains_key(*r))
+        .filter(|r| !outer.outputs.contains_key(**r))
+        .copied()
         .collect();
     if !missing.is_empty() {
         return err(format!(
@@ -893,7 +963,7 @@ pub fn dynamic_plan(
         ));
     }
     let mut taken = BTreeMap::new();
-    for (name, root) in &units.roots {
+    for (name, root) in roots {
         let output = &outer.outputs[name];
         if let Some(other) = taken.insert(output.clone(), name.clone()) {
             return err(format!(
@@ -912,7 +982,7 @@ pub fn dynamic_plan(
         .doctests
         .keys()
         .filter_map(|id| id.strip_prefix("d-"))
-        .filter(|p| !outer.doctests.contains_key(*p))
+        .filter(|p| outer.submits(p) && !outer.doctests.contains_key(*p))
         .collect();
     if !unpredicted.is_empty() {
         return err(format!(
@@ -935,7 +1005,14 @@ pub fn dynamic_plan(
         }
         wrappers.push((format!("wrapper:{package}.doctest"), w, output.clone()));
     }
-    match (&units.docs, &outer.docs) {
+    // The docs read every package's rustdoc output: with packages left,
+    // the other outer derivation writes them.
+    let docs = if outer.leave.is_empty() {
+        &units.docs
+    } else {
+        &None
+    };
+    match (docs, &outer.docs) {
         (None, None) => {}
         (Some(d), Some(output)) => {
             if let Some(other) = taken.insert(output.clone(), "the docs".into()) {
@@ -989,7 +1066,7 @@ pub fn dynamic_plan(
         }
         wrappers.push((
             "wrapper:*units".into(),
-            all_units(inputs, &prefix, outer, output)?,
+            all_units(inputs, &prefix, outer, output, &left)?,
             output.clone(),
         ));
     }
@@ -1001,7 +1078,7 @@ pub fn dynamic_plan(
         }
         wrappers.push((
             "wrapper:*runs".into(),
-            all_runs(inputs, &prefix, outer, output)?,
+            all_runs(inputs, &prefix, outer, output, &left)?,
             output.clone(),
         ));
     }
