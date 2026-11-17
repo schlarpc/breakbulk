@@ -53,6 +53,14 @@ let
       on = t: t.isMingw;
       what = "Windows -gnu and -gnullvm";
     };
+    rust-lld = {
+      on = t: t.isApple;
+      what = "Apple";
+    };
+    "ld64.lld" = {
+      on = t: t.isApple;
+      what = "Apple";
+    };
   };
 in
 {

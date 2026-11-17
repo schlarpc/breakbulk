@@ -46,6 +46,7 @@
   runners,
   wasmBindgen,
   wasiSdk,
+  appleSdk,
   stageHelpers,
 }:
 let
@@ -629,6 +630,19 @@ let
           ;
       }
     );
+    darwin = mkPreset (
+      import ./darwin.nix {
+        inherit
+          lib
+          targetTraits
+          llvmVersions
+          appleSdk
+          linkers
+          chooseRunner
+          hostSpec
+          ;
+      }
+    );
     windowsGnu = mkPreset (
       import ./windows-gnu.nix {
         inherit
@@ -698,6 +712,7 @@ in
     ;
   inherit (linkers)
     linkerKind
+    linkerFeatures
     rustcFacts
     moldLinker
     lldLinker
@@ -767,6 +782,13 @@ in
     else
       throw "breakbulk.presets.windows: `${triple}` is not a Windows -msvc, -gnu or -gnullvm triple"
   );
+
+  # macOS: {aarch64,x86_64}-apple-darwin (./darwin.nix). On a Linux build
+  # machine rustc links with an ld64.lld against the macOS SDK, which is
+  # required (`sdk`, a package or a version for breakbulk.appleSdk);
+  # `deploymentTarget`, `nativeBuilder`. Default triple:
+  # aarch64-apple-darwin.
+  inherit (impl) darwin;
 
   # wasm for the web: core modules through wasm-bindgen.
   inherit (impl) wasmWeb;

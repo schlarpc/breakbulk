@@ -9,6 +9,7 @@
 #   breakbulk.mkVendor pkgs { fetch; entries; ... }
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
 #   breakbulk.xwinSdk { pkgs; crt; sdk; arches; hash; }   (unfree; FOD)
+#   breakbulk.appleSdk { pkgs; version; }   (unfree; nixpkgs' FOD)
 #   breakbulk.wasmBindgen.forLockfile { pkgs; lockfile; }
 #   breakbulk.mkProduct { name; linked; stages; checks; target; pkgs; … }
 #     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers;
@@ -131,9 +132,11 @@ let
       runners
       wasmBindgen
       wasiSdk
+      appleSdk
       ;
     stageHelpers = stages.helpers;
   };
+  appleSdk = import ./apple-sdk.nix { inherit lib; };
 
   mkFetch =
     pkgs:
@@ -268,6 +271,7 @@ let
     versionReq = import ./modules/version-req.nix { inherit lib; };
 
     xwinSdk = import ./xwin-sdk.nix { inherit lib; };
+    inherit appleSdk;
 
     inherit
       wasmBindgen
@@ -280,7 +284,7 @@ let
       ;
 
     # Toolchain presets: breakbulk.presets.{linux, linuxStatic,
-    # linuxPortable, windows, wasmWeb, wasmComponent, uefi}, named for their
+    # linuxPortable, windows, darwin, wasmWeb, wasmComponent, uefi}, named for their
     # purpose, the mechanism from the triple; runners; the Rust to
     # LLVM version table; the Rust to wasi-sdk table (lib/wasi-sdk.nix).
     # Target traits (lib/target-traits.nix): `resolve { triple; traits; }`,

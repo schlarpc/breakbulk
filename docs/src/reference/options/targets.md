@@ -166,19 +166,21 @@ for every package of the target, because the units are shared:
    ` linked `; ` splitDebug ` moves it to a ` debug ` output (` $debug/lib/debug/.build-id/… `); the
    target’s links get a GNU build ID, and shipped units remap
    source paths only in panic messages, ` file!() ` and diagnostics,
-   so the debug info names the real sources\. ELF only\.
+   so the debug info names the real sources\. ELF and Mach-O: on
+   Apple targets the debug info is the link’s ` .dSYM `, which goes
+   to the ` debug ` output, and the binary’s debug map is removed\.
  - ` "keep" `: the ` packDwo ` stage on an ELF target, else none;
    every source path is remapped, so the debug info stays in the
    file without naming store paths\. msvc’s ` .pdb ` is a separate
    file already and goes to the ` debug ` output\.
  - ` "strip" `: the ` strip ` stage (` strip --strip-debug `), first
    after ` linked `; every source path is remapped, and no ` .dwo `
-   file ships\. ELF only\.
+   file ships\. ELF and Mach-O\.
 
 ` packDwo ` packs the ` .dwo ` files of ` split-debuginfo = "unpacked" ` into ` <file>.dwp ` in the ` debug ` output\.
 
 ` null `: the target’s traits’ ` debugInfo `: ` "split" ` on Linux
-ELF targets, ` "keep" ` elsewhere\.
+ELF targets and Apple targets, ` "keep" ` elsewhere\.
 
 *Type:*
 null or one of “split”, “keep”, “strip”
@@ -317,14 +319,16 @@ for the triple and Rust release, always through nixpkgs’ wrapped
 C compiler: ` lld ` on Linux where rustc links with its bundled
 lld, ` cc ` (the C compiler’s default, GNU ld) on other Linux
 targets; ` lld-link `, ` wasm-ld `, ` wasm-component-ld ` or
-` mingw-lld ` on Windows, UEFI and wasm\. A kind that cannot link for this
+` mingw-lld ` on Windows, UEFI and wasm; on macOS from a Linux
+machine, ` rust-lld ` (the toolchain’s own) or ` ld64.lld ` (nixpkgs’,
+for a toolchain without one)\. A kind that cannot link for this
 target, or with the preset’s other settings (` mold ` with
 ` crossLanguageLto `), is an evaluation error\. It needs a ` preset `
 here; a target defined directly from a preset takes ` linkerKind `
 as the preset’s argument\.
 
 *Type:*
-null or one of “cc”, “clang-lld”, “lld”, “lld-link”, “mingw-lld”, “mold”, “wasm-component-ld”, “wasm-ld”
+null or one of “cc”, “clang-lld”, “ld64\.lld”, “lld”, “lld-link”, “mingw-lld”, “mold”, “rust-lld”, “wasm-component-ld”, “wasm-ld”
 
 *Default:*
 

@@ -22,6 +22,10 @@
 #   wasm-component-ld    isWasm, os wasi, env p2         rustc's wasm-component-ld over wasm-ld
 #   wasm-ld              other isWasm                    wasm-ld
 #   mingw-lld            isMingw (windows-gnu, -gnullvm) the MinGW C driver with -fuse-ld=lld
+#   rust-lld             isApple, a Linux build machine, the toolchain's own rust-lld as ld64.lld
+#                        rustc ships rust-lld
+#   ld64.lld             isApple, a Linux build machine, nixpkgs' lld as ld64.lld, of
+#                        rustc ships none            rustc's LLVM major
 #   clang-lld            isLinux with lto                clang with -fuse-ld=lld
 #   lld                  isLinux, rustc picks lld        the wrapped cc with -fuse-ld=lld
 #   cc                   other isLinux                   the wrapped cc with its own default (GNU ld)
@@ -46,6 +50,17 @@
 #
 # `isLinux` is a Linux userland; Android (the Linux kernel, its own
 # userland) has no rule and fails with a message naming issue #27.
+#
+# Apple targets: the rule is keyed on the build machine (`rustc.host`).
+# From a Linux build machine rustc links directly with an ld64.lld (its
+# `darwin` lld flavor, `-syslibroot` from `SDKROOT`): the toolchain's own
+# rust-lld when it ships one (a rust-lang build, `bundledLld`), whose LLVM
+# is rustc's, as `-C linker-plugin-lto` needs; else nixpkgs' lld of
+# rustc's LLVM major. A Mac build machine has no rule yet (issue #13).
+# What an SDK asks of the linker is a second, separate fact
+# (`linkerFeatures` below, lib/apple-sdk.nix's `requirements`), checked by
+# presets.darwin; a linker that lacks it is an error, never a silent switch
+# to the other kind.
 #
 # Every LLVM tool (lld, wasm-ld, lld-link, clang) comes from the LLVM
 # release matching rustc's (`llvm`, chosen by the preset through
@@ -235,6 +250,77 @@ let
   # self-contained-lld arguments.
   zigLinker = pkgs: zig: driverWrapper pkgs "zig-cc-link-${zig.target}" zig.cc "";
 
+  # The toolchain's own rust-lld. rustc puts its lib/rustlib/<host>/bin
+  # first on the linker's PATH (rustc_codegen_ssa back/linker.rs,
+  # get_linker), so the wrapper finds the rust-lld of the rustc that runs
+  # it; a path into the toolchain would assume one layout, and fenix's
+  # and other wrapped toolchains keep the sysroot elsewhere. Named
+  # rust-lld so that rustc calls it as lld (rustc_target spec/mod.rs,
+  # `infer_linker_hints`) with `-flavor darwin`.
+  rustLldLinker =
+    bp:
+    "${bp.writeShellScriptBin "rust-lld" ''
+      self=$(readlink -f "$0")
+      IFS=: read -ra dirs <<< "''${PATH:-}"
+      for d in "''${dirs[@]}"; do
+        if [[ -x $d/rust-lld && $(readlink -f "$d/rust-lld") != "$self" ]]; then
+          exec "$d/rust-lld" "$@"
+        fi
+      done
+      echo "breakbulk: no rust-lld on PATH; the Rust toolchain ships it in lib/rustlib/<host>/bin (rustup's and rust-overlay's do); set \`linkerKind = \"ld64.lld\"\` for nixpkgs' lld instead" >&2
+      exit 1
+    ''}/bin/rust-lld";
+
+  # nixpkgs' lld as ld64.lld: through `lld`, whose name makes rustc call it
+  # with `-flavor darwin`; rustc infers nothing from the name `ld64.lld`
+  # and would call it as a C compiler.
+  ld64LldLinker = llvm: "${llvm.lld}/bin/lld";
+
+  # What an Apple SDK may ask of its linker (lib/apple-sdk.nix,
+  # `requirements`), and which LLD has it: from LLD release `lld` on, or
+  # with a nixpkgs patch to its LLVM whose file name contains
+  # `nixpkgsPatch` (nixpkgs backports some to older majors).
+  linkerFeatures = {
+    "arm64e.x1" = {
+      what = "the arm64e.x1 CPU subtype in the SDK's .tbd stub files (llvm/llvm-project#222721)";
+      lld = "23.1.3";
+      nixpkgsPatch = "arm64e_x1";
+    };
+  };
+
+  # The LLD an Apple linker kind links with: { name; version; patches; }.
+  lldOf =
+    {
+      kind,
+      # `rustcFacts`.
+      rustc ? null,
+      llvm ? null,
+    }:
+    if kind == "rust-lld" then
+      {
+        name = "rust-lld of rustc ${rustc.version}";
+        version = rustc.llvmVersion;
+        patches = [ ];
+      }
+    else if kind == "ld64.lld" then
+      {
+        name = "nixpkgs' lld";
+        version = llvm.lld.version;
+        patches = map (p: baseNameOf (toString p)) (llvm.libllvm.patches or [ ]);
+      }
+    else
+      throw "breakbulk.presets.linkerFeatures: `${kind}` is not an Apple linker kind";
+
+  # Whether `lld` (lldOf) has feature `f` (a name in linkerFeatures).
+  lldHas =
+    lld: f:
+    let
+      feat =
+        linkerFeatures.${f}
+          or (throw "breakbulk.presets: unknown linker feature `${f}`; known: ${lib.concatStringsSep ", " (lib.attrNames linkerFeatures)}");
+    in
+    lib.versionAtLeast lld.version feat.lld || lib.any (lib.hasInfix feat.nixpkgsPatch) lld.patches;
+
   # What each kind links for (./linker-kinds.nix).
   linkerKinds = import ./linker-kinds.nix { inherit lib; };
   inherit (linkerKinds) kinds;
@@ -283,6 +369,17 @@ let
       "wasm-ld"
     else if t.isMingw then
       "mingw-lld"
+    else if t.isApple then
+      (
+        if rustc == null then
+          throw "breakbulk.presets.chooseLinker: the default linker for `${triple}` depends on whether rustc ships its own rust-lld; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
+        else if (targetTraits.resolve { triple = rustc.host; }).isApple then
+          throw "breakbulk.presets.chooseLinker: no linker rule for `${triple}` on a Mac build machine yet (issue #13); set `targets.${triple}.linker`"
+        else if rustc.bundledLld then
+          "rust-lld"
+        else
+          "ld64.lld"
+      )
     else if t.isLinux then
       (
         if lto then
@@ -353,7 +450,7 @@ let
       };
     in
     {
-      inherit (f) version bundledLld;
+      inherit (f) version bundledLld llvmVersion;
       host = targetTraits.nativeTriple pkgs.buildPackages;
     };
 
@@ -422,6 +519,8 @@ let
       wasm-component-ld = componentLinker bp "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
       mingw-lld = mingwLinker pkgs packageSet lld;
       zig = zigLinker pkgs (needs k "zig" zig);
+      rust-lld = rustLldLinker bp;
+      "ld64.lld" = ld64LldLinker (needs k "rustc or llvm" llvm);
     }
     .${k};
 in
@@ -430,6 +529,9 @@ in
     chooseLinker
     linkerKind
     kindNames
+    linkerFeatures
+    lldOf
+    lldHas
     rustcFacts
     driverWrapper
     moldLinker
