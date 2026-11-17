@@ -17,9 +17,9 @@
 //!    the unset `rerun-if-env-changed` variables and at paths the output
 //!    names that the source view lacks ([`view_hints`]); on success, warn
 //!    about missing paths and list them in `$flags/missing-paths.json`,
-//!    which the products' `buildScriptPaths` check reads. The run itself
+//!    which the plan's `buildScriptPaths` check reads. The run itself
 //!    does not fail on them: a check fails without blocking what is built
-//!    above it, and names every missing path below a product at once.
+//!    above it, and names every missing path of the plan at once.
 //! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
 //!    ([`remove_cmake_state`]).
 
@@ -617,6 +617,7 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         &MetadataFile {
             package: package.to_owned(),
             version: version.to_owned(),
+            platform: r.platform,
             links: r.links.clone(),
             metadata: output.metadata.clone(),
             out: out_dir.display().to_string(),

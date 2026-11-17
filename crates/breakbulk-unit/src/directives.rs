@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::spec::{PackageTarget, SpliceKind};
+use crate::spec::{PackageTarget, Platform, SpliceKind};
 
 /// Cargo's `const DOCS_LINK_SUGGESTION`.
 const DOCS_LINK_SUGGESTION: &str = "See https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script \
@@ -574,8 +574,8 @@ pub fn metadata_env(links: &str, metadata: &[(String, String)]) -> Vec<(String, 
 }
 
 /// `$flags/metadata.json`, written by every run: which package it belongs
-/// to, where its `OUT_DIR` is, and what a run with `links` passes to
-/// dependents. Product stages read it to find a run
+/// to and for which platform it ran, where its `OUT_DIR` is, and what a
+/// run with `links` passes to dependents. Product stages read it to find a run
 /// (docs/src/reference/stage-functions.md).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -583,6 +583,9 @@ pub struct MetadataFile {
     /// The package's name and version, as in its `Cargo.toml`.
     pub package: String,
     pub version: String,
+    /// `host` (the build machine's units: build-dependencies, proc macros
+    /// and their dependencies) or `target`.
+    pub platform: Platform,
     /// The package's `links`, when it declares one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub links: Option<String>,

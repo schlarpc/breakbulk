@@ -88,6 +88,7 @@ fn outer(names: &[&str]) -> Outer {
             .map(|n| (n.to_string(), format!("{}.drv", n.replace('/', "."))))
             .collect(),
         units: Some("units.drv".into()),
+        runs: Some("runs.drv".into()),
         doctests: BTreeMap::new(),
         docs: None,
     }
@@ -220,12 +221,13 @@ fn nodes_are_in_dependency_order() {
             ("wrapper:smokeapp/bin/smokeapp", "smokeapp.bin.smokeapp.drv"),
             ("wrapper:smokeapp/test/it", "smokeapp.test.it.drv"),
             ("wrapper:*units", "units.drv"),
+            ("wrapper:*runs", "runs.drv"),
         ]
     );
     assert!(pos.contains_key("stub:smokeapp/test/it"));
     // A product stub fails, so it is not written: its wrapper says why.
     assert!(!pos.contains_key("stub:smokeapp/bin/admin-cli"));
-    assert_eq!(plan.nodes.last().unwrap().key, "wrapper:*units");
+    assert_eq!(plan.nodes.last().unwrap().key, "wrapper:*runs");
 }
 
 #[test]
@@ -245,6 +247,26 @@ fn units_output_depends_on_every_unit_output() {
     }
     // No stub: a check variant has no roots.
     assert!(!u.input_drvs.keys().any(|d| d.contains("stub")));
+}
+
+#[test]
+fn runs_output_depends_on_every_run_flags_only() {
+    let inputs = dyn_inputs();
+    let (resolved, _) = write_all(&inputs);
+    let (_, r) = resolved.iter().find(|(k, _)| k == "wrapper:*runs").unwrap();
+    assert_eq!(r.name, "ws-x86_64-unknown-linux-gnu-dev-runs");
+    let mut runs = 0;
+    for (id, unit) in &inputs.plan.units {
+        match unit {
+            Unit::Run(_) => {
+                runs += 1;
+                assert_eq!(r.input_drvs[&drv_of(id)], ["flags".to_owned()].into());
+                assert!(r.env["runs"].contains(&unit_path(id, "flags")));
+            }
+            Unit::Compile(_) => assert!(!r.input_drvs.contains_key(&drv_of(id)), "{id}"),
+        }
+    }
+    assert!(runs > 0);
 }
 
 #[test]

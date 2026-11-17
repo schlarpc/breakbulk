@@ -622,6 +622,7 @@ fn envify_and_metadata_env() {
     let m = MetadataFile {
         package: "openssl-sys".into(),
         version: "0.9.0".into(),
+        platform: Platform::Target,
         links: Some("openssl".into()),
         metadata: kv(&[("include", "/i"), ("version-number", "30000")]),
         out: "/o".into(),

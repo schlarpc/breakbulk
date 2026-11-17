@@ -699,6 +699,7 @@ pub fn compare_with(
                     Some(MetadataFile {
                         package: package.to_owned(),
                         version: version.to_owned(),
+                        platform: u.platform,
                         links: Some(u.links.clone()?),
                         metadata: outputs.get(m)?.metadata.clone(),
                         out: resolver.run_dirs.get(m).cloned().unwrap_or_default(),

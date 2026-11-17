@@ -608,6 +608,7 @@ fn dep_env_and_out_dir() {
         MetadataFile {
             package: "z-sys".into(),
             version: "0.1.0".into(),
+            platform: Platform::Target,
             links: Some("z".into()),
             metadata: vec![("include".into(), "/z/inc".into())],
             out: "/z-out".into(),
@@ -615,6 +616,7 @@ fn dep_env_and_out_dir() {
         MetadataFile {
             package: "openssl-sys".into(),
             version: "0.9.0".into(),
+            platform: Platform::Target,
             links: Some("open-ssl".into()),
             metadata: vec![("version-number".into(), "30".into())],
             out: "/ssl-out".into(),
@@ -623,6 +625,7 @@ fn dep_env_and_out_dir() {
         MetadataFile {
             package: "plain".into(),
             version: "1.0.0".into(),
+            platform: Platform::Target,
             links: None,
             metadata: vec![("ignored".into(), "x".into())],
             out: "/plain-out".into(),
@@ -675,6 +678,7 @@ fn run_mode_end_to_end() {
         &MetadataFile {
             package: "up".into(),
             version: "0.1.0".into(),
+            platform: Platform::Target,
             links: Some("up".into()),
             metadata: vec![("key".into(), "v".into())],
             out: "/up-out".into(),

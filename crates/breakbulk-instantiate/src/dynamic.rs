@@ -67,6 +67,12 @@ pub struct Outer {
     /// clippy variants need (they have no roots). None: no such output.
     #[serde(default)]
     pub units: Option<String>,
+    /// The output for a derivation that depends on the `flags` output of
+    /// every build-script run of the plan, on both platforms (`runs.drv`):
+    /// what the plan's `buildScriptPaths` check reads, without building
+    /// the rest of the plan. None: no such output.
+    #[serde(default)]
+    pub runs: Option<String>,
     /// Package name to the output for its doctest (`<package>.doctest.drv`):
     /// the predicted doctests of a test plan. Must cover every doctest of
     /// the plan.
@@ -843,6 +849,28 @@ fn all_units(
     )
 }
 
+/// The derivation that depends on the `flags` output of every build-script
+/// run of the plan; `$out/runs` lists them. Not `$out/units`: that one
+/// builds every compile of the plan too.
+fn all_runs(inputs: &Inputs, prefix: &str, outer: &Outer, output_name: &str) -> Result<Drv, Error> {
+    let tokens = Tokens::new(inputs, prefix);
+    let mut list = String::new();
+    for (id, unit) in &inputs.plan.units {
+        if let Unit::Run(_) = unit {
+            list.push_str(&tokens.unit(id, "flags"));
+            list.push('\n');
+        }
+    }
+    small_drv(
+        inputs,
+        &tokens,
+        outer,
+        output_name,
+        r#"mkdir "$out" && printf '%s' "$runs" > "$out/runs""#,
+        [("runs", list)],
+    )
+}
+
 /// The derivations to write, units first in dependency order, then each
 /// root's stub (if any) and wrapper.
 pub fn dynamic_plan(
@@ -962,6 +990,18 @@ pub fn dynamic_plan(
         wrappers.push((
             "wrapper:*units".into(),
             all_units(inputs, &prefix, outer, output)?,
+            output.clone(),
+        ));
+    }
+    if let Some(output) = &outer.runs {
+        if taken.contains_key(output) || outer.units.as_ref() == Some(output) {
+            return err(format!(
+                "the runs output {output} is also a root's or the units output"
+            ));
+        }
+        wrappers.push((
+            "wrapper:*runs".into(),
+            all_runs(inputs, &prefix, outer, output)?,
             output.clone(),
         ));
     }
