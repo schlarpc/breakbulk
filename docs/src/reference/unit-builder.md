@@ -386,22 +386,25 @@ separate file already, and wasm has no splitting stage).
 
 Three things follow from it (`products.debugInfoOf`):
 
-| `debugInfo` | Stage first after `linked` | Remap scope of target units | `NIX_SET_BUILD_ID` on target units |
+| `debugInfo` | Stages first after `linked` | Remap scope of target units | `NIX_SET_BUILD_ID` on target units |
 | --- | --- | --- | --- |
-| `"split"` | `splitDebug` | `macro,diagnostics` (table above) | yes (the GNU build ID `splitDebug` needs) |
-| `"strip"` | `strip` (`strip --strip-debug`) | all | no |
-| `"keep"` | none | all | no |
+| `"split"` | `packDwo`, `splitDebug` | `macro,diagnostics` (table above) | yes (the GNU build ID `splitDebug` needs) |
+| `"strip"` | `strip` (`strip --strip-debug`; drops `.dwo` files) | all | no |
+| `"keep"` | `packDwo` on an ELF target, else none | all | no |
 
 - `"split"` and `"strip"` need an ELF target, or evaluation fails.
 - Units are shared by every package of the target, so no `stages`
   setting, the target's or a package's, may:
-  - remove the inserted stage (that would leave real source paths in the
-    product), or
+  - remove the inserted `splitDebug` or `strip` (that would leave real
+    source paths in the product), or
   - add `splitDebug` where the target does not split (its links have no
     build ID and remap every path).
 
   Either is an evaluation error naming `debugInfo`.
-- Overriding the inserted stage's attributes (its `run`, `after`) is
+- `packDwo` changes no unit and leaves no source path in the product, so
+  it is an ordinary stage: configure it, or remove it with `null` to ship
+  the loose `.dwo` files.
+- Overriding the inserted stages' attributes (their `run`, `after`) is
   allowed, and a stage of another name (an extra
   `strip { all = true; }` after `splitDebug`) is an ordinary stage.
 

@@ -61,13 +61,14 @@ attributes:
 | `sourcesAllowedIn` | stages and checks | File name globs whose own references to sources `noSourceReferences` allows: each staticlib root's archive name in `linked`. |
 | `buildScriptFlags` | stages and checks | The `flags` outputs of the build-script runs of the product's target that its roots depend on ([below](#build-script-runs)). A list in IFD mode. In dynamic-derivation mode `{ rootInfo; }`: the roots' `breakbulk-root.json` files, which list the outputs at build time. |
 | `linkedDebug` | stages and checks | The `debug` output of `linked`: the link units' debuginfo side files (`.pdb`, `.dwp`, `.dwo`). Only when `linked` has a `debug` output, which it always has in dynamic-derivation mode. |
-| `debugSplit` | stages | Whether an earlier stage has a `debug` output. |
+| `earlierDebug` | stages | The `debug` output of the last earlier stage that has one, or null. A stage that writes its own `debug` output starts from it (`packDwo`, `splitDebug` and `strip` do), so a later stage's has every debug file so far. |
+| `debugSplit` | stages | Whether an earlier stage has a `debug` output (`earlierDebug` is not null). |
 | `stageOrder` | checks | The stage names after `linked`, in order. |
 | `checkName` | checks | The name the check runs under in `checks`. A failure message names it, since a check may run a helper under another name. |
 
 A product made with `breakbulk.mkProduct` directly has
 `name`, `sourcePaths` and `toolchainPaths` (empty unless given),
-`linkedDebug`, `debugSplit`, `stageOrder` and `checkName` as above,
+`linkedDebug`, `earlierDebug`, `debugSplit`, `stageOrder` and `checkName` as above,
 and the attributes of its `info` argument. `bindgen` also reads
 `lockEntries` there, a lockfile's parsed entries
 (`breakbulk.lockfile.read`), when there is no `lockfile`. Without

@@ -27,11 +27,16 @@ path remapping and build ID depend on it.
 
 | Target | `debugInfo` default | Default stages |
 | --- | --- | --- |
-| Linux (gnu, musl) | `split` | `splitDebug` |
+| Linux (gnu, musl) | `split` | `packDwo` → `splitDebug` |
+| Other ELF targets (bare metal, BSDs) | `keep` | `packDwo` |
 | Windows (MSVC) | `keep` | none: PDBs are already separate files; `install` puts them in the `debug` output |
 | wasm for browsers | `keep` | `bindgen` → `wasmOpt` |
 | wasm components | `keep` | `wasmOpt` → `componentize` |
 | macOS (not yet, [#13](https://github.com/schlarpc/breakbulk/issues/13)) | to decide (`.dSYM` via `dsymutil`) | `dsymutil` → `strip` → `adhocSign` |
+
+`"strip"` inserts `strip` instead. `packDwo` packs split DWARF objects
+(see [Split DWARF](#split-dwarf)); it does
+nothing unless a profile sets `split-debuginfo = "unpacked"`.
 
 There is no hidden fixup phase. Stripping breaks some signing schemes, and
 some checks need unstripped bytes, so every default stage can be removed
@@ -105,7 +110,7 @@ Typical checks: ISA level, DLL import closure, PE headers, signature
 verification, "no interpreter, no needed libraries".
 
 breakbulk ships [stage helpers](../reference/stage-helpers.md):
-`splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt`,
+`packDwo`, `splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt`,
 `componentize`, `deterministicZip` and more. Your own stages are
 ordinary derivations: container images, boot images, distribution
 packages, signing, metadata stamps. What a stage function gets is in
@@ -195,6 +200,46 @@ of its own, and keeps the per-kind scopes above, unless the project sets
 Under Cargo's trim-paths, breakbulk's C prefix maps use Cargo's names, so
 they agree with cc-rs, which reads the same remaps from
 `CARGO_TRIM_PATHS_REMAP`.
+
+### Split DWARF
+
+With `split-debuginfo = "unpacked"` in a Cargo profile, rustc leaves most
+of the DWARF out of the objects. Each object keeps a small skeleton unit
+that names a `.dwo` file holding the rest. The skeleton names the file by
+rustc's absolute build path (`/build/out/…`), which does not exist after
+the build. gdb opens such a name as given and nowhere else, so a loose
+`.dwo` file is of no use to a debugger.
+
+So the `packDwo` stage packs the `.dwo` files that each file of the
+product names into one `<file>.dwp` (a DWARF package) in the `debug`
+output, and ships no loose `.dwo` files:
+
+| Product file | `debug` output | How gdb finds it |
+| --- | --- | --- |
+| `bin/app` | `bin/app.dwp` | with `split`, `splitDebug` moves it next to the separate debug file; with `keep`, it must be next to the binary, as in a profile that has both outputs |
+| `lib/libfoo.so` | `lib/libfoo.so.dwp` | the same |
+| `lib/libfoo.a` | `lib/libfoo.a.dwp` | it does not: see below |
+
+With `debugInfo = "strip"`, the skeleton units are stripped, so nothing
+names the `.dwo` files any more and none ship. To ship the loose files
+anyway, remove the stage: `packages.<name>.stages.packDwo = null`.
+
+**A staticlib's `.dwp`.** The archive keeps its skeleton units, because
+the program that links it needs them. gdb looks for a DWARF package only
+under the name of the program it debugs (`<program>.dwp`, next to the
+program or in `debug-file-directory`; gdb 17.2, `gdb/dwarf2/read.c`,
+`open_and_init_dwp_file`), never under the archive's name. So the program
+that links `libfoo.a` packs the archive's `.dwp` into its own, with its
+own `.dwo` files if it has any:
+
+```
+llvm-dwp libfoo.a.dwp their/*.dwo -o their-program.dwp
+```
+
+`llvm-dwp` matches each skeleton to its unit by the DWARF ID they share,
+so the `/build/out/…` names in the archive do not matter. Use `llvm-dwp`,
+not binutils' `dwp`: from DWARF 5 units, binutils' `dwp` writes an empty
+package and succeeds.
 
 ## Tests
 

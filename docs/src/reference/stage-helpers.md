@@ -415,6 +415,45 @@ for wasm.
 
 It has no options.
 
+### `packDwo`
+
+Packs the `.dwo` files that each ELF file and each `ar` archive
+names (`split-debuginfo = "unpacked"`) into `<file>.dwp` in the
+stage's `debug` output, with `llvm-dwp`, and drops the loose `.dwo`
+files. The `.dwp` goes under `bin/` or `lib/`, where the file
+lands in the install layout: `bin/app.dwp`, `lib/libfoo.so.dwp`,
+`lib/libfoo.a.dwp`. A file that already has a `<file>.dwp`
+(`"packed"`) keeps it. The output files are unchanged.
+
+The skeleton units name their `.dwo` files by rustc's absolute
+build path, which gdb opens as given and nowhere else, so loose
+`.dwo` files are of no use to a debugger. gdb finds `<binary>.dwp`
+next to the binary or next to its separate debug file
+(`splitDebug` moves it there). An archive's `.dwp` is for the
+program that links the archive: pack it with that program's own
+`.dwo` files into `<program>.dwp`.
+
+`targets.<triple>.debugInfo` inserts this stage on ELF targets:
+before `splitDebug` with `"split"`, alone with `"keep"`. It is an
+ordinary stage: configure it, replace it, or remove it with `null`
+to ship the loose `.dwo` files.
+
+#### `packDwo.binutils`
+
+The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
+#### `packDwo.llvm`
+
+The package to run instead of `llvm` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
 ### `patchelfRpath`
 
 Adds run paths to every dynamically linked ELF file, so that it
@@ -488,11 +527,12 @@ The file keeps its symbol table and gets a `.gnu_debuglink`.
 A file without debug information is left as it is; one with debug
 information but no build ID fails the stage.
 
-The `.dwo` files a binary names (`split-debuginfo = "unpacked"`)
-are packed into `<binary>.dwp` with `llvm-dwp`; a `<binary>.dwp`
-(`"packed"`) moves next to the `.debug` file, where gdb finds it,
-with a symlink at its place in the install layout.
-`targets.<triple>.debugInfo = "split"` inserts this stage.
+A `<binary>.dwp` (`split-debuginfo = "packed"`, or `packDwo`'s)
+moves next to the `.debug` file, where gdb finds it, with a symlink
+at its place in the install layout. The other debug files so far
+(an earlier stage's `debug` output, else the link units') are kept.
+`targets.<triple>.debugInfo = "split"` inserts this stage, after
+`packDwo`.
 
 #### `splitDebug.binutils`
 
@@ -502,19 +542,14 @@ The package to run instead of `binutils-unwrapped-all-targets` from the stage's 
 
 *Default:* `null`
 
-#### `splitDebug.llvm`
-
-The package to run instead of `llvm` from the stage's `pkgs`.
-
-*Type:* null or package
-
-*Default:* `null`
-
 ### `strip`
 
 Runs `strip` on every ELF file: `--strip-debug`, or
-`--strip-all` with `all`. `targets.<triple>.debugInfo = "strip"`
-inserts this stage.
+`--strip-all` with `all`. It also drops the `.dwo` files from
+the debug files so far (`split-debuginfo = "unpacked"`): the
+skeleton units that name them are gone. When there are debug
+files, what is left of them is the stage's `debug` output.
+`targets.<triple>.debugInfo = "strip"` inserts this stage.
 
 #### `strip.all`
 

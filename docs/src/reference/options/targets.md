@@ -163,17 +163,20 @@ null
 What this target’s products do with debug info,
 for every package of the target, because the units are shared:
 
- - ` "split" `: the ` splitDebug ` stage, first after ` linked `, moves
-   it to a ` debug ` output (` $debug/lib/debug/.build-id/… `); the
+ - ` "split" `: the ` packDwo ` and ` splitDebug ` stages, first after
+   ` linked `; ` splitDebug ` moves it to a ` debug ` output (` $debug/lib/debug/.build-id/… `); the
    target’s links get a GNU build ID, and shipped units remap
    source paths only in panic messages, ` file!() ` and diagnostics,
    so the debug info names the real sources\. ELF only\.
- - ` "keep" `: no stage; every source path is remapped, so the debug
-   info stays in the file without naming store paths\. msvc’s
-   ` .pdb ` is a separate file already and goes to the ` debug `
-   output\.
+ - ` "keep" `: the ` packDwo ` stage on an ELF target, else none;
+   every source path is remapped, so the debug info stays in the
+   file without naming store paths\. msvc’s ` .pdb ` is a separate
+   file already and goes to the ` debug ` output\.
  - ` "strip" `: the ` strip ` stage (` strip --strip-debug `), first
-   after ` linked `; every source path is remapped\. ELF only\.
+   after ` linked `; every source path is remapped, and no ` .dwo `
+   file ships\. ELF only\.
+
+` packDwo ` packs the ` .dwo ` files of ` split-debuginfo = "unpacked" ` into ` <file>.dwp ` in the ` debug ` output\.
 
 ` null `: the target’s traits’ ` debugInfo `: ` "split" ` on Linux
 ELF targets, ` "keep" ` elsewhere\.
@@ -444,14 +447,16 @@ null
 ## `targets.<name>.stages`
 
 Post-link stages for this target’s products, merged over the
-stage ` debugInfo ` inserts and the stage preset’s defaults
+stages ` debugInfo ` inserts and the stage preset’s defaults
 (` stagePreset `)\. A stage is ` { after ? null; before ? null; run = { input, product, target, pkgs }: <derivation>; } `; ` null `
 removes one\. A stage runs before ` install ` and sees the flat link
 output, unless it is ordered after ` install ` (` after = "install" `, or after such a stage); then it sees the installed
 layout (` bin/ `, ` lib/ `, ` pkg/ `), the place for wrappers and
 packaging\. Package settings (` packages.<name>.stages `) merge
-over these\. Neither may remove the stage ` debugInfo ` inserts or
-add ` splitDebug ` where it inserts none; set ` debugInfo ` instead\.
+over these\. Neither may remove the ` splitDebug ` or ` strip ` stage
+` debugInfo ` inserts or add ` splitDebug ` where it inserts none; set
+` debugInfo ` instead\. ` packDwo ` is an ordinary stage: ` null `
+removes it\.
 
 *Type:*
 attribute set of (null or raw value)
