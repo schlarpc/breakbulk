@@ -2489,6 +2489,53 @@ in
         touch $out
       '';
 
+  # `productInputs` that cannot work, named from the declarations and
+  # Cargo.lock without planning (feature-unification: a and b depend on
+  # shared): a product whose package depends on the declaring one, a
+  # package's own product, and a product the second outer derivation
+  # makes for another declaration.
+  product-inputs-conflicts =
+    let
+      conflicts =
+        decls:
+        (mkRepo (fixtures + "/feature-unification") [
+          (oneWs ".")
+          { packages = lib.mapAttrs (_: l: { productInputs = l; }) decls; }
+        ]).workspaces.main.instances.${native}.default.productInputConflicts;
+      cases = [
+        {
+          decls.shared = [ "a" ];
+          want = [
+            "breakbulk: `a` depends on `shared` in Cargo.lock (a -> shared), and `packages.shared.productInputs` says the settings of `shared` use the product of `a`: that product would need itself."
+          ];
+        }
+        {
+          decls.a = [ "a" ];
+          want = [
+            "breakbulk: `packages.a.productInputs` names `a` itself: the settings of `a` cannot use its own product, which is built with them."
+          ];
+        }
+        {
+          decls = {
+            shared = [ "itoa" ];
+            b = [ "a" ];
+          };
+          want = [
+            "breakbulk: `packages.b.productInputs` names `a`, but `a` depends on `shared` in Cargo.lock (a -> shared), which declares products of its plan (`packages.shared.productInputs`). Dynamic-derivation mode builds a plan's units in two steps, the products that settings use and then the packages whose settings use them (with everything that depends on those), so `a` is in the second step and its product cannot be an input of `b`."
+          ];
+        }
+        {
+          decls.a = [ "b" ];
+          want = [ ];
+        }
+      ];
+      bad = lib.filter (c: conflicts c.decls != c.want) cases;
+    in
+    assert lib.assertMsg (bad == [ ]) "product-inputs-conflicts: ${
+      builtins.toJSON (map (c: c // { got = conflicts c.decls; }) bad)
+    }";
+    evalCheck "product-inputs-conflicts" "ok";
+
   # Instantiating a plan needs only the names of package settings; their
   # values reach a unit's derivation when it is substituted. Here every
   # value-carrying setting of `app` (package level and `target.<triple>`,

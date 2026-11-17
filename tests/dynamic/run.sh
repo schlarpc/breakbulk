@@ -85,6 +85,7 @@ else
     test-home test-closure test-wrapper doctest-false optional-dependency exclusive-features
     cdylib-debug ui-dist build-script-outputs manifest-dir nested-cargo rustc-private
     declared-paths run-files-ca-off roots-override docs docs-deps source-overlay
+    same-workspace-products
   )
 fi
 

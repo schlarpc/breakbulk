@@ -453,8 +453,8 @@ let
     docs-deps = products.docsDeps;
     # Another repository's wasm product at a path in `assets`' views.
     source-overlay = products.sourceOverlayRepo;
-    # Products of the same plan in a package's env and inputs: an infinite
-    # recursion in dynamic mode (#126), so not in run.sh's default list.
+    # Products of the same plan in a package's env and inputs, declared in
+    # `productInputs`: the build plan has two outer derivations.
     same-workspace-products = products.sameWsRepo;
     # A build script that runs Cargo, with the workspace's vendor directory
     # as CARGO_HOME; without noSourceReferences, which fails on its product
@@ -745,6 +745,8 @@ let
     ui-dist = "^app-";
     # `assets`' views link the product; `server` links `assets`.
     source-overlay = "^(assets|server)-";
+    # `app`'s env and inputs name `tool`'s and `shared`'s products.
+    same-workspace-products = "^app-";
   };
 
   # The fixtures whose doc plans are compared: every variant of them gets

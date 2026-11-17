@@ -381,11 +381,41 @@ packages and what they depend on in `Cargo.lock`. Another package's
 settings do not reach it, so a product of the wasm target in the example
 does not depend on `app`'s `env`.
 
-In dynamic-derivation mode, one derivation makes the derivations of all
-units of a plan, and it takes every setting it is given as an input. So
-a product of the same plan, as in the third form, is an infinite
-recursion there (#126). Products of another target or another workspace
-work in both modes.
+A product of the same plan, as in the third form, must be named in the
+package's
+[`productInputs`](../reference/options/packages.md#packagesnameproductinputs):
+
+```nix
+packages.app = {
+  env.TOOL_BIN = "${repo.workspaces.default.packages.tool}/bin/tool";
+  productInputs = [ "tool" ];
+};
+```
+
+Products of another target, another variant or another workspace need no
+entry. The reason is dynamic-derivation mode. There, one derivation makes
+the derivations of all units of a plan, and it takes every setting it is
+given as an input. When `app`'s settings use `tool`'s product, that
+derivation would need its own output. With the entry, the build plan
+gets a second such derivation. It makes the units of `app` and of every
+package that depends on `app` in `Cargo.lock`, and it takes their
+settings. The first one makes all other units, `tool`'s among them, and
+takes none of those settings, so it does not depend on the second.
+
+Dynamic-derivation mode cannot find a missing entry: evaluating the
+setting to find the product in it is the infinite recursion itself. IFD
+mode checks the entries. When `repo.checks` is evaluated, each package's
+settings are compared with the products of its plan, and a product that
+is not named fails the checks with a message that names the setting and
+the line to add. Run the checks in IFD mode (`mode = "ifd"`) after you
+add such a setting.
+
+Some entries cannot work, and breakbulk names them in both modes, from
+the entries and `Cargo.lock` alone. When `tool` depends on `app` in
+`Cargo.lock`, `app`'s settings cannot use `tool`'s product, because that
+product is built with them. A product made by the second derivation (of
+a package that declares entries itself, or that depends on one that
+does) cannot be an entry of another package either.
 
 A product that needs itself, directly or through other products, is an
 infinite recursion. Determinate Nix evaluates in parallel, and there such

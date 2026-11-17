@@ -20,9 +20,15 @@
 #     nixFeatures = <standalone>;  # the record the outer derivation and
 #                                # outputOf are checked against
 #                                # (lib/nix-features.nix; repo.nixFeatures)
+#     split = null;              # or { packages; owner; }: two outer
+#                                # derivations (below); `owner key` is the
+#                                # package whose settings an input holds
 #   };
 #   i.outer                      the outer derivation (CA, text-hashed,
 #                                requiredSystemFeatures = builder-rpc-v0)
+#                                that writes every unit of the plan
+#   i.writers                    every outer derivation of the plan: `outer`,
+#                                or with `split` the first and `outer`
 #   i.roots."<pkg>/<kind>/<target>"
 #                                a small derivation symlinking the root's
 #                                output, resolved at build time; its
@@ -67,6 +73,15 @@
 # `builder-rpc-v0` socket. Each wrapper is
 # submitted as the output `<root>.drv` (with `/` as `.`), named
 # `<outer name>-<root>`, as Nix requires.
+#
+# With `split` (packages whose settings use products of this plan:
+# `productInputs`), a plan has two outer derivations. The first takes no
+# input of `split.packages` and leaves their units out (outer.json
+# `leave`), so it never depends on their settings, which may name its
+# products. The second, `<outer name>-product-users`, takes every input,
+# writes every unit (the same .drv files as the first, where both write
+# one) and submits the roots and doctests of `split.packages` (outer.json
+# `submit`).
 #
 # Nothing but the plan is built before the outer derivation runs: every
 # input's .drv is in the outer derivation's context as a plain path (the
@@ -181,6 +196,7 @@ let
       doctests ? { },
       docs ? false,
       nixFeatures ? featureGates.standalone { dynamic = true; },
+      split ? null,
       ...
     }:
     let
@@ -193,6 +209,7 @@ let
           "outerName"
           "doctests"
           "docs"
+          "split"
         ]
         // {
           nixFeatures = nixFeatures // {
@@ -200,13 +217,19 @@ let
           };
         }
       );
-      outputOf =
-        what: output: featureGates.outputOf nixFeatures "the ${what} of `${outerName}`" outer.${output}.outPath "out";
+      # An output of outer derivation `w` (`outer`, by default).
+      outputOfIn =
+        w: what: output: featureGates.outputOf nixFeatures "the ${what} of `${w.name}`" w.${output}.outPath "out";
+      outputOf = outputOfIn outer;
       # Without predicted roots (check and clippy plans) the outer
       # derivation has only its `units.drv` output.
       predicted = if roots == null then [ ] else roots.roots;
 
-      values =
+      # With `split`, the second outer derivation's packages: it writes
+      # them, and the first takes none of their inputs.
+      second = p: split != null && lib.elem p split.packages;
+
+      allValues =
         base.inputs
         // {
           "dynamic:coreutils" = "${coreutils}";
@@ -215,26 +238,11 @@ let
         // lib.concatMapAttrs (
           pkg: attrs: lib.mapAttrs' (k: v: lib.nameValuePair "doctest:${pkg}:${k}" v) attrs
         ) doctests;
-      valuesJson = lib.mapAttrs (k: v: {
-        value = unsafeDiscardStringContext v;
-        context = contextList k v;
-      }) values;
-      # Every store path any value depends on, as a plain path: a derivation
-      # output becomes its .drv file (drv-only: nothing is built).
-      contextPaths = lib.unique (lib.concatMap (v: lib.attrNames (getContext v)) (lib.attrValues values));
-      context = builtins.appendContext "" (
-        lib.genAttrs contextPaths (_: {
-          path = true;
-        })
-      );
 
       names = map rootName predicted;
-      outputs = lib.genAttrs names outputName;
-      outputList = lib.attrValues outputs;
       # `<package>.doctest.drv`: package names have no `.`, so these cannot
       # be named like a root's (`<package>.<kind>.<target>.drv`).
       doctestOutputs = lib.mapAttrs (pkg: _: outputName "${pkg}/doctest") doctests;
-      dupes = lib.filter (o: lib.count (x: x == o) outputList > 1) outputList;
       # A derivation on every output of every unit; root outputs always have
       # a `.` before `.drv`, so they cannot be named like it.
       unitsOutput = "units.drv";
@@ -243,60 +251,111 @@ let
       # Likewise the docs derivation's wrapper.
       docsOutput = "docs.drv";
 
-      outerAttrs = {
-        name = outerName;
-        inherit system;
-        builder = "${breakbulkDrv}/bin/breakbulk-drv";
-        args = [
-          "--plan"
-          plan
-          "--sources"
-          base.files.sourcesFile
-          "--toolchains"
-          base.files.toolchainsFile
-          "--overrides"
-          base.files.overridesFile
-          "--roots"
-          base.files.rootsFile
-          "--values"
-          (toFile "values.json" (toJSON valuesJson))
-          "--outer"
-          (toFile "outer.json" (
-            toJSON (
-              {
-                name = outerName;
-                inherit outputs;
-                units = unitsOutput;
-                runs = runsOutput;
-                doctests = doctestOutputs;
-              }
-              // lib.optionalAttrs docs { docs = docsOutput; }
-            )
-          ))
-        ];
-        outputs =
-          if dupes != [ ] then
-            throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
-          else
-            outputList
-            ++ lib.attrValues doctestOutputs
-            ++ [
-              unitsOutput
-              runsOutput
-            ]
-            ++ lib.optional docs docsOutput;
-        BREAKBULK_INPUTS = context;
-        requiredSystemFeatures = [ "builder-rpc-v0" ];
-      };
-      outer = derivation (
-        outerAttrs
-        // featureGates.caAttrs nixFeatures "the outer derivation `${outerName}`"
-        // {
-          outputHashMode = "text";
-        }
-      );
+      # One outer derivation: `mine p` says whether it submits package p's
+      # roots and doctest; `full` whether it writes every unit (and the
+      # docs), else it leaves the second outer derivation's packages out.
+      mkOuter =
+        {
+          name,
+          mine,
+          full,
+        }:
+        let
+          values = if full then allValues else lib.filterAttrs (k: _: !second (split.owner k)) allValues;
+          valuesJson = lib.mapAttrs (k: v: {
+            value = unsafeDiscardStringContext v;
+            context = contextList k v;
+          }) values;
+          # Every store path any value depends on, as a plain path: a
+          # derivation output becomes its .drv file (drv-only: nothing is
+          # built).
+          contextPaths = lib.unique (lib.concatMap (v: lib.attrNames (getContext v)) (lib.attrValues values));
+          context = builtins.appendContext "" (
+            lib.genAttrs contextPaths (_: {
+              path = true;
+            })
+          );
+          outputs = lib.genAttrs (lib.filter (n: mine (lib.head (lib.splitString "/" n))) names) outputName;
+          outputList = lib.attrValues outputs;
+          doctests = lib.filterAttrs (p: _: mine p) doctestOutputs;
+          dupes = lib.filter (o: lib.count (x: x == o) outputList > 1) outputList;
+          hasDocs = docs && full;
+        in
+        derivation (
+          {
+            inherit name system;
+            builder = "${breakbulkDrv}/bin/breakbulk-drv";
+            args = [
+              "--plan"
+              plan
+              "--sources"
+              base.files.sourcesFile
+              "--toolchains"
+              base.files.toolchainsFile
+              "--overrides"
+              base.files.overridesFile
+              "--roots"
+              base.files.rootsFile
+              "--values"
+              (toFile "values.json" (toJSON valuesJson))
+              "--outer"
+              (toFile "outer.json" (
+                toJSON (
+                  {
+                    inherit name outputs doctests;
+                    units = unitsOutput;
+                    runs = runsOutput;
+                  }
+                  // lib.optionalAttrs hasDocs { docs = docsOutput; }
+                  // lib.optionalAttrs (split != null) (
+                    if full then { submit = split.packages; } else { leave = split.packages; }
+                  )
+                )
+              ))
+            ];
+            outputs =
+              if dupes != [ ] then
+                throw "breakbulk: roots with the same dynamic-derivation output name: ${toString dupes}"
+              else
+                outputList
+                ++ lib.attrValues doctests
+                ++ [
+                  unitsOutput
+                  runsOutput
+                ]
+                ++ lib.optional hasDocs docsOutput;
+            BREAKBULK_INPUTS = context;
+            requiredSystemFeatures = [ "builder-rpc-v0" ];
+          }
+          // featureGates.caAttrs nixFeatures "the outer derivation `${name}`"
+          // {
+            outputHashMode = "text";
+          }
+        );
 
-      wrapperOf = n: outputOf "root `${n}`" outputs.${n};
+      # Without `split`, one outer derivation writes everything. With it,
+      # the first writes every package but the second's, and the second
+      # writes every unit (it cannot read the first's) with every input,
+      # and submits its packages' roots and doctests. The first never
+      # depends on the second, so the second's packages' settings can use
+      # the first's products.
+      first = mkOuter {
+        name = outerName;
+        mine = p: !second p;
+        full = split == null;
+      };
+      outer =
+        if split == null then
+          first
+        else
+          mkOuter {
+            name = "${outerName}-product-users";
+            mine = second;
+            full = true;
+          };
+      outerOf = p: if second p then outer else first;
+
+      wrapperOf = n: outputOfIn (outerOf (lib.head (lib.splitString "/" n))) "root `${n}`" (outputName n);
 
       # Building it builds every unit of the plan (`$out/units` lists their
       # outputs): what check and clippy variants build.
@@ -376,7 +435,7 @@ let
       mkDoctest =
         pkg:
         let
-          wrapper = outputOf "doctest of `${pkg}`" doctestOutputs.${pkg};
+          wrapper = outputOfIn (outerOf pkg) "doctest of `${pkg}`" doctestOutputs.${pkg};
         in
         derivation {
           name = storeName "${pkg}-doctest";
@@ -420,6 +479,7 @@ let
       buildScriptRuns = {
         runsFile = "${allRuns}/runs";
       };
+      writers = [ first ] ++ lib.optional (split != null) outer;
       inherit (base) files inputs;
       delivery = "dynamic";
       roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) predicted);

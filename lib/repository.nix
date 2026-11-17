@@ -996,6 +996,119 @@ let
       ) locks.${wsName};
     };
 
+  # productInputs by package name, from every layer of every matching
+  # entry (the curated defaults' layers may lack the option).
+  productInputsOf =
+    wsName: triple: vName: entries:
+    lib.foldl' (
+      acc: e:
+      let
+        names = lib.concatMap (l: l.productInputs or [ ]) (layersFor wsName triple vName e);
+      in
+      if names == [ ] then acc else acc // { ${e.name} = lib.unique ((acc.${e.name} or [ ]) ++ names); }
+    ) { } entries;
+
+  # IFD mode's check of `productInputs`: for the settings of each package
+  # the build plan can contain, the products of that plan (a product, its
+  # stages and its roots) in the string context of a value that the
+  # package does not declare. The settings as written, every layer: the
+  # instantiation's inputs would hide `inputs`, `nativeInputs` and
+  # `sourceOverlay` inside env captures and views. One message per
+  # package, naming the settings and the line to add. Dynamic-derivation
+  # mode cannot evaluate this: a missing declaration is an infinite
+  # recursion there (null).
+  #
+  # Evaluated by repo.checks only, never by a product: the check reads
+  # every product of the plan, and a product the settings use would then
+  # depend on it.
+  undeclaredProductInputs =
+    wsName: triple: vName: inst: products:
+    let
+      label = "workspace ${wsName}, target ${triple}, variant ${vName}";
+      discard = builtins.unsafeDiscardStringContext;
+      byDrv = lib.listToAttrs (
+        lib.concatLists (
+          lib.mapAttrsToList (
+            pkg: p:
+            map (d: lib.nameValuePair (discard d.drvPath) pkg) (
+              [ p ] ++ lib.attrValues (p.stages or { }) ++ lib.attrValues (p.roots or { })
+            )
+          ) products
+        )
+      );
+      # A value's string context, as instantiation would take it.
+      context =
+        v:
+        if builtins.isString v then
+          builtins.getContext v
+        else if builtins.isList v then
+          lib.foldl' (a: x: a // context x) { } v
+        else if lib.isDerivation v || (builtins.isAttrs v && v ? outPath) then
+          builtins.getContext "${v}"
+        else
+          { };
+      called = f: if lib.isFunction f then f pkgs else f;
+      # Every value-carrying setting of one layer the build plan takes:
+      # { what; value; }.
+      layerValues =
+        l:
+        let
+          side =
+            prefix: s:
+            lib.mapAttrsToList (k: v: {
+              what = "`${prefix}env.${k}`";
+              value = v;
+            }) (s.env or { })
+            ++ map (v: {
+              what = "`${prefix}nativeInputs`";
+              value = v;
+            }) (called (s.nativeInputs or [ ]))
+            ++ map (v: {
+              what = "`${prefix}inputs`";
+              value = v;
+            }) (called (s.inputs or [ ]));
+        in
+        side "" l
+        ++ side "forHost." (l.forHost or { })
+        ++ side "forTarget." (l.forTarget or { })
+        ++ lib.mapAttrsToList (k: v: {
+          what = "`sourceOverlay.\"${k}\"`";
+          value = v;
+        }) (l.sourceOverlay or { });
+      found = lib.concatMap (
+        e:
+        let
+          owner = e.name;
+          declared = inst.productInputs.${owner} or [ ];
+        in
+        lib.optionals (inst.canContain "build" owner) (
+          lib.concatMap (
+            s:
+            lib.concatMap (
+              d:
+              let
+                q = byDrv.${d} or null;
+              in
+              lib.optional (q != null && q != owner && !(lib.elem q declared)) {
+                inherit owner q;
+                inherit (s) what;
+              }
+            ) (lib.attrNames (context s.value))
+          ) (lib.concatMap layerValues (layersFor wsName triple vName e))
+        )
+      ) locks.${wsName};
+      message =
+        owner: xs:
+        let
+          uses = lib.mapAttrsToList (
+            what: ys: "${what} uses ${lib.concatMapStringsSep ", " (q: "`${q}`") (lib.sort (a: b: a < b) (lib.unique (map (y: y.q) ys)))}"
+          ) (lib.groupBy (y: y.what) xs);
+          all = lib.sort (a: b: a < b) (lib.unique ((inst.productInputs.${owner} or [ ]) ++ map (x: x.q) xs));
+        in
+        "breakbulk: the settings of `${owner}` use products of the plan that builds it (${label}) that `packages.${owner}.productInputs` does not name: ${lib.concatStringsSep "; " uses}. Dynamic-derivation mode needs them named (it cannot find them: there, this is an infinite recursion). Add: packages.${owner}.productInputs = [ ${lib.concatMapStringsSep " " (q: "\"${q}\"") all} ];";
+    in
+    if inst.delivery != "ifd" then null else lib.mapAttrsToList message (lib.groupBy (x: x.owner) found);
+
   # --- workspaces --------------------------------------------------------------
 
   # The packages a variant plans on a target (null: the whole workspace):
@@ -1090,6 +1203,7 @@ let
       select = if sel == null then [ ] else sel;
       testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
       extraSources = extraSourcesOf wsName triple vName entries;
+      productInputs = productInputsOf wsName triple vName entries;
       packageOverrides = instOverrides wsName entries triple vName;
       name = "${wsName}-${triple}-${vName}";
       inherit delivery;
@@ -1300,13 +1414,15 @@ let
               testsOn = tsel != false;
               tSel = if testsOn then tsel else null;
               ifTests = attrs: if testsOn then attrs else { };
+              psel = productSelOf wsName triple v;
+              packages = if psel == false then { } else productsOf wsName ws triple vName v inst psel;
             in
             {
-              packages =
-                let
-                  psel = productSelOf wsName triple v;
-                in
-                if psel == false then { } else productsOf wsName ws triple vName v inst psel;
+              inherit packages;
+              # IFD mode: the undeclared products as inputs, a message per
+              # package (undeclaredProductInputs); repo.checks fails with
+              # them. null in dynamic-derivation mode.
+              productInputErrors = undeclaredProductInputs wsName triple vName inst packages;
               # The `buildScriptPaths` check of each plan the variant
               # builds: the build plan (unless products are off), and the
               # test plan when there are test outputs; a check or clippy
@@ -1494,8 +1610,15 @@ let
         let
           vc = variantCells.${wsName}.${triple}.${vName};
           prefix = variantPrefix wsName triple vName;
+          # IFD mode checks the variant's `productInputs` here.
+          verified =
+            d:
+            if v.productInputErrors == null || v.productInputErrors == [ ] then
+              d
+            else
+              throw (lib.concatStringsSep "\n" v.productInputErrors);
         in
-        lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
+        lib.mapAttrs (_: verified) (lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
           lib.concatMapAttrs (
             pkg: p:
             # IFD mode leaves out a product whose roots Cargo all skipped
@@ -1517,7 +1640,7 @@ let
             ) v.namedTestRuns
             // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
           )
-        )
+        ))
       ) t.variants
       // lib.optionalAttrs (cfg.workspaces.${wsName}.benchSmoke && t.canRunTests) (
         lib.concatMapAttrs (

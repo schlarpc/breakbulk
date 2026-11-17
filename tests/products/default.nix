@@ -174,8 +174,9 @@
 #   same-workspace-products   products of the plan that uses them: `app`'s
 #                    build script runs `tool` (`nativeInputs`), `app` links
 #                    `shared`'s cdylib (`inputs`) and embeds `tool`'s
-#                    binary (`env`); the app runs with an empty
-#                    environment and the embedded binary runs
+#                    binary (`env`), declared in `productInputs`; the app
+#                    runs with an empty environment and the embedded
+#                    binary runs
 #   nested-cargo     a build script that runs Cargo (`outer`'s builds the
 #                    member `inner`, which has a registry dependency), with
 #                    the workspace as `extraSources` and
@@ -887,22 +888,29 @@ let
   ];
 
   # Products of one plan as another member's `env`, `inputs` and
-  # `nativeInputs`.
+  # `nativeInputs`, declared in `productInputs`. sameWsUses is the
+  # settings without the declaration.
+  sameWsUses =
+    { repo, ... }:
+    let
+      p = repo.workspaces.main.packages;
+    in
+    {
+      packages.app = {
+        env.TOOL_BIN = "${p.tool}/bin/tool";
+        nativeInputs = _: [ p.tool ];
+        inputs = _: [ p.shared ];
+      };
+    };
   sameWsRepo = mkRepo (fixtures + "/same-workspace-products") [
     (oneWs "." "dev")
-    (
-      { repo, ... }:
-      let
-        p = repo.workspaces.main.packages;
-      in
-      {
-        packages.app = {
-          env.TOOL_BIN = "${p.tool}/bin/tool";
-          nativeInputs = _: [ p.tool ];
-          inputs = _: [ p.shared ];
-        };
-      }
-    )
+    sameWsUses
+    {
+      packages.app.productInputs = [
+        "tool"
+        "shared"
+      ];
+    }
   ];
 
   # The stdpaths fixture on a toolchain with rust-src (see rust-src).
@@ -1377,6 +1385,27 @@ in
         chmod +x $TMPDIR/tool
         [ "$($TMPDIR/tool)" = "tool says hi" ]
       '';
+
+  # IFD mode's check of `productInputs`: same-workspace-products without
+  # its declaration names both products and the line to add, and
+  # repo.checks fails with it; with the declaration it finds nothing.
+  product-inputs-undeclared =
+    let
+      undeclared = mkRepo (fixtures + "/same-workspace-products") [
+        (oneWs "." "dev")
+        sameWsUses
+      ];
+      errorsOf = r: r.workspaces.main.target.${native}.variants.default.productInputErrors;
+      got = errorsOf undeclared;
+      want = [
+        "breakbulk: the settings of `app` use products of the plan that builds it (workspace main, target ${native}, variant default) that `packages.app.productInputs` does not name: `env.TOOL_BIN` uses `tool`; `inputs` uses `shared`; `nativeInputs` uses `tool`. Dynamic-derivation mode needs them named (it cannot find them: there, this is an infinite recursion). Add: packages.app.productInputs = [ \"shared\" \"tool\" ];"
+      ];
+      checkFails = !(builtins.tryEval undeclared.checks."main/${native}/app/build".drvPath).success;
+    in
+    assert lib.assertMsg (got == want) "product-inputs-undeclared: ${builtins.toJSON got}";
+    assert lib.assertMsg checkFails "product-inputs-undeclared: repo.checks evaluated";
+    assert lib.assertMsg (errorsOf sameWsRepo == [ ]) "product-inputs-undeclared: declared: ${builtins.toJSON (errorsOf sameWsRepo)}";
+    evalCheck "product-inputs-undeclared" (lib.concatStringsSep "\n" got);
 
   embed =
     let

@@ -100,7 +100,7 @@ It is a layer on top of the pipeline, not a step of it. A file set is made of fi
 - **Only this package's units** get the overlaid views. Its dependents depend on the product through its outputs, as with [`env`](../../reference/options/packages.md#packagesnameenv).
 - **Instantiation does not depend on the product.** `breakbulk-instantiate` sees each view by key only (`src:<dir>`), and Nix substitutes the value afterwards, so planning and instantiating the host workspace never build the product.
 - **A link, not a copy.** The product is passed by reference. A crate that canonicalizes paths (rust-embed does) sees the product's own store path.
-- **A plan gets the views of the packages it can contain**, as it gets their settings: in dynamic-derivation mode the outer derivation depends on every view it is given, so another member's overlay of a product of this plan would make the plan depend on itself. A product of the same plan as the package that embeds it is the dynamic-mode limit of `env` too (#126).
+- **A plan gets the views of the packages it can contain**, as it gets their settings: in dynamic-derivation mode the outer derivation depends on every view it is given, so another member's overlay of a product of this plan would make the plan depend on itself. An overlay of a product of the package's own plan needs the product's package in [`productInputs`](../configuration.md#products-as-inputs), as `env` does.
 
 ## The planning skeleton
 
