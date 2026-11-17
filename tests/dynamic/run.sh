@@ -201,13 +201,16 @@ for f in "${fixtures[@]}"; do
   say "$f: dynamic-derivation mode (Nix master)"
   dyn=$(mbuild --arg mode '"dynamic"' -L "build.$f")
   say "$f: IFD mode (Nix master)"
-  ifd=$(mbuild --arg mode '"ifd"' "build.$f")
+  # With `ca`, as dynamic mode always is: a product that names another
+  # product's path (an rpath, debug info) has the same bytes only when
+  # that path is content-addressed in both modes.
+  ifd=$(mbuild --arg mode '"ifd"' --arg ca true "build.$f")
 
 
   # Unit .drv paths: IFD mode's from units.json, dynamic mode's from the
   # outer derivations' build logs, per workspace and plan kind. Units whose
   # names match mayDiffer (downstream of an embedded product) may differ.
-  ifdUnits=$(real "$(mbuild --arg mode '"ifd"' "unitDrvs.$f")")
+  ifdUnits=$(real "$(mbuild --arg mode '"ifd"' --arg ca true "unitDrvs.$f")")
   mayDiffer=$(nix-instantiate --eval --raw "$REPO/tests/dynamic" --arg mode '"ifd"' -A "mayDiffer.$f" 2>/dev/null || true)
   mapfile -t keys < <(python3 -c 'import json, sys; print("\n".join(sorted(json.load(open(sys.argv[1])))))' "$ifdUnits")
   for key in "${keys[@]}"; do
