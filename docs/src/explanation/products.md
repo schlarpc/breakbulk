@@ -316,6 +316,34 @@ unset, so tools fall back to `$HOME/.cache` and the like.
   [`test.env`](../reference/options/packages.md#packagesnametestenv).
 - Test apps run on your machine with your own `HOME`.
 
+**Working directory and `CARGO_TARGET_TMPDIR`.** A test binary runs in
+its package directory, as under `cargo test`. Integration tests and
+benches can use `env!("CARGO_TARGET_TMPDIR")`, a scratch directory that
+Cargo puts inside its target directory. The value is compiled into the
+binary, and breakbulk has no target directory, so it compiles in the
+relative path `target/tmp`. A relative path resolves wherever the binary
+runs: in the sandbox, in a test app on your machine, and in a copy of the
+binary that you run by hand somewhere else (create `target/tmp` there
+first, as Cargo does, unless the test creates it itself).
+
+A test run or test app whose binary contains `target/tmp` therefore runs
+in a fresh directory of its own. That directory holds a symbolic link to
+each entry of the package directory and a real, empty, writable
+`target/tmp`. Each run gets its own, also when runs happen at the same
+time or outside the sandbox. A test app removes it when it exits. A binary
+without the string runs in the package directory itself. Only for
+binaries that use the variable, this differs from `cargo test`:
+
+- A relative path under it, passed as an argument to a child process
+  that runs in another directory, resolves against the child's
+  directory. `Command::current_dir` with a relative path is fine.
+- `std::env::current_dir()` is not `CARGO_MANIFEST_DIR`, although the
+  files in both are the same.
+- A walk of `.` meets symbolic links. Walkers that are given a named
+  directory as their root follow it.
+- A checked-in `target/` directory of the package is hidden by the
+  `target` entry.
+
 **Test output.** A test run's output goes to the build log only: see it
 with `nix log <run>` or `nix build -L`. The run's own output (`$out`) is
 an empty directory. The output holds timings and, with more than one

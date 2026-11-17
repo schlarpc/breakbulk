@@ -22,8 +22,11 @@
 #                           kept the network test out; #[ignore] tests are
 #                           reported ignored; the required-features test is
 #                           a skipped stub; runtime env, cwd, rustc-env,
-#                           dynamic-library path, CARGO_TARGET_TMPDIR,
-#                           test.env, test.path, RUST_TEST_THREADS
+#                           dynamic-library path, CARGO_TARGET_TMPDIR
+#                           (writable in the run's working directory, and
+#                           relative: a copy of the binary run in a scratch
+#                           directory makes ./target/tmp), test.env,
+#                           test.path, RUST_TEST_THREADS
 #   test-control-stable-dylibs   the env binary's dylib-path test passes
 #                           with the stable (content-addressed) copies of
 #                           the build scripts' library directories
@@ -41,7 +44,8 @@
 #   test-control-app        the test apps run outside a test run, as `nix
 #                           run` runs a derivation: the network binary with
 #                           a filter, and the env binary against a checkout
-#                           at /build/checkout
+#                           at /build/checkout, in a private working
+#                           directory removed on exit, twice at once
 #   test-control-repo-apps  repo.apps: every test app of every build
 #                           variant (a disabled run's and a `checks =
 #                           false` variant's too), named as its test run's
@@ -364,6 +368,7 @@ let
         lib_ = r."lib/ctl";
         net = r.net;
         envRun = r.env;
+        envBin = r.env.passthru.binary;
         ignored = r.ignored;
         binExe = r.bin_exe;
         bin = r."bin/ctl";
@@ -377,9 +382,15 @@ let
         ! grep -q needs_network $net/log
         grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out' $net/log
         grep -q 'test slow ... ignored, slow' $ignored/log
-        for t in runtime_env dylib_path_has_only_out_dir_search_paths target_tmpdir_is_writable test_config; do
+        for t in runtime_env dylib_path_has_only_out_dir_search_paths target_tmpdir_is_writable target_tmpdir_can_be_created test_config; do
           grep -q "test $t ... ok" $envRun/log
         done
+        # CARGO_TARGET_TMPDIR is relative: a copy of the binary run by hand
+        # elsewhere makes it under its working directory.
+        mkdir scratch
+        cp $envBin/* scratch/
+        (cd scratch && ./env-* --exact target_tmpdir_can_be_created)
+        [ -f scratch/target/tmp/created ]
         grep -q 'test runs_the_bin ... ok' $binExe/log
         grep -q 'test bin_exe_at_run_time ... ok' $binExe/log
         grep -q 'test bin_has_its_cargo_name ... ok' $binExe/log
@@ -558,8 +569,21 @@ let
         export CTL_EXPECT_NIX=1 NIX_BUILD_CORES=$NIX_BUILD_CORES RUST_TEST_THREADS=$NIX_BUILD_CORES
         $envApp --show-output | tee env.log
         grep -q 'CARGO_MANIFEST_DIR=/build/checkout$' env.log
-        grep -q 'cwd=/build/checkout$' env.log
-        grep -q 'test result: ok. 4 passed' env.log
+        # The binary uses CARGO_TARGET_TMPDIR: a private working directory of
+        # links to the checkout's package directory, removed on exit. Two
+        # runs at once each get their own.
+        grep -q 'cwd=/build/breakbulk-run\.' env.log
+        grep -q 'test result: ok. 5 passed' env.log
+        $envApp --exact target_tmpdir_is_writable > a.log &
+        $envApp --exact target_tmpdir_is_writable > b.log &
+        wait %1
+        wait %2
+        grep -q 'test target_tmpdir_is_writable ... ok' a.log
+        grep -q 'test target_tmpdir_is_writable ... ok' b.log
+        if [ -n "$(find /build -maxdepth 1 -name 'breakbulk-run.*')" ]; then
+          echo "a test app left its working directory behind" >&2
+          exit 1
+        fi
         mkdir -p $out
         cp net.log env.log $out/
       '';

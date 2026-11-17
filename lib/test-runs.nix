@@ -74,8 +74,9 @@
 #     the same rule as for compiles, runs and doctests,
 #     `LibraryPath::for_dylib_path` in breakbulk-unit), then the sysroot's
 #     library directory of its platform's triple;
-#   - `/tmp/breakbulk-target-tmp`, the planner's `CARGO_TARGET_TMPDIR`, is
-#     created first;
+#   - a binary that contains the planner's relative `CARGO_TARGET_TMPDIR`
+#     runs in a private copy of the package directory made of symbolic
+#     links, with a real, writable `target/tmp` (`workdirScript`);
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
 #     `$out`: it holds timings and, with several test threads, lines in a
 #     varying order, and `nix build --rebuild` compares every output. `$out`
@@ -519,6 +520,15 @@ rec {
   # nextest's `libdir` entry for a sysroot library directory (or null),
   # which the run's dynamic-library path already ends with; without it
   # nextest warns.
+  # A jq command (shell words; cargo metadata on stdin) that moves the
+  # package whose directory is `dir` (a shell word) to `$__bb_wd`
+  # (`workdirScript`): nextest runs a test binary in its package's
+  # manifest directory, and sets CARGO_MANIFEST_DIR to it.
+  nextestWorkdirJq =
+    jq: dir:
+    "${jq} -c --arg o ${dir}/Cargo.toml --arg n \"$__bb_wd/Cargo.toml\" "
+    + lib.escapeShellArg ".packages |= map(if .manifest_path == $o then .manifest_path = $n else . end)";
+
   nextestLibdir =
     libDir:
     if libDir != null then
@@ -648,6 +658,54 @@ rec {
     export HOME=$TMPDIR/home
     mkdir -p "$HOME"
   '';
+
+  # `CARGO_TARGET_TMPDIR` as the planner bakes it into integration tests
+  # and benches (`TARGET_TMPDIR` in crates/breakbulk-plan/src/graph.rs).
+  targetTmpdir = "target/tmp";
+
+  # Shell lines (bash) defining `__bb_workdir BINARY DIR`, which sets
+  # `__bb_wd` to the working directory of a run of BINARY whose package
+  # directory is DIR. A binary that contains `targetTmpdir` (a byte search:
+  # `env!` bakes the value in) gets a fresh directory, private to this run,
+  # holding a symbolic link per entry of DIR and a real, empty, writable
+  # `target/tmp`; DIR's own `target`, if any, is left out. Any other binary
+  # gets DIR itself. `pkgs` gives grep and coreutils, so the lines work
+  # with any PATH (test apps).
+  workdirScript = pkgs: ''
+    __bb_workdir() {
+      __bb_wd=$2
+      if ${pkgs.gnugrep}/bin/grep -qF ${targetTmpdir} "$1"; then
+        __bb_wd=$(${pkgs.coreutils}/bin/mktemp -d "''${TMPDIR:-/tmp}/breakbulk-run.XXXXXX")
+        for __bb_e in "$2"/* "$2"/.[!.]* "$2"/..?*; do
+          [ -e "$__bb_e" ] || [ -L "$__bb_e" ] || continue
+          [ "''${__bb_e##*/}" = target ] || ${pkgs.coreutils}/bin/ln -s "$__bb_e" "$__bb_wd/"
+        done
+        ${pkgs.coreutils}/bin/mkdir -p "$__bb_wd/${targetTmpdir}"
+      fi
+    }
+  '';
+
+  # The end of a test app's script: run `command` (shell words naming the
+  # binary as "${files[0]}") in the binary's working directory
+  # (`workdirScript`) for package directory `dir` (a shell word). A
+  # private working directory is removed when the run ends, so only a run
+  # without one replaces the script's process.
+  appRunScript =
+    {
+      pkgs,
+      dir,
+      command,
+    }:
+    ''
+      ${workdirScript pkgs}
+      __bb_workdir "''${files[0]}" ${dir}
+      cd "$__bb_wd"
+      if [ "$__bb_wd" = ${dir} ]; then
+        exec ${command}
+      fi
+      trap '${pkgs.coreutils}/bin/rm -rf "$__bb_wd"' EXIT
+      ${command}
+    '';
 
   # Only a default: the variable may already hold a value from `[env]` or
   # the test configuration, which wins.
@@ -931,12 +989,16 @@ rec {
             ${coverageEnvScript coverage}
             ws=$TMPDIR/nextest-ws
             log=${logFile}
-            mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
+            mkdir -p $out $ws/target
             touch $ws/Cargo.toml
             files=(${bin}/*)
+            ${workdirScript p.testPkgs}
+            __bb_workdir "''${files[0]}" ${lib.escapeShellArg s.sourceDir}
             subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" "$1"; }
             subst "$nextestBinariesPath" > $TMPDIR/binaries-metadata.json
-            subst "$nextestCargoMetadataPath" > $TMPDIR/cargo-metadata.json
+            subst "$nextestCargoMetadataPath" | ${
+              nextestWorkdirJq "${p.testPkgs.jq}/bin/jq" (lib.escapeShellArg s.sourceDir)
+            } > $TMPDIR/cargo-metadata.json
             cd $TMPDIR
             set +e
             env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
@@ -1006,10 +1068,12 @@ rec {
               ${configScript cfg s.binary}
               ${threadsScript}
               ${coverageEnvScript coverage}
-              mkdir -p /tmp/breakbulk-target-tmp $out
+              mkdir -p $out
               log=${logFile}
               files=(${bin}/*)
-              cd ${lib.escapeShellArg s.sourceDir}
+              ${workdirScript testPkgs}
+              __bb_workdir "''${files[0]}" ${lib.escapeShellArg s.sourceDir}
+              cd "$__bb_wd"
               set +e
               env "''${__bb_env[@]}" ${lib.escapeShellArgs s.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
               status=''${PIPESTATUS[0]}

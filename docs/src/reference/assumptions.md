@@ -436,10 +436,10 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 ### U10. `CARGO_TARGET_TMPDIR`
 
 - **Assumption.** `CARGO_TARGET_TMPDIR` is compile-time env of integration tests and benches only, naming a directory inside Cargo's target directory that must be writable when the test runs.
-- **Where.** `crates/breakbulk-plan/src/graph.rs`: `TARGET_TMPDIR`, `rewrite_env`; `lib/test-runs.nix` (creates it).
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `TARGET_TMPDIR` (the relative `target/tmp`), `rewrite_env`; `lib/test-runs.nix` `workdirScript` (a private working directory with it writable, for binaries that contain the string).
 - **Upstream.** The Cargo book (environment variables for crates); cargo `src/compiler/mod.rs`.
 - **Holds for.** The window.
-- **Pinned by.** `test-runs-test-control`. Portability of the fixed path (#21), checked by hand with the test-control fixture's `env` test run: with `sandbox-build-dir = /var/bbuild` it passes; with `sandbox = false` it fails when `/tmp/breakbulk-target-tmp` already exists and belongs to another user (a test app's run, or another build user), because the value is compiled into the binary and unsandboxed builds share `/tmp`.
+- **Pinned by.** `test-runs-test-control` (the run, and a copy of the binary run in a scratch directory), `test-runs-test-control-app` (two runs of a test app at once). Checked by hand with the test-control fixture's `env` test run: it passes with `sandbox = false`.
 - **If it changes.** A test that writes there fails.
 
 ## Rustflags, linkers and config

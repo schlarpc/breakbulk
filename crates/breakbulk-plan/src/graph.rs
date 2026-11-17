@@ -122,11 +122,14 @@ const TRIM_PATHS_REMAP_VAR: &str = "CARGO_TRIM_PATHS_REMAP";
 const DYLIB_VAR: &str = breakbulk_format::HOST_DYLIB_PATH_VAR;
 
 /// What `CARGO_TARGET_TMPDIR` (compile-time env of integration tests and
-/// benches) becomes: a fixed path that the test-run derivation creates
-/// before running the test ("Tests" in
-/// `docs/src/explanation/internals/products.md`). Cargo's
-/// value names its target directory, which breakbulk does not have.
-pub const TARGET_TMPDIR: &str = "/tmp/breakbulk-target-tmp";
+/// benches) becomes: a relative path, which resolves against the working
+/// directory wherever the binary runs. Test runs and test apps give a
+/// binary that contains it a private working directory with this path
+/// writable ("Tests" in `docs/src/explanation/internals/products.md`).
+/// Not an absolute path: the value is baked in with `env!`, and no one
+/// absolute path is private and writable for every run, on every machine
+/// and for every user the binary may run on.
+pub const TARGET_TMPDIR: &str = "target/tmp";
 
 /// Where `CARGO_BIN_EXE_<bin>` points for a bin Cargo did not build (its
 /// required features are off): `<this>/<bin>`, which never exists, so a

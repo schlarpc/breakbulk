@@ -28,8 +28,9 @@
 # values, `CARGO_*` runtime variables, `test.env`,
 # `test.binaries.<binary>.env` and `test.path` as its test run, under the
 # runner of its platform (the build machine's for a proc macro's unit
-# tests), and creates
-# `/tmp/breakbulk-target-tmp`. With `checkout`, `CARGO_MANIFEST_DIR` and
+# tests), in a private working directory when the binary uses
+# `CARGO_TARGET_TMPDIR`, as its test run (testRuns.workdirScript; removed
+# when the app exits). With `checkout`, `CARGO_MANIFEST_DIR` and
 # `CARGO_MANIFEST_PATH` name the checkout, so tests that read files through
 # them see the working tree; values compiled in with `env!` still name the
 # store.
@@ -74,10 +75,12 @@
               jq = "${pkgs.jq}/bin/jq";
             }}
             ${testRunsLib.configScript cfg spec.binary}
-            mkdir -p /tmp/breakbulk-target-tmp
             files=(${spec.unitOut}/*)
-            cd ${lib.escapeShellArg dir}
-            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs spec.runner} "''${files[0]}" "$@"
+            ${testRunsLib.appRunScript {
+              inherit pkgs;
+              dir = lib.escapeShellArg dir;
+              command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs spec.runner} "''${files[0]}" "$@"'';
+            }}
           '';
         in
         script;

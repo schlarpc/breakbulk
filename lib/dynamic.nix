@@ -657,13 +657,17 @@ let
           ) "export ${runnerVar}=${lib.escapeShellArg (lib.concatStringsSep " " p.runner)}"}
           ${testRuns.nextestThreadsScript}
           ws=$TMPDIR/nextest-ws
-          mkdir -p /tmp/breakbulk-target-tmp $out $ws/target
+          mkdir -p $out $ws/target
           touch $ws/Cargo.toml
           files=(${bin})
+          ${testRuns.workdirScript p.testPkgs}
+          __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
           libdir=${lib.escapeShellArg libdir}
           subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" -e "s|\"@LIBDIR@\"|$libdir|g"; }
           ${jq} -c '.testSpec.nextest.binaries' "$info" | subst > $TMPDIR/binaries-metadata.json
-          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst > $TMPDIR/cargo-metadata.json
+          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst | ${
+            testRuns.nextestWorkdirJq jq ''"$CARGO_MANIFEST_DIR"''
+          } > $TMPDIR/cargo-metadata.json
           cd $TMPDIR
           set +e
           env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
@@ -696,24 +700,28 @@ let
           inherit (p) testPkgs;
         } ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), custom: (.custom // false), $widen}' "$info")"'';
 
-      libtestScript = p: b: cfg: args: bin: ''
-        mkdir -p /tmp/breakbulk-target-tmp $out
-        files=(${bin})
-        cd "$CARGO_MANIFEST_DIR"
-        set +e
-        env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
-        status=''${PIPESTATUS[0]}
-        set -e
-        if [ "$status" -ne 0 ]; then
-          echo "test binary ${b.package} ${testRuns.binaryKey b} failed (exit status $status)" >&2
-          ${hint p b cfg}
-          exit "$status"
-        fi
-        ${testRuns.postRunScript {
-          inherit cfg coverage;
-          binary = testRuns.binaryKey b;
-        }}
-      '';
+      libtestScript =
+        p: b: cfg: args: bin:
+        ''
+          mkdir -p $out
+          files=(${bin})
+          ${testRuns.workdirScript p.testPkgs}
+          __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
+          cd "$__bb_wd"
+          set +e
+          env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+          status=''${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "test binary ${b.package} ${testRuns.binaryKey b} failed (exit status $status)" >&2
+            ${hint p b cfg}
+            exit "$status"
+          fi
+          ${testRuns.postRunScript {
+            inherit cfg coverage;
+            binary = testRuns.binaryKey b;
+          }}
+        '';
 
       run =
         r:
@@ -846,10 +854,12 @@ let
                 ''
             }
             ${testRunsLib.configScript cfg (testRunsLib.binaryKey b)}
-            mkdir -p /tmp/breakbulk-target-tmp
             files=(${b.wrapper}/root/*)
-            cd "$dir"
-            exec ${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" "$@"
+            ${testRunsLib.appRunScript {
+              inherit pkgs;
+              dir = ''"$dir"'';
+              command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${lib.escapeShellArgs p.runner} "''${files[0]}" "$@"'';
+            }}
           '';
         in
         script;

@@ -581,8 +581,21 @@ let
         # comparison reads.
         $envApp --show-output | tee env.log
         grep -q 'CARGO_MANIFEST_DIR=/build/checkout$' env.log
-        grep -q 'cwd=/build/checkout$' env.log
-        grep -q 'test result: ok. 4 passed' env.log
+        # The binary uses CARGO_TARGET_TMPDIR: a private working directory of
+        # links to the checkout's package directory, removed on exit. Two
+        # runs at once each get their own.
+        grep -q 'cwd=/build/breakbulk-run\.' env.log
+        grep -q 'test result: ok. 5 passed' env.log
+        $envApp --exact target_tmpdir_is_writable > a.log &
+        $envApp --exact target_tmpdir_is_writable > b.log &
+        wait %1
+        wait %2
+        grep -q 'test target_tmpdir_is_writable ... ok' a.log
+        grep -q 'test target_tmpdir_is_writable ... ok' b.log
+        if [ -n "$(find /build -maxdepth 1 -name 'breakbulk-run.*')" ]; then
+          echo "a test app left its working directory behind" >&2
+          exit 1
+        fi
         ${lib.optionalString isDynamic ''
           if $skipped 2> skipped.log; then
             echo "the app of a skipped test succeeded" >&2

@@ -354,7 +354,7 @@ pub fn compare(plan: &Plan, log: &str, target: &Path, metadata: &Metadata) -> Re
 /// - In the dynamic-library path, Cargo's `deps` and profile directories
 ///   (inside `target`, but not inside any run's `OUT_DIR`), which have no
 ///   counterpart in breakbulk; a path left empty is dropped.
-/// - `CARGO_TARGET_TMPDIR`, which the plan points at a fixed directory:
+/// - `CARGO_TARGET_TMPDIR`, which the plan points at a relative path:
 ///   only its presence is compared.
 /// - `CARGO_BIN_EXE_*`, which name the bin unit's output rather than
 ///   Cargo's uplifted copy: only the file name is compared, which the unit

@@ -6,7 +6,13 @@ fn runtime_env() {
     let cwd = std::env::current_dir().unwrap();
     println!("CARGO_MANIFEST_DIR={dir}");
     println!("cwd={}", cwd.display());
-    assert_eq!(Path::new(&dir), cwd);
+    // The package directory, as with cargo test; under breakbulk, a
+    // directory of symbolic links to it, since this binary uses
+    // CARGO_TARGET_TMPDIR.
+    assert_eq!(
+        Path::new(&dir).join("Cargo.toml").canonicalize().unwrap(),
+        cwd.join("Cargo.toml").canonicalize().unwrap()
+    );
     assert_eq!(
         std::env::var("CARGO_MANIFEST_PATH").unwrap(),
         format!("{dir}/Cargo.toml")
@@ -41,6 +47,16 @@ fn dylib_path_has_only_out_dir_search_paths() {
 fn target_tmpdir_is_writable() {
     let d = env!("CARGO_TARGET_TMPDIR");
     std::fs::write(format!("{d}/probe"), "x").unwrap();
+}
+
+/// What a test that makes CARGO_TARGET_TMPDIR itself does; run by hand
+/// from a copy of the binary (a relative value resolves against the
+/// working directory).
+#[test]
+fn target_tmpdir_can_be_created() {
+    let d = env!("CARGO_TARGET_TMPDIR");
+    std::fs::create_dir_all(d).unwrap();
+    std::fs::write(format!("{d}/created"), "x").unwrap();
 }
 
 /// What the test-control check configures: `test.env`, `test.path` and
