@@ -140,6 +140,8 @@ let
       }
     )).repos;
   extraTargets = (import ../presets/extra-targets.nix testArgs).repos;
+  # As the flake's: Apple's SDK admitted, for these tests only.
+  darwin = (import ../presets/darwin.nix testArgs).repo;
   buildStd = (import ../presets/build-std.nix testArgs).repos;
   nightly = pkgs.rust-bin.nightly.latest.minimal;
 
@@ -491,6 +493,7 @@ let
     windows-gnu = extraTargets.windowsGnuRepo;
     windows-gnullvm-aarch64 = extraTargets.windowsGnullvmA64Repo;
     uefi = extraTargets.uefiRepo;
+    darwin = darwin;
     # Only the staged repository: the other's buildScriptFiles check fails
     # by design in both modes (the DLL beside the .exe is not staged).
     windows-dll-staged = extraTargets.windowsDllStagedRepo;

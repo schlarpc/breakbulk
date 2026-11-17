@@ -1,0 +1,11 @@
+# darwin: macOS targets cross-built from Linux with presets.darwin
+# (tests/presets/darwin.nix). `pure` is Rust only, with a unit test;
+# `with-c` compiles C with cc-rs against the SDK's headers; `framework`
+# links CoreFoundation from the SDK and is also a cdylib.
+[workspace]
+resolver = "3"
+members = ["pure", "with-c", "framework"]
+
+# Debug info, so the links write a .dSYM.
+[profile.release]
+debug = 1

@@ -248,6 +248,15 @@
             system = pkgs.stdenv.hostPlatform.system;
             config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "xwin-sdk";
           };
+          # Apple's macOS SDK, for the Darwin-from-Linux checks
+          # (tests/presets/darwin.nix). Apple's agreement authorizes it
+          # only on Apple-branded computers; fetching it here, on Linux
+          # builders, is this repository's author's own decision, not a
+          # breakbulk default (presets.darwin requires `sdk` there).
+          appleSdkPkgs = import nixpkgs {
+            system = pkgs.stdenv.hostPlatform.system;
+            config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "macOS-SDK";
+          };
         }
         # Post-link stages and helpers (stages-*). stages-wasm-web
         # downloads a rust-overlay toolchain with the wasm32 target.

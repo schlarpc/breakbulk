@@ -15,12 +15,14 @@
 #   msvc-sdk              HEAVY, network, unfree: the xwin CRT + SDK splat
 #                         (~250 MB) and its layout and case symlinks
 #
-# The preset fixtures through mkRepository are in ./fixtures.nix and
-# ./extra-targets.nix.
+# The preset fixtures through mkRepository are in ./fixtures.nix,
+# ./extra-targets.nix and ./darwin.nix (with `appleSdkPkgs`, a package set
+# that allows Apple's macOS SDK; see flake.nix).
 {
   pkgs,
   breakbulk,
   xwinPkgs ? null,
+  appleSdkPkgs ? null,
 }:
 let
   inherit (pkgs) lib;
@@ -228,6 +230,11 @@ in
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
   (import ./extra-targets.nix { inherit pkgs breakbulk; }).checks
 )
+# macOS from Linux (./darwin.nix): the SDK is unfree and fetched only
+# with `appleSdkPkgs`.
+// lib.optionalAttrs (
+  appleSdkPkgs != null && pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin
+) (import ./darwin.nix { inherit pkgs breakbulk; sdkPkgs = appleSdkPkgs; }).checks
 # -Zbuild-std (./build-std.nix): rust-overlay's nightly with rust-src.
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
   (import ./build-std.nix { inherit pkgs breakbulk; }).checks

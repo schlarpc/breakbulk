@@ -110,6 +110,7 @@ let
     crate-types = [ (plain "crate-types" [ ]) ];
     cross-doctests = [ dynamic.repos.cross-doctests-aarch64 ];
     cross-lto = [ presetFixtures.repos.crossLto ];
+    darwin = [ (import ../presets/darwin.nix args).repo ];
     declared-paths = [ dynamic.repos.declared-paths ];
     dev-dep-features = [ (plain "dev-dep-features" [ ]) ];
     directives = [ dynamic.repos.directives ];
