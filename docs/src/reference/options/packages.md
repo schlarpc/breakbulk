@@ -567,15 +567,15 @@ check groups; the binary is built either way\. A more specific
 layer’s value wins over the layers it refines
 ([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)):
 ` memberDefaults.test.binaries.<key>.enable = false ` with ` true `
-for a few packages runs only theirs\. ` null `: ` true `\.
+for a few packages runs only theirs\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Declared by:*
@@ -672,15 +672,15 @@ value wins over the layers it refines
 ` memberDefaults.test.doctest.enable = false ` with ` true ` for a
 few packages runs only theirs\. For a
 library whose manifest sets ` doctest = false `, there is no
-doctest run to enable\. ` null `: ` true `\.
+doctest run to enable\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Declared by:*

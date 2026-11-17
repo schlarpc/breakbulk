@@ -284,7 +284,11 @@ any layer wins over all three. Lists keep their priority, so that they
 still concatenate.
 
 Package layers are separate settings blocks. breakbulk compares their
-single values by the same rule.
+single values by the same rule, and also each variable of `env`, each
+stage of `stages` and each check of `checks`. A `lib.mkForce` around a
+whole set (`env = lib.mkForce { FOO = "a"; }`) counts for each variable
+in it. Stages and checks of equal priority from several layers still
+merge their fields, as without priorities.
 
 `breakbulk.variants.packageFeaturePowerset` gives each run's
 `features`, `noDefaultFeatures` and `allFeatures` priority 90, so they

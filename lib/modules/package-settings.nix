@@ -30,11 +30,42 @@ let
 
   # `priorityOf [ "test" "runner" ]`: the priority of an option's
   # definitions in this settings block (`highestPrio`: 1500 for the
-  # default alone). Each layer is a block of its own, and module priorities
-  # hold only within one; lib/repository.nix compares the layers' single
-  # values by these.
+  # default alone). A path one name past an attribute-set option
+  # (`[ "env" "FOO" ]`, `[ "stages" "sign" ]`) gives that attribute's, or
+  # null when the block does not set it. Each layer is a block of its own,
+  # and module priorities hold only within one; lib/repository.nix
+  # compares the layers' values by these.
   priorityOf =
     { options, ... }:
+    let
+      # An `mkOverride` around the whole set counts for each attribute it
+      # holds that has no priority of its own, as if pushed down to it.
+      # Not the module system's reading, which drops the set's other
+      # definitions in the block: across layers, sets merge.
+      attrPrio =
+        opt: name:
+        let
+          byName = lib.modules.mergeAttrDefinitionsWithPrio opt;
+          p = byName.${name}.highestPrio;
+        in
+        if !(byName ? ${name}) then
+          null
+        else if p == lib.modules.defaultOverridePriority then
+          opt.highestPrio
+        else
+          p;
+      go =
+        o: path:
+        if lib.isOption o then
+          if path == [ ] then
+            o.highestPrio
+          else if lib.length path == 1 then
+            attrPrio o (lib.head path)
+          else
+            throw "breakbulk: priorityOf: `${lib.concatStringsSep "." path}` goes past the attributes of `${lib.showOption o.loc}`"
+        else
+          go o.${lib.head path} (lib.tail path);
+    in
     {
       options.priorityOf = mkOption {
         type = types.raw;
@@ -43,7 +74,7 @@ let
         readOnly = true;
         description = "The priority of an option's definitions in this block, by its path.";
       };
-      config.priorityOf = path: (lib.getAttrFromPath path options).highestPrio;
+      config.priorityOf = go options;
     };
 
   # The settings of one run over the package's: a test binary's or the
@@ -66,15 +97,15 @@ let
     imports = [ priorityOf ];
     options = runSettings "this test binary's run" // {
       enable = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
+        type = types.bool;
+        default = true;
         description = ''
           Whether this binary's test run is part of `repo.checks` and the
           check groups; the binary is built either way. A more specific
           layer's value wins over the layers it refines
           ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
           `memberDefaults.test.binaries.<key>.enable = false` with `true`
-          for a few packages runs only theirs. `null`: `true`.
+          for a few packages runs only theirs.
         '';
       };
     };
@@ -84,8 +115,8 @@ let
     imports = [ priorityOf ];
     options = runSettings "the package's doctest run" // {
       enable = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
+        type = types.bool;
+        default = true;
         description = ''
           Whether the package's doctest run is part of `repo.checks` and
           the check groups. A doctest compiles and runs in one rustdoc
@@ -96,7 +127,7 @@ let
           `memberDefaults.test.doctest.enable = false` with `true` for a
           few packages runs only theirs. For a
           library whose manifest sets `doctest = false`, there is no
-          doctest run to enable. `null`: `true`.
+          doctest run to enable.
         '';
       };
     };

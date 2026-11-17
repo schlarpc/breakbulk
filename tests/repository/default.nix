@@ -1904,6 +1904,71 @@ in
     assert lib.assertMsg (bad == [ ]) "package-layer-priorities: failed ${toString bad}";
     evalCheck "package-layer-priorities" (builtins.toJSON checks);
 
+  # Env variables, stages and checks across package layers, each by
+  # itself: `lib.mkForce` in memberDefaults wins over a plain value in
+  # `packages.<name>`, a plain value in a more specific layer wins, and
+  # variables and stages no other layer sets still merge in.
+  package-layer-attr-priorities =
+    let
+      probe = { product, ... }: product.linked;
+      repo = mkRepo (fixtures + "/multi-ws") [
+        (oneWs "b")
+        {
+          workspaces.main.memberDefaults = {
+            env = {
+              FORCED = lib.mkForce "low";
+              PLAIN = "low";
+            };
+            forTarget.env = lib.mkForce { FORCED_TARGET = "low"; };
+            test.env.FORCED_TEST = lib.mkForce "low";
+            test.binaries."bin/app-b".env.FORCED_BIN = lib.mkForce "low";
+            stages.probe = lib.mkForce null;
+            checks.noSourceReferences = lib.mkForce null;
+            checks.lowOnly = {
+              on = "linked";
+              run = probe;
+            };
+          };
+          packages.shared = {
+            env = {
+              FORCED = "high";
+              PLAIN = "high";
+              HIGH_ONLY = "high";
+            };
+            forTarget.env.FORCED_TARGET = "high";
+          };
+          packages.app-b = {
+            test.env.FORCED_TEST = "high";
+            test.binaries."bin/app-b".env.FORCED_BIN = "high";
+            stages.probe = {
+              after = "install";
+              run = probe;
+            };
+            checks.noSourceReferences.run = probe;
+          };
+        }
+      ];
+      t = repo.workspaces.main.target.${native};
+      units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
+      envOf =
+        n:
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+      bin = envOf "shared-0.1.0-lib";
+      run = t.testRuns.app-b."bin/app-b".drvAttrs.buildCommand;
+      product = t.packages.app-b;
+      checks = {
+        env = bin.FORCED == "low" && bin.PLAIN == "high" && bin.HIGH_ONLY == "high";
+        forTargetEnv = bin.FORCED_TARGET == "low";
+        testEnv = lib.hasInfix "export FORCED_TEST=low" run;
+        binaryEnv = lib.hasInfix "export FORCED_BIN=low" run;
+        stages = !(product.stages ? probe);
+        checks = !(product.checks ? noSourceReferences) && product.checks ? lowOnly;
+      };
+      bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
+    in
+    assert lib.assertMsg (bad == [ ]) "package-layer-attr-priorities: failed ${toString bad} (${builtins.toJSON bin})";
+    evalCheck "package-layer-attr-priorities" (builtins.toJSON checks);
+
   # `forHost`/`forTarget` sides and the package-shaped `target.<triple>`
   # layer. libc has a build script: its compile is a host unit, its run
   # and lib are target units. `target.<other triple>` reaches nothing

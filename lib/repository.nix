@@ -283,6 +283,30 @@ let
       blocks
     ).value;
 
+  # The attribute set at `path` (`[ "env" ]`) across settings blocks, each
+  # attribute picked by `pickSingle` from the blocks that set it. Its
+  # names are known without any priority or value: an env value can be a
+  # product of the plan whose instantiation lists the names.
+  pickAttrs =
+    path: blocks:
+    lib.mapAttrs (
+      n: _: pickSingle null (path ++ [ n ]) (lib.filter (b: lib.getAttrFromPath path b ? ${n}) blocks)
+    ) (lib.foldl' (acc: b: acc // lib.getAttrFromPath path b) { } blocks);
+
+  # The attribute set at `path` (`[ "stages" ]`) of each settings block,
+  # keeping only the attributes no other block sets at a higher priority.
+  # Those left merge in layer order as before, so a stage's fields still
+  # combine across layers of equal priority.
+  keepHighestPrio =
+    path: blocks:
+    let
+      setsOf = b: lib.getAttrFromPath path b;
+      best = lib.zipAttrsWith (_: lib.foldl' lib.min 9999) (
+        map (b: lib.mapAttrs (n: _: b.priorityOf (path ++ [ n ])) (setsOf b)) blocks
+      );
+    in
+    map (b: lib.filterAttrs (n: _: b.priorityOf (path ++ [ n ]) <= best.${n}) (setsOf b)) blocks;
+
   # The package settings of one lockfile entry of workspace `wsName` in
   # the plans of variant `vName` on `triple`, as a list of
   # `packages.<name>`-shaped layers, lowest first: the curated defaults
@@ -305,6 +329,13 @@ let
         // {
           forHost = mergeSide l l.forHost;
           forTarget = emptySide;
+          # A `forHost.env` variable that came from `env` has its priority.
+          priorityOf =
+            path:
+            if lib.take 2 path == [ "forHost" "env" ] && lib.length path == 3 && !(l.forHost.env ? ${lib.last path}) then
+              l.priorityOf [ "env" (lib.last path) ]
+            else
+              l.priorityOf path;
         };
     in
     lib.optionals (sys != null) (
@@ -316,16 +347,24 @@ let
     ++ lib.optionals (e.source or null == null) (withTriple cfg.workspaces.${wsName}.memberDefaults)
     ++ lib.concatMap (k: withTriple cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
 
-  # The merged override for one lockfile entry, or null.
+  # The merged override for one lockfile entry, or null. Each env
+  # variable is `pickAttrs`'s.
   overrideFor =
     wsName: triple: vName: e:
     let
       ls = layersFor wsName triple vName e;
+      m = lib.foldl' mergeOverride emptyOverride ls;
+      envAt = side: m.${side} // { env = pickAttrs [ side "env" ] ls; };
     in
     if ls == [ ] then
       null
     else
-      lib.foldl' mergeOverride emptyOverride ls;
+      m
+      // {
+        env = pickAttrs [ "env" ] ls;
+        forHost = envAt "forHost";
+        forTarget = envAt "forTarget";
+      };
 
   envStrings = lib.mapAttrs (_: bt.envString);
 
@@ -337,22 +376,27 @@ let
     in
     if e == null then [ ] else layersFor wsName triple vName e;
 
-  # Product settings for mkProducts: each layer's stages and checks.
+  # Product settings for mkProducts: each layer's stages and checks, but
+  # those another layer sets at a higher priority.
   productConfig =
     wsName: triple: vName: pkg:
-    map (o: { inherit (o) stages checks; }) (memberLayers wsName triple vName pkg);
+    let
+      ls = memberLayers wsName triple vName pkg;
+    in
+    lib.zipListsWith (stages: checks: { inherit stages checks; }) (keepHighestPrio [ "stages" ] ls) (
+      keepHighestPrio [ "checks" ] ls
+    );
 
   # The layers' `test`, `sources` and `sourceOverlay` settings merged, for
   # mkWorkspace's `packages`: `{ <pkg> = { test = …; sources = …; }; }` for the
-  # workspace's path packages. Lists, env and snippets combine, in layer
-  # order; single values are `pickSingle`'s.
+  # workspace's path packages. Lists and snippets combine, in layer order;
+  # single values are `pickSingle`'s, env variables `pickAttrs`'.
   memberConfigs =
     wsName: triple: vName:
     let
       members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
       joinLines = a: b: if a == "" then b else if b == "" then a else a + "\n" + b;
       mergeTest = a: b: {
-        env = a.env // envStrings b.env;
         path = a.path ++ b.path;
         args = a.args ++ b.args;
         sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
@@ -370,12 +414,10 @@ let
           lib.foldl'
             (x: y: {
               args = x.args ++ y.args;
-              env = x.env // envStrings y.env;
               postRun = joinLines x.postRun y.postRun;
             })
             {
               args = [ ];
-              env = { };
               postRun = "";
             }
         ) [
@@ -384,19 +426,16 @@ let
         ];
         doctest = {
           args = a.doctest.args ++ b.doctest.args;
-          env = a.doctest.env // envStrings b.doctest.env;
           postRun = joinLines a.doctest.postRun b.doctest.postRun;
         };
       };
       empty = {
-        env = { };
         path = [ ];
         args = [ ];
         sourceScope = [ ];
         binaries = { };
         doctest = {
           args = [ ];
-          env = { };
           postRun = "";
         };
         runFiles = null;
@@ -417,16 +456,25 @@ let
           stripForRun = single null [ "stripForRun" ];
           keepLog = single null [ "keepLog" ];
           nextest = lib.genAttrs [ "profile" "configFile" "package" ] (n: single null [ "nextest" n ]);
-          doctest = t.doctest // {
-            enable = pickSingle null [ "enable" ] (map (l: l.test.doctest) ls);
-          };
+          env = envStrings (pickAttrs [ "test" "env" ] ls);
+          doctest =
+            let
+              ds = map (l: l.test.doctest) ls;
+            in
+            t.doctest
+            // {
+              env = envStrings (pickAttrs [ "env" ] ds);
+              enable = pickSingle true [ "enable" ] ds;
+            };
           binaries = lib.mapAttrs (
             k: b:
+            let
+              bs = map (l: l.test.binaries.${k}) (lib.filter (l: l.test.binaries ? ${k}) ls);
+            in
             b
             // {
-              enable = pickSingle null [ "enable" ] (
-                map (l: l.test.binaries.${k}) (lib.filter (l: l.test.binaries ? ${k}) ls)
-              );
+              env = envStrings (pickAttrs [ "env" ] bs);
+              enable = pickSingle true [ "enable" ] bs;
             }
           ) t.binaries;
         };

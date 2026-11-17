@@ -205,9 +205,13 @@ the unit's triple and variant:
 | `workspaces.<ws>.memberDefaults` | the workspace's path packages |
 | `packages.<name>` | that package, in every workspace |
 
-Lists concatenate, `env` merges, and a single value (`test.runner`) is
-the highest layer's that sets one. Priorities still count across layers:
-`lib.mkForce` in a lower layer wins over a plain value in a higher one.
+Lists concatenate, and a single value (`test.runner`) is the highest
+layer's that sets one. `env` (with `forHost.env`, `forTarget.env` and
+`test.env`), `stages` and `checks` merge, and each variable, stage or
+check in them is a single value of its own. Priorities still count
+across layers: `lib.mkForce` in a lower layer wins over a plain value in
+a higher one, so `memberDefaults.env.FOO = lib.mkForce "a"` keeps `a`
+for every member, whatever `packages.<name>.env.FOO` says.
 Variant layers (`variantDefaults`, `variants.<v>.target.<triple>`)
 follow the same rule ([layers and
 priorities](../how-to/targets.md#layers-and-priorities)).

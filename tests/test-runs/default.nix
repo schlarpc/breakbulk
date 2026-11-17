@@ -111,7 +111,9 @@
 #                           `memberDefaults.test.binaries.smoke.enable =
 #                           false` with `true` for `checked`: only
 #                           checked's smoke run is in repo.checks, and
-#                           both runs stay buildable
+#                           both runs stay buildable; with `lib.mkForce
+#                           false` in memberDefaults (smoke and doctest),
+#                           checked's `true` loses
 #
 # `workspaces` exposes the mkWorkspace results for debugging; `repos` the
 # mkRepository results that tests/dynamic builds in both modes.
@@ -1297,7 +1299,25 @@ let
       ];
       smoke = lib.filter (lib.hasSuffix "/test-smoke") (lib.attrNames repo.checks);
       runs = repo.workspaces.main.target.${native}.testRuns;
+      # `lib.mkForce` in memberDefaults wins over a package's plain `true`,
+      # for test binaries and doctests alike.
+      forced = doctestRepo [
+        {
+          workspaces.main.memberDefaults.test = {
+            binaries.smoke.enable = lib.mkForce false;
+            doctest.enable = lib.mkForce false;
+          };
+          packages.checked.test = {
+            binaries.smoke.enable = true;
+            doctest.enable = true;
+          };
+        }
+      ];
+      forcedOff = lib.filter (n: lib.hasSuffix "/test-smoke" n || lib.hasSuffix "/doctest" n) (
+        lib.attrNames forced.checks
+      );
     in
+    assert lib.assertMsg (forcedOff == [ ]) "binary-enable: forced off, yet in repo.checks: ${toString forcedOff}";
     assert lib.assertMsg (smoke == [ "${p}/checked/test-smoke" ]) "binary-enable: smoke runs in repo.checks: ${toString smoke}";
     assert lib.assertMsg (runs.checked ? smoke && runs.unchecked ? smoke) "binary-enable: a smoke run is gone";
     pkgs.runCommand "test-runs-binary-enable" { run = repo.checks."${p}/checked/test-smoke"; } ''
