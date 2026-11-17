@@ -48,6 +48,11 @@
 # otherwise: `workspaces.<ws>.toolchain.capabilities`. `cargo` is needed
 # only for trimPaths and nightly.
 #
+# `nixFeatures` (lib/nix-features.nix; default: import from derivation
+# allowed) is the record the probes are checked against; `mayProbe {
+# rustc; cargo; }` says whether `of` may probe that toolchain, which is
+# what repo.nixFeatures counts.
+#
 # lib/llvm-versions.nix (`packagesFor`, `probe`) and lib/wasi-sdk.nix
 # (`sysrootFor`) read their rustc through this.
 {
@@ -55,6 +60,7 @@
   util,
   llvmVersions,
   wasiSdk,
+  featureGates,
 }:
 let
   # The first release with each version-decided capability.
@@ -88,7 +94,11 @@ let
   # `rustc -vV`'s release and LLVM major, and whether it takes
   # `--remap-path-scope`, as { release; llvmMajor; remapPathScope; }.
   probe =
-    { pkgs, rustc }:
+    {
+      pkgs,
+      rustc,
+      nixFeatures ? featureGates.standalone { },
+    }:
     let
       out =
         pkgs.runCommand "rustc-facts"
@@ -113,11 +123,15 @@ let
             printf '{"release":"%s","llvmMajor":%s,"remapPathScope":%s}' "$release" "$llvm" "$scope" > $out
           '';
     in
-    builtins.fromJSON (builtins.readFile out);
+    builtins.fromJSON (featureGates.readOutput nixFeatures "probing `${rustc}/bin/rustc -vV` (lib/toolchain-facts.nix)" out);
 
   # `cargo -V`'s release, as { release; }.
   probeCargo =
-    { pkgs, cargo }:
+    {
+      pkgs,
+      cargo,
+      nixFeatures ? featureGates.standalone { },
+    }:
     let
       out =
         pkgs.runCommand "cargo-facts"
@@ -135,7 +149,22 @@ let
             printf '{"release":"%s"}' "$release" > $out
           '';
     in
-    builtins.fromJSON (builtins.readFile out);
+    builtins.fromJSON (featureGates.readOutput nixFeatures "probing `${cargo}/bin/cargo -V` (lib/toolchain-facts.nix)" out);
+
+  # Whether `of` may probe: a release from `version` and the LLVM major
+  # from `llvmPackages` or the table leave nothing to ask. Lazy reads
+  # count, as a preset may read `llvmMajor`.
+  mayProbe =
+    {
+      rustc,
+      cargo ? null,
+    }:
+    let
+      release = releaseOf rustc;
+    in
+    release == null
+    || (!(rustc ? llvmPackages) && llvmVersions.lookup release == null)
+    || (cargo != null && releaseOf cargo == null);
 
   of =
     {
@@ -143,9 +172,10 @@ let
       rustc,
       cargo ? null,
       capabilities ? { },
+      nixFeatures ? featureGates.standalone { },
     }:
     let
-      probed = probe { inherit pkgs rustc; };
+      probed = probe { inherit pkgs rustc nixFeatures; };
       rustcRelease = releaseOf rustc;
       version = if rustcRelease != null then rustcRelease else probed.release;
       fromTable = if rustcRelease != null then llvmVersions.lookup rustcRelease else null;
@@ -156,7 +186,7 @@ let
           let
             r = releaseOf cargo;
           in
-          if r != null then r else (probeCargo { inherit pkgs cargo; }).release;
+          if r != null then r else (probeCargo { inherit pkgs cargo nixFeatures; }).release;
       unknown = lib.subtractLists capabilityNames (lib.attrNames capabilities);
       detected = {
         remapPathScope =
@@ -210,6 +240,7 @@ in
     capabilitiesFile
     probe
     probeCargo
+    mayProbe
     of
     capabilitySince
     capabilityNames

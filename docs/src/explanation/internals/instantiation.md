@@ -70,11 +70,11 @@ The spike result is in [spikes/B-delivery.md](https://github.com/schlarpc/breakb
 
 ## Mode selection
 
-`mode = "auto"` (the default) chooses dynamic-derivation mode when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`). Otherwise it chooses IFD. Determinate Nix reports its upstream base version there, so the same check works for it.
+`mode` defaults to `"dynamic"` when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`), and to `"ifd"` otherwise (`lib/nix-features.nix`, `defaultMode`). Determinate Nix reports its upstream base version there, so the same check works for it. `ca` defaults to `mode == "dynamic"`.
 
-`mode = "ifd"` and `mode = "dynamic"` override the choice; `mode = "dynamic"` on an evaluator without `builtins.outputOf` is an evaluation error. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
+Setting `mode` overrides the default; `mode = "dynamic"` on an evaluator without the `outputOf` builtin is an evaluation error. `repo.config.mode` is the mode chosen, and [`repo.nixFeatures`](../../reference/outputs.md#nixfeatures) the Nix features it needs. Every use of `outputOf`, of content addressing and of import from derivation goes through a gate in `lib/nix-features.nix` that checks it against that record. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
 
-The daemon needs `dynamic-derivations` too: a daemon without it refuses to store the outer derivation ("text-hashed derivation output") even when the evaluator has it. mkRepository resolves the mode once and passes it to each workspace instance as `delivery`.
+The daemon needs `dynamic-derivations` too: a daemon without it refuses to store the outer derivation ("text-hashed derivation output") even when the evaluator has it. mkRepository passes the mode to each workspace instance as `delivery`, with the record as `nixFeatures`.
 
 Unit derivations are identical in both modes. Products are not (resolved at build time in dynamic-derivation mode, input-addressed in IFD mode), so teams that mix Nix versions should pin the mode to share product cache entries.
 

@@ -17,7 +17,8 @@
 # breakbulk.predictedRoots { ... }, breakbulk.planRoots { ... } (the
 # prediction, or the `roots` option's names). Dynamic-derivation mode:
 # breakbulk.dynamic.{instantiate, mkTestRuns, mkBreakbulkDrv, available}
-# (lib/dynamic.nix).
+# (lib/dynamic.nix). The Nix features each uses, and their gates:
+# breakbulk.nixFeatures (lib/nix-features.nix).
 # Planning and the minimal end-to-end entry:
 #   breakbulk.mkTools pkgs                breakbulk's own binaries
 #   breakbulk.defaultTools pkgs           the ones mkRepository uses without
@@ -44,6 +45,7 @@
 }:
 let
   util = import ./util.nix { inherit lib; };
+  featureGates = import ./nix-features.nix { inherit lib; };
   checkGroups = import ./check-groups.nix { inherit lib util; };
   targetTraits = import ./target-traits.nix { inherit lib; };
   lockfile = import ./lockfile.nix { inherit lib util; };
@@ -59,9 +61,16 @@ let
       roots
       ;
   };
-  inherit (import ./instantiate.nix { inherit lib; }) instantiate predictedRoots planRoots;
+  inherit (import ./instantiate.nix { inherit lib featureGates; }) instantiate predictedRoots planRoots;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
-  stages = import ./stages.nix { inherit lib wasmBindgen targetTraits; };
+  stages = import ./stages.nix {
+    inherit
+      lib
+      wasmBindgen
+      targetTraits
+      featureGates
+      ;
+  };
   testRuns = import ./test-runs.nix {
     inherit
       lib
@@ -69,9 +78,17 @@ let
       util
       targetTraits
       runners
+      featureGates
       ;
   };
-  products = import ./products.nix { inherit lib stages targetTraits; };
+  products = import ./products.nix {
+    inherit
+      lib
+      stages
+      targetTraits
+      featureGates
+      ;
+  };
   variants = import ./variants.nix { inherit lib util manifest; };
   testApps = import ./test-apps.nix {
     inherit lib;
@@ -85,6 +102,7 @@ let
       stages
       runners
       util
+      featureGates
       ;
     breakbulkTraits = targetTraits;
   };
@@ -96,6 +114,7 @@ let
       util
       llvmVersions
       wasiSdk
+      featureGates
       ;
   };
   runners = import ./runners.nix { inherit lib; };
@@ -184,6 +203,7 @@ let
       testApps
       dynamic
       toolchainFacts
+      featureGates
       ;
     targetTraitsLib = targetTraits;
   };
@@ -203,6 +223,8 @@ let
       products
       presets
       targetTraits
+      toolchainFacts
+      featureGates
       ;
     variantsLib = variants;
     breakbulkLib = self;
@@ -231,6 +253,7 @@ let
       dynamic
       checkGroups
       ;
+    nixFeatures = featureGates;
 
     mkSkeleton = skeleton.mkSkeleton;
 

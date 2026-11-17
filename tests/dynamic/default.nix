@@ -3,7 +3,8 @@
 # tests/dynamic/run.sh runs it in a private store and compares the modes
 # (`nix run .#test-dynamic`). This file only describes what to build.
 #
-#   mode = "ifd" | "dynamic"
+#   mode = "ifd" | "dynamic"   (default: the evaluator's)
+#   ca = null | true | false   (null: `ca`'s default)
 #
 # Attributes:
 #   repos.<fixture>          the mkRepository results: most are the
@@ -31,6 +32,8 @@
 #   unitDrvs.<fixture>       a JSON file: "<i>/<kind>" -> unit id (or
 #                            `doctest:<pkg>`, or `docs`) -> .drv path (IFD
 #                            mode)
+#   nixFeatures.<fixture>    its repo.nixFeatures (run.sh builds
+#                            `nixFeaturesFixtures` with exactly these)
 #   explain.<fixture>        whether repo.explainSharing finds every unit
 #                            of the first workspace's build plan shared
 #                            with itself (it must)
@@ -69,7 +72,8 @@
       overlays = [ (import (fetch lock.rust-overlay.locked)) ];
     },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
-  mode ? "auto",
+  mode ? breakbulk.nixFeatures.defaultMode,
+  ca ? null,
   # `cutoff`'s edit: a number other than 1, new on each run.sh run, so
   # that the edited fixtures and settings are new to the store.
   cutoffEdit ? "2",
@@ -113,7 +117,8 @@ let
     extraModules = [
       { inherit mode; }
       keepLogs
-    ];
+    ]
+    ++ lib.optional (ca != null) { inherit ca; };
   };
   productTests = import ../products testArgs;
   products = productTests.repos;
@@ -155,7 +160,13 @@ let
   ];
 
   repos = {
-    walking-skeleton = mkRepo "walking-skeleton" [ oneWs ];
+    # Without a dev shell (whose Cargo env is read at evaluation time), so
+    # that its dynamic mode imports nothing: run.sh builds it with
+    # import from derivation off (`nixFeaturesFixtures`).
+    walking-skeleton = mkRepo "walking-skeleton" [
+      oneWs
+      { workspaces.main.devShell.target = null; }
+    ];
     # #23: a build script writes next to the binaries. The product takes
     # the file with the `buildScriptFiles` stage (read in dynamic mode from
     # the root's `breakbulk-root.json`), its check passes,
@@ -526,7 +537,7 @@ let
     ];
   };
 
-  isDynamic = breakbulk.dynamic.resolveMode mode == "dynamic";
+  isDynamic = breakbulk.dynamic.checkMode mode == "dynamic";
 
   # Test apps run outside a test run (as tests/test-runs `test-control-app`):
   # the network binary with the skipped test filtered out, and the env
@@ -540,7 +551,7 @@ let
             root = fixtures + "/test-control";
             inherit tools;
             name = "test-control";
-            delivery = breakbulk.dynamic.resolveMode mode;
+            delivery = breakbulk.dynamic.checkMode mode;
             packages.ctl.test = ctlTest;
           }
           // args
@@ -962,6 +973,7 @@ in
     cutoff
     ;
   build = lib.mapAttrs build repos;
+  nixFeatures = lib.mapAttrs (_: r: r.nixFeatures) repos;
   unitDrvs = lib.mapAttrs unitDrvs repos;
   outer = lib.mapAttrs (
     name: repo:

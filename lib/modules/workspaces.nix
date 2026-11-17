@@ -5,6 +5,7 @@
   pkgs,
   root,
   projectBuildTarget,
+  targetsDefaultTarget,
   ...
 }:
 let
@@ -14,7 +15,13 @@ let
   nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
   util = import ../util.nix { inherit lib; };
   manifest = import ../manifest.nix { inherit lib util; };
-  inherit (import ../instantiate.nix { inherit lib; }) rootNameRegex;
+  inherit
+    (import ../instantiate.nix {
+      inherit lib;
+      featureGates = import ../nix-features.nix { inherit lib; };
+    })
+    rootNameRegex
+    ;
 
   # The exclude form, in each selection option's description.
   excludeFormDoc = ''
@@ -883,14 +890,13 @@ let
           default =
             let
               ts = lib.attrNames config.targets;
+              fromTargets = targetsDefaultTarget ts;
               # Read only when needed: an import-from-derivation unless the
               # workspace has no Cargo config file.
               buildTarget = projectBuildTarget config.path;
             in
-            if lib.elem nativeTriple ts then
-              nativeTriple
-            else if lib.length ts == 1 then
-              lib.head ts
+            if fromTargets != null then
+              fromTargets
             else if buildTarget != null && lib.length buildTarget == 1 && lib.elem (lib.head buildTarget) ts then
               lib.head buildTarget
             else

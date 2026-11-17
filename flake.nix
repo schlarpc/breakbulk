@@ -376,6 +376,18 @@
           # Dynamic-derivation mode's outer-derivation builder compiles (its
           # behaviour needs Nix master: `nix run .#test-dynamic`).
           // { breakbulk-drv = self.lib.dynamic.mkBreakbulkDrv pkgs; }
+          # Content addressing and `outputOf` are used only through their
+          # gates (lib/nix-features.nix), which check them against
+          # repo.nixFeatures.
+          // {
+            nix-features-gates = pkgs.runCommand "nix-features-gates" { lib = ./lib; } ''
+              if grep -rnE '__contentAddressed|builtins\.outputOf' "$lib" | grep -v "^$lib/nix-features.nix:"; then
+                echo "the lines above use a Nix feature outside lib/nix-features.nix" >&2
+                exit 1
+              fi
+              touch $out
+            '';
+          }
         ));
     };
 }

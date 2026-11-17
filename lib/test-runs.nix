@@ -20,7 +20,8 @@
 #                         # triple, which a host unit's test (a proc macro's
 #                         # unit tests) runs with (`testPlatforms`)
 #     packages = { };     # packages.<name>.test, as in the module options
-#     ca = null;          # null: automatic (stages.caAuto); true; false
+#     ca = breakbulk.nixFeatures.defaultCa;   # true; false
+#     nixFeatures = <standalone>;  # as stages.mkProduct's
 #     coverage = false;   # coverage variants: each run keeps its profiles
 #                         # in $out/profraw (`postRunSnippets`)
 #     name = "breakbulk";
@@ -103,6 +104,7 @@
   util,
   targetTraits,
   runners,
+  featureGates,
 }:
 let
   inherit (builtins)
@@ -829,14 +831,15 @@ rec {
       # runDirs.<package> = the package directory of its "run" view, or
       # null for the test binary's own view (lib/workspace.nix).
       runDirs ? { },
-      ca ? null,
+      ca ? featureGates.defaultCa,
+      nixFeatures ? featureGates.standalone { inherit ca; },
       coverage ? false,
       name ? "breakbulk",
     }:
     let
       inherit (inst) units;
-      useCa = stages.resolveCa ca;
-      caAttrs = lib.optionalAttrs useCa stages.caAttrs;
+      useCa = ca;
+      caAttrs = lib.optionalAttrs useCa (featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)");
       platforms = testPlatforms {
         inherit pkgs tools host;
         target = {

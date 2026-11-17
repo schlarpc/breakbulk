@@ -22,14 +22,13 @@
 # built, and a source edit or a changed env value does not rerun the
 # instantiate derivation at all (only the plan's and the keys' changes do).
 # See crates/breakbulk-instantiate/src/output.rs for the format.
-{ lib }:
+{ lib, featureGates }:
 let
   inherit (builtins)
     fromJSON
     isAttrs
     isPath
     isString
-    readFile
     stringLength
     substring
     toFile
@@ -130,6 +129,9 @@ rec {
       capabilities,
       name ? "breakbulk-units",
       storeDir ? builtins.storeDir,
+      # The record importing units.json is checked against
+      # (lib/nix-features.nix; repo.nixFeatures, from mkRepository).
+      nixFeatures ? featureGates.standalone { },
     }:
     let
       workspace = sources.workspace or { };
@@ -195,7 +197,7 @@ rec {
         ];
       };
 
-      json = fromJSON (readFile unitsJson);
+      json = fromJSON (featureGates.readOutput nixFeatures "the units of `${name}` (units.json)" unitsJson);
 
       # --- substitution -----------------------------------------------------
 

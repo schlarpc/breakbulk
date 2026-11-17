@@ -17,7 +17,8 @@
 #     packageConfig = pkg: [ { stages; checks; } … ];  # matching package
 #                           # overrides, least specific first, each with
 #                           # its target.<triple> settings applied after it
-#     ca = null;            # null: automatic (stages.caAuto)
+#     ca = breakbulk.nixFeatures.defaultCa;
+#     nixFeatures = <standalone>;  # as stages.mkProduct's
 #     lockfile = null;      # the workspace's Cargo.lock (bindgen stage)
 #     defaultChecks = true; # false: no noSourceReferences (sourcePaths = "keep")
 #   };
@@ -66,6 +67,7 @@
   lib,
   stages,
   targetTraits,
+  featureGates,
 }:
 let
   inherit (lib)
@@ -328,7 +330,8 @@ let
       targetStages ? { },
       targetChecks ? { },
       packageConfig ? _: [ ],
-      ca ? null,
+      ca ? featureGates.defaultCa,
+      nixFeatures ? featureGates.standalone { inherit ca; },
       lockfile ? null,
       # Package name -> its `[package]` table, workspace fields resolved
       # (manifest.packageInfo's `package`), for `product.package`.
@@ -438,6 +441,7 @@ let
             inherit
               pkgs
               ca
+              nixFeatures
               sourcePaths
               toolchainPaths
               defaultChecks

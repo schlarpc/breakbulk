@@ -36,8 +36,8 @@
     }
   ) { },
   breakbulk ? import ../../lib { inherit (pkgs) lib; },
-  # null: automatic (off on stock Nix); run.sh passes true.
-  ca ? null,
+  # The default: off on stock Nix; run.sh passes true.
+  ca ? breakbulk.nixFeatures.defaultCa,
 }:
 let
   inherit (pkgs) lib;

@@ -2508,53 +2508,135 @@ in
     ) "poisoned-settings: other members' derivations differ: ${builtins.toJSON got}";
     evalCheck "poisoned-settings" (builtins.toJSON got);
 
-  # `nixFeatures` is what `mode` and `ca` came out as: set, and at their
-  # defaults on this evaluator. Reading it plans nothing.
+  # `nixFeatures` is what Nix must allow for `mode` and `ca` (set, and at
+  # their defaults on this evaluator), import from derivation in dynamic
+  # mode only where a site may import. Reading it plans nothing; in
+  # dynamic mode on a stock evaluator it does not need dynamic derivations.
+  # `repo.config` holds what was chosen.
   nix-features =
     let
-      features =
+      repoWith =
         settings:
-        (breakbulk.mkRepository {
+        breakbulk.mkRepository {
           inherit pkgs tools;
           root = fixtures + "/multi-ws";
-          modules = [ settings ];
-        }).nixFeatures;
+          modules = [ { workspaces.a.path = "a"; } ] ++ lib.toList settings;
+        };
+      features = settings: (repoWith settings).nixFeatures;
+      record = ca: dyn: ifd: {
+        caDerivations = ca;
+        dynamicDerivations = dyn;
+        importFromDerivation = ifd;
+      };
+      # No dev shell (its Cargo env is read by IFD in either mode).
+      noShell = {
+        workspaces.a.devShell.target = null;
+      };
+      g = breakbulk.nixFeatures;
       cases = [
         {
           settings = {
             mode = "ifd";
             ca = false;
           };
-          want = {
-            caDerivations = false;
-            dynamicDerivations = false;
-            importFromDerivation = true;
-          };
+          want = record false false true;
         }
         {
           settings = {
             mode = "ifd";
             ca = true;
           };
-          want = {
-            caDerivations = true;
-            dynamicDerivations = false;
-            importFromDerivation = true;
-          };
+          want = record true false true;
         }
         {
-          settings = { };
-          want = {
-            caDerivations = builtins ? outputOf;
-            dynamicDerivations = breakbulk.dynamic.available;
-            importFromDerivation = !breakbulk.dynamic.available;
+          settings = [
+            noShell
+            {
+              mode = "dynamic";
+              ca = false;
+            }
+          ];
+          want = record true true false;
+        }
+        {
+          settings = [
+            noShell
+            { mode = "dynamic"; }
+          ];
+          want = record true true false;
+        }
+        # The dev shell's Cargo env.
+        {
+          settings = {
+            mode = "dynamic";
           };
+          want = record true true true;
+        }
+        # A rustc whose `version` is not a Rust release is probed.
+        {
+          settings = [
+            noShell
+            {
+              mode = "dynamic";
+              workspaces.a.toolchain.rustc = pkgs.rustc // {
+                version = "2026-10-15";
+              };
+            }
+          ];
+          want = record true true true;
+        }
+        # Several targets, none native: `defaultTarget` may read the
+        # project's `build.target`, but this fixture has no Cargo config.
+        {
+          settings = [
+            noShell
+            {
+              mode = "dynamic";
+              workspaces.a.targets = {
+                wasm32-unknown-unknown = { };
+                aarch64-unknown-linux-gnu = { };
+              };
+            }
+          ];
+          want = record true true false;
+        }
+        {
+          settings = [ noShell ];
+          want = record g.defaultCa g.available (!g.available);
         }
       ];
       bad = lib.filter (c: features c.settings != c.want) cases;
+      # With a Cargo config file, `build.target` may be read.
+      configured =
+        (breakbulk.mkRepository {
+          inherit pkgs tools;
+          root = fixtures + "/feature-unification";
+          modules = [
+            {
+              mode = "dynamic";
+              workspaces.main = {
+                path = ".";
+                devShell.target = null;
+                targets = {
+                  wasm32-unknown-unknown = { };
+                  aarch64-unknown-linux-gnu = { };
+                };
+              };
+            }
+          ];
+        }).nixFeatures;
+      chosen = repoWith { };
     in
     assert lib.assertMsg (bad == [ ])
       "nix-features: wrong for ${builtins.toJSON (map (c: c // { got = features c.settings; }) bad)}";
+    assert lib.assertMsg (
+      chosen.config.mode == g.defaultMode
+      && chosen.config.ca == (g.defaultMode == "dynamic")
+      && chosen.options.ca.highestPrio == 1500
+      && (repoWith { mode = "dynamic"; }).config.ca
+      && !(repoWith { ca = false; }).config.ca
+    ) "nix-features: repo.config.mode and repo.config.ca are not what was chosen";
+    assert lib.assertMsg configured.importFromDerivation "nix-features: a Cargo config's build.target is not counted";
     evalCheck "nix-features" (builtins.toJSON (map (c: features c.settings) cases));
 
   # Every option has a description, so the docs generate.

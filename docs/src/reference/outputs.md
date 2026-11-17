@@ -94,7 +94,7 @@ repo = {
   apps."<ws>/<triple>/<pkg>/test-<name>";  # every test app, for apps.<system>
   sources.<crate>;                       # fetched crate sources
   explainSharing;                        # why two plans' units differ
-  nixFeatures;                           # the Nix features this evaluation uses
+  nixFeatures;                           # the Nix features this evaluation may use
   config; options; optionsDoc;           # the evaluated modules
 };
 ```
@@ -213,23 +213,37 @@ then units with the same outputs. With `b` a check variant's build plan,
 
 ### `nixFeatures`
 
-`repo.nixFeatures` says which Nix features breakbulk uses in this
-evaluation, under Nix's own names. It is read-only: it shows what
-[`mode`](options/repository.md#mode) and
-[`ca`](options/repository.md#ca) came out as, which with `mode = "auto"`
-and `ca = null` depends on the evaluator. On a Nix without dynamic
-derivations, with both at their defaults, it is:
+`repo.nixFeatures` says what Nix must allow for this evaluation, under
+Nix's own names: each feature is `true` when some part of the
+repository's outputs may use it, including parts that are evaluated only
+when asked for. It is read-only. What breakbulk chose is in
+`repo.config`: `repo.config.mode` and `repo.config.ca` (and
+`repo.options.mode.highestPrio` says whether `mode` is at its default).
+On a Nix without dynamic derivations, with both at their defaults, it is:
 
 ```nix
 { caDerivations = false; dynamicDerivations = false; importFromDerivation = true; }
 ```
 
-- `importFromDerivation`: `mode` came out as `ifd`.
-- `dynamicDerivations`: `mode` came out as `dynamic`.
-- `caDerivations`: `ca` came out as on, so stages, checks and test runs
-  are content-addressed and an unchanged input does not re-run them
-  ([Content addressing at the edges](../explanation/caching.md#content-addressing-at-the-edges)).
-  When it is `false`,
-  [`test.runFiles`](options/packages.md#packagesnametestrunfiles) and
-  [`test.stripForRun`](options/packages.md#packagesnameteststripforrun)
-  do not save test runs.
+- `caDerivations`: the `ca-derivations` experimental feature. On when
+  [`ca`](options/repository.md#ca) is on, and always in dynamic mode,
+  whose outer derivations are content-addressed whatever `ca` says.
+- `dynamicDerivations`: the `dynamic-derivations` experimental feature,
+  in dynamic mode ([`mode`](options/repository.md#mode)).
+- `importFromDerivation`: `allow-import-from-derivation`. Always in IFD
+  mode. In dynamic mode, only when a workspace's toolchain may be asked
+  for its version or LLVM (a `rustc` or `cargo` whose `version` is not a
+  Rust release, or a Rust release newer than breakbulk's LLVM table), a
+  workspace's `defaultTarget` default may read the project's
+  `build.target` (several targets, none native, and a Cargo config file),
+  or a workspace has a dev shell (its Cargo env is read at evaluation
+  time; `devShell.target = null` turns it off).
+
+breakbulk uses each feature in one place (`lib/nix-features.nix`), which
+fails with an error naming what needed it when the record says the
+feature is off. So with `experimental-features` set to exactly the
+listed features, and `allow-import-from-derivation` matching, the
+repository's outputs evaluate and build. Two things are outside the
+record: `explainSharing`, which always imports from derivations, and a
+preset given a `rustc` other than its workspace's, whose toolchain may
+be probed.

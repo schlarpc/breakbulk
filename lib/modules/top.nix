@@ -6,6 +6,7 @@ let
   bt = import ./types.nix { inherit lib; };
   settings = (import ./package-settings.nix { inherit lib; }).settings;
   curated = import ../sys-defaults.nix { inherit lib; };
+  gates = import ../nix-features.nix { inherit lib; };
 in
 {
   config.sysDefaults.packages = lib.mkIf config.sysDefaults.enable (
@@ -15,28 +16,29 @@ in
   options = {
     mode = mkOption {
       type = types.enum [
-        "auto"
         "ifd"
         "dynamic"
       ];
-      default = "auto";
+      default = gates.defaultMode;
+      defaultText = lib.literalMD ''
+        `"dynamic"` when the evaluator has dynamic derivations (Nix's
+        `outputOf` builtin) and is Nix 2.36 or later, else `"ifd"`
+      '';
       description = ''
         How unit derivations reach Nix. `ifd`: breakbulk-instantiate writes
         units.json, which Nix imports (import-from-derivation). `dynamic`:
         an outer derivation writes the unit derivations through Nix's
-        `builder-rpc-v0` interface and products reach them with
-        `builtins.outputOf` (needs Nix 2.36 or later with the
+        `builder-rpc-v0` interface and products reach them with Nix's
+        `outputOf` builtin (needs Nix 2.36 or later with the
         `dynamic-derivations` and `ca-derivations` experimental features).
-        `auto` picks `dynamic` when the evaluator has `builtins.outputOf`
-        and is Nix 2.36 or later, and `ifd` otherwise. A daemon or builder
-        older than the evaluator fails with Nix's own "missing system
-        features" error naming `builder-rpc-v0`; set `ifd` then. Unit
-        derivations are identical in both modes; products are not (they are
-        resolved at build time in `dynamic`), so teams that mix Nix versions
-        should pin the mode. `importFromDerivation` and
-        `dynamicDerivations` in
-        [`repo.nixFeatures`](../outputs.md#nixfeatures) say which it
-        came out as.
+        The default is the evaluator's: `dynamic` where it can, `ifd`
+        elsewhere. A daemon or builder older than the evaluator fails with
+        Nix's own "missing system features" error naming `builder-rpc-v0`;
+        set `ifd` then. Unit derivations are identical in both modes;
+        products are not (they are resolved at build time in `dynamic`), so
+        teams that mix Nix versions should pin the mode.
+        [`repo.nixFeatures`](../outputs.md#nixfeatures) lists the Nix
+        features the evaluation may use.
 
         In `ifd`, evaluating another system's outputs builds its plans, which
         needs a builder for that system: `nix flake check --all-systems` and
@@ -50,19 +52,16 @@ in
     };
 
     ca = mkOption {
-      type = types.nullOr types.bool;
-      default = null;
+      type = types.bool;
+      default = config.mode == "dynamic";
+      defaultText = lib.literalExpression ''mode == "dynamic"'';
       description = ''
         Content-address post-link stages, checks and test runs, so that an
         unchanged input does not re-run them. Needs Nix's `ca-derivations`
-        experimental feature in the evaluator and the daemon. `null` turns
-        it on exactly when the evaluator has `dynamic-derivations` (which
-        needs `ca-derivations` too), and off otherwise: Nix code cannot
-        tell whether `ca-derivations` is on, and without it a
+        experimental feature in the evaluator and the daemon. The default
+        follows `mode`: `dynamic` needs `ca-derivations` anyway, while Nix
+        code cannot tell whether it is on otherwise, and without it a
         content-addressed derivation is an error that cannot be caught.
-        `caDerivations` in
-        [`repo.nixFeatures`](../outputs.md#nixfeatures) says which it
-        came out as.
       '';
     };
 

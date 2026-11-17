@@ -28,7 +28,7 @@
 #   repo.explainSharing { a; b; package; }                why units differ
 #   repo.config, repo.options                             the evaluated modules
 #   repo.optionsDoc                                       nixosOptionsDoc of them
-#   repo.nixFeatures                                      the Nix features this evaluation uses
+#   repo.nixFeatures                                      the Nix features this evaluation may use
 #
 #   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
 #   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  test apps (`nix run`)
@@ -75,6 +75,8 @@
   variantsLib,
   presets,
   targetTraits,
+  toolchainFacts,
+  featureGates,
   # The whole library (lib/default.nix), for modules' `breakbulk` argument.
   breakbulkLib,
 }:
@@ -108,9 +110,15 @@ let
     # Module arguments: `pkgs`; `root` (the repository root, a path), for
     # reading project files; `repo` (the result, below), for products used
     # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk);
-    # `projectBuildTarget` (below). The caller's specialArgs win.
+    # `projectBuildTarget` and `targetsDefaultTarget` (below). The
+    # caller's specialArgs win.
     specialArgs = {
-      inherit pkgs root projectBuildTarget;
+      inherit
+        pkgs
+        root
+        projectBuildTarget
+        targetsDefaultTarget
+        ;
       repo = result;
       breakbulk = breakbulkLib;
       breakbulkPresets = presets;
@@ -145,7 +153,21 @@ let
     if breakbulkLib.skeleton.configFiles { inherit root wsDir; } == [ ] then
       null
     else
-      (builtins.fromJSON (builtins.readFile "${drv}/build-target.json")).buildTarget;
+      (builtins.fromJSON (
+        featureGates.readOutput nixFeatures "the default of `defaultTarget` for the workspace at `${wsDir}` (its Cargo config's `build.target`)" "${drv}/build-target.json"
+      )).buildTarget;
+
+  # `defaultTarget`'s default from the workspace's `targets` alone: the
+  # native triple when it is one of them, else the only one, else null
+  # (then the project's `build.target` decides, `projectBuildTarget`).
+  targetsDefaultTarget =
+    ts:
+    if lib.elem nativeTriple ts then
+      nativeTriple
+    else if lib.length ts == 1 then
+      lib.head ts
+    else
+      null;
 
   nativeTriple = targetTraits.nativeTriple pkgs;
 
@@ -1036,6 +1058,7 @@ let
       traits = traitsOf wsName triple;
       packages = memberConfigs wsName triple vName;
       inherit (cfg) ca;
+      inherit nixFeatures;
       inherit (v) mode clippyArgs;
       clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
       clippyOption = "workspaces.${wsName}.toolchain.clippy";
@@ -1099,6 +1122,7 @@ let
       targetChecks = targetField wsName triple "checks" { };
       packageConfig = productConfig wsName triple vName;
       inherit (cfg) ca;
+      inherit nixFeatures;
       lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
       cargoPackages =
         let
@@ -1385,7 +1409,11 @@ let
                 ++ spec.rustflags
             );
             withContext = builtins.replaceStrings (map builtins.unsafeDiscardStringContext values) values;
-            j = builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${inst.cargoEnv}/cargo-env.json"));
+            j = builtins.fromJSON (
+              builtins.unsafeDiscardStringContext (
+                featureGates.readOutput nixFeatures "the dev shell of workspace `${wsName}` (cargo-env.json)" "${inst.cargoEnv}/cargo-env.json"
+              )
+            );
           in
           if inst == null then
             { }
@@ -1575,9 +1603,39 @@ let
     map (a: a.message) (lib.filter (a: !a.assertion) (cfg.assertions ++ cellAssertions))
     ++ selectionErrors
   );
-  # `mode = "auto"`: dynamic-derivation mode when the evaluator has
-  # `builtins.outputOf` and is Nix 2.36 or later (lib/dynamic.nix).
-  delivery = dynamic.resolveMode cfg.mode;
+  delivery = dynamic.checkMode cfg.mode;
+
+  # repo.nixFeatures: every Nix feature some part of this evaluation may
+  # use, lazy parts included, so that a gate (lib/nix-features.nix) that
+  # throws means the record is wrong. Dynamic-derivation mode imports from
+  # derivations only where a workspace's toolchain needs probing, a
+  # workspace's `defaultTarget` default may read the project's
+  # `build.target`, or a dev shell reads its Cargo env. A preset given a
+  # rustc other than its workspace's is not counted: it checks its probes
+  # against no record. The order matters: `devShell.target` defaults to
+  # `defaultTarget`, which reads `build.target` through the record, and is
+  # reached only when the `defaultTarget` site is not.
+  importsInDynamicMode =
+    ws:
+    toolchainFacts.mayProbe { inherit (ws.toolchain) rustc cargo; }
+    || (
+      targetsDefaultTarget (lib.attrNames ws.targets) == null
+      && breakbulkLib.skeleton.configFiles {
+        inherit root;
+        wsDir = wsDirOf ws;
+      } != [ ]
+    )
+    || ws.devShell.target != null;
+  nixFeatures = {
+    dynamicDerivations = cfg.mode == "dynamic";
+    caDerivations = cfg.ca || cfg.mode == "dynamic";
+    importFromDerivation = cfg.mode == "ifd" || lib.any importsInDynamicMode (lib.attrValues cfg.workspaces);
+  };
+  # explainSharing reads plans and units.json in either mode and is not
+  # counted in repo.nixFeatures (it is a function to call, not an output).
+  explainFeatures = nixFeatures // {
+    importFromDerivation = true;
+  };
   guard =
     x: if failedAssertions == [ ] then warned x else throw (lib.concatStringsSep "\n" failedAssertions);
 
@@ -1661,7 +1719,10 @@ let
       fromParts h;
 
   readPlanOf =
-    r: builtins.fromJSON (discard (builtins.readFile "${r.inst.plans.${r.kind}}/plan.json"));
+    r:
+    builtins.fromJSON (
+      discard (featureGates.readOutput explainFeatures "explainSharing (plan.json)" "${r.inst.plans.${r.kind}}/plan.json")
+    );
 
   pkgNameOf =
     id:
@@ -1955,11 +2016,7 @@ let
     sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
     inherit explainSharing warnings;
     inherit (eval) config options;
-    nixFeatures = {
-      importFromDerivation = delivery == "ifd";
-      dynamicDerivations = delivery == "dynamic";
-      caDerivations = breakbulkLib.stages.resolveCa cfg.ca;
-    };
+    inherit nixFeatures;
     optionsDoc = pkgs.nixosOptionsDoc {
       options = removeAttrs eval.options [
         "_module"

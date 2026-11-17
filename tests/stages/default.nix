@@ -438,10 +438,31 @@ let
         )).success;
       expected = false;
     };
-    # Nothing on this evaluator says ca-derivations is on.
-    testCaAuto = {
-      expr = S.caAuto == (builtins ? outputOf);
+    # `ca`'s default follows the default mode.
+    testCaDefault = {
+      expr = breakbulk.nixFeatures.defaultCa == (breakbulk.nixFeatures.defaultMode == "dynamic");
       expected = true;
+    };
+    # A record that says ca-derivations is off stops `ca = true` at the
+    # stage.
+    testCaGate = {
+      expr =
+        let
+          p = S.mkProduct {
+            name = "gated";
+            linked = helloLinked;
+            stages = S.chain [ "splitDebug" ];
+            inherit pkgs;
+            ca = true;
+            nixFeatures = {
+              caDerivations = false;
+              dynamicDerivations = false;
+              importFromDerivation = true;
+            };
+          };
+        in
+        (builtins.tryEval p.stages.splitDebug.drvAttrs.__contentAddressed).success;
+      expected = false;
     };
     # With ca = true, stages and checks carry the CA attributes (not
     # instantiated: that needs the experimental feature); linked does not.

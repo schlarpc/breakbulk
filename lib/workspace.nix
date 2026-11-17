@@ -56,7 +56,9 @@
 # Test options (set by mkRepository's module options): `runner` (null or a
 # list), `testSystem`, `packages.<name>.test` (env, path, args,
 # includeIgnored, binaries.<binary>.{args,env,enable},
-# doctest.{args,env,postRun,enable}), `ca` (null: automatic),
+# doctest.{args,env,postRun,enable}), `ca` (default:
+# breakbulk.nixFeatures.defaultCa), `nixFeatures` (the record every use of
+# a Nix feature is checked against, lib/nix-features.nix),
 # `checkout` (the user's checkout of the repository root, for test apps).
 {
   lib,
@@ -77,6 +79,7 @@
   testApps,
   dynamic,
   toolchainFacts,
+  featureGates,
   targetTraitsLib,
 }:
 pkgs:
@@ -119,12 +122,16 @@ pkgs:
   targetEnv ? { },
   runner ? null,
   testSystem ? null,
-  ca ? null,
+  ca ? featureGates.defaultCa,
   checkout ? null,
   # How unit derivations reach Nix: "ifd" (units.json, imported) or
   # "dynamic" (an outer derivation writes them through builder-rpc-v0;
-  # lib/dynamic.nix). mkRepository resolves `mode = "auto"`.
+  # lib/dynamic.nix).
   delivery ? "ifd",
+  nixFeatures ? featureGates.standalone {
+    inherit ca;
+    dynamic = delivery == "dynamic";
+  },
   # `--remap-path-scope` for non-test target compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
@@ -278,7 +285,7 @@ let
   # breakbulk-instantiate's capabilities come from.
   capabilities =
     (toolchainFacts.of {
-      inherit pkgs;
+      inherit pkgs nixFeatures;
       inherit (toolchain) rustc cargo;
       capabilities = toolchain.capabilities or { };
     }).capabilities;
@@ -490,10 +497,11 @@ let
             ) predictedDoctests
           );
           docs = kind == "doc";
+          inherit nixFeatures;
         }
       )
     else
-      instantiate args;
+      instantiate (args // { inherit nixFeatures; });
 
   inst =
     kind:
@@ -585,6 +593,7 @@ let
       packages
       runDirs
       ca
+      nixFeatures
       name
       traits
       ;
@@ -691,6 +700,7 @@ in
           testSystem
           runDirs
           ca
+          nixFeatures
           traits
           ;
         dylibPath = testDylibPath;

@@ -33,6 +33,8 @@
 #     them with, and does not hold the
 #     package's whole source view where it has a "run" view;
 #   - repo.explainSharing works in dynamic mode;
+#   - walking-skeleton and doctests, in both modes with `ca` off and on,
+#     build with only the Nix features their repo.nixFeatures lists;
 #   - with test-cutoff and test-options: a test run whose inputs' contents
 #     an edit leaves unchanged is not re-run (`cutoff` in default.nix).
 #
@@ -452,6 +454,38 @@ for c in test-cutoff test-options; do
     echo "FAIL: $c: test-run cutoff in dynamic-derivation mode" >&2
     status=1
   fi
+done
+
+# repo.nixFeatures is all Nix must allow: each of these fixtures, in each
+# mode with `ca` off and on, builds with `experimental-features` set to
+# exactly the features its record lists and `allow-import-from-derivation`
+# to its `importFromDerivation`. walking-skeleton (no dev shell) imports
+# nothing in dynamic mode; doctests has doctests (`outputOf`) and a dev
+# shell (import from derivation in both modes).
+nixFeaturesFixtures=(walking-skeleton doctests)
+for f in "${nixFeaturesFixtures[@]}"; do
+  case " ${fixtures[*]} " in *" $f "*) ;; *) continue ;; esac
+  for mode in ifd dynamic; do
+    for ca in false true; do
+      record=$(nixm eval --json -f "$REPO/tests/dynamic" --arg mode "\"$mode\"" --arg ca "$ca" "nixFeatures.$f")
+      read -r ifdAllowed features < <(python3 -c '
+import json, sys
+r = json.loads(sys.argv[1])
+names = {"caDerivations": "ca-derivations", "dynamicDerivations": "dynamic-derivations"}
+print("true" if r["importFromDerivation"] else "false", " ".join(n for k, n in names.items() if r[k]))
+' "$record")
+      say "$f: mode = $mode, ca = $ca: experimental-features = \"$features\", allow-import-from-derivation = $ifdAllowed"
+      if "$NIX_MASTER/bin/nix-build" --store "$STORE" "$REPO/tests/dynamic" --no-out-link \
+        --option experimental-features "$features" --option allow-import-from-derivation "$ifdAllowed" \
+        --arg mode "\"$mode\"" --arg ca "$ca" -A "build.$f" >"$WORK/features.log" 2>&1; then
+        echo "$f: builds with exactly $record" >&2
+      else
+        tail -30 "$WORK/features.log" >&2
+        echo "FAIL: $f (mode = $mode, ca = $ca) needs more than $record" >&2
+        status=1
+      fi
+    done
+  done
 done
 
 # A check variant (no roots) builds every unit through `units.drv`.

@@ -15,7 +15,10 @@
 #     sourcePaths = [ … ];   # source-view and crate-source store paths
 #     toolchainPaths = [ … ];   # rustc, its sysroot, cargo, toolchain components
 #     info = { lockfile = ./Cargo.lock; };  # extra `product` attributes
-#     ca = null;             # null: automatic (see `caAuto`); true; false
+#     ca = breakbulk.nixFeatures.defaultCa;   # true; false
+#     nixFeatures = breakbulk.nixFeatures.standalone { inherit ca; };
+#                            # the record `ca` is checked against
+#                            # (repo.nixFeatures, from mkRepository)
 #   };
 #
 #   p                  the product (the last stage's output)
@@ -62,23 +65,19 @@
 # too: it is rebuilt from its `drvAttrs` with the guard as builder.
 #
 # Content addressing: with `ca`, every stage and check derivation gets
-# `__contentAddressed = true; outputHashMode = "recursive";
-# outputHashAlgo = "sha256"` (through overrideAttrs, or from `drvAttrs` for a
-# bare `derivation`, as for the guard). `linked` is left as it
-# is. Nix rejects such a derivation at evaluation unless the evaluator has
-# the `ca-derivations` experimental feature, and the build fails unless the
-# daemon has it too. Nix offers no way for an expression to test for the
-# feature (`builtins.tryEval` does not catch the missing-feature error, and
-# no builtin is gated on it), so `ca = null` follows the closest signal:
-# `builtins ? outputOf`, which exists only when `dynamic-derivations` is
-# enabled. breakbulk's dynamic-derivation mode needs `ca-derivations` as well
-# (its instantiate derivation has a floating CA output), so this is on
-# exactly when `mode = "auto"` picks dynamic-derivation mode, and off on a
-# stock Nix.
+# the floating content-addressed attributes (lib/nix-features.nix
+# `caAttrs`, through overrideAttrs, or from `drvAttrs` for a bare
+# `derivation`, as for the guard). `linked` is left as it is. Nix rejects
+# such a derivation at evaluation unless the evaluator has the
+# `ca-derivations` experimental feature, and the build fails unless the
+# daemon has it too; Nix code cannot test for the feature, so the default
+# is `nixFeatures.defaultCa`, on exactly when dynamic-derivation mode is
+# the default mode (which needs `ca-derivations` as well).
 {
   lib,
   wasmBindgen,
   targetTraits,
+  featureGates,
 }:
 let
   inherit (lib)
@@ -93,15 +92,6 @@ let
     ;
 
   helpers = import ./stage-helpers { inherit lib wasmBindgen targetTraits; };
-
-  caAttrs = {
-    __contentAddressed = true;
-    outputHashMode = "recursive";
-    outputHashAlgo = "sha256";
-  };
-
-  caAuto = builtins ? outputOf;
-  resolveCa = ca: if ca == null then caAuto else ca;
 
   # The file a product's `linked` stage holds instead of
   # binaries when Cargo built none of them (dynamic-derivation mode, where
@@ -358,11 +348,11 @@ let
       info ? { },
       sourcePaths ? [ ],
       toolchainPaths ? [ ],
-      ca ? null,
+      ca ? featureGates.defaultCa,
+      nixFeatures ? featureGates.standalone { inherit ca; },
       defaultChecks ? true,
     }:
     let
-      useCa = resolveCa ca;
       ordered = order { inherit name stages; };
       product = {
         inherit name sourcePaths toolchainPaths;
@@ -374,10 +364,10 @@ let
 
       caify =
         what: drv:
-        if !useCa then
+        if !ca then
           drv
         else if drv ? drvAttrs then
-          modifyDrv drv (_: _: caAttrs)
+          modifyDrv drv (_: _: featureGates.caAttrs nixFeatures "${what} of `${name}` (`ca`)")
         else
           throw "breakbulk: ${what} of `${name}` returned something that is not a derivation, so it cannot be made content-addressed; set `ca = false`";
 
@@ -463,7 +453,7 @@ let
         stages = built.stages;
         stageOrder = ordered.order;
         checks = builtChecks;
-        ca = useCa;
+        inherit ca;
       }
       // lib.optionalAttrs (debug != null && !(final ? debug)) { inherit debug; }
     ) final;
@@ -478,9 +468,6 @@ in
     merge
     explainOrder
     order
-    caAuto
-    resolveCa
-    caAttrs
     noBinariesMarker
     ;
 }

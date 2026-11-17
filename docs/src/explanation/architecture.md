@@ -79,7 +79,7 @@ There are two ways to hand those derivations to Nix:
 - **Dynamic-derivation mode** (Nix 2.36 and later): one derivation writes
   the unit derivations into the store as it builds.
 
-Both give the same unit derivations. `mode = "auto"` picks dynamic mode
+Both give the same unit derivations. `mode` defaults to dynamic mode
 when the evaluator supports it.
 
 Details: [Instantiation](internals/instantiation.md).

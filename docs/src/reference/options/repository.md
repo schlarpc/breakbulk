@@ -8,22 +8,18 @@ Settings for the whole repository.
 
 Content-address post-link stages, checks and test runs, so that an
 unchanged input does not re-run them\. Needs Nix’s ` ca-derivations `
-experimental feature in the evaluator and the daemon\. ` null ` turns
-it on exactly when the evaluator has ` dynamic-derivations ` (which
-needs ` ca-derivations ` too), and off otherwise: Nix code cannot
-tell whether ` ca-derivations ` is on, and without it a
+experimental feature in the evaluator and the daemon\. The default
+follows ` mode `: ` dynamic ` needs ` ca-derivations ` anyway, while Nix
+code cannot tell whether it is on otherwise, and without it a
 content-addressed derivation is an error that cannot be caught\.
-` caDerivations ` in
-[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says which it
-came out as\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+mode == "dynamic"
 ```
 
 *Declared by:*
@@ -158,19 +154,17 @@ attribute set of absolute path
 How unit derivations reach Nix\. ` ifd `: breakbulk-instantiate writes
 units\.json, which Nix imports (import-from-derivation)\. ` dynamic `:
 an outer derivation writes the unit derivations through Nix’s
-` builder-rpc-v0 ` interface and products reach them with
-` builtins.outputOf ` (needs Nix 2\.36 or later with the
+` builder-rpc-v0 ` interface and products reach them with Nix’s
+` outputOf ` builtin (needs Nix 2\.36 or later with the
 ` dynamic-derivations ` and ` ca-derivations ` experimental features)\.
-` auto ` picks ` dynamic ` when the evaluator has ` builtins.outputOf `
-and is Nix 2\.36 or later, and ` ifd ` otherwise\. A daemon or builder
-older than the evaluator fails with Nix’s own “missing system
-features” error naming ` builder-rpc-v0 `; set ` ifd ` then\. Unit
-derivations are identical in both modes; products are not (they are
-resolved at build time in ` dynamic `), so teams that mix Nix versions
-should pin the mode\. ` importFromDerivation ` and
-` dynamicDerivations ` in
-[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) say which it
-came out as\.
+The default is the evaluator’s: ` dynamic ` where it can, ` ifd `
+elsewhere\. A daemon or builder older than the evaluator fails with
+Nix’s own “missing system features” error naming ` builder-rpc-v0 `;
+set ` ifd ` then\. Unit derivations are identical in both modes;
+products are not (they are resolved at build time in ` dynamic `), so
+teams that mix Nix versions should pin the mode\.
+[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) lists the Nix
+features the evaluation may use\.
 
 In ` ifd `, evaluating another system’s outputs builds its plans, which
 needs a builder for that system: ` nix flake check --all-systems ` and
@@ -181,13 +175,11 @@ only the systems you can build on (the common ` nix-systems/default `
 includes darwin)\.
 
 *Type:*
-one of “auto”, “ifd”, “dynamic”
+one of “ifd”, “dynamic”
 
 *Default:*
-
-```nix
-"auto"
-```
+` "dynamic" ` when the evaluator has dynamic derivations (Nix’s
+` outputOf ` builtin) and is Nix 2\.36 or later, else ` "ifd" `
 
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)

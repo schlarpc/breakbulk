@@ -2,8 +2,10 @@
 # docs/src/explanation/internals/instantiation.md).
 #
 #   d = breakbulk.dynamic;
-#   d.available                  whether `mode = "auto"` picks dynamic
-#   d.resolveMode "auto"         "dynamic" or "ifd"
+#   d.available                  whether `mode` defaults to dynamic
+#                                (breakbulk.nixFeatures.available)
+#   d.checkMode mode             mode, or an error for "dynamic" on an
+#                                evaluator without dynamic derivations
 #   d.mkBreakbulkDrv pkgs        the outer derivation's builder
 #   i = d.instantiate {
 #     <every argument of breakbulk.instantiate>;   # roots is required
@@ -15,6 +17,9 @@
 #                                # doctest derivation gets from the test
 #                                # configuration (testRuns.doctestConfig)
 #     docs = false;              # doc plans: the plan has a docs derivation
+#     nixFeatures = <standalone>;  # the record the outer derivation and
+#                                # outputOf are checked against
+#                                # (lib/nix-features.nix; repo.nixFeatures)
 #   };
 #   i.outer                      the outer derivation (CA, text-hashed,
 #                                requiredSystemFeatures = builder-rpc-v0)
@@ -69,6 +74,7 @@
   breakbulkTraits,
   runners,
   util,
+  featureGates,
 }:
 let
   inherit (builtins)
@@ -78,19 +84,11 @@ let
     unsafeDiscardStringContext
     ;
 
-  # `builtins ? outputOf` is true exactly when the evaluator has the
-  # `dynamic-derivations` feature (primops gated on a disabled feature are
-  # not registered); builder-rpc-v0 is on Nix master since 2026-07-21 and
-  # first released in 2.36. Master reports `2.36.0pre…`, which compares
-  # below "2.36", hence "2.36pre". Determinate Nix reports its upstream
-  # base (2.35.x) and lacks builder-rpc-v0.
-  available = builtins ? outputOf && builtins.compareVersions builtins.nixVersion "2.36pre" >= 0;
+  inherit (featureGates) available;
 
-  resolveMode =
+  checkMode =
     mode:
-    if mode == "auto" then
-      (if available then "dynamic" else "ifd")
-    else if mode == "dynamic" && !(builtins ? outputOf) then
+    if mode == "dynamic" && !featureGates.hasOutputOf then
       throw "breakbulk: mode = \"dynamic\" needs an evaluator with the `dynamic-derivations` experimental feature (and `ca-derivations`), on Nix 2.36 or later; use mode = \"ifd\""
     else
       mode;
@@ -176,9 +174,12 @@ let
       roots,
       doctests ? { },
       docs ? false,
+      nixFeatures ? featureGates.standalone { dynamic = true; },
       ...
     }:
     let
+      # Only `ifdUnits` reads base's units.json: explainSharing, which
+      # always imports from derivations and is not counted in the record.
       base = instantiate (
         removeAttrs args [
           "breakbulkDrv"
@@ -187,7 +188,14 @@ let
           "doctests"
           "docs"
         ]
+        // {
+          nixFeatures = nixFeatures // {
+            importFromDerivation = true;
+          };
+        }
       );
+      outputOf =
+        what: output: featureGates.outputOf nixFeatures "the ${what} of `${outerName}`" outer.${output}.outPath "out";
       # Without predicted roots (check and clippy plans) the outer
       # derivation has only its `units.drv` output.
       predicted = if roots == null then [ ] else roots.roots;
@@ -227,7 +235,7 @@ let
       # Likewise the docs derivation's wrapper.
       docsOutput = "docs.drv";
 
-      outer = derivation {
+      outerAttrs = {
         name = outerName;
         inherit system;
         builder = "${breakbulkDrv}/bin/breakbulk-drv";
@@ -263,20 +271,24 @@ let
           else
             outputList ++ lib.attrValues doctestOutputs ++ [ unitsOutput ] ++ lib.optional docs docsOutput;
         BREAKBULK_INPUTS = context;
-        __contentAddressed = true;
-        outputHashMode = "text";
-        outputHashAlgo = "sha256";
         requiredSystemFeatures = [ "builder-rpc-v0" ];
       };
+      outer = derivation (
+        outerAttrs
+        // featureGates.caAttrs nixFeatures "the outer derivation `${outerName}`"
+        // {
+          outputHashMode = "text";
+        }
+      );
 
-      wrapperOf = n: builtins.outputOf outer.${outputs.${n}}.outPath "out";
+      wrapperOf = n: outputOf "root `${n}`" outputs.${n};
 
       # Building it builds every unit of the plan (`$out/units` lists their
       # outputs): what check and clippy variants build.
       allUnits = derivation {
         name = "${outerName}-units";
         inherit system;
-        units = builtins.outputOf outer.${unitsOutput}.outPath "out";
+        units = outputOf "units" unitsOutput;
         builder = tools.shell;
         args = [
           "-c"
@@ -335,7 +347,7 @@ let
       mkDoctest =
         pkg:
         let
-          wrapper = builtins.outputOf outer.${doctestOutputs.${pkg}}.outPath "out";
+          wrapper = outputOf "doctest of `${pkg}`" doctestOutputs.${pkg};
         in
         derivation {
           name = storeName "${pkg}-doctest";
@@ -366,7 +378,7 @@ let
       docsOut = derivation {
         name = outerName;
         inherit system;
-        wrapper = builtins.outputOf outer.${docsOutput}.outPath "out";
+        wrapper = outputOf "docs" docsOutput;
         builder = tools.shell;
         args = [
           "-c"
@@ -470,14 +482,18 @@ let
       packages ? { },
       # As testRuns.mkTestRuns's: the package directories of "run" views.
       runDirs ? { },
-      ca ? null,
+      ca ? featureGates.defaultCa,
+      nixFeatures ? featureGates.standalone {
+        inherit ca;
+        dynamic = true;
+      },
       coverage ? false,
       name ? "breakbulk",
       ...
     }:
     let
-      useCa = stages.resolveCa ca;
-      caAttrs = lib.optionalAttrs useCa stages.caAttrs;
+      useCa = ca;
+      caAttrs = lib.optionalAttrs useCa (featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)");
       # The predicted platform picks the run's system, so it must be known
       # at evaluation time; instantiation checks it against the plan.
       platforms = testRuns.testPlatforms {
@@ -843,7 +859,7 @@ in
 {
   inherit
     available
-    resolveMode
+    checkMode
     rootName
     outputName
     mkBreakbulkDrv

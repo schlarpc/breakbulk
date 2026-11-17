@@ -45,12 +45,12 @@ input-addressed, so resolving it downloads only those inputs:
 
 Test runs, stages and checks are content-addressed when
 [`ca`](../reference/options/repository.md#ca) is on. By default it is on
-exactly when the evaluator has dynamic derivations (which need Nix's
-`ca-derivations` feature too), because Nix code cannot tell whether
-`ca-derivations` is on. Without CA, stages and test runs
-simply re-run when their input's derivation changes.
+exactly in dynamic-derivation mode (which needs Nix's `ca-derivations`
+feature too), because Nix code cannot tell whether `ca-derivations` is
+on. Without CA, stages and test runs simply re-run when their input's
+derivation changes. `repo.config.ca` says which was chosen, and
 `caDerivations` in [`repo.nixFeatures`](../reference/outputs.md#nixfeatures)
-says which it came out as.
+whether Nix must allow content-addressed derivations.
 
 On a cache without realisations this degrades gracefully: units are still
 substituted; stages and test runs re-run.

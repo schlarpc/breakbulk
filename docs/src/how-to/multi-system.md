@@ -22,7 +22,7 @@ needs a builder for each one:
 - In IFD mode, list only the systems you can build on. Use your own list
   instead of `nix-systems/default`, or a list without the systems you have
   no builder for.
-- Or use dynamic-derivation mode (`mode = "dynamic"`, or `"auto"` on a Nix
+- Or use dynamic-derivation mode (`mode = "dynamic"`, the default on a Nix
   with dynamic derivations), where evaluating another system's outputs
   needs no builder for it.
 

@@ -923,9 +923,7 @@ fails\. ` null `: the view of the package’s test compiles, as
 ` cargo test ` sees it\. Test apps keep that view\. A built-in
 step of [` sources `](\#packagesnamesources), for kind ` "run" `: a later function can
 still add files, such as another package’s fixtures\.
-` caDerivations ` in
-[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says whether
-` ca ` is on\.
+` repo.config.ca ` says whether [` ca `](repository\.md\#ca) is on\.
 
 *Type:*
 null or (list of string)
@@ -1048,9 +1046,7 @@ of every test binary that links it; the stripped copy does not
 change, and the test is not re-run\. Backtraces still name
 functions, but not files and lines\. The unstripped binary stays
 in ` tests.<pkg>.<binary> ` for debugging\. ` null `: off\.
-` caDerivations ` in
-[` repo.nixFeatures `](\.\./outputs\.md\#nixfeatures) says whether
-` ca ` is on\.
+` repo.config.ca ` says whether [` ca `](repository\.md\#ca) is on\.
 
 *Type:*
 null or boolean
