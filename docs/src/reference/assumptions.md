@@ -598,7 +598,7 @@ Status of the 81 entries: all 81 pinned; [Gaps](#gaps) is empty.
 - **Where.** `crates/breakbulk-plan/src/trace.rs`: `rust_src_remap`, `sysroot`; `crates/breakbulk-plan/src/build_std.rs`; `lib/test-runs.nix`: `testLibs`.
 - **Upstream.** rustc's sysroot layout; rustup and rust-overlay components.
 - **Holds for.** 1.99, nightly 1.101.
-- **Pinned by.** `products-rust-src`, `loose-ends-test-libs`, `test-runs-test-control`, `build-std`.
+- **Pinned by.** `products-rust-src`, `loose-ends-test-libs`, `products-rustc-private`, `test-runs-test-control`, `build-std`.
 - **If it changes.** Test runs miss `libstd-*.so` or products reference the toolchain; the checks fail.
 
 ## Tests and doctests at run time

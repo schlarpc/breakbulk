@@ -240,6 +240,23 @@ More behavior:
   binary is an error). Changing a skip list re-runs only the affected
   test runs.
 
+**The toolchain's libraries.** A test run finds the standard library's
+shared library (`libstd-*.so`, for binaries linked with
+`-C prefer-dynamic`) in a small copy, so it does not depend on the
+whole toolchain. The copy has none of the compiler's own libraries, so
+a `rustc` that a test starts uses its own sysroot.
+
+- A test linked against the compiler's crates
+  (`#![feature(rustc_private)]`) loads `librustc_driver` from the
+  sysroot. It finds the library through its RUNPATH: nixpkgs' linker
+  wrapper (the `cc` of a nixpkgs toolchain) adds the directory of every
+  store library it links to the RUNPATH. Only such a test depends on the
+  toolchain.
+- A test binary linked without the wrapper, for example by `rust-lld`
+  called directly, has no RUNPATH, and fails to load `librustc_driver`.
+  Give its linker an rpath to the sysroot's
+  `lib/rustlib/<triple>/lib` (`-rpath`) in the target's rustflags.
+
 **Home directory.** A test run and a doctest run get a fresh, empty,
 writable `HOME` inside the run's own temporary directory, as a test has a
 writable home under `cargo test`. Tests that keep a cache or a config
