@@ -492,6 +492,7 @@ in
           "wasm32-wasip2"
           "wasm32-unknown-unknown"
           "x86_64-pc-windows-gnullvm"
+          "aarch64-unknown-uefi"
         ];
       expected = [
         "lld"
@@ -500,6 +501,31 @@ in
         "wasm-component-ld"
         "wasm-ld"
         "mingw-lld"
+        "lld-link"
+      ];
+    };
+    # The preset a target gets when it sets none: only presets that need
+    # no arguments (msvc's needs an SDK).
+    testDefaultPresets = {
+      expr =
+        map
+          (
+            triple:
+            tt.defaultPreset {
+              inherit pkgs triple;
+            }
+          )
+          [
+            (tt.nativeTriple pkgs)
+            "x86_64-unknown-uefi"
+            "x86_64-pc-windows-msvc"
+            "x86_64-unknown-none"
+          ];
+      expected = [
+        (if pkgs.stdenv.hostPlatform.isMusl then "linuxStatic" else "linux")
+        "uefi"
+        null
+        null
       ];
     };
     # The test runner kinds (lib/presets/runner.nix), from traits alone.

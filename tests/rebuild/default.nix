@@ -180,6 +180,7 @@ let
     test-only = [ repository.repos.testOnly ];
     trim-paths = [ products.repos.trimPathsRepo ];
     trim-paths-cc = [ products.repos.trimCc ];
+    uefi = [ extraTargets.repos.uefiRepo ];
     # The `strict` clippy variant fails on lib-a by design.
     ui-dist = [ products.repos.uiDistRepo ];
     variants = [
@@ -210,7 +211,6 @@ let
     build-script-signal = "a build script dies of a signal by design";
     diagnostics = "a unit fails to compile by design";
     directive-errors = "build scripts print outputs Cargo rejects, by design";
-    uefi = "not bit-identical: rustc's temporary symbols.o path lands in the PDB";
     forced-target = "planning fails by design";
     roots-layouts = "root prediction only; nothing is built";
     vendor-collision = "a Cargo build over the vendor directory; fetches GitHub repositories at evaluation";

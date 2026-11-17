@@ -278,7 +278,7 @@ let
       ;
 
     # Toolchain presets: breakbulk.presets.{linux, linuxStatic,
-    # linuxPortable, windows, wasmWeb, wasmComponent}, named for their
+    # linuxPortable, windows, wasmWeb, wasmComponent, uefi}, named for their
     # purpose, the mechanism from the triple; runners; the Rust to
     # LLVM version table; the Rust to wasi-sdk table (lib/wasi-sdk.nix).
     # Target traits (lib/target-traits.nix): `resolve { triple; traits; }`,

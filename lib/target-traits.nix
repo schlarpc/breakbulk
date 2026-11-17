@@ -556,22 +556,36 @@ let
   # a native package set).
   nativeTriple = pkgs: pkgs.stdenv.hostPlatform.rust.rustcTarget;
 
-  # The name of the preset (`breakbulk.presets.<name>`) the native target
-  # gets when it sets none, or null. It follows the
-  # `pkgs` given to mkRepository, not the machine evaluating: a glibc
-  # Linux package set gets "linux", a musl one (`pkgs.pkgsMusl`, or
-  # nixpkgs on a musl system) "linuxStatic".
-  nativeDefaultPreset =
-    pkgs:
+  # The name of the preset (`breakbulk.presets.<name>`) a target gets when
+  # it sets none, or null. Only a preset that needs no arguments can be a
+  # default: msvc needs SDK choices, so `-msvc` triples have none. The
+  # native triple's follows the `pkgs` given to mkRepository, not the
+  # machine evaluating: a glibc Linux package set gets "linux", a musl one
+  # (`pkgs.pkgsMusl`, or nixpkgs on a musl system) "linuxStatic".
+  #
+  #   defaultPreset { pkgs; triple; traits ? <built-in>; } -> a name or null
+  defaultPreset =
+    {
+      pkgs,
+      triple,
+      traits ? resolve { inherit triple; },
+    }:
     let
       h = pkgs.stdenv.hostPlatform;
     in
-    if !h.isLinux then
-      null
-    else if h.isMusl then
-      "linuxStatic"
-    else if h.isGnu then
-      "linux"
+    if triple == nativeTriple pkgs then
+      (
+        if !h.isLinux then
+          null
+        else if h.isMusl then
+          "linuxStatic"
+        else if h.isGnu then
+          "linux"
+        else
+          null
+      )
+    else if traits.isUefi then
+      "uefi"
     else
       null;
 
@@ -582,7 +596,7 @@ in
     derive
     resolve
     nativeTriple
-    nativeDefaultPreset
+    defaultPreset
     fieldNames
     ;
 }

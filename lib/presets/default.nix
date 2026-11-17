@@ -31,7 +31,7 @@
 # never reach them: target env is added only to target units at
 # instantiation, never through Cargo's `[env]`.
 #
-# Presets that use LLVM tools (windows for msvc, wasm, the Linux presets
+# Presets that use LLVM tools (windows for msvc, uefi, wasm, the Linux presets
 # with crossLanguageLto or the lld linker kind) need the LLVM matching
 # rustc: the workspace's `rustc` by default, or one
 # passed as `rustc` (its version is looked up in breakbulk.llvmVersions,
@@ -535,6 +535,51 @@ let
       }
     );
 
+    # UEFI applications: lld-link from the LLVM matching rustc, wrapped
+    # as for msvc so the PDB, and so the .efi, are reproducible; rustc's
+    # target spec otherwise links with its own rust-lld as lld-link, and
+    # its temporary directory's random name lands in the PDB. No C
+    # toolchain and no runner: nothing to set them from.
+    uefi = mkPreset (
+      {
+        pkgs,
+        triple,
+        traits ? targetTraits.resolve { inherit triple; },
+        linkerKind ? null,
+        rustc ? null,
+        llvmMajor ? null,
+        llvmPackages ? null,
+        ...
+      }:
+      assert lib.assertMsg traits.isUefi "breakbulk.presets.uefi: `${triple}` is not a UEFI triple";
+      {
+        packageSet = mkDefault null;
+        linker = mkDefault (chooseLinker {
+          inherit
+            pkgs
+            triple
+            traits
+            rustc
+            ;
+          kind = linkerKind;
+          llvm = llvmVersions.packagesFor {
+            pkgs = pkgs.buildPackages;
+            inherit rustc llvmMajor llvmPackages;
+          };
+        });
+        runner = mkDefault null;
+        testSystem = mkDefault null;
+        host = hostSpec {
+          inherit
+            pkgs
+            rustc
+            triple
+            linkerKind
+            ;
+        };
+      }
+    );
+
     # wasm32-unknown-unknown for the browser: rustc's own wasm linker flavor,
     # with the version-matched `wasm-ld` instead of rustup's rust-lld; C code
     # with unwrapped clang targeting wasm32; tests under
@@ -725,6 +770,10 @@ in
 
   # wasm for the web: core modules through wasm-bindgen.
   inherit (impl) wasmWeb;
+
+  # UEFI applications (`*-unknown-uefi`): the default preset of every UEFI
+  # triple, which only sets the linker.
+  inherit (impl) uefi;
 
   # wasm components: `wasm32-wasip2` links them directly with rustc's
   # wasm-component-ld (./wasip2.nix; `withC`, `wasiSdkVersion`,

@@ -35,8 +35,8 @@ let
       choosable = false;
     };
     lld-link = {
-      on = t: t.isMsvc;
-      what = "Windows -msvc";
+      on = t: t.isMsvc || t.isUefi;
+      what = "Windows -msvc and UEFI";
       bitcode = true;
     };
     wasm-ld = {

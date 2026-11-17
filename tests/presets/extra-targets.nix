@@ -24,9 +24,10 @@
 #                     canRunTests is false, repo.checks has no test runs
 #                     or doctests for it, and a run fails naming
 #                     targets.<t>.runner and testSystem
-#   uefi-*            x86_64- and aarch64-unknown-uefi with no preset (the
-#                     target spec's rust-lld as lld-link): an EFI application
-#                     PE with a PDB in the debug output
+#   uefi-*            x86_64- and aarch64-unknown-uefi with no target
+#                     settings, so the default preset `uefi` (lld-link,
+#                     wrapped): an EFI application PE with a PDB in the
+#                     debug output
 #   windows-dll-*     a windows-gnu test binary importing a DLL its build
 #                     script built: the test run finds it through WINEPATH;
 #                     without it, wine fails (missing DLL); -beside-exe:
@@ -351,8 +352,7 @@ let
 
   # --- uefi ----------------------------------------------------------------------
 
-  # No preset: `targets.<t> = { }` and rustc's target spec links with its
-  # own rust-lld as lld-link.
+  # No settings: `targets.<t> = { }` gets the default preset `uefi`.
   uefiTriples = [
     "x86_64-unknown-uefi"
     "aarch64-unknown-uefi"
@@ -360,11 +360,26 @@ let
   uefiRepo = mkRepo (fixtures + "/uefi") [
     { workspaces.main = wsWith (rustWith uefiTriples) uefiTriples; }
   ];
+  # A field set on the target overrides the default preset's, which
+  # still sets the rest.
+  uefiOverridden = mkRepo (fixtures + "/uefi") [
+    {
+      workspaces.main = wsWith (rustWith uefiTriples) uefiTriples;
+      targets.x86_64-unknown-uefi.linker = "/custom/lld-link";
+    }
+  ];
   uefiCheckFor =
     triple: machine:
     let
-      product = uefiRepo.workspaces.main.target.${triple}.packages.app;
+      t = uefiRepo.workspaces.main.target.${triple};
+      product = t.packages.app;
+      o = uefiOverridden.workspaces.main.target.x86_64-unknown-uefi.spec;
     in
+    assert lib.assertMsg (lib.hasSuffix "/bin/lld-link-stable" (toString t.spec.linker))
+      "uefi: ${triple} links with ${toString t.spec.linker}, not the uefi preset's lld-link-stable";
+    assert lib.assertMsg (
+      o.linker == "/custom/lld-link" && o.host.linker != null
+    ) "uefi: targets.<t>.linker does not override the uefi preset's linker alone";
     pkgs.runCommand "uefi-${triple}"
       {
         nativeBuildInputs = [ pkgs.llvmPackages.llvm ];

@@ -18,7 +18,7 @@
 #
 #   kind                 default when (traits)           linker
 #   zig                  flavor = "zig"                  `zig cc -target <arch>-linux-gnu.<glibc>`
-#   lld-link             isMsvc                          lld-link (wrapped: reproducible PDBs)
+#   lld-link             isMsvc, isUefi                  lld-link (wrapped: reproducible PDBs)
 #   wasm-component-ld    isWasm, os wasi, env p2         rustc's wasm-component-ld over wasm-ld
 #   wasm-ld              other isWasm                    wasm-ld
 #   mingw-lld            isMingw (windows-gnu, -gnullvm) the MinGW C driver with -fuse-ld=lld
@@ -275,7 +275,7 @@ let
       "zig"
     else if flavor != null then
       throw "breakbulk.presets.chooseLinker: unknown linker flavor `${flavor}`"
-    else if t.isMsvc then
+    else if t.isMsvc || t.isUefi then
       "lld-link"
     else if t.isWasm && t.isWasi && t.env == "p2" then
       "wasm-component-ld"

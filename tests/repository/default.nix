@@ -1735,7 +1735,6 @@ in
       ccOf = x: builtins.unsafeDiscardStringContext (toString x.cc);
       checks = {
         nativeIsMusl = mNative == "${mp.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-musl";
-        targetsHasNative = repo.config.targets ? ${mNative};
         defaultIsLinuxMusl = lib.hasSuffix "cc-default" (builtins.unsafeDiscardStringContext (toString spec.linker));
         crtStatic = lib.elem "target-feature=+crt-static" spec.rustflags;
         pkgConfigStatic = (spec.env.PKG_CONFIG_ALL_STATIC or null) == "1";

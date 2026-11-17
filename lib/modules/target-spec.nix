@@ -18,15 +18,14 @@
 let
   inherit (lib) types mkOption;
 
-  # On Linux the native target gets `presets.linux`
-  # (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`) unless another
-  # preset is set, so the native linker is nixpkgs' wrapped cc, as on every
-  # other target, instead of rustc's bundled rust-lld. A target
-  # defined directly from a preset (`targets.<t> =
+  # A target whose preset needs no arguments gets it unless another preset
+  # is set (`targetTraits.defaultPreset`): on Linux the native target gets
+  # `presets.linux` (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`),
+  # so the native linker is nixpkgs' wrapped cc, as on every other target,
+  # instead of rustc's bundled rust-lld; a UEFI target gets `presets.uefi`.
+  # A target defined directly from a preset (`targets.<t> =
   # breakbulk.presets.linuxPortable { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
-  nativeTriple = targetTraits.nativeTriple pkgs;
-  nativePreset = targetTraits.nativeDefaultPreset pkgs;
   bt = import ./types.nix { inherit lib; };
   linkerKinds = import ../presets/linker-kinds.nix { inherit lib; };
   tool = types.nullOr (
@@ -115,15 +114,19 @@ in
     preset = mkOption {
       type = types.nullOr presetType;
       default =
-        if name == nativeTriple && nativePreset != null && !config.presetDirect then
-          breakbulkPresets.${nativePreset}
-        else
-          null;
+        let
+          d = targetTraits.defaultPreset {
+            inherit pkgs traits;
+            triple = name;
+          };
+        in
+        if d != null && !config.presetDirect then breakbulkPresets.${d} else null;
       defaultText = lib.literalMD ''
-        for the native triple, unless the target is defined directly from
-        a preset: `breakbulk.presets.linux` when the `pkgs` given to
+        unless the target is defined directly from a preset: for the
+        native triple, `breakbulk.presets.linux` when the `pkgs` given to
         mkRepository is Linux with glibc, `breakbulk.presets.linuxStatic`
-        when it is Linux with musl (`pkgs.pkgsMusl`); `null` otherwise
+        when it is Linux with musl (`pkgs.pkgsMusl`); for a UEFI triple,
+        `breakbulk.presets.uefi`; `null` otherwise
       '';
       example = lib.literalExpression "breakbulk.presets.linuxStatic";
       description = ''
@@ -139,8 +142,8 @@ in
         `breakbulk.presets.<name> { inherit pkgs; triple = …; }` gives
         the same fields, except that the preset then sees no workspace
         toolchain (pass `rustc` there). Set `null` to use no preset on
-        the native target (rustc's own linker choice and the C toolchain
-        Cargo finds).
+        a target that has a default one (rustc's own linker choice and
+        the C toolchain Cargo finds).
       '';
     };
     traits = mkOption {
@@ -209,7 +212,7 @@ in
         C compiler: `lld` on Linux where rustc links with its bundled
         lld, `cc` (the C compiler's default, GNU ld) on other Linux
         targets; `lld-link`, `wasm-ld`, `wasm-component-ld` or
-        `mingw-lld` on Windows and wasm. A kind that cannot link for this
+        `mingw-lld` on Windows, UEFI and wasm. A kind that cannot link for this
         target, or with the preset's other settings (`mold` with
         `crossLanguageLto`), is an evaluation error. It needs a `preset`
         here; a target defined directly from a preset takes `linkerKind`

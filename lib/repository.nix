@@ -685,8 +685,9 @@ let
   # `targets.<triple>` and the workspace's own `workspaces.<ws>.targets.<triple>`
   # (both modules, lib/modules/target-spec.nix), evaluated together with the
   # workspace's toolchain, so a preset picks tools for that workspace's
-  # rustc. `present` is false when neither defines anything but `packages`:
-  # such a target has no spec (the toolchain as Cargo finds it), as before.
+  # rustc. `present` is false when neither defines anything but `packages`
+  # and the triple has no default preset (`targetTraits.defaultPreset`):
+  # such a target has no spec (the toolchain as Cargo finds it).
   specArgs = {
     inherit pkgs;
     breakbulkPresets = presets;
@@ -721,7 +722,10 @@ let
     in
     {
       inherit (e) config;
-      present = repoDef != null || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions);
+      present =
+        repoDef != null
+        || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions)
+        || e.config.preset != null;
       selectionErrors = lib.concatLists (
         lib.mapAttrsToList (
           o: s:

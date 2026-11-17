@@ -27,14 +27,10 @@
 #    `packages.<name>.inputs` functions are called with.
 {
   lib,
-  pkgs,
   ...
 }:
 let
   inherit (lib) types mkOption;
-  targetTraits = import ../target-traits.nix { inherit lib; };
-  nativeTriple = targetTraits.nativeTriple pkgs;
-  nativeDefault = targetTraits.nativeDefaultPreset pkgs != null;
 in
 {
   options.targets = mkOption {
@@ -45,15 +41,13 @@ in
       the triple (`workspaces.<ws>.targets`). Each workspace's spec is
       these definitions together with its own
       `workspaces.<ws>.targets.<triple>`, evaluated with that workspace's
-      toolchain, so a preset uses each workspace's rustc. When the `pkgs`
-      given to mkRepository is Linux, the native triple always has an
-      entry, with `presets.linux` (glibc) or `presets.linuxStatic` (musl)
-      by default. Any other triple with no entry here or
-      in the workspace uses an empty spec (the toolchain as Cargo finds
-      it).
+      toolchain, so a preset uses each workspace's rustc. A triple whose
+      preset needs no arguments gets it without an entry here, and with
+      entries that set other fields: the native triple, when the `pkgs`
+      given to mkRepository is Linux, gets `presets.linux` (glibc) or
+      `presets.linuxStatic` (musl), and a UEFI triple `presets.uefi`.
+      Any other triple with no entry here or in the workspace uses an
+      empty spec (the toolchain as Cargo finds it).
     '';
   };
-
-  # The native target always has an entry, so its default preset applies.
-  config.targets = lib.mkIf nativeDefault { ${nativeTriple} = { }; };
 }
