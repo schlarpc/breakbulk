@@ -150,6 +150,7 @@ let
     required-features = [ repository.repos.rf ];
     riscv64 = [ extraTargets.repos.riscv64Repo ];
     rlib-example = [ dynamic.repos.rlib-example ];
+    rustc-private = [ dynamic.repos.rustc-private ];
     roots-override = [ repository.repos.rootsOverride ];
     same-triple = [ presetFixtures.repos.sameTriple ];
     same-workspace-products = [ products.repos.sameWsRepo ];

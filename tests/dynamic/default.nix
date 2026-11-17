@@ -448,6 +448,9 @@ let
         { packages.outer.checks.noSourceReferences = null; }
       ];
     };
+    # A `rustc_private` test binary, which finds librustc_driver through
+    # its RUNPATH.
+    rustc-private = products.rustcPrivate;
 
     # tests/presets
     same-triple = presetFixtures.sameTriple;

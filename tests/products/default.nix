@@ -173,6 +173,11 @@
 #                    target's rustflags: the nested Cargo reads both from
 #                    the run's CARGO_ENCODED_RUSTFLAGS (the inner binary is
 #                    static and sees the cfg)
+#   rustc-private    an integration test linked against the compiler's
+#                    crates (`rustc_private`, with nixpkgs' rustc): it runs,
+#                    finding librustc_driver through the RUNPATH nixpkgs'
+#                    linker wrapper gives it, not the test run's copy of the
+#                    sysroot's libraries
 #   trim-paths       Cargo's trim-paths, with rust-overlay's nightly (Cargo
 #                    1.101): workspace `set` sets it in its dev profile, so
 #                    its plan keeps Cargo's remaps and scope (the planner
@@ -927,6 +932,25 @@ let
       }
     ]
   );
+  # --- rustc-private -------------------------------------------------------------
+
+  # A `rustc_private` test, built with the default toolchain (nixpkgs'
+  # rustc, whose sysroot has the compiler's crates). librustc_driver
+  # links against nixpkgs' LLVM, which the sysroot does not hold.
+  rustcPrivate = mkRepo (fixtures + "/rustc-private") [
+    (oneWs "." "dev")
+    (
+      { repo, ... }:
+      {
+        packages.driver-user.env.RUSTC_BOOTSTRAP = "1";
+        targets.${native}.rustflags = [
+          "-L"
+          "${repo.workspaces.main.toolchain.rustc.unwrapped.llvm.lib}/lib"
+        ];
+      }
+    )
+  ];
+
   # Runs the product, and the inner binary it embeds, which is static or
   # not.
   nestedCargoRun =
@@ -1132,6 +1156,7 @@ in
       buildScriptOutputs
       nestedCargo
       nestedCargoFlags
+      rustcPrivate
       cargoConfigRepo
       docsNoDeps
       docsDeps
@@ -1411,6 +1436,29 @@ in
         # names the source view the build script ran in.
         cat $failure/testBuildFailure.log
         grep -qF ${lib.escapeShellArg view} $failure/testBuildFailure.log
+        touch $out
+      '';
+
+  # The test binary loads librustc_driver, which the test run's copy of
+  # the sysroot's libraries lacks: it finds the driver through the RUNPATH
+  # nixpkgs' linker wrapper gives it.
+  rustc-private =
+    let
+      w = rustcPrivate.workspaces.main;
+      sysroot = w.toolchain.rustc.unwrapped;
+    in
+    pkgs.runCommand "rustc-private"
+      {
+        run = w.testRuns.driver-user.driver;
+        test = w.tests.driver-user.driver;
+        nativeBuildInputs = [ pkgs.binutils-unwrapped ];
+      }
+      ''
+        set -euo pipefail
+        bin=$(find $test -type f -executable | head -n1)
+        readelf -d "$bin" | tee $TMPDIR/dynamic
+        grep -q 'NEEDED.*librustc_driver-' $TMPDIR/dynamic
+        grep -q 'RUNPATH.*${builtins.unsafeDiscardStringContext sysroot.outPath}/lib/rustlib/${native}/lib' $TMPDIR/dynamic
         touch $out
       '';
 

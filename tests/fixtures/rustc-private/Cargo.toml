@@ -1,0 +1,6 @@
+# An integration test linked against the compiler's own crates
+# (`rustc_private`): it loads librustc_driver at run time.
+[package]
+name = "driver-user"
+version = "0.1.0"
+edition = "2021"
