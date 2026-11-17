@@ -1533,7 +1533,7 @@ let
 
           It edits bytes, so it breaks a code signature made before it
           (the linker signs every binary for Apple's arm64 targets):
-          sign again after it.
+          `presets.darwin`'s `adhocSign`, after `install`, signs it again.
         '';
         options.sources = mkOption {
           type = types.nullOr (types.listOf storePathType);
