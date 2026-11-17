@@ -25,6 +25,37 @@ included, is in [Stage and check functions](stage-functions.md).
 
 ## Stages
 
+### `adhocSign`
+
+Signs every Mach-O executable, dylib and bundle ad hoc with
+`rcodesign`, which macOS on Apple silicon requires before it
+runs one. The identifier is set explicitly: the file's name, or
+`identifiers.<name>`. Left to itself, a signer keeps the
+identifier already in the file, which the linker and
+`llvm-strip` set to the name of the file they wrote, and a stage
+may write under a temporary name.
+
+Any change to the file's bytes afterwards breaks the signature,
+so this runs last: `presets.darwin` adds it after `install`.
+
+#### `adhocSign.identifiers`
+
+The identifier of each file, by file name. A file not named here is signed under its file name.
+
+*Type:* attribute set of string
+
+*Default:* `{ }`
+
+*Example:* `{ app = "com.example.app"; }`
+
+#### `adhocSign.rcodesign`
+
+The package to run instead of `rcodesign` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
 ### `bindgen`
 
 Runs `wasm-bindgen` on the input's single `.wasm` file and
@@ -534,6 +565,15 @@ at its place in the install layout. The other debug files so far
 `targets.<triple>.debugInfo = "split"` inserts this stage, after
 `packDwo`.
 
+A Mach-O file (Apple targets) keeps no DWARF itself: its debug
+information is the `.dSYM` bundle dsymutil wrote at the link
+(`split-debuginfo = "packed"`, which `presets.darwin` sets), and the
+file holds only a debug map naming the link's object files. The
+`.dSYM` goes to the `debug` output next to where its file lands
+(`bin/app.dSYM`, `lib/libx.dylib.dSYM`), where lldb looks for it,
+and `llvm-strip -S` removes the debug map. A file with a debug map
+but no `.dSYM` of the same UUID fails the stage.
+
 #### `splitDebug.binutils`
 
 The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
@@ -542,10 +582,22 @@ The package to run instead of `binutils-unwrapped-all-targets` from the stage's 
 
 *Default:* `null`
 
+#### `splitDebug.llvm`
+
+The package to run instead of `llvm` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
 ### `strip`
 
 Runs `strip` on every ELF file: `--strip-debug`, or
-`--strip-all` with `all`. It also drops the `.dwo` files from
+`--strip-all` with `all`. On a Mach-O executable, dylib or
+bundle it runs `llvm-strip`: `-S` (the debug map), or with `all`
+`--strip-all` on an executable and `-x` (local symbols) on a
+dylib or bundle, whose exported symbols other images bind to, as
+rustc's own `-C strip=symbols` does. It also drops the `.dwo` files from
 the debug files so far (`split-debuginfo = "unpacked"`): the
 skeleton units that name them are gone. When there are debug
 files, what is left of them is the stage's `debug` output.
@@ -562,6 +614,14 @@ Also remove the symbol tables (`--strip-all`), not only the debug information.
 #### `strip.binutils`
 
 The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
+#### `strip.llvm`
+
+The package to run instead of `llvm` from the stage's `pkgs`.
 
 *Type:* null or package
 

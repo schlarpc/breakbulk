@@ -163,10 +163,10 @@ let
   # install layout: an earlier stage's `debug` output
   # (`product.earlierDebug`) as it is, else the debuginfo side files of
   # the product's link units (`.pdb` on msvc, `.dwp`/`.dwo` with
-  # `split-debuginfo`), from the `linked` stage's `debug` output
-  # (`product.linkedDebug`, when the product has one), next to where
-  # their binary lands (Windows: bin/; elsewhere `*.so.dwp` under lib/,
-  # the rest under bin/).
+  # `split-debuginfo`, Apple's `.dSYM` directories), from the `linked`
+  # stage's `debug` output (`product.linkedDebug`, when the product has
+  # one), next to where their binary lands (Windows: bin/; elsewhere a
+  # shared library's under lib/, the rest under bin/).
   placeDebugFn = product: target: pkgs: ''
     placeDebug() {
       ${
@@ -186,12 +186,12 @@ let
               b=''${f##*/}
               case "${if (traitsOf target pkgs).isWindows then "windows" else "unix"}:$b" in
                 windows:*) d=bin ;;
-                unix:*.so.dwp|unix:*.so.*.dwp) d=lib ;;
+                unix:*.so.dwp|unix:*.so.*.dwp|unix:*.dylib.dSYM) d=lib ;;
                 *) d=bin ;;
               esac
               mkdir -p "$1/$d"
-              cp -L "$f" "$1/$d/$b"
-              chmod u+w "$1/$d/$b"
+              cp -RL "$f" "$1/$d/$b"
+              chmod -R u+w "$1/$d/$b"
             done
           ''
       }
@@ -203,6 +203,28 @@ let
     isAr() { [ "$(head -c7 "$1")" = '!<arch>' ]; }
   '';
 
+  # A Mach-O file: thin (32- or 64-bit, little-endian) or universal. A
+  # universal file shares its magic with Java class files, which give a
+  # class file version (45 or more) where it gives an architecture count.
+  # `machoType` prints a thin file's `filetype` (2 executable, 6 dylib,
+  # 8 bundle, 1 object, …), "fat" for a universal one.
+  isMachoFn = ''
+    machoType() {
+      local m n
+      m=$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')
+      case "$m" in
+        cffaedfe|cefaedfe) od -An -tu4 -j12 -N4 "$1" | tr -d ' \n' ;;
+        cafebabe)
+          n=$(od -An -tx1 -j4 -N4 "$1" | tr -d ' \n')
+          case "$n" in
+            000000[01][0-9a-f]|0000002[0-9a-c]) [ "$n" != 00000000 ] && echo fat ;;
+          esac
+          ;;
+      esac
+    }
+    isMacho() { [ -n "$(machoType "$1")" ]; }
+  '';
+
   # Whether a stage that writes the debug files so far (`placeDebug`)
   # has any: its `debug` output is declared only then.
   hasDebugFiles = product: (product.earlierDebug or null) != null || (product.linkedDebug or null) != null;
@@ -210,6 +232,33 @@ let
   stageName = product: helper: "${product.name}-${helper}";
 
   binutilsOf = cfg: pkgs: toolOf cfg.binutils pkgs "binutils-unwrapped-all-targets";
+
+  # Shell lines defining `splitMacho <file>` for splitDebug, after
+  # `placeDebug "$debug"`: the `.dSYM` of a Mach-O file with a debug map
+  # (stab entries, `llvm-nm -a`'s `-` lines) must be in `$debug` under
+  # the file's name with the file's UUID; then the debug map goes. A
+  # static archive is not a Mach-O file and keeps its objects' DWARF: the
+  # final link decides.
+  splitMachoFn = ''
+    machoUuids() { llvm-dwarfdump --uuid "$1" | cut -d' ' -f2 | LC_ALL=C sort | tr '\n' ' '; }
+    splitMacho() {
+      local f=$1 rel=''${1#$out/} b=''${1##*/} dsym= d u
+      if ! llvm-nm -a "$f" 2>/dev/null | grep '^[0-9a-f]* - ' > /dev/null; then
+        echo "splitDebug: $rel: no debug map, left unchanged"
+        return 0
+      fi
+      for d in bin lib; do
+        if [ -d "$debug/$d/$b.dSYM" ]; then dsym=$debug/$d/$b.dSYM; fi
+      done
+      u=$(machoUuids "$f")
+      if [ -z "$dsym" ] || [ "$(machoUuids "$dsym")" != "$u" ]; then
+        echo "splitDebug: $rel has a debug map but no $b.dSYM with its UUID ($u); rustc writes one with -C split-debuginfo=packed and dsymutil on PATH, as presets.darwin sets them" >&2
+        exit 1
+      fi
+      echo "splitDebug: $rel (UUID $u): debug info in ''${dsym#$debug/}"
+      llvm-strip -S "$f"
+    }
+  '';
 
   # ---------------------------------------------------------------------
   # ELF
@@ -350,9 +399,19 @@ let
       (an earlier stage's `debug` output, else the link units') are kept.
       `targets.<triple>.debugInfo = "split"` inserts this stage, after
       `packDwo`.
+
+      A Mach-O file (Apple targets) keeps no DWARF itself: its debug
+      information is the `.dSYM` bundle dsymutil wrote at the link
+      (`split-debuginfo = "packed"`, which `presets.darwin` sets), and the
+      file holds only a debug map naming the link's object files. The
+      `.dSYM` goes to the `debug` output next to where its file lands
+      (`bin/app.dSYM`, `lib/libx.dylib.dSYM`), where lldb looks for it,
+      and `llvm-strip -S` removes the debug map. A file with a debug map
+      but no `.dSYM` of the same UUID fails the stage.
     '';
     options = {
       binutils = toolOption "binutils-unwrapped-all-targets";
+      llvm = toolOption "llvm";
     };
   } (
     cfg:
@@ -369,17 +428,26 @@ let
           "out"
           "debug"
         ];
-        nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
+        nativeBuildInputs = [
+          (binutilsOf cfg pkgs)
+          (toolOf cfg.llvm pkgs "llvm")
+        ];
       }
       ''
         set -euo pipefail
         ${copyIn input}
         ${isElfFn}
+        ${isMachoFn}
         ${placeDebugFn product target pkgs}
         copyIn "$out"
         mkdir -p "$debug"
         placeDebug "$debug"
+        ${splitMachoFn}
         find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+          if isMacho "$f"; then
+            splitMacho "$f"
+            continue
+          fi
           isElf "$f" || continue
           if ! readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
             echo "splitDebug: ''${f#$out/}: no debug info, left unchanged"
@@ -422,7 +490,11 @@ let
         name = "strip";
         description = ''
           Runs `strip` on every ELF file: `--strip-debug`, or
-          `--strip-all` with `all`. It also drops the `.dwo` files from
+          `--strip-all` with `all`. On a Mach-O executable, dylib or
+          bundle it runs `llvm-strip`: `-S` (the debug map), or with `all`
+          `--strip-all` on an executable and `-x` (local symbols) on a
+          dylib or bundle, whose exported symbols other images bind to, as
+          rustc's own `-C strip=symbols` does. It also drops the `.dwo` files from
           the debug files so far (`split-debuginfo = "unpacked"`): the
           skeleton units that name them are gone. When there are debug
           files, what is left of them is the stage's `debug` output.
@@ -435,6 +507,7 @@ let
             description = "Also remove the symbol tables (`--strip-all`), not only the debug information.";
           };
           binutils = toolOption "binutils-unwrapped-all-targets";
+          llvm = toolOption "llvm";
         };
       }
       (
@@ -452,7 +525,10 @@ let
         pkgs.runCommand (stageName product "strip")
           (
             {
-              nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
+              nativeBuildInputs = [
+                (binutilsOf cfg pkgs)
+                (toolOf cfg.llvm pkgs "llvm")
+              ];
             }
             // lib.optionalAttrs debug {
               outputs = [
@@ -465,9 +541,16 @@ let
             set -euo pipefail
             ${copyIn input}
             ${isElfFn}
+            ${isMachoFn}
             ${placeDebugFn product target pkgs}
             copyIn "$out"
             find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              case "$(machoType "$f")" in
+                "") ;;
+                2) llvm-strip ${if cfg.all then "--strip-all" else "-S"} "$f"; continue ;;
+                6|8|fat) llvm-strip ${if cfg.all then "-x" else "-S"} "$f"; continue ;;
+                *) continue ;;
+              esac
               isElf "$f" || continue
               strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
             done
@@ -527,6 +610,67 @@ let
               patchelf --print-rpath "$f" >/dev/null 2>&1 || continue
               echo "patchelfRpath: ''${f#$out/}"
               patchelf --add-rpath ${escapeShellArg rpath} "$f"
+            done
+          ''
+      );
+
+  # ---------------------------------------------------------------------
+  # Mach-O
+
+  adhocSign =
+    mkHelper
+      {
+        name = "adhocSign";
+        description = ''
+          Signs every Mach-O executable, dylib and bundle ad hoc with
+          `rcodesign`, which macOS on Apple silicon requires before it
+          runs one. The identifier is set explicitly: the file's name, or
+          `identifiers.<name>`. Left to itself, a signer keeps the
+          identifier already in the file, which the linker and
+          `llvm-strip` set to the name of the file they wrote, and a stage
+          may write under a temporary name.
+
+          Any change to the file's bytes afterwards breaks the signature,
+          so this runs last: `presets.darwin` adds it after `install`.
+        '';
+        options = {
+          identifiers = mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+            example = literalExpression ''{ app = "com.example.app"; }'';
+            description = "The identifier of each file, by file name. A file not named here is signed under its file name.";
+          };
+          rcodesign = toolOption "rcodesign";
+        };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        pkgs.runCommand (stageName product "adhocSign")
+          { nativeBuildInputs = [ (toolOf cfg.rcodesign pkgs "rcodesign") ]; }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            ${isMachoFn}
+            declare -A ids=(${
+              concatStringsSep " " (mapAttrsToList (n: v: "[${escapeShellArg n}]=${escapeShellArg v}") cfg.identifiers)
+            })
+            copyIn "$out"
+            find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              case "$(machoType "$f")" in
+                2|6|8|fat) ;;
+                *) continue ;;
+              esac
+              b=''${f##*/}
+              id=''${ids[$b]:-$b}
+              echo "adhocSign: ''${f#$out/} as $id"
+              # -C /dev/null: no configuration file from the environment.
+              rcodesign sign -C /dev/null --binary-identifier "$id" "$f" > /dev/null
             done
           ''
       );
@@ -2100,6 +2244,7 @@ in
     splitDebug
     strip
     patchelfRpath
+    adhocSign
     bindgen
     wasmOpt
     componentize

@@ -110,7 +110,8 @@ let
 
   # The `linked` stage of one package: a directory of symlinks (`out`), and
   # the root units' debuginfo side files (`debug`) under the names Cargo
-  # uplifts them to: a bin's `.dwp` renamed as the bin is (`<bin>.dwp`),
+  # uplifts them to: a bin's `.dwp` and Apple `.dSYM` renamed as the bin
+  # is (`<bin>.dwp`, `<bin>.dSYM`),
   # `.pdb` and `.dwo` under rustc's names, which the binaries record, with
   # the `.dwo` files of the libraries below each root.
   # Dynamic-derivation roots are read through their wrappers and left out
@@ -189,7 +190,15 @@ let
                 [ -e "$f" ] || continue
                 b=''${f##*/}
                 case "$b" in
-                  ${if bin then "*.dwp) link \"$f\" ${target}.dwp \"$debug\" ;;" else ""}
+                  ${
+                    if bin then
+                      ''
+                        *.dwp) link "$f" ${target}.dwp "$debug" ;;
+                        *.dSYM) link "$f" ${target}.dSYM "$debug" ;;
+                      ''
+                    else
+                      ""
+                  }
                   *) link "$f" "$b" "$debug" ;;
                 esac
               done
@@ -248,8 +257,15 @@ let
       ])
     then
       throw "breakbulk: targets.\"${triple}\".debugInfo: `${toString v}` is not one of split, keep, strip"
-    else if v != "keep" && traits.objectFormat != "elf" then
-      throw "breakbulk: targets.\"${triple}\".debugInfo = \"${v}\" needs an ELF target (the splitDebug and strip stages work on ELF files), and ${triple} is ${traits.objectFormat}; use \"keep\""
+    else
+      if
+        v != "keep"
+        && !(elem traits.objectFormat [
+          "elf"
+          "macho"
+        ])
+      then
+        throw "breakbulk: targets.\"${triple}\".debugInfo = \"${v}\" needs an ELF or Mach-O target (the splitDebug and strip stages work on those files), and ${triple} is ${traits.objectFormat}; use \"keep\""
     else
       v;
 

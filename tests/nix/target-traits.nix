@@ -470,7 +470,7 @@ in
           objectFormat = "macho";
           isLinux = false;
           kernel = "darwin";
-          debugInfo = "keep";
+          debugInfo = "split";
         }
       ];
     };

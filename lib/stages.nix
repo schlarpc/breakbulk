@@ -182,7 +182,8 @@ let
         )
       );
 
-  # Default stage chains per preset (`stagePreset`), as data. Debug
+  # Default stage chains per preset (`stagePreset`), as data
+  # (`defaultStages` adds `darwin`, whose one stage runs after `install`). Debug
   # handling is not among them: mkRepository puts the stages of the
   # target's `debugInfo` (`packDwo`, `splitDebug`, `strip`) first (lib/products.nix).
   defaultStageNames = {
@@ -210,7 +211,16 @@ let
       ) names
     );
 
-  defaultStages = mapAttrs (_: chain) defaultStageNames;
+  defaultStages = mapAttrs (_: chain) defaultStageNames // {
+    # Last: signing hashes the bytes every earlier stage wrote, and a
+    # stage after `install` that changes them must order itself before
+    # `adhocSign`.
+    darwin.adhocSign = {
+      after = "install";
+      before = null;
+      run = helpers.adhocSign;
+    };
+  };
 
   # Merge stage modules attribute-wise (later wins per attribute); `null`
   # removes a stage. A stand-in for module-system merging.

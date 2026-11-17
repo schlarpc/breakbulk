@@ -91,9 +91,9 @@
 #                          `dylibPathOf` in lib/test-runs.nix
 #   debugInfo              the default of `targets.<t>.debugInfo` (decision
 #                          137): "split" (into a `debug` output) on a Linux
-#                          ELF target, "keep" elsewhere (msvc's `.pdb` is
-#                          separate already; wasm and others have no
-#                          splitting stage)
+#                          ELF target and on Apple (the `.dSYM`), "keep"
+#                          elsewhere (msvc's `.pdb` is separate already;
+#                          wasm and others have no splitting stage)
 { lib }:
 let
   inherit (lib)
@@ -462,8 +462,7 @@ let
             }
           ]
         else if isApple then
-          # From rustc's dsymutil run with split-debuginfo=packed. Not
-          # verified: breakbulk has no Darwin builders yet.
+          # From rustc's dsymutil run with split-debuginfo=packed.
           [
             {
               suffix = ".dSYM";
@@ -499,10 +498,11 @@ let
       dylibPathSep = if isWindows then ";" else ":";
       # What a target's products do with debug info by
       # default (`targets.<t>.debugInfo` overrides it): split it off into
-      # a `debug` output on a Linux ELF target; elsewhere keep it in the
-      # file (msvc's PDB is separate already; wasm and other targets have
-      # no splitting stage).
-      debugInfo = if isLinux && objectFormat == "elf" then "split" else "keep";
+      # a `debug` output on a Linux ELF target and on Apple, where it is
+      # the link's `.dSYM` already and the binary keeps only a debug map
+      # naming build paths; elsewhere keep it in the file (msvc's PDB is
+      # separate already; wasm and other targets have no splitting stage).
+      debugInfo = if (isLinux && objectFormat == "elf") || isApple then "split" else "keep";
     };
 
   fieldNames = lib.attrNames (derive {
