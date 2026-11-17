@@ -31,7 +31,8 @@
 //!
 //! `--capabilities` is the toolchain's capabilities as JSON
 //! (`breakbulk_format::Capabilities`, the Nix library's `toolchainFacts`):
-//! whether Cargo has `trim-paths` and allows unstable features.
+//! whether Cargo has `trim-paths`. Whether Cargo allows unstable features
+//! the planner asks the cargo it runs.
 //!
 //! `--cargo-config` is the variant's own Cargo configuration
 //! (`variants.<v>.cargoConfig`), a TOML file: Cargo gets it with

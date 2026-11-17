@@ -97,7 +97,6 @@ What breakbulk turns on or off per toolchain is decided in one place, the Nix li
 | --- | --- | --- |
 | [`remapPathScope`](../../reference/options/workspaces.md#workspacesnametoolchaincapabilitiesremappathscope) | rustc takes `--remap-path-scope` | rustc 1.95 or later; for a rustc without a `version` attribute, whether `rustc --remap-path-scope=macro,diagnostics --print sysroot` succeeds |
 | `trimPaths` | Cargo has the `trim-paths` profile setting | Cargo 1.101 or later (nightly 1.101 included); `cargo -V` without a `version` attribute |
-| `nightly` | Cargo allows unstable features | a `-nightly` or `-dev` Cargo release |
 
 The rustc probe is reliable because rustc parses every option before it acts on `--print`: an unknown option fails in `handle_options` (rustc_driver_impl `lib.rs`, getopts' `UnrecognizedOption`, "Did you mean `-Z remap-path-scope`?" on 1.94), and the scope list is parsed by `parse_remap_path_scope` (rustc_session `config.rs`), so a rustc that accepts the probe accepts breakbulk's scopes; checked on rust-overlay 1.94.0 (rejects), 1.95.0, 1.99.0, nightly 1.101 and nixpkgs' 1.99.0 (accept).
 
@@ -107,7 +106,9 @@ Checked end to end with fenix's stable `rustc` and `cargo` (1.99.1), its stable 
 
 `workspaces.<ws>.toolchain.capabilities.<name>` overrides any of them, for a forked or patched toolchain whose version says otherwise (`null` keeps the default).
 
-The planner receives them as `--capabilities <file>` (`trimPaths`: whether Cargo can take trim-paths at all, see [trim-paths](#trim-paths); `nightly`: the plan's `nightlyFeaturesAllowed` for build-script runs) and breakbulk-instantiate as `toolchains.json`'s `capabilities` (`remapPathScope`: whether shipped units get a scope); both parse breakbulk-format's `Capabilities`, every field required. No Rust program reads a Rust or Cargo version to decide a feature. The dev shell's trim-paths export reads the same `trimPaths` (`breakbulk-plan --cargo-env-only --capabilities <file>`). `breakbulk-unit` keeps its own check of a package's `rust-version` against 1.77 (the `cargo::` syntax): that is the package's declared version, not the toolchain's.
+Whether Cargo allows unstable features is not a capability. The planner asks the cargo it traces: `cargo -Zunstable-options help` succeeds only where Cargo allows unstable features, since any `-Z` flag fails otherwise (cargo `CliUnstable::parse`, called from `GlobalContext::configure`), while `-Zhelp` and `-V` succeed on every channel. It runs in the trace's environment, without `RUSTC_BOOTSTRAP`. The answer is the plan's `nightlyFeaturesAllowed`, which replays Cargo's `RUSTC_BOOTSTRAP` rule for build-script directives; every other unstable feature Cargo itself accepts or rejects while the planner traces it. A version string cannot say it: nixpkgs' cargo is built without a release channel, so it is a `dev` build that allows unstable features, though its version is `1.99.0`. No override exists, as one could only make breakbulk disagree with the cargo it runs.
+
+The planner receives them as `--capabilities <file>` (`trimPaths`: whether Cargo can take trim-paths at all, see [trim-paths](#trim-paths)) and breakbulk-instantiate as `toolchains.json`'s `capabilities` (`remapPathScope`: whether shipped units get a scope); both parse breakbulk-format's `Capabilities`, every field required. No Rust program reads a Rust or Cargo version to decide a feature. The dev shell's trim-paths export reads the same `trimPaths` (`breakbulk-plan --cargo-env-only --capabilities <file>`). `breakbulk-unit` keeps its own check of a package's `rust-version` against 1.77 (the `cargo::` syntax): that is the package's declared version, not the toolchain's.
 
 ## Target facts from rustc
 

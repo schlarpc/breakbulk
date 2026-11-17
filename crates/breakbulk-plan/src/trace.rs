@@ -102,6 +102,8 @@ pub struct Trace {
     pub metadata: Metadata,
     pub cargo_version: String,
     pub rustc_version: String,
+    /// Whether this cargo allows unstable features ([`nightly_features_allowed`]).
+    pub nightly_features_allowed: bool,
     pub host: String,
     /// [`breakbulk_format::plan::Plan::rust_src_remap`].
     pub rust_src_remap: Option<(String, String)>,
@@ -127,7 +129,7 @@ impl Trace {
             rustc_version: self.rustc_version.clone(),
             rustdoc: opts.rustdoc.clone(),
             cargo: opts.cargo.clone(),
-            nightly: capabilities(opts)?.nightly,
+            nightly: self.nightly_features_allowed,
             executable_suffix: self.target_spec.exe_suffix.clone(),
             target_debuginfo: self.target_spec.debuginfo.clone(),
             keep_workspace_wrapper: runs_clippy(opts),
@@ -432,6 +434,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .strip_prefix("cargo ")
         .unwrap_or(cargo_version.trim())
         .to_owned();
+    let nightly_features_allowed = nightly_features_allowed(opts)?;
     let rustc_vv = output(
         {
             let mut c = command(opts, &opts.rustc);
@@ -598,10 +601,27 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         metadata,
         cargo_version,
         rustc_version,
+        nightly_features_allowed,
         host,
         rust_src_remap,
         target_spec,
     })
+}
+
+/// Cargo's `nightly_features_allowed`, asked of the cargo the trace runs:
+/// any `-Z` flag fails on a channel without unstable features (cargo
+/// `CliUnstable::parse`, from `GlobalContext::configure`). Not `-Zhelp` or
+/// `-V`, which succeed on every channel, and not `cargo -V`'s version
+/// string: a cargo built without a release channel (nixpkgs') is a `dev`
+/// build whatever its version says. The environment is the trace's, without
+/// `RUSTC_BOOTSTRAP`, which makes any cargo a `dev` build.
+fn nightly_features_allowed(opts: &Options) -> Result<bool, Error> {
+    let mut cmd = command(opts, &opts.cargo);
+    cmd.args(["-Zunstable-options", "help"]);
+    let out = cmd
+        .output()
+        .map_err(|e| Error(format!("could not run cargo -Zunstable-options help: {e}")))?;
+    Ok(out.status.success())
 }
 
 /// The target's spec (`rustc --print target-spec-json`), asked where

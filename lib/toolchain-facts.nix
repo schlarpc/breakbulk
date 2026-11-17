@@ -12,7 +12,7 @@
 #                        (lib/presets/linker.nix, `rustcPicksLld`); false
 #                        for nixpkgs' rustc (`rustc.llvmPackages`), built
 #                        with `--disable-lld` against nixpkgs' LLVM
-#   facts.capabilities   { remapPathScope; trimPaths; nightly; } (below)
+#   facts.capabilities   { remapPathScope; trimPaths; } (below)
 #
 # Each fact comes from the toolchain's attributes and breakbulk's tables
 # when they can say, and otherwise from the toolchain itself, read by one
@@ -39,14 +39,16 @@
 #   trimPaths       Cargo has the `trim-paths` profile setting (stable from
 #                   Cargo 1.101, nightly 1.101 included). From cargo's
 #                   version, else `cargo -V`.
-#   nightly         Cargo allows unstable features: a `-nightly` or `-dev`
-#                   release (Cargo's own channel rule). From cargo's
-#                   version, else `cargo -V`.
+#
+# Whether Cargo allows unstable features is not one: the planner asks the
+# cargo it runs (`cargo -Zunstable-options help`), since a version string
+# does not say it (nixpkgs' cargo has no release channel, so it is a `dev`
+# build).
 #
 # `capabilities` (an attribute set; `null` values are ignored) overrides
 # any of them, for a forked or patched toolchain whose version says
 # otherwise: `workspaces.<ws>.toolchain.capabilities`. `cargo` is needed
-# only for trimPaths and nightly.
+# only for trimPaths.
 #
 # `nixFeatures` (lib/nix-features.nix; default: import from derivation
 # allowed) is the record the probes are checked against; `mayProbe {
@@ -71,11 +73,7 @@ let
   capabilityNames = [
     "remapPathScope"
     "trimPaths"
-    "nightly"
   ];
-
-  # Whether a rustc or cargo release is a nightly or development build.
-  isNightly = v: lib.hasInfix "-nightly" v || lib.hasInfix "-dev" v;
 
   # A package's `version` when it is a Rust release (`1.99.0`,
   # `1.101.0-nightly`, `1.100.0-beta.3`), else null, so the toolchain is
@@ -181,7 +179,7 @@ let
       fromTable = if rustcRelease != null then llvmVersions.lookup rustcRelease else null;
       cargoVersion =
         if cargo == null then
-          throw "breakbulk.toolchainFacts: the trimPaths and nightly capabilities need `cargo`"
+          throw "breakbulk.toolchainFacts: the trimPaths capability needs `cargo`"
         else
           let
             r = releaseOf cargo;
@@ -195,7 +193,6 @@ let
           else
             probed.remapPathScope;
         trimPaths = util.rustVersion.atLeast capabilitySince.trimPaths cargoVersion;
-        nightly = isNightly cargoVersion;
       };
     in
     {

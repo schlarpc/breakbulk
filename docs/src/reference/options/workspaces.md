@@ -773,7 +773,9 @@ through import-from-derivation)\. Set one only for a
 forked or patched toolchain whose version says otherwise;
 ` null ` keeps breakbulk’s own answer\. The planner and the
 instantiator read nothing else
-(` breakbulk.toolchainFacts.of `)\.
+(` breakbulk.toolchainFacts.of `)\. Whether Cargo allows
+unstable features is not one of them: the planner asks
+the cargo it runs\.
 
 *Type:*
 submodule
@@ -788,23 +790,6 @@ submodule
 
 ```nix
 { remapPathScope = false; }
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.toolchain.capabilities.nightly`
-
-Cargo allows unstable features (default: a ` -nightly ` or ` -dev `
-Cargo release)\.
-
-*Type:*
-null or boolean
-
-*Default:*
-
-```nix
-null
 ```
 
 *Declared by:*

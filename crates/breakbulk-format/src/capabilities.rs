@@ -22,9 +22,6 @@ pub struct Capabilities {
     /// nightly 1.101 included). The planner then turns it on unless the
     /// project declares it or `cargoTrimPaths` says otherwise ("trim-paths").
     pub trim_paths: bool,
-    /// Cargo allows unstable features (a nightly or development build):
-    /// recorded in the plan for build-script directives that differ there.
-    pub nightly: bool,
 }
 
 impl Capabilities {
@@ -42,21 +39,19 @@ mod tests {
     #[test]
     fn json_shape() {
         let c: Capabilities =
-            serde_json::from_str(r#"{"remapPathScope":true,"trimPaths":false,"nightly":true}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"remapPathScope":true,"trimPaths":false}"#).unwrap();
         assert_eq!(
             c,
             Capabilities {
                 remap_path_scope: true,
-                trim_paths: false,
-                nightly: true
+                trim_paths: false
             }
         );
         // Every field is required, and an unknown one is an error.
         assert!(serde_json::from_str::<Capabilities>(r#"{"remapPathScope":true}"#).is_err());
         assert!(
             serde_json::from_str::<Capabilities>(
-                r#"{"remapPathScope":true,"trimPaths":false,"nightly":true,"other":true}"#
+                r#"{"remapPathScope":true,"trimPaths":false,"other":true}"#
             )
             .is_err()
         );

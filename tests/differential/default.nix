@@ -203,12 +203,7 @@ let
   errors = import ./errors.nix {
     inherit pkgs breakbulk tools;
     toolchains = {
-      # nixpkgs' cargo is built without a release channel, which makes it
-      # a `dev` build that allows unstable features, whatever its version
-      # says; the planner reads the channel from the version.
-      default = toolchain // {
-        capabilities.nightly = true;
-      };
+      default = toolchain;
     }
     // versionToolchains;
   };

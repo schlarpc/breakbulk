@@ -45,10 +45,6 @@ let
       later, nightly 1.101 included). The planner then turns it on when the
       project has not.
     '';
-    nightly = ''
-      Cargo allows unstable features (default: a `-nightly` or `-dev`
-      Cargo release).
-    '';
   };
 
   # The workspace-only option of `workspaces.<ws>.targets.<triple>`; the
@@ -678,7 +674,6 @@ let
                       [
                         "remapPathScope"
                         "trimPaths"
-                        "nightly"
                       ]
                       (
                         n:
@@ -700,7 +695,9 @@ let
                   forked or patched toolchain whose version says otherwise;
                   `null` keeps breakbulk's own answer. The planner and the
                   instantiator read nothing else
-                  (`breakbulk.toolchainFacts.of`).
+                  (`breakbulk.toolchainFacts.of`). Whether Cargo allows
+                  unstable features is not one of them: the planner asks
+                  the cargo it runs.
                 '';
               };
             };

@@ -696,28 +696,29 @@ in
           (caps (r "1.99.0") {
             remapPathScope = false;
             trimPaths = true;
-            nightly = null;
           })
+          (caps (r "1.99.0") { trimPaths = null; })
           (builtins.tryEval (caps (r "1.99.0") { remapPathscope = false; })).success
         ];
       expected =
         let
-          c = remapPathScope: trimPaths: nightly: { inherit remapPathScope trimPaths nightly; };
+          c = remapPathScope: trimPaths: { inherit remapPathScope trimPaths; };
         in
         [
-          (c false false false)
-          (c true false false)
-          (c true false false)
-          (c true false false)
-          (c true true true)
-          (c true false false)
-          (c false false false)
-          (c true false false)
-          (c true true true)
-          (c false false false)
-          (c true false false)
-          (c true true true)
-          (c false true false)
+          (c false false)
+          (c true false)
+          (c true false)
+          (c true false)
+          (c true true)
+          (c true false)
+          (c false false)
+          (c true false)
+          (c true true)
+          (c false false)
+          (c true false)
+          (c true true)
+          (c false true)
+          (c true false)
           false
         ];
     };

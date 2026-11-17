@@ -59,7 +59,6 @@ fn smoke_inputs() -> Inputs {
             capabilities: breakbulk_format::Capabilities {
                 remap_path_scope: true,
                 trim_paths: false,
-                nightly: false,
             },
         },
         overrides: Overrides {
