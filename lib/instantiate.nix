@@ -124,6 +124,9 @@ rec {
       shippedRemapScope ? null,
       # `sourcePaths = "keep"`: no remaps of breakbulk's own.
       keepSourcePaths ? false,
+      # The extensions of the side files that compile units run through a
+      # wrapper keep beside their crate files (`variants.<v>.sideFiles`).
+      sideFiles ? [ ],
       # The toolchain's capabilities (`breakbulk.toolchainFacts.of`'s
       # `capabilities`): whether rustc takes `--remap-path-scope`.
       capabilities,
@@ -169,7 +172,8 @@ rec {
         target = platformJson target;
       }
       // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
-      // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }));
+      // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }
+      // lib.optionalAttrs (sideFiles != [ ]) { inherit sideFiles; }));
       overridesFile = toFile "overrides.json" (toJSON {
         packages = lib.mapAttrs (_: o: lib.genAttrs platforms (p: platformJson (ovPlatform o p))) overrides;
       });

@@ -95,6 +95,7 @@ fn render_doc<R: Resolve>(
         cwd: c.cwd.render(r)?,
         outputs: Default::default(),
         uplifted: Default::default(),
+        side_files: Vec::new(),
         deps: doc_deps(plan, &c)
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))

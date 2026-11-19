@@ -387,6 +387,10 @@ impl Resolve for Tokens<'_> {
         self.inputs.toolchains.keep_source_paths
     }
 
+    fn side_files(&self) -> Vec<breakbulk_format::rendered::SideFile> {
+        self.inputs.toolchains.side_files.clone()
+    }
+
     fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
         // Test units remap every scope; so does everything with a rustc
         // that has no `--remap-path-scope` (toolchains.json's

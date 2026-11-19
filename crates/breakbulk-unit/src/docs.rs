@@ -174,6 +174,7 @@ mod tests {
             cwd: "/src".into(),
             outputs: BTreeMap::new(),
             uplifted: BTreeMap::new(),
+            side_files: Vec::new(),
             deps: vec![],
             dep_manifests: vec![],
             link_manifest_crates: false,

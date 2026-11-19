@@ -13,6 +13,9 @@
 //! | Compile | `--crate-name` and an input file | record, fake outputs |
 //!
 //! As `RUSTC_WRAPPER` the shim is started as `shim [workspace-wrapper] rustc ARGS…`.
+//! A variant's own rustc wrapper cannot also be Cargo's `RUSTC_WRAPPER`, so
+//! the planner passes it in `BREAKBULK_RUSTC_WRAPPER` and the shim puts it
+//! first in the chain, where Cargo would have.
 //! As `RUSTDOC` it must be started through a path whose file name contains
 //! `rustdoc` (the planner makes a `rustdoc` symlink to the shim), and finds the
 //! real rustdoc in `$BREAKBULK_RUSTDOC`.
@@ -36,6 +39,8 @@ use std::process::{Command, ExitCode};
 
 pub const RECORD_ENV: &str = "BREAKBULK_RECORD";
 pub const RUSTDOC_ENV: &str = "BREAKBULK_RUSTDOC";
+/// The variant's rustc wrapper, which every rustc invocation goes through.
+pub const RUSTC_WRAPPER_ENV: &str = "BREAKBULK_RUSTC_WRAPPER";
 /// The file name the planner starts the shim by as the test runner.
 pub const TEST_RUNNER: &str = "breakbulk-test-runner";
 
@@ -120,11 +125,14 @@ fn rustdoc_mode(args: Vec<String>) -> Result<ExitCode, Error> {
 }
 
 fn wrapper_mode(argv: Vec<String>) -> Result<ExitCode, Error> {
-    let (program, args) = split_chain(&argv);
+    let (mut program, args) = split_chain(&argv);
     if program.is_empty() {
         return Err(Error::new(
             "expected to be started as RUSTC_WRAPPER (`breakbulk-shim rustc ARGS`), as RUSTDOC, or as a build-script stub",
         ));
+    }
+    if let Some(w) = std::env::var_os(RUSTC_WRAPPER_ENV).filter(|w| !w.is_empty()) {
+        program.insert(0, w.to_string_lossy().into_owned());
     }
     let a = RustcArgs::parse(&args);
     if a.is_query || a.crate_name.is_none() || a.input.is_none() {

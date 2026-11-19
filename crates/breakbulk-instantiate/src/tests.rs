@@ -56,6 +56,7 @@ fn smoke_inputs() -> Inputs {
             },
             shipped_remap_scope: None,
             keep_source_paths: false,
+            side_files: Vec::new(),
             capabilities: breakbulk_format::Capabilities {
                 remap_path_scope: true,
                 trim_paths: false,

@@ -125,6 +125,7 @@ pub fn render_doctest<R: Resolve>(
         cwd: c.cwd.render(r)?,
         outputs: Default::default(),
         uplifted: Default::default(),
+        side_files: Vec::new(),
         deps: deps
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))

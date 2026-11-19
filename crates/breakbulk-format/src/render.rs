@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{append, list_separator};
 use breakbulk_unit::spec::{
-    RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, RepositoryPath, SourceView,
+    RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, RepositoryPath, SideFile,
+    SourceView, debug_side_files,
 };
 
 use crate::deps::Graph;
@@ -89,6 +90,13 @@ pub trait Resolve {
         _unit: &CompileUnit,
     ) -> Result<Option<String>, Self::Error> {
         Ok(None)
+    }
+    /// The rules for the files a compile unit run through a wrapper
+    /// writes beyond its outputs (`RenderedCompile::side_files`): what the
+    /// variant's rustc driver writes, such as files for its dependents to
+    /// read. They come after the debuginfo rules.
+    fn side_files(&self) -> Vec<SideFile> {
+        Vec::new()
     }
     /// For a unit (or doctest) of a repository package: the source view it
     /// sees, for the hints when it fails naming a path the view lacks
@@ -509,6 +517,16 @@ pub fn render_unit_in<R: Resolve>(
                     )
                     .collect(),
                 uplifted: c.uplifted.clone(),
+                // The variant's rules apply where a wrapper runs: plain
+                // rustc writes nothing more, and units without one stay
+                // the same as a plain variant's, and shared.
+                side_files: c
+                    .has_debug_output(&plan.target_debuginfo)
+                    .then(debug_side_files)
+                    .into_iter()
+                    .flatten()
+                    .chain((c.program.len() > 1).then(|| r.side_files()).into_iter().flatten())
+                    .collect(),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,
                 link_manifest_crates: deps.link_manifest_crates,

@@ -167,14 +167,19 @@ pkgs:
     dylibPath = testDylibPath;
   },
   # Variants (lib/variants.nix): `mode` is build, check, clippy or
-  # coverage; clippy needs `clippyDriver` (the clippy-driver executable,
-  # matching rustc; `clippyOption`, the option that set it, is named when
-  # it does not). `bench` adds a bench plan (`cargo bench --no-run`):
-  # ws.benches, ws.plans.bench, ws.units.bench.
+  # coverage. `rustcWrapper` and `rustcWorkspaceWrapper` are Cargo's
+  # `build.rustc-wrapper` and `build.rustc-workspace-wrapper` (executable
+  # paths, or null); clippy needs the latter to be clippy-driver, matching
+  # rustc (`clippyOption`, the option that set it, is named when it does
+  # not). `sideFiles`: the extensions of the files a wrapper writes beside
+  # a crate file that its unit keeps there. `bench` adds a bench plan
+  # (`cargo bench --no-run`): ws.benches, ws.plans.bench, ws.units.bench.
   mode ? "build",
-  clippyDriver ? null,
+  rustcWrapper ? null,
+  rustcWorkspaceWrapper ? null,
   clippyOption ? null,
   clippyArgs ? [ ],
+  sideFiles ? [ ],
   bench ? false,
   # The doc plan's `cargo doc --no-deps` (`workspaces.<ws>.docs.noDeps`).
   docsNoDeps ? true,
@@ -345,8 +350,9 @@ let
       packages = if kind == "test" then testSelect else select;
       profile = if kind == "test" && !checking then testProfile else profile;
       cargoConfig = cargoConfigFile;
-      # A doc plan runs no clippy (breakbulk-plan's `runs_clippy`).
-      clippyDriver = if kind == "doc" then null else clippyDriver;
+      # A doc plan runs no wrapper (breakbulk-plan's `runs_wrappers`).
+      rustcWrapper = if kind == "doc" then null else rustcWrapper;
+      rustcWorkspaceWrapper = if kind == "doc" then null else rustcWorkspaceWrapper;
       clippyArgs = if kind == "doc" then [ ] else clippyArgs;
       noDeps = docsNoDeps;
       inherit (toolchain) cargo rustc;
@@ -414,7 +420,10 @@ let
   )
   // specTools
   // cargoConfigTools
-  // lib.optionalAttrs (clippyDriver != null) { clippy-driver = "${clippyDriver}"; };
+  // lib.optionalAttrs (rustcWrapper != null) { rustc-wrapper = "${rustcWrapper}"; }
+  // lib.optionalAttrs (rustcWorkspaceWrapper != null) {
+    rustc-workspace-wrapper = "${rustcWorkspaceWrapper}";
+  };
 
   # Test runs also get breakbulk-hints, for their hints after a failure.
   # Not in `unitTools`, which instantiation reads: a breakbulk-hints change
@@ -658,7 +667,7 @@ let
       # `packages` (by name) and mkRepository's `packageOverrides` (by name
       # or name@version, already in instantiate's shape); the latter win.
       overrides = overridesFor kind;
-      inherit shippedRemapScope;
+      inherit shippedRemapScope sideFiles;
       keepSourcePaths = sourcePaths == "keep";
       inherit capabilities;
       roots =

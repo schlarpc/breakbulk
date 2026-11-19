@@ -388,6 +388,11 @@ pub struct RenderedCompile {
     /// in `outputs` to rustc's (a bin stored under Cargo's uplifted name).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub uplifted: BTreeMap<String, String>,
+    /// Where the files the program writes that `outputs` does not list
+    /// go, first matching rule first ([`SideFile`]); the rest, dep-info
+    /// aside, are discarded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub side_files: Vec<SideFile>,
     /// Crate files (`.rmeta`, `.rlib` or a proc macro's shared library)
     /// that `breakbulk-unit` symlinks into one directory, passed as the only
     /// `-L dependency=`: the files the arguments name, and for a unit that
@@ -510,6 +515,46 @@ pub fn package_spec(id: &str) -> String {
 /// The output of a linking unit that receives its debuginfo side files
 /// (`.pdb`, `.dwp`, `.dwo`). The unit lists it in `outputs` with no files.
 pub const DEBUG_OUTPUT: &str = "debug";
+
+/// A rule for a file the program writes into its output directory that
+/// no output lists: a name ending in `suffix` goes `into` a place.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SideFile {
+    pub suffix: String,
+    pub into: SideInto,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SideInto {
+    /// Beside a listed file: `<stem><suffix>`, where `<stem>` is a listed
+    /// file's name without its extension, goes into that file's output
+    /// (each of them, when an `rlib` and an `rmeta` share the stem), under
+    /// its stored stem. A dependent finds it there with no list of its
+    /// own: rustc and the drivers built on it resolve a crate file to its
+    /// real path, in the dependency's output, and look beside it (Verus's
+    /// `.vir` beside the `.rmeta`).
+    Beside,
+    /// Into this derivation output, under the program's name, when the
+    /// unit has that output; otherwise the file is discarded.
+    Output(String),
+}
+
+/// The debuginfo files and directories rustc writes next to a linked
+/// output but `--print=file-names` does not name, for a unit with a
+/// [`DEBUG_OUTPUT`]: `.pdb` (msvc), `.dwp` (`split-debuginfo=packed`),
+/// `.dwo` (`unpacked`), and the `.dSYM` bundle dsymutil writes on Apple
+/// targets with `packed`.
+pub fn debug_side_files() -> Vec<SideFile> {
+    [".pdb", ".dwp", ".dwo", ".dSYM"]
+        .into_iter()
+        .map(|suffix| SideFile {
+            suffix: suffix.to_owned(),
+            into: SideInto::Output(DEBUG_OUTPUT.to_owned()),
+        })
+        .collect()
+}
 
 pub fn derivation_output(output: &str) -> &str {
     match output {

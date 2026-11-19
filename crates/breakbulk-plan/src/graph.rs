@@ -43,8 +43,11 @@ pub struct Context {
     pub executable_suffix: String,
     /// [`Plan::target_debuginfo`].
     pub target_debuginfo: breakbulk_format::TargetDebuginfo,
-    /// Whether the clippy variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
+    /// Whether the variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
     pub keep_workspace_wrapper: bool,
+    /// The variant's rustc wrapper: build-script runs get it as
+    /// `RUSTC_WRAPPER`, where Cargo gives them its own (the shim).
+    pub rustc_wrapper: Option<String>,
     /// The variables the project's `[env]` table sets on Cargo's
     /// processes ([`crate::spec::ProjectConfig::applied_env`]).
     pub config_env: BTreeSet<String>,
@@ -102,6 +105,7 @@ fn names_path(value: &str, dir: &str) -> bool {
 /// design drops ("Env filtering").
 const DROPPED_ENV: &[&str] = &[
     "RUSTC_WRAPPER",
+    crate::trace::RUSTC_WRAPPER_ENV,
     "CARGO_MAKEFLAGS",
     "BREAKBULK_RECORD",
     "BREAKBULK_RUSTDOC",
@@ -788,6 +792,13 @@ impl<'a> Builder<'a> {
     fn filter_env(&self, env: &BTreeMap<String, String>, run: bool) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         for (k, v) in env {
+            if run
+                && k == "RUSTC_WRAPPER"
+                && let Some(w) = &self.ctx.rustc_wrapper
+            {
+                out.insert(k.clone(), w.clone());
+                continue;
+            }
             if DROPPED_ENV.contains(&k.as_str()) {
                 continue;
             }
@@ -2000,6 +2011,7 @@ mod error_tests {
             executable_suffix: String::new(),
             target_debuginfo: Default::default(),
             keep_workspace_wrapper: false,
+            rustc_wrapper: None,
             config_env: BTreeSet::new(),
             rust_src_remap: None,
             trim_paths_default: false,

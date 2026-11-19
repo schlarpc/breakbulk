@@ -68,8 +68,14 @@ set up the same home in their own derivation
    ([Missing paths](#missing-paths)).
 7. Move outputs into place (details below): `.rmeta` to `$rmeta`, `.rlib`
    to `$rlib`, binaries and cdylibs to `$out` (a bin under the name the
-   plan's `uplifted` gives it), debuginfo side files to `$debug`. Discard
-   dep-info.
+   plan's `uplifted` gives it). Other files go where the unit's side-file
+   rules send them, the first rule whose suffix the name ends in winning:
+   breakbulk's own rules send debuginfo side files (`.pdb`, `.dwp`,
+   `.dwo`, `.dSYM`) to `$debug` when the unit has it, and a variant's
+   [`sideFiles`](options/workspaces.md#workspacesnamevariantsnamesidefiles)
+   rules, on units a wrapper runs on, send a file into a named output or
+   beside the output file of the same stem. Discard the rest, dep-info
+   included.
 
 ### Working directory
 

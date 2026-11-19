@@ -10,8 +10,9 @@
 //! 6. Print the `rendered` text of rustc's JSON diagnostics; drop artifact
 //!    notifications.
 //! 7. Move the listed outputs to their derivation outputs (a bin under
-//!    Cargo's uplifted name, `uplifted`), and debuginfo side files to
-//!    `debug` when the unit has it; discard the rest (dep-info).
+//!    Cargo's uplifted name, `uplifted`), and other files where the unit's
+//!    side-file rules send them (debuginfo to `debug`, a driver's files
+//!    beside their crate file); discard the rest (dep-info).
 //! 8. For a library, write its own manifest into its `rmeta` output.
 //!
 //! The plan carries no `--out-dir`, no `-L dependency=` and no
@@ -27,7 +28,9 @@ use crate::diag::{Line, classify};
 use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, capture_layer, layered};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{DEBUG_OUTPUT, RenderedArg, RenderedCompile, SpliceKind, derivation_output};
+use crate::spec::{
+    RenderedArg, RenderedCompile, SideFile, SideInto, SpliceKind, derivation_output,
+};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
 use crate::{Error, io_err, manifest, read_directives, repository_paths, view_hints};
 
@@ -281,29 +284,24 @@ pub fn run_diagnosed(
     Ok(())
 }
 
-/// Debuginfo side files rustc writes next to a linked output but
-/// `--print=file-names` does not name: `.pdb` (msvc), `.dwp`
-/// (`split-debuginfo=packed`), `.dwo` (`unpacked`).
-pub const DEBUG_SIDE_FILES: &[&str] = &[".pdb", ".dwp", ".dwo"];
-
-/// Debuginfo side directories, as [`DEBUG_SIDE_FILES`]: the `.dSYM`
-/// bundle dsymutil writes on Apple targets with `split-debuginfo=packed`.
-pub const DEBUG_SIDE_DIRS: &[&str] = &[".dSYM"];
-
 /// Move each listed output file into its derivation output, under the
 /// listed name; rustc's name for it is its entry in `uplifted`, if any.
 /// Every output named in `outputs` is created, even if it lists no files.
-/// When the unit has a `debug` output (it lists no files), unlisted
-/// debuginfo side files and directories ([`DEBUG_SIDE_FILES`],
-/// [`DEBUG_SIDE_DIRS`]) go there, under rustc's names. Other unlisted files, dep-info aside, are reported and left
-/// behind.
+/// Unlisted files and directories go where the first `side_files` rule
+/// whose suffix they end in sends them ([`SideFile`]); the rest, dep-info
+/// aside, are reported and left behind.
 pub fn collect_outputs(
     outputs: &BTreeMap<String, Vec<String>>,
     uplifted: &BTreeMap<String, String>,
+    side_files: &[SideFile],
     from: &Path,
     dest: impl Fn(&str) -> Result<PathBuf, Error>,
 ) -> Result<(), Error> {
+    let stem = |f: &str| f.rsplit_once('.').map_or(f, |(s, _)| s).to_owned();
     let mut listed = BTreeSet::new();
+    // rustc's stem of a listed file, to the (directory, stored stem) pairs
+    // its side files go to.
+    let mut stems: BTreeMap<String, Vec<(PathBuf, String)>> = BTreeMap::new();
     for (output, files) in outputs {
         let dir = dest(derivation_output(output))?;
         std::fs::create_dir_all(&dir).map_err(|e| io_err("creating", &dir, e))?;
@@ -325,31 +323,66 @@ pub fn collect_outputs(
             }
             move_file(&src, &dir.join(f))?;
             listed.insert(written.as_str());
+            stems
+                .entry(stem(written))
+                .or_default()
+                .push((dir.clone(), stem(f)));
         }
     }
-    let debug = if outputs.contains_key(DEBUG_OUTPUT) {
-        Some(dest(DEBUG_OUTPUT)?)
-    } else {
-        None
-    };
     let mut names: Vec<String> = Vec::new();
     for e in std::fs::read_dir(from).map_err(|e| io_err("reading", from, e))? {
         let e = e.map_err(|e| io_err("reading", from, e))?;
         names.push(e.file_name().to_string_lossy().into_owned());
     }
     names.sort();
-    for name in names {
+    'names: for name in names {
         if listed.contains(name.as_str()) || name.ends_with(".d") {
             continue;
         }
         let path = from.join(&name);
-        let side_file = DEBUG_SIDE_FILES.iter().any(|x| name.ends_with(x)) && path.is_file();
-        let side_dir = DEBUG_SIDE_DIRS.iter().any(|x| name.ends_with(x)) && path.is_dir();
-        match &debug {
-            Some(dir) if side_file => move_file(&path, &dir.join(&name))?,
-            Some(dir) if side_dir => move_dir(&path, &dir.join(&name))?,
-            _ => eprintln!("warning: discarding unlisted rustc output `{name}`"),
+        for rule in side_files {
+            let Some(stem) = name.strip_suffix(&rule.suffix) else {
+                continue;
+            };
+            match &rule.into {
+                SideInto::Beside => {
+                    let Some(places) = stems.get(stem) else {
+                        continue;
+                    };
+                    for (dir, stored) in places {
+                        copy_tree(&path, &dir.join(format!("{stored}{}", rule.suffix)))?;
+                    }
+                }
+                SideInto::Output(o) => {
+                    if !outputs.contains_key(o) {
+                        continue;
+                    }
+                    let to = dest(derivation_output(o))?.join(&name);
+                    if path.is_dir() {
+                        move_dir(&path, &to)?;
+                    } else {
+                        move_file(&path, &to)?;
+                    }
+                }
+            }
+            continue 'names;
         }
+        eprintln!("warning: discarding unlisted rustc output `{name}`");
+    }
+    Ok(())
+}
+
+/// Copy a file, or a directory tree of files and directories.
+fn copy_tree(src: &Path, dst: &Path) -> Result<(), Error> {
+    if !src.is_dir() {
+        return std::fs::copy(src, dst)
+            .map(|_| ())
+            .map_err(|e| io_err("copying to", dst, e));
+    }
+    std::fs::create_dir_all(dst).map_err(|e| io_err("creating", dst, e))?;
+    for e in std::fs::read_dir(src).map_err(|e| io_err("reading", src, e))? {
+        let e = e.map_err(|e| io_err("reading", src, e))?;
+        copy_tree(&e.path(), &dst.join(e.file_name()))?;
     }
     Ok(())
 }
@@ -441,7 +474,9 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
         hints.extend(repository_paths::hints(&c.package, &c.repository_paths));
         hints
     })?;
-    collect_outputs(&c.outputs, &c.uplifted, &dirs.out, |o| outer.output(o))?;
+    collect_outputs(&c.outputs, &c.uplifted, &c.side_files, &dirs.out, |o| {
+        outer.output(o)
+    })?;
     if c.outputs.contains_key("rmeta") {
         let dir = outer.output("rmeta")?;
         if let Some(m) = own_manifest(c, &dir, &below) {

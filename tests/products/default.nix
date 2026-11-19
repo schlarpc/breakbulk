@@ -117,6 +117,15 @@
 #                    variants keep `profile`); invalid layers fail evaluation
 #   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
 #                    fails the member's clippy unit naming the lint
+#   variants-driver   a toy rustc driver (it writes `<stem>.side` beside
+#                    each crate file, folding in what it finds beside each
+#                    `--extern`'s real path) as `rustcWrapper` with
+#                    `sideFiles = [ ".side" ]`: app's side file carries
+#                    lib-a's, which carries hostdep's, and the proc
+#                    macro's; hostdep's build-script run gets it as
+#                    RUSTC_WRAPPER; as `rustcWorkspaceWrapper`, dependency units
+#                    are the check variant's and only members get side
+#                    files; a clippy variant refuses a workspace wrapper
 #   variants-clippy-conf   clippy units find `clippy.toml` above the
 #                    workspace (a root `disallowed-methods` fails
 #                    `rooted`) and a member's own file instead of the
@@ -761,6 +770,78 @@ let
   ];
   variantsRepo = mkRepo (fixtures + "/variants") variantsModules;
   variantsBaseRepo = mkRepo (fixtures + "/variants") variantsBase;
+
+  # A toy rustc driver (see variants-driver): runs rustc, then writes
+  # `lib<crate><extra>.side` beside the metadata rustc wrote, naming the
+  # crate and, for each `--extern`, the side file beside its real path.
+  toyDriver = pkgs.writeShellScript "toy-driver" ''
+    set -eu
+    rustc=$1
+    shift
+    out= name= extra= next=
+    externs=()
+    for a in "$@"; do
+      case $next in
+        out) out=$a ;;
+        name) name=$a ;;
+        extern) externs+=("$a") ;;
+        codegen) case $a in extra-filename=*) extra=''${a#extra-filename=} ;; esac ;;
+      esac
+      next=
+      case $a in
+        --out-dir) next=out ;;
+        --crate-name) next=name ;;
+        --extern) next=extern ;;
+        -C) next=codegen ;;
+      esac
+    done
+    "$rustc" "$@"
+    [ -n "$out" ] && [ -n "$name" ] || exit 0
+    {
+      echo "$name"
+      for e in "''${externs[@]}"; do
+        p=''${e#*=}
+        [ "$p" != "$e" ] || continue
+        side=$(${pkgs.coreutils}/bin/realpath "$p")
+        side=''${side%.*}.side
+        if [ -e "$side" ]; then
+          echo "extern ''${e%%=*}:"
+          ${pkgs.gnused}/bin/sed 's/^/  /' "$side"
+        else
+          echo "extern ''${e%%=*}: none"
+        fi
+      done
+    } > "$out/lib$name$extra.side"
+  '';
+  driverRepo =
+    extra:
+    mkRepo (fixtures + "/variants") [
+      {
+        workspaces.main = {
+          path = "ws";
+          variants = {
+            default.profile = "release";
+            check = {
+              mode = "check";
+              profile = "release";
+            };
+            driven = {
+              mode = "check";
+              profile = "release";
+              rustcWrapper = "${toyDriver}";
+              sideFiles = [ ".side" ];
+            };
+            members = {
+              mode = "check";
+              profile = "release";
+              rustcWorkspaceWrapper = "${toyDriver}";
+              sideFiles = [ ".side" ];
+            };
+          }
+          // extra;
+        };
+      }
+    ];
   vt = variantsRepo.workspaces.main.target.${native};
 
   # `cargoConfig` (see variants-cargo-config): the target's own rustflags
@@ -1210,6 +1291,7 @@ in
       portFromCrane
       ;
     trimCc = trimCcRepo { };
+    driver = driverRepo { };
   };
 
   build-script-outputs =
@@ -1952,6 +2034,76 @@ in
         [ -s $TMPDIR/app.profraw ]
         ls -l $run/profraw/
         [ -s "$(echo $run/profraw/*.profraw)" ]
+        touch $out
+      '';
+
+  variants-driver =
+    let
+      repo = driverRepo { };
+      d = drvsOf repo;
+      u = unitsOf repo;
+      deps = lib.filter (n: lib.hasPrefix "pm-" n || lib.hasPrefix "hostdep-" n) (
+        lib.attrNames (d "check" "build")
+      );
+      members = lib.filter (n: lib.hasPrefix "app-" n || lib.hasPrefix "lib-a-" n) (
+        lib.attrNames (d "check" "build")
+      );
+      sharedDeps = lib.filter (n: (d "check" "build").${n} != (d "members" "build").${n}) deps;
+      sharedAll = lib.filter (n: (d "check" "build").${n} == (d "driven" "build").${n}) (
+        lib.attrNames (d "check" "build")
+      );
+      sharedMembers = lib.filter (n: (d "check" "build").${n} == (d "members" "build").${n}) members;
+      # Cargo gives build-script runs its rustc wrapper, for their probes.
+      runWrapper =
+        v:
+        lib.any (a: builtins.isString a && lib.hasInfix "\"RUSTC_WRAPPER\":" a) (
+          lib.attrValues (u v "build")."hostdep-0.1.0-build-run".drvAttrs
+        );
+      clippyWrapped = builtins.tryEval (
+        (driverRepo {
+          clippy = {
+            mode = "clippy";
+            rustcWorkspaceWrapper = "${toyDriver}";
+          };
+        }).workspaces.main.instances.${native}.clippy.units.build
+      );
+    in
+    assert lib.assertMsg (deps != [ ] && members != [ ]) "variants-driver: no units ${toString deps}";
+    assert lib.assertMsg (sharedDeps == [ ])
+      "variants-driver: workspace wrapper changed dependency units ${toString sharedDeps}";
+    assert lib.assertMsg (sharedMembers == [ ])
+      "variants-driver: workspace wrapper left members unchanged ${toString sharedMembers}";
+    assert lib.assertMsg (sharedAll == [ ])
+      "variants-driver: rustc wrapper left units unchanged ${toString sharedAll}";
+    assert lib.assertMsg (!clippyWrapped.success) "variants-driver: clippy took a workspace wrapper";
+    assert lib.assertMsg (runWrapper "driven" && !runWrapper "members")
+      "variants-driver: RUSTC_WRAPPER of build-script runs";
+    pkgs.runCommand "variants-driver"
+      {
+        app = (u "driven" "build")."app-0.1.0-bin".rmeta;
+        libA = (u "driven" "build")."lib-a-0.1.0-lib".rmeta;
+        memberApp = (u "members" "build")."app-0.1.0-bin".rmeta;
+        memberLibA = (u "members" "build")."lib-a-0.1.0-lib".rmeta;
+        checkLibA = (u "check" "build")."lib-a-0.1.0-lib".rmeta;
+        hostdep = (u "members" "build")."hostdep-0.1.0-lib".rmeta;
+      }
+      ''
+        set -x
+        side() { cat "$1"/*.side; }
+        side $app
+        # app reads lib-a's side file, which read hostdep's; and pm's.
+        side $app | grep -qx 'extern lib_a:'
+        side $app | grep -qx '  lib_a'
+        side $app | grep -qx '  extern hostdep:'
+        side $app | grep -qx '    hostdep'
+        side $app | grep -qx 'extern pm:'
+        side $libA | grep -qx 'extern hostdep:'
+        # Beside the crate file, under its stem.
+        for f in $libA/*.rmeta; do [ -e "''${f%.rmeta}.side" ]; done
+        # Members only: dependencies keep nothing, so members find none.
+        side $memberApp | grep -qx '  extern hostdep: none'
+        # (stdenv's nullglob: a glob that matches nothing is no argument.)
+        [ -z "$(find $hostdep $checkLibA -name '*.side')" ]
         touch $out
       '';
 

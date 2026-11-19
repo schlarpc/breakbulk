@@ -10,8 +10,9 @@
 #     kind = "build";        # or "test", "bench" (`cargo bench --no-run`), "doc"
 #     noDeps = false;        # kind = "doc": `cargo doc --no-deps`
 #     mode = "build";        # or "check", "clippy", "coverage" (the variant's)
-#     clippyDriver = null;   # clippy-driver (a path) for mode = "clippy"
-#     clippyOption = null;   # the option that set it, named when it does not match rustc
+#     rustcWrapper = null;   # Cargo's build.rustc-wrapper (an executable path)
+#     rustcWorkspaceWrapper = null;  # build.rustc-workspace-wrapper; clippy-driver for mode = "clippy"
+#     clippyOption = null;   # the option that set clippy-driver, named when it does not match rustc
 #     clippyArgs = [ ];      # clippy's arguments (`cargo clippy -- ARGS`)
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
@@ -63,7 +64,8 @@
       spec ? null,
       name ? "breakbulk-plan",
       mode ? "build",
-      clippyDriver ? null,
+      rustcWrapper ? null,
+      rustcWorkspaceWrapper ? null,
       clippyOption ? null,
       clippyArgs ? [ ],
       # The toolchain's capabilities (lib/toolchain-facts.nix), or null for
@@ -114,11 +116,15 @@
         "--trim-paths"
         trimPaths
       ]
-      ++ lib.optionals (clippyDriver != null) [
-        "--clippy-driver"
-        "${clippyDriver}"
+      ++ lib.optionals (rustcWrapper != null) [
+        "--rustc-wrapper"
+        "${rustcWrapper}"
       ]
-      ++ lib.optionals (clippyDriver != null && clippyOption != null) [
+      ++ lib.optionals (rustcWorkspaceWrapper != null) [
+        "--rustc-workspace-wrapper"
+        "${rustcWorkspaceWrapper}"
+      ]
+      ++ lib.optionals (mode == "clippy" && clippyOption != null) [
         "--clippy-option"
         clippyOption
       ]

@@ -1227,6 +1227,153 @@ string
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.variants.<name>.rustcWorkspaceWrapper`
+
+As ` rustcWrapper `, for workspace members only, as Cargo’s
+` build.rustc-workspace-wrapper ` (` RUSTC_WORKSPACE_WRAPPER `):
+Cargo starts ` [<rustcWrapper>] <wrapper> <rustc> ARGS… ` for
+members, so dependencies stay shared with a variant without
+it\. A clippy variant’s is clippy-driver; set this with
+` mode = "check" ` for another lint driver\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+"${my-lints}/bin/my-lint-driver"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.rustcWrapper`
+
+A program every rustc invocation of the variant goes through,
+as Cargo’s ` build.rustc-wrapper ` (` RUSTC_WRAPPER `): Cargo
+starts ` <wrapper> <rustc> ARGS… ` for every crate, dependencies,
+build scripts and its own queries (` rustc -vV `) included\. Use
+it for a rustc driver (a verifier, a model checker) that must
+see every crate, and set what it reads from the environment
+with ` cargoConfig.env ` (the queries too) or
+` packages.<name>.env ` (that package’s units)\. A path to an
+executable in the store; the units of every crate then depend
+on it\. It applies in every mode, and to every plan but the doc
+plan\. A unit’s derivation names the wrapper, so units are not
+shared with a variant without it\.
+
+When the wrapper is a rustc driver, it must be built for this
+rustc: a driver with its own sysroot makes the units name that
+sysroot’s crates, which instantiation rejects as undeclared
+inputs\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+"${verus}/bin/verus-driver"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.sideFiles`
+
+Where a unit puts the files a wrapper (` rustcWrapper `,
+` rustcWorkspaceWrapper `) writes into rustc’s output directory
+beyond the outputs: each rule sends a file whose name ends in
+` suffix ` ` into ` a place; the first matching rule wins, and a
+file no rule keeps is discarded\. A string is a rule with
+` into = "beside" `\. The debuginfo files rustc writes beside a
+linked output (` .pdb `, ` .dwp `, ` .dwo `, ` .dSYM `) are breakbulk’s
+own rules, into the ` debug ` output, ahead of these\.
+
+` beside ` is for files that a dependent’s compile reads: its
+rustc reaches a crate file through the dependency’s real path,
+in that output, so a driver that looks beside it finds the
+file there (Verus reads ` <stem>.vir ` beside each ` --extern ` and
+each crate it loads)\. The rules apply to the units a wrapper
+runs on; the others are a plain variant’s\.
+
+*Type:*
+list of ((submodule) or string convertible to it)
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  ".vir"
+]
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.sideFiles.*.into`
+
+` beside `: a file ` <stem><suffix> `, where ` <stem> ` is
+an output file’s name without its extension, goes
+into that file’s output beside it (into each, when
+an ` .rlib ` and an ` .rmeta ` share the stem)\. Any other
+value names a derivation output of the unit (` debug `
+on units that have one); a unit without it discards
+the file\.
+
+*Type:*
+string
+
+*Default:*
+
+```nix
+"beside"
+```
+
+*Example:*
+
+```nix
+"debug"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.sideFiles.*.suffix`
+
+The end of the file’s name\.
+
+*Type:*
+string
+
+*Example:*
+
+```nix
+".vir"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.variants.<name>.sourcePaths`
 
 This variant’s ` workspaces.<ws>.sourcePaths `\.

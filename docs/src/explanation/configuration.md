@@ -477,6 +477,12 @@ at the repository root, above the workspace, works with no setup.
 | What an edit rebuilds | | only the clippy units of members below the file |
 
 A `CLIPPY_CONF_DIR` you set in a package's `env` replaces breakbulk's.
+
+A clippy variant is a check variant with clippy-driver as Cargo's
+workspace wrapper. Any variant can set Cargo's wrappers itself
+(`rustcWrapper`, `rustcWorkspaceWrapper`) to run another rustc driver,
+and keep the files it writes beside each crate with `sideFiles`
+([Run a rustc driver](../how-to/rustc-driver.md)).
 `rustfmt.toml` needs nothing: no unit reads it, and the
 [`fmt` check](../reference/options/workspaces.md#workspacesnamefmtenable)
 already sees the rustfmt config files above the workspace.

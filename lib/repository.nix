@@ -1213,8 +1213,14 @@ let
       packages = memberConfigs wsName triple vName;
       inherit (cfg) ca;
       inherit nixFeatures;
-      inherit (v) mode clippyArgs;
-      clippyDriver = if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else null;
+      inherit (v)
+        mode
+        clippyArgs
+        rustcWrapper
+        sideFiles
+        ;
+      rustcWorkspaceWrapper =
+        if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else v.rustcWorkspaceWrapper;
       clippyOption = "workspaces.${wsName}.toolchain.clippy";
       bench = v.benches;
       docsNoDeps = ws.docs.noDeps;

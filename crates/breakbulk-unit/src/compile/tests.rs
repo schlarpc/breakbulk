@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::directives::LibraryPath;
-use crate::spec::{CrateInfo, Platform, Splice, SpliceKind};
+use crate::spec::{CrateInfo, Platform, Splice, SpliceKind, debug_side_files};
 use crate::test_util::TempDir;
 
 fn unit(args: &[&str]) -> RenderedCompile {
@@ -25,6 +25,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         cwd: "/nix/store/x-src".into(),
         outputs: BTreeMap::from([("bin".into(), vec!["app-1".into()])]),
         uplifted: BTreeMap::new(),
+        side_files: Vec::new(),
         deps: vec![],
         dep_manifests: vec![],
         link_manifest_crates: false,
@@ -257,7 +258,7 @@ fn outputs_are_moved() {
     ]);
     let root = t.path().to_owned();
     let dest = |o: &str| Ok(root.join(format!("drv-{o}")));
-    collect_outputs(&outputs, &BTreeMap::new(), &from, dest).unwrap();
+    collect_outputs(&outputs, &BTreeMap::new(), &[], &from, dest).unwrap();
     assert_eq!(
         std::fs::read_to_string(t.path().join("drv-rmeta/libx-1.rmeta")).unwrap(),
         "libx-1.rmeta"
@@ -272,15 +273,78 @@ fn outputs_are_moved() {
     ]);
     let root2 = t.path().join("second");
     let dest = |o: &str| Ok(root2.join(o));
-    collect_outputs(&outputs, &BTreeMap::new(), &from, dest).unwrap();
+    collect_outputs(&outputs, &BTreeMap::new(), &[], &from, dest).unwrap();
     assert!(t.path().join("second/out/stray.o").exists());
     assert!(t.path().join("second/rmeta").is_dir());
 
     let outputs = BTreeMap::from([("bin".to_owned(), vec!["app-1".to_owned()])]);
     let e =
-        collect_outputs(&outputs, &BTreeMap::new(), &from, |o| Ok(t.path().join(o))).unwrap_err();
+        collect_outputs(&outputs, &BTreeMap::new(), &[], &from, |o| Ok(t.path().join(o))).unwrap_err();
     assert!(e.0.contains("did not write `app-1`"), "{e}");
     assert!(e.0.contains("x-1.d"), "{e}");
+}
+
+fn beside(suffix: &str) -> SideFile {
+    SideFile {
+        suffix: suffix.to_owned(),
+        into: SideInto::Beside,
+    }
+}
+
+#[test]
+fn side_files_go_beside_their_crate_file() {
+    let t = TempDir::new("side-files");
+    let from = t.path().join("out");
+    std::fs::create_dir_all(&from).unwrap();
+    for f in [
+        "libx-1.rmeta",
+        "libx-1.rlib",
+        "libx-1.vir",
+        "libx-1-simple.vir",
+        "liby-2.vir",
+        "libx-1.other",
+    ] {
+        std::fs::write(from.join(f), f).unwrap();
+    }
+    let outputs = BTreeMap::from([
+        ("rmeta".to_owned(), vec!["libx-1.rmeta".to_owned()]),
+        ("rlib".to_owned(), vec!["libx-1.rlib".to_owned()]),
+    ]);
+    let root = t.path().join("drv");
+    collect_outputs(
+        &outputs,
+        &BTreeMap::new(),
+        &[beside(".vir")],
+        &from,
+        |o: &str| Ok(root.join(o)),
+    )
+    .unwrap();
+    // Into every output whose file has the stem: an rlib dependent finds
+    // it too.
+    for o in ["rmeta", "rlib"] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(o).join("libx-1.vir")).unwrap(),
+            "libx-1.vir"
+        );
+    }
+    // Another stem, or an extension not asked for, stays behind.
+    for o in ["rmeta", "rlib"] {
+        for f in ["libx-1-simple.vir", "liby-2.vir", "libx-1.other"] {
+            assert!(!root.join(o).join(f).exists(), "{o}/{f}");
+        }
+    }
+
+    // An uplifted file's side file takes its stored stem.
+    std::fs::write(from.join("my_app-1"), "bin").unwrap();
+    std::fs::write(from.join("my_app-1.vir"), "vir").unwrap();
+    let outputs = BTreeMap::from([("bin".to_owned(), vec!["my-app".to_owned()])]);
+    let uplifted = BTreeMap::from([("my-app".to_owned(), "my_app-1".to_owned())]);
+    let root = t.path().join("drv-bin");
+    collect_outputs(&outputs, &uplifted, &[beside(".vir")], &from, |o: &str| {
+        Ok(root.join(o))
+    })
+    .unwrap();
+    assert!(root.join("out/my-app.vir").is_file());
 }
 
 #[test]
@@ -297,7 +361,7 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     ]);
     let uplifted = BTreeMap::from([("my-app".to_owned(), "my_app-1".to_owned())]);
     let root = t.path().join("drv");
-    collect_outputs(&outputs, &uplifted, &from, |o: &str| Ok(root.join(o))).unwrap();
+    collect_outputs(&outputs, &uplifted, &debug_side_files(), &from, |o: &str| Ok(root.join(o))).unwrap();
     assert_eq!(
         std::fs::read_to_string(root.join("out/my-app")).unwrap(),
         "my_app-1"
@@ -307,7 +371,7 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     assert!(root.join("debug/my_app-1.dwp").exists());
     assert!(!from.join("my_app-1").exists());
 
-    let e = collect_outputs(&outputs, &uplifted, &from, |o: &str| Ok(root.join(o))).unwrap_err();
+    let e = collect_outputs(&outputs, &uplifted, &debug_side_files(), &from, |o: &str| Ok(root.join(o))).unwrap_err();
     assert!(e.0.contains("did not write `my_app-1`"), "{e}");
 }
 
@@ -332,7 +396,7 @@ fn debug_side_files_go_to_debug() {
     ]);
     let root = t.path().join("drv");
     let dest = |o: &str| Ok(root.join(o));
-    collect_outputs(&outputs, &BTreeMap::new(), &from, dest).unwrap();
+    collect_outputs(&outputs, &BTreeMap::new(), &debug_side_files(), &from, dest).unwrap();
     assert!(root.join("out/app.exe").exists());
     let mut debug: Vec<String> = std::fs::read_dir(root.join("debug"))
         .unwrap()
@@ -355,6 +419,7 @@ fn debug_side_files_go_to_debug() {
     collect_outputs(
         &outputs,
         &BTreeMap::new(),
+        &debug_side_files(),
         &from,
         |o: &str| Ok(root.join(o)),
     )
@@ -374,6 +439,7 @@ fn debug_side_files_go_to_debug() {
     collect_outputs(
         &outputs,
         &BTreeMap::new(),
+        &debug_side_files(),
         &from,
         |o: &str| Ok(root.join(o)),
     )

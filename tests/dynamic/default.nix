@@ -435,6 +435,9 @@ let
       ];
     };
     variants-coverage = products.coverageRepo;
+    # A toy rustc driver as rustc wrapper and as workspace wrapper, with
+    # the side files it writes kept beside each crate file.
+    variants-driver = products.driver;
     cargo-config = products.cargoConfigRepo;
     benches = products.benchesRepo;
     stdpaths = products.rustSrcRepo;

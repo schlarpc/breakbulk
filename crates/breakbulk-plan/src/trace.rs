@@ -42,11 +42,17 @@ pub struct Options {
     /// --all-targets` (test plan). Coverage's `-C instrument-coverage`
     /// comes in through `configs` like any spec rustflag.
     pub mode: VariantMode,
-    /// The clippy variant's `RUSTC_WORKSPACE_WRAPPER` (a clippy-driver
-    /// store path). Cargo then starts `shim clippy-driver rustc …` for
-    /// workspace members only.
-    pub clippy_driver: Option<String>,
-    /// The option that sets `clippy_driver`
+    /// The variant's rustc wrapper (Cargo's `build.rustc-wrapper`): a
+    /// program every rustc invocation goes through, `wrapper rustc ARGS…`.
+    /// The shim already is Cargo's wrapper, so it gets this one in
+    /// `BREAKBULK_RUSTC_WRAPPER` and puts it first in the chain.
+    pub rustc_wrapper: Option<String>,
+    /// The variant's workspace wrapper (Cargo's
+    /// `build.rustc-workspace-wrapper`), for workspace members only: Cargo
+    /// then starts `shim [wrapper] workspace-wrapper rustc …`. A clippy
+    /// variant's is clippy-driver.
+    pub rustc_workspace_wrapper: Option<String>,
+    /// The option that sets a clippy variant's workspace wrapper
     /// (`workspaces.<ws>.toolchain.clippy`), for the error when it does not
     /// match rustc.
     pub clippy_option: Option<String>,
@@ -132,7 +138,8 @@ impl Trace {
             nightly: self.nightly_features_allowed,
             executable_suffix: self.target_spec.exe_suffix.clone(),
             target_debuginfo: self.target_spec.debuginfo.clone(),
-            keep_workspace_wrapper: runs_clippy(opts),
+            keep_workspace_wrapper: runs_wrappers(opts) && opts.rustc_workspace_wrapper.is_some(),
+            rustc_wrapper: opts.rustc_wrapper.clone().filter(|_| runs_wrappers(opts)),
             config_env: project.applied_env(&cargo_env_names(opts)),
             rust_src_remap: self.rust_src_remap.clone(),
             trim_paths_default: opts.trim_paths_default,
@@ -160,20 +167,29 @@ fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
         ])
         .map(|k| (*k).to_owned())
         .collect();
-    if opts.clippy_driver.is_some() && runs_clippy(opts) {
-        names.insert("RUSTC_WORKSPACE_WRAPPER".into());
-        if !opts.clippy_args.is_empty() {
+    if runs_wrappers(opts) {
+        if opts.rustc_wrapper.is_some() {
+            names.insert(RUSTC_WRAPPER_ENV.into());
+        }
+        if opts.rustc_workspace_wrapper.is_some() {
+            names.insert("RUSTC_WORKSPACE_WRAPPER".into());
+        }
+        if opts.mode == VariantMode::Clippy && !opts.clippy_args.is_empty() {
             names.insert("CLIPPY_ARGS".into());
         }
     }
     names
 }
 
-/// Whether the trace runs clippy-driver as Cargo's workspace wrapper: a
-/// clippy variant's plans, but not its doc plan, whose members' check-mode
-/// units are then the check variant's, and whose docs a lint cannot fail.
-fn runs_clippy(opts: &Options) -> bool {
-    opts.mode == VariantMode::Clippy && opts.kind != PlanKind::Doc
+/// How the planner hands the shim the variant's rustc wrapper
+/// (`breakbulk-shim`'s `RUSTC_WRAPPER_ENV`).
+pub const RUSTC_WRAPPER_ENV: &str = "BREAKBULK_RUSTC_WRAPPER";
+
+/// Whether the trace runs the variant's wrappers: every plan but the doc
+/// plan, whose check-mode units rustdoc reads are then a plain check
+/// variant's, and whose docs neither a lint nor a verifier can fail.
+fn runs_wrappers(opts: &Options) -> bool {
+    opts.kind != PlanKind::Doc
 }
 
 /// Variables passed through from the planner's own environment.
@@ -551,9 +567,9 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .map_err(|e| Error(format!("writing {}: {e}", meta_path.display())))?;
     let metadata = Metadata::read(&meta_path)?;
 
-    if runs_clippy(opts) {
-        let Some(driver) = &opts.clippy_driver else {
-            bail!("the clippy variant needs --clippy-driver");
+    if opts.mode == VariantMode::Clippy && runs_wrappers(opts) {
+        let Some(driver) = &opts.rustc_workspace_wrapper else {
+            bail!("the clippy variant needs --rustc-workspace-wrapper (clippy-driver)");
         };
         check_clippy_driver(opts, driver)?;
     }
@@ -568,11 +584,14 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .args(common_args(opts, &config))
         .args(selection_args(opts))
         .env("BREAKBULK_RECORD", &record);
-    if let Some(driver) = &opts.clippy_driver
-        && runs_clippy(opts)
-    {
-        cmd.env("RUSTC_WORKSPACE_WRAPPER", driver);
-        if !opts.clippy_args.is_empty() {
+    if runs_wrappers(opts) {
+        if let Some(w) = &opts.rustc_wrapper {
+            cmd.env(RUSTC_WRAPPER_ENV, w);
+        }
+        if let Some(w) = &opts.rustc_workspace_wrapper {
+            cmd.env("RUSTC_WORKSPACE_WRAPPER", w);
+        }
+        if opts.mode == VariantMode::Clippy && !opts.clippy_args.is_empty() {
             let joined: String = opts
                 .clippy_args
                 .iter()

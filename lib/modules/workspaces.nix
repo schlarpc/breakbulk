@@ -153,11 +153,11 @@ let
         }
         {
           path = [ "build" "rustc-wrapper" ];
-          use = "the planner records every compile through its own wrapper";
+          use = "set the variant's `rustcWrapper`";
         }
         {
           path = [ "build" "rustc-workspace-wrapper" ];
-          use = "use a clippy variant (`mode = \"clippy\"`)";
+          use = "set the variant's `rustcWorkspaceWrapper`, or use a clippy variant (`mode = \"clippy\"`)";
         }
         {
           path = [ "build" "target-dir" ];
@@ -272,6 +272,10 @@ let
         {
           assertion = !(config.benches && checkMode);
           message = "breakbulk: ${at}${bt.setIn options.benches}: `benches` needs a build variant, not `${config.mode}`";
+        }
+        {
+          assertion = !(config.mode == "clippy" && config.rustcWorkspaceWrapper != null);
+          message = "breakbulk: ${at}${bt.setIn options.rustcWorkspaceWrapper}: a clippy variant's workspace wrapper is clippy-driver; for another, use `mode = \"check\"` with `rustcWorkspaceWrapper`";
         }
         {
           assertion = config.allTargets || checkMode;
@@ -434,6 +438,95 @@ let
             units clippy-driver compiles (workspace members), on both
             sides. A `CLIPPY_ARGS` in a package's `env` replaces them for
             that package's units.
+          '';
+        };
+        rustcWrapper = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = lib.literalExpression ''"''${verus}/bin/verus-driver"'';
+          description = ''
+            A program every rustc invocation of the variant goes through,
+            as Cargo's `build.rustc-wrapper` (`RUSTC_WRAPPER`): Cargo
+            starts `<wrapper> <rustc> ARGS…` for every crate, dependencies,
+            build scripts and its own queries (`rustc -vV`) included. Use
+            it for a rustc driver (a verifier, a model checker) that must
+            see every crate, and set what it reads from the environment
+            with `cargoConfig.env` (the queries too) or
+            `packages.<name>.env` (that package's units). A path to an
+            executable in the store; the units of every crate then depend
+            on it. It applies in every mode, and to every plan but the doc
+            plan. A unit's derivation names the wrapper, so units are not
+            shared with a variant without it.
+
+            When the wrapper is a rustc driver, it must be built for this
+            rustc: a driver with its own sysroot makes the units name that
+            sysroot's crates, which instantiation rejects as undeclared
+            inputs.
+          '';
+        };
+        rustcWorkspaceWrapper = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = lib.literalExpression ''"''${my-lints}/bin/my-lint-driver"'';
+          description = ''
+            As `rustcWrapper`, for workspace members only, as Cargo's
+            `build.rustc-workspace-wrapper` (`RUSTC_WORKSPACE_WRAPPER`):
+            Cargo starts `[<rustcWrapper>] <wrapper> <rustc> ARGS…` for
+            members, so dependencies stay shared with a variant without
+            it. A clippy variant's is clippy-driver; set this with
+            `mode = "check"` for another lint driver.
+          '';
+        };
+        sideFiles = mkOption {
+          type = types.listOf (
+            types.coercedTo types.str (suffix: { inherit suffix; }) (
+              types.submodule {
+                options = {
+                  suffix = mkOption {
+                    type = types.str;
+                    example = ".vir";
+                    description = "The end of the file's name.";
+                  };
+                  into = mkOption {
+                    type = types.str;
+                    default = "beside";
+                    example = "debug";
+                    description = ''
+                      `beside`: a file `<stem><suffix>`, where `<stem>` is
+                      an output file's name without its extension, goes
+                      into that file's output beside it (into each, when
+                      an `.rlib` and an `.rmeta` share the stem). Any other
+                      value names a derivation output of the unit (`debug`
+                      on units that have one); a unit without it discards
+                      the file.
+                    '';
+                  };
+                };
+              }
+            )
+          );
+          default = [ ];
+          example = [ ".vir" ];
+          apply = map (r: {
+            inherit (r) suffix;
+            into = if r.into == "beside" then "beside" else { output = r.into; };
+          });
+          description = ''
+            Where a unit puts the files a wrapper (`rustcWrapper`,
+            `rustcWorkspaceWrapper`) writes into rustc's output directory
+            beyond the outputs: each rule sends a file whose name ends in
+            `suffix` `into` a place; the first matching rule wins, and a
+            file no rule keeps is discarded. A string is a rule with
+            `into = "beside"`. The debuginfo files rustc writes beside a
+            linked output (`.pdb`, `.dwp`, `.dwo`, `.dSYM`) are breakbulk's
+            own rules, into the `debug` output, ahead of these.
+
+            `beside` is for files that a dependent's compile reads: its
+            rustc reaches a crate file through the dependency's real path,
+            in that output, so a driver that looks beside it finds the
+            file there (Verus reads `<stem>.vir` beside each `--extern` and
+            each crate it loads). The rules apply to the units a wrapper
+            runs on; the others are a plain variant's.
           '';
         };
         targets = mkOption {
