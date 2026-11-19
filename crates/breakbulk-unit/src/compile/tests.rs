@@ -278,8 +278,10 @@ fn outputs_are_moved() {
     assert!(t.path().join("second/rmeta").is_dir());
 
     let outputs = BTreeMap::from([("bin".to_owned(), vec!["app-1".to_owned()])]);
-    let e =
-        collect_outputs(&outputs, &BTreeMap::new(), &[], &from, |o| Ok(t.path().join(o))).unwrap_err();
+    let e = collect_outputs(&outputs, &BTreeMap::new(), &[], &from, |o| {
+        Ok(t.path().join(o))
+    })
+    .unwrap_err();
     assert!(e.0.contains("did not write `app-1`"), "{e}");
     assert!(e.0.contains("x-1.d"), "{e}");
 }
@@ -361,7 +363,14 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     ]);
     let uplifted = BTreeMap::from([("my-app".to_owned(), "my_app-1".to_owned())]);
     let root = t.path().join("drv");
-    collect_outputs(&outputs, &uplifted, &debug_side_files(), &from, |o: &str| Ok(root.join(o))).unwrap();
+    collect_outputs(
+        &outputs,
+        &uplifted,
+        &debug_side_files(),
+        &from,
+        |o: &str| Ok(root.join(o)),
+    )
+    .unwrap();
     assert_eq!(
         std::fs::read_to_string(root.join("out/my-app")).unwrap(),
         "my_app-1"
@@ -371,7 +380,14 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     assert!(root.join("debug/my_app-1.dwp").exists());
     assert!(!from.join("my_app-1").exists());
 
-    let e = collect_outputs(&outputs, &uplifted, &debug_side_files(), &from, |o: &str| Ok(root.join(o))).unwrap_err();
+    let e = collect_outputs(
+        &outputs,
+        &uplifted,
+        &debug_side_files(),
+        &from,
+        |o: &str| Ok(root.join(o)),
+    )
+    .unwrap_err();
     assert!(e.0.contains("did not write `my_app-1`"), "{e}");
 }
 

@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{append, list_separator};
 use breakbulk_unit::spec::{
-    RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, RepositoryPath, SideFile,
-    SourceView, debug_side_files,
+    RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, RepositoryPath, SideFile, SourceView,
+    debug_side_files,
 };
 
 use crate::deps::Graph;
@@ -525,7 +525,12 @@ pub fn render_unit_in<R: Resolve>(
                     .then(debug_side_files)
                     .into_iter()
                     .flatten()
-                    .chain((c.program.len() > 1).then(|| r.side_files()).into_iter().flatten())
+                    .chain(
+                        (c.program.len() > 1)
+                            .then(|| r.side_files())
+                            .into_iter()
+                            .flatten(),
+                    )
                     .collect(),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,
