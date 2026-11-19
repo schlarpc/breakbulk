@@ -215,7 +215,7 @@ fn deps_directory() {
     let deps = t.path().join("deps");
     let x = a.join("libx-1.rmeta").display().to_string();
     let y = b.join("liby-1.rlib").display().to_string();
-    link_deps(&[x.clone(), y.clone(), x.clone()], &deps).unwrap();
+    link_deps(&[x.clone(), y.clone(), x.clone()], &[], &deps).unwrap();
     assert_eq!(
         std::fs::read_to_string(deps.join("libx-1.rmeta")).unwrap(),
         "x"
@@ -225,23 +225,46 @@ fn deps_directory() {
         "y"
     );
     // Recreated from scratch.
-    link_deps(std::slice::from_ref(&y), &deps).unwrap();
+    link_deps(std::slice::from_ref(&y), &[], &deps).unwrap();
     assert!(!deps.join("libx-1.rmeta").exists());
     // Same name, different files.
     let x2 = b.join("libx-1.rmeta").display().to_string();
     assert!(
-        link_deps(&[x, x2], &deps)
+        link_deps(&[x, x2], &[], &deps)
             .unwrap_err()
             .0
             .contains("two dependencies")
     );
     let missing = t.path().join("gone.rlib").display().to_string();
     assert!(
-        link_deps(&[missing], &deps)
+        link_deps(&[missing], &[], &deps)
             .unwrap_err()
             .0
             .contains("does not exist")
     );
+}
+
+#[test]
+fn deps_directory_links_side_files() {
+    let t = TempDir::new("deps-side");
+    let a = t.path().join("a");
+    std::fs::create_dir_all(&a).unwrap();
+    for f in ["libx-1.rmeta", "libx-1.rlib", "libx-1.vir", "libx-1.other"] {
+        std::fs::write(a.join(f), f).unwrap();
+    }
+    let deps = t.path().join("deps");
+    let crates = ["libx-1.rmeta", "libx-1.rlib"].map(|f| a.join(f).display().to_string());
+    link_deps(&crates, &[".vir"], &deps).unwrap();
+    // Once, though both crate files have the stem.
+    assert_eq!(
+        std::fs::read_to_string(deps.join("libx-1.vir")).unwrap(),
+        "libx-1.vir"
+    );
+    assert!(!deps.join("libx-1.other").exists());
+    // A crate without a side file links without one.
+    std::fs::remove_file(a.join("libx-1.vir")).unwrap();
+    link_deps(&crates, &[".vir"], &deps).unwrap();
+    assert!(!deps.join("libx-1.vir").exists());
 }
 
 #[test]

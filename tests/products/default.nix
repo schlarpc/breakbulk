@@ -122,8 +122,10 @@
 #                    `--extern`'s real path) as `rustcWrapper` with
 #                    `sideFiles = [ ".side" ]`: app's side file carries
 #                    lib-a's, which carries hostdep's, and the proc
-#                    macro's; hostdep's build-script run gets it as
-#                    RUSTC_WRAPPER; as `rustcWorkspaceWrapper`, dependency units
+#                    macro's, and finds every crate's side file beside
+#                    its link in the dependency directory; hostdep's
+#                    build-script run gets it as RUSTC_WRAPPER; as
+#                    `rustcWorkspaceWrapper`, dependency units
 #                    are the check variant's and only members get side
 #                    files; a clippy variant refuses a workspace wrapper
 #   variants-clippy-conf   clippy units find `clippy.toml` above the
@@ -773,12 +775,15 @@ let
 
   # A toy rustc driver (see variants-driver): runs rustc, then writes
   # `lib<crate><extra>.side` beside the metadata rustc wrote, naming the
-  # crate and, for each `--extern`, the side file beside its real path.
+  # crate and, for each `--extern`, the side file beside its real path;
+  # and, for each crate file in the `-L dependency=` directory, whether a
+  # side file is beside it there, symlinks unresolved (where rustc says it
+  # loaded a crate from, for Verus's transitive imports).
   toyDriver = pkgs.writeShellScript "toy-driver" ''
     set -eu
     rustc=$1
     shift
-    out= name= extra= next=
+    out= name= extra= next= depdir=
     externs=()
     for a in "$@"; do
       case $next in
@@ -786,6 +791,7 @@ let
         name) name=$a ;;
         extern) externs+=("$a") ;;
         codegen) case $a in extra-filename=*) extra=''${a#extra-filename=} ;; esac ;;
+        search) case $a in dependency=*) depdir=''${a#dependency=} ;; esac ;;
       esac
       next=
       case $a in
@@ -793,6 +799,7 @@ let
         --crate-name) next=name ;;
         --extern) next=extern ;;
         -C) next=codegen ;;
+        -L) next=search ;;
       esac
     done
     "$rustc" "$@"
@@ -809,6 +816,15 @@ let
           ${pkgs.gnused}/bin/sed 's/^/  /' "$side"
         else
           echo "extern ''${e%%=*}: none"
+        fi
+      done
+      for c in "$depdir"/*.rmeta "$depdir"/*.rlib "$depdir"/*.so; do
+        [ -e "$c" ] || continue
+        c=''${c##*/}
+        if [ -e "$depdir/''${c%.*}.side" ]; then
+          echo "dep ''${c%.*}: side"
+        else
+          echo "dep ''${c%.*}: none"
         fi
       done
     } > "$out/lib$name$extra.side"
@@ -2098,10 +2114,16 @@ in
         side $app | grep -qx '    hostdep'
         side $app | grep -qx 'extern pm:'
         side $libA | grep -qx 'extern hostdep:'
+        # hostdep, below app only through lib-a: its side file is beside
+        # its crate file in app's dependency directory too.
+        side $app | grep -qx 'dep libhostdep-[0-9a-f]*: side'
+        side $app | grep -qx 'dep liblib_a-[0-9a-f]*: side'
+        ! side $app | grep -q '^dep .*: none'
         # Beside the crate file, under its stem.
         for f in $libA/*.rmeta; do [ -e "''${f%.rmeta}.side" ]; done
         # Members only: dependencies keep nothing, so members find none.
         side $memberApp | grep -qx '  extern hostdep: none'
+        side $memberApp | grep -qx 'dep libhostdep-[0-9a-f]*: none'
         # (stdenv's nullglob: a glob that matches nothing is no argument.)
         [ -z "$(find $hostdep $checkLibA -name '*.side')" ]
         touch $out

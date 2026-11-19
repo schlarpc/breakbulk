@@ -44,7 +44,8 @@ set up the same home in their own derivation
    `NUM_JOBS` with `$NIX_BUILD_CORES`.
 2. Build a dependency directory (details below): `$TMPDIR/deps`, with
    symlinks to the crate files of every transitive dependency (`rmeta`
-   for units that do not link, `rlib` for units that do). Pass one
+   for units that do not link, `rlib` for units that do), and to the side
+   files next to them that the unit's `beside` rules name. Pass one
    `-L dependency=$TMPDIR/deps`.
 3. Expand splice points from each referenced run's `flags` output, using
    the [sentinel table](sentinels.md) and the
@@ -105,6 +106,13 @@ source view, or in the crate source.
 `$TMPDIR/deps` replaces Cargo's single shared `deps` directory (classic
 layout) or its one `-L dependency=` per dependency (new layout), and keeps
 argv short.
+
+rustc records a crate it loads from here under the link's path, not the
+real one. So next to each crate file's link, the directory also links
+each side file of the same stem that a
+[`sideFiles`](options/workspaces.md#workspacesnamevariantsnamesidefiles)
+rule with `into = "beside"` names, when the dependency's output has one.
+A driver that looks beside a loaded crate (Verus's `.vir`) finds it.
 
 - **Libraries name only their direct dependencies.** Each library's `rmeta`
   output holds a manifest, `breakbulk-deps.json`, naming:

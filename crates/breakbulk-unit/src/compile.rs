@@ -3,7 +3,8 @@
 //! 1. Set up the environment contract ([`crate::env`]).
 //! 2. Symlink every dependency's crate file into `$TMPDIR/deps` (those the
 //!    unit lists, and those its dependencies' manifests name; see
-//!    [`crate::manifest`]) and pass it as the one `-L dependency=`.
+//!    [`crate::manifest`]), with the side files the unit's `beside` rules
+//!    keep next to them, and pass it as the one `-L dependency=`.
 //! 3. Expand splice points from the referenced runs' `flags` outputs.
 //! 4. Add path remapping (`--remap-path-prefix`, `--remap-path-scope`).
 //! 5. Point `--out-dir` at `$TMPDIR/out` and run the program.
@@ -174,8 +175,13 @@ pub fn invocation(
     })
 }
 
-/// Create `dir` afresh, holding a symlink to each dependency file.
-pub fn link_deps(deps: &[String], dir: &Path) -> Result<(), Error> {
+/// Create `dir` afresh, holding a symlink to each dependency file, and to
+/// each file beside it whose name is its stem and one of `beside` (the
+/// unit's [`SideInto::Beside`] suffixes). rustc records a crate it finds
+/// here under this directory's path, not the real one, and a driver
+/// that looks beside a loaded crate (Verus's `<stem>.vir`, through
+/// `used_crate_source`) looks here.
+pub fn link_deps(deps: &[String], beside: &[&str], dir: &Path) -> Result<(), Error> {
     fresh_dir(dir)?;
     let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
     for d in deps {
@@ -196,8 +202,26 @@ pub fn link_deps(deps: &[String], dir: &Path) -> Result<(), Error> {
             return Err(Error(format!("dependency {d} does not exist")));
         }
         symlink(path, &dir.join(name))?;
+        let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+        for suffix in beside {
+            let side = format!("{stem}{suffix}");
+            let (from, to) = (path.with_file_name(&side), dir.join(&side));
+            // An rlib and an rmeta of one crate share the stem.
+            if from.exists() && to.symlink_metadata().is_err() {
+                symlink(&from, &to)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// The suffixes of a unit's [`SideInto::Beside`] rules, for [`link_deps`].
+pub fn beside_suffixes(side_files: &[SideFile]) -> Vec<&str> {
+    side_files
+        .iter()
+        .filter(|r| r.into == SideInto::Beside)
+        .map(|r| r.suffix.as_str())
+        .collect()
 }
 
 #[cfg(unix)]
@@ -461,7 +485,11 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     let below = manifest::walk(&c.dep_manifests)?;
     let directives = load_directives(c)?;
     let inv = invocation(c, outer, &directives, &dirs)?;
-    link_deps(&all_deps(c, &below), &dirs.deps)?;
+    link_deps(
+        &all_deps(c, &below),
+        &beside_suffixes(&c.side_files),
+        &dirs.deps,
+    )?;
     fresh_dir(&dirs.out)?;
     run_rustc(&inv, &c.krate.name, &|text| {
         let mut hints = view_hints::hints(

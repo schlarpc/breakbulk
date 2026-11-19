@@ -531,10 +531,12 @@ pub enum SideInto {
     /// Beside a listed file: `<stem><suffix>`, where `<stem>` is a listed
     /// file's name without its extension, goes into that file's output
     /// (each of them, when an `rlib` and an `rmeta` share the stem), under
-    /// its stored stem. A dependent finds it there with no list of its
-    /// own: rustc and the drivers built on it resolve a crate file to its
-    /// real path, in the dependency's output, and look beside it (Verus's
-    /// `.vir` beside the `.rmeta`).
+    /// its stored stem. A dependent's compile sees it beside the crate
+    /// file wherever it sees the crate file: at its real path, in that
+    /// output, and in the dependency directory, where `breakbulk-unit`
+    /// links it beside the crate file's link (`compile::link_deps`).
+    /// Verus reads a `.vir` beside each `--extern`'s real path and beside
+    /// the path rustc loaded each other crate from, the link.
     Beside,
     /// Into this derivation output, under the program's name, when the
     /// unit has that output; otherwise the file is discarded.

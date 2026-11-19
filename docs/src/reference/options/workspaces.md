@@ -1303,11 +1303,14 @@ file no rule keeps is discarded\. A string is a rule with
 linked output (` .pdb `, ` .dwp `, ` .dwo `, ` .dSYM `) are breakbulk’s
 own rules, into the ` debug ` output, ahead of these\.
 
-` beside ` is for files that a dependent’s compile reads: its
-rustc reaches a crate file through the dependency’s real path,
-in that output, so a driver that looks beside it finds the
-file there (Verus reads ` <stem>.vir ` beside each ` --extern ` and
-each crate it loads)\. The rules apply to the units a wrapper
+` beside ` is for files that a dependent’s compile reads: the
+file is beside the crate file both in the dependency’s output
+and in a dependent’s dependency directory (` -L dependency= `),
+where breakbulk links it next to the crate file’s link\. So a
+driver finds it beside the path it gets a crate by, whether
+it resolves symlinks or not (Verus reads ` <stem>.vir ` beside
+each ` --extern `’s real path, and beside the path rustc loaded
+each other crate from)\. The rules apply to the units a wrapper
 runs on; the others are a plain variant’s\.
 
 *Type:*

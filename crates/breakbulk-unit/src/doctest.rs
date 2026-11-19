@@ -301,7 +301,7 @@ pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
     let deps = outer.tmpdir().join("deps");
     let directives = load_directives(d)?;
     let inv = invocation(d, outer, &directives, &config, &deps)?;
-    link_deps(&d.compile.deps, &deps)?;
+    link_deps(&d.compile.deps, &[], &deps)?;
     let home = outer.test_home();
     std::fs::create_dir_all(&home).map_err(|e| io_err("creating", &home, e))?;
     let out = outer.output("out")?;

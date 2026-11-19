@@ -64,10 +64,13 @@ file of the same stem:
 sideFiles = [ ".vir" ];   # lib<crate>-<hash>.vir beside lib<crate>-<hash>.rmeta
 ```
 
-A dependent's rustc finds a dependency's crate file by its real path,
-which is in that dependency's output. A driver that looks beside that
-path (Verus does) finds the side file there, with no extra setup. The
-rules apply only to units that a wrapper runs on.
+The side file is in the dependency's output, beside the crate file. A
+dependent's compile sees crates through links in its dependency
+directory (`-L dependency=`), and breakbulk links the side file next to
+the crate file's link there too. A driver that looks beside a crate file
+finds the side file either way: beside the real path, or beside the path
+rustc loaded the crate from. The rules apply only to units that a
+wrapper runs on.
 
 ## Verus
 
@@ -84,7 +87,8 @@ variables that `cargo verus` computes from `cargo metadata`:
 
 The driver writes `<stem>.vir` beside the crate's `.rmeta`. It reads a
 dependency's `.vir` beside the real path of each `--extern`, and beside
-each crate it loads. A variant for it looks like this:
+the path rustc loaded each other verified crate from, which is its link
+in the dependency directory. A variant for it looks like this:
 
 ```nix
 workspaces.main.variants.verus = {

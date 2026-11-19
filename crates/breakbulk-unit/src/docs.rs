@@ -109,7 +109,7 @@ pub fn docs(d: &RenderedDocs, outer: &Outer) -> Result<(), Error> {
         let deps = outer.tmpdir().join(format!("deps-{i}"));
         let directives = load_directives(c)?;
         let inv = invocation(c, outer, &directives, &deps, &out)?;
-        link_deps(&c.deps, &deps)?;
+        link_deps(&c.deps, &[], &deps)?;
         let own = out.join(&c.krate.name);
         if own.symlink_metadata().is_ok() {
             std::fs::remove_dir_all(&own).map_err(|e| io_err("removing", &own, e))?;
