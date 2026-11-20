@@ -202,6 +202,7 @@ the unit's triple and variant:
 | Layer | Applies to |
 | --- | --- |
 | [`sysDefaults.packages.<name>`](../reference/options/repository.md#sysdefaultspackages) | curated `-sys` crates, where a package set exists |
+| [`sysDefaults.dependents.<name>`](../reference/options/repository.md#sysdefaultsdependents) | the path packages that depend on the crate `<name>` |
 | `workspaces.<ws>.memberDefaults` | the workspace's path packages |
 | `packages.<name>` | that package, in every workspace |
 
@@ -223,6 +224,26 @@ nixpkgs package set. They declare tools and libraries only. Switches that make a
 system library instead of its bundled copy
 (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so
 they are left to you.
+
+Some crates need settings in the packages that use them, not in their
+own units. [`sysDefaults.dependents`](../reference/options/repository.md#sysdefaultsdependents)
+holds those, by the crate's name. A member gets them when it depends on
+the crate, directly or through other crates, by any kind of dependency
+in `Cargo.lock`. The one curated entry is `insta`, for
+[snapshot tests](../how-to/snapshot-tests.md#insta).
+
+A value in `test.env` (and in `test.binaries.<key>.env` and
+`test.doctest.env`) can be a function of the run, `run: …`. The run
+gives facts that only breakbulk knows, such as `run.workspaceRoot`, the
+workspace's root directory in the files the run reads. The function is
+called separately for each package, and for each kind of run: a test
+run, a doctest, a test app. So one `memberDefaults` value is right for
+members at any depth:
+
+```nix
+workspaces.main.memberDefaults.test.env.FIXTURES =
+  { workspaceRoot, ... }: "${workspaceRoot}/fixtures";
+```
 
 ### How inputs become environment
 

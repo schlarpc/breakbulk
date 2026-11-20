@@ -14,7 +14,7 @@ says what each library needs there.
 | snapbox (`file![…]`, `str![…]`) | `CARGO_RUSTC_CURRENT_DIR` at compile time, when the project sets it in `[env]`; otherwise the topmost directory above the compile's `CARGO_MANIFEST_DIR` that has a `Cargo.toml` | works |
 | trycmd | case files relative to the working directory | works |
 | expect-test (`expect_file![…]`) | `CARGO_WORKSPACE_DIR` at run time; otherwise the topmost directory above the run's `CARGO_MANIFEST_DIR` that has a `Cargo.toml` | works |
-| insta | `INSTA_WORKSPACE_ROOT` at run time, then at compile time; otherwise `cargo metadata --no-deps` in the package directory | needs a setting, [below](#insta) |
+| insta | `INSTA_WORKSPACE_ROOT` at run time, then at compile time; otherwise `cargo metadata --no-deps` in the package directory | works, with a curated default, [below](#insta) |
 
 snapbox and expect-test work because every member's test units and test
 runs see the workspace's root `Cargo.toml`
@@ -37,27 +37,29 @@ or for one package with `packages.<name>.test.workspaceManifest = false`.
 
 insta runs `cargo metadata` to find the workspace root. That fails in a
 view, because Cargo wants every member of the workspace, and the view
-holds only the package. insta then uses the package directory, finds no
-snapshot, and tries to write a new one into the store, which fails with
+holds only the package. insta would then use the package directory, find
+no snapshot, and try to write a new one into the store, which fails with
 `Permission denied`.
 
-Set the root for the package's test runs, and tell insta not to write:
+So every member that depends on insta gets two variables in its test
+runs and doctests, from the curated
+[`sysDefaults.dependents.insta`](../reference/options/repository.md#sysdefaultsdependents):
 
-```nix
-packages.my-crate.test.env = {
-  INSTA_WORKSPACE_ROOT = "../..";
-  INSTA_UPDATE = "no";
-};
-```
-
-- `INSTA_WORKSPACE_ROOT` is the workspace root, relative to the package
-  directory, where the test runs. For a package at `crates/my-crate` it is
-  `../..`; for a package at the workspace root it is `.`. So set it per
-  package, or in `memberDefaults` only when every member is at the same
-  depth. breakbulk has no value yet that names the view's workspace root
-  for you.
+- `INSTA_WORKSPACE_ROOT`: the workspace root in the files the run reads.
+  That is the test view, or the narrower "run" view with
+  [`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles),
+  or your checkout for a test app with `checkout`.
 - `INSTA_UPDATE = "no"`: on a mismatch, insta prints the diff and the test
   fails. Without it, insta also tries to write a `.snap.new` file.
+
+The value of `INSTA_WORKSPACE_ROOT` is a function of the run,
+`run: run.workspaceRoot`. You can use the same form for any other
+variable in `test.env`. To set your own values, set the variables in
+`test.env`, which wins over the default. To turn the default off:
+
+```nix
+sysDefaults.dependents.insta = null;
+```
 
 ## Keep snapshot files test-only
 

@@ -291,6 +291,35 @@ let
   # use it as their working directory and runtime CARGO_MANIFEST_DIR.
   runDirs = lib.mapAttrs (_: v: v.runDir) views;
 
+  # `packages` with the function values of their test env applied
+  # (testRuns.resolveTestEnv) for one kind of run. `filesOf` gives the
+  # files such a run of a package reads, from the package's views, and
+  # `workspaceRoot` is the package's Cargo workspace root in them: this
+  # workspace's for a member; for a path package outside it, the
+  # workspace it belongs to, else its own directory. Test runs read the
+  # "run" view, doctests and test apps the test view, a test app with
+  # `checkout` the checkout. A package outside the workspace has only its
+  # "build" view, which its test units read.
+  closureWsRoots = (skeleton.packageClosure { inherit root wsDir; }).wsRootOf;
+  testEnvIn =
+    filesOf:
+    testRuns.resolveTestEnv (
+      lib.mapAttrs' (
+        dir: v:
+        let
+          d = if views ? ${v.name} then wsDir else closureWsRoots.${dir} or null;
+          rel = if d == null then dir else d;
+        in
+        lib.nameValuePair v.name {
+          workspaceRoot = if rel == "" then filesOf v else "${filesOf v}/${rel}";
+        }
+      ) allViews
+    ) packages;
+  runPackages = testEnvIn (v: "${v.runSrc or v.src}");
+  viewPackages = testEnvIn (v: "${v.testSrc or v.src}");
+  appPackages =
+    if checkout == null then viewPackages else testEnvIn (_: lib.removeSuffix "/" (toString checkout));
+
   # What the toolchain can do (lib/toolchain-facts.nix), with the
   # toolchain's own overrides: the one place the planner's and
   # breakbulk-instantiate's capabilities come from.
@@ -636,7 +665,8 @@ let
             lib.mapAttrs (
               pkg: _:
               testRuns.doctestConfig {
-                inherit pkgs packages runner;
+                inherit pkgs runner;
+                packages = viewPackages;
                 hostRunner = hostTest.runner;
               } pkg
             ) predictedDoctests
@@ -735,7 +765,6 @@ let
       target
       runner
       testSystem
-      packages
       runDirs
       ca
       nixFeatures
@@ -744,6 +773,8 @@ let
       ;
     dylibPath = testDylibPath;
     host = hostTest;
+    packages = runPackages;
+    doctestPackages = viewPackages;
     inst = tested;
     coverage = mode == "coverage";
     tools = testRunTools;
@@ -779,6 +810,8 @@ in
   };
   sources = {
     workspace = lib.mapAttrs (_: v: v.src) allViews;
+    # The tested members' test views, by directory.
+    workspaceTest = lib.mapAttrs (_: v: v.testSrc) (lib.filterAttrs (_: v: v ? testSrc) allViews);
     inherit crates;
   };
   roots = built.roots;
@@ -867,7 +900,7 @@ in
         name = "${name}-bench";
         packages = lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots))) (
           pkg: {
-            test = (packages.${pkg}.test or { }) // {
+            test = (runPackages.${pkg}.test or { }) // {
               args = [ "--test" ];
               includeIgnored = false;
               binaries = { };
@@ -885,9 +918,9 @@ in
     inherit
       pkgs
       checkout
-      packages
       name
       ;
+    packages = appPackages;
     testRuns = tr;
   };
   inherit (tr) doctests checks;

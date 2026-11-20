@@ -669,13 +669,20 @@ list of string
 
 Environment for this test binary’s run, over ` test.env `\.
 
+A value can also be a function of the run, ` run: … `, with
+` run.workspaceRoot `: the absolute path of the workspace’s root
+directory in the files the run sees (its source view, or the checkout
+for a test app with ` checkout `)\. For example
+` INSTA_WORKSPACE_ROOT = run: run.workspaceRoot; `\. More attributes may
+be added, so take them with ` { workspaceRoot, ... } `\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
 
 *Default:*
 
@@ -808,13 +815,20 @@ list of string
 
 Environment for the package’s doctest run, over ` test.env `\.
 
+A value can also be a function of the run, ` run: … `, with
+` run.workspaceRoot `: the absolute path of the workspace’s root
+directory in the files the run sees (its source view, or the checkout
+for a test app with ` checkout `)\. For example
+` INSTA_WORKSPACE_ROOT = run: run.workspaceRoot; `\. More attributes may
+be added, so take them with ` { workspaceRoot, ... } `\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
 
 *Default:*
 
@@ -848,13 +862,20 @@ a fresh, empty ` HOME ` in their temporary directory by default;
 ` HOME = "/homeless-shelter" ` makes a test that writes to its home
 fail, as compiles and build-script runs do\.
 
+A value can also be a function of the run, ` run: … `, with
+` run.workspaceRoot `: the absolute path of the workspace’s root
+directory in the files the run sees (its source view, or the checkout
+for a test app with ` checkout `)\. For example
+` INSTA_WORKSPACE_ROOT = run: run.workspaceRoot; `\. More attributes may
+be added, so take them with ` { workspaceRoot, ... } `\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
 
 *Default:*
 

@@ -86,6 +86,25 @@ rec {
     else
       v;
 
+  # A test-run environment value: an env value, or a function of the
+  # run's facts (`{ workspaceRoot, ... }`) that returns one. The facts are
+  # known only per run (lib/test-runs.nix resolveTestEnv), so the function
+  # is kept until then.
+  testEnvValue = types.either envValue (types.functionTo envValue);
+  testEnvAttrs = types.lazyAttrsOf testEnvValue;
+
+  # An env value as the string a run sees, keeping a function a function.
+  testEnvString = v: if lib.isFunction v then facts: envString (v facts) else envString v;
+
+  testEnvNote = ''
+    A value can also be a function of the run, `run: …`, with
+    `run.workspaceRoot`: the absolute path of the workspace's root
+    directory in the files the run sees (its source view, or the checkout
+    for a test app with `checkout`). For example
+    `INSTA_WORKSPACE_ROOT = run: run.workspaceRoot;`. More attributes may
+    be added, so take them with `{ workspaceRoot, ... }`.
+  '';
+
   # What `envAttrs` and `inputs` being lazy means for `lib.mkIf`, for the
   # texts of their options.
   envNote = ''
@@ -106,6 +125,14 @@ rec {
       type = envAttrs;
       default = { };
       description = description + "\n\n" + envNote;
+    };
+
+  mkTestEnv =
+    description:
+    mkOption {
+      type = testEnvAttrs;
+      default = { };
+      description = description + "\n\n" + testEnvNote + "\n" + envNote;
     };
 
   mkInputs =

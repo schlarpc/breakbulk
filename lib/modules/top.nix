@@ -1,17 +1,24 @@
 # Repository-wide options: delivery mode, source strictness, fetching,
-# and the curated defaults for -sys crates (lib/sys-defaults.nix).
+# and the curated defaults for -sys crates (lib/sys-defaults.nix) and for
+# the dependents of crates (lib/sys-defaults-dependents.nix).
 { lib, config, ... }:
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
   settings = (import ./package-settings.nix { inherit lib; }).settings;
   curated = import ../sys-defaults.nix { inherit lib; };
+  curatedDependents = import ../sys-defaults-dependents.nix { inherit lib; };
   gates = import ../nix-features.nix { inherit lib; };
 in
 {
-  config.sysDefaults.packages = lib.mkIf config.sysDefaults.enable (
-    lib.mapAttrs (_: v: lib.mkDefault (if builtins.isFunction v then v else _: v)) curated
-  );
+  config.sysDefaults =
+    let
+      define = lib.mapAttrs (_: v: lib.mkDefault (if builtins.isFunction v then v else _: v));
+    in
+    {
+      packages = lib.mkIf config.sysDefaults.enable (define curated);
+      dependents = lib.mkIf config.sysDefaults.enable (define curatedDependents);
+    };
 
   options = {
     mode = mkOption {
@@ -181,6 +188,37 @@ in
         The curated entries are defined at `mkDefault` priority, so a
         plain definition replaces one: `null` turns it off, a function
         replaces it. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curated)}.
+      '';
+    };
+
+    sysDefaults.dependents = mkOption {
+      type = types.attrsOf (types.nullOr (types.functionTo (types.submodule settings)));
+      default = { };
+      # The result has the options of `packages.<name>`, documented there.
+      visible = "shallow";
+      example = lib.literalExpression ''
+        {
+          insta = null;  # no INSTA_* variables in test runs
+          my-fixtures = _: { test.env.FIXTURES = run: "''${run.workspaceRoot}/fixtures"; };
+        }
+      '';
+      description = ''
+        Default settings for the workspace members that depend on a
+        crate, by the crate's name: a function of the crate's lockfile
+        entry (`{ name, version, ... }`) that returns settings with the
+        options of `packages.<name>`. They apply to every path package of
+        a workspace whose `Cargo.lock` has the crate among its
+        dependencies of any kind (dev-dependencies too), directly or
+        through other crates. They are a layer over `sysDefaults.packages`
+        and under `memberDefaults`
+        ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)).
+
+        The curated entries are defined at `mkDefault` priority, so a
+        plain definition replaces one: `null` turns it off, a function
+        replaces it. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curatedDependents)}.
+        `insta` sets `INSTA_WORKSPACE_ROOT` to the workspace root of the
+        run's files and `INSTA_UPDATE = "no"`, in test runs and doctests
+        (see [Run snapshot tests](../../how-to/snapshot-tests.md)).
       '';
     };
 

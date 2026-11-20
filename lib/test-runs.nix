@@ -454,6 +454,41 @@ rec {
       };
     };
 
+  # Packages' test settings with every function value of `test.env`,
+  # `test.binaries.<binary>.env` and `test.doctest.env` applied to the
+  # facts of the runs that read them, `facts.<package>` (`{ workspaceRoot
+  # }`). Each kind of run has its own facts: a test run reads its "run"
+  # view, a doctest its test view, a test app possibly the checkout.
+  resolveTestEnv =
+    facts: packages:
+    let
+      resolve = f: lib.mapAttrs (_: v: if lib.isFunction v then v f else v);
+      one =
+        pkg: p:
+        if !(p ? test) then
+          p
+        else
+          let
+            f =
+              facts.${pkg}
+                or (throw "breakbulk: a test env value of `${pkg}` is a function of the run, but `${pkg}` has no source view in this workspace");
+            t = p.test;
+          in
+          p
+          // {
+            test =
+              t
+              // lib.optionalAttrs (t ? env) { env = resolve f t.env; }
+              // lib.optionalAttrs (t ? binaries) {
+                binaries = lib.mapAttrs (_: b: b // lib.optionalAttrs (b ? env) { env = resolve f b.env; }) t.binaries;
+              }
+              // lib.optionalAttrs (t ? doctest) {
+                doctest = t.doctest // lib.optionalAttrs (t.doctest ? env) { env = resolve f t.doctest.env; };
+              };
+          };
+    in
+    lib.mapAttrs one packages;
+
   # The package's test configuration, with defaults.
   testConfig =
     packages: pkg:
@@ -1002,6 +1037,9 @@ rec {
           ;
       },
       packages ? { },
+      # The test settings for doctests, when their env differs
+      # (resolveTestEnv: a doctest reads the test view, not the "run" view).
+      doctestPackages ? packages,
       # runDirs.<package> = the package directory of its "run" view, or
       # null for the test binary's own view (lib/workspace.nix).
       runDirs ? { },
@@ -1237,7 +1275,8 @@ rec {
         derivation (
           attrs
           // doctestConfig {
-            inherit pkgs packages runner;
+            inherit pkgs runner;
+            packages = doctestPackages;
             hostRunner = host.runner;
           } pkg
         )

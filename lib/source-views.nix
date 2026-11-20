@@ -341,6 +341,9 @@ rec {
     }
     // lib.optionalAttrs tested {
       inherit testSrc;
+      # The view the test runs read: the "run" view when a step chose
+      # other files for runs, else the test view.
+      runSrc = if "${realized.run}" == "${realized.test}" then testSrc else run;
       # Compared by store path, so that a run reads its test binary's own
       # view unless a step chose other files for runs.
       runDir =

@@ -436,6 +436,12 @@ let
     };
   };
   rootsPredicted = mkRepo (fixtures + "/roots-override") [ rootsSelection ];
+  # A test env function of the run: its workspace root is app's
+  # workspace for app, and tool's own directory for tool (no workspace).
+  rootsEnvFn = mkRepo (fixtures + "/roots-override") [
+    rootsSelection
+    { workspaces.main.memberDefaults.test.env.WS_ROOT = run: run.workspaceRoot; }
+  ];
   # A `roots.build` that leaves out tool's bin: wrong on purpose, for the
   # error naming an unpredicted root.
   rootsMissing = mkRepo (fixtures + "/roots-override") [
@@ -617,16 +623,13 @@ let
 
   # --- snapshots -----------------------------------------------------------------
 
-  # docs/src/how-to/snapshot-tests.md: insta's root setting, and the
-  # snapshots under src/ kept out of the "build" view by pattern.
-  # snapbox and expect-test need nothing.
+  # docs/src/how-to/snapshot-tests.md: the snapshots under src/ kept out
+  # of the "build" view by pattern. insta's settings are the curated
+  # default (`sysDefaults.dependents.insta`); snapbox and expect-test need
+  # nothing.
   snapshotsModule =
     { lib, ... }:
     {
-      packages.snaps.test.env = {
-        INSTA_WORKSPACE_ROOT = "../..";
-        INSTA_UPDATE = "no";
-      };
       packages.snaps.sources = [
         (
           {
@@ -1326,7 +1329,13 @@ in
   # Snapshot tests (`snapshotsModule`), in a workspace at `ws/`: snapbox
   # and expect-test find their files through the workspace's root
   # Cargo.toml in the test view, insta through INSTA_WORKSPACE_ROOT; all
-  # three pass. The root manifest is in no "build" view: an edit to it
+  # three pass. The curated insta default sets INSTA_WORKSPACE_ROOT (a
+  # function of the run) to the workspace directory of the files each
+  # run reads: the test view for a test run and the doctest, the "run"
+  # view with `runFiles` (a test app with `checkout`: tests/test-runs).
+  # `other` does not depend on insta and gets nothing; `null` turns the
+  # default off. A function in `memberDefaults` gets each member's own
+  # root. The root manifest is in no "build" view: an edit to it
   # changes only the members' test units, and none with
   # `test.workspaceManifest = false`. An edit to the snapshot under src/
   # changes only snaps' test compiles, which share one view.
@@ -1351,8 +1360,36 @@ in
       };
       i = inst snapshots;
       runs = i.testRuns.snaps;
+      script = r: r.drvAttrs.buildCommand;
+      exported = r: k: builtins.match ".*\nexport ${k}=([^\n]*)\n.*" (script r);
+      doctestEnv = inst: p: builtins.fromJSON (builtins.unsafeDiscardStringContext inst.doctests.${p}.drvAttrs.BREAKBULK_TEST_ENV);
+      testView = i: p: "${i.sources.workspaceTest."ws/crates/${p}"}";
+      wsIn = v: "${v}/ws";
+      narrowed = inst (snapshotsRepo null [ { packages.snaps.test.runFiles = [ "src/snapshots" ]; } ]);
+      narrowedRoot = lib.head (exported narrowed.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT");
+      off = inst (snapshotsRepo null [ { sysDefaults.dependents.insta = null; } ]);
+      ownFn = inst (snapshotsRepo null [ { workspaces.main.memberDefaults.test.env.MY_ROOT = run: "${run.workspaceRoot}/x"; } ]);
     in
     assert lib.assertMsg (got == want) "snapshots: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg (exported runs."lib/snaps" "INSTA_WORKSPACE_ROOT" == [ (wsIn (testView i "snaps")) ])
+      "snapshots: the run's INSTA_WORKSPACE_ROOT is ${builtins.toJSON (exported runs."lib/snaps" "INSTA_WORKSPACE_ROOT")}";
+    assert lib.assertMsg (exported runs."lib/snaps" "INSTA_UPDATE" == [ "no" ]) "snapshots: INSTA_UPDATE";
+    assert lib.assertMsg ((doctestEnv i "snaps").INSTA_WORKSPACE_ROOT or null == wsIn (testView i "snaps"))
+      "snapshots: the doctest's env ${builtins.toJSON (doctestEnv i "snaps")}";
+    assert lib.assertMsg (exported i.testRuns.other."lib/other" "INSTA_WORKSPACE_ROOT" == null && !((doctestEnv i "other") ? INSTA_UPDATE))
+      "snapshots: other, which does not depend on insta, got insta's settings";
+    assert lib.assertMsg (
+      narrowedRoot != wsIn (testView narrowed "snaps")
+      && lib.hasSuffix "/ws" narrowedRoot
+      && builtins.pathExists "${narrowedRoot}/crates/snaps/src/snapshots"
+      && !(builtins.pathExists "${narrowedRoot}/crates/snaps/tests")
+    ) "snapshots: with runFiles, INSTA_WORKSPACE_ROOT is ${narrowedRoot}, not the run view's workspace directory";
+    assert lib.assertMsg (exported off.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT" == null) "snapshots: `sysDefaults.dependents.insta = null` left the default";
+    assert lib.assertMsg (
+      exported ownFn.testRuns.other."lib/other" "MY_ROOT" == [ "${wsIn (testView ownFn "other")}/x" ]
+      && exported ownFn.testRuns.snaps."lib/snaps" "MY_ROOT" == [ "${wsIn (testView ownFn "snaps")}/x" ]
+    ) "snapshots: a memberDefaults function did not get each member's root";
+
     pkgs.runCommand "snapshots"
       {
         view = i.sources.workspace."ws/crates/snaps";
@@ -1714,6 +1751,10 @@ in
   # fails instantiation, naming the root and the option.
   roots-override =
     let
+      fnInst = inst rootsEnvFn;
+      wsRootOf =
+        pkg: key:
+        builtins.match ".*\nexport WS_ROOT=([^\n]*)\n.*" fnInst.testRuns.${pkg}.${key}.drvAttrs.buildCommand;
       check =
         name: repo:
         let
@@ -1737,6 +1778,10 @@ in
           "${name}_doctest" = w.target.${native}.doctests.tool;
         };
     in
+    assert lib.assertMsg (
+      wsRootOf "app" "bin/app" == [ "${fnInst.sources.workspaceTest.ws}/ws" ]
+      && wsRootOf "tool" "lib/tool" == [ "${fnInst.sources.workspace.tool}/tool" ]
+    ) "roots-override: WS_ROOT ${builtins.toJSON [ (wsRootOf "app" "bin/app") (wsRootOf "tool" "lib/tool") ]}";
     pkgs.runCommand "roots-override"
       (
         check "predicted" rootsPredicted

@@ -85,7 +85,7 @@ let
       default = [ ];
       description = "libtest arguments for ${what}, after `test.args`.";
     };
-    env = bt.mkEnv "Environment for ${what}, over `test.env`.";
+    env = bt.mkTestEnv "Environment for ${what}, over `test.env`.";
     postRun = mkOption {
       type = types.lines;
       default = "";
@@ -344,7 +344,7 @@ let
       };
 
       test = {
-        env = bt.mkEnv ''
+        env = bt.mkTestEnv ''
           Environment for this package's test runs and doctests. They get
           a fresh, empty `HOME` in their temporary directory by default;
           `HOME = "/homeless-shelter"` makes a test that writes to its home

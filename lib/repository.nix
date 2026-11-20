@@ -356,8 +356,10 @@ let
   # The package settings of one lockfile entry of workspace `wsName` in
   # the plans of variant `vName` on `triple`, as a list of
   # `packages.<name>`-shaped layers, lowest first: the curated defaults
-  # (`sysDefaults.packages`), the workspace's `memberDefaults` for its path
-  # packages, then each matching `packages` key; each followed by its own
+  # (`sysDefaults.packages`), for a path package those of the crates it
+  # depends on for their dependents (`sysDefaults.dependents`), the
+  # workspace's `memberDefaults` for its path packages, then each matching
+  # `packages` key; each followed by its own
   # `target.<triple>`, `variant.<v>` and `variant.<v>.target.<triple>`.
   layersFor =
     wsName: triple: vName: e:
@@ -384,14 +386,44 @@ let
               l.priorityOf path;
         };
     in
-    lib.optionals (sys != null) (
-      let
-        ls = withTriple (sys e);
-      in
-      if packageSetOf wsName triple != null then ls else map hostOnly ls
+    let
+      curatedLayers =
+        l:
+        let
+          ls = withTriple l;
+        in
+        if packageSetOf wsName triple != null then ls else map hostOnly ls;
+    in
+    lib.optionals (sys != null) (curatedLayers (sys e))
+    ++ lib.optionals (e.source or null == null) (
+      lib.concatMap (d: curatedLayers (cfg.sysDefaults.dependents.${d.name} d)) (curatedDeps wsName e.name)
     )
     ++ lib.optionals (e.source or null == null) (withTriple cfg.workspaces.${wsName}.memberDefaults)
     ++ lib.concatMap (k: withTriple cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
+
+  # The lockfile entries of workspace `wsName` that `pkg` depends on, by
+  # any kind of dependency and transitively, and that have curated
+  # settings for their dependents (`sysDefaults.dependents`), sorted by
+  # name. Cargo.lock names a dependency `<name>` or `<name> <version>
+  # [(<source>)]`; every entry of the name counts.
+  curatedDeps =
+    wsName: pkg:
+    let
+      entries = locks.${wsName};
+      byName = lib.groupBy (e: e.name) entries;
+      reached = builtins.genericClosure {
+        startSet = [ { key = pkg; } ];
+        operator =
+          x:
+          map (d: { key = lib.head (lib.splitString " " d); }) (
+            lib.concatMap (e: e.dependencies or [ ]) (byName.${x.key} or [ ])
+          );
+      };
+      names = lib.filter (n: n != pkg && cfg.sysDefaults.dependents.${n} or null != null) (
+        lib.sort lib.lessThan (map (x: x.key) reached)
+      );
+    in
+    lib.concatMap (n: byName.${n}) names;
 
   # The merged override for one lockfile entry, or null. Each env
   # variable is `pickAttrs`'s.
@@ -413,6 +445,9 @@ let
       };
 
   envStrings = lib.mapAttrs (_: bt.envString);
+  # Test-run env: a function of the run stays one (lib/test-runs.nix
+  # resolveTestEnv applies it).
+  testEnvStrings = lib.mapAttrs (_: bt.testEnvString);
 
   # The layers of a workspace's path package `pkg`.
   memberLayers =
@@ -503,14 +538,14 @@ let
           wrapper = single null [ "wrapper" ];
           keepLog = single null [ "keepLog" ];
           nextest = lib.genAttrs [ "profile" "configFile" "package" ] (n: single null [ "nextest" n ]);
-          env = envStrings (pickAttrs [ "test" "env" ] ls);
+          env = testEnvStrings (pickAttrs [ "test" "env" ] ls);
           doctest =
             let
               ds = map (l: l.test.doctest) ls;
             in
             t.doctest
             // {
-              env = envStrings (pickAttrs [ "env" ] ds);
+              env = testEnvStrings (pickAttrs [ "env" ] ds);
               enable = pickSingle true [ "enable" ] ds;
             };
           binaries = lib.mapAttrs (
@@ -520,7 +555,7 @@ let
             in
             b
             // {
-              env = envStrings (pickAttrs [ "env" ] bs);
+              env = testEnvStrings (pickAttrs [ "env" ] bs);
               enable = pickSingle true [ "enable" ] bs;
               wrapper = pickSingle null [ "wrapper" ] bs;
             }

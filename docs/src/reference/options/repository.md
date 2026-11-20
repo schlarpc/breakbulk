@@ -295,3 +295,44 @@ attribute set of (null or (function that evaluates to a(n) (submodule)))
 
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.dependents`
+
+Default settings for the workspace members that depend on a
+crate, by the crate’s name: a function of the crate’s lockfile
+entry (` { name, version, ... } `) that returns settings with the
+options of ` packages.<name> `\. They apply to every path package of
+a workspace whose ` Cargo.lock ` has the crate among its
+dependencies of any kind (dev-dependencies too), directly or
+through other crates\. They are a layer over ` sysDefaults.packages `
+and under ` memberDefaults `
+([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order))\.
+
+The curated entries are defined at ` mkDefault ` priority, so a
+plain definition replaces one: ` null ` turns it off, a function
+replaces it\. They are: ` insta `\.
+` insta ` sets ` INSTA_WORKSPACE_ROOT ` to the workspace root of the
+run’s files and ` INSTA_UPDATE = "no" `, in test runs and doctests
+(see [Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md))\.
+
+*Type:*
+attribute set of (null or (function that evaluates to a(n) (submodule)))
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  insta = null;  # no INSTA_* variables in test runs
+  my-fixtures = _: { test.env.FIXTURES = run: "${run.workspaceRoot}/fixtures"; };
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)

@@ -557,9 +557,15 @@ let
   # Test apps run outside the sandbox; here they run inside a check to
   # test their setup: the network binary with the skipped test filtered
   # out, and the env binary against a checkout of the fixture.
+  # A function of the run in `test.env` gets the checkout's workspace
+  # directory (the fixture is its own workspace, at the checkout's root).
   ctlCheckout = mk "test-control" {
-    packages.ctl.test = ctlTest;
-    checkout = "/build/checkout";
+    packages.ctl.test = ctlTest // {
+      env = ctlTest.env // {
+        CTL_ROOT = run: "${run.workspaceRoot}/root";
+      };
+    };
+    checkout = "/build/checkout/";
   };
   # The program `nix run` runs for a derivation (src/nix/app.cc: `outPath`,
   # `/bin/`, `meta.mainProgram`); a check cannot call `nix run` itself.
@@ -580,6 +586,7 @@ let
         export CTL_EXPECT_NIX=1 NIX_BUILD_CORES=$NIX_BUILD_CORES RUST_TEST_THREADS=$NIX_BUILD_CORES
         $envApp --show-output | tee env.log
         grep -q 'CARGO_MANIFEST_DIR=/build/checkout$' env.log
+        grep -qF 'CTL_ROOT=/build/checkout/root' $envApp
         # The binary uses CARGO_TARGET_TMPDIR: a private working directory of
         # links to the checkout's package directory, removed on exit. Two
         # runs at once each get their own.
