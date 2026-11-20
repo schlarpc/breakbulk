@@ -376,6 +376,17 @@ let
   };
 
   wsRoots = roots.workspaceRoots { inherit root wsDir; };
+  # The predicted roots of a plan kind: every member's, and those of the
+  # selected path packages outside the workspace. A member's roots are
+  # predicted whatever the selection (the unselected ones are stubs); an
+  # outside package's only when selected, since a plan without it has none.
+  outsideRoots = skeleton.outsideRoots { inherit root wsDir; };
+  rootsOf =
+    kind:
+    let
+      sel = if kind == "test" then testSelect else select;
+    in
+    wsRoots // lib.filterAttrs (n: _: lib.elem n sel && !(wsRoots ? ${n})) outsideRoots;
 
   # Each package's own env capture per platform (envCapture.forPackage
   # gives the base capture when it declares no inputs), and its env.
@@ -461,7 +472,7 @@ let
     if rootNames.doctests or null != null then
       lib.genAttrs rootNames.doctests (_: { })
     else
-      lib.filterAttrs (_: p: p.roots.doc != [ ]) wsRoots
+      lib.filterAttrs (_: p: p.roots.doc != [ ]) (rootsOf "test")
   );
   # The package settings a plan's units can read: those of the packages the
   # plan can contain, which are its selection and everything Cargo.lock
@@ -675,7 +686,7 @@ let
           null
         else
           planRoots {
-            workspaceRoots = wsRoots;
+            workspaceRoots = rootsOf kind;
             planKind = kind;
             inherit variant;
             names = rootNames.${kind} or null;

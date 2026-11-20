@@ -509,19 +509,20 @@ case " ${fixtures[*]} " in
     ;;
 esac
 
-# Without `roots`, roots-override's build plan has a root that was not
-# predicted: the outer derivation fails, naming it.
+# With a `roots.build` that leaves out tool's bin, roots-override's build
+# plan has a root that was not predicted: the outer derivation fails,
+# naming it.
 case " ${fixtures[*]} " in
   *" roots-override "*)
-    say "roots-override without roots (dynamic-derivation mode)"
+    say "roots-override with a root left out (dynamic-derivation mode)"
     if mbuild --arg mode '"dynamic"' unpredicted >"$WORK/unpredicted.log" 2>&1; then
-      echo "FAIL: roots-override built without roots" >&2
+      echo "FAIL: roots-override built with a root left out" >&2
       status=1
     elif grep -qF 'the plan has roots that were not predicted: tool/bin/tool' "$WORK/unpredicted.log"; then
-      echo "roots-override without roots: fails with the unpredicted root" >&2
+      echo "roots-override with a root left out: fails with the unpredicted root" >&2
     else
       tail -30 "$WORK/unpredicted.log" >&2
-      echo "FAIL: roots-override without roots failed otherwise" >&2
+      echo "FAIL: roots-override with a root left out failed otherwise" >&2
       status=1
     fi
     ;;

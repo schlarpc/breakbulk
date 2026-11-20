@@ -52,9 +52,10 @@
 #                            the build-dependency's and the
 #                            dev-dependency's paths, and pass with them
 #                            allowed (run.sh builds it in dynamic mode)
-#   unpredicted              roots-override without its `roots` option:
-#                            a product whose plan has a root that was not
-#                            predicted (run.sh checks that it fails)
+#   unpredicted              roots-override with a `roots.build` that
+#                            leaves out a root: a product whose plan has a
+#                            root that was not predicted (run.sh checks
+#                            that it fails)
 #   prereqs.<fixture>, prereqs.tools
 #                            the plans and breakbulk's tools: with the
 #                            outputs upstream of the units, what run.sh
@@ -403,10 +404,11 @@ let
     env-repository-path = repository.envRepoPathFixed;
     optional-dependency = repository.optionalDep;
     exclusive-features = repository.exclusive;
-    # Roots the prediction misses (a selected path package outside the
-    # workspace), listed in `roots`: products, test runs and the doctest.
-    # `unpredicted` is the same repository without `roots`.
-    roots-override = repository.rootsOverride;
+    # A selected path package outside the workspace, its roots predicted
+    # from its own manifest: products, test runs and the doctest.
+    # `unpredicted` is the same repository with a `roots.build` that
+    # leaves one out.
+    roots-override = repository.rootsPredicted;
 
     # tests/products
     post-link = products.postLink;
@@ -1038,7 +1040,7 @@ in
     )
   ) repos;
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
-  unpredicted = repository.rootsPredicted.workspaces.main.packages.app;
+  unpredicted = repository.rootsMissing.workspaces.main.packages.app;
   declaredPaths = repository.declaredPathsTest;
   explain = lib.mapAttrs (
     name: repo:

@@ -421,8 +421,8 @@ let
   # --- roots-override ----------------------------------------------------------
 
   # The variant selects `tool`, a path dependency outside the workspace:
-  # Cargo plans its bin, unit tests and doctest, but the prediction covers
-  # members only, so instantiation fails until `roots` lists them.
+  # Cargo plans its bin, unit tests and doctest, and the prediction has
+  # them from tool's own manifest.
   rootsSelection = {
     workspaces.main = {
       path = "ws";
@@ -436,6 +436,12 @@ let
     };
   };
   rootsPredicted = mkRepo (fixtures + "/roots-override") [ rootsSelection ];
+  # A `roots.build` that leaves out tool's bin: wrong on purpose, for the
+  # error naming an unpredicted root.
+  rootsMissing = mkRepo (fixtures + "/roots-override") [
+    rootsSelection
+    { workspaces.main.roots.build = [ "app/bin/app" ]; }
+  ];
   rootsOverride = mkRepo (fixtures + "/roots-override") [
     rootsSelection
     {
@@ -743,6 +749,7 @@ in
       envRepoPathFixed
       sources
       rootsPredicted
+      rootsMissing
       rootsOverride
       snapshots
       ;
@@ -1701,43 +1708,55 @@ in
         touch $out
       '';
 
-  # `roots` replaces the prediction: the repository builds tool's product,
-  # test runs and doctest, with no "not implemented" warning. Without it,
-  # instantiating the build plan fails, naming the unpredicted root and
-  # the option.
+  # With the prediction alone, and with `roots` replacing it, the
+  # repository builds tool's product, test runs and doctest, with no "not
+  # implemented" warning. A `roots` list that lacks a root of the plan
+  # fails instantiation, naming the root and the option.
   roots-override =
     let
-      w = rootsOverride.workspaces.main;
+      check =
+        name: repo:
+        let
+          w = repo.workspaces.main;
+        in
+        assert lib.assertMsg (repo.warnings or [ ] == [ ]) "${name}: warnings ${builtins.toJSON repo.warnings}";
+        assert lib.assertMsg (
+          lib.mapAttrs (_: lib.attrNames) w.tests == {
+            app = [ "bin-app" ];
+            tool = [
+              "bin-tool"
+              "lib"
+            ];
+          }
+        ) "${name}: tests ${builtins.toJSON (lib.mapAttrs (_: lib.attrNames) w.tests)}";
+        {
+          "${name}_app" = w.packages.app;
+          "${name}_tool" = w.packages.tool;
+          "${name}_toolLib" = w.tests.tool.lib;
+          "${name}_toolBin" = w.tests.tool.bin-tool;
+          "${name}_doctest" = w.target.${native}.doctests.tool;
+        };
     in
-    assert lib.assertMsg (rootsOverride.warnings or [ ] == [ ]) "roots-override: warnings ${builtins.toJSON rootsOverride.warnings}";
-    assert lib.assertMsg (
-      lib.mapAttrs (_: lib.attrNames) w.tests == {
-        app = [ "bin-app" ];
-        tool = [
-          "bin-tool"
-          "lib"
-        ];
-      }
-    ) "roots-override: tests ${builtins.toJSON (lib.mapAttrs (_: lib.attrNames) w.tests)}";
     pkgs.runCommand "roots-override"
-      {
-        app = w.packages.app;
-        tool = w.packages.tool;
-        toolLib = w.tests.tool.lib;
-        toolBin = w.tests.tool.bin-tool;
-        doctest = w.target.${native}.doctests.tool;
-        unpredicted = expectFailure "roots-unpredicted" (inst rootsPredicted).unitsJson.build [
-          "the plan has roots that were not predicted: tool/bin/tool"
-          "`roots` option"
-        ];
-      }
+      (
+        check "predicted" rootsPredicted
+        // check "override" rootsOverride
+        // {
+          unpredicted = expectFailure "roots-unpredicted" (inst rootsMissing).unitsJson.build [
+            "the plan has roots that were not predicted: tool/bin/tool"
+            "`roots` option"
+          ];
+        }
+      )
       ''
-        [ "$($app/bin/app)" = "app: hello" ]
-        [ "$($tool/bin/tool)" = "tool: hello" ]
+        for v in predicted override; do
+          app=''${v}_app tool=''${v}_tool
+          [ "$(''${!app}/bin/app)" = "app: hello" ]
+          [ "$(''${!tool}/bin/tool)" = "tool: hello" ]
+        done
         cat $unpredicted/log
         touch $out
       '';
-
   # The native target gets presets.linux unless another
   # preset is set, both through `preset` and by defining the target
   # directly from a preset (no doubled rustflags, no conflicting linker);

@@ -137,8 +137,39 @@ rec {
     {
       inherit ws;
       packages = lib.attrNames found;
+      # The workspace root directory of each package, or null.
+      wsRootOf = found;
       workspaceRoots = lib.unique ([ wsDir ] ++ filter (d: d != null) (attrValues found));
     };
+
+  # The path packages Cargo loads that are not members of the workspace,
+  # by package name, each with its predicted targets and plan roots (as
+  # roots.workspaceRoots gives a member's). Cargo's `-p` takes any package
+  # of the dependency graph (`Packages::to_package_id_specs`), so a
+  # selection can name one of these and plan its targets.
+  outsideRoots =
+    { root, wsDir ? "" }:
+    let
+      c = packageClosure { inherit root wsDir; };
+      dirs = filter (d: !(lib.elem d c.ws.members)) c.packages;
+      one =
+        dir:
+        let
+          wsRootDir = c.wsRootOf.${dir};
+          m = manifest.readManifest root dir;
+          p = roots.packageTargets {
+            inherit root;
+            pkgDir = dir;
+            wsManifest = if wsRootDir == null then null else manifest.readManifest root wsRootDir;
+          };
+        in
+        # The name without packageTargets, which may throw for a package
+        # that is never selected.
+        lib.nameValuePair (m.package or m.project).name (p // { roots = roots.planRoots p.targets; });
+    in
+    lib.listToAttrs (
+      map one (filter (d: lib.any (k: (manifest.readManifest root d) ? ${k}) [ "package" "project" ]) dirs)
+    );
 
   # Names of target files of one package that exist on disk.
   targetFiles =

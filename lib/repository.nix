@@ -559,19 +559,24 @@ let
   # The keys of `test.binaries` (lib/test-runs.nix `binaryKey`), by
   # workspace and package, from the test roots predicted from the
   # manifests (or listed in `roots.test`). Every plan of a workspace has
-  # exactly those roots, whatever its target, variant or package selection
+  # its members' roots, whatever its target, variant or package selection
   # (Cargo's skipped ones, such as an unmet `required-features`, as stubs;
-  # a root the plan has and these do not is an instantiation error), so
-  # one check covers them
-  # all, at evaluation, without planning, in both delivery modes.
+  # a root the plan has and the prediction does not is an instantiation
+  # error), and an outside package's when it selects one, so one check
+  # covers them all, at evaluation, without planning, in both delivery
+  # modes.
   testBinaryKeys = lib.mapAttrs (
     _: ws:
     let
       predicted = breakbulkLib.planRoots {
-        workspaceRoots = breakbulkLib.roots.workspaceRoots {
-          inherit root;
-          wsDir = wsDirOf ws;
-        };
+        # Path packages outside the workspace too: a selection can name
+        # one, and its test binaries are then the plan's.
+        workspaceRoots =
+          let
+            wsDir = wsDirOf ws;
+            members = breakbulkLib.roots.workspaceRoots { inherit root wsDir; };
+          in
+          breakbulkLib.skeleton.outsideRoots { inherit root wsDir; } // members;
         planKind = "test";
         variant = "";
         names = ws.roots.test;
