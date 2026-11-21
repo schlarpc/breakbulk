@@ -1153,6 +1153,37 @@ in
         touch $out
       '';
 
+  # A nextest run's synthesized cargo metadata names other packages only
+  # by name: bumping the version of `solo`, which nx does not depend on,
+  # leaves nx's nextest runs the same derivations.
+  nextest-unrelated-version =
+    let
+      repo =
+        root:
+        mkRepo root [
+          (oneWs ".")
+          {
+            packages.nx.test = {
+              runner = "nextest";
+              nextest.profile = "ci";
+            };
+          }
+        ];
+      before = repo (fixtures + "/nextest");
+      after = repo (
+        edited "nextest" ''
+          sed -i 's/^version = "0.1.0"/version = "0.1.1"/' solo/Cargo.toml
+          sed -i '/^name = "solo"/{n;s/0.1.0/0.1.1/}' Cargo.lock
+        ''
+      );
+      runs = r: lib.mapAttrs (_: d: d.drvPath) (inst r).testRuns.nx;
+      soloRun = r: (inst r).testRuns.solo."lib/solo".drvPath;
+    in
+    assert lib.assertMsg (soloRun before != soloRun after) "nextest-unrelated-version: the edit did not change solo";
+    assert lib.assertMsg (runs before == runs after)
+      "nextest-unrelated-version: solo's version bump changed nx's runs ${builtins.toJSON (runs after)}";
+    evalCheck "nextest-unrelated-version" (builtins.toJSON (runs before));
+
   # The same test units where Cargo passes no `--test`: in the clippy
   # variant (`cargo check --all-targets`, which checks the integration test
   # and the bench without the libtest harness, and the example), and in the
