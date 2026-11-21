@@ -655,31 +655,13 @@ let
 
   # --- snapshots -----------------------------------------------------------------
 
-  # docs/src/how-to/snapshot-tests.md: the snapshots under src/ kept out
-  # of the "build" view by pattern. insta's settings are the curated
-  # default (`sysDefaults.dependents.insta`); snapbox and expect-test need
-  # nothing.
-  snapshotsModule =
-    { lib, ... }:
-    {
-      packages.snaps.sources = [
-        (
-          {
-            default,
-            kind,
-            root,
-            packageDir,
-            ...
-          }:
-          let
-            snaps = lib.fileset.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}/src");
-          in
-          if kind == "build" then lib.fileset.difference default snaps else default
-        )
-      ];
-      # The checks read the runs' output.
-      workspaces.main.memberDefaults.test.keepLog = true;
-    };
+  # insta's settings, and the snapshots kept out of every view but the
+  # test runs', are the curated default (`sysDefaults.dependents.insta`);
+  # snapbox and expect-test need nothing.
+  snapshotsModule = {
+    # The checks read the runs' output.
+    workspaces.main.memberDefaults.test.keepLog = true;
+  };
   snapshotsRepo =
     edit: modules:
     mkRepo (if edit == null then fixtures + "/snapshots" else edited "snapshots" edit) (
@@ -1554,7 +1536,7 @@ in
   # root. The root manifest is in no "build" view: an edit to it
   # changes only the members' test units, and none with
   # `test.workspaceManifest = false`. The curated default also leaves the
-  # snapshots out of the test compiles' view, so an edit to the snapshot
+  # snapshots out of every view but the runs', so an edit to the snapshot
   # under src/ changes no unit, only snaps' test runs, which read the
   # "run" view with them (INSTA_WORKSPACE_ROOT there).
   snapshots =
@@ -1565,6 +1547,9 @@ in
         root = changedBy rootEdit [ ];
         rootOff = changedBy rootEdit [ { workspaces.main.memberDefaults.test.workspaceManifest = false; } ];
         snapshot = changedBy "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [ ];
+        snapshotOff = changedBy "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [
+          { sysDefaults.dependents.insta = null; }
+        ];
       };
       want = rec {
         root = [
@@ -1575,6 +1560,13 @@ in
         ];
         rootOff = [ ];
         snapshot = [ ];
+        # Without the default the snapshot is in every view.
+        snapshotOff = [
+          "snaps-0.1.0-lib"
+          "snaps-0.1.0-test"
+          "snaps-0.1.0-test-expect"
+          "snaps-0.1.0-test-snapbox"
+        ];
       };
       snapshotEdit = snapshotsRepo "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [ ];
       i = inst snapshots;

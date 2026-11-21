@@ -52,13 +52,13 @@ runs and doctests, and a `sources` function, from the curated
   `checkout`.
 - `INSTA_UPDATE = "no"`: on a mismatch, insta prints the diff and the test
   fails. Without it, insta also tries to write a `.snap.new` file.
-- The package's `.snap` files are left out of the view its test
-  compiles read, and stay in the "run" view. insta reads a snapshot when
-  the test runs, never when it compiles, so an edit to a snapshot
-  re-runs the package's tests and rebuilds no test binary. A test that
-  reads a `.snap` file at compile time (`include_str!`), or a doctest
-  that compares snapshots, does not find it; set your own `sources`, or
-  turn the default off.
+- The package's `.snap` files are left out of every view but the "run"
+  view: the library, bins and test compiles do not see them. insta
+  reads a snapshot when the test runs, never when it compiles, so an
+  edit to a snapshot re-runs the package's tests and rebuilds nothing.
+  Code that reads a `.snap` file at compile time (`include_str!`), or a
+  doctest that compares snapshots, does not find it; set your own
+  `sources`, or turn the default off.
 
 The value of `INSTA_WORKSPACE_ROOT` is a function of the run,
 `run: run.workspaceRoot`. You can use the same form for any other
@@ -75,11 +75,14 @@ Only tests read snapshot files. If the library or a bin can see them, an
 edit to a snapshot rebuilds the library and everything that depends on
 it.
 
+- With insta, the curated default above keeps every `.snap` file of the
+  package out of the library's, bins' and test compiles' views.
 - Snapshots under `tests/` are test-only already: the `tests/` directory
   is in the test views only
   ([`test.scopeTestsDir`](../reference/options/packages.md#packagesnametestscopetestsdir)).
-- Snapshots under `src/` (insta's `src/snapshots/` for unit tests) are in
-  the `"build"` view. Leave them out of it with a
+- Other snapshot files under `src/` (snapbox's or expect-test's, or
+  insta's with the default off) are in the `"build"` view. Leave them
+  out of it with a
   [`sources`](../reference/options/packages.md#packagesnamesources)
   function:
 
@@ -95,9 +98,8 @@ modules = [
 ];
 ```
 
-An edit to a snapshot then rebuilds no library, bin or product. With
-insta, the curated default above also keeps it out of the test binaries'
-view, so the edit only re-runs the package's tests. For whole directories,
+An edit to a snapshot then rebuilds no library, bin or product. For whole
+directories,
 [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
 does the same without a function. More recipes are in [Rebuild less when
 unrelated files change](filter-source.md).
