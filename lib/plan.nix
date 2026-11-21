@@ -34,6 +34,7 @@
 {
   lib,
   toolchainFacts,
+  util,
 }:
 {
   mkPlan =
@@ -152,7 +153,7 @@
       ]
       ++ lib.optionals (spec != null) [
         "--spec"
-        (builtins.toFile "breakbulk-spec.json" (builtins.unsafeDiscardStringContext (builtins.toJSON spec)))
+        (builtins.toFile "breakbulk-spec.json" (util.devirtualizeAndDiscard (builtins.toJSON spec)))
       ];
     in
     pkgs.runCommand "${name}-${kind}"
@@ -232,7 +233,7 @@
       )
       ++ lib.optionals (spec != null) [
         "--spec"
-        (builtins.toFile "breakbulk-spec.json" (builtins.unsafeDiscardStringContext (builtins.toJSON spec)))
+        (builtins.toFile "breakbulk-spec.json" (util.devirtualizeAndDiscard (builtins.toJSON spec)))
       ];
     in
     pkgs.runCommand name { } ''

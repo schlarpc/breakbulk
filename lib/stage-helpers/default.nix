@@ -37,6 +37,7 @@
 #   that uses one takes an option to replace it.
 {
   lib,
+  util,
   wasmBindgen,
   targetTraits,
 }:
@@ -1486,7 +1487,7 @@ let
       rel = lib.removePrefix "${builtins.storeDir}/" s;
     in
     if rel == s then s else "${builtins.storeDir}/${lib.head (lib.splitString "/" rel)}";
-  sourceStoreRoots = l: lib.unique (map (s: sourceStoreRoot (builtins.unsafeDiscardStringContext "${s}")) l);
+  sourceStoreRoots = l: lib.unique (map (s: sourceStoreRoot (util.devirtualizeAndDiscard "${s}")) l);
 
   # Where a stage goes that should run on the flat link output in this
   # product: after its last stage before `install`, before `install` (when
@@ -2182,7 +2183,7 @@ let
           patterns = lib.concatMap (
             a:
             let
-              s = builtins.unsafeDiscardStringContext (toString a);
+              s = util.devirtualizeAndDiscard (toString a);
             in
             # A store path matches itself and anything below it.
             if lib.hasPrefix "${builtins.storeDir}/" s && !(lib.hasInfix "*" s) then

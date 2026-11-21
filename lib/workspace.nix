@@ -353,7 +353,7 @@ let
     if cargoConfig == { } then
       null
     else
-      builtins.toFile "breakbulk-cargo-config.toml" (builtins.unsafeDiscardStringContext cargoConfigText);
+      builtins.toFile "breakbulk-cargo-config.toml" (util.devirtualizeAndDiscard cargoConfigText);
   cargoConfigTools = lib.listToAttrs (
     lib.imap0 (i: p: lib.nameValuePair "cargo-config-${toString i}" p) (util.storePathsIn cargoConfigText)
   );

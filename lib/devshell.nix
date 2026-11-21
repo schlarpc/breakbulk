@@ -48,7 +48,7 @@
 # configuration can work locally (from the union, or from the user's
 # system) and fail in Nix; and for same-triple presets local Cargo cannot
 # keep target env away from build scripts.
-{ lib }:
+{ lib, util }:
 {
   pkgs,
   name,
@@ -137,7 +137,7 @@ let
         )
       );
   # Without the context: a warning message cannot carry one.
-  show = v: builtins.unsafeDiscardStringContext (builtins.toJSON v);
+  show = v: util.devirtualizeAndDiscard (builtins.toJSON v);
   conflictWarning =
     var: setters:
     let

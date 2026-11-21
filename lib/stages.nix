@@ -77,6 +77,7 @@
 # the default mode (which needs `ca-derivations` as well).
 {
   lib,
+  util,
   wasmBindgen,
   targetTraits,
   featureGates,
@@ -93,7 +94,14 @@ let
     mapAttrs
     ;
 
-  helpers = import ./stage-helpers { inherit lib wasmBindgen targetTraits; };
+  helpers = import ./stage-helpers {
+    inherit
+      lib
+      util
+      wasmBindgen
+      targetTraits
+      ;
+  };
 
   # The file a product's `linked` stage holds instead of
   # binaries when Cargo built none of them (dynamic-derivation mode, where

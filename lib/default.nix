@@ -65,11 +65,12 @@ let
       roots
       ;
   };
-  inherit (import ./instantiate.nix { inherit lib featureGates; }) instantiate predictedRoots planRoots;
+  inherit (import ./instantiate.nix { inherit lib featureGates util; }) instantiate predictedRoots planRoots;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix {
     inherit
       lib
+      util
       wasmBindgen
       targetTraits
       featureGates
@@ -185,7 +186,7 @@ let
       mkTools nixpkgs.legacyPackages.${system}
     else
       mkTools pkgs;
-  inherit (import ./plan.nix { inherit lib toolchainFacts; })
+  inherit (import ./plan.nix { inherit lib toolchainFacts util; })
     mkPlan
     mkCargoEnv
     mkBuildTarget

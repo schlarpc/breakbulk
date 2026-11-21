@@ -43,6 +43,7 @@ let
     hasAttr
     head
     isAttrs
+    isString
     length
     pathExists
     readDir
@@ -162,8 +163,9 @@ let
   # virtual path, real only where string context carries it into a
   # derivation, so the string without context names nothing and changes
   # with every evaluation. The NAR hash lets Nix skip the copy when the
-  # path is in the store. Not for reading the tree: read-only evaluation
-  # only computes this path.
+  # path is in the store. A string naming such a tree (`"${inputs.foo}"`)
+  # has no NAR hash; `util.devirtualize` makes it real. Not for reading the
+  # tree: read-only evaluation only computes this path.
   realTree =
     t:
     if isAttrs t && t ? narHash && t ? outPath && !(t ? drvPath) then
@@ -172,6 +174,8 @@ let
         name = substring 33 (-1) (baseNameOf (builtins.unsafeDiscardStringContext t.outPath));
         sha256 = t.narHash;
       }
+    else if isString t then
+      util.devirtualize t
     else
       t;
 

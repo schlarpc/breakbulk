@@ -261,7 +261,9 @@ let
           full,
         }:
         let
-          values = if full then allValues else lib.filterAttrs (k: _: !second (split.owner k)) allValues;
+          values = lib.mapAttrs (_: util.devirtualize) (
+            if full then allValues else lib.filterAttrs (k: _: !second (split.owner k)) allValues
+          );
           valuesJson = lib.mapAttrs (k: v: {
             value = unsafeDiscardStringContext v;
             context = contextList k v;

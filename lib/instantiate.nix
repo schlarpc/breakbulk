@@ -22,7 +22,11 @@
 # built, and a source edit or a changed env value does not rerun the
 # instantiate derivation at all (only the plan's and the keys' changes do).
 # See crates/breakbulk-instantiate/src/output.rs for the format.
-{ lib, featureGates }:
+{
+  lib,
+  featureGates,
+  util,
+}:
 let
   inherit (builtins)
     fromJSON
@@ -149,7 +153,7 @@ rec {
 
       # --- the instantiate derivation's inputs: keys and tool paths only ---
 
-      noCtx = v: unsafeDiscardStringContext (str v);
+      noCtx = v: util.devirtualizeAndDiscard (str v);
       platformJson = s: {
         env = lib.attrNames (spec s).env;
         envCapture = (spec s).envCapture != null;

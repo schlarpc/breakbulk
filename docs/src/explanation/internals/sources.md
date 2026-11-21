@@ -18,6 +18,16 @@ Fetch derivations are created from the lockfiles at evaluation time. Registry cr
 - Fetches are keyed by URL and locked revision, because two workspaces can lock the same git source at different revisions.
 - With `lazy-trees = true` (Determinate Nix), `builtins.fetchGit` returns a virtual store path. That path does not exist, and it changes with every evaluation. So breakbulk copies each fetched tree to its real store path with `builtins.path` and the tree's NAR hash. Nix skips the copy when the path is already in the store. A crate's source path then names a real path, also where breakbulk writes it without string context, such as the source list of `noSourceReferences`. `gitTrees` values that are fetched trees (a `fetchGit` or `fetchTree` result, or a flake input) get the same treatment.
 
+### Settings that name a fetched tree
+
+A setting can name a path in a fetched tree as a string: `packages.<name>.env.FOO = "${inputs.foo}/data"`, or a rustflag `-L native=${inputs.foo}/lib`. With lazy trees, that string names the virtual path. Where the string reaches a derivation with its context, Nix puts the real path in its place. But breakbulk writes some strings without their context: the planner's spec (linker and rustflags), the generated Cargo config, the tool paths for instantiation, the dev shell's Cargo environment, dynamic mode's `values.json`, and the patterns of `noStorePaths`' `allow`. There, the virtual path would name nothing and change the derivation on every evaluation.
+
+So at each of those places, breakbulk replaces every virtual path in the string with its real one first (`util.devirtualizeAndDiscard`; `util.devirtualize` keeps the context).
+
+- **Finding a virtual path:** no builtin returns the real path of a virtual one. But Determinate Nix's `builtins.hashString` hashes a string with its virtual paths replaced by the real ones. So a store path in the string's context whose hash with its context differs from its hash without context is virtual. On Nix without lazy trees, and on Lix, the two hashes always agree, and the string is unchanged.
+- **The real path:** `builtins.path` copies the virtual path's tree under the same name, as Nix does when the path reaches a derivation, so it is the same store path. This copies the tree during evaluation. Any unit that reads the value would copy it anyway.
+- A `gitTrees` value that is such a string (`"${inputs.foo}"`, with no NAR hash) gets the same treatment.
+
 ## Vendoring for planning
 
 Each workspace gets a vendor directory with one subdirectory per source, following crane's layout:

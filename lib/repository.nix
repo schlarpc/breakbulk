@@ -91,7 +91,7 @@ let
   versionReq = import ./modules/version-req.nix { inherit lib; };
   bt = import ./modules/types.nix { inherit lib; };
   bbModules = import ./modules;
-  mkDevShell = import ./devshell.nix { inherit lib; };
+  mkDevShell = import ./devshell.nix { inherit lib util; };
 in
 {
   pkgs,
@@ -1624,7 +1624,7 @@ let
                 ]
                 ++ spec.rustflags
             );
-            withContext = builtins.replaceStrings (map builtins.unsafeDiscardStringContext values) values;
+            withContext = builtins.replaceStrings (map util.devirtualizeAndDiscard values) (map util.devirtualize values);
             j = builtins.fromJSON (
               builtins.unsafeDiscardStringContext (
                 featureGates.readOutput nixFeatures "the dev shell of workspace `${wsName}` (cargo-env.json)" "${inst.cargoEnv}/cargo-env.json"

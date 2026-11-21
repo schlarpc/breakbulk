@@ -17,7 +17,7 @@ let
   manifest = import ../manifest.nix { inherit lib util; };
   inherit
     (import ../instantiate.nix {
-      inherit lib;
+      inherit lib util;
       featureGates = import ../nix-features.nix { inherit lib; };
     })
     rootNameRegex

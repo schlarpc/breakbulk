@@ -315,11 +315,69 @@ rec {
   # first `/`, space, `=`, `:`, `;` or `"`), each with the string's
   # context: the inputs of what passes the string on without its context
   # (the planner's spec and `cargoConfig` files).
+  # Lazy-tree paths in the string are made real first (`devirtualize`), so
+  # the paths match the spec's and config's text.
   storePathsIn =
-    s:
+    s0:
+    let
+      s = devirtualize s0;
+    in
     lib.concatMap (p: if isList p then [ (lib.addContextFrom s (lib.head p)) ] else [ ]) (
       split "(${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[^/ =:;\"]+)" s
     );
+
+  # A string with every lazy-tree path in it replaced by its real store
+  # path, and its context to match. With `lazy-trees = true` (Determinate
+  # Nix), a flake input or a `fetchGit`/`fetchTree` result interpolated into
+  # a string (`"${inputs.foo}/lib"`) names a virtual store path: Nix
+  # replaces it with the real path only where the context reaches a
+  # derivation, so the text without its context names nothing and changes
+  # with every evaluation. Other values pass unchanged.
+  #
+  # No builtin returns the real path of a virtual one. `hashString` hashes
+  # the string with its virtual paths replaced (Determinate's
+  # `EvalState::devirtualize`), so a hash that differs from the hash of the
+  # text alone finds them; elsewhere the two always agree. A store path in
+  # the context of `substring 0 0 s` plus its own text tests one entry.
+  # `builtins.path` then copies the tree under the same name, as Nix's own
+  # replacement does, which gives the same real path.
+  devirtualize = s: (devirtualized s).withContext;
+
+  # The text of `devirtualize s`, without context: for every place that
+  # writes a value without its context (files that planning or
+  # instantiation reads, values.json, check patterns), so that a lazy-tree
+  # path is written as the real path.
+  devirtualizeAndDiscard = s: (devirtualized s).text;
+
+  devirtualized =
+    s:
+    let
+      ctx = builtins.getContext s;
+      text = builtins.unsafeDiscardStringContext s;
+      differs = t: hashString "sha256" t != hashString "sha256" (builtins.unsafeDiscardStringContext t);
+      paths = filter (p: ctx.${p}.path or false) (attrNames ctx);
+      noContext = substring 0 0 s;
+      virtual = filter (p: differs (noContext + p)) paths;
+      real = map (
+        p:
+        "${builtins.path {
+          path = /. + p;
+          name = substring 33 (-1) (baseNameOf p);
+        }}"
+      ) virtual;
+      kept = builtins.removeAttrs ctx virtual;
+      newText = replaceStrings virtual (map builtins.unsafeDiscardStringContext real) text;
+    in
+    if !isString s || paths == [ ] || !differs (noContext + concatStringsSep " " paths) then
+      {
+        withContext = s;
+        text = if isString s then text else s;
+      }
+    else
+      {
+        withContext = builtins.appendContext newText kept + lib.concatMapStrings (substring 0 0) real;
+        text = newText;
+      };
 
   # A short, stable identifier for a string, for directory and source names.
   shortHash = s: substring 0 16 (sha256 s);
