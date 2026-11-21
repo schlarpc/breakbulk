@@ -40,8 +40,9 @@ perSystem = { ... }: {
 
 `root` defaults to the flake's `self`. Per system it sets
 `breakbulk.repo` (the `mkRepository` result) and adds `repo.checks` to
-`checks`, the default target's products to `packages`, `repo.apps` to
-`apps`, and each workspace's dev shell to `devShells`. Each of these
+`checks`, the default target's products to `packages`, each
+workspace's `docs` to `packages` as `<ws>-docs`, `repo.apps` to `apps`,
+and each workspace's dev shell to `devShells`. Each of these
 has a switch under `breakbulk`, `true` by default: `exposeChecks`,
 `exposePackages`, `exposeApps`, `exposeDevShells`.
 
@@ -57,6 +58,7 @@ repo = {
     packages.<pkg>;          # a product: the build after the default stages
     tests.<pkg>.<test>;      # a test binary
     testRuns.<pkg>.<binary>; # a test run
+    docs;                    # `cargo doc`'s folder, or null
     devShell;                # a shell matching the planner's Cargo invocation
     toolchain = { rustc; cargo; clippy; rustfmt; };   # resolved
 
@@ -120,7 +122,10 @@ the target: a directory per documented crate (`<crate>/index.html`),
 by default) documents the planned packages only (`cargo doc --no-deps`);
 `false` documents their dependencies too. Proc macros are in the same
 folder. The doc plan (`plans.<triple>.<v>.doc`) is traced only when
-`docs` is used. Docs are not in `checks`. See
+`docs` is used. A variant's docs are in `checks` only with
+[`docs.check`](options/workspaces.md#workspacesnamevariantsnamedocscheck)
+(`false` by default), as `<ws>/<triple>/docs` for the default variant.
+See
 [Documentation](../explanation/products.md#documentation).
 
 ### `checks`
@@ -135,6 +140,7 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 | doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
 | plan check | `…/buildScriptPaths/<plan>` | `…/variant-<v>/buildScriptPaths/<plan>` |
 | check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
+| docs, with `docs.check` | `<ws>/<triple>/docs` | `<ws>/<triple>/variant-<v>/docs` |
 
 The first five rows come from every build or coverage variant with
 [`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)

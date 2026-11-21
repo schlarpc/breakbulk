@@ -20,7 +20,8 @@
 #    (`all`, every prefix, `checkGroups`);
 #  - packages."<pkg>" for each product of the default variant on the
 #    workspace's default target (`defaultTarget`)
-#    ("<ws>-<pkg>" when two workspaces have a package of that name);
+#    ("<ws>-<pkg>" when two workspaces have a package of that name), and
+#    packages."<ws>-docs", the default variant's docs on that target;
 #  - apps."<ws>/<triple>/<pkg>/test-<name>": repo.apps, every test app;
 #  - devShells."<ws>" for each workspace, and devShells.default when there
 #    is exactly one.
@@ -80,7 +81,7 @@ in
         exposePackages = mkOption {
           type = types.bool;
           default = true;
-          description = "Add every workspace's products on its default target (`workspaces.<ws>.defaultTarget`) to the flake's packages.";
+          description = "Add every workspace's products on its default target (`workspaces.<ws>.defaultTarget`) to the flake's packages, and its default variant's docs there as `<ws>-docs`.";
         };
         exposeApps = mkOption {
           type = types.bool;
@@ -101,7 +102,29 @@ in
         };
         checks = lib.mkIf cfg.exposeChecks repo.checks;
         packages = lib.mkIf cfg.exposePackages (
-          lib.listToAttrs (map (x: lib.nameValuePair (pkgName x) repo.workspaces.${x.ws}.packages.${x.p}) allPkgs)
+          let
+            products = lib.listToAttrs (
+              map (x: lib.nameValuePair (pkgName x) repo.workspaces.${x.ws}.packages.${x.p}) allPkgs
+            );
+            docs = lib.listToAttrs (
+              lib.concatMap (
+                ws:
+                let
+                  c = repo.config.workspaces.${ws};
+                in
+                # Not `docs != null`: that evaluates the docs derivation,
+                # which in IFD mode plans `cargo doc` to list `packages`.
+                lib.optional (
+                  c.defaultTarget != null && repo.workspaces.${ws}.target.${c.defaultTarget}.variants ? ${c.defaultVariant}
+                ) (lib.nameValuePair "${ws}-docs" repo.workspaces.${ws}.docs)
+              ) wsNames
+            );
+            clash = lib.attrNames (builtins.intersectAttrs products docs);
+          in
+          if clash != [ ] then
+            throw "breakbulk: the flake-parts module names both a product and a workspace's docs ${lib.concatStringsSep ", " clash} in `packages`; rename the package or set `perSystem.breakbulk.exposePackages = false`"
+          else
+            products // docs
         );
         apps = lib.mkIf cfg.exposeApps repo.apps;
         devShells = lib.mkIf cfg.exposeDevShells (

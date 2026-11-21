@@ -498,7 +498,11 @@ default variant's. Open `<crate>/index.html` in it, as in Cargo's
   index, the list of crates, the implementors of each trait) into the
   folder as each crate is documented, and stable rustdoc has no way to
   merge them later. So any change to any documented crate runs every
-  rustdoc again.
+  rustdoc again. That is why a variant's docs are in `repo.checks` only
+  with
+  [`docs.check = true`](../reference/options/workspaces.md#workspacesnamevariantsnamedocscheck).
+  The flake-parts module puts each workspace's docs (the default target
+  and variant's) in the flake's `packages` as `<ws>-docs`.
 - The crates rustdoc reads are check-mode units: metadata only, no code.
   They are the same derivations as a check variant's with the same
   profile and features, so the docs and `cargo check` share them.

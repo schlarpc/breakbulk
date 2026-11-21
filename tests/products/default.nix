@@ -1187,6 +1187,9 @@ let
   # "document output filename collision" on this workspace (the proc macro
   # `derive` is a member and a dependency of `util`), as it does outside
   # breakbulk (rust-lang/cargo#10368); `--no-deps` and `dev` do not.
+  # `docs.check` from the target's `variantDefaults`, replaced in the check
+  # variant's own target settings: only the default variant's docs are in
+  # repo.checks.
   docsRepo =
     noDeps: profile:
     mkRepo (fixtures + "/docs") [
@@ -1194,10 +1197,12 @@ let
         workspaces.main = {
           path = ".";
           docs = { inherit noDeps; };
+          targets.${native}.variantDefaults.docs.check = true;
           variants.default = { inherit profile; };
           variants.check = {
             mode = "check";
             inherit profile;
+            target.${native}.docs.check = false;
           };
         };
       }
@@ -1361,6 +1366,7 @@ in
         repo: lib.filter (d: !((drvSet (lib.attrValues (check repo).units.build)) ? ${d})) (inputsOf repo);
       sharedNoDeps = sharing docsNoDeps;
       sharedDeps = sharing docsDeps;
+      docsChecks = lib.filter (lib.hasSuffix "/docs") (lib.attrNames docsNoDeps.checks);
     in
     assert lib.assertMsg (
       sharedNoDeps.notShared == [ ] && sharedNoDeps.shared > 0
@@ -1371,8 +1377,14 @@ in
     assert lib.assertMsg (
       inputsOf docsDeps != [ ] && notCheckUnits docsDeps == [ ]
     ) "docs: the docs derivation names units that are not the check variant's: ${builtins.toJSON (notCheckUnits docsDeps)}";
+    assert lib.assertMsg (
+      docsChecks == [ "main/${native}/docs" ]
+    ) "docs: docs in repo.checks: ${toString docsChecks}";
     pkgs.runCommand "docs"
       {
+        docsCheck = docsNoDeps.checks."main/${native}/docs";
+        # The default target's, as `repo.workspaces.<ws>.docs`.
+        wsDocs = docsNoDeps.workspaces.main.docs;
         noDeps = docsNoDeps.workspaces.main.target.${native}.docs;
         noDepsRef = cargoDoc docsNoDeps (
           map (p: "--no-deps --release -p ${p}") [
@@ -1389,7 +1401,7 @@ in
       }
       ''
         set -euo pipefail
-        [ "$noDeps" = "$variantDocs" ]
+        [ "$noDeps" = "$variantDocs" ] && [ "$noDeps" = "$wsDocs" ] && [ "$noDeps" = "$docsCheck" ]
         # The same files and bytes, but for the store path of the registry
         # crate's source, which its source pages name (its fetched source
         # here, the vendor directory under Cargo).

@@ -1143,6 +1143,33 @@ list of string
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.variants.<name>.docs.check`
+
+Put this variant’s documentation (` target.<triple>.variants.<v>.docs `)
+in ` repo.checks `, as ` <ws>/<triple>/docs ` for the default
+variant and ` <ws>/<triple>/variant-<v>/docs ` for the others,
+in any mode and whatever ` checks ` says\. Off by default: any
+change to a documented crate runs every rustdoc of the
+variant again\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+false
+```
+
+*Example:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.variants.<name>.features`
 
 Features to enable (` --features `), as Cargo spells them (` pkg/feat ` is allowed)\.

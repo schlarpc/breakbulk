@@ -613,6 +613,19 @@ let
             arguments set it.
           '';
         };
+        docs.check = mkOption {
+          type = types.bool;
+          default = false;
+          example = true;
+          description = ''
+            Put this variant's documentation (`target.<triple>.variants.<v>.docs`)
+            in `repo.checks`, as `<ws>/<triple>/docs` for the default
+            variant and `<ws>/<triple>/variant-<v>/docs` for the others,
+            in any mode and whatever `checks` says. Off by default: any
+            change to a documented crate runs every rustdoc of the
+            variant again.
+          '';
+        };
         cargoTrimPaths = mkOption {
           type = types.nullOr types.bool;
           default = ws.cargoTrimPaths;

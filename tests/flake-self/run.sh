@@ -19,8 +19,9 @@
 #   - the flake-parts module with no configuration at all
 #     (zero-config/flake.nix, around the walking-skeleton fixture): no
 #     `root` and no `modules` give one workspace, `default`, whose product
-#     is in `packages` and whose dev shell is `devShells.default`, and
-#     whose test apps are in `apps`, named as their checks;
+#     and docs (`default-docs`) are in `packages`, whose dev shell is
+#     `devShells.default`, and whose test apps are in `apps`, named as
+#     their checks;
 #   - `nix run` on a test app (apps/flake.nix, around the test-control
 #     fixture): at its attribute path under the flake's `repo` output,
 #     where Nix wants a derivation, and by its name in `apps`
@@ -85,11 +86,12 @@ for lazy in true false; do
 
   zeroPkgs=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/zero#packages.x86_64-linux" --apply builtins.attrNames)
   zeroShells=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/zero#devShells.x86_64-linux" --apply builtins.attrNames)
-  jq -e 'index("walking-skeleton")' <<< "$zeroPkgs" > /dev/null && jq -e 'index("default")' <<< "$zeroShells" > /dev/null || {
+  jq -e 'index("walking-skeleton") and index("default-docs")' <<< "$zeroPkgs" > /dev/null && jq -e 'index("default")' <<< "$zeroShells" > /dev/null || {
     echo "flake-self: zero-config packages $zeroPkgs, devShells $zeroShells" >&2
     exit 1
   }
   "${nix[@]}" build "${opts[@]}" --no-link "path:$work/zero#packages.x86_64-linux.walking-skeleton"
+  "${nix[@]}" build "${opts[@]}" --no-link "path:$work/zero#packages.x86_64-linux.default-docs"
   zeroApps=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/zero#apps.x86_64-linux" --apply builtins.attrNames)
   jq -e 'index("default/x86_64-unknown-linux-gnu/walking-skeleton/test-bin-walking-skeleton")' <<< "$zeroApps" > /dev/null || {
     echo "flake-self: zero-config apps $zeroApps" >&2

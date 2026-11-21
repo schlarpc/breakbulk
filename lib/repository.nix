@@ -33,6 +33,7 @@
 #   repo.workspaces.<ws>.target.<triple>.testRuns.<pkg>.<test>   test runs
 #   repo.workspaces.<ws>.target.<triple>.testApps.<pkg>.<binary>  test apps (`nix run`)
 #   repo.workspaces.<ws>.target.<triple>.doctests.<pkg>
+#   repo.workspaces.<ws>.docs                          the default target's, or null
 #   repo.workspaces.<ws>.target.<triple>.docs          `cargo doc`'s folder
 #                                                      (also per variant)
 #   repo.workspaces.<ws>.target.<triple>.buildScriptPaths.{build,test}
@@ -58,6 +59,8 @@
 # `<ws>/<triple>/` for the default variant and `<ws>/<triple>/variant-<v>/`
 # for the others; check and clippy variants as
 # `<ws>/<triple>/variant-<v>/check` and `…/buildScriptPaths/<plan>`.
+# A variant with `docs.check` (any mode) adds its docs as `docs` under its
+# prefix.
 # Every proper prefix of those names,
 # `all` and each of `checkGroups` is also a check: an aggregate of the
 # checks it selects (lib/check-groups.nix).
@@ -1587,6 +1590,7 @@ let
       packages = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.packages;
       tests = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.tests;
       testRuns = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.testRuns;
+      docs = if ws.defaultTarget == null then null else perTarget.${ws.defaultTarget}.docs;
       plans = lib.mapAttrs (_: lib.mapAttrs (_: inst: inst.plans)) instances;
       devShell = mkDevShell {
         inherit pkgs nativeTriple;
@@ -1646,7 +1650,8 @@ let
   # something (`<pkg>/build`) and their checks, every enabled test run
   # (`<pkg>/test-<name>`, named as in `tests`) and doctest, and the
   # plans' `buildScriptPaths/<plan>`; check and clippy variants' `check`
-  # and `buildScriptPaths/<plan>`.
+  # and `buildScriptPaths/<plan>`; and the docs of every variant with
+  # `docs.check`.
   checks = lib.concatMapAttrs (
     wsName: w:
     lib.concatMapAttrs (
@@ -1687,6 +1692,12 @@ let
             // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
           )
         ))
+      ) t.variants
+      // lib.concatMapAttrs (
+        vName: v:
+        lib.optionalAttrs (variantCells.${wsName}.${triple}.${vName}.docs.check) {
+          "${variantPrefix wsName triple vName}/docs" = v.docs;
+        }
       ) t.variants
       // lib.optionalAttrs (cfg.workspaces.${wsName}.benchSmoke && t.canRunTests) (
         lib.concatMapAttrs (
