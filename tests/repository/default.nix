@@ -1441,14 +1441,17 @@ in
   # Cargo.toml in the test view, insta through INSTA_WORKSPACE_ROOT; all
   # three pass. The curated insta default sets INSTA_WORKSPACE_ROOT (a
   # function of the run) to the workspace directory of the files each
-  # run reads: the test view for a test run and the doctest, the "run"
-  # view with `runFiles` (a test app with `checkout`: tests/test-runs).
+  # run reads: the "run" view for a test run (narrower with `runFiles`),
+  # the test view for the doctest (a test app with `checkout`:
+  # tests/test-runs).
   # `other` does not depend on insta and gets nothing; `null` turns the
   # default off. A function in `memberDefaults` gets each member's own
   # root. The root manifest is in no "build" view: an edit to it
   # changes only the members' test units, and none with
-  # `test.workspaceManifest = false`. An edit to the snapshot under src/
-  # changes only snaps' test compiles, which share one view.
+  # `test.workspaceManifest = false`. The curated default also leaves the
+  # snapshots out of the test compiles' view, so an edit to the snapshot
+  # under src/ changes no unit, only snaps' test runs, which read the
+  # "run" view with them (INSTA_WORKSPACE_ROOT there).
   snapshots =
     let
       changedBy = edit: modules: changedUnits (snapshotsRepo null modules) (snapshotsRepo edit modules);
@@ -1466,10 +1469,12 @@ in
           "snaps-0.1.0-test-snapbox"
         ];
         rootOff = [ ];
-        snapshot = lib.tail root;
+        snapshot = [ ];
       };
+      snapshotEdit = snapshotsRepo "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [ ];
       i = inst snapshots;
       runs = i.testRuns.snaps;
+      runRoot = lib.head (exported runs."lib/snaps" "INSTA_WORKSPACE_ROOT");
       script = r: r.drvAttrs.buildCommand;
       exported = r: k: builtins.match ".*\nexport ${k}=([^\n]*)\n.*" (script r);
       doctestEnv = inst: p: builtins.fromJSON (builtins.unsafeDiscardStringContext inst.doctests.${p}.drvAttrs.BREAKBULK_TEST_ENV);
@@ -1481,8 +1486,14 @@ in
       ownFn = inst (snapshotsRepo null [ { workspaces.main.memberDefaults.test.env.MY_ROOT = run: "${run.workspaceRoot}/x"; } ]);
     in
     assert lib.assertMsg (got == want) "snapshots: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
-    assert lib.assertMsg (exported runs."lib/snaps" "INSTA_WORKSPACE_ROOT" == [ (wsIn (testView i "snaps")) ])
-      "snapshots: the run's INSTA_WORKSPACE_ROOT is ${builtins.toJSON (exported runs."lib/snaps" "INSTA_WORKSPACE_ROOT")}";
+    assert lib.assertMsg ((inst snapshotEdit).testRuns.snaps."lib/snaps".drvPath != runs."lib/snaps".drvPath)
+      "snapshots: an edit to a snapshot left the test run unchanged";
+    assert lib.assertMsg (
+      runRoot != wsIn (testView i "snaps")
+      && lib.hasSuffix "/ws" runRoot
+      && builtins.pathExists "${runRoot}/crates/snaps/src/snapshots/snaps__tests__render.snap"
+      && !(builtins.pathExists "${testView i "snaps"}/ws/crates/snaps/src/snapshots/snaps__tests__render.snap")
+    ) "snapshots: the run's INSTA_WORKSPACE_ROOT is ${runRoot}, not the workspace directory of the run view with the snapshots";
     assert lib.assertMsg (exported runs."lib/snaps" "INSTA_UPDATE" == [ "no" ]) "snapshots: INSTA_UPDATE";
     assert lib.assertMsg ((doctestEnv i "snaps").INSTA_WORKSPACE_ROOT or null == wsIn (testView i "snaps"))
       "snapshots: the doctest's env ${builtins.toJSON (doctestEnv i "snaps")}";
@@ -1497,7 +1508,7 @@ in
     assert lib.assertMsg (exported off.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT" == null) "snapshots: `sysDefaults.dependents.insta = null` left the default";
     assert lib.assertMsg (
       exported ownFn.testRuns.other."lib/other" "MY_ROOT" == [ "${wsIn (testView ownFn "other")}/x" ]
-      && exported ownFn.testRuns.snaps."lib/snaps" "MY_ROOT" == [ "${wsIn (testView ownFn "snaps")}/x" ]
+      && exported ownFn.testRuns.snaps."lib/snaps" "MY_ROOT" == [ "${lib.head (exported ownFn.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT")}/x" ]
     ) "snapshots: a memberDefaults function did not get each member's root";
 
     pkgs.runCommand "snapshots"

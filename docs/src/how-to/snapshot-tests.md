@@ -42,15 +42,23 @@ no snapshot, and try to write a new one into the store, which fails with
 `Permission denied`.
 
 So every member that depends on insta gets two variables in its test
-runs and doctests, from the curated
+runs and doctests, and a `sources` function, from the curated
 [`sysDefaults.dependents.insta`](../reference/options/repository.md#sysdefaultsdependents):
 
 - `INSTA_WORKSPACE_ROOT`: the workspace root in the files the run reads.
-  That is the test view, or the narrower "run" view with
-  [`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles),
-  or your checkout for a test app with `checkout`.
+  That is the "run" view for a test run (narrower with
+  [`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles)),
+  the test view for a doctest, or your checkout for a test app with
+  `checkout`.
 - `INSTA_UPDATE = "no"`: on a mismatch, insta prints the diff and the test
   fails. Without it, insta also tries to write a `.snap.new` file.
+- The package's `.snap` files are left out of the view its test
+  compiles read, and stay in the "run" view. insta reads a snapshot when
+  the test runs, never when it compiles, so an edit to a snapshot
+  re-runs the package's tests and rebuilds no test binary. A test that
+  reads a `.snap` file at compile time (`include_str!`), or a doctest
+  that compares snapshots, does not find it; set your own `sources`, or
+  turn the default off.
 
 The value of `INSTA_WORKSPACE_ROOT` is a function of the run,
 `run: run.workspaceRoot`. You can use the same form for any other
@@ -71,7 +79,7 @@ it.
   is in the test views only
   ([`test.scopeTestsDir`](../reference/options/packages.md#packagesnametestscopetestsdir)).
 - Snapshots under `src/` (insta's `src/snapshots/` for unit tests) are in
-  every view. Leave them out of the `"build"` view with a
+  the `"build"` view. Leave them out of it with a
   [`sources`](../reference/options/packages.md#packagesnamesources)
   function:
 
@@ -87,8 +95,9 @@ modules = [
 ];
 ```
 
-An edit to a snapshot then rebuilds only the package's test binaries
-(they share one view) and re-runs its tests. For whole directories,
+An edit to a snapshot then rebuilds no library, bin or product. With
+insta, the curated default above also keeps it out of the test binaries'
+view, so the edit only re-runs the package's tests. For whole directories,
 [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
 does the same without a function. More recipes are in [Rebuild less when
 unrelated files change](filter-source.md).
