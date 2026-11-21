@@ -299,6 +299,55 @@ whole set (`env = lib.mkForce { FOO = "a"; }`) counts for each variable
 in it. Stages and checks of equal priority from several layers still
 merge their fields, as without priorities.
 
+## A custom target
+
+A target rustc does not know by name (a `.json` target spec, or an OS
+breakbulk has no table entry for) works, but its products need
+[`traits`](../reference/options/targets.md#targetsnametraits): the facts
+breakbulk otherwise reads from its built-in table for the triple.
+
+Some facts come from rustc and need no traits. The planner asks your
+rustc for the target's spec, so the executable suffix of the stored
+binaries and which units get a `debug` output follow the `.json` file.
+
+The products still read the table. The names of the root files in the
+`linked` stage (`product.rootFiles`) and the `install` layout (which
+suffixes go to `bin/` or `lib/`, where shared libraries and debug side
+files go) are fixed when Nix evaluates the product, before anything
+builds, so rustc cannot supply them. The check `target-traits-rustc`
+compares the table with rustc for every built-in target; for your own
+target, you state the facts. Give the base fields and the rest is
+derived from them, then set any derived field that differs from your
+spec:
+
+```nix
+targets."my-board".traits = {
+  # Base fields: rustc's target_* cfg values.
+  arch = "x86_64";
+  vendor = "unknown";
+  os = "none";
+  env = "";
+  abi = "";
+  families = [ ];
+  # The spec's "exe-suffix".
+  executableSuffix = ".elf";
+};
+```
+
+The file-name and layout fields are `executableSuffix`,
+`sharedLibraryPrefix`, `sharedLibrarySuffix`, `staticLibraryPrefix`,
+`staticLibrarySuffix` (the spec's `exe-suffix`, `dll-prefix`,
+`dll-suffix`, `staticlib-prefix`, `staticlib-suffix`), `sharedLibraryDir`
+(`"bin"` where DLLs are found beside the executable, `"lib"` elsewhere),
+`debugArtifacts` (the debuginfo side files `install` places), and
+`isWindows` and `isWasm`. Without traits, building a product fails with
+a message naming `targets.<triple>.traits`. The linker kind, the test
+runner and the default debug handling read the traits too, unless you
+set [`linker`](../reference/options/targets.md#targetsnamelinker),
+[`runner`](../reference/options/targets.md#targetsnamerunner) and
+[`debugInfo`](../reference/options/targets.md#targetsnamedebuginfo)
+yourself.
+
 ## Windows (MSVC)
 
 The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
