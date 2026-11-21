@@ -36,4 +36,21 @@
       )
     ];
   };
+
+  # They read the dependent's `Cargo.toml` from `CARGO_MANIFEST_DIR`
+  # (proc-macro-crate also its workspace's, found with `cargo
+  # locate-project --workspace` when `CARGO` is set); checked in each
+  # crate's source. bevy_macro_utils panics without it; the others return
+  # an error that their callers may pass over.
+  proc-macro-crate = {
+    predictSources.keep = [
+      "Cargo.toml"
+      (
+        { root, workspaceDir, ... }:
+        lib.fileset.maybeMissing (root + "/${if workspaceDir == "" then "" else workspaceDir + "/"}Cargo.toml")
+      )
+    ];
+  };
+  find-crate = { predictSources.keep = [ "Cargo.toml" ]; };
+  bevy_macro_utils = { predictSources.keep = [ "Cargo.toml" ]; };
 }

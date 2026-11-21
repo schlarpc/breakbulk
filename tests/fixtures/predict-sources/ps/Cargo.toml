@@ -1,0 +1,8 @@
+# A comment that a check edits.
+[package]
+name = "ps"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+reader = { path = "../reader" }

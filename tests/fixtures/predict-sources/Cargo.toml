@@ -1,0 +1,11 @@
+# Source prediction (`predictSources`): ps's units see only the files they
+# read. README.md and NOTES.md are read by nothing; `reader` is a proc
+# macro that reads `templates/page.txt` from its caller's
+# CARGO_MANIFEST_DIR, a read prediction cannot see (`predictSources.keep`).
+[workspace]
+resolver = "2"
+members = ["ps", "reader"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

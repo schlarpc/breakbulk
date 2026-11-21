@@ -14,7 +14,7 @@
 #
 #   tools = breakbulk.mkTools pkgs;
 #   tools.breakbulk-plan  tools.breakbulk-shim  tools.breakbulk-unit
-#   tools.breakbulk-hints  tools.breakbulk-instantiate
+#   tools.breakbulk-hints  tools.breakbulk-instantiate  tools.breakbulk-predict
 #   tools.<name>.passthru.crates     the member crates in its source
 #
 # `root` is overridable for tests (tests/plan's tools-narrow check builds
@@ -143,4 +143,5 @@ lib.genAttrs [
   "breakbulk-unit"
   "breakbulk-hints"
   "breakbulk-instantiate"
+  "breakbulk-predict"
 ] build

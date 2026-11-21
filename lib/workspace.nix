@@ -235,8 +235,15 @@ let
     inherit root wsDir;
     packages = lib.genAttrs (lib.attrNames packages ++ lib.attrNames extraSources) viewSettings;
     targetsOf = dir: memberTargets.${dir} or [ ];
+    extraKeep = clippyKeep wsDir;
     runCommand = pkgs.runCommandLocal;
   };
+  # A clippy variant's predicted views keep the `Cargo.toml` of the
+  # compiles' working directory (`cwd`: the workspace root for a member,
+  # the package directory for a package outside it): clippy's
+  # `lint_groups_priority` reads it there, and skips the lint without a
+  # word when it is missing.
+  clippyKeep = cwd: lib.optional (mode == "clippy") (util.joinRel cwd "Cargo.toml");
   memberTargets = lib.listToAttrs (map (p: lib.nameValuePair p.dir p.targets) (lib.attrValues wsRoots));
   # Path packages Cargo loads from outside the workspace root.
   closureDirs = skel.passthru.description.packages;
@@ -262,6 +269,7 @@ let
         if outsideRoots ? ${pkgName} && r.success then r.value else [ ];
       tested = false;
       runCommand = pkgs.runCommandLocal;
+      extraKeep = clippyKeep dir;
     }
     // {
       name = pkgName;
@@ -281,11 +289,73 @@ let
     {
       workspace = lib.mapAttrs (_: v: v.src) keep;
       workspaceTest = lib.mapAttrs (_: v: v.testSrc) (lib.filterAttrs (_: v: v ? testSrc) keep);
-      workspaceTargets = lib.filterAttrs (_: ts: ts != { }) (lib.mapAttrs (_: v: v.targetSrc) keep);
+      # A predicted view's key is listed with the view it narrows as its
+      # value; instantiate's `sources.predicted` gives the predicted one.
+      workspaceTargets = lib.filterAttrs (_: ts: ts != { }) (
+        lib.mapAttrs (_: v: v.targetSrc // lib.mapAttrs (_: s: s.view) (v.predicted.build or { })) keep
+      );
       workspaceTestTargets = lib.filterAttrs (_: ts: ts != { }) (
-        lib.mapAttrs (_: v: v.targetTestSrc or { }) keep
+        lib.mapAttrs (_: v: v.targetTestSrc or { } // lib.mapAttrs (_: s: s.view) (v.predicted.test or { })) keep
       );
     };
+  # Predicted views (`predictSources`), by instantiation key: `spec`, what
+  # breakbulk-predict narrows, and `value`, the view, from one
+  # derivation over every predicted view of the workspace (import from
+  # derivation; dynamic-derivation mode's outer derivation makes the views
+  # from the specs instead and never reads `value`). A view whose
+  # prediction falls back is the view it would have narrowed.
+  predictedAll = lib.concatMapAttrs (
+    dir: v:
+    let
+      at = prefix: specs: lib.mapAttrs' (t: spec: lib.nameValuePair "${prefix}:${dir}#${t}" spec) specs;
+    in
+    at "src" (v.predicted.build or { }) // at "test-src" (v.predicted.test or { })
+  ) allViews;
+  predictOut = derivation {
+    name = "${name}-predicted-views";
+    inherit system;
+    builder = "${tools.breakbulk-predict}/bin/breakbulk-predict";
+    args = [
+      "--spec"
+      (builtins.toFile "predict.json" (
+        builtins.toJSON (lib.mapAttrsToList (key: spec: spec // { inherit key; }) predictedAll)
+      ))
+      "--out"
+      (placeholder "out")
+    ];
+  };
+  predictResult = builtins.fromJSON (
+    featureGates.readOutput nixFeatures "the predicted views of `${name}`" "${predictOut}/result.json"
+  );
+  predictedFor =
+    kind:
+    let
+      dirs = lib.attrNames (lib.filterAttrs (_: v: canContain kind v.name) allViews);
+    in
+    lib.mapAttrs
+      (key: spec: {
+        inherit spec;
+        value =
+          let
+            r = predictResult.${key};
+          in
+          if r ? view then
+            builtins.path {
+              path = "${predictOut}/${r.view}";
+              name = "source";
+            }
+          else
+            spec.view;
+      })
+      (
+        lib.filterAttrs (
+          key: _:
+          let
+            m = builtins.match "([a-z-]+):([^#]*)#.*" key;
+          in
+          lib.elem (lib.elemAt m 1) dirs && (lib.head m == "src" || kind == "test" || kind == "bench")
+        ) predictedAll
+      );
   # Test-only paths by directory (instantiate's `sources.testOnly`), for
   # the hint when a non-test unit misses one.
   testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
@@ -709,6 +779,7 @@ let
           targetRoots
           custom
           ;
+        predicted = predictedFor kind;
       }
       # The build and doc plans have no test units; the bench plan's
       # benches and harnesses in bench mode are.
@@ -835,6 +906,9 @@ in
     # directory.
     workspaceTargets = lib.mapAttrs (_: v: v.targetSrc) allViews;
     workspaceTestTargets = lib.mapAttrs (_: v: v.targetTestSrc) (lib.filterAttrs (_: v: v ? targetTestSrc) allViews);
+    # Predicted views, by key. IFD mode only: in dynamic-derivation mode
+    # the outer derivation makes them, and they are not known here.
+    predicted = lib.optionalAttrs (delivery != "dynamic") (lib.mapAttrs (_: p: p.value) (predictedFor "test"));
     inherit crates;
   };
   roots = built.roots;

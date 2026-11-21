@@ -101,6 +101,11 @@ rec {
       #   in place of `workspaceTest`
       # sources.targetRoots."<dir>" = [ "<path relative to the root>" ... ]
       #   the paths per-target views of that package leave out, for a hint
+      # sources.predicted."<key>" = { spec; value; }: the keys (listed in
+      #   workspaceTargets or workspaceTestTargets) whose views source
+      #   prediction narrows (`predictSources`): `spec`, breakbulk-predict's
+      #   ViewSpec (dynamic-derivation mode makes the view from it), and
+      #   `value`, the view (IFD mode; never read in dynamic mode)
       # sources.clippyConf."<dir>" = a member's clippy config tree
       #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
       # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
@@ -156,6 +161,7 @@ rec {
       clippyConf = sources.clippyConf or { };
       testOnly = sources.testOnly or { };
       custom = sources.custom or [ ];
+      predicted = sources.predicted or { };
       crates = sources.crates or { };
       spec = p: { env = { }; envCapture = null; } // p;
       platformSpec = { inherit host target; };
@@ -184,6 +190,7 @@ rec {
         // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
         // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
         // lib.optionalAttrs (custom != [ ]) { inherit custom; }
+        // lib.optionalAttrs (predicted != { }) { predicted = lib.attrNames predicted; }
       ));
       toolchainsFile = toFile "toolchains.json" (toJSON ({
         inherit system storeDir;
@@ -236,6 +243,7 @@ rec {
         // lib.concatMapAttrs (
           d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "test-src:${d}#${t}" (str v)) ts
         ) workspaceTestTargets
+        // lib.mapAttrs (_: p: str p.value) predicted
         // lib.mapAttrs' (d: v: lib.nameValuePair "clippy-conf:${d}" (str v)) clippyConf
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
         // {
@@ -371,6 +379,10 @@ rec {
           ;
       };
       inherit inputs;
+      # The predicted views' specs by key, for dynamic-derivation mode's
+      # outer derivation, which makes those views itself: `inputs` has
+      # them too, but from import from derivation.
+      predictedSpecs = lib.mapAttrs (_: p: p.spec) predicted;
       roots = rootsOut;
       # Test plans: package name to the attributes of its doctest derivation
       # (`breakbulk-unit doctest`), for lib/test-runs.nix to add the test

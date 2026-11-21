@@ -392,6 +392,101 @@ rec {
   # package's Cargo targets (`{ kind; name; path; }`, `path` relative to
   # the package directory; lib/roots.nix `packageTargets`). `runCommand`:
   # for a package with a `sourceOverlay`.
+  # Build-dependencies whose library code prints `rerun-if-changed`
+  # directives (lib/directive-printers.nix).
+  directivePrinters = import ./directive-printers.nix;
+
+  # The crate names in a package's `[build-dependencies]` (and
+  # `target.<cfg>.build-dependencies`), by the package they name.
+  buildDependencies =
+    { root, pkgDir }:
+    let
+      m = builtins.fromTOML (builtins.readFile (manifest.at root (util.joinRel pkgDir "Cargo.toml")));
+      tables =
+        [ (m.build-dependencies or { }) (m.build_dependencies or { }) ]
+        ++ lib.concatMap (t: [
+          (t.build-dependencies or { })
+          (t.build_dependencies or { })
+        ]) (lib.attrValues (m.target or { }));
+    in
+    lib.unique (
+      lib.concatMap (
+        t: lib.mapAttrsToList (k: v: if builtins.isAttrs v && v ? package then v.package else k) t
+      ) tables
+    );
+
+  # A package's `predictSources` settings, resolved: `enable` (false for a
+  # package with a `sourceOverlay`, with a warning), `runs` (whether its
+  # build-script runs are predicted), and `spec`, the predicted view spec
+  # of one target's units (`breakbulk-predict`'s ViewSpec, `view` with its
+  # context).
+  predictSettings =
+    {
+      root,
+      name,
+      pkgDir,
+      wsDir,
+      settings,
+      extraKeep,
+    }:
+    let
+      ps = settings.predictSources or { };
+      wanted = ps.enable or null == true;
+      overlaid = settings.sourceOverlay or { } != { };
+      enable =
+        if wanted && overlaid then
+          lib.warn "breakbulk: packages.${name}.predictSources: the package has a sourceOverlay, so its views are not predicted" false
+        else
+          wanted;
+      rel = p: if lib.path.hasPrefix root p then util.normalizeRel (lib.path.removePrefix root p) else null;
+      keepOf =
+        args:
+        lib.concatMap (
+          k:
+          if builtins.isString k then
+            [ (util.joinRel pkgDir k) ]
+          else if builtins.isPath k then
+            lib.toList (rel k)
+          else
+            let
+              r = k (args // { ${sentinel} = null; });
+            in
+            if fs.isFileset r then
+              lib.filter (x: x != null) (map rel (fs.toList r))
+            else
+              throw "breakbulk: a function in packages.${name}.predictSources.keep returned a ${typeOf r}, not a file set (lib.fileset)"
+        ) (ps.keep or [ ]);
+    in
+    {
+      inherit enable;
+      runs =
+        ps.buildScriptRuns or null == true
+        || ps.buildScriptRuns or null == null
+          && !lib.any (d: lib.elem d directivePrinters) (buildDependencies { inherit root pkgDir; });
+      spec =
+        {
+          kind,
+          cargoTarget,
+          run,
+          view,
+        }:
+        {
+          view = "${view}";
+          packageDir = pkgDir;
+          kind = if run then "run" else "crate";
+          root = util.joinRel pkgDir cargoTarget.path;
+          keep = lib.unique (
+            extraKeep
+            ++ keepOf {
+              inherit root kind cargoTarget;
+              buildScriptRun = run;
+              packageDir = pkgDir;
+              workspaceDir = wsDir;
+            }
+          );
+        };
+    };
+
   packageViews =
     {
       root,
@@ -403,6 +498,10 @@ rec {
       targets ? [ ],
       tested ? true,
       runCommand ? null,
+      # Paths every predicted view of the package keeps, relative to the
+      # root, besides `predictSources.keep` (the curated keeps of the
+      # variant: clippy's `Cargo.toml`).
+      extraKeep ? [ ],
     }:
     let
       cargoTargets = map (t: { inherit (t) kind name path; }) targets;
@@ -455,12 +554,61 @@ rec {
           } != [ ];
       targetViews =
         kind: ts: lib.listToAttrs (map (t: lib.nameValuePair "${t.kind}/${t.name}" (view kind t)) (filter narrowed ts));
+      buildTargets = filter (t: lib.elem t.kind [ "lib" "bin" "custom-build" ]) cargoTargets;
+      testTargets = filter (t: t.kind != "custom-build") cargoTargets;
+      predict = predictSettings {
+        inherit
+          root
+          name
+          pkgDir
+          wsDir
+          settings
+          extraKeep
+          ;
+      };
+      # The view a target's predicted view narrows: its own when the steps
+      # narrow it, else the package's.
+      allowed = kind: t: if narrowed t then view kind t else realized.${kind};
+      specsOf =
+        kind: ts:
+        lib.listToAttrs (
+          lib.concatMap (
+            t:
+            [
+              (lib.nameValuePair "${t.kind}/${t.name}" (
+                predict.spec {
+                  inherit kind;
+                  cargoTarget = t;
+                  run = false;
+                  view = allowed kind t;
+                }
+              ))
+            ]
+            ++ lib.optional (t.kind == "custom-build" && predict.runs) (
+              lib.nameValuePair "run/${t.kind}/${t.name}" (
+                predict.spec {
+                  inherit kind;
+                  cargoTarget = t;
+                  run = true;
+                  view = allowed kind t;
+                }
+              )
+            )
+          ) ts
+        );
     in
     {
       inherit src custom;
-      targetSrc = targetViews "build" (
-        filter (t: lib.elem t.kind [ "lib" "bin" "custom-build" ]) cargoTargets
+      # The predicted views' specs (lib/instantiate.nix `sources.predicted`),
+      # by `<kind>/<name>` (`run/custom-build/<name>` for a build-script
+      # run), for "build" and "test" units.
+      predicted = lib.optionalAttrs predict.enable (
+        {
+          build = specsOf "build" buildTargets;
+        }
+        // lib.optionalAttrs tested { test = specsOf "test" testTargets; }
       );
+      targetSrc = targetViews "build" buildTargets;
       targetRoots = lib.optionals (settings.scopeTargetRoots or null != false) (targetRootPaths {
         inherit root pkgDir;
         targets = cargoTargets;
@@ -473,7 +621,7 @@ rec {
     }
     // lib.optionalAttrs tested {
       inherit testSrc;
-      targetTestSrc = targetViews "test" (filter (t: t.kind != "custom-build") cargoTargets);
+      targetTestSrc = targetViews "test" testTargets;
       # The view the test runs read: the "run" view when a step chose
       # other files for runs, else the test view.
       runSrc = if "${run}" == "${testSrc}" then testSrc else run;
@@ -527,6 +675,8 @@ rec {
       # `targets`).
       targetsOf ? (_: [ ]),
       runCommand ? null,
+      # packageViews' `extraKeep`, for every member.
+      extraKeep ? [ ],
     }:
     let
       ws = manifest.workspace { inherit root wsDir; };
@@ -545,7 +695,7 @@ rec {
             inherit dir;
           }
           // packageViews {
-            inherit root wsDir runCommand;
+            inherit root wsDir runCommand extraKeep;
             inherit (info) name;
             pkgDir = dir;
             memberDirs = ws.members;

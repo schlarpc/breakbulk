@@ -548,6 +548,24 @@ let
     );
   targetViews = targetViewsRepo null [ ];
 
+  # --- predict-sources -----------------------------------------------------------
+
+  predictSourcesRepo =
+    edit: modules:
+    mkRepo (if edit == null then fixtures + "/predict-sources" else edited "predict-sources" edit) (
+      [
+        (oneWs ".")
+        {
+          packages.ps.predictSources = {
+            enable = true;
+            keep = [ "templates" ];
+          };
+        }
+      ]
+      ++ modules
+    );
+  predictSources = predictSourcesRepo null [ ];
+
   # --- sources -------------------------------------------------------------------
 
   # The fixture's source-view functions. `cli`, the root package, keeps
@@ -760,6 +778,7 @@ in
       overrideRepo
       testOnly
       targetViews
+      predictSources
       viewHints
       viewHintsFixed
       pkgidShort
@@ -1229,6 +1248,64 @@ in
       ''
         grep -q 'test foo ... ok' $foo/log
         [ "$($tool/bin/tool)" = 43 ]
+        touch $out
+      '';
+
+  # Source prediction (`predictSources`): an edit to a file no unit of ps
+  # reads (README.md, a comment in Cargo.toml) changes no unit; without
+  # it, the README edit changes every unit of ps. A file the build script
+  # declares changes the run and what reads its output; one the library
+  # includes changes the library's compiles and what links them. A proc
+  # macro's read that prediction does not see fails with a hint naming
+  # predictSources.keep, and the kept path builds.
+  predict-sources =
+    let
+      changedBy = edit: modules: changedUnits (predictSourcesRepo null modules) (predictSourcesRepo edit modules);
+      readme = "echo more >> ps/README.md";
+      psUnits = lib.filter (lib.hasPrefix "ps-");
+      got = {
+        readme = changedBy readme [ ];
+        manifest = changedBy "sed -i 's/^# A comment.*/# An edited comment./' ps/Cargo.toml" [ ];
+        notes = changedBy "echo more >> ps/NOTES.md" [ ];
+        proto = psUnits (changedBy "echo more >> ps/proto/x.proto" [ ]);
+        data = psUnits (changedBy "echo -n more >> ps/src/data.txt" [ ]);
+      };
+      want = {
+        readme = [ ];
+        manifest = [ ];
+        notes = [ ];
+        proto = [
+          "ps-0.1.0-bin"
+          "ps-0.1.0-build-run"
+          "ps-0.1.0-lib"
+          "ps-0.1.0-test"
+          "ps-0.1.0-test-t"
+        ];
+        data = [
+          "ps-0.1.0-bin"
+          "ps-0.1.0-lib"
+          "ps-0.1.0-test"
+          "ps-0.1.0-test-t"
+        ];
+      };
+      off = psUnits (changedBy readme [ { packages.ps.predictSources.enable = lib.mkForce false; } ]);
+      missing = predictSourcesRepo null [ { packages.ps.predictSources.keep = lib.mkForce [ ]; } ];
+      missingLib = (unitsNamed (inst missing) "build")."ps-0.1.0-lib";
+    in
+    assert lib.assertMsg (got == want) "predict-sources: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg (lib.elem "ps-0.1.0-lib" off)
+      "predict-sources: without predictSources, a README edit changed only ${builtins.toJSON off}";
+    pkgs.runCommand "predict-sources"
+      {
+        ps = predictSources.workspaces.main.packages.ps;
+        t = (inst predictSources).testRuns.ps.t;
+        hint = expectFailure "predict-sources-hint" missingLib [
+          "ps/templates/page.txt"
+          "packages.ps.predictSources.keep"
+        ];
+      }
+      ''
+        [ "$($ps/bin/ps)" = "42 data page proto" ]
         touch $out
       '';
 
