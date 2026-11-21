@@ -389,7 +389,7 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     collect_outputs(
         &outputs,
         &uplifted,
-        &debug_side_files(),
+        &debug_side_files(ALL_DEBUG),
         &from,
         |o: &str| Ok(root.join(o)),
     )
@@ -406,13 +406,16 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     let e = collect_outputs(
         &outputs,
         &uplifted,
-        &debug_side_files(),
+        &debug_side_files(ALL_DEBUG),
         &from,
         |o: &str| Ok(root.join(o)),
     )
     .unwrap_err();
     assert!(e.0.contains("did not write `my_app-1`"), "{e}");
 }
+
+/// Every target's debuginfo side files at once.
+const ALL_DEBUG: [&str; 4] = [".pdb", ".dwp", ".dwo", ".dSYM"];
 
 #[test]
 fn debug_side_files_go_to_debug() {
@@ -435,7 +438,14 @@ fn debug_side_files_go_to_debug() {
     ]);
     let root = t.path().join("drv");
     let dest = |o: &str| Ok(root.join(o));
-    collect_outputs(&outputs, &BTreeMap::new(), &debug_side_files(), &from, dest).unwrap();
+    collect_outputs(
+        &outputs,
+        &BTreeMap::new(),
+        &debug_side_files(ALL_DEBUG),
+        &from,
+        dest,
+    )
+    .unwrap();
     assert!(root.join("out/app.exe").exists());
     let mut debug: Vec<String> = std::fs::read_dir(root.join("debug"))
         .unwrap()
@@ -458,7 +468,7 @@ fn debug_side_files_go_to_debug() {
     collect_outputs(
         &outputs,
         &BTreeMap::new(),
-        &debug_side_files(),
+        &debug_side_files(ALL_DEBUG),
         &from,
         |o: &str| Ok(root.join(o)),
     )
@@ -478,7 +488,7 @@ fn debug_side_files_go_to_debug() {
     collect_outputs(
         &outputs,
         &BTreeMap::new(),
-        &debug_side_files(),
+        &debug_side_files(ALL_DEBUG),
         &from,
         |o: &str| Ok(root.join(o)),
     )

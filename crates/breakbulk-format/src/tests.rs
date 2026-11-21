@@ -1541,6 +1541,23 @@ fn debug_output_only_where_side_files() {
     assert!(!c.has_debug_output(elf));
 }
 
+/// A unit with a `debug` output sends the plan's debuginfo side files
+/// there, and no other target's.
+#[test]
+fn debug_side_files_from_the_plan() {
+    let mut p = example();
+    p.target_debuginfo = elf_debuginfo();
+    compile(&mut p, "c-ring").args.extend(
+        ["-C", "debuginfo=2", "-C", "split-debuginfo=unpacked"].map(|s| Arg::Literal(s.into())),
+    );
+    let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Fake).unwrap() else {
+        panic!()
+    };
+    assert!(c.outputs.contains_key("debug"));
+    let suffixes: Vec<&str> = c.side_files.iter().map(|f| f.suffix.as_str()).collect();
+    assert_eq!(suffixes, [".dwp", ".dwo"]);
+}
+
 #[test]
 fn per_object_debug_files_only_with_unpacked() {
     let lit = |a: &[&str]| {

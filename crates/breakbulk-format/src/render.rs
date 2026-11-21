@@ -522,7 +522,14 @@ pub fn render_unit_in<R: Resolve>(
                 // the same as a plain variant's, and shared.
                 side_files: c
                     .has_debug_output(&plan.target_debuginfo)
-                    .then(debug_side_files)
+                    .then(|| {
+                        debug_side_files(
+                            plan.target_debuginfo
+                                .artifacts
+                                .iter()
+                                .map(|a| a.suffix.as_str()),
+                        )
+                    })
                     .into_iter()
                     .flatten()
                     .chain(

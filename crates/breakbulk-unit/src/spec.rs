@@ -543,13 +543,12 @@ pub enum SideInto {
     Output(String),
 }
 
-/// The debuginfo files and directories rustc writes next to a linked
-/// output but `--print=file-names` does not name, for a unit with a
-/// [`DEBUG_OUTPUT`]: `.pdb` (msvc), `.dwp` (`split-debuginfo=packed`),
-/// `.dwo` (`unpacked`), and the `.dSYM` bundle dsymutil writes on Apple
-/// targets with `packed`.
-pub fn debug_side_files() -> Vec<SideFile> {
-    [".pdb", ".dwp", ".dwo", ".dSYM"]
+/// The rules that send the debuginfo files and directories rustc writes
+/// next to an output but `--print=file-names` does not name into a unit's
+/// [`DEBUG_OUTPUT`], one per suffix: the target's, from the plan
+/// (`.pdb` on msvc, `.dwp` and `.dwo` on Linux, Apple's `.dSYM` bundle).
+pub fn debug_side_files<'a>(suffixes: impl IntoIterator<Item = &'a str>) -> Vec<SideFile> {
+    suffixes
         .into_iter()
         .map(|suffix| SideFile {
             suffix: suffix.to_owned(),

@@ -71,8 +71,9 @@ set up the same home in their own derivation
    to `$rlib`, binaries and cdylibs to `$out` (a bin under the name the
    plan's `uplifted` gives it). Other files go where the unit's side-file
    rules send them, the first rule whose suffix the name ends in winning:
-   breakbulk's own rules send debuginfo side files (`.pdb`, `.dwp`,
-   `.dwo`, `.dSYM`) to `$debug` when the unit has it, and a variant's
+   breakbulk's own rules send the target's debuginfo side files (the
+   suffixes of the plan's `targetDebuginfo`: `.pdb`, `.dwp`, `.dwo`,
+   `.dSYM`) to `$debug` when the unit has it, and a variant's
    [`sideFiles`](options/workspaces.md#workspacesnamevariantsnamesidefiles)
    rules, on units a wrapper runs on, send a file into a named output or
    beside the output file of the same stem. Discard the rest, dep-info
@@ -152,9 +153,10 @@ A driver that looks beside a loaded crate (Verus's `.vir`) finds it.
 are not in the plan's output list, because `--print=file-names` does not
 name them.
 
-- They are collected by scanning `$TMPDIR/out` for `.pdb`, `.dwp` and
-  `.dwo` files and `.dSYM` directories, and moved, under rustc's names,
-  to the unit's `debug` output.
+- They are collected by scanning `$TMPDIR/out` for the suffixes of the
+  plan's `targetDebuginfo` artifacts (`.dwp` and `.dwo` on Linux, `.pdb`
+  on msvc and UEFI, `.dSYM` directories on Apple), and moved, under
+  rustc's names, to the unit's `debug` output.
 - Units without a `debug` output discard them with a warning: host units,
   libraries outside the `.dwo` case, and any unit the plan's target spec says
   writes none.
