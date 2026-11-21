@@ -369,7 +369,7 @@ let
     pkgs.runCommand "sources-sentinel"
       {
         nativeBuildInputs = [ pkgs.nix ];
-        without = expr "{ default, kind, root, packageDir }: default";
+        without = expr "{ default, kind, cargoTarget, root, packageDir }: default";
         fewer = expr "{ default, kind }: default";
         withDots = expr "{ default, kind, ... }: default";
         passAsFile = [
