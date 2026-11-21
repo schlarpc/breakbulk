@@ -610,7 +610,7 @@ let
       # Whether a run executes a copy of its binary, as in IFD mode: a
       # content-addressed one when `ca`, a debug-stripped one with
       # `test.stripForRun`.
-      copiesBinary = cfg: useCa || cfg.stripForRun;
+      copiesBinary = cfg: useCa || testRuns.stripsForRun useCa cfg;
 
       # The copy; empty for a binary Cargo did not build.
       binaryCopy =
@@ -618,7 +618,7 @@ let
         testRuns.binaryCopy {
           inherit pkgs caAttrs;
           name = n;
-          strip = cfg.stripForRun;
+          strip = testRuns.stripsForRun useCa cfg;
           src = "\"$wrapper\"/root/*";
           attrs = { inherit (r.breakbulkRoot) wrapper; };
           prelude = ''

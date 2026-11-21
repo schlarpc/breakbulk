@@ -974,6 +974,11 @@ let
   #                  OUT_DIR: the run is re-run and alpha's test binary
   #                  relinked, so alpha's test (`kept`) gets new
   #                  input-addressed paths with the same contents
+  #   test-cutoff-source
+  #                  the body of a function in beta's source that alpha's
+  #                  test never calls, moved down: alpha's test binary
+  #                  changes (beta's debug info), the debug-stripped copy
+  #                  its run executes by default with `ca` does not
   #   test-options   util's README and app's notes.md, with
   #                  test.stripForRun and test.runFiles = [ "data" ] as in
   #                  tests/test-options: app's test binary changes (util's
@@ -1017,6 +1022,14 @@ let
       test-cutoff = {
         before = cutoffRuns "1";
         after = cutoffRuns cutoffEdit;
+      };
+      test-cutoff-source = {
+        before = cutoffRuns "1";
+        after.kept =
+          (runsOf (edited "test-cutoff-source" cutoffFixture ''
+            sed -i -e 's/^    2$/    \/\/ edit ${cutoffEdit}\n    3/' -e 's/^pub fn unused/\npub fn unused/' beta/src/lib.rs
+            grep -q 'edit ${cutoffEdit}' beta/src/lib.rs
+          '') [ { packages.beta.env.BETA_SUB = "1"; } ]).alpha."lib/alpha";
       };
       test-options = {
         before = optionsRuns optionsFixture;

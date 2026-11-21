@@ -23,8 +23,16 @@
 #                   byte-identical, and the copies hold the run's files,
 #                   not subdirectories); run.sh builds them with
 #                   `ca = true` and checks alpha's test run is not re-run.
-#                   A source edit would not do: the source view's path is
-#                   in beta's debug info, so alpha's binary would change.
+#   source.before.alpha, source.after.alpha
+#                   alpha's test run before and after an edit to the body
+#                   of a function in beta's source that alpha's test never
+#                   calls, which also moves it down. Libraries get the
+#                   remap scope of a split-debug target (macro,diagnostics,
+#                   as mkRepository gives Linux), so beta's debug info
+#                   names its source view and holds its line table, and
+#                   alpha's test binary changes. With `ca` the run executes
+#                   a debug-stripped copy (`test.stripForRun`'s default),
+#                   which does not; run.sh checks the run is not re-run.
 #   run-inputs      (flake check; run.sh with `ca = true`) alpha's test run
 #                   has breakbulk-hints among its inputs (for its hints
 #                   after a failure) and not breakbulk-unit, so a
@@ -48,17 +56,32 @@ let
   fixture = ../fixtures/test-cutoff;
   tools = breakbulk.mkTools pkgs;
 
-  mk =
-    sub:
-    breakbulk.mkWorkspace pkgs {
-      inherit tools ca;
-      root = fixture;
-      name = "test-cutoff";
-      packageOverrides."beta@0.1.0".target.env.BETA_SUB = sub;
-    };
+  mkWith =
+    root: args:
+    breakbulk.mkWorkspace pkgs (
+      {
+        inherit tools ca root;
+        name = "test-cutoff";
+      }
+      // args
+    );
+  mk = sub: mkWith fixture { packageOverrides."beta@0.1.0".target.env.BETA_SUB = sub; };
 
   before = mk "1";
   after = mk "2";
+
+  # The fixture with beta's `unused` edited and moved down a line.
+  sourceEdited =
+    let
+      drv = pkgs.runCommand "test-cutoff-source-edit" { } ''
+        cp -r --no-preserve=mode ${fixture} $out
+        sed -i -e 's/^    2$/    \/\/ edited\n    3/' -e 's/^pub fn unused/\npub fn unused/' $out/beta/src/lib.rs
+        grep -q edited $out/beta/src/lib.rs
+      '';
+    in
+    builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
+  sourceRun =
+    root: (mkWith root { shippedRemapScope = "macro,diagnostics"; }).testRuns.alpha."lib/alpha";
   runsOf = ws: {
     alpha = ws.testRuns.alpha."lib/alpha";
     beta = ws.testRuns.beta."lib/beta";
@@ -86,6 +109,10 @@ in
   runs = {
     before = runsOf before;
     after = runsOf after;
+  };
+  source = {
+    before.alpha = sourceRun fixture;
+    after.alpha = sourceRun sourceEdited;
   };
 
   run-inputs =

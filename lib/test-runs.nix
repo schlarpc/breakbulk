@@ -391,6 +391,11 @@ rec {
       envFlags = lib.optional (spec.envFlags != [ ]) env;
     };
 
+  # Whether a run executes a debug-stripped copy of its binary:
+  # `test.stripForRun`, which defaults to `ca`. Not on without `ca`: the
+  # copy is then input-addressed, so stripping it saves no run.
+  stripsForRun = ca: cfg: if cfg.stripForRun == null then ca else cfg.stripForRun;
+
   # `test.stripForRun`: shell lines defining `stripForRun`,
   # which strips debug info from the copy of a test binary its run
   # consumes, so the source paths that the debug info of workspace
@@ -503,7 +508,7 @@ rec {
       includeIgnored = false;
       binaries = { };
       runner = "libtest";
-      stripForRun = false;
+      stripForRun = null;
       wrapper = null;
       postRun = "";
       keepLog = false;
@@ -1085,13 +1090,13 @@ rec {
       # debug-stripped one with `test.stripForRun`, else the unit's output.
       binaryOf =
         s: cfg:
-        if !useCa && !cfg.stripForRun then
+        if !useCa && !stripsForRun useCa cfg then
           s.unitOut
         else
           binaryCopy {
             inherit pkgs caAttrs;
             inherit (s) name;
-            strip = cfg.stripForRun;
+            strip = stripsForRun useCa cfg;
             src = "${s.unitOut}/*";
           };
 

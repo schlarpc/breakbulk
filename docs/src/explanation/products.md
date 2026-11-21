@@ -130,7 +130,7 @@ stable since 1.95):
 | --- | --- | --- |
 | Binaries and cdylibs, `debugInfo = "split"` (Linux default) | hidden | real store paths, moved to a separate `debug` output |
 | Staticlibs, `debugInfo = "split"` | hidden | real store paths, kept in the archive |
-| Test binaries | hidden | hidden; kept in the binary for backtraces in test logs |
+| Test binaries | hidden | hidden for the test's own crate, real store paths from the workspace libraries it links; with `ca`, test runs execute a copy with the debug info stripped (below) |
 | Anything on a target that keeps or strips debug info | hidden | hidden |
 | Anything built with rustc older than 1.95 | hidden | hidden |
 
@@ -174,10 +174,16 @@ the scrub. Such a program keeps the reference: remove the check instead.
 
 One catch for tests: the workspace libraries a test binary links are
 compiled as shipped libraries are, so their debug information names their
-sources. Editing any file of such a library, even a README, changes the
-test binary. [`test.stripForRun`](../reference/options/packages.md#packagesnameteststripforrun)
-(off by default) runs a debug-stripped copy instead, which does not
-change; the unstripped binary stays available for debugging.
+sources and holds their line tables. Editing any file of such a library,
+even a README or a function the test never calls, changes the test binary.
+So with [`ca`](../reference/options/repository.md#ca) on, a test run
+executes a copy of the binary with its debug information stripped
+([`test.stripForRun`](../reference/options/packages.md#packagesnameteststripforrun)),
+which does not change, and the test is not re-run. Panic messages keep
+their file and line; backtraces keep function names but lose files, lines
+and inlined frames. For debugging, the unstripped binary is
+`tests.<pkg>.<binary>`. Without `ca` the run is not stripped: its input
+changes with the binary anyway.
 
 ### Cargo's trim-paths
 

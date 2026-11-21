@@ -39,8 +39,9 @@
 #   - with declared-paths: the plans' `buildScriptPaths` checks fail
 #     naming a build-dependency's and a dev-dependency's missing paths, and
 #     pass with them allowed (`declaredPaths` in default.nix);
-#   - with test-cutoff and test-options: a test run whose inputs' contents
-#     an edit leaves unchanged is not re-run (`cutoff` in default.nix).
+#   - with test-cutoff (a settings edit and a source edit) and test-options:
+#     a test run whose inputs' contents an edit leaves unchanged is not
+#     re-run (`cutoff` in default.nix).
 #
 # The system daemon's configuration and /etc/nix are not touched: Nix master
 # runs as the calling user against `local?root=$WORK/store` with its own
@@ -409,8 +410,8 @@ done
 # store is kept between runs, so the edit is new on each run: what the
 # second build builds shows what the edit re-ran.
 edit=$(date +%s)
-for c in test-cutoff test-options; do
-  case " ${fixtures[*]} " in *" $c "*) ;; *) continue ;; esac
+for c in test-cutoff test-cutoff-source test-options; do
+  case " ${fixtures[*]} " in *" ${c%-source} "*) ;; *) continue ;; esac
   say "$c: test-run cutoff in dynamic-derivation mode (edit $edit)"
   cbuild() { mbuild --arg mode '"dynamic"' --argstr cutoffEdit "$edit" "$@"; }
   attrs=(kept)
@@ -442,8 +443,8 @@ for c in test-cutoff test-options; do
       ok=0
     fi
     case $c in
-      test-cutoff)
-        grep -q 'alpha-lib-alpha-bin\.drv' "$WORK/cutoff-after.built" || {
+      test-cutoff | test-cutoff-source)
+        grep -q 'alpha-lib-alpha-bin-stripped\.drv' "$WORK/cutoff-after.built" || {
           echo "alpha's test binary was not copied again (vacuous)" >&2
           ok=0
         }

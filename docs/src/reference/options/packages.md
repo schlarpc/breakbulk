@@ -1162,13 +1162,16 @@ list of (absolute path or string)
 
 Run a copy of each test binary with its debug info (and build
 ID) stripped, content-addressed when ` ca ` is on\. Workspace
-libraries keep real source paths in their debug info, so an
-edit to any file of such a library (a README) changes the bytes
-of every test binary that links it; the stripped copy does not
-change, and the test is not re-run\. Backtraces still name
-functions, but not files and lines\. The unstripped binary stays
-in ` tests.<pkg>.<binary> ` for debugging\. ` null `: off\.
-` repo.config.ca ` says whether [` ca `](repository\.md\#ca) is on\.
+libraries keep real source paths and line tables in their debug
+info, so an edit to any file of such a library (a README, a
+function the test never calls) changes the bytes of every test
+binary that links it; the stripped copy does not change, and the
+test is not re-run\. Panic messages keep their file and line;
+backtraces still name functions, but not files, lines or inlined
+frames\. The unstripped binary stays in ` tests.<pkg>.<binary> `
+for debugging\. ` null `: on when [` ca `](repository\.md\#ca) is on
+(` repo.config.ca `), off otherwise: without ` ca ` the stripped copy
+is input-addressed and saves no run\.
 
 *Type:*
 null or boolean
