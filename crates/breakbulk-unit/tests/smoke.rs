@@ -135,6 +135,7 @@ impl Resolve for Tokens<'_> {
             test_only: Vec::new(),
             target_roots: Vec::new(),
             custom: false,
+            predicted: false,
         }))
     }
 }

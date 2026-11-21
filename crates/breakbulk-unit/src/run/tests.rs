@@ -465,6 +465,7 @@ fn script_output_naming_a_path_outside_the_view() {
         test_only: Vec::new(),
         target_roots: Vec::new(),
         custom: false,
+        predicted: false,
     });
     let e = judge_with_stderr(
         &r,

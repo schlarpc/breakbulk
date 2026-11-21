@@ -106,6 +106,11 @@ pub mod keys {
     pub fn of_target(view: &str, target: &str) -> String {
         format!("{view}#{target}")
     }
+    /// The target of a build-script run's own view, from its script's
+    /// target (`custom-build/<name>`).
+    pub fn run_target(target: &str) -> String {
+        format!("run/{target}")
+    }
     /// A workspace member's clippy config tree, by directory.
     pub fn clippy_conf(dir: &str) -> String {
         format!("clippy-conf:{dir}")
@@ -147,6 +152,8 @@ struct Tokens<'a> {
     /// The unit's package and Cargo target (`<kind>/<name>`), whose own
     /// view, when there is one, stands in for the package's.
     target: Option<(String, String)>,
+    /// Whether the unit is a build-script run.
+    run: bool,
     refs: RefCell<Vec<Ref>>,
     index: RefCell<HashMap<Ref, usize>>,
 }
@@ -158,6 +165,7 @@ impl<'a> Tokens<'a> {
             prefix,
             test_package: None,
             target: None,
+            run: false,
             refs: RefCell::default(),
             index: RefCell::default(),
         }
@@ -189,11 +197,19 @@ impl<'a> Tokens<'a> {
         } else {
             (keys::src(dir), &sources.workspace_targets)
         };
-        match &self.target {
-            Some((p, t)) if p == package && targets.get(dir).is_some_and(|ts| ts.contains(t)) => {
-                keys::of_target(&key, t)
-            }
-            _ => key,
+        let Some((p, t)) = &self.target else {
+            return key;
+        };
+        let listed = |t: &str| p == package && targets.get(dir).is_some_and(|ts| ts.contains(t));
+        // A build-script run's own view (its declared paths, when source
+        // prediction narrows it), else its script's.
+        let run = keys::run_target(t);
+        if self.run && listed(&run) {
+            keys::of_target(&key, &run)
+        } else if listed(t) {
+            keys::of_target(&key, t)
+        } else {
+            key
         }
     }
 
@@ -543,6 +559,11 @@ impl Resolve for Tokens<'_> {
             test_only: self.test_only(dir),
             target_roots: self.target_roots(unit.package(), dir),
             custom: self.inputs.sources.custom.contains(dir),
+            predicted: self
+                .inputs
+                .sources
+                .predicted
+                .contains(&self.view_key(unit.package(), dir)),
         }))
     }
 
@@ -709,6 +730,7 @@ fn instantiate_unit(
         tokens.test_package = Some(c.package.clone());
     }
     tokens.target = unit_target(&inputs.plan, unit).map(|t| (unit.package().to_owned(), t.key()));
+    tokens.run = matches!(unit, Unit::Run(_));
     let rendered =
         render_unit_in(graph, id, &tokens).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = unit_env_value(&rendered).map_err(|e| Error(format!("unit {id}: {e}")))?;

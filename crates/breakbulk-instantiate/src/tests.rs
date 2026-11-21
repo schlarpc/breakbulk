@@ -36,6 +36,7 @@ fn smoke_inputs() -> Inputs {
             workspace_targets: Default::default(),
             workspace_test_targets: Default::default(),
             target_roots: Default::default(),
+            predicted: Default::default(),
             clippy_conf: Default::default(),
             test_only: Default::default(),
             custom: Default::default(),
@@ -293,6 +294,7 @@ impl Resolve for RealPaths<'_> {
                 .unwrap_or_default(),
             target_roots: Vec::new(),
             custom: self.0.sources.custom.contains(dir),
+            predicted: false,
         }))
     }
 }
@@ -836,6 +838,39 @@ fn units_use_their_targets_view() {
         text.contains(r#""targetRoots":["smokeapp/src/bin/other.rs"]"#),
         "{text}"
     );
+    assert!(!text.contains("predicted"), "{text}");
+
+    // A build-script run with a view of its own takes it over its
+    // script's; a predicted view is marked for the hints.
+    let run = "src:smokelib#run/custom-build/build-script-build";
+    inputs
+        .sources
+        .workspace_targets
+        .get_mut("smokelib")
+        .unwrap()
+        .insert("run/custom-build/build-script-build".into());
+    inputs.sources.predicted = [run.to_owned()].into();
+    let out = instantiate(&inputs).unwrap();
+    assert_eq!(keys_of(&out.units[SCRIPT]), one(script));
+    assert_eq!(keys_of(&out.units[RUN]), one(run));
+    let literal = |id: &str| -> String {
+        let Value::Parts { parts } = &out.units[id].attrs["BREAKBULK_UNIT"] else {
+            panic!()
+        };
+        parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Literal(l) => Some(l.as_str()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(
+        literal(RUN).contains(r#""predicted":true"#),
+        "{}",
+        literal(RUN)
+    );
+    assert!(!literal(SCRIPT).contains("predicted"));
 }
 
 /// Clippy variants: a unit clippy-driver runs on (a wrapper chain) gets

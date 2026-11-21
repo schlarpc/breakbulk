@@ -65,6 +65,11 @@ pub struct SourceView {
     /// then even a path in the package directory can be left out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub custom: bool,
+    /// Whether source prediction narrowed the view to the files it found
+    /// (`predictSources`): then a path in the package directory can be
+    /// left out, and the option that adds it is `predictSources.keep`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub predicted: bool,
 }
 
 /// The option that adds a path to a unit's source view.
@@ -275,7 +280,7 @@ fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Opti
             entry: e.display().to_string(),
         });
     }
-    let whole_package = !view.custom && view.widen != Widen::TestRunFiles;
+    let whole_package = !view.custom && !view.predicted && view.widen != Widen::TestRunFiles;
     if whole_package && rel.starts_with(&view.package_dir) || exists(p) {
         return None;
     }
@@ -357,6 +362,12 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
                  repository, add `{}` to it",
                 package_relative(rel, &view.package_dir)
             ),
+            Found::Missing { rel, .. } if view.predicted => format!(
+                "`{rel}` is not in this unit's predicted view: source prediction finds the files \
+                 of `mod` items, `#[path]` and `include*!` with literal paths, not files a proc \
+                 macro or build script reads; if it is in the repository, add it to \
+                 `{opt}.predictSources.keep`"
+            ),
             Found::Missing { rel, .. } => format!(
                 "`{rel}` is not in this unit's source view; if it is in the repository, add it \
                  to `{opt}.{}`",
@@ -420,6 +431,8 @@ impl TestRun {
             test_only: self.test_only.clone(),
             target_roots: Vec::new(),
             custom: self.custom,
+            // Test runs read the package's views, never a predicted one.
+            predicted: false,
         })
     }
 }
@@ -468,6 +481,7 @@ mod tests {
             test_only: vec![format!("{dir}/tests"), format!("{dir}/testdata")],
             target_roots: Vec::new(),
             custom: false,
+            predicted: false,
         }
     }
 
@@ -634,6 +648,29 @@ mod tests {
             [
                 "`crates/x/README.md` is not in this unit's source view; if it is in the \
               repository, add it to `packages.x.extraSources`"
+            ]
+        );
+    }
+
+    #[test]
+    fn predicted_view_names_keep() {
+        // A module file a proc macro generates the `mod` of, missing from
+        // a predicted view: in the package directory, so it counts.
+        let v = SourceView {
+            predicted: true,
+            ..view(VIEW, "crates/x", Widen::ExtraSources)
+        };
+        let text = format!(
+            "error: couldn't read `{VIEW}/crates/x/templates/page.html`: No such file or directory"
+        );
+        let (_, h) = run(&text, &v, &[], VIEW, &[]);
+        assert_eq!(
+            h,
+            [
+                "`crates/x/templates/page.html` is not in this unit's predicted view: source \
+                 prediction finds the files of `mod` items, `#[path]` and `include*!` with literal \
+                 paths, not files a proc macro or build script reads; if it is in the repository, \
+                 add it to `packages.x.predictSources.keep`"
             ]
         );
     }

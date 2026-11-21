@@ -41,6 +41,12 @@ pub struct Sources {
     /// Only for hints, as `test_only`.
     #[serde(default)]
     pub target_roots: BTreeMap<String, Vec<String>>,
+    /// The view keys (`src:<dir>#<kind>/<name>`, listed in
+    /// `workspace_targets` or `workspace_test_targets`) whose views source
+    /// prediction narrows. Only for hints: a unit with one names
+    /// `predictSources.keep` for a path its view lacks.
+    #[serde(default)]
+    pub predicted: BTreeSet<String>,
     /// Workspace members with a clippy config tree (clippy variants): the
     /// `.clippy.toml` and `clippy.toml` files of the package directory and
     /// its ancestors up to the repository root, rooted there like source
