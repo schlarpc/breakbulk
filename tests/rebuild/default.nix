@@ -181,6 +181,7 @@ let
     ];
     sys-native = [ presetFixtures.repos.sysNativeCross ];
     target-views = [ repository.repos.targetViews ];
+    predict-sources = [ repository.repos.predictSources ];
     test-closure = [ dynamic.repos.test-closure ];
     test-control = [ dynamic.repos.test-control ];
     test-cutoff = [ (plain "test-cutoff" [ ]) ];

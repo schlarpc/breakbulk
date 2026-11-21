@@ -3,6 +3,7 @@
 //! ```text
 //! breakbulk-drv --plan <plan.json> --sources <file> --toolchains <file>
 //!     --overrides <file> --roots <file> --values <file> --outer <file>
+//!     [--predict <file>]
 //! ```
 //!
 //! It runs instantiation exactly as IFD mode does (`breakbulk_instantiate`),
@@ -22,6 +23,12 @@
 //! outputs when it registers a `.drv`, so a wrong hash cannot get into the
 //! store.
 //!
+//! Predicted views (`--predict`, `predictSources`): each is made from its
+//! spec with `breakbulk_predict` and added as a `source` store path
+//! (recursive SHA-256), the path IFD mode's `builtins.path` gives the same
+//! tree, and becomes the value of its key. One whose prediction falls back
+//! is the view it narrows.
+//!
 //! A unit whose inputs include a content-addressed or deferred derivation
 //! (an embedded product) stays deferred: its outputs are placeholders, and
 //! so are those of every unit that depends on it. Nix resolves them at
@@ -32,7 +39,10 @@ use std::io::Cursor;
 use std::process::ExitCode;
 
 use breakbulk_format::Plan;
-use breakbulk_instantiate::dynamic::{self, Outer, Resolved, Values, Written};
+use breakbulk_instantiate::dynamic::{
+    self, Context, InputValue, Outer, Resolved, Values, Written,
+};
+use breakbulk_predict::view::{Outcome, ViewSpec, materialize, nar, outcome};
 use breakbulk_instantiate::{Inputs, instantiate};
 use harmonia_protocol::types::DaemonStore as _;
 use harmonia_store_aterm::hash_modulo::{HashModulo, fill_deferred_outputs, hash_input_modulo};
@@ -48,7 +58,8 @@ use harmonia_store_remote::DaemonClientBuilder;
 type Res<T> = Result<T, String>;
 
 const USAGE: &str = "usage: breakbulk-drv --plan <plan.json> --sources <file> \
-    --toolchains <file> --overrides <file> --roots <file> --values <file> --outer <file>";
+    --toolchains <file> --overrides <file> --roots <file> --values <file> --outer <file> \
+    [--predict <file>]";
 
 fn read(path: &str) -> Res<String> {
     std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))
@@ -158,7 +169,14 @@ async fn run() -> Res<()> {
             .filter(|n| {
                 matches!(
                     *n,
-                    "plan" | "sources" | "toolchains" | "overrides" | "roots" | "values" | "outer"
+                    "plan"
+                        | "sources"
+                        | "toolchains"
+                        | "overrides"
+                        | "roots"
+                        | "values"
+                        | "outer"
+                        | "predict"
                 )
             })
             .ok_or_else(|| format!("unknown argument `{flag}`\n{USAGE}"))?;
@@ -184,7 +202,11 @@ async fn run() -> Res<()> {
         // `null` for plans without predicted roots (check and clippy).
         roots: parse(&need("roots")?)?,
     };
-    let values: Values = parse(&need("values")?)?;
+    let mut values: Values = parse(&need("values")?)?;
+    let predict: Vec<ViewSpec> = match opts.get("predict") {
+        Some(p) => parse(p)?,
+        None => Vec::new(),
+    };
     let outer: Outer = parse(&need("outer")?)?;
 
     let units = instantiate(&inputs).map_err(|e| e.to_string())?;
@@ -202,6 +224,42 @@ async fn run() -> Res<()> {
         .connect_unix(socket)
         .await
         .map_err(|e| format!("connecting to {remote}: {e}"))?;
+
+    let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+    for (i, spec) in predict.iter().enumerate() {
+        let path = match outcome(spec) {
+            Outcome::Files(files) => {
+                let dir = std::path::Path::new(&tmp).join(format!("predicted-{i}"));
+                materialize(std::path::Path::new(&spec.view), &spec.package_dir, &files, &dir)
+                    .map_err(|e| format!("{}: {e}", spec.key))?;
+                let nar = nar(&dir).map_err(|e| format!("{}: {e}", spec.key))?;
+                let cam = "r:sha256"
+                    .parse()
+                    .map_err(|e| format!("r:sha256: {e:?}"))?;
+                let info = client
+                    .add_ca_to_store("source", cam, &BTreeSet::new(), false, Cursor::new(nar))
+                    .await
+                    .map_err(|e| format!("{}: adding its predicted view: {e}", spec.key))?;
+                sd.display(&info.path).to_string()
+            }
+            Outcome::Fallback(reasons) => {
+                eprintln!(
+                    "breakbulk-drv: {}: not predicted: {}",
+                    spec.key,
+                    reasons.join("; ")
+                );
+                spec.view.clone()
+            }
+        };
+        println!("breakbulk-drv: predicted {} {path}", spec.key);
+        values.insert(
+            spec.key.clone(),
+            InputValue {
+                context: vec![Context::Opaque { path: path.clone() }],
+                value: path,
+            },
+        );
+    }
 
     let mut drvs = Drvs {
         sd: sd.clone(),

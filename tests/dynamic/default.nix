@@ -399,6 +399,9 @@ let
     declared-paths = repository.declaredProvided;
     test-only = repository.testOnly;
     target-views = repository.targetViews;
+    # Its predicted views: the outer derivation makes them, and the units
+    # must come out as IFD mode's (builtins.path of the same trees).
+    predict-sources = repository.predictSources;
     sources = repository.sources;
     # With the options its hints name, so that everything builds.
     view-hints = repository.viewHintsFixed;

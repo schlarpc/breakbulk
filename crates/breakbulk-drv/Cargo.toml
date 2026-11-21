@@ -18,6 +18,7 @@ publish = false
 [dependencies]
 breakbulk-instantiate = { path = "../breakbulk-instantiate" }
 breakbulk-format = { path = "../breakbulk-format" }
+breakbulk-predict = { path = "../breakbulk-predict" }
 serde = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "net", "io-util"] }

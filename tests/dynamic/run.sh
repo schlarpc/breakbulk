@@ -73,7 +73,7 @@ else
     source-paths-dwo source-paths-dwp
     crate-types dev-dep-features build-dep-leak bin-exe-not-built rlib-example
     sys-native feature-unification clippy-conf test-cutoff
-    multi-ws outside-reads own-view stamps missing-input test-only target-views sources
+    multi-ws outside-reads own-view stamps missing-input test-only target-views predict-sources sources
     view-hints pkgid-short snapshots
     post-link source-paths trim-paths trim-paths-cc variants
     variants-coverage variants-driver cargo-config benches stdpaths git-multi-workspace git-revisions

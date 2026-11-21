@@ -170,6 +170,7 @@ let
           (root + "/crates/breakbulk-format")
           (root + "/crates/breakbulk-unit")
           (root + "/crates/breakbulk-hints")
+          (root + "/crates/breakbulk-predict")
           (root + "/crates/breakbulk-drv/Cargo.toml")
           (root + "/crates/breakbulk-drv/Cargo.lock")
           (root + "/crates/breakbulk-drv/src")
@@ -229,8 +230,11 @@ let
       # them, and the first takes none of their inputs.
       second = p: split != null && lib.elem p split.packages;
 
+      # Predicted views are the outer derivation's to make (from their
+      # specs): their values in `base.inputs` come from import from
+      # derivation.
       allValues =
-        base.inputs
+        removeAttrs base.inputs (lib.attrNames base.predictedSpecs)
         // {
           "dynamic:coreutils" = "${coreutils}";
         }
@@ -268,10 +272,23 @@ let
             value = unsafeDiscardStringContext v;
             context = contextList k v;
           }) values;
+          predict = lib.filterAttrs (k: _: full || !second (split.owner k)) base.predictedSpecs;
+          predictJson = lib.mapAttrsToList (
+            key: spec:
+            spec
+            // {
+              inherit key;
+              view = unsafeDiscardStringContext (util.devirtualize spec.view);
+            }
+          ) predict;
           # Every store path any value depends on, as a plain path: a
           # derivation output becomes its .drv file (drv-only: nothing is
           # built).
-          contextPaths = lib.unique (lib.concatMap (v: lib.attrNames (getContext v)) (lib.attrValues values));
+          contextPaths = lib.unique (
+            lib.concatMap (v: lib.attrNames (getContext v)) (
+              lib.attrValues values ++ map (p: util.devirtualize p.view) (lib.attrValues predict)
+            )
+          );
           context = builtins.appendContext "" (
             lib.genAttrs contextPaths (_: {
               path = true;
@@ -300,6 +317,8 @@ let
               base.files.rootsFile
               "--values"
               (toFile "values.json" (toJSON valuesJson))
+              "--predict"
+              (toFile "predict.json" (toJSON predictJson))
               "--outer"
               (toFile "outer.json" (
                 toJSON (
