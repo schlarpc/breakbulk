@@ -31,7 +31,7 @@
 # never reach them: target env is added only to target units at
 # instantiation, never through Cargo's `[env]`.
 #
-# Presets that use LLVM tools (windows for msvc, uefi, wasm, the Linux presets
+# Presets that use LLVM tools (windows, uefi, wasm, the Linux presets
 # with crossLanguageLto or the lld linker kind) need the LLVM matching
 # rustc: the workspace's `rustc` by default, or one
 # passed as `rustc` (its version is looked up in breakbulk.llvmVersions,
@@ -649,6 +649,7 @@ let
           lib
           targetTraits
           targetPkgsFor
+          llvmVersions
           chooseLinker
           chooseRunner
           hostSpec
@@ -765,7 +766,8 @@ in
 
   # Windows: msvc through xwin for a `-msvc` triple (`sdk`, `extraSdks`,
   # `crtStatic` default false), MinGW for a `-gnu` or `-gnullvm` triple
-  # (./windows-gnu.nix; `crtStatic` default true, `lld`).
+  # (./windows-gnu.nix; `crtStatic` default true; `llvmMajor`,
+  # `llvmPackages`, `lld`).
   windows = mkPreset (
     args:
     let

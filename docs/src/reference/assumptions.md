@@ -689,11 +689,11 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 
 ### L5. Cross-language LTO
 
-- **Assumption.** With `-C linker-plugin-lto`, rustc emits LLVM bitcode that clang with `lld` from the LLVM release matching rustc's links, together with C code compiled to bitcode by that release's clang (`-flto=thin`) and archived by its `llvm-ar`.
-- **Where.** `lib/presets/linker.nix`: `linkerKind` (`clang-lld`), `lldLinker`; `lib/presets/default.nix`: `linuxGnuWith` (`crossLanguageLto`: `cc`, `cxx`, `ar`, `cflags`).
+- **Assumption.** With `-C linker-plugin-lto`, rustc emits LLVM bitcode that `lld` from the LLVM release matching rustc's links, driven by that release's clang (`clang-lld`) or by nixpkgs' wrapped cc (`lld`), together with C code compiled to bitcode by that release's clang (`-flto=thin`) and archived by its `llvm-ar`.
+- **Where.** `lib/presets/linker.nix`: `linkerKind` (`clang-lld`, `lld`), `lldLinker`, `ccLldLinker`; `lib/presets/default.nix`: `linuxGnuWith` (`crossLanguageLto`: `cc`, `cxx`, `ar`, `cflags`).
 - **Upstream.** The rustc book, "Linker-plugin-based LTO".
 - **Holds for.** 1.99 (LLVM 23) on x86_64 Linux.
-- **Pinned by.** `cross-lto`: the build script's archive holds bitcode; the C function is inlined into its Rust caller and has no symbol left; without the option, the symbol and the call are there; the archive and the binary rebuild byte for byte.
+- **Pinned by.** `cross-lto` and `cross-lto-lld` (`linkerKind = "lld"`): the build script's archive holds bitcode; the C function is inlined into its Rust caller and has no symbol left; without the option, the symbol and the call are there; the archive and the binary rebuild byte for byte.
 - **If it changes.** The preset fails to link, or links without LTO.
 
 ### L6. musl links Rust's self-contained crt

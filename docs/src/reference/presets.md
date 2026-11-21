@@ -103,7 +103,7 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `mold` | none | nixpkgs' wrapped C compiler with `-fuse-ld=mold`; nixpkgs' mold |
 | `clang-lld` | `linux { crossLanguageLto = true; }` | clang and lld from `llvmPackages_<major>`, rustc's LLVM major release |
 | `lld-link` | Windows MSVC, UEFI | `lld-link` from `llvmPackages_<major>`, wrapped so that PDBs are reproducible |
-| `mingw-lld` | Windows MinGW | the MinGW C compiler with nixpkgs' default lld |
+| `mingw-lld` | Windows MinGW | the MinGW C compiler with lld from `llvmPackages_<major>`, rustc's LLVM major release |
 | `wasm-ld` | wasm, except `wasm32-wasip2` | `wasm-ld` from `llvmPackages_<major>`, not rustc's `rust-lld` |
 | `wasm-component-ld` | `wasm32-wasip2` | rustc's own `wasm-component-ld`, with `wasm-ld` from `llvmPackages_<major>` under it |
 | `rust-lld` | macOS on a Linux machine, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld` as `ld64.lld`, whose LLVM is rustc's |
@@ -144,7 +144,7 @@ which `rust-lld`'s always is.
 A kind that cannot work is an evaluation error that names both sides:
 a kind for another kind of target (`mold` for Windows), `mold` with
 `crossLanguageLto` (cross-language LTO needs a linker that reads LLVM
-bitcode, `clang-lld`), and `mold` with `relocationModel = "static"`
+bitcode, `clang-lld` or `lld`), and `mold` with `relocationModel = "static"`
 (mold 3.0.0 links non-PIE static glibc Rust programs that crash at
 startup; `lld` and `cc` do not).
 

@@ -7,7 +7,9 @@
 #   targets.x86_64-pc-windows-gnu.preset = breakbulk.presets.windows;
 #
 # Linker: the toolchain's C driver (rustc's windows-gnu specs link through
-# a gcc-style driver), with lld (./linker.nix, kind mingw-lld).
+# a gcc-style driver), with lld of rustc's LLVM major (./linker.nix, kind
+# mingw-lld; `llvmMajor` or `llvmPackages` without `rustc`, `lld` to
+# replace it).
 #
 # crtStatic (default true): `+crt-static` links libgcc_eh and winpthread
 # (gnu) or libunwind (gnullvm) statically, so the .exe needs only system
@@ -17,6 +19,7 @@
   lib,
   targetTraits,
   targetPkgsFor,
+  llvmVersions,
   chooseLinker,
   chooseRunner,
   hostSpec,
@@ -34,7 +37,9 @@
   crtStatic ? true,
   linkerKind ? null,
   rustc ? null,
-  lld ? pkgs.buildPackages.lld,
+  llvmMajor ? null,
+  llvmPackages ? null,
+  lld ? null,
   wine ? pkgs.wineWow64Packages.minimal,
   ...
 }:
@@ -52,6 +57,10 @@ let
       rustc
       lld
       ;
+    llvm = llvmVersions.packagesFor {
+      pkgs = pkgs.buildPackages;
+      inherit rustc llvmMajor llvmPackages;
+    };
     kind = linkerKind;
     packageSet = tp;
   };

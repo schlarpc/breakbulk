@@ -33,6 +33,8 @@
 #                     script's C is bitcode, and lld inlines it into its
 #                     Rust caller (the plain linux preset does not); the
 #                     archive and the linked binary rebuild byte for byte
+#   cross-lto-lld     the same with `linkerKind = "lld"` (the wrapped cc
+#                     driving lld)
 {
   pkgs,
   breakbulk,
@@ -899,11 +901,15 @@ let
         targets.${native}.preset = preset;
       }
     ];
-  crossLto = crossLtoWith (presets.linux { crossLanguageLto = true; });
+  crossLtoPreset = presets.linux { crossLanguageLto = true; };
+  crossLto = crossLtoWith crossLtoPreset;
+  # The same through `linkerKind = "lld"`: the wrapped cc driving lld.
+  crossLtoLld = crossLtoWith (crossLtoPreset { linkerKind = "lld"; });
   crossLtoOff = crossLtoWith presets.linux;
   crossLtoCheck =
+    name: repo:
     let
-      ws = crossLto.workspaces.main;
+      ws = repo.workspaces.main;
       unit =
         name:
         lib.findFirst (u: u.name == name) (throw "cross-lto: no unit ${name}") (
@@ -913,9 +919,9 @@ let
       bin = unit "cross-lto-0.1.0-bin";
       # A second build of a unit, as `nix build --rebuild` would do: one
       # extra attribute gives another derivation with the same build.
-      salted = d: derivation (d.drvAttrs // { breakbulkSalt = "cross-lto"; });
+      salted = d: derivation (d.drvAttrs // { breakbulkSalt = name; });
     in
-    pkgs.runCommand "cross-lto"
+    pkgs.runCommand name
       {
         nativeBuildInputs = [
           pkgs.llvmPackages.llvm
@@ -1319,6 +1325,25 @@ let
             triple = "aarch64-unknown-linux-gnu";
             nativeBuilder = true;
           }).testSystem.content == "aarch64-linux";
+        # mingw-lld's lld is of rustc's LLVM major: another major, another
+        # linker; `lld` replaces it.
+        mingwLldOfRustc =
+          let
+            linker =
+              args:
+              (presets.windows (
+                {
+                  inherit pkgs;
+                  triple = "x86_64-pc-windows-gnu";
+                }
+                // args
+              )).linker.content;
+          in
+          linker { llvmMajor = 22; } != linker { llvmMajor = 23; }
+          && linker {
+            llvmMajor = 22;
+            lld = pkgs.llvmPackages_23.lld;
+          } == linker { llvmMajor = 23; };
         llvmTable =
           llvm.majorFor "1.95.0" == 22
           && llvm.majorFor "1.98.1" == 22
@@ -1453,6 +1478,11 @@ let
               lto = true;
             }
           )
+          # lld reads rustc's bitcode (cross-lto-lld).
+          && k native {
+            kind = "lld";
+            lto = true;
+          } == "lld"
           && fails (
             k native {
               kind = "mold";
@@ -1534,6 +1564,7 @@ in
       msvc
       msvcPostLink
       crossLto
+      crossLtoLld
       crossLtoOff
       moldKind
       glibcNonPie
@@ -1548,7 +1579,8 @@ in
     presets-per-workspace = perWorkspace;
     debug-outputs = debugOutputsEval;
     wasm-host-inputs = wasmHostInputsCheck;
-    cross-lto = crossLtoCheck;
+    cross-lto = crossLtoCheck "cross-lto" crossLto;
+    cross-lto-lld = crossLtoCheck "cross-lto-lld" crossLtoLld;
 
     same-triple-eval = sameTripleEval;
     same-triple-build = pkgs.runCommand "same-triple-run" { } ''

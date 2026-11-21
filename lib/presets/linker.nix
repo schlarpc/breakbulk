@@ -21,13 +21,15 @@
 #   lld-link             isMsvc, isUefi                  lld-link (wrapped: reproducible PDBs)
 #   wasm-component-ld    isWasm, os wasi, env p2         rustc's wasm-component-ld over wasm-ld
 #   wasm-ld              other isWasm                    wasm-ld
-#   mingw-lld            isMingw (windows-gnu, -gnullvm) the MinGW C driver with -fuse-ld=lld
+#   mingw-lld            isMingw (windows-gnu, -gnullvm) the MinGW C driver with -fuse-ld=lld,
+#                                                        lld of rustc's LLVM major
 #   rust-lld             isApple, a Linux build machine, the toolchain's own rust-lld as ld64.lld
 #                        rustc ships rust-lld
 #   ld64.lld             isApple, a Linux build machine, nixpkgs' lld as ld64.lld, of
 #                        rustc ships none            rustc's LLVM major
 #   clang-lld            isLinux with lto                clang with -fuse-ld=lld
 #   lld                  isLinux, rustc picks lld        the wrapped cc with -fuse-ld=lld
+#                                                        (reads bitcode too: lto)
 #   cc                   other isLinux                   the wrapped cc with its own default (GNU ld)
 #   mold                 never (`kind = "mold"`)         the wrapped cc with -fuse-ld=mold
 #
@@ -466,7 +468,11 @@ let
     else if flavor == "zig" then
       throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with linuxPortable's `backend = \"zig\"`, which links with `zig cc` against its old glibc"
     else if lto && !(k.bitcode or false) then
-      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (`clang-lld`)"
+      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (${
+        lib.concatMapStringsSep ", " (n: "`${n}`") (
+          lib.attrNames (lib.filterAttrs (_: k: (k.bitcode or false) && (k.choosable or true) && k.on traits) kinds)
+        )
+      })"
     else if staticNonPie && kind == "mold" then
       throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `relocationModel = \"static\"`: mold links non-PIE static glibc Rust executables that crash at startup"
     else
@@ -523,8 +529,8 @@ let
             pkgs = packageSet.buildPackages;
             inherit rustc;
           },
-      # mingw-lld: the lld package.
-      lld ? pkgs.buildPackages.lld,
+      # mingw-lld: the lld package; default: `llvm`'s.
+      lld ? null,
       # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-gnu.<glibc>"; }.
       zig ? null,
     }:
@@ -550,7 +556,7 @@ let
       lld-link = lldLinkLinker bp (needs k "llvm" llvm);
       wasm-ld = "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
       wasm-component-ld = componentLinker bp "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
-      mingw-lld = mingwLinker pkgs packageSet lld;
+      mingw-lld = mingwLinker pkgs packageSet (if lld != null then lld else (needs k "rustc or llvm" llvm).lld);
       zig = zigLinker pkgs (needs k "zig" zig);
       rust-lld = rustLldLinker bp;
       "ld64.lld" = ld64LldLinker (needs k "rustc or llvm" llvm);

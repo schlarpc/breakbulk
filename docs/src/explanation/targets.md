@@ -88,7 +88,7 @@ build of it, through nixpkgs' wrapped C compiler, never rustc's own
 | --- | --- | --- |
 | Linux, where rustc links with its bundled lld | `lld` | nixpkgs' lld for rustc's LLVM release, through the wrapped C compiler (`-fuse-ld=lld`) |
 | other Linux targets | `cc` | the wrapped C compiler's own default: GNU ld |
-| Linux, with cross-language LTO | `clang-lld` | clang with lld; C code compiled to bitcode by the same clang |
+| Linux, with cross-language LTO | `clang-lld` | clang with lld; C code compiled to bitcode by the same clang (`linkerKind = "lld"` works too) |
 | Windows MSVC, UEFI | `lld-link` | `lld-link`, wrapped so that PDBs are reproducible |
 | Windows MinGW (`-gnu`, `-gnullvm`) | `mingw-lld` | the MinGW C driver with lld |
 | wasm | `wasm-ld`, `wasm-component-ld` | `wasm-ld`; on `wasm32-wasip2`, rustc's `wasm-component-ld` over it |

@@ -19,6 +19,7 @@ let
     lld = {
       on = t: t.isLinux;
       what = "Linux";
+      bitcode = true;
     };
     mold = {
       on = t: t.isLinux;
