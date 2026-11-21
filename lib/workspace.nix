@@ -909,6 +909,9 @@ in
     # Predicted views, by key. IFD mode only: in dynamic-derivation mode
     # the outer derivation makes them, and they are not known here.
     predicted = lib.optionalAttrs (delivery != "dynamic") (lib.mapAttrs (_: p: p.value) (predictedFor "test"));
+    # What each predicted view narrows (breakbulk-predict's ViewSpec), by
+    # key, in both modes.
+    predictedSpecs = lib.mapAttrs (_: p: p.spec) (predictedFor "test");
     inherit crates;
   };
   roots = built.roots;

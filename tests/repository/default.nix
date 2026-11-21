@@ -1290,11 +1290,30 @@ in
       };
       off = psUnits (changedBy readme [ { packages.ps.predictSources.enable = lib.mkForce false; } ]);
       missing = predictSourcesRepo null [ { packages.ps.predictSources.keep = lib.mkForce [ ]; } ];
+      specsOf = repo: variant: repo.workspaces.main.instances.${native}.${variant}.sources.predictedSpecs;
+      specs = specsOf predictSources "default";
+      runKey = "src:ps#run/custom-build/build-script-build";
+      # A clippy variant keeps the workspace's Cargo.toml (the compiles'
+      # working directory's), which clippy reads.
+      clippy = predictSourcesRepo null [
+        {
+          workspaces.main.variants.clippy.mode = "clippy";
+        }
+      ];
+      noRuns = specsOf (predictSourcesRepo null [ { packages.ps.predictSources.buildScriptRuns = false; } ]) "default";
+      overlaid = specsOf (predictSourcesRepo null [ { packages.ps.sourceOverlay."assets" = ./.; } ]) "default";
       missingLib = (unitsNamed (inst missing) "build")."ps-0.1.0-lib";
     in
     assert lib.assertMsg (got == want) "predict-sources: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
     assert lib.assertMsg (lib.elem "ps-0.1.0-lib" off)
       "predict-sources: without predictSources, a README edit changed only ${builtins.toJSON off}";
+    assert lib.assertMsg (specs.${runKey}.kind == "run" && specs."src:ps#lib/ps".keep == [ "ps/templates" ])
+      "predict-sources: specs ${builtins.toJSON (lib.mapAttrs (_: s: { inherit (s) kind keep; }) specs)}";
+    assert lib.assertMsg (lib.elem "Cargo.toml" (specsOf clippy "clippy")."src:ps#lib/ps".keep)
+      "predict-sources: a clippy variant's lib view does not keep the workspace's Cargo.toml";
+    assert lib.assertMsg (!(noRuns ? ${runKey}) && noRuns ? "src:ps#lib/ps")
+      "predict-sources: with buildScriptRuns = false the run is still predicted";
+    assert lib.assertMsg (overlaid == { }) "predict-sources: a package with a sourceOverlay is predicted";
     pkgs.runCommand "predict-sources"
       {
         ps = predictSources.workspaces.main.packages.ps;
