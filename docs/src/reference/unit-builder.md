@@ -259,6 +259,11 @@ the repository root, for each path that does not exist and is
 - under the root of another Cargo target of the package, or under
   `examples/` or `benches/`, in the view of one target's units:
   [`scopeTargetRoots = false`](options/packages.md#packagesnamescopetargetroots);
+- otherwise, in a predicted view (`predictSources`), anywhere inside the
+  view root, the package directory included:
+  [`predictSources.keep`](options/packages.md#packagesnamepredictsourceskeep),
+  saying that source prediction does not see files a proc macro or build
+  script reads;
 - otherwise inside the unit's view. The option is
   [`extraSources`](options/packages.md#packagesnameextrasources) for a
   library, bin or build script, and

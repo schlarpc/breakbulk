@@ -151,9 +151,31 @@ targets, and the paths a build script reads. Then an edit to
 ### Leave a README and the manifest out of the build
 
 A README line or a comment in `Cargo.toml` rebuilds the crate and
-everything that depends on it. Planning reads the manifest from its own
-copy, so the units do not need it in their view. If nothing reads these
-files when the crate builds, leave them out of `"build"`:
+everything that depends on it. Source prediction leaves out every file
+that no compile or build-script run reads:
+
+```nix
+packages.ruff_python_ast.predictSources.enable = true;
+# Or for every member: workspaces.<ws>.memberDefaults.predictSources.enable = true;
+```
+
+A compile then sees its module tree and the files it includes with a
+literal path, and a build-script run the paths it declares with
+`rerun-if-changed`. Files a proc macro reads are not found: the compile
+fails naming the file, with a hint, and
+[`predictSources.keep`](../reference/options/packages.md#packagesnamepredictsourceskeep)
+keeps them:
+
+```nix
+packages.web.predictSources.keep = [ "templates" ];
+```
+
+See [Source prediction](../explanation/internals/sources.md#source-prediction)
+for what it reads and when it falls back to the whole view.
+
+To leave the files out by hand instead: planning reads the manifest from
+its own copy, so the units do not need it in their view. If nothing reads
+these files when the crate builds, leave them out of `"build"`:
 
 ```nix
 packages.ruff_python_ast.sources = [

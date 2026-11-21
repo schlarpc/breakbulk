@@ -160,11 +160,14 @@ it. Cargo behaves the same way. What is changing:
   only `rmeta`; linking needs `rlib`. A machine building one crate on
   cached dependencies downloads only their `rmeta`, and check and clippy
   variants use only `rmeta`.
-- **Source narrowing from dep-info** (not built yet,
-  [#7](https://github.com/schlarpc/breakbulk/issues/7)) would give each
-  crate its exact file set, so edits outside its module tree change
-  nothing. The cost is re-running macro expansion, and files that proc
-  macros read are not tracked and must be declared.
+- **Source prediction**
+  ([`predictSources`](../reference/options/packages.md#packagesnamepredictsourcesenable),
+  opt-in) gives each compile the files of its module tree and literal
+  includes, and each build-script run its declared `rerun-if-changed`
+  paths, so a README line or a manifest comment changes no unit. Files a
+  proc macro reads are not seen and must be declared
+  (`predictSources.keep`); see [Source
+  prediction](internals/sources.md#source-prediction).
 - **Separate link derivations** would need nightly `-Zno-link` and
   `-Zlink-only`, so linking stays inside bin and test units.
 - **No impure caches.** rustc's incremental state or a shared compiler

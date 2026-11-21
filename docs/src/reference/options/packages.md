@@ -375,6 +375,108 @@ null
 *Declared by:*
  - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)
 
+## `packages.<name>.predictSources.enable`
+
+Whether this package’s compiles and build-script runs see
+only the files source prediction finds they read, so that an
+edit to any other file of the package (its ` README.md `, a
+comment in its ` Cargo.toml `, a file only a test reads) rebuilds
+none of them\. ` null `: ` false `\.
+
+A compile’s predicted view is the module tree of its Cargo
+target’s crate root, followed as rustc does (` mod ` items,
+` #[path] ` and ` cfg_attr(…, path = …) `), and the files of every
+` include! `, ` include_str! ` and ` include_bytes! ` with a literal
+path (also ` concat!(env!("CARGO_MANIFEST_DIR"), "…") `) and of
+` #[debugger_visualizer] `, out of the view the steps of
+[` sources `](\#packagesnamesources) chose\. A build-script run’s is the paths its
+script declares with literal ` rerun-if-changed ` directives,
+which is what Cargo reruns it for\. Test runs and doctests keep
+the package’s views\.
+
+Files read in a way the prediction does not see are misses: a
+proc macro reading a file (` askama ` templates, ` sqlx `’s
+` .sqlx `, ` include_dir! `), a module a proc macro declares\. rustc
+and most proc macros fail naming the file, and the failure ends
+with a hint naming ` predictSources.keep `\. A unit whose files
+cannot be predicted (a ` mod ` or include in a ` macro_rules! `
+body, an include with a computed path, a file syn cannot parse,
+a build script whose directives are computed or that prints
+none) sees its whole view\. A package with a ` sourceOverlay ` is
+not predicted (an evaluation warning says so)\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.predictSources.buildScriptRuns`
+
+Whether ` predictSources ` narrows this package’s build-script
+runs to their declared ` rerun-if-changed ` paths\. ` null `: ` true `,
+unless the package build-depends on a crate whose library code
+prints such directives (` autocfg `, ` bindgen `, ` cxx-build `, ` glib-build-tools `, ` lalrpop `, ` slint-build `, ` tauri-build `, ` vergen `, ` vergen-lib `),
+which source prediction cannot read\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.predictSources.keep`
+
+Paths every predicted view of this package keeps, when
+[` sources `](\#packagesnamesources) chose them: files a proc macro or build script reads
+that source prediction does not see\. A string is relative to the
+package directory (a directory keeps everything under it); a
+path is absolute\. A function gets ` { kind, cargoTarget, buildScriptRun, root, packageDir, workspaceDir, ... } ` (` kind `
+and ` cargoTarget ` as ` sources ` functions get them, never null
+here; ` buildScriptRun `: whether the view is a build-script
+run’s; ` workspaceDir `: the workspace’s directory, relative to
+` root `) and returns a ` lib.fileset ` value\. Lists concatenate in
+layer order\. The curated defaults keep ` Cargo.toml ` for the
+dependents of ` proc-macro-crate ` (also the workspace’s),
+` find-crate ` and ` bevy_macro_utils `, which read it from
+` CARGO_MANIFEST_DIR `, and clippy variants keep the compiles’
+working directory’s ` Cargo.toml `, which clippy reads\.
+
+*Type:*
+list of (string or absolute path or function from { kind, cargoTarget, buildScriptRun, root, packageDir, workspaceDir, \.\.\. } to a file set)
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  "templates"
+  ({ cargoTarget, root, packageDir, ... }:
+    lib.fileset.fileFilter (f: f.hasExt "sql") (root + "/${packageDir}/migrations"))
+]
+
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.productInputs`
 
 The packages whose products, built by the same plan as this
