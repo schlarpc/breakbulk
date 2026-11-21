@@ -330,7 +330,15 @@
             builtins.removeAttrs (import ./tests/git-multi-workspace {
               inherit pkgs;
               breakbulk = self.lib;
-            }) [ "repo" "ws" ]
+            }) [ "repo" "repoUrl" "rev" "ws" ]
+          )
+          # A rustflag and an env value naming a path in a fetchGit tree
+          # (lazy trees): stable plan and units, real paths.
+          // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "lazy-strings-${n}" v) (
+            builtins.removeAttrs (import ./tests/lazy-strings {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }) [ "repo" ]
           )
           # Stable test-run inputs for content-addressed cutoff (decision
           # 61), built input-addressed; the CA check itself needs

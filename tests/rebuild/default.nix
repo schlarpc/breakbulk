@@ -130,6 +130,7 @@ let
     feature-unification = [ (plain "feature-unification" [ (withToolchain pkgs.rust-bin.nightly.latest.minimal) ]) ];
     git-multi-workspace = [ (import ../git-multi-workspace args).ws ];
     git-revisions = [ (import ../git-revisions args).repos.repository ];
+    lazy-strings = [ (import ../lazy-strings args).repo ];
     linux-portable = [ extraTargets.repos.zigRepo ];
     linux-portable-native = [ extraTargets.repos.zigNativeRepo ];
     manifest-dir = [ dynamic.repos.manifest-dir ];

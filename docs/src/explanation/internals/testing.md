@@ -107,11 +107,11 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and eve
 
 ### Nix settings
 
-The checks run with the evaluating Nix's settings. One setting changes what the tests see: `lazy-trees`. With `lazy-trees = true`, `builtins.fetchGit` returns a virtual store path. Most fixtures point git sources at local directories (`gitTrees`), which are never virtual. `git-multi-workspace-fetched` and `git-multi-workspace-fetched-reference` fetch their git source with `builtins.fetchGit`, so they cover this setting. To check both values, build them twice:
+The checks run with the evaluating Nix's settings. One setting changes what the tests see: `lazy-trees`. With `lazy-trees = true`, `builtins.fetchGit` returns a virtual store path. Most fixtures point git sources at local directories (`gitTrees`), which are never virtual. `git-multi-workspace-fetched` and `git-multi-workspace-fetched-reference` fetch their git source with `builtins.fetchGit`, so they cover this setting. `lazy-strings-stable` names a path in a `builtins.fetchGit` tree in a target rustflag and a package `env` value (strings), in two repositories with a fetch each; their plans and units must be the same derivations. To check both values, build them twice:
 
 ```sh
 nix build .#checks.x86_64-linux.git-multi-workspace-fetched{,-reference}
 nix build .#checks.x86_64-linux.git-multi-workspace-fetched{,-reference} --option lazy-trees false
 ```
 
-CI covers both values. Its `lazy-trees` job builds `git-multi-workspace-fetched`, `git-multi-workspace-fetched-reference` and `products-source-paths` once with `lazy-trees = true` and once with `false`, and fails if a check's derivation path differs between the two. Its `lix` job evaluates and builds the two git checks with Lix, which has no lazy trees, and fails if Lix evaluates a different derivation from Determinate Nix. Every other CI check runs with the runner's default settings.
+CI covers both values. Its `lazy-trees` job builds `git-multi-workspace-fetched`, `git-multi-workspace-fetched-reference`, `lazy-strings-stable` and `products-source-paths` once with `lazy-trees = true` and once with `false`, and fails if a check's derivation path differs between the two. Its `lix` job evaluates and builds the two git checks and `lazy-strings-stable` with Lix, which has no lazy trees, and fails if Lix evaluates a different derivation from Determinate Nix. Every other CI check runs with the runner's default settings.

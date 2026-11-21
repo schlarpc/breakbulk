@@ -7,6 +7,8 @@
 #
 #   repo          the fixture's repository (repo/) as one commit on `main`
 #                 with a fixed date, so its id is the one the lockfile names
+#   repoUrl, rev  `repo` as a URL for `builtins.fetchGit` (reading it
+#                 builds `repo`), and its one commit (tests/lazy-strings)
 #   ws            the consumer's mkWorkspace (tests/rebuild)
 #   layout        the vendor directory gives each workspace its own stub in
 #                 a dot directory, named by the crates' `package.workspace`
@@ -188,7 +190,12 @@ let
   ) toolchains;
 in
 {
-  inherit repo ws;
+  inherit
+    repo
+    repoUrl
+    rev
+    ws
+    ;
 
   layout = pkgs.runCommand "git-multi-workspace-layout" { vendor = ws.vendor.dir; } ''
     cd $vendor/*/

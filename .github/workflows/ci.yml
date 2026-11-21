@@ -59,8 +59,9 @@ jobs:
             | xargs nix build --keep-going --no-link --print-build-logs
 
   # Lazy trees turn `builtins.fetchGit` results and the flake's own source
-  # into virtual store paths. The checks below fetch a git source or compare
-  # product references against the source view, so a virtual path leaking
+  # into virtual store paths. The checks below fetch a git source (as a
+  # crate source, or named in settings as strings) or compare product
+  # references against the source view, so a virtual path leaking
   # into a derivation fails them. They run with the setting forced both
   # ways, because the runner's default can change with the Nix release. The
   # derivation paths must also agree: a leaked virtual path differs per
@@ -78,7 +79,7 @@ jobs:
       - uses: DeterminateSystems/flakehub-cache-action@main
       - name: nix build with lazy-trees = ${{ matrix.lazy-trees }}
         run: |
-          checks=(git-multi-workspace-fetched git-multi-workspace-fetched-reference products-source-paths)
+          checks=(git-multi-workspace-fetched git-multi-workspace-fetched-reference lazy-strings-stable products-source-paths)
           nix config show lazy-trees
           for c in "${checks[@]}"; do
             this=$(nix eval --raw --no-eval-cache --option lazy-trees ${{ matrix.lazy-trees }} ".#checks.x86_64-linux.$c.drvPath")
@@ -93,7 +94,8 @@ jobs:
 
   # Lix has no lazy trees, and its `builtins.path` and `builtins.fetchGit`
   # are separate implementations of the calls `realTree` in lib/fetch.nix
-  # relies on. Lix evaluates as a client of the runner's Nix daemon.
+  # and `devirtualize` in lib/util.nix rely on. Lix evaluates as a client
+  # of the runner's Nix daemon.
   lix:
     name: git sources, Lix
     runs-on: ubuntu-latest
@@ -104,7 +106,7 @@ jobs:
       - name: nix build with Lix
         run: |
           lix=$(nix build --no-link --print-out-paths --inputs-from . "nixpkgs#lix^out")
-          checks=(git-multi-workspace-fetched git-multi-workspace-fetched-reference)
+          checks=(git-multi-workspace-fetched git-multi-workspace-fetched-reference lazy-strings-stable)
           for c in "${checks[@]}"; do
             ours=$("$lix/bin/nix" eval --raw --extra-experimental-features 'nix-command flakes' ".#checks.x86_64-linux.$c.drvPath")
             theirs=$(nix eval --raw ".#checks.x86_64-linux.$c.drvPath")

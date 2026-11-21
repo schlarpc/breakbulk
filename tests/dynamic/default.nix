@@ -381,6 +381,9 @@ let
       ];
     };
     git-revisions = (import ../git-revisions testArgs).repos.repository;
+    # A rustflag and an env value naming a path in a `builtins.fetchGit`
+    # tree, as tests/lazy-strings sets them.
+    lazy-strings = (import ../lazy-strings testArgs).repo;
     # tests/test-cutoff's fixture, as its stable-inputs check builds it.
     test-cutoff = mkRepo "test-cutoff" [ oneWs ];
 
@@ -941,6 +944,8 @@ let
             ++ lib.optional (name == "walking-skeleton") lintRepo
             ++ lib.optional (name == "declared-paths") repository.declaredMissing
           )
+          # The git repository lazy-strings fetches during evaluation.
+          ++ lib.optional (name == "lazy-strings") (toString (import ../git-multi-workspace { inherit pkgs breakbulk; }).repo)
         )
       )
     ) repos
