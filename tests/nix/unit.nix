@@ -91,10 +91,18 @@ let
   layeredWith =
     value: base: layers:
     let
+      c = layeredConfig value base layers;
+    in
+    {
+      inherit (c) profile flag features;
+    };
+  layeredConfig =
+    value: base: layers:
+    let
       e = lib.evalModules {
         modules = [
           (
-            { options, ... }:
+            { ... }:
             {
               options = {
                 profile = lib.mkOption {
@@ -109,9 +117,10 @@ let
                   type = lib.types.listOf lib.types.str;
                   default = [ ];
                 };
-                isSingle = lib.mkOption {
-                  type = lib.types.raw;
-                  default = n: options ? ${n} && bt.singleValued options.${n}.type;
+                # A group of options, as a variant's `docs.check`.
+                docs.check = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
                 };
               };
             }
@@ -119,11 +128,8 @@ let
           base
         ];
       };
-      c = (e.extendModules { modules = lib.imap1 (r: bt.layer r e.config.isSingle value) layers; }).config;
     in
-    {
-      inherit (c) profile flag features;
-    };
+    (e.extendModules { modules = lib.imap1 (r: bt.layer r e.options value) layers; }).config;
   layerFile = builtins.toFile "layer.nix" ''
     { lib, ... }: { profile = lib.mkForce "file"; features = [ "f" ]; }
   '';
@@ -772,6 +778,22 @@ runTests "lib-unit" {
       flag = true;
       features = [ ];
     };
+  };
+  # A nested option layers as a top-level one: the later layer wins.
+  testLayerNested = {
+    expr =
+      map (l: (layeredConfig (_: v: v) { docs.check = false; } l).docs.check)
+        [
+          [ { docs.check = true; } ]
+          [
+            { docs.check = true; }
+            { docs = lib.mkIf true { check = false; }; }
+          ]
+        ];
+    expected = [
+      true
+      false
+    ];
   };
   testLayerDefaultLoses = {
     expr = (layered { flag = false; } [ { flag = lib.mkDefault true; } ]).flag;

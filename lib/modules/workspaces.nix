@@ -232,7 +232,7 @@ let
       config.onTarget =
         defaults: triple:
         let
-          layer = rank: bt.layer rank (n: options ? ${n} && bt.singleValued options.${n}.type);
+          layer = rank: bt.layer rank options;
           cell =
             (extendModules {
               modules = [

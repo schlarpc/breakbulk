@@ -234,17 +234,27 @@ rec {
 
   # Layer `rank` (1, 2, …) of settings that refine a module evaluation
   # (`extendModules`): `module` with the definitions of the single-valued
-  # options it sets (`isSingle`, by option name) moved up by `rank / 4` in
+  # options it sets (of `options`, nested ones too) moved up by `rank / 4` in
   # priority, so that among definitions of equal priority the
   # higher-ranked layer's wins instead of conflicting. A fraction keeps
   # the order of any two integer priorities: `mkForce` and `mkDefault`
   # still win and lose as written. Not `mkOverride` around the whole
   # module: a list at a lower priority would then be dropped, not
   # concatenated. `value name v` rewrites each value the layer gives
-  # option `name`, under its mkIf, mkMerge, mkOverride and mkOrder.
+  # option `name` (`a.b` when nested), under its mkIf, mkMerge, mkOverride
+  # and mkOrder.
   layer =
-    rank: isSingle: value:
+    rank: options: value:
     let
+      optionAt = path: lib.attrByPath path null options;
+      isSingle = path: lib.isOption (optionAt path) && singleValued (optionAt path).type;
+      # A group of options (`docs` of `docs.check`), not an option.
+      isGroup =
+        path:
+        let
+          o = optionAt path;
+        in
+        builtins.isAttrs o && !lib.isOption o;
       shift = rank / 4.0;
       # `f` on each value under a definition's properties.
       under =
@@ -278,25 +288,31 @@ rec {
       # A module's `config`. An `mkOverride` around several options goes
       # down to each, as the module system pushes it down.
       config =
-        prio: c:
+        prio: path: c:
         let
           t = c._type or null;
         in
         if t == "if" then
-          c // { content = config prio c.content; }
+          c // { content = config prio path c.content; }
         else if t == "merge" then
-          c // { contents = map (config prio) c.contents; }
+          c // { contents = map (config prio path) c.contents; }
         else if t == "override" then
-          config c.priority c.content
+          config c.priority path c.content
         else
           lib.mapAttrs (
             n: v:
-            if isSingle n then
-              leaf prio (value n) v
+            let
+              p = path ++ [ n ];
+              name = lib.concatStringsSep "." p;
+            in
+            if isGroup p then
+              config prio p v
+            else if isSingle p then
+              leaf prio (value name) v
             else if prio == lib.modules.defaultOverridePriority then
-              under (value n) v
+              under (value name) v
             else
-              lib.mkOverride prio (under (value n) v)
+              lib.mkOverride prio (under (value name) v)
           ) c;
       reserved = [
         "_class"
@@ -330,7 +346,7 @@ rec {
           ) (_: null)) m
           // {
             imports = map module (m.require or [ ] ++ m.imports or [ ]);
-            config = config lib.modules.defaultOverridePriority (
+            config = config lib.modules.defaultOverridePriority [ ] (
               if explicit then
                 m.config or { }
               else
