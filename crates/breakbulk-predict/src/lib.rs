@@ -452,10 +452,14 @@ impl FileVisitor<'_, '_> {
         };
         let Some(path) = path else { return };
         if which == "include" {
-            // Items of an included file belong to the including module;
-            // its own includes are relative to it.
+            // rustc resolves an included file's `mod` items and includes
+            // against the file's own directory, as in a `mod.rs` file
+            // (rustc_builtin_macros `source_util.rs`, `expand_include`).
             if self.w.exists(&path) {
-                let m = self.module().clone();
+                let m = Module {
+                    dir: parent(&path),
+                    own: Own::Owned(None),
+                };
                 self.w.file(&path, m, true);
             } else {
                 self.w.files.insert(path);

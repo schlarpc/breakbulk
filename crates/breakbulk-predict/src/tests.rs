@@ -201,12 +201,12 @@ fn includes() {
             include!("parts/p.rs");
             "#,
         ),
-        // An included file's includes are relative to it; its modules
-        // belong to the including module.
+        // An included file's includes and modules are relative to it.
         (
             "c/src/parts/p.rs",
             "const D: &str = include_str!(\"d.txt\"); mod m;",
         ),
+        ("c/src/parts/m.rs", ""),
         ("c/src/m.rs", ""),
     ]);
     assert_eq!(
@@ -218,8 +218,8 @@ fn includes() {
             "c/docs/extra.md",
             "c/src/data/a.txt",
             "c/src/lib.rs",
-            "c/src/m.rs",
             "c/src/parts/d.txt",
+            "c/src/parts/m.rs",
             "c/src/parts/p.rs"
         ]
     );
