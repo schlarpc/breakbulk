@@ -511,10 +511,16 @@ default variant's. Open `<crate>/index.html` in it, as in Cargo's
   `cargo doc` without `--target`. With `--target`, Cargo puts them in
   `target/doc` and the other crates in `target/<triple>/doc`.
 
-Cargo 1.99 fails `cargo doc --release --target x86_64-unknown-linux-gnu`
-on an x86\_64 Linux host, without `--no-deps`, with "document output
-filename collision" when a proc macro is a workspace member and another
-member depends on it; without `--target` it succeeds. breakbulk always
-passes `--target`, so the doc plan of such a workspace fails the same
-way with a release profile and `docs.noDeps = false`. Use
-`docs.noDeps = true`, or the docs of a variant with the `dev` profile.
+Cargo fails `cargo doc --target <triple>` without `--no-deps` with
+"document output filename collision" when a proc macro is a workspace
+member, another member depends on it, and the profile's `opt-level`
+differs from its `build-override`'s (`release`: 3 and 0)
+([rust-lang/cargo#10368](https://github.com/rust-lang/cargo/issues/10368)).
+Cargo then has two doc units for the proc macro: the member's, with the
+profile, and the dependency's, with the build override. Without
+`--target`, Cargo drops the second; with it, it does not. breakbulk
+always passes `--target`, so the doc plan of such a workspace fails the
+same way with `docs.noDeps = false`. Use `docs.noDeps = true`, or a variant
+whose profile has the `opt-level` of its build override (the `dev`
+profile, or `[profile.release.build-override] opt-level = 3`, which also
+optimizes build scripts and proc macros).

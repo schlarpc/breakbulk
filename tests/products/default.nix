@@ -1183,10 +1183,10 @@ let
   # --- docs --------------------------------------------------------------------
 
   # With dependencies at Cargo's default profile for `cargo doc`, `dev`:
-  # Cargo 1.99's `cargo doc --release --target <host triple>` fails with
+  # Cargo's `cargo doc --release --target <host triple>` fails with
   # "document output filename collision" on this workspace (the proc macro
   # `derive` is a member and a dependency of `util`), as it does outside
-  # breakbulk; `--no-deps` and `dev` do not.
+  # breakbulk (rust-lang/cargo#10368); `--no-deps` and `dev` do not.
   docsRepo =
     noDeps: profile:
     mkRepo (fixtures + "/docs") [
