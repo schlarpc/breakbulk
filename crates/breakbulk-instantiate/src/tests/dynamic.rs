@@ -533,14 +533,18 @@ fn test_spec_of_a_test_root() {
     let pkgs = meta["packages"].as_array().unwrap();
     assert_eq!(pkgs.len(), 2);
     let view = input_value("src:smokeapp");
-    for p in pkgs {
-        let m = p["manifest_path"].as_str().unwrap();
-        assert!(m.starts_with(&format!("{view}/")), "{m}");
-    }
+    // Only the tested package's manifest is in its source view; the other
+    // is listed by name, under the scratch workspace root.
     let app = pkgs.iter().find(|p| p["name"] == "smokeapp").unwrap();
+    assert_eq!(app["id"], app_id.as_str());
     assert_eq!(app["manifest_path"], format!("{view}/smokeapp/Cargo.toml"));
     assert_eq!(app["version"], "0.1.0");
-    // Targets, for `binary()` filtersets: under the source view.
+    let lib = pkgs.iter().find(|p| p["name"] == "smokelib").unwrap();
+    assert_eq!(lib["id"], "smokelib");
+    assert_eq!(lib["manifest_path"], "@WS@/smokelib/Cargo.toml");
+    assert_eq!(lib["version"], "0.0.0");
+    assert_eq!(lib["description"], serde_json::Value::Null);
+    // Targets, for `binary()` filtersets: under the scratch root.
     let targets: Vec<&str> = app["targets"]
         .as_array()
         .unwrap()
@@ -550,7 +554,7 @@ fn test_spec_of_a_test_root() {
     assert_eq!(targets, ["smokeapp", "unbuilt"]);
     assert_eq!(
         app["targets"][1]["src_path"],
-        format!("{view}/smokeapp/tests/unbuilt.rs")
+        "@WS@/smokeapp/tests/unbuilt.rs"
     );
     // The edge, for `deps()`: declared under the library's name with `*`,
     // and resolved to the library's package.
@@ -562,12 +566,12 @@ fn test_spec_of_a_test_root() {
         .iter()
         .find(|n| n["id"] == app_id.as_str())
         .unwrap();
-    assert_eq!(node["dependencies"], serde_json::json!([lib_id]));
+    assert_eq!(node["dependencies"], serde_json::json!(["smokelib"]));
     assert_eq!(
         node["deps"],
         serde_json::json!([{
             "name": "smokelib",
-            "pkg": lib_id,
+            "pkg": "smokelib",
             "dep_kinds": [{ "kind": null, "target": null }],
         }])
     );
@@ -653,6 +657,8 @@ fn nextest_metadata_leaves_out_build_std_packages() {
         .iter()
         .map(|p| p["id"].as_str().unwrap())
         .collect();
+    // The tested package and smokelib: core is not listed under any id.
+    assert_eq!(ids.len(), 2, "{ids:?}");
     assert!(!ids.contains(&core), "{ids:?}");
     assert!(ids.contains(&app.package.as_str()), "{ids:?}");
     assert!(

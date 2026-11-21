@@ -377,30 +377,42 @@ fn nextest(
 /// view root is `view_root`: nextest-metadata's `BinaryListSummary` and a
 /// `cargo metadata` document, as nextest 0.9.146 reads them
 /// (nextest-runner/src/list/test_list.rs `from_binary_list`,
-/// src/test_command.rs, src/list/rust_build_meta.rs):
+/// src/test_command.rs, src/list/rust_build_meta.rs, nextest-filtering
+/// src/compile.rs). Only what the run can observe is in it, so that the
+/// run's derivation changes only with that:
 ///
 /// - the binary path is absolute and used as is (no remap), so the binary
 ///   stays in its own store path (`@BINARY@`);
-/// - the test's cwd and `CARGO_MANIFEST_DIR` are the package's manifest
-///   directory in the cargo metadata: the package directory of its source
-///   view, as for libtest runs. The workspace root is that view's root;
-///   other path packages of the plan are listed under it too (their
-///   directories need not exist), so `package()` filtersets match them.
-///   Path packages outside the skeleton are the standard library's, from
-///   `-Zbuild-std`: `cargo metadata` resolves the workspace alone
-///   (cargo `ops/cargo_metadata.rs` has no build-std resolve), so they are
-///   left out;
+/// - the test's cwd and `CARGO_MANIFEST_DIR` are the tested package's
+///   manifest directory in the cargo metadata: the package directory of its
+///   source view, as for libtest runs. nextest sets `CARGO_PKG_*` from the
+///   package entry, so the entry is built from the test unit's recorded
+///   `CARGO_PKG_*` values;
+/// - the other path packages of the plan are there for filtersets only:
+///   `package()`, `deps()` and `rdeps()` match package names, and
+///   `binary()` and `binary_id()` are checked against the targets. Nothing
+///   reads their manifest paths, versions or ids, so each is listed by name
+///   alone (its id is its name, its version `0.0.0`), with its manifest
+///   under the scratch workspace root. Path packages outside the skeleton
+///   are the standard library's, from `-Zbuild-std`: `cargo metadata`
+///   resolves the workspace alone (cargo `ops/cargo_metadata.rs` has no
+///   build-std resolve), so they are left out;
 /// - each package lists its Cargo targets ([`Plan::path_packages`]): nextest
 ///   checks the names `binary()` and `binary_id()` filtersets use against
 ///   them (nextest-filtering `ParseContextCache::new`), and fails a run
-///   whose configuration names a binary it does not know;
-/// - the dependency edges between path packages, for `deps()` and
-///   `rdeps()` (guppy's `depends_on`, any dependency kind). guppy matches
-///   each resolve edge to a declared dependency by the dependency's library
-///   name and version requirement, so each edge is declared with `*` and
-///   no rename, under the library's own name, whatever the manifest says;
-/// - nextest sets `CARGO_PKG_*` from the package entry, so the entry is
-///   built from the test unit's recorded `CARGO_PKG_*` values;
+///   whose configuration names a binary it does not know. Nothing reads
+///   their source paths, which are under the scratch workspace root;
+/// - dependency edges for `deps()` and `rdeps()`. A filterset is only
+///   evaluated for the run's own binary, so `deps(x)` asks only whether a
+///   package named `x` reaches the tested package, and `rdeps(x)` whether
+///   the tested package reaches one (guppy's `depends_on`: transitive, any
+///   dependency kind, and true from a package to itself, so neither set is
+///   empty when `x` names a package). Each package that reaches the tested
+///   one is given a direct edge to it, and the tested package one to each
+///   package it reaches; edges between other packages are left out. guppy
+///   matches each resolve edge to a declared dependency by the dependency's
+///   library name and version requirement, so each edge is declared with
+///   `*` and no rename, under the library's own name;
 /// - no base output directories, linked paths, build-script out dirs or
 ///   libdirs: nextest then adds nothing to the dynamic-library path, and
 ///   keeps the environment the run already set, so the process sees what a
@@ -416,15 +428,15 @@ pub fn nextest_for(
     view_root: &str,
 ) -> Result<Nextest, Error> {
     use serde_json::{Value as J, json};
-    let pkg_id = &unit.package;
+    let pkg_id = unit.package.as_str();
     let env_of = |u: &CompileUnit, k: &str| match u.env.get(k) {
         Some(Text::Literal(s)) => s.clone(),
         _ => String::new(),
     };
     let or_null = |v: String| if v.is_empty() { J::Null } else { J::String(v) };
-    let view_root = view_root.to_owned();
-    // One unit and directory per path package under the skeleton: the test
-    // unit for the tested package, else its first compile unit by id.
+    // One unit (for the package's name) and directory per path package
+    // under the skeleton: the test unit for the tested package, else its
+    // first compile unit by id.
     let mut path_pkgs: BTreeMap<&str, (&CompileUnit, &str)> = BTreeMap::new();
     for u in plan.units.values() {
         if let Unit::Compile(c) = u
@@ -433,11 +445,29 @@ pub fn nextest_for(
             path_pkgs.entry(c.package.as_str()).or_insert((c, dir));
         }
     }
-    if !path_pkgs.contains_key(pkg_id.as_str()) {
+    if !path_pkgs.contains_key(pkg_id) {
         return err(format!(
             "nextest: {pkg_id} is not a path package under the skeleton"
         ));
     }
+    let name_of = |id: &str| {
+        if id == pkg_id {
+            env_of(unit, "CARGO_PKG_NAME")
+        } else {
+            path_pkgs
+                .get(id)
+                .map(|(u, _)| env_of(u, "CARGO_PKG_NAME"))
+                .unwrap_or_default()
+        }
+    };
+    // The id a package is listed under.
+    let listed = |id: &str| {
+        if id == pkg_id {
+            id.to_owned()
+        } else {
+            name_of(id)
+        }
+    };
     let path_package = |id: &str| plan.path_packages.get(id);
     let lib_name = |id: &str| {
         path_package(id)
@@ -445,91 +475,99 @@ pub fn nextest_for(
             .map(|t| t.name.replace('-', "_"))
             .unwrap_or_default()
     };
-    // The edges whose both ends are listed.
-    let deps_of = |id: &str| -> Vec<&breakbulk_format::PathDependency> {
-        path_package(id)
-            .map(|p| {
-                p.dependencies
-                    .iter()
-                    .filter(|d| path_pkgs.contains_key(d.package.as_str()))
-                    .collect()
-            })
-            .unwrap_or_default()
+    // The edges whose both ends are listed, forward and reversed.
+    let mut forward: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut reverse: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for id in path_pkgs.keys() {
+        for d in path_package(id).map(|p| &p.dependencies[..]).unwrap_or_default() {
+            if let Some((&to, _)) = path_pkgs.get_key_value(d.package.as_str()) {
+                forward.entry(id).or_default().push(to);
+                reverse.entry(to).or_default().push(id);
+            }
+        }
+    }
+    fn reached<'a>(edges: &BTreeMap<&'a str, Vec<&'a str>>, from: &'a str) -> BTreeSet<&'a str> {
+        let mut seen = BTreeSet::new();
+        let mut todo = vec![from];
+        while let Some(id) = todo.pop() {
+            for &n in edges.get(id).map(|v| &v[..]).unwrap_or_default() {
+                if seen.insert(n) {
+                    todo.push(n);
+                }
+            }
+        }
+        seen.remove(from);
+        seen
+    }
+    let below = reached(&forward, pkg_id);
+    let above = reached(&reverse, pkg_id);
+    let deps_of = |id: &str| -> Vec<&str> {
+        if id == pkg_id {
+            below.iter().copied().collect()
+        } else if above.contains(id) {
+            vec![pkg_id]
+        } else {
+            vec![]
+        }
     };
     let mut packages = Vec::new();
-    for (id, (u, dir)) in &path_pkgs {
-        let u = if *id == pkg_id.as_str() { unit } else { u };
-        let e = |k: &str| env_of(u, k);
-        let dir = if dir.is_empty() {
-            view_root.clone()
-        } else {
-            format!("{view_root}/{dir}")
+    for (id, (_, dir)) in &path_pkgs {
+        let manifest = |root: &str| {
+            if dir.is_empty() {
+                format!("{root}/Cargo.toml")
+            } else {
+                format!("{root}/{dir}/Cargo.toml")
+            }
         };
         let targets: Vec<J> = path_package(id)
             .map(|p| &p.targets[..])
             .unwrap_or_default()
             .iter()
             .map(|t| {
-                let src = if t.src_path.starts_with('/') {
-                    t.src_path.clone()
-                } else {
-                    format!("{view_root}/{}", t.src_path)
-                };
                 json!({
                     "name": t.name,
                     "kind": t.kind,
                     "crate_types": t.crate_types,
-                    "src_path": src,
+                    "src_path": format!("@WS@/{}", t.src_path.trim_start_matches('/')),
                 })
             })
             .collect();
         let dependencies: Vec<J> = deps_of(id)
             .into_iter()
-            .flat_map(|d| {
-                let name = path_pkgs
-                    .get(d.package.as_str())
-                    .map(|(u, _)| env_of(u, "CARGO_PKG_NAME"))
-                    .unwrap_or_default();
-                d.kinds.iter().map(move |k| {
-                    json!({
-                        "name": name,
-                        "source": null,
-                        "req": "*",
-                        "kind": k.kind,
-                        "optional": false,
-                        "uses_default_features": true,
-                        "features": [],
-                        "target": k.target,
-                        "rename": null,
-                        "registry": null,
-                        "path": null,
-                    })
+            .map(|d| {
+                json!({
+                    "name": name_of(d),
+                    "source": null,
+                    "req": "*",
+                    "kind": null,
+                    "optional": false,
+                    "uses_default_features": true,
+                    "features": [],
+                    "target": null,
+                    "rename": null,
+                    "registry": null,
+                    "path": null,
                 })
             })
             .collect();
-        let authors: Vec<String> = e("CARGO_PKG_AUTHORS")
-            .split(':')
-            .filter(|a| !a.is_empty())
-            .map(str::to_owned)
-            .collect();
-        packages.push(json!({
-            "id": id,
-            "name": e("CARGO_PKG_NAME"),
-            "version": e("CARGO_PKG_VERSION"),
-            "authors": authors,
-            "description": or_null(e("CARGO_PKG_DESCRIPTION")),
-            "homepage": or_null(e("CARGO_PKG_HOMEPAGE")),
-            "repository": or_null(e("CARGO_PKG_REPOSITORY")),
-            "license": or_null(e("CARGO_PKG_LICENSE")),
-            "license_file": or_null(e("CARGO_PKG_LICENSE_FILE")),
-            "rust_version": or_null(e("CARGO_PKG_RUST_VERSION")),
+        let mut entry = json!({
+            "id": listed(id),
+            "name": name_of(id),
+            "version": "0.0.0",
+            "authors": [],
+            "description": null,
+            "homepage": null,
+            "repository": null,
+            "license": null,
+            "license_file": null,
+            "rust_version": null,
             "readme": null,
             "documentation": null,
             "source": null,
             "dependencies": dependencies,
             "targets": targets,
             "features": {},
-            "manifest_path": format!("{dir}/Cargo.toml"),
+            "manifest_path": manifest("@WS@"),
             "metadata": null,
             "publish": null,
             "categories": [],
@@ -537,22 +575,45 @@ pub fn nextest_for(
             "edition": "2021",
             "links": null,
             "default_run": null,
-        }));
+        });
+        if *id == pkg_id {
+            let e = |k: &str| env_of(unit, k);
+            let authors: Vec<String> = e("CARGO_PKG_AUTHORS")
+                .split(':')
+                .filter(|a| !a.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let fields = json!({
+                "version": e("CARGO_PKG_VERSION"),
+                "authors": authors,
+                "description": or_null(e("CARGO_PKG_DESCRIPTION")),
+                "homepage": or_null(e("CARGO_PKG_HOMEPAGE")),
+                "repository": or_null(e("CARGO_PKG_REPOSITORY")),
+                "license": or_null(e("CARGO_PKG_LICENSE")),
+                "license_file": or_null(e("CARGO_PKG_LICENSE_FILE")),
+                "rust_version": or_null(e("CARGO_PKG_RUST_VERSION")),
+                "manifest_path": manifest(view_root),
+            });
+            for (k, v) in fields.as_object().into_iter().flatten() {
+                entry[k] = v.clone();
+            }
+        }
+        packages.push(entry);
     }
-    let ids: Vec<&str> = path_pkgs.keys().copied().collect();
-    let nodes: Vec<J> = ids
-        .iter()
+    let ids: Vec<String> = path_pkgs.keys().map(|id| listed(id)).collect();
+    let nodes: Vec<J> = path_pkgs
+        .keys()
         .map(|id| {
             let deps = deps_of(id);
             json!({
-                "id": id,
-                "dependencies": deps.iter().map(|d| &d.package).collect::<Vec<_>>(),
+                "id": listed(id),
+                "dependencies": deps.iter().map(|d| listed(d)).collect::<Vec<_>>(),
                 "deps": deps
                     .iter()
                     .map(|d| json!({
-                        "name": lib_name(&d.package),
-                        "pkg": d.package,
-                        "dep_kinds": d.kinds,
+                        "name": lib_name(d),
+                        "pkg": listed(d),
+                        "dep_kinds": [{ "kind": null, "target": null }],
                     }))
                     .collect::<Vec<_>>(),
                 "features": [],
