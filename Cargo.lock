@@ -41,6 +41,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "breakbulk-predict"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "syn",
+]
+
+[[package]]
 name = "breakbulk-shim"
 version = "0.1.0"
 dependencies = [

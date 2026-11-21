@@ -1,0 +1,19 @@
+[package]
+name = "breakbulk-predict"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Source prediction: the files rustc reads for a crate root, and the paths a
+# build-script run declares, read from the sources without building
+# anything. A library: dynamic-derivation mode's outer derivation and IFD
+# mode's prediction derivation both use it.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# A real parser rather than a hand-written lexer: raw strings, char
+# literals, nested comments and braces in literals are syn's problem.
+proc-macro2 = { version = "1", default-features = false }
+syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
