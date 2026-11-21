@@ -768,7 +768,7 @@ fn test_units_use_the_test_view() {
 }
 
 /// Per-target views: a unit whose Cargo target has a view of its own names
-/// it (a build-script run by its script's target); a unit whose target is
+/// it (a build-script run reads the package's view); a unit whose target is
 /// not listed, or that the plan matched to none, names its package's view.
 #[test]
 fn units_use_their_targets_view() {
@@ -818,7 +818,8 @@ fn units_use_their_targets_view() {
     let one = |k: &str| BTreeSet::from([k.to_owned()]);
     let script = "src:smokelib#custom-build/build-script-build";
     assert_eq!(keys_of(&out.units[SCRIPT]), one(script));
-    assert_eq!(keys_of(&out.units[RUN]), one(script));
+    // A run reads the package's view, not its script's.
+    assert_eq!(keys_of(&out.units[RUN]), one("src:smokelib"));
     assert_eq!(keys_of(&out.units[LIB]), one("src:smokelib"));
     assert_eq!(
         keys_of(&out.units[APP]),
@@ -840,8 +841,8 @@ fn units_use_their_targets_view() {
     );
     assert!(!text.contains("predicted"), "{text}");
 
-    // A build-script run with a view of its own takes it over its
-    // script's; a predicted view is marked for the hints.
+    // A build-script run with a view of its own takes it over the
+    // package's; a predicted view is marked for the hints.
     let run = "src:smokelib#run/custom-build/build-script-build";
     inputs
         .sources

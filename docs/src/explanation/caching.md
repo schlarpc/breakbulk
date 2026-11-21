@@ -96,12 +96,16 @@ script sees no `examples/` or `benches/` at all
 | Edit | Rebuilds |
 | --- | --- |
 | `tests/foo.rs` | that test's compile, and the package's test runs |
-| `examples/x.rs` | that example's compile, and the package's test runs |
-| `src/bin/tool/cli.rs` (a bin whose root is `src/bin/tool/main.rs`) | that bin, its test harness, and the integration tests that link it |
+| `examples/x.rs` | that example's compile, and the package's test runs; and the package's build-script run, unless prediction narrows it |
+| `src/bin/tool/cli.rs` (a bin whose root is `src/bin/tool/main.rs`) | that bin, its test harness, and the integration tests that link it; and the build-script run, as above |
 | a file that is no target's root (`tests/common/mod.rs`) | as before: every unit whose view holds it |
 
-Test runs and doctests read the package's views, which hold every root,
-so they re-run. Each target with such a view costs one more copy of the
+Test runs, doctests and build-script runs read the package's views,
+which hold every root, so they re-run. A re-run build script rebuilds
+the package's units that depend on it, as under Cargo, which re-runs a
+script on any edit to its package. With
+[`predictSources`](../reference/options/packages.md#packagesnamepredictsourcesenable),
+a run sees only its declared `rerun-if-changed` paths. Each target with such a view costs one more copy of the
 package in the store. A target that reads another target's root fails
 with a hint; `scopeTargetRoots = false` gives every target the package's
 view again.

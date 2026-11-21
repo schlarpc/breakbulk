@@ -1188,10 +1188,14 @@ in
       '';
 
   # Per-target views (`scopeTargetRoots`): an edit to one integration
-  # test's root, an example or a directory bin's module changes only that
-  # target's units (and the tests that link the bin); a shared module
-  # under `tests/` changes the test compiles, and no library, bin or build
-  # script. With `scopeTargetRoots = false` every target
+  # test's root changes only that test's compile; a shared module under
+  # `tests/` changes the test compiles, and no library, bin or build
+  # script. tv's build-script run reads the package's whole view, as
+  # Cargo re-runs a script on any edit to its package, so an example or
+  # bin edit re-runs it and rebuilds the package; with `predictSources`,
+  # which narrows the run to its `rerun-if-changed` paths, the edit
+  # changes only that target's units (and the tests that link the bin).
+  # With `scopeTargetRoots = false` every target
   # sees every root again. A test that reads another test's root fails
   # with a hint naming the option. Test runs read the package's views:
   # an edit to one test re-runs the other.
@@ -1200,12 +1204,15 @@ in
       changedBy = edit: modules: changedUnits (targetViewsRepo null modules) (targetViewsRepo edit modules);
       runOf = repo: t: (inst repo).testRuns.tv.${t}.drvPath;
       fooEdit = "echo '// edited' >> tv/tests/foo.rs";
+      exampleEdit = "echo '// edited' >> tv/examples/x.rs";
+      predicted = [ { packages.tv.predictSources.enable = true; } ];
       got = {
         foo = changedBy fooEdit [ ];
-        example = changedBy "echo '// edited' >> tv/examples/x.rs" [ ];
-        tool = changedBy "echo '// edited' >> tv/src/bin/tool/cli.rs" [ ];
+        example = changedBy exampleEdit predicted;
+        tool = changedBy "echo '// edited' >> tv/src/bin/tool/cli.rs" predicted;
         common = changedBy "echo '// edited' >> tv/tests/common/mod.rs" [ ];
       };
+      exampleRun = changedBy exampleEdit [ ];
       off = changedBy fooEdit [ { packages.tv.scopeTargetRoots = false; } ];
       want = {
         foo = [ "tv-0.1.0-test-foo" ];
@@ -1231,6 +1238,8 @@ in
       readerUnit = (unitsNamed (inst reader) "test")."tv-0.1.0-test-foo";
     in
     assert lib.assertMsg (got == want) "target-views: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg (lib.elem "tv-0.1.0-build-run" exampleRun && lib.elem "tv-0.1.0-lib" exampleRun)
+      "target-views: without predictSources, an example edit changed only ${builtins.toJSON exampleRun}";
     assert lib.assertMsg (lib.elem "tv-0.1.0-test-bar" off && lib.elem "tv-0.1.0-test" off)
       "target-views: with scopeTargetRoots = false, an edit to tests/foo.rs changed only ${builtins.toJSON off}";
     assert lib.assertMsg (runOf (targetViewsRepo fooEdit [ ]) "bar" != runOf targetViews "bar")

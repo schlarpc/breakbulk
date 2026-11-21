@@ -521,10 +521,14 @@ and benches (a root ` <dir>/main.rs ` outside ` src/ `, ` src/bin/ `,
 directory), and the view of the library, a bin or the build
 script also leaves out the ` examples/ ` and ` benches/ `
 directories\. So an edit to ` tests/foo.rs ` rebuilds only that
-test, and an edit to an example rebuilds no library, bin or
-product\. Shared files, such as ` tests/common/mod.rs `, stay in
-every view\. Test runs and doctests read the package’s own views,
-with every root\. Set it to ` false ` when a target reads another
+test\. Shared files, such as ` tests/common/mod.rs `, stay in
+every view\. Test runs, doctests and build-script runs read the
+package’s own views, with every root: Cargo re-runs a build
+script on any edit to its package\. So an edit to an example or
+a bin re-runs the package’s build script, unless
+[` predictSources `](\#packagesnamepredictsourcesenable) narrows
+the run to its ` rerun-if-changed ` paths; then it rebuilds no
+library, other bin or product\. Set it to ` false ` when a target reads another
 target’s root (` #[path = "../other.rs"] `, a library that
 ` include_str! `s an example); such a unit fails with a hint
 naming this option\. ` null `: ` true `\. A built-in step of

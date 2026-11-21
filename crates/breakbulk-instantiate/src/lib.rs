@@ -202,10 +202,17 @@ impl<'a> Tokens<'a> {
         };
         let listed = |t: &str| p == package && targets.get(dir).is_some_and(|ts| ts.contains(t));
         // A build-script run's own view (its declared paths, when source
-        // prediction narrows it), else its script's.
+        // prediction narrows it), else the package's. Not its script's:
+        // without `rerun-if-changed`, a run depends on every file of the
+        // package, and a script may read any of them (a nested `cargo`
+        // on its own package needs the other targets' roots).
         let run = keys::run_target(t);
-        if self.run && listed(&run) {
-            keys::of_target(&key, &run)
+        if self.run {
+            if listed(&run) {
+                keys::of_target(&key, &run)
+            } else {
+                key
+            }
         } else if listed(t) {
             keys::of_target(&key, t)
         } else {
@@ -217,7 +224,7 @@ impl<'a> Tokens<'a> {
     /// out, when it has a view of its own target, relative to the
     /// repository root.
     fn target_roots(&self, package: &str, dir: &str) -> Vec<String> {
-        if self.view_key(package, dir).contains('#') {
+        if !self.run && self.view_key(package, dir).contains('#') {
             self.inputs
                 .sources
                 .target_roots

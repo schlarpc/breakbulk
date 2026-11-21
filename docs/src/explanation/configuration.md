@@ -328,7 +328,7 @@ For tests:
 - each Cargo target's compiles see only their own root among the
   package's bins, examples, tests and benches, so an edit to
   `tests/foo.rs` rebuilds only that test, and an example edit rebuilds
-  no library
+  no library unless it re-runs the package's build script
   ([`scopeTargetRoots`](../reference/options/packages.md#packagesnamescopetargetroots)).
 
 When a unit fails and its output names a repository path that its source

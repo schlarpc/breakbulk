@@ -585,12 +585,14 @@ rec {
               ))
             ]
             ++ lib.optional (t.kind == "custom-build" && predict.runs) (
+              # Narrows the package's view, not the script's, as the run
+              # reads it without prediction (instantiation's view_key).
               lib.nameValuePair "run/${t.kind}/${t.name}" (
                 predict.spec {
                   inherit kind;
                   cargoTarget = t;
                   run = true;
-                  view = allowed kind t;
+                  view = realized.${kind};
                 }
               )
             )
