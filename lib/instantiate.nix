@@ -94,6 +94,13 @@ rec {
       # sources.workspaceTest."<dir>" = the wider view of that package's test
       #   units (`test.sourceScope`): the compile units plan.json marks
       #   `test`, and doctests
+      # sources.workspaceTargets."<dir>"."<kind>/<name>" = the view of
+      #   one Cargo target's units, in place of `workspace` for them (a
+      #   build-script run's is its script's target)
+      # sources.workspaceTestTargets."<dir>"."<kind>/<name>" = the same
+      #   in place of `workspaceTest`
+      # sources.targetRoots."<dir>" = [ "<path relative to the root>" ... ]
+      #   the paths per-target views of that package leave out, for a hint
       # sources.clippyConf."<dir>" = a member's clippy config tree
       #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
       # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
@@ -143,6 +150,9 @@ rec {
     let
       workspace = sources.workspace or { };
       workspaceTest = sources.workspaceTest or { };
+      workspaceTargets = sources.workspaceTargets or { };
+      workspaceTestTargets = sources.workspaceTestTargets or { };
+      targetRoots = sources.targetRoots or { };
       clippyConf = sources.clippyConf or { };
       testOnly = sources.testOnly or { };
       custom = sources.custom or [ ];
@@ -164,6 +174,13 @@ rec {
           crates = lib.attrNames crates;
         }
         // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
+        // lib.optionalAttrs (workspaceTargets != { }) {
+          workspaceTargets = lib.mapAttrs (_: lib.attrNames) workspaceTargets;
+        }
+        // lib.optionalAttrs (workspaceTestTargets != { }) {
+          workspaceTestTargets = lib.mapAttrs (_: lib.attrNames) workspaceTestTargets;
+        }
+        // lib.optionalAttrs (targetRoots != { }) { inherit targetRoots; }
         // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
         // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
         // lib.optionalAttrs (custom != [ ]) { inherit custom; }
@@ -213,6 +230,12 @@ rec {
       inputs =
         lib.mapAttrs' (d: v: lib.nameValuePair "src:${d}" (str v)) workspace
         // lib.mapAttrs' (d: v: lib.nameValuePair "test-src:${d}" (str v)) workspaceTest
+        // lib.concatMapAttrs (
+          d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "src:${d}#${t}" (str v)) ts
+        ) workspaceTargets
+        // lib.concatMapAttrs (
+          d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "test-src:${d}#${t}" (str v)) ts
+        ) workspaceTestTargets
         // lib.mapAttrs' (d: v: lib.nameValuePair "clippy-conf:${d}" (str v)) clippyConf
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
         // {

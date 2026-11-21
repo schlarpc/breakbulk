@@ -324,13 +324,19 @@ For tests:
   other units;
 - [`test.runFiles`](../reference/options/packages.md#packagesnametestrunfiles)
   narrows a test run to the files its tests read, so editing any other
-  file of the package does not re-run it.
+  file of the package does not re-run it;
+- each Cargo target's compiles see only their own root among the
+  package's bins, examples, tests and benches, so an edit to
+  `tests/foo.rs` rebuilds only that test, and an example edit rebuilds
+  no library
+  ([`scopeTargetRoots`](../reference/options/packages.md#packagesnamescopetargetroots)).
 
 When a unit fails and its output names a repository path that its source
 view lacks, the message names the path and the option that adds it:
 `extraSources` for a library, bin or build script, `test.sourceScope`
-for a test, a doctest or a test run, and `test.scopeTestsDir` for a
-test-only path that non-test code reads
+for a test, a doctest or a test run, `test.scopeTestsDir` for a
+test-only path that non-test code reads, and `scopeTargetRoots` for
+another target's root
 ([Missing paths](../reference/unit-builder.md#missing-paths)). So does a
 build script that fails while it names a `rerun-if-changed` path that is
 missing from its sandbox. A build script that succeeds without such a

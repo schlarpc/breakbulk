@@ -534,6 +534,20 @@ let
   includeFrom = file: "echo 'pub const DATA: &str = include_str!(\"../${file}\");' >> proto/src/lib.rs";
   protoLib = repo: (unitsNamed (inst repo) "build")."proto-0.1.0-lib";
 
+  # --- target-views --------------------------------------------------------------
+
+  targetViewsRepo =
+    edit: modules:
+    mkRepo (if edit == null then fixtures + "/target-views" else edited "target-views" edit) (
+      [
+        (oneWs ".")
+        # The check reads a run's output.
+        { packages.tv.test.keepLog = true; }
+      ]
+      ++ modules
+    );
+  targetViews = targetViewsRepo null [ ];
+
   # --- sources -------------------------------------------------------------------
 
   # The fixture's source-view functions. `cli`, the root package, keeps
@@ -745,6 +759,7 @@ in
       declaredPathsTest
       overrideRepo
       testOnly
+      targetViews
       viewHints
       viewHintsFixed
       pkgidShort
@@ -1150,6 +1165,70 @@ in
         grep -q 'datadriven: ok' $datadriven/log
         [ "$($example/bin/reads_tests)" = 42 ]
         [ "$($app/bin/app)" = 42 ]
+        touch $out
+      '';
+
+  # Per-target views (`scopeTargetRoots`): an edit to one integration
+  # test's root, an example or a directory bin's module changes only that
+  # target's units (and the tests that link the bin); a shared module
+  # under `tests/` changes the test compiles, and no library, bin or build
+  # script. With `scopeTargetRoots = false` every target
+  # sees every root again. A test that reads another test's root fails
+  # with a hint naming the option. Test runs read the package's views:
+  # an edit to one test re-runs the other.
+  target-views =
+    let
+      changedBy = edit: modules: changedUnits (targetViewsRepo null modules) (targetViewsRepo edit modules);
+      runOf = repo: t: (inst repo).testRuns.tv.${t}.drvPath;
+      fooEdit = "echo '// edited' >> tv/tests/foo.rs";
+      got = {
+        foo = changedBy fooEdit [ ];
+        example = changedBy "echo '// edited' >> tv/examples/x.rs" [ ];
+        tool = changedBy "echo '// edited' >> tv/src/bin/tool/cli.rs" [ ];
+        common = changedBy "echo '// edited' >> tv/tests/common/mod.rs" [ ];
+      };
+      off = changedBy fooEdit [ { packages.tv.scopeTargetRoots = false; } ];
+      want = {
+        foo = [ "tv-0.1.0-test-foo" ];
+        example = [ "tv-0.1.0-test-x" ];
+        # The integration tests link the bin (CARGO_BIN_EXE_tool).
+        tool = [
+          "tv-0.1.0-bin-tool"
+          "tv-0.1.0-test-bar"
+          "tv-0.1.0-test-foo"
+          "tv-0.1.0-test-tool"
+        ];
+        # Not a root: in every test view, as other files under `tests/`.
+        common = [
+          "tv-0.1.0-test"
+          "tv-0.1.0-test-bar"
+          "tv-0.1.0-test-foo"
+          "tv-0.1.0-test-tool"
+          "tv-0.1.0-test-x"
+          "tv-0.1.0-test-y"
+        ];
+      };
+      reader = targetViewsRepo "echo '#[path = \"bar.rs\"] mod bar;' >> tv/tests/foo.rs" [ ];
+      readerUnit = (unitsNamed (inst reader) "test")."tv-0.1.0-test-foo";
+    in
+    assert lib.assertMsg (got == want) "target-views: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg (lib.elem "tv-0.1.0-test-bar" off && lib.elem "tv-0.1.0-test" off)
+      "target-views: with scopeTargetRoots = false, an edit to tests/foo.rs changed only ${builtins.toJSON off}";
+    assert lib.assertMsg (runOf (targetViewsRepo fooEdit [ ]) "bar" != runOf targetViews "bar")
+      "target-views: an edit to tests/foo.rs left bar's test run unchanged";
+    pkgs.runCommand "target-views"
+      {
+        foo = (inst targetViews).testRuns.tv.foo;
+        lib = (inst targetViews).testRuns.tv."lib/tv";
+        tool = targetViews.workspaces.main.packages.tv;
+        hint = expectFailure "target-views-hint" readerUnit [
+          "tests/bar.rs"
+          "packages.tv.scopeTargetRoots = false"
+        ];
+      }
+      ''
+        grep -q 'test foo ... ok' $foo/log
+        [ "$($tool/bin/tool)" = 43 ]
         touch $out
       '';
 

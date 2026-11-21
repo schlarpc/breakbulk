@@ -1,0 +1,12 @@
+# Per-target views (`scopeTargetRoots`): each target's units see only
+# their own root among tv's bins, examples, tests and benches, and the
+# library, bins and build script see no `examples/` or `benches/`.
+# `tests/common` is shared by both integration tests; `src/bin/tool` is a
+# bin whose root is a directory.
+[workspace]
+resolver = "2"
+members = ["tv"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

@@ -234,8 +234,10 @@ let
   views = sourceViews.workspaceViews {
     inherit root wsDir;
     packages = lib.genAttrs (lib.attrNames packages ++ lib.attrNames extraSources) viewSettings;
+    targetsOf = dir: memberTargets.${dir} or [ ];
     runCommand = pkgs.runCommandLocal;
   };
+  memberTargets = lib.listToAttrs (map (p: lib.nameValuePair p.dir p.targets) (lib.attrValues wsRoots));
   # Path packages Cargo loads from outside the workspace root.
   closureDirs = skel.passthru.description.packages;
   memberDirs = lib.catAttrs "dir" (lib.attrValues views);
@@ -251,6 +253,13 @@ let
       pkgDir = dir;
       memberDirs = closureDirs;
       settings = viewSettings pkgName;
+      # No per-target views for a package whose targets cannot be
+      # predicted (outsideRoots' note): the package's view stands in.
+      targets =
+        let
+          r = builtins.tryEval (lib.deepSeq outsideRoots.${pkgName}.targets outsideRoots.${pkgName}.targets);
+        in
+        if outsideRoots ? ${pkgName} && r.success then r.value else [ ];
       tested = false;
       runCommand = pkgs.runCommandLocal;
     }
@@ -272,10 +281,17 @@ let
     {
       workspace = lib.mapAttrs (_: v: v.src) keep;
       workspaceTest = lib.mapAttrs (_: v: v.testSrc) (lib.filterAttrs (_: v: v ? testSrc) keep);
+      workspaceTargets = lib.filterAttrs (_: ts: ts != { }) (lib.mapAttrs (_: v: v.targetSrc) keep);
+      workspaceTestTargets = lib.filterAttrs (_: ts: ts != { }) (
+        lib.mapAttrs (_: v: v.targetTestSrc or { }) keep
+      );
     };
   # Test-only paths by directory (instantiate's `sources.testOnly`), for
   # the hint when a non-test unit misses one.
   testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
+  # The paths per-target views leave out, by directory (instantiate's
+  # `sources.targetRoots`), for the hint when a unit misses one.
+  targetRoots = lib.mapAttrs (_: v: v.targetRoots) (lib.filterAttrs (_: v: v.targetRoots != [ ]) allViews);
   # Directories of the packages whose `sources` functions choose files
   # (instantiate's `sources.custom`), for the same hints.
   custom = lib.attrNames (lib.filterAttrs (_: v: v.custom) allViews);
@@ -549,7 +565,7 @@ let
     key:
     let
       setting = builtins.match "(override|doctest):([^:@]+)[^:]*:.*" key;
-      view = builtins.match "(src|test-src|clippy-conf):(.*)" key;
+      view = builtins.match "(src|test-src|clippy-conf):([^#]*)(#.*)?" key;
     in
     if setting != null then
       lib.elemAt setting 1
@@ -685,17 +701,20 @@ let
       inherit system;
       plan = "${plans.${kind}}/plan.json";
       sources = {
-        inherit (viewsFor kind) workspace;
+        inherit (viewsFor kind) workspace workspaceTargets;
         inherit
           crates
           clippyConf
           testOnly
+          targetRoots
           custom
           ;
       }
       # The build and doc plans have no test units; the bench plan's
       # benches and harnesses in bench mode are.
-      // lib.optionalAttrs (kind == "test" || kind == "bench") { inherit (viewsFor kind) workspaceTest; };
+      // lib.optionalAttrs (kind == "test" || kind == "bench") {
+        inherit (viewsFor kind) workspaceTest workspaceTestTargets;
+      };
       tools = unitTools;
       host = {
         envCapture = captures.host;
@@ -812,6 +831,10 @@ in
     workspace = lib.mapAttrs (_: v: v.src) allViews;
     # The tested members' test views, by directory.
     workspaceTest = lib.mapAttrs (_: v: v.testSrc) (lib.filterAttrs (_: v: v ? testSrc) allViews);
+    # Per-target views (packageViews' `targetSrc`, `targetTestSrc`), by
+    # directory.
+    workspaceTargets = lib.mapAttrs (_: v: v.targetSrc) allViews;
+    workspaceTestTargets = lib.mapAttrs (_: v: v.targetTestSrc) (lib.filterAttrs (_: v: v ? targetTestSrc) allViews);
     inherit crates;
   };
   roots = built.roots;

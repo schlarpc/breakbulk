@@ -256,6 +256,9 @@ the repository root, for each path that does not exist and is
   to [`extraSources`](options/packages.md#packagesnameextrasources). The
   path can come from another view: a library builds a path into its
   `tests/` from `CARGO_MANIFEST_DIR`, and its test run reads it;
+- under the root of another Cargo target of the package, or under
+  `examples/` or `benches/`, in the view of one target's units:
+  [`scopeTargetRoots = false`](options/packages.md#packagesnamescopetargetroots);
 - otherwise inside the unit's view. The option is
   [`extraSources`](options/packages.md#packagesnameextrasources) for a
   library, bin or build script, and

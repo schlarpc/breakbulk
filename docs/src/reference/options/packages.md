@@ -409,6 +409,37 @@ list of string
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
+## `packages.<name>.scopeTargetRoots`
+
+Whether each Cargo target’s units see only their own root among
+the package’s targets\. The view of one target’s compiles leaves
+out the crate roots of the package’s other bins, examples, tests
+and benches (a root ` <dir>/main.rs ` outside ` src/ `, ` src/bin/ `,
+` tests/ `, ` benches/ ` and ` examples/ ` counts as its whole
+directory), and the view of the library, a bin or the build
+script also leaves out the ` examples/ ` and ` benches/ `
+directories\. So an edit to ` tests/foo.rs ` rebuilds only that
+test, and an edit to an example rebuilds no library, bin or
+product\. Shared files, such as ` tests/common/mod.rs `, stay in
+every view\. Test runs and doctests read the package’s own views,
+with every root\. Set it to ` false ` when a target reads another
+target’s root (` #[path = "../other.rs"] `, a library that
+` include_str! `s an example); such a unit fails with a hint
+naming this option\. ` null `: ` true `\. A built-in step of
+[` sources `](\#packagesnamesources)\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.sourceOverlay`
 
 Products to place in this package’s source views, by path
@@ -463,6 +494,12 @@ inside the repository root:
  - ` root `: the repository root, a path\.
  - ` packageDir `: the package directory, relative to ` root ` (` "" `
    for a package at the root)\.
+ - ` cargoTarget `: the Cargo target whose units the view is for,
+   ` { kind, name, path } ` (` kind `: ` "lib" `, ` "bin" `,
+   ` "example" `, ` "test" `, ` "bench" ` or ` "custom-build" `; ` path `:
+   its crate root, relative to the package directory), or null
+   for the package’s view, which test runs, doctests and any
+   unit the planner matched to no target read\.
 
 A function must take ` ... `\. breakbulk passes one more argument,
 so that a function without ` ... ` fails on its first use, not
@@ -471,7 +508,7 @@ function does not take; the extra one’s name says to add ` ... `\.
 
 The functions run after the built-in steps (the package
 directory, then ` extraSources `, ` test.sourceScope `,
-` test.scopeTestsDir `, ` test.runFiles ` and
+` test.scopeTestsDir `, ` scopeTargetRoots `, ` test.runFiles ` and
 ` test.workspaceManifest `), each on the result
 of the one before\. Lists concatenate in [layer
 order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order):
@@ -484,7 +521,7 @@ views](\.\./\.\./explanation/internals/sources\.md\#source-views) and
 change](\.\./\.\./how-to/filter-source\.md)\.
 
 *Type:*
-list of function from { default, kind, root, packageDir, \.\.\. } to a file set
+list of function from { default, kind, cargoTarget, root, packageDir, \.\.\. } to a file set
 
 *Default:*
 

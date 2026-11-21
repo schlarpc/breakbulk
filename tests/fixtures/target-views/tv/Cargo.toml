@@ -1,0 +1,8 @@
+[package]
+name = "tv"
+version.workspace = true
+edition.workspace = true
+
+[[bench]]
+name = "b"
+harness = false

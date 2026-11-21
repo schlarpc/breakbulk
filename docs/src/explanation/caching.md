@@ -88,6 +88,24 @@ reads it. That path is in the library's view, which has no `tests/`.
 [`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
 puts `tests/` back into every view.
 
+Each Cargo target's compiles also see only their own root among the
+package's bins, examples, tests and benches, and a library, bin or build
+script sees no `examples/` or `benches/` at all
+([`scopeTargetRoots`](../reference/options/packages.md#packagesnamescopetargetroots)):
+
+| Edit | Rebuilds |
+| --- | --- |
+| `tests/foo.rs` | that test's compile, and the package's test runs |
+| `examples/x.rs` | that example's compile, and the package's test runs |
+| `src/bin/tool/cli.rs` (a bin whose root is `src/bin/tool/main.rs`) | that bin, its test harness, and the integration tests that link it |
+| a file that is no target's root (`tests/common/mod.rs`) | as before: every unit whose view holds it |
+
+Test runs and doctests read the package's views, which hold every root,
+so they re-run. Each target with such a view costs one more copy of the
+package in the store. A target that reads another target's root fails
+with a hint; `scopeTargetRoots = false` gives every target the package's
+view again.
+
 ## What has to be deterministic
 
 Cutoff and reproducible products need byte-stable outputs. breakbulk makes

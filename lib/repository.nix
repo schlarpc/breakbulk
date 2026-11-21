@@ -471,7 +471,7 @@ let
       keepHighestPrio [ "checks" ] ls
     );
 
-  # The layers' `test`, `sources` and `sourceOverlay` settings merged, for
+  # The layers' `test`, `scopeTargetRoots`, `sources` and `sourceOverlay` settings merged, for
   # mkWorkspace's `packages`: `{ <pkg> = { test = …; sources = …; }; }` for the
   # workspace's path packages. Lists and snippets combine, in layer order;
   # single values are `pickSingle`'s, env variables `pickAttrs`'.
@@ -586,6 +586,7 @@ let
       in
       {
         test = withDefaults (merged ls);
+        scopeTargetRoots = pickSingle null [ "scopeTargetRoots" ] ls;
         sources = lib.concatMap (l: l.sources) ls;
         # Later layers win per path, as for env.
         sourceOverlay = lib.foldl' (acc: l: acc // l.sourceOverlay) { } ls;

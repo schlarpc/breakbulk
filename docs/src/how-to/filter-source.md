@@ -213,9 +213,30 @@ An edit to a snapshot then rebuilds only the package's test units. For
 whole directories, [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
 does the same without a function.
 
+### Files that only one target reads
+
+`cargoTarget` names the Cargo target a view is for (null for the
+package's view, which test runs and doctests read). For example, if only
+the `parser` integration test embeds the files in `tests/parser-cases`
+(`include_str!`), leave them out of every other target's compiles:
+
+```nix
+packages.my-crate.sources = [
+  ({ default, cargoTarget, root, packageDir, ... }:
+    if cargoTarget != null && cargoTarget.name != "parser"
+    then lib.fileset.difference default (root + "/${packageDir}/tests/parser-cases")
+    else default)
+];
+```
+
+An edit there then rebuilds only the `parser` test and re-runs the
+package's tests. The other targets' roots are left out of each target's
+view already
+([`scopeTargetRoots`](../reference/options/packages.md#packagesnamescopetargetroots)).
+
 ### When a unit misses a file
 
 If a unit fails because a file is missing from its view, add the file
-for that kind. A file that `test.sourceScope` or `test.scopeTestsDir`
-left out gets a hint that names the option. breakbulk does not know
+for that kind. A file that `test.sourceScope`, `test.scopeTestsDir` or
+`scopeTargetRoots` left out gets a hint that names the option. breakbulk does not know
 which files a function left out, so such a failure gets no hint.

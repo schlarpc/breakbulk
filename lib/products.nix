@@ -361,7 +361,10 @@ let
       cargoPackages ? { },
       # false: no default noSourceReferences check (`sourcePaths = "keep"`).
       defaultChecks ? true,
-      sourcePaths ? attrValues inst.sources.workspace ++ attrValues inst.sources.crates,
+      sourcePaths ?
+        attrValues inst.sources.workspace
+        ++ lib.concatMap attrValues (attrValues (inst.sources.workspaceTargets or { }))
+        ++ attrValues inst.sources.crates,
       # The toolchain's store paths: noSourceReferences fails when a
       # product's closure has one (field-trial gap 9).
       toolchainPaths ? inst.toolchainPaths or [ ],

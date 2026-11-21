@@ -4,10 +4,12 @@
 #
 # Which files a view holds is a pipeline of steps per package and kind of
 # unit: "build" (non-test compiles, build scripts and their runs), "test"
-# (test compiles and doctests), "run" (test runs). Each step is a function
-# from `{ default, kind, root, packageDir, ... }` to a file set, and gets
-# the previous step's result as `default`. The built-in steps
-# (`defaultSteps`) come first, then the package's `sources` functions.
+# (test compiles and doctests), "run" (test runs), and per Cargo target
+# (`cargoTarget`, null for the package's view). Each step is a function
+# from `{ default, kind, cargoTarget, root, packageDir, ... }` to a file
+# set, and gets the previous step's result as `default`. The built-in
+# steps (`defaultSteps`) come first, then the package's `sources`
+# functions.
 {
   lib,
   util,
@@ -109,6 +111,92 @@ rec {
     in
     lib.unique (lib.optional (tests != null) tests ++ scopeInside { inherit root pkgDir sourceScope; });
 
+  # A target's own root, relative to the package directory: its crate
+  # root file, or the directory of a `<dir>/main.rs` root outside the
+  # conventional directories (`tests/it/main.rs`: `tests/it`), which holds
+  # its modules.
+  targetRoot =
+    t:
+    let
+      dir = util.normalizeRel (builtins.dirOf t.path);
+    in
+    if
+      baseNameOf t.path == "main.rs"
+      && !lib.elem dir [
+        ""
+        "src"
+        "src/bin"
+        "tests"
+        "benches"
+        "examples"
+      ]
+    then
+      dir
+    else
+      t.path;
+
+  # The paths of the package (relative to the package directory) that the
+  # view of `cargoTarget`'s units leaves out: the roots of the package's
+  # other bins, examples, tests and benches, and for a library, bin or
+  # build script the whole `examples/` and `benches/` directories. Never a
+  # path that holds the target's own root, the library's or a build
+  # script's, and never one inside the target's own root directory.
+  targetExcluded =
+    {
+      root,
+      pkgDir,
+      targets,
+      cargoTarget,
+    }:
+    let
+      own = targetRoot cargoTarget;
+      isOwn = t: t.kind == cargoTarget.kind && t.name == cargoTarget.name;
+      roots = map targetRoot (
+        filter (
+          t:
+          lib.elem t.kind [
+            "bin"
+            "example"
+            "test"
+            "bench"
+          ]
+          && !isOwn t
+        ) targets
+      );
+      dirs = lib.optionals (lib.elem cargoTarget.kind [
+        "lib"
+        "bin"
+        "custom-build"
+      ]) (filter (d: (readDir (manifest.at root pkgDir)).${d} or null == "directory") [ "examples" "benches" ]);
+      protected = [ cargoTarget.path ] ++ map (t: t.path) (filter (t: t.kind == "lib" || t.kind == "custom-build") targets);
+      keep =
+        e:
+        e != ""
+        && e != ".."
+        && !lib.hasPrefix "../" e
+        && !lib.any (p: util.isUnder e p) protected
+        && !(own != cargoTarget.path && util.isUnder own e);
+    in
+    lib.unique (filter keep (map util.normalizeRel (roots ++ dirs)));
+
+  # Every path some target's view leaves out (relative to the root), for
+  # the hint when a unit misses one.
+  targetRootPaths =
+    {
+      root,
+      pkgDir,
+      targets,
+    }:
+    lib.unique (
+      lib.concatMap (
+        t:
+        map (util.joinRel pkgDir) (targetExcluded {
+          inherit root pkgDir targets;
+          cargoTarget = t;
+        })
+      ) targets
+    );
+
   # The built-in steps of one package, in order, from its settings
   # (`extraSources` and `test`, as `packages.<name>` has them). `wsDir`:
   # the directory of the package's workspace, relative to the root.
@@ -119,9 +207,11 @@ rec {
       wsDir ? "",
       memberDirs ? [ ],
       settings ? { },
+      targets ? [ ],
     }:
     let
       at = manifest.at root;
+      scopeTargets = settings.scopeTargetRoots or null != false;
       wsManifest = test.workspaceManifest or null != false;
       extra = map (pathOf root "extraSources") (settings.extraSources or [ ]);
       test = settings.test or { };
@@ -150,6 +240,21 @@ rec {
       )
       # test.scopeTestsDir
       ({ default, kind, ... }: if kind == "build" && tests != null then fs.difference default (at tests) else default)
+      # scopeTargetRoots. After test.sourceScope, which can add back a
+      # whole directory of roots for the test kinds.
+      (
+        { default, cargoTarget, ... }:
+        if cargoTarget == null || !scopeTargets then
+          default
+        else
+          fs.difference default (
+            fs.unions (
+              map (e: fs.maybeMissing (at (util.joinRel pkgDir e))) (targetExcluded {
+                inherit root pkgDir targets cargoTarget;
+              })
+            )
+          )
+      )
       # test.runFiles: only the listed paths, relative to the package.
       (
         { default, kind, ... }:
@@ -171,8 +276,9 @@ rec {
       )
     ];
 
-  # The files of one package's units of `kind`: every step in turn, from
-  # the empty set. `name`: the package's, for errors.
+  # The files of one package's units of `kind` (of `cargoTarget`'s units,
+  # or every unit's when null): every step in turn, from the empty set.
+  # `name`: the package's, for errors.
   viewFileset =
     {
       root,
@@ -180,12 +286,13 @@ rec {
       pkgDir,
       steps,
       kind,
+      cargoTarget ? null,
     }:
     lib.foldl' (
       acc: step:
       let
         r = step {
-          inherit root kind;
+          inherit root kind cargoTarget;
           packageDir = pkgDir;
           default = acc;
           ${sentinel} = null;
@@ -276,9 +383,15 @@ rec {
   # is the package directory): `src` for its "build" units; for a package
   # that is `tested`, `testSrc` for its "test" units and `runDir`, the
   # package directory of its "run" view, or null when that view is
-  # `testSrc`. `settings`: `extraSources`, `test`, `sources` and
-  # `sourceOverlay`, as `packages.<name>` has them. `runCommand`: for a
-  # package with a `sourceOverlay`.
+  # `testSrc`. `targetSrc` and `targetTestSrc`: the views of single Cargo
+  # targets' units, by `<kind>/<name>`, for the targets whose view can
+  # differ from the package's: ones the built-in steps narrow, or every
+  # target when `sources` functions choose files. `settings`:
+  # `extraSources`, `scopeTargetRoots`, `test`, `sources` and
+  # `sourceOverlay`, as `packages.<name>` has them. `targets`: the
+  # package's Cargo targets (`{ kind; name; path; }`, `path` relative to
+  # the package directory; lib/roots.nix `packageTargets`). `runCommand`:
+  # for a package with a `sourceOverlay`.
   packageViews =
     {
       root,
@@ -287,10 +400,12 @@ rec {
       wsDir ? "",
       memberDirs ? [ ],
       settings ? { },
+      targets ? [ ],
       tested ? true,
       runCommand ? null,
     }:
     let
+      cargoTargets = map (t: { inherit (t) kind name path; }) targets;
       steps =
         defaultSteps {
           inherit
@@ -300,39 +415,56 @@ rec {
             memberDirs
             settings
             ;
+          targets = cargoTargets;
         }
         ++ settings.sources or [ ];
+      custom = settings.sources or [ ] != [ ];
       view =
-        kind:
-        realize {
-          inherit root pkgDir;
-          fileset = viewFileset {
-            inherit
-              root
-              name
-              pkgDir
-              steps
-              kind
-              ;
-          };
-        };
-      realized = lib.genAttrs [ "build" "test" "run" ] view;
-      overlaid =
-        kind:
+        kind: cargoTarget:
         overlay {
           inherit runCommand name pkgDir;
           entries = settings.sourceOverlay or { };
-          view = realized.${kind};
+          view = realize {
+            inherit root pkgDir;
+            fileset = viewFileset {
+              inherit
+                root
+                name
+                pkgDir
+                steps
+                kind
+                cargoTarget
+                ;
+            };
+          };
         };
-      src = overlaid "build";
-      testSrc = overlaid "test";
-      run = overlaid "run";
+      realized = lib.genAttrs [ "build" "test" "run" ] (kind: view kind null);
+      src = realized.build;
+      testSrc = realized.test;
+      run = realized.run;
+      # Not every target: a view the steps cannot narrow is the package's
+      # view again, and each costs a copy of the package at evaluation.
+      narrowed =
+        t:
+        custom
+        || settings.scopeTargetRoots or null != false
+          && targetExcluded {
+            inherit root pkgDir;
+            targets = cargoTargets;
+            cargoTarget = t;
+          } != [ ];
+      targetViews =
+        kind: ts: lib.listToAttrs (map (t: lib.nameValuePair "${t.kind}/${t.name}" (view kind t)) (filter narrowed ts));
     in
     {
-      inherit src;
-      # Whether `sources` functions choose files: then the failure hints
-      # count paths in the package directory too.
-      custom = settings.sources or [ ] != [ ];
+      inherit src custom;
+      targetSrc = targetViews "build" (
+        filter (t: lib.elem t.kind [ "lib" "bin" "custom-build" ]) cargoTargets
+      );
+      targetRoots = lib.optionals (settings.scopeTargetRoots or null != false) (targetRootPaths {
+        inherit root pkgDir;
+        targets = cargoTargets;
+      });
       testOnly = testOnlyPaths {
         inherit root pkgDir;
         sourceScope = settings.test.sourceScope or [ ];
@@ -341,13 +473,14 @@ rec {
     }
     // lib.optionalAttrs tested {
       inherit testSrc;
+      targetTestSrc = targetViews "test" (filter (t: t.kind != "custom-build") cargoTargets);
       # The view the test runs read: the "run" view when a step chose
       # other files for runs, else the test view.
-      runSrc = if "${realized.run}" == "${realized.test}" then testSrc else run;
+      runSrc = if "${run}" == "${testSrc}" then testSrc else run;
       # Compared by store path, so that a run reads its test binary's own
       # view unless a step chose other files for runs.
       runDir =
-        if "${realized.run}" == "${realized.test}" then
+        if "${run}" == "${testSrc}" then
           null
         else if pkgDir == "" then
           "${run}"
@@ -390,6 +523,9 @@ rec {
       root,
       wsDir ? "",
       packages ? { },
+      # The Cargo targets of the member at a directory (packageViews'
+      # `targets`).
+      targetsOf ? (_: [ ]),
       runCommand ? null,
     }:
     let
@@ -414,6 +550,7 @@ rec {
             pkgDir = dir;
             memberDirs = ws.members;
             settings = packages.${info.name} or { };
+            targets = targetsOf dir;
           }
         )
       ) ws.members

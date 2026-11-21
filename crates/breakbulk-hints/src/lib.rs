@@ -343,10 +343,14 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
                 "`{rel}` is in `{opt}.test.sourceScope`, which only the package's test units \
                  see; if non-test code reads it, move it to `{opt}.extraSources`"
             ),
+            Found::TargetRoot { rel, entry, .. } if rel == entry => format!(
+                "`{rel}` is the root of another Cargo target of the package, which only that \
+                 target's units see; if this target reads it, set \
+                 `{opt}.scopeTargetRoots = false`"
+            ),
             Found::TargetRoot { rel, entry, .. } => format!(
-                "`{rel}` is in `{entry}`, the root of another Cargo target of the package, which \
-                 each target's units see only for their own target; if this target reads it, \
-                 set `{opt}.scopeTargetRoots = false`"
+                "`{rel}` is under `{entry}`, which only other Cargo targets of the package see; \
+                 if this target reads it, set `{opt}.scopeTargetRoots = false`"
             ),
             Found::Missing { rel, .. } if view.widen == Widen::TestRunFiles => format!(
                 "`{rel}` is not in this test run's `{opt}.test.runFiles`; if it is in the \
@@ -613,9 +617,9 @@ mod tests {
         assert_eq!(
             h,
             [
-                "`crates/x/src/bin/tool/cli.rs` is in `crates/x/src/bin/tool`, the root of another \
-                 Cargo target of the package, which each target's units see only for their own \
-                 target; if this target reads it, set `packages.x.scopeTargetRoots = false`"
+                "`crates/x/src/bin/tool/cli.rs` is under `crates/x/src/bin/tool`, which only other \
+                 Cargo targets of the package see; if this target reads it, set \
+                 `packages.x.scopeTargetRoots = false`"
             ]
         );
         // So does a view a `sources` function chose, with the kind's option.

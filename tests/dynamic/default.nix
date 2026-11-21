@@ -398,6 +398,7 @@ let
     # `declaredPaths` checks their failures.
     declared-paths = repository.declaredProvided;
     test-only = repository.testOnly;
+    target-views = repository.targetViews;
     sources = repository.sources;
     # With the options its hints name, so that everything builds.
     view-hints = repository.viewHintsFixed;
