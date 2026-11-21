@@ -635,7 +635,7 @@ let
       # the unit's debuginfo (`debug`), which IFD mode's run does not get.
       # `out` holds `breakbulk-root.json` with `reason` and `testSpec`
       # only, narrowed to the "run" view and without nextest's metadata for
-      # a libtest run (it names the whole view), as IFD mode's run spec
+      # a libtest run (it names the package view), as IFD mode's run spec
       # (testRuns.narrowSpec, nextestSpec).
       #
       # With `ca`, it is content-addressed and also stands in for the

@@ -550,9 +550,13 @@ rec {
       cargoMetadata =
         if spec.sourceDir == orig then
           n.cargoMetadata
+        # The tested package's manifest is the only path of the whole view
+        # in it, so without it the view leaves the context too, which
+        # replaceStrings alone would keep.
         else
-          replaceStrings [ (toJSON "${orig}/Cargo.toml") ] [ (toJSON "${spec.sourceDir}/Cargo.toml") ]
-            n.cargoMetadata;
+          replaceStrings [ (toJSON "${orig}/Cargo.toml") ] [ (toJSON "${spec.sourceDir}/Cargo.toml") ] (
+            builtins.unsafeDiscardStringContext n.cargoMetadata
+          );
       binaries = replaceStrings [ "\"@LIBDIR@\"" ] [ (toJSON libdir) ] n.binaries;
     };
 

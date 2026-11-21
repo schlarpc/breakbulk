@@ -691,9 +691,12 @@ let
         present = "app/data/input.txt";
         absent = "app/src/lib.rs";
       };
-      # nextest's metadata, and the unit's debug info, name the whole
-      # view, in both modes.
-      util = null;
+      # Its "run" view holds only its (empty) package directory: nextest's
+      # metadata names no other path of the whole view.
+      util = {
+        present = "util";
+        absent = "util/src/lib.rs";
+      };
     };
   };
   # A test run's input closure, as its sandbox's store holds it: a
