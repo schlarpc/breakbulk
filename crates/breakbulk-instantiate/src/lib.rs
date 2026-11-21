@@ -21,8 +21,8 @@ use breakbulk_format::rendered::{
     DEBUG_OUTPUT, SourceView, Widen, derivation_output, package_name_version,
 };
 use breakbulk_format::{
-    CompileUnit, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind, SrcRef,
-    TargetDebuginfo, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs,
+    CargoTarget, CompileUnit, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind,
+    SrcRef, TargetDebuginfo, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs,
     render_doctest, render_unit_in, to_canonical_json, unit_env_value, validate,
 };
 
@@ -101,6 +101,11 @@ pub mod keys {
     pub fn test_src(dir: &str) -> String {
         format!("test-src:{dir}")
     }
+    /// The view of one Cargo target's units (`target`: `<kind>/<name>`),
+    /// from a package view key ([`src`] or [`test_src`]).
+    pub fn of_target(view: &str, target: &str) -> String {
+        format!("{view}#{target}")
+    }
     /// A workspace member's clippy config tree, by directory.
     pub fn clippy_conf(dir: &str) -> String {
         format!("clippy-conf:{dir}")
@@ -139,6 +144,9 @@ struct Tokens<'a> {
     /// For a test unit (a `--test` compile or a doctest): its package,
     /// whose source view is the test view when there is one.
     test_package: Option<String>,
+    /// The unit's package and Cargo target (`<kind>/<name>`), whose own
+    /// view, when there is one, stands in for the package's.
+    target: Option<(String, String)>,
     refs: RefCell<Vec<Ref>>,
     index: RefCell<HashMap<Ref, usize>>,
 }
@@ -149,6 +157,7 @@ impl<'a> Tokens<'a> {
             inputs,
             prefix,
             test_package: None,
+            target: None,
             refs: RefCell::default(),
             index: RefCell::default(),
         }
@@ -166,6 +175,42 @@ impl<'a> Tokens<'a> {
 
     fn input(&self, key: String) -> String {
         self.token(Ref::Input { key, json: false })
+    }
+
+    /// The key of the view that `package` (at `dir`) has for this unit:
+    /// its test view for a test unit, else its normal one, and of either
+    /// the unit's own Cargo target's view when the package has one.
+    fn view_key(&self, package: &str, dir: &str) -> String {
+        let sources = &self.inputs.sources;
+        let (key, targets) = if self.test_package.as_deref() == Some(package)
+            && sources.workspace_test.contains(dir)
+        {
+            (keys::test_src(dir), &sources.workspace_test_targets)
+        } else {
+            (keys::src(dir), &sources.workspace_targets)
+        };
+        match &self.target {
+            Some((p, t)) if p == package && targets.get(dir).is_some_and(|ts| ts.contains(t)) => {
+                keys::of_target(&key, t)
+            }
+            _ => key,
+        }
+    }
+
+    /// The roots of other Cargo targets that the view of this unit leaves
+    /// out, when it has a view of its own target, relative to the
+    /// repository root.
+    fn target_roots(&self, package: &str, dir: &str) -> Vec<String> {
+        if self.view_key(package, dir).contains('#') {
+            self.inputs
+                .sources
+                .target_roots
+                .get(dir)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
     }
 
     /// The test-only paths of the package at `dir`, relative to the
@@ -325,14 +370,7 @@ impl Resolve for Tokens<'_> {
                         s.src
                     ));
                 }
-                let key = if self.test_package.as_deref() == Some(s.src.as_str())
-                    && self.inputs.sources.workspace_test.contains(dir)
-                {
-                    keys::test_src(dir)
-                } else {
-                    keys::src(dir)
-                };
-                (self.input(key), s.rel.as_str())
+                (self.input(self.view_key(&s.src, dir)), s.rel.as_str())
             }
             Reference::CrateSrc(s) => {
                 if !self.inputs.sources.crates.contains(&s.crate_src) {
@@ -503,6 +541,7 @@ impl Resolve for Tokens<'_> {
                 Widen::ExtraSources
             },
             test_only: self.test_only(dir),
+            target_roots: self.target_roots(unit.package(), dir),
             custom: self.inputs.sources.custom.contains(dir),
         }))
     }
@@ -641,6 +680,21 @@ pub fn unit_outputs(unit: &Unit, debuginfo: &TargetDebuginfo) -> Vec<String> {
     }
 }
 
+/// The Cargo target a unit belongs to: a compile's own, a build-script
+/// run's script's.
+fn unit_target<'p>(plan: &'p Plan, unit: &'p Unit) -> Option<&'p CargoTarget> {
+    match unit {
+        Unit::Compile(c) => c.cargo_target.as_ref(),
+        Unit::Run(r) => match &r.script {
+            Reference::Out(o) => match plan.units.get(&o.out) {
+                Some(Unit::Compile(c)) => c.cargo_target.as_ref(),
+                _ => None,
+            },
+            _ => None,
+        },
+    }
+}
+
 fn instantiate_unit(
     inputs: &Inputs,
     graph: &Graph,
@@ -654,6 +708,7 @@ fn instantiate_unit(
     {
         tokens.test_package = Some(c.package.clone());
     }
+    tokens.target = unit_target(&inputs.plan, unit).map(|t| (unit.package().to_owned(), t.key()));
     let rendered =
         render_unit_in(graph, id, &tokens).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = unit_env_value(&rendered).map_err(|e| Error(format!("unit {id}: {e}")))?;

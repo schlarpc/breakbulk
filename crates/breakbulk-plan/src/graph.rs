@@ -6,10 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::{
-    Arg, CompileUnit, CrateInfo, Cwd, DepKind, Doc, Doctest, LinkArgKind, OutRef, PLAN_VERSION,
-    PackageTarget, PathDependency, PathPackage, PathTarget, Piece, Plan, PlanKind, Platform,
-    Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice, SpliceKind, Text,
-    Unit, UnitId, Variant, VariantMode, contains_sentinel,
+    Arg, CargoTarget, CompileUnit, CrateInfo, Cwd, DepKind, Doc, Doctest, LinkArgKind, OutRef,
+    PLAN_VERSION, PackageTarget, PathDependency, PathPackage, PathTarget, Piece, Plan, PlanKind,
+    Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice, SpliceKind,
+    Text, Unit, UnitId, Variant, VariantMode, contains_sentinel,
 };
 
 use crate::describe;
@@ -191,6 +191,19 @@ fn codegen_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 /// The input file: the one positional argument.
+/// A `cargo metadata` target as source views name it: a library by `lib`
+/// whatever its crate types.
+fn cargo_target(t: &Target) -> CargoTarget {
+    let kind = ["bin", "example", "test", "bench", "custom-build"]
+        .into_iter()
+        .find(|k| t.has_kind(k))
+        .unwrap_or("lib");
+    CargoTarget {
+        kind: kind.to_owned(),
+        name: t.name.clone(),
+    }
+}
+
 fn input_file(args: &[String]) -> Option<&str> {
     const TAKES_VALUE: &[&str] = &[
         "-o",
@@ -1374,6 +1387,7 @@ impl<'a> Builder<'a> {
             },
             platform: c.platform,
             test: self.is_test_unit(c),
+            cargo_target: self.target_of(c).map(cargo_target),
             program,
             args: out,
             env,

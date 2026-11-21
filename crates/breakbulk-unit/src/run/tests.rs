@@ -463,6 +463,7 @@ fn script_output_naming_a_path_outside_the_view() {
         package_dir: "crates/foo-sys".into(),
         widen: crate::spec::Widen::ExtraSources,
         test_only: Vec::new(),
+        target_roots: Vec::new(),
         custom: false,
     });
     let e = judge_with_stderr(

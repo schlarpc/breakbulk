@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::rendered::{RenderedUnit, derivation_output, package_name_version};
 use breakbulk_format::{
@@ -33,6 +33,9 @@ fn smoke_inputs() -> Inputs {
         sources: Sources {
             workspace: ["smokelib".into(), "smokeapp".into()].into(),
             workspace_test: Default::default(),
+            workspace_targets: Default::default(),
+            workspace_test_targets: Default::default(),
+            target_roots: Default::default(),
             clippy_conf: Default::default(),
             test_only: Default::default(),
             custom: Default::default(),
@@ -288,6 +291,7 @@ impl Resolve for RealPaths<'_> {
                 .get(dir)
                 .cloned()
                 .unwrap_or_default(),
+            target_roots: Vec::new(),
             custom: self.0.sources.custom.contains(dir),
         }))
     }
@@ -759,6 +763,79 @@ fn test_units_use_the_test_view() {
     for id in [LIB, SCRIPT, RUN] {
         assert_eq!(plain.units[id], wide.units[id], "{id}");
     }
+}
+
+/// Per-target views: a unit whose Cargo target has a view of its own names
+/// it (a build-script run by its script's target); a unit whose target is
+/// not listed, or that the plan matched to none, names its package's view.
+#[test]
+fn units_use_their_targets_view() {
+    let mut inputs = smoke_inputs();
+    let target = |kind: &str, name: &str| {
+        Some(CargoTarget {
+            kind: kind.into(),
+            name: name.into(),
+        })
+    };
+    for (id, t) in [
+        (SCRIPT, target("custom-build", "build-script-build")),
+        (LIB, target("lib", "smokelib")),
+        (APP, target("bin", "smokeapp")),
+    ] {
+        let Unit::Compile(c) = inputs.plan.units.get_mut(id).unwrap() else {
+            panic!()
+        };
+        c.cargo_target = t;
+        if id == APP {
+            c.test = true;
+        }
+    }
+    inputs.sources.workspace_test = ["smokeapp".into()].into();
+    inputs.sources.workspace_targets = [(
+        "smokelib".into(),
+        ["custom-build/build-script-build".into()].into(),
+    )]
+    .into();
+    inputs.sources.workspace_test_targets =
+        [("smokeapp".into(), ["bin/smokeapp".into()].into())].into();
+    inputs.sources.target_roots =
+        [("smokeapp".into(), vec!["smokeapp/src/bin/other.rs".into()])].into();
+    let out = instantiate(&inputs).unwrap();
+    let keys_of = |d: &Drv| -> BTreeSet<String> {
+        let Value::Parts { parts } = &d.attrs["BREAKBULK_UNIT"] else {
+            panic!()
+        };
+        parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Input { input, .. } if input.contains("src:") => Some(input.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let one = |k: &str| BTreeSet::from([k.to_owned()]);
+    let script = "src:smokelib#custom-build/build-script-build";
+    assert_eq!(keys_of(&out.units[SCRIPT]), one(script));
+    assert_eq!(keys_of(&out.units[RUN]), one(script));
+    assert_eq!(keys_of(&out.units[LIB]), one("src:smokelib"));
+    assert_eq!(
+        keys_of(&out.units[APP]),
+        one("test-src:smokeapp#bin/smokeapp")
+    );
+    let Value::Parts { parts } = &out.units[APP].attrs["BREAKBULK_UNIT"] else {
+        panic!()
+    };
+    let text: String = parts
+        .iter()
+        .filter_map(|p| match p {
+            Part::Literal(l) => Some(l.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        text.contains(r#""targetRoots":["smokeapp/src/bin/other.rs"]"#),
+        "{text}"
+    );
 }
 
 /// Clippy variants: a unit clippy-driver runs on (a wrapper chain) gets

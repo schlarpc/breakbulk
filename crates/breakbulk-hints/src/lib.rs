@@ -11,6 +11,9 @@
 //! - under one of the package's test-only paths, in a view that leaves it
 //!   out (the view of the package's non-test units, wherever the path came
 //!   from): `test.scopeTestsDir` or `extraSources`;
+//! - under the root of another Cargo target of the package (a bin's,
+//!   example's, test's or bench's), in the view of one target's units:
+//!   `scopeTargetRoots`;
 //! - otherwise inside the unit's own view root: the view's [`Widen`]
 //!   option, the one for the unit's kind. Paths in the package directory
 //!   count only when something other than the built-in steps chose its
@@ -53,6 +56,11 @@ pub struct SourceView {
     /// test unit too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub test_only: Vec<String>,
+    /// The roots of the package's other Cargo targets (bins, examples,
+    /// tests, benches), relative to the repository root, which this view
+    /// of one target's units leaves out (`scopeTargetRoots`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_roots: Vec<String>,
     /// Whether the package's `sources` functions chose the view's files:
     /// then even a path in the package directory can be left out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -180,6 +188,13 @@ pub enum Found {
         rel: String,
         entry: String,
     },
+    /// Under the root `entry` of another target of the package, in a view
+    /// of one target's units.
+    TargetRoot {
+        path: PathBuf,
+        rel: String,
+        entry: String,
+    },
     /// Inside the unit's view, outside the package directory (or anywhere,
     /// in a `test.runFiles` view), and not there.
     Missing { path: PathBuf, rel: String },
@@ -188,7 +203,9 @@ pub enum Found {
 impl Found {
     pub fn path(&self) -> &Path {
         match self {
-            Found::TestOnly { path, .. } | Found::Missing { path, .. } => path,
+            Found::TestOnly { path, .. }
+            | Found::TargetRoot { path, .. }
+            | Found::Missing { path, .. } => path,
         }
     }
 }
@@ -244,6 +261,19 @@ fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Opti
     let rel = p.strip_prefix(&root).ok()?;
     if rel.as_os_str().is_empty() || rel.starts_with("..") {
         return None;
+    }
+    if !exists(p)
+        && let Some(e) = view
+            .target_roots
+            .iter()
+            .map(|e| normalize(Path::new(e)))
+            .find(|e| !e.as_os_str().is_empty() && rel.starts_with(e))
+    {
+        return Some(Found::TargetRoot {
+            path: p.to_owned(),
+            rel: rel.display().to_string(),
+            entry: e.display().to_string(),
+        });
     }
     let whole_package = !view.custom && view.widen != Widen::TestRunFiles;
     if whole_package && rel.starts_with(&view.package_dir) || exists(p) {
@@ -313,6 +343,11 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
                 "`{rel}` is in `{opt}.test.sourceScope`, which only the package's test units \
                  see; if non-test code reads it, move it to `{opt}.extraSources`"
             ),
+            Found::TargetRoot { rel, entry, .. } => format!(
+                "`{rel}` is in `{entry}`, the root of another Cargo target of the package, which \
+                 each target's units see only for their own target; if this target reads it, \
+                 set `{opt}.scopeTargetRoots = false`"
+            ),
             Found::Missing { rel, .. } if view.widen == Widen::TestRunFiles => format!(
                 "`{rel}` is not in this test run's `{opt}.test.runFiles`; if it is in the \
                  repository, add `{}` to it",
@@ -379,6 +414,7 @@ impl TestRun {
             package_dir: dir.to_owned(),
             widen: self.widen,
             test_only: self.test_only.clone(),
+            target_roots: Vec::new(),
             custom: self.custom,
         })
     }
@@ -426,6 +462,7 @@ mod tests {
             package_dir: dir.into(),
             widen,
             test_only: vec![format!("{dir}/tests"), format!("{dir}/testdata")],
+            target_roots: Vec::new(),
             custom: false,
         }
     }
@@ -562,6 +599,25 @@ mod tests {
         let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
         assert!(h[0].contains("add `fixtures/a` to it"), "{h:?}");
         assert!(h[1].contains("add `../../shared/b` to it"), "{h:?}");
+        // In a view of one target, another target's root names
+        // scopeTargetRoots.
+        let v = SourceView {
+            target_roots: vec![
+                "crates/x/tests/other.rs".into(),
+                "crates/x/src/bin/tool".into(),
+            ],
+            ..view(TEST_VIEW, "crates/x", Widen::TestSourceScope)
+        };
+        let text = format!("couldn't read `{TEST_VIEW}/crates/x/src/bin/tool/cli.rs`");
+        let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
+        assert_eq!(
+            h,
+            [
+                "`crates/x/src/bin/tool/cli.rs` is in `crates/x/src/bin/tool`, the root of another \
+                 Cargo target of the package, which each target's units see only for their own \
+                 target; if this target reads it, set `packages.x.scopeTargetRoots = false`"
+            ]
+        );
         // So does a view a `sources` function chose, with the kind's option.
         let v = SourceView {
             custom: true,

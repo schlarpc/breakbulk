@@ -133,6 +133,7 @@ impl Resolve for Tokens<'_> {
             package_dir: dir.split(['#', '?']).next().unwrap_or(dir).to_owned(),
             widen: Widen::ExtraSources,
             test_only: Vec::new(),
+            target_roots: Vec::new(),
             custom: false,
         }))
     }

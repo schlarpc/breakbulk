@@ -9,7 +9,7 @@ it depends on (`…` marks elided values):
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "kind": "build",
   "cargo": "1.96.1",
   "rustc": "1.96.1 (…)",
@@ -75,6 +75,7 @@ it depends on (`…` marks elided values):
 - **`outputs`** maps each output of a compile unit (`rmeta`, `rlib`, `bin`) to the files it holds. **`uplifted`** (omitted when empty) maps a file of `outputs` to the name rustc writes it under. A bin, or an example, that Cargo uplifts is stored under its uplifted name, the target name and the `exe-suffix` of the planning rustc's target spec (`my-app`, from rustc's `my_app-<hash>`), so `CARGO_BIN_EXE_<name>` names a file with the name it has under Cargo. Test and bench executables keep rustc's names, as under Cargo.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout. Instantiation picks the matching toolchain spec and env capture, so host and target settings never mix.
 - **`test`** (compile units; omitted when false) marks a test unit: a compile Cargo builds with the package's dev-dependencies, decided from its Cargo target: a `--test` compile, a test or bench target with or without the libtest harness, or an example. Test units see the package's test view ([Source views](../explanation/internals/sources.md#source-views)), are named `<pkg>-<version>-test[-<crate>]`, remap every path scope, and take their dependencies' `rlib`s.
+- **`cargoTarget`** (compile units; omitted when the planner matched none) is the Cargo target the unit compiles, `{ "kind": …, "name": … }`, matched by crate name and source path. `kind` is `lib` (whatever its crate types), `bin`, `example`, `test`, `bench` or `custom-build`. Instantiation gives the unit the view of its own target when its package has one, else the package's view ([Source views](../explanation/internals/sources.md#source-views)); a build-script run takes its script's target.
 - **`metadataFrom`** on a run lists upstream runs whose `DEP_<links>_*` metadata it receives, observed from sentinels.
 - **`trimPaths`** and **`trimPathsDefault`** (omitted when false): see [trim-paths](../explanation/internals/planner.md#trim-paths).
 - **`targetDebuginfo`** is what the planning rustc's target spec says about the debuginfo side files the target's links write (`rustc --print target-spec-json`; see [Target facts from rustc](../explanation/internals/planner.md#target-facts-from-rustc)). `splitDefault` is the `-C split-debuginfo` rustc uses when a unit's arguments give none (`off`, `packed` or `unpacked`). `artifacts` lists the side files, each `{ "suffix", "when", "perObject"?, "directory"? }`: `when` is `always` (an MSVC-style link's `.pdb`), `split-packed` (`.dwp`, Apple's `.dSYM` directory) or `split-unpacked` (`.dwo`, one per object file, `perObject`). Instantiation decides from it which units get a `debug` output ([Instantiation](../explanation/internals/instantiation.md)). Required: a plan without it is rejected.

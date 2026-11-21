@@ -27,6 +27,20 @@ pub struct Sources {
     /// get a wider source view (`test.sourceScope`), by directory.
     #[serde(default)]
     pub workspace_test: BTreeSet<String>,
+    /// The Cargo targets (`<kind>/<name>`) whose units get a view of their
+    /// own in place of their package's normal view, by directory. A unit
+    /// whose target is not listed (or that the plan matched to none) gets
+    /// the package's view.
+    #[serde(default)]
+    pub workspace_targets: BTreeMap<String, BTreeSet<String>>,
+    /// The same for the test view.
+    #[serde(default)]
+    pub workspace_test_targets: BTreeMap<String, BTreeSet<String>>,
+    /// The roots of a package's targets that the views of its other
+    /// targets leave out (relative to the repository root), by directory.
+    /// Only for hints, as `test_only`.
+    #[serde(default)]
+    pub target_roots: BTreeMap<String, Vec<String>>,
     /// Workspace members with a clippy config tree (clippy variants): the
     /// `.clippy.toml` and `clippy.toml` files of the package directory and
     /// its ancestors up to the repository root, rooted there like source

@@ -9,7 +9,7 @@ pub use breakbulk_unit::spec::{
 };
 
 /// The only plan format version this crate reads and writes.
-pub const PLAN_VERSION: u32 = 4;
+pub const PLAN_VERSION: u32 = 5;
 
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
 /// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`).
@@ -313,6 +313,7 @@ impl Doctest {
             krate: self.krate.clone(),
             platform: self.platform,
             test: true,
+            cargo_target: None,
             program: self.program.clone(),
             args: self
                 .args
@@ -362,6 +363,7 @@ impl Doc {
             krate: self.krate.clone(),
             platform: self.platform,
             test: false,
+            cargo_target: None,
             program: self.program.clone(),
             args: self.args.clone(),
             env: self.env.clone(),
@@ -404,6 +406,23 @@ impl Unit {
     }
 }
 
+/// A Cargo target of a package, as source views name it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CargoTarget {
+    /// `lib` (whatever its crate types), `bin`, `example`, `test`,
+    /// `bench` or `custom-build`.
+    pub kind: String,
+    pub name: String,
+}
+
+impl CargoTarget {
+    /// `<kind>/<name>`, the target's part of a per-target view key.
+    pub fn key(&self) -> String {
+        format!("{}/{}", self.kind, self.name)
+    }
+}
+
 /// A rustc (or wrapper) invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -421,6 +440,11 @@ pub struct CompileUnit {
     /// `docs/src/explanation/internals/sources.md`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub test: bool,
+    /// The Cargo target the unit compiles, when the planner could match
+    /// it to one of the package's targets. Instantiation looks up a view of
+    /// the unit's own target by it, and falls back to the package's view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_target: Option<CargoTarget>,
     /// The program and wrapper chain, e.g. `[clippy-driver, rustc]`.
     pub program: Vec<Text>,
     pub args: Vec<Arg>,

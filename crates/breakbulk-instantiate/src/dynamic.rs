@@ -479,7 +479,10 @@ pub fn nextest_for(
     let mut forward: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     let mut reverse: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for id in path_pkgs.keys() {
-        for d in path_package(id).map(|p| &p.dependencies[..]).unwrap_or_default() {
+        for d in path_package(id)
+            .map(|p| &p.dependencies[..])
+            .unwrap_or_default()
+        {
             if let Some((&to, _)) = path_pkgs.get_key_value(d.package.as_str()) {
                 forward.entry(id).or_default().push(to);
                 reverse.entry(to).or_default().push(id);
