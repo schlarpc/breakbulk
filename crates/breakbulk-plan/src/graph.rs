@@ -1546,8 +1546,21 @@ impl<'a> Builder<'a> {
 
     /// [`Plan::path_packages`]: the path packages under the skeleton that
     /// the plan compiles, with their targets and the dependency edges
-    /// between them from `cargo metadata`'s resolve graph.
-    fn path_packages(&self) -> BTreeMap<String, PathPackage> {
+    /// between them from `cargo metadata`'s resolve graph that one of
+    /// `plan`'s compile units uses. The planner's `cargo metadata` runs
+    /// with `--all-features`, so its resolve also holds the optional
+    /// dependencies the variant's features leave off.
+    fn path_packages(&self, plan: &Plan) -> BTreeMap<String, PathPackage> {
+        let mut used: BTreeSet<(&str, &str)> = BTreeSet::new();
+        for u in plan.units.values() {
+            if let Unit::Compile(c) = u {
+                for o in breakbulk_format::deps::direct_crate_refs(plan, c) {
+                    if let Some(Unit::Compile(d)) = plan.units.get(&o.out) {
+                        used.insert((c.package.as_str(), d.package.as_str()));
+                    }
+                }
+            }
+        }
         let skeleton = self.ctx.skeleton.trim_end_matches('/');
         let under = |p: &str| {
             p.strip_prefix(skeleton)
@@ -1584,7 +1597,9 @@ impl<'a> Builder<'a> {
                     .iter()
                     .filter(|n| n.id == *id)
                     .flat_map(|n| &n.deps)
-                    .filter(|d| pkgs.contains_key(d.pkg.as_str()))
+                    .filter(|d| {
+                        pkgs.contains_key(d.pkg.as_str()) && used.contains(&(*id, d.pkg.as_str()))
+                    })
                     .map(|d| {
                         let mut kinds: Vec<DepKind> = d
                             .dep_kinds
@@ -1868,13 +1883,12 @@ impl<'a> Builder<'a> {
             docs,
             config_env: self.ctx.config_env.clone(),
             rust_src_remap: self.ctx.rust_src_remap.clone(),
-            path_packages: if self.ctx.kind == PlanKind::Test {
-                self.path_packages()
-            } else {
-                BTreeMap::new()
-            },
+            path_packages: BTreeMap::new(),
             target_debuginfo: self.ctx.target_debuginfo.clone(),
         };
+        if self.ctx.kind == PlanKind::Test {
+            plan.path_packages = self.path_packages(&plan);
+        }
         plan.normalize();
         Ok(plan)
     }

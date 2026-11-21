@@ -53,7 +53,7 @@ pub fn embeds_no_metadata(c: &CompileUnit) -> bool {
 
 /// The crate files a compile unit names directly in its arguments: `out`
 /// references to another compile unit's outputs other than `bin`.
-pub(crate) fn direct_crate_refs<'a>(
+pub fn direct_crate_refs<'a>(
     plan: &'a Plan,
     c: &'a CompileUnit,
 ) -> impl Iterator<Item = &'a OutRef> {
