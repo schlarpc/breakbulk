@@ -12,8 +12,16 @@ rust-version.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "breakbulk-predict"
+path = "src/main.rs"
+# The library has the same name; documenting both would collide.
+doc = false
+
 [dependencies]
 # A real parser rather than a hand-written lexer: raw strings, char
 # literals, nested comments and braces in literals are syn's problem.
 proc-macro2 = { version = "1", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }

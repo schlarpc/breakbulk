@@ -32,6 +32,8 @@ use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::{Expr, Lit, LitStr, Meta, Token};
 
+pub mod view;
+
 #[cfg(test)]
 mod tests;
 

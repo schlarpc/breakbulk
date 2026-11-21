@@ -392,3 +392,137 @@ fn run_with_computed_paths_falls_back() {
         [Reason::UnreadableRerunIfChanged(_), Reason::NoRerunIf]
     ));
 }
+
+fn tree(dir: &Path) -> Vec<String> {
+    fn walk(base: &Path, at: &Path, out: &mut Vec<String>) {
+        let mut es: Vec<_> = std::fs::read_dir(at)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        es.sort();
+        for p in es {
+            let rel = p.strip_prefix(base).unwrap().display().to_string();
+            let m = p.symlink_metadata().unwrap();
+            if m.file_type().is_symlink() {
+                out.push(format!(
+                    "{rel} -> {}",
+                    std::fs::read_link(&p).unwrap().display()
+                ));
+            } else if m.is_dir() {
+                out.push(format!("{rel}/"));
+                walk(base, &p, out);
+            } else {
+                out.push(rel);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out
+}
+
+#[test]
+fn predicted_view_keeps_predicted_and_kept_paths() {
+    use crate::view::{Kind, Outcome, ViewSpec, materialize, outcome};
+    let v = View::new(&[
+        ("c/Cargo.toml", ""),
+        ("c/README.md", "# c"),
+        ("c/src/lib.rs", "mod a;"),
+        ("c/src/a.rs", ""),
+        ("c/data/x.txt", ""),
+        ("c/data/sub/y.txt", ""),
+    ]);
+    std::os::unix::fs::symlink("a.rs", v.path().join("c/src/link.rs")).unwrap();
+    let spec = ViewSpec {
+        key: "src:c#lib/c".into(),
+        view: v.path().display().to_string(),
+        package_dir: "c".into(),
+        kind: Kind::Crate,
+        root: "c/src/lib.rs".into(),
+        keep: vec!["c/data".into(), "c/src/link.rs".into(), "c/missing".into()],
+    };
+    let Outcome::Files(files) = outcome(&spec) else {
+        panic!("fell back")
+    };
+    let out = View::new(&[]);
+    let dest = out.path().join("v");
+    materialize(v.path(), "c", &files, &dest).unwrap();
+    assert_eq!(
+        tree(&dest),
+        [
+            "c/",
+            "c/data/",
+            "c/data/sub/",
+            "c/data/sub/y.txt",
+            "c/data/x.txt",
+            "c/src/",
+            "c/src/a.rs",
+            "c/src/lib.rs",
+            "c/src/link.rs -> a.rs"
+        ]
+    );
+    // The package directory stays when nothing in it is kept.
+    let empty = out.path().join("e");
+    materialize(v.path(), "c", &Default::default(), &empty).unwrap();
+    assert_eq!(tree(&empty), ["c/"]);
+}
+
+#[test]
+fn predicted_view_falls_back() {
+    use crate::view::{Kind, Outcome, ViewSpec, outcome};
+    let v = View::new(&[("c/build.rs", "fn main() {}")]);
+    let spec = ViewSpec {
+        key: "src:c#run/custom-build/build-script-build".into(),
+        view: v.path().display().to_string(),
+        package_dir: "c".into(),
+        kind: Kind::Run,
+        root: "c/build.rs".into(),
+        keep: vec![],
+    };
+    assert!(matches!(outcome(&spec), Outcome::Fallback(r) if r.len() == 1));
+}
+
+#[test]
+fn nar_of_a_small_tree() {
+    // Checked against `nix-store --dump` of the same tree.
+    let v = View::new(&[("d/f", "x")]);
+    std::os::unix::fs::symlink("f", v.path().join("d/l")).unwrap();
+    let n = crate::view::nar(&v.path().join("d")).unwrap();
+    let mut expect = Vec::new();
+    for s in [
+        &b"nix-archive-1"[..],
+        b"(",
+        b"type",
+        b"directory",
+        b"entry",
+        b"(",
+        b"name",
+        b"f",
+        b"node",
+        b"(",
+        b"type",
+        b"regular",
+        b"contents",
+        b"x",
+        b")",
+        b")",
+        b"entry",
+        b"(",
+        b"name",
+        b"l",
+        b"node",
+        b"(",
+        b"type",
+        b"symlink",
+        b"target",
+        b"f",
+        b")",
+        b")",
+        b")",
+    ] {
+        expect.extend_from_slice(&(s.len() as u64).to_le_bytes());
+        expect.extend_from_slice(s);
+        expect.extend(std::iter::repeat_n(0u8, (8 - s.len() % 8) % 8));
+    }
+    assert_eq!(n, expect);
+}
