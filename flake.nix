@@ -12,7 +12,7 @@
     # overrides the list with `inputs.breakbulk.inputs.systems.follows` (or
     # `.url`) pointing at another nix-systems flake, e.g. its own.
     systems.url = "github:nix-systems/default-linux";
-    # `nix fmt` (treefmt.nix) and the pre-push hook (`nix develop` installs
+    # `nix fmt` (treefmtFor) and the pre-push hook (`nix develop` installs
     # it). Development only: nothing in `lib` uses them.
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
@@ -44,7 +44,29 @@
             }
           )
         );
-      treefmtFor = pkgs: inputs.treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
+      # `nix fmt` (treefmt-nix): Rust and every Nix file. `checks.<system>.formatting`
+      # fails on unformatted files, and the pre-push hook runs the same
+      # formatters on the files being pushed.
+      treefmtFor =
+        pkgs:
+        inputs.treefmt-nix.lib.evalModule pkgs {
+          projectRootFile = "flake.nix";
+
+          programs.rustfmt = {
+            enable = true;
+            edition = "2024";
+          };
+          programs.nixfmt.enable = true;
+
+          settings.excludes = [
+            # Test fixtures are inputs to tests that edit them by line or compare
+            # their store paths, and some are deliberately written one way (the
+            # rustfmt fixtures). They are formatted, if at all, by their tests.
+            "tests/**/fixture/**"
+            "tests/**/fixtures/**"
+            "tests/fixtures/**"
+          ];
+        };
       # Pre-push, not pre-commit: formatting is checked once per push, so
       # work-in-progress commits stay cheap. `nix develop` installs it.
       gitHooksFor =
@@ -117,7 +139,7 @@
         };
       });
 
-      # `nix fmt`: treefmt.nix.
+      # `nix fmt`: treefmtFor.
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
       # HEAVY and opt-in: dynamic-derivation mode against IFD mode, on
