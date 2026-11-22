@@ -26,6 +26,7 @@ let
   # A target defined directly from a preset (`targets.<t> =
   # breakbulk.presets.linuxPortable { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
+  util = import ../util.nix { inherit lib; };
   bt = import ./types.nix { inherit lib; };
   linkerKinds = import ../presets/linker-kinds.nix { inherit lib; };
   tool = types.nullOr (
@@ -276,6 +277,13 @@ in
       default = [ ];
       description = "Extra libclang arguments for bindgen (`BINDGEN_EXTRA_CLANG_ARGS_<triple>`).";
     };
+    cEnv = mkOption {
+      type = types.raw;
+      internal = true;
+      visible = false;
+      readOnly = true;
+      description = "The per-target variables cc-rs and bindgen read, from `cc`, `cxx`, `ar`, `cflags` and `bindgen.extraClangArgs`.";
+    };
     rustflags = mkOption {
       type = types.listOf types.str;
       default = [ ];
@@ -457,6 +465,25 @@ in
   };
 
   config = lib.mkMerge [
+    {
+      cEnv =
+        let
+          e = util.tripleEnvSuffix name;
+          flags = lib.concatStringsSep " ";
+        in
+        lib.filterAttrs (_: v: v != null) {
+          "CC_${e}" = config.cc;
+          "CXX_${e}" = config.cxx;
+          "AR_${e}" = config.ar;
+        }
+        // lib.optionalAttrs (config.cflags != [ ]) {
+          "CFLAGS_${e}" = flags config.cflags;
+          "CXXFLAGS_${e}" = flags config.cflags;
+        }
+        // lib.optionalAttrs (config.bindgen.extraClangArgs != [ ]) {
+          "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags config.bindgen.extraClangArgs;
+        };
+    }
     (lib.foldl' lib.recursiveUpdate { } (map (p: lib.setAttrByPath p (fromPreset p)) presetFields))
     # Between the preset's defaults and a user's `linker`, which still wins.
     {

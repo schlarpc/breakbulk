@@ -921,21 +921,7 @@ let
     wsName: triple:
     let
       t = targetCfgOf wsName triple;
-      e = util.tripleEnvSuffix triple;
-      flags = l: lib.concatStringsSep " " l;
-      cEnv =
-        lib.filterAttrs (_: v: v != null) {
-          "CC_${e}" = t.cc;
-          "CXX_${e}" = t.cxx;
-          "AR_${e}" = t.ar;
-        }
-        // lib.optionalAttrs (t.cflags != [ ]) {
-          "CFLAGS_${e}" = flags t.cflags;
-          "CXXFLAGS_${e}" = flags t.cflags;
-        }
-        // lib.optionalAttrs (t.bindgen.extraClangArgs != [ ]) {
-          "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags t.bindgen.extraClangArgs;
-        };
+      inherit (t) cEnv;
       str = v: if v == null then null else "${v}";
       linker = str t.linker;
       hostLinker = str t.host.linker;

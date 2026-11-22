@@ -20,7 +20,8 @@
 #    units' linker to `host.linker`.
 #  - `cc`, `cxx`, `ar`, `cflags`, `bindgen.extraClangArgs` become
 #    `CC_<triple>`, `CXX_<triple>`, `AR_<triple>`, `CFLAGS_<triple>` and
-#    `CXXFLAGS_<triple>`, `BINDGEN_EXTRA_CLANG_ARGS_<triple>` in `env`.
+#    `CXXFLAGS_<triple>`, `BINDGEN_EXTRA_CLANG_ARGS_<triple>` in `env`
+#    (`cEnv` in ./target-spec.nix).
 #  - `env` is added to target units only; `host.env` to host units only.
 #    Neither goes through Cargo's `[env]`.
 #  - `packageSet` gives the target's env capture and the package set that
