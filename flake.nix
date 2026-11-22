@@ -12,6 +12,16 @@
     # overrides the list with `inputs.breakbulk.inputs.systems.follows` (or
     # `.url`) pointing at another nix-systems flake, e.g. its own.
     systems.url = "github:nix-systems/default-linux";
+    # `nix fmt` (treefmt.nix) and the pre-push hook (`nix develop` installs
+    # it). Development only: nothing in `lib` uses them.
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs@{ self, nixpkgs, rust-overlay, ... }:
@@ -19,6 +29,17 @@
       systems = import inputs.systems;
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
         f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
+      treefmtFor = pkgs: inputs.treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
+      # Pre-push, not pre-commit: formatting is checked once per push, so
+      # work-in-progress commits stay cheap. `nix develop` installs it.
+      gitHooksFor = pkgs: inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
+        src = ./.;
+        default_stages = [ "pre-push" ];
+        hooks.treefmt = {
+          enable = true;
+          package = (treefmtFor pkgs).config.build.wrapper;
+        };
+      };
       # The documentation site (docs/default.nix).
       docsFor = pkgs: import ./docs {
         inherit pkgs;
@@ -57,9 +78,14 @@
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.rust-analyzer ];
+          packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.rust-analyzer ]
+            ++ (gitHooksFor pkgs).enabledPackages;
+          inherit ((gitHooksFor pkgs)) shellHook;
         };
       });
+
+      # `nix fmt`: treefmt.nix.
+      formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
       # HEAVY and opt-in: dynamic-derivation mode against IFD mode, on
       # Nix master (built from a pinned commit) in a private chroot store
@@ -165,6 +191,8 @@
         # The systems come from the `systems` input: with
         # another list in its place, the outputs follow it.
         // {
+          # Every Rust and Nix file is formatted (`nix fmt`).
+          formatting = (treefmtFor pkgs).config.build.check self;
           # Every internal link and fragment of the documentation site.
           docs-site-links = (docsFor pkgs).links;
           # The committed options pages are what the modules generate, and
@@ -184,7 +212,7 @@
                 self = throw "flake-systems: self is not used";
                 systems = builtins.toFile "systems.nix" ''[ "riscv64-linux" ]'';
               });
-              names = map (o: builtins.attrNames other.${o}) [ "packages" "devShells" "apps" "checks" ];
+              names = map (o: builtins.attrNames other.${o}) [ "packages" "devShells" "apps" "checks" "formatter" ];
             in
             assert nixpkgs.lib.assertMsg (nixpkgs.lib.all (n: n == [ "riscv64-linux" ]) names)
               "flake-systems: outputs do not follow the systems input: ${builtins.toJSON names}";
