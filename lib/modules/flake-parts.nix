@@ -15,7 +15,7 @@
 # moduleLocation; inputs = …; }`), so this module reads it there.
 #
 # Per system it sets `breakbulk.repo` (the mkRepository result) and, unless
-# turned off, adds:
+# turned off (`breakbulk.expose.<output> = false`), adds:
 #  - checks."<ws>/<triple>/<pkg>/<name>": repo.checks, groups included
 #    (`all`, every prefix, `checkGroups`);
 #  - packages."<pkg>" for each product of the default variant on the
@@ -75,25 +75,27 @@ in
           readOnly = true;
           description = "The mkRepository result.";
         };
-        exposeChecks = mkOption {
-          type = types.bool;
-          default = true;
-          description = "Add repo.checks to the flake's checks.";
-        };
-        exposePackages = mkOption {
-          type = types.bool;
-          default = true;
-          description = "Add every workspace's products on its default target (`workspaces.<ws>.defaultTarget`) to the flake's packages, and its default variant's docs there as `<ws>-docs`.";
-        };
-        exposeApps = mkOption {
-          type = types.bool;
-          default = true;
-          description = "Add repo.apps (every test app, named as its test run's check) to the flake's apps.";
-        };
-        exposeDevShells = mkOption {
-          type = types.bool;
-          default = true;
-          description = "Add each workspace's dev shell to the flake's devShells.";
+        expose = {
+          checks = mkOption {
+            type = types.bool;
+            default = true;
+            description = "Add repo.checks to the flake's checks.";
+          };
+          packages = mkOption {
+            type = types.bool;
+            default = true;
+            description = "Add every workspace's products on its default target (`workspaces.<ws>.defaultTarget`) to the flake's packages, and its default variant's docs there as `<ws>-docs`.";
+          };
+          apps = mkOption {
+            type = types.bool;
+            default = true;
+            description = "Add repo.apps (every test app, named as its test run's check) to the flake's apps.";
+          };
+          devShells = mkOption {
+            type = types.bool;
+            default = true;
+            description = "Add each workspace's dev shell to the flake's devShells.";
+          };
         };
       };
 
@@ -102,8 +104,8 @@ in
           pkgs = cfg.pkgs;
           inherit (cfg) root modules;
         };
-        checks = lib.mkIf cfg.exposeChecks repo.checks;
-        packages = lib.mkIf cfg.exposePackages (
+        checks = lib.mkIf cfg.expose.checks repo.checks;
+        packages = lib.mkIf cfg.expose.packages (
           let
             products = lib.listToAttrs (
               map (x: lib.nameValuePair (pkgName x) repo.workspaces.${x.ws}.packages.${x.p}) allPkgs
@@ -125,12 +127,12 @@ in
             clash = lib.attrNames (builtins.intersectAttrs products docs);
           in
           if clash != [ ] then
-            throw "breakbulk: the flake-parts module names both a product and a workspace's docs ${lib.concatStringsSep ", " clash} in `packages`; rename the package or set `perSystem.breakbulk.exposePackages = false`"
+            throw "breakbulk: the flake-parts module names both a product and a workspace's docs ${lib.concatStringsSep ", " clash} in `packages`; rename the package or set `perSystem.breakbulk.expose.packages = false`"
           else
             products // docs
         );
-        apps = lib.mkIf cfg.exposeApps repo.apps;
-        devShells = lib.mkIf cfg.exposeDevShells (
+        apps = lib.mkIf cfg.expose.apps repo.apps;
+        devShells = lib.mkIf cfg.expose.devShells (
           lib.genAttrs wsNames (ws: repo.workspaces.${ws}.devShell)
           // lib.optionalAttrs (lib.length wsNames == 1) {
             default = repo.workspaces.${lib.head wsNames}.devShell;

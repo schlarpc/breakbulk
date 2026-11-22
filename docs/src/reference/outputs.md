@@ -43,8 +43,8 @@ perSystem = { ... }: {
 `checks`, the default target's products to `packages`, each
 workspace's `docs` to `packages` as `<ws>-docs`, `repo.apps` to `apps`,
 and each workspace's dev shell to `devShells`. Each of these
-has a switch under `breakbulk`, `true` by default: `exposeChecks`,
-`exposePackages`, `exposeApps`, `exposeDevShells`.
+has a switch under `breakbulk.expose`, `true` by default: `checks`,
+`packages`, `apps`, `devShells`.
 
 ## The result
 
