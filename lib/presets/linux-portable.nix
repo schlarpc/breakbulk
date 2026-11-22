@@ -62,9 +62,15 @@
   linkerKind ? null,
   rustc ? null,
   ...
-}:
+}@args:
 let
   inherit (lib) mkDefault;
+  # The preset takes `...` (every preset gets the same arguments), so an
+  # argument it no longer has would otherwise be ignored without a word.
+  removedArgs = lib.filter (n: args ? ${n}) [
+    "rebuildInputs"
+    "rebuildOverrides"
+  ];
   bp = pkgs.buildPackages;
   zigArch =
     if !(traits.isLinux && traits.env == "gnu") then
@@ -300,61 +306,68 @@ let
       });
     };
 in
-{
-  packageSet = mkDefault packageSet;
-  # ./linker.nix, kind zig: zig cc, minus the `-fuse-ld=lld -B…/gcc-ld`
-  # rustc adds on x86_64; zig links with its own lld.
-  linker = mkDefault (chooseLinker {
-    inherit pkgs triple;
-    kind = linkerKind;
-    flavor = "zig";
-    zig = {
-      cc = zigCc;
-      target = zigTarget;
+if removedArgs != [ ] then
+  throw "breakbulk.presets.linuxPortable: ${
+    lib.concatMapStringsSep " and " (n: "`${n}`") removedArgs
+  } no longer exist${
+    lib.optionalString (lib.length removedArgs == 1) "s"
+  }: library inputs come from the preset's package set, a static nixpkgs built against `glibc`; name them in `packages.<name>.inputs` (`p: [ p.openssl ]`), and change how one is built with the preset's `overlays` argument"
+else
+  {
+    packageSet = mkDefault packageSet;
+    # ./linker.nix, kind zig: zig cc, minus the `-fuse-ld=lld -B…/gcc-ld`
+    # rustc adds on x86_64; zig links with its own lld.
+    linker = mkDefault (chooseLinker {
+      inherit pkgs triple;
+      kind = linkerKind;
+      flavor = "zig";
+      zig = {
+        cc = zigCc;
+        target = zigTarget;
+      };
+    });
+    cc = mkDefault zigCc;
+    cxx = mkDefault zigCxx;
+    ar = mkDefault zigAr;
+    # pkg-config-rs links every pkg-config library statically (when its
+    # archive exists), as for linuxStatic; target units only.
+    env.PKG_CONFIG_ALL_STATIC = mkDefault "1";
+    # The auditwheel-like check: NEEDED names only glibc's libraries, GCC's
+    # runtime libraries and `systemLibraries`.
+    checks.portableLibraries = {
+      run = stageHelpers.neededLibraries {
+        allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
+        why = "linuxPortable links everything Nix provides statically (its package set builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
+      };
     };
-  });
-  cc = mkDefault zigCc;
-  cxx = mkDefault zigCxx;
-  ar = mkDefault zigAr;
-  # pkg-config-rs links every pkg-config library statically (when its
-  # archive exists), as for linuxStatic; target units only.
-  env.PKG_CONFIG_ALL_STATIC = mkDefault "1";
-  # The auditwheel-like check: NEEDED names only glibc's libraries, GCC's
-  # runtime libraries and `systemLibraries`.
-  checks.portableLibraries = {
-    run = stageHelpers.neededLibraries {
-      allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
-      why = "linuxPortable links everything Nix provides statically (its package set builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
+    # No Nix store path anywhere in a product's files: on
+    # another system nothing is there.
+    checks.portableNoStorePaths = {
+      run = stageHelpers.noStorePaths {
+        allow = allowStorePaths;
+        why = "a linuxPortable product runs where there is no Nix store; allow a path with `presets.linuxPortable { allowStorePaths = [ \"<glob>\" ]; }`";
+      };
     };
-  };
-  # No Nix store path anywhere in a product's files: on
-  # another system nothing is there.
-  checks.portableNoStorePaths = {
-    run = stageHelpers.noStorePaths {
-      allow = allowStorePaths;
-      why = "a linuxPortable product runs where there is no Nix store; allow a path with `presets.linuxPortable { allowStorePaths = [ \"<glob>\" ]; }`";
+    # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a
+    # program for other distributions should; the Nix sandbox has none, so
+    # tests run through the build machine's glibc loader, which also finds
+    # its own libc.so.6 (newer than `glibc`, as on a real target system):
+    # ./runner.nix, kind ld-so, when the build machine runs the target.
+    runner =
+      mkDefault
+        (chooseRunner {
+          inherit pkgs;
+          traits = null;
+          flavor = "zig";
+          inherit canExecute;
+        }).runner;
+    testSystem = mkDefault null;
+    host = hostSpec {
+      inherit
+        pkgs
+        rustc
+        triple
+        linkerKind
+        ;
     };
-  };
-  # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a
-  # program for other distributions should; the Nix sandbox has none, so
-  # tests run through the build machine's glibc loader, which also finds
-  # its own libc.so.6 (newer than `glibc`, as on a real target system):
-  # ./runner.nix, kind ld-so, when the build machine runs the target.
-  runner =
-    mkDefault
-      (chooseRunner {
-        inherit pkgs;
-        traits = null;
-        flavor = "zig";
-        inherit canExecute;
-      }).runner;
-  testSystem = mkDefault null;
-  host = hostSpec {
-    inherit
-      pkgs
-      rustc
-      triple
-      linkerKind
-      ;
-  };
-}
+  }

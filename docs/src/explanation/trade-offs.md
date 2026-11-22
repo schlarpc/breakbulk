@@ -97,6 +97,13 @@ them as nixpkgs' `buildRustPackage` does. Edit-compile loops belong in the
 - **Slow first evaluation in IFD mode.** Planning needs every crate, so the
   first evaluation of a large workspace takes minutes
   ([#19](https://github.com/schlarpc/breakbulk/issues/19)).
+- **`linuxPortable`'s libraries build from source.** The preset's
+  package set is nixpkgs cross-built with `zig cc` against an old glibc,
+  and no binary cache has it. The first build of a library input and
+  everything it needs is a source build: curl with its library closure
+  (OpenSSL, zlib, nghttp2, libssh2 and the rest) took about 25 minutes
+  with 2 jobs on a 4-core machine. Later builds reuse the store
+  ([#22](https://github.com/schlarpc/breakbulk/issues/22)).
 
 ## Risks
 

@@ -611,6 +611,24 @@ let
           zigContainerRepo.workspaces.main.target.${native}.tests.app.bin-app.drvPath
           == t.tests.app.bin-app.drvPath
         ) "zig: the container runner changed the test binary";
+        # The removed `rebuildInputs`/`rebuildOverrides` fail, not ignored.
+        assert lib.assertMsg (lib.all
+          (
+            a:
+            !(builtins.tryEval (
+              builtins.attrNames (
+                presets.linuxPortable {
+                  glibc = "2.17";
+                  ${a} = [ ];
+                } { inherit pkgs; }
+              )
+            )).success
+          )
+          [
+            "rebuildInputs"
+            "rebuildOverrides"
+          ]
+        ) "zig: linuxPortable accepted a removed argument";
         pkgs.runCommand "linux-portable-container-eval" { } "touch $out";
     }
     // zigNativeChecks;
