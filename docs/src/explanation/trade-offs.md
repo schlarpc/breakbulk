@@ -58,6 +58,25 @@ Nothing gives a host unit a rustc flag, such as the project's `--cfg`
 script, or a crate it depends on, that does not compile without such a
 flag builds under plain Cargo and fails under breakbulk.
 
+## The `release` profile by default
+
+A variant's
+[`profile`](../reference/options/workspaces.md#workspacesnamevariantsnameprofile)
+is `release` unless you set it, where `cargo build` uses `dev`. A
+variant's outputs are what gets installed and cached, so breakbulk builds
+them as nixpkgs' `buildRustPackage` does. Edit-compile loops belong in the
+[dev shell](configuration.md#the-dev-shell), with plain `cargo`.
+
+- **Optimized units compile slower.** Units are cached, so each one costs
+  this once, not on every build.
+- **Check and clippy variants use the profile too**, as `cargo check
+  --release` does. Code under `cfg(debug_assertions)` is then not checked
+  or linted.
+- **Test binaries do not.** A build variant's test plan uses
+  [`testProfile`](../reference/options/workspaces.md#workspacesnamevariantsnametestprofile),
+  `test` by default, as `cargo test` does. Its units then share nothing
+  with the build plan's; set `testProfile = "release"` to share them.
+
 ## Costs
 
 - **Per-derivation overhead.** Every unit is a Nix build: sandbox setup,
