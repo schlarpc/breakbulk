@@ -173,17 +173,31 @@ let
     ];
     buildInputs = [ pkgs.openssl ];
   };
-  sysNativeArgs = {
-    packages = {
-      openssl-sys = {
-        nativeInputs = p: [ p.pkg-config ];
-        inputs = p: [ p.openssl ];
-        env.BB_MARKER = "ssl";
+  # In breakbulk.instantiate's shape, as mkRepository makes them of
+  # `packages.<name>.{nativeInputs,inputs,env}`.
+  sysNativeOverrides =
+    lib.mapAttrs
+      (
+        name: o:
+        lib.genAttrs [ "host" "target" ] (platform: {
+          env = o.env or { };
+          envCapture = breakbulk.envCapture.forPackage {
+            inherit pkgs platform name;
+            inherit (o) nativeInputs;
+            inputs = o.inputs or [ ];
+          };
+        })
+      )
+      {
+        openssl-sys = {
+          nativeInputs = p: [ p.pkg-config ];
+          inputs = p: [ p.openssl ];
+          env.BB_MARKER = "ssl";
+        };
+        cm-sys.nativeInputs = p: [ p.cmake ];
+        bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
       };
-      cm-sys.nativeInputs = p: [ p.cmake ];
-      bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
-    };
-  };
+  sysNativeArgs.packageOverrides = sysNativeOverrides;
   sysNative = mk "sys-native" sysNativeArgs;
 
   # The other releases of the supported window for the golden test, from
@@ -711,7 +725,7 @@ in
   sys-native =
     let
       ws = sysNative;
-      captureOf = n: ws.overrides.${n}.target.envCapture;
+      captureOf = n: sysNativeOverrides.${n}.target.envCapture;
       expect = {
         openssl-sys = {
           capture = captureOf "openssl-sys";
