@@ -554,14 +554,19 @@ in
         cp warns.log broken.log $result/
       '';
 
-  # breakbulk's binaries are built from narrow sources, so an
-  # edit to the planner leaves breakbulk-unit (an input of every unit) and
-  # breakbulk-shim alone, and so does an edit to breakbulk-unit's
-  # integration tests. Computes the tools' derivations from a copy of the
-  # repository with a line added to breakbulk-plan's main.rs, to
-  # breakbulk-format's lib.rs and to breakbulk-unit's tests/smoke.rs
-  # (IFD: the copy is a derivation), and compares
-  # .drv paths with the real ones.
+  # breakbulk's binaries are built from narrow sources and trimmed
+  # lockfiles, so an edit to the planner leaves breakbulk-unit (an input of
+  # every unit) and breakbulk-shim alone, and so do an edit to
+  # breakbulk-unit's integration tests or dev-dependencies and a lockfile
+  # change outside its closure. Computes the tools' derivations from copies
+  # of the repository (IFD: a copy is a derivation) and compares .drv paths
+  # with the real ones:
+  #   - `edited`: a line added to breakbulk-plan's main.rs, to
+  #     breakbulk-format's lib.rs and to breakbulk-unit's tests/smoke.rs; a
+  #     dev-dependency added to breakbulk-unit; tokio (breakbulk-drv's
+  #     alone) bumped; a new registry dependency of breakbulk-plan's;
+  #   - `unitDep`: zmij (serde_json's, so breakbulk-unit's) bumped.
+  # Builds every real tool too.
   tools-narrow =
     let
       repo = lib.fileset.toSource {
@@ -572,28 +577,52 @@ in
           ../../crates
         ];
       };
-      edited = pkgs.runCommand "breakbulk-edited-repo" { } ''
-        cp -r --no-preserve=mode ${repo} $out
-        echo '// edited' >> $out/crates/breakbulk-plan/src/main.rs
-        echo '// edited' >> $out/crates/breakbulk-format/src/lib.rs
-        echo '// edited' >> $out/crates/breakbulk-unit/tests/smoke.rs
+      bump = name: ''
+        sed -i '/^name = "${name}"$/{n;s/^version = .*/version = "1.999.0"/}' $out/Cargo.lock
+        grep -qx 'version = "1.999.0"' $out/Cargo.lock
       '';
-      # Realise the copy (IFD), then use it as a path value.
-      editedRoot = builtins.seq (builtins.readDir edited) (
-        /. + builtins.unsafeDiscardStringContext edited.outPath
+      copy =
+        name: script:
+        let
+          drv = pkgs.runCommand "breakbulk-${name}-repo" { } ''
+            cp -r --no-preserve=mode ${repo} $out
+            ${script}
+          '';
+        in
+        # Realise the copy (IFD), then use it as a path value.
+        builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
+      edited = copy "edited" (
+        ''
+          echo '// edited' >> $out/crates/breakbulk-plan/src/main.rs
+          echo '// edited' >> $out/crates/breakbulk-format/src/lib.rs
+          echo '// edited' >> $out/crates/breakbulk-unit/tests/smoke.rs
+          echo 'tempfile = "3"' >> $out/crates/breakbulk-unit/Cargo.toml
+          sed -i '/^\[dependencies\]$/a plan-only = "1"' $out/crates/breakbulk-plan/Cargo.toml
+          sed -i '/^name = "breakbulk-plan"$/,/^\]$/s/^dependencies = \[$/&\n "plan-only",/' $out/Cargo.lock
+          printf '\n[[package]]\nname = "plan-only"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "%064d"\n' 0 >> $out/Cargo.lock
+          grep -q '"plan-only",' $out/Cargo.lock
+        ''
+        + bump "tokio"
       );
+      unitDep = copy "unit-dep" (bump "zmij");
       real = import ../../lib/tools.nix { inherit lib; } pkgs;
-      other = import ../../lib/tools.nix {
-        inherit lib;
-        root = editedRoot;
-      } pkgs;
-      same = n: real.${n}.drvPath == other.${n}.drvPath;
+      toolsOf = root: import ../../lib/tools.nix { inherit lib root; } pkgs;
+      other = toolsOf edited;
+      bumped = toolsOf unitDep;
+      same =
+        a: b: n:
+        a.${n}.drvPath == b.${n}.drvPath;
       checks = {
-        "breakbulk-unit unchanged" = same "breakbulk-unit";
-        "breakbulk-hints unchanged" = same "breakbulk-hints";
-        "breakbulk-shim unchanged" = same "breakbulk-shim";
-        "breakbulk-plan changed" = !same "breakbulk-plan";
-        "breakbulk-instantiate changed" = !same "breakbulk-instantiate";
+        "breakbulk-unit unchanged" = same real other "breakbulk-unit";
+        "breakbulk-hints unchanged" = same real other "breakbulk-hints";
+        "breakbulk-shim unchanged" = same real other "breakbulk-shim";
+        "breakbulk-plan changed" = !same real other "breakbulk-plan";
+        "breakbulk-instantiate changed" = !same real other "breakbulk-instantiate";
+        "breakbulk-drv changed" = !same real other "breakbulk-drv";
+        "breakbulk-plan's lockfile has its new dependency" = lib.hasInfix "\"plan-only\"" (
+          builtins.readFile other.breakbulk-plan.lockFile
+        );
+        "breakbulk-unit changed by its dependency's bump" = !same real bumped "breakbulk-unit";
         "breakbulk-unit's source has only itself and breakbulk-hints" =
           real.breakbulk-unit.crates == [
             "breakbulk-hints"
@@ -604,7 +633,7 @@ in
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in
     assert lib.assertMsg (failed == [ ]) "tools-narrow: ${lib.concatStringsSep ", " failed}";
-    pkgs.runCommand "tools-narrow-check" { } ''
+    pkgs.runCommand "tools-narrow-check" { tools = lib.attrValues real; } ''
       echo ${lib.escapeShellArg (lib.concatStringsSep "\n" (lib.attrNames checks))} > $out
     '';
 
