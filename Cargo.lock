@@ -137,6 +137,7 @@ name = "breakbulk-plan"
 version = "0.1.0"
 dependencies = [
  "breakbulk-format",
+ "breakbulk-sentinel",
  "breakbulk-unit",
  "cargo-platform",
  "serde",
@@ -155,9 +156,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "breakbulk-sentinel"
+version = "0.1.0"
+
+[[package]]
 name = "breakbulk-shim"
 version = "0.1.0"
 dependencies = [
+ "breakbulk-sentinel",
  "serde_json",
 ]
 

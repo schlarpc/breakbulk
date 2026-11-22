@@ -25,6 +25,7 @@ The skeleton and toolchain spec feed planning; the source map, toolchains and en
 | --- | --- |
 | `breakbulk-shim` | Rust binary: rustc wrapper and build-script stub |
 | `breakbulk-plan` | Rust binary: drives cargo and writes `plan.json` |
+| `breakbulk-sentinel` | Rust library without dependencies: the sentinel tag grammar the shim prints and the planner reads |
 | `breakbulk-instantiate` | Rust binary: templates unit derivations as JSON for IFD; also the library that `breakbulk-drv` uses |
 | `breakbulk-drv` | Rust binary: the dynamic-derivation-mode outer builder; writes the same derivations into the store through `builder-rpc-v0` with harmonia |
 | `breakbulk-unit` | Rust binary: the builder of every unit |

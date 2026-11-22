@@ -17,6 +17,7 @@ doc = false
 
 [dependencies]
 breakbulk-format = { path = "../breakbulk-format" }
+breakbulk-sentinel = { path = "../breakbulk-sentinel" }
 breakbulk-unit = { path = "../breakbulk-unit" }
 cargo-platform = "0.3.3"
 serde = { version = "1", features = ["derive"] }

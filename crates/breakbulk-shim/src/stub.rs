@@ -68,24 +68,6 @@ pub fn detect() -> Option<Value> {
     None
 }
 
-/// The tag `R` for a build-script run, taken from its `OUT_DIR`:
-/// `…/build/<pkg>-<hash>/out` gives `<hash>`; a layout with
-/// `…/build/<pkg>/<hash>/out` also gives `<hash>`.
-pub fn run_tag(out_dir: &Path) -> Option<String> {
-    let parent = if out_dir.file_name()? == "out" {
-        out_dir.parent()?
-    } else {
-        out_dir
-    };
-    let last = parent.file_name()?.to_str()?;
-    let tag = last.rsplit_once('-').map_or(last, |(_, h)| h);
-    (!tag.is_empty()
-        && tag
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() || c.is_ascii_lowercase()))
-    .then(|| tag.to_ascii_lowercase())
-}
-
 /// Targets of one package, as far as sentinel selection needs them.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PackageTargets {
@@ -233,7 +215,7 @@ pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
         std::env::var_os("OUT_DIR")
             .ok_or_else(|| Error::new("build-script stub: OUT_DIR not set"))?,
     );
-    let tag = run_tag(&out_dir).ok_or_else(|| {
+    let tag = breakbulk_sentinel::run_tag(&out_dir).ok_or_else(|| {
         Error::new(format!(
             "build-script stub: no run tag in OUT_DIR {}",
             out_dir.display()
@@ -258,7 +240,7 @@ pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
     })?;
     let links = std::env::var("CARGO_MANIFEST_LINKS").is_ok_and(|l| !l.is_empty());
     let old_syntax = needs_old_syntax(&std::env::var("CARGO_PKG_RUST_VERSION").unwrap_or_default());
-    let directives = sentinels(&tag, &out_dir, &targets, links);
+    let directives = sentinels(tag, &out_dir, &targets, links);
     let lines: Vec<String> = directives
         .iter()
         .map(|(k, v)| line(k, v, old_syntax))
@@ -269,7 +251,7 @@ pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
     rec.insert("tag".into(), json!(tag));
     rec.insert("stub".into(), marker.clone());
     rec.insert("printed".into(), json!(lines));
-    record::write(record_dir, "run", &tag, rec)
+    record::write(record_dir, "run", tag, rec)
         .map_err(|e| Error::new(format!("writing record: {e}")))?;
 
     for l in &lines {
@@ -281,21 +263,6 @@ pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tags() {
-        assert_eq!(
-            run_tag(Path::new(
-                "/t/x86_64/debug/build/foo-sys-0a1b2c3d4e5f6789/out"
-            ))
-            .as_deref(),
-            Some("0a1b2c3d4e5f6789")
-        );
-        assert_eq!(
-            run_tag(Path::new("/t/debug/build/foo/0a1b2c3d4e5f6789/out")).as_deref(),
-            Some("0a1b2c3d4e5f6789")
-        );
-    }
 
     #[test]
     fn syntax() {

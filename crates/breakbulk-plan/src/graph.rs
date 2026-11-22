@@ -701,6 +701,12 @@ impl<'a> Builder<'a> {
         let Some(tag) = &rec.tag else {
             bail!("{}: run record without a tag", rec.file);
         };
+        if !breakbulk_sentinel::is_tag(tag) {
+            bail!(
+                "{}: run record with tag `{tag}`, not lowercase hex",
+                rec.file
+            );
+        }
         let Some(out_dir) = rec.env.get("OUT_DIR") else {
             bail!("{}: run record without OUT_DIR", rec.file);
         };

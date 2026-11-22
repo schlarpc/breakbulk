@@ -1,0 +1,11 @@
+[package]
+name = "breakbulk-sentinel"
+description = "The sentinel tag grammar shared by the breakbulk build-script stub and planner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# No dependencies: breakbulk-shim depends on this crate, and the shim's
+# closure is kept small.
+[dependencies]

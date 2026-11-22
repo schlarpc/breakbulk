@@ -3,6 +3,7 @@
 //! (`docs/src/reference/sentinels.md`).
 
 use breakbulk_format::{LinkArgKind, SpliceKind, contains_sentinel};
+use breakbulk_sentinel::{is_tag, split_tag};
 
 /// One sentinel argument pair, as Cargo placed it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,17 +33,6 @@ impl ArgSentinel {
             | ArgSentinel::LinkArg(t, _) => t,
         }
     }
-}
-
-/// `__bb_<tag>_<rest>` → (tag, rest). Tags are Cargo's lowercase hex hashes.
-fn split_tag(s: &str) -> Option<(&str, &str)> {
-    let s = s.strip_prefix("__bb_")?;
-    let (tag, rest) = s.split_once('_')?;
-    (!tag.is_empty()
-        && tag
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
-    .then_some((tag, rest))
 }
 
 /// Parse the argument pair (`flag`, `value`) as a sentinel. `None` if the
@@ -111,7 +101,7 @@ pub fn parse_pair(flag: &str, value: &str) -> Option<Result<ArgSentinel, String>
 pub fn env_sentinel(name: &str, value: &str) -> Option<Result<String, String>> {
     let rest = name.strip_prefix("__BB_")?;
     let tag = rest.strip_suffix("_ENV")?.to_ascii_lowercase();
-    Some(if value == format!("__bb_{tag}_env") {
+    Some(if is_tag(&tag) && value == format!("__bb_{tag}_env") {
         Ok(tag)
     } else {
         Err(format!("`{name}={value}`"))

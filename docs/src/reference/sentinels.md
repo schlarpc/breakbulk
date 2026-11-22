@@ -1,6 +1,6 @@
 # Sentinel directives
 
-Each stub prints one tagged directive of every kind that applies to its package. The tag `R` is the run's hash from its `OUT_DIR`: `build/<pkg>-<hash>/out`, or `build/<pkg>/<hash>/out` in the new build-directory layout. This table is the authoritative list of sentinels, their shapes and where Cargo places them. Placement is identical on every Cargo release tested (1.95 to 1.101); the evidence and source citations are in [spike A's wrapping table](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/A-trace-fidelity.md#wrapping-table).
+Each stub prints one tagged directive of every kind that applies to its package. The tag `R` is the run's hash from its `OUT_DIR`: `build/<pkg>-<hash>/out`, or `build/<pkg>/<hash>/out` in the new build-directory layout. Cargo writes the hash in lowercase hex, and the stub and the planner accept no other tag (`breakbulk-sentinel`); two runs with the same tag fail planning. This table is the authoritative list of sentinels, their shapes and where Cargo places them. Placement is identical on every Cargo release tested (1.95 to 1.101); the evidence and source citations are in [spike A's wrapping table](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/A-trace-fidelity.md#wrapping-table).
 
 "R's package" is the package whose build script is run R. A run's values reach only units of the run's own platform (host or target), except the dynamic-library paths in the last rows.
 
