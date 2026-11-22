@@ -1,7 +1,7 @@
 # End-to-end fixture checks for the traced planner, in IFD mode:
-# breakbulk.mkWorkspace plans each fixture with the real cargo, instantiates
-# the plan, builds the units, and compares the products' behaviour with a
-# plain `cargo build` of the same fixture.
+# mkWorkspace (tests/lib/workspace.nix) plans each fixture with the real
+# cargo, instantiates the plan, builds the units, and compares the
+# products' behaviour with a plain `cargo build` of the same fixture.
 #
 #   nix build -f tests/plan walking-skeleton
 #
@@ -21,13 +21,14 @@
 }:
 let
   inherit (pkgs) lib;
+  mkWorkspace = import ../lib/workspace.nix { inherit lib breakbulk; };
   fixtures = ../fixtures;
   target = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   tools = breakbulk.mkTools pkgs;
 
   mk =
     fixture: args:
-    breakbulk.mkWorkspace pkgs (
+    mkWorkspace pkgs (
       {
         root = fixtures + "/${fixture}";
         inherit tools;
