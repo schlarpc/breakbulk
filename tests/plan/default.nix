@@ -633,9 +633,36 @@ in
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in
     assert lib.assertMsg (failed == [ ]) "tools-narrow: ${lib.concatStringsSep ", " failed}";
-    pkgs.runCommand "tools-narrow-check" { tools = lib.attrValues real; } ''
-      echo ${lib.escapeShellArg (lib.concatStringsSep "\n" (lib.attrNames checks))} > $out
-    '';
+    pkgs.runCommand "tools-narrow-check"
+      {
+        tools = lib.attrValues real;
+        nativeBuildInputs = [ pkgs.python3 ];
+        lock = real.breakbulk-shim.lockFile;
+      }
+      ''
+        check() {
+          if cmp -s $lock "$1"; then echo "$1 is not edited" >&2; exit 1; fi
+          python3 ${../../lib/lock-shrunk.py} $lock "$1"
+        }
+        # Cargo's copy may only lose packages and edges.
+        sed '/^name = "serde_core"$/,/^\]$/{/ "serde_derive",/d}' $lock > lost-edge
+        check lost-edge
+        awk -v RS= -v ORS='\n\n' '!/\nname = "itoa"\n/' $lock | sed '/^ "itoa",$/d' > lost-package
+        check lost-package
+        cat $lock > added-package
+        printf '\n[[package]]\nname = "extra"\nversion = "1.0.0"\n' >> added-package
+        sed '/^name = "proc-macro2"$/,/^\]$/s/^dependencies = \[$/&\n "itoa",/' $lock > added-edge
+        sed '/^name = "itoa"$/{n;s/^version = .*/version = "1.999.0"/}' $lock > changed-version
+        sed '/^name = "itoa"$/,/^$/s/^checksum = .*/checksum = "0"/' $lock > changed-checksum
+        for f in added-package added-edge changed-version changed-checksum; do
+          if check $f 2> $f.err; then
+            echo "lock-shrunk.py accepted $f" >&2
+            exit 1
+          fi
+          cat $f.err
+        done
+        echo ${lib.escapeShellArg (lib.concatStringsSep "\n" (lib.attrNames checks))} > $out
+      '';
 
   # `-sys` crates with native inputs declared per package: pkg-config
   # (openssl-sys), cmake (cm-sys), bindgen and cc (bg-sys). Each package's

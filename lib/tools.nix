@@ -138,10 +138,9 @@ let
   # dependency of a kept package (an edge, or an entry) that only a
   # left-out member's features turn on. serde_core's edge to serde_derive
   # is one, for breakbulk-shim. So the build does not pass `--locked`, which
-  # would fail on those, and Cargo drops them from its copy. It still
-  # cannot change a version or add a package: it keeps every locked version
-  # and builds offline from a vendor directory made from this lockfile, so
-  # a package missing from the trim fails the build.
+  # would fail on those, and lets Cargo drop them from its copy; after the
+  # build, lock-shrunk.py fails it if that copy gained a package or an edge,
+  # or changed a version or checksum, rather than only losing some.
   lock = builtins.fromTOML (builtins.readFile (root + "/Cargo.lock"));
   packages =
     assert lib.assertMsg (
@@ -281,6 +280,10 @@ let
         "-p"
         pname
       ];
+      nativeBuildInputs = [ pkgs.buildPackages.python3 ];
+      postBuild = ''
+        python3 ${./lock-shrunk.py} ${lockFile} Cargo.lock
+      '';
       doCheck = false;
       passthru = { inherit crates lockFile; };
     };
