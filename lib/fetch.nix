@@ -10,6 +10,7 @@
   lib,
   pkgs,
   util,
+  featureGates,
   lockfile,
   manifest,
 }:
@@ -142,9 +143,6 @@ let
         cp "$checksumJsonPath" $out/.cargo-checksum.json
       '';
 
-  # Lix does not know `exportIgnore` (and never applied export-ignore).
-  isLix = lib.hasInfix "lix" (lib.toLower builtins.nixVersion);
-
   gitTree =
     parsed:
     let
@@ -161,7 +159,7 @@ let
       }
       # Cargo checks out the tree as is; `git archive` export-ignore rules
       # do not apply (builtins.fetchGit turns them on by default).
-      // lib.optionalAttrs (!isLix) { exportIgnore = false; }
+      // lib.optionalAttrs featureGates.fetchGitExportIgnore { exportIgnore = false; }
       // lib.optionalAttrs (hash != null) { narHash = hash; }
     );
 

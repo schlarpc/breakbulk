@@ -17,6 +17,10 @@
 #   g.readOutput record site path
 #                            builtins.readFile of a derivation's output, at
 #                            evaluation time (import from derivation)
+#   g.fetchGitExportIgnore   builtins.fetchGit takes `exportIgnore` (not
+#                            on Lix, which never applies export-ignore)
+#   g.namesVirtualPaths s    the string names a lazy-tree (virtual) store
+#                            path (Determinate Nix with `lazy-trees`)
 #
 # A record is `repo.nixFeatures`: { caDerivations; dynamicDerivations;
 # importFromDerivation; }. Every use of a feature goes through its gate,
@@ -86,4 +90,15 @@ in
   readOutput =
     record: site: path:
     gate "importFromDerivation" record site (builtins.readFile path);
+
+  fetchGitExportIgnore = !lib.hasInfix "lix" (lib.toLower builtins.nixVersion);
+
+  # No builtin tells a virtual path from a real one. `hashString` hashes
+  # the string with its virtual paths replaced (Determinate's
+  # `EvalState::devirtualize`), so a hash that differs from the hash of the
+  # text alone finds them; elsewhere the two always agree.
+  namesVirtualPaths =
+    s:
+    builtins.hashString "sha256" s
+    != builtins.hashString "sha256" (builtins.unsafeDiscardStringContext s);
 }

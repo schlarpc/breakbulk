@@ -154,6 +154,7 @@ let
         lib
         pkgs
         util
+        featureGates
         lockfile
         manifest
         ;

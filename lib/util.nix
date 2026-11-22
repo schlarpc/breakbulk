@@ -1,6 +1,7 @@
 # Small helpers shared by the evaluation-time library. No pkgs needed.
 { lib }:
 let
+  featureGates = import ./nix-features.nix { inherit lib; };
   inherit (builtins)
     attrNames
     concatStringsSep
@@ -436,11 +437,9 @@ rec {
   # derivation, so the text without its context names nothing and changes
   # with every evaluation. Other values pass unchanged.
   #
-  # No builtin returns the real path of a virtual one. `hashString` hashes
-  # the string with its virtual paths replaced (Determinate's
-  # `EvalState::devirtualize`), so a hash that differs from the hash of the
-  # text alone finds them; elsewhere the two always agree. A store path in
-  # the context of `substring 0 0 s` plus its own text tests one entry.
+  # No builtin returns the real path of a virtual one;
+  # `nixFeatures.namesVirtualPaths` finds them. A store path in the context
+  # of `substring 0 0 s` plus its own text tests one entry.
   # `builtins.path` then copies the tree under the same name, as Nix's own
   # replacement does, which gives the same real path.
   devirtualize = s: (devirtualized s).withContext;
@@ -456,7 +455,7 @@ rec {
     let
       ctx = builtins.getContext s;
       text = builtins.unsafeDiscardStringContext s;
-      differs = t: hashString "sha256" t != hashString "sha256" (builtins.unsafeDiscardStringContext t);
+      differs = featureGates.namesVirtualPaths;
       paths = filter (p: ctx.${p}.path or false) (attrNames ctx);
       noContext = substring 0 0 s;
       virtual = filter (p: differs (noContext + p)) paths;
