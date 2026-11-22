@@ -8,6 +8,8 @@
 #                            ./target-traits.nix)
 #   linker-kind-rustc        the default Linux linker kind against rustc's
 #                            own target specs (./target-traits.nix)
+#   hint-options             every option a Rust hint names exists
+#                            (./hint-options.nix)
 #   llvm-versions            lib/llvm-versions.nix against `rustc -vV`
 #   wasi-sdk-table           lib/wasi-sdk.nix against rustc's wasip2 libc.a
 #   roots-metadata-fixtures  predicted targets == `cargo metadata` for fixtures
@@ -517,6 +519,8 @@ let
 in
 {
   lib-unit = import ./unit.nix { inherit pkgs bb runTests; };
+
+  hint-options = import ./hint-options.nix { inherit pkgs bb; };
 
   inherit (import ./target-traits.nix { inherit pkgs bb runTests; })
     target-traits
