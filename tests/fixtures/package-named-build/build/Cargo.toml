@@ -1,0 +1,5 @@
+# Cargo forbids a bin target named `build`, not a package or a lib.
+[package]
+name = "build"
+version.workspace = true
+edition.workspace = true

@@ -250,6 +250,35 @@ let
     ws = walking-skeleton;
     install = "install -D $t/walking-skeleton $out/bin/walking-skeleton";
   };
+
+  # package-named-build: the run's `outDir` is Cargo's OUT_DIR relative to
+  # the build directory, `<triple>/debug/build/build<sep><hash>/out` (`-` in
+  # the classic layout, `/` in the new one). With trim-paths (`remapped`),
+  # app prints the generated file under Cargo's build-directory remap.
+  namedBuild =
+    name: ws: sep: remapped:
+    let
+      units = (readPlan ws "build").units;
+      runs = lib.filter (id: lib.hasPrefix "r-build-" id) (lib.attrNames units);
+      run = lib.head runs;
+      tag = lib.removePrefix "r-build-" run;
+      outDir = units.${run}.outDir or "";
+      want = "${target}/debug/build/build${sep}${tag}/out";
+    in
+    assert lib.assertMsg (lib.length runs == 1) "${name}: runs ${builtins.toJSON runs}";
+    assert lib.assertMsg (outDir == want) "${name}: outDir is `${outDir}`, not `${want}`";
+    pkgs.runCommand "${name}-check" { app = ws.packages.app; } ''
+      got=$($app/bin/app)
+      echo "$got"
+      ${
+        if remapped then
+          ''[ "$got" = ${lib.escapeShellArg "42 /cargo/build-dir/${want}/gen.rs"} ]''
+        else
+          ''[ "''${got%% *}" = 42 ]''
+      }
+      mkdir -p $out
+      echo "$got" > $out/output
+    '';
 in
 {
   workspaces = {
@@ -280,6 +309,9 @@ in
     fixture = "walking-skeleton";
     ws = walking-skeleton;
   };
+
+  # A package named `build` with a build script, classic layout.
+  package-named-build = namedBuild "package-named-build" (mk "package-named-build" { }) "-" false;
   walking-skeleton-golden-test = golden {
     fixture = "walking-skeleton";
     ws = walking-skeleton;
@@ -1029,6 +1061,8 @@ in
     dirG = goldens "directives" dir;
     fu = mk "feature-unification" { inherit toolchain; };
     fuG = goldens "feature-unification" fu;
+    pnb = mk "package-named-build" { inherit toolchain; };
+    pnbG = goldens "package-named-build" pnb;
     # The feature sets `shared`'s library is compiled with in a plan, one
     # entry per compile unit, sorted.
     sharedFeatures =
@@ -1245,5 +1279,10 @@ in
           mkdir -p $out
           cat $g/report $gt/report > $out/report
         '';
+    # A package named `build` with a build script, new layout: its
+    # directory `build/build/<hash>` is not mistaken for the profile's
+    # `build`.
+    package-named-build-nightly = namedBuild "package-named-build-nightly" pnb "/" true;
+    package-named-build-nightly-golden = pnbG.build;
   }
 )

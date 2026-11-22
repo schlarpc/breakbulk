@@ -145,6 +145,7 @@ let
     out-dir-walk = [ dynamic.repos.out-dir-walk ];
     outside-reads = [ repository.repos.outside ];
     own-view = [ repository.repos.ownView ];
+    package-named-build = [ dynamic.repos.package-named-build ];
     pkgid-short = [
       (plainAt "app" "pkgid-short" [
         {

@@ -346,6 +346,17 @@ let
         };
       }
     ];
+    # A package named `build` with a build script, in nightly Cargo's new
+    # build-directory layout (`build/build/<hash>`).
+    package-named-build = mkRepo "package-named-build" [
+      oneWs
+      {
+        workspaces.main.toolchain = {
+          rustc = nightly;
+          cargo = nightly;
+        };
+      }
+    ];
     # Nightly `resolver.feature-unification = "package"`.
     feature-unification = mkRepo "feature-unification" [
       oneWs

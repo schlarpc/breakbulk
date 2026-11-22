@@ -1,0 +1,12 @@
+# A package named `build` with a build script. In Cargo's new build-dir
+# layout its run's OUT_DIR is `<profile>/build/build/<hash>/out`: the
+# package's directory has the same name as the `build` directory above it.
+# app prints the path of a file the build script generated, which Cargo's
+# trim-paths remaps under the run's directory.
+[workspace]
+resolver = "2"
+members = ["app", "build"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
