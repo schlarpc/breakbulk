@@ -30,8 +30,8 @@ path remapping and build ID depend on it.
 | Linux (gnu, musl) | `split` | `packDwo` → `splitDebug` |
 | Other ELF targets (bare metal, BSDs) | `keep` | `packDwo` |
 | Windows (MSVC) | `keep` | none: PDBs are already separate files; `install` puts them in the `debug` output |
-| wasm for browsers | `keep` | `bindgen` → `wasmOpt` |
-| wasm components | `keep` | `wasmOpt` → `componentize` → `wasmMetadata` |
+| wasm for browsers | `keep` | `wasmBindgen` → `wasmOpt` |
+| wasm components | `keep` | `wasmOpt` → `wasmComponentize` → `wasmMetadata` |
 | macOS | `split` | `splitDebug` (the `.dSYM` to the `debug` output, `llvm-strip -S`) → `install` → `adhocSign` |
 
 `"strip"` inserts `strip` instead. `packDwo` packs split DWARF objects
@@ -89,7 +89,7 @@ Other files go by suffix: libraries (an import library such as
 `foo.dll.lib` too) to `lib/`, executables to `bin/`, a `.pdb` next to the
 file it describes. Where a suffix does not decide (`.wasm` is both
 executables' and libraries' suffix), the file stays at the top.
-Directories that earlier stages made are kept as they are, so `bindgen`'s
+Directories that earlier stages made are kept as they are, so `wasmBindgen`'s
 `pkg/` (the JavaScript glue and its `.wasm`) and a stage's `share/` land
 unchanged. Where each kind goes comes from the target's traits
 (`sharedLibraryDir`), so a target you define controls it.
@@ -99,9 +99,9 @@ unchanged. Where each kind goes comes from the target's traits
 | Stage | Runs | Sees |
 | --- | --- | --- |
 | names neither `install` nor a stage after it | before `install` | the flat link output (`app`, `libfoo.so`) |
-| `after = "install"`, or after such a stage | after `install` | the installed layout (`bin/`, `lib/`, and `pkg/` after `bindgen`) |
+| `after = "install"`, or after such a stage | after `install` | the installed layout (`bin/`, `lib/`, and `pkg/` after `wasmBindgen`) |
 
-The stage helpers (`splitDebug`, `strip`, `bindgen`, …) expect the flat
+The stage helpers (`splitDebug`, `strip`, `wasmBindgen`, …) expect the flat
 link output. A wrapper made before `install` would run the earlier
 stage's binary, so the product would carry both copies. More in
 [Wrap or package a binary](../how-to/wrap-package.md).
@@ -110,8 +110,8 @@ Typical checks: ISA level, DLL import closure, PE headers, signature
 verification, "no interpreter, no needed libraries".
 
 breakbulk ships [stage helpers](../reference/stage-helpers.md):
-`packDwo`, `splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt`,
-`componentize`, `deterministicZip` and more. Your own stages are
+`packDwo`, `splitDebug`, `strip`, `patchelfRpath`, `wasmBindgen`, `wasmOpt`,
+`wasmComponentize`, `deterministicZip` and more. Your own stages are
 ordinary derivations: container images, boot images, distribution
 packages, signing, metadata stamps. What a stage function gets is in
 [Stage and check functions](../reference/stage-functions.md).

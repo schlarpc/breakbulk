@@ -136,7 +136,7 @@ let
     paths = map (c: repo.workspaces.${c}.target.${wasm}.packages.${c}) components;
   };
 
-  # The emu core: wasm-bindgen --target web --no-typescript (bindgen writes
+  # The emu core: wasm-bindgen --target web --no-typescript (wasmBindgen writes
   # pkg/), plus the crate's asset/ and test-page/ at the root (flake.nix
   # emuDsFor).
   emuInstall =
@@ -255,16 +255,16 @@ in
 
       datboi-emu-ds.target.${wasm}.stages = {
         wasmOpt = lib.mkForce null;
-        componentize = lib.mkForce null;
+        wasmComponentize = lib.mkForce null;
         wasmMetadata = lib.mkForce null;
-        bindgen = {
+        wasmBindgen = {
           after = "linked";
-          run = breakbulk.stageHelpers.bindgen {
+          run = breakbulk.stageHelpers.wasmBindgen {
             extraArgs = [ "--no-typescript" ];
           };
         };
         emu = {
-          after = "bindgen";
+          after = "wasmBindgen";
           run = emuInstall;
         };
         install = lib.mkForce null;

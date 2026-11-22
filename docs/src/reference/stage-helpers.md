@@ -56,64 +56,6 @@ The package to run instead of `rcodesign` from the stage's `pkgs`.
 
 *Default:* `null`
 
-### `bindgen`
-
-Runs `wasm-bindgen` on the input's single `.wasm` file and
-writes its JavaScript glue and processed module to `pkg/`,
-which `install` keeps. The `wasmWeb` preset's first stage.
-
-#### `bindgen.extraArgs`
-
-More arguments for `wasm-bindgen`, before the input file.
-
-*Type:* list of string
-
-*Default:* `[ ]`
-
-*Example:* `[ "--no-typescript" ]`
-
-#### `bindgen.target`
-
-wasm-bindgen's `--target`: the kind of JavaScript to
-generate (`web`, `bundler`, `nodejs`, `deno`,
-`no-modules`, `module`, `experimental-nodejs-module`).
-
-*Type:* string
-
-*Default:* `"web"`
-
-*Example:* `"nodejs"`
-
-#### `bindgen.wasmBindgen`
-
-The wasm-bindgen CLI. It must be the version of the
-`wasm-bindgen` crate the module was built with.
-
-`null` finds it from the product's Cargo.lock
-(`product.lockfile`, or `product.lockEntries` for a
-product made with `mkProduct` that passes parsed entries):
-
-1. The version, X.Y.Z, is the lockfile's `wasm-bindgen`
-   package from a registry. Evaluation fails when the
-   lockfile has none, several versions, or one from git or
-   a path.
-2. nixpkgs' `wasm-bindgen-cli_X_Y_Z` from the stage's
-   `pkgs`, when it has that attribute.
-3. Otherwise wasm-bindgen-cli X.Y.Z from crates.io, built
-   with the stage's `pkgs.rustPlatform`, when breakbulk's
-   table `lib/wasm-bindgen-hashes.nix` has its hashes.
-4. Otherwise evaluation fails, naming the version. Pass
-   the CLI here, for example
-   `breakbulk.wasmBindgen.forVersion { inherit pkgs;
-   version = "X.Y.Z"; hashes."X.Y.Z" = { hash = …;
-   cargoHash = …; }; }`.
-
-*Type:* null or package
-
-*Default:* `null`
-
-*Example:* `pkgs.wasm-bindgen-cli_0_2_100`
-
 ### `buildScriptFiles`
 
 Copies the files the build scripts of the product's target
@@ -215,36 +157,6 @@ The version of `package`. `null`: the one version the product's roots depend on.
 
 *Example:* `"50.0.1"`
 
-### `componentize`
-
-Makes a WebAssembly component from the input's single core
-module with `wasm-tools component new`. The module keeps its
-file name. In the `wasmComponent` preset's chain, `wasmMetadata`
-runs after it.
-
-#### `componentize.adapter`
-
-An adapter module (`--adapt`) that implements imports of
-the core module not bound to WIT interfaces, such as
-`wasi_snapshot_preview1`. Either a module file, whose file
-name wasm-tools takes as the import module's name, or
-`{ name; module; }`, where `name` is the import module it
-implements.
-
-*Type:* null or package or absolute path or (submodule)
-
-*Default:* `null`
-
-*Example:* `{ name = "wasi_snapshot_preview1"; module = ./wasi_snapshot_preview1.reactor.wasm; }`
-
-#### `componentize.wasmTools`
-
-The package to run instead of `wasm-tools` from the stage's `pkgs`.
-
-*Type:* null or package
-
-*Default:* `null`
-
 ### `deterministicZip`
 
 Packs the input's files into one zip file whose bytes depend
@@ -287,7 +199,7 @@ executables have no suffix, an executable file goes to `bin/`. A
 suffix that executables and shared libraries share (`.wasm`)
 decides nothing. A debug side file (`.pdb`) goes next to the file
 of the same stem, else to `bin/`. Anything else stays at the top.
-Top-level directories are copied as they are, so `bindgen`'s
+Top-level directories are copied as they are, so `wasmBindgen`'s
 `pkg/` and a stage's `share/` are kept.
 
 The link units' debuginfo side files (`product.linkedDebug`:
@@ -480,6 +392,94 @@ The package to run instead of `llvm` from the stage's `pkgs`.
 
 *Default:* `null`
 
+### `wasmBindgen`
+
+Runs `wasm-bindgen` on the input's single `.wasm` file and
+writes its JavaScript glue and processed module to `pkg/`,
+which `install` keeps. The `wasmWeb` preset's first stage.
+
+#### `wasmBindgen.extraArgs`
+
+More arguments for `wasm-bindgen`, before the input file.
+
+*Type:* list of string
+
+*Default:* `[ ]`
+
+*Example:* `[ "--no-typescript" ]`
+
+#### `wasmBindgen.package`
+
+The wasm-bindgen CLI. It must be the version of the
+`wasm-bindgen` crate the module was built with.
+
+`null` finds it from the product's Cargo.lock
+(`product.lockfile`, or `product.lockEntries` for a
+product made with `mkProduct` that passes parsed entries):
+
+1. The version, X.Y.Z, is the lockfile's `wasm-bindgen`
+   package from a registry. Evaluation fails when the
+   lockfile has none, several versions, or one from git or
+   a path.
+2. nixpkgs' `wasm-bindgen-cli_X_Y_Z` from the stage's
+   `pkgs`, when it has that attribute.
+3. Otherwise wasm-bindgen-cli X.Y.Z from crates.io, built
+   with the stage's `pkgs.rustPlatform`, when breakbulk's
+   table `lib/wasm-bindgen-hashes.nix` has its hashes.
+4. Otherwise evaluation fails, naming the version. Pass
+   the CLI here, for example
+   `breakbulk.wasmBindgen.forVersion { inherit pkgs;
+   version = "X.Y.Z"; hashes."X.Y.Z" = { hash = …;
+   cargoHash = …; }; }`.
+
+*Type:* null or package
+
+*Default:* `null`
+
+*Example:* `pkgs.wasm-bindgen-cli_0_2_100`
+
+#### `wasmBindgen.target`
+
+wasm-bindgen's `--target`: the kind of JavaScript to
+generate (`web`, `bundler`, `nodejs`, `deno`,
+`no-modules`, `module`, `experimental-nodejs-module`).
+
+*Type:* string
+
+*Default:* `"web"`
+
+*Example:* `"nodejs"`
+
+### `wasmComponentize`
+
+Makes a WebAssembly component from the input's single core
+module with `wasm-tools component new`. The module keeps its
+file name. In the `wasmComponent` preset's chain, `wasmMetadata`
+runs after it.
+
+#### `wasmComponentize.adapter`
+
+An adapter module (`--adapt`) that implements imports of
+the core module not bound to WIT interfaces, such as
+`wasi_snapshot_preview1`. Either a module file, whose file
+name wasm-tools takes as the import module's name, or
+`{ name; module; }`, where `name` is the import module it
+implements.
+
+*Type:* null or package or absolute path or (submodule)
+
+*Default:* `null`
+
+*Example:* `{ name = "wasi_snapshot_preview1"; module = ./wasi_snapshot_preview1.reactor.wasm; }`
+
+#### `wasmComponentize.wasmTools`
+
+The package to run instead of `wasm-tools` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
 ### `wasmMetadata`
 
 Adds `metadata` to every `.wasm` file in place with
@@ -488,8 +488,8 @@ components (on a component's outermost level). With
 `cargoMetadata`, the default, the fields not set come from the
 package's `Cargo.toml`, as cargo-component fills them. The
 `wasmComponent` preset's last stage before `install`, after
-`componentize`. With nothing to add it copies its input. It fails when the input has no
-`.wasm` file.
+`wasmComponentize`. With nothing to add it copies its input. It
+fails when the input has no `.wasm` file.
 
 #### `wasmMetadata.cargoMetadata`
 

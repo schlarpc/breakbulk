@@ -98,9 +98,9 @@ let
     inherit
       lib
       util
-      wasmBindgen
       targetTraits
       ;
+    wasmBindgenCli = wasmBindgen;
   };
 
   # The file a product's `linked` stage holds instead of
@@ -196,12 +196,12 @@ let
   # target's `debugInfo` (`packDwo`, `splitDebug`, `strip`) first (lib/products.nix).
   defaultStageNames = {
     wasmWeb = [
-      "bindgen"
+      "wasmBindgen"
       "wasmOpt"
     ];
     wasmComponent = [
       "wasmOpt"
-      "componentize"
+      "wasmComponentize"
       "wasmMetadata"
     ];
   };

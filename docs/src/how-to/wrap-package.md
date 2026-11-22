@@ -2,7 +2,7 @@
 
 A wrapper script, a launcher, a `.desktop` file or an archive belongs
 after `install`, where the product already has its final layout
-(`bin/`, `lib/`, and `pkg/` after `bindgen`). This page shows how to
+(`bin/`, `lib/`, and `pkg/` after `wasmBindgen`). This page shows how to
 add such a stage.
 
 ## Wrap a binary
@@ -51,8 +51,8 @@ available as `.stages.<name>`, for example `.stages.install`.
 
 | Stage | Before `install` | After `install` |
 | --- | --- | --- |
-| Sees | the flat link output: `app`, `app.exe`, `libfoo.so` | the installed layout: `bin/app`, `lib/libfoo.so`, `pkg/` after `bindgen` |
-| Use for | changing the binary: `packDwo`, `splitDebug`, `strip`, `patchelfRpath`, `bindgen`, `wasmOpt` | wrappers, launchers, `.desktop` files, signing, archives, images |
+| Sees | the flat link output: `app`, `app.exe`, `libfoo.so` | the installed layout: `bin/app`, `lib/libfoo.so`, `pkg/` after `wasmBindgen` |
+| Use for | changing the binary: `packDwo`, `splitDebug`, `strip`, `patchelfRpath`, `wasmBindgen`, `wasmOpt` | wrappers, launchers, `.desktop` files, signing, archives, images |
 | Default | yes: a stage that names neither runs before `install` | `after = "install"`, or after a stage that is |
 
 The stage helpers expect the flat link output. Run them before `install`.

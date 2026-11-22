@@ -1098,17 +1098,17 @@ let
       wasm-web-test-chromium = wasmBrowserIn "chromium";
       wasm-web-test-firefox = wasmBrowserIn "firefox";
       wasm-web-runner-sharing = wasmRunnerSharing;
-      # The bindgen stage with the lockfile-matched CLI (0.2.130), then
+      # The wasmBindgen stage with the lockfile-matched CLI (0.2.130), then
       # wasm-opt; the JS glue loads in Node and computes the digest.
       wasm-web-bindgen =
         pkgs.runCommand "wasm-web-bindgen"
           {
             nativeBuildInputs = [ pkgs.nodejs ];
-            bindgen = product.stages.bindgen;
+            bindgen = product.stages.wasmBindgen;
           }
           ''
             ls $bindgen ${product}
-            cp -r ${product.stages.bindgen}/pkg pkg
+            cp -r ${product.stages.wasmBindgen}/pkg pkg
             chmod -R u+w pkg
             # --target web glue: instantiate from bytes in Node.
             cat > run.mjs <<'EOF'

@@ -38,7 +38,7 @@
 {
   lib,
   util,
-  wasmBindgen,
+  wasmBindgenCli,
   targetTraits,
 }:
 let
@@ -700,10 +700,10 @@ let
     wasm="''${wasms[0]}"
   '';
 
-  bindgen =
+  wasmBindgen =
     mkHelper
       {
-        name = "bindgen";
+        name = "wasmBindgen";
         description = ''
           Runs `wasm-bindgen` on the input's single `.wasm` file and
           writes its JavaScript glue and processed module to `pkg/`,
@@ -720,7 +720,7 @@ let
               `no-modules`, `module`, `experimental-nodejs-module`).
             '';
           };
-          wasmBindgen = mkOption {
+          package = mkOption {
             type = types.nullOr types.package;
             default = null;
             example = literalExpression "pkgs.wasm-bindgen-cli_0_2_100";
@@ -766,27 +766,27 @@ let
         }:
         let
           cli =
-            if cfg.wasmBindgen != null then
-              cfg.wasmBindgen
+            if cfg.package != null then
+              cfg.package
             else if product ? lockfile then
-              wasmBindgen.forLockfile {
+              wasmBindgenCli.forLockfile {
                 inherit pkgs;
                 inherit (product) lockfile;
               }
             else if product ? lockEntries then
-              wasmBindgen.forLockfile {
+              wasmBindgenCli.forLockfile {
                 inherit pkgs;
                 entries = product.lockEntries;
               }
             else
-              throw "breakbulk stage helper `bindgen` (product `${product.name}`): no wasm-bindgen CLI; the product carries no `lockfile` or `lockEntries` to match it from, so pass `bindgen { wasmBindgen = …; }`";
+              throw "breakbulk stage helper `wasmBindgen` (product `${product.name}`): no wasm-bindgen CLI; the product carries no `lockfile` or `lockEntries` to match it from, so pass `wasmBindgen { package = …; }`";
         in
-        pkgs.runCommand (stageName product "bindgen") { nativeBuildInputs = [ cli ]; } ''
+        pkgs.runCommand (stageName product "wasmBindgen") { nativeBuildInputs = [ cli ]; } ''
           set -euo pipefail
           ${copyIn input}
           work=$TMPDIR/in
           copyIn "$work"
-          ${oneWasm "bindgen"}
+          ${oneWasm "wasmBindgen"}
           # pkg/: wasm-bindgen's layout, which install keeps.
           mkdir -p "$out/pkg"
           wasm-bindgen --target ${escapeShellArg cfg.target} --out-dir "$out/pkg" \
@@ -1083,10 +1083,10 @@ let
       ${concatStringsSep "\n" (lib.concatLists (mapAttrsToList field metadata))}
     '';
 
-  componentize =
+  wasmComponentize =
     mkHelper
       {
-        name = "componentize";
+        name = "wasmComponentize";
         description = ''
           Makes a WebAssembly component from the input's single core
           module with `wasm-tools component new`. The module keeps its
@@ -1150,14 +1150,14 @@ let
                 "${cfg.adapter}"
               ];
         in
-        pkgs.runCommand (stageName product "componentize")
+        pkgs.runCommand (stageName product "wasmComponentize")
           { nativeBuildInputs = [ (toolOf cfg.wasmTools pkgs "wasm-tools") ]; }
           ''
             set -euo pipefail
             ${copyIn input}
             work=$out
             copyIn "$out"
-            ${oneWasm "componentize"}
+            ${oneWasm "wasmComponentize"}
             wasm-tools component new "$wasm" ${escapeShellArgs adapt} -o "$wasm.component"
             mv "$wasm.component" "$wasm"
           ''
@@ -1174,8 +1174,8 @@ let
           `cargoMetadata`, the default, the fields not set come from the
           package's `Cargo.toml`, as cargo-component fills them. The
           `wasmComponent` preset's last stage before `install`, after
-          `componentize`. With nothing to add it copies its input. It fails when the input has no
-          `.wasm` file.
+          `wasmComponentize`. With nothing to add it copies its input. It
+          fails when the input has no `.wasm` file.
         '';
         options = {
           metadata = metadataOption;
@@ -1293,7 +1293,7 @@ let
           suffix that executables and shared libraries share (`.wasm`)
           decides nothing. A debug side file (`.pdb`) goes next to the file
           of the same stem, else to `bin/`. Anything else stays at the top.
-          Top-level directories are copied as they are, so `bindgen`'s
+          Top-level directories are copied as they are, so `wasmBindgen`'s
           `pkg/` and a stage's `share/` are kept.
 
           The link units' debuginfo side files (`product.linkedDebug`:
@@ -2259,9 +2259,9 @@ in
     strip
     patchelfRpath
     adhocSign
-    bindgen
+    wasmBindgen
     wasmOpt
-    componentize
+    wasmComponentize
     wasmMetadata
     deterministicZip
     install

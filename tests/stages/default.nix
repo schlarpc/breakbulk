@@ -25,14 +25,14 @@
 #                       (msvc, MinGW), Cygwin and wasm inputs: root files
 #                       by kind (a wasm cdylib to lib/, a wasm bin to bin/,
 #                       a Cygwin DLL to bin/), other files by suffix,
-#                       directories (bindgen's pkg/, share/) unchanged
+#                       directories (wasmBindgen's pkg/, share/) unchanged
 #   stages-no-store-paths  noStorePaths names every store path in any
 #                       file's bytes and how to remove the check, and
 #                       passes once each is allowed
 #   stages-zip          deterministicZip: same bytes from inputs that differ
 #                       in mtimes, modes and creation order
 #   stages-wasm-web wasm32 cdylib (rust-overlay 1.99.0, wasm-bindgen
-#                       0.2.130) through bindgen -> wasmOpt -> install, then
+#                       0.2.130) through wasmBindgen -> wasmOpt -> install, then
 #                       loaded and called from node
 #   stages-linked-crate-types  the `linked` stage of a cdylib+staticlib
 #                       library: two roots over one unit output
@@ -40,7 +40,7 @@
 #                       skipped (dynamic mode) holds the no-binaries marker,
 #                       and every stage and check passes it on without
 #                       running; with a built root, stages run
-#   stages-wasm-component  a core module through wasmOpt -> componentize
+#   stages-wasm-component  a core module through wasmOpt -> wasmComponentize
 #                       -> wasmMetadata; the component imports nothing
 #   stages-build-script-path  buildScriptPath and the build-script lookups
 #                       over stand-in runs (a `links` package, two versions
@@ -112,7 +112,7 @@ let
     testPresetBrowser = {
       expr = orderOf S.defaultStages.wasmWeb;
       expected = [
-        "bindgen"
+        "wasmBindgen"
         "wasmOpt"
         "install"
       ];
@@ -121,7 +121,7 @@ let
       expr = orderOf S.defaultStages.wasmComponent;
       expected = [
         "wasmOpt"
-        "componentize"
+        "wasmComponentize"
         "wasmMetadata"
         "install"
       ];
@@ -130,12 +130,12 @@ let
       expr = S.defaultStageNames;
       expected = {
         wasmWeb = [
-          "bindgen"
+          "wasmBindgen"
           "wasmOpt"
         ];
         wasmComponent = [
           "wasmOpt"
-          "componentize"
+          "wasmComponentize"
           "wasmMetadata"
         ];
       };
@@ -220,14 +220,14 @@ let
         "install"
       ];
     };
-    # Removing bindgen drops wasmOpt's reference to it.
+    # Removing wasmBindgen drops wasmOpt's reference to it.
     testRemoveMiddle = {
       expr =
         let
           r = S.explainOrder {
             stages = S.merge [
               S.defaultStages.wasmWeb
-              { bindgen = null; }
+              { wasmBindgen = null; }
             ];
           };
         in
@@ -239,7 +239,7 @@ let
           "wasmOpt"
           "install"
         ];
-        removed = [ "bindgen" ];
+        removed = [ "wasmBindgen" ];
       };
     };
     testRemoveInstall = {
@@ -761,7 +761,7 @@ let
     };
     testHelperNames = {
       expr = lib.all (n: lib.elem n helperNames) [
-        "bindgen"
+        "wasmBindgen"
         "install"
         "noSourceReferences"
       ];
@@ -1145,7 +1145,7 @@ let
     { name = "libbar.a"; }
     { name = "notes.txt"; }
   ];
-  # A cdylib and a bin with the same suffix, placed by root kind; bindgen's
+  # A cdylib and a bin with the same suffix, placed by root kind; wasmBindgen's
   # pkg/ and an earlier stage's share/ kept as they are.
   installWasm =
     installOf' "wasm32-unknown-unknown"
@@ -1432,9 +1432,9 @@ in
         test -f $pkg/wasm_hello.js
         test -f $pkg/wasm_hello.d.ts
         wasm-tools validate --features all $pkg/wasm_hello_bg.wasm
-        before=$(stat -c %s ${wasmBrowser.stages.bindgen}/pkg/wasm_hello_bg.wasm)
+        before=$(stat -c %s ${wasmBrowser.stages.wasmBindgen}/pkg/wasm_hello_bg.wasm)
         after=$(stat -c %s $pkg/wasm_hello_bg.wasm)
-        echo "bindgen: $before bytes; wasmOpt: $after bytes"
+        echo "wasmBindgen: $before bytes; wasmOpt: $after bytes"
         test "$after" -lt "$before"
         cp $pkg/wasm_hello.js wasm_hello.mjs
         cat > run.mjs <<EOF

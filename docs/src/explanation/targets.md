@@ -234,7 +234,7 @@ yet ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
   Rust release bundles, so std, the C code and the library share one
   wasi-libc version.
 - `wasm-opt` works on core modules, so it runs before componentizing.
-- After `componentize`, the
+- After `wasmComponentize`, the
   [`wasmMetadata`](../reference/stage-helpers.md#wasmmetadata) stage adds
   metadata to the component, by default the name, description, authors,
   license, repository, homepage and version from the package's

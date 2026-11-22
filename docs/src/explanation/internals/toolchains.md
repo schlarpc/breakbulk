@@ -58,8 +58,8 @@ Presets are named for what they are for, and each picks its mechanism from the t
 | `linuxPortable { glibc; systemLibraries ? [ ]; overlays ? [ ] }` (`-gnu`) | `zig cc -target <arch>-linux-gnu.<glibc>` | the same `zig cc`, `zig c++`, `zig ar`; library inputs from a static nixpkgs cross set built with that `zig cc` | static `pkg-config` mode | the build machine's `ld.so` (zig links the FHS loader path) | `packDwo` → `splitDebug` (debugInfo); check `portableLibraries` |
 | `windows { sdk }` (`-msvc`) | `lld-link` | `clang-cl`, `llvm-lib` from the LLVM matching rustc | `-Lnative=` for CRT, `um` and `ucrt` libs; `CFLAGS_<triple>` with `-imsvc`; `BINDGEN_EXTRA_CLANG_ARGS_<triple>` with `-isystem`; `RC`, `RCFLAGS`, `LIB`; optional `+crt-static` | `wine` with a `WINEPREFIX` in `$TMPDIR` | none (the `.pdb` goes to the `debug` output) |
 | `windows` (`-gnu`, `-gnullvm`) | the toolchain's C driver with `-fuse-ld=lld`, `--no-insert-timestamp`, and an `ld.lld` shim that drops GCC's default `-pie` | `pkgsCross.mingwW64` (gcc, msvcrt) for `-gnu`; nixpkgs' `mingw-ucrt-x86_64-llvm` (clang, ucrt) for `-gnullvm` | `+crt-static` by default (only system DLLs); `-L native=` winpthreads for `-gnu` | `wine` (x86\_64, i686) | none |
-| `wasmWeb` (`wasm32-unknown-unknown`) | lld from rustc's target spec, version-matched | unwrapped clang targeting wasm32 | none by default | `wasm-bindgen-test-runner` + Node, or headless Chromium or Firefox | `bindgen` → `wasmOpt` |
-| `wasmComponent` (`wasm32-unknown-unknown`) | as `wasmWeb` | clang + `wasilibc` when C is present | `-C link-self-contained=no` + `-L` to `wasilibc` when C is present | `wasmtime` | `wasmOpt` (optional) → `componentize` → `wasmMetadata` |
+| `wasmWeb` (`wasm32-unknown-unknown`) | lld from rustc's target spec, version-matched | unwrapped clang targeting wasm32 | none by default | `wasm-bindgen-test-runner` + Node, or headless Chromium or Firefox | `wasmBindgen` → `wasmOpt` |
+| `wasmComponent` (`wasm32-unknown-unknown`) | as `wasmWeb` | clang + `wasilibc` when C is present | `-C link-self-contained=no` + `-L` to `wasilibc` when C is present | `wasmtime` | `wasmOpt` (optional) → `wasmComponentize` → `wasmMetadata` |
 | `wasmComponent` (`wasm32-wasip2`) | rustc's own `wasm-component-ld` (found on the PATH rustc gives its linker), through a wrapper adding `--wasm-ld-path` to the version-matched `wasm-ld` | unwrapped clang with `-isystem` to the headers of the wasi-sdk sysroot matching the toolchain (`lib/wasi-sdk.nix`), when `withC` | none: libc and crt1 objects come from rustc's self-contained directory | `wasmtime` | none |
 | `linux` for `riscv64gc-unknown-linux-gnu` | as `linux` (`pkgsCross.riscv64`) | as `linux` | as `linux` | `qemu-riscv64` | `packDwo` → `splitDebug` (debugInfo) |
 
@@ -89,7 +89,7 @@ The include directories are passed twice in different syntax: `-imsvc` for `clan
 
 ### wasm
 
-- **wasm-bindgen version.** The `bindgen` stage reads the `wasm-bindgen` version from the workspace's `Cargo.lock`. It picks the matching `wasm-bindgen-cli_<version>` from nixpkgs, or builds that version from crates.io with a hash from a table shipped with the library. If neither exists, evaluation fails naming the version.
+- **wasm-bindgen version.** The `wasmBindgen` stage reads the `wasm-bindgen` version from the workspace's `Cargo.lock`. It picks the matching `wasm-bindgen-cli_<version>` from nixpkgs, or builds that version from crates.io with a hash from a table shipped with the library. If neither exists, evaluation fails naming the version.
 - **Unwrapped clang.** C code uses clang from the LLVM matching rustc, never the stdenv compiler wrapper. A wrapped gcc can silently produce host objects for a wasm target.
 
 ### wasmComponent on wasip2

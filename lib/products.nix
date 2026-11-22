@@ -19,7 +19,7 @@
 #                           # its target.<triple> settings applied after it
 #     ca = breakbulk.nixFeatures.defaultCa;
 #     nixFeatures = <standalone>;  # as stages.mkProduct's
-#     lockfile = null;      # the workspace's Cargo.lock (bindgen stage)
+#     lockfile = null;      # the workspace's Cargo.lock (wasmBindgen stage)
 #     defaultChecks = true; # false: no noSourceReferences (sourcePaths = "keep")
 #   };
 #

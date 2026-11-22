@@ -56,7 +56,7 @@ attributes:
 | `sourcePaths` | stages and checks | The store paths of the workspace's source views and of every crate source. `noSourceReferences` fails when the product references one. |
 | `toolchainPaths` | stages and checks | The Rust toolchain's store paths: rustc, its sysroot, cargo and components such as rust-src. |
 | `package` | stages and checks | The package's `[package]` table from its `Cargo.toml`, as `builtins.fromTOML` reads it, with each field inherited from the workspace (`description.workspace = true`) replaced by the workspace's value. `wasmMetadata` takes its metadata defaults from it. |
-| `lockfile` | stages and checks | The workspace's `Cargo.lock`, a path. `bindgen` reads the wasm-bindgen version from it. |
+| `lockfile` | stages and checks | The workspace's `Cargo.lock`, a path. `wasmBindgen` reads the wasm-bindgen version from it. |
 | `rootFiles` | stages and checks | Each root's file name in `linked`, mapped to its kind: `bin`, `staticlib`, `cdylib` or `dylib`. `install` lays the files out by kind. |
 | `sourcesAllowedIn` | stages and checks | File name globs whose own references to sources `noSourceReferences` allows: each staticlib root's archive name in `linked`. |
 | `buildScriptFlags` | stages and checks | The `flags` outputs of the build-script runs of the product's target that its roots depend on ([below](#build-script-runs)). A list in IFD mode. In dynamic-derivation mode `{ rootInfo; }`: the roots' `breakbulk-root.json` files, which list the outputs at build time. |
@@ -69,7 +69,7 @@ attributes:
 A product made with `breakbulk.mkProduct` directly has
 `name`, `sourcePaths` and `toolchainPaths` (empty unless given),
 `linkedDebug`, `earlierDebug`, `debugSplit`, `stageOrder` and `checkName` as above,
-and the attributes of its `info` argument. `bindgen` also reads
+and the attributes of its `info` argument. `wasmBindgen` also reads
 `lockEntries` there, a lockfile's parsed entries
 (`breakbulk.lockfile.read`), when there is no `lockfile`. Without
 `info.package` the metadata helpers have no defaults. Its stages get

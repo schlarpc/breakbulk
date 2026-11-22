@@ -418,8 +418,8 @@ in
       example = "wasmWeb";
       description = ''
         Which default stage chain this target's products get
-        (`breakbulk.stages.defaultStageNames`: `wasmWeb` bindgen and
-        wasmOpt; `wasmComponent` wasmOpt, componentize and wasmMetadata). Presets set
+        (`breakbulk.stages.defaultStageNames`: `wasmWeb` wasmBindgen and
+        wasmOpt; `wasmComponent` wasmOpt, wasmComponentize and wasmMetadata). Presets set
         it; `null`: none. Debug info is handled by `debugInfo`, not by
         the chain.
       '';
