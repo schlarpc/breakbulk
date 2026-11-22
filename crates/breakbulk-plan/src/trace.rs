@@ -92,7 +92,7 @@ pub struct Options {
     pub forbidden: Vec<String>,
     /// The toolchain spec file (`--spec`, see [`crate::spec`]).
     pub spec: Option<String>,
-    /// `--trim-paths auto|on|off` (`cargoTrimPaths`): whether
+    /// `--trim-paths auto|on|off` (from `sourcePaths`): whether
     /// the planner may turn Cargo's `trim-paths` on ([`crate::trim_paths`]).
     pub trim_paths: crate::trim_paths::Mode,
     /// Set by the planner when it turned Cargo's `trim-paths` on

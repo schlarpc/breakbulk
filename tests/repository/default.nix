@@ -2230,9 +2230,9 @@ in
   # rule, without a plan: with the workspace root's Cargo.toml broken, the
   # shell still evaluates and sets it (cargo-env.json carries a warning
   # naming the file); a project that declares trim-paths in any profile
-  # gets no variable; `cargoTrimPaths = false` and `sourcePaths = "keep"`
-  # set none either, and `cargoTrimPaths = true` sets it over the
-  # project's own setting.
+  # gets no variable; `sourcePaths = "remap"` and `"keep"` set none
+  # either, and `sourcePaths = "cargo"` sets it over the project's own
+  # setting.
   devshell-trim-paths-files =
     let
       nightly = pkgs.rust-bin.nightly.latest.minimal;
@@ -2266,8 +2266,8 @@ in
         broken = shellVar broken;
         brokenWarned = lib.any (lib.hasInfix "is not valid TOML") (cargoEnvOf broken).warnings;
         declares = shellVar (ws declares { });
-        forced = shellVar (ws declares { cargoTrimPaths = true; });
-        off = shellVar (ws (fixtures + "/stamps") { cargoTrimPaths = false; });
+        forced = shellVar (ws declares { sourcePaths = "cargo"; });
+        off = shellVar (ws (fixtures + "/stamps") { sourcePaths = "remap"; });
         keep = shellVar (ws (fixtures + "/stamps") { sourcePaths = "keep"; });
       };
       want = {

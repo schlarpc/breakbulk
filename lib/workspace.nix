@@ -145,12 +145,9 @@ pkgs:
   # `--remap-path-scope` for non-test target compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
-  # Whether the planner turns Cargo's trim-paths on (null:
-  # unless the project declares it; true; false), and whether source paths
-  # are hidden at all ("hide") or left as they are ("keep": no trim-paths
-  # from breakbulk and no remaps of its own).
-  cargoTrimPaths ? null,
-  sourcePaths ? "hide",
+  # How source paths are hidden (`workspaces.<ws>.sourcePaths`): "auto",
+  # "cargo", "remap" or "keep".
+  sourcePaths ? "auto",
   # The target's traits (lib/target-traits.nix `resolve`); mkRepository
   # passes them with the user's `targets.<triple>.traits` merged in.
   traits ? targetTraitsLib.resolve { triple = target; },
@@ -448,14 +445,13 @@ let
 
   # breakbulk-plan's `--trim-paths`.
   trimPaths =
-    if sourcePaths == "keep" then
-      "off"
-    else if cargoTrimPaths == null then
-      "auto"
-    else if cargoTrimPaths then
-      "on"
-    else
-      "off";
+    {
+      auto = "auto";
+      cargo = "on";
+      remap = "off";
+      keep = "off";
+    }
+    .${sourcePaths};
 
   # Written here rather than by `pkgs.formats.toml`, a derivation that
   # planning would wait for. Without context, as the spec's file:

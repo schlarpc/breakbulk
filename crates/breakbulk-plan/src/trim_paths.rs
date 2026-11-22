@@ -16,17 +16,17 @@ use std::path::Path;
 use crate::Error;
 use crate::spec::ProjectConfig;
 
-/// `cargoTrimPaths`: `--trim-paths auto|on|off`.
+/// `--trim-paths auto|on|off`, from `sourcePaths`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
-    /// `null`: on when Cargo has the setting (1.101 and later) unless the
+    /// `"auto"`: on when Cargo has the setting (1.101 and later) unless the
     /// project declares `trim-paths` anywhere.
     #[default]
     Auto,
-    /// `true`: always on (the project's own setting is replaced); a Cargo
+    /// `"cargo"`: always on (the project's own setting is replaced); a Cargo
     /// without the setting is an error.
     On,
-    /// `false`: never turned on by breakbulk (also `sourcePaths = "keep"`).
+    /// `"remap"` and `"keep"`: never turned on by breakbulk.
     /// A project that sets it itself still gets Cargo's remaps.
     Off,
 }
@@ -120,7 +120,7 @@ pub fn decide(mode: Mode, has: bool, declared: &Declared) -> Result<bool, Error>
     match mode {
         Mode::Off => Ok(false),
         Mode::On if !has => Err(Error(
-            "cargoTrimPaths = true needs Cargo's trim-paths (stable from Cargo 1.101), which \
+            "sourcePaths = \"cargo\" needs Cargo's trim-paths (stable from Cargo 1.101), which \
              this toolchain does not have (its `trimPaths` capability is false)"
                 .into(),
         )),

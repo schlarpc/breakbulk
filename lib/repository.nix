@@ -1348,7 +1348,7 @@ let
         name = "${wsName}-${triple}-${vName}";
         inherit delivery;
         shippedRemapScope = shippedRemapScopeOf wsName triple v;
-        inherit (v) cargoTrimPaths sourcePaths;
+        inherit (v) sourcePaths;
         traits = traitsOf wsName triple;
         packages = memberConfigs wsName triple vName;
         inherit (cfg) ca;
@@ -1423,7 +1423,7 @@ let
       // {
         inherit pkgs inst;
         # `sourcePaths = "keep"`: no default noSourceReferences check.
-        defaultChecks = v.sourcePaths == "hide";
+        defaultChecks = v.sourcePaths != "keep";
         select = sel;
         targetChecks = targetField wsName triple "checks" { };
         packageConfig = productConfig wsName triple vName;

@@ -192,16 +192,17 @@ same remaps, and also keeps absolute paths out of the identity of path
 crates outside the workspace root. Cargo leaves it off by default. On
 Cargo 1.101 and later breakbulk turns it on, uses Cargo's remaps instead
 of its own, and keeps the per-kind scopes above, unless the project sets
-`trim-paths` itself:
+`trim-paths` itself: any `trim-paths` under `[profile]` in the workspace
+root's `Cargo.toml`, the project's Cargo config or the variant's
+[`cargoConfig`](../reference/options/workspaces.md#workspacesnamevariantsnamecargoconfig)
+leaves the choice to the project. That is
+[`sourcePaths = "auto"`](../reference/options/workspaces.md#workspacesnamesourcepaths),
+the default; the other values change it:
 
-- any `trim-paths` under `[profile]` in the workspace root's `Cargo.toml`,
-  the project's Cargo config or the variant's
-  [`cargoConfig`](../reference/options/workspaces.md#workspacesnamevariantsnamecargoconfig)
-  leaves the choice to the project;
-- [`workspaces.<ws>.cargoTrimPaths`](../reference/options/workspaces.md#workspacesnamecargotrimpaths)
-  forces it on or off;
-- [`sourcePaths = "keep"`](../reference/options/workspaces.md#workspacesnamesourcepaths)
-  turns all path hiding off.
+- `"cargo"` turns Cargo's trim-paths on even over the project's own
+  setting;
+- `"remap"` never turns it on and hides paths with breakbulk's own remaps;
+- `"keep"` turns all path hiding off.
 
 Under Cargo's trim-paths, breakbulk's C prefix maps use Cargo's names, so
 they agree with cc-rs, which reads the same remaps from

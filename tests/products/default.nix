@@ -235,7 +235,7 @@
 #                    info name only Cargo's form (`./cfile/c/where.c`), never
 #                    the source view; breakbulk's C prefix maps for the run
 #                    use Cargo's names (the run's OUT_DIR as
-#                    `/cargo/build-dir/…`). `cargoTrimPaths = false`: no
+#                    `/cargo/build-dir/…`). `sourcePaths = "remap"`: no
 #                    trim-paths, breakbulk's own names; `sourcePaths =
 #                    "keep"`: no remaps at all and no noSourceReferences
 #                    check; trim-paths set for one package only (a profile
@@ -3274,7 +3274,7 @@ in
   trim-paths-cc =
     let
       repo = trimCcRepo { };
-      off = trimCcRepo { cargoTrimPaths = false; };
+      off = trimCcRepo { sourcePaths = "remap"; };
       keep = trimCcRepo { sourcePaths = "keep"; };
       planOf =
         r:
@@ -3324,7 +3324,7 @@ in
       "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
     assert lib.assertMsg (
       !(planOf off).trimPaths && lib.hasPrefix "/breakbulk/build/" (offRun.outDirRemap or "")
-    ) "trim-paths-cc: cargoTrimPaths = false: ${builtins.toJSON offRun.outDirRemap}";
+    ) "trim-paths-cc: sourcePaths = remap: ${builtins.toJSON offRun.outDirRemap}";
     assert lib.assertMsg (
       !(planOf keep).trimPaths && keepRemaps == [ ]
     ) "trim-paths-cc: sourcePaths = keep added remaps";

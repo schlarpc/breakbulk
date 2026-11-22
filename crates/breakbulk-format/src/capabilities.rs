@@ -20,7 +20,7 @@ pub struct Capabilities {
     pub remap_path_scope: bool,
     /// Cargo has the `trim-paths` profile setting (stable from Cargo 1.101,
     /// nightly 1.101 included). The planner then turns it on unless the
-    /// project declares it or `cargoTrimPaths` says otherwise ("trim-paths").
+    /// project declares it or `sourcePaths` says otherwise ("trim-paths").
     pub trim_paths: bool,
 }
 
