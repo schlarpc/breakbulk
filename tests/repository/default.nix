@@ -2338,9 +2338,9 @@ in
       got = {
         target = lib.hasSuffix "/my-board.json" plan.target;
         planName = i.plans.test.name;
-        binExe = lib.concatMap (
-          u: lib.optional (u ? env.CARGO_BIN_EXE_tool) u.env.CARGO_BIN_EXE_tool
-        ) (lib.attrValues plan.units);
+        binExe = lib.concatMap (u: lib.optional (u ? env.CARGO_BIN_EXE_tool) u.env.CARGO_BIN_EXE_tool) (
+          lib.attrValues plan.units
+        );
         shellTarget = (w.devShell.CARGO_BUILD_TARGET or w.devShell.env.CARGO_BUILD_TARGET) == plan.target;
       };
       want = {

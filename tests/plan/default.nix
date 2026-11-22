@@ -1222,16 +1222,16 @@ in
           lib.filterAttrs (_: u: !(u.test or false) && lib.elem "tool.elf" (u.outputs.bin or [ ])) p.units
         );
         # A spec file whose stem is not the target's name.
-        misnamed = builtins.tryEval
-          (breakbulk.targetTraits.rustcTargetArg {
-            inherit pkgs;
-            name = "other-board";
-            rustcTarget = ./my-board.json;
-          }).arg;
+        misnamed =
+          builtins.tryEval
+            (breakbulk.targetTraits.rustcTargetArg {
+              inherit pkgs;
+              name = "other-board";
+              rustcTarget = ./my-board.json;
+            }).arg;
       in
-      assert lib.assertMsg (
-        lib.hasSuffix "-my-board-target-spec/my-board.json" p.target
-      ) "custom-target-test-plan: the plan's target is ${p.target}";
+      assert lib.assertMsg (lib.hasSuffix "-my-board-target-spec/my-board.json" p.target)
+        "custom-target-test-plan: the plan's target is ${p.target}";
       assert lib.assertMsg (!misnamed.success) "custom-target-test-plan: a misnamed spec was accepted";
       assert lib.assertMsg (
         lib.length bins == 1
@@ -1247,9 +1247,8 @@ in
           ]
         ]
       ) "custom-target-test-plan: CARGO_BIN_EXE_tool is ${builtins.toJSON tool}";
-      assert lib.assertMsg (
-        envOf "CARGO_BIN_EXE_extra" == [ "/breakbulk/not-built/extra" ]
-      ) "custom-target-test-plan: CARGO_BIN_EXE_extra is ${builtins.toJSON (envOf "CARGO_BIN_EXE_extra")}";
+      assert lib.assertMsg (envOf "CARGO_BIN_EXE_extra" == [ "/breakbulk/not-built/extra" ])
+        "custom-target-test-plan: CARGO_BIN_EXE_extra is ${builtins.toJSON (envOf "CARGO_BIN_EXE_extra")}";
       pkgs.runCommand "custom-target-test-plan-check" { } "touch $out";
     walking-skeleton-nightly =
       pkgs.runCommand "walking-skeleton-nightly-check"
