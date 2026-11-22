@@ -9,7 +9,9 @@
 #                   to util's README changes the bytes of app's test binary
 #                   (util's debug info names its source view; the control),
 #                   but not those of the stripped copy the test run
-#                   consumes; the run passes.
+#                   consumes; the run passes. The run's derivation
+#                   closure lacks binutils-unwrapped-all-targets: the
+#                   native target strips with its stdenv's binutils.
 #   run-files       `packages.app.test.runFiles = [ "data" ]`:
 #                   the `data` test runs in a view holding only data/, with
 #                   CARGO_MANIFEST_DIR pointing at it, and passes; the
@@ -125,8 +127,19 @@ in
         strippedBefore = before.passthru.binary;
         strippedAfter = after.passthru.binary;
         run = before;
+        # The run's derivation and every derivation and source it needs,
+        # without building them.
+        exportReferencesGraph = [
+          "run-drvs"
+          (builtins.unsafeDiscardOutputDependency before.drvPath)
+        ];
+        allTargets = builtins.unsafeDiscardStringContext pkgs.binutils-unwrapped-all-targets.drvPath;
       }
       ''
+        if grep -qxF "$allTargets" run-drvs; then
+          echo "the run needs $allTargets; the native target's strip should not" >&2
+          exit 1
+        fi
         # The control: util's debug info names its source view.
         if cmp -s $unstrippedBefore/* $unstrippedAfter/*; then
           echo "the README edit did not change app's test binary: the check is vacuous" >&2

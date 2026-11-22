@@ -157,6 +157,12 @@ pkgs:
   # How test processes find shared libraries ({ var; sep; } or null;
   # lib/test-runs.nix dylibPathOf): mkRepository passes the runner's.
   testDylibPath ? testRuns.dylibPathOf { inherit traits runner; },
+  # What strips test binaries for runs (path or null; lib/test-runs.nix
+  # objcopyOf): mkRepository passes the one of the target's package set.
+  testObjcopy ? testRuns.objcopyOf {
+    inherit pkgs traits;
+    triple = target;
+  },
   # The test settings of the build machine's triple, { triple; runner;
   # testSystem; dylibPath; }, which host units' tests (a proc macro's) run
   # with (lib/test-runs.nix testPlatforms): mkRepository passes the native
@@ -927,6 +933,7 @@ let
       traits
       ;
     dylibPath = testDylibPath;
+    objcopy = testObjcopy;
     host = hostTest;
     packages = runPackages;
     doctestPackages = viewPackages;
@@ -1067,6 +1074,7 @@ in
           traits
           ;
         dylibPath = testDylibPath;
+        objcopy = testObjcopy;
         host = hostTest;
         name = "${name}-bench";
         packages =

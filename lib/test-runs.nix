@@ -16,6 +16,8 @@
 #                         # the variable the test process finds shared
 #                         # libraries through (`dylibPathOf`)
 #     testPkgs = <pkgs for testSystem>;
+#     objcopy = <the target's>;  # what strips test binaries for runs, or
+#                         # null (`objcopyOf`)
 #     host = <defaultHost>;  # the same settings for the build machine's
 #                         # triple, which a host unit's test (a proc macro's
 #                         # unit tests) runs with (`testPlatforms`)
@@ -120,6 +122,19 @@ let
 
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
 
+  # The objcopy that strips a platform's test binaries for their runs
+  # (lib/presets/objcopy.nix), or null for a platform whose binaries the
+  # strip leaves as they are. `packageSet` is the platform's (mkRepository
+  # passes `targets.<t>.packageSet`).
+  objcopyOf =
+    {
+      pkgs,
+      triple,
+      traits ? targetTraits.resolve { inherit triple; },
+      packageSet ? if triple == targetTraits.nativeTriple pkgs then pkgs else null,
+    }:
+    (import ./presets/objcopy.nix).chooseObjcopy { inherit pkgs traits packageSet; };
+
   # How a test process of a target finds shared libraries: `{ var; sep; }`,
   # or null when it has no such variable (wasm, bare metal). The runner's
   # own, when it declares one (`breakbulkDylibPath`: wine reads WINEPATH,
@@ -185,6 +200,7 @@ rec {
     dylibJqWith
     dylibPathOf
     exportDylib
+    objcopyOf
     ;
 
   # What test runs read from the Rust toolchain: the standard library's
@@ -402,12 +418,18 @@ rec {
   # consumes, so the source paths that the debug info of workspace
   # libraries holds do not change the run's input. The GNU build ID goes
   # too: the linker computes it over the whole file, debug info included.
-  # A file that is not ELF is left as it is.
-  stripScript = ''
+  # A file that is not ELF is left as it is. `objcopy` is the platform's
+  # (`objcopyOf`); null on a platform whose binaries are not ELF.
+  stripScript = objcopy: ''
     stripForRun() {
       chmod u+w "$1"
       if [ "$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then
-        objcopy --strip-debug --remove-section=.note.gnu.build-id "$1"
+        ${
+          if objcopy == null then
+            ''echo "stripForRun: $1 is ELF, but its platform's traits name another object format; left unchanged"''
+          else
+            ''${objcopy} --strip-debug --remove-section=.note.gnu.build-id "$1"''
+        }
       else
         echo "stripForRun: $1 is not ELF; left unchanged"
       fi
@@ -416,35 +438,30 @@ rec {
 
   # The copy of a test binary a run executes, from `src` (a shell glob
   # matching the one file): content-addressed when `caAttrs` says so,
-  # debug-stripped with `strip`. `prelude` runs first; `attrs` are extra
-  # derivation attributes.
+  # debug-stripped with `strip` by `objcopy` (its platform's, `objcopyOf`).
+  # `prelude` runs first; `attrs` are extra derivation attributes.
   binaryCopy =
     {
       pkgs,
       name,
       caAttrs,
       strip,
+      objcopy,
       src,
       prelude ? "",
       attrs ? { },
     }:
-    pkgs.runCommand "${name}-bin${lib.optionalString strip "-stripped"}"
-      (
-        attrs
-        // caAttrs
-        // lib.optionalAttrs strip { nativeBuildInputs = [ pkgs.binutils-unwrapped-all-targets ]; }
-      )
-      ''
-        ${prelude}
-        files=(${src})
-        [ ''${#files[@]} -eq 1 ] || { echo "expected one file in ${src}" >&2; exit 1; }
-        mkdir -p $out
-        cp "''${files[0]}" $out/
-        ${lib.optionalString strip ''
-          ${stripScript}
-          stripForRun "$out/''${files[0]##*/}"
-        ''}
-      '';
+    pkgs.runCommand "${name}-bin${lib.optionalString strip "-stripped"}" (attrs // caAttrs) ''
+      ${prelude}
+      files=(${src})
+      [ ''${#files[@]} -eq 1 ] || { echo "expected one file in ${src}" >&2; exit 1; }
+      mkdir -p $out
+      cp "''${files[0]}" $out/
+      ${lib.optionalString strip ''
+        ${stripScript objcopy}
+        stripForRun "$out/''${files[0]##*/}"
+      ''}
+    '';
 
   # A spec whose working directory and runtime CARGO_MANIFEST_DIR are
   # `dir`, the package directory of the package's "run" view
@@ -951,8 +968,8 @@ rec {
 
   # How the test processes of each platform run, `{ host; target; }`, from
   # each platform's settings (`{ triple; runner; testSystem; dylibPath; }`,
-  # `testPkgs` optional). Cargo runs a test unit with its compile kind's
-  # runner (`target_runner(unit.kind)`), library directories and sysroot
+  # `testPkgs` and `objcopy` optional). Cargo runs a test unit with its
+  # compile kind's runner (`target_runner(unit.kind)`), library directories and sysroot
   # library directory (`fill_env`, `sysroot_target_libdir[&kind]`); a host
   # unit (a proc macro's unit tests) is built for the build machine, so it
   # gets the host's, never `testSystem` or the target's runner. Each entry:
@@ -961,6 +978,8 @@ rec {
   #   runner      a list (runnersByPlatform)
   #   testPkgs    the package set its runs build with (runners.testPkgsFor)
   #   dylibPath   { var; sep; } or null (dylibPathOf)
+  #   objcopy     what strips its test binaries for runs, or null
+  #               (objcopyOf; default: of the triple's built-in traits)
   #   libDir      the sysroot's library directory for the triple, in a
   #               copy holding its shared libraries only (testLibs), or null
   testPlatforms =
@@ -983,6 +1002,11 @@ rec {
         in
         {
           inherit (s) triple dylibPath;
+          objcopy =
+            s.objcopy or (objcopyOf {
+              inherit pkgs;
+              inherit (s) triple;
+            });
           runner = runnerLists.${name};
           testPkgs =
             s.testPkgs or (runners.testPkgsFor {
@@ -1058,6 +1082,10 @@ rec {
       traits ? targetTraits.resolve { triple = target; },
       dylibPath ? dylibPathOf { inherit traits runner; },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
+      objcopy ? objcopyOf {
+        inherit pkgs traits;
+        triple = target;
+      },
       host ? defaultHost {
         inherit
           pkgs
@@ -1094,6 +1122,7 @@ rec {
             testSystem
             dylibPath
             testPkgs
+            objcopy
             ;
         };
       };
@@ -1113,13 +1142,14 @@ rec {
       # The binary a run executes: a content-addressed copy when `ca`, a
       # debug-stripped one with `test.stripForRun`, else the unit's output.
       binaryOf =
-        s: cfg:
+        r: s: cfg:
         if !useCa && !stripsForRun useCa cfg then
           s.unitOut
         else
           binaryCopy {
             inherit pkgs caAttrs;
             inherit (s) name;
+            inherit (platformOf r) objcopy;
             strip = stripsForRun useCa cfg;
             src = "${s.unitOut}/*";
           };
@@ -1229,7 +1259,7 @@ rec {
             else
               narrowed;
           args = testArgs cfg s.binary;
-          bin = binaryOf s cfg;
+          bin = binaryOf r s cfg;
           inherit (platformOf r) testPkgs;
         in
         if cfg.runner == "nextest" then

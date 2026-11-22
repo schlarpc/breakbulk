@@ -949,9 +949,17 @@ let
           }
         else
           t.runner;
+      # What strips its test binaries for runs: the binutils of its
+      # package set's C toolchain, for an ELF target.
+      testObjcopy = breakbulkLib.testRuns.objcopyOf {
+        inherit pkgs triple;
+        traits = traitsOf wsName triple;
+        packageSet = packageSetOf wsName triple;
+      };
     in
     if t == null then
       {
+        inherit testObjcopy;
         mkWorkspace = { };
         canRunTests = true;
         runner = null;
@@ -960,6 +968,7 @@ let
       }
     else
       {
+        inherit testObjcopy;
         mkWorkspace = {
           spec = {
             inherit (t) rustflags;
@@ -1367,7 +1376,12 @@ let
         clippyOption = "workspaces.${wsName}.toolchain.clippy";
         bench = v.benches;
         docsNoDeps = ws.docs.noDeps;
-        inherit (s) runner testSystem testDylibPath;
+        inherit (s)
+          runner
+          testSystem
+          testDylibPath
+          testObjcopy
+          ;
         # Host units' tests run with the native target's settings, as Cargo
         # gives them `target.<host>.runner`.
         hostTest =
@@ -1378,6 +1392,7 @@ let
             triple = nativeTriple;
             inherit (h) runner testSystem;
             dylibPath = h.testDylibPath;
+            objcopy = h.testObjcopy;
           };
       }
       // s.mkWorkspace

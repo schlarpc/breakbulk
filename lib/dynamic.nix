@@ -553,6 +553,12 @@ let
         inherit runner;
       },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
+      # As testRuns.mkTestRuns's: what strips test binaries for runs.
+      objcopy ? testRuns.objcopyOf {
+        inherit pkgs;
+        triple = target;
+        traits = if traits != null then traits else breakbulkTraits.resolve { triple = target; };
+      },
       # As testRuns.mkTestRuns's: the host triple's settings.
       host ? testRuns.defaultHost {
         inherit
@@ -591,6 +597,7 @@ let
             testSystem
             dylibPath
             testPkgs
+            objcopy
             ;
         };
       };
@@ -611,6 +618,7 @@ let
           inherit pkgs caAttrs;
           name = n;
           strip = testRuns.stripsForRun useCa cfg;
+          inherit (platformOf r) objcopy;
           src = "\"$wrapper\"/root/*";
           attrs = { inherit (r.breakbulkRoot) wrapper; };
           prelude = ''
