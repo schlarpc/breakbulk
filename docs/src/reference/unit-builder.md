@@ -444,7 +444,7 @@ Three things follow from it (`products.debugInfoOf`):
 | `debugInfo` | Stages first after `linked` | Remap scope of target units | `NIX_SET_BUILD_ID` on target units |
 | --- | --- | --- | --- |
 | `"split"` | `packDwo`, `splitDebug` | `macro,diagnostics` (table above) | yes (the GNU build ID `splitDebug` needs) |
-| `"strip"` | `strip` (`strip --strip-debug`; drops `.dwo` files) | all | no |
+| `"strip"` | `strip` (`strip --strip-debug`; drops `.dwo` files and packed `.dwp` files) | all | no |
 | `"keep"` | `packDwo` on an ELF target, else none | all | no |
 
 - `"split"` and `"strip"` need an ELF target, or evaluation fails.
@@ -462,6 +462,12 @@ Three things follow from it (`products.debugInfoOf`):
 - Overriding the inserted stages' attributes (their `run`, `after`) is
   allowed, and a stage of another name (an extra
   `strip { all = true; }` after `splitDebug`) is an ordinary stage.
+- A stage with no `after` runs after the inserted stages, unless it is
+  ordered before one of them. So one stage set orders the same way on
+  every target, whichever stages its `debugInfo` inserts.
+- `strip` has a `debug` output whenever `linked` has one (in
+  dynamic-derivation mode, always). With nothing left to keep, it is
+  empty.
 
 ### Cargo's trim-paths and `sourcePaths`
 

@@ -32,7 +32,9 @@
 #
 # Stage modules are `{ after ? null; before ? null; run; }`:
 #   - `after`/`before` name a stage, a list of stages, or null. A stage with
-#     neither runs after `linked`.
+#     neither runs after `linked`. A stage with no `after` also runs after
+#     the `leading` stages (mkProducts: those the target's `debugInfo`
+#     inserts) unless it is ordered before one of them.
 #   - `run = { input, product, target, pkgs }: <derivation>`; `input` is the
 #     previous stage's output, `product` is `{ name; sourcePaths; toolchainPaths; } // info`,
 #     plus `linkedDebug` (the `debug` output of `linked`, when it has one:
@@ -257,6 +259,7 @@ let
     {
       name ? "<product>",
       stages,
+      leading ? [ ],
     }:
     let
       withInstall = {
@@ -301,7 +304,20 @@ let
       afterInstall = if isLive "install" then reachBy explicit "install" else [ ];
       # x must come before y: by constraint, or because every other stage
       # runs before `install` by default.
-      edge = x: y: explicit x y || (y == "install" && x != "install" && !(elem x afterInstall));
+      baseEdge = x: y: explicit x y || (y == "install" && x != "install" && !(elem x afterInstall));
+      # A `leading` stage comes before a stage with no `after` that is not
+      # already ordered before it (a leading stage moved after `install`
+      # stays after a stage that runs before `install`): otherwise such a
+      # stage would be ambiguous against the stages `debugInfo` inserts,
+      # which differ by target.
+      leadingLive = filter isLive leading;
+      leadsTo =
+        x: y:
+        elem x leadingLive
+        && !(elem y leadingLive)
+        && cons.${y}.rawAfter == [ ]
+        && !(elem x (reachBy baseEdge y));
+      edge = x: y: baseEdge x y || leadsTo x y;
 
       fmtList = l: if l == [ ] then "-" else concatStringsSep ", " l;
       width = lib.foldl' (w: n: lib.max w (lib.stringLength n)) 6 names;
@@ -315,7 +331,7 @@ let
           in
           "  ${pad n}  after: ${fmtList c.rawAfter}; before: ${fmtList c.rawBefore}${
               lib.optionalString (n == "install") "; others run before it unless ordered after it"
-            }"
+            }${lib.optionalString (elem n leadingLive) "; stages with no `after` run after it unless ordered before it"}"
         ) names
         ++ lib.optional (removed != [ ]) "  removed: ${concatStringsSep ", " removed}"
       );
@@ -370,9 +386,11 @@ let
       ca ? featureGates.defaultCa,
       nixFeatures ? featureGates.standalone { inherit ca; },
       defaultChecks ? true,
+      # The stages a stage with no `after` runs after (explainOrder).
+      leading ? [ ],
     }:
     let
-      ordered = order { inherit name stages; };
+      ordered = order { inherit name stages leading; };
       product = {
         inherit name sourcePaths toolchainPaths;
       }

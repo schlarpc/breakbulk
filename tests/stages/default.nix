@@ -413,6 +413,86 @@ let
         has "the order is ambiguous: nothing orders `a` and `b`" e;
       expected = true;
     };
+    # A stage with no `after` runs after the stages `debugInfo` inserted
+    # (`leading`); one ordered before them, or naming `after`, is not moved.
+    testLeading =
+      let
+        orderLeading =
+          stages:
+          (S.explainOrder {
+            name = "t";
+            leading = [
+              "packDwo"
+              "strip"
+            ];
+            inherit stages;
+          }).order;
+      in
+      {
+        expr = {
+          plain = orderLeading (S.chain [ "packDwo" ] // { mine.run = dummy; });
+          before = orderLeading (
+            S.chain [ "packDwo" ]
+            // {
+              mine = {
+                before = "packDwo";
+                run = dummy;
+              };
+            }
+          );
+          removed = orderLeading (
+            S.merge [
+              (S.chain [ "packDwo" ])
+              {
+                packDwo = null;
+                mine.run = dummy;
+              }
+            ]
+          );
+          # A leading stage moved after `install` stays there.
+          afterInstall = orderLeading {
+            packDwo = {
+              after = "install";
+              run = dummy;
+            };
+            mine.run = dummy;
+          };
+          explicitLinked = has "nothing orders" (
+            (S.explainOrder {
+              name = "t";
+              leading = [ "packDwo" ];
+              stages = S.chain [ "packDwo" ] // {
+                mine = {
+                  after = "linked";
+                  run = dummy;
+                };
+              };
+            }).error or ""
+          );
+        };
+        expected = {
+          plain = [
+            "packDwo"
+            "mine"
+            "install"
+          ];
+          before = [
+            "mine"
+            "packDwo"
+            "install"
+          ];
+          removed = [
+            "mine"
+            "install"
+          ];
+          afterInstall = [
+            "mine"
+            "install"
+            "packDwo"
+          ];
+          explicitLinked = true;
+        };
+      };
     testLinkedReserved = {
       expr = has "`linked` is the fixed first stage" (errorOf {
         linked.run = dummy;

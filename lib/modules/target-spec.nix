@@ -396,7 +396,9 @@ in
         output, unless it is ordered after `install` (`after =
         "install"`, or after such a stage); then it sees the installed
         layout (`bin/`, `lib/`, `pkg/`), the place for wrappers and
-        packaging. Package settings (`packages.<name>.stages`) merge
+        packaging. A stage with no `after` runs after the stages
+        `debugInfo` inserts, unless it is ordered before one of them.
+        Package settings (`packages.<name>.stages`) merge
         over these. Neither may remove the `splitDebug` or `strip` stage
         `debugInfo` inserts or add `splitDebug` where it inserts none; set
         `debugInfo` instead. `packDwo` is an ordinary stage: `null`
@@ -447,7 +449,9 @@ in
           file already and goes to the `debug` output.
         - `"strip"`: the `strip` stage (`strip --strip-debug`), first
           after `linked`; every source path is remapped, and no `.dwo`
-          file ships. ELF and Mach-O.
+          file or packed `.dwp` ships. ELF and Mach-O. The stage still
+          has a `debug` output whenever `linked` has one, which may be
+          empty.
 
         `packDwo` packs the `.dwo` files of `split-debuginfo =
         "unpacked"` into `<file>.dwp` in the `debug` output.

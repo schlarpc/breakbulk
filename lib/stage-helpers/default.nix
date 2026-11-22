@@ -521,9 +521,12 @@ let
           `--strip-all` on an executable and `-x` (local symbols) on a
           dylib or bundle, whose exported symbols other images bind to, as
           rustc's own `-C strip=symbols` does. It also drops the `.dwo` files from
-          the debug files so far (`split-debuginfo = "unpacked"`): the
-          skeleton units that name them are gone. When there are debug
-          files, what is left of them is the stage's `debug` output.
+          the debug files so far (`split-debuginfo = "unpacked"`), and the
+          `<file>.dwp` of each ELF file it strips (`split-debuginfo =
+          "packed"`, or `packDwo`'s): the skeleton units that name them are
+          gone. A `.dwp` that `splitDebug` moved next to a `.debug` file
+          stays, since that file keeps its skeleton units. When there are
+          debug files, what is left of them is the stage's `debug` output.
           `targets.<triple>.debugInfo = "strip"` inserts this stage.
         '';
         options = {
@@ -570,6 +573,10 @@ let
             ${isMachoFn}
             ${placeDebugFn product target pkgs}
             copyIn "$out"
+            ${lib.optionalString debug ''
+              mkdir -p "$debug"
+              placeDebug "$debug"
+            ''}
             find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
               case "$(machoType "$f")" in
                 "") ;;
@@ -579,10 +586,18 @@ let
               esac
               isElf "$f" || continue
               strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
+              ${lib.optionalString debug ''
+                # splitDebug's `.dwp` is a symlink here, to the file next to
+                # the `.debug` file, whose skeleton units still name it.
+                b=''${f##*/}
+                for d in bin lib; do
+                  if [ -f "$debug/$d/$b.dwp" ] && [ ! -L "$debug/$d/$b.dwp" ]; then
+                    rm "$debug/$d/$b.dwp"
+                  fi
+                done
+              ''}
             done
             ${lib.optionalString debug ''
-              mkdir -p "$debug"
-              placeDebug "$debug"
               find "$debug" -name '*.dwo' -type f -delete
               find "$debug" -mindepth 1 -type d -empty -delete
             ''}

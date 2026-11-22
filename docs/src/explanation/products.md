@@ -227,9 +227,11 @@ output, and ships no loose `.dwo` files:
 | `lib/libfoo.so` | `lib/libfoo.so.dwp` | the same |
 | `lib/libfoo.a` | `lib/libfoo.a.dwp` | it does not: see below |
 
+To ship the loose files anyway, remove the stage:
+`packages.<name>.stages.packDwo = null`.
+
 With `debugInfo = "strip"`, the skeleton units are stripped, so nothing
-names the `.dwo` files any more and none ship. To ship the loose files
-anyway, remove the stage: `packages.<name>.stages.packDwo = null`.
+names the `.dwo` files or a packed `<file>.dwp` any more, and none ship.
 
 **A staticlib's `.dwp`.** The archive keeps its skeleton units, because
 the program that links it needs them. gdb looks for a DWARF package only

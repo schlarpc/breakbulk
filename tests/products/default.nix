@@ -8,7 +8,8 @@
 #                    its stages (packDwo before splitDebug, packDwo alone,
 #                    strip) and sets the units' remap scope; removing
 #                    splitDebug or strip, or adding `splitDebug` against
-#                    it, at target or package level, fails evaluation
+#                    it, at target or package level, fails evaluation; a
+#                    stage with no `after` runs after the inserted ones
 #   post-link        stage order from target and package stages; a stage
 #                    removed with mkForce null; a check on `linked` sees
 #                    unstripped bytes; checks in repo.checks
@@ -45,7 +46,8 @@
 #                    bin/app.dwp and no `.dwo`; gdb reads the dependency's
 #                    arguments with the `.dwp` beside the binary, and not
 #                    without it
-#   debug-info-strip `debugInfo = "strip"` and "unpacked": no `.dwo` ships
+#   debug-info-strip `debugInfo = "strip"` and "unpacked": no `.dwo` ships;
+#                    and "packed": no `.dwp`
 #   pack-dwo-removed `packages.app.stages.packDwo = null` ships the loose
 #                    `.dwo` files beside splitDebug's debug file
 #   product-attributes   the `product` a stage and a check get has the
@@ -708,13 +710,14 @@ let
     EOF
   '') [ (oneWs "." "unpacked") ];
 
-  # source-paths' `unpacked` variant on a target whose debugInfo is `v`,
-  # and with `extra` modules.
-  unpackedApp =
-    v: extra:
+  # source-paths' `variant` on a target whose debugInfo is `v`, and with
+  # `extra` modules.
+  debugInfoApp =
+    variant: v: extra:
     (mkRepo (fixtures + "/source-paths") (
       spModules ++ [ { targets.${native}.debugInfo = v; } ] ++ extra
-    )).workspaces.main.target.${native}.variants.unpacked.packages.app;
+    )).workspaces.main.target.${native}.variants.${variant}.packages.app;
+  unpackedApp = debugInfoApp "unpacked";
 
   # cc-rs 1.11.1 compiling C under Cargo's trim-paths.
   trimCcRepo =
@@ -3037,21 +3040,28 @@ in
       '';
 
   # `debugInfo = "strip"` with split-debuginfo = "unpacked": no `.dwo`
-  # ships, as the skeleton units that name them are stripped.
+  # ships, as the skeleton units that name them are stripped; with
+  # "packed", no `.dwp`.
   debug-info-strip =
     let
       p = unpackedApp "strip" [ ];
+      packed = debugInfoApp "packed" "strip" [ ];
     in
     pkgs.runCommand "debug-info-strip"
       {
         app = p;
         debug = p.debug;
         linkedDebug = p.stages.linked.debug;
+        packedApp = packed;
+        packedLinkedDebug = packed.stages.linked.debug;
+        packedDebug = packed.stages.strip.debug or "";
       }
       ''
         set -euo pipefail
         ls $linkedDebug | grep -qE '^dep[-.].*\.dwo$'
         test -z "$(find -L $app $debug -name '*.dwo')"
+        test -f $packedLinkedDebug/app.dwp
+        test -z "$(find -L $packedApp $packedDebug -name '*.dwp')"
         touch $out
       '';
 
@@ -3628,6 +3638,24 @@ in
               debugInfo = "split";
             }
           )).success;
+        # A stage with no `after` runs after the inserted stages, whichever
+        # the target's debugInfo inserts.
+        noAfter =
+          map
+            (
+              v:
+              (pk (mk [
+                {
+                  targets.${native}.debugInfo = v;
+                  packages.tool.stages.mine.run = helpers.patchelfRpath { libs = [ ]; };
+                }
+              ])).tool.stageOrder
+            )
+            [
+              "split"
+              "keep"
+              "strip"
+            ];
         # Overriding the inserted stage's attributes is allowed.
         override =
           (pk (mk [
@@ -3663,6 +3691,25 @@ in
         && report.stripRemoved
         && report.packageAdds
         && report.wasmSplit
+        &&
+          report.noAfter == [
+            [
+              "packDwo"
+              "splitDebug"
+              "mine"
+              "install"
+            ]
+            [
+              "packDwo"
+              "mine"
+              "install"
+            ]
+            [
+              "strip"
+              "mine"
+              "install"
+            ]
+          ]
         &&
           report.override == [
             "packDwo"

@@ -53,7 +53,7 @@ available as `.stages.<name>`, for example `.stages.install`.
 | --- | --- | --- |
 | Sees | the flat link output: `app`, `app.exe`, `libfoo.so` | the installed layout: `bin/app`, `lib/libfoo.so`, `pkg/` after `wasmBindgen` |
 | Use for | changing the binary: `packDwo`, `splitDebug`, `strip`, `patchelfRpath`, `wasmBindgen`, `wasmOpt` | wrappers, launchers, `.desktop` files, signing, archives, images |
-| Default | yes: a stage that names neither runs before `install` | `after = "install"`, or after a stage that is |
+| Default | yes: a stage that names neither runs before `install`, after the debug-info stages (`packDwo`, `splitDebug`, `strip`) | `after = "install"`, or after a stage that is |
 
 The stage helpers expect the flat link output. Run them before `install`.
 

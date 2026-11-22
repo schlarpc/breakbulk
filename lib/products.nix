@@ -476,6 +476,7 @@ let
             name = pkg;
             linked = mkLinked pkgs traits pkg built;
             stages = stageSet;
+            leading = lib.attrNames (debugStages effectiveDebugInfo traits);
             checks = checkSet;
             target = { inherit triple traits; };
             inherit

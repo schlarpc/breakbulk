@@ -363,9 +363,12 @@ bundle it runs `llvm-strip`: `-S` (the debug map), or with `all`
 `--strip-all` on an executable and `-x` (local symbols) on a
 dylib or bundle, whose exported symbols other images bind to, as
 rustc's own `-C strip=symbols` does. It also drops the `.dwo` files from
-the debug files so far (`split-debuginfo = "unpacked"`): the
-skeleton units that name them are gone. When there are debug
-files, what is left of them is the stage's `debug` output.
+the debug files so far (`split-debuginfo = "unpacked"`), and the
+`<file>.dwp` of each ELF file it strips (`split-debuginfo =
+"packed"`, or `packDwo`'s): the skeleton units that name them are
+gone. A `.dwp` that `splitDebug` moved next to a `.debug` file
+stays, since that file keeps its skeleton units. When there are
+debug files, what is left of them is the stage's `debug` output.
 `targets.<triple>.debugInfo = "strip"` inserts this stage.
 
 #### `strip.all`
