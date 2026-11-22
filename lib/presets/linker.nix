@@ -398,7 +398,7 @@ let
       throw "breakbulk.presetHelpers.chooseLinker: unknown linker flavor `${flavor}`"
     else if t.isMsvc || t.isUefi then
       "lld-link"
-    else if t.isWasm && t.isWasi && t.env == "p2" then
+    else if t.linksComponents then
       "wasm-component-ld"
     else if t.isWasm then
       "wasm-ld"

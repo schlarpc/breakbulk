@@ -612,7 +612,12 @@ let
     # Further targets, one file each.
     wasip2 = mkPreset (
       import ./wasip2.nix {
-        inherit lib wasmCommon chooseRunner;
+        inherit
+          lib
+          targetTraits
+          wasmCommon
+          chooseRunner
+          ;
         wasiSdkLib = wasiSdk;
       }
     );
@@ -818,7 +823,7 @@ in
           inherit triple traits;
         };
       in
-      if traits.isWasm && traits.isWasi && traits.env == "p2" then
+      if traits.linksComponents then
         impl.wasip2 a
       else if traits.isWasm && !traits.isWasi then
         impl.wasmCore a

@@ -41,13 +41,13 @@ let
       bitcode = true;
     };
     wasm-ld = {
-      on = t: t.isWasm && !(t.isWasi && t.env == "p2");
-      what = "wasm (not wasm32-wasip2)";
+      on = t: t.isWasm && !t.linksComponents;
+      what = "wasm core modules (not wasm32-wasip2)";
       bitcode = true;
     };
     wasm-component-ld = {
-      on = t: t.isWasm && t.isWasi && t.env == "p2";
-      what = "wasm32-wasip2";
+      on = t: t.linksComponents;
+      what = "wasm components (wasm32-wasip2)";
       bitcode = true;
     };
     mingw-lld = {

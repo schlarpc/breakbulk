@@ -45,6 +45,10 @@
 #                          for (issue #27)
 #   isWindows isMsvc isMingw          os windows; env msvc; env gnu
 #   isApple isWasm isWasi isBareMetal isUefi
+#   linksComponents        the link writes a WebAssembly component, not a
+#                          core module: WASI from preview 2 on
+#                          (wasm32-wasip2, -wasip3), whose target specs
+#                          name `wasm-component-ld` as the linker
 #   objectFormat           "elf" | "pe" | "macho" | "wasm" | "xcoff" (AIX):
 #                          rustc's target-spec `binary-format` ("wasm"
 #                          for every wasm architecture)
@@ -555,6 +559,13 @@ let
         else
           b.os;
       isWasi = b.os == "wasi";
+      linksComponents =
+        isWasm
+        && b.os == "wasi"
+        && !elem b.env [
+          ""
+          "p1"
+        ];
       isBareMetal = b.os == "none";
       # rustc's target specs: `exe_suffix`, `dll_prefix`/`dll_suffix`
       # (dylib and cdylib), `staticlib_prefix`/`staticlib_suffix`

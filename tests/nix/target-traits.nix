@@ -14,7 +14,7 @@
 #                        and families (and abi, where the name spells one);
 #                        its file-name traits are `--print file-names`',
 #                        and objectFormat, isApple, isWasm, isMsvc/isUefi
-#                        (an MSVC-style linker) and debugArtifacts are
+#                        (an MSVC-style linker), linksComponents and debugArtifacts are
 #                        what `--print all-target-specs-json` says
 #   linker-kind-rustc    the default Linux linker kind against the linker
 #                        flavor of rustc's own target specs, for several
@@ -224,9 +224,15 @@ let
         isWasm = s "is-like-wasm" false;
         isMsvcOrUefi = msvcLinker;
         debugArtifacts = artifacts;
+        linksComponents = s "linker" null == "wasm-component-ld";
       };
       ours = {
-        inherit (t) objectFormat isApple isWasm;
+        inherit (t)
+          objectFormat
+          isApple
+          isWasm
+          linksComponents
+          ;
         isMsvcOrUefi = t.isMsvc || t.isUefi;
         inherit (t) debugArtifacts;
       };
@@ -383,6 +389,7 @@ in
               "env"
               "isWasm"
               "isWasi"
+              "linksComponents"
               "executableSuffix"
               "dylibPathVar"
               "objectFormat"
@@ -398,6 +405,7 @@ in
           env = "";
           isWasm = true;
           isWasi = false;
+          linksComponents = false;
           executableSuffix = ".wasm";
           dylibPathVar = null;
           objectFormat = "wasm";
@@ -407,6 +415,7 @@ in
           env = "p2";
           isWasm = true;
           isWasi = true;
+          linksComponents = true;
           executableSuffix = ".wasm";
           dylibPathVar = null;
           objectFormat = "wasm";

@@ -18,6 +18,7 @@
 # table has a hash for) or `wasiSdk` (a sysroot directory) to override.
 {
   lib,
+  targetTraits,
   wasmCommon,
   wasiSdkLib,
   chooseRunner,
@@ -25,6 +26,7 @@
 {
   pkgs,
   triple ? "wasm32-wasip2",
+  traits ? targetTraits.resolve { inherit triple; },
   withC ? false,
   rustc ? null,
   wasiSdkVersion ? null,
@@ -42,19 +44,18 @@
 let
   inherit (lib) mkDefault;
   bp = pkgs.buildPackages;
-  inc = "-isystem ${wasiSdk}/include/wasm32-wasip2";
+  inc = "-isystem ${wasiSdk}/include/${triple}";
   common = wasmCommon (args // { inherit triple; });
 in
-assert lib.assertMsg (
-  triple == "wasm32-wasip2"
-) "breakbulk.presets.wasmComponent: ${triple} is not wasm32-wasip2";
+assert lib.assertMsg traits.linksComponents
+  "breakbulk.presets.wasmComponent: ${triple} does not link wasm components";
 common
 // {
   runner =
     mkDefault
       (chooseRunner {
         inherit pkgs wasmtime;
-        traits = args.traits or null;
+        inherit traits;
         canExecute = false;
         flavor = "wasmtime";
       }).runner;
