@@ -39,11 +39,9 @@ use std::io::Cursor;
 use std::process::ExitCode;
 
 use breakbulk_format::Plan;
-use breakbulk_instantiate::dynamic::{
-    self, Context, InputValue, Outer, Resolved, Values, Written,
-};
-use breakbulk_predict::view::{Outcome, ViewSpec, materialize, nar, outcome};
+use breakbulk_instantiate::dynamic::{self, Context, InputValue, Outer, Resolved, Values, Written};
 use breakbulk_instantiate::{Inputs, instantiate};
+use breakbulk_predict::view::{Outcome, ViewSpec, materialize, nar, outcome};
 use harmonia_protocol::types::DaemonStore as _;
 use harmonia_store_aterm::hash_modulo::{HashModulo, fill_deferred_outputs, hash_input_modulo};
 use harmonia_store_aterm::input_address::UnfilledOutput;
@@ -230,12 +228,15 @@ async fn run() -> Res<()> {
         let path = match outcome(spec) {
             Outcome::Files(files) => {
                 let dir = std::path::Path::new(&tmp).join(format!("predicted-{i}"));
-                materialize(std::path::Path::new(&spec.view), &spec.package_dir, &files, &dir)
-                    .map_err(|e| format!("{}: {e}", spec.key))?;
+                materialize(
+                    std::path::Path::new(&spec.view),
+                    &spec.package_dir,
+                    &files,
+                    &dir,
+                )
+                .map_err(|e| format!("{}: {e}", spec.key))?;
                 let nar = nar(&dir).map_err(|e| format!("{}: {e}", spec.key))?;
-                let cam = "r:sha256"
-                    .parse()
-                    .map_err(|e| format!("r:sha256: {e:?}"))?;
+                let cam = "r:sha256".parse().map_err(|e| format!("r:sha256: {e:?}"))?;
                 let info = client
                     .add_ca_to_store("source", cam, &BTreeSet::new(), false, Cursor::new(nar))
                     .await
