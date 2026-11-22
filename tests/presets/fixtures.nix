@@ -1140,7 +1140,7 @@ let
         stages = breakbulk.stages.merge [
           breakbulk.stages.defaultStages.wasmComponent
           {
-            componentize.run = breakbulk.stageHelpers.componentize {
+            wasmMetadata.run = breakbulk.stageHelpers.wasmMetadata {
               metadata = {
                 name = "comp";
                 processedBy.breakbulk = "0.1.0";
@@ -1155,7 +1155,7 @@ let
     {
       wasm-component = pkgs.runCommand "wasm-component" { nativeBuildInputs = [ pkgs.wasm-tools ]; } ''
         core=$(echo ${t.packages.comp.roots."cdylib/comp"}/*.wasm)
-        comp=$(echo ${product.stages.componentize}/*.wasm)
+        comp=$(echo ${product.stages.wasmMetadata}/*.wasm)
         wasm-tools print "$core" > core.wat
         if grep -q '(import' core.wat; then echo "the core module has imports:"; grep '(import' core.wat; exit 1; fi
         grep -q '(export "checksum"' core.wat
@@ -1168,7 +1168,7 @@ let
         mkdir -p $out
         cp core.wat comp.wit meta.txt $out/
       '';
-      # The product, with no metadata set: componentize fills it from
+      # The product, with no metadata set: wasmMetadata fills it from
       # comp's Cargo.toml, `license` from the workspace's.
       wasm-component-metadata =
         pkgs.runCommand "wasm-component-metadata"

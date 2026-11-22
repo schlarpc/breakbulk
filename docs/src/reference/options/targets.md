@@ -426,7 +426,7 @@ list of string
 
 Which default stage chain this target’s products get
 (` breakbulk.stages.defaultStageNames `: ` wasmWeb ` bindgen and
-wasmOpt; ` wasmComponent ` wasmOpt and componentize)\. Presets set
+wasmOpt; ` wasmComponent ` wasmOpt, componentize and wasmMetadata)\. Presets set
 it; ` null `: none\. Debug info is handled by ` debugInfo `, not by
 the chain\.
 

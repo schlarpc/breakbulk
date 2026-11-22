@@ -853,8 +853,7 @@ let
       );
 
   # ---------------------------------------------------------------------
-  # wasm metadata (`wasm-tools metadata add`), shared by `componentize` and
-  # `wasmMetadata`
+  # wasm metadata (`wasm-tools metadata add`)
 
   # A value: a string, or a derivation or path whose file the stage reads
   # at build time. `str` first: `package` would turn a store-path string
@@ -1090,13 +1089,9 @@ let
         name = "componentize";
         description = ''
           Makes a WebAssembly component from the input's single core
-          module with `wasm-tools component new`, then adds metadata
-          with `wasm-tools metadata add`, as `wasmMetadata` does: by
-          default the fields of the package's `Cargo.toml`
-          (`cargoMetadata`), with `metadata` over them. With nothing to
-          add it runs no `metadata add`. The module keeps its file
-          name. The `wasmComponent` preset's last stage before
-          `install`.
+          module with `wasm-tools component new`. The module keeps its
+          file name. In the `wasmComponent` preset's chain, `wasmMetadata`
+          runs after it.
         '';
         options = {
           adapter = mkOption {
@@ -1129,8 +1124,6 @@ let
               implements.
             '';
           };
-          metadata = metadataOption;
-          cargoMetadata = cargoMetadataOption;
           wasmTools = toolOption "wasm-tools";
         };
       }
@@ -1156,7 +1149,6 @@ let
                 "--adapt"
                 "${cfg.adapter}"
               ];
-          meta = metadataOf cfg product;
         in
         pkgs.runCommand (stageName product "componentize")
           { nativeBuildInputs = [ (toolOf cfg.wasmTools pkgs "wasm-tools") ]; }
@@ -1167,16 +1159,7 @@ let
             copyIn "$out"
             ${oneWasm "componentize"}
             wasm-tools component new "$wasm" ${escapeShellArgs adapt} -o "$wasm.component"
-            ${
-              if meta == { } then
-                ''mv "$wasm.component" "$wasm"''
-              else
-                ''
-                  ${metadataShell "componentize" meta}
-                  wasm-tools metadata add "''${meta[@]}" "$wasm.component" -o "$wasm"
-                  rm "$wasm.component"
-                ''
-            }
+            mv "$wasm.component" "$wasm"
           ''
       );
 
@@ -1189,10 +1172,9 @@ let
           `wasm-tools metadata add`, which works on core modules and on
           components (on a component's outermost level). With
           `cargoMetadata`, the default, the fields not set come from the
-          package's `Cargo.toml`. `componentize` adds metadata in the
-          same way; use this stage for a core module, or after
-          `componentize` for values it should not add. With nothing to
-          add it copies its input. It fails when the input has no
+          package's `Cargo.toml`, as cargo-component fills them. The
+          `wasmComponent` preset's last stage before `install`, after
+          `componentize`. With nothing to add it copies its input. It fails when the input has no
           `.wasm` file.
         '';
         options = {

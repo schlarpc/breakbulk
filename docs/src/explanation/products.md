@@ -31,7 +31,7 @@ path remapping and build ID depend on it.
 | Other ELF targets (bare metal, BSDs) | `keep` | `packDwo` |
 | Windows (MSVC) | `keep` | none: PDBs are already separate files; `install` puts them in the `debug` output |
 | wasm for browsers | `keep` | `bindgen` → `wasmOpt` |
-| wasm components | `keep` | `wasmOpt` → `componentize` |
+| wasm components | `keep` | `wasmOpt` → `componentize` → `wasmMetadata` |
 | macOS | `split` | `splitDebug` (the `.dSYM` to the `debug` output, `llvm-strip -S`) → `install` → `adhocSign` |
 
 `"strip"` inserts `strip` instead. `packDwo` packs split DWARF objects

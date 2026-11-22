@@ -234,12 +234,12 @@ yet ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
   Rust release bundles, so std, the C code and the library share one
   wasi-libc version.
 - `wasm-opt` works on core modules, so it runs before componentizing.
-- `componentize` adds metadata to the component, by default the name,
-  description, authors, license, repository, homepage and version from
-  the package's `Cargo.toml`, as cargo-component does. The
+- After `componentize`, the
   [`wasmMetadata`](../reference/stage-helpers.md#wasmmetadata) stage adds
-  metadata to core modules too, and takes values computed in a
-  derivation, such as a source revision.
+  metadata to the component, by default the name, description, authors,
+  license, repository, homepage and version from the package's
+  `Cargo.toml`, as cargo-component does. It works on core modules too,
+  and takes values computed in a derivation, such as a source revision.
 
 ## Static and musl
 

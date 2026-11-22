@@ -117,7 +117,7 @@ let
       printf 'tree:%s;guest:%s' "$tree" "$guest" > $out
     '';
 
-  # After componentize: the D54 identity stamp. description, authors,
+  # The preset's wasmMetadata stage: the D54 identity stamp. description, authors,
   # licenses and version come from the crate's Cargo.toml; `install` then
   # places the component as lib/<module>.wasm, the layout
   # DATBOI_COMPONENTS_DIR expects.
@@ -256,6 +256,7 @@ in
       datboi-emu-ds.target.${wasm}.stages = {
         wasmOpt = lib.mkForce null;
         componentize = lib.mkForce null;
+        wasmMetadata = lib.mkForce null;
         bindgen = {
           after = "linked";
           run = breakbulk.stageHelpers.bindgen {
@@ -273,10 +274,7 @@ in
       target.${wasm}.stages = {
         # No wasm-opt: the flake componentizes the core module as built.
         wasmOpt = lib.mkForce null;
-        stamp = {
-          after = "componentize";
-          run = stamp c;
-        };
+        wasmMetadata.run = stamp c;
       };
     }))
   ];

@@ -55,7 +55,7 @@ attributes:
 | `name` | stages and checks | The package's name in `Cargo.toml`, which is the product's name. |
 | `sourcePaths` | stages and checks | The store paths of the workspace's source views and of every crate source. `noSourceReferences` fails when the product references one. |
 | `toolchainPaths` | stages and checks | The Rust toolchain's store paths: rustc, its sysroot, cargo and components such as rust-src. |
-| `package` | stages and checks | The package's `[package]` table from its `Cargo.toml`, as `builtins.fromTOML` reads it, with each field inherited from the workspace (`description.workspace = true`) replaced by the workspace's value. `componentize` and `wasmMetadata` take their metadata defaults from it. |
+| `package` | stages and checks | The package's `[package]` table from its `Cargo.toml`, as `builtins.fromTOML` reads it, with each field inherited from the workspace (`description.workspace = true`) replaced by the workspace's value. `wasmMetadata` takes its metadata defaults from it. |
 | `lockfile` | stages and checks | The workspace's `Cargo.lock`, a path. `bindgen` reads the wasm-bindgen version from it. |
 | `rootFiles` | stages and checks | Each root's file name in `linked`, mapped to its kind: `bin`, `staticlib`, `cdylib` or `dylib`. `install` lays the files out by kind. |
 | `sourcesAllowedIn` | stages and checks | File name globs whose own references to sources `noSourceReferences` allows: each staticlib root's archive name in `linked`. |

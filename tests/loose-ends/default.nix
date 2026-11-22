@@ -34,7 +34,7 @@
 #   wasm-embed   the flagship pattern: a native host bin embeds (with
 #                include_bytes!) the wasm component that another
 #                workspace builds for wasm32 with the wasmComponent preset
-#                (wasmOpt, componentize, install), through
+#                (wasmOpt, componentize, wasmMetadata, install), through
 #                `packages.host.env`. Only the host's bin and its test
 #                harness name the product; the host workspace's
 #                instantiation and `util`'s units do not depend on it; the

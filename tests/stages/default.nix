@@ -41,7 +41,7 @@
 #                       and every stage and check passes it on without
 #                       running; with a built root, stages run
 #   stages-wasm-component  a core module through wasmOpt -> componentize
-#                       with metadata; the component imports nothing
+#                       -> wasmMetadata; the component imports nothing
 #   stages-build-script-path  buildScriptPath and the build-script lookups
 #                       over stand-in runs (a `links` package, two versions
 #                       of one package), with the runs listed as in IFD mode
@@ -50,7 +50,7 @@
 #                       with its versions, a missing key or links name
 #                       failing with what there is; options of both forms
 #                       or of neither fail evaluation
-#   stages-wasm-metadata  componentize's metadata: a revision read from a
+#   stages-wasm-metadata  wasmMetadata on a component: a revision read from a
 #                       derivation, defaults from `product.package`, a
 #                       field set to null left out; `cargoMetadata =
 #                       false` gives `wasm-tools component new`'s bytes;
@@ -122,6 +122,7 @@ let
       expected = [
         "wasmOpt"
         "componentize"
+        "wasmMetadata"
         "install"
       ];
     };
@@ -135,6 +136,7 @@ let
         wasmComponent = [
           "wasmOpt"
           "componentize"
+          "wasmMetadata"
         ];
       };
     };
@@ -602,7 +604,7 @@ let
         (H.wasmOpt { flags = "-O3"; })
         (H.wasmOpt { flags = [ 3 ]; })
         (H.packDwo { llvm = "llvm"; })
-        (H.componentize { metadata.name = 3; })
+        (H.wasmMetadata { metadata.name = 3; })
         H.patchelfRpath
       ];
       expected = [
@@ -620,7 +622,7 @@ let
           (H.wasmOpt { flags = [ "-O1" ]; } { features = [ ]; } helperArgs).buildCommand;
       expected = true;
     };
-    testHelperComponentizeMetadata = {
+    testHelperWasmMetadataFlags = {
       expr =
         lib.hasInfix
           ''
@@ -631,7 +633,7 @@ let
             meta+=(--x-custom a)
             meta+=(--x-custom b)
           ''
-          (H.componentize {
+          (H.wasmMetadata {
             metadata = {
               name = "comp";
               processedBy.breakbulk = "0.1.0";
@@ -679,7 +681,7 @@ let
               };
             }
           );
-          off = metaOf (H.componentize { cargoMetadata = false; });
+          off = metaOf (H.wasmMetadata { cargoMetadata = false; });
         };
         expected = {
           defaults = [
@@ -971,7 +973,7 @@ let
     stages = S.merge [
       S.defaultStages.wasmComponent
       {
-        componentize.run = H.componentize {
+        wasmMetadata.run = H.wasmMetadata {
           metadata = {
             name = "adder";
             language.Rust = "1.99.0";
@@ -1015,22 +1017,22 @@ let
       };
     };
   componentized =
-    componentizeRun:
+    metadataRun:
     withPackage (
       S.merge [
         S.defaultStages.wasmComponent
-        { componentize.run = componentizeRun; }
+        { wasmMetadata.run = metadataRun; }
       ]
     );
   metaDefaults = componentized (
-    H.componentize {
+    H.wasmMetadata {
       metadata = {
         revision = revisionFile;
         homepage = null;
       };
     }
   );
-  metaOff = componentized (H.componentize { cargoMetadata = false; });
+  metaOff = componentized (H.wasmMetadata { cargoMetadata = false; });
   # A core module, not componentized.
   metaCore = withPackage {
     meta = {
