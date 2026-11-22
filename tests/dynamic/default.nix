@@ -106,13 +106,13 @@ let
   };
 
   # The repositories of the IFD-mode tests, in this mode.
-  # Every workspace keeps its runs' output (`test.keepLog`): run.sh
+  # Every workspace keeps its runs' output in `$out/log`: run.sh
   # compares the test outcomes of both modes from it.
   keepLogs = {
     options.workspaces = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
-          config.memberDefaults.test.keepLog = lib.mkDefault true;
+          config.memberDefaults.test.postRun = lib.mkDefault ''cp "$log" "$out/log"'';
         }
       );
     };

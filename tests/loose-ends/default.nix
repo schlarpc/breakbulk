@@ -112,7 +112,7 @@ let
             scopeTargetRoots = false;
             test = {
               scopeTestsDir = false;
-              keepLog = true;
+              postRun = ''cp "$log" "$out/log"'';
             };
           };
         }
@@ -169,7 +169,7 @@ let
   scopeBase = {
     workspaces.main = {
       variants.default.profile = "dev";
-      memberDefaults.test.keepLog = true;
+      memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
     };
   };
   noScope = mkRepo [ scopeBase ];
@@ -717,7 +717,7 @@ let
       {
         workspaces.main = {
           variants.default.profile = "dev";
-          memberDefaults.test.keepLog = true;
+          memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
         };
       }
     ];

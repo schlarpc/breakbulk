@@ -56,7 +56,7 @@ let
           workspaces.main = {
             variants.default.profile = "dev";
             # native-link-runs reads the runs' output.
-            memberDefaults.test.keepLog = true;
+            memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
           };
           packages.foo-sys.inputs = [ lib' ];
         }

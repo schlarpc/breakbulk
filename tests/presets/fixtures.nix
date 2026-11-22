@@ -492,7 +492,7 @@ let
         };
         targets.${a64} = { };
         variants.default.profile = "dev";
-        memberDefaults.test.keepLog = true;
+        memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
       };
       packages.pmn.test.runner = "nextest";
       targets.${a64}.preset = presets.linux;

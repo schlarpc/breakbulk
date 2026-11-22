@@ -365,17 +365,15 @@ parse the output into a stable form either: that would tie it to
 libtest's and nextest's formats, and `harness = false` tests have
 neither. Doctest runs work the same way.
 
-- [`test.keepLog`](../reference/options/packages.md#packagesnametestkeeplog)
-  copies the raw output to `$out/log`, for a binary cache that does not
-  store build logs or a CI that keeps logs as artifacts. Such a run is
-  not reproducible under `--rebuild`.
 - [`test.postRun`](../reference/options/packages.md#packagesnametestpostrun)
   (per package, and per binary under `test.binaries.<binary>.postRun`)
   is a shell snippet that runs inside the run after it passes, with the
   raw output in `$log`. Under nextest, `$nextestDir` is nextest's store,
   so `cp -r "$nextestDir/ci" "$out/junit"` keeps a profile's JUnit
-  report. Whether the result is reproducible depends on what the
-  snippet puts in `$out`.
+  report, and `cp "$log" "$out/log"` keeps the raw output (see
+  [Keep test output as an artifact](../how-to/ci.md#keep-test-output-as-an-artifact)).
+  Whether the result is reproducible depends on what the snippet puts
+  in `$out`.
 - A coverage variant's runs keep their profiles in `$out/profraw`, named
   by content. The counters themselves can differ between runs (hash
   seeds, timing), so coverage runs are outside the `--rebuild`

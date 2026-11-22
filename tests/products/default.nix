@@ -1006,7 +1006,7 @@ let
     {
       packages.assets.sourceOverlay."ui/dist" = uiProduct;
       # The check reads the test run's output.
-      packages.assets.test.keepLog = true;
+      packages.assets.test.postRun = ''cp "$log" "$out/log"'';
     }
   ];
 
@@ -1148,7 +1148,7 @@ let
         path = ".";
         benchSmoke = true;
         # `benches` reads the smoke runs' output.
-        memberDefaults.test.keepLog = true;
+        memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
         variants = {
           default.profile = "dev";
           bench = {

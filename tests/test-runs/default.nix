@@ -82,10 +82,10 @@
 #                           nextest profile's `test-threads` and
 #                           NEXTEST_TEST_THREADS win over that default
 #   post-run                a run's `$out` is empty by default; the
-#                           package's `test.postRun`, the binary's and
-#                           `keepLog`'s copy run in that order after a
-#                           passing run and see `$log`; the doctest run
-#                           gets the package's snippet and `keepLog`
+#                           package's `test.postRun` and the binary's
+#                           run in that order after a passing run and see
+#                           `$log`; the doctest run gets the package's
+#                           snippet
 #   home                    over the `test-home` fixture: a test and a
 #                           doctest that write under $HOME and the user
 #                           cache directory pass with no setting, in a
@@ -172,12 +172,14 @@ let
 
   # --- doctests -------------------------------------------------------------
 
-  # The checks below read the runs' output, so they keep it
-  # (`test.keepLog`); `$out` is otherwise empty.
+  # A run's raw output in `$out/log`, which is otherwise empty.
+  keepLogRun = ''cp "$log" "$out/log"'';
+
+  # The checks below read the runs' output, so they keep it.
   keepLog =
     names:
     lib.genAttrs names (_: {
-      test.keepLog = true;
+      test.postRun = keepLogRun;
     });
 
   doctestsWs = mk "doctests" {
@@ -341,7 +343,7 @@ let
   # --- test-control -----------------------------------------------------------
 
   ctlTest = {
-    keepLog = true;
+    postRun = keepLogRun;
     env.CTL_EXPECT_NIX = "1";
     path = [ pkgs.hello ];
     binaries.net.args = [
@@ -746,8 +748,10 @@ let
   # nextest's store (the `ci` profile's junit) reaches `$out` through
   # `test.postRun`.
   keepJunit = {
-    keepLog = true;
-    postRun = ''cp -r "$nextestDir" "$out/nextest"'';
+    postRun = ''
+      ${keepLogRun}
+      cp -r "$nextestDir" "$out/nextest"
+    '';
   };
   nxWs = mk "nextest" {
     packages.nx.test = keepJunit // {
@@ -758,7 +762,7 @@ let
       env.NX_EXPECT_NIX = "1";
     };
     packages.other.test = {
-      keepLog = true;
+      postRun = keepLogRun;
       runner = "nextest";
     };
     packages.solo.test = keepJunit // {
@@ -828,7 +832,7 @@ let
       {
         workspaces.main = {
           variants.default.profile = "dev";
-          memberDefaults.test.keepLog = true;
+          memberDefaults.test.postRun = keepLogRun;
         };
         packages.nx.test = {
           runner = "nextest";
@@ -926,7 +930,7 @@ let
           memberDefaults.test = {
             runner = "nextest";
             nextest.profile = "ci";
-            keepLog = true;
+            postRun = keepLogRun;
           };
         };
         packages.other.test.runner = "libtest";
@@ -962,7 +966,7 @@ let
         inherit path;
         variants.default.profile = "dev";
         memberDefaults.test = test // {
-          keepLog = true;
+          postRun = keepLogRun;
         };
       };
       nx = test: test // { runner = "nextest"; };
@@ -1062,7 +1066,6 @@ let
       {
         workspaces.main.variants.default.profile = "dev";
         packages.ctl.test = lib.recursiveUpdate ctlTest {
-          keepLog = false;
           postRun = ''
             grep -q '^test result: ok' "$log"
             echo package >> "$out/order"
@@ -1073,7 +1076,7 @@ let
         };
       }
       # A second matching key: a later layer.
-      { packages."ctl@0.1.0".test.keepLog = true; }
+      { packages."ctl@0.1.0".test.postRun = keepLogRun; }
     ];
   };
   postRun =
@@ -1084,16 +1087,15 @@ let
     pkgs.runCommand "test-runs-post-run"
       {
         plain =
-          (mk "test-control" { packages.ctl.test = removeAttrs ctlTest [ "keepLog" ]; }).testRuns.ctl.env;
+          (mk "test-control" { packages.ctl.test = removeAttrs ctlTest [ "postRun" ]; }).testRuns.ctl.env;
         envRun = t.testRuns.ctl.env;
         net = t.testRuns.ctl.net;
         doctest = t.doctests.ctl;
       }
       ''
-        # Without postRun or keepLog, the output is an empty directory.
+        # Without postRun, the output is an empty directory.
         [ -z "$(ls -A $plain)" ]
-        # Package, then binary, then keepLog's copy (a later layer's keepLog
-        # wins over the earlier false).
+        # Package (both layers' snippets), then binary.
         [ "$(cat $envRun/order)" = "$(printf 'package\nbinary')" ]
         grep -q 'test result: ok' $envRun/log
         [ "$(cat $net/order)" = package ]
@@ -1114,7 +1116,7 @@ let
       {
         workspaces.main.variants.default.profile = "dev";
         workspaces.main.memberDefaults.test = {
-          keepLog = true;
+          postRun = keepLogRun;
           wrapper = layout;
         };
         packages.locate.test.sourceScope = [ "repo-marker.txt" ];
@@ -1131,7 +1133,7 @@ let
     test:
     mk "test-wrapper" {
       packages.locate.test = {
-        keepLog = true;
+        postRun = keepLogRun;
         sourceScope = [ "repo-marker.txt" ];
       }
       // test;
@@ -1142,7 +1144,7 @@ let
       t = testWrapperRepo.workspaces.main.target.${native};
       withRunner = mk "test-wrapper" {
         packages.locate.test = {
-          keepLog = true;
+          postRun = keepLogRun;
           sourceScope = [ "repo-marker.txt" ];
           wrapper = layout;
         };
@@ -1200,7 +1202,7 @@ let
       {
         workspaces.main.variants.default.profile = "dev";
         packages.th.test = {
-          keepLog = true;
+          postRun = keepLogRun;
           env.TH_EXPECT_NIX = "1";
         };
       }
@@ -1251,7 +1253,7 @@ let
       {
         workspaces.main = {
           variants.default.profile = "dev";
-          memberDefaults.test.keepLog = true;
+          memberDefaults.test.postRun = keepLogRun;
         };
       }
     ]
@@ -1381,7 +1383,7 @@ let
     {
       workspaces.main.memberDefaults.test = {
         doctest.enable = false;
-        keepLog = true;
+        postRun = keepLogRun;
       };
       packages.checked.test = {
         postRun = ''echo package >> "$out/order"'';

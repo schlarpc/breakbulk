@@ -1013,27 +1013,6 @@ lazy attribute set of (string or absolute path or package or signed integer or b
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
-## `packages.<name>.test.keepLog`
-
-Keep each test run’s and doctest run’s raw output in
-` $out/log `, as a ` postRun ` of ` cp "$log" "$out/log" `\. For a
-binary cache that does not store build logs, or a CI that keeps
-them as artifacts\. The output holds timings and, with more than
-one test thread, lines in a varying order, so such a run is
-not reproducible under ` nix build --rebuild `\. ` null `: off\.
-
-*Type:*
-null or boolean
-
-*Default:*
-
-```nix
-null
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
 ## `packages.<name>.test.nextest.package`
 
 cargo-nextest to run with (` null `: the test platform’s ` cargo-nextest `)\.
@@ -1120,10 +1099,15 @@ output and ` $out ` the run’s output directory, empty otherwise\.
 With ` test.runner = "nextest" `, ` $nextestDir ` is nextest’s
 store (JUnit reports)\. The package’s snippet runs first, then
 the binary’s (` test.binaries.<binary>.postRun `) or the doctest
-run’s (` test.doctest.postRun `), then ` keepLog `’s\. Whatever a
-snippet puts in ` $out ` decides whether the run is
-reproducible: breakbulk keeps ` $out ` empty so that ` nix build --rebuild ` of a passing run succeeds, and the output stays in
-the build log (` nix log `)\.
+run’s (` test.doctest.postRun `)\. Whatever a snippet puts in
+` $out ` decides whether the run is reproducible: breakbulk keeps
+` $out ` empty so that ` nix build --rebuild ` of a passing run
+succeeds, and the output stays in the build log (` nix log `)\.
+` cp "$log" "$out/log" ` keeps the raw output, for a binary cache
+that does not store build logs or a CI that keeps them as
+artifacts; it holds timings and, with several test threads,
+lines in a varying order, so such a run is not reproducible
+under ` nix build --rebuild `\.
 
 *Type:*
 strings concatenated with “\\n”

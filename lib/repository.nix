@@ -618,7 +618,6 @@ let
           runner = single null [ "runner" ];
           stripForRun = single null [ "stripForRun" ];
           wrapper = single null [ "wrapper" ];
-          keepLog = single null [ "keepLog" ];
           nextest = lib.genAttrs [ "profile" "configFile" "package" ] (
             n:
             single null [

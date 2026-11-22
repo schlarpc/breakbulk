@@ -536,7 +536,7 @@ let
         (oneWs ".")
         testOnlyScope
         # test-only reads the run's output.
-        { packages.proto.test.keepLog = true; }
+        { packages.proto.test.postRun = ''cp "$log" "$out/log"''; }
       ]
       ++ modules
     );
@@ -555,7 +555,7 @@ let
       [
         (oneWs ".")
         # The check reads a run's output.
-        { packages.tv.test.keepLog = true; }
+        { packages.tv.test.postRun = ''cp "$log" "$out/log"''; }
       ]
       ++ modules
     );
@@ -656,7 +656,7 @@ let
         (onRun ({ default, root, ... }: fs.union default (root + "/data")))
       ];
       # The checks read the runs' output.
-      workspaces.main.memberDefaults.test.keepLog = true;
+      workspaces.main.memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
     };
   sourcesRepo =
     edit:
@@ -673,7 +673,7 @@ let
   # snapbox and expect-test need nothing.
   snapshotsModule = {
     # The checks read the runs' output.
-    workspaces.main.memberDefaults.test.keepLog = true;
+    workspaces.main.memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
   };
   snapshotsRepo =
     edit: modules:
@@ -2716,13 +2716,13 @@ in
         {
           workspaces.main.memberDefaults.test = {
             runner = lib.mkForce "nextest";
-            keepLog = false;
+            stripForRun = false;
           };
           packages.app-b = {
             test.runner = "libtest";
             test.nextest.profile = "package-layer";
             target.${native}.test.nextest.profile = "target-layer";
-            variant.default.test.keepLog = lib.mkDefault true;
+            variant.default.test.stripForRun = lib.mkDefault true;
           };
         }
       ];
@@ -2730,7 +2730,7 @@ in
       checks = {
         targetLayerWins = lib.hasInfix "--profile target-layer" run.drvAttrs.buildCommand;
         forcedLowerWins = run.drvAttrs ? nextestCargoMetadata;
-        defaultHigherLoses = !(lib.hasInfix ''"$out/log"'' run.drvAttrs.buildCommand);
+        defaultHigherLoses = !(lib.hasSuffix "-bin-stripped" run.passthru.binary.name);
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
     in

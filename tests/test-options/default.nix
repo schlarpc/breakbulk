@@ -72,7 +72,7 @@ let
           workspaces.main = {
             variants.default.profile = "dev";
             # Some checks read the runs' output.
-            memberDefaults.test.keepLog = true;
+            memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
           };
         }
       ]

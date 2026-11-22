@@ -84,8 +84,7 @@
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
 #     `$out`: it holds timings and, with several test threads, lines in a
 #     varying order, and `nix build --rebuild` compares every output. `$out`
-#     is an empty directory, unless a `test.postRun` snippet (or `keepLog`)
-#     puts something there after a passing run (`postRunScript`);
+#     is an empty directory, unless a `test.postRun` snippet puts something there after a passing run (`postRunScript`);
 #   - the run fails when the binary does, then prints a hint for each path
 #     its output names that its source view lacks (`hintScript`).
 #
@@ -526,7 +525,6 @@ rec {
       stripForRun = null;
       wrapper = null;
       postRun = "";
-      keepLog = false;
     }
     // t
     // {
@@ -807,7 +805,7 @@ rec {
 
   # What runs after a passing run, in order: breakbulk's own (coverage),
   # the package's `test.postRun`, the binary's (`binary`: its key) or,
-  # without a binary, the doctest run's, then `keepLog`'s copy.
+  # without a binary, the doctest run's.
   postRunSnippets =
     {
       cfg,
@@ -819,8 +817,7 @@ rec {
     in
     lib.optional coverage coverageCollect
     ++ lib.optional (cfg.postRun != "") cfg.postRun
-    ++ lib.optional (own.postRun != "") own.postRun
-    ++ lib.optional cfg.keepLog ''cp "$log" "$out/log"'';
+    ++ lib.optional (own.postRun != "") own.postRun;
 
   # The snippets in a subshell, so that a snippet's `cd` or `exit` stays
   # its own; `$log` and `$out` are set.

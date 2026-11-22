@@ -61,6 +61,22 @@ one `/`-separated segment, `**` across any number) and derivations:
 variant's check. A pattern that matches no check is an evaluation error,
 since it is most likely a typo.
 
+## Keep test output as an artifact
+
+A test run's output goes to the build log, and the run's `$out` is
+empty. If your binary cache does not store build logs, or your CI keeps
+logs as artifacts, copy the raw output into `$out` with a
+[`test.postRun`](../reference/options/packages.md#packagesnametestpostrun)
+snippet:
+
+```nix
+workspaces.main.memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
+```
+
+Every test run and doctest run then has its output in `log`. The output
+holds timings and, with several test threads, lines in a varying order,
+so such a run is not reproducible: `nix build --rebuild` of it fails.
+
 ## A clippy check fails where `cargo clippy` passes
 
 A clippy variant lints a workspace member twice when the member is also
