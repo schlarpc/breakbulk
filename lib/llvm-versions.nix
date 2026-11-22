@@ -17,8 +17,9 @@
 #   1.91.0 - 1.94.1       21.1.2 - 21.1.8
 #   1.95.0 - 1.98.1       22.1.2 - 22.1.8
 #   1.99.0 - 1.101 (nightly)  23.1.1 - 23.1.5
-# nixpkgs' rustc 1.99.0 is built against nixpkgs' LLVM 21 instead, which is
-# why `rustc.llvmPackages` wins when present.
+# nixpkgs' rustc may be built against another LLVM than the official
+# build's (its 1.99.0 used LLVM 21), which is why `rustc.llvmPackages`
+# wins when present.
 #
 #   llvm = breakbulk.llvmVersions;
 #   llvm.majorFor "1.97.1"                       # 22

@@ -164,10 +164,7 @@
 #                    and the clippy plan builds; nixpkgs' clippy (another
 #                    sysroot) and a toolchain without clippy-driver fail
 #                    planning naming `workspaces.main.toolchain.clippy`
-#   variants-coverage   with rust-overlay's 1.99 (nixpkgs' rustc 1.99
-#                    builds instrumented multi-crate binaries that crash
-#                    in the profiler runtime at exit, with plain Cargo
-#                    too): the coverage product writes a profile, and the
+#   variants-coverage   the coverage product writes a profile, and the
 #                    coverage test run keeps its profiles in $out/profraw
 #   embed            products as inputs: `packages.embedder.env` names
 #                    another workspace's product, which `embedder` embeds
@@ -916,16 +913,12 @@ let
   ];
   cargoConfigRepo = mkRepo (fixtures + "/cargo-config") cargoConfigModules;
 
-  # Coverage with an upstream toolchain (see variants-coverage).
+  # An upstream toolchain, for the tests that need rust-overlay's.
   overlayRust = pkgs.rust-bin.stable."1.99.0".minimal;
   coverageRepo = mkRepo (fixtures + "/variants") [
     {
       workspaces.main = {
         path = "ws";
-        toolchain = {
-          rustc = overlayRust;
-          cargo = overlayRust;
-        };
         variants.default = {
           mode = "coverage";
           profile = "release";

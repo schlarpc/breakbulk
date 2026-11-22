@@ -210,7 +210,7 @@ let
       inherit version;
       majorMinor = util.rustVersion.majorMinor version;
       # nixpkgs' own rustc names its LLVM, which may differ from the
-      # official builds' (nixpkgs' 1.99.0 uses LLVM 21, rustup's 23).
+      # official builds' (nixpkgs' 1.99.0 used LLVM 21, rustup's 23).
       llvmMajor =
         if rustc ? llvmPackages then
           lib.toInt (lib.versions.major rustc.llvmPackages.llvm.version)
