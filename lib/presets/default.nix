@@ -73,23 +73,25 @@ let
     let
       go =
         bound:
-        lib.setFunctionArgs (
-          args:
-          let
-            a = bound // args;
-            tc = a.toolchain or null;
-            withRustc =
-              removeAttrs a [ "toolchain" ]
-              // lib.optionalAttrs (!(a ? rustc) && tc != null && tc.rustc or null != null) {
-                inherit (tc) rustc;
-              };
-          in
-          if a ? pkgs then f withRustc // { presetDirect = true; } else go a
-        ) {
-          toolchain = true;
-          traits = true;
-          linkerKind = true;
-        };
+        lib.setFunctionArgs
+          (
+            args:
+            let
+              a = bound // args;
+              tc = a.toolchain or null;
+              withRustc =
+                removeAttrs a [ "toolchain" ]
+                // lib.optionalAttrs (!(a ? rustc) && tc != null && tc.rustc or null != null) {
+                  inherit (tc) rustc;
+                };
+            in
+            if a ? pkgs then f withRustc // { presetDirect = true; } else go a
+          )
+          {
+            toolchain = true;
+            traits = true;
+            linkerKind = true;
+          };
     in
     go { };
 
@@ -278,7 +280,10 @@ let
       # optimize with rustc's: the LLVM's clang compiles it, and its llvm-ar
       # archives it (GNU ar cannot index bitcode members).
       cc = mkDefault (
-        if crossLanguageLto then "${llvm.clang}/bin/${llvm.clang.targetPrefix}clang" else "${cc}/bin/${prefix}cc"
+        if crossLanguageLto then
+          "${llvm.clang}/bin/${llvm.clang.targetPrefix}clang"
+        else
+          "${cc}/bin/${prefix}cc"
       );
       cxx = mkDefault (
         if crossLanguageLto then
@@ -520,10 +525,12 @@ let
           # findClang); PATH is appended to the capture's.
           PATH = "${clang}/bin:${tools}:${llvm.lld}/bin";
         };
-        runner = mkDefault (chooseRunner {
-          inherit pkgs traits wine;
-          canExecute = false;
-        }).runner;
+        runner =
+          mkDefault
+            (chooseRunner {
+              inherit pkgs traits wine;
+              canExecute = false;
+            }).runner;
         testSystem = mkDefault null;
         host = hostSpec {
           inherit
@@ -601,12 +608,14 @@ let
       wasmCommon (args // { inherit triple; })
       // {
         stagePreset = mkDefault "wasmWeb";
-        runner = mkDefault (chooseRunner {
-          inherit pkgs browser;
-          traits = args.traits or (targetTraits.resolve { inherit triple; });
-          canExecute = false;
-          flavor = "wasm-bindgen";
-        }).runner;
+        runner =
+          mkDefault
+            (chooseRunner {
+              inherit pkgs browser;
+              traits = args.traits or (targetTraits.resolve { inherit triple; });
+              canExecute = false;
+              flavor = "wasm-bindgen";
+            }).runner;
       }
     );
 
@@ -692,12 +701,14 @@ let
       }
       // {
         stagePreset = mkDefault "wasmComponent";
-        runner = mkDefault (chooseRunner {
-          inherit pkgs;
-          traits = args.traits or (targetTraits.resolve { inherit triple; });
-          canExecute = false;
-          flavor = "wasmtime";
-        }).runner;
+        runner =
+          mkDefault
+            (chooseRunner {
+              inherit pkgs;
+              traits = args.traits or (targetTraits.resolve { inherit triple; });
+              canExecute = false;
+              flavor = "wasmtime";
+            }).runner;
       }
     );
   };

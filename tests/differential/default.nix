@@ -185,19 +185,19 @@ let
   aggregate =
     name: seeds:
     pkgs.runCommand name { reports = lib.attrValues seeds; } ''
-    mkdir -p $out
-    n=0; detected=0
-    for r in $reports; do
-      cat $r/summary >> $out/summary
-      head -1 $r/report-build $r/report-test >> $out/reports
-      n=$((n + 1))
-      if [ -e $r/negative-detected ]; then detected=$((detected + 1)); fi
-    done
-    cat $out/reports
-    echo "negative control: differences found in $detected of $n seeds" | tee $out/negative
-    # Not vacuous: most seeds print search paths of both classes.
-    [ $((detected * 2)) -ge $n ]
-  '';
+      mkdir -p $out
+      n=0; detected=0
+      for r in $reports; do
+        cat $r/summary >> $out/summary
+        head -1 $r/report-build $r/report-test >> $out/reports
+        n=$((n + 1))
+        if [ -e $r/negative-detected ]; then detected=$((detected + 1)); fi
+      done
+      cat $out/reports
+      echo "negative control: differences found in $detected of $n seeds" | tee $out/negative
+      # Not vacuous: most seeds print search paths of both classes.
+      [ $((detected * 2)) -ge $n ]
+    '';
   # The error paths (errors.nix) on the same releases: `default` is the
   # suite's own toolchain, the others are versionToolchains' labels.
   errors = import ./errors.nix {
@@ -209,7 +209,12 @@ let
   };
 in
 {
-  inherit seeds one versionSeeds errors;
+  inherit
+    seeds
+    one
+    versionSeeds
+    errors
+    ;
   differential = aggregate "differential-check" seeds;
   versions = lib.mapAttrs (label: aggregate "differential-${label}-check") versionSeeds;
 }

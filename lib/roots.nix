@@ -37,7 +37,9 @@ let
     ;
 
   # Accept both spellings Cargo accepts (`deprecated_underscore`).
-  get2 = t: a: b: if t ? ${a} then t.${a} else t.${b} or null;
+  get2 =
+    t: a: b:
+    if t ? ${a} then t.${a} else t.${b} or null;
 in
 rec {
   # Directory listing helpers over (root, package dir).
@@ -62,9 +64,24 @@ rec {
         # DirEntry::file_type does not follow symlinks, so only real
         # directories are searched for main.rs.
         else if type == "directory" then
-          (if existsRel root "${full}/${n}/main.rs" then [ { name = n; path = "${rel}/${n}/main.rs"; } ] else [ ])
+          (
+            if existsRel root "${full}/${n}/main.rs" then
+              [
+                {
+                  name = n;
+                  path = "${rel}/${n}/main.rs";
+                }
+              ]
+            else
+              [ ]
+          )
         else if lib.hasSuffix ".rs" n then
-          [ { name = lib.removeSuffix ".rs" n; path = "${rel}/${n}"; } ]
+          [
+            {
+              name = lib.removeSuffix ".rs" n;
+              path = "${rel}/${n}";
+            }
+          ]
         else
           [ ];
     in
@@ -139,27 +156,38 @@ rec {
       allNamed = tomlTargets == null || lib.all (t: t ? name && t ? path) tomlTargets;
     in
     if autodiscover == false && allNamed then
-      map (t: t // { path = util.normalizeRel t.path; }) (if tomlTargets == null then [ ] else tomlTargets)
+      map (t: t // { path = util.normalizeRel t.path; }) (
+        if tomlTargets == null then [ ] else tomlTargets
+      )
     else
-      map (
-        t:
-        if !(t ? name) then
-          throw "breakbulk: ${pkgDir}: ${kind} target ${kind}.name is required"
-        else
-          t
-          // {
-            path = targetPath {
-              inherit
-                inferred
-                kind
-                edition
-                legacyPath
-                pkgDir
-                ;
-              target = t;
-            };
-          }
-      ) (mergeInferred { inherit tomlTargets inferred autodiscover edition; });
+      map
+        (
+          t:
+          if !(t ? name) then
+            throw "breakbulk: ${pkgDir}: ${kind} target ${kind}.name is required"
+          else
+            t
+            // {
+              path = targetPath {
+                inherit
+                  inferred
+                  kind
+                  edition
+                  legacyPath
+                  pkgDir
+                  ;
+                target = t;
+              };
+            }
+        )
+        (mergeInferred {
+          inherit
+            tomlTargets
+            inferred
+            autodiscover
+            edition
+            ;
+        });
 
   # normalize_lib + to_lib_target
   libTarget =
@@ -229,31 +257,33 @@ rec {
         doctest = true;
       };
 
-  mkTarget =
-    t: defaults:
-    {
-      inherit (t) name;
-      path = util.normalizeRel t.path;
-      inherit (defaults) kind crateTypes;
-      test = t.test or defaults.tested;
-      bench = t.bench or defaults.benched;
-      doctest = t.doctest or defaults.doctest;
-      harness = t.harness or true;
-      requiredFeatures = get2 t "required-features" "required_features";
-      # Whether Cargo builds it for the build machine (`Target::for_host`,
-      # as `configure` sets it on every kind): `proc-macro`, else a
-      # `proc-macro` crate type.
-      forHost =
-        let
-          pm = get2 t "proc-macro" "proc_macro";
-          ct = get2 t "crate-type" "crate_type";
-        in
-        if pm != null then pm else ct != null && lib.elem "proc-macro" ct;
-    };
+  mkTarget = t: defaults: {
+    inherit (t) name;
+    path = util.normalizeRel t.path;
+    inherit (defaults) kind crateTypes;
+    test = t.test or defaults.tested;
+    bench = t.bench or defaults.benched;
+    doctest = t.doctest or defaults.doctest;
+    harness = t.harness or true;
+    requiredFeatures = get2 t "required-features" "required_features";
+    # Whether Cargo builds it for the build machine (`Target::for_host`,
+    # as `configure` sets it on every kind): `proc-macro`, else a
+    # `proc-macro` crate type.
+    forHost =
+      let
+        pm = get2 t "proc-macro" "proc_macro";
+        ct = get2 t "crate-type" "crate_type";
+      in
+      if pm != null then pm else ct != null && lib.elem "proc-macro" ct;
+  };
 
   # normalize_build
   buildScripts =
-    { root, pkgDir, pkg }:
+    {
+      root,
+      pkgDir,
+      pkg,
+    }:
     let
       b = pkg.build or null;
     in
@@ -287,37 +317,58 @@ rec {
       packageName = info.name;
 
       libT = libTarget {
-        inherit root pkgDir packageName edition;
+        inherit
+          root
+          pkgDir
+          packageName
+          edition
+          ;
         tomlLib = m.lib or null;
         autolib = pkg.autolib or null;
       };
       hasLib = libT != null;
 
       binInferred =
-        (if existsRel root (util.joinRel pkgDir "src/main.rs") then [ { name = packageName; path = "src/main.rs"; } ] else [ ])
+        (
+          if existsRel root (util.joinRel pkgDir "src/main.rs") then
+            [
+              {
+                name = packageName;
+                path = "src/main.rs";
+              }
+            ]
+          else
+            [ ]
+        )
         ++ inferFromDirectory root pkgDir "src/bin";
 
       # legacy_bin_path
       legacyBin =
         t:
         let
-          candidates =
-            lib.optional (!hasLib) "src/${t.name}.rs"
-            ++ [
-              "src/main.rs"
-              "src/bin/main.rs"
-            ];
+          candidates = lib.optional (!hasLib) "src/${t.name}.rs" ++ [
+            "src/main.rs"
+            "src/bin/main.rs"
+          ];
         in
         lib.findFirst (c: existsRel root (util.joinRel pkgDir c)) null candidates;
 
       legacyBench =
         t:
-        if t.name == "bench" && existsRel root (util.joinRel pkgDir "src/bench.rs") then "src/bench.rs" else null;
+        if t.name == "bench" && existsRel root (util.joinRel pkgDir "src/bench.rs") then
+          "src/bench.rs"
+        else
+          null;
 
       norm =
         kind: tomlKey: autoKey: dir: legacy:
         normalizeTargets {
-          inherit root pkgDir kind edition;
+          inherit
+            root
+            pkgDir
+            kind
+            edition
+            ;
           tomlTargets = m.${tomlKey} or null;
           inferred = if dir == null then binInferred else inferFromDirectory root pkgDir dir;
           autodiscover = pkg.${autoKey} or null;
@@ -372,18 +423,23 @@ rec {
         }
       ) (norm "bench" "bench" "autobenches" "benches" legacyBench);
 
-      builds = map (p: {
-        kind = "custom-build";
-        name = "build-script-${lib.removeSuffix ".rs" (baseNameOf p)}";
-        path = p;
-        crateTypes = [ "bin" ];
-        test = false;
-        bench = false;
-        doctest = false;
-        harness = true;
-        requiredFeatures = null;
-        forHost = true;
-      }) (buildScripts { inherit root pkgDir pkg; });
+      builds =
+        map
+          (p: {
+            kind = "custom-build";
+            name = "build-script-${lib.removeSuffix ".rs" (baseNameOf p)}";
+            path = p;
+            crateTypes = [ "bin" ];
+            test = false;
+            bench = false;
+            doctest = false;
+            harness = true;
+            requiredFeatures = null;
+            forHost = true;
+          })
+          (buildScripts {
+            inherit root pkgDir pkg;
+          });
 
       targets = lib.optional hasLib libT ++ bins ++ examples ++ tests ++ benches ++ builds;
     in
@@ -422,7 +478,17 @@ rec {
       # crate types can be doctested (Target::doctestable: lib, rlib, proc-macro).
       doc = map (root "doctest") (
         filter (
-          t: isLib t && t.doctest && lib.any (c: lib.elem c [ "lib" "rlib" "proc-macro" ]) t.crateTypes
+          t:
+          isLib t
+          && t.doctest
+          && lib.any (
+            c:
+            lib.elem c [
+              "lib"
+              "rlib"
+              "proc-macro"
+            ]
+          ) t.crateTypes
         ) ordinary
       );
     };

@@ -64,9 +64,9 @@ let
   cratesOf =
     plan:
     lib.unique (
-      map (u: if u.kind == "compile" then u.crate.name else "run:${lib.last (lib.splitString "#" u.package)}") (
-        lib.attrValues plan.units
-      )
+      map (
+        u: if u.kind == "compile" then u.crate.name else "run:${lib.last (lib.splitString "#" u.package)}"
+      ) (lib.attrValues plan.units)
     );
 
   none = "x86_64-unknown-none";
@@ -144,12 +144,11 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
           touch $out
         '';
 
-    build-std-deps =
-      pkgs.runCommand "build-std-deps" { app = hosted.workspaces.main.packages.app; } ''
-        $app/bin/app | tee out.txt
-        grep -qx 'hashmap has 3 entries' out.txt
-        mkdir -p $out
-        cp out.txt $out/
-      '';
+    build-std-deps = pkgs.runCommand "build-std-deps" { app = hosted.workspaces.main.packages.app; } ''
+      $app/bin/app | tee out.txt
+      grep -qx 'hashmap has 3 entries' out.txt
+      mkdir -p $out
+      cp out.txt $out/
+    '';
   };
 }

@@ -148,9 +148,7 @@ let
     }. The shell uses ${show last.value} from ${last.label}: the last value, with packages in Cargo.lock order and the target's env after them. To choose a value, set `workspaces.${name}.devShell.env.${var}`.";
 
   ownEnv = lib.filterAttrs (_: v: v != null) (
-    packageEnv
-    // planEnv
-    // lib.mapAttrs (_: v: if v == null then null else envString v) shellEnv
+    packageEnv // planEnv // lib.mapAttrs (_: v: if v == null then null else envString v) shellEnv
   );
 
   # Variables that change what Cargo builds but never reach the planner.
@@ -186,40 +184,36 @@ let
     (cargoEnv.warnings or [ ]) ++ lib.mapAttrsToList conflictWarning conflicts
   );
 in
-lib.foldr lib.warn
-  (
-    pkgs.mkShell {
-      name = "breakbulk-${name}";
-      packages = pkgsList;
-      nativeBuildInputs = nativeInputs;
-      buildInputs = inputs;
-      strictDeps = true;
-      env = ownEnv;
-      breakbulkOwnEnv = lib.concatStringsSep " " (lib.attrNames ownEnv);
-      shellHook = ''
-        __breakbulk_warn() { echo "breakbulk: $*" >&2; }
-        for __bb_v in "''${!CARGO_@}" ${lib.concatStringsSep " " watched}; do
-          # Exported variables only (the planner's Cargo would inherit
-          # nothing else either).
-          case "$(declare -p "$__bb_v" 2>/dev/null)" in "declare -x"*) ;; *) continue ;; esac
-          case " $breakbulkOwnEnv " in *" $__bb_v "*) continue ;; esac
-          case "$__bb_v" in
-            ${lib.concatStringsSep " | " harmless}) ;;
-            CARGO_* | ${lib.concatStringsSep " | " watched})
-              __breakbulk_warn "$__bb_v is set in your environment. breakbulk's planner does not see it, so Nix builds will differ from local cargo; move the setting into the project's .cargo/config.toml." ;;
-          esac
-        done
-        for __bb_f in "''${CARGO_HOME:-$HOME/.cargo}"/config.toml "''${CARGO_HOME:-$HOME/.cargo}"/config; do
-          if [ -f "$__bb_f" ]; then
-            __breakbulk_warn "$__bb_f exists. breakbulk's planner reads only the project's own Cargo config; settings there that change the build do not reach Nix builds."
-          fi
-        done
-        unset __bb_v __bb_f
-        unset -f __breakbulk_warn
-      '';
-      # The messages that evaluating the shell prints, for reading them
-      # without parsing the evaluator's stderr.
-      passthru = { inherit warnings; };
-    }
-  )
-  warnings
+lib.foldr lib.warn (pkgs.mkShell {
+  name = "breakbulk-${name}";
+  packages = pkgsList;
+  nativeBuildInputs = nativeInputs;
+  buildInputs = inputs;
+  strictDeps = true;
+  env = ownEnv;
+  breakbulkOwnEnv = lib.concatStringsSep " " (lib.attrNames ownEnv);
+  shellHook = ''
+    __breakbulk_warn() { echo "breakbulk: $*" >&2; }
+    for __bb_v in "''${!CARGO_@}" ${lib.concatStringsSep " " watched}; do
+      # Exported variables only (the planner's Cargo would inherit
+      # nothing else either).
+      case "$(declare -p "$__bb_v" 2>/dev/null)" in "declare -x"*) ;; *) continue ;; esac
+      case " $breakbulkOwnEnv " in *" $__bb_v "*) continue ;; esac
+      case "$__bb_v" in
+        ${lib.concatStringsSep " | " harmless}) ;;
+        CARGO_* | ${lib.concatStringsSep " | " watched})
+          __breakbulk_warn "$__bb_v is set in your environment. breakbulk's planner does not see it, so Nix builds will differ from local cargo; move the setting into the project's .cargo/config.toml." ;;
+      esac
+    done
+    for __bb_f in "''${CARGO_HOME:-$HOME/.cargo}"/config.toml "''${CARGO_HOME:-$HOME/.cargo}"/config; do
+      if [ -f "$__bb_f" ]; then
+        __breakbulk_warn "$__bb_f exists. breakbulk's planner reads only the project's own Cargo config; settings there that change the build do not reach Nix builds."
+      fi
+    done
+    unset __bb_v __bb_f
+    unset -f __breakbulk_warn
+  '';
+  # The messages that evaluating the shell prints, for reading them
+  # without parsing the evaluator's stderr.
+  passthru = { inherit warnings; };
+}) warnings

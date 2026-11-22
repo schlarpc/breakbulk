@@ -48,25 +48,33 @@ let
     else
       throw "${name}: ${builtins.toJSON failures}";
 
-  doctestable = t: t.kind == "lib" && lib.any (c: lib.elem c [ "lib" "rlib" "proc-macro" ]) t.crateTypes;
+  doctestable =
+    t:
+    t.kind == "lib"
+    && lib.any (
+      c:
+      lib.elem c [
+        "lib"
+        "rlib"
+        "proc-macro"
+      ]
+    ) t.crateTypes;
 
   # The prediction, in the shape of tests/nix/metadata-shape.jq.
-  predictedShape =
-    wsRoots:
-    {
-      members = lib.sort (a: b: a < b) (lib.attrNames wsRoots);
-      packages = lib.mapAttrs (
-        _: p:
-        map (t: {
-          kind = if t.kind == "lib" then t.crateTypes else [ t.kind ];
-          crate_types = if t.kind == "lib" || t.kind == "example" then t.crateTypes else [ "bin" ];
-          inherit (t) name test;
-          src_path = bb.util.joinRel p.dir t.path;
-          doctest = t.doctest && doctestable t;
-          required_features = t.requiredFeatures;
-        }) p.targets
-      ) wsRoots;
-    };
+  predictedShape = wsRoots: {
+    members = lib.sort (a: b: a < b) (lib.attrNames wsRoots);
+    packages = lib.mapAttrs (
+      _: p:
+      map (t: {
+        kind = if t.kind == "lib" then t.crateTypes else [ t.kind ];
+        crate_types = if t.kind == "lib" || t.kind == "example" then t.crateTypes else [ "bin" ];
+        inherit (t) name test;
+        src_path = bb.util.joinRel p.dir t.path;
+        doctest = t.doctest && doctestable t;
+        required_features = t.requiredFeatures;
+      }) p.targets
+    ) wsRoots;
+  };
 
   # One comparison: `root` is a store path (string) or Nix path holding the
   # workspace; `wsDir` its workspace directory.
@@ -129,27 +137,79 @@ let
 
   corpus = [
     # src/bin/*.rs next to a lib
-    { name = "cargo-binutils"; version = "0.3.6"; checksum = "ec9a0e2ad2c6ec1516256bf9d0f07841a55265f2167e5d1c88ed1f99c73900da"; }
+    {
+      name = "cargo-binutils";
+      version = "0.3.6";
+      checksum = "ec9a0e2ad2c6ec1516256bf9d0f07841a55265f2167e5d1c88ed1f99c73900da";
+    }
     # [[bin]] with path src/bin/<name>/main.rs and required-features
-    { name = "sccache"; version = "0.7.7"; checksum = "578f230c68caf909e056db3be748acfe19cd7e5bc5b985a27e4e63b826b9777c"; }
+    {
+      name = "sccache";
+      version = "0.7.7";
+      checksum = "578f230c68caf909e056db3be748acfe19cd7e5bc5b985a27e4e63b826b9777c";
+    }
     # autotests = false with an explicit [[test]] path
-    { name = "regex"; version = "1.10.4"; checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c"; }
+    {
+      name = "regex";
+      version = "1.10.4";
+      checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c";
+    }
     # many [[example]] tables with required-features
-    { name = "clap"; version = "4.4.18"; checksum = "1e578d6ec4194633722ccf9544794b71b1385c3c027efe0c55db226fc880865c"; }
+    {
+      name = "clap";
+      version = "4.4.18";
+      checksum = "1e578d6ec4194633722ccf9544794b71b1385c3c027efe0c55db226fc880865c";
+    }
     # [[test]] and [[bench]] tables, harness = false
-    { name = "syn"; version = "2.0.48"; checksum = "0f3531638e407dfc0814761abb7c00a5b54992b849452a0646b7f65c9f770f3f"; }
+    {
+      name = "syn";
+      version = "2.0.48";
+      checksum = "0f3531638e407dfc0814761abb7c00a5b54992b849452a0646b7f65c9f770f3f";
+    }
     # src/bin/*/main.rs (wasm-bindgen-test-runner)
-    { name = "wasm-bindgen-cli"; version = "0.2.92"; checksum = "08f61e21873f51e3059a8c7c3eef81ede7513d161cfc60751c7b2ffa6ed28270"; }
-    { name = "mdbook"; version = "0.4.37"; checksum = "0c33564061c3c640bed5ace7d6a2a1b65f2c64257d1ac930c15e94ed0fb561d3"; }
-    { name = "criterion"; version = "0.5.1"; checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"; }
+    {
+      name = "wasm-bindgen-cli";
+      version = "0.2.92";
+      checksum = "08f61e21873f51e3059a8c7c3eef81ede7513d161cfc60751c7b2ffa6ed28270";
+    }
+    {
+      name = "mdbook";
+      version = "0.4.37";
+      checksum = "0c33564061c3c640bed5ace7d6a2a1b65f2c64257d1ac930c15e94ed0fb561d3";
+    }
+    {
+      name = "criterion";
+      version = "0.5.1";
+      checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f";
+    }
     # edition 2015
-    { name = "rand"; version = "0.4.6"; checksum = "552840b97013b1a26992c11eac34bdd778e464601a4c2054b5f0bff7c6761293"; }
-    { name = "lazy_static"; version = "1.4.0"; checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"; }
+    {
+      name = "rand";
+      version = "0.4.6";
+      checksum = "552840b97013b1a26992c11eac34bdd778e464601a4c2054b5f0bff7c6761293";
+    }
+    {
+      name = "lazy_static";
+      version = "1.4.0";
+      checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646";
+    }
     # [[bin]] path = "main.rs" at the package root
-    { name = "bindgen-cli"; version = "0.69.4"; checksum = "5d31479f44d2c9eed368e5f945cb4846d2c8313bd91feb16b6ae937a80b7ae01"; }
+    {
+      name = "bindgen-cli";
+      version = "0.69.4";
+      checksum = "5d31479f44d2c9eed368e5f945cb4846d2c8313bd91feb16b6ae937a80b7ae01";
+    }
     # published with normalized, fully explicit targets (auto* = false)
-    { name = "ripgrep"; version = "14.1.1"; checksum = "f77b8032dc584527975f34aa5a897d0ef5a785573fda778771a614ff9da501d9"; }
-    { name = "tokio"; version = "1.36.0"; checksum = "61285f6515fa018fb2d1e46eb21223fff441ee8db5d0f1435e8ab4f5cdb80931"; }
+    {
+      name = "ripgrep";
+      version = "14.1.1";
+      checksum = "f77b8032dc584527975f34aa5a897d0ef5a785573fda778771a614ff9da501d9";
+    }
+    {
+      name = "tokio";
+      version = "1.36.0";
+      checksum = "61285f6515fa018fb2d1e46eb21223fff441ee8db5d0f1435e8ab4f5cdb80931";
+    }
   ];
 
   corpusEntry =
@@ -228,53 +288,60 @@ let
       bench = entries "bench";
     };
 
-  rootsPlans = pkgs.runCommandCC "roots-plans" {
-    nativeBuildInputs = [ cargo rustc jq ];
-    expectedJson = builtins.toJSON (planExpectation rootsLayouts);
-    passAsFile = [ "expectedJson" ];
-  } ''
-    export CARGO_HOME=$TMPDIR/cargo-home
-    cp -r ${rootsLayouts} ws
-    chmod -R u+w ws
-    cd ws
-    root=$(pwd)
-    # Roots of a plan from Cargo's JSON messages: test-mode units, plus
-    # (cargo build) every unit, or (cargo test) examples built in build mode.
-    collect() {
-      jq -r --arg root "$root/" --arg plan "$1" '
-        select(.reason == "compiler-artifact")
-        | (.manifest_path | ltrimstr($root) | sub("/?Cargo.toml$"; "")) as $dir
-        | (.target.kind) as $k
-        | (if ($k | index("example")) then "example"
-           elif ($k | index("test")) then "test"
-           elif ($k | index("bench")) then "bench"
-           elif ($k | index("custom-build")) then "custom-build"
-           elif ($k | index("bin")) then "bin"
-           else "lib" end) as $kind
-        | (if .profile.test then "test" else "build" end) as $mode
-        | select($kind != "custom-build")
-        | select($plan == "build" or $mode == "test" or ($plan == "test" and $kind == "example"))
-        | "\($dir)|\($kind)|\(.target.name)|\($mode)"'
-    }
-    cargo build --workspace --offline --message-format=json -q | collect build | sort -u > got-build
-    cargo test --workspace --no-run --offline --message-format=json -q | collect test | sort -u > got-test
-    cargo bench --workspace --no-run --offline --message-format=json -q | collect bench | sort -u > got-bench
-    fail=0
-    for plan in build test bench; do
-      jq -r ".$plan[] | .key" "$expectedJsonPath" | sort -u > want-$plan
-      jq -r ".$plan[] | select(.optional | not) | .key" "$expectedJsonPath" | sort -u > want-required-$plan
-      # Cargo may skip roots whose required-features are off; nothing else.
-      if ! comm -13 want-$plan got-$plan | diff /dev/null - ; then
-        echo "$plan: Cargo built roots that were not predicted"; fail=1
-      fi
-      if ! comm -23 want-required-$plan got-$plan | diff /dev/null - ; then
-        echo "$plan: predicted roots without required-features that Cargo did not build"; fail=1
-      fi
-      echo "== $plan"; cat got-$plan
-    done
-    [ $fail = 0 ]
-    touch $out
-  '';
+  rootsPlans =
+    pkgs.runCommandCC "roots-plans"
+      {
+        nativeBuildInputs = [
+          cargo
+          rustc
+          jq
+        ];
+        expectedJson = builtins.toJSON (planExpectation rootsLayouts);
+        passAsFile = [ "expectedJson" ];
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r ${rootsLayouts} ws
+        chmod -R u+w ws
+        cd ws
+        root=$(pwd)
+        # Roots of a plan from Cargo's JSON messages: test-mode units, plus
+        # (cargo build) every unit, or (cargo test) examples built in build mode.
+        collect() {
+          jq -r --arg root "$root/" --arg plan "$1" '
+            select(.reason == "compiler-artifact")
+            | (.manifest_path | ltrimstr($root) | sub("/?Cargo.toml$"; "")) as $dir
+            | (.target.kind) as $k
+            | (if ($k | index("example")) then "example"
+               elif ($k | index("test")) then "test"
+               elif ($k | index("bench")) then "bench"
+               elif ($k | index("custom-build")) then "custom-build"
+               elif ($k | index("bin")) then "bin"
+               else "lib" end) as $kind
+            | (if .profile.test then "test" else "build" end) as $mode
+            | select($kind != "custom-build")
+            | select($plan == "build" or $mode == "test" or ($plan == "test" and $kind == "example"))
+            | "\($dir)|\($kind)|\(.target.name)|\($mode)"'
+        }
+        cargo build --workspace --offline --message-format=json -q | collect build | sort -u > got-build
+        cargo test --workspace --no-run --offline --message-format=json -q | collect test | sort -u > got-test
+        cargo bench --workspace --no-run --offline --message-format=json -q | collect bench | sort -u > got-bench
+        fail=0
+        for plan in build test bench; do
+          jq -r ".$plan[] | .key" "$expectedJsonPath" | sort -u > want-$plan
+          jq -r ".$plan[] | select(.optional | not) | .key" "$expectedJsonPath" | sort -u > want-required-$plan
+          # Cargo may skip roots whose required-features are off; nothing else.
+          if ! comm -13 want-$plan got-$plan | diff /dev/null - ; then
+            echo "$plan: Cargo built roots that were not predicted"; fail=1
+          fi
+          if ! comm -23 want-required-$plan got-$plan | diff /dev/null - ; then
+            echo "$plan: predicted roots without required-features that Cargo did not build"; fail=1
+          fi
+          echo "== $plan"; cat got-$plan
+        done
+        [ $fail = 0 ]
+        touch $out
+      '';
 
   # --- skeleton --------------------------------------------------------------
 
@@ -284,7 +351,11 @@ let
     in
     pkgs.runCommand "skeleton"
       {
-        nativeBuildInputs = [ cargo rustc jq ];
+        nativeBuildInputs = [
+          cargo
+          rustc
+          jq
+        ];
       }
       ''
         export CARGO_HOME=$TMPDIR/cargo-home
@@ -320,7 +391,9 @@ let
         packages.normalized.test.workspaceManifest = false;
       };
     in
-    assert lib.assertMsg (views.bin-dirs.runDir == null) "source-views: bin-dirs' runs have a view of their own";
+    assert lib.assertMsg (
+      views.bin-dirs.runDir == null
+    ) "source-views: bin-dirs' runs have a view of their own";
     assert lib.assertMsg (
       "${views.normalized.src}" == "${views.normalized.testSrc}"
     ) "source-views: normalized's test view differs from its build view";
@@ -417,7 +490,10 @@ let
     in
     pkgs.runCommandCC name
       {
-        nativeBuildInputs = [ cargo rustc ];
+        nativeBuildInputs = [
+          cargo
+          rustc
+        ];
         passthru = { inherit vendor; };
       }
       ''
@@ -466,10 +542,12 @@ in
         rs.beta.latest
         rs.nightly.latest
       ];
-      sysroot = t: bb.wasiSdk.sysrootFor {
-        inherit pkgs;
-        version = bb.wasiSdk.versionFor t.version;
-      };
+      sysroot =
+        t:
+        bb.wasiSdk.sysrootFor {
+          inherit pkgs;
+          version = bb.wasiSdk.versionFor t.version;
+        };
     in
     pkgs.runCommand "wasi-sdk-table" { } ''
       set -eu
@@ -506,7 +584,9 @@ in
       missing = lib.filter (e: e.llvm == null) expected;
     in
     assert lib.assertMsg (missing == [ ])
-      "llvm-versions: not in the table (extend it, or `verifiedThrough`): ${toString (map (e: e.version) missing)}";
+      "llvm-versions: not in the table (extend it, or `verifiedThrough`): ${
+        toString (map (e: e.version) missing)
+      }";
     pkgs.runCommand "llvm-versions" { } ''
       set -eu
       ${lib.concatMapStrings (t: ''

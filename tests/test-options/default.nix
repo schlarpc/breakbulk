@@ -91,8 +91,20 @@ let
 in
 {
   runs = {
-    before = (runsOf (mkRepo fixture [ strip narrow ])).data;
-    after = (runsOf (mkRepo bothEdited [ strip narrow ])).data;
+    before =
+      (runsOf (
+        mkRepo fixture [
+          strip
+          narrow
+        ]
+      )).data;
+    after =
+      (runsOf (
+        mkRepo bothEdited [
+          strip
+          narrow
+        ]
+      )).data;
   };
 
   strip-for-run =
@@ -138,7 +150,8 @@ in
     assert lib.assertMsg (
       !(lib.elem (builtins.unsafeDiscardStringContext "${fullView}") inputs)
     ) "run-files: the data test run names app's source view";
-    assert lib.assertMsg (lib.elem (viewOf dir) inputs) "run-files: the data test run does not name the narrowed view";
+    assert lib.assertMsg (lib.elem (viewOf dir) inputs)
+      "run-files: the data test run does not name the narrowed view";
     assert lib.assertMsg (
       builtins.unsafeDiscardStringContext dir == builtins.unsafeDiscardStringContext editedDir
     ) "run-files: editing notes.md changed the narrowed view";

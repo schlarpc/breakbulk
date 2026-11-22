@@ -86,7 +86,9 @@ let
         in
         aggregate pkgs gName (
           lib.foldl' (a: b: a // b) { } selected
-          // lib.listToAttrs (lib.imap0 (i: d: lib.nameValuePair "derivations/${toString i}-${d.name or "item"}" d) drvs)
+          // lib.listToAttrs (
+            lib.imap0 (i: d: lib.nameValuePair "derivations/${toString i}-${d.name or "item"}" d) drvs
+          )
         );
     in
     if clash != [ ] then

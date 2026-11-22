@@ -220,7 +220,8 @@ let
       );
       # An output of outer derivation `w` (`outer`, by default).
       outputOfIn =
-        w: what: output: featureGates.outputOf nixFeatures "the ${what} of `${w.name}`" w.${output}.outPath "out";
+        w: what: output:
+        featureGates.outputOf nixFeatures "the ${what} of `${w.name}`" w.${output}.outPath "out";
       outputOf = outputOfIn outer;
       # Without predicted roots (check and clippy plans) the outer
       # derivation has only its `units.drv` output.
@@ -606,7 +607,9 @@ let
     }:
     let
       useCa = ca;
-      caAttrs = lib.optionalAttrs useCa (featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)");
+      caAttrs = lib.optionalAttrs useCa (
+        featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)"
+      );
       # The predicted platform picks the run's system, so it must be known
       # at evaluation time; instantiation checks it against the plan.
       platforms = testRuns.testPlatforms {
@@ -781,9 +784,7 @@ let
           libdir=${lib.escapeShellArg libdir}
           subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" -e "s|\"@LIBDIR@\"|$libdir|g"; }
           ${jq} -c '.testSpec.nextest.binaries' "$info" | subst > $TMPDIR/binaries-metadata.json
-          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst | ${
-            testRuns.nextestWorkdirJq jq ''"$CARGO_MANIFEST_DIR"''
-          } > $TMPDIR/cargo-metadata.json
+          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst | ${testRuns.nextestWorkdirJq jq ''"$CARGO_MANIFEST_DIR"''} > $TMPDIR/cargo-metadata.json
           cd $TMPDIR
           set +e
           env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
@@ -811,10 +812,12 @@ let
       # testRuns.hintScript, with the spec read from `$info`.
       hint =
         p: b: cfg:
-        testRuns.hintScript {
-          inherit tools pkgs;
-          inherit (p) testPkgs;
-        } ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), custom: (.custom // false), $widen}' "$info")"'';
+        testRuns.hintScript
+          {
+            inherit tools pkgs;
+            inherit (p) testPkgs;
+          }
+          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), custom: (.custom // false), $widen}' "$info")"'';
 
       libtestScript =
         p: b: cfg: args: bin:
@@ -967,7 +970,7 @@ let
             }}
             ${
               if checkout == null then
-                ''dir=$CARGO_MANIFEST_DIR''
+                "dir=$CARGO_MANIFEST_DIR"
               else
                 ''
                   if [ "$(${jq} -r '.testSpec.packageDir == null' "$info")" = true ]; then

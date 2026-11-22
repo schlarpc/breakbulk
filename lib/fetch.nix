@@ -84,7 +84,13 @@ let
   crateUrl =
     dl: e:
     let
-      markers = [ "{crate}" "{version}" "{prefix}" "{lowerprefix}" "{sha256-checksum}" ];
+      markers = [
+        "{crate}"
+        "{version}"
+        "{prefix}"
+        "{lowerprefix}"
+        "{sha256-checksum}"
+      ];
       hasMarker = lib.any (m: lib.hasInfix m dl) markers;
       prefix = prefixOf e.name;
     in
@@ -101,7 +107,8 @@ let
       (dlByIndex.${e.parsed.url} or (throw ''
         breakbulk: no download URL for registry ${e.parsed.url} (needed by ${e.name} ${e.version}).
         Set registries.<name> = { index = "${e.parsed.url}"; dl = "<dl template from the registry's config.json>"; };
-      '')).dl;
+      '')
+      ).dl;
 
   # Store-path-safe name fragment.
   safeName = s: replaceStrings [ "+" ] [ "_" ] s;
@@ -188,7 +195,12 @@ let
   locateInTree =
     tree: name: version:
     let
-      isDir = rel: let p = manifest.at tree rel; in pathExists p && readFileType p == "directory";
+      isDir =
+        rel:
+        let
+          p = manifest.at tree rel;
+        in
+        pathExists p && readFileType p == "directory";
       hasManifest = rel: pathExists (manifest.at tree (util.joinRel rel "Cargo.toml"));
 
       # Workspace root for inheritance of `version`, as find_workspace_root.
@@ -221,7 +233,14 @@ let
             else
               v;
         in
-        if p == null then null else { inherit rel m; name = p.name; version = version'; };
+        if p == null then
+          null
+        else
+          {
+            inherit rel m;
+            name = p.name;
+            version = version';
+          };
 
       matches = info: info != null && info.name == name && info.version == version;
 
@@ -233,16 +252,23 @@ let
         else
           let
             info = pkgAt rel;
-            st' = st // { visited = st.visited // { ${rel} = true; }; };
+            st' = st // {
+              visited = st.visited // {
+                ${rel} = true;
+              };
+            };
           in
           if matches info then
             st' // { found = rel; }
           else if info == null then
             st'
           else
-            lib.foldl' (
-              s: d: readNested s (util.joinRel rel d)
-            ) st' (lib.concatMap (t: lib.concatMap (dep: if isAttrs dep && dep ? path then [ dep.path ] else [ ]) (builtins.attrValues t)) (manifest.dependencyTables info.m));
+            lib.foldl' (s: d: readNested s (util.joinRel rel d)) st' (
+              lib.concatMap (
+                t:
+                lib.concatMap (dep: if isAttrs dep && dep ? path then [ dep.path ] else [ ]) (builtins.attrValues t)
+              ) (manifest.dependencyTables info.m)
+            );
 
       walk =
         st: rel: top:
@@ -264,7 +290,10 @@ let
             in
             lib.foldl' (s: d: walk s (util.joinRel rel d) false) st' dirs;
 
-      result = walk { found = null; visited = { }; } "" true;
+      result = walk {
+        found = null;
+        visited = { };
+      } "" true;
     in
     if result.found == null then
       throw "breakbulk: could not find package ${name} ${version} in git tree ${toString tree}"
@@ -311,7 +340,11 @@ rec {
         entry = e;
       }
     else if e.parsed.kind == "git" then
-      (gitCrate e) // { kind = "git"; entry = e; }
+      (gitCrate e)
+      // {
+        kind = "git";
+        entry = e;
+      }
     else
       throw "breakbulk: ${e.id} is a path package and is not fetched";
 

@@ -63,7 +63,10 @@ let
 
   a = lockfile.fromLockText lockA;
   b = lockfile.fromLockText lockB;
-  merged = lockfile.merge [ a b ];
+  merged = lockfile.merge [
+    a
+    b
+  ];
   find = es: n: lib.findFirst (e: e.name == n) null es;
 
   fetch = bb.mkFetch pkgs {
@@ -156,7 +159,10 @@ runTests "lib-unit" {
       kind = "git";
       url = "https://github.com/me/serde";
       # query values are percent-decoded, as `url::Url::query_pairs` does
-      reference = { type = "branch"; value = "fix/thing"; };
+      reference = {
+        type = "branch";
+        value = "fix/thing";
+      };
       precise = "abcdef0123456789abcdef0123456789abcdef01";
       id = "https://github.com/me/serde?branch=fix%2Fthing";
     };
@@ -177,24 +183,42 @@ runTests "lib-unit" {
   # as an entry but is not remote.
   testMerge = {
     expr = lib.sort (x: y: x < y) (map (e: "${e.name}@${e.version}") (builtins.attrValues merged));
-    expected = [ "app@0.1.0" "itoa@1.0.11" "priv@2.0.0" "serde@1.0.0" "serde@1.0.0" ];
+    expected = [
+      "app@0.1.0"
+      "itoa@1.0.11"
+      "priv@2.0.0"
+      "serde@1.0.0"
+      "serde@1.0.0"
+    ];
   };
   testRemote = {
     expr = map (e: e.name) (lockfile.remoteEntries a);
-    expected = [ "itoa" "serde" "priv" ];
+    expected = [
+      "itoa"
+      "serde"
+      "priv"
+    ];
   };
   testLastQueryWins = {
     expr = (lockfile.parseSource "git+https://x/y?branch=a&rev=b#c").reference;
-    expected = { type = "rev"; value = "b"; };
+    expected = {
+      type = "rev";
+      value = "b";
+    };
   };
   testRefIsBranch = {
     expr = (lockfile.parseSource "git+https://x/y?ref=a#c").reference;
-    expected = { type = "branch"; value = "a"; };
+    expected = {
+      type = "branch";
+      value = "a";
+    };
   };
 
   # --- download URLs (cargo-util src/registry.rs) -------------------------
   testCratesIoUrl = {
-    expr = fetch.crateUrl "https://static.crates.io/crates/{crate}/{crate}-{version}.crate" (find a "itoa");
+    expr = fetch.crateUrl "https://static.crates.io/crates/{crate}/{crate}-{version}.crate" (
+      find a "itoa"
+    );
     expected = "https://static.crates.io/crates/itoa/itoa-1.0.11.crate";
   };
   testTemplateMarkers = {
@@ -206,16 +230,38 @@ runTests "lib-unit" {
     expected = "x/Ab/Cd/ab/cd/AbCd/1/c";
   };
   testShortPrefixes = {
-    expr = map (n: fetch.crateUrl "{prefix}" { name = n; version = "1"; checksum = ""; }) [ "a" "ab" "abc" ];
-    expected = [ "1" "2" "3/a" ];
+    expr =
+      map
+        (
+          n:
+          fetch.crateUrl "{prefix}" {
+            name = n;
+            version = "1";
+            checksum = "";
+          }
+        )
+        [
+          "a"
+          "ab"
+          "abc"
+        ];
+    expected = [
+      "1"
+      "2"
+      "3/a"
+    ];
   };
   testNoMarkers = {
     expr = fetch.crateUrl "https://old.example/api/v1/crates" (find a "itoa");
     expected = "https://old.example/api/v1/crates/itoa/1.0.11/download";
   };
   testAltRegistryFetchUrl = {
-    expr = (fetch.fetchRegistryTarball (find a "priv")).urls or [ (fetch.fetchRegistryTarball (find a "priv")).url ];
-    expected = [ "https://my.registry/dl/pr/iv/priv/2.0.0/1111111111111111111111111111111111111111111111111111111111111111" ];
+    expr =
+      (fetch.fetchRegistryTarball (find a "priv")).urls
+        or [ (fetch.fetchRegistryTarball (find a "priv")).url ];
+    expected = [
+      "https://my.registry/dl/pr/iv/priv/2.0.0/1111111111111111111111111111111111111111111111111111111111111111"
+    ];
   };
 
   # --- vendor config --------------------------------------------------------
@@ -225,11 +271,18 @@ runTests "lib-unit" {
         h1 = util.shortHash "registry+https://github.com/rust-lang/crates.io-index";
         h2 = util.shortHash "sparse+https://my.registry/index/";
       in
-      lib.all (s: lib.hasInfix (builtins.unsafeDiscardStringContext s) (builtins.unsafeDiscardStringContext vendor.config)) [
-        "[source.crates-io]\nreplace-with = \"breakbulk-${h1}\""
-        "[source.\"my\"]\nregistry = \"sparse+https://my.registry/index/\"\nreplace-with = \"breakbulk-${h2}\""
-        "[source.\"breakbulk-${h1}\"]\ndirectory = \"${vendor.dir}/${h1}\""
-      ];
+      lib.all
+        (
+          s:
+          lib.hasInfix (builtins.unsafeDiscardStringContext s) (
+            builtins.unsafeDiscardStringContext vendor.config
+          )
+        )
+        [
+          "[source.crates-io]\nreplace-with = \"breakbulk-${h1}\""
+          "[source.\"my\"]\nregistry = \"sparse+https://my.registry/index/\"\nreplace-with = \"breakbulk-${h2}\""
+          "[source.\"breakbulk-${h1}\"]\ndirectory = \"${vendor.dir}/${h1}\""
+        ];
     expected = true;
   };
   testVendorGitSection = {
@@ -237,7 +290,9 @@ runTests "lib-unit" {
       let
         entries = lockfile.read ../fixtures/vendor-git-inherit/consumer/Cargo.lock;
         v = bb.mkVendor pkgs {
-          fetch = bb.mkFetch pkgs { gitTrees."https://example.invalid/repo" = ../fixtures/vendor-git-inherit/repo; };
+          fetch = bb.mkFetch pkgs {
+            gitTrees."https://example.invalid/repo" = ../fixtures/vendor-git-inherit/repo;
+          };
           inherit entries;
         };
         h = util.shortHash "https://example.invalid/repo?branch=main";
@@ -262,8 +317,20 @@ runTests "lib-unit" {
 
   # --- path helpers -----------------------------------------------------------
   testNormalize = {
-    expr = map util.normalizeRel [ "a/./b/../c" "./x" "../a/../../b" "" "a/" ];
-    expected = [ "a/c" "x" "../../b" "" "a" ];
+    expr = map util.normalizeRel [
+      "a/./b/../c"
+      "./x"
+      "../a/../../b"
+      ""
+      "a/"
+    ];
+    expected = [
+      "a/c"
+      "x"
+      "../../b"
+      ""
+      "a"
+    ];
   };
   testRelativeTo = {
     expr = [
@@ -271,7 +338,11 @@ runTests "lib-unit" {
       (util.relativeTo "crates/a/x" "crates/a")
       (util.relativeTo "crates/b" "crates/a")
     ];
-    expected = [ "../../README.md" "x" "../b" ];
+    expected = [
+      "../../README.md"
+      "x"
+      "../b"
+    ];
   };
   testIsUnder = {
     expr = [
@@ -281,7 +352,13 @@ runTests "lib-unit" {
       (util.isUnder "a" "ab")
       (util.isUnder "a" "a/b")
     ];
-    expected = [ true false true false true ];
+    expected = [
+      true
+      false
+      true
+      false
+      true
+    ];
   };
   testPercentDecode = {
     expr = util.percentDecode "a%2Fb%2541+c";
@@ -302,7 +379,12 @@ runTests "lib-unit" {
   };
   testGlobClass = {
     expr = util.expandGlob ../fixtures/roots-layouts "crates/[ep]*";
-    expected = [ "crates/edition2015" "crates/excluded" "crates/explicit-paths" "crates/proc" ];
+    expected = [
+      "crates/edition2015"
+      "crates/excluded"
+      "crates/explicit-paths"
+      "crates/proc"
+    ];
   };
   testGlobDoubleStar = {
     expr = util.expandGlob ../fixtures/roots-layouts "**/util";
@@ -336,7 +418,26 @@ runTests "lib-unit" {
         (m "Core" "core")
         (m "a]" "a]")
       ];
-    expected = [ true false true true false true false true false true true true true true true false false true ];
+    expected = [
+      true
+      false
+      true
+      true
+      false
+      true
+      false
+      true
+      false
+      true
+      true
+      true
+      true
+      true
+      true
+      false
+      false
+      true
+    ];
   };
   testPackagePatternErrors = {
     expr = map (p: (util.packagePattern p).error) [
@@ -359,13 +460,16 @@ runTests "lib-unit" {
     ];
   };
   testExcludeMembers = {
-    expr = bb.manifest.excludeMembers [ "core-b" "app" "core-a" "helper" ] [
-      "core-*"
-      "helper"
-      "nope"
-      "zz*"
-      "x**"
-    ];
+    expr =
+      bb.manifest.excludeMembers
+        [ "core-b" "app" "core-a" "helper" ]
+        [
+          "core-*"
+          "helper"
+          "nope"
+          "zz*"
+          "x**"
+        ];
     expected = {
       selected = [ "app" ];
       errors = [
@@ -399,9 +503,17 @@ runTests "lib-unit" {
           };
           dependencies.y = {
             version = "1";
-            features = [ "a" "b" ];
+            features = [
+              "a"
+              "b"
+            ];
           };
-          bin = [ { name = "z"; path = "src/z.rs"; } ];
+          bin = [
+            {
+              name = "z";
+              path = "src/z.rs";
+            }
+          ];
         };
       in
       builtins.fromTOML (util.toTOML v) == v;
@@ -426,11 +538,26 @@ runTests "lib-unit" {
   testMemberPackages = {
     expr = bb.manifest.memberPackages { root = ../fixtures/workspace-members; };
     expected = {
-      app = { name = "app"; path = "."; };
-      core-a = { name = "core-a"; path = "crates/core-a"; };
-      core-b = { name = "core-b"; path = "crates/core-b"; };
-      helper = { name = "helper"; path = "libs/helper"; };
-      ws-util = { name = "ws-util"; path = "crates/util"; };
+      app = {
+        name = "app";
+        path = ".";
+      };
+      core-a = {
+        name = "core-a";
+        path = "crates/core-a";
+      };
+      core-b = {
+        name = "core-b";
+        path = "crates/core-b";
+      };
+      helper = {
+        name = "helper";
+        path = "libs/helper";
+      };
+      ws-util = {
+        name = "ws-util";
+        path = "crates/util";
+      };
     };
   };
 
@@ -447,7 +574,11 @@ runTests "lib-unit" {
         bench = names r.bench;
       };
     expected = {
-      build = [ "bin:bar:build" "bin:bin-dirs:build" "bin:foo:build" ];
+      build = [
+        "bin:bar:build"
+        "bin:bin-dirs:build"
+        "bin:foo:build"
+      ];
       test = [
         "bin:bin-dirs:test"
         "bin:foo:test"
@@ -456,7 +587,12 @@ runTests "lib-unit" {
         "test:it:test"
         "test:sub:test"
       ];
-      bench = [ "bin:bar:bench" "bin:bin-dirs:bench" "bin:foo:bench" "bench:b:bench" ];
+      bench = [
+        "bin:bar:bench"
+        "bin:bin-dirs:bench"
+        "bin:foo:bench"
+        "bench:b:bench"
+      ];
     };
   };
 
@@ -608,7 +744,8 @@ runTests "lib-unit" {
             excludeAllFeatures = false;
           }
         );
-        unknown = (builtins.tryEval (bb.variants.packageFeaturePowerset (ws // { packages = [ "nope" ]; }))).success;
+        unknown =
+          (builtins.tryEval (bb.variants.packageFeaturePowerset (ws // { packages = [ "nope" ]; }))).success;
       };
       expected = {
         powerset = app // {
@@ -660,7 +797,14 @@ runTests "lib-unit" {
       expr = {
         package = checksOf (bb.variants.packageFeaturePowerset ws);
         packageOptIn = checksOf (bb.variants.packageFeaturePowerset (ws // { checks = true; }));
-        workspace = checksOf (bb.variants.featurePowerset { features = [ "a" "b" ]; });
+        workspace = checksOf (
+          bb.variants.featurePowerset {
+            features = [
+              "a"
+              "b"
+            ];
+          }
+        );
         workspaceOptIn = checksOf (
           bb.variants.featurePowerset {
             features = [ "a" ];
@@ -719,14 +863,38 @@ runTests "lib-unit" {
   # Check-group patterns: `*` within a segment, `**` across any number.
   testCheckGroupMatches = {
     expr = map (p: bb.checkGroups.matches (lib.head p) (lib.last p)) [
-      [ "*/fmt" "main/fmt" ]
-      [ "*/fmt" "main/x86_64-unknown-linux-gnu/fmt" ]
-      [ "*/*/variant-clippy/**" "main/x86_64-unknown-linux-gnu/variant-clippy/check" ]
-      [ "*/*/variant-clippy/**" "main/x86_64-unknown-linux-gnu/variant-clippy/app/build" ]
-      [ "*/*/variant-clippy/**" "main/x86_64-unknown-linux-gnu/app/build" ]
-      [ "**/test-*" "main/x86_64-unknown-linux-gnu/app/test-it" ]
-      [ "main/**" "main" ]
-      [ "ma?n/*-unknown-*/app/build" "main/x86_64-unknown-linux-gnu/app/build" ]
+      [
+        "*/fmt"
+        "main/fmt"
+      ]
+      [
+        "*/fmt"
+        "main/x86_64-unknown-linux-gnu/fmt"
+      ]
+      [
+        "*/*/variant-clippy/**"
+        "main/x86_64-unknown-linux-gnu/variant-clippy/check"
+      ]
+      [
+        "*/*/variant-clippy/**"
+        "main/x86_64-unknown-linux-gnu/variant-clippy/app/build"
+      ]
+      [
+        "*/*/variant-clippy/**"
+        "main/x86_64-unknown-linux-gnu/app/build"
+      ]
+      [
+        "**/test-*"
+        "main/x86_64-unknown-linux-gnu/app/test-it"
+      ]
+      [
+        "main/**"
+        "main"
+      ]
+      [
+        "ma?n/*-unknown-*/app/build"
+        "main/x86_64-unknown-linux-gnu/app/build"
+      ]
     ];
     expected = [
       true
@@ -741,19 +909,22 @@ runTests "lib-unit" {
   };
   # A later layer's single value wins without mkForce; lists concatenate.
   testLayerPlain = {
-    expr = layered {
-      profile = "base";
-      features = [ "b" ];
-    } [
-      {
-        profile = "one";
-        features = [ "1" ];
-      }
-      {
-        profile = "two";
-        flag = true;
-      }
-    ];
+    expr =
+      layered
+        {
+          profile = "base";
+          features = [ "b" ];
+        }
+        [
+          {
+            profile = "one";
+            features = [ "1" ];
+          }
+          {
+            profile = "two";
+            flag = true;
+          }
+        ];
     expected = {
       profile = "two";
       flag = true;
@@ -781,15 +952,13 @@ runTests "lib-unit" {
   };
   # A nested option layers as a top-level one: the later layer wins.
   testLayerNested = {
-    expr =
-      map (l: (layeredConfig (_: v: v) { docs.check = false; } l).docs.check)
-        [
-          [ { docs.check = true; } ]
-          [
-            { docs.check = true; }
-            { docs = lib.mkIf true { check = false; }; }
-          ]
-        ];
+    expr = map (l: (layeredConfig (_: v: v) { docs.check = false; } l).docs.check) [
+      [ { docs.check = true; } ]
+      [
+        { docs.check = true; }
+        { docs = lib.mkIf true { check = false; }; }
+      ]
+    ];
     expected = [
       true
       false

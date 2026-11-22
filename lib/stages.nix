@@ -300,9 +300,7 @@ let
       afterInstall = if isLive "install" then reachBy explicit "install" else [ ];
       # x must come before y: by constraint, or because every other stage
       # runs before `install` by default.
-      edge =
-        x: y:
-        explicit x y || (y == "install" && x != "install" && !(elem x afterInstall));
+      edge = x: y: explicit x y || (y == "install" && x != "install" && !(elem x afterInstall));
 
       fmtList = l: if l == [ ] then "-" else concatStringsSep ", " l;
       width = lib.foldl' (w: n: lib.max w (lib.stringLength n)) 6 names;

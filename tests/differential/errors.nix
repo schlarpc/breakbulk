@@ -78,7 +78,9 @@ let
           ];
           cases = toString cases;
         }
-        // lib.listToAttrs (map (c: lib.nameValuePair "unit_${lib.replaceStrings [ "-" ] [ "_" ] c}" (runOf c)) cases)
+        // lib.listToAttrs (
+          map (c: lib.nameValuePair "unit_${lib.replaceStrings [ "-" ] [ "_" ] c}" (runOf c)) cases
+        )
       )
       ''
         export CARGO_HOME=$TMPDIR/cargo-home

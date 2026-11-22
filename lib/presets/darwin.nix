@@ -75,7 +75,10 @@ let
             Apple's Xcode and Apple SDKs Agreement (https://www.apple.com/legal/sla/docs/xcode.pdf) authorizes the SDK only on Apple-branded computers, so breakbulk does not fetch it on another machine by default: passing it is your own licence decision.''
       )
     else if builtins.isString sdk then
-      appleSdk { inherit pkgs; version = sdk; }
+      appleSdk {
+        inherit pkgs;
+        version = sdk;
+      }
     else
       sdk;
   version = if sdkVersion != null then sdkVersion else appleSdk.versionOf sdkPackage;
@@ -155,9 +158,12 @@ let
     hostPlatform = lib.systems.elaborate triple;
   };
 in
-assert lib.assertMsg (traits.isApple && traits.os == "macos")
-  "breakbulk.presets.darwin: `${triple}` is not a macOS target";
-assert lib.assertMsg (!onMac) "breakbulk.presets.darwin: Mac build machines are not supported yet (issue #13)";
+assert lib.assertMsg (
+  traits.isApple && traits.os == "macos"
+) "breakbulk.presets.darwin: `${triple}` is not a macOS target";
+assert lib.assertMsg (
+  !onMac
+) "breakbulk.presets.darwin: Mac build machines are not supported yet (issue #13)";
 assert checked;
 {
   packageSet = mkDefault null;

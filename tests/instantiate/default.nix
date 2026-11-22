@@ -144,7 +144,9 @@ let
   reformatted = breakbulk.instantiate (
     args
     // {
-      plan = builtins.toFile "plan-compact.json" (builtins.toJSON (builtins.fromJSON (planText pkgs.rustc)));
+      plan = builtins.toFile "plan-compact.json" (
+        builtins.toJSON (builtins.fromJSON (planText pkgs.rustc))
+      );
     }
   );
 
@@ -248,11 +250,12 @@ let
     env-values-do-not-rerun-instantiate =
       envA.unitsJson.drvPath == envB.unitsJson.drvPath
       # The build script compiles for the host: unchanged.
-      && changed envA envB == [
-        "c-a0e9aa7440d71279"
-        "c-a6654c0a89d81026"
-        "r-smokelib-63aa584f9c6a6c6c"
-      ]
+      &&
+        changed envA envB == [
+          "c-a0e9aa7440d71279"
+          "c-a6654c0a89d81026"
+          "r-smokelib-63aa584f9c6a6c6c"
+        ]
       && lib.hasInfix ''"SMOKE_MARKER":"b \"quoted\"\n"'' (unitText envB "c-a6654c0a89d81026");
     list-like-env-appends =
       listEnvLib.env.PATH == "${pkgs.hello}/bin:${pkgs.cowsay}/bin"
@@ -260,12 +263,20 @@ let
       && listEnvLib.env.PKG_CONFIG_PATH == "/spec"
       && listEnvLib.env.SMOKE_MARKER == "override"
       # The joined values keep their context: both PATH entries are inputs.
-      && lib.all (p: builtins.getContext (unitText listEnv "c-a0e9aa7440d71279") ? ${builtins.unsafeDiscardStringContext p.drvPath}) [
-        pkgs.hello
-        pkgs.cowsay
-      ];
+      &&
+        lib.all
+          (
+            p:
+            builtins.getContext (unitText listEnv "c-a0e9aa7440d71279")
+              ? ${builtins.unsafeDiscardStringContext p.drvPath}
+          )
+          [
+            pkgs.hello
+            pkgs.cowsay
+          ];
     source-views-do-not-rerun-instantiate =
-      appView.unitsJson.drvPath == inst.unitsJson.drvPath && changed inst appView == [ "c-a6654c0a89d81026" ];
+      appView.unitsJson.drvPath == inst.unitsJson.drvPath
+      && changed inst appView == [ "c-a6654c0a89d81026" ];
     nothing-else-realised = builtins.deepSeq (drvPaths unbuildable) true;
     builder = inst.units.c-a6654c0a89d81026.builder == "${smoke.breakbulk-unit}/bin/breakbulk-unit";
     # A short unit text stays in the environment; the attribute is there
@@ -327,7 +338,8 @@ let
     stubs =
       inst.roots."smokeapp/bin/admin-cli".breakbulkRoot.reason
       == "`admin-cli` was not built by Cargo in variant `dev`: required features `[cli]` not enabled"
-      && inst.roots."smokeapp/test/it".breakbulkRoot.reason
+      &&
+        inst.roots."smokeapp/test/it".breakbulkRoot.reason
         == "`it` was skipped: not built by Cargo in variant `dev`: Cargo did not select it"
       && app.breakbulkRoot.unit == "c-a6654c0a89d81026"
       && app.outPath == inst.units.c-a6654c0a89d81026.out.outPath;

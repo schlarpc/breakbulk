@@ -11,7 +11,8 @@ let
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   musl = ws.target.x86_64-unknown-linux-musl.packages;
   win = t: ws.target.${t}.packages;
-  flat = attrs: lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) attrs;
+  flat =
+    attrs: lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) attrs;
 in
 {
   build = pkgs.linkFarm "kmsrsos-build" (
@@ -28,7 +29,11 @@ in
   # The flake's checks: build, clippy and the tests natively (nextest, so no
   # doctests), and the policy features.
   ci = pkgs.linkFarm "kmsrsos-ci" (
-    flat (lib.filterAttrs (n: _: lib.hasPrefix "main/${native}/" n && !(lib.hasSuffix "/doctest" n)) repo.checks)
+    flat (
+      lib.filterAttrs (
+        n: _: lib.hasPrefix "main/${native}/" n && !(lib.hasSuffix "/doctest" n)
+      ) repo.checks
+    )
   );
   # Beyond the flake: the same tests on the static and Windows targets
   # (x86_64 under wine; aarch64 has no runner here).

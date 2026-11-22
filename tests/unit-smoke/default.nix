@@ -34,7 +34,10 @@ let
       ];
     };
     cargoLock.lockFile = root + "/Cargo.lock";
-    cargoBuildFlags = [ "-p" "breakbulk-unit" ];
+    cargoBuildFlags = [
+      "-p"
+      "breakbulk-unit"
+    ];
     doCheck = false;
   };
 

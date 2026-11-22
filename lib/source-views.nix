@@ -163,12 +163,23 @@ rec {
           && !isOwn t
         ) targets
       );
-      dirs = lib.optionals (lib.elem cargoTarget.kind [
-        "lib"
-        "bin"
-        "custom-build"
-      ]) (filter (d: (readDir (manifest.at root pkgDir)).${d} or null == "directory") [ "examples" "benches" ]);
-      protected = [ cargoTarget.path ] ++ map (t: t.path) (filter (t: t.kind == "lib" || t.kind == "custom-build") targets);
+      dirs =
+        lib.optionals
+          (lib.elem cargoTarget.kind [
+            "lib"
+            "bin"
+            "custom-build"
+          ])
+          (
+            filter (d: (readDir (manifest.at root pkgDir)).${d} or null == "directory") [
+              "examples"
+              "benches"
+            ]
+          );
+      protected = [
+        cargoTarget.path
+      ]
+      ++ map (t: t.path) (filter (t: t.kind == "lib" || t.kind == "custom-build") targets);
       keep =
         e:
         e != ""
@@ -227,7 +238,12 @@ rec {
       runFiles = test.runFiles or null;
     in
     [
-      ({ default, ... }: fs.union default (packageFileset { inherit root pkgDir memberDirs; }))
+      (
+        { default, ... }:
+        fs.union default (packageFileset {
+          inherit root pkgDir memberDirs;
+        })
+      )
       # extraSources
       ({ default, ... }: fs.unions ([ default ] ++ extra))
       # test.sourceScope
@@ -239,7 +255,10 @@ rec {
           fs.unions ([ default ] ++ map (pathOf root "test.sourceScope") scope)
       )
       # test.scopeTestsDir
-      ({ default, kind, ... }: if kind == "build" && tests != null then fs.difference default (at tests) else default)
+      (
+        { default, kind, ... }:
+        if kind == "build" && tests != null then fs.difference default (at tests) else default
+      )
       # scopeTargetRoots. After test.sourceScope, which can add back a
       # whole directory of roots for the test kinds.
       (
@@ -250,7 +269,12 @@ rec {
           fs.difference default (
             fs.unions (
               map (e: fs.maybeMissing (at (util.joinRel pkgDir e))) (targetExcluded {
-                inherit root pkgDir targets cargoTarget;
+                inherit
+                  root
+                  pkgDir
+                  targets
+                  cargoTarget
+                  ;
               })
             )
           )
@@ -323,7 +347,8 @@ rec {
       name = "source";
       src = root;
       filter =
-        path: type: files.filter path type || (type == "directory" && (path == dir || lib.hasPrefix "${path}/" dir));
+        path: type:
+        files.filter path type || (type == "directory" && (path == dir || lib.hasPrefix "${path}/" dir));
     };
 
   # `view` with each `sourceOverlay` entry in place: a symbolic link at
@@ -402,12 +427,14 @@ rec {
     { root, pkgDir }:
     let
       m = builtins.fromTOML (builtins.readFile (manifest.at root (util.joinRel pkgDir "Cargo.toml")));
-      tables =
-        [ (m.build-dependencies or { }) (m.build_dependencies or { }) ]
-        ++ lib.concatMap (t: [
-          (t.build-dependencies or { })
-          (t.build_dependencies or { })
-        ]) (lib.attrValues (m.target or { }));
+      tables = [
+        (m.build-dependencies or { })
+        (m.build_dependencies or { })
+      ]
+      ++ lib.concatMap (t: [
+        (t.build-dependencies or { })
+        (t.build_dependencies or { })
+      ]) (lib.attrValues (m.target or { }));
     in
     lib.unique (
       lib.concatMap (
@@ -438,7 +465,8 @@ rec {
           lib.warn "breakbulk: packages.${name}.predictSources: the package has a sourceOverlay, so its views are not predicted" false
         else
           wanted;
-      rel = p: if lib.path.hasPrefix root p then util.normalizeRel (lib.path.removePrefix root p) else null;
+      rel =
+        p: if lib.path.hasPrefix root p then util.normalizeRel (lib.path.removePrefix root p) else null;
       keepOf =
         args:
         lib.concatMap (
@@ -461,8 +489,11 @@ rec {
       inherit enable;
       runs =
         ps.buildScriptRuns or null == true
-        || ps.buildScriptRuns or null == null
-          && !lib.any (d: lib.elem d directivePrinters) (buildDependencies { inherit root pkgDir; });
+        ||
+          ps.buildScriptRuns or null == null
+          && !lib.any (d: lib.elem d directivePrinters) (buildDependencies {
+            inherit root pkgDir;
+          });
       spec =
         {
           kind,
@@ -546,15 +577,27 @@ rec {
       narrowed =
         t:
         custom
-        || settings.scopeTargetRoots or null != false
-          && targetExcluded {
-            inherit root pkgDir;
-            targets = cargoTargets;
-            cargoTarget = t;
-          } != [ ];
+        ||
+          settings.scopeTargetRoots or null != false
+          &&
+            targetExcluded {
+              inherit root pkgDir;
+              targets = cargoTargets;
+              cargoTarget = t;
+            } != [ ];
       targetViews =
-        kind: ts: lib.listToAttrs (map (t: lib.nameValuePair "${t.kind}/${t.name}" (view kind t)) (filter narrowed ts));
-      buildTargets = filter (t: lib.elem t.kind [ "lib" "bin" "custom-build" ]) cargoTargets;
+        kind: ts:
+        lib.listToAttrs (
+          map (t: lib.nameValuePair "${t.kind}/${t.name}" (view kind t)) (filter narrowed ts)
+        );
+      buildTargets = filter (
+        t:
+        lib.elem t.kind [
+          "lib"
+          "bin"
+          "custom-build"
+        ]
+      ) cargoTargets;
       testTargets = filter (t: t.kind != "custom-build") cargoTargets;
       predict = predictSettings {
         inherit
@@ -650,8 +693,7 @@ rec {
     { root, pkgDir }:
     let
       at = manifest.at root;
-      ancestors =
-        d: [ d ] ++ lib.optionals (d != "") (ancestors (util.normalizeRel (builtins.dirOf d)));
+      ancestors = d: [ d ] ++ lib.optionals (d != "") (ancestors (util.normalizeRel (builtins.dirOf d)));
       configs = lib.concatMap (
         d:
         map (n: fs.maybeMissing (at (util.joinRel d n))) [
@@ -697,7 +739,12 @@ rec {
             inherit dir;
           }
           // packageViews {
-            inherit root wsDir runCommand extraKeep;
+            inherit
+              root
+              wsDir
+              runCommand
+              extraKeep
+              ;
             inherit (info) name;
             pkgDir = dir;
             memberDirs = ws.members;

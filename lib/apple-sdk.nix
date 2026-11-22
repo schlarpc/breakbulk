@@ -59,10 +59,9 @@ let
       pinned = builtins.fromJSON (builtins.readFile "${dir}/metadata/versions.json");
       major = lib.versions.major version;
       info =
-        pinned.${major}
-          or (throw "breakbulk.appleSdk: nixpkgs pins no macOS SDK ${major}; it pins ${
-            lib.concatMapStringsSep ", " (m: pinned.${m}.version) (lib.attrNames pinned)
-          }");
+        pinned.${major} or (throw "breakbulk.appleSdk: nixpkgs pins no macOS SDK ${major}; it pins ${
+          lib.concatMapStringsSep ", " (m: pinned.${m}.version) (lib.attrNames pinned)
+        }");
       fetchSdk = pkgs.callPackage "${dir}/common/fetch-sdk.nix" { };
     in
     if info.version != version then

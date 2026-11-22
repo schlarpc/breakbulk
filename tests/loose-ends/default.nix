@@ -327,10 +327,15 @@ let
       targetOf = ws: (plain ws).devShell.drvAttrs.CARGO_BUILD_TARGET or null;
       fails = ws: !(builtins.tryEval (plain ws).devShell.drvPath).success;
       buildTargetOf =
-        config: (repoOf (withConfig config) { targets = uefi; }).devShell.drvAttrs.CARGO_BUILD_TARGET or null;
+        config:
+        (repoOf (withConfig config) { targets = uefi; }).devShell.drvAttrs.CARGO_BUILD_TARGET or null;
       got = {
         native = targetOf { };
-        withNative = targetOf { targets = uefi // { ${native} = { }; }; };
+        withNative = targetOf {
+          targets = uefi // {
+            ${native} = { };
+          };
+        };
         only = targetOf { targets.x86_64-unknown-uefi = { }; };
         several = targetOf { targets = uefi; };
         severalPackages = (plain { targets = uefi; }).packages;
@@ -416,7 +421,8 @@ let
         var:
         "breakbulk: the dev shell of workspace `main`: ${var} is set to different values: itoa@1.0.11 = \"from-itoa\", walking-skeleton@0.1.0 = \"from-ws\". The shell uses \"from-ws\" from walking-skeleton@0.1.0: the last value, with packages in Cargo.lock order and the target's env after them. To choose a value, set `workspaces.main.devShell.env.${var}`.";
       # The closure of the shell's .drv file: every derivation it needs.
-      drvClosure = s: pkgs.closureInfo { rootPaths = [ (builtins.unsafeDiscardOutputDependency s.drvPath) ]; };
+      drvClosure =
+        s: pkgs.closureInfo { rootPaths = [ (builtins.unsafeDiscardOutputDependency s.drvPath) ]; };
     in
     assert lib.assertMsg (
       plain.warnings == map conflict [
@@ -424,12 +430,15 @@ let
         "BB_Y"
       ]
     ) "devshell-env: the shell without devShell.env warns ${builtins.toJSON plain.warnings}";
-    assert lib.assertMsg (over.warnings == [ (conflict "BB_C") ])
-      "devshell-env: the shell with devShell.env warns ${builtins.toJSON over.warnings}";
-    assert lib.assertMsg (lib.elem marker.drvPath (inputsOf plain))
-      "devshell-env: the shell without devShell.env does not depend on the marker";
-    assert lib.assertMsg (!(lib.elem marker.drvPath (inputsOf over)))
-      "devshell-env: BB_X = null leaves the shell depending on the marker";
+    assert lib.assertMsg (
+      over.warnings == [ (conflict "BB_C") ]
+    ) "devshell-env: the shell with devShell.env warns ${builtins.toJSON over.warnings}";
+    assert lib.assertMsg (lib.elem marker.drvPath (
+      inputsOf plain
+    )) "devshell-env: the shell without devShell.env does not depend on the marker";
+    assert lib.assertMsg (
+      !(lib.elem marker.drvPath (inputsOf over))
+    ) "devshell-env: BB_X = null leaves the shell depending on the marker";
     over.overrideAttrs (_: {
       name = "loose-ends-devshell-env";
       phases = [ "buildPhase" ];
@@ -476,7 +485,8 @@ let
         builtins.unsafeDiscardStringContext (builtins.readFile "${trimShellInst.plans.build}/plan.json")
       );
     in
-    assert lib.assertMsg (plan.trimPathsDefault or false) "devshell-trim-paths: the plan has no trimPathsDefault";
+    assert lib.assertMsg (plan.trimPathsDefault or false
+    ) "devshell-trim-paths: the plan has no trimPathsDefault";
     assert lib.assertMsg (
       shell.drvAttrs.CARGO_PROFILE_RELEASE_TRIM_PATHS or null == "all"
     ) "devshell-trim-paths: CARGO_PROFILE_RELEASE_TRIM_PATHS is not set";
@@ -551,7 +561,9 @@ let
       uiOut = builtins.unsafeDiscardStringContext ui.outPath;
       units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
       naming = lib.sort lib.lessThan (
-        lib.unique (map (u: u.name) (lib.filter (u: lib.hasInfix uiOut (u.drvAttrs.BREAKBULK_UNIT or "")) units))
+        lib.unique (
+          map (u: u.name) (lib.filter (u: lib.hasInfix uiOut (u.drvAttrs.BREAKBULK_UNIT or "")) units)
+        )
       );
       drvOnly = d: builtins.unsafeDiscardOutputDependency d.drvPath;
       util = lib.filter (u: lib.hasPrefix "util-" u.name) units;
@@ -633,11 +645,15 @@ let
         ];
       };
       i = repo.workspaces.ui.instances.${wasm}.default;
-      unit = lib.findFirst (u: u.name == "ui-0.1.0-lib") (throw "no ui lib unit") (lib.attrValues i.units.build);
+      unit = lib.findFirst (u: u.name == "ui-0.1.0-lib") (throw "no ui lib unit") (
+        lib.attrValues i.units.build
+      );
       data = builtins.fromJSON (builtins.unsafeDiscardStringContext unit.drvAttrs.BREAKBULK_UNIT);
     in
     assert lib.assertMsg (
-      !(data.env ? SYS_UI) && data.env.USER_UI or null == "user" && !(lib.hasInfix "no-package-set" (data.envCapture or ""))
+      !(data.env ? SYS_UI)
+      && data.env.USER_UI or null == "user"
+      && !(lib.hasInfix "no-package-set" (data.envCapture or ""))
     ) "sys-defaults-no-package-set: ui lib ${builtins.toJSON data.env} ${data.envCapture or ""}";
     pkgs.runCommand "loose-ends-sys-defaults-no-package-set" { } "touch $out";
 
@@ -710,12 +726,15 @@ let
       runs = t.namedTestRuns.a;
       check = "main/${native}/a/test-bench-speed";
     in
-    assert lib.assertMsg (t.tests.a ? bench-speed)
-      "names: tests.a has ${toString (lib.attrNames t.tests.a)}";
-    assert lib.assertMsg (runs ? bench-speed)
-      "names: the named test runs of a are ${toString (lib.attrNames runs)}";
-    assert lib.assertMsg (namesRepo.checks ? ${check})
-      "names: no check ${check} among ${toString (lib.attrNames namesRepo.checks)}";
+    assert lib.assertMsg (
+      t.tests.a ? bench-speed
+    ) "names: tests.a has ${toString (lib.attrNames t.tests.a)}";
+    assert lib.assertMsg (
+      runs ? bench-speed
+    ) "names: the named test runs of a are ${toString (lib.attrNames runs)}";
+    assert lib.assertMsg (
+      namesRepo.checks ? ${check}
+    ) "names: no check ${check} among ${toString (lib.attrNames namesRepo.checks)}";
     pkgs.runCommand "loose-ends-names"
       {
         a = runs.runs_tool;
@@ -750,10 +769,12 @@ let
       };
       t = repo.workspaces.main.target.${native};
     in
-    assert lib.assertMsg (t.runner == [
-      "${pkgs.coreutils}/bin/env"
-      "BB_RUNNER=1"
-    ]) "runner-list: the runner is ${builtins.toJSON t.runner}";
+    assert lib.assertMsg (
+      t.runner == [
+        "${pkgs.coreutils}/bin/env"
+        "BB_RUNNER=1"
+      ]
+    ) "runner-list: the runner is ${builtins.toJSON t.runner}";
     t.namedTestRuns.a.runs_tool;
 
   # --- test-libs --------------------------------------------------------------
@@ -770,8 +791,9 @@ let
       libs = breakbulk.testRuns.testLibs pkgs sysroot native;
       inputs = lib.attrNames (builtins.getContext (builtins.toJSON run.drvAttrs));
     in
-    assert lib.assertMsg (!(lib.elem sysroot.drvPath inputs))
-      "test-libs: the test run depends on the whole sysroot ${sysroot.drvPath}";
+    assert lib.assertMsg (
+      !(lib.elem sysroot.drvPath inputs)
+    ) "test-libs: the test run depends on the whole sysroot ${sysroot.drvPath}";
     assert lib.assertMsg (lib.elem libs.drvPath inputs)
       "test-libs: the test run does not depend on ${libs.drvPath}: ${toString inputs}";
     pkgs.runCommand "loose-ends-test-libs"

@@ -83,5 +83,7 @@ in
     record: site: drvPath: output:
     gate "dynamicDerivations" record site (builtins.outputOf drvPath output);
 
-  readOutput = record: site: path: gate "importFromDerivation" record site (builtins.readFile path);
+  readOutput =
+    record: site: path:
+    gate "importFromDerivation" record site (builtins.readFile path);
 }

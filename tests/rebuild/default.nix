@@ -127,7 +127,9 @@ let
     embed = [ products.repos.embed ];
     env-repository-path = [ repository.repos.envRepoPathFixed ];
     exclusive-features = [ repository.repos.exclusive ];
-    feature-unification = [ (plain "feature-unification" [ (withToolchain pkgs.rust-bin.nightly.latest.minimal) ]) ];
+    feature-unification = [
+      (plain "feature-unification" [ (withToolchain pkgs.rust-bin.nightly.latest.minimal) ])
+    ];
     git-multi-workspace = [ (import ../git-multi-workspace args).ws ];
     git-revisions = [ (import ../git-revisions args).repos.repository ];
     lazy-strings = [ (import ../lazy-strings args).repo ];
@@ -237,7 +239,9 @@ let
     packages:
     lib.concatMap (p: [ p ] ++ lib.filter lib.isDerivation (lib.attrValues (p.stages or { }))) (
       lib.attrValues (
-        lib.filterAttrs (_: d: !(d ? unbuilt) || lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) packages
+        lib.filterAttrs (
+          _: d: !(d ? unbuilt) || lib.length d.unbuilt < lib.length (lib.attrNames d.roots)
+        ) packages
       )
     );
 
@@ -310,8 +314,9 @@ let
     lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir fixtures))
   );
 in
-assert lib.assertMsg (missing == [ ])
-  "tests/rebuild: fixtures neither in the catalog nor skipped: ${toString missing}";
+assert lib.assertMsg (
+  missing == [ ]
+) "tests/rebuild: fixtures neither in the catalog nor skipped: ${toString missing}";
 {
   names = lib.attrNames catalog;
   inherit skipped;

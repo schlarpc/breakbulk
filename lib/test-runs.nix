@@ -373,14 +373,15 @@ rec {
         })
         ${copyDylibsScript (specDylib spec).sep}
       '';
-      env = pkgs.runCommand "${name}-${storeName spec.package}-rustc-env" (
-        caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }
-      ) ''
-        mkdir -p $out
-        jq -s ${lib.escapeShellArg mergeRustcEnvJq} ${
-          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.envFlags
-        } > $out/directives.json
-      '';
+      env =
+        pkgs.runCommand "${name}-${storeName spec.package}-rustc-env"
+          (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; })
+          ''
+            mkdir -p $out
+            jq -s ${lib.escapeShellArg mergeRustcEnvJq} ${
+              lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.envFlags
+            } > $out/directives.json
+          '';
     in
     spec
     // {
@@ -485,7 +486,9 @@ rec {
               t
               // lib.optionalAttrs (t ? env) { env = resolve f t.env; }
               // lib.optionalAttrs (t ? binaries) {
-                binaries = lib.mapAttrs (_: b: b // lib.optionalAttrs (b ? env) { env = resolve f b.env; }) t.binaries;
+                binaries = lib.mapAttrs (
+                  _: b: b // lib.optionalAttrs (b ? env) { env = resolve f b.env; }
+                ) t.binaries;
               }
               // lib.optionalAttrs (t ? doctest) {
                 doctest = t.doctest // lib.optionalAttrs (t.doctest ? env) { env = resolve f t.doctest.env; };
@@ -675,7 +678,9 @@ rec {
         export ${var}=${lib.escapeShellArg wrapper}
       ''
     else
-      lib.optionalString (runner != [ ]) "export ${var}=${lib.escapeShellArg (lib.concatStringsSep " " runner)}";
+      lib.optionalString (
+        runner != [ ]
+      ) "export ${var}=${lib.escapeShellArg (lib.concatStringsSep " " runner)}";
 
   # The root of a run's source view, as a shell word, or null when its
   # package directory is not inside one: the root of `checkout` (a string,
@@ -720,10 +725,12 @@ rec {
   # process ID) differs on every run, so they are renamed by content.
   # The counters themselves can still differ (hash seeds, timing), so
   # coverage runs are outside the `--rebuild` guarantee.
-  coverageEnvScript = coverage: lib.optionalString coverage ''
-    mkdir -p $TMPDIR/profraw
-    export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
-  '';
+  coverageEnvScript =
+    coverage:
+    lib.optionalString coverage ''
+      mkdir -p $TMPDIR/profraw
+      export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
+    '';
   coverageCollect = ''
     mkdir -p "$out/profraw"
     for f in "$TMPDIR"/profraw/*.profraw; do
@@ -753,17 +760,24 @@ rec {
       testPkgs,
     }:
     spec:
-    lib.optionalString (
-      tools ? breakbulk-hints && testPkgs.stdenv.buildPlatform.system == pkgs.stdenv.buildPlatform.system
-    ) ''
-      ${tools.breakbulk-hints} ${spec} "$log" || true
-    '';
+    lib.optionalString
+      (
+        tools ? breakbulk-hints && testPkgs.stdenv.buildPlatform.system == pkgs.stdenv.buildPlatform.system
+      )
+      ''
+        ${tools.breakbulk-hints} ${spec} "$log" || true
+      '';
 
   # The JSON `hintScript` takes, for a run spec.
   hintSpec =
     spec: cfg:
     lib.escapeShellArg (toJSON {
-      inherit (spec) package packageDir testOnly custom;
+      inherit (spec)
+        package
+        packageDir
+        testOnly
+        custom
+        ;
       widen = hintWiden cfg;
     });
 
@@ -919,7 +933,14 @@ rec {
       triple = targetTraits.nativeTriple pkgs;
     in
     if triple == target then
-      { inherit triple runner testSystem dylibPath; }
+      {
+        inherit
+          triple
+          runner
+          testSystem
+          dylibPath
+          ;
+      }
     else
       {
         inherit triple;
@@ -963,7 +984,11 @@ rec {
         {
           inherit (s) triple dylibPath;
           runner = runnerLists.${name};
-          testPkgs = s.testPkgs or (runners.testPkgsFor { inherit pkgs; inherit (s) testSystem; });
+          testPkgs =
+            s.testPkgs or (runners.testPkgsFor {
+              inherit pkgs;
+              inherit (s) testSystem;
+            });
           libDir = if libs == null then null else "${libs}/lib/rustlib/${s.triple}/lib";
         };
     in
@@ -1005,7 +1030,9 @@ rec {
             + "export PATH=${lib.makeBinPath pkgs.stdenv.initialPath}\${PATH:+:$PATH}\n"
             + lib.concatStringsSep "\n" snippets
           )}";
-      BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform { inherit runner hostRunner; });
+      BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform {
+        inherit runner hostRunner;
+      });
       BREAKBULK_TEST_ARGS = toJSON (
         cfg.args ++ cfg.doctest.args ++ lib.optional cfg.includeIgnored "--include-ignored"
       );
@@ -1060,7 +1087,9 @@ rec {
     let
       inherit (inst) units;
       useCa = ca;
-      caAttrs = lib.optionalAttrs useCa (featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)");
+      caAttrs = lib.optionalAttrs useCa (
+        featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)"
+      );
       platforms = testPlatforms {
         inherit pkgs tools host;
         target = {
@@ -1161,9 +1190,7 @@ rec {
             __bb_workdir "''${files[0]}" ${lib.escapeShellArg s.sourceDir}
             subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" "$1"; }
             subst "$nextestBinariesPath" > $TMPDIR/binaries-metadata.json
-            subst "$nextestCargoMetadataPath" | ${
-              nextestWorkdirJq "${p.testPkgs.jq}/bin/jq" (lib.escapeShellArg s.sourceDir)
-            } > $TMPDIR/cargo-metadata.json
+            subst "$nextestCargoMetadataPath" | ${nextestWorkdirJq "${p.testPkgs.jq}/bin/jq" (lib.escapeShellArg s.sourceDir)} > $TMPDIR/cargo-metadata.json
             cd $TMPDIR
             set +e
             env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
@@ -1178,7 +1205,10 @@ rec {
             set -e
             if [ "$status" -ne 0 ]; then
               echo "test binary ${s.package} ${s.binary} failed under nextest (exit status $status)" >&2
-              ${hintScript { inherit tools pkgs; inherit (p) testPkgs; } (hintSpec s cfg)}
+              ${hintScript {
+                inherit tools pkgs;
+                inherit (p) testPkgs;
+              } (hintSpec s cfg)}
               exit "$status"
             fi
             nextestDir=$ws/target/nextest

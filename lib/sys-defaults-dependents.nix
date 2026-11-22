@@ -47,10 +47,16 @@
       "Cargo.toml"
       (
         { root, workspaceDir, ... }:
-        lib.fileset.maybeMissing (root + "/${if workspaceDir == "" then "" else workspaceDir + "/"}Cargo.toml")
+        lib.fileset.maybeMissing (
+          root + "/${if workspaceDir == "" then "" else workspaceDir + "/"}Cargo.toml"
+        )
       )
     ];
   };
-  find-crate = { predictSources.keep = [ "Cargo.toml" ]; };
-  bevy_macro_utils = { predictSources.keep = [ "Cargo.toml" ]; };
+  find-crate = {
+    predictSources.keep = [ "Cargo.toml" ];
+  };
+  bevy_macro_utils = {
+    predictSources.keep = [ "Cargo.toml" ];
+  };
 }

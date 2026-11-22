@@ -78,7 +78,9 @@ let
       i = inst repo;
     in
     lib.listToAttrs (
-      map (u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) (lib.attrValues i.units.build ++ lib.attrValues i.units.test)
+      map (u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) (
+        lib.attrValues i.units.build ++ lib.attrValues i.units.test
+      )
     );
 
   # The unit derivations that exist after the edit but not before, by
@@ -96,8 +98,9 @@ let
     let
       got = changedUnits before after;
     in
-    assert lib.assertMsg (got == expected)
-      "${name}: changed units ${builtins.toJSON got}, expected ${builtins.toJSON expected}";
+    assert lib.assertMsg (
+      got == expected
+    ) "${name}: changed units ${builtins.toJSON got}, expected ${builtins.toJSON expected}";
     evalCheck name "changed units: ${builtins.toJSON got}";
 
   # Run a unit derivation's builder in a derivation that succeeds only when
@@ -152,7 +155,8 @@ let
     );
 
   # Units of a plan, by derivation name.
-  unitsNamed = i: kind: lib.listToAttrs (map (u: lib.nameValuePair u.name u) (lib.attrValues i.units.${kind}));
+  unitsNamed =
+    i: kind: lib.listToAttrs (map (u: lib.nameValuePair u.name u) (lib.attrValues i.units.${kind}));
 
   # --- multi-ws --------------------------------------------------------------
 
@@ -165,7 +169,11 @@ let
     }
   ];
   mwInst = ws: multiWs.workspaces.${ws}.instances.${native}.default;
-  mwDrvs = ws: lib.mapAttrs' (_: u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) (mwInst ws).units.build;
+  mwDrvs =
+    ws:
+    lib.mapAttrs' (
+      _: u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name
+    ) (mwInst ws).units.build;
   sharedNames =
     wss:
     let
@@ -333,12 +341,14 @@ let
     assert lib.assertMsg (
       !(missing.packages.app.checks ? buildScriptPaths)
     ) "declared-paths: the product still has a buildScriptPaths check";
-    assert lib.assertMsg (
-      lib.attrNames missing.buildScriptPaths == [
-        "build"
-        "test"
-      ]
-    ) "declared-paths: expected a check per plan, got ${toString (lib.attrNames missing.buildScriptPaths)}";
+    assert lib.assertMsg
+      (
+        lib.attrNames missing.buildScriptPaths == [
+          "build"
+          "test"
+        ]
+      )
+      "declared-paths: expected a check per plan, got ${toString (lib.attrNames missing.buildScriptPaths)}";
     assert lib.assertMsg (
       declaredMissing.checks ? "main/${native}/buildScriptPaths/build"
       && declaredMissing.checks ? "main/${native}/buildScriptPaths/test"
@@ -531,7 +541,8 @@ let
   testOnly = testOnlyRepo null [ ];
   addFixture = "echo 43 > proto/tests/fixtures/extra.txt";
   editTestdata = "echo 42 >> proto/testdata/more.txt";
-  includeFrom = file: "echo 'pub const DATA: &str = include_str!(\"../${file}\");' >> proto/src/lib.rs";
+  includeFrom =
+    file: "echo 'pub const DATA: &str = include_str!(\"../${file}\");' >> proto/src/lib.rs";
   protoLib = repo: (unitsNamed (inst repo) "build")."proto-0.1.0-lib";
 
   # --- target-views --------------------------------------------------------------
@@ -729,17 +740,25 @@ let
       i = inst repo;
     in
     lib.listToAttrs (
-      lib.concatMap (
-        kind:
-        let
-          plan = builtins.fromJSON (
-            builtins.unsafeDiscardStringContext (builtins.readFile "${i.plans.${kind}}/plan.json")
-          );
-        in
-        lib.mapAttrsToList (
-          id: u: lib.nameValuePair i.units.${kind}.${id}.name (builtins.unsafeDiscardStringContext i.units.${kind}.${id}.drvPath)
-        ) (lib.filterAttrs (_: u: u.platform == "host") plan.units)
-      ) [ "build" "test" ]
+      lib.concatMap
+        (
+          kind:
+          let
+            plan = builtins.fromJSON (
+              builtins.unsafeDiscardStringContext (builtins.readFile "${i.plans.${kind}}/plan.json")
+            );
+          in
+          lib.mapAttrsToList (
+            id: u:
+            lib.nameValuePair i.units.${kind}.${id}.name (
+              builtins.unsafeDiscardStringContext i.units.${kind}.${id}.drvPath
+            )
+          ) (lib.filterAttrs (_: u: u.platform == "host") plan.units)
+        )
+        [
+          "build"
+          "test"
+        ]
     );
 in
 {
@@ -784,13 +803,14 @@ in
       differ = lib.attrNames (lib.filterAttrs (n: d: keep.${n} or null != d) split);
       names = lib.attrNames split;
     in
+    assert lib.assertMsg
+      (lib.any (lib.hasSuffix "-build-script") names && lib.any (lib.hasPrefix "pm-") names)
+      "host-units-shared: expected build scripts and the proc macro among host units: ${toString names}";
+    assert lib.assertMsg (lib.attrNames keep == names)
+      "host-units-shared: host units differ by name: ${toString names} vs ${toString (lib.attrNames keep)}";
     assert lib.assertMsg (
-      lib.any (lib.hasSuffix "-build-script") names && lib.any (lib.hasPrefix "pm-") names
-    ) "host-units-shared: expected build scripts and the proc macro among host units: ${toString names}";
-    assert lib.assertMsg (
-      lib.attrNames keep == names
-    ) "host-units-shared: host units differ by name: ${toString names} vs ${toString (lib.attrNames keep)}";
-    assert lib.assertMsg (differ == [ ]) "host-units-shared: host units differ between split and keep: ${toString differ}";
+      differ == [ ]
+    ) "host-units-shared: host units differ between split and keep: ${toString differ}";
     evalCheck "host-units-shared" "host units: ${toString names}";
 
   # Check groups over the three workspaces: every proper prefix of a check
@@ -832,19 +852,32 @@ in
       under = p: lib.filter (lib.hasPrefix "${p}/") leaves;
       failsOn = extra: !(builtins.tryEval (lib.attrNames (groupsRepo extra).checks)).success;
     in
-    assert lib.assertMsg (c ? a && c ? b && c ? "a/${native}" && c ? all) "check-groups: groups ${toString (lib.filter isGroup (lib.attrNames c))}";
-    assert lib.assertMsg (entriesOf "a" == under "a") "check-groups: a holds ${toString (entriesOf "a")}";
-    assert lib.assertMsg (entriesOf "a/${native}" == under "a/${native}") "check-groups: a/${native} holds ${toString (entriesOf "a/${native}")}";
-    assert lib.assertMsg (entriesOf "all" == lib.sort lib.lessThan leaves) "check-groups: all holds ${toString (entriesOf "all")}";
     assert lib.assertMsg (
-      entriesOf "builds" == lib.filter (n: lib.hasSuffix "/build" n && lib.length (lib.splitString "/" n) == 4) leaves
+      c ? a && c ? b && c ? "a/${native}" && c ? all
+    ) "check-groups: groups ${toString (lib.filter isGroup (lib.attrNames c))}";
+    assert lib.assertMsg (
+      entriesOf "a" == under "a"
+    ) "check-groups: a holds ${toString (entriesOf "a")}";
+    assert lib.assertMsg (
+      entriesOf "a/${native}" == under "a/${native}"
+    ) "check-groups: a/${native} holds ${toString (entriesOf "a/${native}")}";
+    assert lib.assertMsg (
+      entriesOf "all" == lib.sort lib.lessThan leaves
+    ) "check-groups: all holds ${toString (entriesOf "all")}";
+    assert lib.assertMsg (
+      entriesOf "builds"
+      == lib.filter (n: lib.hasSuffix "/build" n && lib.length (lib.splitString "/" n) == 4) leaves
     ) "check-groups: builds holds ${toString (entriesOf "builds")}";
     assert lib.assertMsg (
       lib.filter (n: !(lib.hasPrefix "derivations/" n)) (entriesOf "extra") == under "a"
       && lib.any (lib.hasPrefix "derivations/0-marker") (entriesOf "extra")
     ) "check-groups: extra holds ${toString (entriesOf "extra")}";
-    assert lib.assertMsg (failsOn [ { checkGroups.a = [ "b/**" ]; } ]) "check-groups: a group named like a prefix group";
-    assert lib.assertMsg (failsOn [ { checkGroups.all = [ "b/**" ]; } ]) "check-groups: a group named all";
+    assert lib.assertMsg (failsOn [
+      { checkGroups.a = [ "b/**" ]; }
+    ]) "check-groups: a group named like a prefix group";
+    assert lib.assertMsg (failsOn [
+      { checkGroups.all = [ "b/**" ]; }
+    ]) "check-groups: a group named all";
     assert lib.assertMsg (
       !(builtins.tryEval (groupsRepo [ { checkGroups.none = [ "c/**" ]; } ]).checks.none.drvPath).success
     ) "check-groups: a pattern matching nothing";
@@ -863,9 +896,19 @@ in
   # only by b and c, which both see it from outside.
   multi-ws-sharing =
     let
-      all3 = sharedNames [ "a" "b" "c" ];
-      bc = sharedNames [ "b" "c" ];
-      ab = sharedNames [ "a" "b" ];
+      all3 = sharedNames [
+        "a"
+        "b"
+        "c"
+      ];
+      bc = sharedNames [
+        "b"
+        "c"
+      ];
+      ab = sharedNames [
+        "a"
+        "b"
+      ];
       inner = multiWs.explainSharing {
         a = multiWs.workspaces.a.plans.${native}.default.build;
         b = "b";
@@ -873,9 +916,12 @@ in
       };
       innerUnit = lib.head inner.units;
     in
-    assert lib.assertMsg (all3 == sharedEverywhere) "multi-ws: shared by a, b, c: ${builtins.toJSON all3}";
-    assert lib.assertMsg (bc == lib.sort lib.lessThan (sharedEverywhere ++ [ "inner-0.1.0-lib" ]))
-      "multi-ws: shared by b, c: ${builtins.toJSON bc}";
+    assert lib.assertMsg (
+      all3 == sharedEverywhere
+    ) "multi-ws: shared by a, b, c: ${builtins.toJSON all3}";
+    assert lib.assertMsg (
+      bc == lib.sort lib.lessThan (sharedEverywhere ++ [ "inner-0.1.0-lib" ])
+    ) "multi-ws: shared by b, c: ${builtins.toJSON bc}";
     assert lib.assertMsg (ab == sharedEverywhere) "multi-ws: shared by a, b: ${builtins.toJSON ab}";
     # repo.sources: fetched once for all lockfiles, by name and name@version.
     assert lib.assertMsg (
@@ -890,12 +936,11 @@ in
       && innerUnit.fields ? cwd
       && lib.elem "inner/src/lib.rs" innerUnit.fields.args.onlyA
     ) "multi-ws: explainSharing inner: ${inner.text}";
-    assert lib.assertMsg (
-      (multiWs.explainSharing {
-        a = "a";
-        b = "c";
-        package = "shared";
-      }).shared
+    assert lib.assertMsg ((multiWs.explainSharing {
+      a = "a";
+      b = "c";
+      package = "shared";
+    }).shared
     ) "multi-ws: explainSharing shared reports a difference";
     pkgs.runCommand "multi-ws-sharing"
       {
@@ -955,22 +1000,46 @@ in
             )
           );
         in
-        lib.head (lib.attrValues (lib.filterAttrs (_: u: u.kind == "compile" && lib.hasInfix infix u.package) plan.units));
+        lib.head (
+          lib.attrValues (
+            lib.filterAttrs (_: u: u.kind == "compile" && lib.hasInfix infix u.package) plan.units
+          )
+        );
       lib1 = unitOf "main" "/crates/lib1#";
       itoaPaths =
         ws:
         let
           u = unitOf ws "#itoa@";
         in
-        lib.assertMsg (
-          u.env.BB_ROOT == [ { empty = ""; } "/" ] && u.env.BB_ASSETS == [ { empty = "assets"; } ]
-        ) "own-view: itoa's config paths in ${ws} are ${builtins.toJSON { inherit (u.env) BB_ROOT BB_ASSETS; }}";
+        lib.assertMsg
+          (
+            u.env.BB_ROOT == [
+              { empty = ""; }
+              "/"
+            ]
+            && u.env.BB_ASSETS == [ { empty = "assets"; } ]
+          )
+          "own-view: itoa's config paths in ${ws} are ${
+            builtins.toJSON { inherit (u.env) BB_ROOT BB_ASSETS; }
+          }";
     in
     assert itoaPaths "main";
     assert itoaPaths "virt";
-    assert lib.assertMsg (
-      lib1.cwd == { src = lib1.package; rel = ""; } && lib1.env.BB_LIB1_DATA == [ { src = lib1.package; rel = "crates/lib1/data"; } ]
-    ) "own-view: lib1's cwd ${builtins.toJSON lib1.cwd} and BB_LIB1_DATA ${builtins.toJSON lib1.env.BB_LIB1_DATA}";
+    assert lib.assertMsg
+      (
+        lib1.cwd == {
+          src = lib1.package;
+          rel = "";
+        }
+        &&
+          lib1.env.BB_LIB1_DATA == [
+            {
+              src = lib1.package;
+              rel = "crates/lib1/data";
+            }
+          ]
+      )
+      "own-view: lib1's cwd ${builtins.toJSON lib1.cwd} and BB_LIB1_DATA ${builtins.toJSON lib1.env.BB_LIB1_DATA}";
     pkgs.runCommand "own-view"
       {
         app = ownView.workspaces.main.packages.app;
@@ -1007,13 +1076,19 @@ in
   ];
 
   # A per-package stamp reaches only that package's units.
-  stamps = pkgs.runCommand "stamps" { app = stampsA.workspaces.main.packages.app; tool = stampsA.workspaces.main.packages.tool; } ''
-    got=$($app/bin/app); echo "$got"
-    [ "$got" = "app rev=aaaaaaa epoch=1700000000 util:42:yes" ]
-    got=$($tool/bin/tool); echo "$got"
-    [ "$got" = "tool rev=unset util:1:yes" ]
-    touch $out
-  '';
+  stamps =
+    pkgs.runCommand "stamps"
+      {
+        app = stampsA.workspaces.main.packages.app;
+        tool = stampsA.workspaces.main.packages.tool;
+      }
+      ''
+        got=$($app/bin/app); echo "$got"
+        [ "$got" = "app rev=aaaaaaa epoch=1700000000 util:42:yes" ]
+        got=$($tool/bin/tool); echo "$got"
+        [ "$got" = "tool rev=unset util:1:yes" ]
+        touch $out
+      '';
   stamps-invalidation = invalidation "stamps-invalidation" stampsA stampsB [
     "app-0.1.0-bin"
     "app-0.1.0-test"
@@ -1028,9 +1103,14 @@ in
       admin = rfDefault.roots."bin/admin";
       reason = admin.breakbulkRoot.reason;
     in
-    assert lib.assertMsg (admin.breakbulkRoot.unit == null) "required-features: admin was built without `cli`";
-    assert lib.assertMsg (lib.hasInfix "cli" reason) "required-features: the stub's reason does not name the feature: ${reason}";
-    assert lib.assertMsg (map (u: u.root) rfDefault.unbuilt == [ "bin/admin" ]) "required-features: unbuilt ${builtins.toJSON rfDefault.unbuilt}";
+    assert lib.assertMsg (
+      admin.breakbulkRoot.unit == null
+    ) "required-features: admin was built without `cli`";
+    assert lib.assertMsg (lib.hasInfix "cli" reason)
+      "required-features: the stub's reason does not name the feature: ${reason}";
+    assert lib.assertMsg (
+      map (u: u.root) rfDefault.unbuilt == [ "bin/admin" ]
+    ) "required-features: unbuilt ${builtins.toJSON rfDefault.unbuilt}";
     pkgs.runCommand "required-features"
       {
         rf = rfDefault;
@@ -1142,16 +1222,20 @@ in
         packages.proto.test.scopeTestsDir = true;
       };
     in
-    assert lib.assertMsg (changedUnits testOnly fixtureEdit == testUnits)
-      "test-only: a fixture edit changed ${builtins.toJSON (changedUnits testOnly fixtureEdit)}";
-    assert lib.assertMsg (changedUnits testOnly testdataEdit == testUnits)
-      "test-only: a testdata edit changed ${builtins.toJSON (changedUnits testOnly testdataEdit)}";
+    assert lib.assertMsg (
+      changedUnits testOnly fixtureEdit == testUnits
+    ) "test-only: a fixture edit changed ${builtins.toJSON (changedUnits testOnly fixtureEdit)}";
+    assert lib.assertMsg (
+      changedUnits testOnly testdataEdit == testUnits
+    ) "test-only: a testdata edit changed ${builtins.toJSON (changedUnits testOnly testdataEdit)}";
     assert lib.assertMsg (
       runOf fixtureEdit != runOf testOnly && runOf testdataEdit != runOf testOnly
     ) "test-only: the edits left proto's test run unchanged";
-    assert lib.assertMsg (lib.all (c: lib.elem "proto-0.1.0-lib" c && lib.elem "app-0.1.0-bin" c) (
-      lib.attrValues optOutChanged
-    )) "test-only: with scopeTestsDir = false, a fixture edit changed only ${builtins.toJSON optOutChanged}";
+    assert lib.assertMsg
+      (lib.all (c: lib.elem "proto-0.1.0-lib" c && lib.elem "app-0.1.0-bin" c) (
+        lib.attrValues optOutChanged
+      ))
+      "test-only: with scopeTestsDir = false, a fixture edit changed only ${builtins.toJSON optOutChanged}";
     assert lib.assertMsg (backOn == testUnits)
       "test-only: the package's scopeTestsDir = true did not override memberDefaults: ${builtins.toJSON backOn}";
     pkgs.runCommand "test-only"
@@ -1183,7 +1267,8 @@ in
   # an edit to one test re-runs the other.
   target-views =
     let
-      changedBy = edit: modules: changedUnits (targetViewsRepo null modules) (targetViewsRepo edit modules);
+      changedBy =
+        edit: modules: changedUnits (targetViewsRepo null modules) (targetViewsRepo edit modules);
       runOf = repo: t: (inst repo).testRuns.tv.${t}.drvPath;
       fooEdit = "echo '// edited' >> tv/tests/foo.rs";
       exampleEdit = "echo '// edited' >> tv/examples/x.rs";
@@ -1219,13 +1304,17 @@ in
       reader = targetViewsRepo "echo '#[path = \"bar.rs\"] mod bar;' >> tv/tests/foo.rs" [ ];
       readerUnit = (unitsNamed (inst reader) "test")."tv-0.1.0-test-foo";
     in
-    assert lib.assertMsg (got == want) "target-views: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
-    assert lib.assertMsg (lib.elem "tv-0.1.0-build-run" exampleRun && lib.elem "tv-0.1.0-lib" exampleRun)
+    assert lib.assertMsg (
+      got == want
+    ) "target-views: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg
+      (lib.elem "tv-0.1.0-build-run" exampleRun && lib.elem "tv-0.1.0-lib" exampleRun)
       "target-views: without predictSources, an example edit changed only ${builtins.toJSON exampleRun}";
     assert lib.assertMsg (lib.elem "tv-0.1.0-test-bar" off && lib.elem "tv-0.1.0-test" off)
       "target-views: with scopeTargetRoots = false, an edit to tests/foo.rs changed only ${builtins.toJSON off}";
-    assert lib.assertMsg (runOf (targetViewsRepo fooEdit [ ]) "bar" != runOf targetViews "bar")
-      "target-views: an edit to tests/foo.rs left bar's test run unchanged";
+    assert lib.assertMsg (
+      runOf (targetViewsRepo fooEdit [ ]) "bar" != runOf targetViews "bar"
+    ) "target-views: an edit to tests/foo.rs left bar's test run unchanged";
     pkgs.runCommand "target-views"
       {
         foo = (inst targetViews).testRuns.tv.foo;
@@ -1251,7 +1340,8 @@ in
   # predictSources.keep, and the kept path builds.
   predict-sources =
     let
-      changedBy = edit: modules: changedUnits (predictSourcesRepo null modules) (predictSourcesRepo edit modules);
+      changedBy =
+        edit: modules: changedUnits (predictSourcesRepo null modules) (predictSourcesRepo edit modules);
       readme = "echo more >> ps/README.md";
       psUnits = lib.filter (lib.hasPrefix "ps-");
       got = {
@@ -1291,20 +1381,31 @@ in
           workspaces.main.variants.clippy.mode = "clippy";
         }
       ];
-      noRuns = specsOf (predictSourcesRepo null [ { packages.ps.predictSources.buildScriptRuns = false; } ]) "default";
-      overlaid = specsOf (predictSourcesRepo null [ { packages.ps.sourceOverlay."assets" = ./.; } ]) "default";
+      noRuns = specsOf (predictSourcesRepo null [
+        { packages.ps.predictSources.buildScriptRuns = false; }
+      ]) "default";
+      overlaid = specsOf (predictSourcesRepo null [
+        { packages.ps.sourceOverlay."assets" = ./.; }
+      ]) "default";
       missingLib = (unitsNamed (inst missing) "build")."ps-0.1.0-lib";
     in
-    assert lib.assertMsg (got == want) "predict-sources: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
+    assert lib.assertMsg (
+      got == want
+    ) "predict-sources: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
     assert lib.assertMsg (lib.elem "ps-0.1.0-lib" off)
       "predict-sources: without predictSources, a README edit changed only ${builtins.toJSON off}";
-    assert lib.assertMsg (specs.${runKey}.kind == "run" && specs."src:ps#lib/ps".keep == [ "ps/templates" ])
+    assert lib.assertMsg
+      (specs.${runKey}.kind == "run" && specs."src:ps#lib/ps".keep == [ "ps/templates" ])
       "predict-sources: specs ${builtins.toJSON (lib.mapAttrs (_: s: { inherit (s) kind keep; }) specs)}";
-    assert lib.assertMsg (lib.elem "Cargo.toml" (specsOf clippy "clippy")."src:ps#lib/ps".keep)
-      "predict-sources: a clippy variant's lib view does not keep the workspace's Cargo.toml";
-    assert lib.assertMsg (!(noRuns ? ${runKey}) && noRuns ? "src:ps#lib/ps")
-      "predict-sources: with buildScriptRuns = false the run is still predicted";
-    assert lib.assertMsg (overlaid == { }) "predict-sources: a package with a sourceOverlay is predicted";
+    assert lib.assertMsg (lib.elem "Cargo.toml"
+      (specsOf clippy "clippy")."src:ps#lib/ps".keep
+    ) "predict-sources: a clippy variant's lib view does not keep the workspace's Cargo.toml";
+    assert lib.assertMsg (
+      !(noRuns ? ${runKey}) && noRuns ? "src:ps#lib/ps"
+    ) "predict-sources: with buildScriptRuns = false the run is still predicted";
+    assert lib.assertMsg (
+      overlaid == { }
+    ) "predict-sources: a package with a sourceOverlay is predicted";
     pkgs.runCommand "predict-sources"
       {
         ps = predictSources.workspaces.main.packages.ps;
@@ -1345,7 +1446,9 @@ in
       runs = r: lib.mapAttrs (_: d: d.drvPath) (inst r).testRuns.nx;
       soloRun = r: (inst r).testRuns.solo."lib/solo".drvPath;
     in
-    assert lib.assertMsg (soloRun before != soloRun after) "nextest-unrelated-version: the edit did not change solo";
+    assert lib.assertMsg (
+      soloRun before != soloRun after
+    ) "nextest-unrelated-version: the edit did not change solo";
     assert lib.assertMsg (runs before == runs after)
       "nextest-unrelated-version: solo's version bump changed nx's runs ${builtins.toJSON (runs after)}";
     evalCheck "nextest-unrelated-version" (builtins.toJSON (runs before));
@@ -1394,21 +1497,29 @@ in
 
   # A library that reads a test-only path at compile time fails with a hint
   # naming the option that keeps it; with `scopeTestsDir = false` it builds.
-  test-only-hint = pkgs.runCommand "test-only-hint" {
-    tests = expectFailure "test-only-tests" (protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ ])) [
-      "proto/tests/fixtures/input.txt"
-      "packages.proto.test.scopeTestsDir = false"
-    ];
-    scope = expectFailure "test-only-scope" (protoLib (testOnlyRepo (includeFrom "testdata/more.txt") [ ])) [
-      "proto/testdata/more.txt"
-      "packages.proto.test.sourceScope"
-      "packages.proto.extraSources"
-    ];
-    optOut = protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ testOnlyOptOut ]);
-  } ''
-    cat $tests/log $scope/log
-    touch $out
-  '';
+  test-only-hint =
+    pkgs.runCommand "test-only-hint"
+      {
+        tests =
+          expectFailure "test-only-tests"
+            (protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ ]))
+            [
+              "proto/tests/fixtures/input.txt"
+              "packages.proto.test.scopeTestsDir = false"
+            ];
+        scope =
+          expectFailure "test-only-scope" (protoLib (testOnlyRepo (includeFrom "testdata/more.txt") [ ]))
+            [
+              "proto/testdata/more.txt"
+              "packages.proto.test.sourceScope"
+              "packages.proto.extraSources"
+            ];
+        optOut = protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ testOnlyOptOut ]);
+      }
+      ''
+        cat $tests/log $scope/log
+        touch $out
+      '';
 
   # `packages.<name>.sources` (`sourcesModule`): an edit to a file only
   # lint's unit tests read (a snapshot, its README, a comment in its
@@ -1574,38 +1685,62 @@ in
       runRoot = lib.head (exported runs."lib/snaps" "INSTA_WORKSPACE_ROOT");
       script = r: r.drvAttrs.buildCommand;
       exported = r: k: builtins.match ".*\nexport ${k}=([^\n]*)\n.*" (script r);
-      doctestEnv = inst: p: builtins.fromJSON (builtins.unsafeDiscardStringContext inst.doctests.${p}.drvAttrs.BREAKBULK_TEST_ENV);
+      doctestEnv =
+        inst: p:
+        builtins.fromJSON (
+          builtins.unsafeDiscardStringContext inst.doctests.${p}.drvAttrs.BREAKBULK_TEST_ENV
+        );
       testView = i: p: "${i.sources.workspaceTest."ws/crates/${p}"}";
       wsIn = v: "${v}/ws";
       narrowed = inst (snapshotsRepo null [ { packages.snaps.test.runFiles = [ "src/snapshots" ]; } ]);
       narrowedRoot = lib.head (exported narrowed.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT");
       off = inst (snapshotsRepo null [ { sysDefaults.dependents.insta = null; } ]);
-      ownFn = inst (snapshotsRepo null [ { workspaces.main.memberDefaults.test.env.MY_ROOT = run: "${run.workspaceRoot}/x"; } ]);
+      ownFn = inst (
+        snapshotsRepo null [
+          { workspaces.main.memberDefaults.test.env.MY_ROOT = run: "${run.workspaceRoot}/x"; }
+        ]
+      );
     in
-    assert lib.assertMsg (got == want) "snapshots: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
-    assert lib.assertMsg ((inst snapshotEdit).testRuns.snaps."lib/snaps".drvPath != runs."lib/snaps".drvPath)
-      "snapshots: an edit to a snapshot left the test run unchanged";
     assert lib.assertMsg (
-      runRoot != wsIn (testView i "snaps")
-      && lib.hasSuffix "/ws" runRoot
-      && builtins.pathExists "${runRoot}/crates/snaps/src/snapshots/snaps__tests__render.snap"
-      && !(builtins.pathExists "${testView i "snaps"}/ws/crates/snaps/src/snapshots/snaps__tests__render.snap")
-    ) "snapshots: the run's INSTA_WORKSPACE_ROOT is ${runRoot}, not the workspace directory of the run view with the snapshots";
-    assert lib.assertMsg (exported runs."lib/snaps" "INSTA_UPDATE" == [ "no" ]) "snapshots: INSTA_UPDATE";
-    assert lib.assertMsg ((doctestEnv i "snaps").INSTA_WORKSPACE_ROOT or null == wsIn (testView i "snaps"))
-      "snapshots: the doctest's env ${builtins.toJSON (doctestEnv i "snaps")}";
-    assert lib.assertMsg (exported i.testRuns.other."lib/other" "INSTA_WORKSPACE_ROOT" == null && !((doctestEnv i "other") ? INSTA_UPDATE))
-      "snapshots: other, which does not depend on insta, got insta's settings";
+      got == want
+    ) "snapshots: changed units ${builtins.toJSON got}, expected ${builtins.toJSON want}";
     assert lib.assertMsg (
-      narrowedRoot != wsIn (testView narrowed "snaps")
-      && lib.hasSuffix "/ws" narrowedRoot
-      && builtins.pathExists "${narrowedRoot}/crates/snaps/src/snapshots"
-      && !(builtins.pathExists "${narrowedRoot}/crates/snaps/tests")
-    ) "snapshots: with runFiles, INSTA_WORKSPACE_ROOT is ${narrowedRoot}, not the run view's workspace directory";
-    assert lib.assertMsg (exported off.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT" == null) "snapshots: `sysDefaults.dependents.insta = null` left the default";
+      (inst snapshotEdit).testRuns.snaps."lib/snaps".drvPath != runs."lib/snaps".drvPath
+    ) "snapshots: an edit to a snapshot left the test run unchanged";
+    assert lib.assertMsg
+      (
+        runRoot != wsIn (testView i "snaps")
+        && lib.hasSuffix "/ws" runRoot
+        && builtins.pathExists "${runRoot}/crates/snaps/src/snapshots/snaps__tests__render.snap"
+        && !(builtins.pathExists "${testView i "snaps"}/ws/crates/snaps/src/snapshots/snaps__tests__render.snap")
+      )
+      "snapshots: the run's INSTA_WORKSPACE_ROOT is ${runRoot}, not the workspace directory of the run view with the snapshots";
+    assert lib.assertMsg (
+      exported runs."lib/snaps" "INSTA_UPDATE" == [ "no" ]
+    ) "snapshots: INSTA_UPDATE";
+    assert lib.assertMsg (
+      (doctestEnv i "snaps").INSTA_WORKSPACE_ROOT or null == wsIn (testView i "snaps")
+    ) "snapshots: the doctest's env ${builtins.toJSON (doctestEnv i "snaps")}";
+    assert lib.assertMsg (
+      exported i.testRuns.other."lib/other" "INSTA_WORKSPACE_ROOT" == null
+      && !((doctestEnv i "other") ? INSTA_UPDATE)
+    ) "snapshots: other, which does not depend on insta, got insta's settings";
+    assert lib.assertMsg
+      (
+        narrowedRoot != wsIn (testView narrowed "snaps")
+        && lib.hasSuffix "/ws" narrowedRoot
+        && builtins.pathExists "${narrowedRoot}/crates/snaps/src/snapshots"
+        && !(builtins.pathExists "${narrowedRoot}/crates/snaps/tests")
+      )
+      "snapshots: with runFiles, INSTA_WORKSPACE_ROOT is ${narrowedRoot}, not the run view's workspace directory";
+    assert lib.assertMsg (
+      exported off.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT" == null
+    ) "snapshots: `sysDefaults.dependents.insta = null` left the default";
     assert lib.assertMsg (
       exported ownFn.testRuns.other."lib/other" "MY_ROOT" == [ "${wsIn (testView ownFn "other")}/x" ]
-      && exported ownFn.testRuns.snaps."lib/snaps" "MY_ROOT" == [ "${lib.head (exported ownFn.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT")}/x" ]
+      &&
+        exported ownFn.testRuns.snaps."lib/snaps" "MY_ROOT"
+        == [ "${lib.head (exported ownFn.testRuns.snaps."lib/snaps" "INSTA_WORKSPACE_ROOT")}/x" ]
     ) "snapshots: a memberDefaults function did not get each member's root";
 
     pkgs.runCommand "snapshots"
@@ -1629,14 +1764,14 @@ in
     let
       units = unitsNamed (inst' overrideRepo "b") "build";
       envOf =
-        n:
-        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       itoa = envOf "itoa-1.0.11-lib";
       libc = envOf "libc-0.2.191-lib";
       libcRun = envOf "libc-0.2.191-build-run";
       captureOf =
         n:
-        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).envCapture or "";
+        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT))
+        .envCapture or "";
       ws = overrideRepo.warnings;
       has = s: lib.any (lib.hasInfix s) ws;
     in
@@ -1647,17 +1782,26 @@ in
       && lib.hasInfix "breakbulk-env-shared" (captureOf "shared-0.1.0-build-script")
       && lib.hasInfix "breakbulk-env-base" (captureOf "itoa-1.0.11-lib")
     ) "overrides: env captures `${captureOf "shared-0.1.0-lib"}` `${captureOf "itoa-1.0.11-lib"}`";
-    assert lib.assertMsg (itoa.ITOA_CARET or null == "1" && !(itoa ? ITOA_TWO)) "overrides: itoa env ${builtins.toJSON itoa}";
-    assert lib.assertMsg (libc.LIBC or null == "exact" && libcRun.LIBC or null == "exact") "overrides: libc env ${builtins.toJSON libc}";
+    assert lib.assertMsg (
+      itoa.ITOA_CARET or null == "1" && !(itoa ? ITOA_TWO)
+    ) "overrides: itoa env ${builtins.toJSON itoa}";
+    assert lib.assertMsg (
+      libc.LIBC or null == "exact" && libcRun.LIBC or null == "exact"
+    ) "overrides: libc env ${builtins.toJSON libc}";
     assert lib.assertMsg (!((envOf "shared-0.1.0-lib") ? LIBC)) "overrides: libc's env reached shared";
     # targets.<triple>.env reaches target units only, never host units
     # (build-script compiles).
-    assert lib.assertMsg (libc.TARGET_MARK or null == "t" && !((envOf "libc-0.2.191-build-script") ? TARGET_MARK))
-      "overrides: target env placement";
-    assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package") "overrides: no unmatched warning: ${builtins.toJSON ws}";
-    assert lib.assertMsg (has "`packages.itoa` matches no package") "overrides: itoa >=2 should match nothing";
-    assert lib.assertMsg (has "`packages.libc.sourceOverlay` has no effect on libc 0.2.191") "overrides: no sourceOverlay warning: ${builtins.toJSON ws}";
-    assert lib.assertMsg (has "packages.app-b.pipelining") "overrides: no warning for pipelining (not implemented)";
+    assert lib.assertMsg (
+      libc.TARGET_MARK or null == "t" && !((envOf "libc-0.2.191-build-script") ? TARGET_MARK)
+    ) "overrides: target env placement";
+    assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package")
+      "overrides: no unmatched warning: ${builtins.toJSON ws}";
+    assert lib.assertMsg (has "`packages.itoa` matches no package")
+      "overrides: itoa >=2 should match nothing";
+    assert lib.assertMsg (has "`packages.libc.sourceOverlay` has no effect on libc 0.2.191")
+      "overrides: no sourceOverlay warning: ${builtins.toJSON ws}";
+    assert lib.assertMsg (has "packages.app-b.pipelining")
+      "overrides: no warning for pipelining (not implemented)";
     # targets.<triple>.rustflags reach target units only.
     assert lib.assertMsg (
       lib.hasInfix "bb_target_mark" units."libc-0.2.191-lib".drvAttrs.BREAKBULK_UNIT
@@ -1670,8 +1814,9 @@ in
       && (envOf "libc-0.2.191-build-script").LIBC_VARIANT_HOST or null == "1"
       && !(libc ? LIBC_VARIANT_HOST)
     ) "overrides: variant layer env placement";
-    assert lib.assertMsg ((builtins.readDir (inst' overrideRepo "b").sources.workspace.b) ? c)
-      "overrides: the variant layer's extraSources are not in b's view";
+    assert lib.assertMsg (
+      (builtins.readDir (inst' overrideRepo "b").sources.workspace.b) ? c
+    ) "overrides: the variant layer's extraSources are not in b's view";
     assert lib.assertMsg (
       has "`packages.libc.variant.not-a-variant` names no variant of any workspace"
       && has "`workspaces.b.memberDefaults.variant.not-a-variant-of-b` names no variant of workspaces.b (default)"
@@ -1683,29 +1828,121 @@ in
     let
       m = breakbulk.versionReq.matches;
       cases = [
-        [ "1.2.3" "1.2.3" true ]
-        [ "1.2.3" "1.3.0" true ]
-        [ "1.2.3" "2.0.0" false ]
-        [ "^0.2.3" "0.2.9" true ]
-        [ "^0.2.3" "0.3.0" false ]
-        [ "^0.0.3" "0.0.4" false ]
-        [ "~1.2" "1.2.9" true ]
-        [ "~1.2" "1.3.0" false ]
-        [ "~1.2.3" "1.2.2" false ]
-        [ "=1.2" "1.2.7" true ]
-        [ ">=0.42.0" "0.42.0" true ]
-        [ "<0.42.0" "0.41.9" true ]
-        [ "<0.42.0" "0.42.0" false ]
-        [ ">=1, <2" "1.9.9" true ]
-        [ ">=1, <2" "2.0.0" false ]
-        [ "1.*" "1.7.0" true ]
-        [ "1.2.*" "1.3.0" false ]
-        [ "*" "9.9.9" true ]
-        [ "1.2.3" "1.2.4-alpha" false ]
-        [ ">=1.2.4-alpha" "1.2.4-beta" true ]
-        [ ">1.2" "1.2.9" false ]
-        [ ">1.2" "1.3.0" true ]
-        [ "<=1.2" "1.2.9" true ]
+        [
+          "1.2.3"
+          "1.2.3"
+          true
+        ]
+        [
+          "1.2.3"
+          "1.3.0"
+          true
+        ]
+        [
+          "1.2.3"
+          "2.0.0"
+          false
+        ]
+        [
+          "^0.2.3"
+          "0.2.9"
+          true
+        ]
+        [
+          "^0.2.3"
+          "0.3.0"
+          false
+        ]
+        [
+          "^0.0.3"
+          "0.0.4"
+          false
+        ]
+        [
+          "~1.2"
+          "1.2.9"
+          true
+        ]
+        [
+          "~1.2"
+          "1.3.0"
+          false
+        ]
+        [
+          "~1.2.3"
+          "1.2.2"
+          false
+        ]
+        [
+          "=1.2"
+          "1.2.7"
+          true
+        ]
+        [
+          ">=0.42.0"
+          "0.42.0"
+          true
+        ]
+        [
+          "<0.42.0"
+          "0.41.9"
+          true
+        ]
+        [
+          "<0.42.0"
+          "0.42.0"
+          false
+        ]
+        [
+          ">=1, <2"
+          "1.9.9"
+          true
+        ]
+        [
+          ">=1, <2"
+          "2.0.0"
+          false
+        ]
+        [
+          "1.*"
+          "1.7.0"
+          true
+        ]
+        [
+          "1.2.*"
+          "1.3.0"
+          false
+        ]
+        [
+          "*"
+          "9.9.9"
+          true
+        ]
+        [
+          "1.2.3"
+          "1.2.4-alpha"
+          false
+        ]
+        [
+          ">=1.2.4-alpha"
+          "1.2.4-beta"
+          true
+        ]
+        [
+          ">1.2"
+          "1.2.9"
+          false
+        ]
+        [
+          ">1.2"
+          "1.3.0"
+          true
+        ]
+        [
+          "<=1.2"
+          "1.2.9"
+          true
+        ]
       ];
       bad = lib.filter (c: m (lib.elemAt c 0) (lib.elemAt c 1) != lib.elemAt c 2) cases;
       # `isReq` (the `versionReq` option type): every requirement above, and
@@ -1732,17 +1969,22 @@ in
     let
       shell = provided.workspaces.main.devShell;
     in
-    pkgs.runCommand "devshell" { inherit (shell) shellHook; target = shell.CARGO_BUILD_TARGET or shell.env.CARGO_BUILD_TARGET or ""; } ''
-      [ "$target" = ${native} ]
-      export HOME=$TMPDIR CARGO_INCREMENTAL=1 CARGO_TARGET_DIR=x RUSTFLAGS=-g breakbulkOwnEnv=CARGO_BUILD_TARGET
-      out_=$out
-      eval "$shellHook" 2> warnings
-      cat warnings
-      grep -q 'CARGO_INCREMENTAL is set' warnings
-      grep -q 'RUSTFLAGS is set' warnings
-      ! grep -q CARGO_TARGET_DIR warnings
-      touch $out_
-    '';
+    pkgs.runCommand "devshell"
+      {
+        inherit (shell) shellHook;
+        target = shell.CARGO_BUILD_TARGET or shell.env.CARGO_BUILD_TARGET or "";
+      }
+      ''
+        [ "$target" = ${native} ]
+        export HOME=$TMPDIR CARGO_INCREMENTAL=1 CARGO_TARGET_DIR=x RUSTFLAGS=-g breakbulkOwnEnv=CARGO_BUILD_TARGET
+        out_=$out
+        eval "$shellHook" 2> warnings
+        cat warnings
+        grep -q 'CARGO_INCREMENTAL is set' warnings
+        grep -q 'RUSTFLAGS is set' warnings
+        ! grep -q CARGO_TARGET_DIR warnings
+        touch $out_
+      '';
 
   # The dev shell does not need the plan. With a member's
   # Cargo.toml broken (planning would fail), the shell still evaluates and
@@ -1755,13 +1997,19 @@ in
       linkerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}_LINKER";
       linker = shell.${linkerVar} or shell.env.${linkerVar} or "";
     in
-    assert lib.assertMsg (lib.hasSuffix "cc-default" linker) "devshell-broken-manifest: no linker in the shell (${linker})";
-    pkgs.runCommand "devshell-broken-manifest" { inherit (shell) shellHook; inherit linker; } ''
-      export HOME=$TMPDIR
-      eval "$shellHook"
-      [ -x "$linker" ]
-      echo "$linker" > $out
-    '';
+    assert lib.assertMsg (lib.hasSuffix "cc-default" linker)
+      "devshell-broken-manifest: no linker in the shell (${linker})";
+    pkgs.runCommand "devshell-broken-manifest"
+      {
+        inherit (shell) shellHook;
+        inherit linker;
+      }
+      ''
+        export HOME=$TMPDIR
+        eval "$shellHook"
+        [ -x "$linker" ]
+        echo "$linker" > $out
+      '';
 
   # #23: a build script that places a file next to the binaries (Cargo's
   # `target/<profile>`) gets the default `buildScriptFiles` check, which
@@ -1779,13 +2027,14 @@ in
           extra
         ]).workspaces.main;
       plain = (wsOf { }).packages.out-dir-walk;
-      staged = (wsOf {
-        packages.out-dir-walk.stages.buildScriptFiles = {
-          after = "splitDebug";
-          before = "install";
-          run = breakbulk.stages.helpers.buildScriptFiles { };
-        };
-      }).packages.out-dir-walk;
+      staged =
+        (wsOf {
+          packages.out-dir-walk.stages.buildScriptFiles = {
+            after = "splitDebug";
+            before = "install";
+            run = breakbulk.stages.helpers.buildScriptFiles { };
+          };
+        }).packages.out-dir-walk;
       off = (wsOf { packages.out-dir-walk.checks.buildScriptFiles = null; }).packages.out-dir-walk;
       # The fixture as one member of a workspace with `other`, which does not
       # depend on it: only out-dir-walk's check names walked.txt.
@@ -1800,7 +2049,9 @@ in
       '';
       twoWs = (mkRepo twoMembers [ (oneWs ".") ]).workspaces.main.packages;
     in
-    assert lib.assertMsg (!(off.checks ? buildScriptFiles)) "build-script-files: the check is not removable";
+    assert lib.assertMsg (
+      !(off.checks ? buildScriptFiles)
+    ) "build-script-files: the check is not removable";
     pkgs.runCommand "build-script-files"
       {
         failure = pkgs.testers.testBuildFailure plain.checks.buildScriptFiles;
@@ -1848,15 +2099,16 @@ in
         printf '#[cfg(not(included_flag))]\ncompile_error!("the included rustflags are missing");\n' >> app/src/main.rs
       '';
       ws = (mkRepo root [ (oneWs ".") ]).workspaces.main;
-      uefi = (mkRepo root [
-        (oneWs ".")
-        {
-          workspaces.main.targets = {
-            x86_64-unknown-uefi = { };
-            aarch64-unknown-uefi = { };
-          };
-        }
-      ]).workspaces.main;
+      uefi =
+        (mkRepo root [
+          (oneWs ".")
+          {
+            workspaces.main.targets = {
+              x86_64-unknown-uefi = { };
+              aarch64-unknown-uefi = { };
+            };
+          }
+        ]).workspaces.main;
       got = {
         configFiles = breakbulk.skeleton.configFiles { inherit root; };
         defaultTarget = uefi.devShell.drvAttrs.CARGO_BUILD_TARGET or null;
@@ -1868,7 +2120,11 @@ in
           )).warnings;
       };
       want = {
-        configFiles = [ ".cargo/config.toml" ".cargo/shared.toml" "more.toml" ];
+        configFiles = [
+          ".cargo/config.toml"
+          ".cargo/shared.toml"
+          "more.toml"
+        ];
         defaultTarget = "aarch64-unknown-uefi";
         cargoEnvWarnings = [ ];
       };
@@ -1939,11 +2195,10 @@ in
   # Git dependencies built through units: instantiation finds each fetched
   # source under Cargo's package id, which keeps `git+` and the reference
   # query, and leaves the name out when the URL ends in it.
-  pkgid-short =
-    pkgs.runCommand "pkgid-short" { app = pkgidShort.workspaces.main.packages.app; } ''
-      [ "$($app/bin/app)" = "gitdep 43" ]
-      touch $out
-    '';
+  pkgid-short = pkgs.runCommand "pkgid-short" { app = pkgidShort.workspaces.main.packages.app; } ''
+    [ "$($app/bin/app)" = "gitdep 43" ]
+    touch $out
+  '';
 
   # A git crate's build script reads a repository path from Cargo config
   # `[env]`: the run fails, and the hint names the package's `env` setting
@@ -1951,10 +2206,13 @@ in
   env-repository-path =
     pkgs.runCommand "env-repository-path"
       {
-        run = expectFailure "env-repository-path-run" (unitsNamed (inst envRepoPath) "build")."envdep-0.1.0-build-run" [
-          "`envdep` was given the repository path `app/vendor/envdep` in `ENVDEP_DIR` (from Cargo config `[env]`)"
-          "set `packages.envdep.env.ENVDEP_DIR = ./app/vendor/envdep;`"
-        ];
+        run =
+          expectFailure "env-repository-path-run"
+            (unitsNamed (inst envRepoPath) "build")."envdep-0.1.0-build-run"
+            [
+              "`envdep` was given the repository path `app/vendor/envdep` in `ENVDEP_DIR` (from Cargo config `[env]`)"
+              "set `packages.envdep.env.ENVDEP_DIR = ./app/vendor/envdep;`"
+            ];
         app = envRepoPathFixed.workspaces.main.packages.app;
       }
       ''
@@ -1972,13 +2230,16 @@ in
       fnInst = inst rootsEnvFn;
       wsRootOf =
         pkg: key:
-        builtins.match ".*\nexport WS_ROOT=([^\n]*)\n.*" fnInst.testRuns.${pkg}.${key}.drvAttrs.buildCommand;
+        builtins.match ".*\nexport WS_ROOT=([^\n]*)\n.*"
+          fnInst.testRuns.${pkg}.${key}.drvAttrs.buildCommand;
       check =
         name: repo:
         let
           w = repo.workspaces.main;
         in
-        assert lib.assertMsg (repo.warnings or [ ] == [ ]) "${name}: warnings ${builtins.toJSON repo.warnings}";
+        assert lib.assertMsg (
+          repo.warnings or [ ] == [ ]
+        ) "${name}: warnings ${builtins.toJSON repo.warnings}";
         assert lib.assertMsg (
           lib.mapAttrs (_: lib.attrNames) w.tests == {
             app = [ "bin-app" ];
@@ -1996,10 +2257,17 @@ in
           "${name}_doctest" = w.target.${native}.doctests.tool;
         };
     in
-    assert lib.assertMsg (
-      wsRootOf "app" "bin/app" == [ "${fnInst.sources.workspaceTest.ws}/ws" ]
-      && wsRootOf "tool" "lib/tool" == [ "${fnInst.sources.workspace.tool}/tool" ]
-    ) "roots-override: WS_ROOT ${builtins.toJSON [ (wsRootOf "app" "bin/app") (wsRootOf "tool" "lib/tool") ]}";
+    assert lib.assertMsg
+      (
+        wsRootOf "app" "bin/app" == [ "${fnInst.sources.workspaceTest.ws}/ws" ]
+        && wsRootOf "tool" "lib/tool" == [ "${fnInst.sources.workspace.tool}/tool" ]
+      )
+      "roots-override: WS_ROOT ${
+        builtins.toJSON [
+          (wsRootOf "app" "bin/app")
+          (wsRootOf "tool" "lib/tool")
+        ]
+      }";
     pkgs.runCommand "roots-override"
       (
         check "predicted" rootsPredicted
@@ -2027,7 +2295,10 @@ in
   # the linker wrapper of nixpkgs' rustc's choice, the cc's own linker.
   native-preset =
     let
-      t = modules: (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules)).workspaces.main.target.${native}.spec;
+      t =
+        modules:
+        (mkRepo (fixtures + "/multi-ws") ([ (oneWs "a") ] ++ modules))
+        .workspaces.main.target.${native}.spec;
       dflt = t [ ];
       off = t [ { targets.${native}.preset = lib.mkForce null; } ];
       static = breakbulk.presets.linuxStatic { inherit pkgs; };
@@ -2035,7 +2306,9 @@ in
       viaOption = t [ { targets.${native}.preset = breakbulk.presets.linuxStatic; } ];
       linkerOf = x: builtins.unsafeDiscardStringContext (toString x.linker);
       isStatic = x: lib.elem "target-feature=+crt-static" x.rustflags;
-      unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (lib.attrValues (mwInst "a").units.build);
+      unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (
+        lib.attrValues (mwInst "a").units.build
+      );
       checks = {
         # linux: the cc's own linker, and no static-linking rustflags.
         defaultIsLinuxGnu = lib.hasSuffix "cc-default" (linkerOf dflt) && dflt.rustflags == [ ];
@@ -2069,11 +2342,15 @@ in
       ccOf = x: builtins.unsafeDiscardStringContext (toString x.cc);
       checks = {
         nativeIsMusl = mNative == "${mp.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-musl";
-        defaultIsLinuxMusl = lib.hasSuffix "cc-default" (builtins.unsafeDiscardStringContext (toString spec.linker));
+        defaultIsLinuxMusl = lib.hasSuffix "cc-default" (
+          builtins.unsafeDiscardStringContext (toString spec.linker)
+        );
         crtStatic = lib.elem "target-feature=+crt-static" spec.rustflags;
         pkgConfigStatic = (spec.env.PKG_CONFIG_ALL_STATIC or null) == "1";
         muslCc = lib.hasPrefix (builtins.unsafeDiscardStringContext (toString mp.stdenv.cc)) (ccOf spec);
-        glibcStillGnu = (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).workspaces.main.target.${native}.spec.rustflags == [ ];
+        glibcStillGnu =
+          (mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ]).workspaces.main.target.${native}.spec.rustflags
+          == [ ];
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
     in
@@ -2089,32 +2366,57 @@ in
       # Every entry at an old and a new version (aws-lc-sys differs).
       settings = lib.concatMap (
         n:
-        map (version: sysCfg.${n} { inherit version; name = n; }) [
-          "0.41.0"
-          "0.42.0"
-        ]
+        map
+          (
+            version:
+            sysCfg.${n} {
+              inherit version;
+              name = n;
+            }
+          )
+          [
+            "0.41.0"
+            "0.42.0"
+          ]
       ) (lib.attrNames sysCfg);
       envNames = lib.concatMap (p: lib.attrNames p.env) settings;
-      switches = lib.filter (n: builtins.match ".*_(USE_PKG_CONFIG|USE_SYSTEM|NO_VENDOR|SYSTEM)" n != null) envNames;
-      inputsOf = n: version: map lib.getName ((sysCfg.${n} { inherit version; name = n; }).inputs pkgs);
+      switches = lib.filter (
+        n: builtins.match ".*_(USE_PKG_CONFIG|USE_SYSTEM|NO_VENDOR|SYSTEM)" n != null
+      ) envNames;
+      inputsOf =
+        n: version:
+        map lib.getName (
+          (sysCfg.${n} {
+            inherit version;
+            name = n;
+          }).inputs
+            pkgs
+        );
       awsOld = sysCfg.aws-lc-sys {
         name = "aws-lc-sys";
         version = "0.41.0";
       };
     in
     assert lib.assertMsg (switches == [ ]) "sys-defaults: system-library switches ${toString switches}";
-    assert lib.assertMsg (inputsOf "libsqlite3-sys" "0.30.0" == [ "sqlite" ]) "sys-defaults: libsqlite3-sys inputs";
+    assert lib.assertMsg (
+      inputsOf "libsqlite3-sys" "0.30.0" == [ "sqlite" ]
+    ) "sys-defaults: libsqlite3-sys inputs";
     # aws-lc-sys by version: a function of the lockfile entry.
-    assert lib.assertMsg (inputsOf "aws-lc-sys" "0.42.0" == [ "aws-lc" ]) "sys-defaults: aws-lc-sys 0.42 inputs";
+    assert lib.assertMsg (
+      inputsOf "aws-lc-sys" "0.42.0" == [ "aws-lc" ]
+    ) "sys-defaults: aws-lc-sys 0.42 inputs";
     assert lib.assertMsg (
       inputsOf "aws-lc-sys" "0.41.0" == [ ] && awsOld.env.AWS_LC_SYS_CMAKE_BUILDER or null == "1"
     ) "sys-defaults: aws-lc-sys 0.41 settings";
     # The reference docs list every curated name.
-    assert lib.assertMsg (lib.all (n: lib.hasInfix "`${n}`" repo.options.sysDefaults.packages.description) (
-      lib.attrNames breakbulk.sysDefaults
-    )) "sys-defaults: a curated name is missing from the option's description";
+    assert lib.assertMsg (lib.all
+      (n: lib.hasInfix "`${n}`" repo.options.sysDefaults.packages.description)
+      (lib.attrNames breakbulk.sysDefaults)
+    ) "sys-defaults: a curated name is missing from the option's description";
     # Curated entries are not `packages` keys (no warnings, no internal keys).
-    assert lib.assertMsg (repo.config.packages == { }) "sys-defaults: packages ${toString (lib.attrNames repo.config.packages)}";
+    assert lib.assertMsg (
+      repo.config.packages == { }
+    ) "sys-defaults: packages ${toString (lib.attrNames repo.config.packages)}";
     evalCheck "sys-defaults-no-switches" (toString envNames);
 
   # `sysDefaults.packages`: the lowest layer under `packages`, replaced by a
@@ -2143,8 +2445,7 @@ in
       ];
       units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
       envOf =
-        n:
-        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       itoa = envOf "itoa-1.0.11-lib";
       libc = envOf "libc-0.2.191-lib";
       off = mkRepo (fixtures + "/multi-ws") [
@@ -2152,10 +2453,13 @@ in
         { sysDefaults.enable = false; }
       ];
     in
-    assert lib.assertMsg (itoa.SYS_ITOA or null == "curated" && itoa.SYS_BOTH or null == "user")
-      "sys-defaults: itoa env ${builtins.toJSON itoa}";
+    assert lib.assertMsg (
+      itoa.SYS_ITOA or null == "curated" && itoa.SYS_BOTH or null == "user"
+    ) "sys-defaults: itoa env ${builtins.toJSON itoa}";
     assert lib.assertMsg (!(libc ? SYS_LIBC)) "sys-defaults: libc = null left ${builtins.toJSON libc}";
-    assert lib.assertMsg (repo.config.sysDefaults.packages.libsqlite3-sys == null) "sys-defaults: libsqlite3-sys not null";
+    assert lib.assertMsg (
+      repo.config.sysDefaults.packages.libsqlite3-sys == null
+    ) "sys-defaults: libsqlite3-sys not null";
     assert lib.assertMsg (off.config.sysDefaults.packages == { }) "sys-defaults: enable = false";
     evalCheck "sys-defaults" (builtins.toJSON itoa);
 
@@ -2189,23 +2493,26 @@ in
       hasC = view: (builtins.readDir view) ? c;
       units = unitsNamed i "build";
       envOf =
-        n:
-        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
     in
     assert lib.assertMsg (
       lib.hasInfix "export MD_ONLY=md" script && lib.hasInfix "export MD_BOTH=own" script
     ) "member-defaults: test env in ${script}";
     # The package's `test.runner = "libtest"` wins over the default nextest.
-    assert lib.assertMsg (!(run.drvAttrs ? nextestCargoMetadata)) "member-defaults: app-b runs under nextest";
+    assert lib.assertMsg (
+      !(run.drvAttrs ? nextestCargoMetadata)
+    ) "member-defaults: app-b runs under nextest";
     assert lib.assertMsg (lib.all (n: hasC i.sources.workspace.${n}) [
       "b"
       "a/inner"
       "shared"
     ]) "member-defaults: a member's view lacks c/";
-    assert lib.assertMsg (i.sources.crates == (plain.workspaces.main.instances.${native}.default).sources.crates)
-      "member-defaults: registry crate sources changed";
-    assert lib.assertMsg ((envOf "shared-0.1.0-lib").MD_UNIT or null == "md" && !((envOf "libc-0.2.191-lib") ? MD_UNIT))
-      "member-defaults: unit env placement";
+    assert lib.assertMsg (
+      i.sources.crates == (plain.workspaces.main.instances.${native}.default).sources.crates
+    ) "member-defaults: registry crate sources changed";
+    assert lib.assertMsg (
+      (envOf "shared-0.1.0-lib").MD_UNIT or null == "md" && !((envOf "libc-0.2.191-lib") ? MD_UNIT)
+    ) "member-defaults: unit env placement";
     evalCheck "member-defaults" script;
 
   # Single values across package layers: a more specific layer wins
@@ -2287,8 +2594,7 @@ in
       t = repo.workspaces.main.target.${native};
       units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
       envOf =
-        n:
-        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       bin = envOf "shared-0.1.0-lib";
       run = t.testRuns.app-b."bin/app-b".drvAttrs.buildCommand;
       product = t.packages.app-b;
@@ -2302,7 +2608,9 @@ in
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
     in
-    assert lib.assertMsg (bad == [ ]) "package-layer-attr-priorities: failed ${toString bad} (${builtins.toJSON bin})";
+    assert lib.assertMsg (
+      bad == [ ]
+    ) "package-layer-attr-priorities: failed ${toString bad} (${builtins.toJSON bin})";
     evalCheck "package-layer-attr-priorities" (builtins.toJSON checks);
 
   # `forHost`/`forTarget` sides and the package-shaped `target.<triple>`
@@ -2329,8 +2637,7 @@ in
       ];
       units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
       envOf =
-        n:
-        (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       lib' = envOf "libc-0.2.191-lib";
       run = envOf "libc-0.2.191-build-run";
       script = envOf "libc-0.2.191-build-script";
@@ -2441,16 +2748,20 @@ in
         };
       repoOf = r: mkRepo r [ (oneWs ".") ];
       whole = changedUnits (repoOf (withRepoFiles "a")) (repoOf (withRepoFiles "b"));
-      narrow = changedUnits (repoOf (filtered (withRepoFiles "a"))) (repoOf (filtered (withRepoFiles "b")));
+      narrow = changedUnits (repoOf (filtered (withRepoFiles "a"))) (
+        repoOf (filtered (withRepoFiles "b"))
+      );
     in
     assert lib.assertMsg (whole != [ ]) "filtered-root: the unfiltered root changed no units";
     assert lib.assertMsg (narrow == [ ]) "filtered-root: changed units ${builtins.toJSON narrow}";
-    pkgs.runCommand "filtered-root" {
-      bin = (repoOf (filtered (withRepoFiles "a"))).workspaces.main.packages.walking-skeleton;
-    } ''
-      $bin/bin/walking-skeleton
-      echo ${lib.escapeShellArg (builtins.toJSON whole)} > $out
-    '';
+    pkgs.runCommand "filtered-root"
+      {
+        bin = (repoOf (filtered (withRepoFiles "a"))).workspaces.main.packages.walking-skeleton;
+      }
+      ''
+        $bin/bin/walking-skeleton
+        echo ${lib.escapeShellArg (builtins.toJSON whole)} > $out
+      '';
 
   # `workspaces.<ws>.fmt` (#32): `cargo fmt --check` over the members. The
   # (rustfmt-clean) walking skeleton passes; a misformatted file fails
@@ -2488,7 +2799,8 @@ in
     assert lib.assertMsg (!(off ? "main/fmt")) "fmt: a check without fmt.enable";
     # The resolved toolchain is an output, for treefmt's rustfmt.
     assert lib.assertMsg (
-      (mkRepo (fixtures + "/walking-skeleton") [ (oneWs ".") ]).workspaces.main.toolchain.rustfmt == pkgs.rustfmt
+      (mkRepo (fixtures + "/walking-skeleton") [ (oneWs ".") ]).workspaces.main.toolchain.rustfmt
+      == pkgs.rustfmt
     ) "fmt: repo.workspaces.main.toolchain.rustfmt";
     pkgs.runCommand "fmt"
       {
@@ -2514,7 +2826,12 @@ in
       variantsOf =
         ws:
         (mkRepo (fixtures + "/walking-skeleton") [
-          { workspaces.main = { path = "."; } // ws; }
+          {
+            workspaces.main = {
+              path = ".";
+            }
+            // ws;
+          }
         ]).config.workspaces.main.variants;
       withClippy = variantsOf { variants.clippy.mode = "clippy"; };
       changed = variantsOf { variants.default.profile = "release"; };
@@ -2524,7 +2841,10 @@ in
       };
     in
     assert lib.assertMsg (
-      lib.attrNames withClippy == [ "clippy" "default" ]
+      lib.attrNames withClippy == [
+        "clippy"
+        "default"
+      ]
     ) "default-variant: with clippy: ${toString (lib.attrNames withClippy)}";
     assert lib.assertMsg (
       lib.attrNames changed == [ "default" ] && changed.default.profile == "release"
@@ -2571,7 +2891,9 @@ in
         };
         setTarget = {
           m.devShell.setTarget = true;
-          want = [ "${ws}.devShell.setTarget ${at} was removed; use devShell.target: a triple, or null for none" ];
+          want = [
+            "${ws}.devShell.setTarget ${at} was removed; use devShell.target: a triple, or null for none"
+          ];
         };
         benches = {
           m.variants.c = {
@@ -2582,7 +2904,9 @@ in
         };
         allTargets = {
           m.variants.default.allTargets = false;
-          want = [ "${ws}.variants.default ${at}: `allTargets = false` needs a check or clippy variant, not `build`" ];
+          want = [
+            "${ws}.variants.default ${at}: `allTargets = false` needs a check or clippy variant, not `build`"
+          ];
         };
         variantTargets = {
           m.variants.default.targets = [ "riscv64gc-unknown-linux-gnu" ];
@@ -2604,11 +2928,18 @@ in
     in
     assert lib.assertMsg (bad == [ ]) "option-assertions: ${builtins.toJSON (lib.getAttrs bad got)}";
     assert lib.assertMsg (
-      failed badKey == [ "breakbulk: packages.\"foo@>=nope\" (set in `/checks/key.nix'): `>=nope` is not a Cargo version requirement" ]
+      failed badKey == [
+        "breakbulk: packages.\"foo@>=nope\" (set in `/checks/key.nix'): `>=nope` is not a Cargo version requirement"
+      ]
     ) "option-assertions: key: ${builtins.toJSON (failed badKey)}";
-    assert lib.assertMsg (fails (repoOf { defaultVariant = "x"; }).workspaces) "option-assertions: workspaces read despite a failed assertion";
-    assert lib.assertMsg (fails badVersion.config.packages.foo.version) "option-assertions: a bad version requirement was accepted";
-    assert lib.assertMsg (!(fails badVersion.config.packages.foo.env)) "option-assertions: the version's type error reached another option";
+    assert lib.assertMsg (fails
+      (repoOf { defaultVariant = "x"; }).workspaces
+    ) "option-assertions: workspaces read despite a failed assertion";
+    assert lib.assertMsg (fails badVersion.config.packages.foo.version)
+      "option-assertions: a bad version requirement was accepted";
+    assert lib.assertMsg (
+      !(fails badVersion.config.packages.foo.env)
+    ) "option-assertions: the version's type error reached another option";
     evalCheck "option-assertions" (builtins.toJSON got);
 
   # `workspaces.<ws>.members` is what `cargo metadata` lists (glob
@@ -2639,10 +2970,23 @@ in
         ];
         class = [ "[a-c]*" ];
       };
-      viaTests = lib.mapAttrs (_: ex: testPkgs (repoWith { targets.${native}.tests.exclude = ex; })) cargoCases;
-      viaPackages = testPkgs (repoWith { targets.${native}.packages.exclude = [ "[a-c]*" ]; });
-      viaVariant = testPkgs (repoWith { variants.default.packages.exclude = [ "ws-util" ]; });
-      products = lib.attrNames (t (repoWith { targets.${native}.products.exclude = [ "app" ]; })).packages;
+      viaTests = lib.mapAttrs (
+        _: ex:
+        testPkgs (repoWith {
+          targets.${native}.tests.exclude = ex;
+        })
+      ) cargoCases;
+      viaPackages = testPkgs (repoWith {
+        targets.${native}.packages.exclude = [ "[a-c]*" ];
+      });
+      viaVariant = testPkgs (repoWith {
+        variants.default.packages.exclude = [ "ws-util" ];
+      });
+      products =
+        lib.attrNames
+          (t (repoWith {
+            targets.${native}.products.exclude = [ "app" ];
+          })).packages;
       fromConfig = mkRepo (fixtures + "/workspace-members") [
         (oneWs ".")
         (
@@ -2659,18 +3003,51 @@ in
       fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
       all = "app, core-a, core-b, helper, ws-util";
     in
-    assert lib.assertMsg (viaPackages == [ "helper" "ws-util" ]) "workspace-members: packages.exclude: ${toString viaPackages}";
-    assert lib.assertMsg (viaVariant == [ "app" "core-a" "core-b" "helper" ]) "workspace-members: variant packages.exclude: ${toString viaVariant}";
-    assert lib.assertMsg (products == [ "core-a" "core-b" "ws-util" ]) "workspace-members: products.exclude: ${toString products}";
-    assert lib.assertMsg (testPkgs fromConfig == [ "core-a" "core-b" "helper" "ws-util" ]) "workspace-members: from config: ${toString (testPkgs fromConfig)}";
     assert lib.assertMsg (
-      failed (repoWith { variants.default.packages.exclude = [ "nope" ]; }) == [
+      viaPackages == [
+        "helper"
+        "ws-util"
+      ]
+    ) "workspace-members: packages.exclude: ${toString viaPackages}";
+    assert lib.assertMsg (
+      viaVariant == [
+        "app"
+        "core-a"
+        "core-b"
+        "helper"
+      ]
+    ) "workspace-members: variant packages.exclude: ${toString viaVariant}";
+    assert lib.assertMsg (
+      products == [
+        "core-a"
+        "core-b"
+        "ws-util"
+      ]
+    ) "workspace-members: products.exclude: ${toString products}";
+    assert lib.assertMsg (
+      testPkgs fromConfig == [
+        "core-a"
+        "core-b"
+        "helper"
+        "ws-util"
+      ]
+    ) "workspace-members: from config: ${toString (testPkgs fromConfig)}";
+    assert lib.assertMsg (
+      failed (repoWith {
+        variants.default.packages.exclude = [ "nope" ];
+      }) == [
         "breakbulk: workspaces.main.variants.default.packages.exclude (set in `${file}'): `nope` matches no member (${all})"
       ]
     ) "workspace-members: variant message";
-    assert lib.assertMsg (fails (repoWith { targets.${native}.tests.exclude = [ "zz*" ]; }).workspaces) "workspace-members: an unmatched pattern was accepted";
-    assert lib.assertMsg (fails (repoWith { targets.${native}.products.exclude = [ "core**" ]; }).checks) "workspace-members: an invalid pattern was accepted";
-    assert lib.assertMsg (fails (repoWith { targets.${native}.packages.exclude = [ "nope" ]; }).workspaces) "workspace-members: an unmatched name was accepted";
+    assert lib.assertMsg (fails
+      (repoWith { targets.${native}.tests.exclude = [ "zz*" ]; }).workspaces
+    ) "workspace-members: an unmatched pattern was accepted";
+    assert lib.assertMsg (fails
+      (repoWith { targets.${native}.products.exclude = [ "core**" ]; }).checks
+    ) "workspace-members: an invalid pattern was accepted";
+    assert lib.assertMsg (fails
+      (repoWith { targets.${native}.packages.exclude = [ "nope" ]; }).workspaces
+    ) "workspace-members: an unmatched name was accepted";
     pkgs.runCommand "workspace-members"
       {
         nativeBuildInputs = [
@@ -2813,9 +3190,8 @@ in
       ];
       bad = lib.filter (c: conflicts c.decls != c.want) cases;
     in
-    assert lib.assertMsg (bad == [ ]) "product-inputs-conflicts: ${
-      builtins.toJSON (map (c: c // { got = conflicts c.decls; }) bad)
-    }";
+    assert lib.assertMsg (bad == [ ])
+      "product-inputs-conflicts: ${builtins.toJSON (map (c: c // { got = conflicts c.decls; }) bad)}";
     evalCheck "product-inputs-conflicts" "ok";
 
   # Instantiating a plan needs only the names of package settings; their
@@ -3016,7 +3392,8 @@ in
       && (repoWith { mode = "dynamic"; }).config.ca
       && !(repoWith { ca = false; }).config.ca
     ) "nix-features: repo.config.mode and repo.config.ca are not what was chosen";
-    assert lib.assertMsg configured.importFromDerivation "nix-features: a Cargo config's build.target is not counted";
+    assert lib.assertMsg configured.importFromDerivation
+      "nix-features: a Cargo config's build.target is not counted";
     evalCheck "nix-features" (builtins.toJSON (map (c: features c.settings) cases));
 
   # Every option has a description, so the docs generate.

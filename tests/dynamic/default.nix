@@ -721,7 +721,9 @@ let
     guard: key: run:
     pkgs.runCommand "closure-${lib.replaceStrings [ "/" ] [ "-" ] key}-${mode}"
       (
-        { runAttrs = builtins.toJSON run.drvAttrs; }
+        {
+          runAttrs = builtins.toJSON run.drvAttrs;
+        }
         // lib.optionalAttrs isDynamic {
           exportReferencesGraph = [
             "tools"
@@ -954,7 +956,9 @@ let
             ++ lib.optional (name == "declared-paths") repository.declaredMissing
           )
           # The git repository lazy-strings fetches during evaluation.
-          ++ lib.optional (name == "lazy-strings") (toString (import ../git-multi-workspace { inherit pkgs breakbulk; }).repo)
+          ++ lib.optional (name == "lazy-strings") (
+            toString (import ../git-multi-workspace { inherit pkgs breakbulk; }).repo
+          )
         )
       )
     ) repos

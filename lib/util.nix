@@ -30,21 +30,43 @@ rec {
   percentDecode =
     let
       codes = {
-        "%20" = " "; "%25" = "%"; "%21" = "!"; "%22" = "\""; "%23" = "#"; "%24" = "$";
-        "%26" = "&"; "%27" = "'"; "%28" = "("; "%29" = ")"; "%2A" = "*";
-        "%2B" = "+"; "%2C" = ","; "%2F" = "/"; "%3A" = ":"; "%3B" = ";";
-        "%3C" = "<"; "%3D" = "="; "%3E" = ">"; "%3F" = "?"; "%40" = "@";
-        "%5B" = "["; "%5C" = "\\"; "%5D" = "]"; "%5E" = "^"; "%60" = "`";
-        "%7B" = "{"; "%7C" = "|"; "%7D" = "}"; "%7E" = "~";
+        "%20" = " ";
+        "%25" = "%";
+        "%21" = "!";
+        "%22" = "\"";
+        "%23" = "#";
+        "%24" = "$";
+        "%26" = "&";
+        "%27" = "'";
+        "%28" = "(";
+        "%29" = ")";
+        "%2A" = "*";
+        "%2B" = "+";
+        "%2C" = ",";
+        "%2F" = "/";
+        "%3A" = ":";
+        "%3B" = ";";
+        "%3C" = "<";
+        "%3D" = "=";
+        "%3E" = ">";
+        "%3F" = "?";
+        "%40" = "@";
+        "%5B" = "[";
+        "%5C" = "\\";
+        "%5D" = "]";
+        "%5E" = "^";
+        "%60" = "`";
+        "%7B" = "{";
+        "%7C" = "|";
+        "%7D" = "}";
+        "%7E" = "~";
       };
       lower = lib.mapAttrs' (k: v: lib.nameValuePair (lib.toLower k) v) codes;
       all = codes // lower;
     in
     s:
     # One left-to-right pass, so `%2541` decodes to `%41`, not `A`.
-    (
-      replaceStrings ([ "+" ] ++ attrNames all) ([ " " ] ++ map (k: all.${k}) (attrNames all)) s
-    );
+    (replaceStrings ([ "+" ] ++ attrNames all) ([ " " ] ++ map (k: all.${k}) (attrNames all)) s);
 
   # Split a string on a literal separator.
   splitOn = sep: s: filter isString (split (lib.escapeRegex sep) s);
@@ -57,13 +79,21 @@ rec {
     let
       parts = filter (c: c != "" && c != ".") (splitOn "/" p);
       step =
-        acc: c:
-        if c == ".." && acc != [ ] && lib.last acc != ".." then lib.init acc else acc ++ [ c ];
+        acc: c: if c == ".." && acc != [ ] && lib.last acc != ".." then lib.init acc else acc ++ [ c ];
     in
     concatStringsSep "/" (lib.foldl' step [ ] parts);
 
   # Join relative path strings and normalize.
-  joinRel = a: b: normalizeRel (if a == "" then b else if b == "" then a else "${a}/${b}");
+  joinRel =
+    a: b:
+    normalizeRel (
+      if a == "" then
+        b
+      else if b == "" then
+        a
+      else
+        "${a}/${b}"
+    );
 
   # `a` relative to `b`, both normalized relative paths from the same root.
   relativeTo =
@@ -73,7 +103,12 @@ rec {
       bs = filter (c: c != "") (splitOn "/" b);
       common =
         let
-          go = i: if i < length as && i < length bs && builtins.elemAt as i == builtins.elemAt bs i then go (i + 1) else i;
+          go =
+            i:
+            if i < length as && i < length bs && builtins.elemAt as i == builtins.elemAt bs i then
+              go (i + 1)
+            else
+              i;
         in
         go 0;
       ups = lib.genList (_: "..") (length bs - common);
@@ -105,13 +140,26 @@ rec {
             rest = builtins.tail cs;
           in
           if inClass then
-            (if c == "]" then "]" else if c == "\\" then "\\\\" else c) + go rest (c != "]")
+            (
+              if c == "]" then
+                "]"
+              else if c == "\\" then
+                "\\\\"
+              else
+                c
+            )
+            + go rest (c != "]")
           else if c == "*" then
             "[^/]*" + go rest false
           else if c == "?" then
             "[^/]" + go rest false
           else if c == "[" then
-            (if rest != [ ] && builtins.head rest == "!" then "[^" + go (builtins.tail rest) true else "[" + go rest true)
+            (
+              if rest != [ ] && builtins.head rest == "!" then
+                "[^" + go (builtins.tail rest) true
+              else
+                "[" + go rest true
+            )
           else
             lib.escapeRegex c + go rest false;
     in
@@ -132,7 +180,14 @@ rec {
       cs = lib.stringToCharacters pat;
       n = length cs;
       at = i: builtins.elemAt cs i;
-      closeFrom = i: if i >= n then null else if at i == "]" then i else closeFrom (i + 1);
+      closeFrom =
+        i:
+        if i >= n then
+          null
+        else if at i == "]" then
+          i
+        else
+          closeFrom (i + 1);
       # The character specifiers in [from, to): `a-z` ranges and single
       # characters.
       specs =
@@ -140,9 +195,21 @@ rec {
         if from >= to then
           [ ]
         else if from + 3 <= to && at (from + 1) == "-" then
-          [ { lo = at from; hi = at (from + 2); } ] ++ specs (from + 3) to
+          [
+            {
+              lo = at from;
+              hi = at (from + 2);
+            }
+          ]
+          ++ specs (from + 3) to
         else
-          [ { lo = at from; hi = at from; } ] ++ specs (from + 1) to;
+          [
+            {
+              lo = at from;
+              hi = at from;
+            }
+          ]
+          ++ specs (from + 1) to;
       stars = i: if i < n && at i == "*" then 1 + stars (i + 1) else 0;
       fail = pos: msg: {
         error = "near position ${toString pos}: ${msg}";
@@ -188,16 +255,40 @@ rec {
               let
                 k = closeFrom (i + 3);
               in
-              parse (k + 1) (toks ++ [ { t = "except"; specs = specs (i + 2) k; } ])
+              parse (k + 1) (
+                toks
+                ++ [
+                  {
+                    t = "except";
+                    specs = specs (i + 2) k;
+                  }
+                ]
+              )
             else if plain then
               let
                 k = closeFrom (i + 2);
               in
-              parse (k + 1) (toks ++ [ { t = "within"; specs = specs (i + 1) k; } ])
+              parse (k + 1) (
+                toks
+                ++ [
+                  {
+                    t = "within";
+                    specs = specs (i + 1) k;
+                  }
+                ]
+              )
             else
               fail i "invalid range pattern"
           else
-            parse (i + 1) (toks ++ [ { t = "char"; inherit c; } ]);
+            parse (i + 1) (
+              toks
+              ++ [
+                {
+                  t = "char";
+                  inherit c;
+                }
+              ]
+            );
       parsed = parse 0 [ ];
       toks = parsed.tokens;
       nt = length toks;
@@ -246,9 +337,17 @@ rec {
     root: pattern:
     let
       comps = filter (c: c != "" && c != ".") (splitOn "/" pattern);
-      entries = rel: let p = if rel == "" then root else root + "/${rel}"; in
+      entries =
+        rel:
+        let
+          p = if rel == "" then root else root + "/${rel}";
+        in
         if builtins.pathExists p && builtins.readFileType p == "directory" then builtins.readDir p else { };
-      isDirAt = rel: let p = if rel == "" then root else root + "/${rel}"; in
+      isDirAt =
+        rel:
+        let
+          p = if rel == "" then root else root + "/${rel}";
+        in
         builtins.pathExists p && builtins.readFileType p == "directory";
       go =
         rel: cs:
@@ -280,9 +379,12 @@ rec {
             let
               r = sub c;
             in
-            if rest == [ ] then (if builtins.pathExists (if r == "" then root else root + "/${r}") then [ r ] else [ ])
-            else if isDirAt r then go r rest
-            else [ ];
+            if rest == [ ] then
+              (if builtins.pathExists (if r == "" then root else root + "/${r}") then [ r ] else [ ])
+            else if isDirAt r then
+              go r rest
+            else
+              [ ];
     in
     lib.unique (go "" comps);
 

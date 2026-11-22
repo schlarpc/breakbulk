@@ -80,9 +80,20 @@ let
         "app-tool"
       ];
       # Every build script includes ../common/build_common.rs.
-      args.extraSources = lib.genAttrs [ "a-sys" "b-sys" "c" "pm" "hostdep" "app" "oldsyn" ] (_: [
-        "common"
-      ]);
+      args.extraSources =
+        lib.genAttrs
+          [
+            "a-sys"
+            "b-sys"
+            "c"
+            "pm"
+            "hostdep"
+            "app"
+            "oldsyn"
+          ]
+          (_: [
+            "common"
+          ]);
     };
   };
 
@@ -116,7 +127,8 @@ in
       {
         # The self-built programs are really breakbulk's builds.
         units = lib.concatStringsSep " " (
-          lib.attrNames repo.workspaces.breakbulk.instances.${pkgs.stdenv.hostPlatform.rust.rustcTarget}.default.units.build
+          lib.attrNames
+            repo.workspaces.breakbulk.instances.${pkgs.stdenv.hostPlatform.rust.rustcTarget}.default.units.build
         );
       }
       ''
@@ -128,7 +140,9 @@ in
         # comparison is not vacuous.
         ${compareFixture "walking-skeleton"}
         ${compareFixture "directives"}
-        for p in ${lib.concatStringsSep " " (lib.attrValues (lib.mapAttrs (n: d: "${d}/bin/${n}") selfBuilt))}; do
+        for p in ${
+          lib.concatStringsSep " " (lib.attrValues (lib.mapAttrs (n: d: "${d}/bin/${n}") selfBuilt))
+        }; do
           [ -x "$p" ]
         done
         mkdir -p $out

@@ -215,7 +215,9 @@ in
 
         The curated entries are defined at `mkDefault` priority, so a
         plain definition replaces one: `null` turns it off, a function
-        replaces it. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curatedDependents)}.
+        replaces it. They are: ${
+          lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curatedDependents)
+        }.
         `insta` sets `INSTA_WORKSPACE_ROOT` to the workspace root of the
         run's files and `INSTA_UPDATE = "no"`, in test runs and doctests
         (see [Run snapshot tests](../../how-to/snapshot-tests.md)).

@@ -33,7 +33,8 @@ let
   isWasmBindgen = e: e.name == "wasm-bindgen";
   fromRegistry = e: e.parsed.kind == "registry";
   versionsIn =
-    entries: lib.unique (map (e: e.version) (lib.filter (e: isWasmBindgen e && fromRegistry e) entries));
+    entries:
+    lib.unique (map (e: e.version) (lib.filter (e: isWasmBindgen e && fromRegistry e) entries));
 
   versionFromEntries =
     what: entries:

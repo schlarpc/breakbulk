@@ -89,7 +89,10 @@ let
     let
       v = drv.version or null;
     in
-    if builtins.isString v && builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+(-.*)?" v != null then v else null;
+    if builtins.isString v && builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+(-.*)?" v != null then
+      v
+    else
+      null;
 
   # `rustc -vV`'s release, LLVM version and major, and whether it takes
   # `--remap-path-scope`, as { release; llvmVersion; llvmMajor;
@@ -125,7 +128,9 @@ let
             printf '{"release":"%s","llvmVersion":"%s","llvmMajor":%s,"remapPathScope":%s}' "$release" "$llvmVersion" "$llvm" "$scope" > $out
           '';
     in
-    builtins.fromJSON (featureGates.readOutput nixFeatures "probing `${rustc}/bin/rustc -vV` (lib/toolchain-facts.nix)" out);
+    builtins.fromJSON (
+      featureGates.readOutput nixFeatures "probing `${rustc}/bin/rustc -vV` (lib/toolchain-facts.nix)" out
+    );
 
   # `cargo -V`'s release, as { release; }.
   probeCargo =
@@ -151,7 +156,9 @@ let
             printf '{"release":"%s"}' "$release" > $out
           '';
     in
-    builtins.fromJSON (featureGates.readOutput nixFeatures "probing `${cargo}/bin/cargo -V` (lib/toolchain-facts.nix)" out);
+    builtins.fromJSON (
+      featureGates.readOutput nixFeatures "probing `${cargo}/bin/cargo -V` (lib/toolchain-facts.nix)" out
+    );
 
   # Whether `of` may probe: a release from `version` and the LLVM major
   # from `llvmPackages` or the table leave nothing to ask. Lazy reads

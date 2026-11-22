@@ -45,9 +45,10 @@ let
       };
 
       config.warnings =
-        bt.unimplementedWarnings "packages.${lib.strings.escapeNixIdentifier name}" options {
-          "14" = [ [ "pipelining" ] ];
-        };
+        bt.unimplementedWarnings "packages.${lib.strings.escapeNixIdentifier name}" options
+          {
+            "14" = [ [ "pipelining" ] ];
+          };
     };
 in
 {
@@ -71,16 +72,19 @@ in
 
   config.warnings =
     let
-      variants = lib.unique (lib.concatMap (ws: lib.attrNames ws.variants) (lib.attrValues config.workspaces));
+      variants = lib.unique (
+        lib.concatMap (ws: lib.attrNames ws.variants) (lib.attrValues config.workspaces)
+      );
       esc = lib.strings.escapeNixIdentifier;
     in
     lib.concatMap (p: p.warnings) (lib.attrValues config.packages)
     ++ lib.concatLists (
       lib.mapAttrsToList (
         k: p:
-        map (v: "breakbulk: `packages.${esc k}.variant.${esc v}` names no variant of any workspace; it has no effect.") (
-          lib.filter (v: !(lib.elem v variants)) (lib.attrNames p.variant)
-        )
+        map (
+          v:
+          "breakbulk: `packages.${esc k}.variant.${esc v}` names no variant of any workspace; it has no effect."
+        ) (lib.filter (v: !(lib.elem v variants)) (lib.attrNames p.variant))
       ) config.packages
     );
 

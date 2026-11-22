@@ -622,14 +622,15 @@ let
     };
     testHelperComponentizeMetadata = {
       expr =
-        lib.hasInfix ''
-          meta=()
-          meta+=(--licenses MIT)
-          meta+=(--name comp)
-          meta+=(--processed-by 'breakbulk=0.1.0')
-          meta+=(--x-custom a)
-          meta+=(--x-custom b)
-        ''
+        lib.hasInfix
+          ''
+            meta=()
+            meta+=(--licenses MIT)
+            meta+=(--name comp)
+            meta+=(--processed-by 'breakbulk=0.1.0')
+            meta+=(--x-custom a)
+            meta+=(--x-custom b)
+          ''
           (H.componentize {
             metadata = {
               name = "comp";
@@ -664,7 +665,8 @@ let
             };
           };
         };
-        metaOf = h: lib.filter (lib.hasPrefix "meta+=") (map lib.trim (lib.splitString "\n" (h args).buildCommand));
+        metaOf =
+          h: lib.filter (lib.hasPrefix "meta+=") (map lib.trim (lib.splitString "\n" (h args).buildCommand));
       in
       {
         expr = {
@@ -717,7 +719,9 @@ let
       {
         expr = lib.filter (lib.hasPrefix "meta") (
           map lib.trim (
-            lib.splitString "\n" (lib.replaceStrings [ path ] [ "FILE" ] (builtins.unsafeDiscardStringContext cmd))
+            lib.splitString "\n" (
+              lib.replaceStrings [ path ] [ "FILE" ] (builtins.unsafeDiscardStringContext cmd)
+            )
           )
         );
         expected = [
@@ -860,16 +864,19 @@ let
 
   # An msvc product: `install` writes the PDB to its own `debug` output,
   # which a later `sign` stage without one keeps.
-  msvcLinked = pkgs.runCommand "app-linked" {
-    outputs = [
-      "out"
-      "debug"
-    ];
-  } ''
-    mkdir $out $debug
-    echo exe > $out/app.exe
-    echo pdb > $debug/app.pdb
-  '';
+  msvcLinked =
+    pkgs.runCommand "app-linked"
+      {
+        outputs = [
+          "out"
+          "debug"
+        ];
+      }
+      ''
+        mkdir $out $debug
+        echo exe > $out/app.exe
+        echo pdb > $debug/app.pdb
+      '';
   msvcSigned = S.mkProduct {
     name = "app";
     linked = msvcLinked;
@@ -1349,11 +1356,13 @@ in
         echo "tool=${ref}/bin/hello" >> $out/share/conf
         echo "/nix/store/too-short-openssl" > $out/share/fine
       '';
-      run = h: h {
-        input = product;
-        product.name = "p";
-        inherit pkgs;
-      };
+      run =
+        h:
+        h {
+          input = product;
+          product.name = "p";
+          inherit pkgs;
+        };
       strict = H.noStorePaths { why = "test"; };
       allowed = H.noStorePaths {
         allow = [
@@ -1867,17 +1876,18 @@ in
         );
       evalFails =
         opts:
-        !(builtins.tryEval
-          (builtins.seq (H.buildScriptPath opts {
-            input = pkgs.emptyDirectory;
-            product = {
-              name = "app";
-              buildScriptFlags = [ ];
-            };
-            inherit pkgs;
-          }).drvPath null
-          )
-        ).success;
+        !(builtins.tryEval (
+          builtins.seq
+            (H.buildScriptPath opts {
+              input = pkgs.emptyDirectory;
+              product = {
+                name = "app";
+                buildScriptFlags = [ ];
+              };
+              inherit pkgs;
+            }).drvPath
+            null
+        )).success;
     in
     assert lib.assertMsg (evalFails {
       links = "hdr";

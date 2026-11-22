@@ -103,16 +103,18 @@ let
       i = instOf r;
     in
     lib.listToAttrs (
-      map (
-        u:
-        lib.nameValuePair u.name (
-          builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)
+      map
+        (
+          u:
+          lib.nameValuePair u.name (
+            builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)
+          )
         )
-      ) (
-        lib.filter (u: u.drvAttrs ? BREAKBULK_UNIT) (
-          lib.attrValues i.units.build ++ lib.attrValues i.units.test
+        (
+          lib.filter (u: u.drvAttrs ? BREAKBULK_UNIT) (
+            lib.attrValues i.units.build ++ lib.attrValues i.units.test
+          )
         )
-      )
     );
 
   # `comment`: a shell test on the bin's `.comment` (comment.txt).
@@ -132,7 +134,9 @@ let
       lib.length (linkCaps "app-0.1.0-bin") == 1
     ) "native-link: app's bin has link captures ${builtins.toJSON (linkCaps "app-0.1.0-bin")}";
     assert lib.assertMsg (
-      linkCaps "mid-0.1.0-lib" == [ ] && linkCaps "foo-sys-0.1.0-lib" == [ ] && linkCaps "other-0.1.0-bin" == [ ]
+      linkCaps "mid-0.1.0-lib" == [ ]
+      && linkCaps "foo-sys-0.1.0-lib" == [ ]
+      && linkCaps "other-0.1.0-bin" == [ ]
     ) "native-link: a unit that does not link, or links nothing of foo-sys, got link captures";
     assert lib.assertMsg (lib.all (n: linkCaps n == [ ]) (
       lib.filter (lib.hasInfix "build-script") (lib.attrNames units)

@@ -42,7 +42,9 @@ in
       cfg = config.breakbulk;
       repo = cfg.repo;
       wsNames = lib.attrNames repo.workspaces;
-      allPkgs = lib.concatMap (ws: map (p: { inherit ws p; }) (lib.attrNames repo.workspaces.${ws}.packages)) wsNames;
+      allPkgs = lib.concatMap (
+        ws: map (p: { inherit ws p; }) (lib.attrNames repo.workspaces.${ws}.packages)
+      ) wsNames;
       counts = lib.groupBy (x: x.p) allPkgs;
       pkgName = x: if lib.length counts.${x.p} > 1 then "${x.ws}-${x.p}" else x.p;
     in
@@ -115,7 +117,8 @@ in
                 # Not `docs != null`: that evaluates the docs derivation,
                 # which in IFD mode plans `cargo doc` to list `packages`.
                 lib.optional (
-                  c.defaultTarget != null && repo.workspaces.${ws}.target.${c.defaultTarget}.variants ? ${c.defaultVariant}
+                  c.defaultTarget != null
+                  && repo.workspaces.${ws}.target.${c.defaultTarget}.variants ? ${c.defaultVariant}
                 ) (lib.nameValuePair "${ws}-docs" repo.workspaces.${ws}.docs)
               ) wsNames
             );

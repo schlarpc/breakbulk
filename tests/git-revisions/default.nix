@@ -162,9 +162,7 @@ let
     wss:
     let
       sets = map drvs wss;
-      common = lib.foldl' (acc: s: lib.filterAttrs (d: _: s ? ${d}) acc) (lib.head sets) (
-        lib.tail sets
-      );
+      common = lib.foldl' (acc: s: lib.filterAttrs (d: _: s ? ${d}) acc) (lib.head sets) (lib.tail sets);
     in
     lib.sort lib.lessThan (lib.attrValues common);
 
@@ -230,7 +228,8 @@ in
         package = "gitdep";
       };
       checks = {
-        "a and c share every git unit and common" = ac == lib.sort lib.lessThan ([ "common-0.1.0-lib" ] ++ gitUnits);
+        "a and c share every git unit and common" =
+          ac == lib.sort lib.lessThan ([ "common-0.1.0-lib" ] ++ gitUnits);
         "a and b share only common" = ab == [ "common-0.1.0-lib" ];
         "a and d share only common" = ad == [ "common-0.1.0-lib" ];
         "Cargo's -C metadata of gitdep ignores the commit" = libKey "a" "gitdep" == libKey "b" "gitdep";

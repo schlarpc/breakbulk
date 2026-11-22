@@ -192,7 +192,9 @@ rec {
     issue: opt:
     opt
     // {
-      description = (opt.description or "") + "\n\nNot implemented yet ([#${toString issue}](${issueUrl issue})): setting it only gives an evaluation warning.";
+      description =
+        (opt.description or "")
+        + "\n\nNot implemented yet ([#${toString issue}](${issueUrl issue})): setting it only gives an evaluation warning.";
     };
 
   # The paths (lists of attribute names) of options in `paths` that some
@@ -396,7 +398,8 @@ rec {
     let
       files = lib.filter (f: f != "<unknown-file>") opt.files;
     in
-    lib.optionalString (files != [ ]) " (set in ${lib.concatMapStringsSep " and " (f: "`${toString f}'") files})";
+    lib.optionalString (files != [ ])
+      " (set in ${lib.concatMapStringsSep " and " (f: "`${toString f}'") files})";
 
   # Warnings for options of a submodule that are set but not implemented:
   # `prefix` names the submodule instance (e.g. `targets.wasm32-unknown-unknown`).
@@ -406,7 +409,8 @@ rec {
       lib.mapAttrsToList (
         issue: paths:
         map (
-          p: "breakbulk: `${prefix}.${lib.concatStringsSep "." p}` is set but not implemented yet (${issueUrl issue}); it has no effect."
+          p:
+          "breakbulk: `${prefix}.${lib.concatStringsSep "." p}` is set but not implemented yet (${issueUrl issue}); it has no effect."
         ) (setPaths options paths)
       ) byIssue
     );

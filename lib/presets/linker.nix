@@ -174,7 +174,8 @@ let
     let
       prefix = llvm.clang.targetPrefix;
     in
-    driverWrapper p "${prefix}clang-lld" "${withLld p llvm.clang llvm}/bin/${prefix}clang" "-fuse-ld=lld";
+    driverWrapper p "${prefix}clang-lld" "${withLld p llvm.clang llvm}/bin/${prefix}clang"
+      "-fuse-ld=lld";
 
   # lld-link, wrapped so the PDB, and so the .exe, are reproducible
   # (./lld-link-stable.sh).
@@ -262,9 +263,8 @@ let
   #    src/main.zig), while -search_paths_first does.
   zigLinker =
     pkgs: zig:
-    driverWrapper pkgs "zig-cc-link-${zig.target}" (pkgs.buildPackages.writeShellScript
-      "zig-cc-search-path"
-      ''
+    driverWrapper pkgs "zig-cc-link-${zig.target}"
+      (pkgs.buildPackages.writeShellScript "zig-cc-search-path" ''
         dynamic=-Wl,-Bdynamic
         args=()
         for a in "$@"; do
@@ -282,8 +282,8 @@ let
           [[ $f == -L* ]] && args+=("$f")
         done
         exec ${zig.cc} "''${args[@]}"
-      ''
-    ) "";
+      '')
+      "";
 
   # The toolchain's own rust-lld. rustc puts its lib/rustlib/<host>/bin
   # first on the linker's PATH (rustc_codegen_ssa back/linker.rs,
@@ -470,7 +470,9 @@ let
     else if lto && !(k.bitcode or false) then
       throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (${
         lib.concatMapStringsSep ", " (n: "`${n}`") (
-          lib.attrNames (lib.filterAttrs (_: k: (k.bitcode or false) && (k.choosable or true) && k.on traits) kinds)
+          lib.attrNames (
+            lib.filterAttrs (_: k: (k.bitcode or false) && (k.choosable or true) && k.on traits) kinds
+          )
         )
       })"
     else if staticNonPie && kind == "mold" then
@@ -556,7 +558,9 @@ let
       lld-link = lldLinkLinker bp (needs k "llvm" llvm);
       wasm-ld = "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
       wasm-component-ld = componentLinker bp "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
-      mingw-lld = mingwLinker pkgs packageSet (if lld != null then lld else (needs k "rustc or llvm" llvm).lld);
+      mingw-lld = mingwLinker pkgs packageSet (
+        if lld != null then lld else (needs k "rustc or llvm" llvm).lld
+      );
       zig = zigLinker pkgs (needs k "zig" zig);
       rust-lld = rustLldLinker bp;
       "ld64.lld" = ld64LldLinker (needs k "rustc or llvm" llvm);

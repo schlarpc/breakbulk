@@ -65,7 +65,14 @@ let
               y = elemAt bs i;
               c =
                 if isNum x && isNum y then
-                  (if num x < num y then -1 else if num x > num y then 1 else 0)
+                  (
+                    if num x < num y then
+                      -1
+                    else if num x > num y then
+                      1
+                    else
+                      0
+                  )
                 else if isNum x then
                   -1
                 else if isNum y then
@@ -85,11 +92,21 @@ let
     a: b:
     let
       c3 = lib.findFirst (c: c != 0) 0 (
-        map (k: if a.${k} < b.${k} then -1 else if a.${k} > b.${k} then 1 else 0) [
-          "major"
-          "minor"
-          "patch"
-        ]
+        map
+          (
+            k:
+            if a.${k} < b.${k} then
+              -1
+            else if a.${k} > b.${k} then
+              1
+            else
+              0
+          )
+          [
+            "major"
+            "minor"
+            "patch"
+          ]
       );
     in
     if c3 != 0 then c3 else cmpPre a.pre b.pre;
@@ -100,8 +117,27 @@ let
     let
       t = lib.trim s;
       m = match "(=|>=|<=|>|<|~|\\^)?[[:space:]]*v?([0-9]+|[*xX])(\\.([0-9]+|[*xX]))?(\\.([0-9]+|[*xX]))?(-([^+]*))?(\\+.*)?" t;
-      part = i: if elemAt m i == null || lib.elem (elemAt m i) [ "*" "x" "X" ] then null else num (elemAt m i);
-      wild = i: elemAt m i != null && lib.elem (elemAt m i) [ "*" "x" "X" ];
+      part =
+        i:
+        if
+          elemAt m i == null
+          || lib.elem (elemAt m i) [
+            "*"
+            "x"
+            "X"
+          ]
+        then
+          null
+        else
+          num (elemAt m i);
+      wild =
+        i:
+        elemAt m i != null
+        && lib.elem (elemAt m i) [
+          "*"
+          "x"
+          "X"
+        ];
     in
     if t == "*" || t == "x" || t == "X" then
       { op = "*"; }
@@ -163,9 +199,7 @@ let
     c: v:
     v.major == c.major
     && (c.minor == null || v.minor == c.minor)
-    && (
-      if c.patch != null && v.patch != c.patch then v.patch > c.patch else cmpPre v.pre c.pre >= 0
-    );
+    && (if c.patch != null && v.patch != c.patch then v.patch > c.patch else cmpPre v.pre c.pre >= 0);
 
   matchesCaret =
     c: v:
@@ -176,7 +210,8 @@ let
     else if c.patch == null then
       (if c.major > 0 then v.minor >= c.minor else v.minor == c.minor)
     else if c.major > 0 then
-      v.minor > c.minor || (v.minor == c.minor && (v.patch > c.patch || (v.patch == c.patch && cmpPre v.pre c.pre >= 0)))
+      v.minor > c.minor
+      || (v.minor == c.minor && (v.patch > c.patch || (v.patch == c.patch && cmpPre v.pre c.pre >= 0)))
     else if c.minor > 0 then
       v.minor == c.minor && (v.patch > c.patch || (v.patch == c.patch && cmpPre v.pre c.pre >= 0))
     else
@@ -202,12 +237,7 @@ let
       matchesCaret c v;
 
   preIsCompatible =
-    c: v:
-    c.op != "*"
-    && c.major == v.major
-    && c.minor == v.minor
-    && c.patch == v.patch
-    && c.pre != "";
+    c: v: c.op != "*" && c.major == v.major && c.minor == v.minor && c.patch == v.patch && c.pre != "";
 in
 rec {
   inherit parseVersion cmp;
@@ -230,6 +260,5 @@ rec {
       cs = parse req;
       v = parseVersion version;
     in
-    lib.all (c: matchesComparator c v) cs
-    && (v.pre == "" || lib.any (c: preIsCompatible c v) cs);
+    lib.all (c: matchesComparator c v) cs && (v.pre == "" || lib.any (c: preIsCompatible c v) cs);
 }

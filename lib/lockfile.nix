@@ -77,21 +77,42 @@ rec {
         ) (filter (s: s != "") (util.splitOn "&" query));
         # GitReference::from_query: the last of branch/ref/rev/tag wins;
         # `ref` is the old spelling of `branch`.
-        reference = lib.foldl' (
-          acc: p:
-          if p.k == "branch" || p.k == "ref" then
-            { type = "branch"; value = p.v; }
-          else if p.k == "tag" then
-            { type = "tag"; value = p.v; }
-          else if p.k == "rev" then
-            { type = "rev"; value = p.v; }
-          else
-            acc
-        ) { type = "default"; value = null; } pairs;
+        reference =
+          lib.foldl'
+            (
+              acc: p:
+              if p.k == "branch" || p.k == "ref" then
+                {
+                  type = "branch";
+                  value = p.v;
+                }
+              else if p.k == "tag" then
+                {
+                  type = "tag";
+                  value = p.v;
+                }
+              else if p.k == "rev" then
+                {
+                  type = "rev";
+                  value = p.v;
+                }
+              else
+                acc
+            )
+            {
+              type = "default";
+              value = null;
+            }
+            pairs;
       in
       {
         kind = "git";
-        inherit url reference precise source;
+        inherit
+          url
+          reference
+          precise
+          source
+          ;
         id = withQuery;
       }
     else
@@ -110,8 +131,7 @@ rec {
       # Lockfile v1 stored checksums in [metadata] as
       # "checksum <name> <version> (<source>)" = "<sha256>".
       v1Checksums = lib.filterAttrs (k: _: lib.hasPrefix "checksum " k) (toml.metadata or { });
-      v1Checksum =
-        p: v1Checksums."checksum ${p.name} ${p.version} (${p.source or ""})" or null;
+      v1Checksum = p: v1Checksums."checksum ${p.name} ${p.version} (${p.source or ""})" or null;
     in
     map (
       p:
@@ -163,9 +183,7 @@ rec {
   # attrset keyed by `key`. Entries with the same (source, name, version) but
   # different checksums are kept apart; that is a corrupted or tampered
   # lockfile, and fetching both makes the fixed-output hash fail loudly.
-  merge =
-    entryLists:
-    listToAttrs (map (e: lib.nameValuePair e.key e) (lib.concatLists entryLists));
+  merge = entryLists: listToAttrs (map (e: lib.nameValuePair e.key e) (lib.concatLists entryLists));
 
   # Same, read from paths.
   mergeFiles = paths: merge (map read paths);

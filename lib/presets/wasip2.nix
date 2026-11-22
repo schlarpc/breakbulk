@@ -50,12 +50,14 @@ assert lib.assertMsg (
 ) "breakbulk.presets.wasmComponent: ${triple} is not wasm32-wasip2";
 common
 // {
-  runner = mkDefault (chooseRunner {
-    inherit pkgs wasmtime;
-    traits = args.traits or null;
-    canExecute = false;
-    flavor = "wasmtime";
-  }).runner;
+  runner =
+    mkDefault
+      (chooseRunner {
+        inherit pkgs wasmtime;
+        traits = args.traits or null;
+        canExecute = false;
+        flavor = "wasmtime";
+      }).runner;
 }
 // lib.optionalAttrs withC {
   cflags = [ inc ];

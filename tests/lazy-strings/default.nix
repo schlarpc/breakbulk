@@ -74,7 +74,8 @@ let
 
   same =
     what: a: b:
-    lib.assertMsg (a == b) "lazy-strings: ${what} differ between two fetches of the same tree: ${builtins.toJSON a} vs ${builtins.toJSON b}";
+    lib.assertMsg (a == b)
+      "lazy-strings: ${what} differ between two fetches of the same tree: ${builtins.toJSON a} vs ${builtins.toJSON b}";
   realFlag = "native=${builtins.unsafeDiscardStringContext real}/tools";
 in
 {

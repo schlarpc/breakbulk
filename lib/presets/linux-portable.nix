@@ -358,12 +358,14 @@ in
   # tests run through the build machine's glibc loader, which also finds
   # its own libc.so.6 (newer than `glibc`, as on a real target system):
   # ./runner.nix, kind ld-so, when the build machine runs the target.
-  runner = mkDefault (chooseRunner {
-    inherit pkgs;
-    traits = null;
-    flavor = "zig";
-    inherit canExecute;
-  }).runner;
+  runner =
+    mkDefault
+      (chooseRunner {
+        inherit pkgs;
+        traits = null;
+        flavor = "zig";
+        inherit canExecute;
+      }).runner;
   testSystem = mkDefault null;
   host = hostSpec {
     inherit

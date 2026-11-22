@@ -164,7 +164,9 @@ let
       null
     else
       (builtins.fromJSON (
-        featureGates.readOutput nixFeatures "the default of `defaultTarget` for the workspace at `${wsDir}` (its Cargo config's `build.target`)" "${drv}/build-target.json"
+        featureGates.readOutput nixFeatures
+          "the default of `defaultTarget` for the workspace at `${wsDir}` (its Cargo config's `build.target`)"
+          "${drv}/build-target.json"
       )).buildTarget;
 
   # `defaultTarget`'s default from the workspace's `targets` alone: the
@@ -246,7 +248,9 @@ let
   unmatchedWarnings = map (
     k:
     "breakbulk: `packages.${lib.strings.escapeNixIdentifier k}` matches no package in any workspace's Cargo.lock${
-      lib.optionalString (cfg.packages.${k}.version != null) " (version requirement `${cfg.packages.${k}.version}`)"
+      lib.optionalString (
+        cfg.packages.${k}.version != null
+      ) " (version requirement `${cfg.packages.${k}.version}`)"
     }; it has no effect."
   ) (lib.filter (k: !(lib.any (overrideMatches k) allEntries)) (lib.attrNames cfg.packages));
 
@@ -256,9 +260,15 @@ let
     k:
     let
       o = cfg.packages.${k};
-      layers = [ o ] ++ lib.attrValues o.target ++ lib.concatMap (v: [ v ] ++ lib.attrValues v.target) (lib.attrValues o.variant);
+      layers = [
+        o
+      ]
+      ++ lib.attrValues o.target
+      ++ lib.concatMap (v: [ v ] ++ lib.attrValues v.target) (lib.attrValues o.variant);
       fetched = lib.unique (
-        map (e: "${e.name} ${e.version}") (lib.filter (e: e.source or null != null && overrideMatches k e) allEntries)
+        map (e: "${e.name} ${e.version}") (
+          lib.filter (e: e.source or null != null && overrideMatches k e) allEntries
+        )
       );
     in
     lib.optional (lib.any (l: l.sourceOverlay != { }) layers && fetched != [ ])
@@ -288,7 +298,9 @@ let
     forHost = emptySide;
     forTarget = emptySide;
   };
-  catFn = f: g: p: f p ++ g p;
+  catFn =
+    f: g: p:
+    f p ++ g p;
   mergeSide = a: b: {
     env = a.env // b.env;
     nativeInputs = catFn a.nativeInputs b.nativeInputs;
@@ -383,8 +395,18 @@ let
           # A `forHost.env` variable that came from `env` has its priority.
           priorityOf =
             path:
-            if lib.take 2 path == [ "forHost" "env" ] && lib.length path == 3 && !(l.forHost.env ? ${lib.last path}) then
-              l.priorityOf [ "env" (lib.last path) ]
+            if
+              lib.take 2 path == [
+                "forHost"
+                "env"
+              ]
+              && lib.length path == 3
+              && !(l.forHost.env ? ${lib.last path})
+            then
+              l.priorityOf [
+                "env"
+                (lib.last path)
+              ]
             else
               l.priorityOf path;
         };
@@ -399,10 +421,14 @@ let
     in
     lib.optionals (sys != null) (curatedLayers (sys e))
     ++ lib.optionals (e.source or null == null) (
-      lib.concatMap (d: curatedLayers (cfg.sysDefaults.dependents.${d.name} d)) (curatedDeps wsName e.name)
+      lib.concatMap (d: curatedLayers (cfg.sysDefaults.dependents.${d.name} d)) (
+        curatedDeps wsName e.name
+      )
     )
     ++ lib.optionals (e.source or null == null) (withTriple cfg.workspaces.${wsName}.memberDefaults)
-    ++ lib.concatMap (k: withTriple cfg.packages.${k}) (lib.filter (k: overrideMatches k e) orderedKeys);
+    ++ lib.concatMap (k: withTriple cfg.packages.${k}) (
+      lib.filter (k: overrideMatches k e) orderedKeys
+    );
 
   # The lockfile entries of workspace `wsName` that `pkg` depends on, by
   # any kind of dependency and transitively, and that have curated
@@ -479,7 +505,14 @@ let
     wsName: triple: vName:
     let
       members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
-      joinLines = a: b: if a == "" then b else if b == "" then a else a + "\n" + b;
+      joinLines =
+        a: b:
+        if a == "" then
+          b
+        else if b == "" then
+          a
+        else
+          a + "\n" + b;
       mergeTest = a: b: {
         path = a.path ++ b.path;
         args = a.args ++ b.args;
@@ -493,21 +526,24 @@ let
             b.runFiles
           else
             lib.unique (a.runFiles ++ b.runFiles);
-        binaries = lib.zipAttrsWith (
-          _:
-          lib.foldl'
-            (x: y: {
-              args = x.args ++ y.args;
-              postRun = joinLines x.postRun y.postRun;
-            })
-            {
-              args = [ ];
-              postRun = "";
-            }
-        ) [
-          a.binaries
-          b.binaries
-        ];
+        binaries =
+          lib.zipAttrsWith
+            (
+              _:
+              lib.foldl'
+                (x: y: {
+                  args = x.args ++ y.args;
+                  postRun = joinLines x.postRun y.postRun;
+                })
+                {
+                  args = [ ];
+                  postRun = "";
+                }
+            )
+            [
+              a.binaries
+              b.binaries
+            ];
         doctest = {
           args = a.doctest.args ++ b.doctest.args;
           postRun = joinLines a.doctest.postRun b.doctest.postRun;
@@ -540,7 +576,13 @@ let
           stripForRun = single null [ "stripForRun" ];
           wrapper = single null [ "wrapper" ];
           keepLog = single null [ "keepLog" ];
-          nextest = lib.genAttrs [ "profile" "configFile" "package" ] (n: single null [ "nextest" n ]);
+          nextest = lib.genAttrs [ "profile" "configFile" "package" ] (
+            n:
+            single null [
+              "nextest"
+              n
+            ]
+          );
           env = testEnvStrings (pickAttrs [ "test" "env" ] ls);
           doctest =
             let
@@ -653,7 +695,15 @@ let
           k:
           map (d: d.file) (
             lib.filter (
-              d: lib.hasAttrByPath (path ++ [ "test" "binaries" k ]) d.value
+              d:
+              lib.hasAttrByPath (
+                path
+                ++ [
+                  "test"
+                  "binaries"
+                  k
+                ]
+              ) d.value
             ) option.definitionsWithLocations
           )
         ) unknown
@@ -729,9 +779,7 @@ let
           inherit (l) path;
           name = "workspaces.${layerName l.path}";
           inherit keys;
-          known = lib.sort lib.lessThan (
-            lib.unique (lib.concatMap (e: known.${e.name} or [ ]) pathPackages)
-          );
+          known = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: known.${e.name} or [ ]) pathPackages));
           owner = "any member of workspaces.${wsName}";
         })
       ) (withLayers [ wsName "memberDefaults" ] ws.memberDefaults)
@@ -757,7 +805,11 @@ let
       repoDef = cfg.targets.${triple} or null;
       wsDef = ws.targets.${triple} or null;
       e = lib.evalModules {
-        modules = [ ./modules/target-spec.nix ] ++ lib.optional (repoDef != null) repoDef ++ lib.optional (wsDef != null) wsDef;
+        modules = [
+          ./modules/target-spec.nix
+        ]
+        ++ lib.optional (repoDef != null) repoDef
+        ++ lib.optional (wsDef != null) wsDef;
         specialArgs = specArgs // {
           name = triple;
           breakbulkToolchain = ws.toolchain;
@@ -788,14 +840,17 @@ let
         lib.mapAttrsToList (
           o: s:
           lib.optionals (builtins.isAttrs s) (
-            map (m: "breakbulk: workspaces.${wsName}.targets.${triple}.${o}.exclude${bt.setIn e.options.${o}}: ${m}") (excludeOf ws s).errors
+            map (
+              m: "breakbulk: workspaces.${wsName}.targets.${triple}.${o}.exclude${bt.setIn e.options.${o}}: ${m}"
+            ) (excludeOf ws s).errors
           )
         ) selections
       );
     }
     // lib.mapAttrs (_: resolveSelection ws) selections;
   targetSpecs = lib.mapAttrs (
-    wsName: ws: lib.genAttrs (lib.unique (lib.attrNames ws.targets ++ [ nativeTriple ])) (evalTargetSpec wsName ws)
+    wsName: ws:
+    lib.genAttrs (lib.unique (lib.attrNames ws.targets ++ [ nativeTriple ])) (evalTargetSpec wsName ws)
   ) cfg.workspaces;
   # The exclude form of a package selection (`{ exclude = [ … ]; }`) against
   # the workspace's members, and any selection with it resolved to the
@@ -883,7 +938,8 @@ let
       str = v: if v == null then null else "${v}";
       linker = str t.linker;
       hostLinker = str t.host.linker;
-      named = prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
+      named =
+        prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
       runner =
         if t.runner == null then
           null
@@ -911,10 +967,12 @@ let
             inherit linker hostLinker;
           };
           specTools =
-            named "spec-linker" (lib.filter (x: x != null) [
-              linker
-              hostLinker
-            ])
+            named "spec-linker" (
+              lib.filter (x: x != null) [
+                linker
+                hostLinker
+              ]
+            )
             // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
           hostEnv = envStrings t.host.env;
           targetPackageSet = captureSetOf wsName triple;
@@ -984,16 +1042,25 @@ let
                   let
                     t = targetCfgOf wsName triple;
                   in
-                  if t == null then null else if platform == "target" then t.stdenv else t.host.stdenv;
+                  if t == null then
+                    null
+                  else if platform == "target" then
+                    t.stdenv
+                  else
+                    t.host.stdenv;
               };
           ov = {
             host = {
               env = envStrings (o.env // o.forHost.env);
-              envCapture = capture "host" (catFn o.nativeInputs o.forHost.nativeInputs) (catFn o.inputs o.forHost.inputs);
+              envCapture = capture "host" (catFn o.nativeInputs o.forHost.nativeInputs) (
+                catFn o.inputs o.forHost.inputs
+              );
             };
             target = {
               env = envStrings (o.env // o.forTarget.env);
-              envCapture = capture "target" (catFn o.nativeInputs o.forTarget.nativeInputs) (catFn o.inputs o.forTarget.inputs);
+              envCapture = capture "target" (catFn o.nativeInputs o.forTarget.nativeInputs) (
+                catFn o.inputs o.forTarget.inputs
+              );
             };
           };
           # Members always have a layer (`memberDefaults`); one that sets
@@ -1150,13 +1217,21 @@ let
         owner: xs:
         let
           uses = lib.mapAttrsToList (
-            what: ys: "${what} uses ${lib.concatMapStringsSep ", " (q: "`${q}`") (lib.sort (a: b: a < b) (lib.unique (map (y: y.q) ys)))}"
+            what: ys:
+            "${what} uses ${
+              lib.concatMapStringsSep ", " (q: "`${q}`") (lib.sort (a: b: a < b) (lib.unique (map (y: y.q) ys)))
+            }"
           ) (lib.groupBy (y: y.what) xs);
           all = lib.sort (a: b: a < b) (lib.unique ((inst.productInputs.${owner} or [ ]) ++ map (x: x.q) xs));
         in
-        "breakbulk: the settings of `${owner}` use products of the plan that builds it (${label}) that `packages.${owner}.productInputs` does not name: ${lib.concatStringsSep "; " uses}. Dynamic-derivation mode needs them named (it cannot find them: there, this is an infinite recursion). Add: packages.${owner}.productInputs = [ ${lib.concatMapStringsSep " " (q: "\"${q}\"") all} ];";
+        "breakbulk: the settings of `${owner}` use products of the plan that builds it (${label}) that `packages.${owner}.productInputs` does not name: ${lib.concatStringsSep "; " uses}. Dynamic-derivation mode needs them named (it cannot find them: there, this is an infinite recursion). Add: packages.${owner}.productInputs = [ ${
+          lib.concatMapStringsSep " " (q: "\"${q}\"") all
+        } ];";
     in
-    if inst.delivery != "ifd" then null else lib.mapAttrsToList message (lib.groupBy (x: x.owner) found);
+    if inst.delivery != "ifd" then
+      null
+    else
+      lib.mapAttrsToList message (lib.groupBy (x: x.owner) found);
 
   # --- workspaces --------------------------------------------------------------
 
@@ -1164,7 +1239,10 @@ let
   # the variant's own selection, else the target's.
   selOf =
     wsName: triple: v:
-    if v.packages != null then resolveSelection cfg.workspaces.${wsName} v.packages else selectionOf wsName triple;
+    if v.packages != null then
+      resolveSelection cfg.workspaces.${wsName} v.packages
+    else
+      selectionOf wsName triple;
   # The test plan's selection: false (no test outputs on this target), a
   # list (`workspaces.<ws>.targets.<t>.tests`), or the variant's selection.
   testSelOf =
@@ -1172,7 +1250,12 @@ let
     let
       t = targetSpecs.${wsName}.${triple}.tests;
     in
-    if t == false then false else if builtins.isList t then t else selOf wsName triple v;
+    if t == false then
+      false
+    else if builtins.isList t then
+      t
+    else
+      selOf wsName triple v;
 
   # The packages with products: false (none; the build plan is then never
   # read), the target's list, or the variant's selection.
@@ -1181,7 +1264,12 @@ let
     let
       p = targetSpecs.${wsName}.${triple}.products;
     in
-    if p == false then false else if builtins.isList p then p else selOf wsName triple v;
+    if p == false then
+      false
+    else if builtins.isList p then
+      p
+    else
+      selOf wsName triple v;
 
   # The variants planned for a target (`variants.<v>.targets`).
   variantsFor =
@@ -1232,87 +1320,93 @@ let
     in
     mkWorkspace pkgs (
       {
-      inherit root tools fetchArgs;
-      vendor = vendors.${wsName};
-      path = ws.path;
-      toolchain = {
-        inherit (ws.toolchain) rustc cargo capabilities;
-      };
-      target = triple;
-      inherit (v)
-        profile
-        testProfile
-        cargoConfig
-        features
-        noDefaultFeatures
-        allFeatures
-        ;
-      variant = vName;
-      rootNames = ws.roots;
-      select = if sel == null then [ ] else sel;
-      testSelect = if builtins.isList tsel then tsel else if sel == null then [ ] else sel;
-      extraSources = extraSourcesOf wsName triple vName entries;
-      productInputs = productInputsOf wsName triple vName entries;
-      packageOverrides = instOverrides wsName entries triple vName;
-      name = "${wsName}-${triple}-${vName}";
-      inherit delivery;
-      shippedRemapScope = shippedRemapScopeOf wsName triple v;
-      inherit (v) cargoTrimPaths sourcePaths;
-      traits = traitsOf wsName triple;
-      packages = memberConfigs wsName triple vName;
-      inherit (cfg) ca;
-      inherit nixFeatures;
-      inherit (v)
-        mode
-        clippyArgs
-        rustcWrapper
-        sideFiles
-        ;
-      rustcWorkspaceWrapper =
-        if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else v.rustcWorkspaceWrapper;
-      clippyOption = "workspaces.${wsName}.toolchain.clippy";
-      bench = v.benches;
-      docsNoDeps = ws.docs.noDeps;
-      inherit (s) runner testSystem testDylibPath;
-      # Host units' tests run with the native target's settings, as Cargo
-      # gives them `target.<host>.runner`.
-      hostTest =
-        let
-          h = specFor wsName nativeTriple;
-        in
-        {
-          triple = nativeTriple;
-          inherit (h) runner testSystem;
-          dylibPath = h.testDylibPath;
+        inherit root tools fetchArgs;
+        vendor = vendors.${wsName};
+        path = ws.path;
+        toolchain = {
+          inherit (ws.toolchain) rustc cargo capabilities;
         };
-    }
-    // s.mkWorkspace
-    // {
-      targetEnv = buildId // (s.mkWorkspace.targetEnv or { });
-    }
-    # Coverage: `-C instrument-coverage` on target units, through the
-    # spec's rustflags (so under the key the project uses).
-    // lib.optionalAttrs (v.mode == "coverage") {
-      spec =
-        let
-          base =
-            if s.mkWorkspace.spec or null != null then
-              s.mkWorkspace.spec
-            else
-              {
-                rustflags = [ ];
-                linker = null;
-                hostLinker = null;
-              };
-        in
-        base
-        // {
-          rustflags = base.rustflags ++ [
-            "-C"
-            "instrument-coverage"
-          ];
-        };
-    }
+        target = triple;
+        inherit (v)
+          profile
+          testProfile
+          cargoConfig
+          features
+          noDefaultFeatures
+          allFeatures
+          ;
+        variant = vName;
+        rootNames = ws.roots;
+        select = if sel == null then [ ] else sel;
+        testSelect =
+          if builtins.isList tsel then
+            tsel
+          else if sel == null then
+            [ ]
+          else
+            sel;
+        extraSources = extraSourcesOf wsName triple vName entries;
+        productInputs = productInputsOf wsName triple vName entries;
+        packageOverrides = instOverrides wsName entries triple vName;
+        name = "${wsName}-${triple}-${vName}";
+        inherit delivery;
+        shippedRemapScope = shippedRemapScopeOf wsName triple v;
+        inherit (v) cargoTrimPaths sourcePaths;
+        traits = traitsOf wsName triple;
+        packages = memberConfigs wsName triple vName;
+        inherit (cfg) ca;
+        inherit nixFeatures;
+        inherit (v)
+          mode
+          clippyArgs
+          rustcWrapper
+          sideFiles
+          ;
+        rustcWorkspaceWrapper =
+          if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else v.rustcWorkspaceWrapper;
+        clippyOption = "workspaces.${wsName}.toolchain.clippy";
+        bench = v.benches;
+        docsNoDeps = ws.docs.noDeps;
+        inherit (s) runner testSystem testDylibPath;
+        # Host units' tests run with the native target's settings, as Cargo
+        # gives them `target.<host>.runner`.
+        hostTest =
+          let
+            h = specFor wsName nativeTriple;
+          in
+          {
+            triple = nativeTriple;
+            inherit (h) runner testSystem;
+            dylibPath = h.testDylibPath;
+          };
+      }
+      // s.mkWorkspace
+      // {
+        targetEnv = buildId // (s.mkWorkspace.targetEnv or { });
+      }
+      # Coverage: `-C instrument-coverage` on target units, through the
+      # spec's rustflags (so under the key the project uses).
+      // lib.optionalAttrs (v.mode == "coverage") {
+        spec =
+          let
+            base =
+              if s.mkWorkspace.spec or null != null then
+                s.mkWorkspace.spec
+              else
+                {
+                  rustflags = [ ];
+                  linker = null;
+                  hostLinker = null;
+                };
+          in
+          base
+          // {
+            rustflags = base.rustflags ++ [
+              "-C"
+              "instrument-coverage"
+            ];
+          };
+      }
     );
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
@@ -1324,26 +1418,26 @@ let
     products.mkProducts (
       stageSetArgs wsName triple
       // {
-      inherit pkgs inst;
-      # `sourcePaths = "keep"`: no default noSourceReferences check.
-      defaultChecks = v.sourcePaths == "hide";
-      select = sel;
-      targetChecks = targetField wsName triple "checks" { };
-      packageConfig = productConfig wsName triple vName;
-      inherit (cfg) ca;
-      inherit nixFeatures;
-      lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
-      cargoPackages =
-        let
-          wsManifest = manifest.readManifest root (wsDirOf ws);
-        in
-        lib.mapAttrs (
-          _: m:
-          (manifest.packageInfo {
-            inherit root wsManifest;
-            dir = util.normalizeRel m.path;
-          }).package
-        ) ws.members;
+        inherit pkgs inst;
+        # `sourcePaths = "keep"`: no default noSourceReferences check.
+        defaultChecks = v.sourcePaths == "hide";
+        select = sel;
+        targetChecks = targetField wsName triple "checks" { };
+        packageConfig = productConfig wsName triple vName;
+        inherit (cfg) ca;
+        inherit nixFeatures;
+        lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
+        cargoPackages =
+          let
+            wsManifest = manifest.readManifest root (wsDirOf ws);
+          in
+          lib.mapAttrs (
+            _: m:
+            (manifest.packageInfo {
+              inherit root wsManifest;
+              dir = util.normalizeRel m.path;
+            }).package
+          ) ws.members;
       }
     );
 
@@ -1359,7 +1453,8 @@ let
     else
       "${b.kind}-${b.target}";
 
-  selectPkgs = sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
+  selectPkgs =
+    sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
 
   # benches.<pkg>.<name>: bench-plan roots installed as
   # $out/bin/<target><exe suffix> (stubs as they are): a bench by its name,
@@ -1445,7 +1540,10 @@ let
       in
       lib.listToAttrs (
         map (
-          x: lib.nameValuePair (if lib.length counts.${x.short} > 1 then x.long else x.short) inst.testBins.${x.root}
+          x:
+          lib.nameValuePair (
+            if lib.length counts.${x.short} > 1 then x.long else x.short
+          ) inst.testBins.${x.root}
         ) named
       )
     ) selected;
@@ -1612,7 +1710,9 @@ let
           }) locks.${wsName}
         );
         shellEnv = ws.devShell.env;
-        targetEnv = lib.optionalAttrs (ws.devShell.target != null) (envStrings (targetField wsName ws.devShell.target "env" { }));
+        targetEnv = lib.optionalAttrs (ws.devShell.target != null) (
+          envStrings (targetField wsName ws.devShell.target "env" { })
+        );
         # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default
         # variant's profile (IFD: a small derivation that reads the
@@ -1622,8 +1722,16 @@ let
         # their context; the spec's own values carry it.
         cargoEnv =
           let
-            inst = if ws.devShell.target == null then null else instances.${ws.devShell.target}.${ws.defaultVariant} or null;
-            spec = if ws.devShell.target == null then null else (specFor wsName ws.devShell.target).mkWorkspace.spec or null;
+            inst =
+              if ws.devShell.target == null then
+                null
+              else
+                instances.${ws.devShell.target}.${ws.defaultVariant} or null;
+            spec =
+              if ws.devShell.target == null then
+                null
+              else
+                (specFor wsName ws.devShell.target).mkWorkspace.spec or null;
             values = lib.filter builtins.isString (
               if spec == null then
                 [ ]
@@ -1634,17 +1742,17 @@ let
                 ]
                 ++ spec.rustflags
             );
-            withContext = builtins.replaceStrings (map util.devirtualizeAndDiscard values) (map util.devirtualize values);
+            withContext = builtins.replaceStrings (map util.devirtualizeAndDiscard values) (
+              map util.devirtualize values
+            );
             j = builtins.fromJSON (
               builtins.unsafeDiscardStringContext (
-                featureGates.readOutput nixFeatures "the dev shell of workspace `${wsName}` (cargo-env.json)" "${inst.cargoEnv}/cargo-env.json"
+                featureGates.readOutput nixFeatures "the dev shell of workspace `${wsName}` (cargo-env.json)"
+                  "${inst.cargoEnv}/cargo-env.json"
               )
             );
           in
-          if inst == null then
-            { }
-          else
-            j // { env = lib.mapAttrs (_: withContext) j.env; };
+          if inst == null then { } else j // { env = lib.mapAttrs (_: withContext) j.env; };
       };
     };
 
@@ -1658,74 +1766,80 @@ let
   # plans' `buildScriptPaths/<plan>`; check and clippy variants' `check`
   # and `buildScriptPaths/<plan>`; and the docs of every variant with
   # `docs.check`.
-  checks = lib.concatMapAttrs (
-    wsName: w:
+  checks =
     lib.concatMapAttrs (
-      triple: t:
+      wsName: w:
       lib.concatMapAttrs (
-        vName: v:
-        let
-          vc = variantCells.${wsName}.${triple}.${vName};
-          prefix = variantPrefix wsName triple vName;
-          # IFD mode checks the variant's `productInputs` here.
-          verified =
-            d:
-            if v.productInputErrors == null || v.productInputErrors == [ ] then
-              d
-            else
-              throw (lib.concatStringsSep "\n" v.productInputErrors);
-        in
-        lib.mapAttrs (_: verified) (lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
-          lib.concatMapAttrs (
-            pkg: p:
-            # IFD mode leaves out a product whose roots Cargo all skipped
-            # (it is a stub). Dynamic-derivation mode cannot tell at
-            # evaluation time: such a product holds only the no-binaries
-            # marker and its stages and checks pass it on, so it is in
-            # like any other.
-            lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
-              {
-                "${prefix}/${pkg}/build" = p;
-              }
-              // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
-            )
-          ) v.packages
-          // lib.mapAttrs' (kind: c: lib.nameValuePair "${prefix}/buildScriptPaths/${kind}" c) v.buildScriptPaths
-          // lib.optionalAttrs t.canRunTests (
-            lib.concatMapAttrs (
-              pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
-            ) v.namedTestRuns
-            // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
-          )
-        ))
-      ) t.variants
-      // lib.concatMapAttrs (
-        vName: v:
-        lib.optionalAttrs (variantCells.${wsName}.${triple}.${vName}.docs.check) {
-          "${variantPrefix wsName triple vName}/docs" = v.docs;
-        }
-      ) t.variants
-      // lib.optionalAttrs (cfg.workspaces.${wsName}.benchSmoke && t.canRunTests) (
+        triple: t:
         lib.concatMapAttrs (
-          pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
-        ) t.namedBenchRuns
-      )
-      // lib.concatMapAttrs (
-        vName: v:
-        lib.optionalAttrs (v ? check) (
-          {
-            "${wsName}/${triple}/variant-${vName}/check" = v.check;
+          vName: v:
+          let
+            vc = variantCells.${wsName}.${triple}.${vName};
+            prefix = variantPrefix wsName triple vName;
+            # IFD mode checks the variant's `productInputs` here.
+            verified =
+              d:
+              if v.productInputErrors == null || v.productInputErrors == [ ] then
+                d
+              else
+                throw (lib.concatStringsSep "\n" v.productInputErrors);
+          in
+          lib.mapAttrs (_: verified) (
+            lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
+              lib.concatMapAttrs (
+                pkg: p:
+                # IFD mode leaves out a product whose roots Cargo all skipped
+                # (it is a stub). Dynamic-derivation mode cannot tell at
+                # evaluation time: such a product holds only the no-binaries
+                # marker and its stages and checks pass it on, so it is in
+                # like any other.
+                lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
+                  {
+                    "${prefix}/${pkg}/build" = p;
+                  }
+                  // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
+                )
+              ) v.packages
+              // lib.mapAttrs' (
+                kind: c: lib.nameValuePair "${prefix}/buildScriptPaths/${kind}" c
+              ) v.buildScriptPaths
+              // lib.optionalAttrs t.canRunTests (
+                lib.concatMapAttrs (
+                  pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
+                ) v.namedTestRuns
+                // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
+              )
+            )
+          )
+        ) t.variants
+        // lib.concatMapAttrs (
+          vName: v:
+          lib.optionalAttrs (variantCells.${wsName}.${triple}.${vName}.docs.check) {
+            "${variantPrefix wsName triple vName}/docs" = v.docs;
           }
-          // lib.mapAttrs' (
-            kind: c: lib.nameValuePair "${wsName}/${triple}/variant-${vName}/buildScriptPaths/${kind}" c
-          ) v.buildScriptPaths
+        ) t.variants
+        // lib.optionalAttrs (cfg.workspaces.${wsName}.benchSmoke && t.canRunTests) (
+          lib.concatMapAttrs (
+            pkg: rs:
+            lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
+          ) t.namedBenchRuns
         )
-      ) t.variants
-    ) w.target
-  ) workspaces
-  // lib.concatMapAttrs (
-    wsName: ws: lib.optionalAttrs ws.fmt.enable { "${wsName}/fmt" = fmtCheck wsName ws; }
-  ) cfg.workspaces;
+        // lib.concatMapAttrs (
+          vName: v:
+          lib.optionalAttrs (v ? check) (
+            {
+              "${wsName}/${triple}/variant-${vName}/check" = v.check;
+            }
+            // lib.mapAttrs' (
+              kind: c: lib.nameValuePair "${wsName}/${triple}/variant-${vName}/buildScriptPaths/${kind}" c
+            ) v.buildScriptPaths
+          )
+        ) t.variants
+      ) w.target
+    ) workspaces
+    // lib.concatMapAttrs (
+      wsName: ws: lib.optionalAttrs ws.fmt.enable { "${wsName}/fmt" = fmtCheck wsName ws; }
+    ) cfg.workspaces;
 
   # Where a variant's checks are named: `<ws>/<triple>` for the default
   # variant, `<ws>/<triple>/variant-<v>` for the others.
@@ -1808,7 +1922,9 @@ let
       src = lib.fileset.toSource {
         inherit root;
         fileset = lib.fileset.unions (
-          [ (lib.fileset.difference (at wsDir) (lib.fileset.unions (map (n: at (util.joinRel wsDir n)) junk))) ]
+          [
+            (lib.fileset.difference (at wsDir) (lib.fileset.unions (map (n: at (util.joinRel wsDir n)) junk)))
+          ]
           ++ map at configs
         );
       };
@@ -1870,16 +1986,18 @@ let
     toolchainFacts.mayProbe { inherit (ws.toolchain) rustc cargo; }
     || (
       targetsDefaultTarget (lib.attrNames ws.targets) == null
-      && breakbulkLib.skeleton.configFiles {
-        inherit root;
-        wsDir = wsDirOf ws;
-      } != [ ]
+      &&
+        breakbulkLib.skeleton.configFiles {
+          inherit root;
+          wsDir = wsDirOf ws;
+        } != [ ]
     )
     || ws.devShell.target != null;
   nixFeatures = {
     dynamicDerivations = cfg.mode == "dynamic";
     caDerivations = cfg.ca || cfg.mode == "dynamic";
-    importFromDerivation = cfg.mode == "ifd" || lib.any importsInDynamicMode (lib.attrValues cfg.workspaces);
+    importFromDerivation =
+      cfg.mode == "ifd" || lib.any importsInDynamicMode (lib.attrValues cfg.workspaces);
   };
   # explainSharing reads plans and units.json in either mode and is not
   # counted in repo.nixFeatures (it is a function to call, not an output).
@@ -1964,14 +2082,18 @@ let
         // lib.optionalAttrs (n > 3) { kind = lib.elemAt ps 3; }
       )
     else if h ? outPath then
-      planIndex.${discard h.outPath} or (throw "breakbulk: explainSharing: ${discard h.outPath} is not a plan of this repository")
+      planIndex.${discard h.outPath}
+      or (throw "breakbulk: explainSharing: ${discard h.outPath} is not a plan of this repository")
     else
       fromParts h;
 
   readPlanOf =
     r:
     builtins.fromJSON (
-      discard (featureGates.readOutput explainFeatures "explainSharing (plan.json)" "${r.inst.plans.${r.kind}}/plan.json")
+      discard (
+        featureGates.readOutput explainFeatures "explainSharing (plan.json)"
+          "${r.inst.plans.${r.kind}}/plan.json"
+      )
     );
 
   pkgNameOf =
@@ -2016,7 +2138,9 @@ let
   refsOf =
     v:
     if builtins.isAttrs v then
-      (if v ? out then [ v.out ] else [ ]) ++ (if v ? splice then [ v.splice ] else [ ]) ++ lib.concatMap refsOf (lib.attrValues v)
+      (if v ? out then [ v.out ] else [ ])
+      ++ (if v ? splice then [ v.splice ] else [ ])
+      ++ lib.concatMap refsOf (lib.attrValues v)
     else if builtins.isList v then
       lib.concatMap refsOf v
     else
@@ -2050,7 +2174,9 @@ let
   listDiff = a: b: {
     onlyA = lib.filter (x: !(lib.elem x b)) a;
     onlyB = lib.filter (x: !(lib.elem x a)) b;
-    sameElementsOtherOrder = a != b && lib.sort lib.lessThan (map builtins.toJSON a) == lib.sort lib.lessThan (map builtins.toJSON b);
+    sameElementsOtherOrder =
+      a != b
+      && lib.sort lib.lessThan (map builtins.toJSON a) == lib.sort lib.lessThan (map builtins.toJSON b);
   };
   attrDiff =
     a: b:
@@ -2108,7 +2234,8 @@ let
       # In dynamic-derivation mode the unit derivations are not known at
       # evaluation time; IFD mode's are the same derivations (except
       # downstream of an embedded product), so they are read through it.
-      unitsOf = r: if r.inst.delivery == "dynamic" then r.inst.ifdUnits.${r.kind} else r.inst.units.${r.kind};
+      unitsOf =
+        r: if r.inst.delivery == "dynamic" then r.inst.ifdUnits.${r.kind} else r.inst.units.${r.kind};
       ua = unitsOf ra;
       ub = unitsOf rb;
       ga = grouped pa package;
@@ -2225,7 +2352,9 @@ let
         else if d ? a then
           "    ${f}: a = ${show d.a}\n    ${f}: b = ${show d.b}\n"
         else
-          lib.concatStrings (lib.mapAttrsToList (k: x: "    ${f}.${k}: a = ${show x.a}, b = ${show x.b}\n") d);
+          lib.concatStrings (
+            lib.mapAttrsToList (k: x: "    ${f}.${k}: a = ${show x.a}, b = ${show x.b}\n") d
+          );
       unitText =
         u:
         if u ? onlyIn then
@@ -2235,7 +2364,9 @@ let
         else
           "  ${u.unit}: differs\n"
           + lib.concatStrings (lib.mapAttrsToList fieldText u.fields)
-          + lib.optionalString (u.deps != [ ]) "    dependencies that differ: ${lib.concatStringsSep "; " u.deps}\n";
+          + lib.optionalString (
+            u.deps != [ ]
+          ) "    dependencies that differ: ${lib.concatStringsSep "; " u.deps}\n";
     in
     {
       inherit package units;
@@ -2244,7 +2375,12 @@ let
       shared = lib.all (u: u.same) units;
       text =
         "explainSharing ${what}: a = ${ra.label}, b = ${rb.label}\n"
-        + (if units == [ ] then "  no units of ${what} in either plan\n" else lib.concatMapStrings unitText units);
+        + (
+          if units == [ ] then
+            "  no units of ${what} in either plan\n"
+          else
+            lib.concatMapStrings unitText units
+        );
     };
 
   # The repository object. Modules receive it as `repo`, for products used

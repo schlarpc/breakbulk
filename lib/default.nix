@@ -65,7 +65,11 @@ let
       roots
       ;
   };
-  inherit (import ./instantiate.nix { inherit lib featureGates util; }) instantiate predictedRoots planRoots;
+  inherit (import ./instantiate.nix { inherit lib featureGates util; })
+    instantiate
+    predictedRoots
+    planRoots
+    ;
   wasmBindgen = import ./wasm-bindgen.nix { inherit lib lockfile; };
   stages = import ./stages.nix {
     inherit

@@ -81,10 +81,12 @@ in
     ];
   env = { };
   # wine for x86_64 and i686 (./runner.nix).
-  runner = mkDefault (chooseRunner {
-    inherit pkgs traits wine;
-    canExecute = false;
-  }).runner;
+  runner =
+    mkDefault
+      (chooseRunner {
+        inherit pkgs traits wine;
+        canExecute = false;
+      }).runner;
   testSystem = mkDefault null;
   host = hostSpec {
     inherit

@@ -244,14 +244,17 @@ let
   # `lint_groups_priority` reads it there, and skips the lint without a
   # word when it is missing.
   clippyKeep = cwd: lib.optional (mode == "clippy") (util.joinRel cwd "Cargo.toml");
-  memberTargets = lib.listToAttrs (map (p: lib.nameValuePair p.dir p.targets) (lib.attrValues wsRoots));
+  memberTargets = lib.listToAttrs (
+    map (p: lib.nameValuePair p.dir p.targets) (lib.attrValues wsRoots)
+  );
   # Path packages Cargo loads from outside the workspace root.
   closureDirs = skel.passthru.description.packages;
   memberDirs = lib.catAttrs "dir" (lib.attrValues views);
   outsideViews = lib.genAttrs (lib.filter (d: !(lib.elem d memberDirs)) closureDirs) (
     dir:
     let
-      pkgName = (builtins.fromTOML (builtins.readFile (root + "/${util.joinRel dir "Cargo.toml"}"))).package.name;
+      pkgName =
+        (builtins.fromTOML (builtins.readFile (root + "/${util.joinRel dir "Cargo.toml"}"))).package.name;
     in
     # Not tested, so no test view; test-only paths still stay out.
     sourceViews.packageViews {
@@ -295,7 +298,9 @@ let
         lib.mapAttrs (_: v: v.targetSrc // lib.mapAttrs (_: s: s.view) (v.predicted.build or { })) keep
       );
       workspaceTestTargets = lib.filterAttrs (_: ts: ts != { }) (
-        lib.mapAttrs (_: v: v.targetTestSrc or { } // lib.mapAttrs (_: s: s.view) (v.predicted.test or { })) keep
+        lib.mapAttrs (
+          _: v: v.targetTestSrc or { } // lib.mapAttrs (_: s: s.view) (v.predicted.test or { })
+        ) keep
       );
     };
   # Predicted views (`predictSources`), by instantiation key: `spec`, what
@@ -361,7 +366,9 @@ let
   testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
   # The paths per-target views leave out, by directory (instantiate's
   # `sources.targetRoots`), for the hint when a unit misses one.
-  targetRoots = lib.mapAttrs (_: v: v.targetRoots) (lib.filterAttrs (_: v: v.targetRoots != [ ]) allViews);
+  targetRoots = lib.mapAttrs (_: v: v.targetRoots) (
+    lib.filterAttrs (_: v: v.targetRoots != [ ]) allViews
+  );
   # Directories of the packages whose `sources` functions choose files
   # (instantiate's `sources.custom`), for the same hints.
   custom = lib.attrNames (lib.filterAttrs (_: v: v.custom) allViews);
@@ -369,7 +376,13 @@ let
   # Clippy variants: each member's clippy config tree, by directory
   # (instantiate's `sources.clippyConf`).
   clippyConf = lib.optionalAttrs (mode == "clippy") (
-    lib.genAttrs memberDirs (dir: sourceViews.clippyConfTree { inherit root; pkgDir = dir; })
+    lib.genAttrs memberDirs (
+      dir:
+      sourceViews.clippyConfTree {
+        inherit root;
+        pkgDir = dir;
+      }
+    )
   );
 
   # The package directory of each member's "run" view, by package name, or
@@ -389,18 +402,16 @@ let
   closureWsRoots = (skeleton.packageClosure { inherit root wsDir; }).wsRootOf;
   testEnvIn =
     filesOf:
-    testRuns.resolveTestEnv (
-      lib.mapAttrs' (
-        dir: v:
-        let
-          d = if views ? ${v.name} then wsDir else closureWsRoots.${dir} or null;
-          rel = if d == null then dir else d;
-        in
-        lib.nameValuePair v.name {
-          workspaceRoot = if rel == "" then filesOf v else "${filesOf v}/${rel}";
-        }
-      ) allViews
-    ) packages;
+    testRuns.resolveTestEnv (lib.mapAttrs' (
+      dir: v:
+      let
+        d = if views ? ${v.name} then wsDir else closureWsRoots.${dir} or null;
+        rel = if d == null then dir else d;
+      in
+      lib.nameValuePair v.name {
+        workspaceRoot = if rel == "" then filesOf v else "${filesOf v}/${rel}";
+      }
+    ) allViews) packages;
   runPackages = testEnvIn (v: "${v.runSrc or v.src}");
   viewPackages = testEnvIn (v: "${v.testSrc or v.src}");
   appPackages =
@@ -441,41 +452,53 @@ let
     else
       builtins.toFile "breakbulk-cargo-config.toml" (util.devirtualizeAndDiscard cargoConfigText);
   cargoConfigTools = lib.listToAttrs (
-    lib.imap0 (i: p: lib.nameValuePair "cargo-config-${toString i}" p) (util.storePathsIn cargoConfigText)
+    lib.imap0 (i: p: lib.nameValuePair "cargo-config-${toString i}" p) (
+      util.storePathsIn cargoConfigText
+    )
   );
 
-  plans = lib.genAttrs ([ "build" "test" "doc" ] ++ lib.optional bench "bench") (
-    kind:
-    mkPlan pkgs {
-      vendor = vendored;
-      inherit
-        mode
-        clippyOption
-        tools
-        kind
-        target
-        features
-        configs
-        wsDir
-        noDefaultFeatures
-        allFeatures
-        spec
-        trimPaths
-        ;
-      packages = if kind == "test" then testSelect else select;
-      profile = if kind == "test" && !checking then testProfile else profile;
-      cargoConfig = cargoConfigFile;
-      # A doc plan runs no wrapper (breakbulk-plan's `runs_wrappers`).
-      rustcWrapper = if kind == "doc" then null else rustcWrapper;
-      rustcWorkspaceWrapper = if kind == "doc" then null else rustcWorkspaceWrapper;
-      clippyArgs = if kind == "doc" then [ ] else clippyArgs;
-      noDeps = docsNoDeps;
-      inherit (toolchain) cargo rustc;
-      inherit capabilities;
-      skeleton = skel;
-      name = "${name}-plan";
-    }
-  );
+  plans =
+    lib.genAttrs
+      (
+        [
+          "build"
+          "test"
+          "doc"
+        ]
+        ++ lib.optional bench "bench"
+      )
+      (
+        kind:
+        mkPlan pkgs {
+          vendor = vendored;
+          inherit
+            mode
+            clippyOption
+            tools
+            kind
+            target
+            features
+            configs
+            wsDir
+            noDefaultFeatures
+            allFeatures
+            spec
+            trimPaths
+            ;
+          packages = if kind == "test" then testSelect else select;
+          profile = if kind == "test" && !checking then testProfile else profile;
+          cargoConfig = cargoConfigFile;
+          # A doc plan runs no wrapper (breakbulk-plan's `runs_wrappers`).
+          rustcWrapper = if kind == "doc" then null else rustcWrapper;
+          rustcWorkspaceWrapper = if kind == "doc" then null else rustcWorkspaceWrapper;
+          clippyArgs = if kind == "doc" then [ ] else clippyArgs;
+          noDeps = docsNoDeps;
+          inherit (toolchain) cargo rustc;
+          inherit capabilities;
+          skeleton = skel;
+          name = "${name}-plan";
+        }
+      );
 
   captures = {
     host = envCapture.base {
@@ -599,7 +622,10 @@ let
   # crates under -Zbuild-std) is kept.
   lockDeps = lib.foldl' (
     acc: e:
-    acc // { ${e.name} = (acc.${e.name} or [ ]) ++ map (d: lib.head (lib.splitString " " d)) e.dependencies; }
+    acc
+    // {
+      ${e.name} = (acc.${e.name} or [ ]) ++ map (d: lib.head (lib.splitString " " d)) e.dependencies;
+    }
   ) { } entries;
   reachableFrom = lib.genAttrs [ "build" "test" "doc" "bench" ] (
     kind:
@@ -626,7 +652,9 @@ let
     r == null || r ? ${n} || !(lockDeps ? ${n});
   overridesFor =
     kind:
-    lib.filterAttrs (k: _: canContain kind (lib.head (lib.splitString "@" k))) (overrides // packageOverrides);
+    lib.filterAttrs (k: _: canContain kind (lib.head (lib.splitString "@" k))) (
+      overrides // packageOverrides
+    );
 
   # The package whose settings an instantiation input holds (its key, as
   # lib/instantiate.nix names it), or null for the toolchain's, the
@@ -654,7 +682,15 @@ let
   declaring = lib.filterAttrs (n: l: l != [ ] && lockDeps ? ${n}) productInputs;
   lockDependents = lib.mapAttrs (_: map (x: x.from)) (
     lib.groupBy (x: x.to) (
-      lib.concatLists (lib.mapAttrsToList (n: ds: map (d: { from = n; to = d; }) (lib.unique ds)) lockDeps)
+      lib.concatLists (
+        lib.mapAttrsToList (
+          n: ds:
+          map (d: {
+            from = n;
+            to = d;
+          }) (lib.unique ds)
+        ) lockDeps
+      )
     )
   );
   dependentsOf =
@@ -673,22 +709,30 @@ let
   lockChain =
     a: b:
     lib.concatStringsSep " -> " (
-      (lib.findFirst (x: x.key == b) { path = [ a b ]; } (
-        builtins.genericClosure {
-          startSet = [
-            {
-              key = a;
-              path = [ a ];
-            }
+      (lib.findFirst (x: x.key == b)
+        {
+          path = [
+            a
+            b
           ];
-          operator =
-            x:
-            map (n: {
-              key = n;
-              path = x.path ++ [ n ];
-            }) (lockDeps.${x.key} or [ ]);
         }
-      )).path
+        (
+          builtins.genericClosure {
+            startSet = [
+              {
+                key = a;
+                path = [ a ];
+              }
+            ];
+            operator =
+              x:
+              map (n: {
+                key = n;
+                path = x.path ++ [ n ];
+              }) (lockDeps.${x.key} or [ ]);
+          }
+        )
+      ).path
     );
   # Declarations that cannot work, found from the names alone: a product
   # whose package depends on the declaring one (the product would need
@@ -706,7 +750,9 @@ let
         if !(productUsers ? ${q}) then
           [ ]
         else if q == d then
-          [ "breakbulk: ${opt} names `${d}` itself: the settings of `${d}` cannot use its own product, which is built with them." ]
+          [
+            "breakbulk: ${opt} names `${d}` itself: the settings of `${d}` cannot use its own product, which is built with them."
+          ]
         else if via == d then
           [
             "breakbulk: `${q}` depends on `${d}` in Cargo.lock (${lockChain q d}), and ${opt} says the settings of `${d}` use the product of `${q}`: that product would need itself."
@@ -714,7 +760,10 @@ let
         else
           [
             "breakbulk: ${opt} names `${q}`, but `${q}` ${
-              if q == via then "declares products of its plan itself" else "depends on `${via}` in Cargo.lock (${lockChain q via}), which declares products of its plan"
+              if q == via then
+                "declares products of its plan itself"
+              else
+                "depends on `${via}` in Cargo.lock (${lockChain q via}), which declares products of its plan"
             } (`packages.${via}.productInputs`). Dynamic-derivation mode builds a plan's units in two steps, the products that settings use and then the packages whose settings use them (with everything that depends on those), so `${q}` is in the second step and its product cannot be an input of `${d}`."
           ]
       ) qs
@@ -905,10 +954,14 @@ in
     # Per-target views (packageViews' `targetSrc`, `targetTestSrc`), by
     # directory.
     workspaceTargets = lib.mapAttrs (_: v: v.targetSrc) allViews;
-    workspaceTestTargets = lib.mapAttrs (_: v: v.targetTestSrc) (lib.filterAttrs (_: v: v ? targetTestSrc) allViews);
+    workspaceTestTargets = lib.mapAttrs (_: v: v.targetTestSrc) (
+      lib.filterAttrs (_: v: v ? targetTestSrc) allViews
+    );
     # Predicted views, by key. IFD mode only: in dynamic-derivation mode
     # the outer derivation makes them, and they are not known here.
-    predicted = lib.optionalAttrs (delivery != "dynamic") (lib.mapAttrs (_: p: p.value) (predictedFor "test"));
+    predicted = lib.optionalAttrs (delivery != "dynamic") (
+      lib.mapAttrs (_: p: p.value) (predictedFor "test")
+    );
     # What each predicted view narrows (breakbulk-predict's ViewSpec), by
     # key, in both modes.
     predictedSpecs = lib.mapAttrs (_: p: p.spec) (predictedFor "test");
@@ -998,15 +1051,15 @@ in
         dylibPath = testDylibPath;
         host = hostTest;
         name = "${name}-bench";
-        packages = lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots))) (
-          pkg: {
-            test = (runPackages.${pkg}.test or { }) // {
-              args = [ "--test" ];
-              includeIgnored = false;
-              binaries = { };
-            };
-          }
-        );
+        packages =
+          lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots)))
+            (pkg: {
+              test = (runPackages.${pkg}.test or { }) // {
+                args = [ "--test" ];
+                includeIgnored = false;
+                binaries = { };
+              };
+            });
         inst = benched;
         tools = testRunTools;
       }).runs;

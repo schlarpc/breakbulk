@@ -85,7 +85,10 @@ rec {
   # Returns { dir, manifest, members = [ <dir relative to root> ... ] } with
   # members sorted.
   workspace =
-    { root, wsDir ? "" }:
+    {
+      root,
+      wsDir ? "",
+    }:
     let
       wsManifest = readManifest root wsDir;
       ws = wsManifest.workspace or null;
@@ -136,7 +139,12 @@ rec {
               deps =
                 if m ? package then
                   pathDeps {
-                    inherit root dir wsDir wsManifest;
+                    inherit
+                      root
+                      dir
+                      wsDir
+                      wsManifest
+                      ;
                     manifest = m;
                   }
                 else
@@ -178,7 +186,10 @@ rec {
   # { <name> = { name; path; }; }, `path` relative to root ("." for root
   # itself). Two members with one name are an error, as in Cargo.
   memberPackages =
-    { root, wsDir ? "" }:
+    {
+      root,
+      wsDir ? "",
+    }:
     let
       described = workspace { inherit root wsDir; };
       members = map (dir: {
@@ -221,7 +232,10 @@ rec {
             error = null;
             matches = n: n == e;
           };
-      ms = map (e: { inherit e; m = matcher e; }) entries;
+      ms = map (e: {
+        inherit e;
+        m = matcher e;
+      }) entries;
       excluded = n: lib.any (x: x.m.matches n) ms;
       sorted = lib.sort (a: b: a < b) names;
     in
@@ -286,7 +300,8 @@ rec {
         if v == null then
           default
         else if isAttrs v && (v.workspace or false) then
-          wsPkg.${f} or (throw "breakbulk: ${dir}/Cargo.toml inherits `${f}` but workspace.package.${f} is not set")
+          wsPkg.${f}
+            or (throw "breakbulk: ${dir}/Cargo.toml inherits `${f}` but workspace.package.${f} is not set")
         else
           v;
     in

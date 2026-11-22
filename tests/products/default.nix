@@ -477,7 +477,7 @@ let
       }
     ]
   );
-  sourcePathsReadme =mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
+  sourcePathsReadme = mkRepo (edited "source-paths" "echo 'More words.' >> dep/README.md") spModules;
 
   # --- manifest-dir ------------------------------------------------------------
 
@@ -534,7 +534,8 @@ let
           givenTo = lib.elemAt m 1;
         }
       ) (lib.splitString "\n" section);
-      namesFor = what: lib.sort lib.lessThan (map (r: r.name) (lib.filter (r: lib.hasInfix what r.givenTo) rows));
+      namesFor =
+        what: lib.sort lib.lessThan (map (r: r.name) (lib.filter (r: lib.hasInfix what r.givenTo) rows));
     in
     {
       stages = namesFor "stages";
@@ -1220,17 +1221,24 @@ let
   # package at a time, in the docs derivation's order.
   cargoDoc =
     repo: runs:
-    pkgs.runCommandCC "docs-cargo-doc" { nativeBuildInputs = [ pkgs.cargo pkgs.rustc ]; } ''
-      export CARGO_HOME=$TMPDIR/cargo-home
-      cp -r --no-preserve=mode ${fixtures + "/docs"} "$NIX_BUILD_TOP/ws"
-      cd "$NIX_BUILD_TOP/ws"
-      ${lib.concatMapStrings (args: ''
-        cargo doc --frozen --offline ${args} \
-          --config ${(inst repo).vendor.configFile} 2> doc.log || { cat doc.log; exit 1; }
-      '') runs}
-      cp -r target/doc $out
-      rm $out/.lock
-    '';
+    pkgs.runCommandCC "docs-cargo-doc"
+      {
+        nativeBuildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+        ];
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode ${fixtures + "/docs"} "$NIX_BUILD_TOP/ws"
+        cd "$NIX_BUILD_TOP/ws"
+        ${lib.concatMapStrings (args: ''
+          cargo doc --frozen --offline ${args} \
+            --config ${(inst repo).vendor.configFile} 2> doc.log || { cat doc.log; exit 1; }
+        '') runs}
+        cp -r target/doc $out
+        rm $out/.lock
+      '';
 
   # --- clippy-host ---------------------------------------------------------------
 
@@ -1374,9 +1382,8 @@ in
     assert lib.assertMsg (
       sharedDeps.notShared == [ ] && sharedDeps.shared > 0
     ) "docs: doc-plan units not shared with the check variant (deps):\n${sharedDeps.e.text}";
-    assert lib.assertMsg (
-      inputsOf docsDeps != [ ] && notCheckUnits docsDeps == [ ]
-    ) "docs: the docs derivation names units that are not the check variant's: ${builtins.toJSON (notCheckUnits docsDeps)}";
+    assert lib.assertMsg (inputsOf docsDeps != [ ] && notCheckUnits docsDeps == [ ])
+      "docs: the docs derivation names units that are not the check variant's: ${builtins.toJSON (notCheckUnits docsDeps)}";
     assert lib.assertMsg (
       docsChecks == [ "main/${native}/docs" ]
     ) "docs: docs in repo.checks: ${toString docsChecks}";
@@ -1441,7 +1448,13 @@ in
     let
       i = sourceOverlayRepo.workspaces.main.instances.${native}.default;
       units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
-      member = u: lib.any (p: lib.hasPrefix p u.name) [ "assets-" "server-" "other-" ];
+      member =
+        u:
+        lib.any (p: lib.hasPrefix p u.name) [
+          "assets-"
+          "server-"
+          "other-"
+        ];
     in
     pkgs.runCommand "source-overlay"
       {
@@ -1514,7 +1527,9 @@ in
     in
     assert lib.assertMsg (got == want) "product-inputs-undeclared: ${builtins.toJSON got}";
     assert lib.assertMsg checkFails "product-inputs-undeclared: repo.checks evaluated";
-    assert lib.assertMsg (errorsOf sameWsRepo == [ ]) "product-inputs-undeclared: declared: ${builtins.toJSON (errorsOf sameWsRepo)}";
+    assert lib.assertMsg (
+      errorsOf sameWsRepo == [ ]
+    ) "product-inputs-undeclared: declared: ${builtins.toJSON (errorsOf sameWsRepo)}";
     evalCheck "product-inputs-undeclared" (lib.concatStringsSep "\n" got);
 
   embed =
@@ -1641,7 +1656,8 @@ in
 
   nested-cargo-rustflags =
     nestedCargoRun "nested-cargo-rustflags" nestedCargoFlags.workspaces.main.packages.outer
-      "inner says 42, nested_cfg true" true;
+      "inner says 42, nested_cfg true"
+      true;
 
   benches =
     let
@@ -1757,7 +1773,8 @@ in
       namesWith = prefix: lib.filter (lib.hasPrefix prefix) (lib.attrNames (d "clippy" "build"));
       variantLayer = {
         clippyHasIt =
-          namesWith "lib-a-" != [ ] && lib.all (n: (envOf "clippy" "build" n) ? LINT_ONLY) (namesWith "lib-a-");
+          namesWith "lib-a-" != [ ]
+          && lib.all (n: (envOf "clippy" "build" n) ? LINT_ONLY) (namesWith "lib-a-");
         appLacksIt = lib.all (n: !((envOf "clippy" "build" n) ? LINT_ONLY)) (namesWith "app-");
         othersUnchanged = lib.all (
           vName:
@@ -1789,8 +1806,9 @@ in
         unitsBy "default" "host"
       );
     in
-    assert lib.assertMsg (lib.all lib.id (lib.attrValues variantLayer))
-      "variants: packages.lib-a.variant.clippy: ${builtins.toJSON variantLayer}";
+    assert lib.assertMsg (lib.all lib.id (
+      lib.attrValues variantLayer
+    )) "variants: packages.lib-a.variant.clippy: ${builtins.toJSON variantLayer}";
     assert lib.assertMsg (sharedTarget == [ ])
       "variants: target units shared between build and coverage: ${
         builtins.toJSON (map (u: u.name) sharedTarget)
@@ -1828,9 +1846,9 @@ in
     assert lib.assertMsg (
       lib.filter (lib.hasInfix "/variant-fp-") (lib.attrNames variantsRepo.checks) == [ ]
     ) "variants: powerset variants in repo.checks";
-    assert lib.assertMsg (
-      lib.any (lib.hasPrefix "main/${native}/variant-coverage/lib-a/test-") (lib.attrNames variantsRepo.checks)
-    ) "variants: the coverage variant's test runs are not in repo.checks";
+    assert lib.assertMsg (lib.any (lib.hasPrefix "main/${native}/variant-coverage/lib-a/test-") (
+      lib.attrNames variantsRepo.checks
+    )) "variants: the coverage variant's test runs are not in repo.checks";
     # Its products and their checks too, and the custom build variant's.
     assert lib.assertMsg (lib.all (n: variantsRepo.checks ? ${n}) [
       "main/${native}/variant-coverage/app/build"
@@ -1862,10 +1880,16 @@ in
   # --all-targets`). A build variant rejects it.
   variants-all-targets =
     let
-      outsOf = us: lib.sort lib.lessThan (map (o: builtins.unsafeDiscardStringContext o) (lib.concatMap (u: map (o: u.${o}) u.outputs) us));
+      outsOf =
+        us:
+        lib.sort lib.lessThan (
+          map (o: builtins.unsafeDiscardStringContext o) (lib.concatMap (u: map (o: u.${o}) u.outputs) us)
+        );
       lib' = vt.variants.check-lib.check;
       all = vt.variants.check.check;
-      buildOuts = outsOf (lib.attrValues variantsRepo.workspaces.main.instances.${native}.check.units.build);
+      buildOuts = outsOf (
+        lib.attrValues variantsRepo.workspaces.main.instances.${native}.check.units.build
+      );
       got = lib.sort lib.lessThan (map builtins.unsafeDiscardStringContext lib'.units);
       allGot = map builtins.unsafeDiscardStringContext all.units;
       rejected = mkRepo (fixtures + "/variants") [
@@ -1876,11 +1900,19 @@ in
           };
         }
       ];
-      rejectedEval = builtins.tryEval (builtins.seq rejected.workspaces.main.target.${native}.packages.app.drvPath true);
+      rejectedEval = builtins.tryEval (
+        builtins.seq rejected.workspaces.main.target.${native}.packages.app.drvPath true
+      );
     in
-    assert lib.assertMsg (got == buildOuts) "variants-all-targets: check-lib does not check exactly the build plan";
-    assert lib.assertMsg (lib.length allGot > lib.length got) "variants-all-targets: the default does not check more than the build plan";
-    assert lib.assertMsg (!rejectedEval.success) "variants-all-targets: a build variant accepted allTargets = false";
+    assert lib.assertMsg (
+      got == buildOuts
+    ) "variants-all-targets: check-lib does not check exactly the build plan";
+    assert lib.assertMsg (
+      lib.length allGot > lib.length got
+    ) "variants-all-targets: the default does not check more than the build plan";
+    assert lib.assertMsg (
+      !rejectedEval.success
+    ) "variants-all-targets: a build variant accepted allTargets = false";
     pkgs.runCommand "variants-all-targets" { check = lib'; } ''
       cp $check/units $out
     '';
@@ -1920,17 +1952,16 @@ in
         };
       }
     ) "variants-test-profile: plan profiles ${builtins.toJSON profiles}";
-    assert lib.assertMsg (
-      deps (common "default") != [ ] && deps (same "default") == [ ]
-    ) "variants-test-profile: dependency units shared between the release build plan and the test-profile test plan: ${builtins.toJSON (same "default")}";
-    assert lib.assertMsg (
-      lib.length (deps (common "release-tests")) >= 3 && same "release-tests" == common "release-tests"
-    ) "variants-test-profile: release-tests' plans differ in ${
-      builtins.toJSON (lib.subtractLists (same "release-tests") (common "release-tests"))
-    }";
-    pkgs.runCommand "variants-test-profile" { run = variantsRepo.checks."main/${native}/lib-a/test-lib"; } ''
-      echo "$run" > $out
-    '';
+    assert lib.assertMsg (deps (common "default") != [ ] && deps (same "default") == [ ])
+      "variants-test-profile: dependency units shared between the release build plan and the test-profile test plan: ${builtins.toJSON (same "default")}";
+    assert lib.assertMsg
+      (lib.length (deps (common "release-tests")) >= 3 && same "release-tests" == common "release-tests")
+      "variants-test-profile: release-tests' plans differ in ${builtins.toJSON (lib.subtractLists (same "release-tests") (common "release-tests"))}";
+    pkgs.runCommand "variants-test-profile"
+      { run = variantsRepo.checks."main/${native}/lib-a/test-lib"; }
+      ''
+        echo "$run" > $out
+      '';
 
   # `cargoConfig`: `dist`'s `profile.release.panic = "abort"` reaches its
   # build plan's target units (`-C panic=abort`), not its host units nor
@@ -1947,9 +1978,9 @@ in
       t = w.target.${native};
       rendered =
         vName: kind:
-        lib.mapAttrs (_: u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)) (
-          lib.filterAttrs (_: u: u ? drvAttrs) (unitsOf cargoConfigRepo vName kind)
-        );
+        lib.mapAttrs (
+          _: u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)
+        ) (lib.filterAttrs (_: u: u ? drvAttrs) (unitsOf cargoConfigRepo vName kind));
       compiles = vName: kind: lib.filterAttrs (_: u: u.kind == "compile") (rendered vName kind);
       abortsIn =
         vName: kind:
@@ -1960,36 +1991,46 @@ in
         );
       targetCompiles =
         vName: kind:
-        lib.sort lib.lessThan (lib.attrNames (lib.filterAttrs (_: u: u.platform == "target") (compiles vName kind)));
+        lib.sort lib.lessThan (
+          lib.attrNames (lib.filterAttrs (_: u: u.platform == "target") (compiles vName kind))
+        );
       planCmd = vName: w.instances.${native}.${vName}.plans.build.drvAttrs.buildCommand;
       refused =
         modules:
         !(builtins.tryEval (
-          builtins.deepSeq (mkRepo (fixtures + "/cargo-config") (cargoConfigModules ++ modules))
-          .workspaces.main.plans true
+          builtins.deepSeq
+            (mkRepo (fixtures + "/cargo-config") (cargoConfigModules ++ modules)).workspaces.main.plans
+            true
         )).success;
       bad = lib.attrNames (
         lib.filterAttrs (_: ok: !ok) {
-          distAborts = abortsIn "dist" "build" == targetCompiles "dist" "build" && abortsIn "dist" "build" != [ ];
-          hostUnwinds = lib.length (lib.attrNames (compiles "dist" "build")) > lib.length (abortsIn "dist" "build");
+          distAborts =
+            abortsIn "dist" "build" == targetCompiles "dist" "build" && abortsIn "dist" "build" != [ ];
+          hostUnwinds =
+            lib.length (lib.attrNames (compiles "dist" "build")) > lib.length (abortsIn "dist" "build");
           testsUnwind = abortsIn "dist" "test" == [ ];
           defaultUnwinds = abortsIn "default" "build" == [ ];
           # Only `dist`'s planner gets a file.
-          distFile = lib.hasInfix "--cargo-config" (planCmd "dist") && !(lib.hasInfix "--cargo-config" (planCmd "default"));
+          distFile =
+            lib.hasInfix "--cargo-config" (planCmd "dist")
+            && !(lib.hasInfix "--cargo-config" (planCmd "default"));
           ownedKey = refused [ { workspaces.main.variants.dist.cargoConfig.build.rustc = "/bin/false"; } ];
           ownedTargetKey = refused [
             { targets.${native}.variantDefaults.cargoConfig.target.${native}.linker = "/bin/false"; }
           ];
-          ownedSource = refused [ { workspaces.main.variants.dist.target.${native}.cargoConfig.source.crates-io.replace-with = "x"; } ];
+          ownedSource = refused [
+            { workspaces.main.variants.dist.target.${native}.cargoConfig.source.crates-io.replace-with = "x"; }
+          ];
         }
       );
     in
-    assert lib.assertMsg (bad == [ ]) "variants-cargo-config: failed ${toString bad}: aborts ${
-      builtins.toJSON {
-        dist = abortsIn "dist" "build";
-        target = targetCompiles "dist" "build";
-      }
-    }";
+    assert lib.assertMsg (bad == [ ])
+      "variants-cargo-config: failed ${toString bad}: aborts ${
+        builtins.toJSON {
+          dist = abortsIn "dist" "build";
+          target = targetCompiles "dist" "build";
+        }
+      }";
     pkgs.runCommand "variants-cargo-config"
       {
         dist = t.variants.dist.packages.app;
@@ -2097,15 +2138,19 @@ in
       );
     in
     assert lib.assertMsg (deps != [ ] && members != [ ]) "variants-driver: no units ${toString deps}";
-    assert lib.assertMsg (sharedDeps == [ ])
-      "variants-driver: workspace wrapper changed dependency units ${toString sharedDeps}";
-    assert lib.assertMsg (sharedMembers == [ ])
-      "variants-driver: workspace wrapper left members unchanged ${toString sharedMembers}";
-    assert lib.assertMsg (sharedAll == [ ])
-      "variants-driver: rustc wrapper left units unchanged ${toString sharedAll}";
+    assert lib.assertMsg (
+      sharedDeps == [ ]
+    ) "variants-driver: workspace wrapper changed dependency units ${toString sharedDeps}";
+    assert lib.assertMsg (
+      sharedMembers == [ ]
+    ) "variants-driver: workspace wrapper left members unchanged ${toString sharedMembers}";
+    assert lib.assertMsg (
+      sharedAll == [ ]
+    ) "variants-driver: rustc wrapper left units unchanged ${toString sharedAll}";
     assert lib.assertMsg (!clippyWrapped.success) "variants-driver: clippy took a workspace wrapper";
-    assert lib.assertMsg (runWrapper "driven" && !runWrapper "members")
-      "variants-driver: RUSTC_WRAPPER of build-script runs";
+    assert lib.assertMsg (
+      runWrapper "driven" && !runWrapper "members"
+    ) "variants-driver: RUSTC_WRAPPER of build-script runs";
     pkgs.runCommand "variants-driver"
       {
         app = (u "driven" "build")."app-0.1.0-bin".rmeta;
@@ -2199,12 +2244,14 @@ in
     assert lib.assertMsg (
       changed "default" "build" == [ ] && changed "check" "build" == [ ] && changed "check" "test" == [ ]
     ) "variants-clippy-conf: a clippy.toml edit changed build or check units";
-    assert lib.assertMsg (
-      changed "clippy" "build" == [
-        "own-0.1.0-lib"
-        "rooted-0.1.0-lib"
-      ]
-    ) "variants-clippy-conf: clippy units changed by a root clippy.toml edit: ${builtins.toJSON (changed "clippy" "build")}";
+    assert lib.assertMsg
+      (
+        changed "clippy" "build" == [
+          "own-0.1.0-lib"
+          "rooted-0.1.0-lib"
+        ]
+      )
+      "variants-clippy-conf: clippy units changed by a root clippy.toml edit: ${builtins.toJSON (changed "clippy" "build")}";
     pkgs.runCommand "variants-clippy-conf"
       {
         rooted = expectFailure "rooted-clippy" (clippyUnits repo)."rooted-0.1.0-lib" [
@@ -2244,11 +2291,14 @@ in
       missing = lib.subtractLists names expected;
       # Built for wasm32 only, tested natively only.
       unexpected = lib.filter (
-        n: lib.hasPrefix "greet/wasm32-unknown-unknown/greet/test-" n || lib.hasPrefix "greet/${native}/greet/build" n
+        n:
+        lib.hasPrefix "greet/wasm32-unknown-unknown/greet/test-" n
+        || lib.hasPrefix "greet/${native}/greet/build" n
       ) names;
     in
-    assert lib.assertMsg (missing == [ ] && unexpected == [ ])
-      "port-from-crane: checks missing ${toString missing}, unexpected ${toString unexpected}";
+    assert lib.assertMsg (
+      missing == [ ] && unexpected == [ ]
+    ) "port-from-crane: checks missing ${toString missing}, unexpected ${toString unexpected}";
     pkgs.runCommand "port-from-crane"
       {
         server = r.workspaces.host.packages.server;
@@ -2267,7 +2317,8 @@ in
   variants-clippy-host =
     let
       unitsIn = repo: vName: lib.attrValues repo.workspaces.main.instances.${native}.${vName}.units.build;
-      platformOf = u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
+      platformOf =
+        u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
       runtimeLibs = repo: vName: lib.filter (u: u.name == "runtime-0.1.0-lib") (unitsIn repo vName);
       runtimeLib =
         repo: vName: platform:
@@ -2286,7 +2337,8 @@ in
       drvs clippyHost "default" == drvs clippyHostFixed "default"
     ) "variants-clippy-host: the clippy variant's package setting changed the default variant's units";
     assert lib.assertMsg (
-      (runtimeLib clippyHost "clippy" "target").drvPath == (runtimeLib clippyHostFixed "clippy" "target").drvPath
+      (runtimeLib clippyHost "clippy" "target").drvPath == (runtimeLib clippyHostFixed "clippy" "target")
+      .drvPath
     ) "variants-clippy-host: the forHost setting changed the target copy";
     pkgs.runCommand "variants-clippy-host"
       {
@@ -2371,21 +2423,24 @@ in
       names = lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) repo.checks);
       under = prefix: lib.filter (lib.hasPrefix prefix) names;
       planCmd = vName: kind: w.instances.${native}.${vName}.plans.${kind}.drvAttrs.buildCommand;
-      selects = vName: kind: pkg: lib.hasInfix " -p ${lib.escapeShellArg pkg} " (planCmd vName kind);
+      selects =
+        vName: kind: pkg:
+        lib.hasInfix " -p ${lib.escapeShellArg pkg} " (planCmd vName kind);
       yRun = repo.checks."main/${native}/variant-y-only/lib-a/test-lib";
       defaultRun = repo.checks."main/${native}/lib-a/test-lib";
       bad = lib.attrNames (
         lib.filterAttrs (_: ok: !ok) {
-          nativeVariants = lib.attrNames n.variants == [
-            "default"
-            "hack-lib-a.all-features"
-            "hack-lib-a.default"
-            "hack-lib-a.no-default-features"
-            "hack-lib-a.x"
-            "hack-lib-a.y"
-            "quiet"
-            "y-only"
-          ];
+          nativeVariants =
+            lib.attrNames n.variants == [
+              "default"
+              "hack-lib-a.all-features"
+              "hack-lib-a.default"
+              "hack-lib-a.no-default-features"
+              "hack-lib-a.x"
+              "hack-lib-a.y"
+              "quiet"
+              "y-only"
+            ];
           hackPlan =
             selects "hack-lib-a.y" "build" "lib-a"
             && lib.hasInfix " --features y " (planCmd "hack-lib-a.y" "build")
@@ -2420,10 +2475,16 @@ in
           };
         }
       ];
-      unknownEval = builtins.tryEval (builtins.attrNames unknown.workspaces.main.target.${native}.variants);
+      unknownEval = builtins.tryEval (
+        builtins.attrNames unknown.workspaces.main.target.${native}.variants
+      );
     in
-    assert lib.assertMsg (bad == [ ]) "variants-narrowing: failed ${toString bad}; checks: ${builtins.toJSON names}";
-    assert lib.assertMsg (!unknownEval.success) "variants-narrowing: a variant target outside the workspace's targets was accepted";
+    assert lib.assertMsg (
+      bad == [ ]
+    ) "variants-narrowing: failed ${toString bad}; checks: ${builtins.toJSON names}";
+    assert lib.assertMsg (
+      !unknownEval.success
+    ) "variants-narrowing: a variant target outside the workspace's targets was accepted";
     pkgs.runCommand "variants-narrowing"
       {
         inherit yRun;
@@ -2483,19 +2544,22 @@ in
       wasmChecks = lib.filter (lib.hasPrefix "main/${wasm}/") (leaves repo);
       # The test plan's buildScriptPaths check comes with the test runs.
       isRun =
-        n: lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n || lib.hasSuffix "/buildScriptPaths/test" n;
+        n:
+        lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n || lib.hasSuffix "/buildScriptPaths/test" n;
       t = repo.workspaces.main.target;
     in
-    assert lib.assertMsg (t.${native}.packages == { }) "products-tests-only: native products ${toString (lib.attrNames t.${native}.packages)}";
+    assert lib.assertMsg (t.${native}.packages == { })
+      "products-tests-only: native products ${toString (lib.attrNames t.${native}.packages)}";
     assert lib.assertMsg (
       nativeChecks != [ ] && lib.all isRun nativeChecks && lib.any (lib.hasSuffix "/doctest") nativeChecks
     ) "products-tests-only: native checks ${toString nativeChecks}";
     assert lib.assertMsg (
       wasmChecks != [ ] && !(lib.any isRun wasmChecks)
     ) "products-tests-only: wasm checks ${toString wasmChecks}";
-    assert lib.assertMsg (
-      lib.attrNames partial.workspaces.main.target.${native}.packages == [ "app" ]
-    ) "products-tests-only: with a list, native products ${toString (lib.attrNames partial.workspaces.main.target.${native}.packages)}";
+    assert lib.assertMsg (lib.attrNames partial.workspaces.main.target.${native}.packages == [ "app" ])
+      "products-tests-only: with a list, native products ${
+        toString (lib.attrNames partial.workspaces.main.target.${native}.packages)
+      }";
     evalCheck "products-tests-only" (builtins.toJSON { inherit nativeChecks wasmChecks; });
 
   variants-per-target =
@@ -2568,8 +2632,12 @@ in
       hackProfiles = lib.mapAttrs (_: _: "release") (
         lib.filterAttrs (n: _: lib.hasPrefix "hack-" n) w.instances.${native}
       );
-      planCmd = triple: vName: kind: w.instances.${triple}.${vName}.plans.${kind}.drvAttrs.buildCommand;
-      has = triple: vName: s: lib.hasInfix " ${s} " (planCmd triple vName "build");
+      planCmd =
+        triple: vName: kind:
+        w.instances.${triple}.${vName}.plans.${kind}.drvAttrs.buildCommand;
+      has =
+        triple: vName: s:
+        lib.hasInfix " ${s} " (planCmd triple vName "build");
       unitsOf = triple: lib.length w.target.${triple}.variants.gate.check.units;
       planUnits =
         triple: kind:
@@ -2577,7 +2645,9 @@ in
       fails =
         extra:
         !(builtins.tryEval (
-          builtins.deepSeq (lib.mapAttrs (_: lib.mapAttrs (_: p: p.build.drvPath)) (repoWith extra).workspaces.main.plans) true
+          builtins.deepSeq (lib.mapAttrs (_: lib.mapAttrs (_: p: p.build.drvPath))
+            (repoWith extra).workspaces.main.plans
+          ) true
         )).success;
       bad = lib.attrNames (
         lib.filterAttrs (_: ok: !ok) {
@@ -2658,7 +2728,8 @@ in
                 };
               };
             in
-            lib.hasInfix " --profile release " r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+            lib.hasInfix " --profile release "
+              r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
           mkDefaultLoses =
             let
               r = repoWith {
@@ -2668,18 +2739,21 @@ in
                 };
               };
             in
-            lib.hasInfix " --profile release " r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+            lib.hasInfix " --profile release "
+              r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
           # The example of the docs: test runs and products in repo.checks
           # on wasm only.
           checksOnOneTarget =
             let
-              names = lib.attrNames (repoWith {
-                variants.default = {
-                  profile = "release";
-                  checks = false;
-                  target.${wasm}.checks = true;
-                };
-              }).checks;
+              names =
+                lib.attrNames
+                  (repoWith {
+                    variants.default = {
+                      profile = "release";
+                      checks = false;
+                      target.${wasm}.checks = true;
+                    };
+                  }).checks;
             in
             lib.elem "main/${wasm}/app/build" names && !(lib.any (lib.hasPrefix "main/${native}/app/") names);
         }
@@ -2797,8 +2871,9 @@ in
         checks = lib.sort lib.lessThan p.checks.probe.productNames;
       };
     in
-    assert lib.assertMsg (lib.length documentedProduct.stages > 5)
-      "product-attributes: no `product` table found in docs/src/reference/stage-functions.md";
+    assert lib.assertMsg (
+      lib.length documentedProduct.stages > 5
+    ) "product-attributes: no `product` table found in docs/src/reference/stage-functions.md";
     assert lib.assertMsg (actual == documentedProduct)
       "product-attributes: docs/src/reference/stage-functions.md documents ${builtins.toJSON documentedProduct}, but a product has ${builtins.toJSON actual}";
     evalCheck "product-attributes" (builtins.toJSON actual);
@@ -2993,12 +3068,12 @@ in
       };
       badDefault = lib.filterAttrs (n: s: ((scopes "default").${n} or "missing") != s) wantDefault;
       setScoped = lib.filterAttrs (_: s: s != null) (scopes "set");
-      setNoScope = lib.filterAttrs (
-        _: u: !(hasArg (a: a == "--remap-path-scope=all") u)
-      ) (allCompiles "set");
-      defaultScope = lib.filterAttrs (
-        _: u: hasArg (lib.hasPrefix "--remap-path-scope") u
-      ) (allCompiles "default");
+      setNoScope = lib.filterAttrs (_: u: !(hasArg (a: a == "--remap-path-scope=all") u)) (
+        allCompiles "set"
+      );
+      defaultScope = lib.filterAttrs (_: u: hasArg (lib.hasPrefix "--remap-path-scope") u) (
+        allCompiles "default"
+      );
       # A build-directory remap per run named (`<run out>=/cargo/build-dir`:
       # the out copies Cargo's build directory), as the shared crate's lib has.
       sharedLib = lib.head (
@@ -3048,7 +3123,8 @@ in
       plans.set.build.trimPaths && !(plans.set.build.trimPathsDefault or false)
     ) "trim-paths: set's plan: trimPaths ${builtins.toJSON plans.set.build.trimPaths}";
     assert lib.assertMsg (
-      plans.default.build.trimPaths && plans.default.build.trimPathsDefault
+      plans.default.build.trimPaths
+      && plans.default.build.trimPathsDefault
       && plans.default.test.trimPathsDefault
     ) "trim-paths: the planner did not turn trim-paths on for default's plans";
     assert lib.assertMsg (
@@ -3058,8 +3134,12 @@ in
       defaultScope == { }
     ) "trim-paths: default's units kept Cargo's scope: ${toString (lib.attrNames defaultScope)}";
     assert lib.assertMsg (ownRemaps "set" == { } && ownRemaps "default" == { })
-      "trim-paths: breakbulk added remaps: ${toString (lib.attrNames (ownRemaps "set" // ownRemaps "default"))}";
-    assert lib.assertMsg (setScoped == { }) "trim-paths: set's units got a breakbulk scope: ${builtins.toJSON setScoped}";
+      "trim-paths: breakbulk added remaps: ${
+        toString (lib.attrNames (ownRemaps "set" // ownRemaps "default"))
+      }";
+    assert lib.assertMsg (
+      setScoped == { }
+    ) "trim-paths: set's units got a breakbulk scope: ${builtins.toJSON setScoped}";
     assert lib.assertMsg (
       badDefault == { }
     ) "trim-paths: default's scopes ${builtins.toJSON (scopes "default")}";
@@ -3068,10 +3148,17 @@ in
     ) "trim-paths: shared's build-directory remaps: ${builtins.toJSON buildDirRemaps}";
     # Hashed without its absolute path: one key in both workspaces and at
     # two other locations.
-    assert lib.assertMsg (
-      sharedKey plans.set.build == sharedKey plans.default.build
-      && lib.length (sharedKey plans.set.build) == 1
-    ) "trim-paths: shared's keys ${builtins.toJSON [ (sharedKey plans.set.build) (sharedKey plans.default.build) ]}";
+    assert lib.assertMsg
+      (
+        sharedKey plans.set.build == sharedKey plans.default.build
+        && lib.length (sharedKey plans.set.build) == 1
+      )
+      "trim-paths: shared's keys ${
+        builtins.toJSON [
+          (sharedKey plans.set.build)
+          (sharedKey plans.default.build)
+        ]
+      }";
     assert lib.assertMsg (
       sharedKey (readPlanAt atA) == sharedKey plans.default.build
       && sharedKey (readPlanAt atB) == sharedKey plans.default.build
@@ -3131,38 +3218,50 @@ in
       runOf =
         r:
         lib.head (lib.attrValues (lib.filterAttrs (n: _: lib.hasPrefix "r-cfile-" n) (inst r).units.build));
-      renderedRun = r: builtins.fromJSON (builtins.unsafeDiscardStringContext (runOf r).drvAttrs.BREAKBULK_UNIT);
+      renderedRun =
+        r: builtins.fromJSON (builtins.unsafeDiscardStringContext (runOf r).drvAttrs.BREAKBULK_UNIT);
       run = renderedRun repo;
       cargoNamed = to: to == "." || lib.hasPrefix "/cargo/" to || lib.hasPrefix "/rustc/" to;
       offRun = renderedRun off;
-      keepUnits = map (u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)) (
-        lib.attrValues (inst keep).units.build
-      );
-      keepRemaps = lib.filter (u: (u.remap or [ ]) != [ ] || (u.remapScope or null) != null || (u.outDirRemap or null) != null) keepUnits;
+      keepUnits = map (
+        u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)
+      ) (lib.attrValues (inst keep).units.build);
+      keepRemaps = lib.filter (
+        u: (u.remap or [ ]) != [ ] || (u.remapScope or null) != null || (u.outDirRemap or null) != null
+      ) keepUnits;
       # trim-paths for one package only: planning fails naming both sides.
-      mixed = pkgs.testers.testBuildFailure (inst (
-        mkRepo (edited "trim-paths-cc" "printf '\\n[profile.dev.package.cc]\\ntrim-paths = \"all\"\\n' >> Cargo.toml") [
-          (oneWs "." "dev")
-          {
-            workspaces.main.toolchain = {
-              rustc = trimRust;
-              cargo = trimRust;
-            };
-          }
-        ]
-      )).plans.build;
+      mixed =
+        pkgs.testers.testBuildFailure
+          (inst (
+            mkRepo
+              (edited "trim-paths-cc" "printf '\\n[profile.dev.package.cc]\\ntrim-paths = \"all\"\\n' >> Cargo.toml")
+              [
+                (oneWs "." "dev")
+                {
+                  workspaces.main.toolchain = {
+                    rustc = trimRust;
+                    cargo = trimRust;
+                  };
+                }
+              ]
+          )).plans.build;
       view = builtins.unsafeDiscardStringContext "${(inst repo).sources.workspace.cfile}";
       product = repo.workspaces.main.packages.cfile;
     in
-    assert lib.assertMsg ((planOf repo).trimPaths && (planOf repo).trimPathsDefault) "trim-paths-cc: trim-paths is not on";
+    assert lib.assertMsg (
+      (planOf repo).trimPaths && (planOf repo).trimPathsDefault
+    ) "trim-paths-cc: trim-paths is not on";
     assert lib.assertMsg (
       lib.all (p: cargoNamed (lib.elemAt p 1)) run.remap && run.remap != [ ]
     ) "trim-paths-cc: the run's C prefix maps: ${builtins.toJSON run.remap}";
-    assert lib.assertMsg ((run.outDirRemap or "") == "/cargo/build-dir") "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
+    assert lib.assertMsg ((run.outDirRemap or "") == "/cargo/build-dir")
+      "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
     assert lib.assertMsg (
       !(planOf off).trimPaths && lib.hasPrefix "/breakbulk/build/" (offRun.outDirRemap or "")
     ) "trim-paths-cc: cargoTrimPaths = false: ${builtins.toJSON offRun.outDirRemap}";
-    assert lib.assertMsg (!(planOf keep).trimPaths && keepRemaps == [ ]) "trim-paths-cc: sourcePaths = keep added remaps";
+    assert lib.assertMsg (
+      !(planOf keep).trimPaths && keepRemaps == [ ]
+    ) "trim-paths-cc: sourcePaths = keep added remaps";
     assert lib.assertMsg (
       !(keep.workspaces.main.packages.cfile.checks ? noSourceReferences)
     ) "trim-paths-cc: sourcePaths = keep still has noSourceReferences";
@@ -3258,7 +3357,9 @@ in
       ];
       missing = lib.filter (p: !(lib.elem p listed)) want;
     in
-    assert lib.assertMsg (missing == [ ]) "no-toolchain-references: not looked for: ${toString missing}";
+    assert lib.assertMsg (
+      missing == [ ]
+    ) "no-toolchain-references: not looked for: ${toString missing}";
     pkgs.runCommand "no-toolchain-references"
       {
         failure = pkgs.testers.testBuildFailure ps.app.checks.noSourceReferences;
@@ -3285,20 +3386,26 @@ in
           ++ extra
         );
       plain = (repo [ ]).workspaces.main.packages.stat;
-      naming = (repo [
-        {
-          packages.stat.stages.nameSource = {
-            after = "splitDebug";
-            before = "install";
-            run =
-              { input, product, pkgs, ... }:
-              pkgs.runCommand "stat-name-source" { } ''
-                cp -r --no-preserve=mode ${input} $out
-                echo ${toString product.sourcePaths} > $out/where.txt
-              '';
-          };
-        }
-      ]).workspaces.main.packages.stat;
+      naming =
+        (repo [
+          {
+            packages.stat.stages.nameSource = {
+              after = "splitDebug";
+              before = "install";
+              run =
+                {
+                  input,
+                  product,
+                  pkgs,
+                  ...
+                }:
+                pkgs.runCommand "stat-name-source" { } ''
+                  cp -r --no-preserve=mode ${input} $out
+                  echo ${toString product.sourcePaths} > $out/where.txt
+                '';
+            };
+          }
+        ]).workspaces.main.packages.stat;
     in
     pkgs.runCommand "staticlib-sources"
       {
@@ -3379,7 +3486,9 @@ in
           rustc = tc;
           cargo = tc;
         }).workspaces.main.packages.tool;
-      cargoComponent = lib.findFirst (p: builtins.match "[a-z0-9]{32}-cargo-.*" (baseNameOf "${p}") != null) null tc.paths;
+      cargoComponent = lib.findFirst (
+        p: builtins.match "[a-z0-9]{32}-cargo-.*" (baseNameOf "${p}") != null
+      ) null tc.paths;
     in
     assert lib.assertMsg (cargoComponent != null) "prefer-dynamic: no cargo component in ${tc}";
     pkgs.runCommand "prefer-dynamic"
@@ -3488,11 +3597,12 @@ in
         && report.stripRemoved
         && report.packageAdds
         && report.wasmSplit
-        && report.override == [
-          "packDwo"
-          "splitDebug"
-          "install"
-        ]
+        &&
+          report.override == [
+            "packDwo"
+            "splitDebug"
+            "install"
+          ]
         && report.keepIsStrip
         && report.splitDiffers
         && report.splitScope

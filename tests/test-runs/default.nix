@@ -172,7 +172,11 @@ let
 
   # The checks below read the runs' output, so they keep it
   # (`test.keepLog`); `$out` is otherwise empty.
-  keepLog = names: lib.genAttrs names (_: { test.keepLog = true; });
+  keepLog =
+    names:
+    lib.genAttrs names (_: {
+      test.keepLog = true;
+    });
 
   doctestsWs = mk "doctests" {
     packages = keepLog [
@@ -293,10 +297,11 @@ let
           _: d: lib.concatMap (a: a.searchPathsOf or [ ]) (lib.filter builtins.isAttrs d.args)
         ) p.doctests;
       checks = p: {
-        "doctests of d and pmt only" = lib.attrNames p.doctests == [
-          "d-d"
-          "d-pmt"
-        ];
+        "doctests of d and pmt only" =
+          lib.attrNames p.doctests == [
+            "d-d"
+            "d-pmt"
+          ];
         "one run of d, for the target" =
           map (r: p.units.${r}.platform) (runsOf p) == [ "target" ]
           && lib.hasPrefix "r-d-" (lib.head (runsOf p));
@@ -307,7 +312,8 @@ let
           d: !lib.any (a: a == "--test-runtool" || a == "--test-runtool-arg") d.args
         ) (lib.attrValues p.doctests);
       };
-      failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) (checks plan))
+      failed =
+        lib.attrNames (lib.filterAttrs (_: ok: !ok) (checks plan))
         ++ map (n: "cross: ${n}") (lib.attrNames (lib.filterAttrs (_: ok: !ok) (checks cross)));
     in
     assert lib.assertMsg (failed == [ ]) "doctest-false: ${lib.concatStringsSep ", " failed}";
@@ -652,8 +658,9 @@ let
       net = apps."main/${native}/ctl/test-net";
       variantNet = ctlRepo.workspaces.main.target.${native}.variants.default.testApps.ctl.net;
     in
-    assert lib.assertMsg (lib.attrNames apps == lib.sort lib.lessThan want)
-      "test-control-repo-apps: apps ${toString (lib.attrNames apps)}";
+    assert lib.assertMsg (
+      lib.attrNames apps == lib.sort lib.lessThan want
+    ) "test-control-repo-apps: apps ${toString (lib.attrNames apps)}";
     # IFD mode has no app for a binary Cargo did not build (needs_feat).
     assert lib.assertMsg (
       checkNames == [
@@ -668,8 +675,9 @@ let
     assert lib.assertMsg (lib.all (
       a: a.type == "app" && lib.isString a.program && lib.isString a.meta.description
     ) (lib.attrValues apps)) "test-control-repo-apps: an app is not in the flake app shape";
-    assert lib.assertMsg (discard net.program == discard (nixRunProgram variantNet))
-      "test-control-repo-apps: ${net.program} is not the variant's test app";
+    assert lib.assertMsg (
+      discard net.program == discard (nixRunProgram variantNet)
+    ) "test-control-repo-apps: ${net.program} is not the variant's test app";
     pkgs.runCommand "test-runs-test-control-repo-apps"
       {
         net = net.program;
@@ -971,7 +979,9 @@ let
             env = ws "plain" { env = oneThread; };
             binary = ws "plain" binary;
             config = ws "env-config" { };
-            nextest-env = ws "plain" (nx { env = oneThread; });
+            nextest-env = ws "plain" (nx {
+              env = oneThread;
+            });
             nextest-binary = ws "plain" (
               nx (
                 lib.recursiveUpdate binary {
@@ -1001,9 +1011,9 @@ let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       runs = lib.concatMapAttrs (
         w: v:
-        lib.mapAttrs' (
-          n: d: lib.nameValuePair (lib.replaceStrings [ "-" ] [ "_" ] "${w}_${n}") d
-        ) (removeAttrs v.target.${native}.testRuns.tt [ "lib/tt" ])
+        lib.mapAttrs' (n: d: lib.nameValuePair (lib.replaceStrings [ "-" ] [ "_" ] "${w}_${n}") d) (
+          removeAttrs v.target.${native}.testRuns.tt [ "lib/tt" ]
+        )
       ) testThreadsRepo.workspaces;
     in
     assert lib.assertMsg (
@@ -1071,7 +1081,8 @@ let
     in
     pkgs.runCommand "test-runs-post-run"
       {
-        plain = (mk "test-control" { packages.ctl.test = removeAttrs ctlTest [ "keepLog" ]; }).testRuns.ctl.env;
+        plain =
+          (mk "test-control" { packages.ctl.test = removeAttrs ctlTest [ "keepLog" ]; }).testRuns.ctl.env;
         envRun = t.testRuns.ctl.env;
         net = t.testRuns.ctl.net;
         doctest = t.doctests.ctl;
@@ -1338,7 +1349,9 @@ let
         "breakbulk: workspaces.main.memberDefaults.test.binaries (set in `/checks/keys.nix'): `bin` names no test binary of any member of workspaces.main; the test binaries are ${ctlKeys}"
       ];
     in
-    assert lib.assertMsg (failed good == [ ]) "test-binary-keys: valid keys rejected: ${builtins.toJSON (failed good)}";
+    assert lib.assertMsg (
+      failed good == [ ]
+    ) "test-binary-keys: valid keys rejected: ${builtins.toJSON (failed good)}";
     assert lib.assertMsg (
       variants.default.testRuns.ctl.needs_feat.breakbulkRoot.unit == null
       && variants.extra.testRuns.ctl.needs_feat.passthru.breakbulkTest.args == [ "--exact" ]
@@ -1397,8 +1410,9 @@ let
       leaves base == lib.sort lib.lessThan (leaves c ++ [ "${p}/unchecked/doctest" ])
       && c ? "${p}/checked/doctest"
     ) "doctest-settings: checks ${toString (leaves c)}, without the settings ${toString (leaves base)}";
-    assert lib.assertMsg (groups c == groups base)
-      "doctest-settings: groups ${toString (groups c)}, without the settings ${toString (groups base)}";
+    assert lib.assertMsg (
+      groups c == groups base
+    ) "doctest-settings: groups ${toString (groups c)}, without the settings ${toString (groups base)}";
     assert lib.assertMsg (
       lib.attrNames c.all.passthru.entries == leaves c
     ) "doctest-settings: all holds ${toString (lib.attrNames c.all.passthru.entries)}";
@@ -1446,9 +1460,15 @@ let
         lib.attrNames forced.checks
       );
     in
-    assert lib.assertMsg (forcedOff == [ ]) "binary-enable: forced off, yet in repo.checks: ${toString forcedOff}";
-    assert lib.assertMsg (smoke == [ "${p}/checked/test-smoke" ]) "binary-enable: smoke runs in repo.checks: ${toString smoke}";
-    assert lib.assertMsg (runs.checked ? smoke && runs.unchecked ? smoke) "binary-enable: a smoke run is gone";
+    assert lib.assertMsg (
+      forcedOff == [ ]
+    ) "binary-enable: forced off, yet in repo.checks: ${toString forcedOff}";
+    assert lib.assertMsg (
+      smoke == [ "${p}/checked/test-smoke" ]
+    ) "binary-enable: smoke runs in repo.checks: ${toString smoke}";
+    assert lib.assertMsg (
+      runs.checked ? smoke && runs.unchecked ? smoke
+    ) "binary-enable: a smoke run is gone";
     pkgs.runCommand "test-runs-binary-enable" { run = repo.checks."${p}/checked/test-smoke"; } ''
       touch $out
     '';

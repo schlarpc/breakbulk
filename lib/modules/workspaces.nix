@@ -144,35 +144,59 @@ let
     let
       fixed = [
         {
-          path = [ "build" "rustc" ];
+          path = [
+            "build"
+            "rustc"
+          ];
           use = "set `workspaces.<ws>.toolchain.rustc`";
         }
         {
-          path = [ "build" "rustdoc" ];
+          path = [
+            "build"
+            "rustdoc"
+          ];
           use = "set `workspaces.<ws>.toolchain.rustc`";
         }
         {
-          path = [ "build" "rustc-wrapper" ];
+          path = [
+            "build"
+            "rustc-wrapper"
+          ];
           use = "set the variant's `rustcWrapper`";
         }
         {
-          path = [ "build" "rustc-workspace-wrapper" ];
+          path = [
+            "build"
+            "rustc-workspace-wrapper"
+          ];
           use = "set the variant's `rustcWorkspaceWrapper`, or use a clippy variant (`mode = \"clippy\"`)";
         }
         {
-          path = [ "build" "target-dir" ];
+          path = [
+            "build"
+            "target-dir"
+          ];
           use = "every unit has its own output";
         }
         {
-          path = [ "build" "build-dir" ];
+          path = [
+            "build"
+            "build-dir"
+          ];
           use = "every unit has its own output";
         }
         {
-          path = [ "build" "target" ];
+          path = [
+            "build"
+            "target"
+          ];
           use = "set `workspaces.<ws>.targets`";
         }
         {
-          path = [ "build" "profile" ];
+          path = [
+            "build"
+            "profile"
+          ];
           use = "set the variant's `profile` and `testProfile`";
         }
         {
@@ -180,11 +204,17 @@ let
           use = "crates come from Cargo.lock, vendored";
         }
         {
-          path = [ "host" "linker" ];
+          path = [
+            "host"
+            "linker"
+          ];
           use = "set `targets.<triple>.host.linker`";
         }
         {
-          path = [ "host" "runner" ];
+          path = [
+            "host"
+            "runner"
+          ];
           use = "set `targets.<triple>.runner`";
         }
       ];
@@ -195,11 +225,19 @@ let
         in
         lib.optionals (builtins.isAttrs t) (
           lib.optional (t ? linker) {
-            path = [ "target" key "linker" ];
+            path = [
+              "target"
+              key
+              "linker"
+            ];
             use = "set `targets.<triple>.linker`";
           }
           ++ lib.optional (t ? runner) {
-            path = [ "target" key "runner" ];
+            path = [
+              "target"
+              key
+              "runner"
+            ];
             use = "set `targets.<triple>.runner`";
           }
         )
@@ -221,7 +259,9 @@ let
     let
       at = "workspaces.${wsName}.variants.${name}";
       checkMode = config.mode == "check" || config.mode == "clippy";
-      unknownTargets = lib.filter (t: !(ws.targets ? ${t})) (if config.targets == null then [ ] else config.targets);
+      unknownTargets = lib.filter (t: !(ws.targets ? ${t})) (
+        if config.targets == null then [ ] else config.targets
+      );
       planned = if config.targets == null then lib.attrNames ws.targets else config.targets;
       unplannedLayers = lib.filter (t: !(lib.elem t planned)) (lib.attrNames config.target);
     in
@@ -1034,7 +1074,9 @@ let
             in
             if fromTargets != null then
               fromTargets
-            else if buildTarget != null && lib.length buildTarget == 1 && lib.elem (lib.head buildTarget) ts then
+            else if
+              buildTarget != null && lib.length buildTarget == 1 && lib.elem (lib.head buildTarget) ts
+            then
               lib.head buildTarget
             else
               null;
@@ -1197,7 +1239,10 @@ let
           {
             assertion = config.variants ? ${config.defaultVariant};
             message = "breakbulk: workspaces.${name}.defaultVariant `${config.defaultVariant}`${bt.setIn options.defaultVariant} is not one of its variants (${
-              if config.variants == { } then "it has none" else lib.concatStringsSep ", " (lib.attrNames config.variants)
+              if config.variants == { } then
+                "it has none"
+              else
+                lib.concatStringsSep ", " (lib.attrNames config.variants)
             })";
           }
           (targetOption [ "defaultTarget" ])

@@ -147,14 +147,13 @@ let
         cp file.txt dylibs.txt $out/
       '';
 
-  x86_64 =
-    pkgs.runCommand "darwin-x86_64" { nativeBuildInputs = tools; } ''
-      set -euo pipefail
-      ${checkFile}
-      checkFile ${tx.packages.pure}/bin/pure x86_64 10.12 pure ${tx.packages.pure.debug}/bin/pure.dSYM
-      mkdir -p $out
-      cp file.txt $out/
-    '';
+  x86_64 = pkgs.runCommand "darwin-x86_64" { nativeBuildInputs = tools; } ''
+    set -euo pipefail
+    ${checkFile}
+    checkFile ${tx.packages.pure}/bin/pure x86_64 10.12 pure ${tx.packages.pure.debug}/bin/pure.dSYM
+    mkdir -p $out
+    cp file.txt $out/
+  '';
 
   noRunner =
     let
@@ -228,12 +227,22 @@ let
         sdk = fakeSdk "14.4";
         deploymentTarget = "12.0";
       }).env.MACOSX_DEPLOYMENT_TARGET.content == "12.0";
-    packed = (direct { sdk = fakeSdk "14.4"; }).rustflags == [
-      "-C"
-      "split-debuginfo=packed"
-    ];
-    sdkVersionString = (breakbulk.appleSdk { pkgs = sdkPkgs; version = "14.4"; }).version == "14.4";
-    pinnedVersionsOnly = errorOf (breakbulk.appleSdk { pkgs = sdkPkgs; version = "14.5"; }).drvPath == true;
+    packed =
+      (direct { sdk = fakeSdk "14.4"; }).rustflags == [
+        "-C"
+        "split-debuginfo=packed"
+      ];
+    sdkVersionString =
+      (breakbulk.appleSdk {
+        pkgs = sdkPkgs;
+        version = "14.4";
+      }).version == "14.4";
+    pinnedVersionsOnly =
+      errorOf
+        (breakbulk.appleSdk {
+          pkgs = sdkPkgs;
+          version = "14.5";
+        }).drvPath == true;
   };
   failedEval = lib.filterAttrs (_: ok: !ok) evalChecks;
   # The messages, which tryEval cannot read: checked by hand with

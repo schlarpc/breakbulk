@@ -40,14 +40,16 @@ rec {
     mdbook build book --dest-dir $out
   '';
 
-  optionsPages = pkgs.runCommand "breakbulk-options-pages" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-    python3 ${./options-pages.py} ${optionsCommonMark} $out
-    # A store path would change with every evaluation of a dependency.
-    if grep -rn '${builtins.storeDir}/' $out; then
-      echo "the options pages name store paths (above); make them repository-relative" >&2
-      exit 1
-    fi
-  '';
+  optionsPages =
+    pkgs.runCommand "breakbulk-options-pages" { nativeBuildInputs = [ pkgs.python3 ]; }
+      ''
+        python3 ${./options-pages.py} ${optionsCommonMark} $out
+        # A store path would change with every evaluation of a dependency.
+        if grep -rn '${builtins.storeDir}/' $out; then
+          echo "the options pages name store paths (above); make them repository-relative" >&2
+          exit 1
+        fi
+      '';
 
   stageHelpersPage =
     let

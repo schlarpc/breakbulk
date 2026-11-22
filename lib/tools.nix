@@ -110,7 +110,10 @@ let
         );
       };
       stubs = lib.concatMap (
-        c: map (f: "crates/${c}/${f}") (lib.filter (f: builtins.pathExists (root + "/crates/${c}/${f}")) autoTargets)
+        c:
+        map (f: "crates/${c}/${f}") (
+          lib.filter (f: builtins.pathExists (root + "/crates/${c}/${f}")) autoTargets
+        )
       ) outside;
       crates = inside;
     };

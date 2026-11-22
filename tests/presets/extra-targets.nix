@@ -304,7 +304,9 @@ let
       run = lib.head (lib.attrValues t.testRuns.gnu-smoke);
     in
     assert lib.assertMsg (!t.canRunTests) "windows-gnullvm-aarch64: canRunTests is true";
-    assert lib.assertMsg (runChecks == [ ]) "windows-gnullvm-aarch64: repo.checks has test runs: ${toString runChecks}";
+    assert lib.assertMsg (
+      runChecks == [ ]
+    ) "windows-gnullvm-aarch64: repo.checks has test runs: ${toString runChecks}";
     assert lib.assertMsg (lib.any (lib.hasSuffix "/gnu-smoke/build") checkNames)
       "windows-gnullvm-aarch64: the product is not in repo.checks";
     {
@@ -377,8 +379,9 @@ let
       product = t.packages.app;
       o = uefiOverridden.workspaces.main.target.x86_64-unknown-uefi.spec;
     in
-    assert lib.assertMsg (lib.hasSuffix "/bin/lld-link-stable" (toString t.spec.linker))
-      "uefi: ${triple} links with ${toString t.spec.linker}, not the uefi preset's lld-link-stable";
+    assert lib.assertMsg (lib.hasSuffix "/bin/lld-link-stable" (
+      toString t.spec.linker
+    )) "uefi: ${triple} links with ${toString t.spec.linker}, not the uefi preset's lld-link-stable";
     assert lib.assertMsg (
       o.linker == "/custom/lld-link" && o.host.linker != null
     ) "uefi: targets.<t>.linker does not override the uefi preset's linker alone";

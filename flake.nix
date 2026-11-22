@@ -24,31 +24,51 @@
     };
   };
 
-  outputs = inputs@{ self, nixpkgs, rust-overlay, ... }:
+  outputs =
+    inputs@{
+      self,
+      nixpkgs,
+      rust-overlay,
+      ...
+    }:
     let
       systems = import inputs.systems;
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
-        f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          f (
+            import nixpkgs {
+              inherit system;
+              overlays = [ rust-overlay.overlays.default ];
+            }
+          )
+        );
       treefmtFor = pkgs: inputs.treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
       # Pre-push, not pre-commit: formatting is checked once per push, so
       # work-in-progress commits stay cheap. `nix develop` installs it.
-      gitHooksFor = pkgs: inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
-        src = ./.;
-        default_stages = [ "pre-push" ];
-        hooks.treefmt = {
-          enable = true;
-          package = (treefmtFor pkgs).config.build.wrapper;
+      gitHooksFor =
+        pkgs:
+        inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
+          src = ./.;
+          default_stages = [ "pre-push" ];
+          hooks.treefmt = {
+            enable = true;
+            package = (treefmtFor pkgs).config.build.wrapper;
+          };
         };
-      };
       # The documentation site (docs/default.nix).
-      docsFor = pkgs: import ./docs {
-        inherit pkgs;
-        optionsCommonMark = (self.lib.mkRepository {
+      docsFor =
+        pkgs:
+        import ./docs {
           inherit pkgs;
-          root = ./tests/fixtures/walking-skeleton;
-        }).optionsDoc.optionsCommonMark;
-        inherit (self.lib) stageHelpers;
-      };
+          optionsCommonMark =
+            (self.lib.mkRepository {
+              inherit pkgs;
+              root = ./tests/fixtures/walking-skeleton;
+            }).optionsDoc.optionsCommonMark;
+          inherit (self.lib) stageHelpers;
+        };
     in
     {
       # The evaluation-time library (see lib/default.nix).
@@ -63,23 +83,36 @@
       # and units use still come from lib/tools.nix (the bootstrap). The
       # names are listed here: the products' names come from the plan,
       # and listing the flake's packages must not plan (IFD).
-      packages = forAllSystems (pkgs:
+      packages = forAllSystems (
+        pkgs:
         let
-          selfBuilt = (import ./tests/self-host {
-            inherit pkgs;
-            breakbulk = self.lib;
-          }).selfBuilt;
+          selfBuilt =
+            (import ./tests/self-host {
+              inherit pkgs;
+              breakbulk = self.lib;
+            }).selfBuilt;
         in
         nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "breakbulk-bb-${n}" v) selfBuilt
         # The documentation site: nix build .#docs-site
-        // { docs-site = (docsFor pkgs).site; }
+        // {
+          docs-site = (docsFor pkgs).site;
+        }
         # For a project's .envrc: `use breakbulk` (lib/direnvrc.nix).
-        // { direnvrc = import ./lib/direnvrc.nix pkgs; });
+        // {
+          direnvrc = import ./lib/direnvrc.nix pkgs;
+        }
+      );
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.rust-analyzer ]
-            ++ (gitHooksFor pkgs).enabledPackages;
+          packages = [
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.clippy
+            pkgs.rustfmt
+            pkgs.rust-analyzer
+          ]
+          ++ (gitHooksFor pkgs).enabledPackages;
           inherit ((gitHooksFor pkgs)) shellHook;
         };
       });
@@ -92,90 +125,140 @@
       # under $WORK (default $TMPDIR/breakbulk-dynamic). `nix flake check`
       # cannot run it: stock Nix has no builder-rpc-v0.
       #   nix run .#test-dynamic -- [fixture ...]
-      apps = forAllSystems (pkgs: {
-        # Regenerate docs/src/reference/options from the modules and
-        # docs/src/reference/stage-helpers.md from the stage helpers
-        # (checked by docs-options-fresh). Run from the checkout's root.
-        update-docs-options = {
-          type = "app";
-          program = toString (docsFor pkgs).updateOptions;
-        };
-        test-dynamic = {
-          type = "app";
-          program = toString (pkgs.writeShellScript "test-dynamic" ''
-            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.python3 pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.gnugrep ]}
-            export REPO=''${REPO:-${self}}
-            exec ${pkgs.bash}/bin/bash "$REPO/tests/dynamic/run.sh" "$@"
-          '');
-        };
-        # Content-addressed test cutoff: private store
-        # with ca-derivations on the command line only.
-        #   nix run .#test-cutoff
-        test-cutoff = {
-          type = "app";
-          program = toString (pkgs.writeShellScript "test-cutoff" ''
-            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.gnugrep ]}
-            export REPO=''${REPO:-${self}}
-            exec ${pkgs.bash}/bin/bash "$REPO/tests/test-cutoff/run.sh" "$@"
-          '');
-        };
-        # stripForRun and runFiles under content addressing.
-        #   nix run .#test-options
-        test-options = {
-          type = "app";
-          program = toString (pkgs.writeShellScript "test-options" ''
-            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.gnugrep ]}
-            export REPO=''${REPO:-${self}}
-            exec ${pkgs.bash}/bin/bash "$REPO/tests/test-options/run.sh" "$@"
-          '');
-        };
-        # HEAVY: builds every fixture's products and a sample of its units,
-        # then rebuilds them with `nix build --rebuild` and compares bytes.
-        #   nix run .#test-rebuild -- [--targets REGEX] [--every N] [fixture ...] [-- nix options]
-        test-rebuild = {
-          type = "app";
-          program = toString (pkgs.writeShellScript "test-rebuild" ''
-            export PATH=$PATH:${nixpkgs.lib.makeBinPath [ pkgs.coreutils pkgs.gnused pkgs.diffutils pkgs.gnugrep pkgs.jq ]}
-            export REPO=''${REPO:-${self}}
-            # Built on the first difference only: diffoscope's closure is large.
-            export DIFFOSCOPE_DRV=''${DIFFOSCOPE_DRV:-${builtins.unsafeDiscardOutputDependency pkgs.diffoscopeMinimal.drvPath}}
-            exec ${pkgs.bash}/bin/bash "$REPO/tests/rebuild/run.sh" "$@"
-          '');
-        };
-      } // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
-        # linuxPortable (zig) binaries in a real glibc 2.17 userland: pulls
-        # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
-        # cc, so it is not a flake check. Arguments go to nix-store.
-        #   nix run .#test-linux-portable-container [-- --max-jobs 2 --cores 4]
-        test-linux-portable-container =
-          let
-            checks = (import ./tests/presets/extra-targets.nix {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }).containerChecks;
-            # The .drv files only: the checks are built when the app runs,
-            # not when it is built.
-            drvs = nixpkgs.lib.mapAttrsToList (n: d: "${n}=${builtins.unsafeDiscardOutputDependency d.drvPath}") checks;
-          in
-          {
+      apps = forAllSystems (
+        pkgs:
+        {
+          # Regenerate docs/src/reference/options from the modules and
+          # docs/src/reference/stage-helpers.md from the stage helpers
+          # (checked by docs-options-fresh). Run from the checkout's root.
+          update-docs-options = {
             type = "app";
-            program = toString (pkgs.writeShellScript "test-linux-portable-container" ''
-              set -euo pipefail
-              status=0
-              for nd in ${nixpkgs.lib.escapeShellArgs drvs}; do
-                name=''${nd%%=*}
-                printf '\n== %s\n' "$name" >&2
-                if out=$(nix-store --realise "''${nd#*=}" "$@"); then
-                  echo "ok: $name $out" >&2
-                else
-                  echo "FAIL: $name" >&2
-                  status=1
-                fi
-              done
-              exit $status
-            '');
+            program = toString (docsFor pkgs).updateOptions;
           };
-      });
+          test-dynamic = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "test-dynamic" ''
+                export PATH=$PATH:${
+                  nixpkgs.lib.makeBinPath [
+                    pkgs.python3
+                    pkgs.coreutils
+                    pkgs.gnused
+                    pkgs.diffutils
+                    pkgs.findutils
+                    pkgs.gnugrep
+                  ]
+                }
+                export REPO=''${REPO:-${self}}
+                exec ${pkgs.bash}/bin/bash "$REPO/tests/dynamic/run.sh" "$@"
+              ''
+            );
+          };
+          # Content-addressed test cutoff: private store
+          # with ca-derivations on the command line only.
+          #   nix run .#test-cutoff
+          test-cutoff = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "test-cutoff" ''
+                export PATH=$PATH:${
+                  nixpkgs.lib.makeBinPath [
+                    pkgs.coreutils
+                    pkgs.gnused
+                    pkgs.diffutils
+                    pkgs.findutils
+                    pkgs.gnugrep
+                  ]
+                }
+                export REPO=''${REPO:-${self}}
+                exec ${pkgs.bash}/bin/bash "$REPO/tests/test-cutoff/run.sh" "$@"
+              ''
+            );
+          };
+          # stripForRun and runFiles under content addressing.
+          #   nix run .#test-options
+          test-options = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "test-options" ''
+                export PATH=$PATH:${
+                  nixpkgs.lib.makeBinPath [
+                    pkgs.coreutils
+                    pkgs.gnused
+                    pkgs.diffutils
+                    pkgs.findutils
+                    pkgs.gnugrep
+                  ]
+                }
+                export REPO=''${REPO:-${self}}
+                exec ${pkgs.bash}/bin/bash "$REPO/tests/test-options/run.sh" "$@"
+              ''
+            );
+          };
+          # HEAVY: builds every fixture's products and a sample of its units,
+          # then rebuilds them with `nix build --rebuild` and compares bytes.
+          #   nix run .#test-rebuild -- [--targets REGEX] [--every N] [fixture ...] [-- nix options]
+          test-rebuild = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "test-rebuild" ''
+                export PATH=$PATH:${
+                  nixpkgs.lib.makeBinPath [
+                    pkgs.coreutils
+                    pkgs.gnused
+                    pkgs.diffutils
+                    pkgs.gnugrep
+                    pkgs.jq
+                  ]
+                }
+                export REPO=''${REPO:-${self}}
+                # Built on the first difference only: diffoscope's closure is large.
+                export DIFFOSCOPE_DRV=''${DIFFOSCOPE_DRV:-${builtins.unsafeDiscardOutputDependency pkgs.diffoscopeMinimal.drvPath}}
+                exec ${pkgs.bash}/bin/bash "$REPO/tests/rebuild/run.sh" "$@"
+              ''
+            );
+          };
+        }
+        // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
+          # linuxPortable (zig) binaries in a real glibc 2.17 userland: pulls
+          # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
+          # cc, so it is not a flake check. Arguments go to nix-store.
+          #   nix run .#test-linux-portable-container [-- --max-jobs 2 --cores 4]
+          test-linux-portable-container =
+            let
+              checks =
+                (import ./tests/presets/extra-targets.nix {
+                  inherit pkgs;
+                  breakbulk = self.lib;
+                }).containerChecks;
+              # The .drv files only: the checks are built when the app runs,
+              # not when it is built.
+              drvs = nixpkgs.lib.mapAttrsToList (
+                n: d: "${n}=${builtins.unsafeDiscardOutputDependency d.drvPath}"
+              ) checks;
+            in
+            {
+              type = "app";
+              program = toString (
+                pkgs.writeShellScript "test-linux-portable-container" ''
+                  set -euo pipefail
+                  status=0
+                  for nd in ${nixpkgs.lib.escapeShellArgs drvs}; do
+                    name=''${nd%%=*}
+                    printf '\n== %s\n' "$name" >&2
+                    if out=$(nix-store --realise "''${nd#*=}" "$@"); then
+                      echo "ok: $name $out" >&2
+                    else
+                      echo "FAIL: $name" >&2
+                      status=1
+                    fi
+                  done
+                  exit $status
+                ''
+              );
+            };
+        }
+      );
 
       # Library tests. `roots-metadata-crates-io` uses import-from-derivation
       # and downloads from crates.io; `vendor-collision` fetches two GitHub
@@ -183,7 +266,8 @@
       # (IFD) build the unit-smoke plan through breakbulk-instantiate; that
       # plan targets x86_64-unknown-linux-gnu. Env capture builds a cross
       # toolchain.
-      checks = forAllSystems (pkgs:
+      checks = forAllSystems (
+        pkgs:
         import ./tests/nix {
           inherit pkgs;
           breakbulk = self.lib;
@@ -201,21 +285,34 @@
 
           # Every fixture is in `nix run .#test-rebuild`'s catalog or
           # skipped with a reason (evaluation only).
-          rebuild-catalog = pkgs.writeText "rebuild-catalog" (builtins.toJSON (import ./tests/rebuild {
-            inherit pkgs;
-            breakbulk = self.lib;
-          }).names);
+          rebuild-catalog = pkgs.writeText "rebuild-catalog" (
+            builtins.toJSON
+              (import ./tests/rebuild {
+                inherit pkgs;
+                breakbulk = self.lib;
+              }).names
+          );
 
           flake-systems =
             let
-              other = (import ./flake.nix).outputs (inputs // {
-                self = throw "flake-systems: self is not used";
-                systems = builtins.toFile "systems.nix" ''[ "riscv64-linux" ]'';
-              });
-              names = map (o: builtins.attrNames other.${o}) [ "packages" "devShells" "apps" "checks" "formatter" ];
+              other = (import ./flake.nix).outputs (
+                inputs
+                // {
+                  self = throw "flake-systems: self is not used";
+                  systems = builtins.toFile "systems.nix" ''[ "riscv64-linux" ]'';
+                }
+              );
+              names = map (o: builtins.attrNames other.${o}) [
+                "packages"
+                "devShells"
+                "apps"
+                "checks"
+                "formatter"
+              ];
             in
-            assert nixpkgs.lib.assertMsg (nixpkgs.lib.all (n: n == [ "riscv64-linux" ]) names)
-              "flake-systems: outputs do not follow the systems input: ${builtins.toJSON names}";
+            assert nixpkgs.lib.assertMsg (nixpkgs.lib.all (
+              n: n == [ "riscv64-linux" ]
+            ) names) "flake-systems: outputs do not follow the systems input: ${builtins.toJSON names}";
             assert builtins.attrNames self.checks == import inputs.systems;
             pkgs.runCommand "flake-systems" { } "touch $out";
 
@@ -244,20 +341,27 @@
               units =
                 extra:
                 lib.mapAttrs (_: u: u.drvPath)
-                  (self.lib.mkRepository ({
-                    pkgs = other;
-                    root = ./tests/fixtures/walking-skeleton;
-                    modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
-                  } // extra)).workspaces.main.instances.${native}.default.units.build;
+                  (self.lib.mkRepository (
+                    {
+                      pkgs = other;
+                      root = ./tests/fixtures/walking-skeleton;
+                      modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
+                    }
+                    // extra
+                  )).workspaces.main.instances.${native}.default.units.build;
             in
-            assert lib.assertMsg (paths (self.lib.defaultTools pkgs) == paths (self.lib.defaultTools other))
-              "default-tools: the default tools depend on the consumer's nixpkgs";
-            assert lib.assertMsg (paths (self.lib.mkTools pkgs) != paths (self.lib.mkTools other))
-              "default-tools: both nixpkgs build the same tools; the check proves nothing";
-            assert lib.assertMsg (units { } == units { tools = self.lib.defaultTools pkgs; })
-              "default-tools: the units do not use the default tools";
-            assert lib.assertMsg (units { } != units { tools = self.lib.mkTools other; })
-              "default-tools: the units do not depend on the tools; the check proves nothing";
+            assert lib.assertMsg (
+              paths (self.lib.defaultTools pkgs) == paths (self.lib.defaultTools other)
+            ) "default-tools: the default tools depend on the consumer's nixpkgs";
+            assert lib.assertMsg (
+              paths (self.lib.mkTools pkgs) != paths (self.lib.mkTools other)
+            ) "default-tools: both nixpkgs build the same tools; the check proves nothing";
+            assert lib.assertMsg (
+              units { } == units { tools = self.lib.defaultTools pkgs; }
+            ) "default-tools: the units do not use the default tools";
+            assert lib.assertMsg (
+              units { } != units { tools = self.lib.mkTools other; }
+            ) "default-tools: the units do not depend on the tools; the check proves nothing";
             pkgs.runCommand "default-tools" { } "touch $out";
         }
         // import ./tests/env-capture {
@@ -315,10 +419,11 @@
             instantiate = t.check;
             # breakbulk builds itself; the self-built programs give
             # byte-identical plans, units.json and products (IFD).
-            self-host = (import ./tests/self-host {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }).self-host;
+            self-host =
+              (import ./tests/self-host {
+                inherit pkgs;
+                breakbulk = self.lib;
+              }).self-host;
             # Directive differential test: 32 random workspaces, real
             # `cargo build -vv` and `cargo test --no-run -vv` against the
             # traced plans, argv and env per unit. No network.
@@ -346,19 +451,32 @@
           # A git source locked at two revisions by different workspaces;
           # git package ids against real Cargo's (a local repository).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-revisions-${n}" v) (
-            builtins.removeAttrs (import ./tests/git-revisions {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }) [ "repos" "repo" "lockfiles" ]
+            builtins.removeAttrs
+              (import ./tests/git-revisions {
+                inherit pkgs;
+                breakbulk = self.lib;
+              })
+              [
+                "repos"
+                "repo"
+                "lockfiles"
+              ]
           )
           # One git source, crates from two inheriting workspaces: argv
           # and CARGO_PKG_* against real Cargo over a local repository;
           # the same source through builtins.fetchGit (lazy trees).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "git-multi-workspace-${n}" v) (
-            builtins.removeAttrs (import ./tests/git-multi-workspace {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }) [ "repo" "repoUrl" "rev" "ws" ]
+            builtins.removeAttrs
+              (import ./tests/git-multi-workspace {
+                inherit pkgs;
+                breakbulk = self.lib;
+              })
+              [
+                "repo"
+                "repoUrl"
+                "rev"
+                "ws"
+              ]
           )
           # A rustflag and an env value naming a path in a fetchGit tree
           # (lazy trees): stable plan and units, real paths.
@@ -386,18 +504,28 @@
           # Test runs, doctests and test apps over the doctests and
           # test-control fixtures (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-runs-${n}" v) (
-            builtins.removeAttrs (import ./tests/test-runs {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }) [ "workspaces" "repos" ]
+            builtins.removeAttrs
+              (import ./tests/test-runs {
+                inherit pkgs;
+                breakbulk = self.lib;
+              })
+              [
+                "workspaces"
+                "repos"
+              ]
           )
           # Products through stages, source paths, products as inputs and
           # variants through mkRepository (IFD).
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "products-${n}" v) (
-            builtins.removeAttrs (import ./tests/products {
-              inherit pkgs;
-              breakbulk = self.lib;
-            }) [ "repos" "modules" ]
+            builtins.removeAttrs
+              (import ./tests/products {
+                inherit pkgs;
+                breakbulk = self.lib;
+              })
+              [
+                "repos"
+                "modules"
+              ]
           )
           # Loose ends: [env] in test runs, test.sourceScope, the dev
           # shell's Cargo env config, wasm embedding.
@@ -426,7 +554,9 @@
           )
           # Dynamic-derivation mode's outer-derivation builder compiles (its
           # behaviour needs Nix master: `nix run .#test-dynamic`).
-          // { breakbulk-drv = self.lib.dynamic.mkBreakbulkDrv pkgs; }
+          // {
+            breakbulk-drv = self.lib.dynamic.mkBreakbulkDrv pkgs;
+          }
           # Content addressing and `outputOf` are used only through their
           # gates (lib/nix-features.nix), which check them against
           # repo.nixFeatures.
@@ -439,6 +569,7 @@
               touch $out
             '';
           }
-        ));
+        )
+      );
     };
 }

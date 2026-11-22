@@ -163,7 +163,13 @@ rec {
       custom = sources.custom or [ ];
       predicted = sources.predicted or { };
       crates = sources.crates or { };
-      spec = p: { env = { }; envCapture = null; } // p;
+      spec =
+        p:
+        {
+          env = { };
+          envCapture = null;
+        }
+        // p;
       platformSpec = { inherit host target; };
       ovPlatform = o: p: spec (o.${p} or { });
 
@@ -174,34 +180,40 @@ rec {
         env = lib.attrNames (spec s).env;
         envCapture = (spec s).envCapture != null;
       };
-      sourcesFile = toFile "sources.json" (toJSON (
-        {
-          workspace = lib.attrNames workspace;
-          crates = lib.attrNames crates;
-        }
-        // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
-        // lib.optionalAttrs (workspaceTargets != { }) {
-          workspaceTargets = lib.mapAttrs (_: lib.attrNames) workspaceTargets;
-        }
-        // lib.optionalAttrs (workspaceTestTargets != { }) {
-          workspaceTestTargets = lib.mapAttrs (_: lib.attrNames) workspaceTestTargets;
-        }
-        // lib.optionalAttrs (targetRoots != { }) { inherit targetRoots; }
-        // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
-        // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
-        // lib.optionalAttrs (custom != [ ]) { inherit custom; }
-        // lib.optionalAttrs (predicted != { }) { predicted = lib.attrNames predicted; }
-      ));
-      toolchainsFile = toFile "toolchains.json" (toJSON ({
-        inherit system storeDir;
-        inherit capabilities;
-        tools = lib.mapAttrs (_: noCtx) tools;
-        host = platformJson host;
-        target = platformJson target;
-      }
-      // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
-      // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }
-      // lib.optionalAttrs (sideFiles != [ ]) { inherit sideFiles; }));
+      sourcesFile = toFile "sources.json" (
+        toJSON (
+          {
+            workspace = lib.attrNames workspace;
+            crates = lib.attrNames crates;
+          }
+          // lib.optionalAttrs (workspaceTest != { }) { workspaceTest = lib.attrNames workspaceTest; }
+          // lib.optionalAttrs (workspaceTargets != { }) {
+            workspaceTargets = lib.mapAttrs (_: lib.attrNames) workspaceTargets;
+          }
+          // lib.optionalAttrs (workspaceTestTargets != { }) {
+            workspaceTestTargets = lib.mapAttrs (_: lib.attrNames) workspaceTestTargets;
+          }
+          // lib.optionalAttrs (targetRoots != { }) { inherit targetRoots; }
+          // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
+          // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
+          // lib.optionalAttrs (custom != [ ]) { inherit custom; }
+          // lib.optionalAttrs (predicted != { }) { predicted = lib.attrNames predicted; }
+        )
+      );
+      toolchainsFile = toFile "toolchains.json" (
+        toJSON (
+          {
+            inherit system storeDir;
+            inherit capabilities;
+            tools = lib.mapAttrs (_: noCtx) tools;
+            host = platformJson host;
+            target = platformJson target;
+          }
+          // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
+          // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }
+          // lib.optionalAttrs (sideFiles != [ ]) { inherit sideFiles; }
+        )
+      );
       overridesFile = toFile "overrides.json" (toJSON {
         packages = lib.mapAttrs (_: o: lib.genAttrs platforms (p: platformJson (ovPlatform o p))) overrides;
       });
@@ -229,7 +241,9 @@ rec {
         ];
       };
 
-      json = fromJSON (featureGates.readOutput nixFeatures "the units of `${name}` (units.json)" unitsJson);
+      json = fromJSON (
+        featureGates.readOutput nixFeatures "the units of `${name}` (units.json)" unitsJson
+      );
 
       # --- substitution -----------------------------------------------------
 
@@ -270,7 +284,8 @@ rec {
 
       input =
         set: k:
-        set.${k} or (throw "breakbulk: units.json names the input `${k}`, which was not given to instantiate");
+        set.${k}
+          or (throw "breakbulk: units.json names the input `${k}`, which was not given to instantiate");
 
       part =
         p:
@@ -279,8 +294,7 @@ rec {
         else if p ? unit then
           # A weak reference names a path the unit reaches through its
           # dependencies' references (their manifests), not as an input.
-          (if p.weak or false then unsafeDiscardStringContext else lib.id)
-            units.${p.unit}.${p.output}.outPath
+          (if p.weak or false then unsafeDiscardStringContext else lib.id) units.${p.unit}.${p.output}.outPath
         else if p ? join then
           # A list-like variable set by several env layers: the non-empty
           # layers, joined (breakbulk_unit::env::append).
@@ -325,7 +339,9 @@ rec {
       };
 
       units =
-        assert lib.assertMsg (json.version == 3) "breakbulk: units.json version ${toString json.version} is not supported";
+        assert lib.assertMsg (
+          json.version == 3
+        ) "breakbulk: units.json version ${toString json.version} is not supported";
         lib.mapAttrs (_: mkDrv) json.units;
 
       rootsOut = lib.mapAttrs (
@@ -364,7 +380,9 @@ rec {
       # The `flags` output of every build-script run of the plan, on both
       # platforms (`buildScriptRuns` in lib/dynamic.nix).
       buildScriptRuns = lib.concatLists (
-        lib.mapAttrsToList (id: d: lib.optional (lib.elem "flags" d.attrs.outputs) units.${id}.flags) json.units
+        lib.mapAttrsToList (
+          id: d: lib.optional (lib.elem "flags" d.attrs.outputs) units.${id}.flags
+        ) json.units
       );
       # For dynamic-derivation mode (lib/dynamic.nix), which runs the same
       # instantiation inside its outer derivation: the files given to
@@ -387,9 +405,9 @@ rec {
       # Test plans: package name to the attributes of its doctest derivation
       # (`breakbulk-unit doctest`), for lib/test-runs.nix to add the test
       # configuration to before calling `derivation`.
-      doctestAttrs = lib.mapAttrs' (
-        id: d: lib.nameValuePair (lib.removePrefix "d-" id) (drvAttrs d)
-      ) (json.doctests or { });
+      doctestAttrs = lib.mapAttrs' (id: d: lib.nameValuePair (lib.removePrefix "d-" id) (drvAttrs d)) (
+        json.doctests or { }
+      );
       # Doc plans: `breakbulk-unit docs`, every traced rustdoc into its `out`.
       docs = if json ? docs then mkDrv json.docs else null;
     };

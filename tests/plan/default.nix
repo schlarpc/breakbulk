@@ -39,7 +39,9 @@ let
   # A run unit's OUT_DIR: inside its `out`, at `outDir` (#23).
   outDirOf =
     run:
-    "${run.out}/${(builtins.fromJSON (builtins.unsafeDiscardStringContext run.drvAttrs.BREAKBULK_UNIT)).outDir or ""}";
+    "${run.out}/${
+      (builtins.fromJSON (builtins.unsafeDiscardStringContext run.drvAttrs.BREAKBULK_UNIT)).outDir or ""
+    }";
 
   # Plain cargo over the same sources, offline against the same vendor
   # directory: the reference products. Run outside $HOME (the sandbox).
@@ -267,9 +269,9 @@ in
       # the search paths of every run as one searchPathsOf splice.
       doctestsOk =
         lib.attrNames testPlan.doctests == map (p: "d-${p}") (lib.sort lib.lessThan directivesLibs)
-        && lib.all (
-          d: lib.length (lib.filter (a: builtins.isAttrs a && a ? searchPathsOf) d.args) == 1
-        ) (lib.attrValues testPlan.doctests);
+        && lib.all (d: lib.length (lib.filter (a: builtins.isAttrs a && a ? searchPathsOf) d.args) == 1) (
+          lib.attrValues testPlan.doctests
+        );
       directivesLibs = lib.remove "app" directivesPackages;
       ref = cargoBuild {
         fixture = "directives";
@@ -328,13 +330,19 @@ in
         "no target unit splices a host run" = leaks == { };
         # Both run once per platform: helper is a workspace member too, so
         # `--workspace` also builds it for the target.
-        "helper and shared run once per platform" = lib.all (
-          n:
-          platforms (runsOf n) == [
-            "host"
-            "target"
-          ]
-        ) [ "helper" "shared" ];
+        "helper and shared run once per platform" =
+          lib.all
+            (
+              n:
+              platforms (runsOf n) == [
+                "host"
+                "target"
+              ]
+            )
+            [
+              "helper"
+              "shared"
+            ];
         "the host runs reach host units only" = lib.all (u: u.platform == "host") (
           lib.attrValues (
             lib.filterAttrs (
@@ -458,7 +466,9 @@ in
     let
       ws = mk "build-script-signal" { };
       runs = lib.filter (u: lib.hasSuffix "-build-run" u.name) (lib.attrValues ws.units.build);
-      run = assert lib.length runs == 1; lib.head runs;
+      run =
+        assert lib.length runs == 1;
+        lib.head runs;
     in
     pkgs.runCommand "build-script-signal-check" { unit = run.drvAttrs.BREAKBULK_UNIT; } ''
       result=$out
@@ -628,8 +638,7 @@ in
       # The package a unit derivation belongs to, from its name
       # (`<package>-<version>-<kind>`).
       pkgOf =
-        d:
-        lib.findFirst (n: builtins.match "${n}-[0-9].*" d.name != null) null (lib.attrNames expect);
+        d: lib.findFirst (n: builtins.match "${n}-[0-9].*" d.name != null) null (lib.attrNames expect);
       unitOf = d: builtins.fromJSON (builtins.unsafeDiscardStringContext d.drvAttrs.BREAKBULK_UNIT);
       wrong = lib.concatLists (
         lib.mapAttrsToList (
@@ -642,7 +651,10 @@ in
               want = if p == null then base else expect.${p};
               capture = builtins.unsafeDiscardStringContext "${want.capture}";
             in
-            lib.optional (u.envCapture or null != capture || u.env.BB_MARKER or null != want.marker) "${kind}: ${d.name} (capture ${u.envCapture or "none"}, BB_MARKER ${toString (u.env.BB_MARKER or null)})"
+            lib.optional (u.envCapture or null != capture || u.env.BB_MARKER or null != want.marker)
+              "${kind}: ${d.name} (capture ${u.envCapture or "none"}, BB_MARKER ${
+                toString (u.env.BB_MARKER or null)
+              })"
           ) (lib.attrValues units)
         ) ws.units
       );
@@ -656,7 +668,9 @@ in
         // sysNativeInputs
       );
     in
-    assert lib.assertMsg (wrong == [ ]) "sys-native: units with the wrong capture or env:\n${lib.concatStringsSep "\n" wrong}";
+    assert lib.assertMsg (
+      wrong == [ ]
+    ) "sys-native: units with the wrong capture or env:\n${lib.concatStringsSep "\n" wrong}";
     assert lib.assertMsg (
       lib.length (lib.unique (lib.attrValues captures ++ [ base.capture ])) == 4
     ) "sys-native: the captures are not distinct";
@@ -775,8 +789,9 @@ in
         lib.attrValues plan.units
       );
     in
-    assert lib.assertMsg (envs == [ "/breakbulk/not-built/extra" ])
-      "bin-exe-not-built: CARGO_BIN_EXE_extra is ${builtins.toJSON envs}";
+    assert lib.assertMsg (
+      envs == [ "/breakbulk/not-built/extra" ]
+    ) "bin-exe-not-built: CARGO_BIN_EXE_extra is ${builtins.toJSON envs}";
     pkgs.runCommand "bin-exe-not-built-check" { t = ws.testBins."tool/test/run"; } ''
       $t/bin/run | tee log
       grep -q 'test result: ok. 2 passed' log
@@ -798,9 +813,9 @@ in
       spec = u: builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT);
       unitOf =
         name:
-        lib.findSingle (u: (spec u).crate.name or null == name) (throw "rlib-example: no unit ${name}")
-          (throw "rlib-example: several units ${name}")
-          units;
+        lib.findSingle (
+          u: (spec u).crate.name or null == name
+        ) (throw "rlib-example: no unit ${name}") (throw "rlib-example: several units ${name}") units;
       # The unit outputs a unit's spec names, as "<unit name>:<output>".
       inputs =
         name:
@@ -958,20 +973,22 @@ in
     sharedFeatures =
       kind:
       lib.sort lib.lessThan (
-        map (
-          u:
-          lib.concatStringsSep "+" (
-            lib.sort lib.lessThan (
-              map (a: lib.removeSuffix "\"" (lib.removePrefix "feature=\"" a)) (
-                lib.filter (a: builtins.isString a && lib.hasPrefix "feature=\"" a) u.args
+        map
+          (
+            u:
+            lib.concatStringsSep "+" (
+              lib.sort lib.lessThan (
+                map (a: lib.removeSuffix "\"" (lib.removePrefix "feature=\"" a)) (
+                  lib.filter (a: builtins.isString a && lib.hasPrefix "feature=\"" a) u.args
+                )
               )
             )
           )
-        ) (
-          lib.filter (u: u.kind == "compile" && u.crate.name == "shared" && u.platform == "target") (
-            lib.attrValues (readPlan fu kind).units
+          (
+            lib.filter (u: u.kind == "compile" && u.crate.name == "shared" && u.platform == "target") (
+              lib.attrValues (readPlan fu kind).units
+            )
           )
-        )
       );
   in
   {
@@ -987,8 +1004,16 @@ in
         build = sharedFeatures "build";
         doctests = lib.attrNames (readPlan fu "test").doctests;
       in
-      assert lib.assertMsg (build == [ "" "fa" "fb" ]) "feature-unification: build plan's shared units have ${builtins.toJSON build}";
-      assert lib.assertMsg (doctests == [ "d-shared" ]) "feature-unification: doctests ${builtins.toJSON doctests}";
+      assert lib.assertMsg (
+        build == [
+          ""
+          "fa"
+          "fb"
+        ]
+      ) "feature-unification: build plan's shared units have ${builtins.toJSON build}";
+      assert lib.assertMsg (
+        doctests == [ "d-shared" ]
+      ) "feature-unification: doctests ${builtins.toJSON doctests}";
       pkgs.runCommand "feature-unification-check"
         {
           a = fu.packages.a;
@@ -1047,7 +1072,9 @@ in
       assert lib.assertMsg (
         p.targetDebuginfo == expected
       ) "custom-target-plan: targetDebuginfo is ${builtins.toJSON p.targetDebuginfo}";
-      assert lib.assertMsg (bins == [ "walking-skeleton.elf" ]) "custom-target-plan: stored bins ${builtins.toJSON bins}";
+      assert lib.assertMsg (
+        bins == [ "walking-skeleton.elf" ]
+      ) "custom-target-plan: stored bins ${builtins.toJSON bins}";
       pkgs.runCommand "custom-target-plan-check" { } "touch $out";
     walking-skeleton-nightly =
       pkgs.runCommand "walking-skeleton-nightly-check"

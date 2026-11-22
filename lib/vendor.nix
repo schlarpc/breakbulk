@@ -86,7 +86,10 @@ in
               m = if pathExists p then builtins.fromTOML (builtins.readFile p) else null;
             in
             if m != null && m ? workspace then
-              { dir = r; manifest = m; }
+              {
+                dir = r;
+                manifest = m;
+              }
             else if r == "" then
               null
             else
@@ -119,19 +122,32 @@ in
           # (cargo src/workspace/parser/mod.rs): paths relative to the
           # workspace root, re-expressed relative to the package root.
           rel = p: util.relativeTo (util.joinRel ws.dir p) src.subdir;
-          defaultReadme = lib.findFirst (
-            f:
-            let
-              p = manifest.at src.tree (util.joinRel ws.dir f);
-            in
-            pathExists p && readFileType p != "directory"
-          ) null [ "README.md" "README.txt" "README" ];
+          defaultReadme =
+            lib.findFirst
+              (
+                f:
+                let
+                  p = manifest.at src.tree (util.joinRel ws.dir f);
+                in
+                pathExists p && readFileType p != "directory"
+              )
+              null
+              [
+                "README.md"
+                "README.txt"
+                "README"
+              ];
           wsReadme =
             let
               r = wsPkg.readme or null;
             in
             if r == null then
-              (if defaultReadme == null then throw "breakbulk: ${e.id} inherits readme, but the workspace has none" else rel defaultReadme)
+              (
+                if defaultReadme == null then
+                  throw "breakbulk: ${e.id} inherits readme, but the workspace has none"
+                else
+                  rel defaultReadme
+              )
             else if r == false then
               false
             else if r == true then
@@ -164,7 +180,14 @@ in
               null
             else
               util.toTOML {
-                workspace = lib.filterAttrs (k: _: lib.elem k [ "package" "dependencies" "lints" ]) ws.manifest.workspace;
+                workspace = lib.filterAttrs (
+                  k: _:
+                  lib.elem k [
+                    "package"
+                    "dependencies"
+                    "lints"
+                  ]
+                ) ws.manifest.workspace;
               };
         in
         {
@@ -209,7 +232,8 @@ in
             { e, g }:
             let
               src = fetch.crateSource e;
-              pointer = if g != null && g.stub != null && pointerLayout h then "../${stubDirName g.stub}" else null;
+              pointer =
+                if g != null && g.stub != null && pointerLayout h then "../${stubDirName g.stub}" else null;
             in
             {
               inherit e;
@@ -224,11 +248,16 @@ in
       );
 
       # Stubs one level above the crates: source directory -> contents.
-      stubs = lib.mapAttrs (_: head) (lib.filterAttrs (h: ss: ss != [ ] && !(pointerLayout h)) stubsBySource);
+      stubs = lib.mapAttrs (_: head) (
+        lib.filterAttrs (h: ss: ss != [ ] && !(pointerLayout h)) stubsBySource
+      );
       # Stubs named by `package.workspace`: vendor-relative directory ->
       # contents.
       pointerStubs = lib.concatMapAttrs (
-        h: ss: lib.optionalAttrs (pointerLayout h) (lib.listToAttrs (map (s: lib.nameValuePair "${h}/${stubDirName s}" s) ss))
+        h: ss:
+        lib.optionalAttrs (pointerLayout h) (
+          lib.listToAttrs (map (s: lib.nameValuePair "${h}/${stubDirName s}" s) ss)
+        )
       ) stubsBySource;
 
       # Shell script that builds the directory. Paths are store paths with
@@ -268,12 +297,13 @@ in
       regNameByIndex = lib.listToAttrs (
         lib.mapAttrsToList (
           n: r:
-          lib.nameValuePair (if lib.hasPrefix "sparse+" r.index then r.index else lib.removePrefix "registry+" r.index) n
+          lib.nameValuePair (
+            if lib.hasPrefix "sparse+" r.index then r.index else lib.removePrefix "registry+" r.index
+          ) n
         ) (lib.filterAttrs (_: r: r ? index) registries)
       );
 
-      replacement =
-        h: "breakbulk-${h}";
+      replacement = h: "breakbulk-${h}";
 
       sourceSection =
         h: es:
@@ -305,10 +335,14 @@ in
           '';
 
       config = concatStringsSep "\n" (
-        lib.mapAttrsToList (h: es: sourceSection h es + ''
-          [source.${q (replacement h)}]
-          directory = ${q "${dir}/${h}"}
-        '') groups
+        lib.mapAttrsToList (
+          h: es:
+          sourceSection h es
+          + ''
+            [source.${q (replacement h)}]
+            directory = ${q "${dir}/${h}"}
+          ''
+        ) groups
       );
     in
     {
@@ -332,10 +366,13 @@ in
       # For the planner's path rewriting: vendor-relative crate directory ->
       # package id and the crate source store path.
       crates = lib.listToAttrs (
-        map (c: lib.nameValuePair c.dir {
-          inherit (c.e) id name version;
-          inherit (c) path kind;
-        }) crateEntries
+        map (
+          c:
+          lib.nameValuePair c.dir {
+            inherit (c.e) id name version;
+            inherit (c) path kind;
+          }
+        ) crateEntries
       );
     };
 }

@@ -257,21 +257,27 @@ let
       ])
     then
       throw "breakbulk: targets.\"${triple}\".debugInfo: `${toString v}` is not one of split, keep, strip"
-    else
-      if
-        v != "keep"
-        && !(elem traits.objectFormat [
-          "elf"
-          "macho"
-        ])
-      then
-        throw "breakbulk: targets.\"${triple}\".debugInfo = \"${v}\" needs an ELF or Mach-O target (the splitDebug and strip stages work on those files), and ${triple} is ${traits.objectFormat}; use \"keep\""
+    else if
+      v != "keep"
+      && !(elem traits.objectFormat [
+        "elf"
+        "macho"
+      ])
+    then
+      throw "breakbulk: targets.\"${triple}\".debugInfo = \"${v}\" needs an ELF or Mach-O target (the splitDebug and strip stages work on those files), and ${triple} is ${traits.objectFormat}; use \"keep\""
     else
       v;
 
   # The stage `debugInfo` puts in every product's chain that no stage set
   # may remove, by name, or null.
-  debugStageName = v: { split = "splitDebug"; strip = "strip"; keep = null; }.${v};
+  debugStageName =
+    v:
+    {
+      split = "splitDebug";
+      strip = "strip";
+      keep = null;
+    }
+    .${v};
 
   # The chain `debugInfo` puts first after `linked`: packing the `.dwo`
   # files where they would ship (`packDwo`, an ordinary stage), then the
@@ -339,7 +345,10 @@ let
       coverage ? false,
       ...
     }@args:
-    if targetSplitsDebug args then "macro,diagnostics${lib.optionalString coverage ",coverage"}" else null;
+    if targetSplitsDebug args then
+      "macro,diagnostics${lib.optionalString coverage ",coverage"}"
+    else
+      null;
 
   mkProducts =
     {
@@ -404,7 +413,9 @@ let
               { rootInfo = map (r: "${r.breakbulkRoot.wrapper}/breakbulk-root.json") dynamicRoots; }
             else
               lib.unique (
-                lib.concatMap (r: map (id: inst.units.build.${id}.flags) (r.breakbulkRoot.buildScriptRuns or [ ])) built
+                lib.concatMap (
+                  r: map (id: inst.units.build.${id}.flags) (r.breakbulkRoot.buildScriptRuns or [ ])
+                ) built
               );
           unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
           # Each root's file in `linked`, by name, to its root kind, for

@@ -61,10 +61,11 @@ let
     # A version nixpkgs packages is taken from nixpkgs.
     prefersNixpkgs =
       !(pkgs ? wasm-bindgen-cli_0_2_130)
-      || (wb.forVersion {
-        inherit pkgs;
-        version = "0.2.130";
-      }).drvPath == pkgs.wasm-bindgen-cli_0_2_130.drvPath;
+      ||
+        (wb.forVersion {
+          inherit pkgs;
+          version = "0.2.130";
+        }).drvPath == pkgs.wasm-bindgen-cli_0_2_130.drvPath;
     # ... unless asked not to, which builds the same version from the table.
     tableWhenAsked =
       let
@@ -82,11 +83,12 @@ let
         n = wb.attrName v;
       in
       !(pkgs ? ${n})
-      || pkgs.${n}.src.outputHash == (wb.forVersion {
-        inherit pkgs;
-        version = v;
-        preferNixpkgs = false;
-      }).src.outputHash
+      ||
+        pkgs.${n}.src.outputHash == (wb.forVersion {
+          inherit pkgs;
+          version = v;
+          preferNixpkgs = false;
+        }).src.outputHash
     ) (lib.attrNames wb.hashes);
     userHashes =
       (wb.forVersion {
@@ -232,9 +234,13 @@ in
 )
 # macOS from Linux (./darwin.nix): the SDK is unfree and fetched only
 # with `appleSdkPkgs`.
-// lib.optionalAttrs (
-  appleSdkPkgs != null && pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin
-) (import ./darwin.nix { inherit pkgs breakbulk; sdkPkgs = appleSdkPkgs; }).checks
+//
+  lib.optionalAttrs
+    (appleSdkPkgs != null && pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin)
+    (import ./darwin.nix {
+      inherit pkgs breakbulk;
+      sdkPkgs = appleSdkPkgs;
+    }).checks
 # -Zbuild-std (./build-std.nix): rust-overlay's nightly with rust-src.
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
   (import ./build-std.nix { inherit pkgs breakbulk; }).checks

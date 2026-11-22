@@ -111,16 +111,18 @@ let
   # The file-name traits against `rustc --print file-names` per crate type
   # (empty where rustc drops the crate type for the target: no dylibs on
   # wasm, none of either on bare metal).
-  rustcFileNames = pkgs.runCommand "rustc-target-file-names" { nativeBuildInputs = [ pkgs.rustc ]; } ''
-    for t in $(rustc --print target-list); do
-      rustc --print cfg --target "$t" >/dev/null 2>&1 || continue
-      printf '%s' "$t"
-      for c in bin dylib cdylib staticlib; do
-        printf '\t%s' "$(rustc --print file-names --crate-type $c --crate-name foo --target "$t" - </dev/null 2>/dev/null)"
-      done
-      printf '\n'
-    done > $out
-  '';
+  rustcFileNames =
+    pkgs.runCommand "rustc-target-file-names" { nativeBuildInputs = [ pkgs.rustc ]; }
+      ''
+        for t in $(rustc --print target-list); do
+          rustc --print cfg --target "$t" >/dev/null 2>&1 || continue
+          printf '%s' "$t"
+          for c in bin dylib cdylib staticlib; do
+            printf '\t%s' "$(rustc --print file-names --crate-type $c --crate-name foo --target "$t" - </dev/null 2>/dev/null)"
+          done
+          printf '\n'
+        done > $out
+      '';
   fileNameRows = map (
     l:
     let
@@ -151,7 +153,9 @@ let
     else if wrong == [ ] then
       true
     else
-      "${row.triple}: ${lib.concatMapStringsSep ", " (c: "${c} is ${row.${c}}, traits say ${expect.${c}}") wrong}";
+      "${row.triple}: ${
+        lib.concatMapStringsSep ", " (c: "${c} is ${row.${c}}, traits say ${expect.${c}}") wrong
+      }";
   fileNameResults = map checkFileNames fileNameRows;
   fileNameMismatches = lib.filter builtins.isString fileNameResults;
   fileNamesKnown = lib.count (x: x == true) fileNameResults;
@@ -190,12 +194,13 @@ let
           when = "split-packed";
           directory = true;
         }
-        ++ lib.optional (
-          lib.elem "packed" supported && !(s "is-like-darwin" false) && !(s "is-like-windows" false)
-        ) {
-          suffix = ".dwp";
-          when = "split-packed";
-        }
+        ++
+          lib.optional
+            (lib.elem "packed" supported && !(s "is-like-darwin" false) && !(s "is-like-windows" false))
+            {
+              suffix = ".dwp";
+              when = "split-packed";
+            }
         ++ lib.optional (lib.elem "unpacked" supported && s "debuginfo-kind" "dwarf" == "dwarf") {
           suffix = ".dwo";
           when = "split-unpacked";
@@ -409,14 +414,28 @@ in
       ];
     };
     testOthers = {
-      expr = map (t: pick [ "os" "env" "abi" "objectFormat" "isLinux" "kernel" "debugInfo" ] (r t)) [
-        "aarch64-unknown-linux-musl"
-        "riscv64gc-unknown-linux-gnu"
-        "x86_64-unknown-none"
-        "thumbv7em-none-eabihf"
-        "aarch64-linux-android"
-        "aarch64-apple-darwin"
-      ];
+      expr =
+        map
+          (
+            t:
+            pick [
+              "os"
+              "env"
+              "abi"
+              "objectFormat"
+              "isLinux"
+              "kernel"
+              "debugInfo"
+            ] (r t)
+          )
+          [
+            "aarch64-unknown-linux-musl"
+            "riscv64gc-unknown-linux-gnu"
+            "x86_64-unknown-none"
+            "thumbv7em-none-eabihf"
+            "aarch64-linux-android"
+            "aarch64-apple-darwin"
+          ];
       expected = [
         {
           os = "linux";
@@ -485,15 +504,23 @@ in
             host = "x86_64-unknown-linux-gnu";
           };
         in
-        map (t: bb.presets.linkerKind { triple = t; inherit rustc; }) [
-          "x86_64-unknown-linux-gnu"
-          "aarch64-unknown-linux-musl"
-          "x86_64-pc-windows-msvc"
-          "wasm32-wasip2"
-          "wasm32-unknown-unknown"
-          "x86_64-pc-windows-gnullvm"
-          "aarch64-unknown-uefi"
-        ];
+        map
+          (
+            t:
+            bb.presets.linkerKind {
+              triple = t;
+              inherit rustc;
+            }
+          )
+          [
+            "x86_64-unknown-linux-gnu"
+            "aarch64-unknown-linux-musl"
+            "x86_64-pc-windows-msvc"
+            "wasm32-wasip2"
+            "wasm32-unknown-unknown"
+            "x86_64-pc-windows-gnullvm"
+            "aarch64-unknown-uefi"
+          ];
       expected = [
         "lld"
         "cc"
@@ -759,10 +786,12 @@ in
     };
     # A misspelt or renamed trait is an error, not silently ignored.
     testMisnamedTrait = {
-      expr = fails (tt.resolve {
-        triple = "x86_64-unknown-linux-gnu";
-        traits.exeSuffix = ".elf";
-      }).os;
+      expr =
+        fails
+          (tt.resolve {
+            triple = "x86_64-unknown-linux-gnu";
+            traits.exeSuffix = ".elf";
+          }).os;
       expected = true;
     };
     # Android: the Linux kernel, not a Linux userland. No
@@ -867,11 +896,13 @@ in
     assert lib.assertMsg (known >= 200) "target-traits-rustc: only ${toString known} targets known";
     assert lib.assertMsg (fileNameMismatches == [ ])
       "target-traits-rustc: file-name traits disagree with rustc --print file-names:\n${lib.concatStringsSep "\n" fileNameMismatches}";
-    assert lib.assertMsg (fileNamesKnown == known) "target-traits-rustc: file names checked for ${toString fileNamesKnown} targets, cfg for ${toString known}";
+    assert lib.assertMsg (fileNamesKnown == known)
+      "target-traits-rustc: file names checked for ${toString fileNamesKnown} targets, cfg for ${toString known}";
     assert lib.assertMsg (specMismatches == [ ])
       "target-traits-rustc: traits disagree with rustc --print all-target-specs-json:\n${lib.concatStringsSep "\n" specMismatches}";
     # Every target `--print cfg` was checked for has a spec checked too.
-    assert lib.assertMsg (specsKnown >= known) "target-traits-rustc: specs checked for ${toString specsKnown} targets, cfg for ${toString known}";
+    assert lib.assertMsg (specsKnown >= known)
+      "target-traits-rustc: specs checked for ${toString specsKnown} targets, cfg for ${toString known}";
     pkgs.runCommand "target-traits-rustc" { } ''
       echo "${toString known} of ${toString (lib.length rows)} rustc targets parsed, all agreeing with rustc --print cfg and --print file-names; ${toString specsKnown} target specs agreeing with --print all-target-specs-json" > $out
     '';
@@ -908,7 +939,9 @@ in
           rustc = bb.presets.rustcFacts { inherit pkgs rustc; };
         };
       rows = lib.concatLists (
-        lib.mapAttrsToList (name: rustc: map (t: "${name} ${rustc} ${t} ${kind rustc t}") targets) toolchains
+        lib.mapAttrsToList (
+          name: rustc: map (t: "${name} ${rustc} ${t} ${kind rustc t}") targets
+        ) toolchains
       );
     in
     pkgs.runCommand "linker-kind-rustc" { rows = lib.concatStringsSep "\n" rows; } ''

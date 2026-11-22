@@ -159,7 +159,9 @@ let
           lib.filter (s: s != [ ] && (depth == null || lib.length s <= depth) && !redundant s) (
             subsets candidates
           );
-      sorted = lib.sort (a: b: lib.length a < lib.length b || (lib.length a == lib.length b && a < b)) sets;
+      sorted = lib.sort (
+        a: b: lib.length a < lib.length b || (lib.length a == lib.length b && a < b)
+      ) sets;
       skipAll =
         excludeAllFeatures
         || (if eachFeature then optionalDeps == [ ] && lib.length names <= 1 else optionalDeps == [ ]);

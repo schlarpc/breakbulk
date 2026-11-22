@@ -110,10 +110,12 @@ let
                 make (given // arg);
         };
     in
-    assert lib.assertMsg (lib.elem kind [
-      "stage"
-      "check"
-    ]) "breakbulk stage helper `${name}`: kind must be \"stage\" or \"check\", not ${builtins.toJSON kind}";
+    assert lib.assertMsg
+      (lib.elem kind [
+        "stage"
+        "check"
+      ])
+      "breakbulk stage helper `${name}`: kind must be \"stage\" or \"check\", not ${builtins.toJSON kind}";
     make { };
 
   # An option that replaces the nixpkgs package a helper runs.
@@ -228,7 +230,8 @@ let
 
   # Whether a stage that writes the debug files so far (`placeDebug`)
   # has any: its `debug` output is declared only then.
-  hasDebugFiles = product: (product.earlierDebug or null) != null || (product.linkedDebug or null) != null;
+  hasDebugFiles =
+    product: (product.earlierDebug or null) != null || (product.linkedDebug or null) != null;
 
   stageName = product: helper: "${product.name}-${helper}";
 
@@ -264,226 +267,232 @@ let
   # ---------------------------------------------------------------------
   # ELF
 
-  packDwo = mkHelper {
-    name = "packDwo";
-    description = ''
-      Packs the `.dwo` files that each ELF file and each `ar` archive
-      names (`split-debuginfo = "unpacked"`) into `<file>.dwp` in the
-      stage's `debug` output, with `llvm-dwp`, and drops the loose `.dwo`
-      files. The `.dwp` goes under `bin/` or `lib/`, where the file
-      lands in the install layout: `bin/app.dwp`, `lib/libfoo.so.dwp`,
-      `lib/libfoo.a.dwp`. A file that already has a `<file>.dwp`
-      (`"packed"`) keeps it. The output files are unchanged.
+  packDwo =
+    mkHelper
+      {
+        name = "packDwo";
+        description = ''
+          Packs the `.dwo` files that each ELF file and each `ar` archive
+          names (`split-debuginfo = "unpacked"`) into `<file>.dwp` in the
+          stage's `debug` output, with `llvm-dwp`, and drops the loose `.dwo`
+          files. The `.dwp` goes under `bin/` or `lib/`, where the file
+          lands in the install layout: `bin/app.dwp`, `lib/libfoo.so.dwp`,
+          `lib/libfoo.a.dwp`. A file that already has a `<file>.dwp`
+          (`"packed"`) keeps it. The output files are unchanged.
 
-      The skeleton units name their `.dwo` files by rustc's absolute
-      build path, which gdb opens as given and nowhere else, so loose
-      `.dwo` files are of no use to a debugger. gdb finds `<binary>.dwp`
-      next to the binary or next to its separate debug file
-      (`splitDebug` moves it there). An archive's `.dwp` is for the
-      program that links the archive: pack it with that program's own
-      `.dwo` files into `<program>.dwp`.
+          The skeleton units name their `.dwo` files by rustc's absolute
+          build path, which gdb opens as given and nowhere else, so loose
+          `.dwo` files are of no use to a debugger. gdb finds `<binary>.dwp`
+          next to the binary or next to its separate debug file
+          (`splitDebug` moves it there). An archive's `.dwp` is for the
+          program that links the archive: pack it with that program's own
+          `.dwo` files into `<program>.dwp`.
 
-      `targets.<triple>.debugInfo` inserts this stage on ELF targets:
-      before `splitDebug` with `"split"`, alone with `"keep"`. It is an
-      ordinary stage: configure it, replace it, or remove it with `null`
-      to ship the loose `.dwo` files.
-    '';
-    options = {
-      binutils = toolOption "binutils-unwrapped-all-targets";
-      llvm = toolOption "llvm";
-    };
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      target ? { },
-      ...
-    }:
-    let
-      t = traitsOf target pkgs;
-      debug = hasDebugFiles product;
-      # Where a file of the flat link output lands in the install layout
-      # (as `install` places it), for its `.dwp`.
-      libGlob = lib.concatMapStringsSep "|" (x: "*${escapeShellArg x}") (
-        lib.unique (
-          lib.filter (x: x != "") [
-            t.staticLibrarySuffix
-            t.sharedLibrarySuffix
-          ]
-        )
-      );
-    in
-    pkgs.runCommand (stageName product "packDwo")
+          `targets.<triple>.debugInfo` inserts this stage on ELF targets:
+          before `splitDebug` with `"split"`, alone with `"keep"`. It is an
+          ordinary stage: configure it, replace it, or remove it with `null`
+          to ship the loose `.dwo` files.
+        '';
+        options = {
+          binutils = toolOption "binutils-unwrapped-all-targets";
+          llvm = toolOption "llvm";
+        };
+      }
       (
+        cfg:
         {
-          nativeBuildInputs = [
-            (binutilsOf cfg pkgs)
-            (toolOf cfg.llvm pkgs "llvm")
-          ];
-        }
-        // lib.optionalAttrs debug {
-          outputs = [
-            "out"
-            "debug"
-          ];
-        }
-      )
-      ''
-        set -euo pipefail
-        ${copyIn input}
-        ${isElfFn}
-        ${placeDebugFn product target pkgs}
-        copyIn "$out"
-        ${lib.optionalString debug ''
-          mkdir -p "$debug"
-          placeDebug "$debug"
-          find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-            isElf "$f" || isAr "$f" || continue
-            b=''${f##*/}
-            rel=''${f#$out/}
-            if [ "$rel" != "$b" ]; then
-              # After `install`: the file's own directory.
-              d=''${rel%/*}
-            else
-              case "$b" in
-                ${lib.optionalString (libGlob != "") "${libGlob}) d=lib ;;"}
-                *.so.*) d=lib ;;
-                *) d=bin ;;
-              esac
-            fi
-            if [ -e "$debug/$d/$b.dwp" ]; then
-              continue
-            fi
-            # readelf walks an archive's members. Not binutils' dwp for
-            # packing: it reads only DWARF 4's DW_AT_GNU_dwo_id, so from
-            # DWARF 5 units it writes a .dwp with no units in it, and
-            # succeeds.
-            dwos=()
-            while IFS= read -r n; do
-              n=''${n##*/}
-              for dd in bin lib; do
-                if [ -f "$debug/$dd/$n" ]; then
-                  dwos+=("$debug/$dd/$n")
-                  break
+          input,
+          product,
+          pkgs,
+          target ? { },
+          ...
+        }:
+        let
+          t = traitsOf target pkgs;
+          debug = hasDebugFiles product;
+          # Where a file of the flat link output lands in the install layout
+          # (as `install` places it), for its `.dwp`.
+          libGlob = lib.concatMapStringsSep "|" (x: "*${escapeShellArg x}") (
+            lib.unique (
+              lib.filter (x: x != "") [
+                t.staticLibrarySuffix
+                t.sharedLibrarySuffix
+              ]
+            )
+          );
+        in
+        pkgs.runCommand (stageName product "packDwo")
+          (
+            {
+              nativeBuildInputs = [
+                (binutilsOf cfg pkgs)
+                (toolOf cfg.llvm pkgs "llvm")
+              ];
+            }
+            // lib.optionalAttrs debug {
+              outputs = [
+                "out"
+                "debug"
+              ];
+            }
+          )
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            ${isElfFn}
+            ${placeDebugFn product target pkgs}
+            copyIn "$out"
+            ${lib.optionalString debug ''
+              mkdir -p "$debug"
+              placeDebug "$debug"
+              find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+                isElf "$f" || isAr "$f" || continue
+                b=''${f##*/}
+                rel=''${f#$out/}
+                if [ "$rel" != "$b" ]; then
+                  # After `install`: the file's own directory.
+                  d=''${rel%/*}
+                else
+                  case "$b" in
+                    ${lib.optionalString (libGlob != "") "${libGlob}) d=lib ;;"}
+                    *.so.*) d=lib ;;
+                    *) d=bin ;;
+                  esac
+                fi
+                if [ -e "$debug/$d/$b.dwp" ]; then
+                  continue
+                fi
+                # readelf walks an archive's members. Not binutils' dwp for
+                # packing: it reads only DWARF 4's DW_AT_GNU_dwo_id, so from
+                # DWARF 5 units it writes a .dwp with no units in it, and
+                # succeeds.
+                dwos=()
+                while IFS= read -r n; do
+                  n=''${n##*/}
+                  for dd in bin lib; do
+                    if [ -f "$debug/$dd/$n" ]; then
+                      dwos+=("$debug/$dd/$n")
+                      break
+                    fi
+                  done
+                done < <(readelf --debug-dump=info,no-follow-links --dwarf-depth=1 "$f" 2>/dev/null | sed -n 's/^.*DW_AT_\(GNU_\)\{0,1\}dwo_name *: .*: //p' | LC_ALL=C sort -u)
+                if [ ''${#dwos[@]} -gt 0 ]; then
+                  echo "packDwo: $rel: packing ''${#dwos[@]} .dwo files into $d/$b.dwp"
+                  mkdir -p "$debug/$d"
+                  llvm-dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
                 fi
               done
-            done < <(readelf --debug-dump=info,no-follow-links --dwarf-depth=1 "$f" 2>/dev/null | sed -n 's/^.*DW_AT_\(GNU_\)\{0,1\}dwo_name *: .*: //p' | LC_ALL=C sort -u)
-            if [ ''${#dwos[@]} -gt 0 ]; then
-              echo "packDwo: $rel: packing ''${#dwos[@]} .dwo files into $d/$b.dwp"
-              mkdir -p "$debug/$d"
-              llvm-dwp -o "$debug/$d/$b.dwp" "''${dwos[@]}"
-            fi
-          done
-          # Packed, or named by no file (an rlib member the link left
-          # out).
-          find "$debug" -name '*.dwo' -type f -delete
-          find "$debug" -mindepth 1 -type d -empty -delete
-        ''}
-      ''
-  );
+              # Packed, or named by no file (an rlib member the link left
+              # out).
+              find "$debug" -name '*.dwo' -type f -delete
+              find "$debug" -mindepth 1 -type d -empty -delete
+            ''}
+          ''
+      );
 
-  splitDebug = mkHelper {
-    name = "splitDebug";
-    description = ''
-      Moves the debug information of every ELF file into the stage's
-      `debug` output, at `lib/debug/.build-id/<xx>/<rest>.debug` (from
-      the file's GNU build ID), where gdb and debuginfod look for it.
-      The file keeps its symbol table and gets a `.gnu_debuglink`.
-      A file without debug information is left as it is; one with debug
-      information but no build ID fails the stage.
-
-      A `<binary>.dwp` (`split-debuginfo = "packed"`, or `packDwo`'s)
-      moves next to the `.debug` file, where gdb finds it, with a symlink
-      at its place in the install layout. The other debug files so far
-      (an earlier stage's `debug` output, else the link units') are kept.
-      `targets.<triple>.debugInfo = "split"` inserts this stage, after
-      `packDwo`.
-
-      A Mach-O file (Apple targets) keeps no DWARF itself: its debug
-      information is the `.dSYM` bundle dsymutil wrote at the link
-      (`split-debuginfo = "packed"`, which `presets.darwin` sets), and the
-      file holds only a debug map naming the link's object files. The
-      `.dSYM` goes to the `debug` output next to where its file lands
-      (`bin/app.dSYM`, `lib/libx.dylib.dSYM`), where lldb looks for it,
-      and `llvm-strip -S` removes the debug map. A file with a debug map
-      but no `.dSYM` of the same UUID fails the stage.
-    '';
-    options = {
-      binutils = toolOption "binutils-unwrapped-all-targets";
-      llvm = toolOption "llvm";
-    };
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      target ? { },
-      ...
-    }:
-    pkgs.runCommand (stageName product "splitDebug")
+  splitDebug =
+    mkHelper
       {
-        outputs = [
-          "out"
-          "debug"
-        ];
-        nativeBuildInputs = [
-          (binutilsOf cfg pkgs)
-          (toolOf cfg.llvm pkgs "llvm")
-        ];
+        name = "splitDebug";
+        description = ''
+          Moves the debug information of every ELF file into the stage's
+          `debug` output, at `lib/debug/.build-id/<xx>/<rest>.debug` (from
+          the file's GNU build ID), where gdb and debuginfod look for it.
+          The file keeps its symbol table and gets a `.gnu_debuglink`.
+          A file without debug information is left as it is; one with debug
+          information but no build ID fails the stage.
+
+          A `<binary>.dwp` (`split-debuginfo = "packed"`, or `packDwo`'s)
+          moves next to the `.debug` file, where gdb finds it, with a symlink
+          at its place in the install layout. The other debug files so far
+          (an earlier stage's `debug` output, else the link units') are kept.
+          `targets.<triple>.debugInfo = "split"` inserts this stage, after
+          `packDwo`.
+
+          A Mach-O file (Apple targets) keeps no DWARF itself: its debug
+          information is the `.dSYM` bundle dsymutil wrote at the link
+          (`split-debuginfo = "packed"`, which `presets.darwin` sets), and the
+          file holds only a debug map naming the link's object files. The
+          `.dSYM` goes to the `debug` output next to where its file lands
+          (`bin/app.dSYM`, `lib/libx.dylib.dSYM`), where lldb looks for it,
+          and `llvm-strip -S` removes the debug map. A file with a debug map
+          but no `.dSYM` of the same UUID fails the stage.
+        '';
+        options = {
+          binutils = toolOption "binutils-unwrapped-all-targets";
+          llvm = toolOption "llvm";
+        };
       }
-      ''
-        set -euo pipefail
-        ${copyIn input}
-        ${isElfFn}
-        ${isMachoFn}
-        ${placeDebugFn product target pkgs}
-        copyIn "$out"
-        mkdir -p "$debug"
-        placeDebug "$debug"
-        ${splitMachoFn}
-        find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-          if isMacho "$f"; then
-            splitMacho "$f"
-            continue
-          fi
-          isElf "$f" || continue
-          if ! readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
-            echo "splitDebug: ''${f#$out/}: no debug info, left unchanged"
-            continue
-          fi
-          id=$(readelf -n "$f" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p' | head -n1)
-          if [ "''${#id}" -lt 3 ]; then
-            echo "splitDebug: ''${f#$out/} has debug info but no GNU build ID; link it with --build-id (breakbulk's presets pass a content-derived one)" >&2
-            exit 1
-          fi
-          dir="$debug/lib/debug/.build-id/''${id:0:2}"
-          dbg="$dir/''${id:2}.debug"
-          if [ -e "$dbg" ]; then
-            echo "splitDebug: two files have build ID $id" >&2
-            exit 1
-          fi
-          mkdir -p "$dir"
-          echo "splitDebug: ''${f#$out/} (build ID $id)"
-          objcopy --only-keep-debug "$f" "$dbg"
-          objcopy --strip-debug "$f"
-          objcopy --add-gnu-debuglink="$dbg" "$f"
-          b=''${f##*/}
-          # gdb looks for `<binary>.dwp` next to the separate debug file
-          # it found, under the binary's name (gdb 17.2,
-          # gdb/dwarf2/read.c, open_and_init_dwp_file), so it moves there;
-          # its install-layout place keeps a relative symlink.
-          for d in bin lib; do
-            if [ -f "$debug/$d/$b.dwp" ] && [ ! -L "$debug/$d/$b.dwp" ]; then
-              mv "$debug/$d/$b.dwp" "$dir/$b.dwp"
-              ln -s "../lib/debug/.build-id/''${id:0:2}/$b.dwp" "$debug/$d/$b.dwp"
-            fi
-          done
-        done
-      ''
-  );
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          target ? { },
+          ...
+        }:
+        pkgs.runCommand (stageName product "splitDebug")
+          {
+            outputs = [
+              "out"
+              "debug"
+            ];
+            nativeBuildInputs = [
+              (binutilsOf cfg pkgs)
+              (toolOf cfg.llvm pkgs "llvm")
+            ];
+          }
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            ${isElfFn}
+            ${isMachoFn}
+            ${placeDebugFn product target pkgs}
+            copyIn "$out"
+            mkdir -p "$debug"
+            placeDebug "$debug"
+            ${splitMachoFn}
+            find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
+              if isMacho "$f"; then
+                splitMacho "$f"
+                continue
+              fi
+              isElf "$f" || continue
+              if ! readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
+                echo "splitDebug: ''${f#$out/}: no debug info, left unchanged"
+                continue
+              fi
+              id=$(readelf -n "$f" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p' | head -n1)
+              if [ "''${#id}" -lt 3 ]; then
+                echo "splitDebug: ''${f#$out/} has debug info but no GNU build ID; link it with --build-id (breakbulk's presets pass a content-derived one)" >&2
+                exit 1
+              fi
+              dir="$debug/lib/debug/.build-id/''${id:0:2}"
+              dbg="$dir/''${id:2}.debug"
+              if [ -e "$dbg" ]; then
+                echo "splitDebug: two files have build ID $id" >&2
+                exit 1
+              fi
+              mkdir -p "$dir"
+              echo "splitDebug: ''${f#$out/} (build ID $id)"
+              objcopy --only-keep-debug "$f" "$dbg"
+              objcopy --strip-debug "$f"
+              objcopy --add-gnu-debuglink="$dbg" "$f"
+              b=''${f##*/}
+              # gdb looks for `<binary>.dwp` next to the separate debug file
+              # it found, under the binary's name (gdb 17.2,
+              # gdb/dwarf2/read.c, open_and_init_dwp_file), so it moves there;
+              # its install-layout place keeps a relative symlink.
+              for d in bin lib; do
+                if [ -f "$debug/$d/$b.dwp" ] && [ ! -L "$debug/$d/$b.dwp" ]; then
+                  mv "$debug/$d/$b.dwp" "$dir/$b.dwp"
+                  ln -s "../lib/debug/.build-id/''${id:0:2}/$b.dwp" "$debug/$d/$b.dwp"
+                fi
+              done
+            done
+          ''
+      );
 
   strip =
     mkHelper
@@ -659,7 +668,9 @@ let
             ${copyIn input}
             ${isMachoFn}
             declare -A ids=(${
-              concatStringsSep " " (mapAttrsToList (n: v: "[${escapeShellArg n}]=${escapeShellArg v}") cfg.identifiers)
+              concatStringsSep " " (
+                mapAttrsToList (n: v: "[${escapeShellArg n}]=${escapeShellArg v}") cfg.identifiers
+              )
             })
             copyIn "$out"
             find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
@@ -960,7 +971,9 @@ let
               description = "The string fields given, even as null, which `cargoMetadata` leaves alone.";
             };
           };
-        config.explicit = lib.filter (n: options.${n}.highestPrio < defaultPrio) (attrNames metadataStrings);
+        config.explicit = lib.filter (n: options.${n}.highestPrio < defaultPrio) (
+          attrNames metadataStrings
+        );
       }
     );
     default = { };
@@ -1258,8 +1271,7 @@ let
         let
           fileName = if cfg.name != null then cfg.name else "${product.name}.zip";
         in
-        pkgs.runCommand (stageName product "zip")
-          { nativeBuildInputs = [ (toolOf cfg.zip pkgs "zip") ]; }
+        pkgs.runCommand (stageName product "zip") { nativeBuildInputs = [ (toolOf cfg.zip pkgs "zip") ]; }
           ''
             set -euo pipefail
             ${copyIn input}
@@ -1280,129 +1292,138 @@ let
           ''
       );
 
-  install = mkHelper {
-    name = "install";
-    description = ''
-      Lays the flat link output out as an installed tree. Every product
-      has this stage unless `install = null` removes it.
+  install =
+    mkHelper
+      {
+        name = "install";
+        description = ''
+          Lays the flat link output out as an installed tree. Every product
+          has this stage unless `install = null` removes it.
 
-      A root's file (`product.rootFiles`) goes by its kind: a bin to
-      `bin/`, a staticlib to `lib/`, a cdylib or dylib to the target
-      traits' `sharedLibraryDir` (`bin/` on Windows and Cygwin, where
-      DLLs are found beside the executable; `lib/` elsewhere). Other
-      files (renamed or added by a stage, import libraries) go by the
-      traits' suffixes: static libraries and `.rlib` to `lib/`, shared
-      libraries to `sharedLibraryDir`, executables to `bin/`. Where
-      executables have no suffix, an executable file goes to `bin/`. A
-      suffix that executables and shared libraries share (`.wasm`)
-      decides nothing. A debug side file (`.pdb`) goes next to the file
-      of the same stem, else to `bin/`. Anything else stays at the top.
-      Top-level directories are copied as they are, so `bindgen`'s
-      `pkg/` and a stage's `share/` are kept.
+          A root's file (`product.rootFiles`) goes by its kind: a bin to
+          `bin/`, a staticlib to `lib/`, a cdylib or dylib to the target
+          traits' `sharedLibraryDir` (`bin/` on Windows and Cygwin, where
+          DLLs are found beside the executable; `lib/` elsewhere). Other
+          files (renamed or added by a stage, import libraries) go by the
+          traits' suffixes: static libraries and `.rlib` to `lib/`, shared
+          libraries to `sharedLibraryDir`, executables to `bin/`. Where
+          executables have no suffix, an executable file goes to `bin/`. A
+          suffix that executables and shared libraries share (`.wasm`)
+          decides nothing. A debug side file (`.pdb`) goes next to the file
+          of the same stem, else to `bin/`. Anything else stays at the top.
+          Top-level directories are copied as they are, so `bindgen`'s
+          `pkg/` and a stage's `share/` are kept.
 
-      The link units' debuginfo side files (`product.linkedDebug`:
-      `.pdb`, `.dwp`, `.dwo`) go to a `debug` output in the same layout,
-      so a `.pdb` sits in `$debug/bin` as its `.exe` does in `$out/bin`.
-      Not when an earlier stage split debug information
-      (`product.debugSplit`), whose `debug` output holds them, and not
-      for wasm.
-    '';
-  } (
-    _cfg:
-    {
-      input,
-      product,
-      target,
-      pkgs,
-      ...
-    }:
-    let
-      t = traitsOf target pkgs;
-      rootFiles = product.rootFiles or { };
-      dirOfKind =
-        k:
-        if k == "bin" then
-          "bin"
-        else if k == "cdylib" || k == "dylib" then
-          t.sharedLibraryDir
-        else
-          "lib";
-      globOf =
-        suffixes:
-        lib.concatMapStringsSep "|" (x: "*${x}") (lib.unique (lib.filter (x: x != "") suffixes));
-      ambiguous = t.executableSuffix != "" && t.executableSuffix == t.sharedLibrarySuffix;
-      shared = lib.optionals (!ambiguous) [
-        t.sharedLibrarySuffix
-        "${t.sharedLibrarySuffix}.*"
-      ];
-      sideFiles = map (a: a.suffix) (
-        lib.filter (a: !(a.perObject or false) && !(a.directory or false)) t.debugArtifacts
+          The link units' debuginfo side files (`product.linkedDebug`:
+          `.pdb`, `.dwp`, `.dwo`) go to a `debug` output in the same layout,
+          so a `.pdb` sits in `$debug/bin` as its `.exe` does in `$out/bin`.
+          Not when an earlier stage split debug information
+          (`product.debugSplit`), whose `debug` output holds them, and not
+          for wasm.
+        '';
+      }
+      (
+        _cfg:
+        {
+          input,
+          product,
+          target,
+          pkgs,
+          ...
+        }:
+        let
+          t = traitsOf target pkgs;
+          rootFiles = product.rootFiles or { };
+          dirOfKind =
+            k:
+            if k == "bin" then
+              "bin"
+            else if k == "cdylib" || k == "dylib" then
+              t.sharedLibraryDir
+            else
+              "lib";
+          globOf =
+            suffixes: lib.concatMapStringsSep "|" (x: "*${x}") (lib.unique (lib.filter (x: x != "") suffixes));
+          ambiguous = t.executableSuffix != "" && t.executableSuffix == t.sharedLibrarySuffix;
+          shared = lib.optionals (!ambiguous) [
+            t.sharedLibrarySuffix
+            "${t.sharedLibrarySuffix}.*"
+          ];
+          sideFiles = map (a: a.suffix) (
+            lib.filter (a: !(a.perObject or false) && !(a.directory or false)) t.debugArtifacts
+          );
+          # File-name globs by destination; an import library (`.dll.lib`,
+          # `.dll.a`) ends in the static suffix.
+          globs = {
+            lib = globOf (
+              [
+                t.staticLibrarySuffix
+                ".rlib"
+              ]
+              ++ lib.optionals (t.sharedLibraryDir == "lib") shared
+            );
+            bin = globOf (
+              lib.optional (!ambiguous) t.executableSuffix ++ lib.optionals (t.sharedLibraryDir == "bin") shared
+            );
+            side = globOf sideFiles;
+          };
+          # The side files go to install's own `debug` output when no earlier
+          # stage split debug information (whose `debug` holds them already).
+          debug = !t.isWasm && (product.linkedDebug or null) != null && !(product.debugSplit or false);
+        in
+        pkgs.runCommand (stageName product "install")
+          (lib.optionalAttrs debug {
+            outputs = [
+              "out"
+              "debug"
+            ];
+          })
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            ${placeDebugFn product target pkgs}
+            work=$TMPDIR/in
+            copyIn "$work"
+            mkdir -p "$out"
+            ${lib.optionalString debug ''
+              mkdir -p "$debug"
+              placeDebug "$debug"
+            ''}
+            sides=()
+            for f in "$work"/* "$work"/.[!.]*; do
+              [ -e "$f" ] || continue
+              b=$(basename "$f")
+              if [ -d "$f" ]; then
+                mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
+              fi
+              case "$b" in
+                ${lib.concatStrings (
+                  lib.mapAttrsToList (n: k: "${lib.escapeShellArg n}) dest=${dirOfKind k} ;;\n") rootFiles
+                )}
+                ${lib.optionalString (globs.side != "") "${globs.side}) sides+=(\"$f\"); continue ;;"}
+                ${lib.optionalString (globs.lib != "") "${globs.lib}) dest=lib ;;"}
+                ${lib.optionalString (globs.bin != "") "${globs.bin}) dest=bin ;;"}
+                ${
+                  if t.executableSuffix == "" then
+                    ''*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;''
+                  else
+                    "*) dest=. ;;"
+                }
+              esac
+              mkdir -p "$out/$dest"
+              cp "$f" "$out/$dest/$b"
+            done
+            for f in "''${sides[@]}"; do
+              b=$(basename "$f")
+              dest=bin
+              for d in bin lib; do
+                if compgen -G "$out/$d/''${b%.*}.*" > /dev/null; then dest=$d; break; fi
+              done
+              mkdir -p "$out/$dest"
+              cp "$f" "$out/$dest/$b"
+            done
+          ''
       );
-      # File-name globs by destination; an import library (`.dll.lib`,
-      # `.dll.a`) ends in the static suffix.
-      globs = {
-        lib = globOf (
-          [
-            t.staticLibrarySuffix
-            ".rlib"
-          ]
-          ++ lib.optionals (t.sharedLibraryDir == "lib") shared
-        );
-        bin = globOf (
-          lib.optional (!ambiguous) t.executableSuffix ++ lib.optionals (t.sharedLibraryDir == "bin") shared
-        );
-        side = globOf sideFiles;
-      };
-      # The side files go to install's own `debug` output when no earlier
-      # stage split debug information (whose `debug` holds them already).
-      debug = !t.isWasm && (product.linkedDebug or null) != null && !(product.debugSplit or false);
-    in
-    pkgs.runCommand (stageName product "install")
-      (lib.optionalAttrs debug {
-        outputs = [
-          "out"
-          "debug"
-        ];
-      })
-      ''
-        set -euo pipefail
-        ${copyIn input}
-        ${placeDebugFn product target pkgs}
-        work=$TMPDIR/in
-        copyIn "$work"
-        mkdir -p "$out"
-        ${lib.optionalString debug ''
-          mkdir -p "$debug"
-          placeDebug "$debug"
-        ''}
-        sides=()
-        for f in "$work"/* "$work"/.[!.]*; do
-          [ -e "$f" ] || continue
-          b=$(basename "$f")
-          if [ -d "$f" ]; then
-            mkdir -p "$out/$b"; cp -R "$f"/. "$out/$b/"; continue
-          fi
-          case "$b" in
-            ${lib.concatStrings (lib.mapAttrsToList (n: k: "${lib.escapeShellArg n}) dest=${dirOfKind k} ;;\n") rootFiles)}
-            ${lib.optionalString (globs.side != "") "${globs.side}) sides+=(\"$f\"); continue ;;"}
-            ${lib.optionalString (globs.lib != "") "${globs.lib}) dest=lib ;;"}
-            ${lib.optionalString (globs.bin != "") "${globs.bin}) dest=bin ;;"}
-            ${if t.executableSuffix == "" then ''*) if [ -x "$f" ]; then dest=bin; else dest=.; fi ;;'' else "*) dest=. ;;"}
-          esac
-          mkdir -p "$out/$dest"
-          cp "$f" "$out/$dest/$b"
-        done
-        for f in "''${sides[@]}"; do
-          b=$(basename "$f")
-          dest=bin
-          for d in bin lib; do
-            if compgen -G "$out/$d/''${b%.*}.*" > /dev/null; then dest=$d; break; fi
-          done
-          mkdir -p "$out/$dest"
-          cp "$f" "$out/$dest/$b"
-        done
-      ''
-  );
 
   # The `flags` outputs of the build-script runs of the product's target
   # that its roots depend on, as shell words: `product.buildScriptFlags`
@@ -1439,44 +1460,47 @@ let
     }
   '';
 
-  buildScriptFiles = mkHelper {
-    name = "buildScriptFiles";
-    description = ''
-      Copies the files the build scripts of the product's target
-      placed next to the binaries (Cargo's `target/<profile>`, where
-      `cargo run` and a Windows loader find them: shared libraries that
-      sdl2-sys `bundled` or ort-sys `copy-dylibs` copy there, Tauri's
-      external binaries and resources) into the product, beside its own
-      files. `install` then lays them out with them: a DLL next to the
-      `.exe` in `bin/`, a `.so` in `lib/`, where on Linux the binary
-      needs a run path to find it (`patchelfRpath`). Symlinks are
-      resolved. A file name the product already has fails the stage.
-      Run it before `install`.
-    '';
-  } (
-    _cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    pkgs.runCommand (stageName product "buildScriptFiles") { } ''
-      set -euo pipefail
-      ${copyIn input}
-      ${placedFilesFn "buildScriptFiles" product pkgs}
-      copyIn "$out"
-      placedFiles | while IFS= read -r f; do
-        b=''${f##*/}
-        if [ -e "$out/$b" ]; then
-          echo "buildScriptFiles: ${product.name} already has $b; a build script also placed $f" >&2
-          exit 1
-        fi
-        cp -L "$f" "$out/$b"
-        echo "buildScriptFiles: ${product.name}: $b (from $f)"
-      done
-    ''
-  );
+  buildScriptFiles =
+    mkHelper
+      {
+        name = "buildScriptFiles";
+        description = ''
+          Copies the files the build scripts of the product's target
+          placed next to the binaries (Cargo's `target/<profile>`, where
+          `cargo run` and a Windows loader find them: shared libraries that
+          sdl2-sys `bundled` or ort-sys `copy-dylibs` copy there, Tauri's
+          external binaries and resources) into the product, beside its own
+          files. `install` then lays them out with them: a DLL next to the
+          `.exe` in `bin/`, a `.so` in `lib/`, where on Linux the binary
+          needs a run path to find it (`patchelfRpath`). Symlinks are
+          resolved. A file name the product already has fails the stage.
+          Run it before `install`.
+        '';
+      }
+      (
+        _cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        pkgs.runCommand (stageName product "buildScriptFiles") { } ''
+          set -euo pipefail
+          ${copyIn input}
+          ${placedFilesFn "buildScriptFiles" product pkgs}
+          copyIn "$out"
+          placedFiles | while IFS= read -r f; do
+            b=''${f##*/}
+            if [ -e "$out/$b" ]; then
+              echo "buildScriptFiles: ${product.name} already has $b; a build script also placed $f" >&2
+              exit 1
+            fi
+            cp -L "$f" "$out/$b"
+            echo "buildScriptFiles: ${product.name}: $b (from $f)"
+          done
+        ''
+      );
 
   # The store path a source lies in, not the source itself: a git crate's
   # source is a directory inside its tree, and a closure and a reference
@@ -1806,213 +1830,218 @@ let
       product.checkName or helperName
     } = null;";
 
-  buildScriptFilesIncluded = mkHelper {
-    name = "buildScriptFilesIncluded";
-    kind = "check";
-    description = ''
-      Fails when a build script of the product's target placed files
-      next to the binaries (Cargo's `target/<profile>`, where `cargo run`
-      and a Windows loader find them) and the product holds no file of
-      that name. The message names the files, the `buildScriptFiles`
-      stage that includes them, at its place in this product's stage
-      order, and how to remove the check. Every product has it as the
-      check `buildScriptFiles`; it passes when no build script placed
-      anything.
-    '';
-  } (
-    _cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    let
-      stanza = "packages.${product.name}.stages.buildScriptFiles = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
-      removal = removeCheckLine "buildScriptFiles" product "does not need them at run time";
-    in
-    pkgs.runCommand "${product.name}-build-script-files" { inherit stanza removal; } ''
-      set -euo pipefail
-      ${placedFilesFn "buildScriptFilesIncluded" product pkgs}
-      missing=()
-      while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        b=''${f##*/}
-        if [ -z "$(find ${input}/ -name "$b" -print -quit)" ]; then
-          missing+=("$b (from $f)")
-        fi
-      done < <(placedFiles)
-      if [ ''${#missing[@]} -gt 0 ]; then
+  buildScriptFilesIncluded =
+    mkHelper
+      {
+        name = "buildScriptFilesIncluded";
+        kind = "check";
+        description = ''
+          Fails when a build script of the product's target placed files
+          next to the binaries (Cargo's `target/<profile>`, where `cargo run`
+          and a Windows loader find them) and the product holds no file of
+          that name. The message names the files, the `buildScriptFiles`
+          stage that includes them, at its place in this product's stage
+          order, and how to remove the check. Every product has it as the
+          check `buildScriptFiles`; it passes when no build script placed
+          anything.
+        '';
+      }
+      (
+        _cfg:
         {
-          echo "buildScriptFiles: build scripts placed files next to the binaries, where cargo run finds them, but ${product.name} does not include them:"
-          printf '  %s\n' "''${missing[@]}"
-          echo "Include them: $stanza"
-          echo "$removal"
-        } >&2
-        exit 1
-      fi
-      touch $out
-    ''
-  );
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          stanza = "packages.${product.name}.stages.buildScriptFiles = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
+          removal = removeCheckLine "buildScriptFiles" product "does not need them at run time";
+        in
+        pkgs.runCommand "${product.name}-build-script-files" { inherit stanza removal; } ''
+          set -euo pipefail
+          ${placedFilesFn "buildScriptFilesIncluded" product pkgs}
+          missing=()
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            b=''${f##*/}
+            if [ -z "$(find ${input}/ -name "$b" -print -quit)" ]; then
+              missing+=("$b (from $f)")
+            fi
+          done < <(placedFiles)
+          if [ ''${#missing[@]} -gt 0 ]; then
+            {
+              echo "buildScriptFiles: build scripts placed files next to the binaries, where cargo run finds them, but ${product.name} does not include them:"
+              printf '  %s\n' "''${missing[@]}"
+              echo "Include them: $stanza"
+              echo "$removal"
+            } >&2
+            exit 1
+          fi
+          touch $out
+        ''
+      );
 
   # Paths are compared as strings, so they are not realised for the check.
   # Only toolchain paths found in the closure cost a scan for the
   # libraries the output loads.
-  noSourceReferences = mkHelper {
-    name = "noSourceReferences";
-    kind = "check";
-    description = ''
-      Fails when the closure of the checked output (by default the
-      product's main output) contains a source path or a Rust toolchain
-      path: a std panic location that names rust-src, or an embedded
-      `CARGO`, makes the whole toolchain a run-time dependency. A
-      separate `debug` output is not checked. Every product has this
-      check unless it is removed.
-
-      A source named only by files matching `sourcesAllowedIn` is
-      allowed. One toolchain reference is allowed: a toolchain path
-      holding a shared library the checked output loads (read from its
-      files' ELF `NEEDED` entries and PE imports, looked up in the
-      path's `lib`, `bin` and `lib/rustlib/<target>/{lib,bin}`). So a
-      binary linked with `-C prefer-dynamic` may reference the sysroot
-      whose `libstd-*.so` it loads; rustc's own component, cargo and
-      rust-src never are. A rust-overlay toolchain's joined sysroot
-      brings its rustc and cargo components along, so such a binary
-      still fails there.
-
-      When a source is referenced, the failure says that
-      `env!("CARGO_MANIFEST_DIR")` kept in a string is the usual cause,
-      and names the `removeSourceReferences` stage, at its place in the
-      product's stage order, besides narrowing and removing the check.
-    '';
-    options =
-      let
-        paths =
-          what: default:
-          mkOption {
-            type = types.nullOr (types.listOf storePathType);
-            default = null;
-            description = "The ${what} store paths. `null`: ${default}.";
-          };
-      in
+  noSourceReferences =
+    mkHelper
       {
-        sources = paths "source" "the product's `sourcePaths` (its source views and crate sources)";
-        toolchain =
-          paths "Rust toolchain"
-            "the product's `toolchainPaths` (rustc, its sysroot, cargo, rust-src). `[ ]` checks sources only";
-        sourcesAllowedIn = mkOption {
-          type = types.nullOr (types.listOf types.str);
-          default = null;
-          example = [ "libapp-*.a" ];
-          description = ''
-            File name globs (in any directory) whose own references to
-            sources are allowed; a source another file names still
-            fails. `null`: the product's `sourcesAllowedIn` (each
-            staticlib root's archive, whose objects keep their debug
-            information for the final link).
-          '';
-        };
-      };
-  } (
-    cfg:
-    {
-      input,
-      product,
-      pkgs,
-      ...
-    }:
-    let
-      sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
-      toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
-      allowedIn = if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
-      listFile = name: l: builtins.toFile name (concatStringsSep "\n" (sourceStoreRoots l) + "\n");
-      checkName = product.checkName or "noSourceReferences";
-    in
-    pkgs.runCommand "${product.name}-no-source-references"
-      {
-        closure = pkgs.closureInfo { rootPaths = [ input ]; };
-        sourcesList = listFile "sources" sources;
-        toolchainList = listFile "toolchain" toolchain;
-        # readelf reads ELF of every architecture; objdump -p prints PE
-        # imports ("DLL Name:").
-        binutils = pkgs.buildPackages.binutils-unwrapped;
-        allowedIn = concatStringsSep "\n" allowedIn;
-        narrowing = "packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };";
-        scrub = "packages.${product.name}.stages.removeSourceReferences = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.removeSourceReferences; };";
-        removal = removeCheckLine "noSourceReferences" product "may reference them";
-      }
-      ''
-        set -euo pipefail
-        bad=0
-        badSource=0
-        # The shared libraries the checked output's files load (computed
-        # once, on first use).
-        needed=
-        neededLibs() {
-          [ -z "$needed" ] || return 0
-          needed=$TMPDIR/needed
-          find -L ${input} -type f | while IFS= read -r f; do
-            { "$binutils/bin/readelf" -d "$f" 2>/dev/null || true; } \
-              | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p'
-            { "$binutils/bin/objdump" -p "$f" 2>/dev/null || true; } \
-              | sed -n 's/^[[:space:]]*DLL Name: *//p'
-          done | sort -u > "$needed"
-        }
-        # Whether toolchain path "$1" holds a library the output loads.
-        loadsFrom() {
-          neededLibs
-          local n d
-          while IFS= read -r n; do
-            [ -n "$n" ] || continue
-            for d in "$1/lib" "$1/bin" "$1"/lib/rustlib/*/lib "$1"/lib/rustlib/*/bin; do
-              if [ -e "$d/$n" ]; then
-                echo "noSourceReferences: ${product.name} loads $n from the Rust toolchain's $1: allowed" >&2
-                return 0
-              fi
-            done
-          done < "$needed"
-          return 1
-        }
-        while IFS= read -r s; do
-          [ -n "$s" ] || continue
-          if grep -qxF "$s" "$closure/store-paths"; then
-            if [ -n "$allowedIn" ]; then
-              excludes=()
-              while IFS= read -r f; do excludes+=("--exclude=$f"); done <<< "$allowedIn"
-              # -a: an archive is binary, and grep would only say so.
-              if ! grep -RlqaF "''${excludes[@]}" "$s" ${input}; then
-                echo "noSourceReferences: ${product.name} references source $s only from files matching ${concatStringsSep ", " allowedIn}: allowed" >&2
-                continue
-              fi
-            fi
-            echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references source $s" >&2
-            bad=1
-            badSource=1
-          fi
-        done < "$sourcesList"
-        while IFS= read -r s; do
-          [ -n "$s" ] || continue
-          if grep -qxF "$s" "$closure/store-paths" && ! loadsFrom "$s"; then
-            echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references the Rust toolchain $s" >&2
-            bad=1
-          fi
-        done < "$toolchainList"
-        if [ "$bad" = 1 ]; then
+        name = "noSourceReferences";
+        kind = "check";
+        description = ''
+          Fails when the closure of the checked output (by default the
+          product's main output) contains a source path or a Rust toolchain
+          path: a std panic location that names rust-src, or an embedded
+          `CARGO`, makes the whole toolchain a run-time dependency. A
+          separate `debug` output is not checked. Every product has this
+          check unless it is removed.
+
+          A source named only by files matching `sourcesAllowedIn` is
+          allowed. One toolchain reference is allowed: a toolchain path
+          holding a shared library the checked output loads (read from its
+          files' ELF `NEEDED` entries and PE imports, looked up in the
+          path's `lib`, `bin` and `lib/rustlib/<target>/{lib,bin}`). So a
+          binary linked with `-C prefer-dynamic` may reference the sysroot
+          whose `libstd-*.so` it loads; rustc's own component, cargo and
+          rust-src never are. A rust-overlay toolchain's joined sysroot
+          brings its rustc and cargo components along, so such a binary
+          still fails there.
+
+          When a source is referenced, the failure says that
+          `env!("CARGO_MANIFEST_DIR")` kept in a string is the usual cause,
+          and names the `removeSourceReferences` stage, at its place in the
+          product's stage order, besides narrowing and removing the check.
+        '';
+        options =
+          let
+            paths =
+              what: default:
+              mkOption {
+                type = types.nullOr (types.listOf storePathType);
+                default = null;
+                description = "The ${what} store paths. `null`: ${default}.";
+              };
+          in
           {
-            echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in the breakbulk documentation: https://schlarpc.github.io/breakbulk/explanation/products.html#source-paths-and-debug-information"
-            if [ "$badSource" = 1 ]; then
-              echo "A source path in a product usually comes from env!(\"CARGO_MANIFEST_DIR\") kept in a string, which rustc's path remapping does not rewrite."
-              echo "When the program never reads that path, blank its hash: $scrub"
+            sources = paths "source" "the product's `sourcePaths` (its source views and crate sources)";
+            toolchain = paths "Rust toolchain" "the product's `toolchainPaths` (rustc, its sysroot, cargo, rust-src). `[ ]` checks sources only";
+            sourcesAllowedIn = mkOption {
+              type = types.nullOr (types.listOf types.str);
+              default = null;
+              example = [ "libapp-*.a" ];
+              description = ''
+                File name globs (in any directory) whose own references to
+                sources are allowed; a source another file names still
+                fails. `null`: the product's `sourcesAllowedIn` (each
+                staticlib root's archive, whose objects keep their debug
+                information for the final link).
+              '';
+            };
+          };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          ...
+        }:
+        let
+          sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
+          toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
+          allowedIn =
+            if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
+          listFile = name: l: builtins.toFile name (concatStringsSep "\n" (sourceStoreRoots l) + "\n");
+          checkName = product.checkName or "noSourceReferences";
+        in
+        pkgs.runCommand "${product.name}-no-source-references"
+          {
+            closure = pkgs.closureInfo { rootPaths = [ input ]; };
+            sourcesList = listFile "sources" sources;
+            toolchainList = listFile "toolchain" toolchain;
+            # readelf reads ELF of every architecture; objdump -p prints PE
+            # imports ("DLL Name:").
+            binutils = pkgs.buildPackages.binutils-unwrapped;
+            allowedIn = concatStringsSep "\n" allowedIn;
+            narrowing = "packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };";
+            scrub = "packages.${product.name}.stages.removeSourceReferences = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.removeSourceReferences; };";
+            removal = removeCheckLine "noSourceReferences" product "may reference them";
+          }
+          ''
+            set -euo pipefail
+            bad=0
+            badSource=0
+            # The shared libraries the checked output's files load (computed
+            # once, on first use).
+            needed=
+            neededLibs() {
+              [ -z "$needed" ] || return 0
+              needed=$TMPDIR/needed
+              find -L ${input} -type f | while IFS= read -r f; do
+                { "$binutils/bin/readelf" -d "$f" 2>/dev/null || true; } \
+                  | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p'
+                { "$binutils/bin/objdump" -p "$f" 2>/dev/null || true; } \
+                  | sed -n 's/^[[:space:]]*DLL Name: *//p'
+              done | sort -u > "$needed"
+            }
+            # Whether toolchain path "$1" holds a library the output loads.
+            loadsFrom() {
+              neededLibs
+              local n d
+              while IFS= read -r n; do
+                [ -n "$n" ] || continue
+                for d in "$1/lib" "$1/bin" "$1"/lib/rustlib/*/lib "$1"/lib/rustlib/*/bin; do
+                  if [ -e "$d/$n" ]; then
+                    echo "noSourceReferences: ${product.name} loads $n from the Rust toolchain's $1: allowed" >&2
+                    return 0
+                  fi
+                done
+              done < "$needed"
+              return 1
+            }
+            while IFS= read -r s; do
+              [ -n "$s" ] || continue
+              if grep -qxF "$s" "$closure/store-paths"; then
+                if [ -n "$allowedIn" ]; then
+                  excludes=()
+                  while IFS= read -r f; do excludes+=("--exclude=$f"); done <<< "$allowedIn"
+                  # -a: an archive is binary, and grep would only say so.
+                  if ! grep -RlqaF "''${excludes[@]}" "$s" ${input}; then
+                    echo "noSourceReferences: ${product.name} references source $s only from files matching ${concatStringsSep ", " allowedIn}: allowed" >&2
+                    continue
+                  fi
+                fi
+                echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references source $s" >&2
+                bad=1
+                badSource=1
+              fi
+            done < "$sourcesList"
+            while IFS= read -r s; do
+              [ -n "$s" ] || continue
+              if grep -qxF "$s" "$closure/store-paths" && ! loadsFrom "$s"; then
+                echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references the Rust toolchain $s" >&2
+                bad=1
+              fi
+            done < "$toolchainList"
+            if [ "$bad" = 1 ]; then
+              {
+                echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in the breakbulk documentation: https://schlarpc.github.io/breakbulk/explanation/products.html#source-paths-and-debug-information"
+                if [ "$badSource" = 1 ]; then
+                  echo "A source path in a product usually comes from env!(\"CARGO_MANIFEST_DIR\") kept in a string, which rustc's path remapping does not rewrite."
+                  echo "When the program never reads that path, blank its hash: $scrub"
+                fi
+                echo "A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic."
+                echo "Check sources only: $narrowing"
+                echo "$removal"
+              } >&2
+              exit 1
             fi
-            echo "A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic."
-            echo "Check sources only: $narrowing"
-            echo "$removal"
-          } >&2
-          exit 1
-        fi
-        touch "$out"
-      ''
-  );
+            touch "$out"
+          ''
+      );
   # ---------------------------------------------------------------------
   # Run-time libraries
 
@@ -2195,37 +2224,39 @@ let
               [ s ]
           ) cfg.allow;
         in
-        pkgs.runCommand (stageName product "noStorePaths") {
-          removal = removeCheckLine "noStorePaths" product "may name them";
-        } ''
-          set -euo pipefail
-          allowed=(${escapeShellArgs patterns})
-          why=${escapeShellArg (lib.optionalString (cfg.why != "") ": ${cfg.why}")}
-          bad=0
-          mkdir -p $out
-          : > $out/allowed
-          while IFS= read -r -d "" f; do
-            rel=''${f#${input}/}
-            while IFS= read -r p; do
-              ok=0
-              for a in "''${allowed[@]}"; do
-                # Unquoted: a glob pattern.
-                if [[ $p == $a ]]; then ok=1; break; fi
-              done
-              if [ "$ok" = 1 ]; then
-                echo "$rel: $p" >> $out/allowed
-              else
-                echo "noStorePaths: ${product.name}: $rel names the Nix store path $p$why" >&2
-                bad=1
-              fi
-            done < <({ LC_ALL=C grep -aoE '${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[A-Za-z0-9+._?=/-]*' "$f" || true; } | LC_ALL=C sort -u)
-          done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
-          if [ "$bad" = 1 ]; then
-            echo "A portable product must not name the Nix store; allow a path with \`stageHelpers.noStorePaths { allow = [ \"<glob>\" ]; }\`." >&2
-            echo "$removal" >&2
-            exit 1
-          fi
-        ''
+        pkgs.runCommand (stageName product "noStorePaths")
+          {
+            removal = removeCheckLine "noStorePaths" product "may name them";
+          }
+          ''
+            set -euo pipefail
+            allowed=(${escapeShellArgs patterns})
+            why=${escapeShellArg (lib.optionalString (cfg.why != "") ": ${cfg.why}")}
+            bad=0
+            mkdir -p $out
+            : > $out/allowed
+            while IFS= read -r -d "" f; do
+              rel=''${f#${input}/}
+              while IFS= read -r p; do
+                ok=0
+                for a in "''${allowed[@]}"; do
+                  # Unquoted: a glob pattern.
+                  if [[ $p == $a ]]; then ok=1; break; fi
+                done
+                if [ "$ok" = 1 ]; then
+                  echo "$rel: $p" >> $out/allowed
+                else
+                  echo "noStorePaths: ${product.name}: $rel names the Nix store path $p$why" >&2
+                  bad=1
+                fi
+              done < <({ LC_ALL=C grep -aoE '${lib.escapeRegex builtins.storeDir}/[0-9a-z]{32}-[A-Za-z0-9+._?=/-]*' "$f" || true; } | LC_ALL=C sort -u)
+            done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
+            if [ "$bad" = 1 ]; then
+              echo "A portable product must not name the Nix store; allow a path with \`stageHelpers.noStorePaths { allow = [ \"<glob>\" ]; }\`." >&2
+              echo "$removal" >&2
+              exit 1
+            fi
+          ''
       );
 in
 {

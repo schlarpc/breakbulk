@@ -34,7 +34,8 @@ let
     readFileType
     ;
 
-  existsFile = root: rel: pathExists (manifest.at root rel) && readFileType (manifest.at root rel) != "directory";
+  existsFile =
+    root: rel: pathExists (manifest.at root rel) && readFileType (manifest.at root rel) != "directory";
 
   # Ancestors of a relative directory, from itself up to the root ("").
   ancestors =
@@ -48,9 +49,9 @@ let
 
   findWsRoot =
     root: dir:
-    lib.findFirst (
-      d: manifest.hasManifest root d && (manifest.readManifest root d) ? workspace
-    ) null (ancestors dir);
+    lib.findFirst (d: manifest.hasManifest root d && (manifest.readManifest root d) ? workspace) null (
+      ancestors dir
+    );
 
   patchPathDeps =
     wsDir: m:
@@ -59,7 +60,10 @@ let
     in
     concatLists (
       map (
-        t: concatLists (lib.mapAttrsToList (_: d: if isAttrs d && d ? path then [ (util.joinRel wsDir d.path) ] else [ ]) t)
+        t:
+        concatLists (
+          lib.mapAttrsToList (_: d: if isAttrs d && d ? path then [ (util.joinRel wsDir d.path) ] else [ ]) t
+        )
       ) tables
     );
 
@@ -79,7 +83,14 @@ let
         let
           inc = (builtins.fromTOML (builtins.readFile (manifest.at root rel))).include or [ ];
           entries = if builtins.isList inc then inc else [ inc ];
-          pathOf = e: if builtins.isString e then e else if isAttrs e && e ? path then e.path else null;
+          pathOf =
+            e:
+            if builtins.isString e then
+              e
+            else if isAttrs e && e ? path then
+              e.path
+            else
+              null;
           paths = filter (p: builtins.isString p && !(lib.hasPrefix "/" p)) (map pathOf entries);
         in
         filter (p: p != ".." && !(lib.hasPrefix "../" p) && existsFile root p) (
@@ -93,14 +104,20 @@ let
           let
             f = builtins.head queue;
           in
-          if lib.elem f seen then walk seen (builtins.tail queue) else walk (seen ++ [ f ]) (builtins.tail queue ++ includesOf f);
+          if lib.elem f seen then
+            walk seen (builtins.tail queue)
+          else
+            walk (seen ++ [ f ]) (builtins.tail queue ++ includesOf f);
     in
     walk [ ] files;
 in
 rec {
   # Every package directory Cargo may load for this workspace.
   packageClosure =
-    { root, wsDir ? "" }:
+    {
+      root,
+      wsDir ? "",
+    }:
     let
       ws = manifest.workspace { inherit root wsDir; };
       seeds = ws.members ++ patchPathDeps wsDir ws.manifest;
@@ -148,7 +165,10 @@ rec {
   # of the dependency graph (`Packages::to_package_id_specs`), so a
   # selection can name one of these and plan its targets.
   outsideRoots =
-    { root, wsDir ? "" }:
+    {
+      root,
+      wsDir ? "",
+    }:
     let
       c = packageClosure { inherit root wsDir; };
       dirs = filter (d: !(lib.elem d c.ws.members)) c.packages;
@@ -168,7 +188,15 @@ rec {
         lib.nameValuePair (m.package or m.project).name (p // { roots = roots.planRoots p.targets; });
     in
     lib.listToAttrs (
-      map one (filter (d: lib.any (k: (manifest.readManifest root d) ? ${k}) [ "package" "project" ]) dirs)
+      map one (
+        filter (
+          d:
+          lib.any (k: (manifest.readManifest root d) ? ${k}) [
+            "package"
+            "project"
+          ]
+        ) dirs
+      )
     );
 
   # Names of target files of one package that exist on disk.
@@ -191,13 +219,23 @@ rec {
       explicit =
         lib.optional (m ? lib && m.lib ? path) m.lib.path
         ++ concatLists (
-          map (k: map (t: t.path) (filter (t: t ? path) (m.${k} or [ ]))) [ "bin" "example" "test" "bench" ]
+          map (k: map (t: t.path) (filter (t: t ? path) (m.${k} or [ ]))) [
+            "bin"
+            "example"
+            "test"
+            "bench"
+          ]
         )
         ++ (
           let
             b = pkg.build or null;
           in
-          if builtins.isString b then [ b ] else if builtins.isList b then b else [ ]
+          if builtins.isString b then
+            [ b ]
+          else if builtins.isList b then
+            b
+          else
+            [ ]
         );
       # Legacy 2015-edition paths are only found through discovery itself.
       predicted =
@@ -211,14 +249,25 @@ rec {
         in
         if r.success then map (t: t.path) r.value else [ ];
       candidates = lib.unique (
-        map util.normalizeRel (conventional ++ listDir "src/bin" ++ listDir "examples" ++ listDir "tests" ++ listDir "benches" ++ explicit ++ predicted)
+        map util.normalizeRel (
+          conventional
+          ++ listDir "src/bin"
+          ++ listDir "examples"
+          ++ listDir "tests"
+          ++ listDir "benches"
+          ++ explicit
+          ++ predicted
+        )
       );
     in
     map (f: util.joinRel pkgDir f) (filter (f: existsFile root (util.joinRel pkgDir f)) candidates);
 
   # Description of the skeleton as relative paths.
   describe =
-    { root, wsDir ? "" }:
+    {
+      root,
+      wsDir ? "",
+    }:
     let
       c = packageClosure { inherit root wsDir; };
       manifests = map (d: util.joinRel d "Cargo.toml") (lib.unique (c.packages ++ c.workspaceRoots));
@@ -235,7 +284,16 @@ rec {
         );
       lock = filter (existsFile root) [ (util.joinRel wsDir "Cargo.lock") ];
       readmes = concatLists (
-        map (d: filter (existsFile root) (map (f: util.joinRel d f) [ "README.md" "README.txt" "README" ])) c.workspaceRoots
+        map (
+          d:
+          filter (existsFile root) (
+            map (f: util.joinRel d f) [
+              "README.md"
+              "README.txt"
+              "README"
+            ]
+          )
+        ) c.workspaceRoots
       );
       empty = lib.unique (concatLists (map (targetFiles root) c.packages) ++ readmes);
       real = lib.unique (manifests ++ projectFiles ++ lock);
@@ -252,7 +310,10 @@ rec {
   # paths. Unlike `describe`, it reads no manifest, so it works while a
   # manifest is broken.
   configFiles =
-    { root, wsDir ? "" }:
+    {
+      root,
+      wsDir ? "",
+    }:
     withIncludes root (
       filter (existsFile root) (
         concatLists (

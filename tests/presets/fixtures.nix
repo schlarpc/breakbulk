@@ -343,16 +343,21 @@ let
   ];
   debugOutputs =
     inst:
-    lib.concatMap (
-      kind:
-      lib.mapAttrsToList (id: u: {
-        inherit id kind;
-        inherit (u) platform;
-        links = (u.outputs or { }) ? bin;
-        staticlib = (u.crate.types or [ ]) == [ "staticlib" ];
-        debug = lib.elem "debug" inst.units.${kind}.${id}.outputs;
-      }) (planOf inst kind).units
-    ) [ "build" "test" ];
+    lib.concatMap
+      (
+        kind:
+        lib.mapAttrsToList (id: u: {
+          inherit id kind;
+          inherit (u) platform;
+          links = (u.outputs or { }) ? bin;
+          staticlib = (u.crate.types or [ ]) == [ "staticlib" ];
+          debug = lib.elem "debug" inst.units.${kind}.${id}.outputs;
+        }) (planOf inst kind).units
+      )
+      [
+        "build"
+        "test"
+      ];
   debugOutputsEval =
     let
       linux = debugOutputs linuxRelease.workspaces.main.instances.${native}.default;
@@ -364,7 +369,9 @@ let
     assert lib.assertMsg (
       linuxWithDebug == [ ]
     ) "debug-outputs: Linux release units with a debug output: ${toString linuxWithDebug}";
-    assert lib.assertMsg (!(product.roots."bin/app" ? debug)) "debug-outputs: the Linux root has a debug output";
+    assert lib.assertMsg (
+      !(product.roots."bin/app" ? debug)
+    ) "debug-outputs: the Linux root has a debug output";
     assert lib.assertMsg (
       !(product.stages.linked ? debug)
     ) "debug-outputs: the Linux product's linked stage has a debug output";
@@ -404,7 +411,9 @@ let
       inst = repo.workspaces.main.instances.${triple}.default;
     in
     {
-      "${prefix}-product" = elfCheck "${prefix}-product" "static" linkers.product "${t.packages.app}/bin/app";
+      "${prefix}-product" =
+        elfCheck "${prefix}-product" "static" linkers.product
+          "${t.packages.app}/bin/app";
       "${prefix}-build-script" = elfCheck "${prefix}-build-script" "dynamic" linkers.buildScript (
         oneFile (buildScriptOf inst)
       );
@@ -904,7 +913,9 @@ let
   crossLtoPreset = presets.linux { crossLanguageLto = true; };
   crossLto = crossLtoWith crossLtoPreset;
   # The same through `linkerKind = "lld"`: the wrapped cc driving lld.
-  crossLtoLld = crossLtoWith (crossLtoPreset { linkerKind = "lld"; });
+  crossLtoLld = crossLtoWith (crossLtoPreset {
+    linkerKind = "lld";
+  });
   crossLtoOff = crossLtoWith presets.linux;
   crossLtoCheck =
     name: repo:
@@ -1012,8 +1023,9 @@ let
       capture = builtins.fromJSON (unitText (lib.head macro));
     in
     assert lib.assertMsg (lib.length macro == 1) "wasm-host-inputs: no wasm-bindgen-macro unit";
-    assert lib.assertMsg (lib.hasInfix "breakbulk-env-wasm-bindgen-macro" (capture.envCapture or ""))
-      "wasm-host-inputs: the macro's unit has capture ${capture.envCapture or "none"}";
+    assert lib.assertMsg (lib.hasInfix "breakbulk-env-wasm-bindgen-macro" (
+      capture.envCapture or ""
+    )) "wasm-host-inputs: the macro's unit has capture ${capture.envCapture or "none"}";
     pkgs.runCommand "wasm-host-inputs" {
       ui = wasmHostInputs.workspaces.main.target.${wasm}.packages.ui;
     } "ls $ui/pkg/*.wasm > $out";
@@ -1056,11 +1068,14 @@ let
       };
       units = lib.mapAttrs (_: wasmBrowserUnits) configs;
       differing = lib.filterAttrs (_: u: u != units.node) units;
-      runs = lib.mapAttrs (_: r: discard r.workspaces.main.target.${wasm}.testRuns.ui.web.drvPath) configs;
+      runs = lib.mapAttrs (
+        _: r: discard r.workspaces.main.target.${wasm}.testRuns.ui.web.drvPath
+      ) configs;
     in
     # Guards against a runner setting that never takes effect.
-    assert lib.assertMsg (lib.length (lib.unique (lib.attrValues runs)) == lib.length (lib.attrValues runs))
-      "wasm-web-runner-sharing: two configurations have the same test run: ${builtins.toJSON runs}";
+    assert lib.assertMsg (
+      lib.length (lib.unique (lib.attrValues runs)) == lib.length (lib.attrValues runs)
+    ) "wasm-web-runner-sharing: two configurations have the same test run: ${builtins.toJSON runs}";
     assert lib.assertMsg (units.node != [ ]) "wasm-web-runner-sharing: no units";
     assert lib.assertMsg (differing == { })
       "wasm-web-runner-sharing: units differ from the node runner's in ${toString (lib.attrNames differing)}";
@@ -1239,7 +1254,9 @@ let
           ++ extra
         );
       r = repo [ ];
-      spec = repo': ws: t: repo'.workspaces.${ws}.target.${t}.spec;
+      spec =
+        repo': ws: t:
+        repo'.workspaces.${ws}.target.${t}.spec;
       # The LLVM major in a tool's store path name (clang-22.1.8, lld-23.1.3).
       majorIn =
         s:
@@ -1279,11 +1296,12 @@ let
           && sysrootIn (spec r "c" wasip2).cflags == "33"
           && majorIn (spec r "b" wasip2).cc == 22
           && majorIn (spec r "c" wasip2).cc == 23;
-        workspaceOverride = (spec r "c" wasip2).rustflags == [
-          "--cfg"
-          "only_c"
-        ]
-        && (spec r "b" wasip2).rustflags == [ ];
+        workspaceOverride =
+          (spec r "c" wasip2).rustflags == [
+            "--cfg"
+            "only_c"
+          ]
+          && (spec r "b" wasip2).rustflags == [ ];
         explicitRustcWins = majorIn (spec explicit "b" wasm).linker == 23;
         packagesOnlyHasNoSpec = spec r "b" "aarch64-unknown-linux-gnu" == null;
         sameDrvs = drvsOf wasmComponent == drvsOf componentExplicit;
@@ -1340,10 +1358,11 @@ let
               )).linker.content;
           in
           linker { llvmMajor = 22; } != linker { llvmMajor = 23; }
-          && linker {
-            llvmMajor = 22;
-            lld = pkgs.llvmPackages_23.lld;
-          } == linker { llvmMajor = 23; };
+          &&
+            linker {
+              llvmMajor = 22;
+              lld = pkgs.llvmPackages_23.lld;
+            } == linker { llvmMajor = 23; };
         llvmTable =
           llvm.majorFor "1.95.0" == 22
           && llvm.majorFor "1.98.1" == 22
@@ -1370,10 +1389,11 @@ let
                 version = "1.300.0";
               };
             }).llvm.version == "22"
-          && llvm.probe {
-            inherit pkgs;
-            rustc = removeAttrs staticRust [ "version" ];
-          } == 23;
+          &&
+            llvm.probe {
+              inherit pkgs;
+              rustc = removeAttrs staticRust [ "version" ];
+            } == 23;
         nixpkgsRustcLlvm =
           (llvm.packagesFor {
             inherit pkgs;
@@ -1419,22 +1439,30 @@ let
             && k "x86_64-unknown-linux-musl" { rustc = rustcAt "1.99.0"; } == "cc"
             && k "aarch64-unknown-linux-musl" { rustc = rustcAt "1.99.0"; } == "cc"
             # nixpkgs' rustc, and a rust-lang rustc on another host.
-            && k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.99.0" // { bundledLld = false; }; } == "cc"
-            && k "x86_64-unknown-linux-gnu" {
-              rustc = rustcAt "1.99.0" // {
-                host = "aarch64-unknown-linux-gnu";
-              };
-            } == "cc"
-            && k "aarch64-unknown-linux-gnu" {
-              rustc = rustcAt "1.99.0" // {
-                host = "aarch64-unknown-linux-gnu";
-              };
-            } == "cc"
+            &&
+              k "x86_64-unknown-linux-gnu" {
+                rustc = rustcAt "1.99.0" // {
+                  bundledLld = false;
+                };
+              } == "cc"
+            &&
+              k "x86_64-unknown-linux-gnu" {
+                rustc = rustcAt "1.99.0" // {
+                  host = "aarch64-unknown-linux-gnu";
+                };
+              } == "cc"
+            &&
+              k "aarch64-unknown-linux-gnu" {
+                rustc = rustcAt "1.99.0" // {
+                  host = "aarch64-unknown-linux-gnu";
+                };
+              } == "cc"
             # From the toolchains themselves.
-            && (presets.rustcFacts {
-              inherit pkgs;
-              rustc = pkgs.rustc;
-            }).bundledLld == false
+            &&
+              (presets.rustcFacts {
+                inherit pkgs;
+                rustc = pkgs.rustc;
+              }).bundledLld == false
             && (presets.rustcFacts {
               inherit pkgs;
               rustc = staticRust;
@@ -1460,14 +1488,16 @@ let
           in
           k native { kind = "mold"; } == "mold"
           && k "aarch64-unknown-linux-musl" { kind = "lld"; } == "lld"
-          && k native {
-            kind = "clang-lld";
-            lto = true;
-          } == "clang-lld"
-          && k native {
-            kind = "cc";
-            rustc = rustcAt "1.99.0";
-          } == "cc"
+          &&
+            k native {
+              kind = "clang-lld";
+              lto = true;
+            } == "clang-lld"
+          &&
+            k native {
+              kind = "cc";
+              rustc = rustcAt "1.99.0";
+            } == "cc"
           && fails (k native { kind = "lld-link"; })
           && fails (k "x86_64-pc-windows-msvc" { kind = "mold"; })
           && fails (k native { kind = "zig"; })
@@ -1479,10 +1509,11 @@ let
             }
           )
           # lld reads rustc's bitcode (cross-lto-lld).
-          && k native {
-            kind = "lld";
-            lto = true;
-          } == "lld"
+          &&
+            k native {
+              kind = "lld";
+              lto = true;
+            } == "lld"
           && fails (
             k native {
               kind = "mold";
@@ -1495,39 +1526,53 @@ let
               staticNonPie = true;
             }
           )
-          && k native {
-            kind = "lld";
-            staticNonPie = true;
-          } == "lld"
-          && lib.hasSuffix "cc-mold" (discard (presets.linux {
-            inherit pkgs;
-            triple = native;
-            linkerKind = "mold";
-          }).linker.content)
-          && lib.hasSuffix "cc-mold" (discard (presets.linux {
-            inherit pkgs;
-            triple = native;
-            linkerKind = "mold";
-          }).host.linker.content)
+          &&
+            k native {
+              kind = "lld";
+              staticNonPie = true;
+            } == "lld"
+          && lib.hasSuffix "cc-mold" (
+            discard
+              (presets.linux {
+                inherit pkgs;
+                triple = native;
+                linkerKind = "mold";
+              }).linker.content
+          )
+          && lib.hasSuffix "cc-mold" (
+            discard
+              (presets.linux {
+                inherit pkgs;
+                triple = native;
+                linkerKind = "mold";
+              }).host.linker.content
+          )
           # Another triple's kind stays on its own units.
-          && lib.hasSuffix "cc-lld" (discard (presets.linux {
-            inherit pkgs;
-            triple = "aarch64-unknown-linux-gnu";
-            rustc = staticRust;
-            linkerKind = "mold";
-          }).host.linker.content)
-          && fails (presets.linux {
-            inherit pkgs;
-            triple = native;
-            crossLanguageLto = true;
-            llvmMajor = 23;
-            linkerKind = "mold";
-          }).linker.content
-          && fails (presets.linuxStatic {
-            inherit pkgs;
-            relocationModel = "static";
-            linkerKind = "mold";
-          }).linker.content;
+          && lib.hasSuffix "cc-lld" (
+            discard
+              (presets.linux {
+                inherit pkgs;
+                triple = "aarch64-unknown-linux-gnu";
+                rustc = staticRust;
+                linkerKind = "mold";
+              }).host.linker.content
+          )
+          &&
+            fails
+              (presets.linux {
+                inherit pkgs;
+                triple = native;
+                crossLanguageLto = true;
+                llvmMajor = 23;
+                linkerKind = "mold";
+              }).linker.content
+          &&
+            fails
+              (presets.linuxStatic {
+                inherit pkgs;
+                relocationModel = "static";
+                linkerKind = "mold";
+              }).linker.content;
         # `crtStatic = true` adds the flag (the option once shadowed the
         # flag list, and the preset failed with "expected a list but found
         # a Boolean"; found in the field trials).
@@ -1624,7 +1669,9 @@ in
       t = staticPkgconfig.workspaces.main.target."x86_64-unknown-linux-musl";
     in
     {
-      static-pkgconfig-musl-product = elfCheck "static-pkgconfig-musl-product" "static" "cc" "${t.packages.app}/bin/app";
+      static-pkgconfig-musl-product =
+        elfCheck "static-pkgconfig-musl-product" "static" "cc"
+          "${t.packages.app}/bin/app";
       static-pkgconfig-musl-run = pkgs.runCommand "static-pkgconfig-musl-run" { } ''
         ${t.packages.app}/bin/app | tee $out
         grep -qx "bbfoo says 42" $out
@@ -1632,7 +1679,9 @@ in
     }
   )
   // sysNativeCrossChecks
-  // { cross-doctests-aarch64 = crossDoctestsCheck; }
+  // {
+    cross-doctests-aarch64 = crossDoctestsCheck;
+  }
   // msvcChecks
   // lib.optionalAttrs (xwinPkgs != null) { msvc-debug-outputs = msvcDebugOutputsEval; }
   // wasmBrowserChecks

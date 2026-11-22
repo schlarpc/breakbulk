@@ -294,11 +294,13 @@ let
           '';
         };
         keep = mkOption {
-          type = types.listOf (types.oneOf [
-            types.str
-            types.path
-            keepFunction
-          ]);
+          type = types.listOf (
+            types.oneOf [
+              types.str
+              types.path
+              keepFunction
+            ]
+          );
           default = [ ];
           example = lib.literalExpression ''
             [
@@ -332,7 +334,9 @@ let
             Whether `predictSources` narrows this package's build-script
             runs to their declared `rerun-if-changed` paths. `null`: `true`,
             unless the package build-depends on a crate whose library code
-            prints such directives (${lib.concatMapStringsSep ", " (n: "`${n}`") (import ../directive-printers.nix)}),
+            prints such directives (${
+              lib.concatMapStringsSep ", " (n: "`${n}`") (import ../directive-printers.nix)
+            }),
             which source prediction cannot read.
           '';
         };
