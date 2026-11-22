@@ -816,14 +816,18 @@ let
           breakbulkToolchain = ws.toolchain;
         };
       };
-      specOptions = lib.collect lib.isOption (
-        removeAttrs e.options [
-          "_module"
-          "packages"
-          "tests"
-          "products"
-          "variantDefaults"
-        ]
+      # Read-only options (`cEnv`) are computed from the others and always
+      # defined, so they say nothing about whether the workspace set a spec.
+      specOptions = lib.filter (o: !(o.readOnly or false)) (
+        lib.collect lib.isOption (
+          removeAttrs e.options [
+            "_module"
+            "packages"
+            "tests"
+            "products"
+            "variantDefaults"
+          ]
+        )
       );
       selections = {
         packages = e.config.packages or null;
