@@ -785,7 +785,9 @@ let
       t = namesRepo.workspaces.main.target.${native};
       run = t.namedTestRuns.a.runs_tool;
       sysroot = pkgs.rustc.unwrapped or pkgs.rustc;
-      libs = breakbulk.testRuns.testLibs pkgs sysroot native;
+      libs = breakbulk.testRuns.testLibs pkgs sysroot (
+        breakbulk.targetTraits.resolve { triple = native; }
+      );
       inputs = lib.attrNames (builtins.getContext (builtins.toJSON run.drvAttrs));
     in
     assert lib.assertMsg (

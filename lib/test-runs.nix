@@ -204,8 +204,9 @@ rec {
     ;
 
   # What test runs read from the Rust toolchain: the standard library's
-  # shared library in the sysroot's target library directory (`libstd-*.so`,
-  # for binaries linked with `-C prefer-dynamic` and the like), copied into
+  # shared library in the sysroot's target library directory (`libstd-*.so`
+  # by the traits' shared-library prefix and suffix, for binaries linked
+  # with `-C prefer-dynamic` and the like), copied into
   # a small derivation laid out as a sysroot (`lib/rustlib/<target>/lib`).
   # Depending on the whole sysroot instead (over 1 GB) would make every
   # test run on a fresh machine fetch the toolchain. The compiler's own
@@ -215,16 +216,16 @@ rec {
   # `rustc_private` test binary finds the driver through its RUNPATH
   # instead. `null` without a sysroot.
   testLibs =
-    pkgs: sysroot: target:
+    pkgs: sysroot: traits:
     if sysroot == null then
       null
     else
-      pkgs.runCommand "rust-test-libs-${target}" { } ''
-        dir=lib/rustlib/${target}/lib
+      pkgs.runCommand "rust-test-libs-${traits.triple}" { } ''
+        dir=lib/rustlib/${traits.triple}/lib
         mkdir -p "$out/$dir"
         for f in ${sysroot}/$dir/*; do
           case "''${f##*/}" in
-            libstd-*.so|libstd-*.dylib|std-*.dll) cp -L "$f" "$out/$dir/" ;;
+            ${lib.escapeShellArg traits.sharedLibraryPrefix}std-*${lib.escapeShellArg traits.sharedLibrarySuffix}) cp -L "$f" "$out/$dir/" ;;
           esac
         done
       '';
@@ -267,17 +268,12 @@ rec {
       dylib = {
         flags = t.dylibFlags;
         extra = lib.optional (platform.libDir != null) platform.libDir;
-      }
-      # The variable and separator, when not LD_LIBRARY_PATH and `:`.
-      // lib.optionalAttrs (platform.dylibPath != linuxDylib) { path = platform.dylibPath; };
+        path = platform.dylibPath;
+      };
     };
 
-  linuxDylib = {
-    var = "LD_LIBRARY_PATH";
-    sep = ":";
-  };
   # A spec's dynamic-library variable ({ var; sep; } or null).
-  specDylib = spec: spec.dylib.path or linuxDylib;
+  specDylib = spec: spec.dylib.path;
 
   # Shell lines that set up a test process's environment from a spec, for
   # bash. `jq` is the jq executable; `vars` replaces values of `spec.env`.
@@ -968,9 +964,9 @@ rec {
 
   # How the test processes of each platform run, `{ host; target; }`, from
   # each platform's settings (`{ triple; runner; testSystem; dylibPath; }`,
-  # `testPkgs` and `objcopy` optional). Cargo runs a test unit with its
-  # compile kind's runner (`target_runner(unit.kind)`), library directories and sysroot
-  # library directory (`fill_env`, `sysroot_target_libdir[&kind]`); a host
+  # `testPkgs`, `objcopy` and `traits` optional). Cargo runs a test unit
+  # with its compile kind's runner (`target_runner(unit.kind)`), library
+  # directories and sysroot library directory (`fill_env`, `sysroot_target_libdir[&kind]`); a host
   # unit (a proc macro's unit tests) is built for the build machine, so it
   # gets the host's, never `testSystem` or the target's runner. Each entry:
   #
@@ -998,7 +994,7 @@ rec {
       one =
         name: s:
         let
-          libs = testLibs pkgs sysroot s.triple;
+          libs = testLibs pkgs sysroot (s.traits or (targetTraits.resolve { inherit (s) triple; }));
         in
         {
           inherit (s) triple dylibPath;
@@ -1123,6 +1119,7 @@ rec {
             dylibPath
             testPkgs
             objcopy
+            traits
             ;
         };
       };

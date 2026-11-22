@@ -599,7 +599,8 @@ let
             testPkgs
             objcopy
             ;
-        };
+        }
+        // lib.optionalAttrs (traits != null) { inherit traits; };
       };
       platformOf = r: platforms.${r.breakbulkRoot.platform};
       jqOf = p: "${p.testPkgs.jq}/bin/jq";
