@@ -283,7 +283,7 @@ let
     // windowsDllChecks
     // windowsGnullvmAarch64Checks;
 
-  # aarch64 gnullvm: nixpkgs' ucrtAarch64 (LLVM mingw-w64). Its own
+  # aarch64 gnullvm: nixpkgs' mingw-ucrt-aarch64 (LLVM mingw-w64). Its own
   # repository, so the x86_64 checks keep their toolchain. wine runs no
   # ARM64 code, so the product and the test binary are only linked.
   wgnuA64 = "aarch64-pc-windows-gnullvm";

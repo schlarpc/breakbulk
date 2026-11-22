@@ -162,7 +162,7 @@ let
   # than the GNU triple (CPU flags, the kernel config). The check
   # `target-traits` elaborates each and compares nixpkgs' `rust.rustcTarget`
   # with the key; nixpkgs cannot seed this table itself, because several
-  # examples share a Rust target (mingwW64 and mingw-ucrt-x86_64,
+  # examples share a Rust target (mingw-msvcrt-x86_64 and mingw-ucrt-x86_64,
   # armv7l-hf-multiplatform and remarkable1).
   nixpkgsSystems = {
     "aarch64-unknown-linux-gnu" = "aarch64-multiplatform";
@@ -185,10 +185,10 @@ let
     "loongarch64-unknown-linux-gnu" = "loongarch64-linux";
     "wasm32-wasip1" = "wasi32";
     # mingw-w64 with gcc and msvcrt (Rust's own windows-gnu CRT).
-    "x86_64-pc-windows-gnu" = "mingwW64";
-    "i686-pc-windows-gnu" = "mingw32";
+    "x86_64-pc-windows-gnu" = "mingw-msvcrt-x86_64";
+    "i686-pc-windows-gnu" = "mingw-msvcrt-i686";
     # LLVM mingw-w64 with ucrt.
-    "aarch64-pc-windows-gnullvm" = "ucrtAarch64";
+    "aarch64-pc-windows-gnullvm" = "mingw-ucrt-aarch64";
     "x86_64-pc-windows-gnullvm" = "mingw-ucrt-x86_64-llvm";
   };
 

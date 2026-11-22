@@ -661,7 +661,7 @@ in
         pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.hostPlatform.config
         "riscv64-unknown-linux-musl"
         "armv7l-unknown-linux-musleabihf"
-        pkgs.pkgsCross.mingwW64.stdenv.hostPlatform.config
+        pkgs.pkgsCross.mingw-msvcrt-x86_64.stdenv.hostPlatform.config
         lib.systems.examples.mingw-ucrt-x86_64-llvm.config
         lib.systems.examples.aarch64-multiplatform.config
       ];
