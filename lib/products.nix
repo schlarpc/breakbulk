@@ -127,6 +127,12 @@ let
       # path packages get none).
       staticPrefix = lib.escapeShellArg traits.staticLibraryPrefix;
       staticSuffix = lib.escapeShellArg traits.staticLibrarySuffix;
+      # The side files rustc packs for one linked output (`.dwp`, `.dSYM`),
+      # which Cargo renames with the bin. Not the `.pdb`: the linker
+      # names it, and the binary records that name.
+      packedSuffixes = map (a: lib.escapeShellArg a.suffix) (
+        lib.filter (a: a.when == "split-packed" && !(a.perObject or false)) traits.debugArtifacts
+      );
       # Only dynamic-derivation roots need the build-time bookkeeping; IFD
       # mode's script stays as it was.
       anyDyn = lib.any isDynamic built;
@@ -190,15 +196,11 @@ let
                 [ -e "$f" ] || continue
                 b=''${f##*/}
                 case "$b" in
-                  ${
-                    if bin then
-                      ''
-                        *.dwp) link "$f" ${target}.dwp "$debug" ;;
-                        *.dSYM) link "$f" ${target}.dSYM "$debug" ;;
-                      ''
-                    else
-                      ""
-                  }
+                  ${lib.optionalString bin (
+                    concatMapStrings (x: ''
+                      *${x}) link "$f" ${target}${x} "$debug" ;;
+                    '') packedSuffixes
+                  )}
                   *) link "$f" "$b" "$debug" ;;
                 esac
               done
