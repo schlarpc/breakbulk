@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
+Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
 
 ## Summary
 
@@ -36,6 +36,7 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 | [T13](#t13-which-targets-each-command-builds) | Which targets each command builds | yes |
 | [T14](#t14-the-clippy-chain) | The clippy chain | yes |
 | [T15](#t15-test-units-are-told-by-target-kind) | Test units are told by target kind | yes |
+| [T16](#t16-rustc-wrappers-and-the-files-beside-a-crate) | Rustc wrappers and the files beside a crate | yes |
 | [S1](#s1-sentinel-placement-and-shapes) | Sentinel placement and shapes | yes |
 | [S2](#s2-sentinels-change-no-unit-identity) | Sentinels change no unit identity | yes |
 | [S3](#s3-link-arg-kinds-cargo-accepts-per-package) | Link-arg kinds Cargo accepts per package | yes |
@@ -741,6 +742,15 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 - **Pinned by.** `target-traits` (`testToolchainCapabilities`: rust-overlay 1.94, 1.95, 1.97, 1.99 and nightly, nixpkgs 1.99, with and without versions, and with a fenix-style date for a version); `differential-errors` (nixpkgs' cargo, a `dev` build) and `differential-errors-1_95` (stable), `differential-nightly`, `plan-directives-nightly`. Rust: `capabilities::tests::json_shape`.
 - **If it changes.** A feature is turned on for a toolchain that rejects it, or left off; planning or units fail.
 
+### L11. Where rustc links with its bundled lld
+
+- **Assumption.** A rustc links a target with its bundled lld (linker flavor `gnu-lld-cc`, self-contained linker) only when it is a rust-lang build (rustup, rust-overlay, fenix) whose host is `x86_64-unknown-linux-gnu`, and then for `x86_64-unknown-linux-gnu` from 1.90 (nightly from 1.80) and for every target on the base linux-gnu spec (`*-linux-gnu*`, not musl) from 1.92. nixpkgs' rustc (`--disable-lld`, nixpkgs' LLVM) never does. breakbulk's default Linux linker kind follows it: `lld` there, `cc` elsewhere.
+- **Where.** `lib/presets/linker.nix`: `rustcPicksLld`, `defaultKind`; `lib/toolchain-facts.nix`: `bundledLld`.
+- **Upstream.** rust-lang/rust `compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs` (1.80 to 1.91: `CFG_USE_SELF_CONTAINED_LINKER`) and `spec/base/linux_gnu.rs` (1.92 on: `CFG_DEFAULT_LINKER_SELF_CONTAINED_LLD_CC`); `src/bootstrap/src/core/config/toml/rust.rs` (1.89: on for the dev and nightly channels only; 1.90: every channel, host `x86_64-unknown-linux-gnu`, not with an external `llvm-config`), `core/config/toml/target.rs`, `default_linux_linker_overrides`, and `build_steps/compile.rs` (1.95); nixpkgs `pkgs/development/compilers/rust/rustc.nix` (`--disable-lld`). Checked for this page.
+- **Holds for.** 1.89 to nightly 1.101, by check.
+- **Pinned by.** `linker-kind-rustc`: the kind for seven Linux targets against `rustc --print target-spec-json` of rust-overlay's 1.89, 1.90, 1.91, 1.92, 1.99 and current nightly, and nixpkgs' rustc; `presets-eval` (`linkerKinds`, the version rule).
+- **If it changes.** Products link with another linker than `cargo build` uses, with a different layout and `.comment`; `linker-kind-rustc` fails.
+
 ### G1. Target-trait base fields are rustc's cfg
 
 - **Assumption.** For built-in targets, `target_vendor`, `target_os`, `target_env`, `target_abi` and `target_family` follow from the target name as `lib/target-traits.nix` parses it.
@@ -776,15 +786,6 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 - **Holds for.** nixpkgs rustc 1.99, 255 known targets.
 - **Pinned by.** `target-traits-rustc`.
 - **If it changes.** A preset, linker or debug stage is chosen for the wrong platform; the check fails on the next rustc bump.
-
-### L11. Where rustc links with its bundled lld
-
-- **Assumption.** A rustc links a target with its bundled lld (linker flavor `gnu-lld-cc`, self-contained linker) only when it is a rust-lang build (rustup, rust-overlay, fenix) whose host is `x86_64-unknown-linux-gnu`, and then for `x86_64-unknown-linux-gnu` from 1.90 (nightly from 1.80) and for every target on the base linux-gnu spec (`*-linux-gnu*`, not musl) from 1.92. nixpkgs' rustc (`--disable-lld`, nixpkgs' LLVM) never does. breakbulk's default Linux linker kind follows it: `lld` there, `cc` elsewhere.
-- **Where.** `lib/presets/linker.nix`: `rustcPicksLld`, `defaultKind`; `lib/toolchain-facts.nix`: `bundledLld`.
-- **Upstream.** rust-lang/rust `compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs` (1.80 to 1.91: `CFG_USE_SELF_CONTAINED_LINKER`) and `spec/base/linux_gnu.rs` (1.92 on: `CFG_DEFAULT_LINKER_SELF_CONTAINED_LLD_CC`); `src/bootstrap/src/core/config/toml/rust.rs` (1.89: on for the dev and nightly channels only; 1.90: every channel, host `x86_64-unknown-linux-gnu`, not with an external `llvm-config`), `core/config/toml/target.rs`, `default_linux_linker_overrides`, and `build_steps/compile.rs` (1.95); nixpkgs `pkgs/development/compilers/rust/rustc.nix` (`--disable-lld`). Checked for this page.
-- **Holds for.** 1.89 to nightly 1.101, by check.
-- **Pinned by.** `linker-kind-rustc`: the kind for seven Linux targets against `rustc --print target-spec-json` of rust-overlay's 1.89, 1.90, 1.91, 1.92, 1.99 and current nightly, and nixpkgs' rustc; `presets-eval` (`linkerKinds`, the version rule).
-- **If it changes.** Products link with another linker than `cargo build` uses, with a different layout and `.comment`; `linker-kind-rustc` fails.
 
 ## Fetching, vendoring and root prediction
 
@@ -881,6 +882,6 @@ Smaller unpinned details that are harmless if they change are noted in their ent
 
 ## Keeping this page current
 
-- A new place in the code that relies on Cargo or rustc behavior beyond a documented format gets an entry here, with its test.
+- A new place in the code that relies on Cargo or rustc behavior beyond a documented format gets an entry here, with its test, and a row in the summary table in the entry's place; the status line counts both. `docs-assumptions-summary` fails when the table, the entries and the counts disagree.
 - When a new release joins the window (the rust-overlay versions in `tests/plan`, `tests/differential` and the version tables), update "Holds for".
 - When an issue in [Gaps](#gaps) is closed, move the entry's test into "Pinned by".

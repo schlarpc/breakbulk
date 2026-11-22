@@ -304,6 +304,8 @@
           # The committed options pages are what the modules generate, and
           # the stage helpers page what the helpers generate.
           docs-options-fresh = (docsFor pkgs).optionsFresh;
+          # assumptions.md's summary table and status line match its entries.
+          docs-assumptions-summary = (docsFor pkgs).assumptionsSummary;
 
           # Every fixture is in `nix run .#test-rebuild`'s catalog or
           # skipped with a reason (evaluation only).

@@ -11,6 +11,8 @@
 #   optionsPages    the options pages as the modules generate them
 #   stageHelpersPage  the stage helpers page as the helpers generate it
 #   optionsFresh    a check that the committed pages are the generated ones
+#   assumptionsSummary  a check that assumptions.md's summary table and
+#                   status line agree with its entries
 #   updateOptions   a script writing the generated pages into a checkout
 #                   (nix run .#update-docs-options)
 {
@@ -96,6 +98,13 @@ rec {
     chmod u+w ${helpersFile}
     echo "wrote ${helpersFile}"
   '';
+
+  assumptionsSummary =
+    pkgs.runCommand "docs-assumptions-summary" { nativeBuildInputs = [ pkgs.python3 ]; }
+      ''
+        python3 -I ${./assumptions-summary.py} ${./src/reference/assumptions.md}
+        touch $out
+      '';
 
   links = pkgs.runCommand "docs-site-links" { nativeBuildInputs = [ pkgs.lychee ]; } ''
     # lychee builds its HTTP client even with --offline, and that needs CAs.
