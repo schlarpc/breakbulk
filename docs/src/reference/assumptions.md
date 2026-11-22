@@ -578,12 +578,12 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 
 ### X1. rustc's JSON diagnostics
 
-- **Assumption.** With `--error-format=json`, rustc writes one JSON object per stderr line, diagnostics carry their text in `rendered`, artifact notifications have `"$message_type":"artifact"`, and future-incompatibility reports have `future_incompat_report`.
+- **Assumption.** With `--error-format=json`, rustc writes one JSON object per stderr line, diagnostics carry their text in `rendered`, artifact notifications have `"$message_type":"artifact"`, future-incompatibility reports have `future_incompat_report`, and the unused-dependency reports that `--json=unused-externs-silent` asks for have `"$message_type":"unused_extern"`. Nightly Cargo 1.101 asks for those on every compile, with `--force-warn=unused_crate_dependencies` so that rustc writes them; stable 1.99 asks only under `-Zcargo-lints`.
 - **Where.** `crates/breakbulk-unit/src/diag.rs`: `classify`.
-- **Upstream.** rustc's JSON output format (rustc book, "JSON Output"); Cargo renders the same fields.
-- **Holds for.** 1.99 (nixpkgs' rustc).
-- **Pinned by.** `plan-diagnostics`: two compile units of the `diagnostics` fixture, run by hand with real rustc, log rustc's rendered warning (`unused variable`) and error (`E0308`) and no `{"$message_type"` line. Rust: `diag::tests::*` check hand-written lines.
-- **If it changes.** Build logs are raw JSON again; `plan-diagnostics` fails.
+- **Upstream.** rustc's JSON output format (rustc book, "JSON Output"); rustc 1.99.0 `compiler/rustc_errors/src/json.rs` (`EmitTyped`, `emit_unused_externs`), `compiler/rustc_metadata/src/creader.rs`, `report_unused_deps` (a line only when the lint `unused_crate_dependencies` is not `allow`). cargo `3c747ea3e` `src/compiler/mod.rs`: `add_error_format_and_color` (`unused-externs-silent` always), `build_base_args` (`--force-warn=unused_crate_dependencies`); cargo `0.100.0` the same function (`unused-externs-silent` only with `cargo_lints`). Checked for this page.
+- **Holds for.** 1.99 (nixpkgs' rustc); nightly 1.101 for `unused_extern`.
+- **Pinned by.** `plan-diagnostics`: two compile units of the `diagnostics` fixture, run by hand with real rustc, log rustc's rendered warning (`unused variable`) and error (`E0308`) and no `{"$message_type"` line. `plan-diagnostics-nightly`: the same with nightly Cargo and rustc, whose units ask for `unused_extern` lines (the check fails if they stop asking). Rust: `diag::tests::*` check hand-written lines.
+- **If it changes.** Build logs are raw JSON again; `plan-diagnostics` or `plan-diagnostics-nightly` fails.
 
 ### X2. Which debuginfo side files a link writes
 

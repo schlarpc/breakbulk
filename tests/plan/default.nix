@@ -43,6 +43,45 @@ let
       (builtins.fromJSON (builtins.unsafeDiscardStringContext run.drvAttrs.BREAKBULK_UNIT)).outDir or ""
     }";
 
+  # The `diagnostics` checks over `ws`, the diagnostics fixture's
+  # workspace; `extra` is more shell, run after the units.
+  diagnosticsCheck =
+    name: ws: extra:
+    let
+      unitOf =
+        n:
+        (lib.findFirst (u: u.name == "${n}-0.1.0-lib") (throw "diagnostics: no ${n} unit") (
+          lib.attrValues ws.units.build
+        )).drvAttrs.BREAKBULK_UNIT;
+    in
+    pkgs.runCommand name
+      {
+        warns = unitOf "warns";
+        broken = unitOf "broken";
+      }
+      ''
+        result=$out
+        run() { BREAKBULK_UNIT="$1" out=$TMPDIR/$2-o rlib=$TMPDIR/$2-rlib rmeta=$TMPDIR/$2-rmeta flags=$TMPDIR/$2-f \
+          ${tools.breakbulk-unit}/bin/breakbulk-unit unit; }
+        run "$warns" warns 2> warns.log || { cat warns.log; echo "warns failed" >&2; exit 1; }
+        if run "$broken" broken 2> broken.log; then
+          echo "the broken unit succeeded; it must fail" >&2
+          exit 1
+        fi
+        cat warns.log broken.log
+        # Cargo asks for `diagnostic-rendered-ansi`: the text is colored.
+        for f in warns broken; do sed 's/\x1b\[[0-9;]*m//g' $f.log > $f.txt; done
+        grep -q 'warning: unused variable: `unused`' warns.txt
+        grep -q 'error\[E0308\]: mismatched types' broken.txt
+        if grep -q '{"\$message_type"' warns.log broken.log; then
+          echo "raw rustc JSON in a unit log" >&2
+          exit 1
+        fi
+        ${extra}
+        mkdir -p $result
+        cp warns.log broken.log $result/
+      '';
+
   # Plain cargo over the same sources, offline against the same vendor
   # directory: the reference products. Run outside $HOME (the sandbox).
   cargoBuild =
@@ -518,41 +557,7 @@ in
   # text. With a real rustc, a warning and an error in two compile units
   # (run by hand, as above) appear as rustc renders them, and no raw JSON
   # line (`{"$message_type"`) reaches the log.
-  diagnostics =
-    let
-      ws = mk "diagnostics" { };
-      unitOf =
-        n:
-        (lib.findFirst (u: u.name == "${n}-0.1.0-lib") (throw "diagnostics: no ${n} unit") (
-          lib.attrValues ws.units.build
-        )).drvAttrs.BREAKBULK_UNIT;
-    in
-    pkgs.runCommand "diagnostics-check"
-      {
-        warns = unitOf "warns";
-        broken = unitOf "broken";
-      }
-      ''
-        result=$out
-        run() { BREAKBULK_UNIT="$1" out=$TMPDIR/$2-o rlib=$TMPDIR/$2-rlib rmeta=$TMPDIR/$2-rmeta flags=$TMPDIR/$2-f \
-          ${tools.breakbulk-unit}/bin/breakbulk-unit unit; }
-        run "$warns" warns 2> warns.log || { cat warns.log; echo "warns failed" >&2; exit 1; }
-        if run "$broken" broken 2> broken.log; then
-          echo "the broken unit succeeded; it must fail" >&2
-          exit 1
-        fi
-        cat warns.log broken.log
-        # Cargo asks for `diagnostic-rendered-ansi`: the text is colored.
-        for f in warns broken; do sed 's/\x1b\[[0-9;]*m//g' $f.log > $f.txt; done
-        grep -q 'warning: unused variable: `unused`' warns.txt
-        grep -q 'error\[E0308\]: mismatched types' broken.txt
-        if grep -q '{"\$message_type"' warns.log broken.log; then
-          echo "raw rustc JSON in a unit log" >&2
-          exit 1
-        fi
-        mkdir -p $result
-        cp warns.log broken.log $result/
-      '';
+  diagnostics = diagnosticsCheck "diagnostics-check" (mk "diagnostics" { }) "";
 
   # breakbulk's binaries are built from narrow sources and trimmed
   # lockfiles, so an edit to the planner leaves breakbulk-unit (an input of
@@ -1048,6 +1053,25 @@ in
       );
   in
   {
+    # Assumption X1 on nightly: Cargo 1.101 passes `unused-externs-silent`
+    # and `--force-warn=unused_crate_dependencies` to every compile, so
+    # rustc writes an `unused_extern` line for each; breakbulk-unit drops it.
+    diagnostics-nightly =
+      diagnosticsCheck "diagnostics-nightly-check" (mk "diagnostics" { inherit toolchain; })
+        ''
+          # Not vacuous: both units ask rustc for the lines.
+          for u in "$warns" "$broken"; do
+            case "$u" in
+              *unused-externs-silent*) ;;
+              *) echo "a unit does not pass unused-externs-silent" >&2; exit 1 ;;
+            esac
+            case "$u" in
+              *--force-warn=unused_crate_dependencies*) ;;
+              *) echo "a unit does not pass --force-warn=unused_crate_dependencies" >&2; exit 1 ;;
+            esac
+          done
+        '';
+
     # #3: nightly `resolver.feature-unification = "package"` in the
     # project's config. Cargo builds `shared` once per selected package's
     # feature set (a: fa, b: fb, shared itself: none) instead of once with
