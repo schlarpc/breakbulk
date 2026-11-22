@@ -37,6 +37,7 @@
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
 # Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
+#   breakbulk.presetHelpers (the functions presets are built from),
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
 #   breakbulk.testApps.mkTestApps { ... } (test apps, for `nix run`),
@@ -129,7 +130,7 @@ let
   };
   runners = import ./runners.nix { inherit lib; };
   wrappers = import ./wrappers.nix { inherit lib; };
-  presets = import ./presets {
+  presetsLib = import ./presets {
     inherit
       lib
       util
@@ -143,6 +144,7 @@ let
       ;
     stageHelpers = stages.helpers;
   };
+  inherit (presetsLib) presets;
   appleSdk = import ./apple-sdk.nix { inherit lib; };
 
   mkFetch =
@@ -295,8 +297,11 @@ let
     # linuxPortable, windows, darwin, wasmWeb, wasmComponent, uefi}, named for their
     # purpose, the mechanism from the triple; runners; the Rust to
     # LLVM version table; the Rust to wasi-sdk table (lib/wasi-sdk.nix).
+    # The functions presets are built from: `chooseLinker`, `linkerKind`,
+    # `targetPkgsFor`, ….
     # Target traits (lib/target-traits.nix): `resolve { triple; traits; }`,
     # `parse`, `nativeTriple`.
+    presetHelpers = presetsLib.helpers;
     inherit
       targetTraits
       presets

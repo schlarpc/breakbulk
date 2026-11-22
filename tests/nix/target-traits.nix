@@ -507,7 +507,7 @@ in
         map
           (
             t:
-            bb.presets.linkerKind {
+            bb.presetHelpers.linkerKind {
               triple = t;
               inherit rustc;
             }
@@ -557,7 +557,7 @@ in
     };
     # The test runner kinds (lib/presets/runner.nix), from traits alone.
     testRunnerKinds = {
-      expr = map (c: bb.presets.runnerKind ({ traits = r c.t; } // removeAttrs c [ "t" ])) [
+      expr = map (c: bb.presetHelpers.runnerKind ({ traits = r c.t; } // removeAttrs c [ "t" ])) [
         {
           t = "x86_64-unknown-linux-gnu";
           canExecute = true;
@@ -620,10 +620,10 @@ in
         "none"
       ];
     };
-    # One table of cross package sets (presets.targetPkgsFor), for the
+    # One table of cross package sets (presetHelpers.targetPkgsFor), for the
     # Linux and the MinGW presets alike.
     testPackageSets = {
-      expr = map (t: (bb.presets.targetPkgsFor pkgs t).stdenv.hostPlatform.config) [
+      expr = map (t: (bb.presetHelpers.targetPkgsFor pkgs t).stdenv.hostPlatform.config) [
         "x86_64-unknown-linux-gnu"
         "aarch64-unknown-linux-musl"
         "x86_64-pc-windows-gnu"
@@ -776,7 +776,7 @@ in
         [
           (builtins.isAttrs u)
           (fails u.isLinux)
-          (fails (bb.presets.linkerKind { triple = "my-board"; }))
+          (fails (bb.presetHelpers.linkerKind { triple = "my-board"; }))
         ];
       expected = [
         true
@@ -802,8 +802,8 @@ in
           a = r "aarch64-linux-android";
         in
         [
-          (fails (bb.presets.linkerKind { triple = "aarch64-linux-android"; }))
-          (bb.presets.runnerKind {
+          (fails (bb.presetHelpers.linkerKind { triple = "aarch64-linux-android"; }))
+          (bb.presetHelpers.runnerKind {
             traits = a;
             canExecute = false;
           })
@@ -856,7 +856,7 @@ in
     testRepositoryTraits = {
       expr = {
         board = pick [ "os" "env" "executableSuffix" "isLinux" "debugInfo" ] board;
-        linker = bb.presets.linkerKind {
+        linker = bb.presetHelpers.linkerKind {
           triple = "my-board";
           traits = board;
           rustc = {
@@ -934,9 +934,9 @@ in
       ];
       kind =
         rustc: triple:
-        bb.presets.linkerKind {
+        bb.presetHelpers.linkerKind {
           inherit triple;
-          rustc = bb.presets.rustcFacts { inherit pkgs rustc; };
+          rustc = bb.presetHelpers.rustcFacts { inherit pkgs rustc; };
         };
       rows = lib.concatLists (
         lib.mapAttrsToList (

@@ -78,7 +78,7 @@ of stable, plus the current nightly.
 
 A preset picks the linker from the target's traits and your rustc. One
 function makes the choice for every preset
-(`presets.linkerKind`, used by `presets.chooseLinker`). The default is
+(`presetHelpers.linkerKind`, used by `presetHelpers.chooseLinker`). The default is
 the linker rustc itself would use for the triple and Rust release, so a
 product links as with `cargo build`. Only the program differs: nixpkgs'
 build of it, through nixpkgs' wrapped C compiler, never rustc's own

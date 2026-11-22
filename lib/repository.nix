@@ -883,7 +883,7 @@ let
 
   # The nixpkgs package set of a target's units, one rule for every use:
   # the target spec's `packageSet` (set by the presets,
-  # `presets.targetPkgsFor`), else pkgs for the native triple, else null:
+  # `presetHelpers.targetPkgsFor`), else pkgs for the native triple, else null:
   # the target has none (msvc, wasm32-unknown-unknown), so its packages
   # cannot have library inputs.
   packageSetOf =

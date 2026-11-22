@@ -47,7 +47,7 @@ let
     else if flavor == "wasm-bindgen" || flavor == "wasmtime" then
       flavor
     else if flavor != null then
-      throw "breakbulk.presets.chooseRunner: unknown runner flavor `${flavor}`"
+      throw "breakbulk.presetHelpers.chooseRunner: unknown runner flavor `${flavor}`"
     else if traits.isWindows then
       (
         if

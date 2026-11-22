@@ -344,7 +344,7 @@ let
         patches = map (p: baseNameOf (toString p)) (llvm.libllvm.patches or [ ]);
       }
     else
-      throw "breakbulk.presets.linkerFeatures: `${kind}` is not an Apple linker kind";
+      throw "breakbulk.presetHelpers.linkerFeatures: `${kind}` is not an Apple linker kind";
 
   # Whether `lld` (lldOf) has feature `f` (a name in linkerFeatures).
   lldHas =
@@ -395,7 +395,7 @@ let
     if flavor == "zig" then
       "zig"
     else if flavor != null then
-      throw "breakbulk.presets.chooseLinker: unknown linker flavor `${flavor}`"
+      throw "breakbulk.presetHelpers.chooseLinker: unknown linker flavor `${flavor}`"
     else if t.isMsvc || t.isUefi then
       "lld-link"
     else if t.isWasm && t.isWasi && t.env == "p2" then
@@ -407,9 +407,9 @@ let
     else if t.isApple then
       (
         if rustc == null then
-          throw "breakbulk.presets.chooseLinker: the default linker for `${triple}` depends on whether rustc ships its own rust-lld; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
+          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` depends on whether rustc ships its own rust-lld; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
         else if (targetTraits.resolve { triple = rustc.host; }).isApple then
-          throw "breakbulk.presets.chooseLinker: no linker rule for `${triple}` on a Mac build machine yet (issue #13); set `targets.${triple}.linker`"
+          throw "breakbulk.presetHelpers.chooseLinker: no linker rule for `${triple}` on a Mac build machine yet (issue #13); set `targets.${triple}.linker`"
         else if rustc.bundledLld then
           "rust-lld"
         else
@@ -420,16 +420,16 @@ let
         if lto then
           "clang-lld"
         else if rustc == null then
-          throw "breakbulk.presets.chooseLinker: the default linker for `${triple}` is the one rustc picks, which depends on its release and build; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
+          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` is the one rustc picks, which depends on its release and build; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
         else if rustcPicksLld { inherit triple traits rustc; } then
           "lld"
         else
           "cc"
       )
     else if t.os == "android" then
-      throw "breakbulk.presets.chooseLinker: no linker rule for the Android target `${triple}`: Android has the Linux kernel but its own userland (bionic, the NDK's linker), which breakbulk has no preset for yet (issue #27); set `targets.${triple}.linker`"
+      throw "breakbulk.presetHelpers.chooseLinker: no linker rule for the Android target `${triple}`: Android has the Linux kernel but its own userland (bionic, the NDK's linker), which breakbulk has no preset for yet (issue #27); set `targets.${triple}.linker`"
     else
-      throw "breakbulk.presets.chooseLinker: no linker rule for `${triple}`; set `targets.${triple}.linker`";
+      throw "breakbulk.presetHelpers.chooseLinker: no linker rule for `${triple}`; set `targets.${triple}.linker`";
 
   linkerKind =
     {
@@ -460,15 +460,15 @@ let
           ;
       }
     else if kind == "zig" then
-      throw "breakbulk.presets.chooseLinker: ${asked}: zig links only for presets.linuxPortable, which sets it with the C compiler and glibc"
+      throw "breakbulk.presetHelpers.chooseLinker: ${asked}: zig links only for presets.linuxPortable, which sets it with the C compiler and glibc"
     else if !(kinds ? ${kind}) then
-      throw "breakbulk.presets.chooseLinker: unknown linker kind `${kind}` for `${triple}`; known: ${lib.concatStringsSep ", " kindNames}"
+      throw "breakbulk.presetHelpers.chooseLinker: unknown linker kind `${kind}` for `${triple}`; known: ${lib.concatStringsSep ", " kindNames}"
     else if !(k.on traits) then
-      throw "breakbulk.presets.chooseLinker: ${asked} links for ${k.what} targets, not for `${triple}`"
+      throw "breakbulk.presetHelpers.chooseLinker: ${asked} links for ${k.what} targets, not for `${triple}`"
     else if flavor == "zig" then
-      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with linuxPortable, which links with `zig cc` against its old glibc"
+      throw "breakbulk.presetHelpers.chooseLinker: ${asked} cannot link for `${triple}` with linuxPortable, which links with `zig cc` against its old glibc"
     else if lto && !(k.bitcode or false) then
-      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (${
+      throw "breakbulk.presetHelpers.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (${
         lib.concatMapStringsSep ", " (n: "`${n}`") (
           lib.attrNames (
             lib.filterAttrs (_: k: (k.bitcode or false) && (k.choosable or true) && k.on traits) kinds
@@ -476,7 +476,7 @@ let
         )
       })"
     else if staticNonPie && kind == "mold" then
-      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `relocationModel = \"static\"`: mold links non-PIE static glibc Rust executables that crash at startup"
+      throw "breakbulk.presetHelpers.chooseLinker: ${asked} cannot link for `${triple}` with `relocationModel = \"static\"`: mold links non-PIE static glibc Rust executables that crash at startup"
     else
       kind;
 
@@ -498,7 +498,7 @@ let
   needs =
     kind: what: v:
     if v == null then
-      throw "breakbulk.presets.chooseLinker: the `${kind}` linker needs `${what}`"
+      throw "breakbulk.presetHelpers.chooseLinker: the `${kind}` linker needs `${what}`"
     else
       v;
 
@@ -577,7 +577,6 @@ in
     lldHas
     rustcFacts
     driverWrapper
-    moldLinker
     lldLinker
     ;
 }

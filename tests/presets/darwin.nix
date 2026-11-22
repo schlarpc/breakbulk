@@ -43,6 +43,7 @@
 let
   inherit (pkgs) lib;
   presets = breakbulk.presets;
+  presetHelpers = breakbulk.presetHelpers;
   a64 = "aarch64-apple-darwin";
   x64 = "x86_64-apple-darwin";
   triples = [
@@ -196,9 +197,9 @@ let
     if r.success then null else true;
   kindFor =
     rustc:
-    presets.linkerKind {
+    presetHelpers.linkerKind {
       triple = a64;
-      rustc = presets.rustcFacts { inherit pkgs rustc; };
+      rustc = presetHelpers.rustcFacts { inherit pkgs rustc; };
     };
   evalChecks = {
     rustLldForRustLang = kindFor rust == "rust-lld";

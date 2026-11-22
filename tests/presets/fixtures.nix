@@ -48,6 +48,7 @@ let
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   tools = breakbulk.mkTools pkgs;
   presets = breakbulk.presets;
+  presetHelpers = breakbulk.presetHelpers;
 
   rustWith =
     targets:
@@ -1424,7 +1425,7 @@ let
         # The linker choice (lib/presets/linker.nix), one rule per kind.
         linkerKinds =
           let
-            k = triple: args: presets.linkerKind ({ inherit triple; } // args);
+            k = triple: args: presetHelpers.linkerKind ({ inherit triple; } // args);
           in
           (
             k "x86_64-unknown-linux-gnu" { rustc = rustcAt "1.90.0"; } == "lld"
@@ -1459,11 +1460,11 @@ let
               } == "cc"
             # From the toolchains themselves.
             &&
-              (presets.rustcFacts {
+              (presetHelpers.rustcFacts {
                 inherit pkgs;
                 rustc = pkgs.rustc;
               }).bundledLld == false
-            && (presets.rustcFacts {
+            && (presetHelpers.rustcFacts {
               inherit pkgs;
               rustc = staticRust;
             }).bundledLld
@@ -1484,7 +1485,7 @@ let
         # an impossible combination fails, naming both.
         linkerKindChoice =
           let
-            k = triple: args: presets.linkerKind ({ inherit triple; } // args);
+            k = triple: args: presetHelpers.linkerKind ({ inherit triple; } // args);
           in
           k native { kind = "mold"; } == "mold"
           && k "aarch64-unknown-linux-musl" { kind = "lld"; } == "lld"
