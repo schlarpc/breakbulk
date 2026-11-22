@@ -102,7 +102,7 @@ null
 
 ## `targets.<name>.cflags`
 
-C and C++ flags for this target’s C code (` CFLAGS_<triple> `, ` CXXFLAGS_<triple> `)\.
+Flags for this target’s C code (` CFLAGS_<triple> `)\.
 
 *Type:*
 list of string
@@ -152,6 +152,22 @@ null or string or absolute path or package
 
 ```nix
 null
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.cxxflags`
+
+Flags for this target’s C++ code (` CXXFLAGS_<triple> `)\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
 ```
 
 *Declared by:*

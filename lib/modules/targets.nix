@@ -18,8 +18,8 @@
 #    one rustflags key, so flags under the other one would make it ignore
 #    the project's). On a same-triple target the planner rewrites host
 #    units' linker to `host.linker`.
-#  - `cc`, `cxx`, `ar`, `cflags`, `bindgen.extraClangArgs` become
-#    `CC_<triple>`, `CXX_<triple>`, `AR_<triple>`, `CFLAGS_<triple>` and
+#  - `cc`, `cxx`, `ar`, `cflags`, `cxxflags`, `bindgen.extraClangArgs`
+#    become `CC_<triple>`, `CXX_<triple>`, `AR_<triple>`, `CFLAGS_<triple>`,
 #    `CXXFLAGS_<triple>`, `BINDGEN_EXTRA_CLANG_ARGS_<triple>` in `env`
 #    (`cEnv` in ./target-spec.nix).
 #  - `env` is added to target units only; `host.env` to host units only.

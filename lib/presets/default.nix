@@ -6,7 +6,7 @@
 # for `targets.<triple>`, so every field can be overridden with ordinary
 # module priorities: scalar fields (linker, cc, runner, …) are set with
 # `mkDefault`, so a plain definition replaces them; lists (rustflags,
-# cflags) concatenate, and `mkForce` replaces them; env values are
+# cflags, cxxflags) concatenate, and `mkForce` replaces them; env values are
 # `mkDefault` per variable.
 #
 #   targets.x86_64-unknown-linux-musl =
@@ -282,6 +282,7 @@ let
         if crossLanguageLto then "${llvm.llvm}/bin/llvm-ar" else "${cc.bintools}/bin/${prefix}ar"
       );
       cflags = lib.optionals crossLanguageLto [ "-flto=thin" ];
+      cxxflags = lib.optionals crossLanguageLto [ "-flto=thin" ];
       rustflags =
         lib.optionals crossLanguageLto [
           "-C"
@@ -496,6 +497,7 @@ let
         cxx = mkDefault "${clang}/bin/clang-cl";
         ar = mkDefault "${tools}/llvm-lib";
         inherit cflags;
+        cxxflags = cflags;
         bindgen.extraClangArgs = [
           "--target=${triple}"
         ]
@@ -689,6 +691,7 @@ let
           "native=${wasilibc}/lib/${wasiTriple}"
         ];
         cflags = [ inc ];
+        cxxflags = [ inc ];
         bindgen.extraClangArgs = [
           "--target=${triple}"
           inc

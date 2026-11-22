@@ -62,6 +62,7 @@ common
 }
 // lib.optionalAttrs withC {
   cflags = [ inc ];
+  cxxflags = [ inc ];
   bindgen.extraClangArgs = [
     "--target=${triple}"
     inc

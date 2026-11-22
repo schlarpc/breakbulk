@@ -163,8 +163,8 @@ let
           spec.rustflags or [ ] == [ ]
         ) "wasip2-linker: rustflags ${toString spec.rustflags}";
         assert lib.assertMsg (
-          spec.cflags == [ "-isystem ${sysroot}/include/wasm32-wasip2" ]
-        ) "wasip2-linker: cflags ${toString spec.cflags}";
+          spec.cflags == [ "-isystem ${sysroot}/include/wasm32-wasip2" ] && spec.cxxflags == spec.cflags
+        ) "wasip2-linker: cflags ${toString spec.cflags}, cxxflags ${toString spec.cxxflags}";
         assert breakbulk.wasiSdk.versionFor wasip2Rust.version == "33";
         pkgs.runCommand "wasip2-linker" { } ''
           mkdir -p fake

@@ -45,6 +45,7 @@ let
     [ "cxx" ]
     [ "ar" ]
     [ "cflags" ]
+    [ "cxxflags" ]
     [
       "bindgen"
       "extraClangArgs"
@@ -270,7 +271,12 @@ in
     cflags = mkOption {
       type = types.listOf types.str;
       default = [ ];
-      description = "C and C++ flags for this target's C code (`CFLAGS_<triple>`, `CXXFLAGS_<triple>`).";
+      description = "Flags for this target's C code (`CFLAGS_<triple>`).";
+    };
+    cxxflags = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = "Flags for this target's C++ code (`CXXFLAGS_<triple>`).";
     };
     bindgen.extraClangArgs = mkOption {
       type = types.listOf types.str;
@@ -282,7 +288,7 @@ in
       internal = true;
       visible = false;
       readOnly = true;
-      description = "The per-target variables cc-rs and bindgen read, from `cc`, `cxx`, `ar`, `cflags` and `bindgen.extraClangArgs`.";
+      description = "The per-target variables cc-rs and bindgen read, from `cc`, `cxx`, `ar`, `cflags`, `cxxflags` and `bindgen.extraClangArgs`.";
     };
     rustflags = mkOption {
       type = types.listOf types.str;
@@ -478,7 +484,9 @@ in
         }
         // lib.optionalAttrs (config.cflags != [ ]) {
           "CFLAGS_${e}" = flags config.cflags;
-          "CXXFLAGS_${e}" = flags config.cflags;
+        }
+        // lib.optionalAttrs (config.cxxflags != [ ]) {
+          "CXXFLAGS_${e}" = flags config.cxxflags;
         }
         // lib.optionalAttrs (config.bindgen.extraClangArgs != [ ]) {
           "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags config.bindgen.extraClangArgs;

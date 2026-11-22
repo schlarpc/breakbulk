@@ -175,6 +175,7 @@ assert checked;
   cxx = mkDefault "${clang}/bin/clang++";
   ar = mkDefault "${llvm.llvm}/bin/llvm-ar";
   cflags = sysrootFlags;
+  cxxflags = sysrootFlags;
   bindgen.extraClangArgs = sysrootFlags;
   rustflags = [
     "-C"
