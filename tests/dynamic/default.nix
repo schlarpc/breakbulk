@@ -86,6 +86,7 @@
 }:
 let
   inherit (pkgs) lib;
+  mkWorkspace = import ../lib/workspace.nix { inherit lib breakbulk; };
   fixtures = ../fixtures;
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   tools = breakbulk.mkTools pkgs;
@@ -605,7 +606,7 @@ let
     let
       mkCtl =
         args:
-        breakbulk.mkWorkspace pkgs (
+        mkWorkspace pkgs (
           {
             root = fixtures + "/test-control";
             inherit tools;
