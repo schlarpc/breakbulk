@@ -148,7 +148,29 @@ let
       triple = target.triple or (targetTraits.nativeTriple pkgs);
     });
 
-  # How `install` and `placeDebug` lay files out for a platform.
+  # Case arms that set `d` to the install directory (as `install` places
+  # files) of a file named "$b": static libraries under lib/, shared
+  # libraries under the traits' `sharedLibraryDir`, the rest under bin/.
+  # `sfx` is a list of shell patterns, one of which follows the library's
+  # name ("" for the file itself, `'.dwp'` for its side file).
+  installDirCases =
+    t: sfx:
+    let
+      arms =
+        names:
+        lib.concatMapStringsSep "|" (x: lib.concatMapStringsSep "|" (s: "*${x}${s}") sfx) (
+          lib.unique names
+        );
+      shared = lib.optionals (t.sharedLibrarySuffix != "") [
+        (escapeShellArg t.sharedLibrarySuffix)
+        "${escapeShellArg t.sharedLibrarySuffix}.*"
+      ];
+      static = lib.optional (t.staticLibrarySuffix != "") (escapeShellArg t.staticLibrarySuffix);
+    in
+    lib.optionalString (shared != [ ] && sfx != [ ]) "${arms shared}) d=${t.sharedLibraryDir} ;;\n"
+    + lib.optionalString (static != [ ] && sfx != [ ]) "${arms static}) d=lib ;;\n"
+    + "*) d=bin ;;\n";
+
   # Copy the input into "$1" (created), following symlinks, writable.
   copyIn = input: ''
     copyIn() {
@@ -168,38 +190,44 @@ let
   # the product's link units (`.pdb` on msvc, `.dwp`/`.dwo` with
   # `split-debuginfo`, Apple's `.dSYM` directories), from the `linked`
   # stage's `debug` output (`product.linkedDebug`, when the product has
-  # one), next to where their binary lands (Windows: bin/; elsewhere a
-  # shared library's under lib/, the rest under bin/).
-  placeDebugFn = product: target: pkgs: ''
-    placeDebug() {
-      ${
-        if (product.earlierDebug or null) != null then
-          ''
-            mkdir -p "$1"
-            cp -R --no-preserve=ownership ${product.earlierDebug}/. "$1"/
-            chmod -R u+w "$1"
-          ''
-        else if (product.linkedDebug or null) == null then
-          "return 0"
-        else
-          ''
-            local f b d
-            for f in ${product.linkedDebug}/*; do
-              [ -e "$f" ] || continue
-              b=''${f##*/}
-              case "${if (traitsOf target pkgs).isWindows then "windows" else "unix"}:$b" in
-                windows:*) d=bin ;;
-                unix:*.so.dwp|unix:*.so.*.dwp|unix:*.dylib.dSYM) d=lib ;;
-                *) d=bin ;;
-              esac
-              mkdir -p "$1/$d"
-              cp -RL "$f" "$1/$d/$b"
-              chmod -R u+w "$1/$d/$b"
-            done
-          ''
+  # one), next to where their binary lands (`installDirCases`; a `.pdb`,
+  # whose name drops its binary's suffix, under bin/).
+  placeDebugFn =
+    product: target: pkgs:
+    let
+      t = traitsOf target pkgs;
+      sideSuffixes = map (a: escapeShellArg a.suffix) (
+        lib.filter (a: !(a.perObject or false)) t.debugArtifacts
+      );
+    in
+    ''
+      placeDebug() {
+        ${
+          if (product.earlierDebug or null) != null then
+            ''
+              mkdir -p "$1"
+              cp -R --no-preserve=ownership ${product.earlierDebug}/. "$1"/
+              chmod -R u+w "$1"
+            ''
+          else if (product.linkedDebug or null) == null then
+            "return 0"
+          else
+            ''
+              local f b d
+              for f in ${product.linkedDebug}/*; do
+                [ -e "$f" ] || continue
+                b=''${f##*/}
+                case "$b" in
+                  ${installDirCases t sideSuffixes}
+                esac
+                mkdir -p "$1/$d"
+                cp -RL "$f" "$1/$d/$b"
+                chmod -R u+w "$1/$d/$b"
+              done
+            ''
+        }
       }
-    }
-  '';
+    '';
 
   isElfFn = ''
     isElf() { [ "$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; }
@@ -310,16 +338,6 @@ let
         let
           t = traitsOf target pkgs;
           debug = hasDebugFiles product;
-          # Where a file of the flat link output lands in the install layout
-          # (as `install` places it), for its `.dwp`.
-          libGlob = lib.concatMapStringsSep "|" (x: "*${escapeShellArg x}") (
-            lib.unique (
-              lib.filter (x: x != "") [
-                t.staticLibrarySuffix
-                t.sharedLibrarySuffix
-              ]
-            )
-          );
         in
         pkgs.runCommand (stageName product "packDwo")
           (
@@ -354,9 +372,7 @@ let
                   d=''${rel%/*}
                 else
                   case "$b" in
-                    ${lib.optionalString (libGlob != "") "${libGlob}) d=lib ;;"}
-                    *.so.*) d=lib ;;
-                    *) d=bin ;;
+                    ${installDirCases t [ "" ]}
                   esac
                 fi
                 if [ -e "$debug/$d/$b.dwp" ]; then
@@ -1351,7 +1367,7 @@ let
           };
           # The side files go to install's own `debug` output when no earlier
           # stage split debug information (whose `debug` holds them already).
-          debug = !t.isWasm && (product.linkedDebug or null) != null && !(product.debugSplit or false);
+          debug = (product.linkedDebug or null) != null && !(product.debugSplit or false);
         in
         pkgs.runCommand (stageName product "install")
           (lib.optionalAttrs debug {
