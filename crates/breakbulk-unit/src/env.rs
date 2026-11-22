@@ -47,8 +47,8 @@ pub const FIXED_BASE: [(&str, &str); 4] = [
 /// `NIX_STORE`, `NIX_BUILD_TOP` and `TMPDIR` are what nixpkgs' compiler and
 /// linker wrappers accept paths under when a capture sets
 /// `NIX_ENFORCE_PURITY=1` (`badPath` in `wrapper-common/utils.bash`). Without
-/// `NIX_STORE` every store path counts as impure, and the linker wrapper
-/// drops `-L/nix/store/…` arguments.
+/// `NIX_STORE` the compiler wrapper fails on the unset variable (`set -u`)
+/// and the linker wrapper skips its check.
 pub const PASSED_BASE: [&str; 4] = ["NIX_BUILD_CORES", "NIX_BUILD_TOP", "NIX_STORE", "TMPDIR"];
 
 /// Search-path variables: `:`-separated lists that setup hooks build with

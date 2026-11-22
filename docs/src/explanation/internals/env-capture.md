@@ -24,4 +24,4 @@ Inputs declared on a package become environment through nixpkgs' own setup hooks
 The spike result is in [spikes/C-env-capture.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/C-env-capture.md).
 - Captures are input-addressed. Their output references the inputs' store paths, so building a unit realises the inputs, and substituting a unit does not.
 
-To verify in a spike: that nixpkgs' compiler and linker wrappers behave the same when their role variables come from a replayed environment, and that no common setup hook relies on anything other than environment variables.
+What units rely on from nixpkgs' compiler and linker wrappers, with their role variables from a replayed environment, is [assumption N1](../../reference/assumptions.md#n1-what-the-wrappers-read-from-the-environment), pinned by flake checks. To verify in a spike: that no common setup hook relies on anything other than environment variables.

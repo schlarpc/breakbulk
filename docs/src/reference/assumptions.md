@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
+Status of the 92 entries: 90 pinned; F8 in part and F10 are in [Gaps](#gaps). A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
 
 ## Summary
 
@@ -37,6 +37,7 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 | [T14](#t14-the-clippy-chain) | The clippy chain | yes |
 | [T15](#t15-test-units-are-told-by-target-kind) | Test units are told by target kind | yes |
 | [T16](#t16-rustc-wrappers-and-the-files-beside-a-crate) | Rustc wrappers and the files beside a crate | yes |
+| [T17](#t17-cargo-docs-rustdoc-commands) | `cargo doc`'s rustdoc commands | yes |
 | [S1](#s1-sentinel-placement-and-shapes) | Sentinel placement and shapes | yes |
 | [S2](#s2-sentinels-change-no-unit-identity) | Sentinels change no unit identity | yes |
 | [S3](#s3-link-arg-kinds-cargo-accepts-per-package) | Link-arg kinds Cargo accepts per package | yes |
@@ -59,6 +60,7 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 | [U8](#u8-uplifted-bins) | Uplifted bins | yes |
 | [U9](#u9--zembed-metadatano-on-nightly) | `-Zembed-metadata=no` on nightly | yes |
 | [U10](#u10-cargo_target_tmpdir) | `CARGO_TARGET_TMPDIR` | yes |
+| [U11](#u11-what-cargo-prepares-around-a-build-scripts-out_dir) | What Cargo prepares around a build script's `OUT_DIR` | yes |
 | [C1](#c1-one-rustflags-source) | One rustflags source | yes |
 | [C2](#c2-cfg-rounds) | cfg rounds | yes |
 | [C3](#c3---target-host-keeps-rustflags-off-host-units) | `--target <host>` keeps rustflags off host units | yes |
@@ -77,9 +79,11 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 | [X3](#x3-names-of-uplifted-side-files) | Names of uplifted side files | yes |
 | [X4](#x4-rustcs-link-temp-directory) | rustc's link temp directory | yes |
 | [X5](#x5-sysroot-layout) | Sysroot layout | yes |
+| [X6](#x6-rustdoc-merges-the-files-crates-share) | rustdoc merges the files crates share | yes |
 | [R1](#r1-test-process-environment) | Test-process environment | yes |
 | [R2](#r2-cargo_bin_exe_-for-bins-cargo-did-not-build) | `CARGO_BIN_EXE_*` for bins Cargo did not build | yes |
 | [R3](#r3-the-doctest-command-line) | The doctest command line | yes |
+| [R4](#r4-nextests-reuse-build-inputs) | nextest's reuse-build inputs | yes |
 | [L1](#l1-rustcs-self-contained-lld-arguments) | rustc's self-contained lld arguments | yes |
 | [L2](#l2-wasm32-wasip2-linking) | `wasm32-wasip2` linking | yes |
 | [L3](#l3-the-rust-to-wasi-sdk-table) | The Rust-to-wasi-sdk table | yes |
@@ -102,8 +106,13 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 | [F5](#f5-the-skeleton-is-enough-for-cargo) | The skeleton is enough for Cargo | yes |
 | [F6](#f6-root-prediction) | Root prediction | yes |
 | [F7](#f7-build-std) | build-std | yes |
+| [F8](#f8-source-prediction) | Source prediction | rustc's rules; the curated keeps are in Gaps |
+| [F9](#f9-workspace-membership) | Workspace membership | yes |
+| [F10](#f10-which---features-a-selected-package-accepts) | Which `--features` a selected package accepts | no |
 | [E1](#e1-pkg-config-rs-and-pkg_config_all_static) | pkg-config-rs and `PKG_CONFIG_ALL_STATIC` | yes |
 | [E2](#e2-cc-rs-passes---targetrust-triple) | cc-rs passes `--target=<Rust triple>` | yes |
+| [E3](#e3-cmake-rs-reads-nothing-from-cmakefiles-after-the-run) | cmake-rs reads nothing from `CMakeFiles` after the run | yes |
+| [N1](#n1-what-the-wrappers-read-from-the-environment) | What nixpkgs' wrappers read from the environment | yes |
 
 ## Tracing: how Cargo runs the shim
 
@@ -250,6 +259,15 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Holds for.** 1.99; verus main as of November 2026.
 - **Pinned by.** `products-variants-driver` (a toy driver as rustc wrapper and as workspace wrapper; a dependent reads its dependencies' side files beside each `--extern`'s real path and beside every crate file's link in its dependency directory, a build-script run gets the wrapper). Rust: `compile::tests::side_files_go_beside_their_crate_file`, `compile::tests::deps_directory_links_side_files` (unit).
 - **If it changes.** A wrapper misses the crates or queries Cargo would give it, and units differ from what Cargo runs; or a driver looks for its files somewhere breakbulk does not put them, and the dependent unit fails; `products-variants-driver` fails.
+
+### T17. `cargo doc`'s rustdoc commands
+
+- **Assumption.** `cargo doc` runs one `rustdoc` per documented crate and names its output folder as `-o <dir>`, two arguments. A proc macro is a host unit and is documented into the host's folder (`<target>/doc`), the other crates into the target's. rustdoc reads its dependencies' metadata from check-mode compiles, not from their docs, so the doc plan's compile units are a check variant's. rustdoc links to another crate's items only when that crate's folder is already in the output folder, so a crate must be documented after the crates it reads; `cargo doc` orders them so, except under `--no-deps`, where it leaves members unordered.
+- **Where.** `crates/breakbulk-plan/src/graph.rs`: `Builder::doc` (`-o`, `platform_of`), `without_output_dir`, `doc_order`; `trace.rs`: `runs_wrappers` (the doc plan's trace runs no variant wrapper).
+- **Upstream.** cargo `0.100.0` `src/compiler/mod.rs`, `prepare_rustdoc` (`rustdoc.arg("-o").arg(&doc_dir)`); `src/compiler/build_runner/compilation_files.rs`, `output_dir` (a doc unit's folder is the `doc` of `layout(unit.kind)`); `src/compiler/unit_dependencies.rs`, `compute_deps_doc` (each dependency's library in `check_or_build_mode`, check mode for a normal library; its doc unit only when the command wants dependencies' docs). rustdoc 1.99.0 (`b940084`) `src/librustdoc/clean/types.rs`, `ExternalCrate::location` (`Local` only when `<output>/<crate>` is a directory before rendering starts). Checked for this page.
+- **Holds for.** 1.99.
+- **Pinned by.** `products-docs`: the docs of the `docs` fixture (members that link to each other, a proc macro, a trait implemented in another crate, a registry dependency, a build script's cfg and env) are byte-identical to plain `cargo doc`'s, with and without `--no-deps`, and every unit of the doc plan is shared with the check variant's build plan. Every doc plan fails when a traced rustdoc has no `-o`.
+- **If it changes.** A doc plan without `-o` fails planning loudly. A proc macro's docs in another folder, or a crate documented before what it links to, give other files or broken links; `products-docs` fails.
 
 ## Sentinels and the placement of build-script output
 
@@ -453,6 +471,15 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Pinned by.** `test-runs-test-control` (the run, and a copy of the binary run in a scratch directory), `test-runs-test-control-app` (two runs of a test app at once), `test-runs-test-wrapper` (with a test wrapper). Checked by hand with the test-control fixture's `env` test run: it passes with `sandbox = false`.
 - **If it changes.** A test that writes there fails.
 
+### U11. What Cargo prepares around a build script's `OUT_DIR`
+
+- **Assumption.** Before it runs build scripts, Cargo creates `<profile>/deps` and `<profile>/examples` in the classic layout, so a script that walks up from `OUT_DIR` finds them. A classic unit directory is `<package>-<hash>`, a new-layout one the bare hash, so a `-` in its name tells the layouts apart. Cargo puts `<profile>` and `<profile>/deps` on a test's (and `cargo run`'s) dynamic-library path, after the build scripts' search paths. The profile directory in `OUT_DIR` is `debug` or `release` for `dev`, `test`, `release` and `bench`, the same as the run's `PROFILE`, and the profile's own name for a custom profile.
+- **Where.** `crates/breakbulk-unit/src/run.rs`: `prepare_out_dir`, `files_outside`, `target_dirs`; `directives.rs`: `BuildOutput::target_dirs`; `lib/test-runs.nix` (a test's library path); `crates/breakbulk-plan/src/graph.rs`: `out_dir_rel` (the run's `OUT_DIR` with the profile directory named after `PROFILE`, so a custom profile that inherits `release` shares its runs with `release`).
+- **Upstream.** cargo `0.100.0` `src/compiler/layout.rs`: `BuildDirLayout::prepare` (`deps`, `.fingerprint` and `examples` only in the classic layout; `incremental` and `build` always), `Layout::new` and `ArtifactDirLayout::prepare` (`<profile>/examples` of the artifact directory, for every command but `cargo check`); `src/compiler/compilation.rs`, `fill_env` (the native search paths, then `root_output`, then `deps_output`); `src/workspace/profiles.rs`, `predefined_dir_names`, `get_dir_name`; `src/compiler/custom_build.rs`, `build_work` (`PROFILE` from the profile's root). The same in cargo `3c747ea3e`. Checked for this page.
+- **Holds for.** 1.99 (classic layout), by check. The new layout of nightly 1.101 by source only: there Cargo still creates `<profile>/examples` (the artifact directory's), which breakbulk does not (#181).
+- **Pinned by.** `plan-out-dir-walk` (nixpkgs' Cargo 1.99: a build script that walks up to `<target>/<profile>` writes there and into `deps/`, the files are listed as written outside `OUT_DIR`, and the test run finds both directories on its library path, as under `cargo test`); `products-variants` (a custom profile that inherits `release` gives the same units as `release`, build-script runs included). Rust: `run::tests::out_dir_inside_a_copy_of_cargos_layout`, `run::tests::target_dirs_are_profile_and_deps_with_files`.
+- **If it changes.** A script that walks up from `OUT_DIR` fails to find a directory, or a test fails to load a library its build script copied next to the binaries; `plan-out-dir-walk` fails. A different profile directory gives other run paths and remaps than Cargo's; `products-variants` and the goldens fail.
+
 ## Rustflags, linkers and config
 
 ### C1. One rustflags source
@@ -621,6 +648,15 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Pinned by.** `products-rust-src`, `loose-ends-test-libs`, `products-rustc-private`, `test-runs-test-control`, `build-std`.
 - **If it changes.** Test runs miss `libstd-*.so` or products reference the toolchain; the checks fail.
 
+### X6. rustdoc merges the files crates share
+
+- **Assumption.** rustdoc commands run one after another into one output folder merge their cross-crate files: each reads the search index, `crates.js` and the implementor lists the earlier ones wrote there, and writes them back with its own crate added. Cargo removes a crate's own folder before documenting it. `.lock` in the output folder is rustdoc's lock file, which nothing reads afterwards.
+- **Where.** `crates/breakbulk-unit/src/docs.rs`: `docs` (one folder for every command, the crate's folder removed first, `LOCK_FILE` removed at the end).
+- **Upstream.** rustdoc 1.99.0 `src/librustdoc/html/render/write_shared.rs`: `write_shared` (`.lock` from `flock::Lock::new`), and the reading of each cross-crate file when `read_rendered_cci` is set, which it is unless `--merge` says otherwise; `src/librustdoc/config.rs` (`--merge`, `--parts-out-dir` and `--include-parts-dir` are unstable). cargo `0.100.0` `src/compiler/mod.rs`, `rustdoc` ("Remove output from a previous build"). Checked for this page.
+- **Holds for.** 1.99.
+- **Pinned by.** `products-docs` (the docs derivation's folder is byte-identical to plain `cargo doc`'s with `.lock` removed; base's implementor list holds util's implementation).
+- **If it changes.** The docs miss a crate in the search index or the implementor lists, or differ from Cargo's; `products-docs` fails.
+
 ## Tests and doctests at run time
 
 ### R1. Test-process environment
@@ -649,6 +685,15 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Holds for.** 1.99.
 - **Pinned by.** `test-runs-runner` (a doctest runs through the runner); `test-runs-doctests`; `cross-doctests-aarch64` (a proc macro's doctest runs without qemu, a library's under it). Rust: `doctest::tests::invocation_places_runner_search_paths_and_test_args`, `a_host_doctest_gets_the_hosts_runner_after_the_run_directory`.
 - **If it changes.** rustdoc rejects the arguments or ignores the runner; the checks fail.
+
+### R4. nextest's reuse-build inputs
+
+- **Assumption.** nextest 0.9.146, given `--binaries-metadata` and `--cargo-metadata`, runs each test binary from the binary list at its path as is; takes the test's working directory, `CARGO_MANIFEST_DIR` and `CARGO_PKG_*` from the package's entry in the Cargo metadata; adds nothing to the dynamic-library path when the list names no base output directory, linked paths or libdirs; needs `<workspace root>/Cargo.toml` to exist; and checks the names `binary()` and `binary_id()` filtersets use against each package's targets. The filtersets `deps()` and `rdeps()` use guppy's `depends_on` (transitive, any dependency kind, true from a package to itself), and guppy matches each resolve edge to a declared dependency by the dependency's name and version requirement.
+- **Where.** `crates/breakbulk-instantiate/src/dynamic.rs`: `nextest_for` (the binary list and the Cargo metadata of one test run).
+- **Upstream.** nextest `cargo-nextest-0.9.146` (`8af696d`): `cargo-nextest/src/dispatch/core/base.rs` (`<workspace root>/Cargo.toml` must exist); `nextest-runner/src/list/test_list.rs`, `from_binary_list`; `nextest-runner/src/test_command.rs` (`current_dir`, `CARGO_MANIFEST_DIR`, `CARGO_PKG_*` from the package); `nextest-runner/src/list/rust_build_meta.rs`; `nextest-filtering/src/expression.rs`, `ParseContextCache`; `nextest-filtering/src/compile.rs` (`depends_on`). guppy 0.17.26 (`3f7c2dd`, the version nextest locks): `guppy/src/graph/build.rs`, `DependencyReqs::matches_for` (the name, then `cargo_version_matches`, then the dependency kinds). Checked for this page.
+- **Holds for.** nextest 0.9.146 (nixpkgs).
+- **Pinned by.** `test-runs-nextest` (retries, a slow-timeout override, a default filter naming other packages, junit, package env from the synthesized metadata; an override on `package(nx) and binary(flaky)` applies to that binary only, and one on `rdeps(other)` to `nx` and not to `solo`); `test-runs-nextest-repo`; `repository-nextest-unrelated-version` (the metadata names other packages by name only). `deps()` runs in no check; it uses the same edge matching as `rdeps()`.
+- **If it changes.** nextest rejects the metadata or a filterset, or a filter applies to other binaries; the checks fail.
 
 ## Toolchains, linkers and targets
 
@@ -774,7 +819,7 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Assumption.** A process running natively on the target finds shared libraries through `LD_LIBRARY_PATH` on Linux and most Unix, `PATH` on Windows and `DYLD_FALLBACK_LIBRARY_PATH` on Apple, as Cargo's `dylib_path_envvar` says.
 - **Where.** `lib/target-traits.nix`: `dylibPathVar`, `dylibPathSep`; `lib/test-runs.nix`: `dylibPathOf`.
 - **Upstream.** cargo-util `paths::dylib_path_envvar`.
-- **Holds for.** Linux, by check. Windows targets always run under wine, whose variable (`WINEPATH`) the runner declares; Apple test binaries run only on a Mac builder, which none of the checks has (#13).
+- **Holds for.** Linux, by check. Windows targets always run under wine, whose variable (`WINEPATH`) the runner declares; Apple test binaries run only on a Mac builder, which none of the checks has (#13). No check pins the Windows and Apple rows, and none can on the flake's Linux builders: `PATH` matters only to a Windows binary running on Windows, and `DYLD_FALLBACK_LIBRARY_PATH` only to an Apple binary running on macOS.
 - **Pinned by.** `test-runs-test-control`, `test-runs-dylib-rule` (Linux); `windows-dll-test`, `windows-dll-needs-dll` (the runner's own variable).
 - **If it changes.** Tests cannot load their build scripts' libraries.
 
@@ -852,6 +897,33 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Pinned by.** `build-std`, `build-std-deps`. Rust: `build_std::tests::merged_directory`.
 - **If it changes.** build-std planning fails offline.
 
+### F8. Source prediction
+
+- **Assumption.** rustc reads, for a crate, the files of its module tree by the rules of `rustc_expand/src/module.rs` and the files `include!`, `include_str!` and `include_bytes!` name, relative to the including file, and fails on any module or include it cannot read. Clippy's `lint_groups_priority` reads `Cargo.toml` from the compile's working directory, and skips the lint without a word when the file is missing. proc-macro-crate, find-crate and bevy_macro_utils read the dependent's `Cargo.toml` from `CARGO_MANIFEST_DIR`; proc-macro-crate also reads its workspace's, which it finds with `cargo locate-project --workspace` when `CARGO` is set.
+- **Where.** `crates/breakbulk-predict/src/lib.rs`: `predict_crate`; `view.rs`: `outcome`, `materialize`; `lib/workspace.nix`: `clippyKeep`; `lib/sys-defaults-dependents.nix` (the `predictSources.keep` of the three crates).
+- **Upstream.** rustc 1.99.0 (`b940084`): `compiler/rustc_expand/src/module.rs` (`mod_dir_path`, `mod_file_path`, `mod_file_path_from_attr`, `default_submod_path`), `compiler/rustc_builtin_macros/src/source_util.rs` (`expand_include`, `expand_include_str`, `expand_include_bytes`); clippy in the same tree, `clippy_lints/src/cargo/lint_groups_priority.rs` (`load_file(Path::new("Cargo.toml"))`). proc-macro-crate 3.5.0 `src/lib.rs` (`crate_name`, `workspace_manifest_path`); find-crate 0.7.1 `src/lib.rs`; bevy_macro_utils 0.20.1 `src/bevy_manifest.rs` (panics without the file). Checked for this page.
+- **Holds for.** 1.99 and nightly 1.101 for rustc's rules, by check; the crates at the versions named, by source.
+- **Pinned by.** `predict-rustc-reads` (the `predict-rustc` fixture, one file per module rule and include form: every file in rustc's dep-info is in the predicted view, and rustc compiles the crate in that view alone, with nixpkgs' rustc and rust-overlay's nightly); `repository-predict-sources` (a crate with modules, `include_str!`, a build script and a proc macro that reads a file builds from its predicted views; a missed read fails naming `predictSources.keep`). Rust: `tests::*` in `crates/breakbulk-predict/src/tests.rs` check hand-written trees. Not pinned: clippy's read and the three crates' reads ([Gaps](#gaps)).
+- **If it changes.** A file rustc reads that the prediction misses fails the compile, naming the file, with a hint at `predictSources.keep`; `predict-rustc-reads` fails. A crate that only tests whether a file exists (clippy's `Cargo.toml`, #143) changes behavior without an error.
+
+### F9. Workspace membership
+
+- **Assumption.** A workspace's members are the directories `workspace.members` matches (a pattern that matches nothing is kept as written), the root package, and transitively every `path` dependency, of any kind and target, of a member whose directory lies inside the workspace root; minus those under a `workspace.exclude` entry that are not also under an explicit `members` entry (a component-wise prefix test).
+- **Where.** `lib/manifest.nix`: `workspace` (`expandMember`, `isExcluded`, `walk`), `memberPackages`.
+- **Upstream.** cargo `0.100.0` `src/workspace/workspace.rs`: `find_members`, `find_path_deps`, `members_paths`, `expand_member_path`, `WorkspaceRootConfig::is_excluded` (`Path::starts_with`). Checked for this page.
+- **Holds for.** 1.99.
+- **Pinned by.** `roots-metadata-fixtures` (the members of `roots-layouts`, with a glob, an exclude, a path dependency through `workspace.dependencies` and a nested virtual manifest, equal those of `cargo metadata`); `skeleton` (excluded crates and other non-members are absent from the skeleton, and `cargo metadata` over it equals the real tree's). Nix: `testMembers`, `testMemberPackages` (`lib-unit`) check hand-written expectations.
+- **If it changes.** A member breakbulk does not know has no predicted roots, or a non-member gets some; instantiation fails on an unpredicted root, and `roots-metadata-fixtures` fails.
+
+### F10. Which `--features` a selected package accepts
+
+- **Assumption.** `cargo … -p <pkg> --features <f>` accepts `f` for a selected member when it is one of the member's `[features]` or optional dependencies, `<member>/<one of those>`, or `<dep>/<anything>` (also `<dep>?/…`) for a dependency named as the manifest's dependency tables key it; a feature that no selected member accepts fails the run.
+- **Where.** `lib/manifest.nix`: `acceptsCliFeature`; `lib/modules/workspaces.nix`: `onTarget` (`defaultFeatures`: for a variant that selects packages, the `variantDefaults.features` none of them accepts are left out).
+- **Upstream.** cargo `0.100.0` `src/workspace/workspace.rs`: `Workspace::collect_matching_features`, `members_with_features_new` and `missing_feature_spelling_suggestions` ("none of the selected packages contains these features"). Checked for this page.
+- **Holds for.** 1.99, by source.
+- **Pinned by.** No flake check ([Gaps](#gaps)). Nix: `testAcceptsCliFeature` (`lib-unit`) checks the copy against hand-written cases; `products-variants-per-target` checks which features reach which plan's command line, without running Cargo on them.
+- **If it changes.** A default feature Cargo would accept is left out, so the variant builds without it; or one it rejects is kept, and planning fails loudly.
+
 ## Build-script crates
 
 ### E1. pkg-config-rs and `PKG_CONFIG_ALL_STATIC`
@@ -872,11 +944,32 @@ Status of the 83 entries: 83 pinned; [Gaps](#gaps) is empty. A check (`docs-assu
 - **Pinned by.** `linux-portable-glibc` (C compiled by a build script with `zig cc`).
 - **If it changes.** Harmless if dropped; another spelling makes zig fail, and the check fails.
 
+### E3. cmake-rs reads nothing from `CMakeFiles` after the run
+
+- **Assumption.** Nothing reads a CMake build tree's `CMakeFiles` directory after the build script that configured it: the `cmake` crate reads `CMakeCache.txt` and `Makefile` back only within the same run, and dependents link the installed or built libraries, which lie outside it.
+- **Where.** `crates/breakbulk-unit/src/run.rs`: `remove_cmake_state` (removes `CMakeFiles` next to a `CMakeCache.txt`, because CMake's configure log names randomly named try-compile directories).
+- **Upstream.** cmake-rs 0.1.58 (`6319069`) `src/lib.rs`: `Config::build` (`CMakeCache.txt` to decide whether to configure, `Makefile` for the jobserver), `maybe_clear` (`CMakeCache.txt`); no other read of the build tree. Checked for this page.
+- **Holds for.** cmake 0.1.58, as locked by the `sys-native` fixture.
+- **Pinned by.** `plan-cmake-reproducible` (cm-sys's run without `CMakeFiles`, with its built and installed `libcm.a`, and two builds of the run equal); `plan-sys-native` (the product, which links cm-sys's library, runs as plain Cargo's does). Rust: `run::tests::cmake_state_is_removed_from_build_trees_only`.
+- **If it changes.** A build script or dependent that reads `CMakeFiles` fails on a missing file; the checks fail when cm-sys is affected.
+
+## nixpkgs' compiler wrappers
+
+### N1. What the wrappers read from the environment
+
+- **Assumption.** nixpkgs' compiler and linker wrappers, with `NIX_ENFORCE_PURITY=1` (which every env capture holds), take a path as pure only under `NIX_STORE`, `NIX_BUILD_TOP`, `/tmp` or `TMPDIR` (or `TMP`, `TEMP`, `TEMPDIR`), and drop `-L` and `-I` arguments with other absolute paths; the compiler wrapper fails on an unset `NIX_STORE`. The bintools setup hook appends `-L<input>/lib` (and `lib64`) to `NIX_LDFLAGS` plus the input's role suffix, empty for `buildInputs`, when the directory holds a `lib*` file; the linker wrapper turns those into `-L` and rpaths. The compiler wrapper splits `NIX_CFLAGS_COMPILE` into words on whitespace, without quoting, and puts the words after the command's own arguments.
+- **Where.** `crates/breakbulk-unit/src/env.rs`: `PASSED_BASE` (`NIX_STORE`, `NIX_BUILD_TOP`, `TMPDIR`), `LINK_VARS`, `capture_layer` (other packages' `NIX_LDFLAGS` for a linking unit), `FLAG_LISTS`, `CFlags` (`-frandom-seed` and `-ffile-prefix-map` words added to `NIX_CFLAGS_COMPILE`).
+- **Upstream.** nixpkgs `1d06008` `pkgs/build-support/wrapper-common/utils.bash`, `badPath`; `cc-wrapper/cc-wrapper.sh` (`set -u`; the purity filter on `-n "$NIX_STORE"`; `extraAfter` with `$NIX_CFLAGS_COMPILE` unquoted); `bintools-wrapper/ld-wrapper.sh` (the purity filter, `-L` and rpaths); `bintools-wrapper/setup-hook.sh`, `bintoolsWrapper_addLDVars`. Checked for this page.
+- **Holds for.** The pinned nixpkgs.
+- **Pinned by.** `native-link-runs` (app's bin links a library only through foo-sys's capture's `NIX_LDFLAGS`, and runs with an empty environment through the rpath the linker wrapper recorded); `plan-sys-native` (openssl, cmake, bindgen and cc builds through captures); `unit-smoke` (a build script compiles C through the capture's compiler wrapper: the unit's `-frandom-seed` and `-ffile-prefix-map` reach the compiler as words, and the archive names its source only by the remapped path); `plan-c-seed`; `env-capture-vars` (`NIX_ENFORCE_PURITY=1`, `NIX_LDFLAGS` with the library's `-L`).
+- **If it changes.** C compiles fail or lose their prefix maps, or a dependent's link misses a library or its rpath; the checks fail.
+
 ## Gaps
 
 Assumptions that no flake check pins, or pins for some cases only. Each has an issue with the exit criterion "a test that fails if this assumption changes".
 
-None at the moment.
+- [F8](#f8-source-prediction): clippy's `lint_groups_priority` reading `Cargo.toml` from the working directory, and the `Cargo.toml` reads of proc-macro-crate, find-crate and bevy_macro_utils that the curated keeps serve (#181, #143).
+- [F10](#f10-which---features-a-selected-package-accepts): the copy of Cargo's rule for which `--features` a selected package accepts (#181).
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the `config`-over-`config.toml` rule (T6, guarded at plan time), and the non-Linux rows of G3.
 
