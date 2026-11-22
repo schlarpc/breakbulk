@@ -1,0 +1,8 @@
+# Source prediction against rustc's own reads: the `predict-rustc-reads`
+# check runs rustc on src/lib.rs directly, and Cargo never builds this
+# package. One file per rule of rustc_expand/src/module.rs and per include
+# form; README.md is not read.
+[package]
+name = "pr"
+version = "0.1.0"
+edition = "2021"

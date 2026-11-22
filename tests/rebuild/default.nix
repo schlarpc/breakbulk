@@ -225,6 +225,7 @@ let
     diagnostics = "a unit fails to compile by design";
     directive-errors = "build scripts print outputs Cargo rejects, by design";
     forced-target = "planning fails by design";
+    predict-rustc = "rustc runs on its crate root alone (predict-rustc-reads); Cargo never builds it";
     roots-layouts = "root prediction only; nothing is built";
     vendor-collision = "a Cargo build over the vendor directory; fetches GitHub repositories at evaluation";
     vendor-git-inherit = "a Cargo build over the vendor directory";

@@ -17,6 +17,8 @@
 #                            `cargo bench --no-run` compile
 #   skeleton                 `cargo metadata` over the skeleton == over the
 #                            real tree
+#   predict-rustc-reads      breakbulk-predict's view of a crate holds every
+#                            file rustc reads for it
 #   source-views             file lists of source views
 #   sources-sentinel         a `sources` function without `...` fails with
 #                            the message that says to add it
@@ -609,6 +611,69 @@ in
   ];
 
   roots-metadata-crates-io = compareMetadata "roots-metadata-crates-io" corpusCases;
+
+  # Assumption F8: breakbulk-predict follows rustc's module and include
+  # rules. Over the predict-rustc fixture (one file per rule), every file
+  # rustc's dep-info lists is in the predicted view, README.md is not, and
+  # rustc compiles the crate inside the predicted view alone; with
+  # nixpkgs' rustc and rust-overlay's nightly.
+  predict-rustc-reads =
+    let
+      view = fixtures + "/predict-rustc";
+      spec = builtins.toJSON [
+        {
+          key = "pr";
+          view = "${view}";
+          packageDir = "pr";
+          kind = "crate";
+          root = "pr/src/lib.rs";
+        }
+      ];
+      rustcs = [ rustc ] ++ lib.optional (pkgs ? rust-bin) pkgs.rust-bin.nightly.latest.minimal;
+    in
+    pkgs.runCommand "predict-rustc-reads"
+      {
+        nativeBuildInputs = [ jq ];
+        inherit spec;
+        passAsFile = [ "spec" ];
+      }
+      ''
+        ${(bb.mkTools pkgs).breakbulk-predict}/bin/breakbulk-predict --spec "$specPath" --out p
+        cat p/result.json
+        [ "$(jq -r .pr.view p/result.json)" = views/0 ]
+        pred=$PWD/p/views/0
+        (cd "$pred" && find . -type f | sed 's|^\./||' | sort) > predicted
+        cat predicted
+        if grep -qx pr/README.md predicted; then
+          echo "the prediction keeps README.md, which rustc does not read" >&2
+          exit 1
+        fi
+        cp -r --no-preserve=mode ${view} full
+        compile() {
+          (cd "$2/pr" && CARGO_MANIFEST_DIR=$PWD "$1/bin/rustc" --edition 2021 --crate-type lib \
+            --crate-name pr --emit=metadata,dep-info="$TMPDIR/pr.d" --out-dir "$TMPDIR/o" src/lib.rs)
+        }
+        for r in ${lib.concatMapStringsSep " " toString rustcs}; do
+          echo "== $r"
+          compile "$r" "$PWD/full"
+          head -n 1 "$TMPDIR/pr.d" | cut -d: -f2- | tr ' ' '\n' | grep . | while read -r f; do
+            case "$f" in
+              /*) abs=$f ;;
+              *) abs=$PWD/full/pr/$f ;;
+            esac
+            realpath -ms --relative-to="$PWD/full" "$abs"
+          done | sort -u > read
+          cat read
+          comm -23 read predicted > missed
+          if [ -s missed ]; then
+            echo "rustc read files the prediction left out:" >&2
+            cat missed >&2
+            exit 1
+          fi
+          compile "$r" "$pred"
+        done
+        touch $out
+      '';
 
   roots-plans = rootsPlans;
 
