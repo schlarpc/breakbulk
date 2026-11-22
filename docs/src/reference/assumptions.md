@@ -513,10 +513,10 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 ### P1. trim-paths availability and default
 
 - **Assumption.** The `trim-paths` profile setting is stable from Cargo 1.101 (nightly 1.101 included) and a hard error before; its values are `none`, `object` and `all`, and its default is `none` for every profile, `release` included.
-- **Where.** `lib/toolchain-facts.nix`: `capabilitySince.trimPaths`; `crates/breakbulk-plan/src/trim_paths.rs`: `decide`; `lib.rs`: `plan_with_cargo_env` (retraces without it when Cargo's error names `trim-paths`).
+- **Where.** `lib/toolchain-facts.nix`: `capabilitySince.trimPaths`; `crates/breakbulk-plan/src/trim_paths.rs`: `decide`; `lib.rs`: `plan_with_cargo_env` (a Cargo that rejects the setting fails planning, and the error names `workspaces.<ws>.toolchain.capabilities.trimPaths = false`).
 - **Upstream.** cargo `3c747ea3e` `src/workspace/features.rs` (`stable, trim_paths, "1.101"`), `Profile::default_release`; cargo `TomlTrimPaths`; spike A, "trim-paths".
 - **Holds for.** 1.95–1.99 (rejected), nightly 1.101.
-- **Pinned by.** `products-trim-paths`, `loose-ends-devshell-trim-paths` (nightly sets it, 1.99 does not); `target-traits` (`testToolchainCapabilities`). The retrace for a nightly from before stabilization is not tested; such nightlies are leaving the window.
+- **Pinned by.** `products-trim-paths`, `loose-ends-devshell-trim-paths` (nightly sets it, 1.99 does not); `target-traits` (`testToolchainCapabilities`). A nightly 1.101 from before stabilization has the capability by its version but rejects the setting; it is outside the window and needs the override.
 - **If it changes.** A stable release gaining it earlier is harmless (breakbulk keeps its own remaps); a default other than `none` would be detected in the trace (P2).
 
 ### P2. trim-paths detection and remap forms
@@ -877,7 +877,7 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 
 None at the moment.
 
-Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), the `config`-over-`config.toml` rule (T6, guarded at plan time), and the non-Linux rows of G3.
+Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the `config`-over-`config.toml` rule (T6, guarded at plan time), and the non-Linux rows of G3.
 
 ## Keeping this page current
 

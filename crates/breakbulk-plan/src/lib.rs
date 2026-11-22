@@ -134,25 +134,22 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
             declared.places.join(", ")
         );
     }
-    let (traced, t) = if on {
-        let o = trace::with_trim_paths(&traced);
-        match trace::run(&o) {
-            Ok(t) => (o, t),
-            // A nightly from before the setting was stable.
-            Err(e) if e.0.contains("trim-paths") && opts.trim_paths == trim_paths::Mode::Auto => {
-                eprintln!(
-                    "breakbulk-plan: warning: Cargo rejected trim-paths; using breakbulk's own \
-                     path remapping:\n{e}"
-                );
-                let t = trace::run(&traced)?;
-                (traced, t)
-            }
-            Err(e) => return Err(e),
+    if on {
+        traced = trace::with_trim_paths(&traced);
+    }
+    let t = trace::run(&traced).map_err(|e| {
+        // Only a hint: the failure stands either way.
+        if on && e.0.contains("trim-paths") {
+            Error(format!(
+                "{e}\nbreakbulk passed `--config profile.{}.trim-paths=\"all\"` because the \
+                 toolchain's `trimPaths` capability says its Cargo has the setting; for a Cargo \
+                 that rejects it, set `workspaces.<ws>.toolchain.capabilities.trimPaths = false`",
+                opts.profile
+            ))
+        } else {
+            e
         }
-    } else {
-        let t = trace::run(&traced)?;
-        (traced, t)
-    };
+    })?;
     let opts = &traced;
     if !graph::trace_trims_paths(&t.records) {
         trace::check_location(opts, &t.metadata)?;

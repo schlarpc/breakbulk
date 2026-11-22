@@ -684,12 +684,9 @@ pub fn capabilities(opts: &Options) -> Result<breakbulk_format::Capabilities, Er
 
 /// The options of a trace with Cargo's `trim-paths` on for the profile:
 /// `--config` overrides the project's setting, which is why it is passed
-/// only by [`crate::trim_paths::decide`]'s rule. Its own scratch directory,
-/// so a retrace without it (a nightly from before the setting was stable)
-/// starts clean.
+/// only by [`crate::trim_paths::decide`]'s rule.
 pub fn with_trim_paths(opts: &Options) -> Options {
     let mut o = opts.clone();
-    o.scratch = format!("{}/trim-paths", opts.scratch.trim_end_matches('/'));
     o.configs
         .push(format!("profile.{}.trim-paths=\"all\"", opts.profile));
     o.trim_paths_default = true;
