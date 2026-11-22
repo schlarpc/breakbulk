@@ -50,6 +50,7 @@
 }:
 let
   inherit (pkgs) lib;
+  mkWorkspace = import ../lib/workspace.nix { inherit lib breakbulk; };
   fixture = ../fixtures/git-multi-workspace;
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
   tools = breakbulk.mkTools pkgs;
@@ -99,7 +100,7 @@ let
 
   mk =
     toolchain:
-    breakbulk.mkWorkspace pkgs {
+    mkWorkspace pkgs {
       root = fixture + "/consumer";
       inherit tools toolchain;
       name = "git-multi-workspace";
@@ -124,7 +125,7 @@ let
       }
     )).path;
 
-  fetchedWs = breakbulk.mkWorkspace pkgs {
+  fetchedWs = mkWorkspace pkgs {
     root = fixture + "/consumer";
     inherit tools;
     toolchain = toolchains.default;
