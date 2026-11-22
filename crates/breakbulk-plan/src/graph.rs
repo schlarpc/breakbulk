@@ -522,8 +522,16 @@ impl<'a> Builder<'a> {
                     if !seen.insert(r.id.clone()) {
                         bail!("{} was traced twice", describe_run(&r));
                     }
-                    b.run_by_tag
-                        .insert(rec.tag.clone().expect("checked in run_rec"), b.runs.len());
+                    let tag = rec.tag.clone().expect("checked in run_rec");
+                    if let Some(&other) = b.run_by_tag.get(&tag) {
+                        bail!(
+                            "{} and {} have the same tag `{tag}`; a sentinel names its run by \
+                             the tag alone",
+                            describe_run(&b.runs[other]),
+                            describe_run(&r)
+                        );
+                    }
+                    b.run_by_tag.insert(tag, b.runs.len());
                     b.runs.push(r);
                 }
                 "rustdoc" => b.rustdocs.push(rec),
@@ -948,8 +956,9 @@ impl<'a> Builder<'a> {
                     .any(|p| p.id == owner && p.links.is_some())
                 && self.rw.in_scratch(&v)
                 && self.rw.text(&v, Some(owner)).is_err()
-                && let Some((_, tail)) = v.rsplit_once("/build/")
             {
+                let (parts, at) = self.build_dir_parts(&v)?;
+                let tail = parts[at + 2..].join("/");
                 out.insert(k, Text::Literal(format!("{OVERRIDDEN_OUT_DIR}/{tail}")));
                 continue;
             }
@@ -1292,22 +1301,39 @@ impl<'a> Builder<'a> {
     /// `release`. Cargo names that directory after the profile only for
     /// custom ones; for `dev`, `test`, `release` and `bench` the two agree.
     fn out_dir_rel(&self, r: &RunRec<'_>) -> Result<String, Error> {
-        let rel = match under(&r.out_dir, &self.ctx.scratch) {
-            Some(rel) if !rel.is_empty() => rel,
-            _ => bail!(
-                "OUT_DIR {} is not inside Cargo's target directory {}",
-                r.out_dir,
-                self.ctx.scratch
-            ),
-        };
-        let mut parts: Vec<&str> = rel.split('/').collect();
-        let profile = r.rec.env.get("PROFILE").map(String::as_str);
-        if let (Some(b), Some(profile)) = (parts.iter().rposition(|p| *p == "build"), profile)
-            && b > 0
-        {
-            parts[b - 1] = profile;
+        let (mut parts, at) = self.build_dir_parts(&r.out_dir)?;
+        if let Some(profile) = r.rec.env.get("PROFILE") {
+            parts[at] = profile;
         }
         Ok(parts.join("/"))
+    }
+
+    /// An `OUT_DIR` relative to Cargo's
+    /// build directory, split into components, with the index of the
+    /// profile directory: `[<target short name>/]<profile>/build/…`, the
+    /// short name there exactly for target units ([`Self::platform_of`]).
+    /// Not found by searching for `build`: in the new layout a package
+    /// named `build` has `…/build/build/<hash>`.
+    fn build_dir_parts<'p>(&self, path: &'p str) -> Result<(Vec<&'p str>, usize), Error> {
+        let Some(rel) = under(path, &self.ctx.scratch).filter(|r| !r.is_empty()) else {
+            bail!(
+                "OUT_DIR {path} is not inside Cargo's target directory {}",
+                self.ctx.scratch
+            );
+        };
+        let parts: Vec<&str> = rel.split('/').collect();
+        let at = match self.platform_of(path) {
+            Platform::Target => 1,
+            Platform::Host => 0,
+        };
+        if parts.get(at + 1) != Some(&"build") || parts.len() < at + 3 {
+            bail!(
+                "OUT_DIR {path} is not in a profile's `build` directory of Cargo's target \
+                 directory {} (`[<target>/]<profile>/build/…`)",
+                self.ctx.scratch
+            );
+        }
+        Ok((parts, at))
     }
 
     /// A recorded working directory: one reference, or (the standard
@@ -2208,5 +2234,79 @@ mod error_tests {
             .plan()
             .unwrap_err();
         assert!(e.0.contains("/s/board/debug/elsewhere"), "{e}");
+    }
+
+    fn run(package: &str, tag: &str, out_dir: &str) -> serde_json::Value {
+        json!({
+            "mode": "run",
+            "program": [format!("{out_dir}/../build-script-build")],
+            "args": [],
+            "cwd": format!("/k/{package}"),
+            "env": {
+                "CARGO_MANIFEST_DIR": format!("/k/{package}"),
+                "OUT_DIR": out_dir,
+                "PROFILE": "release",
+            },
+            "tag": tag,
+        })
+    }
+
+    fn metadata(names: &[&str]) -> Metadata {
+        serde_json::from_value(json!({
+            "packages": names.iter().map(|n| package(n)).collect::<Vec<_>>(),
+            "workspace_members": [],
+            "workspace_root": "/k",
+        }))
+        .unwrap()
+    }
+
+    /// A run's directory relative to the build directory, with the profile
+    /// directory renamed after `PROFILE`: found by position, also for a
+    /// package named `build` in the new layout.
+    #[test]
+    fn out_dir_rel_by_position() {
+        let metadata = metadata(&["a", "build"]);
+        let records: Vec<Record> = serde_json::from_value(json!([
+            { "mode": "query", "program": ["rustc"], "args": ["-vV"], "cwd": "/k", "env": {} },
+            run("a", "1111", "/s/custom/build/a-1111/out"),
+            run(
+                "build",
+                "2222",
+                "/s/x86_64-unknown-linux-gnu/custom/build/build/2222/out"
+            ),
+        ]))
+        .unwrap();
+        let ctx = context();
+        let b = Builder::new(&ctx, &metadata, &records).unwrap();
+        let rels: Vec<&str> = b.rw.run_dirs.values().map(|(_, r)| r.as_str()).collect();
+        assert_eq!(
+            rels,
+            [
+                "release/build/a-1111/out",
+                "x86_64-unknown-linux-gnu/release/build/build/2222/out"
+            ]
+        );
+
+        let records: Vec<Record> = serde_json::from_value(json!([
+            { "mode": "query", "program": ["rustc"], "args": ["-vV"], "cwd": "/k", "env": {} },
+            run("a", "1111", "/s/x86_64-unknown-linux-gnu/custom/a-1111/out"),
+        ]))
+        .unwrap();
+        let e = Builder::new(&ctx, &metadata, &records).err().unwrap().0;
+        assert!(e.contains("is not in a profile's `build` directory"), "{e}");
+    }
+
+    #[test]
+    fn duplicate_run_tags() {
+        let metadata = metadata(&["a", "b"]);
+        let records: Vec<Record> = serde_json::from_value(json!([
+            { "mode": "query", "program": ["rustc"], "args": ["-vV"], "cwd": "/k", "env": {} },
+            run("a", "1111", "/s/debug/build/a-1111/out"),
+            run("b", "1111", "/s/debug/build/b-1111/out"),
+        ]))
+        .unwrap();
+        let ctx = context();
+        let e = Builder::new(&ctx, &metadata, &records).err().unwrap().0;
+        assert!(e.contains("have the same tag `1111`"), "{e}");
     }
 }
