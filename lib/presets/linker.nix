@@ -373,7 +373,7 @@ let
     let
       v = rustc.version;
       at = gate: util.rustVersion.atLeast gate v;
-      nightly = lib.hasInfix "-nightly" v || lib.hasInfix "-dev" v;
+      nightly = util.rustVersion.isNightly v;
     in
     rustc.bundledLld
     && rustc.host == "x86_64-unknown-linux-gnu"

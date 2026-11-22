@@ -528,11 +528,15 @@ rec {
   #
   #   rustVersion.majorMinor "1.101.0-nightly (…)"   -> "1.101"
   #   rustVersion.atLeast "1.95" v                    -> bool
+  #   rustVersion.isNightly v                         -> bool
   rustVersion = rec {
     # "<major>.<minor>" of a version (`rustc.version`, `1.99.0`,
     # `1.101.0-nightly`); the channel suffix is ignored.
     majorMinor = v: lib.versions.majorMinor (lib.head (lib.splitString "-" v));
     # Whether release `v` is `gate` ("<major>.<minor>") or later.
     atLeast = gate: v: lib.versionAtLeast (majorMinor v) gate;
+    # A nightly release, or a compiler built from source (`-dev`), which
+    # enables the same unstable defaults.
+    isNightly = v: lib.hasInfix "-nightly" v || lib.hasInfix "-dev" v;
   };
 }
