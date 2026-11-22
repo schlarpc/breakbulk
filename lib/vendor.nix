@@ -347,6 +347,26 @@ in
     in
     {
       inherit dir config;
+      # The directory source `config` replaces crates.io with, or null when
+      # nothing comes from crates.io: the planner's `--crates-io-source` and
+      # `--crates-io-directory`.
+      cratesIo =
+        let
+          h = lib.findFirst (
+            h:
+            let
+              p = (head groups.${h}).parsed;
+            in
+            p.kind == "registry" && p.isCratesIo
+          ) null (attrNames groups);
+        in
+        if h == null then
+          null
+        else
+          {
+            source = replacement h;
+            directory = "${dir}/${h}";
+          };
       # Pass to cargo as `--config <file>`: an inline `--config` value may
       # hold only one dotted key (cargo src/context/mod.rs, toml_dotted_keys).
       configFile = pkgs.writeText "breakbulk-source-replacement.toml" config;

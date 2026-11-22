@@ -73,55 +73,100 @@ pub enum RustflagsKey {
     Target,
 }
 
-/// The settings of the project's config files the planner and the dev shell
-/// read.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// The project's Cargo config files merged into one table, as Cargo merges
+/// them, and what the planner and the dev shell ask of it.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProjectConfig {
-    /// `build.rustflags`, merged across files, when set anywhere.
-    pub build_rustflags: Option<Vec<String>>,
-    /// `target.<key>.rustflags` by key (a triple or `cfg(…)`), merged.
-    pub target_rustflags: BTreeMap<String, Vec<String>>,
-    /// The `[env]` table's variables, with their `force` flag, merged.
-    pub env: BTreeMap<String, bool>,
-    /// `build.target`, merged, as written: a triple, `host-tuple` or a
-    /// `.json` path (Cargo's `BuildTargetConfig`).
-    pub build_target: Option<Vec<String>>,
+    /// The merged table, without `include`.
+    pub table: toml::Table,
     /// The files read, in precedence order (lowest first).
     pub files: Vec<PathBuf>,
-    /// The list keys (`build.rustflags`, `target.<key>.rustflags`,
-    /// `build.target`) whose value so far is a string, which a later string
-    /// replaces instead of extending.
-    string_keys: BTreeSet<String>,
 }
 
-/// Merge a later (higher-precedence) string-or-array value into `old`, as
-/// Cargo's `ConfigValue::merge` does (`src/cargo/util/context/config_value.rs`,
-/// `merge_helper`): arrays concatenate, lower precedence first; a string
-/// replaces a string; a string and an array do not merge.
-fn merge_list(
-    old: &mut Option<Vec<String>>,
-    strings: &mut BTreeSet<String>,
-    key: String,
-    (new, new_is_string): (Vec<String>, bool),
+/// The list keys a higher layer replaces instead of extending (cargo
+/// `crates/cargo-util-config/src/config_value.rs`, `NON_MERGEABLE_LISTS`;
+/// `*` matches one key part).
+const NON_MERGEABLE_LISTS: &[&str] = &[
+    "credential-alias.*",
+    "doc.browser",
+    "host.runner",
+    "registries.*.credential-provider",
+    "registry.credential-provider",
+    "target.*.runner",
+];
+
+fn desc(v: &toml::Value) -> &'static str {
+    match v {
+        toml::Value::String(_) => "a string",
+        toml::Value::Integer(_) => "an integer",
+        toml::Value::Float(_) => "a float",
+        toml::Value::Boolean(_) => "a boolean",
+        toml::Value::Datetime(_) => "a datetime",
+        toml::Value::Array(_) => "an array",
+        toml::Value::Table(_) => "a table",
+    }
+}
+
+/// Merge `new`, a higher-precedence layer read from `what`, into `old`, as
+/// Cargo's `ConfigValue::merge` does: tables merge key by key, arrays
+/// concatenate lower precedence first (but see [`NON_MERGEABLE_LISTS`]),
+/// any other value replaces; a table or an array merges with nothing else.
+fn merge(
+    old: &mut toml::Table,
+    new: toml::Table,
+    key: &mut Vec<String>,
     what: &str,
 ) -> Result<(), Error> {
-    match old {
-        None => *old = Some(new),
-        Some(old) => match (strings.contains(&key), new_is_string) {
-            (false, false) => old.extend(new),
-            (true, true) => *old = new,
-            _ => bail!(
-                "{what}: `{key}` is a string in one config file and an array in another, \
-                 which Cargo does not merge"
-            ),
-        },
-    }
-    if new_is_string {
-        strings.insert(key);
-    } else {
-        strings.remove(&key);
+    use toml::Value::{Array, Table};
+    for (k, v) in new {
+        key.push(k.clone());
+        match old.get_mut(&k) {
+            None => {
+                old.insert(k, v);
+            }
+            Some(o) => match (o, v) {
+                (Table(o), Table(v)) => merge(o, v, key, what)?,
+                (Array(o), Array(v)) => {
+                    let replaces = NON_MERGEABLE_LISTS.iter().any(|l| {
+                        l.split('.').count() == key.len()
+                            && l.split('.')
+                                .zip(key.iter())
+                                .all(|(p, k)| p == "*" || p == k)
+                    });
+                    if replaces {
+                        *o = v;
+                    } else {
+                        o.extend(v);
+                    }
+                }
+                (o @ (Table(_) | Array(_)), v) | (o, v @ (Table(_) | Array(_))) => bail!(
+                    "{what}: `{}` is {} in one config file and {} in another, which Cargo \
+                     does not merge",
+                    key.join("."),
+                    desc(o),
+                    desc(&v)
+                ),
+                (o, v) => *o = v,
+            },
+        }
+        key.pop();
     }
     Ok(())
+}
+
+/// `p` with `.` and `..` resolved lexically, as Cargo's `normalize_path`.
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// A config string list: a whitespace-separated string or an array of
@@ -144,10 +189,11 @@ impl ProjectConfig {
     /// Read the config files Cargo reads when started in `cwd`: every
     /// `.cargo/config.toml` (or `.cargo/config`, which wins when both exist)
     /// from `cwd` up to `/`, with their `include`s, and `$CARGO_HOME`'s
-    /// (`cargo_home`). Deeper files take precedence; arrays concatenate with
-    /// the lower-precedence values first (Cargo's `walk_tree` and
-    /// `ConfigValue::merge`). Includes are merged before the including
-    /// file (`load_includes`).
+    /// (`cargo_home`). Deeper files take precedence (cargo
+    /// `crates/cargo-util-config/src/loader.rs`: `walk_tree`,
+    /// `get_file_path`). An included file is a layer just below the file
+    /// that includes it, its path relative to that file's directory
+    /// (`load_unmerged_file`, `DetailedIncludeConfig::resolve_path`).
     pub fn read(cwd: &Path, cargo_home: Option<&Path>) -> Result<ProjectConfig, Error> {
         let mut dirs: Vec<PathBuf> = cwd.ancestors().map(|d| d.join(".cargo")).collect();
         if let Some(home) = cargo_home
@@ -167,27 +213,23 @@ impl ProjectConfig {
             }
         }
         let mut cfg = ProjectConfig::default();
-        let mut seen = Vec::new();
         for f in &files {
-            cfg.load(f, &mut seen)?;
+            cfg.load(f, &mut Vec::new())?;
         }
         Ok(cfg)
     }
 
     /// [`read`](Self::read) for the planner's workspace, then the variant's
-    /// `--cargo-config` file as the highest layer. Cargo merges a
-    /// `--config` file over the discovered files as it merges a deeper
-    /// file over a shallower one: a string replaces, arrays concatenate
-    /// with the file's values last (cargo `GlobalContext::merge_cli_args`,
-    /// `ConfigValue::merge` with `force`), its `include`s first
-    /// (`load_includes`).
+    /// `--cargo-config` file as the highest layer, merged by the same rules
+    /// (cargo `GlobalContext::merge_cli_args`; `--config` values outrank
+    /// files), its `include`s first.
     pub fn of(opts: &crate::trace::Options) -> Result<ProjectConfig, Error> {
         ProjectConfig::read(&crate::trace::workspace_dir(opts), None)?
             .with_cli(opts.cargo_config.as_deref().map(Path::new))
     }
 
     /// This config with a `--config` file over it (see [`of`](Self::of)).
-    fn with_cli(mut self, file: Option<&Path>) -> Result<ProjectConfig, Error> {
+    pub(crate) fn with_cli(mut self, file: Option<&Path>) -> Result<ProjectConfig, Error> {
         if let Some(f) = file {
             self.load(f, &mut Vec::new())?;
         }
@@ -201,13 +243,13 @@ impl ProjectConfig {
         seen.push(path.to_owned());
         let text = std::fs::read_to_string(path)
             .map_err(|e| Error(format!("reading {}: {e}", path.display())))?;
-        let table: toml::Table =
+        let mut table: toml::Table =
             toml::from_str(&text).map_err(|e| Error(format!("{}: {e}", path.display())))?;
         let what = path.display().to_string();
-        if let Some(inc) = table.get("include") {
+        if let Some(inc) = table.remove("include") {
             let dir = path.parent().unwrap_or(Path::new("/"));
             let entries: Vec<(String, bool)> = match inc {
-                toml::Value::String(s) => vec![(s.clone(), false)],
+                toml::Value::String(s) => vec![(s, false)],
                 toml::Value::Array(a) => a
                     .iter()
                     .map(|x| match x {
@@ -226,93 +268,111 @@ impl ProjectConfig {
                 _ => bail!("{what}: malformed `include`"),
             };
             for (rel, optional) in entries {
-                let p = dir.join(rel);
+                if !rel.ends_with(".toml") {
+                    bail!("{what}: Cargo takes only `.toml` files in `include`, not `{rel}`");
+                }
+                let p = normalize(&dir.join(rel));
                 if optional && !p.exists() {
                     continue;
                 }
                 self.load(&p, seen)?;
             }
         }
-        if let Some(b) = table.get("build").and_then(|b| b.get("rustflags")) {
-            let v = string_list(b, &format!("{what}: build.rustflags"))?;
-            merge_list(
-                &mut self.build_rustflags,
-                &mut self.string_keys,
-                "build.rustflags".into(),
-                (v, b.is_str()),
-                &what,
-            )?;
-        }
-        if let Some(t) = table.get("build").and_then(|b| b.get("target")) {
-            // One target, not a whitespace-separated list: a string is a
-            // single value (Cargo's `BuildTargetConfigInner::One`).
-            let v = match t {
-                toml::Value::String(s) => vec![s.clone()],
-                _ => string_list(t, &format!("{what}: build.target"))?,
-            };
-            merge_list(
-                &mut self.build_target,
-                &mut self.string_keys,
-                "build.target".into(),
-                (v, t.is_str()),
-                &what,
-            )?;
-        }
-        match table.get("env") {
-            None => {}
-            Some(toml::Value::Table(env)) => {
-                for (k, v) in env {
-                    // `NAME = "value"`, or `NAME = { value, force, relative }`
-                    // (Cargo's `EnvConfigValue`). A deeper file's table
-                    // merges into a shallower one's; a string replaces it.
-                    let force = match v {
-                        toml::Value::String(_) => false,
-                        toml::Value::Table(t) => match t.get("force") {
-                            Some(toml::Value::Boolean(f)) => *f,
-                            None => self.env.get(k).copied().unwrap_or(false),
-                            Some(_) => bail!("{what}: env.{k}.force: expected a boolean"),
-                        },
-                        _ => bail!("{what}: env.{k}: expected a string or a table"),
-                    };
-                    self.env.insert(k.clone(), force);
-                }
-            }
-            Some(_) => bail!("{what}: `env` is not a table"),
-        }
-        if let Some(toml::Value::Table(targets)) = table.get("target") {
-            for (key, t) in targets {
-                if let Some(r) = t.get("rustflags") {
-                    let v = string_list(r, &format!("{what}: target.{key}.rustflags"))?;
-                    let mut old = self.target_rustflags.remove(key);
-                    merge_list(
-                        &mut old,
-                        &mut self.string_keys,
-                        format!("target.{key}.rustflags"),
-                        (v, r.is_str()),
-                        &what,
-                    )?;
-                    self.target_rustflags
-                        .insert(key.clone(), old.unwrap_or_default());
-                }
-            }
-        }
+        merge(&mut self.table, table, &mut Vec::new(), &what)?;
         self.files.push(path.to_owned());
         seen.pop();
         Ok(())
     }
-}
 
-impl ProjectConfig {
+    fn get(&self, key: &[&str]) -> Option<&toml::Value> {
+        let (first, rest) = key.split_first()?;
+        rest.iter()
+            .try_fold(self.table.get(*first)?, |v, k| v.get(k))
+    }
+
+    /// `build.rustflags`, when set.
+    pub fn build_rustflags(&self) -> Result<Option<Vec<String>>, Error> {
+        self.get(&["build", "rustflags"])
+            .map(|v| string_list(v, "Cargo config: build.rustflags"))
+            .transpose()
+    }
+
+    /// `target.<key>.rustflags` by key (a triple or `cfg(…)`).
+    pub fn target_rustflags(&self) -> Result<BTreeMap<String, Vec<String>>, Error> {
+        let Some(toml::Value::Table(targets)) = self.table.get("target") else {
+            return Ok(BTreeMap::new());
+        };
+        targets
+            .iter()
+            .filter_map(|(k, t)| Some((k, t.get("rustflags")?)))
+            .map(|(k, r)| {
+                let v = string_list(r, &format!("Cargo config: target.{k}.rustflags"))?;
+                Ok((k.clone(), v))
+            })
+            .collect()
+    }
+
+    /// The `[env]` table's variables, with their `force` flag: `NAME =
+    /// "value"`, or `NAME = { value, force, relative }` (Cargo's
+    /// `EnvConfigValue`).
+    pub fn env(&self) -> Result<BTreeMap<String, bool>, Error> {
+        let env = match self.table.get("env") {
+            None => return Ok(BTreeMap::new()),
+            Some(toml::Value::Table(env)) => env,
+            Some(_) => bail!("Cargo config: `env` is not a table"),
+        };
+        env.iter()
+            .map(|(k, v)| {
+                let force = match v {
+                    toml::Value::String(_) => false,
+                    toml::Value::Table(t) => match t.get("force") {
+                        Some(toml::Value::Boolean(f)) => *f,
+                        None => false,
+                        Some(_) => bail!("Cargo config: env.{k}.force: expected a boolean"),
+                    },
+                    _ => bail!("Cargo config: env.{k}: expected a string or a table"),
+                };
+                Ok((k.clone(), force))
+            })
+            .collect()
+    }
+
+    /// `build.target` as written: a triple, `host-tuple` or a `.json` path
+    /// (Cargo's `BuildTargetConfig`).
+    pub fn build_target(&self) -> Result<Option<Vec<String>>, Error> {
+        let Some(t) = self.get(&["build", "target"]) else {
+            return Ok(None);
+        };
+        // One target, not a whitespace-separated list: a string is a
+        // single value (Cargo's `BuildTargetConfigInner::One`).
+        Ok(Some(match t {
+            toml::Value::String(s) => vec![s.clone()],
+            _ => string_list(t, "Cargo config: build.target")?,
+        }))
+    }
+
+    /// Whether the config turns on `-Zbuild-std` (`[unstable] build-std`).
+    pub fn uses_build_std(&self) -> bool {
+        self.get(&["unstable", "build-std"]).is_some()
+    }
+
+    /// The `trim-paths` keys under `[profile]`
+    /// ([`crate::trim_paths::in_table`]).
+    pub fn trim_paths_keys(&self) -> Vec<String> {
+        crate::trim_paths::in_table(&self.table)
+    }
+
     /// The `[env]` variables Cargo sets on the processes it starts, when its
     /// own environment has the variables `cargo_env`: every one with
     /// `force`, and the others only when Cargo's environment lacks them
     /// (`GlobalContext::env_config`; the Cargo book's `[env]` section).
-    pub fn applied_env(&self, cargo_env: &BTreeSet<String>) -> BTreeSet<String> {
-        self.env
-            .iter()
-            .filter(|(k, force)| **force || !cargo_env.contains(*k))
-            .map(|(k, _)| k.clone())
-            .collect()
+    pub fn applied_env(&self, cargo_env: &BTreeSet<String>) -> Result<BTreeSet<String>, Error> {
+        Ok(self
+            .env()?
+            .into_iter()
+            .filter(|(k, force)| *force || !cargo_env.contains(k))
+            .map(|(k, _)| k)
+            .collect())
     }
 }
 
@@ -345,19 +405,17 @@ impl ProjectConfig {
         triple: &str,
         query: &mut CfgQuery,
     ) -> Result<Effective, Error> {
+        let target_rustflags = self.target_rustflags()?;
+        let build_rustflags = self.build_rustflags()?;
         // `extra_args`: (all flags, the project's share and source).
         let extra = |cfg: Option<&[Cfg]>| -> Result<(Vec<String>, Effective), Error> {
-            let mut project = self
-                .target_rustflags
-                .get(triple)
-                .cloned()
-                .unwrap_or_default();
+            let mut project = target_rustflags.get(triple).cloned().unwrap_or_default();
             let mut all = project.clone();
             if key == RustflagsKey::Target {
                 all.extend(spec.iter().cloned());
             }
             if let Some(cfg) = cfg {
-                let more = self.cfg_flags(cfg);
+                let more = cfg_flags(&target_rustflags, cfg);
                 project.extend(more.iter().cloned());
                 all.extend(more);
             }
@@ -365,8 +423,8 @@ impl ProjectConfig {
                 let source = Some(RustflagsKey::Target);
                 return Ok((all, Effective { source, project }));
             }
-            if self.build_rustflags.is_some() || (key == RustflagsKey::Build && !spec.is_empty()) {
-                let project = self.build_rustflags.clone().unwrap_or_default();
+            if build_rustflags.is_some() || (key == RustflagsKey::Build && !spec.is_empty()) {
+                let project = build_rustflags.clone().unwrap_or_default();
                 let mut all = project.clone();
                 if key == RustflagsKey::Build {
                     all.extend(spec.iter().cloned());
@@ -384,7 +442,7 @@ impl ProjectConfig {
             ))
         };
         let mut flags = extra(None)?;
-        if !self.target_rustflags.keys().any(|k| k.starts_with("cfg(")) {
+        if !target_rustflags.keys().any(|k| k.starts_with("cfg(")) {
             // No key depends on the cfg; a query would change nothing.
             return Ok(flags.1);
         }
@@ -403,17 +461,17 @@ impl ProjectConfig {
         }
         Ok(flags.1)
     }
+}
 
-    /// The flags of every `target.'cfg(…)'` key matching `cfg`, in key
-    /// order (Cargo's `target_cfgs` is a `BTreeMap`). A key that does not
-    /// parse matches nothing, as in Cargo (`CfgExpr::matches_key`).
-    fn cfg_flags(&self, cfg: &[Cfg]) -> Vec<String> {
-        self.target_rustflags
-            .iter()
-            .filter(|(key, _)| CfgExpr::matches_key(key, cfg))
-            .flat_map(|(_, v)| v.iter().cloned())
-            .collect()
-    }
+/// The flags of every `target.'cfg(…)'` key of `target_rustflags` matching
+/// `cfg`, in key order (Cargo's `target_cfgs` is a `BTreeMap`). A key that
+/// does not parse matches nothing, as in Cargo (`CfgExpr::matches_key`).
+fn cfg_flags(target_rustflags: &BTreeMap<String, Vec<String>>, cfg: &[Cfg]) -> Vec<String> {
+    target_rustflags
+        .iter()
+        .filter(|(key, _)| CfgExpr::matches_key(key, cfg))
+        .flat_map(|(_, v)| v.iter().cloned())
+        .collect()
 }
 
 impl RustflagsKey {
@@ -428,7 +486,7 @@ impl RustflagsKey {
         triple: &str,
         query: &mut CfgQuery,
     ) -> Result<(RustflagsKey, Vec<String>), Error> {
-        if project.build_rustflags.is_some() {
+        if project.build_rustflags()?.is_some() {
             let e = project.effective(spec, RustflagsKey::Build, triple, query)?;
             if e.source == Some(RustflagsKey::Build) {
                 return Ok((RustflagsKey::Build, e.project));
@@ -949,7 +1007,7 @@ mod tests {
                 ".cargo/config.toml",
                 "[env]\nPLAIN = \"a\"\nFORCED = { value = \"b\", force = true }\n\
                  PATH = \"/nope\"\nHOME = { value = \"/h\", force = true }\n\
-                 LATER = { value = \"x\", force = true }\n",
+                 LATER = \"x\"\n",
             ),
             (
                 "ws/.cargo/config.toml",
@@ -959,7 +1017,7 @@ mod tests {
         ]);
         let c = read(&d, "ws");
         assert_eq!(
-            c.env,
+            c.env().unwrap(),
             BTreeMap::from([
                 ("FORCED".into(), true),
                 ("HOME".into(), true),
@@ -974,8 +1032,21 @@ mod tests {
             .map(String::from)
             .collect();
         assert_eq!(
-            c.applied_env(&cargo_env).into_iter().collect::<Vec<_>>(),
+            c.applied_env(&cargo_env)
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
             ["FORCED", "HOME", "PLAIN", "REL"]
+        );
+        // A table and a string do not merge; Cargo fails too.
+        let d = dir(&[
+            (".cargo/config.toml", "[env]\nX = { value = \"a\" }\n"),
+            ("ws/.cargo/config.toml", "[env]\nX = \"b\"\n"),
+        ]);
+        let e = ProjectConfig::read(&d.join("ws"), None).unwrap_err();
+        assert!(
+            e.0.contains("`env.X` is a table in one config file and a string in another"),
+            "{e}"
         );
     }
 
@@ -1001,12 +1072,12 @@ mod tests {
         let cli = d.join("variant.toml");
         let c = read(&d, "ws").with_cli(Some(&cli)).unwrap();
         assert_eq!(
-            c.build_rustflags,
+            c.build_rustflags().unwrap(),
             Some(vec!["-Cproject".into(), "--cfg".into(), "variant".into()])
         );
-        assert_eq!(c.build_target, Some(vec!["b".into()]));
+        assert_eq!(c.build_target().unwrap(), Some(vec!["b".into()]));
         assert_eq!(
-            c.env,
+            c.env().unwrap(),
             BTreeMap::from([("PROJECT".into(), false), ("VARIANT".into(), true)])
         );
         assert_eq!(c.files.last(), Some(&cli));
@@ -1145,7 +1216,10 @@ mod tests {
             ),
         ]);
         let c = read(&d, "ws");
-        assert_eq!(c.build_rustflags, Some(vec!["--cfg".into(), "x".into()]));
+        assert_eq!(
+            c.build_rustflags().unwrap(),
+            Some(vec!["--cfg".into(), "x".into()])
+        );
         assert_eq!(
             choose(&c, t).unwrap(),
             (RustflagsKey::Target, vec!["--cfg".into(), "t2".into()])
@@ -1265,6 +1339,39 @@ mod tests {
         );
     }
 
+    /// The merged table: an include path is relative to the including
+    /// file's directory and must name a `.toml` file; tables merge key by
+    /// key; a runner list is replaced, not extended; other values replace.
+    #[test]
+    fn merged_table() {
+        let d = dir(&[
+            (
+                ".cargo/config.toml",
+                "[target.x]\nrunner = [\"a\"]\nrustflags = [\"-C1\"]\n[build]\njobs = 2\n",
+            ),
+            (
+                "ws/.cargo/config.toml",
+                "include = [\"../shared/./x.toml\"]\n[target.x]\nrunner = [\"b\"]\n",
+            ),
+            (
+                "ws/shared/x.toml",
+                "[target.x]\nrustflags = [\"-C2\"]\n[build]\njobs = \"default\"\n",
+            ),
+        ]);
+        let c = read(&d, "ws");
+        let t: toml::Table = toml::from_str(
+            "[target.x]\nrunner = [\"b\"]\nrustflags = [\"-C1\", \"-C2\"]\n\
+             [build]\njobs = \"default\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.table, t);
+        assert_eq!(c.files[1], d.join("ws/shared/x.toml"));
+
+        let d = dir(&[(".cargo/config.toml", "include = [\"x.conf\"]\n")]);
+        let e = ProjectConfig::read(&d, None).unwrap_err();
+        assert!(e.0.contains("only `.toml` files"), "{e}");
+    }
+
     /// `build.target` merges as Cargo's `ConfigValue::merge` does: a deeper
     /// file's string replaces a string, arrays concatenate (lower precedence
     /// first), a string and an array fail; a string is one value, even with
@@ -1282,11 +1389,11 @@ mod tests {
             ),
         ]);
         assert_eq!(
-            read(&d, "ws").build_target,
+            read(&d, "ws").build_target().unwrap(),
             Some(vec!["aarch64-unknown-uefi".into()])
         );
         assert_eq!(
-            read(&d, "").build_target,
+            read(&d, "").build_target().unwrap(),
             Some(vec!["x86_64-unknown-uefi".into()])
         );
 
@@ -1298,7 +1405,7 @@ mod tests {
             ),
         ]);
         assert_eq!(
-            read(&d, "ws").build_target,
+            read(&d, "ws").build_target().unwrap(),
             Some(vec!["a".into(), "b".into(), "host-tuple".into()])
         );
 
@@ -1313,6 +1420,6 @@ mod tests {
         );
 
         let d = dir(&[(".cargo/config.toml", "[build]\njobs = 4\n")]);
-        assert_eq!(read(&d, "").build_target, None);
+        assert_eq!(read(&d, "").build_target().unwrap(), None);
     }
 }

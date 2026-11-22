@@ -9,6 +9,7 @@
 //!   [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--cargo-config FILE] [--spec FILE] --capabilities FILE \
+//!   [--crates-io-source NAME --crates-io-directory DIR] \
 //!   [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]… --out plan.json \
 //!   [--cargo-env cargo-env.json]
 //!
@@ -40,6 +41,10 @@
 //! `--config`, and the planner's reader of the project's config loads it
 //! last, over the project's files.
 //!
+//! `--crates-io-source` and `--crates-io-directory` name the directory
+//! source that the vendor config (a `--config` file) replaces crates.io
+//! with, where `-Zbuild-std` adds the standard library's dependencies.
+//!
 //! `--kind doc` traces `cargo doc`, with `--no-deps` `cargo doc --no-deps`.
 
 use std::process::ExitCode;
@@ -57,7 +62,7 @@ fn usage() -> ! {
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
          [--config X]... [--cargo-config FILE] [--spec FILE] --capabilities FILE \
-         [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
+         [--crates-io-source NAME --crates-io-directory DIR] [--trim-paths auto|on|off] --scratch DIR [--forbid PATH]... --out FILE [--cargo-env FILE]\n       \
          breakbulk-plan --cargo-env-only --rustc R --skeleton DIR [--workspace REL] \
          --target TRIPLE [--spec FILE] [--capabilities FILE --profile P... [--trim-paths auto|on|off]] \
          --scratch DIR --cargo-env FILE\n       \
@@ -91,6 +96,7 @@ fn main() -> ExitCode {
         packages: Vec::new(),
         configs: Vec::new(),
         cargo_config: None,
+        crates_io: None,
         scratch: String::new(),
         forbidden: Vec::new(),
         spec: None,
@@ -106,6 +112,8 @@ fn main() -> ExitCode {
     let mut cargo_env_out: Option<String> = None;
     let mut cargo_env_only = false;
     let mut build_target_only = false;
+    let mut crates_io_source = None;
+    let mut crates_io_directory = None;
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| usage());
         match a.as_str() {
@@ -155,6 +163,8 @@ fn main() -> ExitCode {
             "-p" | "--package" => opts.packages.push(val()),
             "--config" => opts.configs.push(val()),
             "--cargo-config" => opts.cargo_config = Some(val()),
+            "--crates-io-source" => crates_io_source = Some(val()),
+            "--crates-io-directory" => crates_io_directory = Some(val()),
             "--scratch" => opts.scratch = val(),
             "--forbid" => opts.forbidden.push(val()),
             "--spec" => opts.spec = Some(val()),
@@ -176,6 +186,11 @@ fn main() -> ExitCode {
             _ => usage(),
         }
     }
+    opts.crates_io = match (crates_io_source, crates_io_directory) {
+        (Some(name), Some(dir)) => Some((name, dir)),
+        (None, None) => None,
+        _ => usage(),
+    };
     if cargo_env_only {
         return write_cargo_env_only(&opts, &profiles, cargo_env_out);
     }

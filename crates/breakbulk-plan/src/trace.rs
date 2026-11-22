@@ -80,6 +80,11 @@ pub struct Options {
     ///
     /// [`ProjectConfig::of`]: crate::spec::ProjectConfig::of
     pub cargo_config: Option<String>,
+    /// The directory source that `configs` replace crates.io with, as
+    /// (source name, directory) (`--crates-io-source`,
+    /// `--crates-io-directory`): where `-Zbuild-std` adds the standard
+    /// library's dependencies ([`crate::build_std`]).
+    pub crates_io: Option<(String, String)>,
     /// A writable directory for Cargo's target directory and the records.
     pub scratch: String,
     /// Paths no literal in the plan may contain (besides the scratch
@@ -140,7 +145,7 @@ impl Trace {
             target_debuginfo: self.target_spec.debuginfo.clone(),
             keep_workspace_wrapper: runs_wrappers(opts) && opts.rustc_workspace_wrapper.is_some(),
             rustc_wrapper: opts.rustc_wrapper.clone().filter(|_| runs_wrappers(opts)),
-            config_env: project.applied_env(&cargo_env_names(opts)),
+            config_env: project.applied_env(&cargo_env_names(opts))?,
             rust_src_remap: self.rust_src_remap.clone(),
             trim_paths_default: opts.trim_paths_default,
             std_vendor: opts
@@ -289,13 +294,12 @@ fn check_clippy_driver(opts: &Options, driver: &str) -> Result<(), Error> {
 /// directory with the standard library's vendored dependencies
 /// ([`crate::build_std`]).
 pub fn std_vendor(opts: &Options) -> Result<Option<crate::build_std::StdVendor>, Error> {
-    let project = crate::spec::ProjectConfig::of(opts)?;
-    if !crate::build_std::uses_build_std(&project.files)? {
+    if !crate::spec::ProjectConfig::of(opts)?.uses_build_std() {
         return Ok(None);
     }
     let scratch = PathBuf::from(&opts.scratch);
     mkdir(&scratch)?;
-    crate::build_std::prepare(&sysroot(opts)?, &opts.configs, &scratch)
+    crate::build_std::prepare(&sysroot(opts)?, opts.crates_io.as_ref(), &scratch)
 }
 
 fn mkdir(p: &Path) -> Result<(), Error> {

@@ -108,6 +108,12 @@
         "--capabilities"
         (toolchainFacts.capabilitiesFile caps)
       ]
+      ++ lib.optionals (vendor.cratesIo != null) [
+        "--crates-io-source"
+        vendor.cratesIo.source
+        "--crates-io-directory"
+        vendor.cratesIo.directory
+      ]
       ++ lib.optional (kind == "doc" && noDeps) "--no-deps"
       ++ lib.optionals (mode != "build") [
         "--mode"

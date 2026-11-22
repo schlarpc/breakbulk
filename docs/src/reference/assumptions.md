@@ -153,11 +153,11 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 
 ### T6. Config discovery and merging
 
-- **Assumption.** Cargo reads `.cargo/config.toml` (or `.cargo/config`, which wins when both exist) in every ancestor of its working directory and in `$CARGO_HOME`, whatever `CARGO_HOME` says about the others; `include`s merge before the including file; deeper files win; arrays concatenate lower-precedence first and a string replaces a string; `--config` beats every file, merging over them as a deeper file would (later `--config` arguments over earlier ones, arrays appended), and an inline `--config` value holds one dotted key while a file may hold many.
-- **Where.** `crates/breakbulk-plan/src/spec.rs`: `ProjectConfig::read`, `of` (the variant's `cargoConfig` file as the last layer), `load`, `merge_rustflags`; `trim_paths.rs`: `files`; `trace.rs`: `run` (the generated `--config` file), `common_args`; `lib/skeleton.nix` (copies every ancestor's config); `lib/vendor.nix` (vendor config as a file, `toml_dotted_keys`).
-- **Upstream.** cargo `src/context/mod.rs`: `walk_tree`, `load_includes`, `cli_args_to_config`, `merge_cli_args`, `ConfigValue::merge` (`force` for `--config`; checked at cargo 0.103.0, 0a2d4c6); spike A, surprise S1 (ancestors, `$HOME`).
-- **Holds for.** The window (single-file configs); `include` and the `config`-over-`config.toml` rule only by reading the source.
-- **Pinned by.** Every plan check (the `--config` file sets rustc, wrapper, rustdoc and directories); `same-triple-build` and `loose-ends-cfg-rustflags` (project rustflags merged with the spec's); `products-variants-cargo-config` (a `cargoConfig` file's `build.rustflags` and `[env]` reach the units, and its `build.rustflags` move the spec's flags under that key). Rust: `spec::tests::config_file`, `spec::tests::key_choice`, `spec::tests::cli_config_layer`. The rest is guarded at plan time: `Prepared::apply` checks that the project's and the spec's flags reached every target unit.
+- **Assumption.** Cargo reads `.cargo/config.toml` (or `.cargo/config`, which wins when both exist) in every ancestor of its working directory and in `$CARGO_HOME`, whatever `CARGO_HOME` says about the others; an `include`d file (a `.toml` path relative to the including file's directory) is a layer just below the file that includes it; deeper files win; tables merge key by key, arrays concatenate lower-precedence first (except a few, such as `target.*.runner`, which a higher layer replaces), any other value replaces, and a table or an array merges with nothing else; `--config` beats every file, merging over them as a deeper file would (later `--config` arguments over earlier ones, arrays appended), and an inline `--config` value holds one dotted key while a file may hold many.
+- **Where.** `crates/breakbulk-plan/src/spec.rs`: `ProjectConfig::read`, `of` (the variant's `cargoConfig` file as the last layer), `load`, `merge` (one merged table; rustflags, `[env]`, `build.target`, `unstable.build-std` and `profile.*.trim-paths` are queries on it); `trace.rs`: `run` (the generated `--config` file), `common_args`; `lib/skeleton.nix` (copies every ancestor's config and the files their `include`s reach); `lib/vendor.nix` (vendor config as a file, `toml_dotted_keys`).
+- **Upstream.** cargo `crates/cargo-util-config/src/loader.rs`: `walk_tree`, `get_file_path`, `load_unmerged_file`, `include_paths`, `load_cli_args`; `config_value.rs`: `ConfigValue::merge`, `NON_MERGEABLE_LISTS`; `config_store.rs`: `from_layers`; `src/context/mod.rs`: `reload_rooted_at` (checked at cargo 0.103.0, 930a674); spike A, surprise S1 (ancestors, `$HOME`).
+- **Holds for.** The window; the `config`-over-`config.toml` rule only by reading the source.
+- **Pinned by.** Every plan check (the `--config` file sets rustc, wrapper, rustdoc and directories); `same-triple-build` and `loose-ends-cfg-rustflags` (project rustflags merged with the spec's); `products-variants-cargo-config` (a `cargoConfig` file's `build.rustflags` and `[env]` reach the units, and its `build.rustflags` move the spec's flags under that key); `repository-cargo-config-include` (included `build.rustflags` reach the units, an included `build.target` is the default target, a missing optional include is skipped); `repository-trim-paths-included` (a `trim-paths` in an included file is the project's own). Rust: `spec::tests::config_file`, `spec::tests::key_choice`, `spec::tests::cli_config_layer`, `spec::tests::merged_table`. The rest is guarded at plan time: `Prepared::apply` checks that the project's and the spec's flags reached every target unit.
 - **If it changes.** The planner puts spec rustflags under the wrong key; planning fails naming the flags that did not arrive.
 
 ### T7. rustc option arity and output names
@@ -539,11 +539,11 @@ Status of the 82 entries: all 82 pinned; [Gaps](#gaps) is empty.
 
 ### P4. A `--config` profile setting replaces the project's
 
-- **Assumption.** `--config profile.<p>.trim-paths=…` overrides the manifest's and config files' setting, so breakbulk passes it only when the project mentions `trim-paths` nowhere under `[profile]`; a per-package override can turn it on for some packages only.
-- **Where.** `crates/breakbulk-plan/src/trim_paths.rs`: `declared`, `in_table`, `decide`; `trace.rs`: `with_trim_paths`; `graph.rs`: `Builder::trim_paths` (fails on a mix).
+- **Assumption.** `--config profile.<p>.trim-paths=…` overrides the manifest's and config files' setting, so breakbulk passes it only when the project mentions `trim-paths` nowhere under `[profile]`, in the workspace root's `Cargo.toml` or in its Cargo config as Cargo merges it (included files and the variant's `cargoConfig` too, T6); a per-package override can turn it on for some packages only.
+- **Where.** `crates/breakbulk-plan/src/trim_paths.rs`: `declared`, `in_table`, `decide`; `spec.rs`: `ProjectConfig::trim_paths_keys`; `trace.rs`: `with_trim_paths`; `graph.rs`: `Builder::trim_paths` (fails on a mix).
 - **Upstream.** Cargo's config precedence; spike A ("Setting it by default").
 - **Holds for.** Nightly 1.101.
-- **Pinned by.** `products-trim-paths` (a workspace that sets it keeps its scope); `products-trim-paths-cc` (one package only fails planning); `repository-devshell-trim-paths-files`. Rust: `trim_paths::tests::*`.
+- **Pinned by.** `products-trim-paths` (a workspace that sets it keeps its scope); `products-trim-paths-cc` (one package only fails planning); `repository-devshell-trim-paths-files`; `repository-trim-paths-included` (set in an included config file). Rust: `trim_paths::tests::*`.
 - **If it changes.** The project's own setting would be lost or ignored; the checks fail.
 
 ### P5. trim-paths reaches build scripts and cc-rs
@@ -877,7 +877,7 @@ Assumptions that no flake check pins, or pins for some cases only. Each has an i
 
 None at the moment.
 
-Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), `include` and `config`-over-`config.toml` (T6, guarded at plan time), and the non-Linux rows of G3.
+Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the retrace for pre-stabilization nightlies (P1), the `config`-over-`config.toml` rule (T6, guarded at plan time), and the non-Linux rows of G3.
 
 ## Keeping this page current
 

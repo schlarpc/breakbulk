@@ -2132,6 +2132,66 @@ in
       touch $out
     '';
 
+  # A `trim-paths` in a file the project's `.cargo/config.toml` includes is
+  # the project's own setting: on Cargo 1.101 (rust-overlay's nightly) the
+  # planner passes none of its own (the plans' `trimPathsDefault` is unset)
+  # and Cargo's trim-paths, the project's, is on; the dev shell exports no
+  # CARGO_PROFILE_DEV_TRIM_PATHS.
+  trim-paths-included =
+    let
+      nightly = pkgs.rust-bin.nightly.latest.minimal;
+      root = edited "stamps" ''
+        mkdir -p .cargo
+        echo 'include = ["profiles.toml"]' > .cargo/config.toml
+        printf '[profile.dev]\ntrim-paths = "object"\n' > .cargo/profiles.toml
+      '';
+      ws =
+        (mkRepo root [
+          (oneWs ".")
+          {
+            workspaces.main.toolchain = {
+              rustc = nightly;
+              cargo = nightly;
+            };
+          }
+        ]).workspaces.main;
+      planOf =
+        kind:
+        builtins.fromJSON (
+          builtins.unsafeDiscardStringContext (
+            builtins.readFile "${ws.instances.${native}.default.plans.${kind}}/plan.json"
+          )
+        );
+      got =
+        lib.genAttrs [ "build" "test" ] (
+          kind:
+          let
+            p = planOf kind;
+          in
+          {
+            inherit (p) trimPaths;
+            trimPathsDefault = p.trimPathsDefault or false;
+          }
+        )
+        // {
+          shell =
+            ws.devShell.CARGO_PROFILE_DEV_TRIM_PATHS or ws.devShell.env.CARGO_PROFILE_DEV_TRIM_PATHS or null;
+        };
+      want = {
+        build = {
+          trimPaths = true;
+          trimPathsDefault = false;
+        };
+        test = {
+          trimPaths = true;
+          trimPathsDefault = false;
+        };
+        shell = null;
+      };
+    in
+    assert lib.assertMsg (got == want) "trim-paths-included: ${builtins.toJSON got}";
+    evalCheck "trim-paths-included" (builtins.toJSON got);
+
   # On Cargo 1.101 (rust-overlay's nightly) the dev shell
   # decides CARGO_PROFILE_DEV_TRIM_PATHS by the planner's file-reading
   # rule, without a plan: with the workspace root's Cargo.toml broken, the
