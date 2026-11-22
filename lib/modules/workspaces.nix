@@ -1056,12 +1056,6 @@ let
           '';
         };
 
-        devShell.setTarget = mkOption {
-          type = types.raw;
-          visible = false;
-          description = "Removed: use `devShell.target`.";
-        };
-
         defaultTarget = mkOption {
           type = types.nullOr types.str;
           default =
@@ -1231,11 +1225,6 @@ let
             };
         in
         [
-          # Removed (#32).
-          {
-            assertion = !options.devShell.setTarget.isDefined;
-            message = "breakbulk: workspaces.${name}.devShell.setTarget${bt.setIn options.devShell.setTarget} was removed; use devShell.target: a triple, or null for none";
-          }
           {
             assertion = config.variants ? ${config.defaultVariant};
             message = "breakbulk: workspaces.${name}.defaultVariant `${config.defaultVariant}`${bt.setIn options.defaultVariant} is not one of its variants (${

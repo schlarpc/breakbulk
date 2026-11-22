@@ -298,8 +298,7 @@ let
   # `build.target` (one triple among the targets, read from its
   # `.cargo/config.toml` files), else none: empty shortcuts, and no
   # CARGO_BUILD_TARGET, so the project's `build.target` applies locally. A
-  # triple that is not one of the targets, and the removed `setTarget`,
-  # fail.
+  # triple that is not one of the targets fails.
   devshell-target =
     let
       # The walking skeleton with a `.cargo/config.toml` holding `config`.
@@ -360,7 +359,6 @@ let
           targets = uefi;
           defaultTarget = native;
         };
-        removed = fails { devShell.setTarget = false; };
       };
     in
     assert lib.assertMsg (
@@ -379,7 +377,6 @@ let
         noBuildTarget = null;
         notATarget = true;
         defaultNotATarget = true;
-        removed = true;
       }
     ) "devshell-target: ${builtins.toJSON got}";
     pkgs.runCommand "devshell-target" { } "touch $out";

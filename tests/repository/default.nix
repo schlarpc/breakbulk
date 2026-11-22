@@ -2886,12 +2886,6 @@ in
           m.devShell.target = "foo";
           want = [ "${ws}.devShell.target `foo` ${at} is not one of its targets (${native})" ];
         };
-        setTarget = {
-          m.devShell.setTarget = true;
-          want = [
-            "${ws}.devShell.setTarget ${at} was removed; use devShell.target: a triple, or null for none"
-          ];
-        };
         benches = {
           m.variants.c = {
             mode = "check";
