@@ -1,9 +1,10 @@
-# A minimal end-to-end entry for one workspace, in IFD mode: fetch ->
-# skeleton -> vendor -> plan -> instantiate -> units -> root products. The
-# module system (mkRepository) is built on it; it keeps no options
-# beyond what mkRepository and the planner fixtures need.
+# One workspace on one target in one variant: fetch -> skeleton -> vendor
+# -> plan -> instantiate -> units -> root products. mkRepository calls it
+# once per (workspace, target, variant); it is not exported, and keeps no
+# arguments beyond what mkRepository and the planner fixtures need
+# (tests/lib/workspace.nix gives it to tests).
 #
-#   ws = breakbulk.mkWorkspace pkgs {
+#   ws = mkWorkspace pkgs {
 #     root = ./.;                      # the repository root
 #     path = ".";                      # the workspace, relative to root
 #     toolchain = { inherit (pkgs) rustc cargo; };
@@ -16,13 +17,6 @@
 #     profile = "dev";
 #     testProfile = "test";            # the test plan's (default: profile)
 #     features = [ ];
-#     # Per-package overrides (what mkRepository's `packages.<name>` becomes):
-#     # they reach only that package's units, on both platforms.
-#     packages.openssl-sys = {
-#       nativeInputs = p: [ p.pkg-config ];   # or a plain list
-#       inputs = p: [ p.openssl ];
-#       env.OPENSSL_NO_VENDOR = "1";
-#     };
 #   };
 #
 #   ws.packages.<bin>          the bin, installed as $out/bin/<bin><exe suffix>
@@ -111,9 +105,10 @@ pkgs:
   # products of this plan the package's settings use (mkRepository's
   # `packages.<name>.productInputs`).
   productInputs ? { },
-  # packages.<name> = { nativeInputs; inputs; env; test; sources; }: see
-  # above; `sources` is the package's list of source-view functions
-  # (lib/source-views.nix).
+  # packages.<name> = { test; sources; … }: a member's settings, as
+  # mkRepository merges them; `sources` is the package's list of
+  # source-view functions (lib/source-views.nix). Its env captures and env
+  # come in `packageOverrides`.
   packages ? { },
   tools ? defaultTools pkgs,
   name ? "breakbulk",
@@ -538,32 +533,6 @@ let
     in
     wsRoots // lib.filterAttrs (n: _: lib.elem n sel && !(wsRoots ? ${n})) outsideRoots;
 
-  # Each package's own env capture per platform (envCapture.forPackage
-  # gives the base capture when it declares no inputs), and its env.
-  # A package without inputs has no capture of its own (null), as in
-  # mkRepository: its units get the platform's base capture, and linking
-  # units of its dependents add nothing for it.
-  overrides = lib.mapAttrs (
-    n: o:
-    lib.genAttrs [ "host" "target" ] (
-      platform:
-      let
-        stdenv = if platform == "host" then hostStdenv else targetStdenv;
-        c = envCapture.forPackage {
-          inherit pkgs platform stdenv;
-          name = n;
-          nativeInputs = o.nativeInputs or [ ];
-          inputs = o.inputs or [ ];
-        };
-      in
-      {
-        env = o.env or { };
-        envCapture =
-          if c.drvPath == (envCapture.base { inherit pkgs platform stdenv; }).drvPath then null else c;
-      }
-    )
-  ) (lib.filterAttrs (_: o: o ? nativeInputs || o ? inputs || o ? env) packages);
-
   rustcTargetArg = targetTraitsLib.rustcTargetArg {
     inherit pkgs rustcTarget;
     name = target;
@@ -671,10 +640,7 @@ let
     in
     r == null || r ? ${n} || !(lockDeps ? ${n});
   overridesFor =
-    kind:
-    lib.filterAttrs (k: _: canContain kind (lib.head (lib.splitString "@" k))) (
-      overrides // packageOverrides
-    );
+    kind: lib.filterAttrs (k: _: canContain kind (lib.head (lib.splitString "@" k))) (packageOverrides);
 
   # The package whose settings an instantiation input holds (its key, as
   # lib/instantiate.nix names it), or null for the toolchain's, the
@@ -865,8 +831,6 @@ let
         envCapture = captures.target;
         env = targetEnv;
       };
-      # `packages` (by name) and mkRepository's `packageOverrides` (by name
-      # or name@version, already in instantiate's shape); the latter win.
       overrides = overridesFor kind;
       inherit shippedRemapScope sideFiles;
       keepSourcePaths = sourcePaths == "keep";
@@ -949,7 +913,6 @@ in
     plans
     tools
     captures
-    overrides
     toolchainPaths
     ;
   skeleton = skel;
