@@ -98,21 +98,26 @@ let
 
   # --- config-env ---------------------------------------------------------
 
-  configEnvWs = breakbulk.mkWorkspace pkgs {
-    root = fixtures + "/config-env";
-    inherit tools;
-    name = "config-env";
-    # The tests compare a source path the library embedded at compile time
-    # with the one the test run gets, which needs one view for both: no
-    # test-only `tests/`, and no per-target views.
-    packages.config-env = {
-      scopeTargetRoots = false;
-      test = {
-        scopeTestsDir = false;
-        keepLog = true;
-      };
-    };
-  };
+  configEnvWs =
+    (breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/config-env";
+      modules = [
+        {
+          workspaces.main.variants.default.profile = "dev";
+          # The tests compare a source path the library embedded at compile
+          # time with the one the test run gets, which needs one view for
+          # both: no test-only `tests/`, and no per-target views.
+          packages.config-env = {
+            scopeTargetRoots = false;
+            test = {
+              scopeTestsDir = false;
+              keepLog = true;
+            };
+          };
+        }
+      ];
+    }).workspaces.main.instances.${native}.default;
 
   configEnv =
     let
