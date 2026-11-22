@@ -1326,6 +1326,7 @@ let
           inherit (ws.toolchain) rustc cargo capabilities;
         };
         target = triple;
+        inherit (targetSpecs.${wsName}.${triple}.config) rustcTarget;
         inherit (v)
           profile
           testProfile
@@ -1700,6 +1701,15 @@ let
         name = wsName;
         inherit (ws) toolchain;
         target = ws.devShell.target;
+        rustcTarget =
+          if ws.devShell.target == null then
+            null
+          else
+            (targetTraits.rustcTargetArg {
+              inherit pkgs;
+              name = ws.devShell.target;
+              inherit (targetSpecs.${wsName}.${ws.devShell.target}.config) rustcTarget;
+            }).arg;
         packages = lib.filter (p: p.override != null) (
           map (e: {
             id = "${e.name}@${e.version}";

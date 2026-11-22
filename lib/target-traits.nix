@@ -556,6 +556,50 @@ let
   # a native package set).
   nativeTriple = pkgs: pkgs.stdenv.hostPlatform.rust.rustcTarget;
 
+  # What rustc and Cargo get as `--target` for the target `name` whose
+  # `rustcTarget` is given (`targets.<name>.rustcTarget`): `name` itself,
+  # or a `.json` target spec named `<name>.json`. Cargo keys a `.json`
+  # target by its file stem (`[target.<stem>]`, `CARGO_TARGET_<STEM>_*`,
+  # its directory in the target directory, build scripts' `TARGET`) and
+  # breakbulk by `name` (derivation names, `CC_<name>`), so the two must
+  # agree. The spec is passed as a copy at `<store path>/<name>.json`, not
+  # as the file: a file directly in the store has its hash in its stem.
+  #
+  #   rustcTargetArg { pkgs; name; rustcTarget; } -> { arg; storePath; }
+  #   (storePath: the copy's directory, or null for a triple)
+  rustcTargetArg =
+    {
+      pkgs,
+      name,
+      rustcTarget,
+    }:
+    let
+      s = toString rustcTarget;
+      base = baseNameOf s;
+      hashed = builtins.match "[0-9a-df-np-sv-z]{32}-(.*)" base;
+      file = if dirOf s == builtins.storeDir && hashed != null then lib.head hashed else base;
+      stem = lib.removeSuffix ".json" file;
+      copy = pkgs.runCommandLocal "${name}-target-spec" { } ''
+        mkdir $out
+        cp ${rustcTarget} $out/${lib.escapeShellArg "${name}.json"}
+      '';
+    in
+    if !lib.hasSuffix ".json" s then
+      if s == name then
+        {
+          arg = name;
+          storePath = null;
+        }
+      else
+        throw "breakbulk: targets.\"${name}\".rustcTarget is `${s}`, neither the target's name nor a `.json` target spec; for a triple rustc knows, name the target `${s}`"
+    else if stem != name then
+      throw "breakbulk: targets.\"${name}\".rustcTarget is the target spec `${file}`; Cargo names a `.json` target by its file stem, so name the target `${stem}` or the file `${name}.json`"
+    else
+      {
+        arg = "${copy}/${name}.json";
+        storePath = "${copy}";
+      };
+
   # The name of the preset (`breakbulk.presets.<name>`) a target gets when
   # it sets none, or null. Only a preset that needs no arguments can be a
   # default: msvc needs SDK choices, so `-msvc` triples have none. The
@@ -596,6 +640,7 @@ in
     derive
     resolve
     nativeTriple
+    rustcTargetArg
     defaultPreset
     fieldNames
     ;

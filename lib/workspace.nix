@@ -10,6 +10,9 @@
 #     # toolchain.capabilities = { remapPathScope = false; };  overrides
 #     # (lib/toolchain-facts.nix); null values are ignored
 #     target = "x86_64-unknown-linux-gnu";
+#     # rustcTarget = ./my-board.json;  with target = "my-board": a `.json`
+#     # target spec, passed to Cargo as `<name>.json` (target-traits.nix
+#     # rustcTargetArg); `target` names everything else
 #     profile = "dev";
 #     testProfile = "test";            # the test plan's (default: profile)
 #     features = [ ];
@@ -90,6 +93,7 @@ pkgs:
   path ? ".",
   toolchain ? { inherit (pkgs) rustc cargo; },
   target ? targetTraitsLib.nativeTriple pkgs,
+  rustcTarget ? target,
   profile ? "dev",
   # The test plan's profile; check and clippy variants trace their test
   # plan (`cargo check --all-targets`) with `profile`.
@@ -476,7 +480,6 @@ let
             clippyOption
             tools
             kind
-            target
             features
             configs
             wsDir
@@ -485,6 +488,7 @@ let
             spec
             trimPaths
             ;
+          target = rustcTargetArg.arg;
           packages = if kind == "test" then testSelect else select;
           profile = if kind == "test" && !checking then testProfile else profile;
           cargoConfig = cargoConfigFile;
@@ -552,6 +556,11 @@ let
     )
   ) (lib.filterAttrs (_: o: o ? nativeInputs || o ? inputs || o ? env) packages);
 
+  rustcTargetArg = targetTraitsLib.rustcTargetArg {
+    inherit pkgs rustcTarget;
+    name = target;
+  };
+
   unitTools = {
     rustc = toolchain.rustc;
     # The sysroot, which Cargo puts on build scripts' library path.
@@ -568,6 +577,9 @@ let
     )
   )
   // specTools
+  // lib.optionalAttrs (rustcTargetArg.storePath != null) {
+    rustc-target-spec = rustcTargetArg.storePath;
+  }
   // cargoConfigTools
   // lib.optionalAttrs (rustcWrapper != null) { rustc-wrapper = "${rustcWrapper}"; }
   // lib.optionalAttrs (rustcWorkspaceWrapper != null) {
@@ -931,6 +943,8 @@ in
     toolchainPaths
     ;
   skeleton = skel;
+  # What Cargo is given as `--target`.
+  rustcTarget = rustcTargetArg.arg;
   # The toolchain spec as Cargo env config, for the dev shell; independent
   # of the plans, so the shell opens even when planning fails.
   cargoEnv = mkCargoEnv pkgs {
@@ -938,11 +952,11 @@ in
     inherit
       wsDir
       tools
-      target
       spec
       trimPaths
       capabilities
       ;
+    target = rustcTargetArg.arg;
     profiles = lib.unique ([ profile ] ++ lib.optional (!checking) testProfile);
     inherit (toolchain) rustc;
     name = "${name}-cargo-env";

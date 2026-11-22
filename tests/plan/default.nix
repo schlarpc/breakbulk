@@ -1131,7 +1131,8 @@ in
       let
         board = mk "walking-skeleton" {
           inherit toolchain;
-          target = "${./my-board.json}";
+          target = "my-board";
+          rustcTarget = ./my-board.json;
           configs = [
             "unstable.json-target-spec=true"
             "build.rustflags=[\"-Zunstable-options\"]"
@@ -1156,6 +1157,66 @@ in
         bins == [ "walking-skeleton.elf" ]
       ) "custom-target-plan: stored bins ${builtins.toJSON bins}";
       pkgs.runCommand "custom-target-plan-check" { } "touch $out";
+    # The test plan of the same target with a toolchain spec (a linker and
+    # rustflags): Cargo reads them from `[target.my-board]`, the spec's
+    # file stem, and the integration test's CARGO_BIN_EXE_tool names the
+    # bin unit, which is under `my-board/` in Cargo's target directory.
+    # CARGO_BIN_EXE_extra (required features off) is still not built.
+    custom-target-test-plan =
+      let
+        board = mk "bin-exe-not-built" {
+          inherit toolchain;
+          target = "my-board";
+          rustcTarget = ./my-board.json;
+          configs = [
+            "unstable.json-target-spec=true"
+            "build.rustflags=[\"-Zunstable-options\"]"
+          ];
+          spec = {
+            rustflags = [
+              "--cfg"
+              "board"
+            ];
+            linker = "${pkgs.stdenv.cc}/bin/cc";
+            hostLinker = null;
+          };
+        };
+        p = readPlan board "test";
+        envOf = var: lib.concatMap (u: lib.optional (u ? env.${var}) u.env.${var}) (lib.attrValues p.units);
+        tool = envOf "CARGO_BIN_EXE_tool";
+        bins = lib.attrNames (
+          lib.filterAttrs (_: u: !(u.test or false) && lib.elem "tool.elf" (u.outputs.bin or [ ])) p.units
+        );
+        # A spec file whose stem is not the target's name.
+        misnamed = builtins.tryEval
+          (breakbulk.targetTraits.rustcTargetArg {
+            inherit pkgs;
+            name = "other-board";
+            rustcTarget = ./my-board.json;
+          }).arg;
+      in
+      assert lib.assertMsg (
+        lib.hasSuffix "-my-board-target-spec/my-board.json" p.target
+      ) "custom-target-test-plan: the plan's target is ${p.target}";
+      assert lib.assertMsg (!misnamed.success) "custom-target-test-plan: a misnamed spec was accepted";
+      assert lib.assertMsg (
+        lib.length bins == 1
+      ) "custom-target-test-plan: units storing `tool.elf`: ${builtins.toJSON bins}";
+      assert lib.assertMsg (
+        tool == [
+          [
+            {
+              out = lib.head bins;
+              output = "bin";
+              file = "tool.elf";
+            }
+          ]
+        ]
+      ) "custom-target-test-plan: CARGO_BIN_EXE_tool is ${builtins.toJSON tool}";
+      assert lib.assertMsg (
+        envOf "CARGO_BIN_EXE_extra" == [ "/breakbulk/not-built/extra" ]
+      ) "custom-target-test-plan: CARGO_BIN_EXE_extra is ${builtins.toJSON (envOf "CARGO_BIN_EXE_extra")}";
+      pkgs.runCommand "custom-target-test-plan-check" { } "touch $out";
     walking-skeleton-nightly =
       pkgs.runCommand "walking-skeleton-nightly-check"
         {

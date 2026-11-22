@@ -300,7 +300,7 @@ let
     # The functions presets are built from: `chooseLinker`, `linkerKind`,
     # `targetPkgsFor`, ….
     # Target traits (lib/target-traits.nix): `resolve { triple; traits; }`,
-    # `parse`, `nativeTriple`.
+    # `parse`, `nativeTriple`, `rustcTargetArg`.
     presetHelpers = presetsLib.helpers;
     inherit
       targetTraits

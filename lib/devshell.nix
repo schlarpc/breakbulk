@@ -2,7 +2,8 @@
 # docs/src/explanation/internals/nix-library.md):
 # local Cargo set up as the planner runs it.
 #
-#  - CARGO_BUILD_TARGET=<target> (`devShell.target`: by default the native
+#  - CARGO_BUILD_TARGET=<the `rustcTarget` of `devShell.target`> (the
+#    target is by default the native
 #    triple when the workspace targets it, else its only target; null
 #    exports none, so the project's own `build.target` applies): the
 #    planner always passes --target, and without it local Cargo applies
@@ -56,6 +57,9 @@
   toolchain,
   # The triple the shell is set up for (`devShell.target`), or null.
   target ? nativeTriple,
+  # What Cargo is given as `--target` for it (lib/target-traits.nix
+  # rustcTargetArg).
+  rustcTarget ? target,
   # The workspace's packages that have settings, in Cargo.lock order:
   # [ { id = "<name>@<version>"; override; } ], `override` being
   # repository.nix's `overrideFor`, already merged for `target` (or the
@@ -113,7 +117,7 @@ let
   planEnv =
     (cargoEnv.env or { })
     // lib.optionalAttrs (target != null) {
-      CARGO_BUILD_TARGET = target;
+      CARGO_BUILD_TARGET = rustcTarget;
     };
 
   # { <var> = [ { label; value; } … ]; } for the variables that sources

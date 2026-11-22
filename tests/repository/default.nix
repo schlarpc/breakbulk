@@ -2249,6 +2249,85 @@ in
     assert lib.assertMsg (got == want) "devshell-trim-paths-files: ${builtins.toJSON got}";
     evalCheck "devshell-trim-paths-files" (builtins.toJSON got);
 
+  # A custom target from a `.json` spec (`targets.<name>.rustcTarget`),
+  # with a linker, rustflags and a C compiler: the planner gets the spec,
+  # the name is in derivation names and `CC_<name>`, the dev shell's
+  # CARGO_BUILD_TARGET is the spec, and an integration test's
+  # CARGO_BIN_EXE_tool names the bin unit. Planning only; the spec has no
+  # standard library to build against.
+  custom-json-target =
+    let
+      nightly = pkgs.rust-bin.nightly.latest.minimal;
+      cc = "${pkgs.stdenv.cc}/bin/cc";
+      repo = mkRepo (fixtures + "/bin-exe-not-built") [
+        (oneWs ".")
+        {
+          targets.my-board = {
+            rustcTarget = ../plan/my-board.json;
+            traits = {
+              arch = "x86_64";
+              vendor = "unknown";
+              os = "linux";
+              env = "gnu";
+              abi = "";
+              families = [ "unix" ];
+              executableSuffix = ".elf";
+            };
+            linker = cc;
+            inherit cc;
+            rustflags = [
+              "--cfg"
+              "board"
+            ];
+          };
+          workspaces.main = {
+            toolchain = {
+              rustc = nightly;
+              cargo = nightly;
+            };
+            targets.my-board = { };
+            devShell.target = "my-board";
+            variants.default.cargoConfig = {
+              unstable.json-target-spec = true;
+              build.rustflags = [ "-Zunstable-options" ];
+            };
+          };
+        }
+      ];
+      w = repo.workspaces.main;
+      i = w.instances.my-board.default;
+      plan = builtins.fromJSON (
+        builtins.unsafeDiscardStringContext (builtins.readFile "${i.plans.test}/plan.json")
+      );
+      bin = lib.attrNames (
+        lib.filterAttrs (_: u: !(u.test or false) && lib.elem "tool.elf" (u.outputs.bin or [ ])) plan.units
+      );
+      got = {
+        target = lib.hasSuffix "/my-board.json" plan.target;
+        planName = i.plans.test.name;
+        binExe = lib.concatMap (
+          u: lib.optional (u ? env.CARGO_BIN_EXE_tool) u.env.CARGO_BIN_EXE_tool
+        ) (lib.attrValues plan.units);
+        shellTarget = (w.devShell.CARGO_BUILD_TARGET or w.devShell.env.CARGO_BUILD_TARGET) == plan.target;
+      };
+      want = {
+        target = true;
+        planName = "main-my-board-default-plan-test";
+        binExe = [
+          [
+            {
+              out = lib.head bin;
+              output = "bin";
+              file = "tool.elf";
+            }
+          ]
+        ];
+        shellTarget = true;
+      };
+    in
+    assert lib.assertMsg (got == want) "custom-json-target: ${builtins.toJSON got}";
+    evalCheck "custom-json-target" (builtins.toJSON got);
+
   # Git dependencies built through units: instantiation finds each fetched
   # source under Cargo's package id, which keeps `git+` and the reference
   # query, and leaves the name out when the URL ends in it.

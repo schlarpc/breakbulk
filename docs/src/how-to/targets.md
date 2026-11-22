@@ -306,6 +306,28 @@ breakbulk has no table entry for) works, but its products need
 [`traits`](../reference/options/targets.md#targetsnametraits): the facts
 breakbulk otherwise reads from its built-in table for the triple.
 
+For a `.json` target spec, name the target after the file and give the
+file as
+[`rustcTarget`](../reference/options/targets.md#targetsnamerustctarget):
+
+```nix
+targets."my-board".rustcTarget = ./boards/my-board.json;
+```
+
+Cargo names a `.json` target by its file stem. It reads the target's
+`linker` and `rustflags` from `[target.my-board]` and
+`CARGO_TARGET_MY_BOARD_*`, puts its outputs in `target/my-board/`, and
+gives build scripts `TARGET=my-board`, so cc-rs reads `CC_my_board`.
+breakbulk uses the same name everywhere, and a file with another stem
+is an evaluation error. Cargo and rustc get a copy of the file named
+`my-board.json`.
+
+Custom target specs are unstable: the workspace needs a nightly
+toolchain, and the variant needs
+`cargoConfig.unstable.json-target-spec = true`. rustc also needs
+`-Zunstable-options` for a `.json` target; when your Cargo does not pass
+it, add it to `cargoConfig.build.rustflags`.
+
 Some facts come from rustc and need no traits. The planner asks your
 rustc for the target's spec, so the executable suffix of the stored
 binaries and which units get a `debug` output follow the `.json` file.

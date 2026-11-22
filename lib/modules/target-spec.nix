@@ -166,9 +166,32 @@ in
         rustc's `target_*` cfg values) recompute the derived ones
         (`isLinux`, `objectFormat`, `executableSuffix`, `dylibPathVar`, …);
         derived fields set here win over the computed ones. A triple with
-        no built-in traits (a custom target, a `.json` target spec, an
-        uncommon OS) needs at least the base fields here; reading any
+        no built-in traits (a custom target, a `.json` target spec given
+        as `rustcTarget`, an uncommon OS) needs at least the base fields here; reading any
         trait of it otherwise fails with a message naming this option.
+      '';
+    };
+    rustcTarget = mkOption {
+      type = types.oneOf [
+        types.path
+        types.str
+      ];
+      default = name;
+      defaultText = lib.literalMD "the target's name";
+      example = lib.literalExpression "./boards/my-board.json";
+      description = ''
+        What rustc and Cargo are given as `--target`: the target's name (a
+        triple rustc knows), or a `.json` target spec whose file is named
+        after the target (`targets.my-board.rustcTarget =
+        ./boards/my-board.json`). Cargo names a `.json` target by its file
+        stem: it reads the target's configuration from
+        `[target.my-board]` and `CARGO_TARGET_MY_BOARD_*`, and build
+        scripts get `TARGET=my-board`. Everything breakbulk derives from
+        the target (derivation names, `CC_<name>` and the other per-target
+        variables, the Cargo config of `linker` and `rustflags`) uses the
+        name, so a file with another stem is an error. Cargo gets a copy
+        of the file named `<name>.json`. A `.json` target has no built-in
+        traits; set `traits`.
       '';
     };
     presetDirect = mkOption {
