@@ -246,11 +246,14 @@ let
     packages = lib.genAttrs (lib.attrNames packages ++ lib.attrNames extraSources) viewSettings;
     targetsOf = dir: memberTargets.${dir} or [ ];
     extraKeep = clippyKeep wsDir;
+    # A package outside the workspace root needs none: its own `Cargo.toml`
+    # is the one in its working directory.
+    extraFiles = clippyKeep wsDir;
     runCommand = pkgs.runCommandLocal;
   };
-  # A clippy variant's predicted views keep the `Cargo.toml` of the
-  # compiles' working directory (`cwd`: the workspace root for a member,
-  # the package directory for a package outside it): clippy's
+  # A clippy variant's views, predicted or not, hold the `Cargo.toml` of
+  # the compiles' working directory (`cwd`: the workspace root for a
+  # member, the package directory for a package outside it): clippy's
   # `lint_groups_priority` reads it there, and skips the lint without a
   # word when it is missing.
   clippyKeep = cwd: lib.optional (mode == "clippy") (util.joinRel cwd "Cargo.toml");

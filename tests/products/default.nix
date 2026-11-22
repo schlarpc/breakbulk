@@ -134,6 +134,14 @@
 #                    root's (`own`); an edit to the root file changes
 #                    only clippy units, and a `CLIPPY_CONF_DIR` in `env`
 #                    replaces breakbulk's
+#   variants-clippy-lint-groups   clippy's `lint_groups_priority`, which
+#                    reads the compile's working directory's `Cargo.toml`
+#                    (the workspace root's): a member taking a
+#                    `[workspace.lints]` with a group at a lint's priority
+#                    fails its clippy units naming the group, with
+#                    predicted views and without; the same conflict in a
+#                    member's own `[lints]` passes; plain `cargo clippy`
+#                    does the same on both
 #   port-from-crane  the worked example of the porting how-to, its module
 #                    read from the page: a host workspace, a wasm component
 #                    workspace (built on wasm32, tested natively) and a
@@ -378,6 +386,20 @@ let
   drvsOf =
     repo: vName: kind:
     lib.mapAttrs (_: u: u.drvPath) (unitsOf repo vName kind);
+
+  # lint-groups-priority's two workspaces with a clippy variant, with or
+  # without predicted views for every member.
+  lintGroupsRepo =
+    predict:
+    mkRepo (fixtures + "/lint-groups-priority") [
+      {
+        workspaces = lib.genAttrs [ "inherited" "own" ] (path: {
+          inherit path;
+          variants.clippy.mode = "clippy";
+          memberDefaults.predictSources.enable = predict;
+        });
+      }
+    ];
 
   # --- post-link ---------------------------------------------------------------
 
@@ -2270,6 +2292,50 @@ in
           echo "a member with its own clippy.toml saw the root's" >&2
           exit 1
         fi
+        touch $out
+      '';
+
+  variants-clippy-lint-groups =
+    let
+      src = fixtures + "/lint-groups-priority";
+      unitsAt =
+        predict: ws: kind:
+        lib.listToAttrs (
+          map (u: lib.nameValuePair u.name u) (
+            lib.attrValues (lintGroupsRepo predict).workspaces.${ws}.instances.${native}.clippy.units.${kind}
+          )
+        );
+      message = "lint group `pedantic` has the same priority (0) as a lint";
+      # The clippy units of both workspaces, with or without predicted views.
+      unitsWith =
+        predict:
+        let
+          at = unitsAt predict;
+        in
+        [
+          (expectFailure "inherited-lib" (at "inherited" "build")."inherited-0.1.0-lib" [ message ])
+          (expectFailure "inherited-test" (at "inherited" "test")."inherited-0.1.0-test" [ message ])
+          (at "own" "build")."own-0.1.0-lib"
+          (at "own" "test")."own-0.1.0-test"
+        ];
+    in
+    pkgs.runCommand "variants-clippy-lint-groups"
+      {
+        breakbulk = unitsWith false ++ unitsWith true;
+        nativeBuildInputs = [
+          pkgs.cargo
+          pkgs.clippy
+          pkgs.rustc
+        ];
+      }
+      ''
+        export CARGO_HOME=$TMPDIR/cargo-home
+        cp -r --no-preserve=mode ${src} fixture
+        # Plain `cargo clippy` over the same trees: fails on `inherited`
+        # naming the group, passes on `own`.
+        (cd fixture/inherited && ! cargo clippy --offline --locked --all-targets) 2>&1 | tee inherited.log
+        grep -qF ${lib.escapeShellArg message} inherited.log
+        (cd fixture/own && cargo clippy --offline --locked --all-targets)
         touch $out
       '';
 

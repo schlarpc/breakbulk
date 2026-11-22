@@ -1,0 +1,5 @@
+# The same conflict in a member's own `[lints]`: clippy reads the root's
+# `Cargo.toml`, not the member's, so `cargo clippy` passes on `own`.
+[workspace]
+resolver = "2"
+members = ["member"]

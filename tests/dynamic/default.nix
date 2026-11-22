@@ -382,6 +382,24 @@ let
         };
       }
     ];
+    # Clippy variants whose views hold the workspace root's `Cargo.toml`,
+    # predicted for every member. `lint_groups_priority` is a warning here,
+    # so `inherited`'s clippy units build.
+    lint-groups-priority = mkRepo "lint-groups-priority" [
+      {
+        workspaces = lib.genAttrs [ "inherited" "own" ] (path: {
+          inherit path;
+          variants.clippy = {
+            mode = "clippy";
+            clippyArgs = [
+              "-W"
+              "clippy::lint_groups_priority"
+            ];
+          };
+          memberDefaults.predictSources.enable = true;
+        });
+      }
+    ];
     # A git source whose crates come from two inheriting workspaces, as
     # tests/git-multi-workspace builds it.
     git-multi-workspace = breakbulk.mkRepository {

@@ -1,0 +1,11 @@
+# Clippy's `lint_groups_priority` reads the `Cargo.toml` of the compile's
+# working directory, which Cargo makes the workspace root for a member:
+# this `[workspace.lints]`, which `inherited` takes, puts a group at the
+# same priority as a lint in it, so `cargo clippy` fails on `inherited`.
+[workspace]
+resolver = "2"
+members = ["member"]
+
+[workspace.lints.clippy]
+pedantic = "warn"
+similar_names = "allow"

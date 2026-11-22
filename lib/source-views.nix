@@ -236,12 +236,13 @@ rec {
       memberDirs ? [ ],
       settings ? { },
       targets ? [ ],
+      extraFiles ? [ ],
     }:
     let
       at = manifest.at root;
       scopeTargets = settings.scopeTargetRoots or null != false;
       wsManifest = test.workspaceManifest or null != false;
-      extra = map (pathOf root "extraSources") (settings.extraSources or [ ]);
+      extra = map (pathOf root "extraSources") (settings.extraSources or [ ]) ++ map at extraFiles;
       test = settings.test or { };
       scope = test.sourceScope or [ ];
       inside = scopeInside {
@@ -550,6 +551,9 @@ rec {
       # root, besides `predictSources.keep` (the curated keeps of the
       # variant: clippy's `Cargo.toml`).
       extraKeep ? [ ],
+      # Paths every view of the package holds, relative to the root,
+      # besides `extraSources` (the variant's: clippy's `Cargo.toml`).
+      extraFiles ? [ ],
     }:
     let
       cargoTargets = map (t: { inherit (t) kind name path; }) targets;
@@ -561,6 +565,7 @@ rec {
             wsDir
             memberDirs
             settings
+            extraFiles
             ;
           targets = cargoTargets;
         }
@@ -741,8 +746,9 @@ rec {
       # `targets`).
       targetsOf ? (_: [ ]),
       runCommand ? null,
-      # packageViews' `extraKeep`, for every member.
+      # packageViews' `extraKeep` and `extraFiles`, for every member.
       extraKeep ? [ ],
+      extraFiles ? [ ],
     }:
     let
       ws = manifest.workspace { inherit root wsDir; };
@@ -766,6 +772,7 @@ rec {
               wsDir
               runCommand
               extraKeep
+              extraFiles
               ;
             inherit (info) name;
             pkgDir = dir;

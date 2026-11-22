@@ -133,6 +133,8 @@ let
     git-multi-workspace = [ (import ../git-multi-workspace args).ws ];
     git-revisions = [ (import ../git-revisions args).repos.repository ];
     lazy-strings = [ (import ../lazy-strings args).repo ];
+    # Its clippy units fail by design without dynamic's warning.
+    lint-groups-priority = [ dynamic.repos.lint-groups-priority ];
     linux-portable = [ extraTargets.repos.zigRepo ];
     linux-portable-native = [ extraTargets.repos.zigNativeRepo ];
     manifest-dir = [ dynamic.repos.manifest-dir ];
