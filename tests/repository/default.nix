@@ -2417,7 +2417,7 @@ in
     evalCheck "sys-defaults-no-switches" (toString envNames);
 
   # `sysDefaults.packages`: the lowest layer under `packages`, replaced by a
-  # plain definition (`null` opts out), and off with `sysDefaults.enable`.
+  # plain definition (`null` opts out), and all dropped with `mkForce { }`.
   # On a target without a package set, only host units get them
   # (tests/loose-ends, sys-defaults-no-package-set).
   sys-defaults =
@@ -2447,7 +2447,7 @@ in
       libc = envOf "libc-0.2.191-lib";
       off = mkRepo (fixtures + "/multi-ws") [
         (oneWs "b")
-        { sysDefaults.enable = false; }
+        { sysDefaults.packages = lib.mkForce { }; }
       ];
     in
     assert lib.assertMsg (
@@ -2457,7 +2457,7 @@ in
     assert lib.assertMsg (
       repo.config.sysDefaults.packages.libsqlite3-sys == null
     ) "sys-defaults: libsqlite3-sys not null";
-    assert lib.assertMsg (off.config.sysDefaults.packages == { }) "sys-defaults: enable = false";
+    assert lib.assertMsg (off.config.sysDefaults.packages == { }) "sys-defaults: mkForce { }";
     evalCheck "sys-defaults" (builtins.toJSON itoa);
 
   # `workspaces.<ws>.memberDefaults`: a package-shaped layer under every

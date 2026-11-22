@@ -3,7 +3,7 @@
 # rather than from its own units (lib/sys-defaults.nix). Each value is the
 # `sysDefaults.dependents.<name>` settings, or a function of the crate's
 # lockfile entry (`{ version, ... }`) that returns them. lib/modules/top.nix
-# defines them at `mkDefault` priority when `sysDefaults.enable`.
+# defines them at `mkDefault` priority.
 { lib }:
 {
   # insta finds snapshots under `INSTA_WORKSPACE_ROOT`, else through

@@ -238,24 +238,6 @@ string
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
-## `sysDefaults.enable`
-
-Define breakbulk’s curated settings for common ` -sys ` crates
-(seeded from nixpkgs’ ` defaultCrateOverrides `) in
-` sysDefaults.packages `\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-true
-```
-
-*Declared by:*
- - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
-
 ## `sysDefaults.packages`
 
 Default settings for a package, by crate name: a function of the
@@ -272,7 +254,8 @@ those crates build their bundled copies\.
 
 The curated entries are defined at ` mkDefault ` priority, so a
 plain definition replaces one: ` null ` turns it off, a function
-replaces it\. They are: ` alsa-sys `, ` atk-sys `, ` aws-lc-sys `, ` cairo-rs `, ` cairo-sys-rs `, ` capnp-rpc `, ` cargo `, ` curl-sys `, ` dbus `, ` evdev-sys `, ` expat-sys `, ` foundationdb `, ` foundationdb-sys `, ` freetype-sys `, ` fuser `, ` gdk-pixbuf `, ` gdk-pixbuf-sys `, ` gdk-sys `, ` gdk4-sys `, ` gdkx11-sys `, ` gio-sys `, ` glib-sys `, ` gobject-sys `, ` graphene-sys `, ` gsk4-sys `, ` gtk-sys `, ` gtk4-sys `, ` javascriptcore-rs-sys `, ` libdbus-sys `, ` libgit2-sys `, ` libseat-sys `, ` libsqlite3-sys `, ` libssh2-sys `, ` libudev-sys `, ` libz-sys `, ` nettle-sys `, ` openssl `, ` openssl-sys `, ` opentelemetry-proto `, ` pam-sys `, ` pango-sys `, ` pangocairo-sys `, ` pq-sys `, ` prost-wkt-types `, ` rdkafka-sys `, ` rink `, ` sequoia-guide `, ` sequoia-ipc `, ` sequoia-openpgp `, ` sequoia-openpgp-ffi `, ` sequoia-sq `, ` sequoia-store `, ` sequoia-tool `, ` servo-fontconfig-sys `, ` soup3-sys `, ` thrussh-libsodium `, ` tonic-reflection `, ` webkit2gtk-sys `, ` xcb `, ` zstd-sys `\.
+replaces it, and ` sysDefaults.packages = lib.mkForce { } ` drops
+them all\. They are: ` alsa-sys `, ` atk-sys `, ` aws-lc-sys `, ` cairo-rs `, ` cairo-sys-rs `, ` capnp-rpc `, ` cargo `, ` curl-sys `, ` dbus `, ` evdev-sys `, ` expat-sys `, ` foundationdb `, ` foundationdb-sys `, ` freetype-sys `, ` fuser `, ` gdk-pixbuf `, ` gdk-pixbuf-sys `, ` gdk-sys `, ` gdk4-sys `, ` gdkx11-sys `, ` gio-sys `, ` glib-sys `, ` gobject-sys `, ` graphene-sys `, ` gsk4-sys `, ` gtk-sys `, ` gtk4-sys `, ` javascriptcore-rs-sys `, ` libdbus-sys `, ` libgit2-sys `, ` libseat-sys `, ` libsqlite3-sys `, ` libssh2-sys `, ` libudev-sys `, ` libz-sys `, ` nettle-sys `, ` openssl `, ` openssl-sys `, ` opentelemetry-proto `, ` pam-sys `, ` pango-sys `, ` pangocairo-sys `, ` pq-sys `, ` prost-wkt-types `, ` rdkafka-sys `, ` rink `, ` sequoia-guide `, ` sequoia-ipc `, ` sequoia-openpgp `, ` sequoia-openpgp-ffi `, ` sequoia-sq `, ` sequoia-store `, ` sequoia-tool `, ` servo-fontconfig-sys `, ` soup3-sys `, ` thrussh-libsodium `, ` tonic-reflection `, ` webkit2gtk-sys `, ` xcb `, ` zstd-sys `\.
 
 *Type:*
 attribute set of (null or (function that evaluates to a(n) (submodule)))
@@ -310,7 +293,8 @@ and under ` memberDefaults `
 
 The curated entries are defined at ` mkDefault ` priority, so a
 plain definition replaces one: ` null ` turns it off, a function
-replaces it\. They are: ` bevy_macro_utils `, ` find-crate `, ` insta `, ` proc-macro-crate `\.
+replaces it, and ` sysDefaults.dependents = lib.mkForce { } ` drops
+them all\. They are: ` bevy_macro_utils `, ` find-crate `, ` insta `, ` proc-macro-crate `\.
 ` insta ` sets ` INSTA_WORKSPACE_ROOT ` to the workspace root of the
 run’s files and ` INSTA_UPDATE = "no" `, in test runs and doctests
 (see [Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md))\.

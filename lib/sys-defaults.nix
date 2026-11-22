@@ -6,7 +6,7 @@
 # derivation env -> env. By crate name; each value is the
 # `sysDefaults.packages.<name>` settings, or a function of the lockfile
 # entry (`{ version, ... }`) that returns them. lib/modules/top.nix defines
-# them at `mkDefault` priority when `sysDefaults.enable` (the default).
+# them at `mkDefault` priority.
 #
 # Left out, because they are not per-package inputs or env in breakbulk:
 #  - `extraLinkFlags = [ "-L${zlib.out}/lib" ]` (cairo-sys-rs, libz-sys,

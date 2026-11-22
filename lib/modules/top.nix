@@ -16,8 +16,8 @@ in
       define = lib.mapAttrs (_: v: lib.mkDefault (if builtins.isFunction v then v else _: v));
     in
     {
-      packages = lib.mkIf config.sysDefaults.enable (define curated);
-      dependents = lib.mkIf config.sysDefaults.enable (define curatedDependents);
+      packages = define curated;
+      dependents = define curatedDependents;
     };
 
   options = {
@@ -151,16 +151,6 @@ in
       '';
     };
 
-    sysDefaults.enable = mkOption {
-      type = types.bool;
-      default = true;
-      description = ''
-        Define breakbulk's curated settings for common `-sys` crates
-        (seeded from nixpkgs' `defaultCrateOverrides`) in
-        `sysDefaults.packages`.
-      '';
-    };
-
     sysDefaults.packages = mkOption {
       type = types.attrsOf (types.nullOr (types.functionTo (types.submodule settings)));
       default = { };
@@ -187,7 +177,8 @@ in
 
         The curated entries are defined at `mkDefault` priority, so a
         plain definition replaces one: `null` turns it off, a function
-        replaces it. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curated)}.
+        replaces it, and `sysDefaults.packages = lib.mkForce { }` drops
+        them all. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curated)}.
       '';
     };
 
@@ -215,9 +206,8 @@ in
 
         The curated entries are defined at `mkDefault` priority, so a
         plain definition replaces one: `null` turns it off, a function
-        replaces it. They are: ${
-          lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curatedDependents)
-        }.
+        replaces it, and `sysDefaults.dependents = lib.mkForce { }` drops
+        them all. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curatedDependents)}.
         `insta` sets `INSTA_WORKSPACE_ROOT` to the workspace root of the
         run's files and `INSTA_UPDATE = "no"`, in test runs and doctests
         (see [Run snapshot tests](../../how-to/snapshot-tests.md)).
