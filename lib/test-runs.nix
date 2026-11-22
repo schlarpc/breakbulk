@@ -29,8 +29,8 @@
 #
 #   t.runs.<pkg>.<binary>     one test-run derivation per test binary
 #   t.doctests.<pkg>          one doctest derivation per library, with its
-#                             platform's runner, `test.args`, `test.includeIgnored`,
-#                             `test.env`, `test.path` and `test.doctest`
+#                             platform's runner, `test.args`, `test.env`,
+#                             `test.path` and `test.doctest`
 #                             (not per-binary settings)
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
 #                             every enabled run and doctest
@@ -49,9 +49,8 @@
 #   - the binary (a content-addressed copy when `ca`, so that a
 #     byte-identical binary is not re-run) runs under its platform's runner
 #     (`testPlatforms`: a host unit's is the build machine's, not the
-#     target's), in the package directory of its source view, with `test.args`,
-#     `test.binaries.<binary>.args` and `--include-ignored` when
-#     `test.includeIgnored`;
+#     target's), in the package directory of its source view, with `test.args`
+#     and `test.binaries.<binary>.args`;
 #   - its environment: a fresh, empty `HOME` in `$TMPDIR` (`homeScript`),
 #     then the dynamic-library path, then the project's
 #     `[env]` config variables (the plan's `configEnv`, with the values
@@ -508,7 +507,6 @@ rec {
       env = { };
       path = [ ];
       args = [ ];
-      includeIgnored = false;
       binaries = { };
       runner = "libtest";
       stripForRun = null;
@@ -999,8 +997,7 @@ rec {
 
   # The attributes a package's doctest derivation gets from its test
   # configuration: the runners (`runnersByPlatform`), `test.args` and
-  # `test.doctest.args` with `--include-ignored` when
-  # `test.includeIgnored`, and `test.env`, `test.doctest.env` and
+  # `test.doctest.args`, and `test.env`, `test.doctest.env` and
   # `test.path` as PATH. Dynamic-derivation mode passes the same strings to
   # its outer derivation (lib/dynamic.nix), so both modes write the same
   # doctest derivation.
@@ -1033,9 +1030,7 @@ rec {
       BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform {
         inherit runner hostRunner;
       });
-      BREAKBULK_TEST_ARGS = toJSON (
-        cfg.args ++ cfg.doctest.args ++ lib.optional cfg.includeIgnored "--include-ignored"
-      );
+      BREAKBULK_TEST_ARGS = toJSON (cfg.args ++ cfg.doctest.args);
       BREAKBULK_TEST_ENV = toJSON (
         cfg.env
         // cfg.doctest.env
@@ -1048,9 +1043,7 @@ rec {
   doctestEnabled = packages: pkg: (testConfig packages pkg).doctest.enable;
 
   # libtest arguments of one binary.
-  testArgs =
-    cfg: binary:
-    cfg.args ++ (binaryConfig cfg binary).args ++ lib.optional cfg.includeIgnored "--include-ignored";
+  testArgs = cfg: binary: cfg.args ++ (binaryConfig cfg binary).args;
 
   mkTestRuns =
     {

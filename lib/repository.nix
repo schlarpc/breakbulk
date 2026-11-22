@@ -569,7 +569,6 @@ let
         in
         t
         // {
-          includeIgnored = single false [ "includeIgnored" ];
           scopeTestsDir = single null [ "scopeTestsDir" ];
           workspaceManifest = single null [ "workspaceManifest" ];
           runner = single null [ "runner" ];

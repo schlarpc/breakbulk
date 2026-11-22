@@ -2527,15 +2527,15 @@ in
           };
           packages.app-b = {
             test.runner = "libtest";
-            test.includeIgnored = true;
-            target.${native}.test.includeIgnored = false;
+            test.nextest.profile = "package-layer";
+            target.${native}.test.nextest.profile = "target-layer";
             variant.default.test.keepLog = lib.mkDefault true;
           };
         }
       ];
       run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
       checks = {
-        targetLayerWins = !(lib.elem "--include-ignored" run.passthru.breakbulkTest.args);
+        targetLayerWins = lib.hasInfix "--profile target-layer" run.drvAttrs.buildCommand;
         forcedLowerWins = run.drvAttrs ? nextestCargoMetadata;
         defaultHigherLoses = !(lib.hasInfix ''"$out/log"'' run.drvAttrs.buildCommand);
       };

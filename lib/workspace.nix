@@ -57,7 +57,7 @@
 #
 # Test options (set by mkRepository's module options): `runner` (null or a
 # list), `testSystem`, `packages.<name>.test` (env, path, args,
-# includeIgnored, binaries.<binary>.{args,env,enable},
+# binaries.<binary>.{args,env,enable},
 # doctest.{args,env,postRun,enable}), `ca` (default:
 # breakbulk.nixFeatures.defaultCa), `nixFeatures` (the record every use of
 # a Nix feature is checked against, lib/nix-features.nix),
@@ -1056,7 +1056,6 @@ in
             (pkg: {
               test = (runPackages.${pkg}.test or { }) // {
                 args = [ "--test" ];
-                includeIgnored = false;
                 binaries = { };
               };
             });

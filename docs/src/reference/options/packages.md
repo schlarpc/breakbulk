@@ -1011,22 +1011,6 @@ lazy attribute set of (string or absolute path or package or signed integer or b
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
-## `packages.<name>.test.includeIgnored`
-
-Also run ` #[ignore] ` tests\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-false
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
 ## `packages.<name>.test.keepLog`
 
 Keep each test run’s and doctest run’s raw output in

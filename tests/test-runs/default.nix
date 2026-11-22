@@ -30,7 +30,8 @@
 #   test-control-stable-dylibs   the env binary's dylib-path test passes
 #                           with the stable (content-addressed) copies of
 #                           the build scripts' library directories
-#   test-control-include-ignored   includeIgnored runs the ignored tests
+#   test-control-include-ignored   `--include-ignored` in test.args runs the
+#                           ignored tests
 #   test-control-skip-list  changing one binary's skip list changes that
 #                           test run's derivation only (drv paths compared)
 #   test-control-bin-exe    CARGO_BIN_EXE_ctl in the integration test's
@@ -449,10 +450,10 @@ let
       cp $TMPDIR/log $out/
     '';
 
-  # includeIgnored adds --include-ignored to every binary of the package.
+  # `--include-ignored` in test.args reaches every binary of the package.
   ctlIgnored = mk "test-control" {
     packages.ctl.test = ctlTest // {
-      includeIgnored = true;
+      args = [ "--include-ignored" ];
     };
   };
   testControlIncludeIgnored =

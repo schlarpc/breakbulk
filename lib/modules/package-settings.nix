@@ -585,11 +585,6 @@ let
             doctests.
           '';
         };
-        includeIgnored = mkOption {
-          type = types.bool;
-          default = false;
-          description = "Also run `#[ignore]` tests.";
-        };
         postRun = mkOption {
           type = types.lines;
           default = "";
