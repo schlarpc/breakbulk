@@ -149,12 +149,13 @@
 }:
 let
   inherit (pkgs) lib;
+  mkWorkspace = import ../lib/workspace.nix { inherit lib breakbulk; };
   fixtures = ../fixtures;
   tools = breakbulk.mkTools pkgs;
 
   mk =
     fixture: args:
-    breakbulk.mkWorkspace pkgs (
+    mkWorkspace pkgs (
       {
         root = fixtures + "/${fixture}";
         inherit tools;
