@@ -18,7 +18,8 @@
 //!   `.git`, Nix's `result` symlinks): the cause, and the view's [`Widen`]
 //!   option;
 //! - otherwise inside the unit's own view root: the view's [`Widen`]
-//!   option, the one for the unit's kind. Paths in the package directory count only when something
+//!   option, the one for the unit's kind (with `sources` functions, those
+//!   too). Paths in the package directory count only when something
 //!   other than the built-in steps chose its files (`test.runFiles`,
 //!   source prediction, a `sources` function); else the view holds the
 //!   whole directory, and a file missing there is not in the repository
@@ -374,6 +375,13 @@ pub fn adds(opt: &str, view: &SourceView, rel: &str) -> String {
         )
     } else if view.predicted {
         format!("add it to `{opt}.predictSources.keep`")
+    } else if view.custom {
+        // The functions run after the built-in steps, so they can take
+        // out again what the option adds.
+        format!(
+            "have the functions in `{opt}.sources` keep it, or add it to `{opt}.{widen}` if they \
+             keep what that adds"
+        )
     } else {
         format!("add it to `{opt}.{widen}`")
     }
@@ -709,7 +717,8 @@ mod tests {
             h,
             [
                 "`crates/x/README.md` is not in this unit's source view; if it is in the \
-              repository, add it to `packages.x.extraSources`"
+                 repository, have the functions in `packages.x.sources` keep it, or add it to \
+                 `packages.x.extraSources` if they keep what that adds"
             ]
         );
     }

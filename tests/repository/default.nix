@@ -1611,9 +1611,10 @@ in
         lib = expectFailure "view-hints-lib" build."lib-reads-0.1.0-lib" [
           "${missing} `packages.lib-reads.extraSources`"
         ];
-        # A `sources` function left the file out: the option for the kind.
+        # A `sources` function left the file out: the functions, and the
+        # option for the kind.
         chosen = expectFailure "view-hints-chosen" build."chosen-reads-0.1.0-lib" [
-          "`crates/chosen-reads/data.txt` is not in this unit's source view; if it is in the repository, add it to `packages.chosen-reads.extraSources`"
+          "`crates/chosen-reads/data.txt` is not in this unit's source view; if it is in the repository, have the functions in `packages.chosen-reads.sources` keep it, or add it to `packages.chosen-reads.extraSources` if they keep what that adds"
         ];
         run = expectFailure "view-hints-run" build."script-reads-0.1.0-build-run" [
           "${missing} `packages.script-reads.extraSources`"

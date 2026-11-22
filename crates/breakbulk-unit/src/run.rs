@@ -36,7 +36,7 @@ use crate::directives::{
 };
 use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{RenderedRun, package_descr, package_name_version, package_spec};
+use crate::spec::{RenderedRun, SourceView, package_descr, package_name_version, package_spec};
 use crate::splice::expand_dylib_path;
 use crate::view_hints;
 use crate::{
@@ -202,11 +202,12 @@ pub struct MissingPathEntry {
 pub fn missing_path_entries(
     package: &str,
     cwd: &Path,
+    view: Option<&SourceView>,
     missing: &[MissingPath],
 ) -> Vec<MissingPathEntry> {
     missing
         .iter()
-        .zip(path_hints(package, cwd, missing))
+        .zip(path_hints(package, cwd, view, missing))
         .map(|(m, hint)| MissingPathEntry {
             declared: m.declared.clone(),
             path: m.path.display().to_string(),
@@ -215,17 +216,35 @@ pub fn missing_path_entries(
         .collect()
 }
 
-/// One hint line per missing path.
-pub fn path_hints(package: &str, cwd: &Path, missing: &[MissingPath]) -> Vec<String> {
+/// One hint line per missing path. `view`: the run's source view, whose
+/// kind decides the option that adds a path inside it.
+pub fn path_hints(
+    package: &str,
+    cwd: &Path,
+    view: Option<&SourceView>,
+    missing: &[MissingPath],
+) -> Vec<String> {
     let opt = option_prefix(package);
     missing
         .iter()
         .map(|m| {
             let inside = Path::new(&m.declared).is_relative() || m.path.starts_with(cwd);
             if inside {
+                let adds = match view {
+                    // A run's own view is predicted only when its run is.
+                    Some(v) if v.predicted => format!(
+                        "add it to `{opt}.predictSources.keep`, or set \
+                         `{opt}.predictSources.buildScriptRuns = false`"
+                    ),
+                    Some(v) => {
+                        let rel = m.path.strip_prefix(&v.root).unwrap_or(&m.path);
+                        view_hints::adds(&opt, v, &rel.display().to_string())
+                    }
+                    None => format!("add it to `{opt}.extraSources`"),
+                };
                 format!(
                     "the build script declared `rerun-if-changed={}`, but {} is not in the sandbox; \
-                     if the script needs it, add it to `{opt}.extraSources`",
+                     if the script needs it, {adds}",
                     m.declared,
                     m.path.display()
                 )
@@ -341,7 +360,7 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
     let stdout = String::from_utf8_lossy(f.stdout);
     let stderr = String::from_utf8_lossy(f.stderr_tail);
     let missing = parsed.map(|p| missing_paths(p, cwd)).unwrap_or_default();
-    let mut hints = path_hints(&f.run.package, cwd, &missing);
+    let mut hints = path_hints(&f.run.package, cwd, f.run.view.as_ref(), &missing);
     hints.extend(recognize::hints(
         &option_prefix(&f.run.package),
         parsed.map_or(&[][..], |p| &p.rerun_if_env_changed),
@@ -446,7 +465,12 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Failure> {
         });
     }
     let cwd = Path::new(&f.run.cwd);
-    let missing = missing_path_entries(&f.run.package, cwd, &missing_paths(&output, cwd));
+    let missing = missing_path_entries(
+        &f.run.package,
+        cwd,
+        f.run.view.as_ref(),
+        &missing_paths(&output, cwd),
+    );
     let mut warnings: Vec<String> = output
         .log_messages
         .iter()

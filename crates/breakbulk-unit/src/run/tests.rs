@@ -567,6 +567,48 @@ fn failures_print_streamed_messages_first() {
 }
 
 #[test]
+fn missing_sources_name_the_option_of_the_view() {
+    let t = TempDir::new("missing-view");
+    let view = |predicted, custom| crate::spec::SourceView {
+        root: t.path().display().to_string(),
+        package_dir: String::new(),
+        widen: crate::spec::Widen::ExtraSources,
+        test_only: Vec::new(),
+        target_roots: Vec::new(),
+        junk: Vec::new(),
+        custom,
+        predicted,
+    };
+    let hint = |v| {
+        let mut r = unit(t.path());
+        r.view = Some(v);
+        let s = judge_with(&r, 0, "cargo::rerun-if-changed=data/x.txt\n").unwrap();
+        s.missing[0].hint.clone()
+    };
+    let h = hint(view(true, false));
+    assert!(
+        h.ends_with(
+            "if the script needs it, add it to `packages.foo-sys.predictSources.keep`, or set \
+             `packages.foo-sys.predictSources.buildScriptRuns = false`"
+        ),
+        "{h}"
+    );
+    let h = hint(view(false, true));
+    assert!(
+        h.ends_with(
+            "if the script needs it, have the functions in `packages.foo-sys.sources` keep it, \
+             or add it to `packages.foo-sys.extraSources` if they keep what that adds"
+        ),
+        "{h}"
+    );
+    let h = hint(view(false, false));
+    assert!(
+        h.ends_with("if the script needs it, add it to `packages.foo-sys.extraSources`"),
+        "{h}"
+    );
+}
+
+#[test]
 fn missing_sources_warn_and_are_listed() {
     let t = TempDir::new("missing");
     let r = unit(t.path());

@@ -277,9 +277,16 @@ the repository root, for each path that does not exist and is
   the package directory count only for such a run and for a package with
   [`sources`](options/packages.md#packagesnamesources) functions: the
   built-in steps keep the whole directory otherwise, so a file missing
-  there is missing from the repository too. breakbulk cannot tell which
-  function left a path out, so the hint names the option for the unit's
-  kind.
+  there is missing from the repository too. With `sources` functions,
+  breakbulk cannot tell whether a function left the path out, so the
+  hint names the functions and the option for the unit's kind, which
+  helps only if the functions keep what it adds.
+
+A build-script run that succeeds without a `rerun-if-changed` path it
+declared names the option the same way: `extraSources`, or, with
+`sources` functions, those too; in a predicted view,
+`predictSources.keep` or
+[`predictSources.buildScriptRuns = false`](options/packages.md#packagesnamepredictsourcesbuildscriptruns).
 
 The unit cannot see the repository, so the hint says "if it is in the
 repository". A message without a path (`filetests: No such file or

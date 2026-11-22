@@ -260,5 +260,8 @@ view already
 
 If a unit fails because a file is missing from its view, add the file
 for that kind. A file that `test.sourceScope`, `test.scopeTestsDir` or
-`scopeTargetRoots` left out gets a hint that names the option. breakbulk does not know
-which files a function left out, so such a failure gets no hint.
+`scopeTargetRoots` left out gets a hint that names the option.
+breakbulk does not know which files a function left out, so for any
+other missing file the hint names the package's `sources` functions and
+the option for the unit's kind (`extraSources` or `test.sourceScope`),
+which works only if the functions keep what it adds.
