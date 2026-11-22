@@ -53,12 +53,13 @@
 }:
 let
   inherit (pkgs) lib;
+  mkWorkspace = import ../lib/workspace.nix { inherit lib breakbulk; };
   fixture = ../fixtures/test-cutoff;
   tools = breakbulk.mkTools pkgs;
 
   mkWith =
     root: args:
-    breakbulk.mkWorkspace pkgs (
+    mkWorkspace pkgs (
       {
         inherit tools ca root;
         name = "test-cutoff";
