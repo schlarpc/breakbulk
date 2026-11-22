@@ -340,6 +340,12 @@ let
   # arguments).
   targetSplitsDebug = args: debugInfoOf args == "split";
 
+  # The env of the target's units that its debug-info stages need
+  # (targetStageSet's arguments): splitDebug needs a GNU build ID, which
+  # nixpkgs' linker wrapper adds, content-derived (`--build-id=sha1`),
+  # when NIX_SET_BUILD_ID is set, as stdenv's separateDebugInfo does.
+  targetUnitEnv = args: lib.optionalAttrs (targetSplitsDebug args) { NIX_SET_BUILD_ID = "1"; };
+
   # The scope of non-test units for a target (targetStageSet's arguments
   # and `coverage`).
   shippedRemapScope =
@@ -511,7 +517,7 @@ in
     mkProducts
     targetStageSet
     debugInfoOf
-    targetSplitsDebug
+    targetUnitEnv
     shippedRemapScope
     presetStages
     ;

@@ -1320,12 +1320,8 @@ let
       sel = selOf wsName triple v;
       tsel = testSelOf wsName triple v;
       s = specFor wsName triple;
-      # splitDebug needs a GNU build ID; nixpkgs' linker wrapper adds a
-      # content-derived one (`--build-id=sha1`) when NIX_SET_BUILD_ID is
-      # set, as stdenv's separateDebugInfo does. Target units only.
-      buildId = lib.optionalAttrs (products.targetSplitsDebug (stageSetArgs wsName triple)) {
-        NIX_SET_BUILD_ID = "1";
-      };
+      # Target units only: host units' products are not shipped.
+      debugEnv = products.targetUnitEnv (stageSetArgs wsName triple);
     in
     mkWorkspace pkgs (
       {
@@ -1398,7 +1394,7 @@ let
       }
       // s.mkWorkspace
       // {
-        targetEnv = buildId // (s.mkWorkspace.targetEnv or { });
+        targetEnv = debugEnv // (s.mkWorkspace.targetEnv or { });
       }
       # Coverage: `-C instrument-coverage` on target units, through the
       # spec's rustflags (so under the key the project uses).
