@@ -136,6 +136,27 @@ let
   layerFile = builtins.toFile "layer.nix" ''
     { lib, ... }: { profile = lib.mkForce "file"; features = [ "f" ]; }
   '';
+
+  # The variants of the variants fixture's workspace, but `default`, with a
+  # featurePowerset module of `args` and the workspace settings `extra`.
+  powersetVariants =
+    args: extra:
+    removeAttrs
+      (bb.mkRepository {
+        inherit pkgs;
+        root = ../fixtures/variants;
+        modules = [
+          {
+            workspaces.main = {
+              path = "ws";
+              imports = [ (bb.variants.featurePowerset args) ];
+            }
+            // extra;
+          }
+        ];
+      }).config.workspaces.main.variants
+      [ "default" ];
+  fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
 in
 runTests "lib-unit" {
   # --- lockfile ----------------------------------------------------------
@@ -672,10 +693,9 @@ runTests "lib-unit" {
   # enables x).
   testPackageFeaturePowerset =
     let
-      ws = {
-        root = ../fixtures/variants;
-        path = "ws";
-        mode = "check";
+      ps = args: powersetVariants ({ scope = "package"; } // args) { };
+      check = {
+        variant.mode = "check";
       };
       shape = lib.mapAttrs (
         _: v: {
@@ -708,27 +728,36 @@ runTests "lib-unit" {
     in
     {
       expr = {
-        powerset = shape (bb.variants.packageFeaturePowerset ws);
-        each = shape (bb.variants.packageFeaturePowerset (ws // { eachFeature = true; }));
-        depth1 = lib.attrNames (
-          bb.variants.packageFeaturePowerset (
-            ws
-            // {
-              depth = 1;
-              packages = [ "lib-a" ];
-            }
-          )
-        );
-        excluded = lib.attrNames (
-          bb.variants.packageFeaturePowerset (
-            ws
-            // {
-              packages = [ "lib-a" ];
-              excludeFeatures = [ "default" ];
-              excludeNoDefaultFeatures = true;
-            }
-          )
-        );
+        powerset = shape (ps check);
+        each = shape (ps (check // { eachFeature = true; }));
+        depth1 = lib.attrNames (ps {
+          depth = 1;
+          packages = [ "lib-a" ];
+        });
+        excluded = lib.attrNames (ps {
+          packages = [ "lib-a" ];
+          excludeFeatures = [ "default" ];
+          excludeNoDefaultFeatures = true;
+        });
+        # Any --exclude-features turns --all-features off (cargo-hack's
+        # cli.rs).
+        eachExcluded = lib.attrNames (ps {
+          packages = [ "lib-a" ];
+          eachFeature = true;
+          excludeFeatures = [ "y" ];
+        });
+        sets = lib.attrNames (ps {
+          packages = {
+            exclude = [ "app" ];
+          };
+          excludeSets = [
+            [
+              "y"
+              "x"
+            ]
+            [ "default" ]
+          ];
+        });
         # An optional dependency that is an implicit feature brings
         # --all-features back.
         optional = map (r: r.suffix) (
@@ -737,15 +766,18 @@ runTests "lib-unit" {
               a = [ "dep:o" ];
             };
             optionalDeps = [ "z" ];
-            eachFeature = false;
-            depth = null;
-            excludeFeatures = [ ];
-            excludeNoDefaultFeatures = false;
-            excludeAllFeatures = false;
           }
         );
-        unknown =
-          (builtins.tryEval (bb.variants.packageFeaturePowerset (ws // { packages = [ "nope" ]; }))).success;
+        unknown = fails (ps {
+          packages = [ "nope" ];
+        });
+        withFeatures = fails (ps {
+          features = [ "x" ];
+        });
+        eachDepth = fails (ps {
+          eachFeature = true;
+          depth = 2;
+        });
       };
       expected = {
         powerset = app // {
@@ -774,49 +806,204 @@ runTests "lib-unit" {
           "hack-lib-a.x+y"
           "hack-lib-a.y"
         ];
+        eachExcluded = [
+          "hack-lib-a.default"
+          "hack-lib-a.no-default-features"
+          "hack-lib-a.x"
+        ];
+        sets = [
+          "hack-lib-a.default+y"
+          "hack-lib-a.no-default-features"
+          "hack-lib-a.x"
+          "hack-lib-a.y"
+        ];
         optional = [
           ".all-features"
           ".no-default-features"
           ".a"
         ];
-        unknown = false;
+        unknown = true;
+        withFeatures = true;
+        eachDepth = true;
       };
     };
 
-  # Generated variants keep their test runs out of repo.checks unless the
-  # arguments opt in; hand-written variants default to in.
+  # The workspace scope: one feature list for the whole workspace, each set
+  # with --no-default-features.
+  testWorkspaceFeaturePowerset =
+    let
+      ps = args: powersetVariants ({ scope = "workspace"; } // args) { };
+      features = [
+        "lib-a/x"
+        "lib-a/y"
+        "extra"
+      ];
+      names = args: lib.attrNames (ps ({ inherit features; } // args));
+      fp = ps {
+        features = [ "lib-a/y" ];
+        packages = [ "lib-a" ];
+        prefix = "fp";
+      };
+    in
+    {
+      expr = {
+        all = names { };
+        depth = names { depth = 1; };
+        each = names {
+          eachFeature = true;
+          excludeNoDefaultFeatures = true;
+        };
+        excluded = names {
+          excludeFeatures = [ "extra" ];
+          excludeSets = [
+            [
+              "lib-a/y"
+              "lib-a/x"
+            ]
+          ];
+        };
+        fp = lib.mapAttrs (_: v: { inherit (v) features noDefaultFeatures packages; }) fp;
+        noFeatures = fails (ps { });
+        allFeatures = fails (ps {
+          inherit features;
+          excludeAllFeatures = true;
+        });
+        badScope = fails (powersetVariants { scope = "crate"; } { });
+      };
+      expected = {
+        all = [
+          "features-extra"
+          "features-lib-a_x"
+          "features-lib-a_x+extra"
+          "features-lib-a_x+lib-a_y"
+          "features-lib-a_x+lib-a_y+extra"
+          "features-lib-a_y"
+          "features-lib-a_y+extra"
+          "features-none"
+        ];
+        depth = [
+          "features-extra"
+          "features-lib-a_x"
+          "features-lib-a_y"
+          "features-none"
+        ];
+        each = [
+          "features-extra"
+          "features-lib-a_x"
+          "features-lib-a_y"
+        ];
+        excluded = [
+          "features-lib-a_x"
+          "features-lib-a_y"
+          "features-none"
+        ];
+        fp = {
+          fp-none = {
+            features = [ ];
+            noDefaultFeatures = true;
+            packages = [ "lib-a" ];
+          };
+          fp-lib-a_y = {
+            features = [ "lib-a/y" ];
+            noDefaultFeatures = true;
+            packages = [ "lib-a" ];
+          };
+        };
+        noFeatures = true;
+        allFeatures = true;
+        badScope = true;
+      };
+    };
+
+  # Generated variants keep their test runs out of repo.checks unless
+  # `variant` or another definition opts in; hand-written variants default
+  # to in.
   testGeneratedVariantChecks =
     let
-      ws = {
-        root = ../fixtures/variants;
-        path = "ws";
-      };
       checksOf = vs: lib.unique (lib.mapAttrsToList (_: v: v.checks) vs);
     in
     {
       expr = {
-        package = checksOf (bb.variants.packageFeaturePowerset ws);
-        packageOptIn = checksOf (bb.variants.packageFeaturePowerset (ws // { checks = true; }));
+        package = checksOf (powersetVariants { scope = "package"; } { });
+        packageOptIn = checksOf (
+          powersetVariants {
+            scope = "package";
+            variant.checks = true;
+          } { }
+        );
         workspace = checksOf (
-          bb.variants.featurePowerset {
+          powersetVariants {
+            scope = "workspace";
             features = [
-              "a"
-              "b"
+              "lib-a/x"
+              "lib-a/y"
             ];
-          }
+          } { }
         );
         workspaceOptIn = checksOf (
-          bb.variants.featurePowerset {
-            features = [ "a" ];
-            checks = true;
-          }
+          powersetVariants {
+            scope = "workspace";
+            features = [ "lib-a/x" ];
+          } { variants.features-none.checks = true; }
         );
+        handWritten = (powersetVariants { scope = "package"; } { variants.mine = { }; }).mine.checks;
       };
       expected = {
         package = [ false ];
         packageOptIn = [ true ];
         workspace = [ false ];
-        workspaceOptIn = [ true ];
+        workspaceOptIn = [
+          false
+          true
+        ];
+        handWritten = true;
+      };
+    };
+
+  # A package-scope run defines only what it needs, so the user's settings
+  # of a generated variant apply to it: `noDefaultFeatures = true` in
+  # `variant` reaches the --all-features run (whose default features are on
+  # otherwise), a plain `features` elsewhere is added to the run's, and a
+  # definition that contradicts the run is a conflict, not dropped.
+  testFeaturePowersetUserSettings =
+    let
+      vs =
+        extra:
+        powersetVariants {
+          scope = "package";
+          packages = [ "lib-a" ];
+          eachFeature = true;
+          variant.noDefaultFeatures = true;
+        } extra;
+      honoured = vs { variants."hack-lib-a.all-features".features = [ "y" ]; };
+      contradictedRun =
+        (powersetVariants {
+          scope = "package";
+          packages = [ "lib-a" ];
+          eachFeature = true;
+        } { variants."hack-lib-a.x".noDefaultFeatures = false; })."hack-lib-a.x";
+    in
+    {
+      expr = {
+        all = {
+          inherit (honoured."hack-lib-a.all-features") allFeatures noDefaultFeatures features;
+        };
+        x = {
+          inherit (honoured."hack-lib-a.x") noDefaultFeatures features;
+        };
+        conflict = fails contradictedRun.noDefaultFeatures;
+      };
+      expected = {
+        all = {
+          allFeatures = true;
+          noDefaultFeatures = true;
+          features = [ "y" ];
+        };
+        x = {
+          noDefaultFeatures = true;
+          features = [ "x" ];
+        };
+        conflict = true;
       };
     };
 

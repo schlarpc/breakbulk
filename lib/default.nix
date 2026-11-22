@@ -99,7 +99,7 @@ let
       ;
   };
   buildScriptPaths = import ./build-script-paths.nix { inherit lib; };
-  variants = import ./variants.nix { inherit lib util manifest; };
+  variants = import ./variants.nix { inherit lib manifest; };
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;

@@ -1,62 +1,76 @@
-# Variants ("Variants" in docs/src/explanation/configuration.md): helpers for
-# `workspaces.<ws>.variants`, and the derivations mkRepository makes for
-# variants that link nothing.
+# Variants ("Variants" in docs/src/explanation/configuration.md): the
+# feature-matrix generator for `workspaces.<ws>.variants`, and the
+# derivations mkRepository makes for variants that link nothing.
 #
-#   workspaces.main.variants =
-#     { default = { }; }
-#     // breakbulk.variants.featurePowerset {
-#       features = [ "json" "tls" "cli" ];
-#       mode = "check";          # any variant setting, applied to each
-#       profile = "release";
-#       maxSize = 2;             # optional: subsets of at most 2 features
-#       exclude = [ [ "tls" "cli" ] ];   # optional: subsets to leave out
-#       prefix = "features";     # variant names: features-none, features-json+tls, …
-#     };
+#   workspaces.main.imports = [
+#     (breakbulk.variants.featurePowerset {
+#       scope = "package";       # or "workspace"
+#       variant.mode = "check";  # a module for each generated variant
+#     })
+#   ];
 #
-# gives one variant per subset of `features`, each with
-# `noDefaultFeatures = true` (as `cargo hack --feature-powerset` does) and
-# `features` set to the subset, and `checks = false` (pass `checks = true`
-# to put their test runs and doctests in repo.checks). Units identical
-# between variants are shared, so the cost is the crates whose features
-# differ. That is a workspace-wide matrix; cargo-hack's own is per package:
+# is a workspace module that defines one variant per feature set. Its
+# arguments, one vocabulary for both scopes:
 #
-#   workspaces.main.variants =
-#     { default = { }; }
-#     // breakbulk.variants.packageFeaturePowerset {
-#       inherit root;            # the repository root (a module's `root`)
-#       path = ".";              # the workspace, relative to root
-#       packages = null;         # null: every member; or a list of names
-#       eachFeature = false;     # true: --each-feature; false: --feature-powerset
-#       depth = null;            # --depth: at most this many features per set
-#       excludeFeatures = [ ];   # --exclude-features
-#       excludeNoDefaultFeatures = false;   # --exclude-no-default-features
-#       excludeAllFeatures = false;         # --exclude-all-features
-#       prefix = "hack";
-#       mode = "check";          # any variant setting, applied to each
-#       targets = [ "x86_64-unknown-linux-gnu" ];
-#     };
+#   scope                     "package": cargo-hack's per-package matrix,
+#                             `cargo hack <mode> --workspace
+#                             --feature-powerset`, each set its own `-p
+#                             <pkg>` plan. "workspace": one list of
+#                             features combined for the whole workspace.
+#   features                  "workspace" only, required: the features to
+#                             combine (`pkg/feat` spellings included).
+#                             "package" combines each package's own
+#                             `[features]` (`workspaces.<ws>.members`).
+#   packages                  "package": the packages that get runs (null:
+#                             every member; a list, or `{ exclude = … }`).
+#                             "workspace": each variant's `packages`.
+#   eachFeature               each feature alone, not every combination
+#                             (`--each-feature`).
+#   depth                     at most this many features per set (`--depth`).
+#   excludeFeatures           features in no set (`--exclude-features`).
+#   excludeSets               sets to leave out, each a list of features.
+#   excludeNoDefaultFeatures  no run without any features
+#                             (`--exclude-no-default-features`; in the
+#                             workspace scope, `<prefix>-none`).
+#   excludeAllFeatures        "package" only: no `--all-features` run
+#                             (`--exclude-all-features`).
+#   prefix                    variant names start `<prefix>-` (default
+#                             "hack" for "package", "features" for
+#                             "workspace").
+#   variant                   a module for each generated variant: any
+#                             `variants.<v>` setting (`mode`, `profile`,
+#                             `targets`, `checks`, more `features`, …).
 #
-# gives the variants `cargo hack <mode> --workspace --feature-powerset`
-# runs, each its own `-p <pkg>` plan (`variants.<v>.packages`), following
-# cargo-hack's `determine_kind` and `exec_on_package` (taiki-e/cargo-hack
-# e2406853, src/main.rs, src/features.rs): per package, `--all-features`
-# (left out when the package has no optional dependencies that are
-# implicit features, and for --each-feature also when it has at most one
-# feature), `--no-default-features`, and `--no-default-features
-# --features <set>` for each feature alone (--each-feature) or each
-# non-empty set of its `[features]` (--feature-powerset), leaving out sets
+# Generated variants have `checks = lib.mkDefault false`: their test runs
+# stay out of repo.checks unless `variant` or another definition says
+# otherwise. The generator defines only what a run needs, as plain
+# definitions (`noDefaultFeatures = true`, `allFeatures = true`, its
+# `features` and `packages`), so every other definition of a generated
+# variant applies to it: `features` concatenate, `noDefaultFeatures = true`
+# turns off the default features of the runs that keep them, and a
+# definition that contradicts what a run needs is a conflict.
+#
+# Workspace scope: one variant per subset of `features`, each with
+# `noDefaultFeatures = true` and `features` set to the subset, named
+# `<prefix>-none`, `<prefix>-json+tls` (`pkg/feat` spelled `pkg_feat`).
+# Units identical between variants are shared, so the cost is the crates
+# whose features differ.
+#
+# Package scope follows cargo-hack's `determine_kind` and
+# `exec_on_package` (taiki-e/cargo-hack 0.6.46, src/main.rs,
+# src/features.rs, src/cli.rs): per package, `--all-features` (left out
+# with excludeAllFeatures or any excludeFeatures, when the package has no
+# optional dependencies that are implicit features, and for eachFeature
+# also when it has at most one feature), `--no-default-features`, and
+# `--no-default-features --features <set>` for each feature alone
+# (eachFeature) or each non-empty set of its `[features]`, leaving out sets
 # in which one feature already enables another. A package with no features
 # and no optional dependencies gets one plain run. Optional dependencies
 # are not features in the sets (cargo-hack's default without
 # --optional-deps). Names: `<prefix>-<pkg>`, `<prefix>-<pkg>.all-features`,
-# `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. As
-# with featurePowerset, each has `checks = false` unless the arguments say
-# otherwise. A run's `features`, `noDefaultFeatures` and `allFeatures` are
-# plain definitions: `features` given here or set elsewhere is added to the
-# run's, and a target's `variantDefaults` apply as to any variant. Of those
-# defaults' features, a run keeps the ones its package accepts
-# (`variants.<v>.packages`); a `variantDefaults` `noDefaultFeatures = true`
-# turns the run's default features off.
+# `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. A
+# target's `variantDefaults` apply as to any variant; of their features, a
+# run keeps the ones its package accepts (`variants.<v>.packages`).
 #
 #   breakbulk.variants.unitsCheck { pkgs; name; units = [ … ]; }
 #
@@ -66,7 +80,6 @@
 # plans, so clippy's lints run on every workspace member.
 {
   lib,
-  util,
   manifest,
 }:
 let
@@ -77,45 +90,10 @@ let
   # A store-name-safe spelling of a feature (`pkg/feat` → `pkg_feat`).
   safe = lib.replaceStrings [ "/" ":" " " ] [ "_" "_" "_" ];
 
-  featurePowerset =
-    {
-      features,
-      prefix ? "features",
-      maxSize ? null,
-      exclude ? [ ],
-      ...
-    }@args:
-    let
-      settings = removeAttrs args [
-        "features"
-        "prefix"
-        "maxSize"
-        "exclude"
-      ];
-      sorted = lib.sort (a: b: lib.length a < lib.length b || (lib.length a == lib.length b && a < b)) (
-        subsets features
-      );
-      excluded = s: lib.any (e: lib.sort lib.lessThan e == lib.sort lib.lessThan s) exclude;
-      keep = s: (maxSize == null || lib.length s <= maxSize) && !excluded s;
-      nameOf = s: "${prefix}-${if s == [ ] then "none" else lib.concatMapStringsSep "+" safe s}";
-    in
-    lib.listToAttrs (
-      map (
-        s:
-        lib.nameValuePair (nameOf s) (
-          {
-            noDefaultFeatures = true;
-            # Generated variants' test runs stay out of repo.checks unless
-            # asked for.
-            checks = false;
-          }
-          // settings
-          // {
-            features = s;
-          }
-        )
-      ) (lib.filter keep sorted)
-    );
+  # Sets of features smallest first, then by name.
+  bySize = lib.sort (a: b: lib.length a < lib.length b || (lib.length a == lib.length b && a < b));
+
+  sameSet = a: b: lib.sort lib.lessThan a == lib.sort lib.lessThan b;
 
   # One package's runs as cargo-hack makes them: a list of
   # { suffix; settings; } (see the file's header).
@@ -123,11 +101,12 @@ let
     {
       features,
       optionalDeps,
-      eachFeature,
-      depth,
-      excludeFeatures,
-      excludeNoDefaultFeatures,
-      excludeAllFeatures,
+      eachFeature ? false,
+      depth ? null,
+      excludeFeatures ? [ ],
+      excludeSets ? [ ],
+      excludeNoDefaultFeatures ? false,
+      excludeAllFeatures ? false,
     }:
     let
       names = lib.attrNames features;
@@ -152,18 +131,19 @@ let
         in
         go [ ] [ f ];
       redundant = s: lib.any (f: lib.any (g: lib.elem g s) (enables f)) s;
-      sets =
+      sets = lib.filter (s: !(lib.any (sameSet s) excludeSets)) (
         if eachFeature then
           map (f: [ f ]) candidates
         else
           lib.filter (s: s != [ ] && (depth == null || lib.length s <= depth) && !redundant s) (
             subsets candidates
-          );
-      sorted = lib.sort (
-        a: b: lib.length a < lib.length b || (lib.length a == lib.length b && a < b)
-      ) sets;
+          )
+      );
+      # cargo-hack's cli.rs turns --exclude-all-features on with any
+      # --exclude-features.
       skipAll =
         excludeAllFeatures
+        || excludeFeatures != [ ]
         || (if eachFeature then optionalDeps == [ ] && lib.length names <= 1 else optionalDeps == [ ]);
     in
     if names == [ ] && optionalDeps == [ ] then
@@ -188,100 +168,155 @@ let
           noDefaultFeatures = true;
           features = s;
         };
-      }) sorted;
+      }) (bySize sets);
 
-  packageFeaturePowerset =
+  # The workspace scope's runs: a list of { suffix; settings; }.
+  workspaceRuns =
     {
-      root,
-      path ? ".",
+      features,
+      packages,
+      eachFeature,
+      depth,
+      excludeFeatures,
+      excludeSets,
+      excludeNoDefaultFeatures,
+    }:
+    let
+      candidates = lib.filter (f: !(lib.elem f excludeFeatures)) features;
+      sets = if eachFeature then [ [ ] ] ++ map (f: [ f ]) candidates else subsets candidates;
+      keep =
+        s:
+        (depth == null || lib.length s <= depth)
+        && !(lib.any (sameSet s) excludeSets)
+        && !(excludeNoDefaultFeatures && s == [ ]);
+    in
+    map (s: {
+      suffix = "-${if s == [ ] then "none" else lib.concatMapStringsSep "+" safe s}";
+      settings = {
+        noDefaultFeatures = true;
+        features = s;
+      }
+      // lib.optionalAttrs (packages != null) { inherit packages; };
+    }) (bySize (lib.filter keep sets));
+
+  featurePowerset =
+    {
+      scope,
+      features ? null,
       packages ? null,
       eachFeature ? false,
       depth ? null,
       excludeFeatures ? [ ],
+      excludeSets ? [ ],
       excludeNoDefaultFeatures ? false,
       excludeAllFeatures ? false,
-      prefix ? "hack",
-      ...
-    }@args:
+      prefix ? if scope == "package" then "hack" else "features",
+      variant ? { },
+    }:
     let
-      settings = removeAttrs args [
-        "root"
-        "path"
-        "packages"
-        "eachFeature"
-        "depth"
-        "excludeFeatures"
-        "excludeNoDefaultFeatures"
-        "excludeAllFeatures"
-        "prefix"
-      ];
-      rootPath = util.rootPath root;
-      ws = manifest.workspace {
-        root = rootPath;
-        wsDir = util.normalizeRel path;
-      };
-      members = map (
-        dir:
+      fail = msg: throw "breakbulk.variants.featurePowerset: ${msg}";
+      checked =
+        if scope != "package" && scope != "workspace" then
+          fail "`scope` is \"package\" or \"workspace\", not ${builtins.toJSON scope}"
+        else if scope == "workspace" && features == null then
+          fail "the workspace scope needs `features`, the features to combine"
+        else if scope == "package" && features != null then
+          fail "the package scope combines each package's own features; for features in every run, set `variant.features`"
+        else if scope == "workspace" && excludeAllFeatures then
+          fail "the workspace scope has no --all-features run to exclude"
+        else if eachFeature && depth != null then
+          fail "`depth` limits combinations, and `eachFeature` makes none"
+        else
+          true;
+    in
+    assert checked;
+    { config, ... }:
+    let
+      known = lib.attrNames config.members;
+      selected =
+        if packages == null then
+          known
+        else if builtins.isList packages then
+          let
+            unknown = lib.filter (p: !(config.members ? ${p})) packages;
+          in
+          if unknown != [ ] then
+            fail "${lib.concatStringsSep ", " unknown} not among the workspace's members (${lib.concatStringsSep ", " known})"
+          else
+            packages
+        else
+          let
+            r = manifest.excludeMembers known packages.exclude;
+          in
+          if r.errors != [ ] then
+            fail "packages.exclude: ${lib.concatStringsSep "; " r.errors}"
+          else
+            r.selected;
+      # Optional dependencies not named as `dep:<name>` in a feature are
+      # implicit features (cargo-hack `Features::new`).
+      implicit =
+        m:
         let
-          m = manifest.readManifest rootPath dir;
-          # Optional dependencies not named as `dep:<name>` in a feature
-          # are implicit features (cargo-hack `Features::new`).
           referenced = lib.concatMap (
             vs: lib.concatMap (v: lib.optional (lib.hasPrefix "dep:" v) (lib.removePrefix "dep:" v)) vs
-          ) (lib.attrValues (m.features or { }));
-          optional = lib.concatMap (
-            t: lib.attrNames (lib.filterAttrs (_: d: builtins.isAttrs d && d.optional or false) t)
-          ) (manifest.dependencyTables m);
+          ) (lib.attrValues m.features);
         in
-        {
-          name = m.package.name;
-          features = m.features or { };
-          optionalDeps = lib.filter (d: !(lib.elem d referenced) && !((m.features or { }) ? ${d})) (
-            lib.unique optional
-          );
-        }
-      ) ws.members;
-      known = map (p: p.name) members;
-      unknown = lib.filter (p: !(lib.elem p known)) (if packages == null then [ ] else packages);
-      selected = if packages == null then members else lib.filter (p: lib.elem p.name packages) members;
+        lib.filter (d: !(lib.elem d referenced) && !(m.features ? ${d})) m.optionalDependencies;
+      runs =
+        if scope == "workspace" then
+          map (r: r // { name = "${prefix}${r.suffix}"; }) (workspaceRuns {
+            inherit
+              features
+              packages
+              eachFeature
+              depth
+              excludeFeatures
+              excludeSets
+              excludeNoDefaultFeatures
+              ;
+          })
+        else
+          lib.concatMap (
+            p:
+            map
+              (r: {
+                name = "${prefix}-${p}${r.suffix}";
+                settings = r.settings // {
+                  packages = [ p ];
+                };
+              })
+              (packageRuns {
+                inherit (config.members.${p}) features;
+                optionalDeps = implicit config.members.${p};
+                inherit
+                  eachFeature
+                  depth
+                  excludeFeatures
+                  excludeSets
+                  excludeNoDefaultFeatures
+                  excludeAllFeatures
+                  ;
+              })
+          ) selected;
     in
-    if unknown != [ ] then
-      throw "breakbulk.variants.packageFeaturePowerset: ${lib.concatStringsSep ", " unknown} not among the workspace's members (${lib.concatStringsSep ", " known})"
-    else
-      lib.listToAttrs (
-        lib.concatMap (
-          p:
-          map
-            (
-              r:
-              lib.nameValuePair "${prefix}-${p.name}${r.suffix}" (
-                {
-                  checks = false;
-                }
-                // settings
-                // {
-                  noDefaultFeatures = false;
-                  allFeatures = false;
-                }
-                // r.settings
-                // {
-                  features = settings.features or [ ] ++ r.settings.features or [ ];
-                  packages = [ p.name ];
-                }
-              )
-            )
-            (packageRuns {
-              inherit (p) features optionalDeps;
-              inherit
-                eachFeature
-                depth
-                excludeFeatures
-                excludeNoDefaultFeatures
-                excludeAllFeatures
-                ;
-            })
-        ) selected
+    {
+      _file = "breakbulk.variants.featurePowerset";
+      config.variants = lib.listToAttrs (
+        map (
+          r:
+          # A function, so that the definition can import `variant`: an
+          # attribute set there is only settings.
+          lib.nameValuePair r.name (_: {
+            imports = [ variant ];
+            config = r.settings // {
+              # Generated variants' test runs stay out of repo.checks
+              # unless asked for.
+              checks = lib.mkDefault false;
+            };
+          })
+        ) runs
       );
+    };
 
   unitsCheck =
     {
@@ -306,7 +341,6 @@ in
 {
   inherit
     featurePowerset
-    packageFeaturePowerset
     packageRuns
     unitsCheck
     subsets

@@ -129,7 +129,7 @@ let
         ([layers and priorities](../../how-to/targets.md#layers-and-priorities)).
 
         A variant that selects packages (`variants.<v>.packages`, such as
-        those `breakbulk.variants.packageFeaturePowerset` makes) takes
+        the package-scope runs of `breakbulk.variants.featurePowerset`) takes
         only the `features` here that one of those packages accepts, by
         Cargo's rule for `-p <pkg> --features`: one of its own features
         or optional dependencies, `<pkg>/<feature>`, or
@@ -638,8 +638,8 @@ let
             place of the target's `packages` (`workspaces.<ws>.targets.<triple>.packages`).
             `null`: the target's selection. Features then name the
             selected package's own features, as with `cargo build -p
-            <pkg> --features <f>`; `breakbulk.variants.packageFeaturePowerset`
-            makes such variants.
+            <pkg> --features <f>`; `breakbulk.variants.featurePowerset`
+            makes such variants with `scope = "package"`.
             ${excludeFormDoc}
           '';
         };
@@ -656,9 +656,9 @@ let
             skipped (required features) is left out. Check and clippy
             variants have no products or test runs; their `check` is in
             `repo.checks` regardless.
-            Variants made by `breakbulk.variants.featurePowerset` and
-            `packageFeaturePowerset` set this to `false` unless their
-            arguments set it.
+            Variants made by `breakbulk.variants.featurePowerset` set
+            this to `false` with `lib.mkDefault`, so any plain
+            definition, such as one in its `variant`, overrides it.
           '';
         };
         docs.check = mkOption {
@@ -729,19 +729,58 @@ let
                     root as `workspaces.<ws>.path` is (`.` for the root).
                   '';
                 };
+                features = mkOption {
+                  type = types.attrsOf (types.listOf types.str);
+                  description = ''
+                    The package's `[features]` table as written: no
+                    implicit features of optional dependencies.
+                  '';
+                };
+                optionalDependencies = mkOption {
+                  type = types.listOf types.str;
+                  description = ''
+                    The names (renamed names where renamed) of the
+                    package's optional dependencies, in any dependency
+                    table, `[target.<cfg>]` ones included.
+                  '';
+                };
               };
             }
           );
           readOnly = true;
-          default = manifest.memberPackages {
-            inherit root;
-            wsDir = util.normalizeRel config.path;
-          };
+          default =
+            lib.mapAttrs
+              (
+                _: m:
+                let
+                  toml = manifest.readManifest root m.path;
+                in
+                m
+                // {
+                  features = toml.features or { };
+                  optionalDependencies = lib.unique (
+                    lib.concatMap (
+                      t: lib.attrNames (lib.filterAttrs (_: d: builtins.isAttrs d && d.optional or false) t)
+                    ) (manifest.dependencyTables toml)
+                  );
+                }
+              )
+              (
+                manifest.memberPackages {
+                  inherit root;
+                  wsDir = util.normalizeRel config.path;
+                }
+              );
           defaultText = lib.literalMD "the workspace's members, by name";
           example = lib.literalExpression ''
             {
-              app = { name = "app"; path = "."; };
-              core = { name = "core"; path = "crates/core"; };
+              app = { name = "app"; path = "."; features = { }; optionalDependencies = [ ]; };
+              core = {
+                name = "core";
+                path = "crates/core";
+                features = { default = [ "std" ]; std = [ ]; serde = [ "dep:serde" ]; };
+                optionalDependencies = [ "serde" ];
+              };
             }
           '';
           description = ''
@@ -900,7 +939,10 @@ let
             While `defaultVariant` is `"default"`, a `default` variant
             (`{ }`) is always defined, merged with yours: adding
             `variants.clippy` keeps it, and `variants.default.profile`
-            changes it.
+            changes it. For a feature matrix, import
+            `breakbulk.variants.featurePowerset { … }` in
+            `workspaces.<ws>.imports`
+            ([feature matrices](../../how-to/feature-matrix.md)).
           '';
         };
 
@@ -1250,7 +1292,15 @@ let
 in
 {
   options.workspaces = mkOption {
-    type = types.attrsOf (types.submodule workspace);
+    # A definition is a module, as a top-level one is, so that
+    # `workspaces.<ws>.imports` takes workspace modules such as
+    # `breakbulk.variants.featurePowerset`'s.
+    type = types.attrsOf (
+      types.submoduleWith {
+        modules = [ workspace ];
+        shorthandOnlyDefinesConfig = false;
+      }
+    );
     # Zero configuration: a repository whose root is a Cargo workspace (or
     # package) is one workspace, `default`. Any definition replaces the
     # whole default, as for every option default.
@@ -1265,7 +1315,9 @@ in
       The Cargo workspaces of the repository, by a name of your choice.
       Without any definition, a repository whose root has a `Cargo.toml`
       gets one workspace, `default`, at the root, so `mkRepository` needs
-      no modules; declaring any workspace turns that default off.
+      no modules; declaring any workspace turns that default off. A
+      definition is a module of the workspace's options, so it can have
+      `imports`, such as `breakbulk.variants.featurePowerset { … }`.
     '';
   };
 

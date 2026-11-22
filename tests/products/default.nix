@@ -781,15 +781,18 @@ let
               "clippy::len_zero"
             ];
           };
-        }
-        // breakbulk.variants.featurePowerset {
-          features = [
-            "lib-a/x"
-            "lib-a/y"
-          ];
-          profile = "release";
-          prefix = "fp";
         };
+        imports = [
+          (breakbulk.variants.featurePowerset {
+            scope = "workspace";
+            features = [
+              "lib-a/x"
+              "lib-a/y"
+            ];
+            prefix = "fp";
+            variant.profile = "release";
+          })
+        ];
       };
     }
   ];
@@ -2468,18 +2471,21 @@ in
                 mode = "check";
                 targets = [ musl ];
               };
-            }
+            };
             # cargo-hack's per-package matrix for lib-a, one feature at a
             # time (field-trial gap 10).
-            // breakbulk.variants.packageFeaturePowerset {
-              root = fixtures + "/variants";
-              path = "ws";
-              packages = [ "lib-a" ];
-              eachFeature = true;
-              mode = "check";
-              profile = "release";
-              targets = [ native ];
-            };
+            imports = [
+              (breakbulk.variants.featurePowerset {
+                scope = "package";
+                packages = [ "lib-a" ];
+                eachFeature = true;
+                variant = {
+                  mode = "check";
+                  profile = "release";
+                  targets = [ native ];
+                };
+              })
+            ];
           };
         }
       ];
@@ -2661,35 +2667,36 @@ in
         ];
       repo = repoWith {
         variants = lib.mkMerge [
-          (
-            {
-              default.profile = "release";
-              own = {
-                profile = "release";
-                features = [ "lib-a/x" ];
-                target.${wasm} = {
-                  features = lib.mkForce [ ];
-                  noDefaultFeatures = true;
-                  testProfile = lib.mkForce "dev";
-                };
+          ({
+            default.profile = "release";
+            own = {
+              profile = "release";
+              features = [ "lib-a/x" ];
+              target.${wasm} = {
+                features = lib.mkForce [ ];
+                noDefaultFeatures = true;
+                testProfile = lib.mkForce "dev";
               };
-              gate = {
-                mode = "check";
-                profile = "release";
-                target.${wasm}.allTargets = false;
-              };
-            }
-            // breakbulk.variants.packageFeaturePowerset {
-              root = fixtures + "/variants";
-              path = "ws";
-              packages = [ "lib-a" ];
-              eachFeature = true;
+            };
+            gate = {
               mode = "check";
               profile = "release";
-            }
-          )
+              target.${wasm}.allTargets = false;
+            };
+          })
           # A plain definition next to the generated one.
           { "hack-lib-a.x".features = [ "y" ]; }
+        ];
+        imports = [
+          (breakbulk.variants.featurePowerset {
+            scope = "package";
+            packages = [ "lib-a" ];
+            eachFeature = true;
+            variant = {
+              mode = "check";
+              profile = "release";
+            };
+          })
         ];
       };
       w = repo.workspaces.main;

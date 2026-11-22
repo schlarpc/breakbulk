@@ -514,8 +514,10 @@ and keep the files it writes beside each crate with `sideFiles`
 [`fmt` check](../reference/options/workspaces.md#workspacesnamefmtenable)
 already sees the rustfmt config files above the workspace.
 
-For feature matrices, `breakbulk.variants.featurePowerset` and
-`packageFeaturePowerset` generate variants, as cargo-hack does.
+For feature matrices, the workspace module
+`breakbulk.variants.featurePowerset` generates variants, per package as
+cargo-hack does or for one feature list
+([Check feature combinations](../how-to/feature-matrix.md)).
 
 A variant's settings can differ per target: a target's `variantDefaults`
 applies to every variant on it, and `variants.<v>.target.<triple>` to one

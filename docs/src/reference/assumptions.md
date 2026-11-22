@@ -928,7 +928,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 ### F10. Which `--features` a selected package accepts
 
 - **Assumption.** `cargo … -p <pkg> --features <f>` accepts `f` for a selected member when it is one of the member's `[features]` or optional dependencies, `<member>/<one of those>`, or `<dep>/<anything>` (also `<dep>?/…`) for a dependency named as the manifest's dependency tables key it; a feature that no selected member accepts fails the run.
-- **Where.** `lib/manifest.nix`: `acceptsCliFeature`; `lib/modules/workspaces.nix`: `onTarget` (`defaultFeatures`: for a variant that selects packages, the `variantDefaults.features` none of them accepts are left out).
+- **Where.** `lib/manifest.nix`: `acceptsCliFeature`; `lib/modules/workspaces.nix`: `onTarget` (`defaultFeatures`: for a variant that selects packages, such as each package-scope run of `breakbulk.variants.featurePowerset`, the `variantDefaults.features` none of them accepts are left out).
 - **Upstream.** cargo `0.100.0` `src/workspace/workspace.rs`: `Workspace::collect_matching_features`, `members_with_features_new` and `missing_feature_spelling_suggestions` ("none of the selected packages contains these features"). Checked for this page.
 - **Holds for.** 1.99, by source.
 - **Pinned by.** No flake check ([Gaps](#gaps)). Nix: `testAcceptsCliFeature` (`lib-unit`) checks the copy against hand-written cases; `products-variants-per-target` checks which features reach which plan's command line, without running Cargo on them.

@@ -221,7 +221,8 @@ priorities](#layers-and-priorities).
 
 A variant that selects packages
 ([`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)),
-such as each `breakbulk.variants.packageFeaturePowerset` run, gets only
+such as each package-scope run of
+[`breakbulk.variants.featurePowerset`](feature-matrix.md), gets only
 the `variantDefaults` features that one of its packages accepts. Cargo
 runs it with `-p <pkg>`, and then accepts only the package's own
 features and optional dependencies, `<pkg>/<feature>` and

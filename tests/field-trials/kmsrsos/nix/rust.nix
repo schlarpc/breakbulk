@@ -98,17 +98,21 @@ in
           "kmsrs-policy/strict-clock-skew"
         ];
       };
-    }
+    };
     # cargo-hack's matrix: one `cargo check --all-targets -p <pkg>` plan
     # per package and feature set (13 for this workspace), dev profile as
     # `cargo hack check` uses; each is in repo.checks as
     # `main/<native>/variant-hack-<pkg>…/check`.
-    // breakbulk.variants.packageFeaturePowerset {
-      inherit root;
-      mode = "check";
-      profile = "dev";
-      targets = [ native ];
-    };
+    imports = [
+      (breakbulk.variants.featurePowerset {
+        scope = "package";
+        variant = {
+          mode = "check";
+          profile = "dev";
+          targets = [ native ];
+        };
+      })
+    ];
   };
 
   targets = {

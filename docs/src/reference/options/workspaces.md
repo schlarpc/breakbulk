@@ -9,7 +9,9 @@
 The Cargo workspaces of the repository, by a name of your choice\.
 Without any definition, a repository whose root has a ` Cargo.toml `
 gets one workspace, ` default `, at the root, so ` mkRepository ` needs
-no modules; declaring any workspace turns that default off\.
+no modules; declaring any workspace turns that default off\. A
+definition is a module of the workspace’s options, so it can have
+` imports `, such as ` breakbulk.variants.featurePowerset { … } `\.
 
 *Type:*
 attribute set of (submodule)
@@ -296,10 +298,32 @@ the workspace’s members, by name
 
 ```nix
 {
-  app = { name = "app"; path = "."; };
-  core = { name = "core"; path = "crates/core"; };
+  app = { name = "app"; path = "."; features = { }; optionalDependencies = [ ]; };
+  core = {
+    name = "core";
+    path = "crates/core";
+    features = { default = [ "std" ]; std = [ ]; serde = [ "dep:serde" ]; };
+    optionalDependencies = [ "serde" ];
+  };
 }
 
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.members.<name>.features`
+
+The package’s ` [features] ` table as written: no
+implicit features of optional dependencies\.
+
+*Type:*
+attribute set of list of string
+
+*Default:*
+
+```nix
+{ }
 ```
 
 *Declared by:*
@@ -311,6 +335,24 @@ The package’s name\.
 
 *Type:*
 string
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.members.<name>.optionalDependencies`
+
+The names (renamed names where renamed) of the
+package’s optional dependencies, in any dependency
+table, ` [target.<cfg>] ` ones included\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
 
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
@@ -698,7 +740,7 @@ here, ` lib.mkDefault ` here loses to a plain value in the variant
 ([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
 
 A variant that selects packages (` variants.<v>.packages `, such as
-those ` breakbulk.variants.packageFeaturePowerset ` makes) takes
+the package-scope runs of ` breakbulk.variants.featurePowerset `) takes
 only the ` features ` here that one of those packages accepts, by
 Cargo’s rule for ` -p <pkg> --features `: one of its own features
 or optional dependencies, ` <pkg>/<feature> `, or
@@ -905,7 +947,10 @@ and test) per target; units that come out identical are shared\.
 While ` defaultVariant ` is ` "default" `, a ` default ` variant
 (` { } `) is always defined, merged with yours: adding
 ` variants.clippy ` keeps it, and ` variants.default.profile `
-changes it\.
+changes it\. For a feature matrix, import
+` breakbulk.variants.featurePowerset { … } ` in
+` workspaces.<ws>.imports `
+([feature matrices](\.\./\.\./how-to/feature-matrix\.md))\.
 
 *Type:*
 attribute set of (submodule)
@@ -924,8 +969,8 @@ attribute set of (submodule)
 The packages this variant plans, each traced with ` -p `, in
 place of the target’s ` packages ` (` workspaces.<ws>.targets.<triple>.packages `)\.
 ` null `: the target’s selection\. Features then name the
-selected package’s own features, as with ` cargo build -p <pkg> --features <f> `; ` breakbulk.variants.packageFeaturePowerset `
-makes such variants\.
+selected package’s own features, as with ` cargo build -p <pkg> --features <f> `; ` breakbulk.variants.featurePowerset `
+makes such variants with ` scope = "package" `\.
 ` { exclude = [ … ]; } `: every member
 ([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
 package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
@@ -1072,9 +1117,9 @@ its enabled test runs (` <pkg>/test-<name> `) and doctests
 skipped (required features) is left out\. Check and clippy
 variants have no products or test runs; their ` check ` is in
 ` repo.checks ` regardless\.
-Variants made by ` breakbulk.variants.featurePowerset ` and
-` packageFeaturePowerset ` set this to ` false ` unless their
-arguments set it\.
+Variants made by ` breakbulk.variants.featurePowerset ` set
+this to ` false ` with ` lib.mkDefault `, so any plain
+definition, such as one in its ` variant `, overrides it\.
 
 *Type:*
 boolean

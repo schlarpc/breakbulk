@@ -263,16 +263,19 @@ let
   optionalDep = mkRepo (fixtures + "/optional-dependency") [
     (oneWs ".")
     {
-      workspaces.main.variants = {
-        fast = {
+      workspaces.main = {
+        variants.fast = {
           features = [ "fast" ];
           profile = "dev";
         };
-      }
-      // breakbulk.variants.featurePowerset {
-        features = [ "fast" ];
-        profile = "dev";
-        prefix = "fp";
+        imports = [
+          (breakbulk.variants.featurePowerset {
+            scope = "workspace";
+            features = [ "fast" ];
+            prefix = "fp";
+            variant.profile = "dev";
+          })
+        ];
       };
     }
   ];

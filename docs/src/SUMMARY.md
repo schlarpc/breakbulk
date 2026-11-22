@@ -21,6 +21,7 @@
 - [Use a flake with several systems](how-to/multi-system.md)
 - [Run the checks in CI](how-to/ci.md)
 - [Run a rustc driver](how-to/rustc-driver.md)
+- [Check feature combinations](how-to/feature-matrix.md)
 
 # Reference
 
