@@ -11,8 +11,9 @@
 # `parse` reads a built-in Rust target name into rustc's own cfg values
 # (`target_vendor`, `target_os`, `target_env`, `target_abi`,
 # `target_family`), plus `arch`, the triple's first component (not
-# `target_arch`: `i686` and `armv7` stay as spelled, because tool and SDK
-# names use that spelling). A test checks it against
+# `target_arch`: `i686` and `armv7` stay as spelled, because the tool names
+# below need that spelling: nixpkgs' armv7l is not its arm). A test checks
+# it against
 # `rustc --print cfg --target <t>`, and the derived fields rustc's
 # target specs also state against `--print file-names` and
 # `--print all-target-specs-json`, for every built-in target
@@ -94,6 +95,21 @@
 #                          ELF target and on Apple (the `.dSYM`), "keep"
 #                          elsewhere (msvc's `.pdb` is separate already;
 #                          wasm and others have no splitting stage)
+#   nixpkgsSystem          the target's nixpkgs platform: a `pkgsCross`
+#                          attribute name, or a `crossSystem` attribute set
+#                          (`{ config = "<GNU triple>"; }`, the triple
+#                          with nixpkgs' CPU name: riscv64gc as riscv64,
+#                          armv7 as armv7l). `presetHelpers.targetPkgsFor`
+#                          imports nixpkgs with it, and `nixpkgsPlatform`
+#                          elaborates it
+#   zigArch                the architecture of `zig cc -target` (i686 as
+#                          x86, riscv64gc as riscv64, armv7 as arm)
+#   qemuArch               qemu-user's program suffix (`qemu-<arch>`, as
+#                          nixpkgs' `qemuArch`: i686 as i386, powerpc64le
+#                          as ppc64le)
+#   xwinArch               xwin's name for an msvc target's library
+#                          directories (`sdk.libDirs.<arch>`: x86, x86_64,
+#                          aarch, aarch64); null for other targets
 { lib }:
 let
   inherit (lib)
@@ -136,6 +152,135 @@ let
 
   # wasm32, wasm32v1, wasm64.
   wasmArch = arch: builtins.match "wasm(32|64).*" arch != null;
+
+  # nixpkgs' platform for a Rust target, where a `pkgsCross` attribute
+  # builds it: Hydra builds those (and caches them), and some carry more
+  # than the GNU triple (CPU flags, the kernel config). The check
+  # `target-traits` elaborates each and compares nixpkgs' `rust.rustcTarget`
+  # with the key; nixpkgs cannot seed this table itself, because several
+  # examples share a Rust target (mingwW64 and mingw-ucrt-x86_64,
+  # armv7l-hf-multiplatform and remarkable1).
+  nixpkgsSystems = {
+    "aarch64-unknown-linux-gnu" = "aarch64-multiplatform";
+    "aarch64-unknown-linux-musl" = "aarch64-multiplatform-musl";
+    "x86_64-unknown-linux-gnu" = "gnu64";
+    "x86_64-unknown-linux-musl" = "musl64";
+    "i686-unknown-linux-gnu" = "gnu32";
+    "i686-unknown-linux-musl" = "musl32";
+    "riscv64gc-unknown-linux-gnu" = "riscv64";
+    "riscv64gc-unknown-linux-musl" = "riscv64-musl";
+    "armv7-unknown-linux-gnueabihf" = "armv7l-hf-multiplatform";
+    "arm-unknown-linux-gnueabihf" = "raspberryPi";
+    "arm-unknown-linux-musleabihf" = "muslpi";
+    "powerpc64le-unknown-linux-gnu" = "powernv";
+    "powerpc64le-unknown-linux-musl" = "musl-power";
+    # nixpkgs spells the ELF ABI (gnuabielfv1); Rust infers it.
+    "powerpc64-unknown-linux-gnu" = "ppc64-elfv1";
+    "powerpc64-unknown-linux-musl" = "ppc64-musl";
+    "s390x-unknown-linux-gnu" = "s390x";
+    "loongarch64-unknown-linux-gnu" = "loongarch64-linux";
+    "wasm32-wasip1" = "wasi32";
+    # mingw-w64 with gcc and msvcrt (Rust's own windows-gnu CRT).
+    "x86_64-pc-windows-gnu" = "mingwW64";
+    "i686-pc-windows-gnu" = "mingw32";
+    # LLVM mingw-w64 with ucrt.
+    "aarch64-pc-windows-gnullvm" = "ucrtAarch64";
+    "x86_64-pc-windows-gnullvm" = "mingw-ucrt-x86_64-llvm";
+  };
+
+  # Rust architecture names a tool spells otherwise; any other name is
+  # the tool's too. Prefix rules cover the CPU-level variants (armv7,
+  # thumbv7neon, riscv64gc, i586).
+  renameArch =
+    rules: arch:
+    let
+      hit = lib.findFirst (r: builtins.match r.match arch != null) null rules;
+    in
+    if hit == null then arch else hit.name;
+  # nixpkgs' CPU names (lib/systems/parse.nix `cpuTypes`).
+  nixpkgsCpu = renameArch [
+    {
+      match = "riscv64.*";
+      name = "riscv64";
+    }
+    {
+      match = "riscv32.*";
+      name = "riscv32";
+    }
+    {
+      match = "armv7";
+      name = "armv7l";
+    }
+  ];
+  # zig's `-target` architectures (`zig targets`).
+  zigCpu = renameArch [
+    {
+      match = "i[3-6]86";
+      name = "x86";
+    }
+    {
+      match = "armeb.*";
+      name = "armeb";
+    }
+    {
+      match = "arm.*";
+      name = "arm";
+    }
+    {
+      match = "thumb.*";
+      name = "thumb";
+    }
+    {
+      match = "riscv64.*";
+      name = "riscv64";
+    }
+    {
+      match = "riscv32.*";
+      name = "riscv32";
+    }
+  ];
+  # qemu-user's program suffixes (`qemu-<arch>`), as nixpkgs' `qemuArch`.
+  qemuCpu = renameArch [
+    {
+      match = "i[3-6]86";
+      name = "i386";
+    }
+    {
+      match = "(arm|thumb).*";
+      name = "arm";
+    }
+    {
+      match = "riscv64.*";
+      name = "riscv64";
+    }
+    {
+      match = "riscv32.*";
+      name = "riscv32";
+    }
+    {
+      match = "powerpc64le";
+      name = "ppc64le";
+    }
+    {
+      match = "powerpc64";
+      name = "ppc64";
+    }
+    {
+      match = "powerpc";
+      name = "ppc";
+    }
+  ];
+  # xwin's library directories (lib/xwin-sdk.nix).
+  xwinCpu = renameArch [
+    {
+      match = "i[3-6]86";
+      name = "x86";
+    }
+    {
+      match = "thumbv7a";
+      name = "aarch";
+    }
+  ];
 
   # Second components that are not rustc's `target_vendor`.
   vendorAliases = {
@@ -503,6 +648,16 @@ let
       # naming build paths; elsewhere keep it in the file (msvc's PDB is
       # separate already; wasm and other targets have no splitting stage).
       debugInfo = if (isLinux && objectFormat == "elf") || isApple then "split" else "keep";
+      # The target's name in the tools that spell it their own way.
+      nixpkgsSystem =
+        nixpkgsSystems.${b.triple} or {
+          config = lib.concatStringsSep "-" (
+            [ (nixpkgsCpu b.arch) ] ++ lib.drop 1 (splitString "-" b.triple)
+          );
+        };
+      zigArch = zigCpu b.arch;
+      qemuArch = qemuCpu b.arch;
+      xwinArch = if isMsvc then xwinCpu b.arch else null;
     };
 
   fieldNames = lib.attrNames (derive {
@@ -551,6 +706,32 @@ let
       unknown
     else
       derive base // traits;
+
+  # nixpkgs' elaborated platform for a target's `nixpkgsSystem`. A
+  # platform nixpkgs rejects fails here, naming the traits to set, rather
+  # than inside nixpkgs' parser.
+  #
+  #   nixpkgsPlatform traits -> lib.systems.elaborate's result
+  nixpkgsPlatform =
+    traits:
+    let
+      s = traits.nixpkgsSystem;
+      named = builtins.isString s;
+      crossSystem = if named then lib.systems.examples.${s} or null else s;
+      platform = lib.systems.elaborate crossSystem;
+      shown =
+        if named then
+          "pkgsCross.${s}"
+        else
+          "crossSystem ${lib.generators.toPretty { multiline = false; } s}";
+      fix = "set `targets.\"${traits.triple}\".traits.nixpkgsSystem` to a nixpkgs crossSystem (`{ config = \"<GNU triple>\"; … }`) or a `pkgsCross` attribute name, or give its preset a package set (`breakbulk.presets.<name> { packageSet = …; }`)";
+    in
+    if named && crossSystem == null then
+      throw "breakbulk: the target `${traits.triple}` names ${shown}, which nixpkgs does not have; ${fix}"
+    else if !(builtins.tryEval platform.system).success then
+      throw "breakbulk: nixpkgs does not know the platform of the target `${traits.triple}` (${shown}; `lib.systems.elaborate` rejects it); ${fix}"
+    else
+      platform;
 
   # The Rust target of the machine `pkgs` builds for (the native triple of
   # a native package set).
@@ -643,5 +824,7 @@ in
     rustcTargetArg
     defaultPreset
     fieldNames
+    nixpkgsSystems
+    nixpkgsPlatform
     ;
 }

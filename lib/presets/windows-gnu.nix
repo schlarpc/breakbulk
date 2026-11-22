@@ -31,7 +31,7 @@
   traits ? targetTraits.resolve { inherit triple; },
   packageSet ?
     if traits.isMingw then
-      targetPkgsFor pkgs triple
+      targetPkgsFor pkgs traits
     else
       throw "breakbulk.presets.windows: `${triple}` is not a windows-gnu or windows-gnullvm triple",
   crtStatic ? true,

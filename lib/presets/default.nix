@@ -97,42 +97,29 @@ let
 
   inherit (targetTraits) nativeTriple;
 
-  # nixpkgs' cross package set for a Rust target, where it differs from
-  # importing nixpkgs with `crossSystem.config = <triple>`: a pkgsCross
-  # attribute (the ones Hydra builds, and caches), or a crossSystem.
-  crossSets = {
-    "aarch64-unknown-linux-gnu" = "aarch64-multiplatform";
-    "aarch64-unknown-linux-musl" = "aarch64-multiplatform-musl";
-    "x86_64-unknown-linux-gnu" = "gnu64";
-    "x86_64-unknown-linux-musl" = "musl64";
-    "riscv64gc-unknown-linux-gnu" = "riscv64";
-    "armv7-unknown-linux-gnueabihf" = "armv7l-hf-multiplatform";
-    "wasm32-wasip1" = "wasi32";
-    # mingw-w64 with gcc and msvcrt (Rust's own windows-gnu CRT).
-    "x86_64-pc-windows-gnu" = "mingwW64";
-    "i686-pc-windows-gnu" = "mingw32";
-    # LLVM mingw-w64 with ucrt.
-    "aarch64-pc-windows-gnullvm" = "ucrtAarch64";
-    "x86_64-pc-windows-gnullvm" = lib.systems.examples.mingw-ucrt-x86_64-llvm;
-  };
-
-  # The package set whose libraries `triple` links, one table for every
-  # preset: pkgs itself for the native triple, else a cross set.
+  # The package set whose libraries a target links, one rule for every
+  # preset: pkgs itself for the native triple, else nixpkgs for the
+  # target's `nixpkgsSystem` trait.
+  #
+  #   targetPkgsFor pkgs traits -> a package set
   targetPkgsFor =
-    pkgs: triple:
+    pkgs: traits:
     let
-      cross = crossSets.${triple} or { config = triple; };
+      s = traits.nixpkgsSystem;
     in
-    if triple == nativeTriple pkgs then
+    if traits.triple == nativeTriple pkgs then
       pkgs
-    else if builtins.isString cross then
-      pkgs.pkgsCross.${cross}
     else
-      import pkgs.path {
-        localSystem = pkgs.stdenv.buildPlatform;
-        crossSystem = cross;
-        inherit (pkgs) overlays config;
-      };
+      builtins.seq (targetTraits.nixpkgsPlatform traits).system (
+        if builtins.isString s then
+          pkgs.pkgsCross.${s}
+        else
+          import pkgs.path {
+            localSystem = pkgs.stdenv.buildPlatform;
+            crossSystem = s;
+            inherit (pkgs) overlays config;
+          }
+      );
 
   # The linker choice (./linker.nix): one function for every preset.
   linkers = import ./linker.nix {
@@ -230,7 +217,7 @@ let
       pkgs,
       triple ? throw "breakbulk.presets: give the target `triple`",
       traits ? targetTraits.resolve { inherit triple; },
-      packageSet ? targetPkgsFor pkgs triple,
+      packageSet ? targetPkgsFor pkgs traits,
       linkerKind ? null,
       crossLanguageLto ? false,
       nativeBuilder ? false,
@@ -460,8 +447,6 @@ let
         pkgs,
         triple,
         traits ? targetTraits.resolve { inherit triple; },
-        # The SDK's library directories are per arch (`sdk.libDirs.<arch>`).
-        arch ? traits.arch,
         sdk ? throw "breakbulk.presets.windows: the msvc target ${triple} needs `sdk` (breakbulk.xwinSdk { … })",
         crtStatic ? false,
         extraSdks ? [ ],
@@ -481,7 +466,12 @@ let
         clang = llvm.clang-unwrapped;
         tools = "${llvm.llvm}/bin";
         incdirs = sdk.includeDirs ++ lib.concatMap (s: s.includeDirs or [ ]) extraSdks;
-        libdirs = sdk.libDirs.${arch} ++ lib.concatMap (s: s.libDirs or [ ]) extraSdks;
+        # The SDK's library directories are per arch, in xwin's names.
+        arch = traits.xwinArch;
+        sdkLibDirs =
+          sdk.libDirs.${arch}
+            or (throw "breakbulk.presets.windows: the SDK for ${triple} has no libraries for xwin's arch `${arch}`; build it with `breakbulk.xwinSdk { arches = [ \"${arch}\" ]; … }`, or set `targets.\"${triple}\".traits.xwinArch`");
+        libdirs = sdkLibDirs ++ lib.concatMap (s: s.libDirs or [ ]) extraSdks;
         cflags = [
           "--target=${triple}"
         ]

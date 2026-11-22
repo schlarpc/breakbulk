@@ -620,20 +620,182 @@ in
         "none"
       ];
     };
-    # One table of cross package sets (presetHelpers.targetPkgsFor), for the
-    # Linux and the MinGW presets alike.
+    # One rule for cross package sets (presetHelpers.targetPkgsFor), for the
+    # Linux and the MinGW presets alike: the `nixpkgsSystem` trait, with
+    # nixpkgs' CPU names for a triple outside the table, and a user's
+    # value over both.
     testPackageSets = {
-      expr = map (t: (bb.presetHelpers.targetPkgsFor pkgs t).stdenv.hostPlatform.config) [
-        "x86_64-unknown-linux-gnu"
-        "aarch64-unknown-linux-musl"
-        "x86_64-pc-windows-gnu"
-        "x86_64-pc-windows-gnullvm"
-      ];
+      expr =
+        map (t: (bb.presetHelpers.targetPkgsFor pkgs (r t)).stdenv.hostPlatform.config) [
+          "x86_64-unknown-linux-gnu"
+          "aarch64-unknown-linux-musl"
+          "riscv64gc-unknown-linux-musl"
+          "armv7-unknown-linux-musleabihf"
+          "x86_64-pc-windows-gnu"
+          "x86_64-pc-windows-gnullvm"
+        ]
+        ++ [
+          (bb.presetHelpers.targetPkgsFor pkgs (
+            tt.resolve {
+              triple = "my-board";
+              traits = {
+                arch = "aarch64";
+                os = "linux";
+                env = "gnu";
+                nixpkgsSystem = "aarch64-multiplatform";
+              };
+            }
+          )).stdenv.hostPlatform.config
+        ];
       expected = [
         pkgs.stdenv.hostPlatform.config
         pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.hostPlatform.config
+        "riscv64-unknown-linux-musl"
+        "armv7l-unknown-linux-musleabihf"
         pkgs.pkgsCross.mingwW64.stdenv.hostPlatform.config
         lib.systems.examples.mingw-ucrt-x86_64-llvm.config
+        lib.systems.examples.aarch64-multiplatform.config
+      ];
+    };
+    # The tool-name traits against nixpkgs: for every triple of the
+    # `nixpkgsSystem` table, and some the fallback spells, nixpkgs'
+    # platform is the triple's (`rust.rustcTarget`) and its `qemuArch` is
+    # the trait's.
+    testNixpkgsSystems = {
+      expr = lib.filter (x: x != null) (
+        map
+          (
+            t:
+            let
+              tr = r t;
+              p = tt.nixpkgsPlatform tr;
+            in
+            if p.rust.rustcTarget != t then
+              "${t}: nixpkgs' platform is ${p.rust.rustcTarget}"
+            else if p.qemuArch != tr.qemuArch then
+              "${t}: qemuArch is ${tr.qemuArch}, nixpkgs says ${toString p.qemuArch}"
+            else
+              null
+          )
+          (
+            lib.attrNames tt.nixpkgsSystems
+            ++ [
+              "armv7-unknown-linux-musleabihf"
+              "armv7-unknown-linux-gnueabi"
+              "riscv32gc-unknown-linux-gnu"
+              "aarch64-apple-darwin"
+              "x86_64-unknown-freebsd"
+            ]
+          )
+      );
+      expected = [ ];
+    };
+    testToolNames = {
+      expr = map (t: pick [ "zigArch" "qemuArch" "xwinArch" ] (r t)) [
+        "x86_64-unknown-linux-gnu"
+        "i686-unknown-linux-gnu"
+        "riscv64gc-unknown-linux-gnu"
+        "armv7-unknown-linux-gnueabihf"
+        "x86_64-pc-windows-msvc"
+        "i686-pc-windows-msvc"
+        "aarch64-pc-windows-msvc"
+        "thumbv7a-pc-windows-msvc"
+      ];
+      expected = [
+        {
+          zigArch = "x86_64";
+          qemuArch = "x86_64";
+          xwinArch = null;
+        }
+        {
+          zigArch = "x86";
+          qemuArch = "i386";
+          xwinArch = null;
+        }
+        {
+          zigArch = "riscv64";
+          qemuArch = "riscv64";
+          xwinArch = null;
+        }
+        {
+          zigArch = "arm";
+          qemuArch = "arm";
+          xwinArch = null;
+        }
+        {
+          zigArch = "x86_64";
+          qemuArch = "x86_64";
+          xwinArch = "x86_64";
+        }
+        {
+          zigArch = "x86";
+          qemuArch = "i386";
+          xwinArch = "x86";
+        }
+        {
+          zigArch = "aarch64";
+          qemuArch = "aarch64";
+          xwinArch = "aarch64";
+        }
+        {
+          zigArch = "thumb";
+          qemuArch = "arm";
+          xwinArch = "aarch";
+        }
+      ];
+    };
+    # zig has a glibc target for the zigArch of every Linux -gnu triple of
+    # the table (`zig targets`, IFD), except big-endian powerpc64, whose
+    # glibc zig does not ship.
+    testZigArches = {
+      expr =
+        let
+          # Its libc targets, one per line (`arm-linux-gnueabihf`).
+          zigLibcs = lib.splitString "\n" (
+            builtins.readFile (
+              pkgs.runCommand "zig-linux-gnu-targets" { nativeBuildInputs = [ pkgs.zig ]; } ''
+                HOME=$TMPDIR zig targets | tr -d ' ",' | grep -- '-linux-gnu' > $out
+              ''
+            )
+          );
+        in
+        lib.filter (
+          t:
+          let
+            tr = r t;
+          in
+          tr.isLinux && tr.env == "gnu" && !lib.any (lib.hasPrefix "${tr.zigArch}-linux-gnu") zigLibcs
+        ) (lib.attrNames tt.nixpkgsSystems);
+      expected = [ "powerpc64-unknown-linux-gnu" ];
+    };
+    # A platform nixpkgs rejects fails naming the trait to set; the msvc
+    # preset reads the SDK's libraries by xwin's name.
+    testNixpkgsRejects = {
+      expr = [
+        (fails (tt.nixpkgsPlatform (r "thumbv7neon-unknown-linux-gnueabihf")))
+        (fails (
+          tt.nixpkgsPlatform (
+            tt.resolve {
+              triple = "x86_64-unknown-linux-gnu";
+              traits.nixpkgsSystem = "no-such-example";
+            }
+          )
+        ))
+        (fails (tt.nixpkgsPlatform (r "riscv64gc-unknown-linux-musl")))
+        (bb.presets.windows {
+          inherit pkgs;
+          triple = "i686-pc-windows-msvc";
+          sdk = {
+            includeDirs = [ ];
+            libDirs.x86 = [ "/sdk/x86" ];
+          };
+        }).rustflags
+      ];
+      expected = [
+        true
+        true
+        false
+        [ "-Lnative=/sdk/x86" ]
       ];
     };
     # Toolchain facts (lib/toolchain-facts.nix): from attributes and tables,

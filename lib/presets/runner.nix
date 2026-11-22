@@ -85,8 +85,7 @@ let
       canExecute,
       nativeBuilder ? false,
       flavor ? null,
-      # The target's nixpkgs platform (qemu-user's CPU, native-builder's
-      # system).
+      # The target's nixpkgs platform (native-builder's system).
       hostPlatform ? null,
       # wine: the wine package.
       wine ? pkgs.wineWow64Packages.minimal,
@@ -120,7 +119,7 @@ let
       qemu-user = none // {
         runner = runners.qemuUser {
           pkgs = bp;
-          arch = hostPlatform.qemuArch;
+          arch = traits.qemuArch;
         };
       };
       wine = none // {

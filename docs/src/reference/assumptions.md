@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 92 entries: 90 pinned; F8 in part and F10 are in [Gaps](#gaps). A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
+Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
 
 ## Summary
 
@@ -99,6 +99,7 @@ Status of the 92 entries: 90 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 | [G2](#g2-file-name-traits-are-rustcs-target-spec) | File-name traits are rustc's target spec | yes |
 | [G3](#g3-the-dynamic-library-variable-per-os) | The dynamic-library variable per OS | yes (Linux) |
 | [G4](#g4-object-format-and-linker-traits-are-rustcs-target-spec) | Object format and linker traits are rustc's target spec | yes |
+| [G5](#g5-tool-name-traits-are-nixpkgs-and-the-tools-spelling) | Tool-name traits are nixpkgs' and the tools' spelling | yes |
 | [F1](#f1-cargolock-layout) | `Cargo.lock` layout | yes |
 | [F2](#f2-package-id-spelling) | Package id spelling | yes |
 | [F3](#f3-directory-sources-and-source-replacement) | Directory sources and source replacement | yes |
@@ -831,6 +832,15 @@ Status of the 92 entries: 90 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 - **Holds for.** nixpkgs rustc 1.99, 255 known targets.
 - **Pinned by.** `target-traits-rustc`.
 - **If it changes.** A preset, linker or debug stage is chosen for the wrong platform; the check fails on the next rustc bump.
+
+### G5. Tool-name traits are nixpkgs' and the tools' spelling
+
+- **Assumption.** The `nixpkgsSystem` trait names a nixpkgs platform whose `rust.rustcTarget` is the target's triple: a `pkgsCross` attribute from a table, else the triple with nixpkgs' CPU name (riscv64gc as `riscv64`, armv7 as `armv7l`) as `crossSystem.config`. `qemuArch` is nixpkgs' `qemuArch` for that platform; `zigArch` is an architecture zig has a glibc for; `xwinArch` is one of xwin's four architecture names.
+- **Where.** `lib/target-traits.nix`: `nixpkgsSystems`, the derived fields, `nixpkgsPlatform`; read by `presetHelpers.targetPkgsFor`, `linuxPortable`, the `qemu-user` runner and the msvc preset.
+- **Upstream.** nixpkgs `lib/systems/examples.nix`, `lib/systems/parse.nix` (`cpuTypes`), `lib/systems/default.nix` (`qemuArch`, `rust.rustcTarget`); `zig targets`; xwin's `--arch` values.
+- **Holds for.** The flake's nixpkgs and its zig 0.17. nixpkgs rejects `powerpc64-unknown-linux-gnu` as a `config` (it spells the ABI, `gnuabielfv1`), so the table names `ppc64-elfv1`; zig ships no glibc for big-endian powerpc64.
+- **Pinned by.** `target-traits` (`testNixpkgsSystems`: every table entry and several fallbacks elaborate to their own triple with the trait's `qemuArch`; `testZigArches`: `zig targets` has a glibc for every table triple's `zigArch`). `msvc-sdk` and the msvc builds run xwin with `x86_64` and `aarch64`; `x86` and `aarch` are only breakbulk's copy of xwin's list (`lib/xwin-sdk.nix`).
+- **If it changes.** A renamed example or CPU makes the target's package set fail at evaluation, with the message naming `traits.nixpkgsSystem`; a platform elaborating to another triple fails the check.
 
 ## Fetching, vendoring and root prediction
 

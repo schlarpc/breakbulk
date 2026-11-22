@@ -66,12 +66,11 @@
 let
   inherit (lib) mkDefault;
   bp = pkgs.buildPackages;
-  rustArch =
+  zigArch =
     if !(traits.isLinux && traits.env == "gnu") then
       throw "breakbulk.presets.linuxPortable: `${triple}` is not a Linux -gnu triple"
     else
-      traits.arch;
-  zigArch = { riscv64gc = "riscv64"; }.${rustArch} or rustArch;
+      traits.zigArch;
   zigTarget = "${zigArch}-linux-gnu.${glibc}";
   # The package set's platform, the target's GNU triple with the vendor
   # `none` (as in ARM's aarch64-none-linux-gnu toolchains). Not the Rust
@@ -80,7 +79,7 @@ let
   # machine's unwrapped gcc, which a package's `depsBuildBuild` compiler
   # puts first on PATH, and configure scripts given the same `--build` and
   # `--host` do not treat the build as a cross build.
-  nixpkgsConfig = "${zigArch}-none-linux-${lib.last (lib.splitString "-" triple)}";
+  nixpkgsConfig = "${(targetTraits.nixpkgsPlatform traits).parsed.cpu.name}-none-linux-${lib.last (lib.splitString "-" triple)}";
   # Whether the build machine runs the target's programs (through its own
   # loader: zig links the FHS one).
   canExecute =

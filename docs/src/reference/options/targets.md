@@ -573,7 +573,14 @@ Base
 fields (` arch `, ` vendor `, ` os `, ` env `, ` abi `, ` families `, as
 rustc’s ` target_* ` cfg values) recompute the derived ones
 (` isLinux `, ` objectFormat `, ` executableSuffix `, ` dylibPathVar `, …);
-derived fields set here win over the computed ones\. A triple with
+derived fields set here win over the computed ones\. The names
+tools give the target are derived fields too: ` nixpkgsSystem `
+(the nixpkgs platform the presets import the target’s package set
+for: a ` pkgsCross ` attribute name, or a ` crossSystem ` such as
+` { config = "armv7l-unknown-linux-musleabihf"; } `), ` zigArch `
+(` zig cc -target `), ` qemuArch ` (qemu-user) and ` xwinArch ` (the
+msvc SDK’s library directories); set one where a tool spells
+the target otherwise\. A triple with
 no built-in traits (a custom target, a ` .json ` target spec given
 as ` rustcTarget `, an uncommon OS) needs at least the base fields here; reading any
 trait of it otherwise fails with a message naming this option\.

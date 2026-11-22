@@ -155,7 +155,7 @@ let
   r = chooseRunner {
     inherit pkgs traits nativeBuilder;
     canExecute = false;
-    hostPlatform = lib.systems.elaborate triple;
+    hostPlatform = targetTraits.nixpkgsPlatform traits;
   };
 in
 assert lib.assertMsg (
