@@ -332,12 +332,12 @@ let
           default = null;
           description = ''
             Whether `predictSources` narrows this package's build-script
-            runs to their declared `rerun-if-changed` paths. `null`: `true`,
-            unless the package build-depends on a crate whose library code
-            prints such directives (${
-              lib.concatMapStringsSep ", " (n: "`${n}`") (import ../directive-printers.nix)
-            }),
-            which source prediction cannot read.
+            runs to their declared `rerun-if-changed` paths. `null`: `true`.
+            The curated
+            [`sysDefaults.dependents`](repository.md#sysdefaultsdependents)
+            entries set it to `false` for a package whose
+            `[build-dependencies]` name a crate whose library code prints
+            such directives, which source prediction cannot read.
           '';
         };
       };

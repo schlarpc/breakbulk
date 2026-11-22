@@ -422,9 +422,17 @@ let
     in
     lib.optionals (sys != null) (curatedLayers (sys e))
     ++ lib.optionals (e.source or null == null) (
-      lib.concatMap (d: curatedLayers (cfg.sysDefaults.dependents.${d.name} d)) (
-        curatedDeps wsName e.name
-      )
+      lib.concatMap (
+        d:
+        curatedLayers (
+          cfg.sysDefaults.dependents.${d.name} (
+            d
+            // {
+              buildDependency = lib.elem d.name (buildDependencyNames.${wsName}.${e.name} or [ ]);
+            }
+          )
+        )
+      ) (curatedDeps wsName e.name)
     )
     ++ lib.optionals (e.source or null == null) (withTriple cfg.workspaces.${wsName}.memberDefaults)
     ++ lib.concatMap (k: withTriple cfg.packages.${k}) (
@@ -454,6 +462,41 @@ let
       );
     in
     lib.concatMap (n: byName.${n}) names;
+
+  # The crate names in the `[build-dependencies]` of each workspace's path
+  # packages, by workspace and package name, for the `buildDependency`
+  # argument of `sysDefaults.dependents` functions. A manifest is read
+  # only when a function uses the argument.
+  buildDependencyNames = lib.mapAttrs (
+    _:
+    lib.mapAttrs (
+      _: dir:
+      breakbulkLib.sourceViews.buildDependencies {
+        inherit root;
+        pkgDir = dir;
+      }
+    )
+  ) pathPackageDirs;
+  # The directories of each workspace's path packages, by name: every
+  # package Cargo may load for it (lib/skeleton.nix `packageClosure`).
+  pathPackageDirs = lib.mapAttrs (
+    _: ws:
+    lib.listToAttrs (
+      lib.concatMap
+        (
+          dir:
+          let
+            m = manifest.readManifest root dir;
+            p = m.package or m.project or null;
+          in
+          lib.optional (p != null) (lib.nameValuePair p.name dir)
+        )
+        (breakbulkLib.skeleton.packageClosure {
+          inherit root;
+          wsDir = wsDirOf ws;
+        }).packages
+    )
+  ) cfg.workspaces;
 
   # The merged override for one lockfile entry, or null. Each env
   # variable is `pickAttrs`'s.

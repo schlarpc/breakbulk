@@ -283,21 +283,33 @@ attribute set of (null or (function that evaluates to a(n) (submodule)))
 
 Default settings for the workspace members that depend on a
 crate, by the crate’s name: a function of the crate’s lockfile
-entry (` { name, version, ... } `) that returns settings with the
-options of ` packages.<name> `\. They apply to every path package of
-a workspace whose ` Cargo.lock ` has the crate among its
-dependencies of any kind (dev-dependencies too), directly or
-through other crates\. They are a layer over ` sysDefaults.packages `
+entry (` { name, version, buildDependency, ... } `) that returns
+settings with the options of ` packages.<name> `\. They apply to
+every path package of a workspace whose ` Cargo.lock ` has the
+crate among its dependencies of any kind (dev-dependencies too),
+directly or through other crates\. ` buildDependency ` narrows that:
+it is ` true ` when the package’s own ` Cargo.toml ` names the crate
+under ` [build-dependencies] ` (or a
+` [target.<cfg>.build-dependencies] ` table, renamed with
+` package ` too); the manifest is read only by a function that uses
+it\. They are a layer over ` sysDefaults.packages `
 and under ` memberDefaults `
 ([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order))\.
 
 The curated entries are defined at ` mkDefault ` priority, so a
 plain definition replaces one: ` null ` turns it off, a function
 replaces it, and ` sysDefaults.dependents = lib.mkForce { } ` drops
-them all\. They are: ` bevy_macro_utils `, ` find-crate `, ` insta `, ` proc-macro-crate `\.
+them all\. They are: ` autocfg `, ` bevy_macro_utils `, ` bindgen `, ` cxx-build `, ` find-crate `, ` glib-build-tools `, ` insta `, ` lalrpop `, ` proc-macro-crate `, ` slint-build `, ` tauri-build `, ` vergen `, ` vergen-lib `\.
 ` insta ` sets ` INSTA_WORKSPACE_ROOT ` to the workspace root of the
 run’s files and ` INSTA_UPDATE = "no" `, in test runs and doctests
 (see [Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md))\.
+` autocfg `, ` bindgen `, ` cxx-build `, ` glib-build-tools `, ` lalrpop `,
+` slint-build `, ` tauri-build `, ` vergen ` and ` vergen-lib ` print
+` rerun-if-changed ` directives from their library code, which
+source prediction cannot read: for a package that build-depends
+on one, they set
+[` predictSources.buildScriptRuns `](packages\.md\#packagesnamepredictsourcesbuildscriptruns)
+to ` false `\.
 
 *Type:*
 attribute set of (null or (function that evaluates to a(n) (submodule)))

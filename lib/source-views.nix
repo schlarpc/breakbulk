@@ -435,10 +435,6 @@ rec {
   # package's Cargo targets (`{ kind; name; path; }`, `path` relative to
   # the package directory; lib/roots.nix `packageTargets`). `runCommand`:
   # for a package with a `sourceOverlay`.
-  # Build-dependencies whose library code prints `rerun-if-changed`
-  # directives (lib/directive-printers.nix).
-  directivePrinters = import ./directive-printers.nix;
-
   # The crate names in a package's `[build-dependencies]` (and
   # `target.<cfg>.build-dependencies`), by the package they name.
   buildDependencies =
@@ -505,13 +501,7 @@ rec {
     in
     {
       inherit enable;
-      runs =
-        ps.buildScriptRuns or null == true
-        ||
-          ps.buildScriptRuns or null == null
-          && !lib.any (d: lib.elem d directivePrinters) (buildDependencies {
-            inherit root pkgDir;
-          });
+      runs = ps.buildScriptRuns or null != false;
       spec =
         {
           kind,

@@ -2,9 +2,23 @@
 # the crate's name: what a library needs from its dependents' test runs
 # rather than from its own units (lib/sys-defaults.nix). Each value is the
 # `sysDefaults.dependents.<name>` settings, or a function of the crate's
-# lockfile entry (`{ version, ... }`) that returns them. lib/modules/top.nix
-# defines them at `mkDefault` priority.
+# lockfile entry and `buildDependency` (`{ version, buildDependency, ... }`)
+# that returns them. lib/modules/top.nix defines them at `mkDefault`
+# priority.
 { lib }:
+let
+  # Build-dependencies whose library code prints `rerun-if-changed`
+  # directives for the build script, each checked in the crate's source
+  # (latest release, 2026-11): source prediction reads only the script's
+  # own literal directives, so a package that build-depends on one keeps
+  # its build-script runs' whole view. Only a direct build-dependency: a
+  # crate reached through others prints for their scripts, not the
+  # package's. Not prost-build (it prints none), nor cc, pkg-config or
+  # napi-build (only `rerun-if-env-changed`).
+  directivePrinter =
+    { buildDependency, ... }:
+    lib.optionalAttrs buildDependency { predictSources.buildScriptRuns = false; };
+in
 {
   # insta finds snapshots under `INSTA_WORKSPACE_ROOT`, else through
   # `cargo metadata`, which fails in a source view (it wants every
@@ -59,4 +73,14 @@
   bevy_macro_utils = {
     predictSources.keep = [ "Cargo.toml" ];
   };
+
+  autocfg = directivePrinter;
+  bindgen = directivePrinter;
+  cxx-build = directivePrinter;
+  glib-build-tools = directivePrinter;
+  lalrpop = directivePrinter;
+  slint-build = directivePrinter;
+  tauri-build = directivePrinter;
+  vergen = directivePrinter;
+  vergen-lib = directivePrinter;
 }

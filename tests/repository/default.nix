@@ -1398,6 +1398,18 @@ in
         { packages.ps.sourceOverlay."assets" = ./.; }
       ]) "default";
       missingLib = (unitsNamed (inst missing) "build")."ps-0.1.0-lib";
+      # bg-sys build-depends on bindgen, whose library prints
+      # `rerun-if-changed`; app reaches bindgen and cc only through
+      # bg-sys, so a `buildDependency` entry leaves it alone.
+      sysNative = specsOf (mkRepo (fixtures + "/sys-native") [
+        (oneWs ".")
+        {
+          workspaces.main.memberDefaults.predictSources.enable = true;
+          sysDefaults.dependents.cc =
+            { buildDependency, ... }: lib.optionalAttrs buildDependency { predictSources.keep = [ "k" ]; };
+        }
+      ]) "default";
+      keepOf = p: sysNative."src:${p}".keep;
     in
     assert lib.assertMsg (
       got == want
@@ -1416,6 +1428,12 @@ in
     assert lib.assertMsg (
       overlaid == { }
     ) "predict-sources: a package with a sourceOverlay is predicted";
+    assert lib.assertMsg (
+      !(sysNative ? "src:bg-sys#run/custom-build/build-script-build")
+      && sysNative ? "src:cm-sys#run/custom-build/build-script-build"
+    ) "predict-sources: runs predicted ${builtins.toJSON (lib.attrNames sysNative)}";
+    assert lib.assertMsg (keepOf "bg-sys#lib/bg_sys" == [ "bg-sys/k" ] && keepOf "app#bin/app" == [ ])
+      "predict-sources: buildDependency keeps bg-sys ${toString (keepOf "bg-sys#lib/bg_sys")}, app ${toString (keepOf "app#bin/app")}";
     pkgs.runCommand "predict-sources"
       {
         ps = predictSources.workspaces.main.packages.ps;
