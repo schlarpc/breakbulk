@@ -110,9 +110,13 @@ let
   # compares the test outcomes of both modes from it.
   keepLogs = {
     options.workspaces = lib.mkOption {
+      # As lib/modules/workspaces.nix declares it: the two must agree.
       type = lib.types.attrsOf (
-        lib.types.submodule {
-          config.memberDefaults.test.postRun = lib.mkDefault ''cp "$log" "$out/log"'';
+        lib.types.submoduleWith {
+          shorthandOnlyDefinesConfig = false;
+          modules = [
+            { config.memberDefaults.test.postRun = lib.mkDefault ''cp "$log" "$out/log"''; }
+          ];
         }
       );
     };
