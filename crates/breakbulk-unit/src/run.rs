@@ -646,11 +646,16 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
 /// Create the run's `OUT_DIR` at `rel` inside `out` (#23), with what Cargo
 /// creates around it before running build scripts, so a script that walks
 /// up from `OUT_DIR` to the target directory finds what it finds under
-/// Cargo: in the classic layout (`<profile>/build/<pkg>-<hash>/out`),
-/// `<profile>/deps` and `<profile>/examples` (cargo `layout.rs`,
-/// `BuildDirLayout::prepare`); the new layout
-/// (`<profile>/build/<pkg>/<hash>/out`, Cargo 1.100) creates neither.
-/// Returns the `OUT_DIR`.
+/// Cargo: `<profile>/examples` in both layouts, and `<profile>/deps` in
+/// the classic one (`<profile>/build/<pkg>-<hash>/out`) but not the new one
+/// (`<profile>/build/<pkg>/<hash>/out`, Cargo 1.100). Returns the
+/// `OUT_DIR`.
+///
+/// In the new layout `examples` belongs to the artifact directory, which
+/// `cargo check` does not prepare. It is created for every run anyway, not
+/// only outside check plans: Cargo's `check` and `build` share a run's
+/// directory, so under Cargo a script finds `examples` whenever anything but
+/// `check` ran before, and a run here is shared by check and build plans.
 pub fn prepare_out_dir(out: &Path, rel: &str) -> Result<PathBuf, Error> {
     if rel.is_empty() {
         return Ok(out.to_owned());
@@ -660,12 +665,16 @@ pub fn prepare_out_dir(out: &Path, rel: &str) -> Result<PathBuf, Error> {
     // Classic: `…/<profile>/build/<pkg>-<hash>/out`; new: the unit
     // directory is the bare hash, `…/build/<pkg>/<hash>/out`.
     let parts: Vec<&str> = rel.split('/').collect();
-    if let [profile @ .., "build", unit, "out"] = parts.as_slice()
-        && unit.contains('-')
-    {
-        let profile = out.join(profile.join("/"));
-        dirs.push(profile.join("deps"));
-        dirs.push(profile.join("examples"));
+    match parts.as_slice() {
+        [profile @ .., "build", unit, "out"] if unit.contains('-') => {
+            let profile = out.join(profile.join("/"));
+            dirs.push(profile.join("deps"));
+            dirs.push(profile.join("examples"));
+        }
+        [profile @ .., "build", _, _, "out"] => {
+            dirs.push(out.join(profile.join("/")).join("examples"));
+        }
+        _ => {}
     }
     for d in dirs {
         std::fs::create_dir_all(&d).map_err(|e| io_err("creating", &d, e))?;

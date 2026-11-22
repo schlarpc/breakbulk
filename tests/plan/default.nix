@@ -556,8 +556,8 @@ in
     '';
 
   # #23: the run's OUT_DIR is inside its `out`, at the traced Cargo's path
-  # (classic layout with nixpkgs' Cargo 1.99), with `<profile>/deps`
-  # beside it. A build script that walks up to `<target>/<profile>` writes
+  # (classic layout with nixpkgs' Cargo 1.99), with `<profile>/deps` and
+  # `<profile>/examples` beside it. A build script that walks up to `<target>/<profile>` writes
   # there and into `deps/`; the bin includes a file from OUT_DIR; the files
   # outside OUT_DIR are listed in the run's `flags/target-files.json`, and
   # the test run finds both directories on its library path, as under
@@ -581,6 +581,7 @@ in
         cat $runFlags/target-files.json
         [ "$(cat $runFlags/target-files.json)" = '["${target}/debug/deps/walked.txt","${target}/debug/walked.txt"]' ]
         [ -f $runOut/${target}/debug/build/out-dir-walk-*/out/generated.rs ]
+        [ -d $runOut/${target}/debug/examples ]
         grep -q 'test result: ok. 1 passed' $testRun/log
         touch $out
       '';
@@ -1282,6 +1283,31 @@ in
     # directory `build/build/<hash>` is not mistaken for the profile's
     # `build`.
     package-named-build-nightly = namedBuild "package-named-build-nightly" pnb "/" true;
+    # `out-dir-walk` in the new layout: the run's OUT_DIR is
+    # `<profile>/build/out-dir-walk/<hash>/out`, and around it the script
+    # finds `<profile>/examples` (the artifact directory's) but no
+    # `<profile>/deps`, as under nightly Cargo.
+    out-dir-walk-nightly =
+      let
+        w = mk "out-dir-walk" { inherit toolchain; };
+        run = lib.findFirst (u: u.name == "out-dir-walk-0.1.0-build-run") (throw "out-dir-walk: no run") (
+          lib.attrValues w.units.build
+        );
+      in
+      pkgs.runCommand "out-dir-walk-nightly-check"
+        {
+          bin = w.packages.out-dir-walk;
+          runOut = run.out;
+          runFlags = run.flags;
+        }
+        ''
+          [ "$($bin/bin/out-dir-walk)" = walked=true ]
+          [ "$(cat $runFlags/target-files.json)" = '["${target}/debug/walked.txt"]' ]
+          [ -f $runOut/${target}/debug/build/out-dir-walk/*/out/generated.rs ]
+          [ -d $runOut/${target}/debug/examples ]
+          [ ! -e $runOut/${target}/debug/deps ]
+          touch $out
+        '';
     package-named-build-nightly-golden = pnbG.build;
   }
 )

@@ -838,12 +838,15 @@ fn out_dir_inside_a_copy_of_cargos_layout() {
     );
     assert!(out.join("x86_64-unknown-linux-gnu/debug/deps").is_dir());
     assert!(out.join("x86_64-unknown-linux-gnu/debug/examples").is_dir());
-    // The new layout creates neither.
+    // The new layout: `examples` but no `deps`, also for a package named
+    // `build`.
     let out2 = t.path().join("out2");
     prepare_out_dir(&out2, "debug/build/build/1a2b/out").unwrap();
     assert!(out2.join("debug/build/build/1a2b/out").is_dir());
+    assert!(out2.join("debug/examples").is_dir());
     assert!(!out2.join("debug/deps").exists());
     assert!(!out2.join("debug/build/deps").exists());
+    assert!(!out2.join("debug/build/examples").exists());
     // No relative path: the `out` itself.
     assert_eq!(prepare_out_dir(&out2, "").unwrap(), out2);
 
