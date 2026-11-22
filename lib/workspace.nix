@@ -373,6 +373,9 @@ let
   targetRoots = lib.mapAttrs (_: v: v.targetRoots) (
     lib.filterAttrs (_: v: v.targetRoots != [ ]) allViews
   );
+  # The junk paths views leave out (sourceViews.junkPaths), by directory
+  # (instantiate's `sources.junk`), for the hint when a unit misses one.
+  junk = lib.mapAttrs (_: v: v.junk) (lib.filterAttrs (_: v: v.junk != [ ]) allViews);
   # Directories of the packages whose `sources` functions choose files
   # (instantiate's `sources.custom`), for the same hints.
   custom = lib.attrNames (lib.filterAttrs (_: v: v.custom) allViews);
@@ -839,6 +842,7 @@ let
           testOnly
           targetRoots
           custom
+          junk
           ;
         predicted = predictedFor kind;
       }

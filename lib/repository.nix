@@ -1901,7 +1901,7 @@ let
   ) workspaces;
 
   # `workspaces.<ws>.fmt`: `cargo fmt --check -p <member>…` over the
-  # workspace directory (minus `target/`, `.git` and `result*` at its top)
+  # workspace directory (minus its top level's `sourceViews.junkPaths`)
   # and the rustfmt config files above it, with toolchain.rustfmt. Cargo
   # reads only the members' manifests (`cargo metadata --no-deps`), so no
   # plan, lockfile or vendored source is needed.
@@ -1926,13 +1926,15 @@ let
           (util.joinRel d ".rustfmt.toml")
         ]) (above wsDir)
       );
-      top = builtins.readDir (at wsDir);
-      junk = lib.filter (n: n == "target" || n == ".git" || lib.hasPrefix "result" n) (lib.attrNames top);
+      junk = breakbulkLib.sourceViews.junkPaths {
+        inherit root;
+        dir = wsDir;
+      };
       src = lib.fileset.toSource {
         inherit root;
         fileset = lib.fileset.unions (
           [
-            (lib.fileset.difference (at wsDir) (lib.fileset.unions (map (n: at (util.joinRel wsDir n)) junk)))
+            (lib.fileset.difference (at wsDir) (lib.fileset.unions (map at junk)))
           ]
           ++ map at configs
         );

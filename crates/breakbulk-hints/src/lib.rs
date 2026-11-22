@@ -14,12 +14,15 @@
 //! - under the root of another Cargo target of the package (a bin's,
 //!   example's, test's or bench's), in the view of one target's units:
 //!   `scopeTargetRoots`;
+//! - under what every view of the package leaves out as junk (`target/`,
+//!   `.git`, Nix's `result` symlinks): the cause, and the view's [`Widen`]
+//!   option;
 //! - otherwise inside the unit's own view root: the view's [`Widen`]
-//!   option, the one for the unit's kind. Paths in the package directory
-//!   count only when something other than the built-in steps chose its
-//!   files (`test.runFiles`, a `sources` function); else the view holds
-//!   the whole directory, and a file missing there is not in the
-//!   repository either.
+//!   option, the one for the unit's kind. Paths in the package directory count only when something
+//!   other than the built-in steps chose its files (`test.runFiles`,
+//!   source prediction, a `sources` function); else the view holds the
+//!   whole directory, and a file missing there is not in the repository
+//!   either.
 //!
 //! Only the path decides, not who printed it, so one rule covers rustc,
 //! proc macros and test output. A message without a path gets no hint.
@@ -61,6 +64,11 @@ pub struct SourceView {
     /// of one target's units leaves out (`scopeTargetRoots`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_roots: Vec<String>,
+    /// What every view of the package leaves out as junk at its top level
+    /// (`target/`, `.git`, Nix's `result` symlinks), relative to the
+    /// repository root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub junk: Vec<String>,
     /// Whether the package's `sources` functions chose the view's files:
     /// then even a path in the package directory can be left out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -200,6 +208,12 @@ pub enum Found {
         rel: String,
         entry: String,
     },
+    /// Under `entry`, which every view of the package leaves out as junk.
+    Junk {
+        path: PathBuf,
+        rel: String,
+        entry: String,
+    },
     /// Inside the unit's view, outside the package directory (or anywhere,
     /// in a `test.runFiles` view), and not there.
     Missing { path: PathBuf, rel: String },
@@ -210,6 +224,7 @@ impl Found {
         match self {
             Found::TestOnly { path, .. }
             | Found::TargetRoot { path, .. }
+            | Found::Junk { path, .. }
             | Found::Missing { path, .. } => path,
         }
     }
@@ -267,6 +282,21 @@ fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Opti
     if rel.as_os_str().is_empty() || rel.starts_with("..") {
         return None;
     }
+    let under = |entries: &[String]| {
+        entries
+            .iter()
+            .map(|e| normalize(Path::new(e)))
+            .find(|e| !e.as_os_str().is_empty() && rel.starts_with(e))
+    };
+    if !exists(p)
+        && let Some(e) = under(&view.junk)
+    {
+        return Some(Found::Junk {
+            path: p.to_owned(),
+            rel: rel.display().to_string(),
+            entry: e.display().to_string(),
+        });
+    }
     if !exists(p)
         && let Some(e) = view
             .target_roots
@@ -315,6 +345,9 @@ pub fn find(
     found
 }
 
+/// What [`Found::Junk`] hints say junk is.
+const JUNK: &str = "a package's top-level `target/`, `.git`, and `result` symlinks of `nix build`";
+
 /// How many paths get a hint; the rest are counted.
 const MAX_HINTS: usize = 10;
 
@@ -327,6 +360,23 @@ fn package_relative(rel: &str, dir: &str) -> String {
     let mut out: Vec<&str> = vec![".."; dir.len() - common];
     out.extend(&rel[common..]);
     out.join("/")
+}
+
+/// What adds the missing path `rel` (relative to the repository root) to
+/// `view`, as a clause after "if it is in the repository, ". `opt`: the
+/// package's options ([`option_prefix`]).
+pub fn adds(opt: &str, view: &SourceView, rel: &str) -> String {
+    let widen = view.widen.option();
+    if view.widen == Widen::TestRunFiles {
+        format!(
+            "add `{}` to `{opt}.{widen}`",
+            package_relative(rel, &view.package_dir)
+        )
+    } else if view.predicted {
+        format!("add it to `{opt}.predictSources.keep`")
+    } else {
+        format!("add it to `{opt}.{widen}`")
+    }
 }
 
 /// One hint line per path [`find`] finds, at most [`MAX_HINTS`].
@@ -357,6 +407,15 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
                 "`{rel}` is under `{entry}`, which only other Cargo targets of the package see; \
                  if this target reads it, set `{opt}.scopeTargetRoots = false`"
             ),
+            Found::Junk { rel, entry, .. } if rel == entry => format!(
+                "`{rel}` is left out of source views as junk ({JUNK}); if the unit reads it, {}",
+                adds(&opt, view, rel)
+            ),
+            Found::Junk { rel, entry, .. } => format!(
+                "`{rel}` is under `{entry}`, which source views leave out as junk ({JUNK}); if \
+                 the unit reads it, {}",
+                adds(&opt, view, rel)
+            ),
             Found::Missing { rel, .. } if view.widen == Widen::TestRunFiles => format!(
                 "`{rel}` is not in this test run's `{opt}.test.runFiles`; if it is in the \
                  repository, add `{}` to it",
@@ -369,9 +428,8 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
                  `{opt}.predictSources.keep`"
             ),
             Found::Missing { rel, .. } => format!(
-                "`{rel}` is not in this unit's source view; if it is in the repository, add it \
-                 to `{opt}.{}`",
-                view.widen.option()
+                "`{rel}` is not in this unit's source view; if it is in the repository, {}",
+                adds(&opt, view, rel)
             ),
         })
         .collect();
@@ -410,6 +468,8 @@ pub struct TestRun {
     pub package_dir: Option<String>,
     #[serde(default)]
     pub test_only: Vec<String>,
+    #[serde(default)]
+    pub junk: Vec<String>,
     pub widen: Widen,
     #[serde(default)]
     pub custom: bool,
@@ -430,6 +490,7 @@ impl TestRun {
             widen: self.widen,
             test_only: self.test_only.clone(),
             target_roots: Vec::new(),
+            junk: self.junk.clone(),
             custom: self.custom,
             // Test runs read the package's views, never a predicted one.
             predicted: false,
@@ -480,6 +541,7 @@ mod tests {
             widen,
             test_only: vec![format!("{dir}/tests"), format!("{dir}/testdata")],
             target_roots: Vec::new(),
+            junk: Vec::new(),
             custom: false,
             predicted: false,
         }
@@ -649,6 +711,46 @@ mod tests {
                 "`crates/x/README.md` is not in this unit's source view; if it is in the \
               repository, add it to `packages.x.extraSources`"
             ]
+        );
+    }
+
+    #[test]
+    fn junk_names_the_cause() {
+        let v = SourceView {
+            junk: vec!["crates/x/result".into(), "crates/x/target".into()],
+            ..view(VIEW, "crates/x", Widen::ExtraSources)
+        };
+        // `results/` is not junk: in a view of the whole package, a path
+        // missing there is missing from the repository.
+        let text = format!(
+            "couldn't read `{VIEW}/crates/x/result/a.txt`, `{VIEW}/crates/x/target` or \
+             `{VIEW}/crates/x/results/b.txt`"
+        );
+        let (_, h) = run(&text, &v, &[], VIEW, &[]);
+        assert_eq!(
+            h,
+            [
+                "`crates/x/result/a.txt` is under `crates/x/result`, which source views leave out \
+                 as junk (a package's top-level `target/`, `.git`, and `result` symlinks of `nix \
+                 build`); if the unit reads it, add it to `packages.x.extraSources`",
+                "`crates/x/target` is left out of source views as junk (a package's top-level \
+                 `target/`, `.git`, and `result` symlinks of `nix build`); if the unit reads it, \
+                 add it to `packages.x.extraSources`",
+            ]
+        );
+        // A test run's spec carries them.
+        let spec: TestRun = serde_json::from_str(
+            r#"{"package": "x", "packageDir": "crates/x", "junk": ["crates/x/result"], "widen": "test.runFiles"}"#,
+        )
+        .unwrap();
+        let v = spec
+            .view(Path::new(&format!("{TEST_VIEW}/crates/x")))
+            .unwrap();
+        let text = format!("reading {TEST_VIEW}/crates/x/result/a.txt");
+        let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
+        assert!(
+            h[0].ends_with("add `result/a.txt` to `packages.x.test.runFiles`"),
+            "{h:?}"
         );
     }
 

@@ -112,6 +112,9 @@ rec {
       #   the paths left out of that package's normal view
       #   (sourceViews.testOnlyPaths), for a hint when a unit or test run
       #   fails reading one
+      # sources.junk."<dir>" = [ "<path relative to the root>" ... ]: what
+      #   every view of that package leaves out (sourceViews.junkPaths),
+      #   for the same hints
       # sources.custom = [ "<dir>" ... ]: the packages whose `sources`
       #   functions choose their views' files, for the same hints
       # sources.crates."<Cargo package id>" = fetched crate source
@@ -160,6 +163,7 @@ rec {
       targetRoots = sources.targetRoots or { };
       clippyConf = sources.clippyConf or { };
       testOnly = sources.testOnly or { };
+      junk = sources.junk or { };
       custom = sources.custom or [ ];
       predicted = sources.predicted or { };
       crates = sources.crates or { };
@@ -196,6 +200,7 @@ rec {
           // lib.optionalAttrs (targetRoots != { }) { inherit targetRoots; }
           // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
           // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
+          // lib.optionalAttrs (junk != { }) { inherit junk; }
           // lib.optionalAttrs (custom != [ ]) { inherit custom; }
           // lib.optionalAttrs (predicted != { }) { predicted = lib.attrNames predicted; }
         )
@@ -330,6 +335,7 @@ rec {
         dylibFlags = map value t.dylibFlags;
         inherit (t) packageDir;
         testOnly = t.testOnly or [ ];
+        junk = t.junk or [ ];
         custom = t.custom or false;
         nextest = {
           inherit (t.nextest) binaryId;

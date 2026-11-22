@@ -787,7 +787,7 @@ let
             inherit tools pkgs;
             inherit (p) testPkgs;
           }
-          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), custom: (.custom // false), $widen}' "$info")"'';
+          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), junk: (.junk // []), custom: (.custom // false), $widen}' "$info")"'';
 
       libtestScript =
         p: b: cfg: args: bin:

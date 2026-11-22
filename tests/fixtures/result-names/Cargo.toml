@@ -1,0 +1,13 @@
+# `reads` embeds files whose names start with `result` but are not Nix's
+# `result` symlinks: `results/expected.txt`, `result.json` and
+# `result/inner.txt` (a directory). Every source view keeps them.
+# `via-link` embeds a file through `result`, a symlink, which source views
+# leave out as Nix's: it fails with a hint, and builds with the option the
+# hint names.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

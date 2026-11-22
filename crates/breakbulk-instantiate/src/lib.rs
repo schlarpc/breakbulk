@@ -247,6 +247,17 @@ impl<'a> Tokens<'a> {
             .unwrap_or_default()
     }
 
+    /// What every view of the package at `dir` leaves out as junk,
+    /// relative to the repository root.
+    pub(crate) fn junk(&self, dir: &str) -> Vec<String> {
+        self.inputs
+            .sources
+            .junk
+            .get(dir)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn json_input(&self, key: String) -> String {
         self.token(Ref::Input { key, json: true })
     }
@@ -565,6 +576,7 @@ impl Resolve for Tokens<'_> {
             },
             test_only: self.test_only(dir),
             target_roots: self.target_roots(unit.package(), dir),
+            junk: self.junk(dir),
             custom: self.inputs.sources.custom.contains(dir),
             predicted: self
                 .inputs
@@ -992,6 +1004,7 @@ fn instantiate_roots(inputs: &Inputs, prefix: &str) -> Result<BTreeMap<String, R
                     dylib_flags: list(&s.dylib_flags)?,
                     package_dir: s.package_dir,
                     test_only: s.test_only,
+                    junk: s.junk,
                     custom: s.custom,
                     nextest: output::RootNextest {
                         binary_id: s.nextest.binary_id,

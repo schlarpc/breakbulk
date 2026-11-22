@@ -242,6 +242,7 @@ rec {
       inherit (t) packageDir;
       # Its test-only paths, relative to the repository root (`hintScript`).
       testOnly = t.testOnly or [ ];
+      junk = t.junk or [ ];
       custom = t.custom or false;
       sourceDir =
         t.env.CARGO_MANIFEST_DIR
@@ -774,6 +775,7 @@ rec {
         package
         packageDir
         testOnly
+        junk
         custom
         ;
       widen = hintWiden cfg;

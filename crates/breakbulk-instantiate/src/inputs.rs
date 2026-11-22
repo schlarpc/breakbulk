@@ -58,6 +58,11 @@ pub struct Sources {
     /// hints ([`breakbulk_format::Resolve::source_view`]).
     #[serde(default)]
     pub test_only: BTreeMap<String, Vec<String>>,
+    /// What every view of a path package leaves out as junk (`target/`,
+    /// `.git`, Nix's `result` symlinks), relative to the repository root,
+    /// by directory. Only for hints, as `test_only`.
+    #[serde(default)]
+    pub junk: BTreeMap<String, Vec<String>>,
     /// Path packages whose `sources` functions choose their views' files,
     /// by directory. Only for hints, as `test_only`.
     #[serde(default)]

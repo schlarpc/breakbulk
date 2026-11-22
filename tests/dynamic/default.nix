@@ -419,6 +419,7 @@ let
     sources = repository.sources;
     # With the options its hints name, so that everything builds.
     view-hints = repository.viewHintsFixed;
+    result-names = repository.resultNamesFixed;
     snapshots = repository.snapshots;
     pkgid-short = repository.pkgidShort;
     # With the setting its hint names.

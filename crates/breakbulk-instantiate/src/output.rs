@@ -145,6 +145,8 @@ pub struct RootTestSpec {
     pub package_dir: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub test_only: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub junk: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub custom: bool,
     pub nextest: RootNextest,

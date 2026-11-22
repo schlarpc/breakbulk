@@ -134,6 +134,7 @@ impl Resolve for Tokens<'_> {
             widen: Widen::ExtraSources,
             test_only: Vec::new(),
             target_roots: Vec::new(),
+            junk: Vec::new(),
             custom: false,
             predicted: false,
         }))

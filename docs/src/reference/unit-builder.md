@@ -259,6 +259,9 @@ the repository root, for each path that does not exist and is
 - under the root of another Cargo target of the package, or under
   `examples/` or `benches/`, in the view of one target's units:
   [`scopeTargetRoots = false`](options/packages.md#packagesnamescopetargetroots);
+- under what every view of the package leaves out at its top level
+  (`target/`, `.git`, and the `result` and `result-*` symlinks of `nix
+  build`): that cause, and the option for the unit's kind (below);
 - otherwise, in a predicted view (`predictSources`), anywhere inside the
   view root, the package directory included:
   [`predictSources.keep`](options/packages.md#packagesnamepredictsourceskeep),

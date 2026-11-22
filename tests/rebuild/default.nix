@@ -157,6 +157,8 @@ let
     port-from-crane = [ products.repos.portFromCrane ];
     post-link = [ products.repos.postLink ];
     required-features = [ repository.repos.rf ];
+    # With the option its hint names; `via-link` fails by design without.
+    result-names = [ repository.repos.resultNamesFixed ];
     riscv64 = [ extraTargets.repos.riscv64Repo ];
     rlib-example = [ dynamic.repos.rlib-example ];
     rustc-private = [ dynamic.repos.rustc-private ];

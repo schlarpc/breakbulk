@@ -231,6 +231,9 @@ pub struct TestSpec {
     /// paths, which a content-addressed run must not depend on.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub test_only: Vec<String>,
+    /// As a rendered unit's `view.junk`, for those hints.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub junk: Vec<String>,
     /// As a rendered unit's `view.custom`, for those hints.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub custom: bool,
@@ -340,6 +343,7 @@ pub(crate) fn test_spec(
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
         package_dir,
         test_only: dir.map(|d| tokens.test_only(d)).unwrap_or_default(),
+        junk: dir.map(|d| tokens.junk(d)).unwrap_or_default(),
         custom: dir.is_some_and(|d| tokens.inputs.sources.custom.contains(d)),
         nextest: nextest(tokens, plan, c, kind, target)?,
     })

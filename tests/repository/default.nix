@@ -722,6 +722,15 @@ let
     }
   ];
 
+  # --- result-names --------------------------------------------------------------
+
+  resultNames = mkRepo (fixtures + "/result-names") [ (oneWs ".") ];
+  # With the option the hint names.
+  resultNamesFixed = mkRepo (fixtures + "/result-names") [
+    (oneWs ".")
+    { packages.via-link.extraSources = [ "crates/via-link/result" ]; }
+  ];
+
   # --- host units across debugInfo ---------------------------------------------
 
   # One workspace with build scripts and a proc macro, planned for a target
@@ -781,6 +790,8 @@ in
       predictSources
       viewHints
       viewHintsFixed
+      resultNames
+      resultNamesFixed
       pkgidShort
       envRepoPath
       envRepoPathFixed
@@ -1630,6 +1641,27 @@ in
       }
       ''
         cat $lib/log $chosen/log $run/log $testCompile/log $testRun/log $doctest/log $libToTests/log
+        touch $out
+      '';
+
+  # Files and directories named `result*` that Nix did not write are in
+  # the views; a read through a `result` symlink, which they leave out,
+  # gets a hint naming the cause and the option that adds it back.
+  result-names =
+    let
+      build = unitsNamed (inst resultNames) "build";
+    in
+    pkgs.runCommand "result-names"
+      {
+        reads = build."reads-0.1.0-lib";
+        link = expectFailure "result-names-link" build."via-link-0.1.0-lib" [
+          "`crates/via-link/result/linked.txt` is under `crates/via-link/result`, which source views leave out"
+          "`packages.via-link.extraSources`"
+        ];
+        fixed = (unitsNamed (inst resultNamesFixed) "build")."via-link-0.1.0-lib";
+      }
+      ''
+        cat $link/log
         touch $out
       '';
 

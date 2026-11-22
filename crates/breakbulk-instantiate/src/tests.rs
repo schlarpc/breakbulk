@@ -39,6 +39,7 @@ fn smoke_inputs() -> Inputs {
             predicted: Default::default(),
             clippy_conf: Default::default(),
             test_only: Default::default(),
+            junk: Default::default(),
             custom: Default::default(),
             crates: Default::default(),
         },
@@ -293,6 +294,7 @@ impl Resolve for RealPaths<'_> {
                 .cloned()
                 .unwrap_or_default(),
             target_roots: Vec::new(),
+            junk: Vec::new(),
             custom: self.0.sources.custom.contains(dir),
             predicted: false,
         }))

@@ -1,0 +1,4 @@
+[package]
+name = "via-link"
+version.workspace = true
+edition.workspace = true

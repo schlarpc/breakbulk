@@ -44,11 +44,27 @@ rec {
     else
       throw "breakbulk: ${what} entries must be paths or strings relative to the repository root";
 
-  # The package directory, minus `target/`, `.git` and `result*` at its
-  # top level, and minus the directories of other workspace members nested
-  # inside it (`memberDirs`, relative to the root). Other nested
-  # Cargo.toml files (test fixtures, examples of generated projects) stay,
-  # because the package may read them.
+  # The entries at the top level of `dir` (relative to the root) that no
+  # view holds, relative to the root: `target/`, `.git`, and the symlinks
+  # `nix build` writes (`result`, `result-<output>`). By name and type,
+  # not by prefix, so `results/` or `result.json` stay.
+  junkPaths =
+    { root, dir }:
+    let
+      entries = readDir (manifest.at root dir);
+      junk =
+        n:
+        n == "target"
+        || n == ".git"
+        || entries.${n} == "symlink" && (n == "result" || lib.hasPrefix "result-" n);
+    in
+    map (util.joinRel dir) (filter junk (attrNames entries));
+
+  # The package directory, minus its `junkPaths`, and minus the
+  # directories of other workspace members nested inside it (`memberDirs`,
+  # relative to the root). Other nested Cargo.toml files (test fixtures,
+  # examples of generated projects) stay, because the package may read
+  # them.
   packageFileset =
     {
       root,
@@ -57,12 +73,13 @@ rec {
     }:
     let
       at = manifest.at root;
-      junk = filter (n: n == "target" || n == ".git" || lib.hasPrefix "result" n) (
-        attrNames (readDir (at pkgDir))
-      );
+      junk = junkPaths {
+        inherit root;
+        dir = pkgDir;
+      };
       nested = filter (d: d != pkgDir && util.isUnder pkgDir d) memberDirs;
     in
-    fs.difference (at pkgDir) (fs.unions (map (n: at (util.joinRel pkgDir n)) junk ++ map at nested));
+    fs.difference (at pkgDir) (fs.unions (map at (junk ++ nested)));
 
   # The `test.sourceScope` entries inside the package, relative to the
   # root: the ones its non-test units do not see. Entries outside the
@@ -662,6 +679,11 @@ rec {
         inherit root pkgDir;
         sourceScope = settings.test.sourceScope or [ ];
         scopeTestsDir = settings.test.scopeTestsDir or null;
+      };
+      # What every view of the package leaves out as junk, for a hint.
+      junk = junkPaths {
+        inherit root;
+        dir = pkgDir;
       };
     }
     // lib.optionalAttrs tested {
