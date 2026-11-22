@@ -27,7 +27,6 @@
 #   breakbulk.mkPlan pkgs { ... }         the plan derivation (lib/plan.nix)
 #   breakbulk.mkCargoEnv pkgs { ... }     the dev shell's cargo-env.json (lib/plan.nix)
 #   breakbulk.mkBuildTarget pkgs { ... }  the project's build.target (lib/plan.nix)
-#   breakbulk.mkWorkspace pkgs { root; path; toolchain; ... }  (lib/workspace.nix)
 # The module-system entry point:
 #   breakbulk.mkRepository { pkgs; root; modules; }  (lib/repository.nix)
 #   breakbulk.modules           the option declarations (lib/modules)
@@ -174,7 +173,7 @@ let
 
   mkTools = import ./tools.nix { inherit lib; };
 
-  # The tools mkRepository and mkWorkspace use unless given `tools` (#41):
+  # The tools mkRepository uses unless given `tools` (#41):
   # built with breakbulk's own locked nixpkgs for the build platform, so
   # they are the same store paths in every project at a given breakbulk
   # version, whatever nixpkgs the project uses (and a binary cache of them
@@ -199,6 +198,9 @@ let
     mkBuildTarget
     ;
 
+  # mkRepository's per-(workspace, target, variant) function. It is not
+  # exported: its arguments are mkRepository's internals, not an interface.
+  # tests/lib/workspace.nix builds it from the same parts.
   mkWorkspace = import ./workspace.nix {
     inherit
       lib
@@ -266,7 +268,6 @@ let
       mkPlan
       mkCargoEnv
       mkBuildTarget
-      mkWorkspace
       dynamic
       checkGroups
       ;
