@@ -545,6 +545,17 @@ rec {
       // lib.filterAttrs (_: v: v != null) (t.nextest or { });
     };
 
+  # The configuration file nextest reads by default for a workspace
+  # (`wsDir`, relative to `root`): `.config/nextest.toml` under the Cargo
+  # workspace root, or null when there is none. The default of
+  # `test.nextest.configFile`.
+  nextestDefaultConfig =
+    { root, wsDir }:
+    let
+      p = root + "/${util.joinRel wsDir ".config/nextest.toml"}";
+    in
+    if builtins.pathExists p then p else null;
+
   # What nextest's reuse-build mode reads for one test binary: the
   # metadata breakbulk-instantiate synthesizes (`nextest_for` in
   # crates/breakbulk-instantiate/src/dynamic.rs, which says why each field

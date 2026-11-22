@@ -606,16 +606,17 @@ let
             }
           ) t.binaries;
         };
-      # nextest reads `.config/nextest.toml` under the Cargo workspace root.
-      nextestConfig = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) ".config/nextest.toml"}";
       withDefaults =
         t:
         t
         // {
           nextest = t.nextest // {
             configFile =
-              if t.nextest.configFile == null && builtins.pathExists nextestConfig then
-                nextestConfig
+              if t.nextest.configFile == null then
+                breakbulkLib.testRuns.nextestDefaultConfig {
+                  inherit root;
+                  wsDir = wsDirOf cfg.workspaces.${wsName};
+                }
               else
                 t.nextest.configFile;
           };
