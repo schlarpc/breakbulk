@@ -1,5 +1,4 @@
-# `nix fmt` (treefmt-nix): Rust in both Cargo workspaces (the main one
-# and crates/breakbulk-drv) and every Nix file. `checks.<system>.formatting`
+# `nix fmt` (treefmt-nix): Rust and every Nix file. `checks.<system>.formatting`
 # fails on unformatted files, and the pre-push hook runs the same
 # formatters on the files being pushed.
 {

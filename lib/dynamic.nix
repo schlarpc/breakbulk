@@ -152,38 +152,8 @@ let
   # lib/test-runs.nix (mkTestApps takes a test-runs result named testRuns).
   testRunsLib = testRuns;
 
-  mkBreakbulkDrv =
-    pkgs:
-    let
-      root = ../.;
-      fs = lib.fileset;
-    in
-    pkgs.rustPlatform.buildRustPackage {
-      pname = "breakbulk-drv";
-      version = "0.1.0";
-      src = fs.toSource {
-        inherit root;
-        fileset = fs.unions [
-          # Workspace inheritance of the path dependencies.
-          (root + "/Cargo.toml")
-          (root + "/crates/breakbulk-instantiate")
-          (root + "/crates/breakbulk-format")
-          (root + "/crates/breakbulk-unit")
-          (root + "/crates/breakbulk-hints")
-          (root + "/crates/breakbulk-predict")
-          (root + "/crates/breakbulk-drv/Cargo.toml")
-          (root + "/crates/breakbulk-drv/Cargo.lock")
-          (root + "/crates/breakbulk-drv/src")
-        ];
-      };
-      cargoRoot = "crates/breakbulk-drv";
-      buildAndTestSubdir = "crates/breakbulk-drv";
-      cargoLock = {
-        lockFile = root + "/crates/breakbulk-drv/Cargo.lock";
-        outputHashes."harmonia-protocol-3.3.0" = "sha256-LLWOdT+JwMLYDQ5WwK7HIxz6cUNSs79iKhsJV8Mg7Hw=";
-      };
-      doCheck = false;
-    };
+  # For `tools` without a breakbulk-drv.
+  mkBreakbulkDrv = pkgs: (import ./tools.nix { inherit lib; } pkgs).breakbulk-drv;
 
   instantiateDynamic =
     args@{

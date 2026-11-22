@@ -1,5 +1,5 @@
 # Fast checks on every push to main and every pull request (#1): the Rust
-# tests, clippy and rustfmt in both Cargo workspaces, and the flake checks
+# tests, clippy and rustfmt, and the flake checks
 # listed in .github/fast-checks. Heavy checks (Windows SDK, wine, cross
 # toolchains, the CentOS 7 container) and the opt-in `nix run .#test-*`
 # scripts do not run on GitHub-hosted runners; run them locally.
@@ -27,23 +27,16 @@ jobs:
   rust:
     name: cargo test, clippy, fmt
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        workspace: [".", "crates/breakbulk-drv"]
     steps:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/determinate-nix-action@v3
       - uses: DeterminateSystems/flakehub-cache-action@main
       - name: cargo fmt --check
-        working-directory: ${{ matrix.workspace }}
-        run: nix develop "$GITHUB_WORKSPACE" -c cargo fmt --check
+        run: nix develop -c cargo fmt --check
       - name: cargo clippy
-        working-directory: ${{ matrix.workspace }}
-        run: nix develop "$GITHUB_WORKSPACE" -c cargo clippy --workspace --all-targets -- -D warnings
+        run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
       - name: cargo test
-        working-directory: ${{ matrix.workspace }}
-        run: nix develop "$GITHUB_WORKSPACE" -c cargo test --workspace
+        run: nix develop -c cargo test --workspace
 
   checks:
     name: flake checks (fast)

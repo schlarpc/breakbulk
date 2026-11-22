@@ -20,26 +20,7 @@
 }:
 let
   inherit (pkgs) lib;
-  root = ../..;
-
-  breakbulk-unit = pkgs.rustPlatform.buildRustPackage {
-    pname = "breakbulk-unit";
-    version = "0.1.0";
-    src = lib.fileset.toSource {
-      inherit root;
-      fileset = lib.fileset.unions [
-        (root + "/Cargo.toml")
-        (root + "/Cargo.lock")
-        (root + "/crates")
-      ];
-    };
-    cargoLock.lockFile = root + "/Cargo.lock";
-    cargoBuildFlags = [
-      "-p"
-      "breakbulk-unit"
-    ];
-    doCheck = false;
-  };
+  inherit (import ../../lib/tools.nix { inherit lib; } pkgs) breakbulk-unit;
 
   # Both packages' source views are the fixture's repository root.
   src = builtins.path {

@@ -36,30 +36,10 @@
 }:
 let
   inherit (pkgs) lib;
-  root = ../..;
   smoke = import ../unit-smoke { inherit pkgs; };
   system = pkgs.stdenv.buildPlatform.system;
 
-  breakbulk-instantiate = pkgs.rustPlatform.buildRustPackage {
-    pname = "breakbulk-instantiate";
-    version = "0.1.0";
-    src = lib.fileset.toSource {
-      inherit root;
-      fileset = lib.fileset.unions [
-        (root + "/Cargo.toml")
-        (root + "/Cargo.lock")
-        (lib.fileset.difference (root + "/crates") (root + "/crates/breakbulk-drv"))
-        # The crate's tests read the smoke plan.
-        (root + "/tests/unit-smoke/plan.json")
-      ];
-    };
-    cargoLock.lockFile = root + "/Cargo.lock";
-    cargoBuildFlags = [
-      "-p"
-      "breakbulk-instantiate"
-    ];
-    doCheck = false;
-  };
+  inherit (breakbulk.mkTools pkgs) breakbulk-instantiate;
 
   # The smoke plan names rustc by a token; a real plan has its store path.
   # Context is dropped, as a plan derivation's output would carry none here.

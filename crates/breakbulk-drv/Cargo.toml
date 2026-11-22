@@ -1,19 +1,11 @@
 # The store-writing half of dynamic-derivation mode: the builder of the
-# outer derivation. Its own workspace (and lockfile), so that harmonia and
-# tokio stay out of the main workspace's Cargo.lock, which every breakbulk
-# binary is built from, breakbulk-unit included (lib/tools.nix): a harmonia
-# update must not change breakbulk-unit and so every unit. It also keeps
-# them out of breakbulk-instantiate, which IFD mode builds before Nix can
-# import units.json.
+# outer derivation.
 [package]
 name = "breakbulk-drv"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
-rust-version = "1.95"
-publish = false
-
-[workspace]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 breakbulk-instantiate = { path = "../breakbulk-instantiate" }

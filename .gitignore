@@ -1,5 +1,4 @@
 /target
 /result*
-/crates/breakbulk-drv/target
 __pycache__/
 /.pre-commit-config.yaml

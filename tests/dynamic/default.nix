@@ -88,9 +88,7 @@ let
   inherit (pkgs) lib;
   fixtures = ../fixtures;
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
-  tools = breakbulk.mkTools pkgs // {
-    breakbulk-drv = breakbulk.dynamic.mkBreakbulkDrv pkgs;
-  };
+  tools = breakbulk.mkTools pkgs;
 
   mkRepo =
     fixture: modules:
