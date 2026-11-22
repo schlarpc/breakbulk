@@ -207,8 +207,7 @@ the gain ([#14](https://github.com/schlarpc/breakbulk/issues/14)).
 Any backend would fall back to an unsplit compile, check that the `rlib`'s
 crate hash matches the `rmeta` its dependents used, and allow a
 per-package opt-out for crates that do not build reproducibly. Which
-crates are split would be configuration
-([`packages.<name>.pipelining`](../reference/options/packages.md#packagesnamepipelining)),
+crates are split would be per-package configuration,
 never a guess made on the building machine. Not options: a metadata-only
 `--emit=metadata` compile (no optimized MIR for dependents' codegen, and a
 different crate hash), and `-Zalways-encode-mir` (still a different crate

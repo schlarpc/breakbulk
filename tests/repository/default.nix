@@ -508,7 +508,6 @@ let
         "libc@=0.2.191".env.LIBC = "exact";
         not-in-any-lockfile.env.X = "1";
         shared.nativeInputs = p: [ p.pkg-config ];
-        app-b.pipelining = true;
       };
       targets.${native} = {
         rustflags = [
@@ -1800,8 +1799,6 @@ in
       "overrides: itoa >=2 should match nothing";
     assert lib.assertMsg (has "`packages.libc.sourceOverlay` has no effect on libc 0.2.191")
       "overrides: no sourceOverlay warning: ${builtins.toJSON ws}";
-    assert lib.assertMsg (has "packages.app-b.pipelining")
-      "overrides: no warning for pipelining (not implemented)";
     # targets.<triple>.rustflags reach target units only.
     assert lib.assertMsg (
       lib.hasInfix "bb_target_mark" units."libc-0.2.191-lib".drvAttrs.BREAKBULK_UNIT

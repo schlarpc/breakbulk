@@ -357,24 +357,6 @@ p: [ p.openssl ]
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
-## `packages.<name>.pipelining`
-
-Opt this package in or out of the pipelined split\.
-
-Not implemented yet ([\#14](https://github\.com/schlarpc/breakbulk/issues/14)): setting it only gives an evaluation warning\.
-
-*Type:*
-null or boolean
-
-*Default:*
-
-```nix
-null
-```
-
-*Declared by:*
- - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)
-
 ## `packages.<name>.predictSources.enable`
 
 Whether this package’s compiles and build-script runs see

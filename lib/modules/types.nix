@@ -183,34 +183,6 @@ rec {
   # so `lib.mkForce null` can remove one.
   stages = types.attrsOf (types.nullOr types.raw);
 
-  # The GitHub issue that tracks issue number `n`.
-  issueUrl = n: "https://github.com/schlarpc/breakbulk/issues/${toString n}";
-
-  # Mark an option as declared ahead of its implementation. `issue` is the
-  # number of the issue that tracks it.
-  notImplemented =
-    issue: opt:
-    opt
-    // {
-      description =
-        (opt.description or "")
-        + "\n\nNot implemented yet ([#${toString issue}](${issueUrl issue})): setting it only gives an evaluation warning.";
-    };
-
-  # The paths (lists of attribute names) of options in `paths` that some
-  # module set, as opposed to their defaults. Defaults have priority 1500
-  # (mkOptionDefault); anything set with a plain definition, mkDefault
-  # (1000) or mkForce is a definition.
-  setPaths =
-    options: paths:
-    lib.filter (
-      p:
-      let
-        o = lib.getAttrFromPath p options;
-      in
-      o.highestPrio < 1500
-    ) paths;
-
   # Whether an option type keeps one definition's value, where several
   # definitions at one priority conflict, rather than combining them
   # (lists concatenate, attribute sets and modules merge).
@@ -400,18 +372,4 @@ rec {
     in
     lib.optionalString (files != [ ])
       " (set in ${lib.concatMapStringsSep " and " (f: "`${toString f}'") files})";
-
-  # Warnings for options of a submodule that are set but not implemented:
-  # `prefix` names the submodule instance (e.g. `targets.wasm32-unknown-unknown`).
-  unimplementedWarnings =
-    prefix: options: byIssue:
-    lib.concatLists (
-      lib.mapAttrsToList (
-        issue: paths:
-        map (
-          p:
-          "breakbulk: `${prefix}.${lib.concatStringsSep "." p}` is set but not implemented yet (${issueUrl issue}); it has no effect."
-        ) (setPaths options paths)
-      ) byIssue
-    );
 }

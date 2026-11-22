@@ -12,44 +12,25 @@ let
   versionReq = import ./version-req.nix { inherit lib; };
   settings = (import ./package-settings.nix { inherit lib; }).settings;
 
-  package =
-    {
-      name,
-      options,
-      config,
-      ...
-    }:
-    {
-      imports = [ settings ];
-      options = {
-        version = mkOption {
-          type = types.nullOr bt.versionReq;
-          default = null;
-          example = ">=0.42, <0.50";
-          description = ''
-            A version requirement in Cargo's syntax (`1.2`, `^1.2`, `~1.2`,
-            `=1.2.3`, `>=1, <2`, `*`). The override applies to the
-            package's locked versions that match. `null` matches every
-            version. The attribute name may also carry the requirement:
-            `packages."aws-lc-sys@>=0.42"`.
-          '';
-        };
-
-        pipelining = bt.notImplemented 14 (mkOption {
-          type = types.nullOr types.bool;
-          default = null;
-          description = "Opt this package in or out of the pipelined split.";
-        });
-
-        warnings = bt.warningsOption;
+  package = {
+    imports = [ settings ];
+    options = {
+      version = mkOption {
+        type = types.nullOr bt.versionReq;
+        default = null;
+        example = ">=0.42, <0.50";
+        description = ''
+          A version requirement in Cargo's syntax (`1.2`, `^1.2`, `~1.2`,
+          `=1.2.3`, `>=1, <2`, `*`). The override applies to the
+          package's locked versions that match. `null` matches every
+          version. The attribute name may also carry the requirement:
+          `packages."aws-lc-sys@>=0.42"`.
+        '';
       };
 
-      config.warnings =
-        bt.unimplementedWarnings "packages.${lib.strings.escapeNixIdentifier name}" options
-          {
-            "14" = [ [ "pipelining" ] ];
-          };
+      warnings = bt.warningsOption;
     };
+  };
 in
 {
   options.packages = mkOption {
