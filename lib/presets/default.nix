@@ -677,12 +677,12 @@ let
         triple ? "wasm32-unknown-unknown",
         withC ? false,
         wasilibc ? pkgs.pkgsCross.wasi32.wasilibc,
-        # The multiarch directory wasilibc installs headers and libraries under.
-        wasiTriple ? "wasm32-wasip1",
         ...
       }@args:
       let
         c = wasmCommon (args // { inherit triple; });
+        # The multiarch directory wasilibc installs headers and libraries under.
+        wasiTriple = "wasm32-wasip1";
         inc = "-isystem ${lib.getDev wasilibc}/include/${wasiTriple}";
       in
       c
@@ -771,8 +771,8 @@ in
   );
 
   # Linux programs that run on other distributions:
-  # `linuxPortable { glibc = "2.17"; systemLibraries = [ ]; backend =
-  # "zig"; overlays = [ ]; }` (./linux-portable.nix).
+  # `linuxPortable { glibc = "2.17"; systemLibraries = [ ]; overlays = [ ]; }`
+  # (./linux-portable.nix).
   inherit (impl) linuxPortable;
 
   # Windows: msvc through xwin for a `-msvc` triple (`sdk`, `extraSdks`,
@@ -813,7 +813,7 @@ in
   # wasm components: `wasm32-wasip2` links them directly with rustc's
   # wasm-component-ld (./wasip2.nix; `withC`, `wasiSdkVersion`,
   # `wasiSdk`); `wasm32-unknown-unknown` core modules are componentized by
-  # the products' stages (`withC`, `wasilibc`, `wasiTriple`). Default
+  # the products' stages (`withC`, `wasilibc`). Default
   # triple: wasm32-unknown-unknown.
   wasmComponent = mkPreset (
     args:

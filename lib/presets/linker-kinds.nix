@@ -8,7 +8,7 @@
 # `on`: the targets it links for (from lib/target-traits.nix's traits;
 # `what` describes them); `bitcode`: it reads rustc's LLVM bitcode, for
 # `-C linker-plugin-lto`; `choosable`: `linkerKind` may name it (zig comes
-# with linuxPortable's backend, which also sets the C compiler and glibc).
+# with linuxPortable, which also sets the C compiler and glibc).
 { lib }:
 let
   kinds = {

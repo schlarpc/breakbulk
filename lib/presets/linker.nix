@@ -460,13 +460,13 @@ let
           ;
       }
     else if kind == "zig" then
-      throw "breakbulk.presets.chooseLinker: ${asked}: zig links only for presets.linuxPortable, whose `backend = \"zig\"` sets it with the C compiler and glibc"
+      throw "breakbulk.presets.chooseLinker: ${asked}: zig links only for presets.linuxPortable, which sets it with the C compiler and glibc"
     else if !(kinds ? ${kind}) then
       throw "breakbulk.presets.chooseLinker: unknown linker kind `${kind}` for `${triple}`; known: ${lib.concatStringsSep ", " kindNames}"
     else if !(k.on traits) then
       throw "breakbulk.presets.chooseLinker: ${asked} links for ${k.what} targets, not for `${triple}`"
     else if flavor == "zig" then
-      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with linuxPortable's `backend = \"zig\"`, which links with `zig cc` against its old glibc"
+      throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with linuxPortable, which links with `zig cc` against its old glibc"
     else if lto && !(k.bitcode or false) then
       throw "breakbulk.presets.chooseLinker: ${asked} cannot link for `${triple}` with `crossLanguageLto`, which needs a linker that reads LLVM bitcode (${
         lib.concatMapStringsSep ", " (n: "`${n}`") (

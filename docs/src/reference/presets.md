@@ -109,8 +109,7 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `rust-lld` | macOS on a Linux machine, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld` as `ld64.lld`, whose LLVM is rustc's |
 | `ld64.lld` | macOS on a Linux machine, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld64.lld` from `llvmPackages_<major>` |
 
-`linuxPortable` links with `zig cc`, which its `backend` sets; it takes
-no other kind.
+`linuxPortable` links with `zig cc`; it takes no other kind.
 
 rustc links with its bundled lld where its build turns that on: the
 rust-lang builds (rustup, rust-overlay, fenix) for an x86\_64 Linux build

@@ -1,8 +1,7 @@
 # linuxPortable: Linux gnu programs that run on
 # other distributions, linked against an old glibc (default 2.17, the
-# oldest Rust's std supports on x86_64). The one backend, "zig", uses
-# `zig cc -target <arch>-linux-gnu.<glibc>` as the target units' linker and
-# C compiler.
+# oldest Rust's std supports on x86_64). `zig cc -target
+# <arch>-linux-gnu.<glibc>` is the target units' linker and C compiler.
 #
 #   targets.x86_64-unknown-linux-gnu.preset = breakbulk.presets.linuxPortable { glibc = "2.17"; };
 #
@@ -46,8 +45,6 @@
   triple ? nativeTriple pkgs,
   traits ? targetTraits.resolve { inherit triple; },
   glibc ? "2.17",
-  # How the old-glibc link is done; "zig" is the only one.
-  backend ? "zig",
   # Sonames a product may load besides glibc's own libraries and GCC's
   # runtime (libgcc_s.so.1, libstdc++.so.6), because every target system
   # has them (e.g. [ "libGL.so.1" ]). Anything else must be linked
@@ -58,9 +55,6 @@
   # against each whole path found, or store paths.
   allowStorePaths ? [ ],
   zig ? pkgs.buildPackages.zig,
-  # Extra `zig cc` invocations' flags to warm the cache with, e.g.
-  # [ "-lc++" ] for C++ code.
-  warmFlags ? [ ],
   # nixpkgs overlays for the target's package set's own packages (its
   # `crossOverlays`, after breakbulk's, which sets OpenSSL's directories),
   # e.g. to change how a library is configured.
@@ -73,9 +67,7 @@ let
   inherit (lib) mkDefault;
   bp = pkgs.buildPackages;
   rustArch =
-    if backend != "zig" then
-      throw "breakbulk.presets.linuxPortable: unknown backend `${backend}`; the one backend is \"zig\""
-    else if !(traits.isLinux && traits.env == "gnu") then
+    if !(traits.isLinux && traits.env == "gnu") then
       throw "breakbulk.presets.linuxPortable: `${triple}` is not a Linux -gnu triple"
     else
       traits.arch;
@@ -108,9 +100,6 @@ let
         zig cc -target ${zigTarget} main.c -o main $libs
         zig cc -target ${zigTarget} -shared -fPIC main.c -o libmain.so $libs
         zig cc -target ${zigTarget} -O2 -c main.c -o main.o
-        ${lib.concatMapStringsSep "\n" (
-          f: "zig cc -target ${zigTarget} main.c -o extra ${f} $libs"
-        ) warmFlags}
         rm -rf $out/tmp
       '';
 
