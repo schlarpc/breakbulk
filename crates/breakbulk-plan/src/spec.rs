@@ -37,6 +37,7 @@ use breakbulk_format::{Arg, Plan, Platform, Text, Unit};
 use cargo_platform::{Cfg, CfgExpr};
 use serde::Deserialize;
 
+use crate::trace::Target;
 use crate::{Error, bail, describe};
 
 /// The spec file the Nix side writes.
@@ -402,14 +403,17 @@ impl ProjectConfig {
         &self,
         spec: &[String],
         key: RustflagsKey,
-        triple: &str,
+        short_name: &str,
         query: &mut CfgQuery,
     ) -> Result<Effective, Error> {
         let target_rustflags = self.target_rustflags()?;
         let build_rustflags = self.build_rustflags()?;
         // `extra_args`: (all flags, the project's share and source).
         let extra = |cfg: Option<&[Cfg]>| -> Result<(Vec<String>, Effective), Error> {
-            let mut project = target_rustflags.get(triple).cloned().unwrap_or_default();
+            let mut project = target_rustflags
+                .get(short_name)
+                .cloned()
+                .unwrap_or_default();
             let mut all = project.clone();
             if key == RustflagsKey::Target {
                 all.extend(spec.iter().cloned());
@@ -478,21 +482,22 @@ impl RustflagsKey {
     /// Where the spec's flags `spec` join the project's, and the project's
     /// flags Cargo will use (to confirm in the trace): `build.rustflags`
     /// when Cargo, given the spec's flags there, still takes its flags from
-    /// `build.rustflags`; `target.<triple>.rustflags` otherwise. `query`
-    /// answers `rustc --print cfg` for a set of flags.
+    /// `build.rustflags`; `target.<short name>.rustflags` otherwise (the
+    /// target's [`Target::short_name`]). `query` answers `rustc --print
+    /// cfg` for a set of flags.
     pub fn choose(
         project: &ProjectConfig,
         spec: &[String],
-        triple: &str,
+        short_name: &str,
         query: &mut CfgQuery,
     ) -> Result<(RustflagsKey, Vec<String>), Error> {
         if project.build_rustflags()?.is_some() {
-            let e = project.effective(spec, RustflagsKey::Build, triple, query)?;
+            let e = project.effective(spec, RustflagsKey::Build, short_name, query)?;
             if e.source == Some(RustflagsKey::Build) {
                 return Ok((RustflagsKey::Build, e.project));
             }
         }
-        let e = project.effective(spec, RustflagsKey::Target, triple, query)?;
+        let e = project.effective(spec, RustflagsKey::Target, short_name, query)?;
         Ok((RustflagsKey::Target, e.project))
     }
 }
@@ -509,7 +514,7 @@ fn toml_list(v: &[String]) -> String {
 }
 
 /// The `--config` file for a spec.
-pub fn config_text(spec: &Spec, key: RustflagsKey, target: &str, host: &str) -> String {
+pub fn config_text(spec: &Spec, key: RustflagsKey, target: &Target, host: &str) -> String {
     let mut target_table = Vec::new();
     let mut out = String::new();
     if !spec.rustflags.is_empty() {
@@ -531,11 +536,11 @@ pub fn config_text(spec: &Spec, key: RustflagsKey, target: &str, host: &str) -> 
     if !target_table.is_empty() {
         out.push_str(&format!(
             "[target.{}]\n{}\n",
-            toml_str(target),
+            toml_str(&target.short_name),
             target_table.join("\n")
         ));
     }
-    if host != target
+    if host != target.short_name
         && let Some(l) = &spec.host_linker
     {
         out.push_str(&format!(
@@ -564,10 +569,11 @@ pub struct CargoEnv {
     pub warnings: Vec<String>,
 }
 
-/// `CARGO_TARGET_<TRIPLE>_<KEY>`: the triple uppercased, with `-` and `.`
-/// as `_` (Cargo's `ConfigKey::as_env_key`).
-pub fn target_env_var(triple: &str, key: &str) -> String {
-    let t: String = triple
+/// `CARGO_TARGET_<SHORT NAME>_<KEY>`: a target's short name (a triple, or
+/// a `.json` spec's stem, [`Target::short_name`]) uppercased, with `-` and
+/// `.` as `_` (Cargo's `ConfigKey::as_env_key`).
+pub fn target_env_var(short_name: &str, key: &str) -> String {
+    let t: String = short_name
         .chars()
         .map(|c| match c {
             '-' | '.' => '_',
@@ -583,7 +589,7 @@ impl Prepared {
         if !self.spec.rustflags.is_empty() {
             let var = match self.key {
                 RustflagsKey::Build => "CARGO_BUILD_RUSTFLAGS".to_owned(),
-                RustflagsKey::Target => target_env_var(&self.target, "RUSTFLAGS"),
+                RustflagsKey::Target => target_env_var(&self.target.short_name, "RUSTFLAGS"),
             };
             let (ok, bad): (Vec<&String>, Vec<&String>) = self
                 .spec
@@ -600,10 +606,10 @@ impl Prepared {
         }
         if let Some(l) = &self.spec.linker {
             out.env
-                .insert(target_env_var(&self.target, "LINKER"), l.clone());
+                .insert(target_env_var(&self.target.short_name, "LINKER"), l.clone());
         }
         if let Some(l) = &self.spec.host_linker {
-            if self.host != self.target {
+            if self.host != self.target.short_name {
                 out.env
                     .insert(target_env_var(&self.host, "LINKER"), l.clone());
             } else if self.spec.linker.as_ref() != Some(l) {
@@ -665,8 +671,7 @@ pub struct Prepared {
     pub key: RustflagsKey,
     /// The host triple, for the host linker.
     pub host: String,
-    /// The target triple.
-    pub target: String,
+    pub target: Target,
     /// The project's rustflags of the chosen source.
     pub project_flags: Vec<String>,
     /// The generated `--config` file.
@@ -680,7 +685,7 @@ pub fn prepare(
     project: &ProjectConfig,
     cwd: &Path,
     rustc: &str,
-    target: &str,
+    target: &Target,
     host: &str,
     scratch: &Path,
 ) -> Result<Prepared, Error> {
@@ -689,11 +694,12 @@ pub fn prepare(
         if let Some(c) = seen.get(flags) {
             return Ok(c.clone());
         }
-        let c = target_cfg(rustc, target, flags, cwd)?;
+        let c = target_cfg(rustc, &target.arg, flags, cwd)?;
         seen.insert(flags.to_vec(), c.clone());
         Ok(c)
     };
-    let (key, project_flags) = RustflagsKey::choose(project, &spec.rustflags, target, &mut query)?;
+    let (key, project_flags) =
+        RustflagsKey::choose(project, &spec.rustflags, &target.short_name, &mut query)?;
     let config = scratch.join("breakbulk-spec.toml");
     std::fs::write(&config, config_text(&spec, key, target, host))
         .map_err(|e| Error(format!("writing {}: {e}", config.display())))?;
@@ -701,7 +707,7 @@ pub fn prepare(
         spec,
         key,
         host: host.to_owned(),
-        target: target.to_owned(),
+        target: target.clone(),
         project_flags,
         config,
     })
@@ -787,7 +793,7 @@ impl Prepared {
     /// Confirm the spec arrived, and rewrite host linkers for same-triple
     /// targets.
     pub fn apply(&self, plan: &mut Plan) -> Result<(), Error> {
-        let same = plan.host == plan.target;
+        let same = self.host == self.target.short_name;
         let rewrite = match (&self.spec.linker, &self.spec.host_linker) {
             (Some(t), Some(h)) if same && t != h => Some((t.clone(), h.clone())),
             _ => None,
@@ -875,7 +881,9 @@ impl Prepared {
                 plan.cargo,
                 match self.key {
                     RustflagsKey::Build => "build.rustflags".to_owned(),
-                    RustflagsKey::Target => format!("target.{}.rustflags", plan.target),
+                    RustflagsKey::Target => {
+                        format!("target.{}.rustflags", self.target.short_name)
+                    }
                 },
                 describe::grouped(problems).join("\n  ")
             );
@@ -964,7 +972,7 @@ mod tests {
             },
             key,
             host: host.into(),
-            target: "aarch64-unknown-linux-musl".into(),
+            target: Target::triple("aarch64-unknown-linux-musl"),
             project_flags: vec![],
             config: PathBuf::new(),
         };
@@ -994,9 +1002,19 @@ mod tests {
         );
         // Same triple, different host linker: not expressible.
         assert_eq!(e.warnings.len(), 2, "{:?}", e.warnings);
+        // A `.json` target: its stem names the variables.
+        let e = Prepared {
+            target: Target::new("/specs/thumbv7em-board.json", Path::new("/")),
+            ..prepared(RustflagsKey::Target, "x86_64-unknown-linux-gnu")
+        }
+        .cargo_env();
         assert_eq!(
-            target_env_var("thumbv7em-none-eabihf.json", "LINKER"),
-            "CARGO_TARGET_THUMBV7EM_NONE_EABIHF_JSON_LINKER"
+            e.env.keys().collect::<Vec<_>>(),
+            [
+                "CARGO_TARGET_THUMBV7EM_BOARD_LINKER",
+                "CARGO_TARGET_THUMBV7EM_BOARD_RUSTFLAGS",
+                "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
+            ]
         );
     }
 
@@ -1296,7 +1314,7 @@ mod tests {
         let t = config_text(
             &spec,
             RustflagsKey::Target,
-            "aarch64-unknown-linux-gnu",
+            &Target::triple("aarch64-unknown-linux-gnu"),
             "x86_64-unknown-linux-gnu",
         );
         let v: toml::Table = toml::from_str(&t).unwrap();
@@ -1314,7 +1332,7 @@ mod tests {
         let t = config_text(
             &spec,
             RustflagsKey::Build,
-            "x86_64-unknown-linux-gnu",
+            &Target::triple("x86_64-unknown-linux-gnu"),
             "x86_64-unknown-linux-gnu",
         );
         let v: toml::Table = toml::from_str(&t).unwrap();
@@ -1323,6 +1341,24 @@ mod tests {
             v["target"]["x86_64-unknown-linux-gnu"]["linker"].as_str(),
             Some("/nix/store/x-cc/bin/cc"),
             "same triple: only the target linker is configured; host units are rewritten"
+        );
+        // A `.json` target: keyed by the spec's stem, as Cargo reads it.
+        let board = Target::new("/specs/my-board.json", Path::new("/"));
+        let t = config_text(
+            &spec,
+            RustflagsKey::Target,
+            &board,
+            "x86_64-unknown-linux-gnu",
+        );
+        let v: toml::Table = toml::from_str(&t).unwrap();
+        assert_eq!(
+            v["target"]["my-board"]["linker"].as_str(),
+            Some("/nix/store/x-cc/bin/cc")
+        );
+        assert!(v["target"]["my-board"]["rustflags"].is_array());
+        assert_eq!(
+            v["target"]["x86_64-unknown-linux-gnu"]["linker"].as_str(),
+            Some("/nix/store/y-cc/bin/cc")
         );
     }
 

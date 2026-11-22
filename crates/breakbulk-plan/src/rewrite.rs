@@ -51,8 +51,9 @@ pub struct Rewriter {
     /// meant, because Cargo sets `CARGO_BIN_EXE_*` only for the bins of the
     /// test's own package (`artifact.rs`, `get_env`).
     pub uplifted_bins: BTreeMap<(Platform, String), Vec<(String, OutRef)>>,
-    /// The target triple: the first component of target units' paths.
-    pub target_triple: String,
+    /// The planned target: its short name is the first component of
+    /// target units' paths ([`Rewriter::platform_of`]).
+    pub target: crate::trace::Target,
     /// `-Zbuild-std`: crates of the merged crates.io directory that are
     /// the toolchain's own (`library/vendor`): directory → its store path,
     /// kept as a literal like every toolchain path.
@@ -84,10 +85,16 @@ fn under<'a>(path: &'a str, dir: &str) -> Option<&'a str> {
 }
 
 impl Rewriter {
-    pub fn new(scratch: &str, skeleton: &str, metadata: &Metadata) -> Rewriter {
+    pub fn new(
+        scratch: &str,
+        skeleton: &str,
+        target: &crate::trace::Target,
+        metadata: &Metadata,
+    ) -> Rewriter {
         let mut r = Rewriter {
             scratch: scratch.trim_end_matches('/').to_owned(),
             skeleton: skeleton.trim_end_matches('/').to_owned(),
+            target: target.clone(),
             ..Default::default()
         };
         for p in &metadata.packages {
@@ -110,6 +117,16 @@ impl Rewriter {
         r.crate_dirs
             .sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
         r
+    }
+
+    /// Whether a path in the scratch directory belongs to a target unit:
+    /// one under the target's directory, which Cargo names by the target's
+    /// short name (a `.json` spec's stem). Anything else is a host unit's.
+    pub fn platform_of(&self, path: &str) -> Platform {
+        match under(path, &self.scratch).and_then(|r| r.split('/').next()) {
+            Some(first) if first == self.target.short_name => Platform::Target,
+            _ => Platform::Host,
+        }
     }
 
     /// `-Zbuild-std`: the merged crates.io directory `dir`
@@ -224,10 +241,7 @@ impl Rewriter {
             }
         }
         if let Some(rel) = under(p, &self.scratch) {
-            let platform = match rel.split('/').next() {
-                Some(t) if t == self.target_triple => Platform::Target,
-                _ => Platform::Host,
-            };
+            let platform = self.platform_of(p);
             let name = rel.rsplit('/').next().unwrap_or(rel);
             if let Some(bins) = self.uplifted_bins.get(&(platform, name.to_owned())) {
                 let own: Vec<&OutRef> = bins
@@ -421,7 +435,7 @@ mod tests {
         let mut r = Rewriter {
             scratch: "/build/scratch/target".into(),
             skeleton: "/build/skeleton".into(),
-            target_triple: t.into(),
+            target: crate::trace::Target::triple(t),
             ..Default::default()
         };
         let key = (Platform::Target, "tool".to_owned());

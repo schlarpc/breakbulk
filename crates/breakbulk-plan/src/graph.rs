@@ -26,7 +26,7 @@ pub struct Context {
     /// The skeleton root (the repository root's planning copy).
     pub skeleton: String,
     pub host: String,
-    pub target: String,
+    pub target: crate::trace::Target,
     pub kind: PlanKind,
     pub variant: Variant,
     /// `cargo -V`, without the leading `cargo `.
@@ -499,7 +499,7 @@ impl<'a> Builder<'a> {
             runs: Vec::new(),
             run_by_tag: BTreeMap::new(),
             rustdocs: Vec::new(),
-            rw: Rewriter::new(&ctx.scratch, &ctx.skeleton, metadata),
+            rw: Rewriter::new(&ctx.scratch, &ctx.skeleton, &ctx.target, metadata),
         };
         let mut seen = BTreeSet::new();
         for rec in records {
@@ -563,17 +563,14 @@ impl<'a> Builder<'a> {
     /// would be planned as a host unit (`platform_of`) with the wrong
     /// traits, linker and spec. Cargo does that for a package with nightly
     /// `package.forced-target` (`per-package-target`), which overrides
-    /// `--target` (#39). A `.json` target counts by its file stem, the name
-    /// Cargo gives its directory.
+    /// `--target` (#39). A `.json` target counts by its short name: Cargo
+    /// passes rustc the canonical path, not the planner's argument.
     fn check_target(&self, rec: &Record) -> Result<(), Error> {
         let Some(t) = arg_value(&rec.args, "--target").first().copied() else {
             return Ok(());
         };
-        let stem = |s: &str| {
-            let name = s.rsplit('/').next().unwrap_or(s);
-            name.strip_suffix(".json").unwrap_or(name).to_owned()
-        };
-        if t == self.ctx.target || t == self.ctx.host || stem(t) == stem(&self.ctx.target) {
+        let short = crate::trace::Target::new(t, std::path::Path::new(&rec.cwd)).short_name;
+        if t == self.ctx.host || short == self.ctx.target.short_name {
             return Ok(());
         }
         let package = rec
@@ -587,19 +584,12 @@ impl<'a> Builder<'a> {
              `package.forced-target` (cargo-features = [\"per-package-target\"]); \
              remove it, or leave the package out of this target's plan \
              (`workspaces.<ws>.targets.<triple>.packages`)",
-            self.ctx.target
+            self.ctx.target.arg
         )
     }
 
-    /// Target units are those under the target's directory, which Cargo
-    /// names by the target's short name (a `.json` spec's stem).
     fn platform_of(&self, path: &str) -> Platform {
-        match under(path, &self.ctx.scratch).and_then(|r| r.split('/').next()) {
-            Some(first) if first == crate::trace::target_config_key(&self.ctx.target) => {
-                Platform::Target
-            }
-            _ => Platform::Host,
-        }
+        self.rw.platform_of(path)
     }
 
     fn package_of(&self, rec: &Record) -> Result<&'a Package, Error> {
@@ -693,7 +683,7 @@ impl<'a> Builder<'a> {
                  executable suffix `{suffix}` of {}'s target spec",
                 describe_compile(c),
                 t.name,
-                self.ctx.target
+                self.ctx.target.arg
             );
         }
         Ok(Some((rustc.to_owned(), format!("{}{suffix}", t.name))))
@@ -741,7 +731,24 @@ impl<'a> Builder<'a> {
             }
         }
         self.rw.uplifted_bins = by_name;
-        self.rw.target_triple = self.ctx.target.clone();
+    }
+
+    /// Whether `cargo metadata` lists a bin `bin` for the package `owner`
+    /// and no compile links it (its required features are off, or the plan
+    /// only checks).
+    fn bin_not_linked(&self, owner: &str, bin: &str) -> bool {
+        let listed =
+            self.metadata.packages.iter().any(|p| {
+                p.id == owner && p.targets.iter().any(|t| t.name == bin && t.has_kind("bin"))
+            });
+        listed
+            && !self.compiles.iter().any(|c| {
+                c.uplifts
+                    && c.package.id == owner
+                    && self
+                        .target_of(c)
+                        .is_some_and(|t| t.name == bin && t.has_kind("bin"))
+            })
     }
 
     /// Whether a compile is a test unit ([`CompileUnit::test`]): one Cargo
@@ -912,8 +919,11 @@ impl<'a> Builder<'a> {
             // `src/compiler/artifact.rs`, `get_env`: it filters targets on
             // `is_bin()` only). Such a path names no unit's output; it
             // becomes a path that does not exist, as Cargo's does not.
+            // Only for a bin of the package that no compile links: any
+            // other path that does not rewrite is the planner's error.
             if let Some(bin) = k.strip_prefix("CARGO_BIN_EXE_")
                 && self.rw.in_scratch(&v)
+                && self.bin_not_linked(owner, bin)
                 && self.rw.text(&v, Some(owner)).is_err()
             {
                 out.insert(
@@ -1886,7 +1896,7 @@ impl<'a> Builder<'a> {
             cargo: self.ctx.cargo_version.clone(),
             rustc: self.ctx.rustc_version.clone(),
             host: self.ctx.host.clone(),
-            target: self.ctx.target.clone(),
+            target: self.ctx.target.arg.clone(),
             variant: self.ctx.variant.clone(),
             skeleton_root: self.ctx.skeleton.clone(),
             trim_paths: self.trim_paths()?,
@@ -2024,7 +2034,7 @@ mod error_tests {
             scratch: "/s".into(),
             skeleton: "/k".into(),
             host: "x86_64-unknown-linux-gnu".into(),
-            target: "x86_64-unknown-linux-gnu".into(),
+            target: crate::trace::Target::triple("x86_64-unknown-linux-gnu"),
             kind: PlanKind::Build,
             variant: Variant {
                 profile: "dev".into(),
@@ -2114,5 +2124,89 @@ mod error_tests {
                  script with that tag ran",
             ]
         );
+    }
+
+    /// With a `.json` target, an integration test's `CARGO_BIN_EXE_<bin>`
+    /// (under the spec's stem) names the bin unit; a path there that names
+    /// no output of a bin that is linked is an error, not a bin Cargo did
+    /// not build.
+    #[test]
+    fn bin_exe_of_a_json_target() {
+        let mut tool = package("tool");
+        tool["targets"] = json!([
+            { "name": "tool", "kind": ["bin"], "crate_types": ["bin"],
+              "src_path": "/k/tool/src/main.rs" },
+            { "name": "run", "kind": ["test"], "crate_types": ["bin"],
+              "src_path": "/k/tool/tests/run.rs" },
+        ]);
+        let metadata: Metadata = serde_json::from_value(json!({
+            "packages": [tool],
+            "workspace_members": [],
+            "workspace_root": "/k",
+        }))
+        .unwrap();
+        let link = |name: &str, src: &str, hash: &str, extra: &[&str], env: serde_json::Value| {
+            let mut args: Vec<String> = [
+                "--crate-name",
+                name,
+                src,
+                "-C",
+                &format!("metadata={hash}"),
+                "-C",
+                &format!("extra-filename=-{hash}"),
+                "--out-dir",
+                "/s/board/debug/deps",
+                "--target",
+                "/specs/board.json",
+            ]
+            .map(str::to_owned)
+            .into();
+            args.extend(extra.iter().map(|s| s.to_string()));
+            let mut env = env;
+            env["CARGO_MANIFEST_DIR"] = json!("/k/tool");
+            json!({
+                "mode": "compile",
+                "program": ["rustc"],
+                "args": args,
+                "cwd": "/k/tool",
+                "env": env,
+                "outputs": [{ "emit": "link", "path": format!("/s/board/debug/deps/{name}-{hash}") }],
+            })
+        };
+        let records = |bin_exe: &str| -> Vec<Record> {
+            serde_json::from_value(json!([
+                { "mode": "query", "program": ["rustc"], "args": ["-vV"], "cwd": "/k", "env": {} },
+                link("tool", "src/main.rs", "1111", &["--crate-type", "bin"], json!({})),
+                link("run", "tests/run.rs", "2222", &["--test"],
+                     json!({ "CARGO_BIN_EXE_tool": bin_exe })),
+            ]))
+            .unwrap()
+        };
+        let ctx = Context {
+            target: crate::trace::Target {
+                arg: "/specs/board.json".into(),
+                short_name: "board".into(),
+            },
+            ..context()
+        };
+        let ok = records("/s/board/debug/tool");
+        let plan = Builder::new(&ctx, &metadata, &ok).unwrap().plan().unwrap();
+        let Unit::Compile(test) = &plan.units["c-2222"] else {
+            panic!("c-2222 is not a compile");
+        };
+        assert_eq!(
+            test.env["CARGO_BIN_EXE_tool"],
+            Text::Concat(vec![Piece::Ref(Reference::Out(OutRef {
+                out: "c-1111".into(),
+                output: "bin".into(),
+                file: Some("tool".into()),
+            }))])
+        );
+        let bad = records("/s/board/debug/elsewhere");
+        let e = Builder::new(&ctx, &metadata, &bad)
+            .unwrap()
+            .plan()
+            .unwrap_err();
+        assert!(e.0.contains("/s/board/debug/elsewhere"), "{e}");
     }
 }

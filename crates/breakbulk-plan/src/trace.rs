@@ -60,7 +60,7 @@ pub struct Options {
     /// `cargo clippy -- ARGS` passes them: `CLIPPY_ARGS`, each argument
     /// followed by `__CLIPPY_HACKERY__`. Kept only on clippy-driver units.
     pub clippy_args: Vec<String>,
-    pub target: String,
+    pub target: Target,
     pub profile: String,
     pub features: Vec<String>,
     pub all_features: bool,
@@ -381,7 +381,7 @@ fn selection_args(opts: &Options) -> Vec<String> {
 /// The target, profile and feature arguments of [`selection_args`].
 fn build_args(opts: &Options) -> Vec<String> {
     let mut a = Vec::new();
-    a.extend(["--target".into(), opts.target.clone()]);
+    a.extend(["--target".into(), opts.target.arg.clone()]);
     a.extend(["--profile".into(), opts.profile.clone()]);
     if !opts.features.is_empty() {
         a.extend(["--features".into(), opts.features.join(",")]);
@@ -512,7 +512,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     if sub == ["test"] {
         // Cargo looks the runner up per compile kind: proc macros' tests
         // run for the host.
-        let mut keys = vec![target_config_key(&opts.target), host.as_str()];
+        let mut keys = vec![opts.target.short_name.as_str(), host.as_str()];
         keys.dedup();
         for key in keys {
             config_text.push_str(&format!(
@@ -662,7 +662,7 @@ fn target_spec(opts: &Options) -> Result<crate::target_spec::TargetSpec, Error> 
                 "--print",
                 "target-spec-json",
                 "--target",
-                &opts.target,
+                &opts.target.arg,
             ]);
             c
         },
@@ -697,14 +697,45 @@ pub fn with_trim_paths(opts: &Options) -> Options {
 /// (the shim's `TEST_RUNNER`).
 const TEST_RUNNER: &str = "breakbulk-test-runner";
 
-/// Cargo's short name for a target (cargo `CompileTarget::short_name`): the
-/// key of the `target.<key>` table it reads the target's configuration from,
-/// and the name of its directory in the target directory. For a
-/// JSON target spec, the file's stem.
-pub fn target_config_key(target: &str) -> &str {
-    match target.strip_suffix(".json") {
-        Some(path) => path.rsplit('/').next().unwrap_or(path),
-        None => target,
+/// The planned target as Cargo names it (cargo `CompileTarget`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Target {
+    /// What Cargo and rustc are given as `--target`: a triple, or the path
+    /// of a `.json` target spec.
+    pub arg: String,
+    /// Cargo's short name (`CompileTarget::short_name`): the triple, or a
+    /// `.json` spec's file stem. Cargo keys the target's configuration by
+    /// it (`[target.<short name>]`, `CARGO_TARGET_<SHORT NAME>_*`), names
+    /// the target's directory in the target directory after it, and gives
+    /// it to build scripts as `TARGET`.
+    pub short_name: String,
+}
+
+impl Target {
+    /// `arg` as Cargo started in `cwd` reads it (`CompileTarget::new`): a
+    /// `.json` path canonicalized, so a symlink's target names it.
+    pub fn new(arg: &str, cwd: &Path) -> Target {
+        let arg = arg.trim();
+        let short_name = if arg.ends_with(".json") {
+            let path = std::fs::canonicalize(cwd.join(arg)).unwrap_or_else(|_| arg.into());
+            path.file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            arg.to_owned()
+        };
+        Target {
+            arg: arg.to_owned(),
+            short_name,
+        }
+    }
+
+    /// A triple: its own short name.
+    pub fn triple(t: &str) -> Target {
+        Target {
+            arg: t.to_owned(),
+            short_name: t.to_owned(),
+        }
     }
 }
 
@@ -713,12 +744,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_keys() {
-        assert_eq!(
-            target_config_key("x86_64-unknown-linux-gnu"),
-            "x86_64-unknown-linux-gnu"
-        );
-        assert_eq!(target_config_key("/specs/my-target.json"), "my-target");
-        assert_eq!(target_config_key("my-target.json"), "my-target");
+    fn short_names() {
+        let at = |arg: &str| Target::new(arg, Path::new("/nonexistent")).short_name;
+        assert_eq!(at("x86_64-unknown-linux-gnu"), "x86_64-unknown-linux-gnu");
+        assert_eq!(at("/specs/my-target.json"), "my-target");
+        assert_eq!(at("my-target.json"), "my-target");
+        let d = std::env::temp_dir().join(format!("bb-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("board.json"), "{}").unwrap();
+        std::os::unix::fs::symlink("board.json", d.join("alias.json")).unwrap();
+        let alias = Target::new("alias.json", &d);
+        std::fs::remove_dir_all(&d).unwrap();
+        assert_eq!(alias.arg, "alias.json");
+        assert_eq!(alias.short_name, "board");
     }
 }

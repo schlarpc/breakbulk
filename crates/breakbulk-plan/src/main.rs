@@ -50,7 +50,7 @@
 use std::process::ExitCode;
 
 use breakbulk_format::{PlanKind, VariantMode};
-use breakbulk_plan::trace::Options;
+use breakbulk_plan::trace::{Options, Target, workspace_dir};
 
 fn usage() -> ! {
     eprintln!(
@@ -87,7 +87,7 @@ fn main() -> ExitCode {
         rustc_workspace_wrapper: None,
         clippy_option: None,
         clippy_args: Vec::new(),
-        target: String::new(),
+        target: Target::default(),
         profile: "dev".into(),
         features: Vec::new(),
         all_features: false,
@@ -114,6 +114,7 @@ fn main() -> ExitCode {
     let mut build_target_only = false;
     let mut crates_io_source = None;
     let mut crates_io_directory = None;
+    let mut target = String::new();
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| usage());
         match a.as_str() {
@@ -146,7 +147,7 @@ fn main() -> ExitCode {
             "--rustc-workspace-wrapper" => opts.rustc_workspace_wrapper = Some(val()),
             "--clippy-option" => opts.clippy_option = Some(val()),
             "--clippy-arg" => opts.clippy_args.push(val()),
-            "--target" => opts.target = val(),
+            "--target" => target = val(),
             "--profile" => {
                 opts.profile = val();
                 profiles.push(opts.profile.clone());
@@ -191,6 +192,7 @@ fn main() -> ExitCode {
         (None, None) => None,
         _ => usage(),
     };
+    opts.target = Target::new(&target, &workspace_dir(&opts));
     if cargo_env_only {
         return write_cargo_env_only(&opts, &profiles, cargo_env_out);
     }
@@ -203,7 +205,7 @@ fn main() -> ExitCode {
         &opts.rustdoc,
         &opts.shim,
         &opts.skeleton,
-        &opts.target,
+        &opts.target.arg,
         &opts.scratch,
     ]
     .iter()
@@ -262,7 +264,7 @@ fn write_build_target_only(opts: &Options, out: Option<String>) -> ExitCode {
 
 fn write_cargo_env_only(opts: &Options, profiles: &[String], out: Option<String>) -> ExitCode {
     let Some(out) = out else { usage() };
-    if [&opts.rustc, &opts.skeleton, &opts.target, &opts.scratch]
+    if [&opts.rustc, &opts.skeleton, &opts.target.arg, &opts.scratch]
         .iter()
         .any(|s| s.is_empty())
     {
