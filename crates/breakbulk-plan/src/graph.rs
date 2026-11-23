@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use breakbulk_format::{
     Arg, CargoTarget, CrateInfo, Cwd, DepKind, LinkArgKind, OutRef, PLAN_VERSION, PackageFacts,
     PathDependency, PathTarget, Piece, Plan, PlanKind, PlanTarget, Platform, Reference, Remap,
-    Root, RootKind, SearchIn, SearchPathsSplice, Splice, SpliceKind, Text, Unit, UnitBody, UnitId,
-    UnitKind, Variant, VariantMode, contains_sentinel,
+    Root, RootKind, RunnerSlot, SearchIn, SearchPathsSplice, Splice, SpliceKind, Text, Unit,
+    UnitBody, UnitId, UnitKind, Variant, VariantMode, contains_sentinel,
 };
 
 use crate::describe;
@@ -311,23 +311,6 @@ fn doctest_native_block(args: &[String]) -> Option<(usize, usize)> {
         to += 2;
     }
     Some((from, to))
-}
-
-/// A traced `rustdoc --test` without the trace's own runner: Cargo passes it
-/// as `--test-runtool R` and `--test-runtool-arg A` pairs, and
-/// `breakbulk-unit` adds the configured one at build time.
-fn without_runtool(args: &[String]) -> Vec<String> {
-    let mut out = Vec::with_capacity(args.len());
-    let mut i = 0;
-    while i < args.len() {
-        if matches!(args[i].as_str(), "--test-runtool" | "--test-runtool-arg") {
-            i += 2;
-            continue;
-        }
-        out.push(args[i].clone());
-        i += 1;
-    }
-    out
 }
 
 /// The `--crate-name` of recorded arguments, or empty.
@@ -995,6 +978,17 @@ impl<'a> Builder<'a> {
                     || a.starts_with("-Ldependency=") =>
                 {
                     i += 1;
+                    continue;
+                }
+                // A doctest's runner: the trace's, which Cargo passes as
+                // `--test-runtool R` and `--test-runtool-arg A` pairs, is
+                // the planner's; the doctest's builder puts the configured
+                // one in its place.
+                ("--test-runtool" | "--test-runtool-arg", Some(_)) if platform.is_none() => {
+                    if !out.iter().any(|a| matches!(a, Arg::Runner(_))) {
+                        out.push(Arg::Runner(RunnerSlot::TEST));
+                    }
+                    i += 2;
                     continue;
                 }
                 _ => {}
@@ -1672,8 +1666,13 @@ impl<'a> Builder<'a> {
             } else {
                 Platform::Target
             };
-            let args = without_runtool(&rec.args);
-            match self.rustdoc_unit(UnitKind::Doctest, rec, &args, package, platform) {
+            match self.rustdoc_unit(UnitKind::Doctest, rec, &rec.args, package, platform) {
+                Ok(d) if !d.args.iter().any(|a| matches!(a, Arg::Runner(_))) => errors.push((
+                    subject,
+                    "the traced `rustdoc --test` has no `--test-runtool`, where the doctest's \
+                     runner goes"
+                        .into(),
+                )),
                 Ok(d) => {
                     if units.insert(id, d).is_some() {
                         errors.push((
@@ -1930,25 +1929,6 @@ pub fn output_name(emit: &str, path: &str, types: &[String]) -> Option<&'static 
 #[cfg(test)]
 mod trim_tests {
     use super::*;
-
-    #[test]
-    fn runtool_removed() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            without_runtool(&a(&[
-                "--test",
-                "--target",
-                "t",
-                "--test-runtool",
-                "/s/bin/breakbulk-test-runner",
-                "--test-runtool-arg",
-                "x",
-                "-L",
-                "/l",
-            ])),
-            a(&["--test", "--target", "t", "-L", "/l"])
-        );
-    }
 
     #[test]
     fn output_dir_removed() {

@@ -9,7 +9,7 @@ it depends on (`…` marks elided values):
 
 ```json
 {
-  "version": 6,
+  "version": 7,
   "kind": "build",
   "cargo": "1.96.1",
   "nightlyFeaturesAllowed": false,
@@ -92,6 +92,7 @@ The fields every unit has: `package` (Cargo's package id), `platform`, `program`
   - `{ "splice": R, "kind": K }` for `rustc-cfg`, `rustc-check-cfg` and `rustc-link-lib`: run R's values of kind K.
   - `{ "splice": R, "kind": "rustc-link-search", "in": "out" }` or `"in": "other"`: run R's search paths inside its `out`, or all its other search paths.
   - `{ "splice": R, "kind": "rustc-link-arg", "kinds": [ … ] }`: run R's link arguments whose kind is in `kinds`, in printed order across kinds. A `rustc-link-arg-bin` entry carries its bin name (`"rustc-link-arg-bin=app"`). One splice per run covers every link-arg kind, because Cargo keeps one ordered list of link arguments per run; one splice per kind would reorder them.
+  - `{ "runner": "test" }` (doctest units only, at most once): where the traced `--test-runtool R --test-runtool-arg A …` was (the planner's own runner); the doctest's builder puts the runner of the doctest's platform there, or nothing.
   - `{ "searchPathsOf": [R, …], "literals": [ … ] }` (doctest units only): the search paths of every listed run, and the `literals` (search paths of `links` overrides in config), deduplicated and sorted by value, as Cargo's `-L` list for `rustdoc --test`. The traced list names every run of the invocation; the doctest derivation keeps only the runs in the doctest's own closure, as for its `dylibPathFrom`.
 - **`envSplices`** add run R's `rustc-env` values to the unit's env.
 - **`platform`** is `host` or `target`, observed from Cargo's output layout (for a doc unit, from its output directory: a proc macro's docs are the host's). A doctest's is `host` when the command has no `--target` (a proc macro's doctest), else `target`. Instantiation picks the matching toolchain spec, env capture and, for doctests, runner, so host and target settings never mix.

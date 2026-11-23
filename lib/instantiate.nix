@@ -163,9 +163,9 @@ rec {
       # coreutils they run with.
       outerName ? name,
       coreutils,
-      # Test plans: the predicted doctests, package name -> the attributes
-      # its doctest derivation gets from the test configuration
-      # (testRuns.doctestConfig).
+      # Test plans: the predicted doctests, package name -> its test
+      # configuration (testRuns.doctestConfig: `runners`, `args`, `env`,
+      # `postRun`), which its rendered doctest names as input values.
       doctests ? { },
       # Doc plans: the plan has a docs derivation.
       docs ? false,
@@ -320,7 +320,7 @@ rec {
           "empty-dir" = str emptyDir;
           "wrapper:coreutils" = str coreutils;
         }
-        # Each doctest's test configuration (shape.rs `doctest_key`).
+        # Each doctest's test configuration (lib.rs `keys::doctest`).
         // lib.concatMapAttrs (
           pkg: attrs: lib.mapAttrs' (k: v: lib.nameValuePair "doctest:${pkg}:${k}" (str v)) attrs
         ) doctests

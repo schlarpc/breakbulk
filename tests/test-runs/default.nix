@@ -748,12 +748,14 @@ let
             "--flag"
           ];
         };
+        nativeBuildInputs = [ pkgs.jq ];
       }
       ''
         grep -q '^runner: ignored-' $quick/log
         grep -q 'test quick ... ok' $quick/log
         result=$out
-        if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_RUNNERS="$testRunner" out=$TMPDIR/o \
+        unit=$(jq -c --arg r "$testRunner" '.test.runners = $r' <<< "$unit")
+        if BREAKBULK_UNIT="$unit" out=$TMPDIR/o \
             ${tools.breakbulk-doctest}/bin/breakbulk-doctest 2> err; then
           cat err
           echo "the doctest succeeded under a failing runner" >&2
@@ -1313,8 +1315,8 @@ let
         run = t.variants.default.testRuns.th.home;
         doctest = t.variants.default.doctests.th;
         strictRun = pkgs.testers.testBuildFailure strict.testRuns.th.home;
+        # Its test env (in its `test`) sets HOME back.
         unit = strict.doctestDrvs.th.drvAttrs.BREAKBULK_UNIT;
-        testEnv = strict.doctestDrvs.th.drvAttrs.BREAKBULK_TEST_ENV;
       }
       ''
         grep -q 'test writes_home_and_cache ... ok' $run/log
@@ -1322,7 +1324,7 @@ let
         cat $strictRun/testBuildFailure.log
         grep -q 'cannot create /homeless-shelter/.config/th' $strictRun/testBuildFailure.log
         result=$out
-        if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_ENV="$testEnv" out=$TMPDIR/o \
+        if BREAKBULK_UNIT="$unit" out=$TMPDIR/o \
             ${tools.breakbulk-doctest}/bin/breakbulk-doctest 2> err; then
           cat err
           echo "the doctest succeeded with HOME=/homeless-shelter" >&2

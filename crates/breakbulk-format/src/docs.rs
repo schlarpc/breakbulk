@@ -1,5 +1,5 @@
 //! Rendering a doc plan's `doc` units into the `BREAKBULK_UNIT` of its
-//! docs derivation (`kind: docs`, see `breakbulk_unit::docs`), and
+//! docs derivation (`kind: docs`, which `breakbulk-docs` builds), and
 //! the command part rustdoc units (docs and doctests) share.
 
 use std::collections::BTreeSet;
@@ -68,6 +68,7 @@ pub(crate) fn rustdoc_command<R: Resolve>(
                     Arg::Concat(p) => RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?),
                     Arg::Splice(s) => RenderedArg::Splice(splice(s, r, &strong)?),
                     Arg::SearchPaths(s) => RenderedArg::SearchPaths(search_paths(s, r)?),
+                    Arg::Runner(s) => RenderedArg::Runner(*s),
                 })
             })
             .collect::<Result<_, _>>()?,

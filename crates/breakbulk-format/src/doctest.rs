@@ -1,9 +1,9 @@
 //! Rendering a plan's doctest unit into the `BREAKBULK_UNIT` of a doctest
-//! derivation (`kind: doctest`, see `breakbulk_unit::doctest`).
+//! derivation (`kind: doctest`, which `breakbulk-doctest` builds).
 
 use std::collections::BTreeSet;
 
-use breakbulk_unit::spec::RenderedUnit;
+use breakbulk_unit::spec::{RenderedDoctest, RenderedUnit};
 
 use crate::deps::{doctest_deps, runs_of, units_below_unit};
 use crate::docs::rustdoc_command;
@@ -67,14 +67,10 @@ pub fn render_doctest<R: Resolve>(plan: &Plan, id: &str, r: &R) -> Result<Render
     let id = id.to_owned();
     let deps = doctest_deps(plan, &d);
     let link_captures = r.link_captures(&id, &d, &link_packages(plan, &d, &deps))?;
-    Ok(RenderedUnit::Doctest(rustdoc_command(
-        &id,
-        &d,
-        r,
-        deps,
-        link_captures,
-        true,
-    )?))
+    Ok(RenderedUnit::Doctest(RenderedDoctest {
+        command: rustdoc_command(&id, &d, r, deps, link_captures, true)?,
+        test: r.doctest_config(&id, &d)?,
+    }))
 }
 
 /// The runs a doctest depends on: those of its platform, for its `-L`

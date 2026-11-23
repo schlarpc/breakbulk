@@ -1844,9 +1844,11 @@ in
       doctestEnv =
         inst: p:
         unitEnv {
-          envLayers = builtins.fromJSON (
-            builtins.unsafeDiscardStringContext inst.doctestDrvs.${p}.drvAttrs.BREAKBULK_TEST_ENV
-          );
+          envLayers =
+            builtins.fromJSON
+              (builtins.fromJSON (
+                builtins.unsafeDiscardStringContext inst.doctestDrvs.${p}.drvAttrs.BREAKBULK_UNIT
+              )).test.env;
         };
       testView = i: p: "${i.sources.workspaceTest."ws/crates/${p}"}";
       wsIn = v: "${v}/ws";

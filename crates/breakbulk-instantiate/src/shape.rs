@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use breakbulk_format::{Unit, to_canonical_json};
 use serde::{Deserialize, Serialize};
 
-use crate::output::{Drv, Part, RootOut, RootWhat, UnitsJson, Value};
+use crate::output::{Drv, RootOut, RootWhat, UnitsJson, Value};
 use crate::test_spec::{TestSpec, test_spec, test_tokens};
 use crate::{Error, Inputs, TOOL_SHELL, Tokens, err, keys, token_prefix, unit_outputs};
 
@@ -71,21 +71,6 @@ pub struct Outer {
     /// (`docs.drv`), whose `root` links the docs derivation's output.
     #[serde(default)]
     pub docs: Option<String>,
-}
-
-/// The attributes a doctest derivation gets from the package's test
-/// configuration (`doctestConfig` in `lib/test-runs.nix`), each the value of
-/// [`doctest_key`] in `values.json`.
-pub const DOCTEST_CONFIG: [&str; 4] = [
-    "BREAKBULK_TEST_RUNNERS",
-    "BREAKBULK_TEST_ARGS",
-    "BREAKBULK_TEST_ENV",
-    "BREAKBULK_TEST_POST_RUN",
-];
-
-/// The `values.json` key of one doctest configuration attribute.
-pub fn doctest_key(package: &str, attr: &str) -> String {
-    format!("doctest:{package}:{attr}")
 }
 
 /// `breakbulk-root.json` in a wrapper's output.
@@ -192,9 +177,10 @@ fn wrapper(
 /// (one per line), when it lists any.
 const WRAPPER_SCRIPT: &str = r#"mkdir "$out" && { [ -z "$root" ] || ln -s "$root" "$out/root"; } && { [ -z "$debugRoot" ] || { mkdir "$out/debug" && printf '%s' "$debugRoot" | while read -r d; do for f in "$d"/*; do [ ! -e "$f" ] || [ -e "$out/debug/${f##*/}" ] || ln -s "$f" "$out/debug/" || exit 1; done; done; }; } && { [ -z "$notBuilt" ] || printf '%s\n' "$notBuilt" > "$out/not-built"; } && { [ -z "$rootJson" ] || printf '%s' "$rootJson" > "$out/breakbulk-root.json"; }"#;
 
-/// The doctest of one predicted library: the plan's doctest derivation with
-/// the package's test configuration (None when the plan has no doctest for
-/// the package), and its wrapper.
+/// The doctest of one predicted library: the plan's doctest derivation,
+/// whose rendered doctest names the package's test configuration
+/// ([`crate::keys::doctest`]; None when the plan has no doctest for the
+/// package), and its wrapper.
 fn doctest(
     inputs: &Inputs,
     prefix: &str,
@@ -206,20 +192,8 @@ fn doctest(
     let tokens = Tokens::new(inputs, prefix);
     let (drv, root, not_built) = match units.doctests.get(&format!("d-{package}")) {
         Some(d) => {
-            let mut d = d.clone();
-            for a in DOCTEST_CONFIG {
-                d.attrs.insert(
-                    a.into(),
-                    Value::Parts {
-                        parts: vec![Part::Input {
-                            input: doctest_key(package, a),
-                            json: false,
-                        }],
-                    },
-                );
-            }
             let root = tokens.unit(&doctest_node(package), "out");
-            (Some(d), root, String::new())
+            (Some(d.clone()), root, String::new())
         }
         None => (
             None,

@@ -346,6 +346,32 @@ pub enum RenderedArg {
     Literal(String),
     Splice(Splice<String>),
     SearchPaths(SearchPaths),
+    /// Doctests only: where the test runner goes.
+    Runner(RunnerSlot),
+}
+
+/// `{ "runner": "test" }`: where a doctest's `rustdoc --test` takes the
+/// runner of its platform, as `--test-runtool R --test-runtool-arg A …`:
+/// where Cargo passed the traced one, which the planner removes. Empty
+/// when the platform has no runner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerSlot {
+    pub runner: RunnerKind,
+}
+
+/// The runner a [`RunnerSlot`] takes: the platform's test runner (the only
+/// one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunnerKind {
+    Test,
+}
+
+impl RunnerSlot {
+    pub const TEST: RunnerSlot = RunnerSlot {
+        runner: RunnerKind::Test,
+    };
 }
 
 /// `{ "searchPathsOf": [F, …], "literals": [ … ] }`: `-L P` for every
@@ -383,12 +409,61 @@ pub enum RenderedUnit {
     /// One build-script run.
     Run(RenderedRun),
     /// One library's `rustdoc --test`, which compiles and runs its
-    /// examples (`crate::doctest`). Its `outputs` is empty: rustdoc
-    /// writes nothing that is kept.
-    Doctest(RenderedCompile),
+    /// examples (`breakbulk-doctest`).
+    Doctest(RenderedDoctest),
     /// A doc plan's rustdoc commands, run in order into one folder
-    /// (`crate::docs`).
+    /// (`breakbulk-docs`).
     Docs(RenderedDocs),
+}
+
+/// A doctest derivation's command and the package's test configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenderedDoctest {
+    /// The traced `rustdoc --test`. Its `outputs` is empty: rustdoc writes
+    /// nothing that is kept.
+    pub command: RenderedCompile,
+    #[serde(default)]
+    pub test: DoctestConfig,
+}
+
+/// A doctest's test configuration (`testRuns.doctestConfig` in
+/// `lib/test-runs.nix`), each part JSON text, empty for none. Text rather
+/// than values: instantiation renders the doctest before the
+/// configuration's values are known, and substitutes each as a string.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DoctestConfig {
+    /// `{ "host": [P, A, …], "target": [ … ] }`: each platform's runner,
+    /// a program and its arguments; a platform without one runs directly.
+    #[serde(default)]
+    pub runners: String,
+    /// `[A, …]`: libtest arguments.
+    #[serde(default)]
+    pub args: String,
+    /// `[L, …]`: env layers ([`crate::env::EnvLayer`]) merged over the
+    /// command's environment, lowest first.
+    #[serde(default)]
+    pub env: String,
+    /// A program run after passing doctests (not JSON).
+    #[serde(default)]
+    pub post_run: String,
+}
+
+impl DoctestConfig {
+    /// The configuration's parts, by their names in `doctestConfig`.
+    pub const PARTS: [&str; 4] = ["runners", "args", "env", "postRun"];
+
+    /// The part named `name` (one of [`DoctestConfig::PARTS`]).
+    pub fn part_mut(&mut self, name: &str) -> &mut String {
+        match name {
+            "runners" => &mut self.runners,
+            "args" => &mut self.args,
+            "env" => &mut self.env,
+            "postRun" => &mut self.post_run,
+            _ => panic!("no doctest configuration part `{name}`"),
+        }
+    }
 }
 
 /// A docs derivation's commands.

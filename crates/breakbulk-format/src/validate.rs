@@ -191,6 +191,16 @@ pub fn validate(plan: &Plan, opts: &ValidationOptions) -> Result<(), Vec<Validat
         if kind != UnitKind::Doctest && unit.args.iter().any(|a| matches!(a, Arg::SearchPaths(_))) {
             err(id_, "a searchPathsOf splice outside a doctest".into());
         }
+        let runners = unit
+            .args
+            .iter()
+            .filter(|a| matches!(a, Arg::Runner(_)))
+            .count();
+        if kind != UnitKind::Doctest && runners > 0 {
+            err(id_, "a runner slot outside a doctest".into());
+        } else if runners > 1 {
+            err(id_, "more than one runner slot".into());
+        }
 
         // Invariant 3: literals.
         for_each_literal(unit, &mut |s, what| {

@@ -130,7 +130,7 @@ pub fn expand_args<'a>(
         .enumerate()
         .filter_map(|(i, a)| match a {
             RenderedArg::Splice(s) => Some((i, s)),
-            RenderedArg::Literal(_) | RenderedArg::SearchPaths(_) => None,
+            RenderedArg::Literal(_) | RenderedArg::SearchPaths(_) | RenderedArg::Runner(_) => None,
         })
         .collect();
     check_arg_splices(&splices)?;
@@ -150,6 +150,11 @@ pub fn expand_args<'a>(
                     out.extend(["-L".to_owned(), path]);
                 }
                 continue;
+            }
+            RenderedArg::Runner(_) => {
+                return Err(SpliceError(
+                    "a runner slot, which only a doctest's builder fills".into(),
+                ));
             }
             RenderedArg::Splice(s) => s,
         };

@@ -110,6 +110,15 @@ pub trait Resolve {
     fn source_view(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<SourceView>, Self::Error> {
         Ok(None)
     }
+    /// For a doctest: its package's test configuration (runners, test
+    /// arguments, env, post-run program), as text. The default has none.
+    fn doctest_config(
+        &self,
+        _id: &UnitId,
+        _unit: &Unit,
+    ) -> Result<breakbulk_unit::spec::DoctestConfig, Self::Error> {
+        Ok(Default::default())
+    }
 }
 
 /// Cargo's recorded env (layer 3), with its list-like variables
@@ -357,7 +366,7 @@ fn repository_paths(
                 Some((t, rels)) => (t, Some(rels)),
                 None => (text_of_literals(p), None),
             },
-            Arg::Splice(_) | Arg::SearchPaths(_) => (String::new(), None),
+            Arg::Splice(_) | Arg::SearchPaths(_) | Arg::Runner(_) => (String::new(), None),
         })
         .collect();
     out.extend(repository_args(&args));
@@ -480,6 +489,7 @@ pub fn render_unit_in<R: Resolve>(
                             }
                             Arg::Splice(s) => RenderedArg::Splice(splice(s, r, weak)?),
                             Arg::SearchPaths(s) => RenderedArg::SearchPaths(search_paths(s, r)?),
+                            Arg::Runner(s) => RenderedArg::Runner(*s),
                         })
                     })
                     .collect::<Result<_, _>>()?,

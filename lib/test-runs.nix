@@ -702,13 +702,16 @@ rec {
       target = one "target" target;
     };
 
-  # The attributes a package's doctest derivation gets from its doctest
-  # run's settings (`runConfig`): the runners (`runnersByPlatform`; not
-  # the settings' `runner` or `wrapper`, which a doctest cannot honour),
-  # `args`, and `env` with `path` as PATH (packages of `pkgs`, the build
-  # machine, where the doctest runs). Dynamic-derivation mode passes the
-  # same strings to its outer derivation (lib/dynamic.nix), so both modes
-  # write the same doctest derivation.
+  # A package's doctest configuration, from its doctest run's settings
+  # (`runConfig`): the runners (`runnersByPlatform`; not the settings'
+  # `runner` or `wrapper`, which a doctest cannot honour), `args`, `env`
+  # with `path` as PATH (packages of `pkgs`, the build machine, where the
+  # doctest runs), and the `postRun` program. Each is a string, an input
+  # value of its doctest's rendered unit (`test`,
+  # breakbulk_unit::spec::DoctestConfig; keyed `doctest:<pkg>:<name>`).
+  # Dynamic-derivation mode passes the same strings to its outer
+  # derivation (lib/dynamic.nix), so both modes write the same doctest
+  # derivation.
   doctestConfig =
     {
       pkgs,
@@ -724,8 +727,8 @@ rec {
     in
     {
       # A script, run in $TMPDIR with `$log` and `$out` set, after passing
-      # doctests (breakbulk-unit's doctest.rs).
-      BREAKBULK_TEST_POST_RUN =
+      # doctests (breakbulk-doctest).
+      postRun =
         if snippets == [ ] then
           ""
         else
@@ -736,11 +739,11 @@ rec {
             + "export PATH=${lib.makeBinPath pkgs.stdenv.initialPath}\${PATH:+:$PATH}\n"
             + lib.concatStringsSep "\n" snippets
           )}";
-      BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform {
+      runners = toJSON (runnersByPlatform {
         inherit runner hostRunner;
       });
-      BREAKBULK_TEST_ARGS = toJSON cfg.args;
-      BREAKBULK_TEST_ENV = toJSON (
+      args = toJSON cfg.args;
+      env = toJSON (
         [ (envLayerOf cfg) ]
         ++ lib.optional (path != [ ]) {
           PATH = {

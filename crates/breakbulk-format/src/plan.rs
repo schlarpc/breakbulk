@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 pub use breakbulk_unit::spec::{
-    CrateInfo, LinkArgKind, PackageTarget, Platform, SearchIn, SpliceKind,
+    CrateInfo, LinkArgKind, PackageTarget, Platform, RunnerSlot, SearchIn, SpliceKind,
 };
 
 /// The only plan format version this crate reads and writes.
-pub const PLAN_VERSION: u32 = 6;
+pub const PLAN_VERSION: u32 = 7;
 
 /// The derivation output of a unit's output name: a compile unit's `bin`
 /// (everything linked) is its `out`; every other name is its own.
@@ -321,6 +321,8 @@ pub enum Arg {
     Splice(Splice),
     /// Doctest units only.
     SearchPaths(SearchPathsSplice),
+    /// Doctest units only, at most once: where the doctest's runner goes.
+    Runner(RunnerSlot),
 }
 
 /// `{ "searchPathsOf": [R, …] }`: the search paths of every listed run, both
@@ -902,7 +904,7 @@ pub(crate) fn for_each_literal(unit: &Unit, f: &mut dyn FnMut(&str, &dyn Fn() ->
                     f(l, &|| format!("args[{i}] (searchPathsOf literal)"));
                 }
             }
-            Arg::Splice(_) => {}
+            Arg::Splice(_) | Arg::Runner(_) => {}
         }
     }
     for (k, v) in &unit.env {

@@ -65,7 +65,7 @@ pub fn check_args(c: &RenderedCompile) -> Result<(), Error> {
         .iter()
         .map(|a| match a {
             RenderedArg::Literal(s) => s.as_str(),
-            RenderedArg::Splice(_) | RenderedArg::SearchPaths(_) => "",
+            RenderedArg::Splice(_) | RenderedArg::SearchPaths(_) | RenderedArg::Runner(_) => "",
         })
         .collect();
     let bad = |what: &str, arg: &str| {
@@ -134,7 +134,7 @@ pub fn load_directives(c: &RenderedCompile) -> Result<BTreeMap<String, BuildOutp
         .flat_map(|a| match a {
             RenderedArg::Splice(s) => vec![s.splice.as_str()],
             RenderedArg::SearchPaths(p) => p.search_paths_of.iter().map(String::as_str).collect(),
-            RenderedArg::Literal(_) => vec![],
+            RenderedArg::Literal(_) | RenderedArg::Runner(_) => vec![],
         })
         .chain(c.env_splices.iter().map(|s| s.splice.as_str()))
         .chain(c.dylib_path_from.iter().map(String::as_str))

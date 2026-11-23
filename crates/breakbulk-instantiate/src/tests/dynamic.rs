@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 use crate::dynamic::{Context, InputValue, Values, Written, dynamic_plan, resolve};
-use crate::shape::{COREUTILS_KEY, DOCTEST_CONFIG, Outer, doctest_key};
+use crate::shape::{COREUTILS_KEY, Outer};
+use breakbulk_format::rendered::DoctestConfig;
 
 const COREUTILS: &str = "/nix/store/77777777777777777777777777777777-coreutils";
 
@@ -584,11 +585,11 @@ fn doctests() {
     let plan = dynamic_plan(&inputs, &units, &o).unwrap();
     let mut vals = values(&inputs);
     for p in ["smokelib", "smokeapp"] {
-        for a in DOCTEST_CONFIG {
+        for a in DoctestConfig::PARTS {
             vals.insert(
-                doctest_key(p, a),
+                keys::doctest(p, a),
                 InputValue {
-                    value: format!("{p} {a}"),
+                    value: input_value(&keys::doctest(p, a)),
                     context: vec![],
                 },
             );
@@ -611,7 +612,8 @@ fn doctests() {
         );
         by_key.insert(n.key.clone(), (r, n.submit_as.clone()));
     }
-    // The doctest derivation is IFD mode's, plus the test configuration.
+    // The doctest derivation is IFD mode's, its rendered doctest with the
+    // package's test configuration.
     let (d, submit) = &by_key["doctest:smokelib"];
     assert_eq!(submit, &None);
     let ifd = &units.doctests["d-smokelib"];
@@ -621,8 +623,16 @@ fn doctests() {
         }
     }
     assert!(d.args.is_empty());
-    for a in DOCTEST_CONFIG {
-        assert_eq!(d.env[a], format!("smokelib {a}"));
+    let unit: breakbulk_format::rendered::RenderedUnit =
+        serde_json::from_str(&d.env["BREAKBULK_UNIT"]).unwrap();
+    let breakbulk_format::rendered::RenderedUnit::Doctest(rendered) = unit else {
+        panic!("not a doctest: {unit:?}")
+    };
+    for a in DoctestConfig::PARTS {
+        assert_eq!(
+            *rendered.test.clone().part_mut(a),
+            input_value(&keys::doctest("smokelib", a))
+        );
     }
     // Its wrapper, submitted as `<package>.doctest.drv`.
     let (w, submit) = &by_key["wrapper:smokelib.doctest"];

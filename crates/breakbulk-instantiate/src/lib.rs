@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use breakbulk_format::rendered::{
-    OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
+    DoctestConfig, OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
 };
 use breakbulk_format::{
     CargoTarget, DEBUG_OUTPUT, EnvLayer, Graph, LayerValue, Plan, PlanKind, Platform, Reference,
@@ -150,6 +150,12 @@ pub mod keys {
     /// As [`env_sep`], for a package override's env variable.
     pub fn override_env_sep(pkg: &str, p: Platform, var: &str) -> String {
         format!("override:{pkg}:envsep:{}:{var}", platform(p))
+    }
+    /// One part of a package's doctest configuration (`part`, one of
+    /// [`breakbulk_format::rendered::DoctestConfig::PARTS`]; the attributes
+    /// of `testRuns.doctestConfig`), by package name.
+    pub fn doctest(package: &str, part: &str) -> String {
+        format!("doctest:{package}:{part}")
     }
 }
 
@@ -596,6 +602,15 @@ impl Resolve for Tokens<'_> {
                 format!("{tree}/{dir}")
             },
         )))
+    }
+
+    fn doctest_config(&self, _id: &UnitId, unit: &Unit) -> Result<DoctestConfig, Error> {
+        let name = package_name_version(unit.package()).map_or(unit.package(), |(n, _)| n);
+        let mut c = DoctestConfig::default();
+        for part in DoctestConfig::PARTS {
+            *c.part_mut(part) = self.json_input(keys::doctest(name, part));
+        }
+        Ok(c)
     }
 
     fn source_view(&self, _id: &UnitId, unit: &Unit) -> Result<Option<SourceView>, Error> {

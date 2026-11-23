@@ -681,8 +681,8 @@ Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 
 ### R3. The doctest command line
 
-- **Assumption.** Cargo passes the target runner of the doctest's compile kind to rustdoc as `--test-runtool R --test-runtool-arg A …` right after `--test-run-directory D` and, for a target unit, `--target T`, and libtest arguments as `--test-args A` after the `-L` list.
-- **Where.** `crates/breakbulk-unit/src/doctest.rs`: invocation building (`RUNNERS_VAR`, `TEST_ARGS_VAR`); `crates/breakbulk-plan/src/graph.rs`: `doctests` (the platform); `lib/test-runs.nix`: `runnersByPlatform`.
+- **Assumption.** Cargo passes the target runner of the doctest's compile kind to rustdoc as `--test-runtool R --test-runtool-arg A …` right after `--test-run-directory D` and, for a target unit, `--target T`, and libtest arguments as `--test-args A` after the `-L` list. The planner keeps the traced runner's place as a runner slot, so only the order of `--test-args` and the `-L` list is assumed at build time.
+- **Where.** `crates/breakbulk-doctest/src/doctest.rs`: invocation building (the runner slot, the test arguments); `crates/breakbulk-plan/src/graph.rs`: `doctests` (the platform), `convert_args` (the runner slot); `lib/test-runs.nix`: `runnersByPlatform`.
 - **Upstream.** cargo `src/ops/cargo_test.rs`, `run_doc_tests`; spike A, surprise S8.
 - **Holds for.** 1.99.
 - **Pinned by.** `test-runs-runner` (a doctest runs through the target runner); `test-runs-doctests`; `cross-doctests-aarch64` (a proc macro's doctest runs without qemu, a library's under it). Rust: `doctest::tests::invocation_places_runner_search_paths_and_test_args`, `a_host_doctest_gets_the_hosts_runner_after_the_run_directory`.

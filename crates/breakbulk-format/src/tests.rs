@@ -12,7 +12,7 @@ const APP: &str = "path+file:///build/skeleton/app#0.1.0";
 fn example_json() -> String {
     format!(
         r#"{{
-  "version": 6,
+  "version": 7,
   "kind": "build",
   "cargo": "1.96.1", "nightlyFeaturesAllowed": false,
   "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
@@ -278,8 +278,8 @@ fn schema_is_strict() {
         1,
     );
     assert!(Plan::from_json(&json).is_err());
-    let json = example_json().replacen(r#""version": 6"#, r#""version": 7"#, 1);
-    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(7))));
+    let json = example_json().replacen(r#""version": 7"#, r#""version": 8"#, 1);
+    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(8))));
 }
 
 #[test]
@@ -1305,6 +1305,7 @@ fn doctests_validate_like_compiles() {
         program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
         args: vec![
             Arg::Literal("--test".into()),
+            Arg::Runner(RunnerSlot::TEST),
             Arg::SearchPaths(SearchPathsSplice {
                 search_paths_of: vec!["r-ring".into()],
                 literals: vec!["/ovr/lib".into()],
@@ -1328,7 +1329,9 @@ fn doctests_validate_like_compiles() {
     }));
     d.args
         .push(Arg::Literal("--test-run-directory=/build/x".into()));
+    d.args.push(Arg::Runner(RunnerSlot::TEST));
     p.units.insert("d-ring".into(), Unit::Doctest(d));
+    assert_error(&p, "more than one runner slot");
     assert_error(&p, "searchPathsOf names c-cfgif, which is not a run unit");
     assert_error(&p, "forbidden path `/build`");
     assert_error(
@@ -1707,7 +1710,7 @@ fn doctests_keep_only_their_closures_runs() {
     p.units.insert("d-ring".into(), Unit::Doctest(ring));
     p.units.insert("d-app".into(), Unit::Doctest(app));
     let doctest = |id: &str| match render_doctest(&p, id, &Fake).unwrap() {
-        RenderedUnit::Doctest(c) => c,
+        RenderedUnit::Doctest(c) => c.command,
         _ => panic!(),
     };
     let runs = |c: &RenderedCompile| -> Vec<String> {

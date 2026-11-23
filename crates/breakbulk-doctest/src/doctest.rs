@@ -13,25 +13,26 @@
 //! in Cargo's `src/cargo/ops/cargo_test.rs`), is a `searchPathsOf` splice
 //! ([`breakbulk_unit::splice::search_paths`]) at the position the trace showed.
 //!
-//! Configuration from the derivation's environment, all optional:
+//! The package's test configuration is the rendered doctest's `test`
+//! ([`DoctestConfig`], each part JSON text), all optional:
 //!
-//! - [`RUNNERS_VAR`]: a JSON object, the runner (a program and its
-//!   arguments) of each platform, `host` and `target`. The doctest uses its
-//!   own platform's, as Cargo picks the runner by the unit's compile kind
+//! - `runners`: a JSON object, the runner (a program and its arguments) of
+//!   each platform, `host` and `target`. The doctest uses its own
+//!   platform's, as Cargo picks the runner by the unit's compile kind
 //!   (`Compilation::target_runner`): a proc macro's doctest is built and
 //!   run for the host. Passed as Cargo does, `--test-runtool R
-//!   --test-runtool-arg A …` right after `--test-run-directory D` and, for
-//!   the target, `--target T`.
-//! - [`TEST_ARGS_VAR`]: a JSON array of libtest arguments, each passed as
+//!   --test-runtool-arg A …`, at the command's runner slot
+//!   ([`breakbulk_unit::spec::RunnerSlot`]: where the trace had Cargo's,
+//!   after `--test-run-directory D` and, for the target, `--target T`).
+//! - `args`: a JSON array of libtest arguments, each passed as
 //!   `--test-args A` right after the `-L` list, where Cargo puts them.
-//! - [`TEST_ENV_VAR`]: a JSON array of env layers merged over the command's
-//!   environment, lowest first ([`breakbulk_unit::env::LayerValue`]: `{ "value": V,
-//!   "sep": "" }` replaces, `{ "value": V, "sep": S }` appends): the
-//!   package's `test.env`, then its `test.path` on `PATH`.
-//!
-//! - [`POST_RUN_VAR`]: a program run after passing doctests (the
-//!   package's `test.postRun` snippets, `test.keepLog`'s copy), in
-//!   `$TMPDIR`, with `log` and `out` set.
+//! - `env`: a JSON array of env layers merged over the command's
+//!   environment, lowest first ([`breakbulk_unit::env::LayerValue`]: `{
+//!   "value": V, "sep": "" }` replaces, `{ "value": V, "sep": S }`
+//!   appends): the package's `test.env`, then its `test.path` on `PATH`.
+//! - `postRun`: a program run after passing doctests (the package's
+//!   `test.postRun` snippets, `test.keepLog`'s copy), in `$TMPDIR`, with
+//!   `log` and `out` set.
 //!
 //! The doctests get a fresh, empty `HOME` in `$TMPDIR`
 //! ([`Outer::test_base`]), and `RUST_TEST_THREADS` is set to the job count
@@ -53,15 +54,11 @@ use breakbulk_unit::env::{
     CFlags, EnvAppend, EnvLayer, Outer, capture_layer, fold_layers, layered_on, merge_rendered,
 };
 use breakbulk_unit::process::{command, describe_status, shell_words};
-use breakbulk_unit::spec::{Platform, RenderedArg, RenderedCompile};
+use breakbulk_unit::spec::{
+    DoctestConfig, Platform, RenderedArg, RenderedCompile, RenderedDoctest,
+};
 use breakbulk_unit::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
 use breakbulk_unit::{Error, io_err, view_hints};
-
-pub const RUNNERS_VAR: &str = "BREAKBULK_TEST_RUNNERS";
-pub const TEST_ARGS_VAR: &str = "BREAKBULK_TEST_ARGS";
-pub const TEST_ENV_VAR: &str = "BREAKBULK_TEST_ENV";
-
-pub const POST_RUN_VAR: &str = "BREAKBULK_TEST_POST_RUN";
 
 /// The log file in `$TMPDIR`.
 pub const LOG_FILE: &str = "breakbulk-doctest.log";
@@ -78,30 +75,27 @@ pub struct TestConfig {
 }
 
 impl TestConfig {
-    pub fn from_outer(outer: &Outer) -> Result<TestConfig, Error> {
+    pub fn parse(c: &DoctestConfig) -> Result<TestConfig, Error> {
         fn parse<T: serde::de::DeserializeOwned + Default>(
-            outer: &Outer,
-            var: &str,
+            part: &str,
+            text: &str,
         ) -> Result<T, Error> {
-            match outer.get(var).filter(|s| !s.trim().is_empty()) {
-                None => Ok(T::default()),
-                Some(s) => serde_json::from_str(s).map_err(|e| Error(format!("{var}: {e}"))),
+            if text.trim().is_empty() {
+                return Ok(T::default());
             }
+            serde_json::from_str(text).map_err(|e| Error(format!("the doctest's test.{part}: {e}")))
         }
         Ok(TestConfig {
-            runners: parse(outer, RUNNERS_VAR)?,
-            args: parse(outer, TEST_ARGS_VAR)?,
-            env: parse(outer, TEST_ENV_VAR)?,
-            post_run: outer
-                .get(POST_RUN_VAR)
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_owned),
+            runners: parse("runners", &c.runners)?,
+            args: parse("args", &c.args)?,
+            env: parse("env", &c.env)?,
+            post_run: Some(c.post_run.clone()).filter(|s| !s.trim().is_empty()),
         })
     }
 }
 
 /// The full command: the traced arguments with the doctest's platform's
-/// runner where Cargo puts it, the test arguments right after the
+/// runner at the runner slot, the test arguments right after the
 /// `searchPathsOf` splice (or at the end without one), and the dependency
 /// directory last.
 pub fn invocation(
@@ -126,47 +120,44 @@ pub fn invocation(
         .collect();
     check_arg_splices(&splices)?;
     let lookup = |f: &str| directives.get(f);
-    let at = c
-        .args
-        .iter()
-        .position(|a| matches!(a, RenderedArg::SearchPaths(_)))
-        .unwrap_or(c.args.len());
-    let (before, after) = c.args.split_at(at);
-    let (search, after) = after.split_at(after.len().min(1));
-    let mut before = expand_args(before, lookup)?;
-    let search = expand_args(search, lookup)?;
-    let after = expand_args(after, lookup)?;
-
     let runner = config
         .runners
         .get(&c.platform)
         .map_or(&[][..], Vec::as_slice);
+    let mut runtool = Vec::new();
     if let Some((tool, args)) = runner.split_first() {
-        let mut runtool = vec!["--test-runtool".to_owned(), tool.clone()];
+        runtool.extend(["--test-runtool".to_owned(), tool.clone()]);
         for a in args {
             runtool.extend(["--test-runtool-arg".to_owned(), a.clone()]);
         }
-        // Cargo: `--test-run-directory D`, then `--target T` for a target
-        // unit (`add_target_arg`), then the runner.
-        let after = |flag: &str| {
-            before
-                .iter()
-                .position(|a| a == flag)
-                .map(|i| (i + 2).min(before.len()))
-        };
-        let at = after("--target")
-            .or_else(|| after("--test-run-directory"))
-            .unwrap_or(before.len());
-        before.splice(at..at, runtool);
     }
-
     let mut argv = c.program.clone();
-    argv.extend(before);
-    argv.extend(search);
-    for a in &config.args {
-        argv.extend(["--test-args".to_owned(), a.clone()]);
+    for (i, a) in c.args.iter().enumerate() {
+        match a {
+            RenderedArg::Runner(_) => argv.append(&mut runtool),
+            RenderedArg::SearchPaths(_) => {
+                argv.extend(expand_args(&c.args[i..=i], lookup)?);
+                for a in &config.args {
+                    argv.extend(["--test-args".to_owned(), a.clone()]);
+                }
+            }
+            _ => argv.extend(expand_args(&c.args[i..=i], lookup)?),
+        }
     }
-    argv.extend(after);
+    if !runtool.is_empty() {
+        return Err(Error::new(
+            "the doctest has a runner but its command has no runner slot",
+        ));
+    }
+    if !c
+        .args
+        .iter()
+        .any(|a| matches!(a, RenderedArg::SearchPaths(_)))
+    {
+        for a in &config.args {
+            argv.extend(["--test-args".to_owned(), a.clone()]);
+        }
+    }
     argv.extend([
         "-L".to_owned(),
         format!("dependency={}", deps_dir.display()),
@@ -227,8 +218,9 @@ pub fn run_logged(inv: &Invocation, log: &Path) -> Result<std::process::ExitStat
 }
 
 /// The whole `doctest` kind.
-pub fn doctest(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
-    let config = TestConfig::from_outer(outer)?;
+pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
+    let c = &d.command;
+    let config = TestConfig::parse(&d.test)?;
     let deps = outer.tmpdir().join("deps");
     let directives = load_directives(c)?;
     let inv = invocation(c, outer, &directives, &config, &deps)?;
@@ -281,7 +273,9 @@ fn post_run(program: &str, outer: &Outer, log: &Path, out: &Path) -> Result<(), 
 mod tests {
     use super::*;
     use breakbulk_unit::directives::LibraryPath;
-    use breakbulk_unit::spec::{CrateInfo, RenderedUnit, SearchPaths, Splice, SpliceKind};
+    use breakbulk_unit::spec::{
+        CrateInfo, RenderedUnit, RunnerSlot, SearchPaths, Splice, SpliceKind,
+    };
     use breakbulk_unit::splice::search_paths;
 
     fn out(paths: &[&str]) -> BuildOutput {
@@ -379,11 +373,12 @@ mod tests {
                 lit("src/lib.rs"),
                 lit("--target"),
                 lit("x86_64-unknown-linux-gnu"),
+                RenderedArg::Runner(RunnerSlot::TEST),
                 lit("--extern"),
                 lit("c=/s/libc.rlib"),
                 RenderedArg::Splice(Splice::new("/f/a".into(), SpliceKind::RustcCfg)),
             ],
-            4,
+            5,
             &["/f/a", "/f/b"],
         );
         let config = TestConfig {
@@ -449,10 +444,11 @@ mod tests {
                 lit("src/lib.rs"),
                 lit("--test-run-directory"),
                 lit("/src"),
+                RenderedArg::Runner(RunnerSlot::TEST),
                 lit("--extern"),
                 lit("c=/s/libc.so"),
             ],
-            4,
+            5,
             &[],
         );
         d.platform = Platform::Host;
@@ -493,14 +489,12 @@ mod tests {
                 "dependency=/d",
             ]
         );
-        let outer = Outer {
-            vars: BTreeMap::from([(
-                RUNNERS_VAR.into(),
-                r#"{"host": ["/h"], "target": ["/t", "-x"]}"#.into(),
-            )]),
+        let config = DoctestConfig {
+            runners: r#"{"host": ["/h"], "target": ["/t", "-x"]}"#.into(),
+            ..DoctestConfig::default()
         };
         assert_eq!(
-            TestConfig::from_outer(&outer).unwrap().runners,
+            TestConfig::parse(&config).unwrap().runners,
             BTreeMap::from([
                 (Platform::Host, vec!["/h".to_owned()]),
                 (Platform::Target, vec!["/t".to_owned(), "-x".to_owned()]),
@@ -532,6 +526,18 @@ mod tests {
     }
 
     #[test]
+    fn a_runner_needs_a_slot() {
+        let d = doctest(vec![lit("--test")], 1, &[]);
+        let config = TestConfig {
+            runners: BTreeMap::from([(Platform::Target, vec!["/r".into()])]),
+            ..TestConfig::default()
+        };
+        let dirs = BTreeMap::new();
+        let e = invocation(&d, &Outer::default(), &dirs, &config, Path::new("/d")).unwrap_err();
+        assert!(e.0.contains("no runner slot"), "{e}");
+    }
+
+    #[test]
     fn no_runner_no_args() {
         let d = doctest(vec![lit("--test"), lit("src/lib.rs")], 2, &[]);
         let inv = invocation(
@@ -550,19 +556,31 @@ mod tests {
 
     #[test]
     fn rejects_bad_config() {
-        let outer = Outer {
-            vars: BTreeMap::from([(TEST_ARGS_VAR.into(), "{\"a\": 1}".into())]),
+        let config = DoctestConfig {
+            args: "{\"a\": 1}".into(),
+            ..DoctestConfig::default()
         };
-        let e = TestConfig::from_outer(&outer).unwrap_err();
-        assert!(e.0.starts_with(TEST_ARGS_VAR), "{e}");
+        let e = TestConfig::parse(&config).unwrap_err();
+        assert!(e.0.starts_with("the doctest's test.args"), "{e}");
     }
 
     #[test]
     fn parses_with_kind() {
-        let d = RenderedUnit::Doctest(doctest(vec![lit("--test")], 1, &["/f/a"]));
+        let d = RenderedUnit::Doctest(RenderedDoctest {
+            command: doctest(
+                vec![lit("--test"), RenderedArg::Runner(RunnerSlot::TEST)],
+                1,
+                &["/f/a"],
+            ),
+            test: DoctestConfig {
+                args: "[]".into(),
+                ..DoctestConfig::default()
+            },
+        });
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.starts_with("{\"kind\":\"doctest\""), "{json}");
         assert!(json.contains("{\"searchPathsOf\":[\"/f/a\"]}"), "{json}");
+        assert!(json.contains("{\"runner\":\"test\"}"), "{json}");
         assert_eq!(serde_json::from_str::<RenderedUnit>(&json).unwrap(), d);
     }
 }

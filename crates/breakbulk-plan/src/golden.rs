@@ -792,7 +792,7 @@ fn compare_doctests(
     let lookup = |f: &str| outputs.get(f);
     for id in planned.intersection(&real_ids) {
         let d = match render_doctest(plan, id, resolver) {
-            Ok(RenderedUnit::Doctest(d)) => d,
+            Ok(RenderedUnit::Doctest(d)) => d.command,
             Ok(_) => unreachable!("render_doctest renders a doctest"),
             Err(e) => {
                 report.problems.push(format!("{id}: {e}"));
@@ -841,10 +841,12 @@ fn compare_doctests(
             }
         }
         // The rendered list keeps the doctest's own closure's runs; Cargo
-        // passes every run of the invocation.
+        // passes every run of the invocation. The real `cargo test` has no
+        // runner, so its slot stays empty.
         let args: Vec<RenderedArg> = d
             .args
             .iter()
+            .filter(|a| !matches!(a, RenderedArg::Runner(_)))
             .map(|a| match a {
                 RenderedArg::SearchPaths(s) => RenderedArg::SearchPaths(SearchPaths {
                     search_paths_of: traced_runs.clone(),
@@ -992,7 +994,7 @@ mod tests {
     #[test]
     fn trim_paths_forms() {
         let mut plan: Plan = serde_json::from_value(serde_json::json!({
-            "version": 6, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
+            "version": 7, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
             "nightlyFeaturesAllowed": false, "host": "h",
             "target": {
                 "arg": "t", "shortName": "t",
