@@ -453,7 +453,13 @@ and the runs only tests depend on (dev-dependencies). It fails naming
 each missing path, the package, the platform the run was for and the
 option to add the path to: `extraSources` for a path in the
 repository, `inputs` (or `nativeInputs`) for one outside it. The
-products and test runs still build.
+products and test runs still build. The test plan's check is there on
+a target that cannot run tests too; a variant with `tests = false`
+traces no test plan, and so has none.
+[`checks.buildScriptPaths = false`](../reference/options/workspaces.md#workspacesnamevariantsnamechecksbuildscriptpaths)
+leaves the checks out of `repo.checks`, for one variant, for a target
+in its `variantDefaults`, or for the workspace in
+`workspaces.<ws>.variantDefaults`.
 
 A path a script declares but does not need goes in that package's
 [`buildScriptPaths.allow`](../reference/options/packages.md#packagesnamebuildscriptpathsallow),

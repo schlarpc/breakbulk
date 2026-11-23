@@ -920,12 +920,14 @@ in
         }
       ];
       c = repo.checks;
-      # The variant's `checks` record: a clippy variant's `check` left out
+      # The variant's `checks` record: the plan checks off for one
+      # workspace (`variantDefaults`), a clippy variant's `check` left out
       # and its docs put in.
       record =
         (groupsRepo [
           {
             workspaces.a = {
+              variantDefaults.checks.buildScriptPaths = false;
               variants.clippy = {
                 mode = "clippy";
                 profile = "dev";
@@ -957,7 +959,9 @@ in
       { checks."a/${native}/buildScriptPaths/build" = marker; }
     ]) "check-groups: a user's check named as breakbulk's";
     assert lib.assertMsg (
-      !(lib.any (lib.hasPrefix "a/${native}/variant-clippy/") (
+      !(lib.any (n: lib.hasPrefix "a/" n && lib.hasInfix "/buildScriptPaths/" n) recordLeaves)
+      && lib.any (n: lib.hasPrefix "b/" n && lib.hasInfix "/buildScriptPaths/" n) recordLeaves
+      && !(lib.any (lib.hasPrefix "a/${native}/variant-clippy/") (
         lib.remove "a/${native}/variant-clippy/docs" recordLeaves
       ))
       && lib.elem "a/${native}/variant-clippy/docs" recordLeaves

@@ -148,12 +148,14 @@ Each variant's
 [`checks`](options/workspaces.md#workspacesnamevariantsnamechecksproducts)
 record says which of its outputs are in: `products` (products and
 product checks), `tests` (test runs and doctests), `benches` (bench runs,
-of a variant with `benches`), `check` and `docs`. All but `docs` are
+of a variant with `benches`), `check`, `buildScriptPaths` and `docs`.
+All but `docs` are
 on by default for hand-written variants; the feature-matrix helpers'
 variants have `products`, `tests` and `benches` off. Like any variant
 setting, the record can be set for every variant in
 `workspaces.<ws>.variantDefaults` and for one target in its
-`variantDefaults`. A product whose roots Cargo all skipped is left out,
+`variantDefaults` (`checks.buildScriptPaths = false` there turns the
+plan checks off). A product whose roots Cargo all skipped is left out,
 and so is a run turned off with its `enable`
 ([run settings](../explanation/configuration.md#run-settings):
 [`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable),

@@ -820,6 +820,7 @@ module
 {
   sourcePaths = "remap";
   docs.noDeps = false;
+  checks.buildScriptPaths = false;
 }
 
 ```
@@ -999,6 +1000,31 @@ Put this build or coverage variant’s enabled bench runs
 [` benches `](\#workspacesnamevariantsnamebenches) once in test
 mode, ` bench.enable `) in ` repo.checks `, on a target that can
 run tests\. Timed runs never happen inside Nix\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.checks.buildScriptPaths`
+
+Put the ` buildScriptPaths ` check of each plan whose outputs
+are in ` repo.checks ` there too
+([missing build-script paths](\.\./\.\./explanation/configuration\.md\#missing-build-script-paths)):
+of a build or coverage variant, the build plan’s with
+` products ` (` buildScriptPaths/build `) and the test plan’s
+with ` tests ` (` buildScriptPaths/test `), on any target; of a
+check or clippy variant, those of the plans its ` check `
+builds\. For the whole workspace, set it in
+[` variantDefaults `](\#workspacesnamevariantdefaults); for one
+target, in that target’s ` variantDefaults `\.
 
 *Type:*
 boolean

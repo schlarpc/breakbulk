@@ -1693,7 +1693,7 @@ let
   # every enabled test run (`<pkg>/test-<name>`, named as in `tests`) and
   # doctest (`tests`), and bench run (`benches`); a check or clippy
   # variant's `check` (`check`); the `buildScriptPaths/<plan>` of the
-  # plans whose outputs are in; and the docs
+  # plans whose outputs are in (`buildScriptPaths`); and the docs
   # (`docs`). Then the user's own (`checks.<name>`).
   generatedChecks =
     lib.concatMapAttrs (
@@ -1716,7 +1716,9 @@ let
                   "build"
                   "test"
                 ];
-            planChecks = lib.filterAttrs (kind: _: lib.elem kind plansIn) v.buildScriptPaths;
+            planChecks = lib.optionalAttrs c.buildScriptPaths (
+              lib.filterAttrs (kind: _: lib.elem kind plansIn) v.buildScriptPaths
+            );
             # IFD mode checks the variant's `productInputs` here.
             verified =
               d:

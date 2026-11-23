@@ -660,6 +660,22 @@ let
               `<ws>/<triple>/variant-<v>/check`.
             '';
           };
+          buildScriptPaths = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Put the `buildScriptPaths` check of each plan whose outputs
+              are in `repo.checks` there too
+              ([missing build-script paths](../../explanation/configuration.md#missing-build-script-paths)):
+              of a build or coverage variant, the build plan's with
+              `products` (`buildScriptPaths/build`) and the test plan's
+              with `tests` (`buildScriptPaths/test`), on any target; of a
+              check or clippy variant, those of the plans its `check`
+              builds. For the whole workspace, set it in
+              [`variantDefaults`](#workspacesnamevariantdefaults); for one
+              target, in that target's `variantDefaults`.
+            '';
+          };
         };
         sourcePaths = mkOption {
           type = types.enum [
@@ -1207,6 +1223,7 @@ let
             {
               sourcePaths = "remap";
               docs.noDeps = false;
+              checks.buildScriptPaths = false;
             }
           '';
           description = ''
