@@ -177,7 +177,7 @@ workspaces.default.targets = {
 };
 ```
 
-On a check or clippy variant, `tests = false` checks what plain `cargo
+On a check variant (clippy's too), `tests = false` checks what plain `cargo
 check` builds (libraries and binaries), and `products = false` checks
 the test plan only.
 
@@ -225,11 +225,12 @@ One variant can differ on one target with
 which takes any variant option:
 
 ```nix
-workspaces.default.variants.clippy = {
-  mode = "clippy";
-  # No test harness on wasm: lint the libraries and bins only.
-  target.wasm32-unknown-unknown.tests = false;
-};
+workspaces.default.imports = [
+  (breakbulk.variants.clippy {
+    # No test harness on wasm: lint the libraries and bins only.
+    variant.target.wasm32-unknown-unknown.tests = false;
+  })
+];
 workspaces.default.variants.minimal = {
   noDefaultFeatures = true;
   # Not even the target's `windows` feature.

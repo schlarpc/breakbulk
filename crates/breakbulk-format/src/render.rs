@@ -12,7 +12,7 @@ use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
     Arg, CompileUnit, CrateSrcRef, EmptyRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, Text,
-    Unit, UnitId, VariantMode, for_each_reference,
+    Unit, UnitId, for_each_reference,
 };
 use crate::{CanonicalError, Splice, to_canonical_json};
 
@@ -79,16 +79,17 @@ pub trait Resolve {
     ) -> Result<BTreeMap<String, String>, Self::Error> {
         Ok(BTreeMap::new())
     }
-    /// For a compile unit clippy-driver runs on: the directory clippy
-    /// starts its `clippy.toml` lookup in (`CLIPPY_CONF_DIR`), or `None` to
-    /// leave clippy to its default (`CARGO_MANIFEST_DIR`). The unit's env
-    /// layers still win over it, as a user's `CLIPPY_CONF_DIR` does under
-    /// Cargo.
-    fn clippy_conf_dir(
+    /// For a compile unit the variant's workspace wrapper runs on: the
+    /// variable that names the directory the wrapper starts its config
+    /// file lookup in, and that directory (the package's in a tree of its
+    /// config files: `variants.<v>.wrapperConfig`, clippy's
+    /// `CLIPPY_CONF_DIR`), or `None`. The unit's env layers still win over
+    /// it, as a user's own value does under Cargo.
+    fn wrapper_config_dir(
         &self,
         _id: &UnitId,
         _unit: &CompileUnit,
-    ) -> Result<Option<String>, Self::Error> {
+    ) -> Result<Option<(String, String)>, Self::Error> {
         Ok(None)
     }
     /// The rules for the files a compile unit run through a wrapper
@@ -427,12 +428,8 @@ pub fn render_unit_in<R: Resolve>(
             };
             let repository_paths = repository_paths(&c.env, &c.args, &overlay);
             let mut env = env(&c.env, r)?;
-            // A wrapper chain in a clippy plan is clippy-driver over rustc.
-            if plan.variant.mode == VariantMode::Clippy
-                && c.program.len() > 1
-                && let Some(dir) = r.clippy_conf_dir(id, c)?
-            {
-                env.insert("CLIPPY_CONF_DIR".into(), dir);
+            if let Some((var, dir)) = r.wrapper_config_dir(id, c)? {
+                env.insert(var, dir);
             }
             merge_layer_with(r, &mut env, overlay)?;
             let link_captures = if is_linking(c) {

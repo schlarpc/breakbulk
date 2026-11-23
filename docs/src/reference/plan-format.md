@@ -9,7 +9,7 @@ it depends on (`…` marks elided values):
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "kind": "build",
   "cargo": "1.96.1",
   "rustc": "1.96.1 (…)",

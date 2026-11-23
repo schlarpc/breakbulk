@@ -156,13 +156,14 @@ in
       path = ".";
       inherit toolchain;
       variants.default = { };
-      variants.clippy = {
-        mode = "clippy";
-        clippyArgs = [
-          "--deny"
-          "warnings"
-        ];
-      };
+      imports = [
+        (breakbulk.variants.clippy {
+          args = [
+            "--deny"
+            "warnings"
+          ];
+        })
+      ];
     };
     emu-ds = {
       path = "crates/datboi-emu-ds";

@@ -83,6 +83,7 @@
   featureGates,
   targetTraitsLib,
   packageSettings,
+  cargoCommands,
 }:
 pkgs:
 {
@@ -92,8 +93,8 @@ pkgs:
   target ? targetTraitsLib.nativeTriple pkgs,
   rustcTarget ? target,
   profile ? "dev",
-  # The test plan's profile; check and clippy variants trace their test
-  # plan (`cargo check --all-targets`) with `profile`.
+  # The test plan's profile in a build variant (lib/cargo-commands.nix);
+  # a check variant traces its test plan with `profile`.
   testProfile ? profile,
   features ? [ ],
   fetchArgs ? { },
@@ -173,19 +174,24 @@ pkgs:
       ;
     dylibPath = testDylibPath;
   },
-  # Variants (lib/variants.nix): `mode` is build, check, clippy or
-  # coverage. `rustcWrapper` and `rustcWorkspaceWrapper` are Cargo's
+  # Variants (lib/variants.nix): `mode` is build or check, which picks
+  # the Cargo command of each plan (lib/cargo-commands.nix).
+  # `rustcWrapper` and `rustcWorkspaceWrapper` are Cargo's
   # `build.rustc-wrapper` and `build.rustc-workspace-wrapper` (executable
-  # paths, or null); clippy needs the latter to be clippy-driver, matching
-  # rustc (`clippyOption`, the option that set it, is named when it does
-  # not). `sideFiles`: the extensions of the files a wrapper writes beside
-  # a crate file that its unit keeps there. `bench` adds a bench plan
-  # (`cargo bench --no-run`): ws.benches, ws.plans.bench, ws.units.bench.
+  # paths, or null), each checked against rustc's sysroot (`variantOption`,
+  # where they are set, is named when one does not match). `wrapperEnv`:
+  # env kept only on the units the workspace wrapper runs on.
+  # `wrapperConfig`: `{ search; dirVar; workingDirFiles; }`, the files the
+  # workspace wrapper reads (`variants.<v>.wrapperConfig`). `sideFiles`:
+  # the extensions of the files a wrapper writes beside a crate file that
+  # its unit keeps there. `bench` adds a bench plan (`cargo bench
+  # --no-run`): ws.benches, ws.plans.bench, ws.units.bench.
   mode ? "build",
   rustcWrapper ? null,
   rustcWorkspaceWrapper ? null,
-  clippyOption ? null,
-  clippyArgs ? [ ],
+  wrapperEnv ? { },
+  wrapperConfig ? { },
+  variantOption ? null,
   sideFiles ? [ ],
   bench ? false,
   # The doc plan's `cargo doc --no-deps` (`variants.<v>.docs.noDeps`).
@@ -252,18 +258,23 @@ let
     inherit root wsDir;
     packages = lib.genAttrs (lib.attrNames packages ++ lib.attrNames extraSources) viewSettings;
     targetsOf = dir: memberTargets.${dir} or [ ];
-    extraKeep = clippyKeep wsDir;
-    # A package outside the workspace root needs none: its own `Cargo.toml`
-    # is the one in its working directory.
-    extraFiles = clippyKeep wsDir;
+    extraKeep = workingDirFiles wsDir;
+    # A package outside the workspace root needs none in its base view:
+    # its working directory is its own directory, which its view holds.
+    extraFiles = workingDirFiles wsDir;
     runCommand = pkgs.runCommandLocal;
   };
-  # A clippy variant's views, predicted or not, hold the `Cargo.toml` of
-  # the compiles' working directory (`cwd`: the workspace root for a
-  # member, the package directory for a package outside it): clippy's
-  # `lint_groups_priority` reads it there, and skips the lint without a
-  # word when it is missing.
-  clippyKeep = cwd: lib.optional (mode == "clippy") (util.joinRel cwd "Cargo.toml");
+  # The files the workspace wrapper reads from the compiles' working
+  # directory (`cwd`: the workspace root for a member, the package
+  # directory for a package outside it), in every view, predicted or not:
+  # clippy's `lint_groups_priority` reads `Cargo.toml` there, and skips the
+  # lint without a word when it is missing. The base view, not only a
+  # predicted keep: a predicted view can only narrow its base.
+  workingDirFiles =
+    cwd:
+    lib.optionals (rustcWorkspaceWrapper != null) (
+      map (util.joinRel cwd) (wrapperConfig.workingDirFiles or [ ])
+    );
   memberTargets = lib.listToAttrs (
     map (p: lib.nameValuePair p.dir p.targets) (lib.attrValues wsRoots)
   );
@@ -292,7 +303,7 @@ let
         if outsideRoots ? ${pkgName} && r.success then r.value else [ ];
       tested = false;
       runCommand = pkgs.runCommandLocal;
-      extraKeep = clippyKeep dir;
+      extraKeep = workingDirFiles dir;
     }
     // {
       name = pkgName;
@@ -396,17 +407,21 @@ let
   # (instantiate's `sources.custom`), for the same hints.
   custom = lib.attrNames (lib.filterAttrs (_: v: v.custom) allViews);
 
-  # Clippy variants: each member's clippy config tree, by directory
-  # (instantiate's `sources.clippyConf`).
-  clippyConf = lib.optionalAttrs (mode == "clippy") (
-    lib.genAttrs memberDirs (
-      dir:
-      sourceViews.clippyConfTree {
-        inherit root;
-        pkgDir = dir;
-      }
-    )
-  );
+  # With a workspace wrapper whose `wrapperConfig` names a variable: each
+  # member's tree of the wrapper's config files, by directory
+  # (instantiate's `sources.wrapperConfig`).
+  wrapperConfigTrees =
+    lib.optionalAttrs (rustcWorkspaceWrapper != null && wrapperConfig.dirVar or null != null)
+      (
+        lib.genAttrs memberDirs (
+          dir:
+          sourceViews.wrapperConfigTree {
+            inherit root;
+            pkgDir = dir;
+            names = wrapperConfig.search or [ ];
+          }
+        )
+      );
 
   # The package directory of each member's "run" view, by package name, or
   # null when its test runs read their test binary's own view. Test runs
@@ -454,8 +469,23 @@ let
       capabilities = toolchain.capabilities or { };
     }).capabilities;
 
-  # Check and clippy variants link nothing: no roots, no test runs.
-  checking = mode == "check" || mode == "clippy";
+  # Check variants link nothing: no roots, no test runs.
+  checking = mode == "check";
+
+  # The plans the variant traces, each with its Cargo command, profile,
+  # selection and whether it runs the wrappers (lib/cargo-commands.nix).
+  commands = cargoCommands.plans {
+    inherit
+      mode
+      profile
+      testProfile
+      select
+      testSelect
+      benchSelect
+      bench
+      docsNoDeps
+      ;
+  };
 
   # breakbulk-plan's `--trim-paths`.
   trimPaths =
@@ -483,48 +513,35 @@ let
     )
   );
 
-  plans =
-    lib.genAttrs
-      (
-        [
-          "build"
-          "test"
-          "doc"
-        ]
-        ++ lib.optional bench "bench"
-      )
-      (
-        kind:
-        mkPlan pkgs {
-          vendor = vendored;
-          inherit
-            mode
-            clippyOption
-            tools
-            kind
-            features
-            configs
-            wsDir
-            noDefaultFeatures
-            allFeatures
-            spec
-            trimPaths
-            ;
-          target = rustcTargetArg.arg;
-          packages = selectOf kind;
-          profile = if kind == "test" && !checking then testProfile else profile;
-          cargoConfig = cargoConfigFile;
-          # A doc plan runs no wrapper (breakbulk-plan's `runs_wrappers`).
-          rustcWrapper = if kind == "doc" then null else rustcWrapper;
-          rustcWorkspaceWrapper = if kind == "doc" then null else rustcWorkspaceWrapper;
-          clippyArgs = if kind == "doc" then [ ] else clippyArgs;
-          noDeps = docsNoDeps;
-          inherit (toolchain) cargo rustc;
-          inherit capabilities;
-          skeleton = skel;
-          name = "${name}-plan";
-        }
-      );
+  plans = lib.mapAttrs (
+    kind: c:
+    mkPlan pkgs {
+      vendor = vendored;
+      inherit
+        mode
+        tools
+        kind
+        features
+        configs
+        wsDir
+        noDefaultFeatures
+        allFeatures
+        spec
+        trimPaths
+        variantOption
+        ;
+      inherit (c) argv profile packages;
+      target = rustcTargetArg.arg;
+      cargoConfig = cargoConfigFile;
+      rustcWrapper = if c.wrappers then rustcWrapper else null;
+      rustcWorkspaceWrapper = if c.wrappers then rustcWorkspaceWrapper else null;
+      wrapperEnv = if c.wrappers && rustcWorkspaceWrapper != null then wrapperEnv else { };
+      inherit (toolchain) cargo rustc;
+      inherit capabilities;
+      skeleton = skel;
+      name = "${name}-plan";
+    }
+  ) commands;
 
   captures = {
     host = envCapture.base {
@@ -546,14 +563,7 @@ let
   # outside package's only when selected, since a plan without it has none.
   outsideRoots = skeleton.outsideRoots { inherit root wsDir; };
   # A plan's `-p` list (`[ ]`: `--workspace`).
-  selectOf =
-    kind:
-    if kind == "test" then
-      testSelect
-    else if kind == "bench" then
-      benchSelect
-    else
-      select;
+  selectOf = kind: commands.${kind}.packages;
   rootsOf =
     kind:
     let
@@ -640,8 +650,8 @@ let
       ${e.name} = (acc.${e.name} or [ ]) ++ map (d: lib.head (lib.splitString " " d)) e.dependencies;
     }
   ) { } entries;
-  reachableFrom = lib.genAttrs [ "build" "test" "doc" "bench" ] (
-    kind:
+  reachableFrom = lib.mapAttrs (
+    kind: _:
     let
       sel = selectOf kind;
     in
@@ -656,7 +666,7 @@ let
           }
         )
       )
-  );
+  ) commands;
   canContain =
     kind: n:
     let
@@ -673,7 +683,7 @@ let
     key:
     let
       setting = builtins.match "(override|doctest):([^:@]+)[^:]*:.*" key;
-      view = builtins.match "(src|test-src|clippy-conf):([^#]*)(#.*)?" key;
+      view = builtins.match "(src|test-src|wrapper-config):([^#]*)(#.*)?" key;
     in
     if setting != null then
       lib.elemAt setting 1
@@ -840,13 +850,13 @@ let
         inherit (viewsFor kind) workspace workspaceTargets;
         inherit
           crates
-          clippyConf
           testOnly
           targetRoots
           custom
           junk
           ;
         predicted = predictedFor kind;
+        wrapperConfig = wrapperConfigTrees;
       }
       # The build and doc plans have no test units; the bench plan's
       # benches and harnesses in bench mode are.
@@ -864,6 +874,7 @@ let
       };
       overrides = overridesFor kind;
       inherit shippedRemapScope sideFiles;
+      wrapperConfigVar = if wrapperConfigTrees == { } then null else wrapperConfig.dirVar;
       keepSourcePaths = sourcePaths == "keep";
       inherit capabilities;
       roots =
@@ -878,10 +889,13 @@ let
           };
       name = "${name}-${kind}-units";
     };
-  built = inst "build";
-  tested = inst "test";
-  benched = inst "bench";
-  documented = inst "doc";
+  # Each plan's instantiation, by kind.
+  insts = lib.mapAttrs (kind: _: inst kind) commands;
+  built = insts.build;
+  tested = insts.test;
+  benched = insts.bench;
+  documented = insts.doc;
+  ofEach = attr: lib.mapAttrs (_: i: i.${attr}) insts;
 
   # Put a root unit's single linked file at $out/bin/<target name><suffix>,
   # as Cargo uplifts an executable. Products and their stages are in
@@ -929,7 +943,6 @@ let
     packages = runPackages;
     inst = tested;
     workspaceDir = root + "/${wsDir}";
-    coverage = mode == "coverage";
     tools = testRunTools;
   };
 
@@ -953,7 +966,6 @@ let
       packages = runPackages;
       inst = benched;
       workspaceDir = root + "/${wsDir}";
-      coverage = mode == "coverage";
       tools = testRunTools;
     }
   );
@@ -1019,18 +1031,8 @@ in
     build = built.rootUnits or { };
     test = tested.rootUnits or { };
   };
-  units = {
-    build = built.units;
-    test = tested.units;
-    doc = documented.units;
-  }
-  // lib.optionalAttrs bench { bench = benched.units; };
-  unitsJson = {
-    build = built.unitsJson;
-    test = tested.unitsJson;
-    doc = documented.unitsJson;
-  }
-  // lib.optionalAttrs bench { bench = benched.unitsJson; };
+  units = ofEach "units";
+  unitsJson = ofEach "unitsJson";
   # The `flags` outputs of every build-script run of the build and test
   # plans, on both platforms: `{ runsFile; }`, a file listing them at
   # build time (instantiate.nix `rootShape`).
@@ -1047,35 +1049,14 @@ in
   # Dynamic-derivation mode: the outer derivations, by plan kind; each the
   # one that writes every unit of its plan (with `productInputs`, the
   # build plan's second).
-  outer = lib.optionalAttrs isDynamic (
-    {
-      build = built.outer;
-      test = tested.outer;
-      doc = documented.outer;
-    }
-    // lib.optionalAttrs bench { bench = benched.outer; }
-  );
+  outer = lib.optionalAttrs isDynamic (ofEach "outer");
   # The unit derivations through IFD mode, for explainSharing (in
   # dynamic-derivation mode they import units.json: lib/dynamic.nix
   # `ifdUnits`).
-  ifdUnits = (
-    {
-      build = built.ifdUnits;
-      test = tested.ifdUnits;
-      doc = documented.ifdUnits;
-    }
-    // lib.optionalAttrs bench { bench = benched.ifdUnits; }
-  );
+  ifdUnits = ofEach "ifdUnits";
   # A derivation per plan kind that builds every unit (in
   # dynamic-derivation mode ws.units is not known at evaluation time).
-  allUnits = (
-    {
-      build = built.allUnits;
-      test = tested.allUnits;
-      doc = documented.allUnits;
-    }
-    // lib.optionalAttrs bench { bench = benched.allUnits; }
-  );
+  allUnits = ofEach "allUnits";
   # The doc plan's documentation, `cargo doc`'s folder: `<crate>/index.html`
   # per documented crate, `crates.js`, `search.index/`, `static.files/`, ….
   docs = documented.docs;

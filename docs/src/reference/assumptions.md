@@ -146,7 +146,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 
 ### T4. Variables Cargo gives every build script that name the planner
 
-- **Assumption.** Cargo passes `RUSTC_WRAPPER` (when set), `RUSTDOC` as configured, `CARGO_MAKEFLAGS` and, in the clippy variant, `RUSTC_WORKSPACE_WRAPPER` to build-script runs, and `NUM_JOBS` with the planning machine's job count; nothing else names the shim or the planner.
+- **Assumption.** Cargo passes `RUSTC_WRAPPER` (when set), `RUSTDOC` as configured, `CARGO_MAKEFLAGS` and, with a workspace wrapper, `RUSTC_WORKSPACE_WRAPPER` to build-script runs, and `NUM_JOBS` with the planning machine's job count; nothing else names the shim or the planner.
 - **Where.** `crates/breakbulk-plan/src/graph.rs`: `DROPPED_ENV`, `filter_env` (drops them, rewrites `RUSTDOC` to the real rustdoc, sets `NUM_JOBS=1` for `breakbulk-unit` to replace).
 - **Upstream.** cargo `src/compiler/custom_build.rs`, `build_work`; spike A, surprise S7.
 - **Holds for.** The window.
@@ -237,7 +237,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 ### T14. The clippy chain
 
 - **Assumption.** With `RUSTC_WORKSPACE_WRAPPER=clippy-driver`, Cargo starts `wrapper clippy-driver rustc …` for workspace members only, and passes `CLIPPY_ARGS` (each argument followed by `__CLIPPY_HACKERY__`) to every process. Clippy-driver looks for its config from `CLIPPY_CONF_DIR` (else `CARGO_MANIFEST_DIR`), canonicalized, walking up and taking the first directory with `.clippy.toml` or `clippy.toml` (`.clippy.toml` first), with no merging.
-- **Where.** `crates/breakbulk-plan/src/trace.rs`: `run`; `graph.rs`: `compile_unit` (keeps `CLIPPY_ARGS` on clippy-driver units only); `crates/breakbulk-format/src/render.rs`: `render_unit_in` (`CLIPPY_CONF_DIR`); `lib/source-views.nix`: `clippyConfTree`.
+- **Where.** `lib/variants.nix`: `clippy` (the preset); `crates/breakbulk-plan/src/trace.rs`: `run`, `check_wrappers`; `graph.rs`: `compile_unit` (keeps `wrapperEnv`, `CLIPPY_ARGS`, on the workspace wrapper's units only); `crates/breakbulk-instantiate/src/lib.rs`: `wrapper_config_dir` (`CLIPPY_CONF_DIR`); `lib/source-views.nix`: `wrapperConfigTree`.
 - **Upstream.** cargo `src/util/rustc.rs` (workspace wrapper for members); `cargo clippy`'s driver protocol; clippy `clippy_config/src/conf.rs`: `load_conf_file`.
 - **Holds for.** 1.99.
 - **Pinned by.** `products-variants` (dependencies shared between check and clippy, members not); `products-variants-clippy-strict` (a lint argument fails the member); `products-variants-clippy-conf` (a root and a member's own `clippy.toml`).
@@ -245,11 +245,11 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 
 ### T15. Test units are told by target kind
 
-- **Assumption.** Cargo builds a unit with the package's dev-dependencies when its target is a test or an example, or its mode is a test mode (`cargo test`, `cargo bench`, `cargo check --all-targets` for tests and benches). In a test mode it passes no `--crate-type`, and `--test` only when the target has the libtest harness, so a `harness = false` test or bench is a plain bin without `--test`.
+- **Assumption.** Cargo builds a unit with the package's dev-dependencies when its target is a test or an example, or its mode is a test mode (`cargo test`, `cargo bench`, `cargo check --tests` and `--benches`). In a test mode it passes no `--crate-type`, and `--test` only when the target has the libtest harness, so a `harness = false` test or bench is a plain bin without `--test`.
 - **Where.** `crates/breakbulk-plan/src/graph.rs`: `is_test_unit` (a compile unit's `test`); `crates/breakbulk-instantiate/src/lib.rs`: the test view, `unit_name`, `remap_scope`.
 - **Upstream.** cargo `0.100.0` `src/compiler/unit_dependencies.rs`: `State::deps` (non-transitive dependencies only for test and example targets or a test mode); `src/compiler/mod.rs`: `build_base_args` (`--crate-type` only outside a test mode, `--test` only with `unit.target.harness()`). Checked for this page.
 - **Holds for.** 1.99.
-- **Pinned by.** `repository-test-only` (an integration test without the harness and an example read `tests/`); `repository-test-only-variants` (the same in a clippy variant, and a bench without the harness reads a `test.sourceScope` path in the clippy and bench variants).
+- **Pinned by.** `repository-test-only` (an integration test without the harness and an example read `tests/`); `repository-test-only-variants` (the same in a clippy variant, which checks no bench, and a bench without the harness reads a `test.sourceScope` path in the bench variant).
 - **If it changes.** A test unit gets the normal view and fails to find its crate root or a fixture, with the hint at `test.scopeTestsDir`; these checks fail.
 
 ### T16. Rustc wrappers and the files beside a crate

@@ -415,17 +415,13 @@ let
   # when NIX_SET_BUILD_ID is set, as stdenv's separateDebugInfo does.
   targetUnitEnv = args: lib.optionalAttrs (targetSplitsDebug args) { NIX_SET_BUILD_ID = "1"; };
 
-  # The scope of non-test units for a target (targetLayers' arguments and
-  # `coverage`).
-  shippedRemapScope =
-    {
-      coverage ? false,
-      ...
-    }@args:
-    if targetSplitsDebug args then
-      "macro,diagnostics${lib.optionalString coverage ",coverage"}"
-    else
-      null;
+  # The scope of non-test units for a target (targetLayers' arguments):
+  # when debug info is split off, every scope but `debuginfo`, which keeps
+  # the real source paths the debug output is read against. `coverage`
+  # too where nothing is instrumented: one scope for every variant, so
+  # instrumenting (`-C instrument-coverage` in a variant's `rustflags`)
+  # needs no scope of its own.
+  shippedRemapScope = args: if targetSplitsDebug args then "macro,diagnostics,coverage" else null;
 
   mkProducts =
     {

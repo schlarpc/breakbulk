@@ -72,12 +72,23 @@
 # `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. The
 # `variantDefaults` apply as to any variant.
 #
+#   workspaces.main.imports = [
+#     (breakbulk.variants.clippy { args = [ "-D" "warnings" ]; })
+#     (breakbulk.variants.coverage { })
+#   ];
+#
+# are workspace modules for a variant of a tool, over the general variant
+# options (`mode`, `rustflags`, `rustcWorkspaceWrapper`, `wrapperEnv`,
+# `wrapperConfig`) and `memberDefaults.variant.<v>`. Both take `name`
+# (default "clippy", "coverage") and `variant`, a module for the variant
+# (`profile`, `targets`, …).
+#
 #   breakbulk.variants.unitsCheck { pkgs; name; units = [ … ]; }
 #
 # is a derivation that depends on every unit derivation given (all outputs),
-# and lists them. mkRepository uses it for check and clippy variants:
+# and lists them. mkRepository uses it for check variants:
 # `target.<triple>.variants.<v>.check`, which builds every unit of both
-# plans, so clippy's lints run on every workspace member.
+# plans, so a lint driver's lints run on every workspace member.
 {
   lib,
   manifest,
@@ -322,6 +333,92 @@ let
       );
     };
 
+  # `cargo clippy` as a variant: a check variant with clippy-driver as the
+  # workspace wrapper, its arguments in `CLIPPY_ARGS` (each followed by
+  # `__CLIPPY_HACKERY__`, as `cargo clippy -- ARGS` passes them), and the
+  # files it reads: `.clippy.toml` and `clippy.toml` from each member's
+  # directory up to the repository root, through `CLIPPY_CONF_DIR`, and
+  # the `Cargo.toml` of the working directory (the workspace root), whose
+  # `[lints]` table `lint_groups_priority` checks and skips without a
+  # word when it is missing.
+  clippy =
+    {
+      name ? "clippy",
+      args ? [ ],
+      variant ? { },
+    }:
+    { config, ... }:
+    {
+      _file = "breakbulk.variants.clippy";
+      config.variants.${name} = _: {
+        imports = [ variant ];
+        config = {
+          mode = "check";
+          rustcWorkspaceWrapper = "${config.toolchain.clippy}/bin/clippy-driver";
+          wrapperEnv = lib.optionalAttrs (args != [ ]) {
+            CLIPPY_ARGS = lib.concatMapStrings (a: "${a}__CLIPPY_HACKERY__") args;
+          };
+          wrapperConfig = {
+            search = [
+              ".clippy.toml"
+              "clippy.toml"
+            ];
+            dirVar = "CLIPPY_CONF_DIR";
+            workingDirFiles = [ "Cargo.toml" ];
+          };
+        };
+      };
+    };
+
+  # Coverage as a variant: a build variant whose target units are
+  # instrumented (`-C instrument-coverage`), and whose test and bench runs
+  # write their profiles to `$TMPDIR/profraw` (the `coverage` entry of
+  # `preRun`), moved into `$out/profraw` when the run passes (`postRun`).
+  # LLVM_PROFILE_FILE's `%p` (the process ID) differs on every run, so the
+  # files are renamed by content. The counters can still differ (hash
+  # seeds, timing), so coverage runs are outside the `--rebuild`
+  # guarantee. The copy runs only when the directory exists: doctests take
+  # `postRun` too, and run no `preRun`.
+  coverage =
+    {
+      name ? "coverage",
+      variant ? { },
+    }:
+    let
+      run = {
+        preRun.coverage = ''
+          mkdir -p $TMPDIR/profraw
+          export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
+        '';
+        postRun = ''
+          if [ -d "$TMPDIR/profraw" ]; then
+            mkdir -p "$out/profraw"
+            for f in "$TMPDIR"/profraw/*.profraw; do
+              [ -e "$f" ] || continue
+              b=''${f##*/}
+              cp "$f" "$out/profraw/''${b%-*}-$(sha256sum "$f" | cut -c1-32).profraw"
+            done
+          fi
+        '';
+      };
+    in
+    {
+      _file = "breakbulk.variants.coverage";
+      config = {
+        variants.${name} = _: {
+          imports = [ variant ];
+          config.rustflags = [
+            "-C"
+            "instrument-coverage"
+          ];
+        };
+        memberDefaults.variant.${name} = {
+          test = run;
+          bench = run;
+        };
+      };
+    };
+
   unitsCheck =
     {
       pkgs,
@@ -345,6 +442,8 @@ in
 {
   inherit
     featurePowerset
+    clippy
+    coverage
     packageRuns
     unitsCheck
     subsets

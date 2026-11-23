@@ -109,8 +109,8 @@ rec {
       #   prediction narrows (`predictSources`): `spec`, breakbulk-predict's
       #   ViewSpec (dynamic-derivation mode makes the view from it), and
       #   `value`, the view (IFD mode; never read in dynamic mode)
-      # sources.clippyConf."<dir>" = a member's clippy config tree
-      #   (sourceViews.clippyConfTree), for clippy-driver's CLIPPY_CONF_DIR
+      # sources.wrapperConfig."<dir>" = a member's tree of the workspace
+      #   wrapper's config files (sourceViews.wrapperConfigTree), for `wrapperConfigVar`
       # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
       #   the paths left out of that package's normal view
       #   (sourceViews.testOnlyPaths), for a hint when a unit or test run
@@ -141,7 +141,7 @@ rec {
       # plan's roots as they are.
       roots ? null,
       # The `--remap-path-scope` of non-test target compile units, for targets
-      # whose products split debug info off (`"macro,diagnostics"`), or
+      # whose products split debug info off (`"macro,diagnostics,coverage"`), or
       # null for every scope. See inputs.rs `shipped_remap_scope`.
       shippedRemapScope ? null,
       # `sourcePaths = "keep"`: no remaps of breakbulk's own.
@@ -149,6 +149,10 @@ rec {
       # The extensions of the side files that compile units run through a
       # wrapper keep beside their crate files (`variants.<v>.sideFiles`).
       sideFiles ? [ ],
+      # The variable that names a unit's directory in its package's tree of
+      # wrapper config files (`sources.wrapperConfig`), on the units the
+      # workspace wrapper (the `rustc-workspace-wrapper` tool) runs on.
+      wrapperConfigVar ? null,
       # The toolchain's capabilities (`breakbulk.toolchainFacts.of`'s
       # `capabilities`): whether rustc takes `--remap-path-scope`.
       capabilities,
@@ -175,7 +179,7 @@ rec {
       workspaceTargets = sources.workspaceTargets or { };
       workspaceTestTargets = sources.workspaceTestTargets or { };
       targetRoots = sources.targetRoots or { };
-      clippyConf = sources.clippyConf or { };
+      wrapperConfig = sources.wrapperConfig or { };
       testOnly = sources.testOnly or { };
       junk = sources.junk or { };
       custom = sources.custom or [ ];
@@ -212,7 +216,7 @@ rec {
             workspaceTestTargets = lib.mapAttrs (_: lib.attrNames) workspaceTestTargets;
           }
           // lib.optionalAttrs (targetRoots != { }) { inherit targetRoots; }
-          // lib.optionalAttrs (clippyConf != { }) { clippyConf = lib.attrNames clippyConf; }
+          // lib.optionalAttrs (wrapperConfig != { }) { wrapperConfig = lib.attrNames wrapperConfig; }
           // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
           // lib.optionalAttrs (junk != { }) { inherit junk; }
           // lib.optionalAttrs (custom != [ ]) { inherit custom; }
@@ -231,6 +235,7 @@ rec {
           // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
           // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }
           // lib.optionalAttrs (sideFiles != [ ]) { inherit sideFiles; }
+          // lib.optionalAttrs (wrapperConfigVar != null) { inherit wrapperConfigVar; }
         )
       );
       overridesFile = toFile "overrides.json" (toJSON {
@@ -289,7 +294,7 @@ rec {
           d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "test-src:${d}#${t}" (str v)) ts
         ) workspaceTestTargets
         // lib.mapAttrs (_: p: str p.value) predicted
-        // lib.mapAttrs' (d: v: lib.nameValuePair "clippy-conf:${d}" (str v)) clippyConf
+        // lib.mapAttrs' (d: v: lib.nameValuePair "wrapper-config:${d}" (str v)) wrapperConfig
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
         // {
           "empty-dir" = str emptyDir;
@@ -490,7 +495,7 @@ rec {
   #   docs                 the docs derivation's output, or null
   #   allUnits             building it builds every unit of the plan
   #                        (`$out/units` lists their outputs): what check
-  #                        and clippy variants build
+  #                        variants build
   #   buildScriptRuns      { runsFile; }: a file listing the `flags` output
   #                        of every build-script run of the plan, on both
   #                        platforms, and building nothing else

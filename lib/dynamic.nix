@@ -128,7 +128,7 @@ let
       outputOfIn =
         w: what: output:
         featureGates.outputOf nixFeatures "the ${what} of `${w.name}`" w.${output}.outPath "out";
-      # Without predicted roots (check and clippy plans) the outer
+      # Without predicted roots (check plans) the outer
       # derivation has only its `units.drv` and `runs.drv` outputs.
       predicted = if roots == null then [ ] else roots.roots;
       full = outerOf {

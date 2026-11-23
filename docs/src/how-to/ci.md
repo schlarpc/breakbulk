@@ -108,10 +108,9 @@ Give that member's host units their own clippy arguments, in the clippy
 variant only:
 
 ```nix
-workspaces.main.variants.clippy = {
-  mode = "clippy";
-  clippyArgs = [ "-D" "warnings" ];
-};
+workspaces.main.imports = [
+  (breakbulk.variants.clippy { args = [ "-D" "warnings" ]; })
+];
 # `runtime` is a dependency and a build-dependency of `app`.
 packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS =
   lib.concatMapStrings (a: a + "__CLIPPY_HACKERY__") [
@@ -121,9 +120,9 @@ packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS =
 ```
 
 `CLIPPY_ARGS` is how clippy-driver gets its arguments, each followed by
-`__CLIPPY_HACKERY__`. The value replaces `clippyArgs` for the host copy
-only. The target copy is still linted with `clippyArgs`, and no other
-variant's units rebuild.
+`__CLIPPY_HACKERY__`. The value replaces the preset's `args` for the
+host copy only. The target copy is still linted with `args`, and no
+other variant's units rebuild.
 
 ## Read a failed `--keep-going` build
 

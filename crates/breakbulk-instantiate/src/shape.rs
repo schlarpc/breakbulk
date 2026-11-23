@@ -53,8 +53,8 @@ pub struct Outer {
     /// (`<…>.drv`). Must cover every root of the instantiation.
     pub outputs: BTreeMap<String, String>,
     /// The output for a derivation that depends on every output of every
-    /// unit (`units.drv`): building it builds the whole plan, as check and
-    /// clippy variants need (they have no roots). None: no such output.
+    /// unit (`units.drv`): building it builds the whole plan, as check
+    /// variants need (they have no roots). None: no such output.
     #[serde(default)]
     pub units: Option<String>,
     /// The output for a derivation that depends on the `flags` output of

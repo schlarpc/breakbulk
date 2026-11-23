@@ -928,14 +928,17 @@ in
           {
             workspaces.a = {
               variantDefaults.checks.buildScriptPaths = false;
-              variants.clippy = {
-                mode = "clippy";
-                profile = "dev";
-                checks = {
-                  check = false;
-                  docs = true;
-                };
-              };
+              imports = [
+                (breakbulk.variants.clippy {
+                  variant = {
+                    profile = "dev";
+                    checks = {
+                      check = false;
+                      docs = true;
+                    };
+                  };
+                })
+              ];
             };
           }
         ]).checks;
@@ -1486,7 +1489,7 @@ in
       # working directory's), which clippy reads.
       clippy = predictSourcesRepo null [
         {
-          workspaces.main.variants.clippy.mode = "clippy";
+          workspaces.main.imports = [ (breakbulk.variants.clippy { }) ];
         }
       ];
       noRuns = specsOf (predictSourcesRepo null [
@@ -1577,19 +1580,17 @@ in
     evalCheck "nextest-unrelated-version" (builtins.toJSON (runs before));
 
   # The same test units where Cargo passes no `--test`: in the clippy
-  # variant (`cargo check --all-targets`, which checks the integration test
-  # and the bench without the libtest harness, and the example), and in the
-  # bench variant (the bench reads `testdata/`, in `test.sourceScope`).
+  # variant (`cargo check --lib --bins --tests --examples`, which checks
+  # the integration test without the libtest harness and the example, and,
+  # as `cargo test` builds, not the bench), and in the bench variant (the
+  # bench reads `testdata/`, in `test.sourceScope`).
   test-only-variants =
     let
       repo = testOnlyRepo null [
         {
-          workspaces.main.variants = {
-            clippy = {
-              mode = "clippy";
-              profile = "dev";
-            };
-            bench = {
+          workspaces.main = {
+            imports = [ (breakbulk.variants.clippy { variant.profile = "dev"; }) ];
+            variants.bench = {
               profile = "bench";
               benches = true;
             };
@@ -1601,11 +1602,13 @@ in
       clippyTest = lib.attrNames (unitsNamed i.clippy "test");
       benchUnits = lib.attrNames (unitsNamed i.bench "bench");
     in
-    assert lib.assertMsg (lib.all (n: lib.elem n clippyTest) [
-      "proto-0.1.0-test-datadriven"
-      "proto-0.1.0-test-unharnessed"
-      "proto-0.1.0-test-reads_tests"
-    ]) "test-only-variants: clippy test-plan units ${builtins.toJSON clippyTest}";
+    assert lib.assertMsg (
+      lib.all (n: lib.elem n clippyTest) [
+        "proto-0.1.0-test-datadriven"
+        "proto-0.1.0-test-reads_tests"
+      ]
+      && !lib.elem "proto-0.1.0-test-unharnessed" clippyTest
+    ) "test-only-variants: clippy test-plan units ${builtins.toJSON clippyTest}";
     assert lib.assertMsg (lib.elem "proto-0.1.0-test-unharnessed" benchUnits)
       "test-only-variants: bench-plan units ${builtins.toJSON benchUnits}";
     pkgs.runCommand "test-only-variants"
@@ -3144,7 +3147,7 @@ in
             // ws;
           }
         ]).config.workspaces.main.variants;
-      withClippy = variantsOf { variants.clippy.mode = "clippy"; };
+      withClippy = variantsOf { imports = [ (breakbulk.variants.clippy { }) ]; };
       changed = variantsOf { variants.default.profile = "release"; };
       renamed = variantsOf {
         defaultVariant = "release";

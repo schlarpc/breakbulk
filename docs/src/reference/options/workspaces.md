@@ -945,10 +945,11 @@ pkgs.cargo
 
 ## `workspaces.<name>.toolchain.clippy`
 
-clippy (with ` bin/clippy-driver `), for ` clippy ` variants\.
+clippy (with ` bin/clippy-driver `), for clippy variants
+([` breakbulk.variants.clippy `](\.\./presets\.md\#clippy))\.
 It must be built for the same rustc: planning compares
-` clippy-driver --rustc --print sysroot ` with rustc’s and
-fails naming this option when they differ\. The default is
+` clippy-driver <rustc> --print sysroot ` with rustc’s
+sysroot and fails when they differ\. The default is
 nixpkgs’ clippy with nixpkgs’ rustc, and ` rustc ` itself
 otherwise, as a rustup-style toolchain with the clippy
 component (rust-overlay’s default profile, fenix’s
@@ -1321,7 +1322,7 @@ settings (use ` profile = "bench" `): bench binaries, and lib
 and bin harnesses in bench mode, at
 ` target.<triple>.variants.<v>.benches.<pkg>.<binary> `\. ` false `:
 none, the plan is not traced\. ` true `: those of the ` packages `
-selection\. A list of packages, or the exclude form: ` cargo bench -p <pkg> … ` for those only\. Build and coverage variants
+selection\. A list of packages, or the exclude form: ` cargo bench -p <pkg> … ` for those only\. Build variants
 only\. The test plan
 builds no benches (` cargo test --no-run ` does not)\. Each
 bench binary also runs once, with ` --test `, as a check of the
@@ -1404,7 +1405,7 @@ attribute set of (Cargo config value)
 
 ## `workspaces.<name>.variants.<name>.checks.benches`
 
-Put this build or coverage variant’s enabled bench runs
+Put this build variant’s enabled bench runs
 (` <pkg>/bench/<binary> `, each bench binary of
 [` benches `](\#workspacesnamevariantsnamebenches) once in test
 mode, ` bench.enable `) in ` repo.checks `, on a target that can
@@ -1427,10 +1428,10 @@ true
 Put the ` buildScriptPaths ` check of each plan whose outputs
 are in ` repo.checks ` there too
 ([missing build-script paths](\.\./\.\./explanation/configuration\.md\#missing-build-script-paths)):
-of a build or coverage variant, the build plan’s with
+of a build variant, the build plan’s with
 ` products ` (` buildScriptPaths/build `) and the test plan’s
 with ` tests ` (` buildScriptPaths/test `), on any target; of a
-check or clippy variant, those of the plans its ` check `
+check variant, those of the plans its ` check `
 builds\. For the whole workspace, set it in
 [` variantDefaults `](\#workspacesnamevariantdefaults); for one
 target, in that target’s ` variantDefaults `\.
@@ -1449,7 +1450,7 @@ true
 
 ## `workspaces.<name>.variants.<name>.checks.check`
 
-Put this check or clippy variant’s ` check ` (every unit of
+Put this check variant’s ` check ` (every unit of
 its plans) in ` repo.checks `, as
 ` <ws>/<triple>/variant-<v>/check `\.
 
@@ -1494,7 +1495,7 @@ true
 
 ## `workspaces.<name>.variants.<name>.checks.products`
 
-Put this build or coverage variant’s products in
+Put this build variant’s products in
 ` repo.checks `, as ` <pkg>/build `, and their checks, as
 ` <pkg>/<check> `, under the variant’s prefix:
 ` <ws>/<triple>/ ` for the default variant,
@@ -1519,7 +1520,7 @@ true
 
 ## `workspaces.<name>.variants.<name>.checks.tests`
 
-Put this build or coverage variant’s enabled test runs
+Put this build variant’s enabled test runs
 (` <pkg>/test/<binary> `, ` test.binaries.<key>.enable `) and
 doctests (` <pkg>/doctest `, ` test.doctest.enable `) in
 ` repo.checks `, on a target that can run tests
@@ -1532,35 +1533,6 @@ boolean
 
 ```nix
 true
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.variants.<name>.clippyArgs`
-
-Clippy’s own arguments, as in ` cargo clippy -- ARGS `
-(` CLIPPY_ARGS `), for a ` clippy ` variant\. They reach only the
-units clippy-driver compiles (workspace members), on both
-sides\. A ` CLIPPY_ARGS ` in a package’s ` env ` replaces them for
-that package’s units\.
-
-*Type:*
-list of string
-
-*Default:*
-
-```nix
-[ ]
-```
-
-*Example:*
-
-```nix
-[
-  "-D"
-  "warnings"
-]
 ```
 
 *Declared by:*
@@ -1609,27 +1581,18 @@ list of string
 
 ## `workspaces.<name>.variants.<name>.mode`
 
-What the variant compiles\. ` build `: products and test binaries
-(` cargo build `, ` cargo test `)\. ` check `: ` cargo check `
-and ` cargo check --all-targets `, metadata only, no products or
-test runs; ` target.<triple>.variants.<v>.check ` builds every
-unit and is in ` repo.checks ` (` checks.check `)\. ` clippy `: as ` check `, with
-clippy-driver as ` RUSTC_WORKSPACE_WRAPPER ` (workspace members
-only, so dependencies are shared with ` check `), and the
-` clippy.toml ` files of each member’s directory and its parents
-up to the repository root (` CLIPPY_CONF_DIR `)\. A member that
-is also a build-dependency is linted twice, and its host copy
-without the project’s rustflags, so with ` -D warnings ` it can
-fail where ` cargo clippy ` passes; give its host units their
-own ` CLIPPY_ARGS ` with
-` packages.<name>.variant.<v>.forHost.env ` (see [Run the checks
-in CI](\.\./\.\./how-to/ci\.md\#a-clippy-check-fails-where-cargo-clippy-passes))\.
-` coverage `: ` build ` with ` -C instrument-coverage ` on target
-units\. Use the same profile as the build variant to share host
-units; Cargo’s own ` clippy ` uses the dev profile\.
+Which Cargo command each plan of the variant traces\. ` build `:
+products and test binaries (` cargo build `, ` cargo test `)\.
+` check `: ` cargo check `, and for the test plan ` cargo check --lib --bins --tests --examples ` (what ` cargo test ` builds), metadata
+only, no products or test runs;
+` target.<triple>.variants.<v>.check ` builds every unit and is in
+` repo.checks ` (` checks.check `)\. A lint (clippy) or a coverage
+build is a preset over the other variant options:
+[` breakbulk.variants.clippy `](\.\./presets\.md\#clippy) and
+[` breakbulk.variants.coverage `](\.\./presets\.md\#coverage)\.
 
 *Type:*
-one of “build”, “check”, “clippy”, “coverage”
+one of “build”, “check”
 
 *Default:*
 
@@ -1662,8 +1625,8 @@ Products (` packages.<pkg> `) and their checks, from the build
 plan\. ` true `: one for every package ` packages ` selects\.
 ` false `: none, and the build plan is not traced: a target that
 is only tested (the native target of crates that ship as wasm
-and run their unit tests natively); a check or clippy
-variant’s ` check ` then covers the test plan only\. A list of
+and run their unit tests natively); a check variant’s ` check `
+then covers the test plan only\. A list of
 packages, or the exclude form: products for those only, from
 the same build plan of ` packages `\. Test binaries, test runs,
 doctests and benches do not depend on it\.
@@ -1694,7 +1657,7 @@ false
 ## `workspaces.<name>.variants.<name>.profile`
 
 The Cargo profile (` --profile `) of the build plan, and of the
-bench plan\. A check or clippy variant’s test plan uses it too\.
+bench plan\. A check variant’s test plan uses it too\.
 Units are shared between variants whose profiles have the same
 settings, whatever their names\.
 
@@ -1716,8 +1679,9 @@ As ` rustcWrapper `, for workspace members only, as Cargo’s
 ` build.rustc-workspace-wrapper ` (` RUSTC_WORKSPACE_WRAPPER `):
 Cargo starts ` [<rustcWrapper>] <wrapper> <rustc> ARGS… ` for
 members, so dependencies stay shared with a variant without
-it\. A clippy variant’s is clippy-driver; set this with
-` mode = "check" ` for another lint driver\.
+it\. Clippy’s is clippy-driver
+([` breakbulk.variants.clippy `](\.\./presets\.md\#clippy) sets it);
+` wrapperEnv ` and ` wrapperConfig ` say what it reads\.
 
 *Type:*
 null or string
@@ -1752,10 +1716,10 @@ on it\. It applies in every mode, and to every plan but the doc
 plan\. A unit’s derivation names the wrapper, so units are not
 shared with a variant without it\.
 
-When the wrapper is a rustc driver, it must be built for this
-rustc: a driver with its own sysroot makes the units name that
-sysroot’s crates, which instantiation rejects as undeclared
-inputs\.
+The planner checks that ` <wrapper> <rustc> --print sysroot `
+prints rustc’s sysroot: a rustc driver must be built for this
+rustc, as a driver with its own sysroot makes the units name
+that sysroot’s crates\.
 
 *Type:*
 null or string
@@ -1770,6 +1734,35 @@ null
 
 ```nix
 "${verus}/bin/verus-driver"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.rustflags`
+
+Flags added to the rustc arguments of the variant’s target
+units, after the target’s own (` targets.<triple>.rustflags `),
+under the key the project’s rustflags use (as the target’s
+are)\. Host units (build scripts, proc macros) do not get them,
+so they stay shared with other variants\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  "-C"
+  "instrument-coverage"
+]
 ```
 
 *Declared by:*
@@ -1908,7 +1901,7 @@ one of “auto”, “cargo”, “remap”, “keep”
 
 This variant’s settings on one of its targets: any option of
 the variant (` features `, ` noDefaultFeatures `, ` profile `,
-` testProfile `, ` cargoConfig `, ` clippyArgs `, ` packages `, ` tests `, ` benches `, ` checks.tests `, …)
+` testProfile `, ` cargoConfig `, ` rustflags `, ` wrapperEnv `, ` packages `, ` tests `, ` benches `, ` checks.tests `, …)
 except ` targets `\. They apply over the target’s
 ` variantDefaults `
 (` workspaces.<ws>.targets.<triple>.variantDefaults `) and the
@@ -1975,7 +1968,7 @@ null
 
 ## `workspaces.<name>.variants.<name>.testProfile`
 
-The Cargo profile of a build or coverage variant’s test plan
+The Cargo profile of a build variant’s test plan
 (test binaries, test runs, doctests)\. The default, ` test `, is
 what plain ` cargo test ` uses: Cargo’s ` test ` profile inherits
 ` dev ` (debug assertions on, no optimization), with the
@@ -1983,8 +1976,8 @@ project’s ` [profile.test] ` over it\. Set it to the variant’s
 ` profile ` (` "release" `) to build tests as the products are
 built: the test plan then shares its dependency units with the
 build plan, while with two profiles of different settings it
-shares none\. Check and clippy variants ignore it: they trace
-one Cargo command with ` profile `, as ` cargo check ` and ` cargo clippy ` do\.
+shares none\. Check variants ignore it: they trace one Cargo
+command with ` profile `, as ` cargo check ` and ` cargo clippy ` do\.
 
 *Type:*
 string
@@ -2006,12 +1999,11 @@ string
 
 ## `workspaces.<name>.variants.<name>.tests`
 
-The test plan (` cargo test --no-run `; for a check or clippy
-variant, ` cargo check --all-targets `): test binaries, test
+The test plan (` cargo test `; for a check variant, ` cargo check --lib --bins --tests --examples `): test binaries, test
 runs, test apps and doctests\. ` true `: those of the ` packages `
 selection\. ` false `: none, and the test plan is not traced: a
 target that is only built (a wasm component whose tests run
-natively, with ` targets.<triple>.variantDefaults.tests = false `), or on a check or clippy variant plain ` cargo check `
+natively, with ` targets.<triple>.variantDefaults.tests = false `), or on a check variant plain ` cargo check `
 (libraries and binaries)\. A list of packages, or the exclude
 form: the test plan is ` cargo test -p <pkg> … ` for those only\.
 ` { exclude = [ … ]; } `: every member
@@ -2033,6 +2025,133 @@ true
 
 ```nix
 { exclude = [ "*-bench" ]; }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.wrapperConfig`
+
+The files the workspace wrapper (` rustcWorkspaceWrapper `) reads
+besides the crate’s sources: clippy’s ` clippy.toml ` and the
+workspace’s ` Cargo.toml `\.
+
+*Type:*
+submodule
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.wrapperConfig.dirVar`
+
+The variable that gives the wrapper’s units their
+member’s directory in that tree, where the wrapper
+starts its own lookup\. Unset (` null `): no tree\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+"CLIPPY_CONF_DIR"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.wrapperConfig.search`
+
+The workspace wrapper’s config file names, looked for in
+each member’s directory and its parents up to the
+repository root\. With ` dirVar `, the files found make one
+tree per member, outside the source views, so editing one
+rebuilds only the units the wrapper runs on\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  ".clippy.toml"
+  "clippy.toml"
+]
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.wrapperConfig.workingDirFiles`
+
+Files the wrapper reads from the compile’s working
+directory (the workspace root for a member), relative to
+it, which every source view (predicted ones included)
+then holds\. Clippy reads the workspace’s ` Cargo.toml `
+there for its ` [lints] ` checks\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  "Cargo.toml"
+]
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.wrapperEnv`
+
+Variables for the workspace wrapper (` rustcWorkspaceWrapper `):
+Cargo gets them, as ` cargo clippy ` gives clippy-driver
+` CLIPPY_ARGS `, and only the compile units the wrapper runs on
+keep them, so every other unit stays shared with a variant
+without them\. A package’s ` env ` still replaces them for that
+package’s units\.
+
+*Type:*
+attribute set of string
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{ CLIPPY_ARGS = "-Dwarnings__CLIPPY_HACKERY__"; }
+
 ```
 
 *Declared by:*

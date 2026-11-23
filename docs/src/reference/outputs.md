@@ -79,7 +79,7 @@ repo = {
         docs;                        # `cargo doc`'s folder
         buildScriptPaths.<plan>;     # each plan's check (build, test)
         plans = { build; test; doc; };   # plan.json, for debugging and explainSharing
-        check;                       # check and clippy variants only
+        check;                       # check variants only
       };
       packages.<pkg>;        # the default variant's products
       runner;                # the target runner (a list), or null
@@ -160,7 +160,7 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 | doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
 | bench run | `…/<pkg>/bench/<binary>` | `…/variant-<v>/<pkg>/bench/<binary>` |
 | plan check | `…/buildScriptPaths/<plan>` | `…/variant-<v>/buildScriptPaths/<plan>` |
-| check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
+| check variant | | `<ws>/<triple>/variant-<v>/check` |
 | docs | `<ws>/<triple>/docs` | `<ws>/<triple>/variant-<v>/docs` |
 | your own | `<name>` of [`checks`](options/repository.md#checks) | |
 
@@ -189,7 +189,7 @@ of a plan the variant traces (the build plan, `<plan>` is `build`,
 unless it has `products = false`; the test plan, `test`, unless it has
 `tests = false`) whose outputs are in: the build plan's with
 `checks.products`, the test plan's with `checks.tests`, on any target;
-a check or clippy variant's with `checks.check`, for the plans its
+a check variant's with `checks.check`, for the plans its
 `check` builds.
 
 Groups are checks too, each an aggregate (a `linkFarm` of the checks it
@@ -220,7 +220,7 @@ directory, which the app removes when the binary exits. That app waits
 for the binary and passes INT and TERM on to it; any other app replaces
 its own process with the binary.
 
-`repo.apps` has every test app of every build or coverage variant, in
+`repo.apps` has every test app of every build variant, in
 the shape of a flake's `apps` output (`{ type = "app"; program; meta; }`),
 for `apps.<system> = repo.apps;`. Each is named as its test run's check
 in the table above (`…/<pkg>/test/<binary>`,

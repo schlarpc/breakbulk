@@ -58,7 +58,7 @@
 # doctests), `<pkg>/bench-<name>` (bench runs),
 # `buildScriptPaths/{build,test}` (the plans' checks), `docs`, under
 # `<ws>/<triple>/` for the default variant and `<ws>/<triple>/variant-<v>/`
-# for the others; check and clippy variants as
+# for the others; check variants as
 # `<ws>/<triple>/variant-<v>/check` and `…/buildScriptPaths/<plan>`;
 # then the user's own `checks.<name>`. Every proper prefix of those names,
 # `all` and each of `checkGroups` is also a check: an aggregate of the
@@ -1227,9 +1227,6 @@ let
     debugInfo = targetField wsName triple "debugInfo" null;
     targetStages = targetDefinitions wsName triple "stages";
   };
-  shippedRemapScopeOf =
-    wsName: triple: v:
-    products.shippedRemapScope (stageSetArgs wsName triple // { coverage = v.mode == "coverage"; });
 
   instance =
     wsName: ws: triple: vName:
@@ -1274,7 +1271,7 @@ let
         packageOverrides = instOverrides wsName entries triple vName;
         name = "${wsName}-${triple}-${vName}";
         inherit delivery;
-        shippedRemapScope = shippedRemapScopeOf wsName triple v;
+        shippedRemapScope = products.shippedRemapScope (stageSetArgs wsName triple);
         inherit (v) sourcePaths;
         traits = traitsOf wsName triple;
         packages = memberConfigs wsName triple vName;
@@ -1282,13 +1279,13 @@ let
         inherit nixFeatures;
         inherit (v)
           mode
-          clippyArgs
           rustcWrapper
+          rustcWorkspaceWrapper
+          wrapperEnv
+          wrapperConfig
           sideFiles
           ;
-        rustcWorkspaceWrapper =
-          if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else v.rustcWorkspaceWrapper;
-        clippyOption = "workspaces.${wsName}.toolchain.clippy";
+        variantOption = "workspaces.${wsName}.variants.${vName}";
         bench = bsel != false;
         docsNoDeps = v.docs.noDeps;
         inherit (s)
@@ -1317,9 +1314,9 @@ let
       // {
         targetEnv = debugEnv // (s.mkWorkspace.targetEnv or { });
       }
-      # Coverage: `-C instrument-coverage` on target units, through the
-      # spec's rustflags (so under the key the project uses).
-      // lib.optionalAttrs (v.mode == "coverage") {
+      # The variant's rustflags: target units, through the spec's
+      # rustflags (so under the key the project uses).
+      // lib.optionalAttrs (v.rustflags != [ ]) {
         spec =
           let
             base =
@@ -1334,10 +1331,7 @@ let
           in
           base
           // {
-            rustflags = base.rustflags ++ [
-              "-C"
-              "instrument-coverage"
-            ];
+            rustflags = base.rustflags ++ v.rustflags;
           };
       }
     );
@@ -1403,7 +1397,7 @@ let
             vName: inst:
             let
               v = variantCells.${wsName}.${triple}.${vName};
-              checking = v.mode == "check" || v.mode == "clippy";
+              checking = v.mode == "check";
               # Test outputs: none with `tests = false`.
               tsel = testSelOf wsName v;
               testsOn = tsel != false;
@@ -1415,7 +1409,7 @@ let
               bSel = if bsel != false then bsel else null;
               packages = if psel == false then { } else productsOf wsName ws triple vName v inst psel;
               # The plans the variant traces, of the build and test plans:
-              # a check or clippy variant's `check` builds their units.
+              # a check variant's `check` builds their units.
               traced = lib.optional (psel != false) "build" ++ lib.optional testsOn "test";
             in
             {
@@ -1439,8 +1433,8 @@ let
               inherit (inst) docs;
             }
             // lib.optionalAttrs (checking && traced != [ ]) {
-              # Every unit of the plans it traces (`cargo check` and `cargo
-              # check --all-targets`): for clippy, its lints on every
+              # Every unit of the plans it traces (`cargo check` and the test
+              # plan's check form): with a lint driver, its lints on every
               # workspace member. With `tests = false`, the build plan's
               # only; with `products = false`, the test plan's.
               check = variantsLib.unitsCheck {
@@ -1575,10 +1569,10 @@ let
 
   # repo.checks, for every workspace and target, from each variant, as
   # its `checks` record says (the default variant's under the target, the
-  # others' under `variant-<v>/`): a build or coverage variant's products
+  # others' under `variant-<v>/`): a build variant's products
   # (`<pkg>/build`) and their checks (`products`), every enabled test run
   # (`<pkg>/test/<binary key>`) and doctest (`tests`), and bench run
-  # (`<pkg>/bench/<binary key>`, `benches`); a check or clippy
+  # (`<pkg>/bench/<binary key>`, `benches`); a check
   # variant's `check` (`check`); the `buildScriptPaths/<plan>` of the
   # plans whose outputs are in (`buildScriptPaths`); and the docs
   # (`docs`). Then the user's own (`checks.<name>`).
@@ -1592,7 +1586,7 @@ let
           let
             vc = variantCells.${wsName}.${triple}.${vName};
             c = vc.checks;
-            building = vc.mode == "build" || vc.mode == "coverage";
+            building = vc.mode == "build";
             prefix = variantPrefix wsName triple vName;
             # The plans whose outputs are in repo.checks.
             plansIn =
@@ -1674,7 +1668,7 @@ let
     else
       "${wsName}/${triple}/variant-${vName}";
 
-  # repo.apps: every test app of every build or coverage variant, in a
+  # repo.apps: every test app of every build variant, in a
   # flake's `apps` shape, named as its test run's check
   # (`<prefix>/<pkg>/test/<binary key>`). Unlike repo.checks, it does not ask
   # for `checks.tests` or an enabled run: the sandbox's skip lists and
@@ -1691,7 +1685,7 @@ let
             vc = variantCells.${wsName}.${triple}.${vName};
             prefix = variantPrefix wsName triple vName;
           in
-          lib.optionalAttrs (vc.mode == "build" || vc.mode == "coverage") (
+          lib.optionalAttrs (vc.mode == "build") (
             lib.concatMapAttrs (
               pkg: as:
               lib.mapAttrs' (

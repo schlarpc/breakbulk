@@ -131,11 +131,11 @@ let
           `/homeless-shelter`, so a test that writes to its home fails, as
           compiles do. `XDG_*` stay unset, so tools fall back to
           directories under `HOME`.
-        - `coverage`, in coverage variants: `LLVM_PROFILE_FILE` into
-          `$TMPDIR/profraw`, which the run moves into `$out/profraw` when
-          it passes. breakbulk adds it to the run, so
-          `coverage = null` removes it and a whole-set `lib.mkForce` does
-          not.
+        - `coverage`, in the variant of
+          [`breakbulk.variants.coverage`](../presets.md#coverage) (its
+          `memberDefaults.variant.<v>` layer): `LLVM_PROFILE_FILE` into
+          `$TMPDIR/profraw`, which the run's `postRun` moves into
+          `$out/profraw` when it passes.
 
         Doctests and test apps do not run them: rustdoc runs the examples
         itself, with a fresh `HOME` and `RUST_TEST_THREADS`
@@ -437,8 +437,8 @@ let
             layer order. The curated defaults keep `Cargo.toml` for the
             dependents of `proc-macro-crate` (also the workspace's),
             `find-crate` and `bevy_macro_utils`, which read it from
-            `CARGO_MANIFEST_DIR`, and clippy variants keep the compiles'
-            working directory's `Cargo.toml`, which clippy reads.
+            `CARGO_MANIFEST_DIR`, and a variant's `wrapperConfig.workingDirFiles`
+            are kept (clippy's: the working directory's `Cargo.toml`).
           '';
         };
         buildScriptRuns = mkOption {

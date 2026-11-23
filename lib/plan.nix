@@ -7,13 +7,13 @@
 #     vendor;                # breakbulk.mkVendor output
 #     cargo; rustc;          # the toolchain (rustc provides bin/rustc and bin/rustdoc)
 #     tools;                 # breakbulk.mkTools pkgs
-#     kind = "build";        # or "test", "bench" (`cargo bench --no-run`), "doc"
-#     noDeps = false;        # kind = "doc": `cargo doc --no-deps`
-#     mode = "build";        # or "check", "clippy", "coverage" (the variant's)
+#     argv = [ "test" ];     # the traced Cargo command (lib/cargo-commands.nix)
+#     kind = "build";        # the plan's kind: "test", "bench", "doc" (a label)
+#     mode = "build";        # or "check" (the variant's; a label)
 #     rustcWrapper = null;   # Cargo's build.rustc-wrapper (an executable path)
-#     rustcWorkspaceWrapper = null;  # build.rustc-workspace-wrapper; clippy-driver for mode = "clippy"
-#     clippyOption = null;   # the option that set clippy-driver, named when it does not match rustc
-#     clippyArgs = [ ];      # clippy's arguments (`cargo clippy -- ARGS`)
+#     rustcWorkspaceWrapper = null;  # build.rustc-workspace-wrapper
+#     wrapperEnv = { };      # env kept only where the workspace wrapper runs
+#     variantOption = null;  # where the variant is set, for messages
 #     target = "x86_64-unknown-linux-gnu";
 #     profile = "dev";
 #     features = [ ]; allFeatures = false; noDefaultFeatures = false;
@@ -46,8 +46,8 @@
       cargo,
       rustc,
       tools,
+      argv,
       kind ? "build",
-      noDeps ? false,
       target,
       profile ? "dev",
       features ? [ ],
@@ -67,8 +67,8 @@
       mode ? "build",
       rustcWrapper ? null,
       rustcWorkspaceWrapper ? null,
-      clippyOption ? null,
-      clippyArgs ? [ ],
+      wrapperEnv ? { },
+      variantOption ? null,
       # The toolchain's capabilities (lib/toolchain-facts.nix), or null for
       # toolchainFacts' own for this rustc and cargo.
       capabilities ? null,
@@ -114,7 +114,10 @@
         "--crates-io-directory"
         vendor.cratesIo.directory
       ]
-      ++ lib.optional (kind == "doc" && noDeps) "--no-deps"
+      ++ lib.concatMap (a: [
+        "--cargo-arg"
+        a
+      ]) argv
       ++ lib.optionals (mode != "build") [
         "--mode"
         mode
@@ -131,14 +134,16 @@
         "--rustc-workspace-wrapper"
         "${rustcWorkspaceWrapper}"
       ]
-      ++ lib.optionals (mode == "clippy" && clippyOption != null) [
-        "--clippy-option"
-        clippyOption
+      ++ lib.concatLists (
+        lib.mapAttrsToList (k: v: [
+          "--wrapper-env"
+          "${k}=${v}"
+        ]) wrapperEnv
+      )
+      ++ lib.optionals (variantOption != null) [
+        "--variant-option"
+        variantOption
       ]
-      ++ lib.concatMap (a: [
-        "--clippy-arg"
-        a
-      ]) clippyArgs
       ++ lib.concatMap (f: [
         "--features"
         f

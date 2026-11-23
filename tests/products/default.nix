@@ -119,7 +119,7 @@
 #                    mkForce, priorities still count (`checks` on one
 #                    target only); `testProfile` per target (check
 #                    variants keep `profile`); invalid layers fail evaluation
-#   variants-clippy-strict   `clippyArgs = [ "-D" "clippy::len_zero" ]`
+#   variants-clippy-strict   `variants.clippy { args = [ "-D" "clippy::len_zero" ]; }`
 #                    fails the member's clippy unit naming the lint
 #   variants-driver   a toy rustc driver (it writes `<stem>.side` beside
 #                    each crate file, folding in what it finds beside each
@@ -131,7 +131,7 @@
 #                    build-script run gets it as RUSTC_WRAPPER; as
 #                    `rustcWorkspaceWrapper`, dependency units
 #                    are the check variant's and only members get side
-#                    files; a clippy variant refuses a workspace wrapper
+#                    files; `wrapperEnv` without a workspace wrapper fails
 #   variants-clippy-conf   clippy units find `clippy.toml` above the
 #                    workspace (a root `disallowed-methods` fails
 #                    `rooted`) and a member's own file instead of the
@@ -167,7 +167,7 @@
 #                    cargo, `toolchain.clippy` defaults to that toolchain
 #                    and the clippy plan builds; nixpkgs' clippy (another
 #                    sysroot) and a toolchain without clippy-driver fail
-#                    planning naming `workspaces.main.toolchain.clippy`
+#                    planning naming the variant's `rustcWorkspaceWrapper`
 #   variants-coverage   the coverage product writes a profile, and the
 #                    coverage test run keeps its profiles in $out/profraw
 #   embed            products as inputs: `packages.embedder.env` names
@@ -397,7 +397,7 @@ let
       {
         workspaces = lib.genAttrs [ "inherited" "own" ] (path: {
           inherit path;
-          variants.clippy.mode = "clippy";
+          imports = [ (breakbulk.variants.clippy { }) ];
           memberDefaults.predictSources.enable = predict;
         });
       }
@@ -765,30 +765,24 @@ let
             mode = "check";
             profile = "release";
           };
-          clippy = {
-            mode = "clippy";
-            profile = "release";
-          };
-          coverage = {
-            mode = "coverage";
-            profile = "release";
-          };
           # Plain `cargo check`.
           check-lib = {
             mode = "check";
             profile = "release";
             tests = false;
           };
-          strict = {
-            mode = "clippy";
-            profile = "release";
-            clippyArgs = [
+        };
+        imports = [
+          (breakbulk.variants.clippy { variant.profile = "release"; })
+          (breakbulk.variants.coverage { variant.profile = "release"; })
+          (breakbulk.variants.clippy {
+            name = "strict";
+            args = [
               "-D"
               "clippy::len_zero"
             ];
-          };
-        };
-        imports = [
+            variant.profile = "release";
+          })
           (breakbulk.variants.featurePowerset {
             scope = "workspace";
             features = [
@@ -928,10 +922,12 @@ let
     {
       workspaces.main = {
         path = "ws";
-        variants.default = {
-          mode = "coverage";
-          profile = "release";
-        };
+        imports = [
+          (breakbulk.variants.coverage {
+            name = "default";
+            variant.profile = "release";
+          })
+        ];
       };
     }
   ];
@@ -1277,17 +1273,16 @@ let
     {
       workspaces.main = {
         path = ".";
-        variants = {
-          default.profile = "dev";
-          clippy = {
-            mode = "clippy";
-            profile = "dev";
-            clippyArgs = [
+        variants.default.profile = "dev";
+        imports = [
+          (breakbulk.variants.clippy {
+            args = [
               "-D"
               "warnings"
             ];
-          };
-        };
+            variant.profile = "dev";
+          })
+        ];
       };
     }
   ];
@@ -1947,7 +1942,7 @@ in
 
   # A check variant with `tests = false` checks the build plan's units only
   # (`cargo check`); the default also checks the test plan's (`cargo check
-  # --all-targets`); with `products = false`, the test plan's only, and
+  # --lib --bins --tests --examples`); with `products = false`, the test plan's only, and
   # the build plan is not traced.
   variants-all-targets =
     let
@@ -2149,7 +2144,7 @@ in
             workspaces.main = {
               path = "ws";
               inherit toolchain;
-              variants.clippy.mode = "clippy";
+              imports = [ (breakbulk.variants.clippy { }) ];
             };
           }
         ]).workspaces.main.internal.instances.${native}.clippy.plans.build;
@@ -2173,8 +2168,8 @@ in
       ''
         cat $mismatch/testBuildFailure.log $missing/testBuildFailure.log
         grep -q 'is built for another rustc' $mismatch/testBuildFailure.log
-        grep -q 'set workspaces.main.toolchain.clippy to the clippy of this rustc' $mismatch/testBuildFailure.log
-        grep -q 'does not exist; set workspaces.main.toolchain.clippy' $missing/testBuildFailure.log
+        grep -q 'workspaces.main.variants.clippy.rustcWorkspaceWrapper (.*) is built for another rustc' $mismatch/testBuildFailure.log
+        grep -q 'workspaces.main.variants.clippy.rustcWorkspaceWrapper is .*, which does not exist' $missing/testBuildFailure.log
         touch $out
       '';
 
@@ -2218,13 +2213,14 @@ in
         lib.any (a: builtins.isString a && lib.hasInfix "\"RUSTC_WRAPPER\":" a) (
           lib.attrValues (u v "build")."hostdep-0.1.0-build-run".drvAttrs
         );
-      clippyWrapped = builtins.tryEval (
+      # Wrapper env without a workspace wrapper is a mistake.
+      unwrappedEnv = builtins.tryEval (
         (driverRepo {
-          clippy = {
-            mode = "clippy";
-            rustcWorkspaceWrapper = "${toyDriver}";
+          lone = {
+            mode = "check";
+            wrapperEnv.LINT = "1";
           };
-        }).workspaces.main.internal.instances.${native}.clippy.units.build
+        }).workspaces.main.internal.instances.${native}.lone.units.build
       );
     in
     assert lib.assertMsg (deps != [ ] && members != [ ]) "variants-driver: no units ${toString deps}";
@@ -2237,7 +2233,9 @@ in
     assert lib.assertMsg (
       sharedAll == [ ]
     ) "variants-driver: rustc wrapper left units unchanged ${toString sharedAll}";
-    assert lib.assertMsg (!clippyWrapped.success) "variants-driver: clippy took a workspace wrapper";
+    assert lib.assertMsg (
+      !unwrappedEnv.success
+    ) "variants-driver: wrapperEnv without a workspace wrapper";
     assert lib.assertMsg (
       runWrapper "driven" && !runWrapper "members"
     ) "variants-driver: RUSTC_WRAPPER of build-script runs";
@@ -2305,14 +2303,15 @@ in
               variants = {
                 default.profile = "dev";
                 check.mode = "check";
-                clippy = {
-                  mode = "clippy";
-                  clippyArgs = [
+              };
+              imports = [
+                (breakbulk.variants.clippy {
+                  args = [
                     "-D"
                     "clippy::disallowed_methods"
                   ];
-                };
-              };
+                })
+              ];
             };
           }
           extra

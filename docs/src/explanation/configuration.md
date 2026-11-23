@@ -17,7 +17,7 @@ most of the pieces this page describes:
   packages.app.env.UI_DIST =
     repo.workspaces.default.target.wasm32-unknown-unknown.packages.ui;
 
-  workspaces.default.variants.clippy.mode = "clippy";
+  workspaces.default.imports = [ (breakbulk.variants.clippy { }) ];
 }
 ```
 
@@ -327,7 +327,8 @@ packages.app.bench.enable = false;  # no bench-run checks for app
 
 `preRun` holds named shell snippets that run before the binary, after
 its environment is set. breakbulk's own entries give each run a fresh
-`HOME`, and, in a coverage variant, the
+`HOME`, and, in a coverage variant
+([`breakbulk.variants.coverage`](../reference/presets.md#coverage)), the
 profile path; a layer replaces one by its name or removes it with
 `null`. `stages` is the chain the binary goes through before it runs:
 with [`ca`](../reference/options/repository.md#ca) a `strip` stage, so
@@ -562,13 +563,13 @@ Cargo builds:
 | --- | --- | --- |
 | build and check or clippy | build scripts, proc macros and their dependencies | other dependencies, which Cargo compiles in check mode |
 | check and clippy | all dependencies | workspace members |
-| build and coverage | host units | target units, which carry the instrumentation flag |
+| build and coverage (`rustflags`) | host units | target units, which carry the instrumentation flag |
 | build and test plans, with `testProfile` set to the variant's `profile` | units whose features dev-dependencies do not change | units whose features they change |
 | build and test plans, with the default `testProfile` (`test`) | nothing, unless the `test` profile has the build profile's settings | everything |
 | profiles with the same settings (`release`, `bench`, a profile that only inherits `release`) | everything: a unit depends on a profile's settings, not its name | nothing |
 | profiles with different settings | nothing | everything |
 
-A build or coverage variant has two profiles. Its
+A build variant has two profiles. Its
 [`profile`](../reference/options/workspaces.md#workspacesnamevariantsnameprofile)
 (default `release`) builds the products.
 Its [`testProfile`](../reference/options/workspaces.md#workspacesnamevariantsnametestprofile)
@@ -583,10 +584,11 @@ build plan, and a cold build compiles each of them once instead of once
 per profile. Both options can differ per target, as every variant option
 can (below).
 
-Check and clippy variants check every target, as
-`cargo check --all-targets` does, unless
+A check variant checks what `cargo test` builds (`cargo check --lib
+--bins --tests --examples`), so it has the build variant's units, unless
 [`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests)
-(for a gate that runs plain `cargo check`). They trace one Cargo
+(for a gate that runs plain `cargo check`). Benches are not checked, as
+`cargo test` does not build them. They trace one Cargo
 command with one profile, `profile`, for both plans, and ignore
 `testProfile`. Give them the same profile as your build variant to
 share build scripts and proc macros; Cargo's own `clippy` uses the dev
@@ -606,10 +608,16 @@ at the repository root, above the workspace, works with no setup.
 
 A `CLIPPY_CONF_DIR` you set in a package's `env` replaces breakbulk's.
 
-A clippy variant is a check variant with clippy-driver as Cargo's
-workspace wrapper. Any variant can set Cargo's wrappers itself
-(`rustcWrapper`, `rustcWorkspaceWrapper`) to run another rustc driver,
-and keep the files it writes beside each crate with `sideFiles`
+A variant has one mode, `build` or `check`, the Cargo command its plans
+trace. A tool is a preset over the general options:
+[`breakbulk.variants.clippy`](../reference/presets.md#clippy) is a check
+variant with clippy-driver as Cargo's workspace wrapper
+(`rustcWorkspaceWrapper`), its arguments in `wrapperEnv` and its files in
+`wrapperConfig`; [`breakbulk.variants.coverage`](../reference/presets.md#coverage)
+is a build variant with `-C instrument-coverage` in `rustflags` and the
+profile handling in its runs' `preRun` and `postRun`. Any variant can set
+those options itself to run another rustc driver, and keep the files it
+writes beside each crate with `sideFiles`
 ([Run a rustc driver](../how-to/rustc-driver.md)).
 `rustfmt.toml` needs nothing: no unit reads it, and the
 [`fmt` check](../reference/options/workspaces.md#workspacesnamefmtenable)

@@ -34,6 +34,7 @@ let
       dynamic
       toolchainFacts
       packageSettings
+      cargoCommands
       ;
     featureGates = breakbulk.nixFeatures;
     targetTraitsLib = breakbulk.targetTraits;

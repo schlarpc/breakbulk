@@ -111,6 +111,7 @@ let
   };
   versionReq = import ./modules/version-req.nix { inherit lib; };
   variants = import ./variants.nix { inherit lib manifest; };
+  cargoCommands = import ./cargo-commands.nix { inherit lib; };
   testApps = import ./test-apps.nix {
     inherit lib;
     testRunsLib = testRuns;
@@ -262,6 +263,7 @@ let
       toolchainFacts
       featureGates
       packageSettings
+      cargoCommands
       ;
     targetTraitsLib = targetTraits;
   };
@@ -311,6 +313,7 @@ let
       dynamic
       checkGroups
       evalTargetSpec
+      cargoCommands
       ;
     nixFeatures = featureGates;
 

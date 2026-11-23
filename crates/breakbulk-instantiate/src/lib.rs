@@ -113,9 +113,9 @@ pub mod keys {
     pub fn run_target(target: &str) -> String {
         format!("run/{target}")
     }
-    /// A workspace member's clippy config tree, by directory.
-    pub fn clippy_conf(dir: &str) -> String {
-        format!("clippy-conf:{dir}")
+    /// A workspace member's tree of wrapper config files, by directory.
+    pub fn wrapper_config(dir: &str) -> String {
+        format!("wrapper-config:{dir}")
     }
     /// A fetched crate's source, by package id.
     pub fn crate_src(id: &str) -> String {
@@ -542,19 +542,39 @@ impl Resolve for Tokens<'_> {
         Ok(env)
     }
 
-    fn clippy_conf_dir(&self, _id: &UnitId, unit: &CompileUnit) -> Result<Option<String>, Error> {
+    fn wrapper_config_dir(
+        &self,
+        _id: &UnitId,
+        unit: &CompileUnit,
+    ) -> Result<Option<(String, String)>, Error> {
+        let Some(var) = &self.inputs.toolchains.wrapper_config_var else {
+            return Ok(None);
+        };
+        let Some(wrapper) = self.inputs.toolchains.tools.get("rustc-workspace-wrapper") else {
+            return Ok(None);
+        };
+        if !unit
+            .program
+            .iter()
+            .any(|p| matches!(p, breakbulk_format::Text::Literal(s) if s == wrapper))
+        {
+            return Ok(None);
+        }
         let Some(dir) = workspace_dir(&self.inputs.plan, &unit.package) else {
             return Ok(None);
         };
-        if !self.inputs.sources.clippy_conf.contains(dir) {
+        if !self.inputs.sources.wrapper_config.contains(dir) {
             return Ok(None);
         }
-        let tree = self.input(keys::clippy_conf(dir));
-        Ok(Some(if dir.is_empty() {
-            tree
-        } else {
-            format!("{tree}/{dir}")
-        }))
+        let tree = self.input(keys::wrapper_config(dir));
+        Ok(Some((
+            var.clone(),
+            if dir.is_empty() {
+                tree
+            } else {
+                format!("{tree}/{dir}")
+            },
+        )))
     }
 
     fn source_view(&self, _id: &UnitId, unit: &Unit) -> Result<Option<SourceView>, Error> {

@@ -78,16 +78,19 @@ in
         mode = "check";
         targets = [ wasm ];
       };
-      clippy = {
-        mode = "clippy";
-        targets = [ native ];
-        profile = "dev";
-        clippyArgs = [
+    };
+    imports = [
+      (breakbulk.variants.clippy {
+        args = [
           "--deny"
           "warnings"
         ];
-      };
-    };
+        variant = {
+          targets = [ native ];
+          profile = "dev";
+        };
+      })
+    ];
   };
 
   targets = {

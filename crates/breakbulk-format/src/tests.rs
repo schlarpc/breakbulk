@@ -12,7 +12,7 @@ const APP: &str = "path+file:///build/skeleton/app#0.1.0";
 fn example_json() -> String {
     format!(
         r#"{{
-  "version": 5,
+  "version": 6,
   "kind": "build",
   "cargo": "1.96.1", "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
   "target": "wasm32-unknown-unknown",
@@ -267,8 +267,8 @@ fn schema_is_strict() {
         1,
     );
     assert!(Plan::from_json(&json).is_err());
-    let json = example_json().replacen(r#""version": 5"#, r#""version": 6"#, 1);
-    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(6))));
+    let json = example_json().replacen(r#""version": 6"#, r#""version": 7"#, 1);
+    assert!(matches!(Plan::from_json(&json), Err(PlanError::Version(7))));
 }
 
 #[test]

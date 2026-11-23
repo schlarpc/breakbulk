@@ -42,8 +42,9 @@ packages.runtime.variant.clippy.forHost.env.CLIPPY_ARGS =
   ];
 ```
 
-This value replaces the variant's
-[`clippyArgs`](../reference/options/workspaces.md#workspacesnamevariantsnameclippyargs)
+This value replaces the arguments of
+[`breakbulk.variants.clippy`](../reference/presets.md#clippy) (the
+variant's [`wrapperEnv`](../reference/options/workspaces.md#workspacesnamevariantsnamewrapperenv))
 for the package's host units only: its host library and, if it has
 one, its build script's compile. The target copy and the other
 variants' units do not change.
@@ -69,7 +70,7 @@ them as nixpkgs' `buildRustPackage` does. Edit-compile loops belong in the
 
 - **Optimized units compile slower.** Units are cached, so each one costs
   this once, not on every build.
-- **Check and clippy variants use the profile too**, as `cargo check
+- **Check variants (clippy's too) use the profile too**, as `cargo check
   --release` does. Code under `cfg(debug_assertions)` is then not checked
   or linted.
 - **Test binaries do not.** A build variant's test plan uses

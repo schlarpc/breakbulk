@@ -427,7 +427,7 @@ capability):
 
 | Unit | Scope |
 | --- | --- |
-| Non-test target units of a target with `debugInfo = "split"` | `macro,diagnostics` (plus `coverage` in coverage variants); debug info keeps store paths |
+| Non-test target units of a target with `debugInfo = "split"` | `macro,diagnostics,coverage`, every scope but `debuginfo`; debug info keeps store paths |
 | Test binaries, and every target unit of a target with `debugInfo = "keep"` or `"strip"` | All scopes |
 | Host units (build scripts, proc macros), on every target | `macro,diagnostics`. They never ship, so `debugInfo` doesn't apply, and one build serves every target |
 | Any unit, with a rustc without `--remap-path-scope` (older than 1.95, or `remapPathScope = false`) | All scopes (no scope flag) |

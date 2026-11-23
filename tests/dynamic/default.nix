@@ -386,8 +386,8 @@ let
           variants = {
             default.profile = "dev";
             check.mode = "check";
-            clippy.mode = "clippy";
           };
+          imports = [ (breakbulk.variants.clippy { }) ];
         };
       }
     ];
@@ -398,13 +398,14 @@ let
       {
         workspaces = lib.genAttrs [ "inherited" "own" ] (path: {
           inherit path;
-          variants.clippy = {
-            mode = "clippy";
-            clippyArgs = [
-              "-W"
-              "clippy::lint_groups_priority"
-            ];
-          };
+          imports = [
+            (breakbulk.variants.clippy {
+              args = [
+                "-W"
+                "clippy::lint_groups_priority"
+              ];
+            })
+          ];
           memberDefaults.predictSources.enable = true;
         });
       }
@@ -476,7 +477,7 @@ let
         keepLogs
         {
           workspaces.main.variants = {
-            strict.clippyArgs = lib.mkForce [ ];
+            strict.wrapperEnv = lib.mkForce { };
             release-tests.targets = [ ];
           };
         }

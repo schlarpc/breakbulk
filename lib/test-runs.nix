@@ -27,9 +27,6 @@
 #                         # `bench` run settings, and no doctests
 #     ca = breakbulk.nixFeatures.defaultCa;   # true; false
 #     nixFeatures = <standalone>;  # as stages.mkProduct's
-#     coverage = false;   # coverage variants: each run keeps its profiles
-#                         # in $out/profraw (`preRunEntries`,
-#                         # `postRunSnippets`)
 #     name = "breakbulk";
 #   };
 #
@@ -440,25 +437,6 @@ rec {
   # A run's raw output, besides the build log: `$log` in `test.postRun`.
   logFile = "$TMPDIR/breakbulk-test.log";
 
-  # Coverage: the profiles go to $TMPDIR (the `coverage` entry of
-  # `preRunEntries`), and a snippet of `postRunSnippets` moves them into
-  # $out. LLVM_PROFILE_FILE's `%p` (the process ID) differs on every run,
-  # so they are renamed by content. The counters themselves can still
-  # differ (hash seeds, timing), so coverage runs are outside the
-  # `--rebuild` guarantee.
-  coverageEnv = ''
-    mkdir -p $TMPDIR/profraw
-    export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
-  '';
-  coverageCollect = ''
-    mkdir -p "$out/profraw"
-    for f in "$TMPDIR"/profraw/*.profraw; do
-      [ -e "$f" ] || continue
-      b=''${f##*/}
-      cp "$f" "$out/profraw/''${b%-*}-$(sha256sum "$f" | cut -c1-32).profraw"
-    done
-  '';
-
   # The option that adds a path to a test run's view: `test.runFiles` when
   # the run is narrowed to it, else the option of the "test" kind, also
   # when a `sources` function chose the run's files.
@@ -487,14 +465,9 @@ rec {
         ${tools.breakbulk-hints} ${spec} "$log" || true
       '';
 
-  # What runs after a passing run, in order: breakbulk's own (coverage),
-  # then the run's `postRun` (its layers' snippets, concatenated).
-  postRunSnippets =
-    {
-      cfg,
-      coverage ? false,
-    }:
-    lib.optional coverage coverageCollect ++ lib.optional (cfg.postRun != "") cfg.postRun;
+  # What runs after a passing run: the run's `postRun` (its layers'
+  # snippets, concatenated).
+  postRunSnippets = { cfg }: lib.optional (cfg.postRun != "") cfg.postRun;
 
   # The snippets in a subshell, so that a snippet's `cd` or `exit` stays
   # its own; `$log` and `$out` are set.
@@ -525,20 +498,13 @@ rec {
     lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)
     + lib.optionalString (path != [ ]) "export PATH=$PATH:${lib.makeBinPath path}\n";
 
-  # A run's `preRun` entries, without the removed ones: those of its run
-  # settings, over breakbulk's own `coverage` in a coverage variant (the
-  # settings know no variant mode, so the run adds it).
-  preRunEntries =
-    cfg: coverage:
-    lib.filterAttrs (_: v: v != null) (
-      lib.optionalAttrs coverage { coverage = coverageEnv; } // cfg.preRun
-    );
+  # A run's `preRun` entries, without the removed ones.
+  preRunEntries = cfg: lib.filterAttrs (_: v: v != null) cfg.preRun;
 
   # Shell lines that run a run's `preRun` entries in name order, in the
   # run's shell (their exports reach the test).
   preRunScript =
-    cfg: coverage:
-    lib.concatStrings (lib.mapAttrsToList (n: v: "# preRun.${n}\n${v}\n") (preRunEntries cfg coverage));
+    cfg: lib.concatStrings (lib.mapAttrsToList (n: v: "# preRun.${n}\n${v}\n") (preRunEntries cfg));
 
   # `CARGO_TARGET_TMPDIR` as the planner bakes it into integration tests
   # and benches (`TARGET_TMPDIR` in crates/breakbulk-plan/src/graph.rs).
@@ -914,7 +880,6 @@ rec {
       nixFeatures ? featureGates.standalone {
         inherit ca;
       },
-      coverage ? false,
       name ? "breakbulk",
       # The Cargo workspace's directory in the repository (a path), for a
       # test runner that reads the project's configuration.
@@ -1020,7 +985,7 @@ rec {
           stable = useCa;
         }}
         ${configScript p.testPkgs cfg}
-        ${preRunScript cfg coverage}
+        ${preRunScript cfg}
         log=${logFile}
       '';
 
@@ -1086,7 +1051,7 @@ rec {
             ${hint p b cfg}
             exit "$status"
           fi
-          ${postRunScript { inherit cfg coverage; }}
+          ${postRunScript { inherit cfg; }}
         '';
 
       # The path-package graph of a test root (TestSpec's `pathPackages`),

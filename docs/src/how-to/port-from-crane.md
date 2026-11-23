@@ -19,9 +19,9 @@ differs in the output.
 | `cargoTest` | a test run per test binary, in `repo.checks`; arguments after `--` in [`test.args`](../reference/options/packages.md#packagesnametestargs) |
 | `cargoDocTest` | a doctest run per library, in `repo.checks` |
 | `cargoNextest` | [`test.runner = breakbulk.lib.testRunners.nextest { }`](../reference/options/packages.md#packagesnametestrunner), for one package or in [`memberDefaults`](../reference/options/workspaces.md#workspacesnamememberdefaults); each test binary is still its own check |
-| `cargoClippy` | a variant with [`mode = "clippy"`](../reference/options/workspaces.md#workspacesnamevariantsnamemode); the arguments after `--` in `cargoClippyExtraArgs` go in [`clippyArgs`](../reference/options/workspaces.md#workspacesnamevariantsnameclippyargs), and `--all-targets` is the default ([`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests) drops it) |
+| `cargoClippy` | a variant from [`breakbulk.variants.clippy`](../reference/presets.md#clippy); the arguments after `--` in `cargoClippyExtraArgs` go in its `args`, and the test targets are checked by default, as `cargo test` builds them ([`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests) drops them) |
 | `cargoFmt` | [`workspaces.<ws>.fmt.enable`](../reference/options/workspaces.md#workspacesnamefmtenable) |
-| `cargoLlvmCov`, `cargoTarpaulin` | a variant with `mode = "coverage"`: instrumented products, and test runs that keep their raw profiles; no report |
+| `cargoLlvmCov`, `cargoTarpaulin` | a variant from [`breakbulk.variants.coverage`](../reference/presets.md#coverage): instrumented products, and test runs that keep their raw profiles; no report |
 | `cargoDoc` | `repo.workspaces.<ws>.target.<triple>.docs`, the folder `cargo doc` writes ([Documentation](../reference/outputs.md#documentation)); `--no-deps` is the default ([`docs.noDeps`](../reference/options/workspaces.md#workspacesnamevariantsnamedocsnodeps)); not in `repo.checks` |
 | `cargoAudit`, `cargoDeny` | not covered |
 | `cleanCargoSource`, `filterCargoSources`, a `fileset` source | automatic: one [source view](../explanation/configuration.md#source-views) per package; add files with [`extraSources`](../reference/options/packages.md#packagesnameextrasources), [`sources`](../reference/options/packages.md#packagesnamesources) and [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope) |
@@ -97,10 +97,9 @@ in
         cargo = stable;
       };
       fmt.enable = true;
-      variants.clippy = {
-        mode = "clippy";
-        clippyArgs = [ "-D" "warnings" ];
-      };
+      imports = [
+        (breakbulk.variants.clippy { args = [ "-D" "warnings" ]; })
+      ];
     };
     # Built for wasm32, tested natively.
     greet = {
@@ -204,7 +203,7 @@ build machine's triple. Other targets are under
   ([Tests](../explanation/products.md#tests)).
 - **There are more checks.** crane makes one check per function you
   call. breakbulk makes one per product, test binary, doctest, and check
-  or clippy variant, named `<ws>/<triple>/<pkg>/test/<binary>` and so on
+  variant (clippy's too), named `<ws>/<triple>/<pkg>/test/<binary>` and so on
   ([`checks`](../reference/outputs.md#checks)). Build them as groups:
   `checks.<system>.all`, one workspace, or your own patterns
   ([Run the checks in CI](ci.md)).

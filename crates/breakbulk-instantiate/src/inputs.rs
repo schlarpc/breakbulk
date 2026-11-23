@@ -47,12 +47,13 @@ pub struct Sources {
     /// `predictSources.keep` for a path its view lacks.
     #[serde(default)]
     pub predicted: BTreeSet<String>,
-    /// Workspace members with a clippy config tree (clippy variants): the
-    /// `.clippy.toml` and `clippy.toml` files of the package directory and
-    /// its ancestors up to the repository root, rooted there like source
-    /// views, by directory.
+    /// Workspace members with a tree of the workspace wrapper's config
+    /// files (`variants.<v>.wrapperConfig.search`: clippy's `.clippy.toml`
+    /// and `clippy.toml`) of the package directory and its ancestors up to
+    /// the repository root, rooted there like source views, by directory.
+    /// The variable that names it is the toolchains' `wrapperConfigVar`.
     #[serde(default)]
-    pub clippy_conf: BTreeSet<String>,
+    pub wrapper_config: BTreeSet<String>,
     /// Path packages' test-only paths (relative to the repository root),
     /// which their normal source views leave out, by directory. Only for
     /// hints ([`breakbulk_format::Resolve::source_view`]).
@@ -92,9 +93,9 @@ pub struct Toolchains {
     pub target: PlatformSpec,
     /// The `--remap-path-scope` of target compile units that end up in
     /// shipped products whose debug information is split off
-    /// (`splitDebug`), e.g. `macro,diagnostics`: debug info keeps real
-    /// store paths (plus `coverage` in coverage variants). `None`: every
-    /// scope is remapped. Host units do not read it: they always get
+    /// (`splitDebug`), e.g. `macro,diagnostics,coverage`: debug info keeps
+    /// real store paths. `None`: every scope is remapped. Host units do
+    /// not read it: they always get
     /// `macro,diagnostics`. Test harnesses (`--test`) always remap every
     /// scope, and so does every unit when rustc has no `--remap-path-scope`
     /// (`capabilities`; "Source paths at run time" in
@@ -109,6 +110,12 @@ pub struct Toolchains {
     /// ([`breakbulk_format::Resolve::side_files`]).
     #[serde(default)]
     pub side_files: Vec<breakbulk_format::rendered::SideFile>,
+    /// The variable that gives a unit the workspace wrapper runs on (its
+    /// program chain names the `rustc-workspace-wrapper` tool) its
+    /// package's directory in the package's tree of wrapper config files
+    /// (`sources.wrapperConfig`; `variants.<v>.wrapperConfig.dirVar`).
+    #[serde(default)]
+    pub wrapper_config_var: Option<String>,
     /// What the toolchain can do (the Nix library's `toolchainFacts`):
     /// whether rustc takes `--remap-path-scope`. Required, so a caller
     /// cannot silently get another toolchain's behaviour.

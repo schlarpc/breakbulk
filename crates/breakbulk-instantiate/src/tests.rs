@@ -37,7 +37,7 @@ fn smoke_inputs() -> Inputs {
             workspace_test_targets: Default::default(),
             target_roots: Default::default(),
             predicted: Default::default(),
-            clippy_conf: Default::default(),
+            wrapper_config: Default::default(),
             test_only: Default::default(),
             junk: Default::default(),
             custom: Default::default(),
@@ -62,6 +62,7 @@ fn smoke_inputs() -> Inputs {
             shipped_remap_scope: None,
             keep_source_paths: false,
             side_files: Vec::new(),
+            wrapper_config_var: None,
             capabilities: breakbulk_format::Capabilities {
                 remap_path_scope: true,
                 trim_paths: false,
@@ -876,22 +877,25 @@ fn units_use_their_targets_view() {
     assert!(!literal(SCRIPT).contains("predicted"));
 }
 
-/// Clippy variants: a unit clippy-driver runs on (a wrapper chain) gets
-/// `CLIPPY_CONF_DIR` in its package's clippy config tree; other units, and
-/// the same unit outside a clippy plan, get nothing.
+/// Wrapper config files: a unit whose program chain names the workspace
+/// wrapper gets the config variable, in its package's tree; other units,
+/// and the same unit without the variable, get nothing.
 #[test]
-fn clippy_units_get_the_config_tree() {
-    let inputs_of = |mode: breakbulk_format::VariantMode| {
+fn wrapper_units_get_the_config_tree() {
+    let driver = format!("{RUSTC}/bin/clippy-driver");
+    let inputs_of = |var: Option<&str>| {
         let mut inputs = smoke_inputs();
-        inputs.plan.variant.mode = mode;
         let Unit::Compile(c) = inputs.plan.units.get_mut(LIB).unwrap() else {
             panic!()
         };
-        c.program.insert(
-            0,
-            breakbulk_format::Text::Literal(format!("{RUSTC}/bin/clippy-driver")),
-        );
-        inputs.sources.clippy_conf = ["smokelib".into(), "smokeapp".into()].into();
+        c.program
+            .insert(0, breakbulk_format::Text::Literal(driver.clone()));
+        inputs
+            .toolchains
+            .tools
+            .insert("rustc-workspace-wrapper".into(), driver.clone());
+        inputs.toolchains.wrapper_config_var = var.map(Into::into);
+        inputs.sources.wrapper_config = ["smokelib".into(), "smokeapp".into()].into();
         inputs
     };
     let has_conf = |d: &Drv| {
@@ -899,16 +903,17 @@ fn clippy_units_get_the_config_tree() {
             panic!()
         };
         parts.iter().any(|p| match p {
-            Part::Input { input, .. } => input == "clippy-conf:smokelib",
+            Part::Input { input, .. } => input == "wrapper-config:smokelib",
             _ => false,
         })
     };
-    let clippy = instantiate(&inputs_of(breakbulk_format::VariantMode::Clippy)).unwrap();
-    let check = instantiate(&inputs_of(breakbulk_format::VariantMode::Check)).unwrap();
-    assert!(has_conf(&clippy.units[LIB]));
-    assert!(!has_conf(&check.units[LIB]));
+    let with = instantiate(&inputs_of(Some("CLIPPY_CONF_DIR"))).unwrap();
+    let without = instantiate(&inputs_of(None)).unwrap();
+    assert!(has_conf(&with.units[LIB]));
+    assert!(!has_conf(&without.units[LIB]));
     for id in [APP, SCRIPT, RUN] {
-        assert_eq!(clippy.units[id], check.units[id], "{id}");
+        assert!(!has_conf(&with.units[id]), "{id}");
+        assert_eq!(with.units[id], without.units[id], "{id}");
     }
 }
 

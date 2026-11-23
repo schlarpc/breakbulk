@@ -9,7 +9,7 @@ pub use breakbulk_unit::spec::{
 };
 
 /// The only plan format version this crate reads and writes.
-pub const PLAN_VERSION: u32 = 5;
+pub const PLAN_VERSION: u32 = 6;
 
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
 /// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`).
@@ -150,8 +150,6 @@ pub struct Variant {
 pub enum VariantMode {
     Build,
     Check,
-    Clippy,
-    Coverage,
 }
 
 /// A working directory: a reference, or a literal store path. The literal

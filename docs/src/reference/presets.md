@@ -296,3 +296,55 @@ TERM sent to the wrapper reach the test.
 workspaces.main.memberDefaults.test.wrapper =
   breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; };
 ```
+
+## Variant presets
+
+A tool that runs over a workspace is a variant made of the general
+variant options. `breakbulk.variants` has workspace modules for two,
+imported in `workspaces.<ws>.imports`. Each takes `name` (the variant's)
+and `variant`, a module of more settings for it (`profile`, `targets`,
+`checks`, …); `lib.mkForce` there replaces one of the preset's own.
+
+### Clippy
+
+**`clippy { name ? "clippy"; args ? [ ]; variant ? { }; }`** is `cargo
+clippy`: a check variant
+([`mode = "check"`](options/workspaces.md#workspacesnamevariantsnamemode))
+with clippy-driver from
+[`toolchain.clippy`](options/workspaces.md#workspacesnametoolchainclippy)
+as the workspace wrapper
+([`rustcWorkspaceWrapper`](options/workspaces.md#workspacesnamevariantsnamerustcworkspacewrapper)),
+so dependency units stay the check variant's. `args` are clippy's own
+arguments, `cargo clippy -- ARGS`, which reach only the units
+clippy-driver runs on as `CLIPPY_ARGS`
+([`wrapperEnv`](options/workspaces.md#workspacesnamevariantsnamewrapperenv)).
+Its [`wrapperConfig`](options/workspaces.md#workspacesnamevariantsnamewrapperconfig)
+gives each member's units `CLIPPY_CONF_DIR` in a tree of the
+`.clippy.toml` and `clippy.toml` files of its directory and its parents
+up to the repository root, and keeps the workspace's `Cargo.toml` in
+every view, which clippy's `lint_groups_priority` reads.
+`target.<triple>.variants.<name>.check` builds every unit and is in
+`repo.checks`.
+
+```nix
+workspaces.main.imports = [
+  (breakbulk.variants.clippy {
+    args = [ "-D" "warnings" ];
+    variant.profile = "dev";  # as `cargo clippy`
+  })
+];
+```
+
+### Coverage
+
+**`coverage { name ? "coverage"; variant ? { }; }`** is a build variant
+whose target units get `-C instrument-coverage`
+([`rustflags`](options/workspaces.md#workspacesnamevariantsnamerustflags)),
+and whose test and bench runs keep their raw profiles: its
+`memberDefaults.variant.<name>` layer adds a `coverage` entry to
+[`preRun`](options/packages.md#packagesnametestprerun) that points
+`LLVM_PROFILE_FILE` into `$TMPDIR/profraw`, and a
+[`postRun`](options/packages.md#packagesnametestpostrun) that moves the
+profiles into `$out/profraw`, named by content. It makes no report. Host
+units are not instrumented, so they stay shared with a build variant of
+the same profile.

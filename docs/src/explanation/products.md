@@ -393,7 +393,9 @@ neither. Doctest runs work the same way.
   [Keep test output as an artifact](../how-to/ci.md#keep-test-output-as-an-artifact)).
   Whether the result is reproducible depends on what the snippet puts
   in `$out`.
-- A coverage variant's runs keep their profiles in `$out/profraw`, named
+- A coverage variant's runs
+  ([`breakbulk.variants.coverage`](../reference/presets.md#coverage))
+  keep their profiles in `$out/profraw`, named
   by content. The counters themselves can differ between runs (hash
   seeds, timing), so coverage runs are outside the `--rebuild`
   guarantee.

@@ -35,13 +35,17 @@ pub struct Options {
     /// skeleton is elsewhere and a path package lies outside the workspace
     /// root, planning fails: Cargo would hash its absolute path.
     pub canonical_root: Option<String>,
+    /// The plan's kind, a label: it decides which traced units are the
+    /// plan's roots ([`crate::graph`]). What Cargo runs is `cargo_args`.
     pub kind: PlanKind,
-    /// What the variant compiles: `build` and `coverage` trace `cargo
-    /// build` / `cargo test` / `cargo bench --no-run`; `check` and
-    /// `clippy` trace `cargo check` (build plan) and `cargo check
-    /// --all-targets` (test plan). Coverage's `-C instrument-coverage`
-    /// comes in through `configs` like any spec rustflag.
+    /// The variant's mode, a label as `kind` is: a check plan has no
+    /// roots.
     pub mode: VariantMode,
+    /// The traced Cargo command: the arguments after `cargo` and before
+    /// the planner's own (`["test"]`, `["check", "--lib", …]`, `["doc",
+    /// "--no-deps"]`), from the Nix library's table of plan commands
+    /// (`lib/cargo-commands.nix`).
+    pub cargo_args: Vec<String>,
     /// The variant's rustc wrapper (Cargo's `build.rustc-wrapper`): a
     /// program every rustc invocation goes through, `wrapper rustc ARGS…`.
     /// The shim already is Cargo's wrapper, so it gets this one in
@@ -49,17 +53,16 @@ pub struct Options {
     pub rustc_wrapper: Option<String>,
     /// The variant's workspace wrapper (Cargo's
     /// `build.rustc-workspace-wrapper`), for workspace members only: Cargo
-    /// then starts `shim [wrapper] workspace-wrapper rustc …`. A clippy
-    /// variant's is clippy-driver.
+    /// then starts `shim [wrapper] workspace-wrapper rustc …` (clippy's
+    /// is clippy-driver).
     pub rustc_workspace_wrapper: Option<String>,
-    /// The option that sets a clippy variant's workspace wrapper
-    /// (`workspaces.<ws>.toolchain.clippy`), for the error when it does not
-    /// match rustc.
-    pub clippy_option: Option<String>,
-    /// Clippy's own arguments (`-D warnings`, `-W clippy::pedantic`), as
-    /// `cargo clippy -- ARGS` passes them: `CLIPPY_ARGS`, each argument
-    /// followed by `__CLIPPY_HACKERY__`. Kept only on clippy-driver units.
-    pub clippy_args: Vec<String>,
+    /// Variables set on the traced Cargo, kept only on the compile units
+    /// whose program chain contains `rustc_workspace_wrapper`
+    /// (`variants.<v>.wrapperEnv`; clippy's `CLIPPY_ARGS`).
+    pub wrapper_env: Vec<(String, String)>,
+    /// Where the variant's settings are (`workspaces.<ws>.variants.<v>`),
+    /// for the error naming a wrapper that does not match rustc.
+    pub variant_option: Option<String>,
     pub target: Target,
     pub profile: String,
     pub features: Vec<String>,
@@ -67,9 +70,6 @@ pub struct Options {
     pub no_default_features: bool,
     /// `-p` selection; empty means `--workspace`.
     pub packages: Vec<String>,
-    /// Doc plans: `cargo doc --no-deps`, documenting the selected packages
-    /// only.
-    pub no_deps: bool,
     /// Extra `--config` values (files or `key=value`): source replacement,
     /// the toolchain spec's rustflags and linkers.
     pub configs: Vec<String>,
@@ -143,8 +143,9 @@ impl Trace {
             nightly: self.nightly_features_allowed,
             executable_suffix: self.target_spec.exe_suffix.clone(),
             target_debuginfo: self.target_spec.debuginfo.clone(),
-            keep_workspace_wrapper: runs_wrappers(opts) && opts.rustc_workspace_wrapper.is_some(),
-            rustc_wrapper: opts.rustc_wrapper.clone().filter(|_| runs_wrappers(opts)),
+            workspace_wrapper: opts.rustc_workspace_wrapper.clone(),
+            wrapper_env: opts.wrapper_env.iter().map(|(k, _)| k.clone()).collect(),
+            rustc_wrapper: opts.rustc_wrapper.clone(),
             config_env: project.applied_env(&cargo_env_names(opts))?,
             rust_src_remap: self.rust_src_remap.clone(),
             trim_paths_default: opts.trim_paths_default,
@@ -172,30 +173,19 @@ fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
         ])
         .map(|k| (*k).to_owned())
         .collect();
-    if runs_wrappers(opts) {
-        if opts.rustc_wrapper.is_some() {
-            names.insert(RUSTC_WRAPPER_ENV.into());
-        }
-        if opts.rustc_workspace_wrapper.is_some() {
-            names.insert("RUSTC_WORKSPACE_WRAPPER".into());
-        }
-        if opts.mode == VariantMode::Clippy && !opts.clippy_args.is_empty() {
-            names.insert("CLIPPY_ARGS".into());
-        }
+    if opts.rustc_wrapper.is_some() {
+        names.insert(RUSTC_WRAPPER_ENV.into());
     }
+    if opts.rustc_workspace_wrapper.is_some() {
+        names.insert("RUSTC_WORKSPACE_WRAPPER".into());
+    }
+    names.extend(opts.wrapper_env.iter().map(|(k, _)| k.clone()));
     names
 }
 
 /// How the planner hands the shim the variant's rustc wrapper
 /// (`breakbulk-shim`'s `RUSTC_WRAPPER_ENV`).
 pub const RUSTC_WRAPPER_ENV: &str = "BREAKBULK_RUSTC_WRAPPER";
-
-/// Whether the trace runs the variant's wrappers: every plan but the doc
-/// plan, whose check-mode units rustdoc reads are then a plain check
-/// variant's, and whose docs neither a lint nor a verifier can fail.
-fn runs_wrappers(opts: &Options) -> bool {
-    opts.kind != PlanKind::Doc
-}
 
 /// Variables passed through from the planner's own environment.
 const BASE_ENV: [&str; 2] = ["PATH", "TMPDIR"];
@@ -252,40 +242,61 @@ fn sysroot(opts: &Options) -> Result<PathBuf, Error> {
     Ok(PathBuf::from(s.trim()))
 }
 
-/// clippy-driver is a rustc with its own sysroot compiled in: one built for
-/// another rustc (nixpkgs' `clippy` beside a rust-overlay toolchain, even of
-/// the same release) makes the traced units point into that rustc's
-/// sysroot, which instantiation later rejects as an undeclared input. Both
-/// `--print sysroot` answers must therefore be the same path
-/// (`clippy-driver --rustc` behaves as plain rustc).
-fn check_clippy_driver(opts: &Options, driver: &str) -> Result<(), Error> {
-    let option = opts
-        .clippy_option
-        .as_deref()
-        .unwrap_or("the toolchain's clippy");
-    if !Path::new(driver).is_file() {
-        bail!(
-            "the clippy variant needs {driver}, which does not exist; set {option} to a \
-             package with bin/clippy-driver built for this rustc"
-        );
+/// Check that each wrapper chain Cargo will start (`rustcWrapper rustc`, and
+/// `[rustcWrapper] rustcWorkspaceWrapper rustc` for members) answers
+/// `--print sysroot` as rustc does. A rustc driver (clippy-driver, a
+/// verifier) is a rustc with its own sysroot compiled in: one built for
+/// another rustc (nixpkgs' `clippy` beside a rust-overlay toolchain, even
+/// of the same release) makes the traced units point into that rustc's
+/// sysroot, which instantiation later rejects as an undeclared input. Not
+/// only drivers: a wrapper that runs the rustc it is given answers with
+/// rustc's own sysroot, and passes. clippy-driver, given `rustc` as its
+/// first argument, drops it, and runs as plain rustc for a `--print`
+/// (`src/driver.rs`, `wrapper_mode` and `info_query`).
+fn check_wrappers(opts: &Options) -> Result<(), Error> {
+    let at = opts.variant_option.as_deref().unwrap_or("the variant");
+    let mut chains: Vec<(&str, Vec<&str>)> = Vec::new();
+    if let Some(w) = &opts.rustc_wrapper {
+        chains.push(("rustcWrapper", vec![w]));
     }
-    let ours = output(
-        {
-            let mut c = command(opts, driver);
-            c.args(["--rustc", "--print", "sysroot"]);
-            c
-        },
-        "clippy-driver --rustc --print sysroot",
-    )?;
+    if let Some(ww) = &opts.rustc_workspace_wrapper {
+        let mut chain: Vec<&str> = opts.rustc_wrapper.iter().map(String::as_str).collect();
+        chain.push(ww);
+        chains.push(("rustcWorkspaceWrapper", chain));
+    }
+    if chains.is_empty() {
+        return Ok(());
+    }
     let rustc = sysroot(opts)?;
-    if Path::new(ours.trim()) != rustc {
-        bail!(
-            "{driver} is built for another rustc: its sysroot is {}, rustc's is {}; set \
-             {option} to the clippy of this rustc (a rustup-style toolchain with the clippy \
-             component has bin/clippy-driver)",
-            ours.trim(),
-            rustc.display()
-        );
+    for (option, chain) in chains {
+        let program = *chain.last().expect("a chain has a wrapper");
+        if !Path::new(program).is_file() {
+            bail!(
+                "{at}.{option} is {program}, which does not exist; set it to an executable \
+                 (a rustc driver built for this rustc)"
+            );
+        }
+        let what = format!("{} {} --print sysroot", chain.join(" "), opts.rustc);
+        let ours = output(
+            {
+                let mut c = command(opts, chain[0]);
+                c.args(&chain[1..])
+                    .arg(&opts.rustc)
+                    .args(["--print", "sysroot"]);
+                c
+            },
+            &what,
+        )?;
+        if Path::new(ours.trim()) != rustc {
+            bail!(
+                "{at}.{option} ({program}) is built for another rustc: `{what}` prints {}, \
+                 rustc's sysroot is {}; set it to a driver of this rustc (for clippy, \
+                 `workspaces.<ws>.toolchain.clippy`: a rustup-style toolchain with the \
+                 clippy component has bin/clippy-driver)",
+                ours.trim(),
+                rustc.display()
+            );
+        }
     }
     Ok(())
 }
@@ -479,27 +490,10 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     let rust_src_remap = rust_src_remap(opts, &rustc_vv)?;
     let target_spec = target_spec(opts)?;
 
-    let checking = matches!(opts.mode, VariantMode::Check | VariantMode::Clippy);
-    // Plain `cargo test`, not `cargo test --no-run` and then `cargo test
-    // --doc`: `--no-run` stops before the doctests, and `--doc` doc-tests
-    // other libraries than `cargo test` does (also those with `doctest =
-    // false`), whose dependencies' build-script runs then reach every
-    // doctest's `-L` list. Cargo starts each test binary through the
-    // runner, which does nothing, and then asks rustdoc for the doctests.
-    // A doc plan is `cargo doc` in every variant: rustdoc reads check-mode
-    // units, which a check variant's plans share.
-    let sub: &[&str] = match opts.kind {
-        PlanKind::Doc if opts.no_deps => &["doc", "--no-deps"],
-        PlanKind::Doc => &["doc"],
-        PlanKind::Build if checking => &["check"],
-        PlanKind::Test if checking => &["check", "--all-targets"],
-        PlanKind::Bench if checking => {
-            bail!("a bench plan needs a build or coverage variant, not check or clippy")
-        }
-        PlanKind::Build => &["build"],
-        PlanKind::Test => &["test"],
-        PlanKind::Bench => &["bench", "--no-run"],
-    };
+    if opts.cargo_args.is_empty() {
+        bail!("no Cargo command to trace (--cargo-arg)");
+    }
+    let sub = &opts.cargo_args;
     let config = scratch.join("breakbulk-config.toml");
     let mut config_text = format!(
         "[build]\nrustc = {}\nrustc-wrapper = {}\nrustdoc = {}\ntarget-dir = {}\nbuild-dir = {}\n",
@@ -509,18 +503,18 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         toml_str(&target),
         toml_str(&target),
     );
-    if sub == ["test"] {
-        // Cargo looks the runner up per compile kind: proc macros' tests
-        // run for the host.
-        let mut keys = vec![opts.target.short_name.as_str(), host.as_str()];
-        keys.dedup();
-        for key in keys {
-            config_text.push_str(&format!(
-                "[target.{}]\nrunner = [{}]\n",
-                toml_str(key),
-                toml_str(&runner_link.display().to_string())
-            ));
-        }
+    // The runner, for `cargo test`'s test binaries and doctests. Cargo
+    // looks it up per compile kind (proc macros' tests run for the host),
+    // and reads it only to start a program (`Compilation::target_process`,
+    // rustdoc's `--test-runtool`), so other commands trace as without it.
+    let mut keys = vec![opts.target.short_name.as_str(), host.as_str()];
+    keys.dedup();
+    for key in keys {
+        config_text.push_str(&format!(
+            "[target.{}]\nrunner = [{}]\n",
+            toml_str(key),
+            toml_str(&runner_link.display().to_string())
+        ));
     }
     std::fs::write(&config, config_text)
         .map_err(|e| Error(format!("writing {}: {e}", config.display())))?;
@@ -571,12 +565,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .map_err(|e| Error(format!("writing {}: {e}", meta_path.display())))?;
     let metadata = Metadata::read(&meta_path)?;
 
-    if opts.mode == VariantMode::Clippy && runs_wrappers(opts) {
-        let Some(driver) = &opts.rustc_workspace_wrapper else {
-            bail!("the clippy variant needs --rustc-workspace-wrapper (clippy-driver)");
-        };
-        check_clippy_driver(opts, driver)?;
-    }
+    check_wrappers(opts)?;
     let record = scratch.join("record");
     if record.exists() {
         std::fs::remove_dir_all(&record)
@@ -588,22 +577,13 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
         .args(common_args(opts, &config))
         .args(selection_args(opts))
         .env("BREAKBULK_RECORD", &record);
-    if runs_wrappers(opts) {
-        if let Some(w) = &opts.rustc_wrapper {
-            cmd.env(RUSTC_WRAPPER_ENV, w);
-        }
-        if let Some(w) = &opts.rustc_workspace_wrapper {
-            cmd.env("RUSTC_WORKSPACE_WRAPPER", w);
-        }
-        if opts.mode == VariantMode::Clippy && !opts.clippy_args.is_empty() {
-            let joined: String = opts
-                .clippy_args
-                .iter()
-                .map(|a| format!("{a}__CLIPPY_HACKERY__"))
-                .collect();
-            cmd.env("CLIPPY_ARGS", joined);
-        }
+    if let Some(w) = &opts.rustc_wrapper {
+        cmd.env(RUSTC_WRAPPER_ENV, w);
     }
+    if let Some(w) = &opts.rustc_workspace_wrapper {
+        cmd.env("RUSTC_WORKSPACE_WRAPPER", w);
+    }
+    cmd.envs(opts.wrapper_env.iter().map(|(k, v)| (k, v)));
     output(cmd, &format!("cargo {}", sub.join(" ")))?;
     let records = read_records(&record)?;
     // With the rustc-info cache off, every invocation asks; one that did

@@ -77,16 +77,9 @@ in
     });
     variants = {
       default = { };
-      # Both gates run natively only, as in the flake. The policy
-      # variant's test runs are in repo.checks under `variant-policy/`.
-      clippy = {
-        mode = "clippy";
-        targets = [ native ];
-        clippyArgs = [
-          "--deny"
-          "warnings"
-        ];
-      };
+      # Both gates (this and the clippy variant imported below) run
+      # natively only, as in the flake. The policy variant's test runs
+      # are in repo.checks under `variant-policy/`.
       policy = {
         targets = [ native ];
         packages = [
@@ -104,6 +97,13 @@ in
     # `cargo hack check` uses; each is in repo.checks as
     # `main/<native>/variant-hack-<pkg>…/check`.
     imports = [
+      (breakbulk.variants.clippy {
+        args = [
+          "--deny"
+          "warnings"
+        ];
+        variant.targets = [ native ];
+      })
       (breakbulk.variants.featurePowerset {
         scope = "package";
         variant = {

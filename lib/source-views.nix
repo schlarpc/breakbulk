@@ -538,11 +538,11 @@ rec {
       tested ? true,
       runCommand ? null,
       # Paths every predicted view of the package keeps, relative to the
-      # root, besides `predictSources.keep` (the curated keeps of the
-      # variant: clippy's `Cargo.toml`).
+      # root, besides `predictSources.keep` (the files the variant's
+      # workspace wrapper reads: `wrapperConfig.workingDirFiles`).
       extraKeep ? [ ],
       # Paths every view of the package holds, relative to the root,
-      # besides `extraSources` (the variant's: clippy's `Cargo.toml`).
+      # besides `extraSources` (the variant's `wrapperConfig.workingDirFiles`).
       extraFiles ? [ ],
     }:
     let
@@ -698,26 +698,27 @@ rec {
           "${run}/${pkgDir}";
     };
 
-  # A member's clippy config tree, rooted at the repository root: every
-  # `.clippy.toml` and `clippy.toml` in `pkgDir` and its ancestors up to
-  # the root, at their places. Clippy-driver gets
-  # `CLIPPY_CONF_DIR=<tree>/<pkgDir>` and does its own lookup there, so
-  # breakbulk picks no file. The package's `Cargo.toml` is in the tree only
-  # so that `<pkgDir>` exists: clippy canonicalizes its start directory.
-  # Not in the source views, because then every edit to a config file would
-  # rebuild every build and check unit below it.
-  clippyConfTree =
-    { root, pkgDir }:
+  # A member's tree of a workspace wrapper's config files, rooted at the
+  # repository root: every file named in `names` in `pkgDir` and its
+  # ancestors up to the root, at their places (clippy's `.clippy.toml` and
+  # `clippy.toml`). The wrapper gets `<tree>/<pkgDir>` in its variable
+  # (`CLIPPY_CONF_DIR`) and does its own lookup there, so breakbulk picks
+  # no file. The package's `Cargo.toml` is in the tree only so that
+  # `<pkgDir>` exists: clippy canonicalizes its start directory. Not in the
+  # source views, because then every edit to a config file would rebuild
+  # every unit below it, those of variants without the wrapper too.
+  wrapperConfigTree =
+    {
+      root,
+      pkgDir,
+      names,
+    }:
     let
       at = manifest.at root;
       ancestors = d: [ d ] ++ lib.optionals (d != "") (ancestors (util.normalizeRel (builtins.dirOf d)));
-      configs = lib.concatMap (
-        d:
-        map (n: fs.maybeMissing (at (util.joinRel d n))) [
-          ".clippy.toml"
-          "clippy.toml"
-        ]
-      ) (ancestors pkgDir);
+      configs = lib.concatMap (d: map (n: fs.maybeMissing (at (util.joinRel d n))) names) (
+        ancestors pkgDir
+      );
     in
     fs.toSource {
       inherit root;

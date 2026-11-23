@@ -32,25 +32,36 @@ workspaces.main.variants.lint = {
 ```
 
 `target.<triple>.variants.lint.check` builds every unit and is in
-`repo.checks`. A clippy variant (`mode = "clippy"`) is this setup with
-clippy-driver as the workspace wrapper, plus clippy's arguments and
-configuration files.
+`repo.checks`. [`breakbulk.variants.clippy`](../reference/presets.md#clippy)
+is this setup with clippy-driver as the workspace wrapper, plus clippy's
+arguments and configuration files, made of the options below.
 
 A driver built on `rustc_driver` has the sysroot of the rustc it was
 built with. Use that rustc as the workspace's toolchain
-(`workspaces.<ws>.toolchain`). If they differ, the units name crates
-from the driver's sysroot, and instantiation rejects those as
-undeclared inputs.
+(`workspaces.<ws>.toolchain`). Before tracing, the planner runs each
+wrapper as Cargo would, `<wrapper> <rustc> --print sysroot`, and fails
+naming the option when the answer is not rustc's sysroot: otherwise the
+units would name crates from the driver's sysroot, which instantiation
+rejects as undeclared inputs.
 
 ## Give the driver its settings
 
-Drivers read their settings from the environment:
+Drivers read their settings from the environment and from files:
 
+- [`wrapperEnv`](../reference/options/workspaces.md#workspacesnamevariantsnamewrapperenv)
+  reaches the units the workspace wrapper runs on, and no other, so the
+  dependency units stay shared (clippy's `CLIPPY_ARGS`).
 - [`cargoConfig.env`](../reference/options/workspaces.md#workspacesnamevariantsnamecargoconfig)
   reaches every process Cargo starts, Cargo's queries too, and every unit
-  of the variant.
+  of the variant: for a `rustcWrapper`, which sees every crate.
 - [`packages.<name>.variant.<v>.env`](../reference/options/packages.md)
   reaches one package's units in one variant.
+- [`wrapperConfig`](../reference/options/workspaces.md#workspacesnamevariantsnamewrapperconfig)
+  names the workspace wrapper's config files: `search` and `dirVar` for
+  files it looks for from the member's directory upwards (clippy's
+  `clippy.toml`, through `CLIPPY_CONF_DIR`), `workingDirFiles` for files
+  it reads from the compile's working directory (the workspace's
+  `Cargo.toml`).
 
 ## Keep the files the driver writes
 

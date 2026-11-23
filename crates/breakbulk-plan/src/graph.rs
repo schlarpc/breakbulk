@@ -43,8 +43,12 @@ pub struct Context {
     pub executable_suffix: String,
     /// [`Plan::target_debuginfo`].
     pub target_debuginfo: breakbulk_format::TargetDebuginfo,
-    /// Whether the variant's `RUSTC_WORKSPACE_WRAPPER` is kept.
-    pub keep_workspace_wrapper: bool,
+    /// The variant's workspace wrapper (`RUSTC_WORKSPACE_WRAPPER`, kept in
+    /// units' env when set).
+    pub workspace_wrapper: Option<String>,
+    /// The variables the planner set on Cargo for the units the workspace
+    /// wrapper runs on (`--wrapper-env`): kept only on those.
+    pub wrapper_env: BTreeSet<String>,
     /// The variant's rustc wrapper: build-script runs get it as
     /// `RUSTC_WRAPPER`, where Cargo gives them its own (the shim).
     pub rustc_wrapper: Option<String>,
@@ -837,7 +841,7 @@ impl<'a> Builder<'a> {
             if DROPPED_ENV.contains(&k.as_str()) {
                 continue;
             }
-            if k == "RUSTC_WORKSPACE_WRAPPER" && !self.ctx.keep_workspace_wrapper {
+            if k == "RUSTC_WORKSPACE_WRAPPER" && self.ctx.workspace_wrapper.is_none() {
                 continue;
             }
             if run && k == "RUSTC_BOOTSTRAP" {
@@ -1392,16 +1396,19 @@ impl<'a> Builder<'a> {
         let args = &c.rec.args;
         let out = self.convert_args(args, &c.rec.env, &c.package.id, Some(c.platform))?;
         let (mut env, env_splices, dylib) = self.convert_env(&c.rec.env, &c.package.id, args)?;
-        // The clippy variant: `cargo clippy` passes clippy's own arguments
-        // (`-- -D warnings`) to clippy-driver in `CLIPPY_ARGS`, which Cargo
-        // inherits to every rustc it starts; keep it only where
-        // clippy-driver runs (a wrapper chain), so dependencies stay shared
-        // with the check variant.
-        if self.ctx.keep_workspace_wrapper
-            && c.rec.program.len() > 1
-            && let Some(v) = c.rec.env.get("CLIPPY_ARGS")
+        // The variant's wrapper env (clippy's `CLIPPY_ARGS`) reaches every
+        // process Cargo starts, so the baseline drops it; it is kept only
+        // where the workspace wrapper runs, so units without it stay
+        // shared with a variant without the wrapper. By the chain's paths,
+        // not its length: with a `rustcWrapper` every unit has a chain.
+        if let Some(ww) = &self.ctx.workspace_wrapper
+            && c.rec.program.iter().any(|p| p == ww)
         {
-            env.insert("CLIPPY_ARGS".into(), Text::Literal(v.clone()));
+            for k in &self.ctx.wrapper_env {
+                if let Some(v) = c.rec.env.get(k) {
+                    env.insert(k.clone(), Text::Literal(v.clone()));
+                }
+            }
         }
 
         let program = c
@@ -1517,15 +1524,11 @@ impl<'a> Builder<'a> {
     /// linkable library crate types of selected packages; in a test plan,
     /// every test harness and every example; in a bench plan, every bench
     /// (with or without the libtest harness) and the lib and bin harnesses
-    /// in bench mode. Check and clippy variants link nothing and have no
-    /// roots, and neither have doc plans.
+    /// in bench mode. Check variants link nothing and have no roots, and
+    /// neither have doc plans.
     fn roots(&self) -> BTreeSet<Root> {
         let mut roots = BTreeSet::new();
-        if matches!(
-            self.ctx.variant.mode,
-            VariantMode::Check | VariantMode::Clippy
-        ) || self.ctx.kind == PlanKind::Doc
-        {
+        if self.ctx.variant.mode == VariantMode::Check || self.ctx.kind == PlanKind::Doc {
             return roots;
         }
         for c in &self.compiles {
@@ -2081,7 +2084,8 @@ mod error_tests {
             nightly: false,
             executable_suffix: String::new(),
             target_debuginfo: Default::default(),
-            keep_workspace_wrapper: false,
+            workspace_wrapper: None,
+            wrapper_env: BTreeSet::new(),
             rustc_wrapper: None,
             config_env: BTreeSet::new(),
             rust_src_remap: None,

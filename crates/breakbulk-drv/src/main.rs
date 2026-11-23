@@ -198,7 +198,7 @@ async fn run() -> Res<()> {
         sources: parse(&need("sources")?)?,
         toolchains: parse(&need("toolchains")?)?,
         overrides: parse(&need("overrides")?)?,
-        // `null` for plans without predicted roots (check and clippy).
+        // `null` for plans without predicted roots (check plans).
         roots: parse(&need("roots")?)?,
     };
     let mut values: Values = parse(&need("values")?)?;

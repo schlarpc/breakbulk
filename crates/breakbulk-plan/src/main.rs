@@ -4,9 +4,9 @@
 //! ```text
 //! breakbulk-plan --cargo C --rustc R --rustdoc D --shim S \
 //!   --skeleton DIR [--workspace REL] [--canonical-root /build/skeleton] \
-//!   --kind build|test|bench|doc [--no-deps] [--mode build|check|clippy|coverage] \
-//!   [--rustc-wrapper PATH] [--rustc-workspace-wrapper PATH [--clippy-option NAME]] \
-//!   [--clippy-arg A]… --target TRIPLE --profile P [--features F]… \
+//!   --kind build|test|bench|doc [--mode build|check] --cargo-arg A… \
+//!   [--rustc-wrapper PATH] [--rustc-workspace-wrapper PATH] [--wrapper-env K=V]… \
+//!   [--variant-option NAME] --target TRIPLE --profile P [--features F]… \
 //!   [--all-features] [--no-default-features] [-p PKG]… \
 //!   [--config FILE-OR-VALUE]… [--cargo-config FILE] [--spec FILE] --capabilities FILE \
 //!   [--crates-io-source NAME --crates-io-directory DIR] \
@@ -45,7 +45,15 @@
 //! source that the vendor config (a `--config` file) replaces crates.io
 //! with, where `-Zbuild-std` adds the standard library's dependencies.
 //!
-//! `--kind doc` traces `cargo doc`, with `--no-deps` `cargo doc --no-deps`.
+//! `--cargo-arg`s are the traced command (`test`; `check --lib --bins
+//! --tests --examples`; `doc --no-deps`), from the Nix library's table of
+//! plan commands (`lib/cargo-commands.nix`); `--kind` and `--mode` label
+//! the plan and decide which units are its roots.
+//!
+//! `--wrapper-env K=V` sets `K` on the traced Cargo; only the compile units
+//! whose program chain contains the `--rustc-workspace-wrapper` keep it.
+//! `--variant-option` names where the variant's wrappers are set, for the
+//! error when one does not match rustc.
 
 use std::process::ExitCode;
 
@@ -55,10 +63,9 @@ use breakbulk_plan::trace::{Options, Target, workspace_dir};
 fn usage() -> ! {
     eprintln!(
         "usage: breakbulk-plan --cargo C --rustc R --rustdoc D --shim S --skeleton DIR \
-         [--workspace REL] [--canonical-root DIR] --kind build|test|bench|doc [--no-deps] \
-         [--mode build|check|clippy|coverage] [--rustc-wrapper PATH] \
-         [--rustc-workspace-wrapper PATH] [--clippy-option NAME] \
-         [--clippy-arg A]... \
+         [--workspace REL] [--canonical-root DIR] --kind build|test|bench|doc \
+         [--mode build|check] --cargo-arg A... [--rustc-wrapper PATH] \
+         [--rustc-workspace-wrapper PATH] [--wrapper-env K=V]... [--variant-option NAME] \
          --target TRIPLE \
          --profile P [--features F]... [--all-features] [--no-default-features] [-p PKG]... \
          [--config X]... [--cargo-config FILE] [--spec FILE] --capabilities FILE \
@@ -85,14 +92,14 @@ fn main() -> ExitCode {
         mode: VariantMode::Build,
         rustc_wrapper: None,
         rustc_workspace_wrapper: None,
-        clippy_option: None,
-        clippy_args: Vec::new(),
+        wrapper_env: Vec::new(),
+        variant_option: None,
+        cargo_args: Vec::new(),
         target: Target::default(),
         profile: "dev".into(),
         features: Vec::new(),
         all_features: false,
         no_default_features: false,
-        no_deps: false,
         packages: Vec::new(),
         configs: Vec::new(),
         cargo_config: None,
@@ -138,15 +145,19 @@ fn main() -> ExitCode {
                 opts.mode = match val().as_str() {
                     "build" => VariantMode::Build,
                     "check" => VariantMode::Check,
-                    "clippy" => VariantMode::Clippy,
-                    "coverage" => VariantMode::Coverage,
                     _ => usage(),
                 }
             }
+            "--cargo-arg" => opts.cargo_args.push(val()),
             "--rustc-wrapper" => opts.rustc_wrapper = Some(val()),
             "--rustc-workspace-wrapper" => opts.rustc_workspace_wrapper = Some(val()),
-            "--clippy-option" => opts.clippy_option = Some(val()),
-            "--clippy-arg" => opts.clippy_args.push(val()),
+            "--wrapper-env" => match val().split_once('=') {
+                Some((k, v)) if !k.is_empty() => {
+                    opts.wrapper_env.push((k.to_owned(), v.to_owned()))
+                }
+                _ => usage(),
+            },
+            "--variant-option" => opts.variant_option = Some(val()),
             "--target" => target = val(),
             "--profile" => {
                 opts.profile = val();
@@ -160,7 +171,6 @@ fn main() -> ExitCode {
             ),
             "--all-features" => opts.all_features = true,
             "--no-default-features" => opts.no_default_features = true,
-            "--no-deps" => opts.no_deps = true,
             "-p" | "--package" => opts.packages.push(val()),
             "--config" => opts.configs.push(val()),
             "--cargo-config" => opts.cargo_config = Some(val()),
