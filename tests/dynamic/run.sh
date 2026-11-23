@@ -237,7 +237,9 @@ label = f"{sys.argv[2]}: {same} unit .drv paths identical in both modes"
 if allowed:
     label += f"; {len(allowed)} downstream of an embedded product differ, as expected ({', '.join(allowed)})"
 print(label, file=sys.stderr)
-if same == 0 or bad:
+# No unit matching is a failure, unless the plan has no units in either
+# mode (a test plan of packages that all set `test = false`).
+if bad or (same == 0 and (ifd or dyn)):
     print("FAIL: unit .drv paths differ:\n" + "\n".join(bad), file=sys.stderr)
     sys.exit(1)
 EOF
