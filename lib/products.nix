@@ -272,21 +272,21 @@ let
         ''
       );
 
-  # What happens to a target's debug info is one property of
-  # the target, `targets.<triple>.debugInfo` (default: the traits'
-  # `debugInfo`), and three things follow from it: the stages it puts
-  # first in every product's chain (`packDwo` then `splitDebug` for
-  # "split", `strip` for "strip", `packDwo` for "keep"; `packDwo` on ELF
-  # targets only), the remap scope of the target's units
+  # What happens to a target's debug info is one property of the target,
+  # `targets.<triple>.debugInfo` (default: the traits' `debugInfo`), and
+  # three things follow from it: the stages it puts first in every
+  # product's chain (the traits' `debugStages` entry for the value: on ELF
+  # `packDwo` then `splitDebug` for "split", `strip` for "strip", `packDwo`
+  # for "keep"), the remap scope of the target's units
   # (`shippedRemapScope`: debug info keeps real store paths only when it is
   # split off) and the GNU build ID of its links (`NIX_SET_BUILD_ID`, which
   # splitDebug needs). The units are shared by every package of the target,
-  # so neither the target's nor a package's `stages` may remove
-  # `splitDebug` or `strip`, or add `splitDebug` where the target does not
-  # split: either is an evaluation error naming `debugInfo`. `packDwo`
-  # changes no unit and leaves no source path in the product, so it is an
-  # ordinary stage: `null` removes it.
-  # Overriding the inserted stages' attributes (`run`, `after`) is allowed.
+  # so neither the target's nor a package's `stages` may remove a stage
+  # the entry inserts, or add one only the "split" entry has where the
+  # value is another: either is an evaluation error naming `debugInfo`. A
+  # `removable` stage (`packDwo`: it changes no unit and leaves no source
+  # path in the product) is an ordinary one: `null` removes it.
+  # Overriding the inserted stages' fields (`run`, `after`) is allowed.
   #
   # `targetLayers`' arguments: { triple; traits; debugInfo; targetStages; }.
   debugInfoOf =
@@ -299,68 +299,79 @@ let
     let
       v = if debugInfo == null then traits.debugInfo else debugInfo;
     in
-    if
-      !(elem v [
-        "split"
-        "keep"
-        "strip"
-      ])
-    then
-      throw "breakbulk: targets.\"${triple}\".debugInfo: `${toString v}` is not one of split, keep, strip"
-    else if
-      v != "keep"
-      && !(elem traits.objectFormat [
-        "elf"
-        "macho"
-      ])
-    then
-      throw "breakbulk: targets.\"${triple}\".debugInfo = \"${v}\" needs an ELF or Mach-O target (the splitDebug and strip stages work on those files), and ${triple} is ${traits.objectFormat}; use \"keep\""
+    if !(traits.debugStages ? ${v}) then
+      throw "breakbulk: targets.\"${triple}\".debugInfo = \"${toString v}\" needs stages for it, and the traits of ${triple} (${traits.objectFormat}) have none: their `debugStages` has ${
+        lib.concatMapStringsSep ", " (n: "\"${n}\"") (lib.attrNames traits.debugStages)
+      }; use one of those, or give the stages as `targets.\"${triple}\".traits.debugStages.${toString v}`"
     else
       v;
 
-  # The stage `debugInfo` puts in every product's chain that no stage set
-  # may remove, by name, or null.
-  debugStageName =
-    v:
+  # The stages of a `debugStages` entry: `{ name; run; removable; }`.
+  entryStages = map (
+    s:
+    let
+      x = if builtins.isString s then { name = s; } else s;
+    in
     {
-      split = "splitDebug";
-      strip = "strip";
-      keep = null;
+      inherit (x) name;
+      run =
+        x.run or stages.helpers.${x.name}
+          or (throw "breakbulk: the debug stage `${x.name}` is no stage helper; give its `run`");
+      removable = x.removable or false;
     }
-    .${v};
+  );
+  entryOf = v: traits: entryStages traits.debugStages.${v};
 
-  # The chain `debugInfo` puts first after `linked`: packing the `.dwo`
-  # files where they would ship (`packDwo`, an ordinary stage), then the
-  # stage above. `packDwo` reads ELF skeleton units, so a non-ELF target,
-  # which can only keep, gets none.
+  # The chain `debugInfo` puts first after `linked`, each stage after the
+  # one before.
   debugStages =
     v: traits:
-    stages.chain (
-      lib.optional (v != "strip" && traits.objectFormat == "elf") "packDwo"
-      ++ lib.optional (debugStageName v != null) (debugStageName v)
+    let
+      e = entryOf v traits;
+    in
+    lib.listToAttrs (
+      lib.imap0 (
+        i: s:
+        nameValuePair s.name {
+          after = if i == 0 then "linked" else (lib.elemAt e (i - 1)).name;
+          before = null;
+          inherit (s) run;
+        }
+      ) e
     );
 
+  # The names of an entry's stages that no stage set may remove.
+  kept = v: traits: map (s: s.name) (filter (s: !s.removable) (entryOf v traits));
+
   # A merged stage set (`where` names the layer in messages) may not
-  # remove the target's debug stage or add `splitDebug` where the target
-  # does not split.
+  # remove a stage the target's entry keeps, or add one that only the
+  # "split" entry has: such a stage needs the units' split setup (the
+  # remap scope, the build ID).
   checkDebugStages =
     {
       triple,
+      traits,
       debugInfo,
       where,
     }:
     set:
     let
-      auto = debugStageName debugInfo;
+      keep = kept debugInfo traits;
+      splitOnly =
+        if debugInfo == "split" || !(traits.debugStages ? split) then
+          [ ]
+        else
+          lib.subtractLists (map (s: s.name) (entryOf debugInfo traits)) (kept "split" traits);
+      removed = filter (n: !(stages.isLive (set.${n} or null))) keep;
+      added = filter (n: stages.isLive (set.${n} or null)) splitOnly;
       fix = "debug splitting is decided per target, for every package of it: set `targets.\"${triple}\".debugInfo` (\"split\", \"keep\" or \"strip\")";
     in
-    if auto != null && !(stages.isLive (set.${auto} or null)) then
-      throw "breakbulk: ${where} removes the `${auto}` stage on ${triple}, which `debugInfo = \"${debugInfo}\"` inserts; ${fix}"
-    else if auto != "splitDebug" && stages.isLive (set.splitDebug or null) then
-      throw "breakbulk: ${where} adds a `splitDebug` stage on ${triple}, whose `debugInfo` is \"${debugInfo}\": the target's units remap every source path and their links get no GNU build ID; ${fix}"
+    if removed != [ ] then
+      throw "breakbulk: ${where} removes the `${lib.head removed}` stage on ${triple}, which `debugInfo = \"${debugInfo}\"` inserts; ${fix}"
+    else if added != [ ] then
+      throw "breakbulk: ${where} adds a `${lib.head added}` stage on ${triple}, whose `debugInfo` is \"${debugInfo}\": the target's units remap every source path and their links get no GNU build ID; ${fix}"
     else
       set;
-
   # The layers of a target's stage set: the stages `debugInfo` inserts,
   # then `targets.<triple>.stages`.
   targetLayers =
@@ -385,10 +396,11 @@ let
   targetStageSet =
     {
       triple,
+      traits ? targetTraits.resolve { inherit triple; },
       ...
     }@args:
     checkDebugStages {
-      inherit triple;
+      inherit triple traits;
       debugInfo = debugInfoOf args;
       where = "targets.\"${triple}\".stages";
     } (mergeSets stageSetEval (targetLayers args));
@@ -498,7 +510,7 @@ let
           stageSet =
             assert targetChecked;
             checkDebugStages {
-              inherit triple;
+              inherit triple traits;
               debugInfo = effectiveDebugInfo;
               where = "packages.${pkg}.stages";
             } (mergeSets stageSetEval (targetLayers setArgs ++ [ { set = conf.stages or { }; } ]));

@@ -3825,13 +3825,41 @@ in
             };
           }
         ]) "server";
-        # A non-ELF target cannot split.
+        # A target whose traits have no stages for a value cannot take it
+        # (wasm: no "split" or "strip" entry)...
         wasmSplit =
           !(builtins.tryEval (
             breakbulk.products.debugInfoOf {
               triple = "wasm32-unknown-unknown";
               debugInfo = "split";
             }
+          )).success;
+        # ...until its traits give them: the entry's stages come first,
+        # and no stage set may remove them.
+        wasmStripGiven =
+          let
+            triple = "wasm32-unknown-unknown";
+            traits = breakbulk.targetTraits.resolve {
+              inherit triple;
+              traits.debugStages.strip = [
+                {
+                  name = "wasmStrip";
+                  run = helpers.wasmOpt;
+                }
+              ];
+            };
+            set =
+              targetStages:
+              breakbulk.products.targetStageSet {
+                inherit triple traits targetStages;
+                debugInfo = "strip";
+              };
+          in
+          lib.attrNames (set { }) == [ "wasmStrip" ]
+          && !(builtins.tryEval (
+            lib.attrNames (set {
+              wasmStrip = null;
+            })
           )).success;
         # A stage with no `after` runs after the inserted stages, whichever
         # the target's debugInfo inserts.
@@ -3886,6 +3914,7 @@ in
         && report.stripRemoved
         && report.packageAdds
         && report.wasmSplit
+        && report.wasmStripGiven
         &&
           report.noAfter == [
             [

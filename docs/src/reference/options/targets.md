@@ -243,15 +243,22 @@ list of string
 ## `targets.<name>.debugInfo`
 
 What this target’s products do with debug info,
-for every package of the target, because the units are shared:
+for every package of the target, because the units are shared\.
+The stages each value puts first after ` linked ` are the traits’
+` debugStages ` entry for it; a value the traits have no entry for
+is an evaluation error\. A target of another format (wasm) gets
+“split” or “strip” by giving the entry, as
+` traits.debugStages.strip = [ { name = "strip"; run = …; } ] `\.
+The built-in entries:
 
  - ` "split" `: the ` packDwo ` and ` splitDebug ` stages, first after
    ` linked `; ` splitDebug ` moves it to a ` debug ` output (` $debug/lib/debug/.build-id/… `); the
    target’s links get a GNU build ID, and shipped units remap
    source paths only in panic messages, ` file!() ` and diagnostics,
-   so the debug info names the real sources\. ELF and Mach-O: on
-   Apple targets the debug info is the link’s ` .dSYM `, which goes
-   to the ` debug ` output, and the binary’s debug map is removed\.
+   so the debug info names the real sources\. ELF and Mach-O (no
+   ` packDwo `): on Apple targets the debug info is the link’s
+   ` .dSYM `, which goes to the ` debug ` output, and the binary’s
+   debug map is removed\.
  - ` "keep" `: the ` packDwo ` stage on an ELF target, else none;
    every source path is remapped, so the debug info stays in the
    file without naming store paths\. msvc’s ` .pdb ` is a separate

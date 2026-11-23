@@ -99,6 +99,20 @@
 #                          ELF target and on Apple (the `.dSYM`), "keep"
 #                          elsewhere (msvc's `.pdb` is separate already;
 #                          wasm and others have no splitting stage)
+#   debugStages            the stages each value of `debugInfo` puts first
+#                          in every product's chain, by value: a list of
+#                          stage names (`breakbulk.stageHelpers` helpers)
+#                          or `{ name; run ? <the helper>; removable ?
+#                          false; }`, each after the one before (the first
+#                          after `linked`). A value with no entry is an
+#                          error naming it. A stage set may not remove an
+#                          entry's stages (but a `removable` one) or add
+#                          the `split` entry's where the value is another.
+#                          ELF: split packDwo then splitDebug, strip strip,
+#                          keep packDwo (packDwo removable); Mach-O: split
+#                          splitDebug, strip strip, keep none; others: keep
+#                          none. A target of another format supplies its
+#                          own (`traits.debugStages.strip = [ … ]` for wasm)
 #   nixpkgsSystem          the target's nixpkgs platform: a `pkgsCross`
 #                          attribute name, or a `crossSystem` attribute set
 #                          (`{ config = "<GNU triple>"; }`, the triple
@@ -659,6 +673,34 @@ let
       # naming build paths; elsewhere keep it in the file (msvc's PDB is
       # separate already; wasm and other targets have no splitting stage).
       debugInfo = if (isLinux && objectFormat == "elf") || isApple then "split" else "keep";
+      # The stages behind each `debugInfo` value. The splitDebug and
+      # strip helpers handle ELF and Mach-O files; packDwo packs ELF
+      # skeleton units' `.dwo` files and changes no unit, so it may be
+      # removed.
+      debugStages =
+        let
+          packDwo = {
+            name = "packDwo";
+            removable = true;
+          };
+        in
+        if objectFormat == "elf" then
+          {
+            split = [
+              packDwo
+              "splitDebug"
+            ];
+            strip = [ "strip" ];
+            keep = [ packDwo ];
+          }
+        else if objectFormat == "macho" then
+          {
+            split = [ "splitDebug" ];
+            strip = [ "strip" ];
+            keep = [ ];
+          }
+        else
+          { keep = [ ]; };
       # The target's name in the tools that spell it their own way.
       nixpkgsSystem =
         nixpkgsSystems.${b.triple} or {

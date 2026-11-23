@@ -440,26 +440,33 @@ What happens to debug info is one property of the target:
 `"split"` on Linux ELF targets, `"keep"` elsewhere (msvc's `.pdb` is a
 separate file already, and wasm has no splitting stage).
 
-Three things follow from it (`products.debugInfoOf`):
+Three things follow from it (`products.debugInfoOf`). The stages are
+the traits' `debugStages` entry for the value; these are the ELF
+target's:
 
 | `debugInfo` | Stages first after `linked` | Remap scope of target units | `NIX_SET_BUILD_ID` on target units |
 | --- | --- | --- | --- |
 | `"split"` | `packDwo`, `splitDebug` | `macro,diagnostics` (table above) | yes (the GNU build ID `splitDebug` needs) |
 | `"strip"` | `strip` (`strip --strip-debug`; drops `.dwo` files and packed `.dwp` files) | all | no |
-| `"keep"` | `packDwo` on an ELF target, else none | all | no |
+| `"keep"` | `packDwo` | all | no |
 
-- `"split"` and `"strip"` need an ELF target, or evaluation fails.
+- Mach-O's entries are `splitDebug`, `strip` and none. Other targets
+  have a `"keep"` entry only: `"split"` and `"strip"` fail at
+  evaluation unless the target's traits give the stages
+  (`targets.<triple>.traits.debugStages.strip = [ { name = "wasmStrip";
+  run = …; } ]`, for wasm).
 - Units are shared by every package of the target, so no `stages`
   setting, the target's or a package's, may:
-  - remove the inserted `splitDebug` or `strip` (that would leave real
-    source paths in the product), or
-  - add `splitDebug` where the target does not split (its links have no
-    build ID and remap every path).
+  - remove a stage the entry inserts (`splitDebug`, `strip`: that would
+    leave real source paths in the product), or
+  - add a stage only the `"split"` entry has where the target does not
+    split (`splitDebug`: its links have no build ID and remap every
+    path).
 
   Either is an evaluation error naming `debugInfo`.
-- `packDwo` changes no unit and leaves no source path in the product, so
-  it is an ordinary stage: configure it, or remove it with `null` to ship
-  the loose `.dwo` files.
+- A stage the entry marks `removable` (`packDwo`: it changes no unit and
+  leaves no source path in the product) is an ordinary stage: configure
+  it, or remove it with `null` to ship the loose `.dwo` files.
 - Overriding the inserted stages' attributes (their `run`, `after`) is
   allowed, and a stage of another name (an extra
   `strip { all = true; }` after `splitDebug`) is an ordinary stage.
