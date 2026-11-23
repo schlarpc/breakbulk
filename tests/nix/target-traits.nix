@@ -506,7 +506,7 @@ in
           objectFormat = "elf";
           isLinux = false;
           kernel = "linux";
-          debugInfo = "keep";
+          debugInfo = "split";
         }
         {
           os = "macos";
@@ -592,6 +592,7 @@ in
             # Bare metal that rustc links through a C compiler.
             "avr-none"
             "wasm32-wasip1"
+            # Android needs the NDK.
             "aarch64-linux-android"
           ];
       expected = [
@@ -611,7 +612,7 @@ in
         "bareMetal"
         null
         null
-        null
+        "choose"
       ];
     };
     # The test runner kinds (lib/presets/runner.nix), from traits alone.
@@ -1136,23 +1137,37 @@ in
           }).os;
       expected = true;
     };
-    # Android: the Linux kernel, not a Linux userland. No
-    # linker rule (issue #27), and qemu-user cannot run bionic programs.
+    # Android: the Linux kernel, not a Linux userland. The NDK's clang
+    # links (presets.android gives it), no Linux kind does, and adb runs
+    # the programs: qemu-user cannot run bionic programs.
     testAndroid = {
       expr =
         let
           a = r "aarch64-linux-android";
         in
         [
-          (fails (bb.presetHelpers.linkerKind { triple = "aarch64-linux-android"; }))
+          (bb.presetHelpers.linkerKind { triple = "aarch64-linux-android"; })
+          (fails (
+            bb.presetHelpers.linkerKind {
+              triple = "aarch64-linux-android";
+              kind = "lld";
+            }
+          ))
           (bb.presetHelpers.runnerKind {
             traits = a;
             canExecute = false;
           })
+          a.ndkTriple
+          a.androidAbi
+          (r "x86_64-unknown-linux-gnu").ndkTriple
         ];
       expected = [
+        "ndk"
         true
-        "none"
+        "adb"
+        "aarch64-linux-android"
+        "arm64-v8a"
+        null
       ];
     };
     # A user's base fields recompute the derived ones; a derived field set

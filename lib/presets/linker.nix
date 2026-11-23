@@ -9,7 +9,7 @@
 #
 #   linkerKind { triple; traits ? <built-in>; lto ? false; kind ? null;
 #                rustc ? null; staticNonPie ? false; zig ? null;
-#                kinds ? builtinKinds; }                 -> a kind name
+#                ndk ? null; kinds ? builtinKinds; }     -> a kind name
 #   chooseLinker { pkgs; triple; traits; lto; kind; kinds; facts; … }
 #                                                        -> a linker path
 #
@@ -37,6 +37,8 @@
 #   lld                  isLinux, rustc picks lld        the wrapped cc with -fuse-ld=lld
 #                                                        (reads bitcode too: lto)
 #   cc                   other isLinux                   the wrapped cc with its own default (GNU ld)
+#   ndk                  isAndroid                       the NDK's clang (`--target=<ndkTriple><api>`)
+#                                                        with the NDK's lld (presets.android)
 #   mold                 never (`kind = "mold"`)         the wrapped cc with -fuse-ld=mold
 #
 # `kind` (`targets.<triple>.linkerKind`) replaces the default; a kind that
@@ -59,7 +61,8 @@
 # and the C driver's default linker everywhere else (musl included).
 #
 # `isLinux` is a Linux userland; Android (the Linux kernel, its own
-# userland) has no rule and fails with a message naming issue #27.
+# userland) has a rule of its own: the NDK's clang, which presets.android
+# gives the kind (`ndk`), as presets.linuxPortable gives zig.
 #
 # Apple targets: the rule is keyed on the build machine (`rustc.host`).
 # From a Linux build machine rustc links directly with an ld64.lld (its
@@ -356,9 +359,9 @@ let
   #   what          the targets `on` accepts, for messages
   #   bitcode       it reads rustc's LLVM bitcode (`-C linker-plugin-lto`)
   #   incompatible  ctx -> null, or why it cannot link in that context
-  #                 (ctx: { triple; traits; lto; staticNonPie; zig; })
+  #                 (ctx: { triple; traits; lto; staticNonPie; zig; ndk; })
   #   build         args -> the linker, a path (args: { pkgs; packageSet;
-  #                 llvm; lld; zig; triple; traits; }, `packageSet` the one
+  #                 llvm; lld; zig; ndk; triple; traits; }, `packageSet` the one
   #                 whose C toolchain drives the link, `llvm` nixpkgs'
   #                 LLVM of rustc's major)
   #   lld           null, or args -> { name; version; patches; }: the LLD
@@ -415,6 +418,27 @@ let
         else
           null;
       build = a: zigLinker a.pkgs a.zig;
+    };
+    # The NDK's clang driver, which links with the NDK's lld against the
+    # sysroot of the API level in its `--target`. Not nixpkgs' wrapped cc:
+    # its ld-wrapper adds store rpaths and its libc's dynamic linker, which
+    # an Android program must not name. Always with a build ID, as the
+    # NDK's own build systems (ndk-build, its CMake toolchain) link: Play
+    # Console and crash reporters match symbol files by it.
+    ndk = {
+      on = t: t.isAndroid;
+      what = "Android";
+      build =
+        a:
+        if a.ndk == null then
+          throw "breakbulk.presetHelpers.chooseLinker: `${a.triple}` links with the Android NDK's clang; use `breakbulk.presets.android { ndk = …; }`, which gives it"
+        else
+          ccDriverLinker {
+            packageSet = a.pkgs;
+            name = "${a.ndk.target}-clang";
+            exe = a.ndk.clang;
+            flag = "--target=${a.ndk.target} -Wl,--build-id=sha1";
+          };
     };
     lld-link = {
       on = t: t.isMsvc || t.isUefi;
@@ -571,8 +595,8 @@ let
         else
           "cc"
       )
-    else if t.os == "android" then
-      throw "breakbulk.presetHelpers.chooseLinker: no linker rule for the Android target `${triple}`: Android has the Linux kernel but its own userland (bionic, the NDK's linker), which breakbulk has no preset for yet (issue #27); set `targets.${triple}.linker`"
+    else if t.isAndroid then
+      "ndk"
     else
       throw "breakbulk.presetHelpers.chooseLinker: no linker rule for `${triple}`; set `targets.${triple}.linker`";
 
@@ -590,6 +614,8 @@ let
       staticNonPie ? false,
       # zig: { cc; target; } from presets.linuxPortable, else null.
       zig ? null,
+      # ndk: { clang; target; } from presets.android, else null.
+      ndk ? null,
       # The kinds to choose from (`targets.<triple>.linkerKinds`).
       kinds ? builtinKinds,
     }:
@@ -604,6 +630,7 @@ let
           lto
           staticNonPie
           zig
+          ndk
           ;
       };
     in
@@ -675,6 +702,8 @@ let
       lld ? null,
       # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-<abi>.<glibc>"; }.
       zig ? null,
+      # ndk: { clang = <the NDK's clang>; target = "<ndkTriple><api>"; }.
+      ndk ? null,
     }:
     let
       k = linkerKind {
@@ -686,6 +715,7 @@ let
           kinds
           staticNonPie
           zig
+          ndk
           ;
         rustc = if facts == null then null else rustcFacts { inherit pkgs facts; };
       };
@@ -697,6 +727,7 @@ let
         llvm
         lld
         zig
+        ndk
         triple
         traits
         ;

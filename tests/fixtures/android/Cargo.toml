@@ -1,0 +1,12 @@
+# android: aarch64-linux-android with presets.android and the NDK
+# (tests/presets/android.nix). `native` is a cdylib (and an rlib, for its
+# binary and tests) and a binary, with C compiled by cc-rs through the
+# NDK's clang; its unit tests run on an emulator
+# (`nix run .#test-android-emulator`).
+[workspace]
+resolver = "3"
+members = ["native"]
+
+# Debug info, so the products have a `debug` output.
+[profile.release]
+debug = 1

@@ -41,10 +41,11 @@
 #                          to speak of (none, uefi, cuda, wasm, wasi)
 #   isLinux                a Linux userland: os linux (glibc, musl, …);
 #                          false for Android, whose userland (bionic, its
-#                          own linker and loader) breakbulk has no preset
-#                          for (issue #27)
+#                          own linker and loader) is not one: Android's
+#                          rules read `os` ("android") and `kernel`
 #   isWindows isMsvc isMingw          os windows; env msvc; env gnu
 #   isApple isWasm isWasi isBareMetal isUefi
+#   isAndroid              os android
 #   linksComponents        the link writes a WebAssembly component, not a
 #                          core module: WASI from preview 2 on
 #                          (wasm32-wasip2, -wasip3), whose target specs
@@ -96,9 +97,9 @@
 #                          `dylibPathOf` in lib/test-runs.nix
 #   debugInfo              the default of `targets.<t>.debugInfo` (decision
 #                          137): "split" (into a `debug` output) on a Linux
-#                          ELF target and on Apple (the `.dSYM`), "keep"
-#                          elsewhere (msvc's `.pdb` is separate already;
-#                          wasm and others have no splitting stage)
+#                          or Android ELF target and on Apple (the `.dSYM`),
+#                          "keep" elsewhere (msvc's `.pdb` is separate
+#                          already; wasm and others have no splitting stage)
 #   debugStages            the stages each value of `debugInfo` puts first
 #                          in every product's chain, by value: a list of
 #                          stage names (`breakbulk.stageHelpers` helpers)
@@ -134,6 +135,16 @@
 #   xwinArch               xwin's name for an msvc target's library
 #                          directories (`sdk.libDirs.<arch>`: x86, x86_64,
 #                          aarch, aarch64); null for other targets
+#   ndkTriple              an Android target's triple as the NDK's clang
+#                          spells it, without the API level (`clang
+#                          --target=<ndkTriple><api>`): aarch64-linux-android,
+#                          armv7a-linux-androideabi (every 32-bit Arm
+#                          triple), i686-linux-android, x86_64-linux-android,
+#                          riscv64-linux-android; null for other targets
+#   androidAbi             an Android target's ABI name (an APK's
+#                          `lib/<abi>/`, Play Console's symbol files):
+#                          arm64-v8a, armeabi-v7a, x86, x86_64, riscv64;
+#                          null for other targets
 { lib }:
 let
   inherit (lib)
@@ -318,6 +329,27 @@ let
       name = "aarch";
     }
   ];
+
+  # The NDK clang's architectures (its `<arch>-linux-android<api>-clang`
+  # drivers): every 32-bit Arm triple is ARMv7-A there.
+  ndkCpu = renameArch [
+    {
+      match = "(arm|thumb).*";
+      name = "armv7a";
+    }
+    {
+      match = "riscv64.*";
+      name = "riscv64";
+    }
+  ];
+  # Android's ABI names, by the NDK clang's architecture.
+  androidAbis = {
+    aarch64 = "arm64-v8a";
+    armv7a = "armeabi-v7a";
+    i686 = "x86";
+    x86_64 = "x86_64";
+    riscv64 = "riscv64";
+  };
 
   # Second components that are not rustc's `target_vendor`.
   vendorAliases = {
@@ -538,6 +570,7 @@ let
       isUefi = b.os == "uefi";
       # A Linux userland; Android has the Linux kernel, not this.
       isLinux = b.os == "linux";
+      isAndroid = b.os == "android";
       isCuda = b.os == "cuda";
       # Cygwin's programs are PE files named as on Windows.
       isCygwin = b.os == "cygwin";
@@ -572,6 +605,7 @@ let
         isWasm
         isUefi
         isLinux
+        isAndroid
         objectFormat
         ;
       kernel =
@@ -691,7 +725,8 @@ let
       # the link's `.dSYM` already and the binary keeps only a debug map
       # naming build paths; elsewhere keep it in the file (msvc's PDB is
       # separate already; wasm and other targets have no splitting stage).
-      debugInfo = if (isLinux && objectFormat == "elf") || isApple then "split" else "keep";
+      debugInfo =
+        if ((isLinux || isAndroid) && objectFormat == "elf") || isApple then "split" else "keep";
       # The stages behind each `debugInfo` value. The splitDebug and
       # strip helpers handle ELF and Mach-O files; packDwo packs ELF
       # skeleton units' `.dwo` files and changes no unit, so it may be
@@ -732,6 +767,8 @@ let
       zigMcpu = zigMcpus."${b.arch}-${b.abi}" or null;
       qemuArch = qemuCpu b.arch;
       xwinArch = if isMsvc then xwinCpu b.arch else null;
+      ndkTriple = if isAndroid then "${ndkCpu b.arch}-linux-android${b.abi}" else null;
+      androidAbi = if isAndroid then androidAbis.${ndkCpu b.arch} or null else null;
     };
 
   fieldNames = lib.attrNames (derive {
@@ -925,6 +962,8 @@ let
       choose "`breakbulk.presets.windows { sdk = breakbulk.xwinSdk { … }; }` (the MSVC CRT and Windows SDK)"
     else if traits.isApple && traits.os == "macos" then
       choose "`breakbulk.presets.darwin { sdk = …; }` (the macOS SDK)"
+    else if traits.isAndroid then
+      choose "`breakbulk.presets.android { ndk = …; }` (the Android NDK)"
     else if traits.isWasm && !traits.isWasi then
       choose "`breakbulk.presets.wasmWeb` (wasm-bindgen, for browsers) or `breakbulk.presets.wasmComponent` (a WebAssembly component)"
     else if traits.isBareMetal && !elem traits.arch ccLinkedBareMetal then

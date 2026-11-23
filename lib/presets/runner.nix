@@ -17,6 +17,10 @@
 #   kind              when                              runs tests
 #   wine              isWindows, arch x86_64 or i686    wine, prefix in $TMPDIR
 #   wasmtime          isWasi                            wasmtime
+#   adb               isAndroid                         on a device or emulator through
+#                                                       adb, outside the sandbox only
+#                                                       (presets.android sets
+#                                                       canRunTests false)
 #   native            canExecute                        directly
 #   native-builder    nativeBuilder                     directly, on a builder of
 #                                                       the target's system (testSystem)
@@ -52,6 +56,10 @@ let
       )
     else if traits.isWasm then
       (if traits.isWasi then "wasmtime" else "none")
+    # Before `canExecute`: an Android program needs Android's userland
+    # (its loader, bionic), which no Linux machine has.
+    else if traits.isAndroid then
+      "adb"
     else if canExecute then
       "native"
     else if nativeBuilder then
@@ -80,6 +88,8 @@ let
       wine ? pkgs.wineWow64Packages.minimal,
       # wasmtime: the wasmtime package.
       wasmtime ? pkgs.buildPackages.wasmtime,
+      # adb: the package with bin/adb.
+      adb ? pkgs.buildPackages.android-tools,
     }:
     let
       bp = pkgs.buildPackages;
@@ -109,6 +119,12 @@ let
         runner = runners.wine {
           pkgs = bp;
           inherit wine;
+        };
+      };
+      adb = direct // {
+        runner = runners.adb {
+          pkgs = bp;
+          inherit adb;
         };
       };
       wasmtime = direct // {

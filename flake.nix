@@ -413,6 +413,14 @@
             system = pkgs.stdenv.hostPlatform.system;
             config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "macOS-SDK";
           };
+          # The Android NDK, for the Android checks
+          # (tests/presets/android.nix): licensed under the Android SDK
+          # License Agreement, which fetching it here accepts for this
+          # repository's tests; presets.android requires `ndk`.
+          ndkPkgs = import nixpkgs {
+            system = pkgs.stdenv.hostPlatform.system;
+            config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "android-ndk";
+          };
         }
         # Post-link stages and helpers (stages-*). stages-wasm-web
         # downloads a rust-overlay toolchain with the wasm32 target.

@@ -10,6 +10,7 @@
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
 #   breakbulk.xwinSdk { pkgs; crt; sdk; arches; hash; }   (unfree; FOD)
 #   breakbulk.appleSdk { pkgs; version; }   (unfree; nixpkgs' FOD)
+#   breakbulk.androidNdk { pkgs; version; }   (unfree; androidenv's archive)
 #   breakbulk.wasmBindgen.forLockfile { pkgs; lockfile; }
 #   breakbulk.mkProduct { name; linked; stages; checks; target; pkgs; … }
 #     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers)
@@ -148,11 +149,13 @@ let
       runners
       wasiSdk
       appleSdk
+      androidNdk
       ;
     stageHelpers = stages.helpers;
   };
   inherit (presetsLib) presets;
   appleSdk = import ./apple-sdk.nix { inherit lib; };
+  androidNdk = import ./android-ndk.nix { inherit lib; };
 
   # The spec of one target (lib/modules/target-spec.nix) with `toolchain`
   # (a workspace's: `{ rustc; cargo; facts; … }`): `modules` (the
@@ -341,7 +344,7 @@ let
     inherit (manifest) acceptsFeature;
 
     xwinSdk = import ./xwin-sdk.nix { inherit lib; };
-    inherit appleSdk;
+    inherit appleSdk androidNdk;
 
     inherit
       wasmBindgen
@@ -355,7 +358,7 @@ let
       ;
 
     # Toolchain presets: breakbulk.presets.{linux, linuxStatic,
-    # linuxPortable, windows, darwin, wasmWeb, wasmComponent, uefi}, named for their
+    # linuxPortable, windows, darwin, android, wasmWeb, wasmComponent, uefi}, named for their
     # purpose, the mechanism from the triple; runners; the Rust to
     # LLVM version table; the Rust to wasi-sdk table (lib/wasi-sdk.nix).
     # The functions presets are built from: `chooseLinker`, `linkerKind`,

@@ -43,6 +43,7 @@
   runners,
   wasiSdk,
   appleSdk,
+  androidNdk,
   stageHelpers,
 }:
 let
@@ -655,6 +656,15 @@ let
         stageHelpers
         ;
     };
+    android = import ./android.nix {
+      inherit
+        lib
+        androidNdk
+        chooseLinker
+        chooseRunner
+        guard
+        ;
+    };
     windowsGnu = import ./windows-gnu.nix {
       inherit
         lib
@@ -796,6 +806,12 @@ in
     # required (`sdk`, a package or a version for breakbulk.appleSdk);
     # `deploymentTarget`, `nativeBuilder`.
     darwin = presetModule impl.darwin;
+
+    # Android: `*-linux-android*` with the Android NDK (./android.nix): its
+    # clang compiles and links for an API level (`ndk`, required, a
+    # package or a version for breakbulk.androidNdk; `apiLevel`); tests
+    # through adb on a device or emulator, outside the sandbox.
+    android = presetModule impl.android;
 
     # wasm for the web: core modules through wasm-bindgen.
     wasmWeb = presetModule impl.wasmWeb;

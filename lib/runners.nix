@@ -19,6 +19,10 @@
 #   runners.qemuUser { inherit pkgs; arch = "aarch64"; } Linux ELF for another CPU
 #   runners.ldSo { inherit pkgs; }                       ELF for the build machine that names
 #                                                        the FHS loader (linuxPortable)
+#   runners.adb { inherit pkgs; }                        Android programs on a device or
+#                                                        emulator, outside the sandbox
+#                                                        (a record: its dylibPath is the
+#                                                        libraries to push)
 #   runners.wasmtime { inherit pkgs; }                    WASI modules and components
 #   runners.wasmBindgenTest { inherit pkgs; wasmBindgen; browser = "node"; }
 #                                                        wasm-bindgen-test binaries
@@ -140,6 +144,63 @@ in
     script pkgs "breakbulk-runner-qemu-${arch}" ''
       exec ${qemu}/bin/qemu-${arch} "$@"
     '';
+
+  # An Android device or emulator through adb (nixpkgs' android-tools,
+  # built from source, not the SDK's platform-tools): the program and the
+  # shared libraries of its dynamic-library path are pushed to a fresh
+  # directory under /data/local/tmp, run there with the `RUST_*` and
+  # `CARGO_*` variables of the runner's environment (`adb shell` starts the
+  # device's shell with none of the caller's), and removed. The device is
+  # adb's choice: ANDROID_SERIAL, else the only one attached. Outside the
+  # Nix sandbox only, which has no device: a test app, not a test run.
+  #
+  # A record whose `dylibPath` is BREAKBULK_ADB_LIBRARY_PATH: the test's
+  # library directories are on the build machine, so the runner reads them
+  # from there and gives the device its own copy as LD_LIBRARY_PATH.
+  adb =
+    {
+      pkgs,
+      adb ? pkgs.android-tools,
+    }:
+    {
+      program = script pkgs "breakbulk-runner-adb" ''
+        adb=${adb}/bin/adb
+        if [ "$($adb get-state 2>/dev/null || true)" != device ]; then
+          echo "breakbulk: adb finds no Android device or emulator (ANDROID_SERIAL=''${ANDROID_SERIAL:-<unset>}); start one, or attach a device, and run the test app again. A test run inside the Nix sandbox cannot reach one." >&2
+          exit 1
+        fi
+        prog=$1
+        shift
+        quote() { printf "'%s'" "''${1//\'/\'\\\'\'}"; }
+        dir=/data/local/tmp/breakbulk-$(${pkgs.coreutils}/bin/od -An -N8 -tx8 /dev/urandom | tr -d ' ')
+        $adb shell "mkdir -p $dir/lib" >/dev/null
+        trap '$adb shell "rm -rf $dir" >/dev/null 2>&1 || true' EXIT
+        $adb push -q "$prog" "$dir/" >/dev/null
+        IFS=: read -ra libdirs <<< "''${BREAKBULK_ADB_LIBRARY_PATH:-}"
+        for d in "''${libdirs[@]}"; do
+          for f in "$d"/*.so; do
+            [ -e "$f" ] && $adb push -q "$f" "$dir/lib/" >/dev/null
+          done
+        done
+        cmd="cd $dir && env LD_LIBRARY_PATH=$dir/lib"
+        while IFS= read -r -d "" kv; do
+          case $kv in
+            RUST_*=* | CARGO_*=*) [[ $kv == *$'\n'* ]] || cmd+=" $(quote "$kv")" ;;
+          esac
+        done < <(${pkgs.coreutils}/bin/env -0)
+        cmd+=" ./$(quote "''${prog##*/}")"
+        for a in "$@"; do
+          cmd+=" $(quote "$a")"
+        done
+        # adb's shell protocol (Android 7+) gives the program's exit status.
+        $adb shell "$cmd"
+      '';
+      args = [ ];
+      dylibPath = {
+        var = "BREAKBULK_ADB_LIBRARY_PATH";
+        sep = ":";
+      };
+    };
 
   wasmtime =
     {

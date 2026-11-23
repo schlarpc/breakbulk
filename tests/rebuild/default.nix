@@ -94,6 +94,7 @@ let
   # fixture (presets, inputs, stages), that configuration is reused.
   catalog = {
     all-required = [ dynamic.repos.all-required ];
+    android = [ (import ../presets/android.nix args).repo ];
     benches = [ products.repos.benchesRepo ];
     bin-exe-not-built = [ (plain "bin-exe-not-built" [ ]) ];
     build-dep-leak = [ (plain "build-dep-leak" [ ]) ];

@@ -16,13 +16,15 @@
 #                         (~250 MB) and its layout and case symlinks
 #
 # The preset fixtures through mkRepository are in ./fixtures.nix,
-# ./extra-targets.nix and ./darwin.nix (with `appleSdkPkgs`, a package set
-# that allows Apple's macOS SDK; see flake.nix).
+# ./extra-targets.nix, ./darwin.nix (with `appleSdkPkgs`, a package set
+# that allows Apple's macOS SDK; see flake.nix) and ./android.nix (with
+# `ndkPkgs`, one that allows the Android NDK).
 {
   pkgs,
   breakbulk,
   xwinPkgs ? null,
   appleSdkPkgs ? null,
+  ndkPkgs ? null,
 }:
 let
   inherit (pkgs) lib;
@@ -240,6 +242,14 @@ in
     (import ./darwin.nix {
       inherit pkgs breakbulk;
       sdkPkgs = appleSdkPkgs;
+    }).checks
+# Android (./android.nix): the NDK is unfree and fetched only with
+# `ndkPkgs`; it runs on x86_64 Linux.
+//
+  lib.optionalAttrs
+    (ndkPkgs != null && pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin)
+    (import ./android.nix {
+      inherit pkgs breakbulk ndkPkgs;
     }).checks
 # -Zbuild-std (./build-std.nix): rust-overlay's nightly with rust-src.
 // lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux" && pkgs ? rust-bin) (
