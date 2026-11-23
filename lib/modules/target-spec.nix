@@ -1,31 +1,21 @@
-# The toolchain spec of one target platform, for one workspace (decision
-# 70). Repository-wide definitions (`targets.<triple>`) and a
-# workspace's own (`workspaces.<ws>.targets.<triple>`) are both modules of
-# this kind; lib/repository.nix evaluates them together once per
-# (workspace, target), with `name` the triple and `breakbulkToolchain` the
-# workspace's toolchain, so a preset gets that workspace's rustc (see
+# The toolchain spec of one target platform, for one workspace.
+# Repository-wide definitions (`targets.<triple>`) and a workspace's own
+# (`workspaces.<ws>.targets.<triple>`) are both modules of this kind;
+# `breakbulk.evalTargetSpec` evaluates them together once per (workspace,
+# target), with `name` the triple and `toolchain` the workspace's
+# toolchain, then again with the `preset` they chose imported (see
 # lib/modules/targets.nix for how the fields reach units).
 {
   lib,
   name,
-  options,
   config,
   pkgs,
   breakbulkPresets,
-  breakbulkToolchain,
   ...
 }:
 let
   inherit (lib) types mkOption;
 
-  # A target whose preset needs no arguments gets it unless another preset
-  # is set (`targetTraits.presetRule`): on Linux the native target gets
-  # `presets.linux` (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`),
-  # so the native linker is nixpkgs' wrapped cc, as on every other target,
-  # instead of rustc's bundled rust-lld; a cross Linux, MinGW, wasip2 or
-  # UEFI target gets the preset its triple determines.
-  # A target defined directly from a preset (`targets.<t> =
-  # breakbulk.presets.linuxPortable { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
   util = import ../util.nix { inherit lib; };
   bt = import ./types.nix { inherit lib; };
@@ -37,100 +27,33 @@ let
       types.package
     ]
   );
-
-  # The fields a preset may set, as attribute paths.
-  presetFields = [
-    [ "packageSet" ]
-    [ "linker" ]
-    [ "cc" ]
-    [ "cxx" ]
-    [ "ar" ]
-    [ "cflags" ]
-    [ "cxxflags" ]
-    [
-      "bindgen"
-      "extraClangArgs"
-    ]
-    [ "rustflags" ]
-    [ "env" ]
-    [ "runner" ]
-    [ "testSystem" ]
-    [ "stdenv" ]
-    [
-      "host"
-      "linker"
-    ]
-    [
-      "host"
-      "env"
-    ]
-    [ "stagePreset" ]
-    [ "debugInfo" ]
-    [ "checks" ]
-  ];
-
-  # This target's traits: the built-in ones of the triple with `traits`
-  # merged over them (lib/target-traits.nix).
-  traits = targetTraits.resolve {
-    triple = name;
-    inherit (config) traits;
-  };
-
-  # A preset that takes `toolchain` (every `breakbulk.presets.*` does)
-  # gets this workspace's, so it picks LLVM tools and the wasi-sdk for the
-  # workspace's rustc unless the preset was given `rustc` itself; one that
-  # takes `traits` or `linkerKind` (every `breakbulk.presets.*` does) gets
-  # the target's.
-  takesLinkerKind = config.preset != null && lib.functionArgs config.preset ? linkerKind;
-  applied =
-    if config.preset == null then
-      { }
-    else
-      config.preset (
-        {
-          inherit pkgs;
-          triple = name;
-        }
-        // lib.optionalAttrs (breakbulkToolchain != null && lib.functionArgs config.preset ? toolchain) {
-          toolchain = breakbulkToolchain;
-        }
-        // lib.optionalAttrs (lib.functionArgs config.preset ? traits) { inherit traits; }
-        // lib.optionalAttrs (takesLinkerKind && config.linkerKind != null) { inherit (config) linkerKind; }
-      );
-
-  # One definition: a function, or a preset with options bound (a functor,
-  # whose function arguments say whether it takes `toolchain`).
-  presetType = lib.mkOptionType {
-    name = "breakbulkPreset";
-    description = "breakbulk preset (function)";
-    descriptionClass = "noun";
-    check = lib.isFunction;
-    merge = lib.mergeOneOption;
-  };
-  fromPreset =
-    path:
-    lib.mkIf (config.preset != null && lib.hasAttrByPath path applied) (
-      lib.getAttrFromPath path applied
-    );
 in
 {
   options = {
     preset = mkOption {
-      type = types.nullOr presetType;
+      type = types.nullOr types.deferredModule;
+      # A target whose preset needs no options gets it unless another
+      # preset is set (`targetTraits.presetRule`): on Linux the native
+      # target gets `presets.linux` (glibc `pkgs`) or
+      # `presets.linuxStatic` (musl `pkgs`), so the native linker is
+      # nixpkgs' wrapped cc, as on every other target, instead of rustc's
+      # bundled rust-lld; a cross Linux, MinGW, wasip2 or UEFI target gets
+      # the preset its triple determines.
       default =
         let
           d = targetTraits.defaultPreset {
-            inherit pkgs traits;
+            inherit pkgs;
+            inherit (config) traits;
             triple = name;
           };
         in
-        if d != null && !config.presetDirect then breakbulkPresets.${d} else null;
+        if d != null then breakbulkPresets.${d} else null;
       defaultText = lib.literalMD ''
-        unless the target is defined directly from a preset: for the
-        native triple, `breakbulk.presets.linux` when the `pkgs` given to
-        mkRepository is Linux with glibc, `breakbulk.presets.linuxStatic`
-        when it is Linux with musl (`pkgs.pkgsMusl`); for another Linux
-        `-gnu` triple `breakbulk.presets.linux`, a Linux `-musl` triple
+        for the native triple, `breakbulk.presets.linux` when the `pkgs`
+        given to mkRepository is Linux with glibc,
+        `breakbulk.presets.linuxStatic` when it is Linux with musl
+        (`pkgs.pkgsMusl`); for another Linux `-gnu` triple
+        `breakbulk.presets.linux`, a Linux `-musl` triple
         `breakbulk.presets.linuxStatic`, a Windows `-gnu` or `-gnullvm`
         triple `breakbulk.presets.windows`, `wasm32-wasip2`
         `breakbulk.presets.wasmComponent`, a UEFI triple
@@ -138,27 +61,33 @@ in
         evaluation error for `-msvc`, macOS and wasm32 without WASI unless
         `linker` is set
       '';
-      example = lib.literalExpression "breakbulk.presets.linuxStatic";
+      example = lib.literalExpression "breakbulk.presets.windows { inherit sdk; }";
       description = ''
-        A toolchain preset (`breakbulk.presets.*`, or a preset with its
-        options bound, such as `breakbulk.presets.windows { inherit sdk; }`).
-        It is called once per workspace that builds this triple, with
-        `pkgs`, the triple and the workspace's `toolchain`, whose rustc
-        it uses unless it was given `rustc` itself: the windows (msvc) and wasm presets
-        pick the LLVM tools and the wasi-sdk matching each workspace's
-        compiler. It sets the fields below at default priority, so
-        fields set here override the preset's (lists concatenate; use
-        `lib.mkForce` to replace one). Defining the target as
-        `breakbulk.presets.<name> { inherit pkgs; triple = …; }` gives
-        the same fields, except that the preset then sees no workspace
-        toolchain (pass `rustc` there). Set `null` to use no preset on
-        a target that has a default one, or that would need one (rustc's
-        own linker choice and the C toolchain Cargo finds).
+        A toolchain preset: a module of this target spec, which the spec
+        imports (`breakbulk.presets.*`, a preset with its options bound,
+        such as `breakbulk.presets.windows { inherit sdk; }`, or a module
+        of your own). It is evaluated once per workspace that builds this
+        triple, with the module arguments `pkgs`, `name` (the triple) and
+        `toolchain` (the workspace's), and reads the target's other
+        options (`config.traits`, `config.linkerKind`, …). The built-in
+        presets set their fields with `lib.mkDefault` (lists
+        concatenate; use `lib.mkForce` to replace one), so fields set
+        here override them, and their `stages` field by field. Set
+        `null` to use no preset on a target that has a default one, or
+        that would need one (rustc's own linker choice and the C
+        toolchain Cargo finds). The preset is chosen before it is
+        imported, so a preset cannot choose another one.
       '';
     };
     traits = mkOption {
       type = types.attrsOf types.anything;
       default = { };
+      apply =
+        t:
+        targetTraits.resolve {
+          triple = name;
+          traits = t;
+        };
       example = lib.literalExpression ''
         # A board breakbulk has no built-in traits for (a custom target
         # spec): an ELF bare-metal target.
@@ -167,11 +96,12 @@ in
       description = ''
         Facts about this target platform that override or extend the
         built-in ones breakbulk reads from the triple
-        (`breakbulk.targetTraits.resolve`). Every platform-dependent
-        decision reads the resulting traits: the linker kind, the default
-        debug handling, the install layout and file names, debuginfo side
-        files, the dynamic-library path of test processes, static linking.
-        Base
+        (`breakbulk.targetTraits.resolve`); the option's value is the
+        resolved traits, which presets read as `config.traits`. Every
+        platform-dependent decision reads them: the linker kind, the
+        default debug handling, the install layout and file names,
+        debuginfo side files, the dynamic-library path of test processes,
+        static linking. Base
         fields (`arch`, `vendor`, `os`, `env`, `abi`, `families`, as
         rustc's `target_*` cfg values) recompute the derived ones
         (`isLinux`, `objectFormat`, `executableSuffix`, `dylibPathVar`, …);
@@ -211,13 +141,6 @@ in
         traits; set `traits`.
       '';
     };
-    presetDirect = mkOption {
-      type = types.bool;
-      default = false;
-      internal = true;
-      visible = false;
-      description = "Set by every preset's value, so a target defined directly from a preset gets no default preset.";
-    };
     packageSet = mkOption {
       type = types.nullOr types.raw;
       default = null;
@@ -256,9 +179,8 @@ in
         machine, `rust-lld` (the toolchain's own) or `ld64.lld` (nixpkgs',
         for a toolchain without one). A kind that cannot link for this
         target, or with the preset's other settings (`mold` with
-        `crossLanguageLto`), is an evaluation error. It needs a `preset`
-        here; a target defined directly from a preset takes `linkerKind`
-        as the preset's argument.
+        `crossLanguageLto`), is an evaluation error. The preset reads it,
+        so it needs a `preset`.
       '';
     };
     cc = mkOption {
@@ -403,30 +325,33 @@ in
       '';
       description = ''
         Post-link stages for this target's products, merged over the
-        stages `debugInfo` inserts and the stage preset's defaults
-        (`stagePreset`). A stage is `{ after ? null; before ? null; run
-        = { input, product, target, pkgs }: <derivation>; }`; `null`
-        removes one. A stage runs before `install` and sees the flat link
+        stages `debugInfo` inserts; a preset may define some (the wasm
+        presets' wasm-bindgen and componentize chains, the darwin
+        preset's `adhocSign`). Definitions merge field by field, as
+        submodules do: `stages.wasmOpt.after = "mine"` keeps the preset's
+        `run`. `null` removes a stage (`enable = false`). A stage runs
+        before `install` and sees the flat link
         output, unless it is ordered after `install` (`after =
         "install"`, or after such a stage); then it sees the installed
         layout (`bin/`, `lib/`, `pkg/`), the place for wrappers and
         packaging. A stage with no `after` runs after the stages
         `debugInfo` inserts, unless it is ordered before one of them.
         Package settings (`packages.<name>.stages`) merge
-        over these. Neither may remove the `splitDebug` or `strip` stage
+        over these, a package's values winning at equal priority. Neither
+        may remove the `splitDebug` or `strip` stage
         `debugInfo` inserts or add `splitDebug` where it inserts none; set
         `debugInfo` instead. `packDwo` is an ordinary stage: `null`
         removes it.
       '';
     };
     checks = mkOption {
-      type = bt.stages;
+      type = bt.checks;
       default = { };
       description = ''
-        Checks on this target's products: `{ on ? <the product>; run =
-        { input, product, pkgs }: <derivation>; }`, where `on` names a
-        stage (`linked` for the raw link output). Every product also
-        gets `noSourceReferences` and `buildScriptFiles`.
+        Checks on this target's products, where `on` names a stage
+        (`linked` for the raw link output). They merge over the default
+        checks every product gets: `noSourceReferences` (unless the
+        variant's `sourcePaths` is `"keep"`) and `buildScriptFiles`.
         `buildScriptFiles` fails when a build script
         placed files next to the binaries (Cargo's `target/<profile>`,
         where `cargo run` finds them; libraries sdl2-sys `bundled` copies,
@@ -474,50 +399,34 @@ in
         ELF targets and Apple targets, `"keep"` elsewhere.
       '';
     };
-    stagePreset = mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      example = "wasmWeb";
-      description = ''
-        Which default stage chain this target's products get
-        (`breakbulk.stages.defaultStageNames`: `wasmWeb` wasmBindgen and
-        wasmOpt; `wasmComponent` wasmOpt, wasmComponentize and wasmMetadata). Presets set
-        it; `null`: none. Debug info is handled by `debugInfo`, not by
-        the chain.
-      '';
-    };
   };
 
-  config = lib.mkMerge [
-    {
-      cEnv =
-        let
-          e = util.tripleEnvSuffix name;
-          flags = lib.concatStringsSep " ";
-        in
-        lib.filterAttrs (_: v: v != null) {
-          "CC_${e}" = config.cc;
-          "CXX_${e}" = config.cxx;
-          "AR_${e}" = config.ar;
-        }
-        // lib.optionalAttrs (config.cflags != [ ]) {
-          "CFLAGS_${e}" = flags config.cflags;
-        }
-        // lib.optionalAttrs (config.cxxflags != [ ]) {
-          "CXXFLAGS_${e}" = flags config.cxxflags;
-        }
-        // lib.optionalAttrs (config.bindgen.extraClangArgs != [ ]) {
-          "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags config.bindgen.extraClangArgs;
-        };
-    }
-    (lib.foldl' lib.recursiveUpdate { } (map (p: lib.setAttrByPath p (fromPreset p)) presetFields))
-    # Between the preset's defaults and a user's `linker`, which still wins.
-    {
-      linker = lib.mkIf (config.linkerKind != null && !takesLinkerKind) (
-        lib.mkOverride 999 (
-          throw "breakbulk: `targets.${name}.linkerKind` needs a `preset` on the target that takes `linkerKind` (every `breakbulk.presets.*` does); a target defined directly from a preset takes it as the preset's argument"
-        )
-      );
-    }
-  ];
+  config = {
+    cEnv =
+      let
+        e = util.tripleEnvSuffix name;
+        flags = lib.concatStringsSep " ";
+      in
+      lib.filterAttrs (_: v: v != null) {
+        "CC_${e}" = config.cc;
+        "CXX_${e}" = config.cxx;
+        "AR_${e}" = config.ar;
+      }
+      // lib.optionalAttrs (config.cflags != [ ]) {
+        "CFLAGS_${e}" = flags config.cflags;
+      }
+      // lib.optionalAttrs (config.cxxflags != [ ]) {
+        "CXXFLAGS_${e}" = flags config.cxxflags;
+      }
+      // lib.optionalAttrs (config.bindgen.extraClangArgs != [ ]) {
+        "BINDGEN_EXTRA_CLANG_ARGS_${e}" = flags config.bindgen.extraClangArgs;
+      };
+    # Between a preset's defaults and a user's `linker`, which still wins:
+    # without a preset nothing reads `linkerKind`.
+    linker = lib.mkIf (config.linkerKind != null && config.preset == null) (
+      lib.mkOverride 999 (
+        throw "breakbulk: `targets.${name}.linkerKind` needs a `preset` on the target, which builds the linker of that kind"
+      )
+    );
+  };
 }

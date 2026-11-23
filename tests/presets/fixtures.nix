@@ -49,6 +49,20 @@ let
   tools = breakbulk.mkTools pkgs;
   presets = breakbulk.presets;
   presetHelpers = breakbulk.presetHelpers;
+  # A preset's target spec as mkRepository evaluates it for a workspace
+  # whose toolchain is `rustc`, with `modules` (target options).
+  presetSpec =
+    {
+      triple,
+      preset,
+      rustc ? null,
+      modules ? [ ],
+    }:
+    (breakbulk.evalTargetSpec {
+      inherit pkgs triple;
+      toolchain = if rustc == null then null else { inherit rustc; };
+      modules = [ { inherit preset; } ] ++ modules;
+    }).config;
 
   rustWith =
     targets:
@@ -1085,7 +1099,10 @@ let
       product = breakbulk.mkProduct {
         name = "ui";
         linked = t.packages.ui.roots."cdylib/ui";
-        stages = breakbulk.stages.defaultStages.wasmWeb;
+        stages = breakbulk.stages.chain [
+          "wasmBindgen"
+          "wasmOpt"
+        ];
         target.triple = wasm;
         info.lockfile = fixtures + "/wasm-browser/Cargo.lock";
         inherit pkgs;
@@ -1135,17 +1152,21 @@ let
       product = breakbulk.mkProduct {
         name = "comp";
         linked = t.packages.comp.roots."cdylib/comp";
-        stages = breakbulk.stages.merge [
-          breakbulk.stages.defaultStages.wasmComponent
-          {
-            wasmMetadata.run = breakbulk.stageHelpers.wasmMetadata {
-              metadata = {
-                name = "comp";
-                processedBy.breakbulk = "0.1.0";
+        stages =
+          lib.recursiveUpdate
+            (breakbulk.stages.chain [
+              "wasmOpt"
+              "wasmComponentize"
+              "wasmMetadata"
+            ])
+            {
+              wasmMetadata.run = breakbulk.stageHelpers.wasmMetadata {
+                metadata = {
+                  name = "comp";
+                  processedBy.breakbulk = "0.1.0";
+                };
               };
             };
-          }
-        ];
         target.triple = wasm;
         inherit pkgs;
       };
@@ -1314,17 +1335,24 @@ let
 
   presetsEval =
     let
-      gnu = presets.linux {
-        inherit pkgs;
+      gnu = presetSpec {
         triple = native;
         rustc = staticRust;
+        preset = presets.linux;
       };
-      cross = presets.linux {
-        inherit pkgs;
+      cross = presetSpec {
         triple = "aarch64-unknown-linux-gnu";
         rustc = staticRust;
+        preset = presets.linux;
       };
       bound = presets.windows { crtStatic = true; };
+      # A preset's spec with `linkerKind = "mold"`.
+      mold =
+        triple: preset:
+        presetSpec {
+          inherit triple preset;
+          modules = [ { linkerKind = "mold"; } ];
+        };
       llvm = breakbulk.llvmVersions;
       # What linkerKind reads of a rust-lang rustc on x86_64 Linux.
       rustcAt = version: {
@@ -1333,28 +1361,29 @@ let
         host = "x86_64-unknown-linux-gnu";
       };
       checks = {
-        partial = lib.isFunction bound && lib.functionArgs bound ? toolchain;
-        nativeRunner = gnu.runner.content == null;
-        crossRunnerQemu = lib.hasInfix "qemu-aarch64" (discard cross.runner.content);
+        # A bound preset is a module, and binds more options.
+        partial =
+          lib.isFunction bound
+          && lib.isFunction (bound {
+            lld = null;
+          });
+        nativeRunner = gnu.runner == null;
+        crossRunnerQemu = lib.hasInfix "qemu-aarch64" (discard (toString cross.runner));
         crossNativeBuilder =
-          (presets.linux {
-            inherit pkgs;
+          (presetSpec {
             triple = "aarch64-unknown-linux-gnu";
-            nativeBuilder = true;
-          }).testSystem.content == "aarch64-linux";
+            preset = presets.linux { nativeBuilder = true; };
+          }).testSystem == "aarch64-linux";
         # mingw-lld's lld is of rustc's LLVM major: another major, another
         # linker; `lld` replaces it.
         mingwLldOfRustc =
           let
             linker =
               args:
-              (presets.windows (
-                {
-                  inherit pkgs;
-                  triple = "x86_64-pc-windows-gnu";
-                }
-                // args
-              )).linker.content;
+              (presetSpec {
+                triple = "x86_64-pc-windows-gnu";
+                preset = presets.windows args;
+              }).linker;
           in
           linker { llvmMajor = 22; } != linker { llvmMajor = 23; }
           &&
@@ -1403,8 +1432,8 @@ let
             inherit pkgs;
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
-        sameHostLinker = discard gnu.host.linker.content == discard cross.host.linker.content;
-        hostLinkerIsLld = lib.hasSuffix "cc-lld" (discard gnu.host.linker.content);
+        sameHostLinker = discard gnu.host.linker == discard cross.host.linker;
+        hostLinkerIsLld = lib.hasSuffix "cc-lld" (discard gnu.host.linker);
         # The Rust to wasi-sdk table (lib/wasi-sdk.nix): an
         # unknown Rust release fails evaluation, naming the file.
         wasiSdkTable =
@@ -1530,61 +1559,41 @@ let
               kind = "lld";
               staticNonPie = true;
             } == "lld"
-          && lib.hasSuffix "cc-mold" (
-            discard
-              (presets.linux {
-                inherit pkgs;
-                triple = native;
-                linkerKind = "mold";
-              }).linker.content
-          )
-          && lib.hasSuffix "cc-mold" (
-            discard
-              (presets.linux {
-                inherit pkgs;
-                triple = native;
-                linkerKind = "mold";
-              }).host.linker.content
-          )
+          && lib.hasSuffix "cc-mold" (discard (mold native presets.linux).linker)
+          && lib.hasSuffix "cc-mold" (discard (mold native presets.linux).host.linker)
           # Another triple's kind stays on its own units.
           && lib.hasSuffix "cc-lld" (
             discard
-              (presets.linux {
-                inherit pkgs;
+              (presetSpec {
                 triple = "aarch64-unknown-linux-gnu";
                 rustc = staticRust;
-                linkerKind = "mold";
-              }).host.linker.content
+                preset = presets.linux;
+                modules = [ { linkerKind = "mold"; } ];
+              }).host.linker
           )
           &&
             fails
-              (presets.linux {
-                inherit pkgs;
-                triple = native;
-                crossLanguageLto = true;
-                llvmMajor = 23;
-                linkerKind = "mold";
-              }).linker.content
-          &&
-            fails
-              (presets.linuxStatic {
-                inherit pkgs;
-                relocationModel = "static";
-                linkerKind = "mold";
-              }).linker.content;
+              (mold native (
+                presets.linux {
+                  crossLanguageLto = true;
+                  llvmMajor = 23;
+                }
+              )).linker
+          && fails (mold native (presets.linuxStatic { relocationModel = "static"; })).linker;
         # `crtStatic = true` adds the flag (the option once shadowed the
         # flag list, and the preset failed with "expected a list but found
         # a Boolean"; found in the field trials).
         msvcCrtStatic =
           let
-            p = presets.windows {
-              inherit pkgs;
+            p = presetSpec {
               triple = "x86_64-pc-windows-msvc";
-              llvmMajor = 22;
-              crtStatic = true;
-              sdk = {
-                includeDirs = [ "/inc" ];
-                libDirs.x86_64 = [ "/lib" ];
+              preset = presets.windows {
+                llvmMajor = 22;
+                crtStatic = true;
+                sdk = {
+                  includeDirs = [ "/inc" ];
+                  libDirs.x86_64 = [ "/lib" ];
+                };
               };
             };
           in

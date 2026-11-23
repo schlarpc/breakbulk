@@ -203,16 +203,21 @@ let
     version = v;
     outPath = "/nix/store/00000000000000000000000000000000-macOS-SDK-${v}";
   };
+  # The preset's spec for a workspace on `rust`: `linkerKind` is the
+  # target's, the rest the preset's options.
   direct =
     args:
-    presets.darwin (
-      {
-        inherit pkgs;
-        triple = a64;
-        rustc = rust;
-      }
-      // args
-    );
+    (breakbulk.evalTargetSpec {
+      inherit pkgs;
+      triple = a64;
+      toolchain.rustc = rust;
+      modules = [
+        {
+          preset = presets.darwin (removeAttrs args [ "linkerKind" ]);
+          linkerKind = args.linkerKind or null;
+        }
+      ];
+    }).config;
   errorOf =
     v:
     let
@@ -233,19 +238,19 @@ let
     sdk27 = map (r: r.feature) (breakbulk.appleSdk.requirementsOf "27.0") == [ "arm64e.x1" ];
     # rust-overlay 1.99.0's rust-lld is LLD 23.1.1: refused.
     rustLld27Fails = errorOf (direct { sdk = fakeSdk "27.0"; }).linker == true;
-    rustLld26 = lib.hasSuffix "/bin/rust-lld" (direct { sdk = fakeSdk "26.5"; }).linker.content;
+    rustLld26 = lib.hasSuffix "/bin/rust-lld" (direct { sdk = fakeSdk "26.5"; }).linker;
     # nixpkgs' lld reads it (LLD 23.1.3, or the backport in older majors).
     ld64Lld27 =
       (direct {
         sdk = fakeSdk "27.0";
         linkerKind = "ld64.lld";
-      }).linker.content == "${pkgs.llvmPackages_23.lld}/bin/lld";
+      }).linker == "${pkgs.llvmPackages_23.lld}/bin/lld";
     ld64Lld27Llvm21 =
       (direct {
         sdk = fakeSdk "27.0";
         linkerKind = "ld64.lld";
         llvmPackages = pkgs.llvmPackages_21;
-      }).linker.content == "${pkgs.llvmPackages_21.lld}/bin/lld";
+      }).linker == "${pkgs.llvmPackages_21.lld}/bin/lld";
     noSdkFails = errorOf (direct { }).linker == true;
     deploymentTarget =
       let
@@ -254,13 +259,13 @@ let
           deploymentTarget = "12.0";
         };
       in
-      p.env.MACOSX_DEPLOYMENT_TARGET.content == "12.0" && !(p ? stdenv);
+      p.env.MACOSX_DEPLOYMENT_TARGET == "12.0" && p.stdenv == null;
     # Without it, the capture reads rustc's.
     deploymentTargetDefault =
       let
         p = direct { sdk = fakeSdk "14.4"; };
       in
-      !(p.env ? MACOSX_DEPLOYMENT_TARGET) && p ? stdenv;
+      !(p.env ? MACOSX_DEPLOYMENT_TARGET) && p.stdenv != null;
     packed =
       (direct { sdk = fakeSdk "14.4"; }).rustflags == [
         "-C"

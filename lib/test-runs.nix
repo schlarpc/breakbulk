@@ -282,7 +282,7 @@ rec {
       nixFeatures,
     }:
     let
-      live = lib.filterAttrs (_: v: v != null) cfg.stages;
+      live = lib.filterAttrs (_: stages.isLive) cfg.stages;
     in
     if live == { } then
       (if ca then copy else linked)
@@ -298,7 +298,6 @@ rec {
         stages = cfg.stages // {
           install = null;
         };
-        defaultChecks = false;
         target = {
           inherit (platform) triple traits packageSet;
         };
@@ -965,7 +964,7 @@ rec {
       # Whether a run executes something other than the binary its spec
       # links: the output of its stages, or a content-addressed copy
       # (runBinary).
-      copiesBinary = cfg: useCa || lib.any (v: v != null) (lib.attrValues cfg.stages);
+      copiesBinary = cfg: useCa || lib.any stages.isLive (lib.attrValues cfg.stages);
 
       # The binary, copied out of its wrapper; for a binary Cargo did not
       # build, the marker that makes the stages skip

@@ -817,14 +817,21 @@ in
           )
         ))
         (fails (tt.nixpkgsPlatform (r "riscv64gc-unknown-linux-musl")))
-        (bb.presets.windows {
+        (bb.evalTargetSpec {
           inherit pkgs;
           triple = "i686-pc-windows-msvc";
-          sdk = {
-            includeDirs = [ ];
-            libDirs.x86 = [ "/sdk/x86" ];
-          };
-        }).rustflags
+          modules = [
+            {
+              preset = bb.presets.windows {
+                llvmMajor = 22;
+                sdk = {
+                  includeDirs = [ ];
+                  libDirs.x86 = [ "/sdk/x86" ];
+                };
+              };
+            }
+          ];
+        }).config.rustflags
       ];
       expected = [
         true

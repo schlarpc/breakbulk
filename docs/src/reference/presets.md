@@ -10,9 +10,11 @@ targets.x86_64-unknown-linux-musl.preset = breakbulk.lib.presets.linuxStatic;
 targets.x86_64-pc-windows-msvc.preset = breakbulk.lib.presets.windows { inherit sdk; };
 ```
 
-A preset is used as is, or called with arguments first. It sets the
-target's options at default priority, so any option you set on the same
-target wins.
+A preset is a module of the target's options. It is used as is, or
+called with arguments first. It sets the target's options with
+`lib.mkDefault`, so any option you set on the same target wins, and its
+stages field by field. [Write a preset](../how-to/write-a-preset.md)
+shows how to make your own.
 
 The preset is named for what you want; the target triple picks how:
 
@@ -81,7 +83,6 @@ for `wasm32-wasip1`).
 | `linux`, `linuxStatic` | `nativeBuilder`: run tests on a native builder for the target (see `testSystem`) instead of under qemu |
 | `linux` | `crossLanguageLto`: LTO across Rust and C; clang and lld from rustc's LLVM, C compiled to bitcode (`-flto=thin`) |
 | `linuxStatic` (glibc) | `staticLibDirs`: directories of static archives to link, `relocationModel`: `"static"` for a non-PIE executable (default: static-pie, rustc's own) |
-| all | `linkerKind`: the [linker kind](#linkers), as `targets.<triple>.linkerKind` sets it |
 | `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `overlays`: nixpkgs overlays for the package set that builds library inputs against that glibc |
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |

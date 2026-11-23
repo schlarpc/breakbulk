@@ -23,7 +23,9 @@
 # - MACOSX_DEPLOYMENT_TARGET for rustc and C compilers alike (cc-rs,
 #   CMake, autotools): `deploymentTarget`, else rustc's own default for
 #   the triple, which the target's env capture reads at build time.
-# - the `darwin` stage preset: `adhocSign` after `install`, last.
+# - the `adhocSign` stage after `install`, last: signing hashes the bytes
+#   every earlier stage wrote, and a stage after `install` that changes
+#   them must order itself before it.
 # - tests: no runner unless `nativeBuilder`, which sends them to a Mac
 #   (`testSystem`).
 #
@@ -44,11 +46,13 @@
   linkers,
   chooseRunner,
   hostSpec,
+  guard,
+  stageHelpers,
 }:
 {
   pkgs,
-  triple ? "aarch64-apple-darwin",
-  traits ? targetTraits.resolve { inherit triple; },
+  triple,
+  traits,
   sdk ? null,
   sdkVersion ? null,
   deploymentTarget ? null,
@@ -173,53 +177,57 @@ let
     hostPlatform = targetTraits.nixpkgsPlatform traits;
   };
 in
-assert lib.assertMsg (
-  traits.isApple && traits.os == "macos"
-) "breakbulk.presets.darwin: `${triple}` is not a macOS target";
-assert lib.assertMsg (
-  !onMac
-) "breakbulk.presets.darwin: Mac build machines are not supported yet (issue #13)";
-assert checked;
-{
-  packageSet = mkDefault null;
-  linker = mkDefault linker;
-  # Unwrapped: nixpkgs has no Linux-to-Darwin cross C toolchain (its
-  # cctools does not evaluate for a Linux host), and a wrapped clang
-  # would add the build machine's own flags.
-  cc = mkDefault "${clang}/bin/clang";
-  cxx = mkDefault "${clang}/bin/clang++";
-  ar = mkDefault "${llvm.llvm}/bin/llvm-ar";
-  cflags = sysrootFlags;
-  cxxflags = sysrootFlags;
-  bindgen.extraClangArgs = sysrootFlags;
-  rustflags = [
-    "-C"
-    "split-debuginfo=packed"
-  ];
-  env = lib.mapAttrs (_: mkDefault) (
-    {
-      SDKROOT = "${sdkPackage}";
-      LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
-      PATH = "${tools}/bin";
-    }
-    // lib.optionalAttrs (deploymentTarget != null) {
-      MACOSX_DEPLOYMENT_TARGET = deploymentTarget;
-    }
-  );
-  stagePreset = mkDefault "darwin";
-  runner = mkDefault r.runner;
-  testSystem = mkDefault r.testSystem;
-  host = hostSpec {
-    inherit
-      pkgs
-      rustc
-      triple
-      linkerKind
-      ;
-  };
-}
-# The capture's stdenv is the build machine's: the target has no package
-# set.
-// lib.optionalAttrs (deploymentTarget == null && rustc != null) {
-  stdenv = mkDefault captureStdenv;
-}
+guard (traits.isApple && traits.os == "macos")
+  "breakbulk.presets.darwin: `${triple}` is not a macOS target"
+  (
+    guard (!onMac) "breakbulk.presets.darwin: Mac build machines are not supported yet (issue #13)" (
+      guard checked "" (
+        {
+          packageSet = mkDefault null;
+          linker = mkDefault linker;
+          # Unwrapped: nixpkgs has no Linux-to-Darwin cross C toolchain (its
+          # cctools does not evaluate for a Linux host), and a wrapped clang
+          # would add the build machine's own flags.
+          cc = mkDefault "${clang}/bin/clang";
+          cxx = mkDefault "${clang}/bin/clang++";
+          ar = mkDefault "${llvm.llvm}/bin/llvm-ar";
+          cflags = sysrootFlags;
+          cxxflags = sysrootFlags;
+          bindgen.extraClangArgs = sysrootFlags;
+          rustflags = [
+            "-C"
+            "split-debuginfo=packed"
+          ];
+          env = lib.mapAttrs (_: mkDefault) (
+            {
+              SDKROOT = "${sdkPackage}";
+              LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
+              PATH = "${tools}/bin";
+            }
+            // lib.optionalAttrs (deploymentTarget != null) {
+              MACOSX_DEPLOYMENT_TARGET = deploymentTarget;
+            }
+          );
+          stages.adhocSign = {
+            after = mkDefault "install";
+            run = mkDefault stageHelpers.adhocSign;
+          };
+          runner = mkDefault r.runner;
+          testSystem = mkDefault r.testSystem;
+          host = hostSpec {
+            inherit
+              pkgs
+              rustc
+              triple
+              linkerKind
+              ;
+          };
+        }
+        # The capture's stdenv is the build machine's: the target has no package
+        # set.
+        // lib.optionalAttrs (deploymentTarget == null && rustc != null) {
+          stdenv = mkDefault captureStdenv;
+        }
+      )
+    )
+  )

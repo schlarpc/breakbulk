@@ -73,6 +73,19 @@ let
   fixtures = ../fixtures;
   tools = breakbulk.mkTools pkgs;
   presets = breakbulk.presets;
+  # A preset's target spec as mkRepository evaluates it for a workspace
+  # whose toolchain is `rustc`.
+  presetSpec =
+    {
+      triple,
+      preset,
+      rustc ? null,
+    }:
+    (breakbulk.evalTargetSpec {
+      inherit pkgs triple;
+      toolchain = if rustc == null then null else { inherit rustc; };
+      modules = [ { inherit preset; } ];
+    }).config;
 
   rustWith =
     targets:
@@ -142,11 +155,10 @@ let
       # whose libc.a rustc bundles, byte for byte.
       wasip2-linker =
         let
-          spec = presets.wasmComponent {
-            inherit pkgs;
+          spec = presetSpec {
             triple = wasip2;
             rustc = wasip2Rust;
-            withC = true;
+            preset = presets.wasmComponent { withC = true; };
           };
           sysroot = breakbulk.wasiSdk.sysrootFor {
             inherit pkgs;
@@ -159,9 +171,7 @@ let
               rustc = wasip2Rust;
             }).lld;
         in
-        assert lib.assertMsg (
-          spec.rustflags or [ ] == [ ]
-        ) "wasip2-linker: rustflags ${toString spec.rustflags}";
+        assert lib.assertMsg (spec.rustflags == [ ]) "wasip2-linker: rustflags ${toString spec.rustflags}";
         assert lib.assertMsg (
           spec.cflags == [ "-isystem ${sysroot}/include/wasm32-wasip2" ] && spec.cxxflags == spec.cflags
         ) "wasip2-linker: cflags ${toString spec.cflags}, cxxflags ${toString spec.cxxflags}";
@@ -171,7 +181,7 @@ let
           printf '#!${pkgs.runtimeShell}\nfor a in "$@"; do case $a in @*) cat "''${a#@}";; *) echo "$a";; esac; done\n' > fake/wasm-component-ld
           chmod +x fake/wasm-component-ld
           echo ${sc}/crt1-reactor.o > args.rsp
-          PATH=$PWD/fake:$PATH ${spec.linker.content} -flavor wasm ${sc}/crt1-command.o x.o @args.rsp > got.txt
+          PATH=$PWD/fake:$PATH ${spec.linker} -flavor wasm ${sc}/crt1-command.o x.o @args.rsp > got.txt
           cat got.txt
           printf '%s\n' -flavor wasm ${sc}/crt1-command.o x.o ${sc}/crt1-reactor.o \
             --wasm-ld-path ${wasmLd}/bin/wasm-ld > want.txt
@@ -592,11 +602,16 @@ let
             printf '#include <iostream>\nint main() { try { throw 1; } catch (int) { std::cout << "ok"; } }\n' > m.cpp
             g++ -shared-libgcc m.cpp -o $out/bin/cxx
           '';
-          check = (presets.linuxPortable { glibc = "2.17"; } { inherit pkgs; }).checks.portableLibraries.run {
-            input = cxx;
-            product.name = "cxx";
-            inherit pkgs;
-          };
+          check =
+            (presetSpec {
+              triple = native;
+              preset = presets.linuxPortable { glibc = "2.17"; };
+            }).checks.portableLibraries.run
+              {
+                input = cxx;
+                product.name = "cxx";
+                inherit pkgs;
+              };
         in
         pkgs.runCommand "linux-portable-libraries-cxx" { } ''
           cat ${check}/needed
@@ -614,14 +629,15 @@ let
         assert lib.assertMsg (lib.all
           (
             a:
-            !(builtins.tryEval (
-              builtins.attrNames (
-                presets.linuxPortable {
+            !(builtins.tryEval
+              (presetSpec {
+                triple = native;
+                preset = presets.linuxPortable {
                   glibc = "2.17";
                   ${a} = [ ];
-                } { inherit pkgs; }
-              )
-            )).success
+                };
+              }).linker
+            ).success
           )
           [
             "rebuildInputs"
@@ -711,7 +727,11 @@ let
   zigNativePreset = presets.linuxPortable { glibc = "2.17"; };
   zigNativeLibs =
     let
-      set = (zigNativePreset { inherit pkgs; }).packageSet.content;
+      set =
+        (presetSpec {
+          triple = native;
+          preset = zigNativePreset;
+        }).packageSet;
       dependsOn = p: d: lib.elem d.drvPath (map (i: i.drvPath) p.propagatedBuildInputs);
     in
     {

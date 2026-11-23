@@ -124,9 +124,10 @@ list of string
 
 ## `targets.<name>.checks`
 
-Checks on this target’s products: ` { on ? <the product>; run = { input, product, pkgs }: <derivation>; } `, where ` on ` names a
-stage (` linked ` for the raw link output)\. Every product also
-gets ` noSourceReferences ` and ` buildScriptFiles `\.
+Checks on this target’s products, where ` on ` names a stage
+(` linked ` for the raw link output)\. They merge over the default
+checks every product gets: ` noSourceReferences ` (unless the
+variant’s ` sourcePaths ` is ` "keep" `) and ` buildScriptFiles `\.
 ` buildScriptFiles ` fails when a build script
 placed files next to the binaries (Cargo’s ` target/<profile> `,
 where ` cargo run ` finds them; libraries sdl2-sys ` bundled ` copies,
@@ -136,13 +137,73 @@ the ` stageHelpers.buildScriptFiles ` stage does (\#23)\.
 in ` repo.checks ` as ` <ws>/<triple>/<pkg>/<name> `\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 
 ```nix
 { }
 ```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.checks.<name>.enable`
+
+Whether the check exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.checks.<name>.ca`
+
+false: the check’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.checks.<name>.on`
+
+The stage whose output the check reads (` linked ` for the raw link output); null: the product\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.checks.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `, which fails when the check does\.
+
+*Type:*
+raw value
 
 *Declared by:*
  - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
@@ -347,9 +408,8 @@ targets; ` lld-link `, ` wasm-ld `, ` wasm-component-ld ` or
 machine, ` rust-lld ` (the toolchain’s own) or ` ld64.lld ` (nixpkgs’,
 for a toolchain without one)\. A kind that cannot link for this
 target, or with the preset’s other settings (` mold ` with
-` crossLanguageLto `), is an evaluation error\. It needs a ` preset `
-here; a target defined directly from a preset takes ` linkerKind `
-as the preset’s argument\.
+` crossLanguageLto `), is an evaluation error\. The preset reads it,
+so it needs a ` preset `\.
 
 *Type:*
 null or one of “cc”, “clang-lld”, “ld64\.lld”, “lld”, “lld-link”, “mingw-lld”, “mold”, “rust-lld”, “wasm-component-ld”, “wasm-ld”
@@ -371,30 +431,30 @@ null
 
 ## `targets.<name>.preset`
 
-A toolchain preset (` breakbulk.presets.* `, or a preset with its
-options bound, such as ` breakbulk.presets.windows { inherit sdk; } `)\.
-It is called once per workspace that builds this triple, with
-` pkgs `, the triple and the workspace’s ` toolchain `, whose rustc
-it uses unless it was given ` rustc ` itself: the windows (msvc) and wasm presets
-pick the LLVM tools and the wasi-sdk matching each workspace’s
-compiler\. It sets the fields below at default priority, so
-fields set here override the preset’s (lists concatenate; use
-` lib.mkForce ` to replace one)\. Defining the target as
-` breakbulk.presets.<name> { inherit pkgs; triple = …; } ` gives
-the same fields, except that the preset then sees no workspace
-toolchain (pass ` rustc ` there)\. Set ` null ` to use no preset on
-a target that has a default one, or that would need one (rustc’s
-own linker choice and the C toolchain Cargo finds)\.
+A toolchain preset: a module of this target spec, which the spec
+imports (` breakbulk.presets.* `, a preset with its options bound,
+such as ` breakbulk.presets.windows { inherit sdk; } `, or a module
+of your own)\. It is evaluated once per workspace that builds this
+triple, with the module arguments ` pkgs `, ` name ` (the triple) and
+` toolchain ` (the workspace’s), and reads the target’s other
+options (` config.traits `, ` config.linkerKind `, …)\. The built-in
+presets set their fields with ` lib.mkDefault ` (lists
+concatenate; use ` lib.mkForce ` to replace one), so fields set
+here override them, and their ` stages ` field by field\. Set
+` null ` to use no preset on a target that has a default one, or
+that would need one (rustc’s own linker choice and the C
+toolchain Cargo finds)\. The preset is chosen before it is
+imported, so a preset cannot choose another one\.
 
 *Type:*
-null or breakbulk preset (function)
+null or module
 
 *Default:*
-unless the target is defined directly from a preset: for the
-native triple, ` breakbulk.presets.linux ` when the ` pkgs ` given to
-mkRepository is Linux with glibc, ` breakbulk.presets.linuxStatic `
-when it is Linux with musl (` pkgs.pkgsMusl `); for another Linux
-` -gnu ` triple ` breakbulk.presets.linux `, a Linux ` -musl ` triple
+for the native triple, ` breakbulk.presets.linux ` when the ` pkgs `
+given to mkRepository is Linux with glibc,
+` breakbulk.presets.linuxStatic ` when it is Linux with musl
+(` pkgs.pkgsMusl `); for another Linux ` -gnu ` triple
+` breakbulk.presets.linux `, a Linux ` -musl ` triple
 ` breakbulk.presets.linuxStatic `, a Windows ` -gnu ` or ` -gnullvm `
 triple ` breakbulk.presets.windows `, ` wasm32-wasip2 `
 ` breakbulk.presets.wasmComponent `, a UEFI triple
@@ -405,7 +465,7 @@ evaluation error for ` -msvc `, macOS and wasm32 without WASI unless
 *Example:*
 
 ```nix
-breakbulk.presets.linuxStatic
+breakbulk.presets.windows { inherit sdk; }
 ```
 
 *Declared by:*
@@ -483,50 +543,28 @@ list of string
 *Declared by:*
  - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
 
-## `targets.<name>.stagePreset`
-
-Which default stage chain this target’s products get
-(` breakbulk.stages.defaultStageNames `: ` wasmWeb ` wasmBindgen and
-wasmOpt; ` wasmComponent ` wasmOpt, wasmComponentize and wasmMetadata)\. Presets set
-it; ` null `: none\. Debug info is handled by ` debugInfo `, not by
-the chain\.
-
-*Type:*
-null or string
-
-*Default:*
-
-```nix
-null
-```
-
-*Example:*
-
-```nix
-"wasmWeb"
-```
-
-*Declared by:*
- - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
-
 ## `targets.<name>.stages`
 
 Post-link stages for this target’s products, merged over the
-stages ` debugInfo ` inserts and the stage preset’s defaults
-(` stagePreset `)\. A stage is ` { after ? null; before ? null; run = { input, product, target, pkgs }: <derivation>; } `; ` null `
-removes one\. A stage runs before ` install ` and sees the flat link
+stages ` debugInfo ` inserts; a preset may define some (the wasm
+presets’ wasm-bindgen and componentize chains, the darwin
+preset’s ` adhocSign `)\. Definitions merge field by field, as
+submodules do: ` stages.wasmOpt.after = "mine" ` keeps the preset’s
+` run `\. ` null ` removes a stage (` enable = false `)\. A stage runs
+before ` install ` and sees the flat link
 output, unless it is ordered after ` install ` (` after = "install" `, or after such a stage); then it sees the installed
 layout (` bin/ `, ` lib/ `, ` pkg/ `), the place for wrappers and
 packaging\. A stage with no ` after ` runs after the stages
 ` debugInfo ` inserts, unless it is ordered before one of them\.
 Package settings (` packages.<name>.stages `) merge
-over these\. Neither may remove the ` splitDebug ` or ` strip ` stage
+over these, a package’s values winning at equal priority\. Neither
+may remove the ` splitDebug ` or ` strip ` stage
 ` debugInfo ` inserts or add ` splitDebug ` where it inserts none; set
 ` debugInfo ` instead\. ` packDwo ` is an ordinary stage: ` null `
 removes it\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 
@@ -543,6 +581,82 @@ attribute set of (null or raw value)
 }
 
 ```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.stages.<name>.enable`
+
+Whether the stage exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.stages.<name>.after`
+
+The stage or stages this one runs after\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.stages.<name>.before`
+
+The stage or stages this one runs before\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.stages.<name>.ca`
+
+false: the stage’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.stages.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `: the stage’s output from its input, the previous stage’s\.
+
+*Type:*
+raw value
 
 *Declared by:*
  - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
@@ -602,11 +716,12 @@ null
 
 Facts about this target platform that override or extend the
 built-in ones breakbulk reads from the triple
-(` breakbulk.targetTraits.resolve `)\. Every platform-dependent
-decision reads the resulting traits: the linker kind, the default
-debug handling, the install layout and file names, debuginfo side
-files, the dynamic-library path of test processes, static linking\.
-Base
+(` breakbulk.targetTraits.resolve `); the option’s value is the
+resolved traits, which presets read as ` config.traits `\. Every
+platform-dependent decision reads them: the linker kind, the
+default debug handling, the install layout and file names,
+debuginfo side files, the dynamic-library path of test processes,
+static linking\. Base
 fields (` arch `, ` vendor `, ` os `, ` env `, ` abi `, ` families `, as
 rustc’s ` target_* ` cfg values) recompute the derived ones
 (` isLinux `, ` objectFormat `, ` executableSuffix `, ` dylibPathVar `, …);

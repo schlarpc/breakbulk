@@ -15,6 +15,7 @@
 - [Supply or patch a crate's source](how-to/crate-sources.md)
 - [A build script runs Cargo](how-to/nested-cargo.md)
 - [Build for another target](how-to/targets.md)
+- [Write a preset](how-to/write-a-preset.md)
 - [Wrap or package a binary](how-to/wrap-package.md)
 - [Rebuild less when unrelated files change](how-to/filter-source.md)
 - [Run snapshot tests](how-to/snapshot-tests.md)

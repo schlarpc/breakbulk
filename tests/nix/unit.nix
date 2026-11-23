@@ -1424,7 +1424,9 @@ runTests "lib-unit" {
         c = e.config;
       in
       {
-        inherit (c) env stages;
+        inherit (c) env;
+        # `null` removes a stage: `enable = false`.
+        stages = lib.mapAttrs (_: s: s.enable) c.stages;
         forHost = c.forHost.env;
         checks = lib.attrNames c.checks;
         binary = (e.runs.test "lib").enable;
@@ -1436,7 +1438,7 @@ runTests "lib-unit" {
         H = "pkg";
         F = "md";
       };
-      stages.sign = null;
+      stages.sign = false;
       checks = [ "lowOnly" ];
       binary = true;
       doctest = true;

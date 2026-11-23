@@ -735,7 +735,7 @@ let
           "pkgsCross.${s}"
         else
           "crossSystem ${lib.generators.toPretty { multiline = false; } s}";
-      fix = "set `targets.\"${traits.triple}\".traits.nixpkgsSystem` to a nixpkgs crossSystem (`{ config = \"<GNU triple>\"; … }`) or a `pkgsCross` attribute name, or give its preset a package set (`breakbulk.presets.<name> { packageSet = …; }`)";
+      fix = "set `targets.\"${traits.triple}\".traits.nixpkgsSystem` to a nixpkgs crossSystem (`{ config = \"<GNU triple>\"; … }`) or a `pkgsCross` attribute name, or give the target a package set (`targets.\"${traits.triple}\".packageSet`)";
     in
     if named && crossSystem == null then
       throw "breakbulk: the target `${traits.triple}` names ${shown}, which nixpkgs does not have; ${fix}"

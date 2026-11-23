@@ -12,8 +12,7 @@
 #   breakbulk.appleSdk { pkgs; version; }   (unfree; nixpkgs' FOD)
 #   breakbulk.wasmBindgen.forLockfile { pkgs; lockfile; }
 #   breakbulk.mkProduct { name; linked; stages; checks; target; pkgs; … }
-#     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers;
-#     preset stage sets in breakbulk.stages.defaultStages)
+#     (= breakbulk.stages.mkProduct; helpers in breakbulk.stageHelpers)
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
 # breakbulk.predictedRoots { ... }, breakbulk.planRoots { ... } (the
 # prediction, or the `roots` option's names). Dynamic-derivation mode:
@@ -39,7 +38,8 @@
 #                               takes `f` (`member`: workspaces.<ws>.members.<name>)
 #   breakbulk.packageSettings   the evaluation of package settings layers
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
-# Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
+# Toolchains: breakbulk.presets.<name> (lib/presets: target-spec modules),
+#   breakbulk.evalTargetSpec { pkgs; triple; toolchain; modules; },
 #   breakbulk.presetHelpers (the functions presets are built from),
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
@@ -153,6 +153,35 @@ let
   };
   inherit (presetsLib) presets;
   appleSdk = import ./apple-sdk.nix { inherit lib; };
+
+  # The spec of one target (lib/modules/target-spec.nix) with `toolchain`
+  # (a workspace's: `{ rustc; cargo; … }`, or null): `modules` (the
+  # repository's and the workspace's definitions) evaluated, then again
+  # with the `preset` they chose imported. Not one evaluation: a module's
+  # imports cannot depend on the options it defines. `first` is the
+  # evaluation before the preset.
+  evalTargetSpec =
+    {
+      pkgs,
+      triple,
+      toolchain ? null,
+      modules ? [ ],
+      specialArgs ? { },
+    }:
+    let
+      first = lib.evalModules {
+        modules = [ ./modules/target-spec.nix ] ++ modules;
+        specialArgs = {
+          inherit pkgs toolchain;
+          name = triple;
+          breakbulk = self;
+          breakbulkPresets = presets;
+        }
+        // specialArgs;
+      };
+      inherit (first.config) preset;
+    in
+    first.extendModules { modules = lib.optional (preset != null) preset; } // { inherit first; };
 
   mkFetch =
     pkgs:
@@ -279,6 +308,7 @@ let
       mkBuildTarget
       dynamic
       checkGroups
+      evalTargetSpec
       ;
     nixFeatures = featureGates;
 

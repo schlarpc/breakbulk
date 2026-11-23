@@ -2588,8 +2588,7 @@ in
         touch $out
       '';
   # The native target gets presets.linux unless another
-  # preset is set, both through `preset` and by defining the target
-  # directly from a preset (no doubled rustflags, no conflicting linker);
+  # preset is set (no doubled rustflags, no conflicting linker);
   # `preset = null` turns it off. The default reaches the plan: units carry
   # the linker wrapper of nixpkgs' rustc's choice, the cc's own linker.
   native-preset =
@@ -2600,11 +2599,8 @@ in
         .workspaces.main.target.${native}.spec;
       dflt = t [ ];
       off = t [ { targets.${native}.preset = lib.mkForce null; } ];
-      static = breakbulk.presets.linuxStatic { inherit pkgs; };
-      direct = t [ { targets.${native} = static; } ];
       viaOption = t [ { targets.${native}.preset = breakbulk.presets.linuxStatic; } ];
       linkerOf = x: builtins.unsafeDiscardStringContext (toString x.linker);
-      isStatic = x: lib.elem "target-feature=+crt-static" x.rustflags;
       unitText = lib.concatMapStrings (u: u.BREAKBULK_UNIT or "") (
         lib.attrValues (mwInst "a").units.build
       );
@@ -2612,8 +2608,7 @@ in
         # linux: the cc's own linker, and no static-linking rustflags.
         defaultIsLinuxGnu = lib.hasSuffix "cc-default" (linkerOf dflt) && dflt.rustflags == [ ];
         offIsEmpty = off.linker == null && off.rustflags == [ ] && off.packageSet == null;
-        directKeepsOwn = isStatic direct && direct.rustflags == static.rustflags;
-        optionKeepsOwn = isStatic viaOption && viaOption.rustflags == static.rustflags;
+        optionKeepsOwn = lib.count (f: f == "target-feature=+crt-static") viaOption.rustflags == 1;
         planUsesWrapper = lib.hasInfix "cc-default" unitText;
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);

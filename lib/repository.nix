@@ -506,9 +506,15 @@ let
     f p ++ g p;
 
   # Product settings for mkProducts.
-  productConfig = wsName: triple: vName: pkg: {
-    inherit (memberSettings wsName triple vName pkg) stages checks;
-  };
+  productConfig =
+    wsName: triple: vName: pkg:
+    let
+      o = (memberEval wsName triple vName pkg).options;
+    in
+    {
+      stages = products.definitionsOf o.stages;
+      checks = products.definitionsOf o.checks;
+    };
 
   # mkWorkspace's `packages`: each member's settings, with its runs'
   # (lib/package-settings.nix `runsOf`: test env values as strings).
@@ -720,32 +726,23 @@ let
   # whose preset needs arguments or a choice fails here when the target
   # sets no preset, no linker and not `preset = null`: the empty spec
   # would fail only at its first link, with the build machine's linker.
-  specArgs = {
-    inherit pkgs;
-    breakbulkPresets = presets;
-  }
-  // specialArgs;
   evalTargetSpec =
     wsName: ws: triple:
     let
       repoDef = cfg.targets.${triple} or null;
       wsDef = ws.targets.${triple} or null;
-      e = lib.evalModules {
-        modules = [
-          ./modules/target-spec.nix
-        ]
-        ++ lib.optional (repoDef != null) repoDef
-        ++ lib.optional (wsDef != null) wsDef;
-        specialArgs = specArgs // {
-          name = triple;
-          breakbulkToolchain = ws.toolchain;
-        };
+      e = breakbulkLib.evalTargetSpec {
+        inherit pkgs triple specialArgs;
+        inherit (ws) toolchain;
+        modules = lib.optional (repoDef != null) repoDef ++ lib.optional (wsDef != null) wsDef;
       };
+      # The definitions before the preset's.
+      inherit (e) first;
       # Read-only options (`cEnv`) are computed from the others and always
       # defined, so they say nothing about whether the workspace set a spec.
       specOptions = lib.filter (o: !(o.readOnly or false)) (
         lib.collect lib.isOption (
-          removeAttrs e.options [
+          removeAttrs first.options [
             "_module"
             "variantDefaults"
           ]
@@ -753,23 +750,20 @@ let
       );
       rule = targetTraits.presetRule {
         inherit pkgs triple;
-        traits = targetTraits.resolve {
-          inherit triple;
-          inherit (e.config) traits;
-        };
+        inherit (first.config) traits;
       };
       # `preset` at its option default (null here), so not `preset = null`.
-      unchosen = rule ? choose && e.options.preset.highestPrio >= 1500 && e.config.linker == null;
+      unchosen = rule ? choose && first.options.preset.highestPrio >= 1500 && first.config.linker == null;
     in
     {
-      inherit (e) config;
+      inherit (e) config options;
       present =
         if unchosen then
           throw "breakbulk: targets.\"${triple}\" (workspace ${wsName}) has no preset and no linker, and ${triple} has no default preset: set `targets.\"${triple}\".preset` to ${rule.choose}; or `preset = null` to build with the toolchain as Cargo finds it"
         else
           repoDef != null
           || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions)
-          || e.config.preset != null;
+          || first.config.preset != null;
     };
   targetSpecs = lib.mapAttrs (
     wsName: ws:
@@ -793,6 +787,14 @@ let
       s = targetSpecs.${wsName}.${triple};
     in
     if s.present then s.config else null;
+  # The definitions of one of its options (`products.definitionsOf`),
+  # or none without a spec.
+  targetDefinitions =
+    wsName: triple: field:
+    let
+      s = targetSpecs.${wsName}.${triple};
+    in
+    if s.present then products.definitionsOf s.options.${field} else { };
   # One field of it, or `default` without a spec.
   targetField =
     wsName: triple: field: default:
@@ -803,12 +805,7 @@ let
   # The target's traits (lib/target-traits.nix): the triple's built-in ones
   # with `targets.<triple>.traits` (repository-wide and the workspace's)
   # merged over them. Every platform-dependent decision below reads these.
-  traitsOf =
-    wsName: triple:
-    targetTraits.resolve {
-      inherit triple;
-      inherit (targetSpecs.${wsName}.${triple}.config) traits;
-    };
+  traitsOf = wsName: triple: targetSpecs.${wsName}.${triple}.config.traits;
 
   # The nixpkgs package set of a target's units, one rule for every use:
   # the target spec's `packageSet` (set by the presets,
@@ -1209,9 +1206,8 @@ let
   stageSetArgs = wsName: triple: {
     inherit triple;
     traits = traitsOf wsName triple;
-    stagePreset = targetField wsName triple "stagePreset" null;
     debugInfo = targetField wsName triple "debugInfo" null;
-    targetStages = targetField wsName triple "stages" { };
+    targetStages = targetDefinitions wsName triple "stages";
   };
   shippedRemapScopeOf =
     wsName: triple: v:
@@ -1333,9 +1329,9 @@ let
       // {
         inherit pkgs inst;
         # `sourcePaths = "keep"`: no default noSourceReferences check.
-        defaultChecks = v.sourcePaths != "keep";
+        keepSourcePaths = v.sourcePaths == "keep";
         select = sel;
-        targetChecks = targetField wsName triple "checks" { };
+        targetChecks = targetDefinitions wsName triple "checks";
         packageConfig = productConfig wsName triple vName;
         inherit (cfg) ca;
         inherit nixFeatures;

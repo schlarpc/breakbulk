@@ -9,10 +9,17 @@ must return.
 
 ```nix
 packages.app.stages.<name> = {
-  after = "linked";
+  after = "linked";    # a stage name, a list of them, or null
+  before = null;
   run = { input, product, target, pkgs }: <derivation>;
+  ca = true;           # false: stays input-addressed (below)
+  enable = true;       # false, or the stage set to null: removed
 };
 ```
+
+A stage is a submodule: definitions of one stage merge field by field,
+so `targets.<t>.stages.wasmOpt.after = "mine"` keeps the preset's `run`,
+and a package's value wins over the target's at equal priority.
 
 | Argument | Value |
 | --- | --- |
@@ -30,20 +37,26 @@ breakbulk changes the derivation, through `overrideAttrs` or, for a bare
 `derivation` call, its `drvAttrs`: its builder runs only when Cargo built
 one of the product's binaries, and with [`ca`](options/repository.md#ca)
 it is content-addressed. A stage that returns something else fails with
-`ca`.
+`ca`, unless the stage sets `ca = false`, which leaves its derivation
+input-addressed.
 
 ## Checks
 
 ```nix
 packages.app.checks.<name> = {
   on = "linked";   # default: the product (the last stage)
-  run = { input, product, pkgs }: <derivation>;
+  run = { input, product, target, pkgs }: <derivation>;
+  ca = true;
+  enable = true;
 };
 ```
 
-`input` is the output of the stage `on` names. `product` and `pkgs` are
-as for a stage, with the check's attributes in `product` (below). A
-check gets no `target`. The check passes when its derivation builds.
+`input` is the output of the stage `on` names. `product`, `target` and
+`pkgs` are as for a stage, with the check's attributes in `product`
+(below). The check passes when its derivation builds. Checks merge as
+stages do, over the checks every product of `mkRepository` gets
+(`noSourceReferences`, unless the variant keeps source paths, and
+`buildScriptFiles`).
 
 ## `product`
 

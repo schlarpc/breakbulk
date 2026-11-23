@@ -73,6 +73,18 @@ let
   # --- evaluation tests -----------------------------------------------------
 
   dummy = _: throw "not built in evaluation tests";
+  # Stage sets merged stage by stage, a later set's attributes winning.
+  merge = lib.foldl' lib.recursiveUpdate { };
+  # The wasm presets' stage chains.
+  wasmWebChain = S.chain [
+    "wasmBindgen"
+    "wasmOpt"
+  ];
+  wasmComponentChain = S.chain [
+    "wasmOpt"
+    "wasmComponentize"
+    "wasmMetadata"
+  ];
   orderOf =
     stages:
     (S.explainOrder {
@@ -110,7 +122,7 @@ let
       expected = [ "install" ];
     };
     testPresetBrowser = {
-      expr = orderOf S.defaultStages.wasmWeb;
+      expr = orderOf wasmWebChain;
       expected = [
         "wasmBindgen"
         "wasmOpt"
@@ -118,7 +130,7 @@ let
       ];
     };
     testPresetComponent = {
-      expr = orderOf S.defaultStages.wasmComponent;
+      expr = orderOf wasmComponentChain;
       expected = [
         "wasmOpt"
         "wasmComponentize"
@@ -126,32 +138,16 @@ let
         "install"
       ];
     };
-    testPresetData = {
-      expr = S.defaultStageNames;
-      expected = {
-        wasmWeb = [
-          "wasmBindgen"
-          "wasmOpt"
-        ];
-        wasmComponent = [
-          "wasmOpt"
-          "wasmComponentize"
-          "wasmMetadata"
-        ];
-      };
-    };
     testUserAfter = {
-      expr = orderOf (
-        S.merge [
-          (S.chain [ "splitDebug" ])
-          {
-            sign = {
-              after = "splitDebug";
-              run = dummy;
-            };
-          }
-        ]
-      );
+      expr = orderOf (merge [
+        (S.chain [ "splitDebug" ])
+        {
+          sign = {
+            after = "splitDebug";
+            run = dummy;
+          };
+        }
+      ]);
       expected = [
         "splitDebug"
         "sign"
@@ -159,17 +155,15 @@ let
       ];
     };
     testUserBefore = {
-      expr = orderOf (
-        S.merge [
-          (S.chain [ "splitDebug" ])
-          {
-            isaFix = {
-              before = "splitDebug";
-              run = dummy;
-            };
-          }
-        ]
-      );
+      expr = orderOf (merge [
+        (S.chain [ "splitDebug" ])
+        {
+          isaFix = {
+            before = "splitDebug";
+            run = dummy;
+          };
+        }
+      ]);
       expected = [
         "isaFix"
         "splitDebug"
@@ -198,22 +192,20 @@ let
     };
     # The design doc's msvc example: removing a stage the set does not have.
     testDesignExample = {
-      expr = orderOf (
-        S.merge [
-          { }
-          {
-            stageDlls = {
-              after = "linked";
-              run = dummy;
-            };
-            zip = {
-              after = "stageDlls";
-              run = dummy;
-            };
-            strip = null;
-          }
-        ]
-      );
+      expr = orderOf (merge [
+        { }
+        {
+          stageDlls = {
+            after = "linked";
+            run = dummy;
+          };
+          zip = {
+            after = "stageDlls";
+            run = dummy;
+          };
+          strip = null;
+        }
+      ]);
       expected = [
         "stageDlls"
         "zip"
@@ -225,8 +217,8 @@ let
       expr =
         let
           r = S.explainOrder {
-            stages = S.merge [
-              S.defaultStages.wasmWeb
+            stages = merge [
+              wasmWebChain
               { wasmBindgen = null; }
             ];
           };
@@ -297,25 +289,23 @@ let
     # A stage after `install`, one after that, and one that names neither
     # (before `install` by default).
     testAfterInstall = {
-      expr = orderOf (
-        S.merge [
-          (S.chain [ "splitDebug" ])
-          {
-            wrap = {
-              after = "install";
-              run = dummy;
-            };
-            sign = {
-              after = "wrap";
-              run = dummy;
-            };
-            patch = {
-              after = "splitDebug";
-              run = dummy;
-            };
-          }
-        ]
-      );
+      expr = orderOf (merge [
+        (S.chain [ "splitDebug" ])
+        {
+          wrap = {
+            after = "install";
+            run = dummy;
+          };
+          sign = {
+            after = "wrap";
+            run = dummy;
+          };
+          patch = {
+            after = "splitDebug";
+            run = dummy;
+          };
+        }
+      ]);
       expected = [
         "splitDebug"
         "patch"
@@ -440,15 +430,13 @@ let
               };
             }
           );
-          removed = orderLeading (
-            S.merge [
-              (S.chain [ "packDwo" ])
-              {
-                packDwo = null;
-                mine.run = dummy;
-              }
-            ]
-          );
+          removed = orderLeading (merge [
+            (S.chain [ "packDwo" ])
+            {
+              packDwo = null;
+              mine.run = dummy;
+            }
+          ]);
           # A leading stage moved after `install` stays there.
           afterInstall = orderLeading {
             packDwo = {
@@ -554,7 +542,16 @@ let
           p = S.mkProduct {
             name = "ca";
             linked = helloLinked;
-            stages = S.chain [ "splitDebug" ];
+            stages = S.chain [ "splitDebug" ] // {
+              # `ca = false`: this stage stays input-addressed, and may
+              # return something that is not a derivation.
+              plain = {
+                after = "splitDebug";
+                run = _: "not-a-derivation";
+                ca = false;
+              };
+            };
+            checks.noSourceReferences.run = H.noSourceReferences;
             inherit pkgs;
             ca = true;
           };
@@ -566,6 +563,7 @@ let
           (isCa p.stages.install)
           (isCa p.checks.noSourceReferences)
           (p.stages.linked.drvAttrs ? __contentAddressed)
+          (p.stages.plain == "not-a-derivation")
         ];
       expected = [
         true
@@ -573,6 +571,7 @@ let
         true
         true
         false
+        true
       ];
     };
     testCaOff = {
@@ -872,6 +871,9 @@ let
     sourcePaths = [ helloSrc ];
     inherit pkgs;
     checks = {
+      # mkProduct adds no checks of its own (mkRepository's default ones
+      # are a layer of its check sets).
+      noSourceReferences.run = H.noSourceReferences;
       # A check on `linked` sees the bytes before splitDebug.
       unstripped = {
         on = "linked";
@@ -880,6 +882,7 @@ let
             input,
             product,
             pkgs,
+            ...
           }:
           pkgs.runCommand "${product.name}-unstripped" { } ''
             ${readelfBin} -S -W ${input}/hello | grep -q ' \.debug_info '
@@ -1030,7 +1033,7 @@ let
   wasmBrowser = S.mkProduct {
     name = "wasm-hello";
     linked = wasmLinked;
-    stages = S.defaultStages.wasmWeb;
+    stages = wasmWebChain;
     target.triple = "wasm32-unknown-unknown";
     info.lockfile = wasmLock;
     inherit pkgs;
@@ -1050,8 +1053,8 @@ let
   component = S.mkProduct {
     name = "adder";
     linked = addLinked;
-    stages = S.merge [
-      S.defaultStages.wasmComponent
+    stages = merge [
+      wasmComponentChain
       {
         wasmMetadata.run = H.wasmMetadata {
           metadata = {
@@ -1098,12 +1101,10 @@ let
     };
   componentized =
     metadataRun:
-    withPackage (
-      S.merge [
-        S.defaultStages.wasmComponent
-        { wasmMetadata.run = metadataRun; }
-      ]
-    );
+    withPackage (merge [
+      wasmComponentChain
+      { wasmMetadata.run = metadataRun; }
+    ]);
   metaDefaults = componentized (
     H.wasmMetadata {
       metadata = {
@@ -1895,7 +1896,6 @@ in
           linked = pkgs.runCommand "app-linked" { } "mkdir $out; echo app > $out/app";
           inherit pkgs stages;
           info = { inherit buildScriptFlags; };
-          defaultChecks = false;
         };
       # A stage reading the runs with the lookups, as a user's would.
       lookups =

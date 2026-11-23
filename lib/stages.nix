@@ -28,9 +28,11 @@
 #                      (packDwo, splitDebug or strip; install, for the
 #                      link units' `.pdb` and other debuginfo side files
 #                      when no earlier stage has one)
-#   p.checks.<name>    every check, `noSourceReferences` included
+#   p.checks.<name>    every check
 #
-# Stage modules are `{ after ? null; before ? null; run; }`:
+# Stages are `{ after ? null; before ? null; run; ca ? true; enable ? true; }`
+# (the `targets.<t>.stages` submodules, lib/modules/types.nix `stage`, or
+# plain sets of those fields):
 #   - `after`/`before` name a stage, a list of stages, or null. A stage with
 #     neither runs after `linked`. A stage with no `after` also runs after
 #     the `leading` stages (mkProducts: those the target's `debugInfo`
@@ -44,8 +46,8 @@
 #     mkRepository has is documented in
 #     docs/src/reference/stage-functions.md, which the
 #     `products-product-attributes` check compares with a real product.
-#   - A stage set to `null` (e.g. `lib.mkForce null` in the module system)
-#     is removed. Constraints that name a removed stage are dropped.
+#   - A stage set to `null`, or with `enable = false`, is removed.
+#     Constraints that name a removed stage are dropped.
 #   - `install` (helpers.install) is added unless the set has `install`;
 #     `install = null` removes it. A stage runs before `install` unless it
 #     is ordered after it, by `after = "install"` or after a stage that is.
@@ -56,10 +58,11 @@
 #     whose relative order is not given fail evaluation, listing every stage
 #     with its constraints.
 #
-# Checks are `{ on ? <the product>; run = { input, product, pkgs }: drv; }`;
-# a check's `product` also has `checkName`, the name it runs under (for
-# its failure message). `null` removes one. `noSourceReferences` is added by default
-# (`defaultChecks = false` turns it off).
+# Checks are `{ on ? <the product>; run = { input, product, target, pkgs }:
+# drv; ca ? true; enable ? true; }`; a check's `product` also has
+# `checkName`, the name it runs under (for its failure message). `null`
+# removes one. mkProduct adds none of its own: mkRepository's default
+# checks are the first layer of its check sets (lib/products.nix).
 #
 # Every stage and check runs through a guard: when its
 # input holds `noBinariesMarker` (a `linked` stage of a product Cargo
@@ -71,7 +74,8 @@
 # Content addressing: with `ca`, every stage and check derivation gets
 # the floating content-addressed attributes (lib/nix-features.nix
 # `caAttrs`, through overrideAttrs, or from `drvAttrs` for a bare
-# `derivation`, as for the guard). `linked` is left as it is. Nix rejects
+# `derivation`, as for the guard), unless the stage or check says `ca =
+# false`. `linked` is left as it is. Nix rejects
 # such a derivation at evaluation unless the evaluator has the
 # `ca-derivations` experimental feature, and the build fails unless the
 # daemon has it too; Nix code cannot test for the feature, so the default
@@ -192,22 +196,6 @@ let
         )
       );
 
-  # Default stage chains per preset (`stagePreset`), as data
-  # (`defaultStages` adds `darwin`, whose one stage runs after `install`). Debug
-  # handling is not among them: mkRepository puts the stages of the
-  # target's `debugInfo` (`packDwo`, `splitDebug`, `strip`) first (lib/products.nix).
-  defaultStageNames = {
-    wasmWeb = [
-      "wasmBindgen"
-      "wasmOpt"
-    ];
-    wasmComponent = [
-      "wasmOpt"
-      "wasmComponentize"
-      "wasmMetadata"
-    ];
-  };
-
   # A chain of helper names as stage modules, each after the previous.
   chain =
     names:
@@ -222,26 +210,9 @@ let
       ) names
     );
 
-  defaultStages = mapAttrs (_: chain) defaultStageNames // {
-    # Last: signing hashes the bytes every earlier stage wrote, and a
-    # stage after `install` that changes them must order itself before
-    # `adhocSign`.
-    darwin.adhocSign = {
-      after = "install";
-      before = null;
-      run = helpers.adhocSign;
-    };
-  };
-
-  # Merge stage modules attribute-wise (later wins per attribute); `null`
-  # removes a stage. A stand-in for module-system merging.
-  merge = lib.foldl' (
-    acc: set:
-    acc
-    // mapAttrs (
-      n: v: if v == null then null else (if acc ? ${n} && acc.${n} != null then acc.${n} else { }) // v
-    ) set
-  ) { };
+  # Whether a stage or check of a set is there: not `null`, not
+  # `enable = false`.
+  isLive = v: v != null && (v.enable or true);
 
   toNames =
     stage: what: v:
@@ -268,10 +239,10 @@ let
         };
       }
       // stages;
-      live = filterAttrs (_: v: v != null) withInstall;
-      removed = attrNames (filterAttrs (_: v: v == null) withInstall);
+      live = filterAttrs (_: isLive) withInstall;
+      removed = attrNames (filterAttrs (_: v: !(isLive v)) withInstall);
       names = attrNames live;
-      isLive = n: live ? ${n};
+      isLiveName = n: live ? ${n};
 
       cons = mapAttrs (
         n: m:
@@ -282,9 +253,9 @@ let
         {
           rawAfter = a;
           rawBefore = b;
-          after = filter isLive a;
-          before = filter isLive b;
-          missing = filter (x: x != "linked" && !(isLive x) && !(elem x removed)) (a ++ b);
+          after = filter isLiveName a;
+          before = filter isLiveName b;
+          missing = filter (x: x != "linked" && !(isLiveName x) && !(elem x removed)) (a ++ b);
         }
       ) live;
 
@@ -301,7 +272,7 @@ let
       # The stages ordered after `install`, directly or through another
       # stage. Counting only those that name `install` would also put a
       # stage that is `after` one of them before `install`: a cycle.
-      afterInstall = if isLive "install" then reachBy explicit "install" else [ ];
+      afterInstall = if isLiveName "install" then reachBy explicit "install" else [ ];
       # x must come before y: by constraint, or because every other stage
       # runs before `install` by default.
       baseEdge = x: y: explicit x y || (y == "install" && x != "install" && !(elem x afterInstall));
@@ -310,7 +281,7 @@ let
       # stays after a stage that runs before `install`): otherwise such a
       # stage would be ambiguous against the stages `debugInfo` inserts,
       # which differ by target.
-      leadingLive = filter isLive leading;
+      leadingLive = filter isLiveName leading;
       leadsTo =
         x: y:
         elem x leadingLive
@@ -385,7 +356,6 @@ let
       toolchainPaths ? [ ],
       ca ? featureGates.defaultCa,
       nixFeatures ? featureGates.standalone { inherit ca; },
-      defaultChecks ? true,
       # The stages a stage with no `after` runs after (explainOrder).
       leading ? [ ],
     }:
@@ -400,20 +370,20 @@ let
       // info;
 
       caify =
-        what: drv:
-        if !ca then
+        what: m: drv:
+        if !ca || !(m.ca or true) then
           drv
         else if drv ? drvAttrs then
           modifyDrv drv (_: _: featureGates.caAttrs nixFeatures "${what} of `${name}` (`ca`)")
         else
-          throw "breakbulk: ${what} of `${name}` returned something that is not a derivation, so it cannot be made content-addressed; set `ca = false`";
+          throw "breakbulk: ${what} of `${name}` returned something that is not a derivation, so it cannot be made content-addressed; set its `ca = false`";
 
       built =
         lib.foldl'
           (
             acc: s:
             let
-              drv = caify "stage `${s}`" (
+              drv = caify "stage `${s}`" ordered.live.${s} (
                 guard pkgs acc.last (
                   ordered.live.${s}.run {
                     input = acc.last;
@@ -448,13 +418,6 @@ let
       # The `debug` output of the last stage that has one.
       inherit (built) debug;
 
-      allChecks =
-        lib.optionalAttrs defaultChecks {
-          noSourceReferences = {
-            run = helpers.noSourceReferences;
-          };
-        }
-        // checks;
       builtChecks = mapAttrs (
         c: m:
         let
@@ -469,10 +432,10 @@ let
                 concatMapStringsSep "" (s: ", " + s) ordered.order
               })";
         in
-        caify "check `${c}`" (
+        caify "check `${c}`" m (
           guard pkgs input (
             m.run {
-              inherit input pkgs;
+              inherit input pkgs target;
               # The stage names after `linked`, in order, and the check's
               # own name, for messages.
               product = product // {
@@ -482,7 +445,7 @@ let
             }
           )
         )
-      ) (filterAttrs (_: v: v != null) allChecks);
+      ) (filterAttrs (_: isLive) checks);
     in
     lib.extendDerivation true (
       {
@@ -498,10 +461,8 @@ in
   inherit
     mkProduct
     helpers
-    defaultStageNames
-    defaultStages
     chain
-    merge
+    isLive
     explainOrder
     order
     noBinariesMarker

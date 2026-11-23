@@ -335,18 +335,22 @@ else
     # The auditwheel-like check: NEEDED names only glibc's libraries, GCC's
     # runtime libraries and `systemLibraries`.
     checks.portableLibraries = {
-      run = stageHelpers.neededLibraries {
-        allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
-        why = "linuxPortable links everything Nix provides statically (its package set builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
-      };
+      run = mkDefault (
+        stageHelpers.neededLibraries {
+          allowed = stageHelpers.glibcLibraries ++ stageHelpers.gccRuntimeLibraries ++ systemLibraries;
+          why = "linuxPortable links everything Nix provides statically (its package set builds static libraries); add a library every target system has to `presets.linuxPortable { systemLibraries = [ \"<soname>\" ]; }`";
+        }
+      );
     };
     # No Nix store path anywhere in a product's files: on
     # another system nothing is there.
     checks.portableNoStorePaths = {
-      run = stageHelpers.noStorePaths {
-        allow = allowStorePaths;
-        why = "a linuxPortable product runs where there is no Nix store; allow a path with `presets.linuxPortable { allowStorePaths = [ \"<glob>\" ]; }`";
-      };
+      run = mkDefault (
+        stageHelpers.noStorePaths {
+          allow = allowStorePaths;
+          why = "a linuxPortable product runs where there is no Nix store; allow a path with `presets.linuxPortable { allowStorePaths = [ \"<glob>\" ]; }`";
+        }
+      );
     };
     # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a
     # program for other distributions should; the Nix sandbox has none, so

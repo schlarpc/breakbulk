@@ -187,9 +187,105 @@ rec {
     merge = lib.mergeEqualOption;
   };
 
-  # A stage or check definition. Kept as raw values
-  # so `lib.mkForce null` can remove one.
-  stages = types.attrsOf (types.nullOr types.raw);
+  # A submodule whose definitions may also be `null`, which stands for
+  # `{ enable = false; }`, so that fields merge across definitions as in
+  # any submodule and `null` (or `lib.mkForce null`) still removes the
+  # entry. Not `types.nullOr`: there a `null` and a set at one priority
+  # conflict, so a plain `null` could not remove what a preset defines.
+  # `nullAs` is read by `layer` below. The module system rebuilds a
+  # submodule type from its modules (`substSubModules`), so that is
+  # wrapped too.
+  nullableSubmodule =
+    sub:
+    sub
+    // {
+      description = "null or ${sub.description}";
+      check = x: x == null || sub.check x;
+      merge =
+        loc: defs: sub.merge loc (map (d: if d.value == null then d // { value = nullAs; } else d) defs);
+      substSubModules = m: nullableSubmodule (sub.substSubModules m);
+      inherit nullAs;
+    };
+  nullAs = {
+    enable = false;
+  };
+
+  # `after` and `before` of a stage: a stage name, a list of them, or
+  # null. One value, which a higher layer replaces (`singleValued`).
+  stageRefs = lib.mkOptionType {
+    name = "stageRefs";
+    description = "null, stage name or list of stage names";
+    descriptionClass = "conjunction";
+    check = v: v == null || builtins.isString v || (builtins.isList v && lib.all builtins.isString v);
+    merge = lib.mergeEqualOption;
+  };
+
+  enableOption = what: {
+    enable = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Whether the ${what} exists. A definition `null` sets it to false.";
+    };
+  };
+  caOption = what: {
+    ca = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        false: the ${what}'s derivation stays input-addressed when the
+        repository's `ca` is on, and its `run` may return something that
+        is not a derivation (which cannot be made content-addressed).
+      '';
+    };
+  };
+
+  # A post-link stage (lib/stages.nix). Its fields merge across
+  # definitions: a preset's stage with the user's `after`.
+  stage = nullableSubmodule (
+    types.submodule {
+      options =
+        enableOption "stage"
+        // caOption "stage"
+        // {
+          after = mkOption {
+            type = stageRefs;
+            default = null;
+            description = "The stage or stages this one runs after.";
+          };
+          before = mkOption {
+            type = stageRefs;
+            default = null;
+            description = "The stage or stages this one runs before.";
+          };
+          run = mkOption {
+            type = types.raw;
+            description = "`{ input, product, target, pkgs }: <derivation>`: the stage's output from its input, the previous stage's.";
+          };
+        };
+    }
+  );
+  stages = types.attrsOf stage;
+
+  # A check on a product (lib/stages.nix).
+  check = nullableSubmodule (
+    types.submodule {
+      options =
+        enableOption "check"
+        // caOption "check"
+        // {
+          on = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "The stage whose output the check reads (`linked` for the raw link output); null: the product.";
+          };
+          run = mkOption {
+            type = types.raw;
+            description = "`{ input, product, target, pkgs }: <derivation>`, which fails when the check does.";
+          };
+        };
+    }
+  );
+  checks = types.attrsOf check;
 
   # Whether an option type keeps one definition's value, where several
   # definitions at one priority conflict, rather than combining them
@@ -215,6 +311,7 @@ rec {
         "package"
         "raw"
         "testRunner"
+        "stageRefs"
       ];
 
   # The modules of a layer's sub-layers (the `target.<triple>` and
@@ -345,7 +442,7 @@ rec {
         if t.name == "submodule" then
           # A function, which a submodule whose attribute-set definitions
           # are its config only (`types.submodule`) still takes as a module.
-          { ... }: sub rank (_: y: y) x
+          { ... }: sub rank (_: y: y) (if x == null && t ? nullAs then t.nullAs else x)
         else if isAttrsType t && builtins.isAttrs x then
           lib.mapAttrs (_: def t.nestedTypes.elemType sub default (y: y)) x
         else

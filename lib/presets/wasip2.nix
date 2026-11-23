@@ -18,15 +18,15 @@
 # table has a hash for) or `wasiSdk` (a sysroot directory) to override.
 {
   lib,
-  targetTraits,
   wasmCommon,
   wasiSdkLib,
   chooseRunner,
+  guard,
 }:
 {
   pkgs,
-  triple ? "wasm32-wasip2",
-  traits ? targetTraits.resolve { inherit triple; },
+  triple,
+  traits,
   withC ? false,
   rustc ? null,
   wasiSdkVersion ? null,
@@ -45,26 +45,28 @@ let
   inherit (lib) mkDefault;
   bp = pkgs.buildPackages;
   inc = "-isystem ${wasiSdk}/include/${triple}";
-  common = wasmCommon (args // { inherit triple; });
+  common = wasmCommon args;
 in
-assert lib.assertMsg traits.linksComponents
-  "breakbulk.presets.wasmComponent: ${triple} does not link wasm components";
-common
-// {
-  runner =
-    mkDefault
-      (chooseRunner {
-        inherit pkgs wasmtime;
-        inherit traits;
-        canExecute = false;
-        flavor = "wasmtime";
-      }).runner;
-}
-// lib.optionalAttrs withC {
-  cflags = [ inc ];
-  cxxflags = [ inc ];
-  bindgen.extraClangArgs = [
-    "--target=${triple}"
-    inc
-  ];
-}
+guard traits.linksComponents
+  "breakbulk.presets.wasmComponent: ${triple} does not link wasm components"
+  (
+    common
+    // {
+      runner =
+        mkDefault
+          (chooseRunner {
+            inherit pkgs wasmtime;
+            inherit traits;
+            canExecute = false;
+            flavor = "wasmtime";
+          }).runner;
+    }
+    // lib.optionalAttrs withC {
+      cflags = [ inc ];
+      cxxflags = [ inc ];
+      bindgen.extraClangArgs = [
+        "--target=${triple}"
+        inc
+      ];
+    }
+  )

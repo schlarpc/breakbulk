@@ -149,10 +149,71 @@ test runner (function from the run’s facts to a shell snippet)
 [` test.stages `](\#packagesnameteststages) for the package’s bench runs\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 ` test.stages `’s
+
+## `packages.<name>.bench.stages.<name>.enable`
+
+Whether the stage exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+## `packages.<name>.bench.stages.<name>.after`
+
+The stage or stages this one runs after\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+## `packages.<name>.bench.stages.<name>.before`
+
+The stage or stages this one runs before\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+## `packages.<name>.bench.stages.<name>.ca`
+
+false: the stage’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+## `packages.<name>.bench.stages.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `: the stage’s output from its input, the previous stage’s\.
+
+*Type:*
+raw value
 
 ## `packages.<name>.bench.wrapper`
 
@@ -205,7 +266,7 @@ They are added to the target’s checks and to the default checks
 from this package only\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 
@@ -218,6 +279,66 @@ attribute set of (null or raw value)
 ```nix
 { noSourceReferences = null; }
 ```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.checks.<name>.enable`
+
+Whether the check exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.checks.<name>.ca`
+
+false: the check’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.checks.<name>.on`
+
+The stage whose output the check reads (` linked ` for the raw link output); null: the product\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.checks.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `, which fails when the check does\.
+
+*Type:*
+raw value
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
@@ -768,13 +889,89 @@ list of function from { default, kind, cargoTarget, root, packageDir, \.\.\. } t
 Post-link stages for this package’s products, as ` targets.<triple>.stages ` (` after = "install" ` for wrappers and packaging)\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 
 ```nix
 { }
 ```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.stages.<name>.enable`
+
+Whether the stage exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.stages.<name>.after`
+
+The stage or stages this one runs after\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.stages.<name>.before`
+
+The stage or stages this one runs before\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.stages.<name>.ca`
+
+false: the stage’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.stages.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `: the stage’s output from its input, the previous stage’s\.
+
+*Type:*
+raw value
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
@@ -989,10 +1186,71 @@ test runner (function from the run’s facts to a shell snippet)
 [` test.stages `](\#packagesnameteststages) for this binary’s runs\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 ` test.stages `’s
+
+## `packages.<name>.test.binaries.<name>.stages.<name>.enable`
+
+Whether the stage exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+## `packages.<name>.test.binaries.<name>.stages.<name>.after`
+
+The stage or stages this one runs after\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+## `packages.<name>.test.binaries.<name>.stages.<name>.before`
+
+The stage or stages this one runs before\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+## `packages.<name>.test.binaries.<name>.stages.<name>.ca`
+
+false: the stage’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+## `packages.<name>.test.binaries.<name>.stages.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `: the stage’s output from its input, the previous stage’s\.
+
+*Type:*
+raw value
 
 ## `packages.<name>.test.binaries.<name>.wrapper`
 
@@ -1386,7 +1644,7 @@ Doctests have no binary to stage (` test.doctest.stages ` is an
 error)\.
 
 *Type:*
-attribute set of (null or raw value)
+attribute set of (null or submodule)
 
 *Default:*
 with [` ca `](repository\.md\#ca), ` strip `; else none
@@ -1397,6 +1655,82 @@ with [` ca `](repository\.md\#ca), ` strip `; else none
 { strip = null; }  # run the unit's own binary
 
 ```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.stages.<name>.enable`
+
+Whether the stage exists\. A definition ` null ` sets it to false\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.stages.<name>.after`
+
+The stage or stages this one runs after\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.stages.<name>.before`
+
+The stage or stages this one runs before\.
+
+*Type:*
+null, stage name or list of stage names
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.stages.<name>.ca`
+
+false: the stage’s derivation stays input-addressed when the
+repository’s ` ca ` is on, and its ` run ` may return something that
+is not a derivation (which cannot be made content-addressed)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.stages.<name>.run`
+
+` { input, product, target, pkgs }: <derivation> `: the stage’s output from its input, the previous stage’s\.
+
+*Type:*
+raw value
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)

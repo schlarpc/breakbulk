@@ -567,7 +567,7 @@ let
         description = "Post-link stages for this package's products, as `targets.<triple>.stages` (`after = \"install\"` for wrappers and packaging).";
       };
       checks = mkOption {
-        type = bt.stages;
+        type = bt.checks;
         default = { };
         example = lib.literalExpression "{ noSourceReferences = null; }";
         description = ''

@@ -9,7 +9,6 @@
 #     triple;               # the target triple
 #     traits = <built-in>;  # its traits (lib/target-traits.nix), with the
 #                           # user's targets.<triple>.traits merged in
-#     stagePreset = null;   # a name in stages.defaultStageNames, or null
 #     debugInfo = null;     # "split" | "keep" | "strip", or null for the
 #                           # traits' default
 #     targetStages = { };   # targets.<triple>.stages
@@ -19,8 +18,13 @@
 #     ca = breakbulk.nixFeatures.defaultCa;
 #     nixFeatures = <standalone>;  # as stages.mkProduct's
 #     lockfile = null;      # the workspace's Cargo.lock (wasmBindgen stage)
-#     defaultChecks = true; # false: no noSourceReferences (sourcePaths = "keep")
+#     keepSourcePaths = false;  # true (`sourcePaths = "keep"`): no
+#                           # noSourceReferences check
 #   };
+#
+# The stage and check sets are plain attribute sets of stages, or
+# `definitionsOf` an evaluated option (its definitions and their
+# priority), which merge field by field.
 #
 #   products.<pkg>                 the product: linked -> stages -> install
 #   products.<pkg>.stages.<name>   every stage (`linked` included)
@@ -28,20 +32,21 @@
 #   products.<pkg>.debug           split debug info, when a stage split it
 #                                  (or install, for `.pdb` and other
 #                                  debuginfo side files of the link units)
-#   products.<pkg>.checks.<name>   checks (`noSourceReferences` by default,
-#                                  `buildScriptFiles` on every product)
+#   products.<pkg>.checks.<name>   checks (`defaultChecks`, then the
+#                                  target's and the package's)
 #   products.<pkg>.roots."<kind>/<target>"   the raw roots
 #
-# The stage set of a product is, merged in this order (later wins per
-# attribute; `null` removes a stage): the target's stage set
-# (`targetStageSet`: the stages `debugInfo` inserts, the preset's default
-# stages, then the target's `stages`), then the package's `stages`, its
-# settings layers already merged (lib/package-settings.nix). Checks
-# merge the same way over the default
-# `noSourceReferences`. What happens to debug info is the target's
-# decision (`debugInfo`): a stage set that removes the `splitDebug` or
-# `strip` it inserts, or adds `splitDebug` where it inserts none, is an
-# evaluation error.
+# The stage set of a product is one option's value, merged by the module
+# system from three layers, lowest first: the stages `debugInfo` inserts,
+# the target's `stages` (a preset's among them), then the package's
+# `stages`, whose own settings layers are ranked already
+# (lib/package-settings.nix). A higher layer's single values win at equal
+# priority (lib/modules/types.nix `layer`), so a package's `after`
+# replaces the target's while the target's `run` stays; `null` removes a
+# stage. Checks merge the same way over `defaultChecks`. What happens to
+# debug info is the target's decision (`debugInfo`): a stage set that
+# removes the `splitDebug` or `strip` it inserts, or adds `splitDebug`
+# where it inserts none, is an evaluation error.
 #
 # `linked` is one directory holding every built root's files, as
 # symlinks, under Cargo's uplifted names: a bin under its target name and
@@ -78,16 +83,83 @@ let
     nameValuePair
     ;
 
-  # A stage preset's chain (`stagePreset`): none by default, because the
-  # browser and component chains need to know which one the user wants;
-  # debug handling is `debugInfo`'s.
-  presetStages =
-    name:
-    if name == null then
-      { }
-    else
-      stages.defaultStages.${name}
-        or (throw "breakbulk: unknown stage preset `${name}`; known: ${lib.concatStringsSep ", " (lib.attrNames stages.defaultStages)}");
+  bt = import ./modules/types.nix { inherit lib; };
+
+  # An evaluated option's definitions, to merge with others as one layer:
+  # each value at the option's priority, so that a priority around a whole
+  # set (`stages = lib.mkForce { … }`) still drops the lower layers.
+  definitionsOf = opt: {
+    defs = opt.definitionsWithLocations;
+    prio = opt.highestPrio;
+  };
+
+  # Stage or check sets (`type`: bt.stages or bt.checks) merged as one
+  # option from `layers`, lowest first: each `{ set; rank ? <none>; }`, a
+  # plain set or `definitionsOf` an option. `rank` (lib/modules/types.nix
+  # `layer`) places a layer below those ranked already: package settings,
+  # whose ranks run from 0 up.
+  setEval =
+    type:
+    lib.evalModules {
+      modules = [
+        {
+          options.set = lib.mkOption {
+            inherit type;
+            default = { };
+          };
+        }
+      ];
+    };
+  stageSetEval = setEval bt.stages;
+  checkSetEval = setEval bt.checks;
+  mergeSets =
+    base: layers:
+    let
+      modulesOf =
+        l:
+        let
+          d =
+            if l.set ? defs && l.set ? prio then
+              l.set
+            else
+              {
+                defs = [
+                  {
+                    file = "<unknown-file>";
+                    value = l.set;
+                  }
+                ];
+                prio = lib.modules.defaultOverridePriority;
+              };
+          ms = map (x: {
+            _file = x.file;
+            set = lib.mkOverride d.prio x.value;
+          }) d.defs;
+        in
+        if l ? rank then [ (bt.layer base.options l.rank (_: v: v) { imports = ms; }) ] else ms;
+    in
+    (base.extendModules { modules = lib.concatMap modulesOf layers; }).config.set;
+
+  # The checks every product of mkRepository gets, as the lowest layer of
+  # its check set: `noSourceReferences`, unless the variant keeps source
+  # paths (`sourcePaths = "keep"`), and `buildScriptFiles`, which passes
+  # when no build script placed files (in dynamic mode whether there are
+  # runs is known only at build time, and both modes have the same
+  # checks).
+  defaultChecks =
+    {
+      keepSourcePaths ? false,
+    }:
+    {
+      noSourceReferences =
+        if keepSourcePaths then
+          null
+        else
+          {
+            run = stages.helpers.noSourceReferences;
+          };
+      buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
+    };
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
@@ -216,8 +288,7 @@ let
   # ordinary stage: `null` removes it.
   # Overriding the inserted stages' attributes (`run`, `after`) is allowed.
   #
-  # `targetStageSet`'s arguments: { triple; traits; stagePreset; debugInfo;
-  # targetStages; }.
+  # `targetLayers`' arguments: { triple; traits; debugInfo; targetStages; }.
   debugInfoOf =
     {
       triple,
@@ -269,8 +340,9 @@ let
       ++ lib.optional (debugStageName v != null) (debugStageName v)
     );
 
-  # A stage set (`where` names it in messages) may not remove the target's
-  # debug stage or add `splitDebug` where the target does not split.
+  # A merged stage set (`where` names the layer in messages) may not
+  # remove the target's debug stage or add `splitDebug` where the target
+  # does not split.
   checkDebugStages =
     {
       triple,
@@ -282,49 +354,57 @@ let
       auto = debugStageName debugInfo;
       fix = "debug splitting is decided per target, for every package of it: set `targets.\"${triple}\".debugInfo` (\"split\", \"keep\" or \"strip\")";
     in
-    if auto != null && set ? ${auto} && set.${auto} == null then
+    if auto != null && !(stages.isLive (set.${auto} or null)) then
       throw "breakbulk: ${where} removes the `${auto}` stage on ${triple}, which `debugInfo = \"${debugInfo}\"` inserts; ${fix}"
-    else if auto != "splitDebug" && (set.splitDebug or null) != null then
+    else if auto != "splitDebug" && stages.isLive (set.splitDebug or null) then
       throw "breakbulk: ${where} adds a `splitDebug` stage on ${triple}, whose `debugInfo` is \"${debugInfo}\": the target's units remap every source path and their links get no GNU build ID; ${fix}"
     else
       set;
 
-  # The target's stage set: the debug stage, the stage preset's defaults
-  # (`stagePreset`, a chain such as `wasmWeb`; none by default), then
-  # `targets.<triple>.stages` over them.
-  targetStageSet =
+  # The layers of a target's stage set: the stages `debugInfo` inserts,
+  # then `targets.<triple>.stages`.
+  targetLayers =
     {
       triple,
       traits ? targetTraits.resolve { inherit triple; },
-      stagePreset ? null,
       targetStages ? { },
       ...
     }@args:
-    let
-      v = debugInfoOf args;
-    in
-    stages.merge [
-      (debugStages v traits)
-      (presetStages stagePreset)
-      (checkDebugStages {
-        inherit triple;
-        debugInfo = v;
-        where = "targets.\"${triple}\".stages";
-      } targetStages)
+    [
+      {
+        set = debugStages (debugInfoOf args) traits;
+        rank = -0.75;
+      }
+      {
+        set = targetStages;
+        rank = -0.5;
+      }
     ];
 
-  # Whether the target's debug info is split off (targetStageSet's
+  # The target's stage set, merged (`targetLayers`' arguments).
+  targetStageSet =
+    {
+      triple,
+      ...
+    }@args:
+    checkDebugStages {
+      inherit triple;
+      debugInfo = debugInfoOf args;
+      where = "targets.\"${triple}\".stages";
+    } (mergeSets stageSetEval (targetLayers args));
+
+  # Whether the target's debug info is split off (targetLayers'
   # arguments).
   targetSplitsDebug = args: debugInfoOf args == "split";
 
   # The env of the target's units that its debug-info stages need
-  # (targetStageSet's arguments): splitDebug needs a GNU build ID, which
+  # (targetLayers' arguments): splitDebug needs a GNU build ID, which
   # nixpkgs' linker wrapper adds, content-derived (`--build-id=sha1`),
   # when NIX_SET_BUILD_ID is set, as stdenv's separateDebugInfo does.
   targetUnitEnv = args: lib.optionalAttrs (targetSplitsDebug args) { NIX_SET_BUILD_ID = "1"; };
 
-  # The scope of non-test units for a target (targetStageSet's arguments
-  # and `coverage`).
+  # The scope of non-test units for a target (targetLayers' arguments and
+  # `coverage`).
   shippedRemapScope =
     {
       coverage ? false,
@@ -342,7 +422,6 @@ let
       select ? null,
       triple,
       traits ? targetTraits.resolve { inherit triple; },
-      stagePreset ? null,
       debugInfo ? null,
       targetStages ? { },
       targetChecks ? { },
@@ -353,8 +432,7 @@ let
       # Package name -> its `[package]` table, workspace fields resolved
       # (manifest.packageInfo's `package`), for `product.package`.
       cargoPackages ? { },
-      # false: no default noSourceReferences check (`sourcePaths = "keep"`).
-      defaultChecks ? true,
+      keepSourcePaths ? false,
       sourcePaths ?
         attrValues inst.sources.workspace
         ++ lib.concatMap attrValues (attrValues (inst.sources.workspaceTargets or { }))
@@ -369,13 +447,13 @@ let
         inherit
           triple
           traits
-          stagePreset
           debugInfo
           targetStages
           ;
       };
-      targetSet = targetStageSet setArgs;
       effectiveDebugInfo = debugInfoOf setArgs;
+      # Checked once for the target, before any package's layer.
+      targetChecked = builtins.seq (targetStageSet setArgs) true;
       byPkg = groupBy (r: r.breakbulkRoot.package) (
         filter (r: !r.breakbulkRoot.test) (attrValues inst.roots)
       );
@@ -417,24 +495,24 @@ let
           );
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           conf = packageConfig pkg;
-          stageSet = stages.merge [
-            targetSet
-            (checkDebugStages {
+          stageSet =
+            assert targetChecked;
+            checkDebugStages {
               inherit triple;
               debugInfo = effectiveDebugInfo;
               where = "packages.${pkg}.stages";
-            } (conf.stages or { }))
-          ];
-          checkSet = stages.merge ([
-            # On every product (passing when no build script placed
-            # files): in dynamic mode whether there are runs is known
-            # only at build time, and both modes have the same checks.
+            } (mergeSets stageSetEval (targetLayers setArgs ++ [ { set = conf.stages or { }; } ]));
+          checkSet = mergeSets checkSetEval [
             {
-              buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
+              set = defaultChecks { inherit keepSourcePaths; };
+              rank = -0.75;
             }
-            targetChecks
-            (conf.checks or { })
-          ]);
+            {
+              set = targetChecks;
+              rank = -0.5;
+            }
+            { set = conf.checks or { }; }
+          ];
           p = stages.mkProduct {
             name = pkg;
             linked = mkLinked pkgs traits pkg built;
@@ -448,7 +526,6 @@ let
               nixFeatures
               sourcePaths
               toolchainPaths
-              defaultChecks
               ;
             # `product` attributes; docs/src/reference/stage-functions.md
             # lists each (checked by products-product-attributes).
@@ -472,10 +549,11 @@ in
 {
   inherit
     mkProducts
+    definitionsOf
+    defaultChecks
     targetStageSet
     debugInfoOf
     targetUnitEnv
     shippedRemapScope
-    presetStages
     ;
 }

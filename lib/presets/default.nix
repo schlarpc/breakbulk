@@ -1,29 +1,26 @@
 # Toolchain presets ("Toolchain presets" in
 # docs/src/explanation/internals/toolchains.md;
-# docs/src/explanation/targets.md).
+# docs/src/explanation/targets.md; docs/src/how-to/write-a-preset.md).
 #
-# A preset is a function from `{ pkgs, triple, …options }` to a module value
-# for `targets.<triple>`, so every field can be overridden with ordinary
-# module priorities: scalar fields (linker, cc, runner, …) are set with
-# `mkDefault`, so a plain definition replaces them; lists (rustflags,
-# cflags, cxxflags) concatenate, and `mkForce` replaces them; env values are
-# `mkDefault` per variable.
+# A preset is a module of the target spec (lib/modules/target-spec.nix),
+# which `targets.<triple>.preset` imports. It gets the module arguments
+# `pkgs`, `name` (the triple) and `toolchain` (the workspace's), reads
+# the target's options (`config.traits`, `config.linkerKind`) and sets
+# any of them: scalar fields (linker, cc, runner, …) with `mkDefault`, so
+# a plain definition replaces them; lists (rustflags, cflags, cxxflags)
+# concatenate, and `mkForce` replaces them; env values are `mkDefault`
+# per variable; stages are `mkDefault` per field.
 #
-#   targets.x86_64-unknown-linux-musl =
-#     breakbulk.presets.linuxStatic { inherit pkgs; triple = "x86_64-unknown-linux-musl"; };
-#   # or, letting the target fill in pkgs and the triple:
 #   targets.x86_64-unknown-linux-musl.preset = breakbulk.presets.linuxStatic;
 #   targets.x86_64-pc-windows-msvc.preset = breakbulk.presets.windows { inherit sdk; };
 #
-# A preset called without `pkgs` returns the same preset with those options
-# bound, so `presets.windows { sdk = …; }` is itself a preset.
+# A preset applied to an attribute set of its options is the same module
+# with those options bound, so `presets.windows { sdk = …; }` is itself a
+# preset.
 #
-# Through `preset`, a target's preset is applied once per workspace and
-# given that workspace's toolchain (`toolchain`, see mkPreset), so presets
-# that need rustc's LLVM or wasi-sdk version follow each workspace's rustc.
-# Calling a preset directly (`presets.windows { inherit pkgs triple sdk;
-# … }`) has no workspace: pass `rustc` there (or `linkerKind`, for a Linux
-# preset whose default linker follows rustc's).
+# A preset is evaluated once per workspace, with that workspace's
+# toolchain, so presets that need rustc's LLVM or wasi-sdk version follow
+# each workspace's rustc.
 #
 # Every preset sets the host spec (`host.linker`, `host.env`) from
 # `pkgs.buildPackages`, so host units (build scripts, proc macros and their
@@ -52,49 +49,80 @@
 let
   inherit (lib) mkDefault;
 
-  # Bind options until `pkgs` is given.
-  #
-  # `traits` are the target's traits (lib/target-traits.nix), which a
-  # target passes with the user's `targets.<triple>.traits` merged in; a
-  # preset called without them uses the built-in traits of its triple.
-  #
-  # `linkerKind` is the target's `targets.<triple>.linkerKind`, which a
-  # target passes like `traits`.
-  #
-  # `toolchain` is the workspace's toolchain (`workspaces.<ws>.toolchain`),
-  # which a target passes when it applies the preset for one workspace
-  # (lib/modules/target-spec.nix): its `rustc` becomes the preset's `rustc`
-  # unless one was given, so LLVM tools and the wasi-sdk follow each
-  # workspace's compiler. Every stage advertises `toolchain`
-  # in its function arguments; a preset that does not (a plain user
-  # function) is called without it.
-  mkPreset =
-    f:
+  # A preset made from `body`, a function of the preset's options and the
+  # target's facts (`{ pkgs; triple; traits; linkerKind; rustc; … }`) to
+  # the module's definitions. The module system calls a module with its
+  # arguments, which have `config` and `options`; any other attribute set
+  # binds options. The definitions' names must not depend on the
+  # target's options (`config.traits`, read lazily here): the module system
+  # reads every module's names before any option's value, so a check on
+  # the traits goes into the values (`guard`) and a choice between
+  # mechanisms into `lib.mkIf` (`dispatch`).
+  presetModule =
+    body:
     let
-      go =
-        bound:
-        lib.setFunctionArgs
-          (
-            args:
-            let
-              a = bound // args;
-              tc = a.toolchain or null;
-              withRustc =
-                removeAttrs a [ "toolchain" ]
-                // lib.optionalAttrs (!(a ? rustc) && tc != null && tc.rustc or null != null) {
-                  inherit (tc) rustc;
-                };
-            in
-            if a ? pkgs then f withRustc // { presetDirect = true; } else go a
-          )
-          {
-            toolchain = true;
-            traits = true;
-            linkerKind = true;
-          };
+      bind = opts: {
+        __functor =
+          _: args:
+          if args ? config && args ? options then
+            body (
+              {
+                rustc = if args.toolchain or null == null then null else args.toolchain.rustc;
+              }
+              // opts
+              // {
+                inherit (args) pkgs config;
+                triple = args.name;
+                inherit (args.config) traits linkerKind;
+              }
+            )
+          else
+            bind (opts // args);
+      };
     in
-    go { };
+    bind { };
 
+  # Definitions `attrs` with every value failing with `msg` unless
+  # `cond`. Plain attribute sets keep their names, down to the values:
+  # under an option group (`host`, `bindgen`) the module system reads the
+  # names before deciding a `lib.mkIf`.
+  guard =
+    cond: msg:
+    let
+      g =
+        v:
+        if builtins.isAttrs v && !(v ? _type) && !lib.isDerivation v then
+          lib.mapAttrs (_: g) v
+        else if cond then
+          v
+        else
+          throw msg;
+    in
+    g;
+
+  # One of several mechanisms, chosen by the target's traits: `cases` is
+  # a list of `{ when; definitions; }`; none matching fails with `msg`
+  # when the linker is read.
+  dispatch =
+    cases: msg:
+    lib.mkMerge (
+      map (c: lib.mkIf c.when c.definitions) cases
+      ++ [ (lib.mkIf (!lib.any (c: c.when) cases) { linker = throw msg; }) ]
+    );
+
+  # A chain of stage helpers (`breakbulk.stageHelpers`), each after the
+  # previous, the first after `linked`, every field `mkDefault`.
+  stageChain =
+    names:
+    lib.listToAttrs (
+      lib.imap0 (
+        i: n:
+        lib.nameValuePair n {
+          after = mkDefault (if i == 0 then "linked" else lib.elemAt names (i - 1));
+          run = mkDefault stageHelpers.${n};
+        }
+      ) names
+    );
   inherit (targetTraits) nativeTriple;
 
   # The package set whose libraries a target links, one rule for every
@@ -215,9 +243,9 @@ let
     extra:
     {
       pkgs,
-      triple ? throw "breakbulk.presets: give the target `triple`",
-      traits ? targetTraits.resolve { inherit triple; },
-      packageSet ? targetPkgsFor pkgs traits,
+      config,
+      triple,
+      traits,
       linkerKind ? null,
       crossLanguageLto ? false,
       nativeBuilder ? false,
@@ -227,7 +255,9 @@ let
       ...
     }:
     let
-      tp = packageSet;
+      # The target's package set: the preset's default below, or the
+      # user's `packageSet`.
+      tp = config.packageSet;
       cc = tp.stdenv.cc;
       prefix = cc.targetPrefix;
       # The LLVM matching rustc: for crossLanguageLto's C toolchain, and the
@@ -250,7 +280,7 @@ let
       };
     in
     {
-      packageSet = mkDefault tp;
+      packageSet = mkDefault (targetPkgsFor pkgs traits);
       linker = mkDefault (chooseLinker {
         inherit
           pkgs
@@ -346,7 +376,7 @@ let
     # `-C linker-plugin-lto`. Tests: native when the build
     # machine can run them; else on a native builder when nativeBuilder
     # (testSystem), else under qemu-user.
-    linux = mkPreset (linuxGnuWith { });
+    linux = linuxGnuWith { };
 
     # Linux musl: as linux with nixpkgs' musl cross toolchain, and static
     # linking (`staticLinking`: `+crt-static`, pkg-config libraries static).
@@ -354,9 +384,9 @@ let
     # libc.a and libunwind.a from the Rust target's self-contained directory
     # (`-C link-self-contained=no` fails: nixpkgs' musl toolchain has no
     # libunwind.a). C code compiles against nixpkgs' musl headers.
-    linuxMusl = mkPreset (linuxGnuWith {
+    linuxMusl = linuxGnuWith {
       crtStatic = true;
-    });
+    };
 
     # A fully static glibc binary (static-pie by default; see relocationModel)
     # on the host triple. Host and target share
@@ -365,11 +395,11 @@ let
     # env: build scripts and proc macros stay dynamic. `staticLibDirs` are
     # extra directories of static archives (`-L native=`), e.g.
     # [ "${openssl.override { static = true; }}/lib" ].
-    staticGlibc = mkPreset (
+    staticGlibc =
       {
         pkgs,
-        triple ? nativeTriple pkgs,
-        traits ? targetTraits.resolve { inherit triple; },
+        triple,
+        traits,
         staticLibDirs ? [ ],
         # null: rustc's default (pic), which with +crt-static gives a
         # static-pie executable, as `cargo build` does. "static" (non-PIE)
@@ -386,55 +416,51 @@ let
       }:
       let
         cc = pkgs.stdenv.cc;
-      in
-      assert lib.assertMsg (
-        triple == nativeTriple pkgs
-      ) "breakbulk.presets.linuxStatic: ${triple} is not the host triple ${nativeTriple pkgs}";
-      let
         st = staticLinking { inherit traits; };
       in
-      {
-        packageSet = mkDefault pkgs;
-        linker = mkDefault (chooseLinker {
-          inherit
-            pkgs
-            triple
-            traits
-            rustc
-            ;
-          kind = linkerKind;
-          staticNonPie = relocationModel == "static";
-          llvm = llvmVersions.packagesFor {
-            pkgs = pkgs.buildPackages;
-            inherit rustc llvmMajor llvmPackages;
+      guard (triple == nativeTriple pkgs)
+        "breakbulk.presets.linuxStatic: ${triple} is not the host triple ${nativeTriple pkgs}"
+        {
+          packageSet = mkDefault pkgs;
+          linker = mkDefault (chooseLinker {
+            inherit
+              pkgs
+              triple
+              traits
+              rustc
+              ;
+            kind = linkerKind;
+            staticNonPie = relocationModel == "static";
+            llvm = llvmVersions.packagesFor {
+              pkgs = pkgs.buildPackages;
+              inherit rustc llvmMajor llvmPackages;
+            };
+          });
+          cc = mkDefault "${cc}/bin/cc";
+          cxx = mkDefault "${cc}/bin/c++";
+          ar = mkDefault "${cc.bintools}/bin/ar";
+          rustflags =
+            st.rustflags
+            ++ lib.optionals (relocationModel != null) [
+              "-C"
+              "relocation-model=${relocationModel}"
+            ]
+            ++ lib.concatMap (d: [
+              "-L"
+              "native=${d}"
+            ]) ([ "${pkgs.glibc.static}/lib" ] ++ staticLibDirs);
+          env = defaultEnv st.env;
+          runner = mkDefault null;
+          testSystem = mkDefault null;
+          host = hostSpec {
+            inherit
+              pkgs
+              rustc
+              triple
+              linkerKind
+              ;
           };
-        });
-        cc = mkDefault "${cc}/bin/cc";
-        cxx = mkDefault "${cc}/bin/c++";
-        ar = mkDefault "${cc.bintools}/bin/ar";
-        rustflags =
-          st.rustflags
-          ++ lib.optionals (relocationModel != null) [
-            "-C"
-            "relocation-model=${relocationModel}"
-          ]
-          ++ lib.concatMap (d: [
-            "-L"
-            "native=${d}"
-          ]) ([ "${pkgs.glibc.static}/lib" ] ++ staticLibDirs);
-        env = defaultEnv st.env;
-        runner = mkDefault null;
-        testSystem = mkDefault null;
-        host = hostSpec {
-          inherit
-            pkgs
-            rustc
-            triple
-            linkerKind
-            ;
         };
-      }
-    );
 
     # Windows msvc through xwin: lld-link (wrapped so
     # the PDB, and so the .exe, are reproducible), clang-cl and llvm-lib from
@@ -443,11 +469,11 @@ let
     # optional +crt-static, wine as the runner (x86_64 and i686).
     # `extraSdks`: further SDKs, each { includeDirs = [ … ]; libDirs = [ … ]; }
     # (libDirs for this target's arch), e.g. a driver kit.
-    msvc = mkPreset (
+    msvc =
       {
         pkgs,
         triple,
-        traits ? targetTraits.resolve { inherit triple; },
+        traits,
         sdk ? throw "breakbulk.presets.windows: the msvc target ${triple} needs `sdk` (breakbulk.xwinSdk { … })",
         crtStatic ? false,
         extraSdks ? [ ],
@@ -532,27 +558,25 @@ let
             linkerKind
             ;
         };
-      }
-    );
+      };
 
     # UEFI applications: lld-link from the LLVM matching rustc, wrapped
     # as for msvc so the PDB, and so the .efi, are reproducible; rustc's
     # target spec otherwise links with its own rust-lld as lld-link, and
     # its temporary directory's random name lands in the PDB. No C
     # toolchain and no runner: nothing to set them from.
-    uefi = mkPreset (
+    uefi =
       {
         pkgs,
         triple,
-        traits ? targetTraits.resolve { inherit triple; },
+        traits,
         linkerKind ? null,
         rustc ? null,
         llvmMajor ? null,
         llvmPackages ? null,
         ...
       }:
-      assert lib.assertMsg traits.isUefi "breakbulk.presets.uefi: `${triple}` is not a UEFI triple";
-      {
+      guard traits.isUefi "breakbulk.presets.uefi: `${triple}` is not a UEFI triple" {
         packageSet = mkDefault null;
         linker = mkDefault (chooseLinker {
           inherit
@@ -577,8 +601,7 @@ let
             linkerKind
             ;
         };
-      }
-    );
+      };
 
     # wasm32-unknown-unknown for the browser: rustc's own wasm linker flavor,
     # with the version-matched `wasm-ld` instead of rustup's rust-lld; C code
@@ -587,97 +610,89 @@ let
     # "firefox" for that headless browser). The runner is a function of the
     # workspace's lockfile, since the runner must be the exact wasm-bindgen
     # version.
-    wasmWeb = mkPreset (
+    wasmWeb =
       {
         pkgs,
-        triple ? "wasm32-unknown-unknown",
+        traits,
         browser ? "node",
-        rustc ? null,
-        llvmMajor ? null,
-        llvmPackages ? null,
         ...
       }@args:
-      wasmCommon (args // { inherit triple; })
+      wasmCommon args
       // {
-        stagePreset = mkDefault "wasmWeb";
+        stages = stageChain [
+          "wasmBindgen"
+          "wasmOpt"
+        ];
         runner =
           mkDefault
             (chooseRunner {
-              inherit pkgs browser;
-              traits = args.traits or (targetTraits.resolve { inherit triple; });
+              inherit pkgs browser traits;
               canExecute = false;
               flavor = "wasm-bindgen";
             }).runner;
-      }
-    );
+      };
 
     # Further targets, one file each.
-    wasip2 = mkPreset (
-      import ./wasip2.nix {
-        inherit
-          lib
-          targetTraits
-          wasmCommon
-          chooseRunner
-          ;
-        wasiSdkLib = wasiSdk;
-      }
-    );
-    linuxPortable = mkPreset (
-      import ./linux-portable.nix {
-        inherit
-          lib
-          targetTraits
-          stageHelpers
-          chooseLinker
-          chooseRunner
-          hostSpec
-          nativeTriple
-          ;
-      }
-    );
-    darwin = mkPreset (
-      import ./darwin.nix {
-        inherit
-          lib
-          targetTraits
-          llvmVersions
-          appleSdk
-          linkers
-          chooseRunner
-          hostSpec
-          ;
-      }
-    );
-    windowsGnu = mkPreset (
-      import ./windows-gnu.nix {
-        inherit
-          lib
-          targetTraits
-          targetPkgsFor
-          llvmVersions
-          chooseLinker
-          chooseRunner
-          hostSpec
-          staticLinking
-          ;
-      }
-    );
+    wasip2 = import ./wasip2.nix {
+      inherit
+        lib
+        wasmCommon
+        chooseRunner
+        guard
+        ;
+      wasiSdkLib = wasiSdk;
+    };
+    linuxPortable = import ./linux-portable.nix {
+      inherit
+        lib
+        targetTraits
+        stageHelpers
+        chooseLinker
+        chooseRunner
+        hostSpec
+        nativeTriple
+        ;
+    };
+    darwin = import ./darwin.nix {
+      inherit
+        lib
+        targetTraits
+        llvmVersions
+        appleSdk
+        linkers
+        chooseRunner
+        hostSpec
+        guard
+        stageHelpers
+        ;
+    };
+    windowsGnu = import ./windows-gnu.nix {
+      inherit
+        lib
+        targetPkgsFor
+        llvmVersions
+        chooseLinker
+        chooseRunner
+        hostSpec
+        staticLinking
+        ;
+    };
 
     # wasm32-unknown-unknown core modules, componentized by the product's
     # stages. withC = true: C code compiles against nixpkgs' wasilibc
     # (headers and libc.a), with `-C link-self-contained=no` and the library
     # directory on the link path. Runner: wasmtime.
-    wasmCore = mkPreset (
+    wasmCore =
       {
         pkgs,
-        triple ? "wasm32-unknown-unknown",
+        triple,
+        traits,
         withC ? false,
         wasilibc ? pkgs.pkgsCross.wasi32.wasilibc,
         ...
       }@args:
       let
-        c = wasmCommon (args // { inherit triple; });
+        c = wasmCommon args;
         # The multiarch directory wasilibc installs headers and libraries under.
         wasiTriple = "wasm32-wasip1";
         inc = "-isystem ${lib.getDev wasilibc}/include/${wasiTriple}";
@@ -698,17 +713,19 @@ let
         ];
       }
       // {
-        stagePreset = mkDefault "wasmComponent";
+        stages = stageChain [
+          "wasmOpt"
+          "wasmComponentize"
+          "wasmMetadata"
+        ];
         runner =
           mkDefault
             (chooseRunner {
-              inherit pkgs;
-              traits = args.traits or (targetTraits.resolve { inherit triple; });
+              inherit pkgs traits;
               canExecute = false;
               flavor = "wasmtime";
             }).runner;
-      }
-    );
+      };
   };
 in
 {
@@ -748,90 +765,80 @@ in
     # `-C linker-plugin-lto`. Tests: native when the build machine can run
     # them; else on a native builder when nativeBuilder (testSystem), else
     # under qemu-user.
-    inherit (impl) linux;
+    linux = presetModule impl.linux;
 
     # Linux, statically linked (`staticLinking`: `+crt-static`, pkg-config
     # libraries static): with musl for a `-musl` triple (nixpkgs' musl cross
     # toolchain; options as `linux`), as a static-pie glibc executable for a
     # `-gnu` triple, which must be the host triple (`staticLibDirs`,
-    # `relocationModel`). Default triple: the host's.
-    linuxStatic = mkPreset (
-      args:
-      let
-        triple = args.triple or (nativeTriple args.pkgs);
-        traits = args.traits or (targetTraits.resolve { inherit triple; });
-        a = args // {
-          inherit triple traits;
-        };
-      in
-      if traits.isLinux && traits.env == "musl" then
-        impl.linuxMusl a
-      else if traits.isLinux && traits.env == "gnu" then
-        impl.staticGlibc a
-      else
-        throw "breakbulk.presets.linuxStatic: `${triple}` is not a Linux -musl or -gnu triple"
+    # `relocationModel`).
+    linuxStatic = presetModule (
+      a:
+      dispatch [
+        {
+          when = a.traits.isLinux && a.traits.env == "musl";
+          definitions = impl.linuxMusl a;
+        }
+        {
+          when = a.traits.isLinux && a.traits.env == "gnu";
+          definitions = impl.staticGlibc a;
+        }
+      ] "breakbulk.presets.linuxStatic: `${a.triple}` is not a Linux -musl or -gnu triple"
     );
 
     # Linux programs that run on other distributions:
     # `linuxPortable { glibc = "2.17"; systemLibraries = [ ]; overlays = [ ]; }`
     # (./linux-portable.nix).
-    inherit (impl) linuxPortable;
+    linuxPortable = presetModule impl.linuxPortable;
 
     # Windows: msvc through xwin for a `-msvc` triple (`sdk`, `extraSdks`,
     # `crtStatic` default false), MinGW for a `-gnu` or `-gnullvm` triple
-    # (./windows-gnu.nix; `crtStatic` default true; `llvmMajor`,
-    # `llvmPackages`, `lld`).
-    windows = mkPreset (
-      args:
-      let
-        triple = args.triple or (throw "breakbulk.presets.windows: give the target `triple`");
-        traits = args.traits or (targetTraits.resolve { inherit triple; });
-        a = args // {
-          inherit traits;
-        };
-      in
-      if traits.isMsvc then
-        impl.msvc a
-      else if traits.isMingw then
-        impl.windowsGnu a
-      else
-        throw "breakbulk.presets.windows: `${triple}` is not a Windows -msvc, -gnu or -gnullvm triple"
+    # (./windows-gnu.nix; `crtStatic` default true; `lld`).
+    windows = presetModule (
+      a:
+      dispatch [
+        {
+          when = a.traits.isMsvc;
+          definitions = impl.msvc a;
+        }
+        {
+          when = a.traits.isMingw;
+          definitions = impl.windowsGnu a;
+        }
+      ] "breakbulk.presets.windows: `${a.triple}` is not a Windows -msvc, -gnu or -gnullvm triple"
     );
 
     # macOS: {aarch64,x86_64}-apple-darwin (./darwin.nix). On a Linux build
     # machine rustc links with an ld64.lld against the macOS SDK, which is
     # required (`sdk`, a package or a version for breakbulk.appleSdk);
-    # `deploymentTarget`, `nativeBuilder`. Default triple:
-    # aarch64-apple-darwin.
-    inherit (impl) darwin;
+    # `deploymentTarget`, `nativeBuilder`.
+    darwin = presetModule impl.darwin;
 
     # wasm for the web: core modules through wasm-bindgen.
-    inherit (impl) wasmWeb;
+    wasmWeb = presetModule impl.wasmWeb;
 
     # UEFI applications (`*-unknown-uefi`): the default preset of every UEFI
     # triple, which only sets the linker.
-    inherit (impl) uefi;
+    uefi = presetModule impl.uefi;
 
     # wasm components: `wasm32-wasip2` links them directly with rustc's
-    # wasm-component-ld (./wasip2.nix; `withC`, `wasiSdkVersion`,
-    # `wasiSdk`); `wasm32-unknown-unknown` core modules are componentized by
-    # the products' stages (`withC`, `wasilibc`). Default
-    # triple: wasm32-unknown-unknown.
-    wasmComponent = mkPreset (
-      args:
-      let
-        triple = args.triple or "wasm32-unknown-unknown";
-        traits = args.traits or (targetTraits.resolve { inherit triple; });
-        a = args // {
-          inherit triple traits;
-        };
-      in
-      if traits.linksComponents then
-        impl.wasip2 a
-      else if traits.isWasm && !traits.isWasi then
-        impl.wasmCore a
-      else
-        throw "breakbulk.presets.wasmComponent: `${triple}` is not wasm32-wasip2 or a wasm target without WASI"
+    # wasm-component-ld (./wasip2.nix; `withC`, `wasiSdk`);
+    # `wasm32-unknown-unknown` core modules are componentized by the
+    # products' stages (`withC`, `wasilibc`).
+    wasmComponent = presetModule (
+      a:
+      dispatch
+        [
+          {
+            when = a.traits.linksComponents;
+            definitions = impl.wasip2 a;
+          }
+          {
+            when = a.traits.isWasm && !a.traits.isWasi;
+            definitions = impl.wasmCore a;
+          }
+        ]
+        "breakbulk.presets.wasmComponent: `${a.triple}` is not wasm32-wasip2 or a wasm target without WASI"
     );
   };
 }

@@ -17,7 +17,6 @@
 # from the toolchain, which wine does not find.
 {
   lib,
-  targetTraits,
   targetPkgsFor,
   llvmVersions,
   chooseLinker,
@@ -27,13 +26,9 @@
 }:
 {
   pkgs,
-  triple ? "x86_64-pc-windows-gnu",
-  traits ? targetTraits.resolve { inherit triple; },
-  packageSet ?
-    if traits.isMingw then
-      targetPkgsFor pkgs traits
-    else
-      throw "breakbulk.presets.windows: `${triple}` is not a windows-gnu or windows-gnullvm triple",
+  config,
+  triple,
+  traits,
   crtStatic ? true,
   linkerKind ? null,
   rustc ? null,
@@ -45,7 +40,9 @@
 }:
 let
   inherit (lib) mkDefault;
-  tp = packageSet;
+  # The target's package set: the default below, or the user's
+  # `packageSet`.
+  tp = config.packageSet;
   cc = tp.stdenv.cc;
   prefix = cc.targetPrefix;
   # The linker (./linker.nix, kind mingw-lld): the C driver with lld.
@@ -66,7 +63,7 @@ let
   };
 in
 {
-  packageSet = mkDefault tp;
+  packageSet = mkDefault (targetPkgsFor pkgs traits);
   linker = mkDefault linker;
   cc = mkDefault "${cc}/bin/${prefix}cc";
   cxx = mkDefault "${cc}/bin/${prefix}c++";
