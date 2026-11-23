@@ -539,4 +539,32 @@ rec {
     # enables the same unstable defaults.
     isNightly = v: lib.hasInfix "-nightly" v || lib.hasInfix "-dev" v;
   };
+
+  # Shell lines (bash) defining `__bb_run COMMAND…`, for a script that must
+  # clean up after a command and so cannot `exec` it: it runs the command
+  # as a child, passes INT and TERM on to it, waits for it and returns its
+  # status. Run in the foreground, the command would get no signal sent to
+  # the script alone (`kill`, a test harness's timeout): bash runs a trap
+  # only once the foreground child has exited. Run with a plain `&`, it
+  # would ignore INT and QUIT and read /dev/null (POSIX, for asynchronous
+  # commands without job control), so `env --default-signal` restores the
+  # signals and `<&0` keeps the script's input. `env` is coreutils'
+  # (8.31 or later).
+  forwardSignalsScript = env: ''
+    __bb_run() {
+      ${env} --default-signal=INT,QUIT "$@" <&0 &
+      __bb_child=$!
+      trap '__bb_sig=1; kill -INT "$__bb_child" 2>/dev/null || :' INT
+      trap '__bb_sig=1; kill -TERM "$__bb_child" 2>/dev/null || :' TERM
+      while :; do
+        __bb_sig=0
+        __bb_status=0
+        # A trapped signal ends `wait` early, with the child still running.
+        wait "$__bb_child" || __bb_status=$?
+        [ "$__bb_sig" = 1 ] || break
+      done
+      trap - INT TERM
+      return "$__bb_status"
+    }
+  '';
 }

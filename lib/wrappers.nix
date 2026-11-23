@@ -8,7 +8,7 @@
 # A wrapper is started as `<wrapper> <binary> <args…>` in the package
 # directory, with BREAKBULK_SOURCE_ROOT and BREAKBULK_NEXT set (lib/test-runs.nix
 # `launchWords`).
-{ lib }:
+{ lib, util }:
 {
   # The binary where Cargo puts it, for tests that find the repository from
   # their own path (`std::env::current_exe()`, walking up to `target`): a
@@ -18,7 +18,8 @@
   # directory. A copy (or a hard link, when the file system allows one),
   # not a symbolic link: `current_exe()` resolves symbolic links. The
   # directory is removed when the binary exits, so the wrapper waits for
-  # it instead of replacing its own process.
+  # it instead of replacing its own process, and passes INT and TERM on
+  # to it.
   cargoTargetLayout =
     {
       profile ? "debug",
@@ -33,6 +34,7 @@
         exit 1
       fi
       PATH=${lib.makeBinPath [ pkgs.coreutils ]}''${PATH:+:$PATH}
+      ${util.forwardSignalsScript "${pkgs.coreutils}/bin/env"}
       repo=$(mktemp -d "''${TMPDIR:-/tmp}/breakbulk-repo.XXXXXX")
       trap 'rm -rf "$repo"' EXIT
       for e in "$BREAKBULK_SOURCE_ROOT"/* "$BREAKBULK_SOURCE_ROOT"/.[!.]* "$BREAKBULK_SOURCE_ROOT"/..?*; do
@@ -42,6 +44,6 @@
       deps=$repo/target/${profile}/deps
       mkdir -p "$deps"
       ln "$bin" "$deps/" 2> /dev/null || cp "$bin" "$deps/"
-      "$BREAKBULK_NEXT" "$deps/''${bin##*/}" "$@"
+      __bb_run "$BREAKBULK_NEXT" "$deps/''${bin##*/}" "$@"
     '';
 }

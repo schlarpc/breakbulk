@@ -103,6 +103,10 @@
 #                           starts the moved binary; with the wrapper on
 #                           one binary only (`test.binaries.<key>`), the
 #                           other fails
+#   signal-forwarding       cargoTargetLayout and a test app with a private
+#                           working directory, which wait for the binary:
+#                           INT or TERM sent to them reaches it, they exit
+#                           with its status and remove their directory
 #   test-closure            over the `test-closure` fixture: a test run and
 #                           a doctest depend on no build-script run outside
 #                           their closure (`quiet`'s on nothing of
@@ -1191,6 +1195,65 @@ let
         mkdir -p $out
       '';
 
+  # Scripts that wait for the test binary instead of `exec`ing it, to
+  # remove a directory afterwards: cargoTargetLayout and a test app with a
+  # private working directory. INT or TERM sent to the script alone reaches
+  # the binary, the script exits with its status, and the directory is
+  # gone.
+  signalForwarding =
+    let
+      # Traps both signals (it could not trap one ignored on entry), says
+      # it is ready, and waits; "target/tmp" in it gives a test app a
+      # private working directory.
+      child = pkgs.writeShellScript "signal-child" ''
+        # target/tmp
+        trap 'echo INT > "$SIG_MARK"; exit 130' INT
+        trap 'echo TERM > "$SIG_MARK"; exit 143' TERM
+        touch "$SIG_READY"
+        while :; do sleep 0.1; done
+      '';
+      next = pkgs.writeShellScript "signal-next" ''exec "$@"'';
+      app = pkgs.writeShellScript "signal-app" ''
+        set -euo pipefail
+        files=(${child})
+        ${breakbulk.testRuns.appRunScript {
+          inherit pkgs;
+          dir = "$SIG_PKGDIR";
+          command = ''"''${files[0]}"'';
+        }}
+      '';
+    in
+    pkgs.runCommand "test-runs-signal-forwarding" { } ''
+      set -euo pipefail
+      mkdir -p src pkg
+      export BREAKBULK_SOURCE_ROOT=$PWD/src BREAKBULK_NEXT=${next} SIG_PKGDIR=$PWD/pkg
+      n=0
+      # Started with `&`, a script would ignore INT on entry.
+      check() {
+        local sig=$1 want=$2
+        shift 2
+        n=$((n + 1))
+        export TMPDIR=$PWD/tmp-$n SIG_MARK=$PWD/mark-$n SIG_READY=$PWD/ready-$n
+        mkdir "$TMPDIR"
+        env --default-signal=INT "$@" &
+        pid=$!
+        for _ in $(seq 100); do [ -e "$SIG_READY" ] && break; sleep 0.1; done
+        test -e "$SIG_READY"
+        kill -s "$sig" "$pid"
+        status=0
+        wait "$pid" || status=$?
+        echo "$* after $sig: status $status, child got $(cat "$SIG_MARK")"
+        [ "$status" = "$want" ]
+        [ "$(cat "$SIG_MARK")" = "$sig" ]
+        test -z "$(ls -A "$TMPDIR")"
+      }
+      for s in INT:130 TERM:143; do
+        check "''${s%:*}" "''${s#*:}" ${layout pkgs} ${child}
+        check "''${s%:*}" "''${s#*:}" ${app}
+      done
+      mkdir -p $out
+    '';
+
   # --- home ------------------------------------------------------------------
 
   # TH_EXPECT_NIX makes the fixture check that its home is fresh, empty and
@@ -1488,6 +1551,7 @@ in
     test-wrapper = testWrapperRepo;
   };
   test-wrapper = testWrapper;
+  signal-forwarding = signalForwarding;
   test-closure = testClosure;
   post-run = postRun;
   inherit home;

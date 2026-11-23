@@ -167,7 +167,9 @@ up from `std::env::current_exe()` to `target`. In a fresh directory in
 (`BREAKBULK_SOURCE_ROOT`) and copies the binary into
 `target/<profile>/deps/`, then starts the copy. It is a copy because
 `current_exe()` resolves symbolic links. The working directory stays the
-package directory. The directory is removed when the test exits.
+package directory. The directory is removed when the test exits, so the
+wrapper waits for the test instead of replacing its own process; INT and
+TERM sent to the wrapper reach the test.
 
 ```nix
 workspaces.main.memberDefaults.test.wrapper =

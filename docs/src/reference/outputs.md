@@ -178,6 +178,11 @@ it at its attribute path. `<binary>` is the test binary's key, as in
 `testRuns`: an integration test by its name, the others as
 `<kind>/<name>` (`lib/<crate>`, `bin/<name>`).
 
+A binary that uses `CARGO_TARGET_TMPDIR` runs in a private working
+directory, which the app removes when the binary exits. That app waits
+for the binary and passes INT and TERM on to it; any other app replaces
+its own process with the binary.
+
 `repo.apps` has every test app of every build or coverage variant, in
 the shape of a flake's `apps` output (`{ type = "app"; program; meta; }`),
 for `apps.<system> = repo.apps;`. Each is named as its test run's check

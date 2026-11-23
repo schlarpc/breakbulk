@@ -884,7 +884,8 @@ rec {
   # binary as "${files[0]}") in the binary's working directory
   # (`workdirScript`) for package directory `dir` (a shell word). A
   # private working directory is removed when the run ends, so only a run
-  # without one replaces the script's process.
+  # without one replaces the script's process; the other waits for it,
+  # passing INT and TERM on (`util.forwardSignalsScript`).
   appRunScript =
     {
       pkgs,
@@ -899,7 +900,8 @@ rec {
         exec ${command}
       fi
       trap '${pkgs.coreutils}/bin/rm -rf "$__bb_wd"' EXIT
-      ${command}
+      ${util.forwardSignalsScript "${pkgs.coreutils}/bin/env"}
+      __bb_run ${command}
     '';
 
   # Only a default: the variable may already hold a value from `[env]` or

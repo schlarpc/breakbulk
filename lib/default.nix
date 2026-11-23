@@ -128,7 +128,7 @@ let
       ;
   };
   runners = import ./runners.nix { inherit lib; };
-  wrappers = import ./wrappers.nix { inherit lib; };
+  wrappers = import ./wrappers.nix { inherit lib util; };
   presetsLib = import ./presets {
     inherit
       lib
