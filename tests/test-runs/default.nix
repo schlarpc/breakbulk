@@ -128,8 +128,12 @@
 #                           (`all` builds) with the check groups unchanged,
 #                           and `doctests.<pkg>` stays; a package's `true`
 #                           wins over it, and its doctest `args`, `env` and
-#                           `postRun` reach its doctest run
-#   binary-enable           over the same fixture:
+#                           `postRun` reach its doctest run;
+#                           `test.doctest.wrapper` and `.runner` (in a
+#                           function module too) are assertion errors
+#                           naming their file, the package's `test.wrapper`
+#                           is not
+#   binary-enable          over the same fixture:
 #                           `memberDefaults.test.binaries.smoke.enable =
 #                           false` with `true` for `checked`: only
 #                           checked's smoke run is in repo.checks, and
@@ -1481,6 +1485,27 @@ let
       groups = cs: lib.filter (isGroup cs) (lib.attrNames cs);
       leaves = cs: lib.filter (n: !(isGroup cs n)) (lib.attrNames cs);
       t = doctestOffRepo.workspaces.main.target.${native};
+      # What a doctest cannot honour is an error under `test.doctest`,
+      # in a function module too; the package's own is not.
+      failed = r: map (a: a.message) (lib.filter (a: !a.assertion) r.config.assertions);
+      refused = doctestRepo [
+        {
+          _file = "/checks/doctest.nix";
+          packages.checked.test = {
+            wrapper = "/bin/package-wrapper";
+            doctest.wrapper = "/bin/doctest-wrapper";
+          };
+          packages.unchecked.test.doctest =
+            { lib, ... }:
+            {
+              runner = lib.mkDefault "nextest";
+            };
+        }
+      ];
+      refusedWant = [
+        "breakbulk: `test.doctest.wrapper` of `checked` in workspaces.main (set in `/checks/doctest.nix'): a doctest run has no wrapper; rustdoc compiles and runs each example itself (the package's `test.wrapper` does not apply to doctests either)"
+        "breakbulk: `test.doctest.runner` of `unchecked` in workspaces.main (set in `/checks/doctest.nix'): a doctest run has no runner; rustdoc compiles and runs each example itself (the package's `test.runner` does not apply to doctests either)"
+      ];
     in
     assert lib.assertMsg (
       leaves base == lib.sort lib.lessThan (leaves c ++ [ "${p}/unchecked/doctest" ])
@@ -1493,6 +1518,9 @@ let
       lib.attrNames c.all.passthru.entries == leaves c
     ) "doctest-settings: all holds ${toString (lib.attrNames c.all.passthru.entries)}";
     assert lib.assertMsg (t.doctests ? unchecked) "doctest-settings: doctests.unchecked is gone";
+    assert lib.assertMsg (
+      failed refused == refusedWant
+    ) "doctest-settings: refused settings: ${builtins.toJSON (failed refused)}";
     pkgs.runCommand "test-runs-doctest-settings"
       {
         all = c.all;
