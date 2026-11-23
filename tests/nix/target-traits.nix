@@ -1165,7 +1165,7 @@ in
           debugInfo = "split";
         };
         linker = "cc";
-        scope = "macro,diagnostics";
+        scope = "macro,diagnostics,coverage";
         nativeVar = "MY_LIBS";
         nativeOs = "linux";
       };

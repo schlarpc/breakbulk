@@ -45,8 +45,8 @@
 //! source that the vendor config (a `--config` file) replaces crates.io
 //! with, where `-Zbuild-std` adds the standard library's dependencies.
 //!
-//! `--cargo-arg`s are the traced command (`test`; `check --lib --bins
-//! --tests --examples`; `doc --no-deps`), from the Nix library's table of
+//! `--cargo-arg`s are the traced command (`test`; `check --tests
+//! --examples`; `doc --no-deps`), from the Nix library's table of
 //! plan commands (`lib/cargo-commands.nix`); `--kind` and `--mode` label
 //! the plan and decide which units are its roots.
 //!

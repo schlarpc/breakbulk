@@ -42,7 +42,7 @@ pub struct Options {
     /// roots.
     pub mode: VariantMode,
     /// The traced Cargo command: the arguments after `cargo` and before
-    /// the planner's own (`["test"]`, `["check", "--lib", …]`, `["doc",
+    /// the planner's own (`["test"]`, `["check", "--tests", …]`, `["doc",
     /// "--no-deps"]`), from the Nix library's table of plan commands
     /// (`lib/cargo-commands.nix`).
     pub cargo_args: Vec<String>,

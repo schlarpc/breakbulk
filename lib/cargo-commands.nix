@@ -36,14 +36,16 @@ let
     # planner's runner, which does nothing, and then asks rustdoc for the
     # doctests. The check form selects what `cargo test` builds, not
     # `--all-targets`, which adds the benches, so that check and build
-    # variants of a workspace have the same units.
+    # variants of a workspace have the same units: `--tests` is the
+    # targets `cargo test` tests (`Target::tested`), `--examples` the
+    # examples it builds. Not `--lib --bins` too: `--lib` fails when no
+    # selected package has a library, and `cargo test` builds the plain
+    # library and bins only as what the tests depend on.
     test = {
       argv = {
         build = _: [ "test" ];
         check = _: [
           "check"
-          "--lib"
-          "--bins"
           "--tests"
           "--examples"
         ];

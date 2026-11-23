@@ -18,7 +18,7 @@ cargo build --frozen --offline <selection> \
   --config '<spec rustflags and linkers, see below>'
 # the command of each plan kind and variant mode, from lib/cargo-commands.nix:
 #   build: `build`, or `check`
-#   test:  `test`, or `check --lib --bins --tests --examples`
+#   test:  `test`, or `check --tests --examples`
 #   bench: `bench --no-run` (build variants only)
 #   doc:   `doc`, with `--no-deps` under `docs.noDeps`
 # env: RUSTC_WRAPPER=breakbulk-shim  RUSTDOC=<dir>/rustdoc (a symlink to breakbulk-shim)

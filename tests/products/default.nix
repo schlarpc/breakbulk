@@ -1942,7 +1942,7 @@ in
 
   # A check variant with `tests = false` checks the build plan's units only
   # (`cargo check`); the default also checks the test plan's (`cargo check
-  # --lib --bins --tests --examples`); with `products = false`, the test plan's only, and
+  # --tests --examples`); with `products = false`, the test plan's only, and
   # the build plan is not traced.
   variants-all-targets =
     let

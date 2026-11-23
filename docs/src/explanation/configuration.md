@@ -584,8 +584,8 @@ build plan, and a cold build compiles each of them once instead of once
 per profile. Both options can differ per target, as every variant option
 can (below).
 
-A check variant checks what `cargo test` builds (`cargo check --lib
---bins --tests --examples`), so it has the build variant's units, unless
+A check variant checks what `cargo test` builds (`cargo check
+--tests --examples`), so it has the build variant's units, unless
 [`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests)
 (for a gate that runs plain `cargo check`). Benches are not checked, as
 `cargo test` does not build them. They trace one Cargo

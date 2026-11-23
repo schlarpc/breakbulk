@@ -382,8 +382,8 @@ let
           description = ''
             Which Cargo command each plan of the variant traces. `build`:
             products and test binaries (`cargo build`, `cargo test`).
-            `check`: `cargo check`, and for the test plan `cargo check --lib
-            --bins --tests --examples` (what `cargo test` builds), metadata
+            `check`: `cargo check`, and for the test plan `cargo check
+            --tests --examples` (what `cargo test` builds), metadata
             only, no products or test runs;
             `target.<triple>.variants.<v>.check` builds every unit and is in
             `repo.checks` (`checks.check`). A lint (clippy) or a coverage
@@ -636,7 +636,7 @@ let
           example = lib.literalExpression ''{ exclude = [ "*-bench" ]; }'';
           description = ''
             The test plan (`cargo test`; for a check variant, `cargo check
-            --lib --bins --tests --examples`): test binaries, test
+            --tests --examples`): test binaries, test
             runs, test apps and doctests. `true`: those of the `packages`
             selection. `false`: none, and the test plan is not traced: a
             target that is only built (a wasm component whose tests run

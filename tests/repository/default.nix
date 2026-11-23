@@ -1580,7 +1580,7 @@ in
     evalCheck "nextest-unrelated-version" (builtins.toJSON (runs before));
 
   # The same test units where Cargo passes no `--test`: in the clippy
-  # variant (`cargo check --lib --bins --tests --examples`, which checks
+  # variant (`cargo check --tests --examples`, which checks
   # the integration test without the libtest harness and the example, and,
   # as `cargo test` builds, not the bench), and in the bench variant (the
   # bench reads `testdata/`, in `test.sourceScope`).
