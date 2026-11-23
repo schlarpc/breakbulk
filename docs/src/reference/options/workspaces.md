@@ -234,17 +234,19 @@ false
 ## `workspaces.<name>.memberDefaults`
 
 Settings for every member of this workspace (the path packages
-of its ` Cargo.lock `), with the options of
-[` packages.<name> `](packages\.md)\. They are a layer under the
-package’s own ` packages.<name> ` settings: lists concatenate,
-` env ` attributes merge, and the package’s own value wins for
-single values (` test.runner `) unless this one has a higher
-priority (` lib.mkForce `)
+of its ` Cargo.lock `): a module with the options of
+[` packages.<name> `](packages\.md), evaluated for each member,
+whose lockfile entry is its ` package ` argument\. They are a
+layer under the package’s own ` packages.<name> ` settings:
+lists concatenate (` lib.mkForce ` in ` packages.<name> ` replaces
+them), ` env ` attributes merge, and the package’s own value
+wins for single values (` test.runner `) unless this one has a
+higher priority (` lib.mkForce `)
 ([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order))\.
 Dependencies from a registry or git do not get them\.
 
 *Type:*
-submodule
+module
 
 *Default:*
 

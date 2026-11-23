@@ -240,11 +240,13 @@ string
 
 ## `sysDefaults.packages`
 
-Default settings for a package, by crate name: a function of the
-package’s lockfile entry (` { name, version, ... } `) that returns
-settings with the options of ` packages.<name> `\. They are the
-lowest layer; ` packages.<name> ` settings add to them (lists
-concatenate, env attributes merge)\.
+Default settings for a package, by crate name: a module with the
+options of ` packages.<name> `, whose ` package ` argument is the
+package’s lockfile entry (` { name, version, ... } `)\. They are the
+lowest layer
+([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)):
+lists concatenate with those of ` packages.<name> `, env attributes
+merge, and a single value there wins over one here\.
 
 They name nixpkgs libraries, so they apply only where a package
 set exists: host units always (the build machine’s), target units
@@ -253,12 +255,12 @@ the native one)\. On other targets (msvc, wasm32-unknown-unknown)
 those crates build their bundled copies\.
 
 The curated entries are defined at ` mkDefault ` priority, so a
-plain definition replaces one: ` null ` turns it off, a function
+plain definition replaces one: ` null ` turns it off, a module
 replaces it, and ` sysDefaults.packages = lib.mkForce { } ` drops
 them all\. They are: ` alsa-sys `, ` atk-sys `, ` aws-lc-sys `, ` cairo-rs `, ` cairo-sys-rs `, ` capnp-rpc `, ` cargo `, ` curl-sys `, ` dbus `, ` evdev-sys `, ` expat-sys `, ` foundationdb `, ` foundationdb-sys `, ` freetype-sys `, ` fuser `, ` gdk-pixbuf `, ` gdk-pixbuf-sys `, ` gdk-sys `, ` gdk4-sys `, ` gdkx11-sys `, ` gio-sys `, ` glib-sys `, ` gobject-sys `, ` graphene-sys `, ` gsk4-sys `, ` gtk-sys `, ` gtk4-sys `, ` javascriptcore-rs-sys `, ` libdbus-sys `, ` libgit2-sys `, ` libseat-sys `, ` libsqlite3-sys `, ` libssh2-sys `, ` libudev-sys `, ` libz-sys `, ` nettle-sys `, ` openssl `, ` openssl-sys `, ` opentelemetry-proto `, ` pam-sys `, ` pango-sys `, ` pangocairo-sys `, ` pq-sys `, ` prost-wkt-types `, ` rdkafka-sys `, ` rink `, ` sequoia-guide `, ` sequoia-ipc `, ` sequoia-openpgp `, ` sequoia-openpgp-ffi `, ` sequoia-sq `, ` sequoia-store `, ` sequoia-tool `, ` servo-fontconfig-sys `, ` soup3-sys `, ` thrussh-libsodium `, ` tonic-reflection `, ` webkit2gtk-sys `, ` xcb `, ` zstd-sys `\.
 
 *Type:*
-attribute set of (null or (function that evaluates to a(n) (submodule)))
+attribute set of (null or module)
 
 *Default:*
 
@@ -271,7 +273,7 @@ attribute set of (null or (function that evaluates to a(n) (submodule)))
 ```nix
 {
   libsqlite3-sys = null;  # no curated inputs
-  aws-lc-sys = { version, ... }: { inputs = p: [ p.aws-lc ]; };
+  aws-lc-sys = breakbulk.whenVersion ">=0.42" { inputs = p: [ p.aws-lc ]; };
 }
 
 ```
@@ -283,8 +285,9 @@ attribute set of (null or (function that evaluates to a(n) (submodule)))
 
 Default settings for the workspace members that depend on a
 crate, by the crate’s name: a function of the crate’s lockfile
-entry (` { name, version, buildDependency, ... } `) that returns
-settings with the options of ` packages.<name> `\. They apply to
+entry (` { name, version, buildDependency, ... } `) that returns a
+module with the options of ` packages.<name> ` (whose ` package `
+argument is the member’s lockfile entry)\. They apply to
 every path package of a workspace whose ` Cargo.lock ` has the
 crate among its dependencies of any kind (dev-dependencies too),
 directly or through other crates\. ` buildDependency ` narrows that:
@@ -312,7 +315,7 @@ on one, they set
 to ` false `\.
 
 *Type:*
-attribute set of (null or (function that evaluates to a(n) (submodule)))
+attribute set of (null or (function that evaluates to a(n) module))
 
 *Default:*
 

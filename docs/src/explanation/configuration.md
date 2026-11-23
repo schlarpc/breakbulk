@@ -137,8 +137,7 @@ tools and libraries for one package's units, and nothing else:
 | [`inputs`](../reference/options/packages.md#packagesnameinputs) | libraries for the platform being built | `openssl` |
 | [`extraSources`](../reference/options/packages.md#packagesnameextrasources) | files outside the package directory | `../../wit` |
 
-A setting can be narrowed to some versions of the package
-([`version`](../reference/options/packages.md#packagesnameversion)), to
+A setting can be narrowed to some versions of the package (below), to
 one side ([`forHost`](../reference/options/packages.md#packagesnameforhostenv)
 or [`forTarget`](../reference/options/packages.md#packagesnamefortargetenv),
 below), to one target triple
@@ -158,6 +157,27 @@ packages.baz.variant.coverage.test.env.RUST_LOG = "debug";  # one variant
 
 A setting for one variant changes only that variant's units. The other
 variants' units stay the same, so they are not rebuilt.
+
+`packages.<name>` is a module, evaluated for each locked package of that
+name, with the package's lockfile entry (`{ name, version, source ? null,
+... }`) as its `package` argument. A condition on the version is a
+condition in the module:
+
+```nix
+packages.aws-lc-sys = { package, lib, breakbulk, ... }:
+  lib.mkIf (breakbulk.versionReq.matches ">=0.42" package.version) {
+    env.AWS_LC_SYS_PREBUILT_NASM = "1";
+  };
+# The same, shorter:
+packages.aws-lc-sys = breakbulk.whenVersion ">=0.42" {
+  env.AWS_LC_SYS_PREBUILT_NASM = "1";
+};
+```
+
+Two majors of one crate in a lockfile are one entry with two conditions.
+Within one layer (below), the module system decides between definitions:
+two values for one variable at the same priority are an error, so a
+value meant to give way is `lib.mkDefault`.
 
 ### Host and target sides
 
@@ -195,7 +215,8 @@ packages.legacy.test.runner = "libtest";  # the package's own value wins
 ```
 
 Members are the workspace's path packages. A unit's package settings are
-these layers, lowest first. Each is followed by its own
+these layers, lowest first, each a module (`memberDefaults` too has the
+member's lockfile entry as `package`). Each is followed by its own
 `target.<triple>`, `variant.<v>` and `variant.<v>.target.<triple>`, for
 the unit's triple and variant:
 
@@ -206,15 +227,28 @@ the unit's triple and variant:
 | `workspaces.<ws>.memberDefaults` | the workspace's path packages |
 | `packages.<name>` | that package, in every workspace |
 
-Lists concatenate, and a single value (`test.runner`) is the highest
-layer's that sets one. `env` (with `forHost.env`, `forTarget.env` and
-`test.env`), `stages` and `checks` merge, and each variable, stage or
-check in them is a single value of its own. Priorities still count
-across layers: `lib.mkForce` in a lower layer wins over a plain value in
-a higher one, so `memberDefaults.env.FOO = lib.mkForce "a"` keeps `a`
-for every member, whatever `packages.<name>.env.FOO` says.
+The module system merges the layers, as if they were one module in
+which each higher layer's single values have a slightly higher priority:
+
+- Lists concatenate, lowest layer first (within one layer,
+  `lib.mkBefore` and `lib.mkAfter` order them). `lib.mkForce` replaces
+  the lists of every lower-priority definition:
+  `packages.<name>.extraSources = lib.mkForce [ ]` drops what
+  `memberDefaults` adds, for that package only.
+- A single value (`test.runner`) is the highest layer's that sets one.
+- `env` (with `forHost.env`, `forTarget.env` and `test.env`), `stages`,
+  `checks` and `test.binaries` merge, and each variable, stage, check or
+  binary setting in them is a single value of its own.
+- Priorities count across layers: `lib.mkForce` in a lower layer wins
+  over a plain value in a higher one, so
+  `memberDefaults.env.FOO = lib.mkForce "a"` keeps `a` for every member,
+  whatever `packages.<name>.env.FOO` says. Around a whole set, a priority
+  is for the whole set: `packages.<name>.env = lib.mkForce { X = "a"; }`
+  replaces every lower-priority definition of `env`, the curated ones
+  included, while `env.X = lib.mkForce "a"` forces one variable.
+
 Variant layers (`variantDefaults`, `variants.<v>.target.<triple>`)
-follow the same rule ([layers and
+follow the same rules ([layers and
 priorities](../how-to/targets.md#layers-and-priorities)).
 
 breakbulk ships settings for common `-sys` crates, from nixpkgs'

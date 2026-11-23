@@ -6,12 +6,17 @@
 
 ## `packages`
 
-Per-package overrides, by package name (or ` name@<version requirement> `)\. They apply in every workspace whose lockfile has a
-matching package, and only to that package’s units\. An override that
-matches nothing in any lockfile is an evaluation warning\.
+Per-package overrides, by crate name\. They apply in every workspace
+whose lockfile has a package of that name, and only to that
+package’s units\. Each is a module of the options below, evaluated
+for each locked package of the name, with that package’s lockfile
+entry (` { name, version, source ? null, ... } `) as its ` package `
+argument: ` { package, ... }: lib.mkIf (breakbulk.versionReq.matches ">=0.42" package.version) { … } ` applies to the matching versions
+only, as does ` breakbulk.whenVersion ">=0.42" { … } `\. A name that no
+lockfile has is an evaluation warning\.
 
 *Type:*
-attribute set of (submodule)
+attribute set of module
 
 *Default:*
 
@@ -26,6 +31,7 @@ attribute set of (submodule)
   openssl-sys = { nativeInputs = p: [ p.pkg-config ]; inputs = p: [ p.openssl ]; };
   app.env.GIT_REV = self.rev or "dirty";
   "libsqlite3-sys".env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";  # opt in to the system SQLite
+  aws-lc-sys = breakbulk.whenVersion ">=0.42" { env.AWS_LC_SYS_PREBUILT_NASM = "1"; };
 }
 
 ```
@@ -363,7 +369,7 @@ Whether this package’s compiles and build-script runs see
 only the files source prediction finds they read, so that an
 edit to any other file of the package (its ` README.md `, a
 comment in its ` Cargo.toml `, a file only a test reads) rebuilds
-none of them\. ` null `: ` false `\.
+none of them\.
 
 A compile’s predicted view is the module tree of its Cargo
 target’s crate root, followed as rustc does (` mod ` items,
@@ -388,12 +394,12 @@ none) sees its whole view\. A package with a ` sourceOverlay ` is
 not predicted (an evaluation warning says so)\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+false
 ```
 
 *Declared by:*
@@ -402,20 +408,19 @@ null
 ## `packages.<name>.predictSources.buildScriptRuns`
 
 Whether ` predictSources ` narrows this package’s build-script
-runs to their declared ` rerun-if-changed ` paths\. ` null `: ` true `\.
-The curated
+runs to their declared ` rerun-if-changed ` paths\. The curated
 [` sysDefaults.dependents `](repository\.md\#sysdefaultsdependents)
 entries set it to ` false ` for a package whose
 ` [build-dependencies] ` name a crate whose library code prints
 such directives, which source prediction cannot read\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Declared by:*
@@ -515,16 +520,15 @@ the run to its ` rerun-if-changed ` paths; then it rebuilds no
 library, other bin or product\. Set it to ` false ` when a target reads another
 target’s root (` #[path = "../other.rs"] `, a library that
 ` include_str! `s an example); such a unit fails with a hint
-naming this option\. ` null `: ` true `\. A built-in step of
-[` sources `](\#packagesnamesources)\.
+naming this option\. A built-in step of [` sources `](\#packagesnamesources)\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Declared by:*
@@ -652,15 +656,16 @@ attribute set of (null or raw value)
 
 ## `packages.<name>.target`
 
-Settings for this package on one target triple, with every option
-of the package level (` env `, ` forHost `, ` forTarget `, ` stages `,
-` test `, …)\. They apply to the plans for that triple, on top of the
-package-level settings of the same definition: ` env ` still means
-both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides) (the build-script compile of a plan for this triple
-included), ` forTarget.env ` the target side only\.
+Settings for this package on one target triple: a module with every
+option of the package level (` env `, ` forHost `, ` forTarget `,
+` stages `, ` test `, …)\. They apply to the plans for that triple, as a
+layer over the settings of the same definition
+([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)):
+` env ` still means both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides) (the build-script compile of a plan
+for this triple included), ` forTarget.env ` the target side only\.
 
 *Type:*
-attribute set of (submodule)
+attribute set of module
 
 *Default:*
 
@@ -1031,18 +1036,14 @@ null
 
 ## `packages.<name>.test.nextest.configFile`
 
-nextest configuration file\. ` null `: the repository’s
-` .config/nextest.toml ` when it exists, else nextest’s
+nextest configuration file\. ` null `: none, nextest’s
 defaults\.
 
 *Type:*
 null or absolute path
 
 *Default:*
-
-```nix
-null
-```
+the workspace’s ` .config/nextest.toml ` when it exists, else ` null `
 
 *Example:*
 
@@ -1055,15 +1056,15 @@ null
 
 ## `packages.<name>.test.nextest.profile`
 
-nextest profile for this package’s test runs (` null `: ` default `)\.
+nextest profile for this package’s test runs\.
 
 *Type:*
-null or string
+string
 
 *Default:*
 
 ```nix
-null
+"default"
 ```
 
 *Example:*
@@ -1168,16 +1169,15 @@ How this package’s test binaries run: ` libtest ` (the binary
 itself, as ` cargo test ` runs it) or ` nextest ` (cargo-nextest’s
 reuse-build mode over the one binary, with the project’s
 nextest configuration: retries, timeouts, default filter, test
-groups)\. Each binary is still its own test run\. ` null `:
-` libtest `\.
+groups)\. Each binary is still its own test run\.
 
 *Type:*
-null or one of “libtest”, “nextest”
+one of “libtest”, “nextest”
 
 *Default:*
 
 ```nix
-null
+"libtest"
 ```
 
 *Example:*
@@ -1201,16 +1201,16 @@ reads from ` tests/ ` at compile time
 (` include_str!("../tests/…") `, a build script that generates
 tests from fixtures), or when the library builds a path into
 ` tests/ ` from ` CARGO_MANIFEST_DIR ` that the tests read; such a
-unit or test run fails with a hint naming this option\. ` null `:
-` true `\. A built-in step of [` sources `](\#packagesnamesources)\.
+unit or test run fails with a hint naming this option\. A
+built-in step of [` sources `](\#packagesnamesources)\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Declared by:*
@@ -1264,18 +1264,15 @@ binary that links it; the stripped copy does not change, and the
 test is not re-run\. Panic messages keep their file and line;
 backtraces still name functions, but not files, lines or inlined
 frames\. The unstripped binary stays in ` tests.<pkg>.<binary> `
-for debugging\. ` null `: on when [` ca `](repository\.md\#ca) is on
-(` repo.config.ca `), off otherwise: without ` ca ` the stripped copy
-is input-addressed and saves no run\.
+for debugging\. Off by default without
+[` ca `](repository\.md\#ca) (` repo.config.ca `): the stripped copy
+would then be input-addressed and save no run\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
-
-```nix
-null
-```
+[` ca `](repository\.md\#ca)
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
@@ -1290,16 +1287,16 @@ their snapshot paths there\. Its cost: an edit to the root
 manifest rebuilds this package’s test units and re-runs its
 tests\. Other units never see it\. Set ` false ` (in
 ` memberDefaults ` for every member) when no test needs it\. See
-[Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md)\. ` null `:
-` true `\. A built-in step of [` sources `](\#packagesnamesources), after ` runFiles `\.
+[Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md)\. A
+built-in step of [` sources `](\#packagesnamesources), after ` runFiles `\.
 
 *Type:*
-null or boolean
+boolean
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Declared by:*
@@ -1342,18 +1339,19 @@ breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; }
 ## `packages.<name>.variant`
 
 Settings for this package in the plans of one variant
-(` workspaces.<ws>.variants.<v> `), with every option of the
-package level, ` target.<triple> ` included\. They apply on top of
-the package-level settings and their ` target.<triple> ` layer of
-the same definition, and leave the units of other variants
-unchanged: a lint setting for a ` clippy ` variant does not
-rebuild the release variant\. A variant layer’s
-` target.<triple> ` applies to that variant on that triple only\.
-The layer applies in every workspace that has a variant of that
-name; a name that no workspace has is an evaluation warning\.
+(` workspaces.<ws>.variants.<v> `): a module with every option of the
+package level, ` target.<triple> ` included\. They are a layer over
+the settings of the same definition and their ` target.<triple> `
+layer
+([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)),
+and leave the units of other variants unchanged: a lint setting for
+a ` clippy ` variant does not rebuild the release variant\. A variant
+layer’s ` target.<triple> ` applies to that variant on that triple
+only\. The layer applies in every workspace that has a variant of
+that name; a name that no workspace has is an evaluation warning\.
 
 *Type:*
-attribute set of (submodule)
+attribute set of module
 
 *Default:*
 
@@ -1374,29 +1372,3 @@ attribute set of (submodule)
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.version`
-
-A version requirement in Cargo’s syntax (` 1.2 `, ` ^1.2 `, ` ~1.2 `,
-` =1.2.3 `, ` >=1, <2 `, ` * `)\. The override applies to the
-package’s locked versions that match\. ` null ` matches every
-version\. The attribute name may also carry the requirement:
-` packages."aws-lc-sys@>=0.42" `\.
-
-*Type:*
-null or Cargo version requirement
-
-*Default:*
-
-```nix
-null
-```
-
-*Example:*
-
-```nix
-">=0.42, <0.50"
-```
-
-*Declared by:*
- - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)

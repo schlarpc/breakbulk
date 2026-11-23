@@ -227,10 +227,10 @@ The layers apply in this order:
 | 2 | `targets.<triple>.variantDefaults` |
 | 3 | `variants.<v>.target.<triple>` |
 
-Lists such as `features` concatenate. A single value, such as `profile`
-or `checks`, set in two layers takes the later layer's value. To replace
-the other layers' lists, use `lib.mkForce` on a list. See [Layers and
-priorities](#layers-and-priorities).
+Lists such as `features` concatenate, in this order. A single value,
+such as `profile` or `checks`, set in two layers takes the later layer's
+value. To replace the other layers' lists, use `lib.mkForce` on a list.
+See [Layers and priorities](#layers-and-priorities).
 
 A variant that selects packages
 ([`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)),
@@ -283,8 +283,8 @@ The layers of one `packages.<name>` apply in this order:
 `workspaces.<ws>.memberDefaults` and `sysDefaults.packages` have the
 same layers, under those of `packages.<name>`
 ([layer order](../explanation/configuration.md#shared-settings-and-layer-order)).
-Lists concatenate and `env` merges. A single value, such as
-`test.runner`, set in two layers takes the later layer's value.
+Lists concatenate in this order and `env` merges. A single value, such
+as `test.runner`, set in two layers takes the later layer's value.
 
 ## Layers and priorities
 
@@ -298,20 +298,23 @@ priorities still apply between layers:
 - `lib.mkDefault` (priority 1000) loses to a plain value in any layer.
 - Between values of the same priority, the later layer wins.
 
-For variant layers, breakbulk does this by changing priorities. In
-`targets.<triple>.variantDefaults`, a single value's priority number is
-lowered by 0.25. In `variants.<v>.target.<triple>`, it is lowered by 0.5.
-So a plain value is 100 in `variants.<v>`, 99.75 in `variantDefaults`
-and 99.5 in `variants.<v>.target.<triple>`, and `lib.mkOverride 99` in
-any layer wins over all three. Lists keep their priority, so that they
-still concatenate.
+breakbulk does this by changing priorities, and the module system
+merges the layers. In `targets.<triple>.variantDefaults`, a single
+value's priority number is lowered by 0.25. In
+`variants.<v>.target.<triple>`, it is lowered by 0.5. So a plain value
+is 100 in `variants.<v>`, 99.75 in `variantDefaults` and 99.5 in
+`variants.<v>.target.<triple>`, and `lib.mkOverride 99` in any layer
+wins over all three. Package layers get fractions between 0 and 1 the
+same way, lowest layer least. Lists keep their priority, so that they
+still concatenate, and are ordered by layer.
 
-Package layers are separate settings blocks. breakbulk compares their
-single values by the same rule, and also each variable of `env`, each
-stage of `stages` and each check of `checks`. A `lib.mkForce` around a
-whole set (`env = lib.mkForce { FOO = "a"; }`) counts for each variable
-in it. Stages and checks of equal priority from several layers still
-merge their fields, as without priorities.
+The same goes for the single values inside attribute sets and
+submodules: each variable of `env`, each stage of `stages` and each
+check of `checks`, `test.binaries.<key>.enable`. A priority around a
+whole set is the module system's: `env = lib.mkForce { FOO = "a"; }`
+replaces every definition of `env` at a lower priority, in any layer,
+while `env.FOO = lib.mkForce "a"` forces one variable. A stage of
+`stages` is one value: a higher layer's replaces it whole.
 
 ## A custom target
 

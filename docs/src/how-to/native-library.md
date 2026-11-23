@@ -16,9 +16,12 @@ Your own `packages.<name>` settings add to them. To drop or replace one,
 assign it:
 
 ```nix
-sysDefaults.packages.libsqlite3-sys = null;                    # drop
-sysDefaults.packages.zstd-sys = _: { inputs = p: [ p.zstd ]; };  # replace
+sysDefaults.packages.libsqlite3-sys = null;                # drop
+sysDefaults.packages.zstd-sys = { inputs = p: [ p.zstd ]; };  # replace
 ```
+
+To drop one list of them for one package only, force your own:
+`packages.zstd-sys.inputs = lib.mkForce (p: [ p.zstd ]);`.
 
 They apply only where nixpkgs has a package set: always for build
 scripts, and for target units only when the target has one. On msvc or
