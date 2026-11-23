@@ -110,8 +110,8 @@ in
         tools give the target are derived fields too: `nixpkgsSystem`
         (the nixpkgs platform the presets import the target's package set
         for: a `pkgsCross` attribute name, or a `crossSystem` such as
-        `{ config = "armv7l-unknown-linux-musleabihf"; }`), `zigArch`
-        (`zig cc -target`), `qemuArch` (qemu-user) and `xwinArch` (the
+        `{ config = "armv7l-unknown-linux-musleabihf"; }`), `zigArch`,
+        `zigAbi` and `zigMcpu` (`zig cc -target`, `-mcpu`), `qemuArch` (qemu-user) and `xwinArch` (the
         msvc SDK's library directories); set one where a tool spells
         the target otherwise. A triple with
         no built-in traits (a custom target, a `.json` target spec given

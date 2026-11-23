@@ -41,6 +41,11 @@
 #                     libraries only), and fails, naming the library, when
 #                     only libc.so.6 is allowed; it allows libgcc_s and
 #                     libstdc++ (a g++-built program passes)
+#   linux-portable-armv7  armv7-unknown-linux-gnueabihf: zig's target is
+#                     arm-linux-gnueabihf with rustc's CPU (VFPv3-D16, no
+#                     NEON, `readelf -A`); GLIBC_2.17 at most; the product
+#                     and its tests run under qemu-arm with an armv7 glibc
+#                     sysroot
 #   linux-portable-container-eval   evaluation only: the container runner
 #                     below leaves the test binary's derivation unchanged
 #   linux-portable-native-glibc   HEAVY (builds OpenSSL, libcurl and its
@@ -645,6 +650,66 @@ let
     }
     // zigNativeChecks;
 
+  # armv7 hard float: zig's target spells the ABI (gnueabihf) and gets
+  # rustc's CPU (`zigMcpu`: ARMv7-A, VFPv3-D16, no NEON), not zig's
+  # baseline. The product runs under qemu-arm with an armv7 glibc and
+  # libgcc_s (nixpkgs' cross builds, cached) as its sysroot: zig links the
+  # FHS loader path, and qemu's -L puts the sysroot under it.
+  armv7 = "armv7-unknown-linux-gnueabihf";
+  zigArmRepo = mkRepo (fixtures + "/linux-portable") [
+    {
+      workspaces.main = wsWith (rustWith [ armv7 ]) [ armv7 ];
+      targets.${armv7} = {
+        preset = presets.linuxPortable { glibc = "2.17"; };
+        runner = armv7Runner;
+      };
+    }
+  ];
+  armv7Runner =
+    let
+      cross = pkgs.pkgsCross.armv7l-hf-multiplatform;
+      gccLib = "${lib.getLib cross.stdenv.cc.cc}/${cross.stdenv.hostPlatform.config}/lib";
+      sysroot = pkgs.runCommand "armv7-glibc-sysroot" { } ''
+        mkdir -p $out/lib
+        ln -s ${lib.getLib cross.glibc}/lib/* $out/lib/
+        ln -s ${gccLib}/libgcc_s.so.1 $out/lib/
+      '';
+    in
+    pkgs.writeShellScript "breakbulk-runner-qemu-arm-sysroot" ''
+      exec ${pkgs.qemu-user or pkgs.qemu}/bin/qemu-arm -L ${sysroot} \
+        -E LD_LIBRARY_PATH=${sysroot}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} "$@"
+    '';
+  zigArmChecks =
+    let
+      t = zigArmRepo.workspaces.main.target.${armv7};
+      bin = "${t.packages.app}/bin/app";
+    in
+    {
+      linux-portable-armv7 =
+        pkgs.runCommand "linux-portable-armv7"
+          {
+            nativeBuildInputs = [ pkgs.binutils-unwrapped-all-targets ];
+          }
+          ''
+            mkdir -p $out
+            readelf -hW ${bin} | tee $out/header.txt
+            grep -q 'Machine:.*ARM$' $out/header.txt
+            grep -q 'Flags:.*hard-float ABI' $out/header.txt
+            readelf -lW ${bin} | grep -F '[Requesting program interpreter: /lib/ld-linux-armhf.so.3]'
+            # The C code (zig cc) has rustc's CPU: no NEON, 16 double registers.
+            readelf -A ${bin} | tee $out/attributes.txt
+            grep -qx '  Tag_CPU_arch: v7' $out/attributes.txt
+            grep -qx '  Tag_FP_arch: VFPv3-D16' $out/attributes.txt
+            if grep -q 'Tag_Advanced_SIMD_arch' $out/attributes.txt; then echo "NEON"; exit 1; fi
+            v=$(objdump -T ${bin} | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n1)
+            newest=$(printf '%s\n' "$v" GLIBC_2.17 | sort -V | tail -n1)
+            [ "$newest" = GLIBC_2.17 ] || { echo "${bin} needs $v"; exit 1; }
+            ${lib.escapeShellArgs t.runner} ${bin} a b | tee $out/out.txt
+            grep -qE "^zig: headers=2.17 args=3 runtime=2\.[0-9]+$" $out/out.txt
+          '';
+      linux-portable-armv7-test = t.variants.default.testRuns.app."bin/app";
+    };
+
   # A real glibc 2.17 system: CentOS 7.9's userland from its Docker Hub
   # image (a fixed-output pull by digest), unpacked into the store. The
   # runner starts a program inside it with bubblewrap, which works inside
@@ -819,9 +884,11 @@ in
       windowsDllStagedRepo
       zigRepo
       zigNativeRepo
+      zigArmRepo
       ;
   };
-  checks = wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks // uefiChecks;
+  checks =
+    wasip2Checks // riscv64Checks // windowsGnuChecks // zigChecks // zigArmChecks // uefiChecks;
   # Opt-in, network: `nix run .#test-linux-portable-container`.
   containerChecks = zigContainerChecks;
 }

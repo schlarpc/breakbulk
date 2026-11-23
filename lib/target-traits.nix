@@ -122,6 +122,12 @@
 #                          elaborates it
 #   zigArch                the architecture of `zig cc -target` (i686 as
 #                          x86, riscv64gc as riscv64, armv7 as arm)
+#   zigAbi                 the ABI of `zig cc -target`: env and abi
+#                          (gnu, gnueabihf, musleabi)
+#   zigMcpu                `zig cc -mcpu`: rustc's target CPU features in
+#                          zig's spelling, for the Arm targets where they
+#                          differ from zig's baseline (ARMv7-A with NEON);
+#                          null for zig's baseline
 #   qemuArch               qemu-user's program suffix (`qemu-<arch>`, as
 #                          nixpkgs' `qemuArch`: i686 as i386, powerpc64le
 #                          as ppc64le)
@@ -230,6 +236,19 @@ let
       name = "armv7l";
     }
   ];
+  # rustc's Arm target features (`features` in rustc_target's spec of
+  # each `<arch>-unknown-linux-<env><abi>` triple) as `zig cc -mcpu`,
+  # by `<arch>-<abi>`. zig names LLVM's `v7` `has_v7` and its
+  # architectures `v6`, `v5te`; `generic` drops zig's baseline (ARMv7-A
+  # with NEON and 32 double registers, which none of these has;
+  # thumbv7neon's features are that baseline).
+  zigMcpus = {
+    "armv7-eabihf" = "generic+has_v7+db+dsp+aclass+perfmon+vfp3d16+thumb2";
+    "armv7-eabi" = "generic+has_v7+thumb2+soft_float";
+    "arm-eabihf" = "generic+strict_align+v6+vfp2";
+    "arm-eabi" = "generic+strict_align+v6";
+    "armv5te-eabi" = "generic+v5te+soft_float+strict_align";
+  };
   # zig's `-target` architectures (`zig targets`).
   zigCpu = renameArch [
     {
@@ -709,6 +728,8 @@ let
           );
         };
       zigArch = zigCpu b.arch;
+      zigAbi = b.env + b.abi;
+      zigMcpu = zigMcpus."${b.arch}-${b.abi}" or null;
       qemuArch = qemuCpu b.arch;
       xwinArch = if isMsvc then xwinCpu b.arch else null;
     };

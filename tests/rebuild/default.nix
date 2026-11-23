@@ -136,7 +136,10 @@ let
     lazy-strings = [ (import ../lazy-strings args).repo ];
     # Its clippy units fail by design without dynamic's warning.
     lint-groups-priority = [ dynamic.repos.lint-groups-priority ];
-    linux-portable = [ extraTargets.repos.zigRepo ];
+    linux-portable = [
+      extraTargets.repos.zigRepo
+      extraTargets.repos.zigArmRepo
+    ];
     linux-portable-native = [ extraTargets.repos.zigNativeRepo ];
     manifest-dir = [ dynamic.repos.manifest-dir ];
     missing-input = [ repository.repos.provided ];

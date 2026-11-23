@@ -750,7 +750,7 @@ in
       expected = [ ];
     };
     testToolNames = {
-      expr = map (t: pick [ "zigArch" "qemuArch" "xwinArch" ] (r t)) [
+      expr = map (t: pick [ "zigArch" "zigAbi" "zigMcpu" "qemuArch" "xwinArch" ] (r t)) [
         "x86_64-unknown-linux-gnu"
         "i686-unknown-linux-gnu"
         "riscv64gc-unknown-linux-gnu"
@@ -763,41 +763,57 @@ in
       expected = [
         {
           zigArch = "x86_64";
+          zigAbi = "gnu";
+          zigMcpu = null;
           qemuArch = "x86_64";
           xwinArch = null;
         }
         {
           zigArch = "x86";
+          zigAbi = "gnu";
+          zigMcpu = null;
           qemuArch = "i386";
           xwinArch = null;
         }
         {
           zigArch = "riscv64";
+          zigAbi = "gnu";
+          zigMcpu = null;
           qemuArch = "riscv64";
           xwinArch = null;
         }
         {
           zigArch = "arm";
+          zigAbi = "gnueabihf";
+          zigMcpu = "generic+has_v7+db+dsp+aclass+perfmon+vfp3d16+thumb2";
           qemuArch = "arm";
           xwinArch = null;
         }
         {
           zigArch = "x86_64";
+          zigAbi = "msvc";
+          zigMcpu = null;
           qemuArch = "x86_64";
           xwinArch = "x86_64";
         }
         {
           zigArch = "x86";
+          zigAbi = "msvc";
+          zigMcpu = null;
           qemuArch = "i386";
           xwinArch = "x86";
         }
         {
           zigArch = "aarch64";
+          zigAbi = "msvc";
+          zigMcpu = null;
           qemuArch = "aarch64";
           xwinArch = "aarch64";
         }
         {
           zigArch = "thumb";
+          zigAbi = "msvc";
+          zigMcpu = null;
           qemuArch = "arm";
           xwinArch = "aarch";
         }
@@ -823,9 +839,63 @@ in
           let
             tr = r t;
           in
-          tr.isLinux && tr.env == "gnu" && !lib.any (lib.hasPrefix "${tr.zigArch}-linux-gnu") zigLibcs
+          tr.isLinux && tr.env == "gnu" && !lib.elem "${tr.zigArch}-linux-${tr.zigAbi}" zigLibcs
         ) (lib.attrNames tt.nixpkgsSystems);
       expected = [ "powerpc64-unknown-linux-gnu" ];
+    };
+    # zig accepts each Arm triple's `zigMcpu`, and an object it compiles
+    # has the CPU architecture, FPU, NEON and float ABI attributes of
+    # rustc's spec for that triple (IFD: `readelf -A`).
+    testZigMcpus = {
+      expr =
+        let
+          triples = [
+            "armv7-unknown-linux-gnueabihf"
+            "armv7-unknown-linux-gnueabi"
+            "arm-unknown-linux-gnueabihf"
+            "arm-unknown-linux-gnueabi"
+            "armv5te-unknown-linux-gnueabi"
+          ];
+          attrs =
+            pkgs.runCommand "zig-mcpu-attributes"
+              {
+                nativeBuildInputs = [
+                  pkgs.zig
+                  pkgs.binutils-unwrapped-all-targets
+                ];
+              }
+              (
+                ''
+                  export HOME=$TMPDIR ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig ZIG_LOCAL_CACHE_DIR=$TMPDIR/zig-local
+                  printf 'double f(double a, double b) { return a * b; }\n' > m.c
+                  mkdir $out
+                ''
+                + lib.concatMapStrings (
+                  t:
+                  let
+                    tr = r t;
+                  in
+                  ''
+                    zig cc -target ${tr.zigArch}-linux-${tr.zigAbi} -mcpu=${tr.zigMcpu} -O2 -c m.c -o m.o
+                    readelf -A m.o | sed -n 's/^ *Tag_\(CPU_arch\|FP_arch\|Advanced_SIMD_arch\|ABI_VFP_args\): //p' | paste -sd, > $out/${t}
+                  ''
+                ) triples
+              );
+        in
+        lib.genAttrs triples (t: lib.removeSuffix "\n" (builtins.readFile "${attrs}/${t}"));
+      # rustc's `features` for each, in the comment.
+      expected = {
+        # +v7,+db,+dsp,+aclass,+perfmon,+vfp3d16,+thumb2
+        "armv7-unknown-linux-gnueabihf" = "v7,VFPv3-D16,VFP registers";
+        # +v7,+thumb2,+soft-float,-neon
+        "armv7-unknown-linux-gnueabi" = "v7";
+        # +strict-align,+v6,+vfp2
+        "arm-unknown-linux-gnueabihf" = "v6,VFPv2,VFP registers";
+        # +strict-align,+v6
+        "arm-unknown-linux-gnueabi" = "v6";
+        # +soft-float,+strict-align
+        "armv5te-unknown-linux-gnueabi" = "v5TE";
+      };
     };
     # A platform nixpkgs rejects fails naming the trait to set; the msvc
     # preset reads the SDK's libraries by xwin's name.

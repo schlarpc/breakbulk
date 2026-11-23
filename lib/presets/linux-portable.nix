@@ -1,7 +1,7 @@
 # linuxPortable: Linux gnu programs that run on
 # other distributions, linked against an old glibc (default 2.17, the
 # oldest Rust's std supports on x86_64). `zig cc -target
-# <arch>-linux-gnu.<glibc>` is the target units' linker and C compiler.
+# <arch>-linux-<abi>.<glibc>` is the target units' linker and C compiler.
 #
 #   targets.x86_64-unknown-linux-gnu.preset = breakbulk.presets.linuxPortable { glibc = "2.17"; };
 #
@@ -77,7 +77,12 @@ let
       throw "breakbulk.presets.linuxPortable: `${triple}` is not a Linux -gnu triple"
     else
       traits.zigArch;
-  zigTarget = "${zigArch}-linux-gnu.${glibc}";
+  # The ABI from the traits (gnueabihf for armv7's hard float), and the
+  # CPU too: zig's own baseline is not rustc's on Arm.
+  zigTarget = "${zigArch}-linux-${traits.zigAbi}.${glibc}";
+  zigTargetArgs = "-target ${zigTarget}${
+    lib.optionalString (traits.zigMcpu != null) " -mcpu=${traits.zigMcpu}"
+  }";
   # The package set's platform, the target's GNU triple with the vendor
   # `none` (as in ARM's aarch64-none-linux-gnu toolchains). Not the Rust
   # triple itself: for the build machine's own triple, the cross tools'
@@ -102,9 +107,9 @@ let
         export ZIG_GLOBAL_CACHE_DIR=$out ZIG_LOCAL_CACHE_DIR=$TMPDIR/zig-local
         printf 'int main(void) { return 0; }\n' > main.c
         libs="-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc"
-        zig cc -target ${zigTarget} main.c -o main $libs
-        zig cc -target ${zigTarget} -shared -fPIC main.c -o libmain.so $libs
-        zig cc -target ${zigTarget} -O2 -c main.c -o main.o
+        zig cc ${zigTargetArgs} main.c -o main $libs
+        zig cc ${zigTargetArgs} -shared -fPIC main.c -o libmain.so $libs
+        zig cc ${zigTargetArgs} -O2 -c main.c -o main.o
         rm -rf $out/tmp
       '';
 
@@ -132,8 +137,8 @@ let
       exec ${zig}/bin/zig ${mode} "''${args[@]}"
     ''}/bin/${name}";
 
-  zigCc = zigTool "zig-cc-${zigTarget}" "cc -target ${zigTarget}";
-  zigCxx = zigTool "zig-cxx-${zigTarget}" "c++ -target ${zigTarget}";
+  zigCc = zigTool "zig-cc-${zigTarget}" "cc ${zigTargetArgs}";
+  zigCxx = zigTool "zig-cxx-${zigTarget}" "c++ ${zigTargetArgs}";
   zigAr = zigTool "zig-ar" "ar";
 
   # The target's package set: nixpkgs for a static variant of the target

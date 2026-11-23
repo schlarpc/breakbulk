@@ -19,7 +19,7 @@
 # facts, lib/toolchain-facts.nix) and the LTO mode:
 #
 #   kind                 default when (traits)           linker
-#   zig                  never (presets.linuxPortable)   `zig cc -target <arch>-linux-gnu.<glibc>`
+#   zig                  never (presets.linuxPortable)   `zig cc -target <arch>-linux-<abi>.<glibc>`
 #   lld-link             isMsvc, isUefi                  lld-link (wrapped: reproducible PDBs)
 #   wasm-component-ld    isWasm, os wasi, env p2         rustc's wasm-component-ld over wasm-ld
 #   wasm-ld              other isWasm                    wasm-ld
@@ -673,7 +673,7 @@ let
       llvm ? if facts == null then null else facts.llvmPackages,
       # mingw-lld: the lld package; default: `llvm`'s.
       lld ? null,
-      # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-gnu.<glibc>"; }.
+      # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-<abi>.<glibc>"; }.
       zig ? null,
     }:
     let
