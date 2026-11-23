@@ -109,10 +109,10 @@ pkgs:
   productInputs ? { },
   # packages.<name>: a member's settings, as mkRepository evaluates them
   # (lib/package-settings.nix), every option set, and `runs`, its runs'
-  # settings (`runsOf` there); `sources` is the
-  # package's list of source-view functions (lib/source-views.nix). A
-  # path package without an entry has the options' defaults. Its env
-  # captures and env come in `packageOverrides`.
+  # settings (`runsOf` there); `sources` is the package's list of
+  # source-view functions (lib/source-views.nix). A path package without
+  # an entry has the options' defaults. Its env captures and env come in
+  # `packageOverrides`.
   packages ? { },
   tools ? defaultTools pkgs,
   name ? "breakbulk",
