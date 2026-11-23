@@ -558,7 +558,7 @@ let
         testArgs
         // {
           extraModules = testArgs.extraModules ++ [
-            { workspaces.main.targets.x86_64-unknown-none.tests = false; }
+            { workspaces.main.targets.x86_64-unknown-none.variantDefaults.tests = false; }
           ];
         }
       )).repos.bare;
@@ -829,23 +829,26 @@ let
               v: inst:
               let
                 out = w.target.${triple}.variants.${v};
-                # The test plan, unless a check variant checks the build
-                # plan only, or the target has no tests
-                # (`workspaces.<ws>.targets.<t>.tests = false`, which
-                # leaves the variant no test binaries or doctests).
-                testPlan =
-                  if out ? check then
-                    repo.config.workspaces.${wsName}.variants.${v}.allTargets
-                  else
-                    out.tests != { } || out.doctests != { };
+                # The plans the variant traces: the test plan unless it
+                # has `tests = false`, the build plan unless it has
+                # `products = false` (each has its `buildScriptPaths`).
+                traced = lib.attrNames out.buildScriptPaths;
               in
               {
                 key = "${wsName}/${triple}/${v}";
                 inherit triple inst out;
                 inherit (w.target.${triple}) canRunTests;
-                kinds = lib.filter (k: (k != "test" || testPlan) && (k != "doc" || lib.elem name docFixtures)) (
-                  lib.attrNames inst.units
-                );
+                kinds = lib.filter (
+                  k:
+                  (
+                    !(lib.elem k [
+                      "build"
+                      "test"
+                    ])
+                    || lib.elem k traced
+                  )
+                  && (k != "doc" || lib.elem name docFixtures)
+                ) (lib.attrNames inst.units);
               }
             ) vs
           ) w.instances

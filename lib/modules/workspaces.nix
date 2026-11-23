@@ -53,52 +53,6 @@ let
   workspaceTarget = {
     key = "breakbulk/modules/workspaces.nix#workspaceTarget";
     _file = ./workspaces.nix;
-    options.packages = mkOption {
-      type = types.nullOr bt.packageList;
-      default = null;
-      example = lib.literalExpression ''{ exclude = [ "xtask" ]; }'';
-      description = ''
-        The packages to plan for this target, each traced with `-p`, in
-        the build and the test plan. `null` traces `--workspace`.
-        ${excludeFormDoc}
-      '';
-    };
-    options.tests = mkOption {
-      type = types.oneOf [
-        types.bool
-        bt.packageList
-      ];
-      default = true;
-      example = lib.literalExpression ''{ exclude = [ "*-bench" ]; }'';
-      description = ''
-        Test binaries, test runs, test apps and doctests on this target.
-        `false`: none (a target that is only built, such as a wasm
-        component whose tests run natively); the test plan is then not
-        traced, except for a check or clippy variant with `allTargets`. A
-        list of packages: the test plan is `cargo test -p <pkg> …`
-        for those packages only, and only their tests are run. `true`: the
-        variant's or target's package selection.
-        ${excludeFormDoc}
-      '';
-    };
-    options.products = mkOption {
-      type = types.oneOf [
-        types.bool
-        bt.packageList
-      ];
-      default = true;
-      example = false;
-      description = ''
-        Products on this target, the counterpart of `tests`. `false`: none
-        (a target that is only tested, such as the native target of
-        crates that ship as wasm and run their unit tests natively): the
-        build plan is not traced, and the target has no `packages.<pkg>`
-        and no product checks; test binaries, test runs, test apps,
-        doctests and benches are unchanged. A list of packages: products
-        for those packages only. `true`: every package the variant plans.
-        ${excludeFormDoc}
-      '';
-    };
     options.variantDefaults = mkOption {
       type = types.deferredModule;
       default = { };
@@ -266,6 +220,12 @@ let
       );
       planned = if config.targets == null then lib.attrNames ws.targets else config.targets;
       unplannedLayers = lib.filter (t: !(lib.elem t planned)) (lib.attrNames config.target);
+      selections = [
+        "packages"
+        "tests"
+        "products"
+        "benches"
+      ];
     in
     {
       # The workspace's `variantDefaults`, the lowest layer: in the
@@ -290,16 +250,12 @@ let
 
       config.assertions = [
         {
-          assertion = !(config.benches && checkMode);
+          assertion = !(config.benches != false && checkMode);
           message = "breakbulk: ${at}${bt.setIn options.benches}: `benches` needs a build variant, not `${config.mode}`";
         }
         {
           assertion = !(config.mode == "clippy" && config.rustcWorkspaceWrapper != null);
           message = "breakbulk: ${at}${bt.setIn options.rustcWorkspaceWrapper}: a clippy variant's workspace wrapper is clippy-driver; for another, use `mode = \"check\"` with `rustcWorkspaceWrapper`";
-        }
-        {
-          assertion = config.allTargets || checkMode;
-          message = "breakbulk: ${at}${bt.setIn options.allTargets}: `allTargets = false` needs a check or clippy variant, not `${config.mode}`";
         }
         {
           assertion = unknownTargets == [ ];
@@ -314,12 +270,15 @@ let
         assertion = false;
         message = "breakbulk: ${at}.cargoConfig${bt.setIn options.cargoConfig}: `${lib.concatStringsSep "." k.path}` is set by breakbulk itself; ${k.use}";
       }) (ownedCargoConfigKeys config.cargoConfig)
-      ++ lib.optionals (builtins.isAttrs config.packages) (
-        map (m: {
-          assertion = false;
-          message = "breakbulk: ${at}.packages.exclude${bt.setIn options.packages}: ${m}";
-        }) (manifest.excludeMembers (lib.attrNames ws.members) config.packages.exclude).errors
-      );
+      ++ lib.concatMap (
+        o:
+        lib.optionals (builtins.isAttrs config.${o}) (
+          map (m: {
+            assertion = false;
+            message = "breakbulk: ${at}.${o}.exclude${bt.setIn options.${o}}: ${m}";
+          }) (manifest.excludeMembers (lib.attrNames ws.members) config.${o}.exclude).errors
+        )
+      ) selections;
 
       options = {
         assertions = bt.assertionsOption;
@@ -431,18 +390,6 @@ let
             `coverage`: `build` with `-C instrument-coverage` on target
             units. Use the same profile as the build variant to share host
             units; Cargo's own `clippy` uses the dev profile.
-          '';
-        };
-        allTargets = mkOption {
-          type = types.bool;
-          default = true;
-          description = ''
-            For `check` and `clippy` variants: also check every target,
-            as `cargo check --all-targets` does (tests, examples, benches
-            in test mode, through the test plan). `false`: plain `cargo
-            check` (libraries and bins, the build plan only), for gates
-            that do not check test code. Only check and clippy variants
-            take `false`.
           '';
         };
         clippyArgs = mkOption {
@@ -574,14 +521,14 @@ let
               x86_64-pc-windows-msvc.features = [ "windows" ];
               wasm32-unknown-unknown = {
                 noDefaultFeatures = lib.mkForce true;
-                allTargets = false;
+                tests = false;
               };
             }
           '';
           description = ''
             This variant's settings on one of its targets: any option of
             the variant (`features`, `noDefaultFeatures`, `profile`,
-            `testProfile`, `cargoConfig`, `allTargets`, `clippyArgs`, `packages`, `benches`, `checks`, …)
+            `testProfile`, `cargoConfig`, `clippyArgs`, `packages`, `tests`, `benches`, `checks`, …)
             except `targets`. They apply over the target's
             `variantDefaults`
             (`workspaces.<ws>.targets.<triple>.variantDefaults`) and the
@@ -602,16 +549,53 @@ let
           '';
         };
         packages = mkOption {
-          type = types.nullOr bt.packageList;
-          default = null;
+          type = bt.selection;
+          default = true;
           example = [ "my-lib" ];
           description = ''
-            The packages this variant plans, each traced with `-p`, in
-            place of the target's `packages` (`workspaces.<ws>.targets.<triple>.packages`).
-            `null`: the target's selection. Features then name the
-            selected package's own features, as with `cargo build -p
-            <pkg> --features <f>`; `breakbulk.variants.featurePowerset`
-            makes such variants with `scope = "package"`.
+            The packages this variant plans on a target, in every plan.
+            `true`: the whole workspace (`--workspace`). A list, or the
+            exclude form: each traced with `-p`; features then name the
+            selected packages' own features, as with `cargo build -p
+            <pkg> --features <f>` (`breakbulk.variants.featurePowerset`
+            makes such variants with `scope = "package"`). `false`:
+            nothing, no plan is traced. For every variant on one target,
+            set it in the target's `variantDefaults`
+            (`workspaces.<ws>.targets.<triple>.variantDefaults.packages`).
+            ${excludeFormDoc}
+          '';
+        };
+        tests = mkOption {
+          type = bt.selection;
+          default = true;
+          example = lib.literalExpression ''{ exclude = [ "*-bench" ]; }'';
+          description = ''
+            The test plan (`cargo test --no-run`; for a check or clippy
+            variant, `cargo check --all-targets`): test binaries, test
+            runs, test apps and doctests. `true`: those of the `packages`
+            selection. `false`: none, and the test plan is not traced: a
+            target that is only built (a wasm component whose tests run
+            natively, with `targets.<triple>.variantDefaults.tests =
+            false`), or on a check or clippy variant plain `cargo check`
+            (libraries and binaries). A list of packages, or the exclude
+            form: the test plan is `cargo test -p <pkg> …` for those only.
+            ${excludeFormDoc}
+          '';
+        };
+        products = mkOption {
+          type = bt.selection;
+          default = true;
+          example = false;
+          description = ''
+            Products (`packages.<pkg>`) and their checks, from the build
+            plan. `true`: one for every package `packages` selects.
+            `false`: none, and the build plan is not traced: a target that
+            is only tested (the native target of crates that ship as wasm
+            and run their unit tests natively); a check or clippy
+            variant's `check` then covers the test plan only. A list of
+            packages, or the exclude form: products for those only, from
+            the same build plan of `packages`. Test binaries, test runs,
+            doctests and benches do not depend on it.
             ${excludeFormDoc}
           '';
         };
@@ -701,19 +685,24 @@ let
         };
 
         benches = mkOption {
-          type = types.bool;
+          type = bt.selection;
           default = false;
+          example = true;
           description = ''
-            Also trace `cargo bench --no-run` with this variant's settings
-            (use `profile = "bench"`): bench binaries, and lib and bin
-            harnesses in bench mode, at
-            `target.<triple>.variants.<v>.benches.<pkg>.<bench>`.
-            `target.<triple>.benches` is the default variant's when it has
-            benches, else the one variant with `benches = true`. The test
-            plan builds no benches (`cargo test --no-run` does not). Each
+            The bench plan, `cargo bench --no-run` with this variant's
+            settings (use `profile = "bench"`): bench binaries, and lib
+            and bin harnesses in bench mode, at
+            `target.<triple>.variants.<v>.benches.<pkg>.<bench>`. `false`:
+            none, the plan is not traced. `true`: those of the `packages`
+            selection. A list of packages, or the exclude form: `cargo
+            bench -p <pkg> …` for those only. Build and coverage variants
+            only. `target.<triple>.benches` is the default variant's when
+            it has benches, else the one variant's that has. The test plan
+            builds no benches (`cargo test --no-run` does not). Each
             bench binary also runs once, with `--test`, as a check of the
             variant, under the package's
             [`bench`](packages.md#packagesnamebench) run settings.
+            ${excludeFormDoc}
           '';
         };
       };
@@ -816,13 +805,14 @@ let
             ```nix
             { config, lib, ... }:
             {
-              workspaces.default.targets.x86_64-unknown-linux-gnu.tests =
+              workspaces.default.targets.x86_64-unknown-linux-gnu.variantDefaults.tests =
                 lib.filter (lib.hasPrefix "core-")
                   (lib.attrNames config.workspaces.default.members);
             }
             ```
 
-            The selection options also take `{ exclude = [ … ]; }`: every
+            The selection options (`variants.<v>.packages`, `tests`,
+            `products`, `benches`) also take `{ exclude = [ … ]; }`: every
             member but those.
           '';
         };
@@ -931,7 +921,7 @@ let
           example = lib.literalExpression ''
             {
               wasm32-unknown-unknown = {
-                packages = [ "ui" ];
+                variantDefaults.packages = [ "ui" ];
                 # Any `targets.<triple>` option, for this workspace only.
                 rustflags = [ "--cfg" "getrandom_backend=\"wasm_js\"" ];
               };
@@ -939,7 +929,7 @@ let
           '';
           description = ''
             The triples this workspace is built for. Each is planned on its
-            own (`--target <triple>`). Besides `packages`, an entry takes
+            own (`--target <triple>`). Besides `variantDefaults`, an entry takes
             every option of `targets.<triple>`: they are merged with the
             repository-wide `targets.<triple>` for this workspace only, as
             two definitions of the same options merge (lists concatenate,

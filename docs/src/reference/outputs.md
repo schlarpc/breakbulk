@@ -154,10 +154,10 @@ is a run turned off with its `enable`
 [`bench.enable`](options/packages.md#packagesnamebenchenable)).
 A plan check is
 [`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths)
-of the build plan (`<plan>` is `build`), unless the target has no
-products, and of the test plan (`test`), unless it has no tests. Check
-and clippy variants have the plan checks of the plans their `check`
-builds.
+of each plan the variant traces: the build plan (`<plan>` is `build`)
+unless it has `products = false`, and the test plan (`test`) unless it
+has `tests = false`. A check or clippy variant's `check` builds the
+same plans.
 
 Groups are checks too, each an aggregate (a `linkFarm` of the checks it
 holds) that builds them as one installable

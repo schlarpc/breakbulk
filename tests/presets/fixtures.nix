@@ -1234,7 +1234,7 @@ let
                 targets = {
                   ${wasm} = { };
                   ${wasip2} = { };
-                  "aarch64-unknown-linux-gnu".packages = [ "app-b" ];
+                  "aarch64-unknown-linux-gnu".variantDefaults.packages = [ "app-b" ];
                 };
               };
               workspaces.c = {

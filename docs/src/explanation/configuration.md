@@ -8,7 +8,7 @@ most of the pieces this page describes:
   # (the workspace's toolchain must include the wasm target)
   workspaces.default.targets = {
     x86_64-unknown-linux-gnu = { };
-    wasm32-unknown-unknown.packages = [ "ui" ];
+    wasm32-unknown-unknown.variantDefaults.packages = [ "ui" ];
   };
   targets.wasm32-unknown-unknown.preset = breakbulk.presets.wasmWeb;
 
@@ -39,24 +39,27 @@ for settings, but too slow for thousands of units.
 A target's toolchain is set once for the repository (`targets.<triple>`)
 and can be refined for one workspace. Each workspace resolves it with its
 own compiler, so a preset picks tools that match that workspace's rustc.
-A target can also build only some packages (`packages = [ "ui" ]` above).
-
-A target can be only built or only tested. Crates that ship as wasm but
+What a variant plans is its own choice, and so are the defaults of every
+variant on one target, in that target's `variantDefaults`
+([variants](#variants), below): only some packages (`packages = [ "ui" ]`
+above), or only products or only tests. Crates that ship as wasm but
 run their unit tests natively are one example:
 
 ```nix
 workspaces.components.targets = {
-  wasm32-unknown-unknown.tests = false;       # products, no test runs
-  x86_64-unknown-linux-gnu.products = false;  # test runs, no products
+  wasm32-unknown-unknown.variantDefaults.tests = false;       # products, no test runs
+  x86_64-unknown-linux-gnu.variantDefaults.products = false;  # test runs, no products
 };
 ```
 
-[`tests = false`](../reference/options/workspaces.md#workspacesnametargetsnametests)
+[`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests)
 leaves out test binaries, runs, apps and doctests, and the test plan is
 not traced.
-[`products = false`](../reference/options/workspaces.md#workspacesnametargetsnameproducts)
+[`products = false`](../reference/options/workspaces.md#workspacesnamevariantsnameproducts)
 leaves out products and their checks, and the build plan is not traced.
-Either also takes a list of packages, or the members to leave out
+[`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages),
+`tests`, `products` and `benches` each take `true` (all), `false`
+(none), a list of packages, or the members to leave out
 (`{ exclude = [ … ]; }`, see [Build for another target](../how-to/targets.md#some-packages-only)).
 
 ### Sharing between workspaces
@@ -575,8 +578,8 @@ can (below).
 
 Check and clippy variants check every target, as
 `cargo check --all-targets` does, unless
-[`allTargets`](../reference/options/workspaces.md#workspacesnamevariantsnamealltargets)
-is off (for a gate that runs plain `cargo check`). They trace one Cargo
+[`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests)
+(for a gate that runs plain `cargo check`). They trace one Cargo
 command with one profile, `profile`, for both plans, and ignore
 `testProfile`. Give them the same profile as your build variant to
 share build scripts and proc macros; Cargo's own `clippy` uses the dev

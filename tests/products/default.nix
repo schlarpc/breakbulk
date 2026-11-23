@@ -100,18 +100,20 @@
 #                    product and test run beside the target's rustflags
 #                    (both readers saw the file); owned keys are refused
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
-#                    and `targets.<t>.tests` narrow plans and outputs per
+#                    and `variants.<v>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
-#                    under `variant-<v>/` unless `checks = false`
-#   tests-only       `targets.<t>.tests = false` on wasm32 and
-#                    `products = false` on the native target: native test
-#                    runs and doctests only; `products = [ "app" ]`
+#                    under `variant-<v>/` unless `checks = false`; a
+#                    test-only variant; `packages = false`
+#   tests-only       `tests = false` on wasm32 and `products = false` on
+#                    the native target, through the targets'
+#                    `variantDefaults`: native test runs and doctests
+#                    only; `products = [ "app" ]`
 #   variants-per-target   `targets.<t>.variantDefaults` and
 #                    `variants.<v>.target.<t>` (wasm32 with rust-overlay's
 #                    1.99): a feature on one target only, a variant's
 #                    layer replacing the defaults, a package run taking
 #                    the defaults' features its package accepts and a
-#                    user's own, `allTargets = false` on one
+#                    user's own, `tests = false` on one check variant's
 #                    target; a single value in the variant's target layer
 #                    wins over the variant and `variantDefaults` without
 #                    mkForce, priorities still count (`checks` on one
@@ -772,7 +774,7 @@ let
           check-lib = {
             mode = "check";
             profile = "release";
-            allTargets = false;
+            tests = false;
           };
           strict = {
             mode = "clippy";
@@ -984,7 +986,7 @@ let
         };
         workspaces.default.targets = {
           ${native} = { };
-          wasm32-unknown-unknown.packages = [ "ui" ];
+          wasm32-unknown-unknown.variantDefaults.packages = [ "ui" ];
         };
         targets.wasm32-unknown-unknown.preset = breakbulk.presets.wasmWeb;
 
@@ -1911,9 +1913,10 @@ in
         cat $check/units $clippy/units > $out
       '';
 
-  # `allTargets = false` checks the build plan's units only
+  # A check variant with `tests = false` checks the build plan's units only
   # (`cargo check`); the default also checks the test plan's (`cargo check
-  # --all-targets`). A build variant rejects it.
+  # --all-targets`); with `products = false`, the test plan's only, and
+  # the build plan is not traced.
   variants-all-targets =
     let
       outsOf =
@@ -1928,16 +1931,22 @@ in
       );
       got = lib.sort lib.lessThan (map builtins.unsafeDiscardStringContext lib'.units);
       allGot = map builtins.unsafeDiscardStringContext all.units;
-      rejected = mkRepo (fixtures + "/variants") [
+      testsOnly = mkRepo (fixtures + "/variants") [
         {
           workspaces.main = {
             path = "ws";
-            variants.default.allTargets = false;
+            variants.default = {
+              mode = "check";
+              profile = "release";
+              products = false;
+            };
           };
         }
       ];
-      rejectedEval = builtins.tryEval (
-        builtins.seq rejected.workspaces.main.target.${native}.packages.app.drvPath true
+      tw = testsOnly.workspaces.main;
+      testOuts = outsOf (lib.attrValues tw.instances.${native}.default.units.test);
+      testsGot = lib.sort lib.lessThan (
+        map builtins.unsafeDiscardStringContext tw.target.${native}.variants.default.check.units
       );
     in
     assert lib.assertMsg (
@@ -1947,8 +1956,8 @@ in
       lib.length allGot > lib.length got
     ) "variants-all-targets: the default does not check more than the build plan";
     assert lib.assertMsg (
-      !rejectedEval.success
-    ) "variants-all-targets: a build variant accepted allTargets = false";
+      testsGot == testOuts && lib.attrNames tw.target.${native}.buildScriptPaths == [ "test" ]
+    ) "variants-all-targets: products = false does not check exactly the test plan";
     pkgs.runCommand "variants-all-targets" { check = lib'; } ''
       cp $check/units $out
     '';
@@ -2439,10 +2448,13 @@ in
       '';
 
   # Field-trial gaps 4 and 5: variants and test plans narrowed per target
-  # (`variants.<v>.targets`, `variants.<v>.packages`,
-  # `workspaces.<ws>.targets.<t>.tests`), and every variant's test runs in
-  # repo.checks under `variant-<v>/`. The musl target is never planned:
-  # only a check variant is planned for it, and nothing here builds it.
+  # (`variants.<v>.targets`, `variants.<v>.packages`, `tests` from the
+  # target's `variantDefaults`), and every variant's test runs in
+  # repo.checks under `variant-<v>/`; a variant that is only tested
+  # (`products = false`), and one that plans nothing (`packages = false`).
+  # The musl target is never planned: only a check variant is planned for
+  # it, without its test plan (`tests = false`), and nothing here builds
+  # it.
   variants-narrowing =
     let
       musl = "x86_64-unknown-linux-musl";
@@ -2451,11 +2463,11 @@ in
           workspaces.main = {
             path = "ws";
             targets = {
-              ${native}.tests = [ "lib-a" ];
+              ${native}.variantDefaults.tests = [ "lib-a" ];
               # The toolchain as Cargo finds it: nothing here builds it.
               ${musl} = {
                 preset = null;
-                tests = false;
+                variantDefaults.tests = false;
               };
             };
             variants = {
@@ -2485,6 +2497,15 @@ in
               musl-check = {
                 mode = "check";
                 targets = [ musl ];
+              };
+              test-only = {
+                profile = "release";
+                targets = [ native ];
+                products = false;
+              };
+              nothing = {
+                targets = [ native ];
+                packages = false;
               };
             };
             # cargo-hack's per-package matrix for lib-a, one feature at a
@@ -2525,7 +2546,9 @@ in
               "hack-lib-a.no-default-features"
               "hack-lib-a.x"
               "hack-lib-a.y"
+              "nothing"
               "quiet"
+              "test-only"
               "y-only"
             ];
           hackPlan =
@@ -2538,7 +2561,6 @@ in
           muslChecks =
             under "main/${musl}/" == [
               "main/${musl}/variant-musl-check/buildScriptPaths/build"
-              "main/${musl}/variant-musl-check/buildScriptPaths/test"
               "main/${musl}/variant-musl-check/check"
             ];
           # `tests = [ "lib-a" ]`: the test plan is `-p lib-a`, the build
@@ -2552,6 +2574,28 @@ in
           yDiffers = yRun.drvPath != defaultRun.drvPath;
           quietOut = under "main/${native}/variant-quiet/" == [ ] && n.variants.quiet.packages ? app;
           defaultKept = repo.checks ? "main/${native}/lib-a/test-lib";
+          testOnly =
+            let
+              t = n.variants.test-only;
+              c = under "main/${native}/variant-test-only/";
+            in
+            t.packages == { }
+            && lib.attrNames t.testRuns == [ "lib-a" ]
+            && lib.attrNames t.buildScriptPaths == [ "test" ]
+            && c != [ ]
+            && lib.all (
+              x: lib.hasInfix "/test-" x || lib.hasSuffix "/doctest" x || lib.hasSuffix "/buildScriptPaths/test" x
+            ) c;
+          nothing =
+            let
+              t = n.variants.nothing;
+            in
+            t.packages == { }
+            && t.tests == { }
+            && t.testRuns == { }
+            && t.doctests == { }
+            && t.buildScriptPaths == { }
+            && under "main/${native}/variant-nothing/" == [ ];
         }
       );
       unknown = mkRepo (fixtures + "/variants") [
@@ -2586,13 +2630,14 @@ in
   # a feature only on another target, through that target's
   # `variantDefaults`), a variant replacing the defaults in its own target
   # layer, a package run taking only the defaults' features its package
-  # accepts and a plain `features` of the user's, and `allTargets = false`
-  # on one target only. wasm32 stands in for msvc,
+  # accepts and a plain `features` of the user's, and a check variant's
+  # `tests = false` on one target only. wasm32 stands in for msvc,
   # with a rust-overlay toolchain that has its std.
-  # A target only built (wasm32, `tests = false`) next to one only tested
-  # (native, `products = false`): repo.checks has the native test runs and
-  # doctests and no native product or product check, nor any wasm test
-  # run; `products = [ "app" ]` keeps app's product only.
+  # A target only built (wasm32, `tests = false` in its `variantDefaults`)
+  # next to one only tested (native, `products = false`): repo.checks has
+  # the native test runs and doctests and no native product or product
+  # check, nor any wasm test run; `products = [ "app" ]` keeps app's
+  # product only.
   tests-only =
     let
       wasm = "wasm32-unknown-unknown";
@@ -2613,20 +2658,20 @@ in
                 # rust-overlay's rust-lld, as Cargo finds it.
                 ${wasm} = {
                   preset = null;
-                  tests = false;
+                  variantDefaults.tests = false;
                 };
               };
             };
           }
         ];
-      repo = repoWith { products = false; };
+      repo = repoWith { variantDefaults.products = false; };
       # Three packages with products (cdylib, staticlib, bin).
       partial = mkRepo (fixtures + "/crate-types") [
         {
           workspaces.main = {
             path = ".";
             variants.default.profile = "dev";
-            targets.${native}.products = [ "app" ];
+            targets.${native}.variantDefaults.products = [ "app" ];
           };
         }
       ];
@@ -2721,7 +2766,7 @@ in
             gate = {
               mode = "check";
               profile = "release";
-              target.${wasm}.allTargets = false;
+              target.${wasm}.tests = false;
             };
           })
           # A plain definition next to the generated one.
@@ -2785,8 +2830,8 @@ in
             has wasm "hack-lib-a.no-default-features" "--features lib-a/y"
             && !(lib.hasInfix "extra" (planCmd wasm "hack-lib-a.no-default-features" "build"))
             && has wasm "hack-lib-a.no-default-features" "--no-default-features";
-          # `allTargets = false` on wasm only: the build plan's units there,
-          # both plans' natively.
+          # `tests = false` on wasm only: the build plan's units there, both
+          # plans' natively.
           # `testProfile` from wasm's defaults, and `own`'s layer over it;
           # the check variant keeps `profile`.
           testProfiles =
@@ -2806,9 +2851,13 @@ in
             };
           gateWasm = unitsOf wasm == planUnits wasm "build";
           gateNative = unitsOf native == planUnits native "build" + planUnits native "test";
-          # A build variant cannot take `allTargets = false`, on one
-          # target either.
-          rejectsBuildAllTargets = fails { variants.default.target.${wasm}.allTargets = false; };
+          # A check variant cannot take `benches`, on one target either.
+          rejectsCheckBenches = fails {
+            variants.gate = {
+              mode = "check";
+              target.${wasm}.benches = true;
+            };
+          };
           # A layer for a target the variant is not planned for.
           rejectsUnplanned = fails {
             variants.default = {

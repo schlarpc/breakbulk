@@ -134,29 +134,50 @@ for everything under `target.<triple>`.
 
 ## Some packages only
 
-A target plans every member of the workspace. Three options of
-`workspaces.<ws>.targets.<triple>` narrow that:
-[`packages`](../reference/options/workspaces.md#workspacesnametargetsnamepackages)
-(both plans),
-[`tests`](../reference/options/workspaces.md#workspacesnametargetsnametests)
-(test binaries, runs and doctests) and
-[`products`](../reference/options/workspaces.md#workspacesnametargetsnameproducts).
-Each takes a list of packages, or the packages to leave out:
+A variant plans every member of the workspace. Four of its options
+narrow that:
+[`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)
+(every plan),
+[`tests`](../reference/options/workspaces.md#workspacesnamevariantsnametests)
+(test binaries, runs and doctests),
+[`products`](../reference/options/workspaces.md#workspacesnamevariantsnameproducts)
+and
+[`benches`](../reference/options/workspaces.md#workspacesnamevariantsnamebenches).
+Each takes `true` (all of `packages`), `false` (none, and that plan is
+not traced), a list of packages, or the packages to leave out. For
+every variant on one target, set them in the target's
+[`variantDefaults`](#different-features-per-target):
 
 ```nix
 workspaces.default.targets = {
   # cargo test --workspace --exclude uap-bench --exclude 'fuzz-*'
-  x86_64-unknown-linux-gnu.tests.exclude = [ "uap-bench" "fuzz-*" ];
-  wasm32-unknown-unknown.packages = [ "ui" ];
+  x86_64-unknown-linux-gnu.variantDefaults.tests.exclude = [ "uap-bench" "fuzz-*" ];
+  wasm32-unknown-unknown.variantDefaults.packages = [ "ui" ];
 };
 ```
+
+A variant's own setting wins over them: `variants.<v>.tests = true`
+tests a variant on every target.
 
 `{ exclude = [ … ]; }` selects what `--workspace --exclude` selects, so
 you can copy the `--exclude` list from your CI. An entry is a package
 name or a glob pattern as Cargo takes it (`*`, `?`, `[…]`, `[!…]`). An
-entry that matches no member is an error; Cargo only warns. A variant's
-[`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)
-takes the same forms.
+entry that matches no member is an error; Cargo only warns.
+
+A target that is only built or only tested has `tests = false` or
+`products = false`. Crates that ship as wasm but run their unit tests
+natively are one example:
+
+```nix
+workspaces.default.targets = {
+  wasm32-unknown-unknown.variantDefaults.tests = false;
+  x86_64-unknown-linux-gnu.variantDefaults.products = false;
+};
+```
+
+On a check or clippy variant, `tests = false` checks what plain `cargo
+check` builds (libraries and binaries), and `products = false` checks
+the test plan only.
 
 For any other selection, compute a list from
 [`workspaces.<ws>.members`](../reference/options/workspaces.md#workspacesnamemembers),
@@ -169,7 +190,7 @@ let
 in
 {
   # The packages under crates/wasm/.
-  workspaces.default.targets.wasm32-unknown-unknown.packages =
+  workspaces.default.targets.wasm32-unknown-unknown.variantDefaults.packages =
     lib.attrNames (lib.filterAttrs (_: m: lib.hasPrefix "crates/wasm/" m.path) members);
 }
 ```
@@ -205,7 +226,7 @@ which takes any variant option:
 workspaces.default.variants.clippy = {
   mode = "clippy";
   # No test harness on wasm: lint the libraries and bins only.
-  target.wasm32-unknown-unknown.allTargets = false;
+  target.wasm32-unknown-unknown.tests = false;
 };
 workspaces.default.variants.minimal = {
   noDefaultFeatures = true;

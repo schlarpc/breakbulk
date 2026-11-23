@@ -61,21 +61,21 @@ in
     targets = {
       ${native} = { };
       # `cargo check-wasm`: --workspace --exclude mtgac --exclude xtask.
-      ${wasm} = {
+      ${wasm}.variantDefaults = {
         packages = lib.filter (n: n != "mtgac") (map memberName members);
         tests = false;
       };
-      ${windows} = {
+      ${windows}.variantDefaults = {
         packages = [ "mtgac" ];
         tests = false;
       };
     };
     variants = {
       default = { };
-      # The wasm gate is plain `cargo check`, for wasm only.
+      # The wasm gate is plain `cargo check` (wasm has `tests = false`),
+      # for wasm only.
       check = {
         mode = "check";
-        allTargets = false;
         targets = [ wasm ];
       };
       clippy = {

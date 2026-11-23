@@ -29,8 +29,9 @@ in
   # What the flake's checks run, from repo.checks: the host workspace's
   # products, tests and clippy, and the components' native unit tests
   # (nextest there, so no doctests; doctests are in `doctests`). The
-  # components' wasm32 target has `tests = false`, so repo.checks has no
-  # wasm32 test runs; their native products are left out here.
+  # components' wasm32 target has `variantDefaults.tests = false`, so
+  # repo.checks has no wasm32 test runs; their native products are left
+  # out here.
   ci =
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;

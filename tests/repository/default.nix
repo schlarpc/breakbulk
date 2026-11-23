@@ -3172,12 +3172,6 @@ in
           };
           want = [ "${ws}.variants.c ${at}: `benches` needs a build variant, not `check`" ];
         };
-        allTargets = {
-          m.variants.default.allTargets = false;
-          want = [
-            "${ws}.variants.default ${at}: `allTargets = false` needs a check or clippy variant, not `build`"
-          ];
-        };
         variantTargets = {
           m.variants.default.targets = [ "riscv64gc-unknown-linux-gnu" ];
           want = [
@@ -3240,11 +3234,11 @@ in
       viaTests = lib.mapAttrs (
         _: ex:
         testPkgs (repoWith {
-          targets.${native}.tests.exclude = ex;
+          targets.${native}.variantDefaults.tests.exclude = ex;
         })
       ) cargoCases;
       viaPackages = testPkgs (repoWith {
-        targets.${native}.packages.exclude = [ "[a-c]*" ];
+        variantDefaults.packages.exclude = [ "[a-c]*" ];
       });
       viaVariant = testPkgs (repoWith {
         variants.default.packages.exclude = [ "ws-util" ];
@@ -3252,14 +3246,14 @@ in
       products =
         lib.attrNames
           (t (repoWith {
-            targets.${native}.products.exclude = [ "app" ];
+            variants.default.products.exclude = [ "app" ];
           })).packages;
       fromConfig = mkRepo (fixtures + "/workspace-members") [
         (oneWs ".")
         (
           { config, ... }:
           {
-            workspaces.main.targets.${native}.tests = lib.subtractLists [ "app" ] (
+            workspaces.main.variants.default.tests = lib.subtractLists [ "app" ] (
               lib.attrNames config.workspaces.main.members
             );
           }
@@ -3307,13 +3301,13 @@ in
       ]
     ) "workspace-members: variant message";
     assert lib.assertMsg (fails
-      (repoWith { targets.${native}.tests.exclude = [ "zz*" ]; }).workspaces
+      (repoWith { targets.${native}.variantDefaults.tests.exclude = [ "zz*" ]; }).workspaces
     ) "workspace-members: an unmatched pattern was accepted";
     assert lib.assertMsg (fails
-      (repoWith { targets.${native}.products.exclude = [ "core**" ]; }).checks
+      (repoWith { variants.default.products.exclude = [ "core**" ]; }).checks
     ) "workspace-members: an invalid pattern was accepted";
     assert lib.assertMsg (fails
-      (repoWith { targets.${native}.packages.exclude = [ "nope" ]; }).workspaces
+      (repoWith { variantDefaults.packages.exclude = [ "nope" ]; }).workspaces
     ) "workspace-members: an unmatched name was accepted";
     pkgs.runCommand "workspace-members"
       {

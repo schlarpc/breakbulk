@@ -24,10 +24,12 @@ By default every package's product is a check, including helper and
 bench crates that nothing ships. A product whose build script needs the
 network fails in the sandbox, often late in a long build. List the
 packages whose products you want instead
-([`products`](../reference/options/workspaces.md#workspacesnametargetsnameproducts)):
+([`products`](../reference/options/workspaces.md#workspacesnamevariantsnameproducts)),
+for every variant through the workspace's or a target's
+`variantDefaults`:
 
 ```nix
-workspaces.main.targets.x86_64-unknown-linux-gnu.products = [ "app" "cli" ];
+workspaces.main.targets.x86_64-unknown-linux-gnu.variantDefaults.products = [ "app" "cli" ];
 ```
 
 Only those packages get `packages.<pkg>` and product checks on that

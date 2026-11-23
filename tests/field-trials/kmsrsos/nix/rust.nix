@@ -63,14 +63,14 @@ in
     };
     targets = {
       ${native} = { };
-      ${musl}.packages = [
+      ${musl}.variantDefaults.packages = [
         "kmsrs-server"
         "kmsrs-client"
         "kmsrs-os"
       ];
     }
     // lib.genAttrs windows (_: {
-      packages = [
+      variantDefaults.packages = [
         "kmsrs-server"
         "kmsrs-client"
       ];

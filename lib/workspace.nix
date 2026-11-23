@@ -39,6 +39,7 @@
 # Arguments added for mkRepository (lib/repository.nix), all optional:
 #   select = [ "<pkg>" ];      plan with -p for each instead of --workspace
 #   testSelect = [ "<pkg>" ];  the test plan's -p list (default: select)
+#   benchSelect = [ "<pkg>" ]; the bench plan's -p list (default: select)
 #   noDefaultFeatures, allFeatures   passed to the planner
 #   variant = "<name>";        the variant's name in root stubs' messages
 #   packageOverrides."<name>@<version>" = { host = { env; envCapture; };
@@ -117,8 +118,10 @@ pkgs:
   tools ? defaultTools pkgs,
   name ? "breakbulk",
   select ? [ ],
-  # The test plan's selection, when it differs (`targets.<t>.tests`).
+  # The test and bench plans' selections, when they differ
+  # (`variants.<v>.tests`, `variants.<v>.benches`).
   testSelect ? select,
+  benchSelect ? select,
   noDefaultFeatures ? false,
   allFeatures ? false,
   variant ? profile,
@@ -511,7 +514,7 @@ let
             trimPaths
             ;
           target = rustcTargetArg.arg;
-          packages = if kind == "test" then testSelect else select;
+          packages = selectOf kind;
           profile = if kind == "test" && !checking then testProfile else profile;
           cargoConfig = cargoConfigFile;
           # A doc plan runs no wrapper (breakbulk-plan's `runs_wrappers`).
@@ -545,10 +548,19 @@ let
   # predicted whatever the selection (the unselected ones are stubs); an
   # outside package's only when selected, since a plan without it has none.
   outsideRoots = skeleton.outsideRoots { inherit root wsDir; };
+  # A plan's `-p` list (`[ ]`: `--workspace`).
+  selectOf =
+    kind:
+    if kind == "test" then
+      testSelect
+    else if kind == "bench" then
+      benchSelect
+    else
+      select;
   rootsOf =
     kind:
     let
-      sel = if kind == "test" then testSelect else select;
+      sel = selectOf kind;
     in
     wsRoots // lib.filterAttrs (n: _: lib.elem n sel && !(wsRoots ? ${n})) outsideRoots;
 
@@ -638,7 +650,7 @@ let
   reachableFrom = lib.genAttrs [ "build" "test" "doc" "bench" ] (
     kind:
     let
-      sel = if kind == "test" then testSelect else select;
+      sel = selectOf kind;
     in
     if sel == [ ] then
       null

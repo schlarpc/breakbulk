@@ -33,7 +33,9 @@ let
 
   # Placeholders as the reference writes them.
   normalize =
-    p: builtins.replaceStrings [ "<ws>" "<triple>" "<pkg>" ] [ "<name>" "<name>" "<name>" ] p;
+    p:
+    builtins.replaceStrings [ "<ws>" "<triple>" "<pkg>" "<v>" ] [ "<name>" "<name>" "<name>" "<name>" ]
+      p;
 
   refsOf =
     file:

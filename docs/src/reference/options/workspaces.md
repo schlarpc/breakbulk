@@ -238,13 +238,14 @@ selection from ` config.workspaces.<ws>.members `:
 ```nix
 { config, lib, ... }:
 {
-  workspaces.default.targets.x86_64-unknown-linux-gnu.tests =
+  workspaces.default.targets.x86_64-unknown-linux-gnu.variantDefaults.tests =
     lib.filter (lib.hasPrefix "core-")
       (lib.attrNames config.workspaces.default.members);
 }
 ```
 
-The selection options also take ` { exclude = [ … ]; } `: every
+The selection options (` variants.<v>.packages `, ` tests `,
+` products `, ` benches `) also take ` { exclude = [ … ]; } `: every
 member but those\.
 
 *Type:*
@@ -538,7 +539,7 @@ null
 ## `workspaces.<name>.targets`
 
 The triples this workspace is built for\. Each is planned on its
-own (` --target <triple> `)\. Besides ` packages `, an entry takes
+own (` --target <triple> `)\. Besides ` variantDefaults `, an entry takes
 every option of ` targets.<triple> `: they are merged with the
 repository-wide ` targets.<triple> ` for this workspace only, as
 two definitions of the same options merge (lists concatenate,
@@ -562,107 +563,13 @@ attribute set of module
 ````nix
 {
   wasm32-unknown-unknown = {
-    packages = [ "ui" ];
+    variantDefaults.packages = [ "ui" ];
     # Any `targets.<triple>` option, for this workspace only.
     rustflags = [ "--cfg" "getrandom_backend=\"wasm_js\"" ];
   };
 }
 
 ````
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.targets.<name>.packages`
-
-The packages to plan for this target, each traced with ` -p `, in
-the build and the test plan\. ` null ` traces ` --workspace `\.
-` { exclude = [ … ]; } `: every member
-([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
-package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
-` [!…] `)\. An entry that matches no member is an error (Cargo only
-warns)\.
-
-*Type:*
-null or (list of string) or (submodule)
-
-*Default:*
-
-```nix
-null
-```
-
-*Example:*
-
-```nix
-{ exclude = [ "xtask" ]; }
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.targets.<name>.products`
-
-Products on this target, the counterpart of ` tests `\. ` false `: none
-(a target that is only tested, such as the native target of
-crates that ship as wasm and run their unit tests natively): the
-build plan is not traced, and the target has no ` packages.<pkg> `
-and no product checks; test binaries, test runs, test apps,
-doctests and benches are unchanged\. A list of packages: products
-for those packages only\. ` true `: every package the variant plans\.
-` { exclude = [ … ]; } `: every member
-([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
-package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
-` [!…] `)\. An entry that matches no member is an error (Cargo only
-warns)\.
-
-*Type:*
-boolean or (list of string) or (submodule)
-
-*Default:*
-
-```nix
-true
-```
-
-*Example:*
-
-```nix
-false
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.targets.<name>.tests`
-
-Test binaries, test runs, test apps and doctests on this target\.
-` false `: none (a target that is only built, such as a wasm
-component whose tests run natively); the test plan is then not
-traced, except for a check or clippy variant with ` allTargets `\. A
-list of packages: the test plan is ` cargo test -p <pkg> … `
-for those packages only, and only their tests are run\. ` true `: the
-variant’s or target’s package selection\.
-` { exclude = [ … ]; } `: every member
-([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
-package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
-` [!…] `)\. An entry that matches no member is an error (Cargo only
-warns)\.
-
-*Type:*
-boolean or (list of string) or (submodule)
-
-*Default:*
-
-```nix
-true
-```
-
-*Example:*
-
-```nix
-{ exclude = [ "*-bench" ]; }
-```
 
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
@@ -946,11 +853,14 @@ attribute set of (submodule)
 
 ## `workspaces.<name>.variants.<name>.packages`
 
-The packages this variant plans, each traced with ` -p `, in
-place of the target’s ` packages ` (` workspaces.<ws>.targets.<triple>.packages `)\.
-` null `: the target’s selection\. Features then name the
-selected package’s own features, as with ` cargo build -p <pkg> --features <f> `; ` breakbulk.variants.featurePowerset `
-makes such variants with ` scope = "package" `\.
+The packages this variant plans on a target, in every plan\.
+` true `: the whole workspace (` --workspace `)\. A list, or the
+exclude form: each traced with ` -p `; features then name the
+selected packages’ own features, as with ` cargo build -p <pkg> --features <f> ` (` breakbulk.variants.featurePowerset `
+makes such variants with ` scope = "package" `)\. ` false `:
+nothing, no plan is traced\. For every variant on one target,
+set it in the target’s ` variantDefaults `
+(` workspaces.<ws>.targets.<triple>.variantDefaults.packages `)\.
 ` { exclude = [ … ]; } `: every member
 ([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
 package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
@@ -958,12 +868,12 @@ package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
 warns)\.
 
 *Type:*
-null or (list of string) or (submodule)
+boolean, list of package names, or { exclude = \[ … ]; }
 
 *Default:*
 
 ```nix
-null
+true
 ```
 
 *Example:*
@@ -993,46 +903,36 @@ false
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
-## `workspaces.<name>.variants.<name>.allTargets`
-
-For ` check ` and ` clippy ` variants: also check every target,
-as ` cargo check --all-targets ` does (tests, examples, benches
-in test mode, through the test plan)\. ` false `: plain ` cargo check ` (libraries and bins, the build plan only), for gates
-that do not check test code\. Only check and clippy variants
-take ` false `\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-true
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
 ## `workspaces.<name>.variants.<name>.benches`
 
-Also trace ` cargo bench --no-run ` with this variant’s settings
-(use ` profile = "bench" `): bench binaries, and lib and bin
-harnesses in bench mode, at
-` target.<triple>.variants.<v>.benches.<pkg>.<bench> `\.
-` target.<triple>.benches ` is the default variant’s when it has
-benches, else the one variant with ` benches = true `\. The test
-plan builds no benches (` cargo test --no-run ` does not)\. Each
-bench binary also runs once, with ` --test `, as a check of the
-variant, under the package’s
-[` bench `](packages\.md\#packagesnamebench) run settings\.
+The bench plan, ` cargo bench --no-run ` with this variant’s
+settings (use ` profile = "bench" `): bench binaries, and lib
+and bin harnesses in bench mode, at
+` target.<triple>.variants.<v>.benches.<pkg>.<bench> `\. ` false `:
+none, the plan is not traced\. ` true `: those of the ` packages `
+selection\. A list of packages, or the exclude form: ` cargo bench -p <pkg> … ` for those only\. Build and coverage variants
+only\. ` target.<triple>.benches ` is the default variant’s when
+it has benches, else the one variant’s that has\. The test plan
+builds no benches (` cargo test --no-run ` does not)\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
 
 *Type:*
-boolean
+boolean, list of package names, or { exclude = \[ … ]; }
 
 *Default:*
 
 ```nix
 false
+```
+
+*Example:*
+
+```nix
+true
 ```
 
 *Declared by:*
@@ -1263,6 +1163,41 @@ false
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.variants.<name>.products`
+
+Products (` packages.<pkg> `) and their checks, from the build
+plan\. ` true `: one for every package ` packages ` selects\.
+` false `: none, and the build plan is not traced: a target that
+is only tested (the native target of crates that ship as wasm
+and run their unit tests natively); a check or clippy
+variant’s ` check ` then covers the test plan only\. A list of
+packages, or the exclude form: products for those only, from
+the same build plan of ` packages `\. Test binaries, test runs,
+doctests and benches do not depend on it\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
+
+*Type:*
+boolean, list of package names, or { exclude = \[ … ]; }
+
+*Default:*
+
+```nix
+true
+```
+
+*Example:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.variants.<name>.profile`
 
 The Cargo profile (` --profile `) of the build plan, and of the
@@ -1480,7 +1415,7 @@ one of “auto”, “cargo”, “remap”, “keep”
 
 This variant’s settings on one of its targets: any option of
 the variant (` features `, ` noDefaultFeatures `, ` profile `,
-` testProfile `, ` cargoConfig `, ` allTargets `, ` clippyArgs `, ` packages `, ` benches `, ` checks `, …)
+` testProfile `, ` cargoConfig `, ` clippyArgs `, ` packages `, ` tests `, ` benches `, ` checks `, …)
 except ` targets `\. They apply over the target’s
 ` variantDefaults `
 (` workspaces.<ws>.targets.<triple>.variantDefaults `) and the
@@ -1506,7 +1441,7 @@ attribute set of module
   x86_64-pc-windows-msvc.features = [ "windows" ];
   wasm32-unknown-unknown = {
     noDefaultFeatures = lib.mkForce true;
-    allTargets = false;
+    tests = false;
   };
 }
 
@@ -1571,6 +1506,40 @@ string
 
 ```nix
 "release"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.variants.<name>.tests`
+
+The test plan (` cargo test --no-run `; for a check or clippy
+variant, ` cargo check --all-targets `): test binaries, test
+runs, test apps and doctests\. ` true `: those of the ` packages `
+selection\. ` false `: none, and the test plan is not traced: a
+target that is only built (a wasm component whose tests run
+natively, with ` targets.<triple>.variantDefaults.tests = false `), or on a check or clippy variant plain ` cargo check `
+(libraries and binaries)\. A list of packages, or the exclude
+form: the test plan is ` cargo test -p <pkg> … ` for those only\.
+` { exclude = [ … ]; } `: every member
+([` members `](\#workspacesnamemembers)) but those, as ` --workspace --exclude <entry>… ` selects; each is traced with ` -p `\. An entry is a
+package name, or a glob pattern as Cargo takes it (` * `, ` ? `, ` […] `,
+` [!…] `)\. An entry that matches no member is an error (Cargo only
+warns)\.
+
+*Type:*
+boolean, list of package names, or { exclude = \[ … ]; }
+
+*Default:*
+
+```nix
+true
+```
+
+*Example:*
+
+```nix
+{ exclude = [ "*-bench" ]; }
 ```
 
 *Declared by:*

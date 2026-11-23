@@ -590,8 +590,9 @@ impl<'a> Builder<'a> {
             "package `{package}` builds for `{t}`, not for the planned target `{}`: \
              breakbulk plans one target at a time and does not support \
              `package.forced-target` (cargo-features = [\"per-package-target\"]); \
-             remove it, or leave the package out of this target's plan \
-             (`workspaces.<ws>.targets.<triple>.packages`)",
+             remove it, or leave the package out of this target's plans \
+             (`workspaces.<ws>.variants.<v>.packages`, for every variant in \
+             `workspaces.<ws>.targets.<triple>.variantDefaults`)",
             self.ctx.target.arg
         )
     }

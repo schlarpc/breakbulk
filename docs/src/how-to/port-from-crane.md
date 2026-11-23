@@ -19,7 +19,7 @@ differs in the output.
 | `cargoTest` | a test run per test binary, in `repo.checks`; arguments after `--` in [`test.args`](../reference/options/packages.md#packagesnametestargs) |
 | `cargoDocTest` | a doctest run per library, in `repo.checks` |
 | `cargoNextest` | [`test.runner = "nextest"`](../reference/options/packages.md#packagesnametestrunner), for one package or in [`memberDefaults`](../reference/options/workspaces.md#workspacesnamememberdefaults); each test binary is still its own check |
-| `cargoClippy` | a variant with [`mode = "clippy"`](../reference/options/workspaces.md#workspacesnamevariantsnamemode); the arguments after `--` in `cargoClippyExtraArgs` go in [`clippyArgs`](../reference/options/workspaces.md#workspacesnamevariantsnameclippyargs), and `--all-targets` is the default ([`allTargets`](../reference/options/workspaces.md#workspacesnamevariantsnamealltargets)) |
+| `cargoClippy` | a variant with [`mode = "clippy"`](../reference/options/workspaces.md#workspacesnamevariantsnamemode); the arguments after `--` in `cargoClippyExtraArgs` go in [`clippyArgs`](../reference/options/workspaces.md#workspacesnamevariantsnameclippyargs), and `--all-targets` is the default ([`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests) drops it) |
 | `cargoFmt` | [`workspaces.<ws>.fmt.enable`](../reference/options/workspaces.md#workspacesnamefmtenable) |
 | `cargoLlvmCov`, `cargoTarpaulin` | a variant with `mode = "coverage"`: instrumented products, and test runs that keep their raw profiles; no report |
 | `cargoDoc` | `repo.workspaces.<ws>.target.<triple>.docs`, the folder `cargo doc` writes ([Documentation](../reference/outputs.md#documentation)); `--no-deps` is the default ([`docs.noDeps`](../reference/options/workspaces.md#workspacesnamevariantsnamedocsnodeps)); not in `repo.checks` |
@@ -40,8 +40,8 @@ differs in the output.
 | `devShell` | `repo.workspaces.<ws>.devShell` ([The dev shell](../explanation/configuration.md#the-dev-shell)) |
 
 A product never runs tests, so `doCheck = false` has no counterpart. To
-leave test runs out of `repo.checks`, use
-[`targets.<triple>.tests`](../reference/options/workspaces.md#workspacesnametargetsnametests)
+leave test runs out of `repo.checks`, use a variant's
+[`tests`](../reference/options/workspaces.md#workspacesnamevariantsnametests)
 or [`test.binaries.<key>.enable`](../reference/options/packages.md#packagesnametestbinariesnameenable).
 
 ## A repository with several workspaces
@@ -110,8 +110,8 @@ in
         cargo = stable;
       };
       targets = {
-        ${wasm}.tests = false;
-        ${native}.products = false;
+        ${wasm}.variantDefaults.tests = false;
+        ${native}.variantDefaults.products = false;
       };
     };
     # The nightly workspace.
@@ -142,8 +142,9 @@ What each part replaces:
   lockfile. A preset picks its tools to match the rustc of the workspace
   that uses it.
 - **`CARGO_BUILD_TARGET = "wasm32-unknown-unknown"`** becomes the
-  workspace's `targets`. `tests = false` leaves out the wasm32 test
-  binaries, and `products = false` leaves out the native products, so
+  workspace's `targets`. `tests = false` in the wasm32 target's
+  `variantDefaults` leaves out its test binaries, and `products = false`
+  leaves out the native products, so
   the component is built for wasm32 and tested natively. The
   `wasmComponent` preset turns the core module into a component.
 - **A crane package passed into another derivation's environment**

@@ -144,18 +144,6 @@ rec {
       description = description + "\n\n" + inputsNote;
     };
 
-  # A package selection by what it leaves out: `{ exclude = [ … ]; }`,
-  # the workspace's members but those (lib/manifest.nix excludeMembers).
-  excludeSelection = types.submodule {
-    options.exclude = mkOption {
-      type = types.listOf types.str;
-      description = ''
-        Members to leave out, as `cargo … --workspace --exclude`: package
-        names, or glob patterns (`*`, `?`, `[…]`, `[!…]`).
-      '';
-    };
-  };
-
   # The content of a Cargo config file: tables of booleans, integers,
   # strings and arrays (Cargo's config has no floats or dates). Tables
   # merge and arrays concatenate between definitions; a single value set
@@ -176,8 +164,28 @@ rec {
     in
     types.attrsOf value;
 
-  # A list of packages, or the exclude form.
-  packageList = types.either (types.listOf types.str) excludeSelection;
+  # A selection of a workspace's members: `true` (all), `false` (none), a
+  # list of package names, or `{ exclude = [ … ]; }` (all but those). One
+  # value, not merged: two definitions at one priority must agree, and in
+  # layers (`layer`) the higher one's replaces the lower's, a list
+  # included. Not `types.oneOf`, whose list member would concatenate a
+  # layer's list with a lower layer's, and refuse a list over a boolean.
+  selection = lib.mkOptionType {
+    name = "selection";
+    description = "boolean, list of package names, or { exclude = [ … ]; }";
+    descriptionClass = "conjunction";
+    check =
+      v:
+      builtins.isBool v
+      || (builtins.isList v && lib.all builtins.isString v)
+      || (
+        builtins.isAttrs v
+        && lib.attrNames v == [ "exclude" ]
+        && builtins.isList v.exclude
+        && lib.all builtins.isString v.exclude
+      );
+    merge = lib.mergeEqualOption;
+  };
 
   # A stage or check definition. Kept as raw values
   # so `lib.mkForce null` can remove one.
@@ -195,6 +203,7 @@ rec {
       singleValued t.nestedTypes.left && singleValued t.nestedTypes.right
     else
       lib.elem t.name [
+        "selection"
         "str"
         "nonEmptyStr"
         "singleLineStr"

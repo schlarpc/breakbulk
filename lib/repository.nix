@@ -721,8 +721,8 @@ let
   # `targets.<triple>` and the workspace's own `workspaces.<ws>.targets.<triple>`
   # (both modules, lib/modules/target-spec.nix), evaluated together with the
   # workspace's toolchain, so a preset picks tools for that workspace's
-  # rustc. `present` is false when neither defines anything but `packages`
-  # and the triple has no default preset (`targetTraits.presetRule`):
+  # rustc. `present` is false when neither defines anything but
+  # `variantDefaults` and the triple has no default preset (`targetTraits.presetRule`):
   # such a target has no spec (the toolchain as Cargo finds it). A triple
   # whose preset needs arguments or a choice fails here when the target
   # sets no preset, no linker and not `preset = null`: the empty spec
@@ -754,18 +754,10 @@ let
         lib.collect lib.isOption (
           removeAttrs e.options [
             "_module"
-            "packages"
-            "tests"
-            "products"
             "variantDefaults"
           ]
         )
       );
-      selections = {
-        packages = e.config.packages or null;
-        tests = e.config.tests or true;
-        products = e.config.products or true;
-      };
       rule = targetTraits.presetRule {
         inherit pkgs triple;
         traits = targetTraits.resolve {
@@ -785,27 +777,22 @@ let
           repoDef != null
           || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions)
           || e.config.preset != null;
-      selectionErrors = lib.concatLists (
-        lib.mapAttrsToList (
-          o: s:
-          lib.optionals (builtins.isAttrs s) (
-            map (
-              m: "breakbulk: workspaces.${wsName}.targets.${triple}.${o}.exclude${bt.setIn e.options.${o}}: ${m}"
-            ) (excludeOf ws s).errors
-          )
-        ) selections
-      );
-    }
-    // lib.mapAttrs (_: resolveSelection ws) selections;
+    };
   targetSpecs = lib.mapAttrs (
     wsName: ws:
     lib.genAttrs (lib.unique (lib.attrNames ws.targets ++ [ nativeTriple ])) (evalTargetSpec wsName ws)
   ) cfg.workspaces;
-  # The exclude form of a package selection (`{ exclude = [ … ]; }`) against
-  # the workspace's members, and any selection with it resolved to the
-  # members it leaves.
-  excludeOf = ws: s: manifest.excludeMembers (lib.attrNames ws.members) s.exclude;
-  resolveSelection = ws: s: if builtins.isAttrs s then (excludeOf ws s).selected else s;
+  # A selection (lib/modules/types.nix `selection`) as the plans take it:
+  # false (none), null (the whole workspace) or a list of members, the
+  # exclude form resolved against the workspace's members.
+  resolveSelection =
+    ws: s:
+    if s == true then
+      null
+    else if builtins.isAttrs s then
+      (manifest.excludeMembers (lib.attrNames ws.members) s.exclude).selected
+    else
+      s;
   # The spec's values, or null when the workspace has none for the triple.
   targetCfgOf =
     wsName: triple:
@@ -820,7 +807,6 @@ let
       t = targetCfgOf wsName triple;
     in
     if t == null then default else t.${field};
-  selectionOf = wsName: triple: targetSpecs.${wsName}.${triple}.packages;
   # The target's traits (lib/target-traits.nix): the triple's built-in ones
   # with `targets.<triple>.traits` (repository-wide and the workspace's)
   # merged over them. Every platform-dependent decision below reads these.
@@ -1184,41 +1170,27 @@ let
 
   # --- workspaces --------------------------------------------------------------
 
-  # The packages a variant plans on a target (null: the whole workspace):
-  # the variant's own selection, else the target's.
-  selOf =
-    wsName: triple: v:
-    if v.packages != null then
-      resolveSelection cfg.workspaces.${wsName} v.packages
-    else
-      selectionOf wsName triple;
-  # The test plan's selection: false (no test outputs on this target), a
-  # list (`workspaces.<ws>.targets.<t>.tests`), or the variant's selection.
-  testSelOf =
-    wsName: triple: v:
+  # The packages a variant plans on a target (its settings there, `v`):
+  # false (none: no plan is traced), null (the whole workspace) or a list.
+  selOf = wsName: v: resolveSelection cfg.workspaces.${wsName} v.packages;
+  # A plan's selection, `option` of `v` (`tests`, `products`, `benches`):
+  # false (the plan is not traced), its own list, or with `true` the
+  # variant's `packages`.
+  planSelOf =
+    option: wsName: v:
     let
-      t = targetSpecs.${wsName}.${triple}.tests;
+      sel = selOf wsName v;
     in
-    if t == false then
+    if sel == false || v.${option} == false then
       false
-    else if builtins.isList t then
-      t
+    else if v.${option} == true then
+      sel
     else
-      selOf wsName triple v;
-
-  # The packages with products: false (none; the build plan is then never
-  # read), the target's list, or the variant's selection.
-  productSelOf =
-    wsName: triple: v:
-    let
-      p = targetSpecs.${wsName}.${triple}.products;
-    in
-    if p == false then
-      false
-    else if builtins.isList p then
-      p
-    else
-      selOf wsName triple v;
+      resolveSelection cfg.workspaces.${wsName} v.${option};
+  testSelOf = planSelOf "tests";
+  # The packages with products; the build plan is traced for `selOf`.
+  productSelOf = planSelOf "products";
+  benchSelOf = planSelOf "benches";
 
   # The variants planned for a target (`variants.<v>.targets`).
   variantsFor =
@@ -1257,8 +1229,11 @@ let
     let
       v = variantCells.${wsName}.${triple}.${vName};
       entries = locks.${wsName};
-      sel = selOf wsName triple v;
-      tsel = testSelOf wsName triple v;
+      # A plan whose selection is false is never read.
+      listOr = s: if builtins.isList s then s else [ ];
+      sel = selOf wsName v;
+      tsel = testSelOf wsName v;
+      bsel = benchSelOf wsName v;
       s = specFor wsName triple;
       # Target units only: host units' products are not shipped.
       debugEnv = products.targetUnitEnv (stageSetArgs wsName triple);
@@ -1283,14 +1258,9 @@ let
           ;
         variant = vName;
         rootNames = ws.roots;
-        select = if sel == null then [ ] else sel;
-        testSelect =
-          if builtins.isList tsel then
-            tsel
-          else if sel == null then
-            [ ]
-          else
-            sel;
+        select = listOr sel;
+        testSelect = listOr tsel;
+        benchSelect = listOr bsel;
         extraSources = extraSourcesOf wsName triple vName entries;
         productInputs = productInputsOf wsName triple vName entries;
         packageOverrides = instOverrides wsName entries triple vName;
@@ -1311,7 +1281,7 @@ let
         rustcWorkspaceWrapper =
           if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else v.rustcWorkspaceWrapper;
         clippyOption = "workspaces.${wsName}.toolchain.clippy";
-        bench = v.benches;
+        bench = bsel != false;
         docsNoDeps = v.docs.noDeps;
         inherit (s)
           runner
@@ -1513,14 +1483,20 @@ let
             vName: inst:
             let
               v = variantCells.${wsName}.${triple}.${vName};
-              sel = selOf wsName triple v;
-              # Test outputs: none when the target has `tests = false`.
-              tsel = testSelOf wsName triple v;
+              checking = v.mode == "check" || v.mode == "clippy";
+              # Test outputs: none with `tests = false`.
+              tsel = testSelOf wsName v;
               testsOn = tsel != false;
               tSel = if testsOn then tsel else null;
               ifTests = attrs: if testsOn then attrs else { };
-              psel = productSelOf wsName triple v;
+              psel = productSelOf wsName v;
+              bsel = benchSelOf wsName v;
+              ifBenches = attrs: if bsel != false then attrs else { };
+              bSel = if bsel != false then bsel else null;
               packages = if psel == false then { } else productsOf wsName ws triple vName v inst psel;
+              # The plans the variant traces, of the build and test plans:
+              # a check or clippy variant's `check` builds their units.
+              traced = lib.optional (psel != false) "build" ++ lib.optional testsOn "test";
             in
             {
               inherit packages;
@@ -1529,17 +1505,8 @@ let
               # them. null in dynamic-derivation mode.
               productInputErrors = undeclaredProductInputs wsName triple vName inst packages;
               # The `buildScriptPaths` check of each plan the variant
-              # builds: the build plan (unless products are off), and the
-              # test plan when there are test outputs; a check or clippy
-              # variant's plans are those its `check` builds.
-              buildScriptPaths =
-                let
-                  checking = v.mode == "check" || v.mode == "clippy";
-                  kinds =
-                    lib.optional (checking || productSelOf wsName triple v != false) "build"
-                    ++ lib.optional (if checking then v.allTargets else testsOn) "test";
-                in
-                lib.genAttrs kinds (kind: planPathsCheck wsName triple vName inst kind);
+              # traces.
+              buildScriptPaths = lib.genAttrs traced (kind: planPathsCheck wsName triple vName inst kind);
               tests = ifTests (testsOf inst tSel);
               testRuns = ifTests (selectPkgs tSel inst.testRuns);
               # testRuns named as `tests` names test binaries, for repo.checks.
@@ -1550,30 +1517,29 @@ let
               enabledDoctests = ifTests (
                 lib.filterAttrs (pkg: _: inst.checks ? "doctest/${pkg}") (selectPkgs tSel inst.doctests)
               );
-              benches = benchesOf inst sel;
-              benchRuns = selectPkgs sel inst.benchRuns;
+              benches = ifBenches (benchesOf inst bSel);
+              benchRuns = ifBenches (selectPkgs bSel inst.benchRuns);
               # benchRuns named as `benches` names bench binaries; `.enabled`
               # holds those in repo.checks (`bench.enable`).
-              namedBenchRuns = namedRuns' true inst.benchRuns (pkg: k: inst.benchChecks ? "test/${pkg}/${k}") sel;
+              namedBenchRuns = ifBenches (
+                namedRuns' true inst.benchRuns (pkg: k: inst.benchChecks ? "test/${pkg}/${k}") bSel
+              );
               # `cargo doc` of the variant's packages (lib/workspace.nix).
               inherit (inst) docs;
             }
-            // lib.optionalAttrs (v.mode == "check" || v.mode == "clippy") {
-              # Every unit of both plans (`cargo check` and `cargo check
-              # --all-targets`): for clippy, its lints on every workspace
-              # member. With `allTargets = false`, the build plan's only;
-              # the test plan is then never planned.
+            // lib.optionalAttrs (checking && traced != [ ]) {
+              # Every unit of the plans it traces (`cargo check` and `cargo
+              # check --all-targets`): for clippy, its lints on every
+              # workspace member. With `tests = false`, the build plan's
+              # only; with `products = false`, the test plan's.
               check = variantsLib.unitsCheck {
                 inherit pkgs;
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
                 units =
-                  let
-                    kinds = [ "build" ] ++ lib.optional v.allTargets "test";
-                  in
                   if inst.delivery == "dynamic" then
-                    map (k: inst.allUnits.${k}) kinds
+                    map (k: inst.allUnits.${k}) traced
                   else
-                    lib.concatMap (k: lib.attrValues inst.units.${k}) kinds;
+                    lib.concatMap (k: lib.attrValues inst.units.${k}) traced;
               };
             }
           ) vs;
@@ -1591,9 +1557,9 @@ let
               buildScriptPaths = { };
             };
           cells = variantCells.${wsName}.${triple};
-          benchVariants = lib.attrNames (lib.filterAttrs (_: v: v.benches) cells);
+          benchVariants = lib.attrNames (lib.filterAttrs (_: v: benchSelOf wsName v != false) cells);
           benchVariant =
-            if cells.${ws.defaultVariant}.benches or false then
+            if lib.elem ws.defaultVariant benchVariants then
               ws.defaultVariant
             else if lib.length benchVariants == 1 then
               lib.head benchVariants
@@ -1922,14 +1888,8 @@ let
   cellAssertions = lib.concatMap (lib.concatMap (lib.concatMap (v: v.assertions))) (
     map (lib.mapAttrsToList (_: lib.attrValues)) (lib.attrValues variantCells)
   );
-  # A target's exclude forms are checked here: its selections are not
-  # options of the workspace module, which cannot read them.
-  selectionErrors = lib.concatMap (lib.concatMap (s: s.selectionErrors)) (
-    map lib.attrValues (lib.attrValues targetSpecs)
-  );
   failedAssertions = lib.unique (
     map (a: a.message) (lib.filter (a: !a.assertion) (cfg.assertions ++ cellAssertions))
-    ++ selectionErrors
   );
   delivery = dynamic.checkMode cfg.mode;
 

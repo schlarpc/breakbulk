@@ -179,7 +179,7 @@ in
     # The component for wasm; its unit tests natively only (flake.nix
     # `<crate>-test`).
     targets = {
-      ${wasm}.tests = false;
+      ${wasm}.variantDefaults.tests = false;
       ${native} = { };
     };
   });
