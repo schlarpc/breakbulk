@@ -3609,6 +3609,33 @@ in
     assert lib.assertMsg (bad == [ ]) "tools-variant: ${builtins.toJSON bad}";
     evalCheck "tools-variant" "ok";
 
+  # IFD mode rejects a value that depends on all outputs of a derivation
+  # (a `drvPath` string), as dynamic-derivation mode must: `app`'s units
+  # fail to evaluate, the other members' do not.
+  ifd-all-outputs =
+    let
+      r = mkRepo (fixtures + "/same-workspace-products") [
+        (oneWs ".")
+        {
+          mode = "ifd";
+          packages.app.env.HELLO_DRV = pkgs.hello.drvPath;
+        }
+      ];
+      ok = d: (builtins.tryEval (builtins.unsafeDiscardStringContext d.drvPath)).success;
+      p = r.workspaces.main.packages;
+      got = {
+        app = ok p.app;
+        tool = ok p.tool;
+      };
+    in
+    assert lib.assertMsg (
+      got == {
+        app = false;
+        tool = true;
+      }
+    ) "ifd-all-outputs: ${builtins.toJSON got}";
+    evalCheck "ifd-all-outputs" "ok";
+
   # Instantiating a plan needs only the names of package settings; their
   # values reach a unit's derivation when it is substituted. Here every
   # value-carrying setting of `app` (package level and `target.<triple>`,

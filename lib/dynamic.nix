@@ -57,25 +57,33 @@ let
     toJSON
     unsafeDiscardStringContext
     ;
-  inherit (instantiateLib) instantiate outerOf rootShape;
+  inherit (instantiateLib)
+    instantiate
+    outerOf
+    rootShape
+    checkInput
+    ;
 
   inherit (featureGates) available;
 
+  # The same test as the default rule (`available`): an explicit
+  # `mode = "dynamic"` is valid exactly where the default would pick it.
   checkMode =
     mode:
-    if mode == "dynamic" && !featureGates.hasOutputOf then
-      throw "breakbulk: mode = \"dynamic\" needs an evaluator with the `dynamic-derivations` experimental feature (and `ca-derivations`), on Nix 2.36 or later; use mode = \"ifd\""
+    if mode == "dynamic" && !available then
+      throw "breakbulk: mode = \"dynamic\" needs an evaluator with the `dynamic-derivations` experimental feature (and `ca-derivations`), on Nix 2.36 or later (this is ${builtins.nixVersion}${
+        lib.optionalString (!featureGates.hasOutputOf) ", without `builtins.outputOf`"
+      }); use mode = \"ifd\""
     else
       mode;
 
-  # getContext as values.json takes it.
+  # getContext as values.json takes it (an all-outputs context is an
+  # error in both modes: instantiateLib.checkInput).
   contextList =
     key: v:
     lib.mapAttrsToList (
       p: c:
-      if c.allOutputs or false then
-        throw "breakbulk: the input `${key}` depends on all outputs of ${p} (a `drvPath` string); dynamic-derivation mode cannot pass that to a unit"
-      else if c ? outputs then
+      if c ? outputs then
         {
           drv = p;
           inherit (c) outputs;
@@ -131,7 +139,7 @@ let
       );
       valuesJson = lib.mapAttrs (k: v: {
         value = unsafeDiscardStringContext v;
-        context = contextList k v;
+        context = contextList k (checkInput k v);
       }) values;
       predictJson = lib.mapAttrsToList (
         key: spec:

@@ -46,7 +46,7 @@ What is therefore not known at evaluation time, in either mode:
 - **Test runs** read what they need from the wrapper's `breakbulk-root.json` at build time, through a small derivation per run that copies it out, narrowed to the run (`runInfo` in `lib/test-runs.nix`; [Tests](products.md#tests)), so that the run does not depend on the wrapper. With `test.runner = "nextest"` they write nextest's metadata from the wrapper's (`TestSpec.nextest`, with the sysroot library directory filled in at build time). `test_spec` in `breakbulk-instantiate` (`src/test_spec.rs`) computes a test binary's spec; `lib/test-runs.nix` adds only what the Nix side knows (the sysroot library directory, the target's dynamic-library variable) and does not read `plan.json`.
 - **Test apps** read the wrapper's `breakbulk-root.json` when they run. The app script depends on the wrapper, so in dynamic-derivation mode it is resolved at build time, and its program path is a placeholder at evaluation time; `nix run` with `ca-derivations` builds it and substitutes the real path (`resolveString` in Nix's `src/nix/app.cc`). Every predicted test binary has an app; one Cargo did not build fails with the reason.
 
-The cost is one small derivation per root more than linking the unit's output directly, and IFD mode imports `units.json` to name each wrapper. IFD mode also gives `rootUnits` (each root's unit output), `doctestDrvs` and `docsDrv`, for tests and debugging.
+The cost is one small derivation per root more than linking the unit's output directly, and IFD mode imports `units.json` to name each wrapper. IFD mode also gives `rootUnits` (each root's unit output), `doctestDrvs` and `docsDrv`, for tests and debugging, under `repo.workspaces.<ws>.internal` with the other mode-specific attributes ([`internal`](../../reference/outputs.md#internal)).
 
 ## IFD mode
 
@@ -60,7 +60,7 @@ Its builder is `breakbulk-drv`, a separate binary (`crates/breakbulk-drv/`), so 
 
 1. It runs the same instantiation as IFD mode over the same `sources.json`, `toolchains.json`, `overrides.json`, `roots.json` and `outer.json`, giving the same `units.json` structure and root shape in memory.
    Before substituting, it makes the package views that [source prediction](sources.md#source-prediction) narrows, from their specs (`predict.json`): each tree is added as a `source` store path, the one IFD mode copies with `builtins.path`, and becomes its key's value. The views it narrows are inputs of the outer derivation.
-2. It substitutes every reference as `lib/instantiate.nix` does, from `values.json`: every input key's value without context, plus its string context as `builtins.getContext` gives it. From those contexts and the unit references it computes each derivation's input derivations and input sources exactly as `derivation` would (a plain path becomes an input source, an output an input derivation; `drvPath` strings with "all outputs" context are rejected). Every unit gets `passAsFile` as in IFD mode: `BREAKBULK_UNIT` above the same length, empty below it.
+2. It substitutes every reference as `lib/instantiate.nix` does, from `values.json`: every input key's value without context, plus its string context as `builtins.getContext` gives it. From those contexts and the unit references it computes each derivation's input derivations and input sources exactly as `derivation` would (a plain path becomes an input source, an output an input derivation). Every unit gets `passAsFile` as in IFD mode: `BREAKBULK_UNIT` above the same length, empty below it.
 3. It writes units, root stubs and wrappers in topological order with harmonia (pinned git commit) over the restricted daemon socket in `$NIX_REMOTE`, one connection for the whole build: output paths from harmonia's `hashDerivationModulo` (input `.drv` files it wrote are kept in memory, because the builder cannot read back what it added; the others are read from the store), the ATerm added as a text-hashed object whose references are its input sources and input derivations. `nix derivation add` cannot be used: paths added during the build are not visible inside its sandbox, and it reads its inputs. Every output variable must be present (as an empty string) before hashing. A derivation with a content-addressed or deferred input stays deferred, and its dependents reference its outputs by placeholder.
 4. It submits each wrapper of the root shape with `SubmitOutput` as its output. The doctests' configuration values come in `values.json`, so changing them reruns the outer derivation.
 
@@ -73,11 +73,32 @@ On the evaluation side, each wrapper of the root shape is `builtins.outputOf <ou
 The spike result is in [spikes/B-delivery.md](https://github.com/schlarpc/breakbulk/blob/spikes-archive/docs/spikes/B-delivery.md).
 - `recursive-nix` is not used. It has an open removal proposal, and `builder-rpc-v0` replaces it for this purpose.
 
+## What both modes check
+
+The modes differ in how units reach Nix, not in what a configuration may
+say. Both check the same things, at the same point:
+
+- **Roots and doctests** are predicted the same way, and `roots` and
+  `roots.doctests` replace the prediction in both.
+- **Output names**: every root's and doctest's wrapper is named as a
+  dynamic derivation's output must be (`outputName` in
+  `lib/instantiate.nix`; no two alike, `shape.rs`), in IFD mode too.
+- **Input values**: a value whose string context depends on all outputs
+  of a derivation (a `drvPath` string) is an error when a unit takes it
+  (`checkInput` in `lib/instantiate.nix`), because the outer derivation
+  cannot pass such a value on.
+- **Checks**: `repo.checks` has the same members; a product whose roots
+  Cargo all skipped is in both, and holds the no-binaries marker.
+
+One difference is left: a package's settings that name a product of the
+plan that builds the package are an infinite recursion in
+dynamic-derivation mode and are not detected in IFD mode (#152).
+
 ## Mode selection
 
 `mode` defaults to `"dynamic"` when `builtins ? outputOf` (the builtin is only registered when the `dynamic-derivations` feature is enabled) and `builtins.compareVersions builtins.nixVersion "2.36pre" >= 0` (master reports `2.36.0pre…`, which compares below `"2.36"`), and to `"ifd"` otherwise (`lib/nix-features.nix`, `defaultMode`). Determinate Nix reports its upstream base version there, so the same check works for it. `ca` defaults to `mode == "dynamic"`.
 
-Setting `mode` overrides the default; `mode = "dynamic"` on an evaluator without the `outputOf` builtin is an evaluation error. `repo.config.mode` is the mode chosen, and [`repo.nixFeatures`](../../reference/outputs.md#nixfeatures) the Nix features it needs. Every use of `outputOf`, of content addressing and of import from derivation goes through a gate in `lib/nix-features.nix` that checks it against that record. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
+Setting `mode` overrides the default; `mode = "dynamic"` where the default rule would not pick it (no `outputOf` builtin, or a Nix version before 2.36) is an evaluation error. `repo.config.mode` is the mode chosen, and [`repo.nixFeatures`](../../reference/outputs.md#nixfeatures) the Nix features it needs. Every use of `outputOf`, of content addressing and of import from derivation goes through a gate in `lib/nix-features.nix` that checks it against that record. A daemon or builder older than the evaluator still fails with Nix's own error; the docs point to `mode = "ifd"`.
 
 The daemon needs `dynamic-derivations` too: a daemon without it refuses to store the outer derivation ("text-hashed derivation output") even when the evaluator has it. mkRepository passes the mode to each workspace instance as `delivery`, with the record as `nixFeatures`.
 

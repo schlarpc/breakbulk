@@ -267,6 +267,27 @@ the build machine's triple: a binary or library for another package's
 settings to use. It is an error without a tools variant
 ([Use a workspace binary in another package's build](../how-to/workspace-tools.md)).
 
+### `internal`
+
+`repo.workspaces.<ws>.internal` is what the outputs are made of, for
+debugging and for breakbulk's own tests. Its shape can change in any
+release. `internal.instances.<triple>.<v>` is one workspace, target and
+variant's instance (`lib/workspace.nix`); among its attributes, some
+exist or work in one delivery mode only:
+
+| Attribute | IFD mode | Dynamic-derivation mode |
+| --- | --- | --- |
+| `units.<kind>.<unit id>` | the unit derivations | an error: units are not known at evaluation time |
+| `unitsJson.<kind>` | the instantiate derivation (`units.json`) | null |
+| `ifdUnits.<kind>` | `units` | the units through IFD mode (imports `units.json`), as `explainSharing` reads them |
+| `outer.<kind>` | absent (`{ }`) | the plan's outer derivation |
+| `allUnits.<kind>` | a derivation that builds every unit of the plan | the same, an output of the outer derivation |
+| `rootUnits`, `doctestDrvs`, `docsDrv` | each root's unit output, the doctest derivations, the docs derivation | empty or null |
+| `sources.predicted` | the predicted views, by key | empty: the outer derivation makes them |
+
+`plans`, `roots`, `tests`, `docs`, `buildScriptRuns`, `sources` (but
+`predicted`) and the test runs are the same in both modes.
+
 ### `explainSharing`
 
 `repo.explainSharing { a; b; package; }` takes two plans (from `plans`)
@@ -277,6 +298,14 @@ a plan share these (a check plan checks a proc macro that is a member,
 and builds it for its dependents), identical units are paired first,
 then units with the same outputs. With `b` a check variant's build plan,
 `a` a doc plan shows which of the docs' units the check variant shares.
+
+It reads unit derivations through IFD mode in both modes: it imports
+each plan's `units.json`, which builds the plans and
+`breakbulk-instantiate` at evaluation time, even where `mode` is
+`"dynamic"`. The derivations are the ones the outer derivation writes,
+except the units downstream of a product named in a package's settings
+(resolved at build time in dynamic-derivation mode), which it describes
+as IFD mode builds them.
 
 ### `nixFeatures`
 

@@ -341,7 +341,9 @@ rec {
             // lib.optionalAttrs (s.envCapture != null) { "override:${pkg}:capture:${p}" = str s.envCapture; }
           ) platformSpec
         ) overrides;
-      inputsJson = lib.mapAttrs (_: jsonInside) inputs;
+      # Checked once per key, when a unit first takes it.
+      checkedInputs = lib.mapAttrs checkInput inputs;
+      inputsJson = lib.mapAttrs (_: jsonInside) checkedInputs;
 
       input =
         set: k:
@@ -359,7 +361,7 @@ rec {
         else if p.json or false then
           input inputsJson p.input
         else
-          input inputs p.input;
+          input checkedInputs p.input;
 
       value = v: if isAttrs v then lib.concatMapStrings part v.parts else v;
 
@@ -446,6 +448,20 @@ rec {
       # them too, but from import from derivation.
       predictedSpecs = lib.mapAttrs (_: p: p.spec) predicted;
     };
+
+  # An input value, or an error when its string context depends on all
+  # outputs of a derivation (a `drvPath` string, `builtins.unsafeDiscardOutputDependency`'s
+  # opposite): dynamic-derivation mode's outer derivation cannot pass that
+  # to a unit (values.json names outputs), so neither mode does.
+  checkInput =
+    key: v:
+    let
+      all = lib.attrNames (lib.filterAttrs (_: c: c.allOutputs or false) (builtins.getContext v));
+    in
+    if all == [ ] then
+      v
+    else
+      throw "breakbulk: the input `${key}` depends on all outputs of ${lib.head all} (a `drvPath` string); a unit cannot take that: name an output's path instead (the derivation itself, or `.out`)";
 
   # The output name of a root's or doctest's wrapper (`n` a root name, or
   # `<package>/doctest`): `<package>.<kind>.<target>.drv`. A dynamic
