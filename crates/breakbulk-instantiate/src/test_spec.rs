@@ -167,7 +167,7 @@ pub(crate) fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<Test
 /// and `cargo metadata` resolves the workspace alone), by name.
 pub(crate) fn path_packages(plan: &Plan) -> BTreeMap<String, PathNode> {
     let name = |id: &str| package_name_version(id).map(|(n, _)| n.to_owned());
-    plan.path_packages
+    plan.packages
         .iter()
         .filter_map(|(id, p)| {
             let dir = workspace_dir(plan, id)?;

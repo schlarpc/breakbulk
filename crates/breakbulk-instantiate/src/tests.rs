@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::rendered::{RenderedUnit, derivation_output, package_name_version};
 use breakbulk_format::{
-    CompileUnit, Plan, Reference, Resolve, RootKind, Unit, UnitId, render_unit, unit_env_value,
+    Plan, Reference, Resolve, RootKind, Unit, UnitId, render_unit, unit_env_value,
 };
 
 use super::inputs::*;
@@ -184,7 +184,7 @@ impl Resolve for RealPaths<'_> {
             Reference::Out(o) => {
                 let output = match &self.0.plan.units[&o.out] {
                     Unit::Run(_) => "out",
-                    Unit::Compile(_) => derivation_output(&o.output),
+                    _ => derivation_output(&o.output),
                 };
                 (unit_path(&o.out, output), o.file.as_deref().unwrap_or(""))
             }
@@ -212,7 +212,7 @@ impl Resolve for RealPaths<'_> {
     fn keep_source_paths(&self) -> bool {
         self.0.toolchains.keep_source_paths
     }
-    fn remap_scope(&self, _: &UnitId, c: &CompileUnit) -> Option<String> {
+    fn remap_scope(&self, _: &UnitId, c: &Unit) -> Option<String> {
         if c.test || !self.0.toolchains.capabilities.remap_path_scope {
             return None;
         }
@@ -238,7 +238,7 @@ impl Resolve for RealPaths<'_> {
     fn link_captures(
         &self,
         _: &UnitId,
-        c: &CompileUnit,
+        c: &Unit,
         packages: &std::collections::BTreeSet<String>,
     ) -> Result<Vec<String>, String> {
         let own = self.ov(&c.package).map(|(k, _)| k);
@@ -500,7 +500,7 @@ fn list_like_variables_append_across_layers() {
     // The recorded env of the library also has a PATH (layer 3).
     let lib = match inputs.plan.units.get_mut(LIB).unwrap() {
         Unit::Compile(c) => c,
-        Unit::Run(_) => panic!(),
+        _ => panic!(),
     };
     lib.env.insert(
         "PATH".into(),
@@ -565,7 +565,7 @@ fn joined_recorded_values_are_json_escaped() {
     let recorded = "-DNAME=\"x\" -IC:\\inc";
     let lib = match inputs.plan.units.get_mut(LIB).unwrap() {
         Unit::Compile(c) => c,
-        Unit::Run(_) => panic!(),
+        _ => panic!(),
     };
     lib.env.insert(
         "BINDGEN_EXTRA_CLANG_ARGS".into(),
@@ -688,7 +688,7 @@ fn names_and_outputs() {
         let Some(Unit::Compile(c)) = inputs.plan.units.get_mut(LIB) else {
             panic!()
         };
-        c.krate.types = vec!["lib".into(), "cdylib".into()];
+        c.krate.as_mut().unwrap().types = vec!["lib".into(), "cdylib".into()];
         c.outputs
             .insert("bin".into(), ["libsmokelib.so".into()].into());
         split_debuginfo_as(&mut inputs, APP, kind);
@@ -715,7 +715,7 @@ fn unit_name_for_other_crates() {
     let Unit::Compile(c) = plan.units.get_mut(APP).unwrap() else {
         panic!()
     };
-    c.krate.name = "admin_cli".into();
+    c.krate.as_mut().unwrap().name = "admin_cli".into();
     assert_eq!(
         unit_name(APP, &plan.units[APP]),
         "smokeapp-0.1.0-bin-admin_cli"

@@ -871,7 +871,7 @@ impl Prepared {
                         )),
                     }
                 }
-                Unit::Run(_) => {}
+                Unit::Run(_) | Unit::Doctest(_) | Unit::Doc(_) => {}
             }
         }
         if !problems.is_empty() {

@@ -6,10 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_format::{
-    Arg, CargoTarget, CompileUnit, CrateInfo, Cwd, DepKind, Doc, Doctest, LinkArgKind, OutRef,
-    PLAN_VERSION, PackageTarget, PathDependency, PathPackage, PathTarget, Piece, Plan, PlanKind,
-    Platform, Reference, Root, RootKind, RunUnit, SearchIn, SearchPathsSplice, Splice, SpliceKind,
-    Text, Unit, UnitId, Variant, VariantMode, contains_sentinel,
+    Arg, CargoTarget, CrateInfo, Cwd, DepKind, LinkArgKind, OutRef, PLAN_VERSION, PackageFacts,
+    PathDependency, PathTarget, Piece, Plan, PlanKind, PlanTarget, Platform, Reference, Remap,
+    Root, RootKind, SearchIn, SearchPathsSplice, Splice, SpliceKind, Text, Unit, UnitBody, UnitId,
+    UnitKind, Variant, VariantMode, contains_sentinel,
 };
 
 use crate::describe;
@@ -330,53 +330,6 @@ fn without_runtool(args: &[String]) -> Vec<String> {
     out
 }
 
-/// The order of a doc plan's rustdoc commands ([`Builder::docs`]): each
-/// command is `documents[i]`, a (package, crate name), and reads the crates
-/// `reads[i]`. Each comes after the commands documenting what it reads;
-/// among those that may run, the smallest (crate name, package) first.
-/// Returns indexes into `documents`.
-fn doc_order(
-    documents: &[(String, String)],
-    reads: &[&BTreeSet<(String, String)>],
-) -> Result<Vec<usize>, Error> {
-    let documented: BTreeMap<&(String, String), usize> =
-        documents.iter().enumerate().map(|(i, d)| (d, i)).collect();
-    if documented.len() != documents.len() {
-        bail!("two rustdoc commands of `cargo doc` document the same crate of one package");
-    }
-    let mut waits_for = vec![0usize; documents.len()];
-    let mut unblocks: Vec<Vec<usize>> = vec![Vec::new(); documents.len()];
-    for (i, rs) in reads.iter().enumerate() {
-        for r in rs.iter() {
-            if let Some(&j) = documented.get(r)
-                && j != i
-            {
-                waits_for[i] += 1;
-                unblocks[j].push(i);
-            }
-        }
-    }
-    let key = |i: usize| (&documents[i].1, &documents[i].0, i);
-    let mut ready: BTreeSet<_> = (0..documents.len())
-        .filter(|&i| waits_for[i] == 0)
-        .map(key)
-        .collect();
-    let mut order = Vec::with_capacity(documents.len());
-    while let Some((_, _, i)) = ready.pop_first() {
-        order.push(i);
-        for &j in &unblocks[i] {
-            waits_for[j] -= 1;
-            if waits_for[j] == 0 {
-                ready.insert(key(j));
-            }
-        }
-    }
-    if order.len() != documents.len() {
-        bail!("the rustdoc commands of `cargo doc` read each other's crates in a cycle");
-    }
-    Ok(order)
-}
-
 /// The `--crate-name` of recorded arguments, or empty.
 fn crate_name(args: &[String]) -> String {
     arg_value(args, "--crate-name")
@@ -400,20 +353,6 @@ fn without_output_dir(args: &[String]) -> Vec<String> {
         i += 1;
     }
     out
-}
-
-/// `cargo metadata`'s description of a package's targets, for run units.
-fn package_targets(p: &Package) -> Vec<PackageTarget> {
-    let mut v: Vec<PackageTarget> = p
-        .targets
-        .iter()
-        .map(|t| PackageTarget {
-            name: t.name.clone(),
-            kind: t.kind.clone(),
-        })
-        .collect();
-    v.sort();
-    v
 }
 
 struct CompileRec<'a> {
@@ -1428,25 +1367,27 @@ impl<'a> Builder<'a> {
             .first()
             .map(|s| s.to_string())
             .unwrap_or_default();
-        Ok(Unit::Compile(CompileUnit {
-            package: c.package.id.clone(),
-            krate: CrateInfo {
-                name,
-                types: c.types.clone(),
-                edition,
+        Ok(Unit::new(
+            UnitKind::Compile,
+            UnitBody {
+                krate: Some(CrateInfo {
+                    name,
+                    types: c.types.clone(),
+                    edition,
+                }),
+                test: self.is_test_unit(c),
+                cargo_target: self.target_of(c).map(cargo_target),
+                program,
+                args: out,
+                env,
+                env_splices,
+                dylib_path_from: dylib,
+                cwd,
+                outputs: c.outputs.clone(),
+                uplifted: c.uplifted.clone(),
+                ..UnitBody::empty(c.package.id.clone(), c.platform)
             },
-            platform: c.platform,
-            test: self.is_test_unit(c),
-            cargo_target: self.target_of(c).map(cargo_target),
-            program,
-            args: out,
-            env,
-            env_splices,
-            dylib_path_from: dylib,
-            cwd,
-            outputs: c.outputs.clone(),
-            uplifted: c.uplifted.clone(),
-        }))
+        ))
     }
 
     fn run_unit(&self, r: &RunRec<'a>) -> Result<Unit, Error> {
@@ -1503,21 +1444,21 @@ impl<'a> Builder<'a> {
         let cwd = self
             .cwd(&rec.cwd, Some(&r.package.id))
             .map_err(|e| Error(format!("cwd: {}", e.0)))?;
-        Ok(Unit::Run(RunUnit {
-            package: r.package.id.clone(),
-            platform: r.platform,
-            links: r.package.links.clone(),
-            script: Reference::Out(script.clone()),
-            env,
-            cwd,
-            metadata_from,
-            dylib_path_from: dylib,
-            rust_version: r.package.rust_version.clone(),
-            targets: package_targets(r.package),
-            nightly_features_allowed: self.ctx.nightly,
-            build_dir_remap,
-            out_dir: self.out_dir_rel(r)?,
-        }))
+        Ok(Unit::new(
+            UnitKind::Run,
+            UnitBody {
+                program: vec![Text::Concat(vec![Piece::Ref(Reference::Out(
+                    script.clone(),
+                ))])],
+                env,
+                cwd,
+                metadata_from,
+                dylib_path_from: dylib,
+                build_dir_remap,
+                out_dir: self.out_dir_rel(r)?,
+                ..UnitBody::empty(r.package.id.clone(), r.platform)
+            },
+        ))
     }
 
     /// The plan's products ("Fields", `roots`): in a build plan, bins and
@@ -1604,61 +1545,75 @@ impl<'a> Builder<'a> {
         roots
     }
 
-    /// [`Plan::path_packages`]: the path packages under the skeleton that
-    /// the plan compiles, with their targets and the dependency edges
-    /// between them from `cargo metadata`'s resolve graph that one of
-    /// `plan`'s compile units uses. The planner's `cargo metadata` runs
-    /// with `--all-features`, so its resolve also holds the optional
-    /// dependencies the variant's features leave off.
-    fn path_packages(&self, plan: &Plan) -> BTreeMap<String, PathPackage> {
-        let mut used: BTreeSet<(&str, &str)> = BTreeSet::new();
-        for u in plan.units.values() {
-            if let Unit::Compile(c) = u {
-                for o in breakbulk_format::deps::direct_crate_refs(plan, c) {
-                    if let Some(Unit::Compile(d)) = plan.units.get(&o.out) {
-                        used.insert((c.package.as_str(), d.package.as_str()));
-                    }
-                }
-            }
-        }
+    /// [`Plan::packages`]: what `cargo metadata` says about every package
+    /// with a unit in `units`, and for the path packages under the
+    /// skeleton, their source paths and the dependency edges between them
+    /// from `cargo metadata`'s resolve graph that one of the compile units
+    /// uses. The planner's `cargo metadata` runs with `--all-features`, so
+    /// its resolve also holds the optional dependencies the variant's
+    /// features leave off.
+    fn packages(
+        &self,
+        units: &BTreeMap<UnitId, Unit>,
+    ) -> Result<BTreeMap<String, PackageFacts>, Error> {
         let skeleton = self.ctx.skeleton.trim_end_matches('/');
         let under = |p: &str| {
             p.strip_prefix(skeleton)
                 .and_then(|r| r.strip_prefix('/'))
                 .map(str::to_owned)
         };
-        let pkgs: BTreeMap<&str, &Package> = self
-            .compiles
-            .iter()
-            .map(|c| c.package)
-            .filter(|p| p.is_path() && (p.dir() == skeleton || under(p.dir()).is_some()))
-            .map(|p| (p.id.as_str(), p))
-            .collect();
+        let local = |p: &Package| p.is_path() && (p.dir() == skeleton || under(p.dir()).is_some());
+        let mut used: BTreeSet<(&str, &str)> = BTreeSet::new();
+        for c in units.values().filter(|u| u.is_compile()) {
+            for a in &c.args {
+                let Arg::Concat(pieces) = a else { continue };
+                for p in pieces {
+                    if let Piece::Ref(Reference::Out(o)) = p
+                        && o.output != "bin"
+                        && let Some(d) = units.get(&o.out)
+                        && d.is_compile()
+                    {
+                        used.insert((c.package.as_str(), d.package.as_str()));
+                    }
+                }
+            }
+        }
+        let ids: BTreeSet<&str> = units.values().map(|u| u.package.as_str()).collect();
         let nodes = self
             .metadata
             .resolve
             .as_ref()
             .map(|r| &r.nodes[..])
             .unwrap_or(&[]);
-        pkgs.iter()
-            .map(|(id, p)| {
-                let mut targets: Vec<PathTarget> = p
-                    .targets
-                    .iter()
-                    .map(|t| PathTarget {
-                        name: t.name.clone(),
-                        kind: t.kind.clone(),
-                        crate_types: t.crate_types.clone(),
-                        src_path: under(&t.src_path).unwrap_or_else(|| t.src_path.clone()),
-                    })
-                    .collect();
-                targets.sort();
-                let mut dependencies: Vec<PathDependency> = nodes
+        let mut out = BTreeMap::new();
+        for id in &ids {
+            let Some(p) = self.metadata.packages.iter().find(|p| p.id == *id) else {
+                bail!("package {id} has units but is not in `cargo metadata`");
+            };
+            let is_local = local(p);
+            let mut targets: Vec<PathTarget> = p
+                .targets
+                .iter()
+                .map(|t| PathTarget {
+                    name: t.name.clone(),
+                    kind: t.kind.clone(),
+                    crate_types: t.crate_types.clone(),
+                    src_path: if is_local { under(&t.src_path) } else { None },
+                })
+                .collect();
+            targets.sort();
+            let mut dependencies: Vec<PathDependency> = if is_local {
+                nodes
                     .iter()
                     .filter(|n| n.id == *id)
                     .flat_map(|n| &n.deps)
                     .filter(|d| {
-                        pkgs.contains_key(d.pkg.as_str()) && used.contains(&(*id, d.pkg.as_str()))
+                        used.contains(&(*id, d.pkg.as_str()))
+                            && self
+                                .metadata
+                                .packages
+                                .iter()
+                                .any(|q| q.id == d.pkg && local(q))
                     })
                     .map(|d| {
                         let mut kinds: Vec<DepKind> = d
@@ -1676,26 +1631,31 @@ impl<'a> Builder<'a> {
                             kinds,
                         }
                     })
-                    .collect();
-                dependencies.sort();
-                (
-                    (*id).to_owned(),
-                    PathPackage {
-                        targets,
-                        dependencies,
-                    },
-                )
-            })
-            .collect()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            dependencies.sort();
+            out.insert(
+                (*id).to_owned(),
+                PackageFacts {
+                    targets,
+                    rust_version: p.rust_version.clone(),
+                    links: p.links.clone(),
+                    dependencies,
+                },
+            );
+        }
+        Ok(out)
     }
 
-    /// The traced `rustdoc --test` commands, one per library, keyed
-    /// `d-<package name>`. Errors go to `errors`, by doctest.
+    /// The traced `rustdoc --test` commands, one doctest unit per library,
+    /// keyed `d-<package name>`. Errors go to `errors`, by doctest.
     fn doctests(
         &self,
+        units: &mut BTreeMap<UnitId, Unit>,
         errors: &mut Vec<(String, String)>,
-    ) -> Result<BTreeMap<String, Doctest>, Error> {
-        let mut out = BTreeMap::new();
+    ) -> Result<(), Error> {
         for rec in &self.rustdocs {
             if !rec.args.iter().any(|a| a == "--test") {
                 continue;
@@ -1703,9 +1663,19 @@ impl<'a> Builder<'a> {
             let package = self.package_of(rec)?;
             let id = format!("d-{}", package.name);
             let subject = describe::doctest(&id, &package.name, &package.version);
-            match self.doctest(rec, package) {
+            // A doctest has no output to read its platform from
+            // (`platform_of`). Cargo passes `--target` exactly for
+            // target-kind units (`CompileKind::add_target_arg`), and the
+            // planner always plans with one.
+            let platform = if arg_value(&rec.args, "--target").is_empty() {
+                Platform::Host
+            } else {
+                Platform::Target
+            };
+            let args = without_runtool(&rec.args);
+            match self.rustdoc_unit(UnitKind::Doctest, rec, &args, package, platform) {
                 Ok(d) => {
-                    if out.insert(id, d).is_some() {
+                    if units.insert(id, d).is_some() {
                         errors.push((
                             subject,
                             "two `rustdoc --test` commands for one package".into(),
@@ -1715,12 +1685,25 @@ impl<'a> Builder<'a> {
                 Err(e) => errors.push((subject, e.0)),
             }
         }
-        Ok(out)
+        Ok(())
     }
 
-    fn doctest(&self, rec: &Record, package: &Package) -> Result<Doctest, Error> {
-        let args = without_runtool(&rec.args);
-        let args = self.convert_args(&args, &rec.env, &package.id, None)?;
+    /// A traced rustdoc command (`args`, the recorded ones with what
+    /// breakbulk-unit gives itself removed) as a unit of `kind`.
+    fn rustdoc_unit(
+        &self,
+        kind: UnitKind,
+        rec: &Record,
+        args: &[String],
+        package: &Package,
+        platform: Platform,
+    ) -> Result<Unit, Error> {
+        let converted = self.convert_args(
+            args,
+            &rec.env,
+            &package.id,
+            (kind == UnitKind::Doc).then_some(platform),
+        )?;
         let (env, env_splices, dylib) = self.convert_env(&rec.env, &package.id, &rec.args)?;
         let program = rec
             .program
@@ -1738,110 +1721,99 @@ impl<'a> Builder<'a> {
         if types.is_empty() {
             types.push("lib".into());
         }
-        // A doctest has no output to read its platform from
-        // (`platform_of`). Cargo passes `--target` exactly for
-        // target-kind units (`CompileKind::add_target_arg`), and the
-        // planner always plans with one.
-        let platform = if arg_value(&rec.args, "--target").is_empty() {
-            Platform::Host
-        } else {
-            Platform::Target
-        };
-        Ok(Doctest {
-            package: package.id.clone(),
-            platform,
-            krate: CrateInfo {
-                name: arg_value(&rec.args, "--crate-name")
-                    .first()
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
-                types,
-                edition: arg_value(&rec.args, "--edition")
-                    .first()
-                    .map_or("2015".to_owned(), |e| e.to_string()),
+        Ok(Unit::new(
+            kind,
+            UnitBody {
+                krate: Some(CrateInfo {
+                    name: crate_name(&rec.args),
+                    types,
+                    edition: arg_value(&rec.args, "--edition")
+                        .first()
+                        .map_or("2015".to_owned(), |e| e.to_string()),
+                }),
+                program,
+                args: converted,
+                env,
+                env_splices,
+                dylib_path_from: dylib,
+                cwd,
+                ..UnitBody::empty(package.id.clone(), platform)
             },
-            program,
-            args,
-            env,
-            env_splices,
-            dylib_path_from: dylib,
-            cwd,
-        })
+        ))
     }
 
-    /// The traced `rustdoc` commands of `cargo doc` ([`Plan::docs`]), in
-    /// the order the docs derivation runs them: each after the documented
-    /// crates it reads (its `--extern`s), as Cargo runs a crate's rustdoc
-    /// after its dependencies' when it documents them
-    /// (`unit_dependencies.rs`, `compute_deps_doc`); otherwise by crate
-    /// name, then package. rustdoc links to a crate's items only when the
-    /// crate's directory is in its output directory when it starts
-    /// (`ExternalCrate::location` in rustdoc's `clean/types.rs`), and under
-    /// `--no-deps` Cargo does not order members' rustdocs at all, so
-    /// replaying them dependencies first is the order in which every link
-    /// that can resolve does.
-    fn docs(&self, errors: &mut Vec<(String, String)>) -> Result<Vec<Doc>, Error> {
-        let mut traced = Vec::new();
+    /// The traced `rustdoc` commands of `cargo doc`, as doc units keyed
+    /// `o-<package name>-<version>-<crate name>`, each `after` the doc
+    /// units of the documented crates it reads (its `--extern`s), as Cargo
+    /// runs a crate's rustdoc after its dependencies' when it documents
+    /// them (`unit_dependencies.rs`, `compute_deps_doc`). rustdoc links to
+    /// a crate's items only when the crate's directory is in its output
+    /// directory when it starts (`ExternalCrate::location` in rustdoc's
+    /// `clean/types.rs`), and under `--no-deps` Cargo does not order
+    /// members' rustdocs at all, so replaying them dependencies first is
+    /// the order in which every link that can resolve does.
+    #[allow(clippy::type_complexity)]
+    fn docs(
+        &self,
+        units: &mut BTreeMap<UnitId, Unit>,
+        errors: &mut Vec<(String, String)>,
+    ) -> Result<(), Error> {
+        let mut documented: BTreeMap<(String, String), UnitId> = BTreeMap::new();
+        let mut traced: Vec<(UnitId, Unit, BTreeSet<(String, String)>)> = Vec::new();
         for rec in &self.rustdocs {
             if rec.args.iter().any(|a| a == "--test") {
                 continue;
             }
             let package = self.package_of(rec)?;
+            let name = crate_name(&rec.args);
+            let subject = describe::doc(&name, &package.name, &package.version);
             match self.doc(rec, package) {
-                Ok(t) => traced.push(t),
-                Err(e) => errors.push((
-                    describe::doc(&crate_name(&rec.args), &package.name, &package.version),
-                    e.0,
-                )),
+                Ok((d, reads)) => {
+                    let id = format!("o-{}-{}-{name}", package.name, package.version);
+                    if documented
+                        .insert((package.id.clone(), name.clone()), id.clone())
+                        .is_some()
+                        || traced.iter().any(|(t, _, _)| *t == id)
+                    {
+                        bail!(
+                            "two rustdoc commands of `cargo doc` document the crate `{name}` of \
+                             {} {}",
+                            package.name,
+                            package.version
+                        );
+                    }
+                    traced.push((id, d, reads));
+                }
+                Err(e) => errors.push((subject, e.0)),
             }
         }
-        let order = doc_order(
-            &traced
+        for (id, mut d, reads) in traced {
+            d.after = reads
                 .iter()
-                .map(|(d, _)| (d.package.clone(), d.krate.name.clone()))
-                .collect::<Vec<_>>(),
-            &traced.iter().map(|(_, reads)| reads).collect::<Vec<_>>(),
-        )?;
-        let mut slots: Vec<Option<(Doc, _)>> = traced.into_iter().map(Some).collect();
-        Ok(order
-            .into_iter()
-            .map(|i| slots[i].take().expect("each index once").0)
-            .collect())
+                .filter_map(|r| documented.get(r))
+                .filter(|a| **a != id)
+                .cloned()
+                .collect();
+            units.insert(id, d);
+        }
+        Ok(())
     }
 
     /// One rustdoc command of `cargo doc`, and the documented crates, as
     /// (package, crate name), whose metadata it reads.
-    #[allow(clippy::type_complexity)]
     fn doc(
         &self,
         rec: &Record,
         package: &Package,
-    ) -> Result<(Doc, BTreeSet<(String, String)>), Error> {
+    ) -> Result<(Unit, BTreeSet<(String, String)>), Error> {
         let Some(out_dir) = arg_value(&rec.args, "-o").first().copied() else {
             bail!("the rustdoc command names no output directory (`-o`)");
         };
         let platform = self.platform_of(out_dir);
         let args = without_output_dir(&rec.args);
-        let args = self.convert_args(&args, &rec.env, &package.id, Some(platform))?;
-        let (env, env_splices, dylib) = self.convert_env(&rec.env, &package.id, &rec.args)?;
-        let program = rec
-            .program
-            .iter()
-            .map(|p| self.rw.text(p, None))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| Error(format!("program: {}", e.0)))?;
-        let cwd = self
-            .cwd(&rec.cwd, Some(&package.id))
-            .map_err(|e| Error(format!("cwd: {}", e.0)))?;
-        let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-        if types.is_empty() {
-            types.push("lib".into());
-        }
+        let doc = self.rustdoc_unit(UnitKind::Doc, rec, &args, package, platform)?;
         let mut reads = BTreeSet::new();
-        for a in &args {
+        for a in &doc.args {
             let Arg::Concat(pieces) = a else { continue };
             for p in pieces {
                 if let Piece::Ref(Reference::Out(o)) = p
@@ -1851,23 +1823,6 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        let doc = Doc {
-            package: package.id.clone(),
-            krate: CrateInfo {
-                name: crate_name(&rec.args),
-                types,
-                edition: arg_value(&rec.args, "--edition")
-                    .first()
-                    .map_or("2015".to_owned(), |e| e.to_string()),
-            },
-            platform,
-            program,
-            args,
-            env,
-            env_splices,
-            dylib_path_from: dylib,
-            cwd,
-        };
         Ok((doc, reads))
     }
 
@@ -1921,8 +1876,8 @@ impl<'a> Builder<'a> {
                 Err(e) => errors.push((describe_run(r), e.0)),
             }
         }
-        let doctests = self.doctests(&mut errors)?;
-        let docs = self.docs(&mut errors)?;
+        self.doctests(&mut units, &mut errors)?;
+        self.docs(&mut units, &mut errors)?;
         if !errors.is_empty() {
             bail!("{}", describe::grouped(errors).join("\n"));
         }
@@ -1930,24 +1885,29 @@ impl<'a> Builder<'a> {
             version: PLAN_VERSION,
             kind: self.ctx.kind,
             cargo: self.ctx.cargo_version.clone(),
+            nightly_features_allowed: self.ctx.nightly,
             rustc: self.ctx.rustc_version.clone(),
             host: self.ctx.host.clone(),
-            target: self.ctx.target.arg.clone(),
+            target: PlanTarget {
+                arg: self.ctx.target.arg.clone(),
+                short_name: self.ctx.target.short_name.clone(),
+                exe_suffix: self.ctx.executable_suffix.clone(),
+                debuginfo: self.ctx.target_debuginfo.clone(),
+            },
             variant: self.ctx.variant.clone(),
             skeleton_root: self.ctx.skeleton.clone(),
-            trim_paths: self.trim_paths()?,
-            trim_paths_default: self.ctx.trim_paths_default,
+            remap: Remap {
+                trim_paths: self.trim_paths()?,
+                trim_paths_default: self.ctx.trim_paths_default,
+                rust_src: self.ctx.rust_src_remap.clone(),
+            },
+            config_env: self.ctx.config_env.clone(),
+            packages: self.packages(&units)?,
             units,
             roots: self.roots(),
-            doctests,
-            docs,
-            config_env: self.ctx.config_env.clone(),
-            rust_src_remap: self.ctx.rust_src_remap.clone(),
-            path_packages: BTreeMap::new(),
-            target_debuginfo: self.ctx.target_debuginfo.clone(),
         };
-        if self.ctx.kind == PlanKind::Test {
-            plan.path_packages = self.path_packages(&plan);
+        if let Err(e) = breakbulk_format::doc_order(&plan) {
+            bail!("{e}");
         }
         plan.normalize();
         Ok(plan)
@@ -2004,37 +1964,6 @@ mod trim_tests {
             ])),
             a(&["--crate-name", "u", "--extern", "b=/x"])
         );
-    }
-
-    #[test]
-    fn docs_run_after_what_they_read() {
-        let d = |p: &str, c: &str| (p.to_owned(), c.to_owned());
-        // app reads util and base; util reads base and derive; base reads
-        // a crate that is not documented (--no-deps).
-        let documents = [
-            d("p-app", "app"),
-            d("p-util", "util"),
-            d("p-derive", "derive"),
-            d("p-base", "base"),
-        ];
-        let reads: Vec<BTreeSet<(String, String)>> = vec![
-            [d("p-util", "util"), d("p-base", "base")].into(),
-            [d("p-base", "base"), d("p-derive", "derive")].into(),
-            BTreeSet::new(),
-            [d("p-itoa", "itoa")].into(),
-        ];
-        let order = doc_order(&documents, &reads.iter().collect::<Vec<_>>()).unwrap();
-        // base and derive may run first: by crate name.
-        assert_eq!(order, [3, 2, 1, 0]);
-
-        let cycle: Vec<BTreeSet<(String, String)>> = vec![
-            [d("p-util", "util")].into(),
-            [d("p-app", "app")].into(),
-            BTreeSet::new(),
-            BTreeSet::new(),
-        ];
-        let e = doc_order(&documents, &cycle.iter().collect::<Vec<_>>()).unwrap_err();
-        assert!(e.0.contains("cycle"), "{}", e.0);
     }
 
     #[test]

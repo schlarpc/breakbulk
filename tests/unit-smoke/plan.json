@@ -2,18 +2,38 @@
   "version": 6,
   "kind": "build",
   "cargo": "1.99.0",
+  "nightlyFeaturesAllowed": false,
   "rustc": "1.99.0",
   "host": "x86_64-unknown-linux-gnu",
-  "target": "x86_64-unknown-linux-gnu",
+  "target": {
+    "arg": "x86_64-unknown-linux-gnu",
+    "shortName": "x86_64-unknown-linux-gnu",
+    "debuginfo": {
+      "splitDefault": "off",
+      "artifacts": [
+        { "suffix": ".dwp", "when": "split-packed" },
+        { "suffix": ".dwo", "when": "split-unpacked", "perObject": true }
+      ]
+    }
+  },
   "variant": { "profile": "dev", "features": [], "mode": "build" },
   "skeletonRoot": "/build/skeleton",
-  "trimPaths": false,
-  "targetDebuginfo": {
-    "splitDefault": "off",
-    "artifacts": [
-      { "suffix": ".dwp", "when": "split-packed" },
-      { "suffix": ".dwo", "when": "split-unpacked", "perObject": true }
-    ]
+  "remap": { "trimPaths": false },
+  "packages": {
+    "path+file:///build/skeleton/smokeapp#0.1.0": {
+      "targets": [
+        { "name": "smokeapp", "kind": ["bin"], "crateTypes": ["bin"], "srcPath": "smokeapp/src/main.rs" }
+      ],
+      "dependencies": [
+        { "package": "path+file:///build/skeleton/smokelib#0.1.0", "kinds": [{ "kind": null, "target": null }] }
+      ]
+    },
+    "path+file:///build/skeleton/smokelib#0.1.0": {
+      "targets": [
+        { "name": "build-script-build", "kind": ["custom-build"], "crateTypes": ["bin"], "srcPath": "smokelib/build.rs" },
+        { "name": "smokelib", "kind": ["lib"], "crateTypes": ["lib"], "srcPath": "smokelib/src/lib.rs" }
+      ]
+    }
   },
   "units": {
     "c-138fecd4c9176bd0": {
@@ -47,7 +67,7 @@
       "kind": "run",
       "package": "path+file:///build/skeleton/smokelib#0.1.0",
       "platform": "target",
-      "script": { "out": "c-138fecd4c9176bd0", "output": "bin", "file": "build_script_build-57c1fadee8f21670" },
+      "program": [[{ "out": "c-138fecd4c9176bd0", "output": "bin", "file": "build_script_build-57c1fadee8f21670" }]],
       "env": {
         "CARGO_CFG_DEBUG_ASSERTIONS": "", "CARGO_CFG_FEATURE": "", "CARGO_CFG_PANIC": "unwind",
         "CARGO_CFG_TARGET_ABI": "", "CARGO_CFG_TARGET_ARCH": "x86_64", "CARGO_CFG_TARGET_ENDIAN": "little",
@@ -68,12 +88,7 @@
         "PROFILE": "debug", "RUSTC": "@bb:rustc@", "TARGET": "x86_64-unknown-linux-gnu"
       },
       "cwd": { "src": "path+file:///build/skeleton/smokelib#0.1.0", "rel": "smokelib" },
-      "metadataFrom": [],
-      "targets": [
-        { "name": "build-script-build", "kind": ["custom-build"] },
-        { "name": "smokelib", "kind": ["lib"] }
-      ],
-      "nightlyFeaturesAllowed": false
+      "metadataFrom": []
     },
     "c-a0e9aa7440d71279": {
       "kind": "compile",

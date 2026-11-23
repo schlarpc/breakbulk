@@ -107,7 +107,7 @@ let
           unitKind = u.kind;
           name = inst.units.${kind}.${id}.name;
           text = unitText inst.units.${kind}.${id};
-        }) plan.units
+        }) (lib.filterAttrs (_: u: u.kind == "compile" || u.kind == "run") plan.units)
       )
       [
         "build"
@@ -382,7 +382,7 @@ let
           links = (u.outputs or { }) ? bin;
           staticlib = (u.crate.types or [ ]) == [ "staticlib" ];
           debug = lib.elem "debug" inst.units.${kind}.${id}.outputs;
-        }) (planOf inst kind).units
+        }) (lib.filterAttrs (_: u: u.kind == "compile" || u.kind == "run") (planOf inst kind).units)
       )
       [
         "build"
@@ -534,9 +534,9 @@ let
       checks = {
         "a runner" = t.runner != null;
         "pmd's doctest is the host's" =
-          plan.doctests.d-pmd.platform == "host" && !hasTarget inst.doctestDrvs.pmd;
+          plan.units.d-pmd.platform == "host" && !hasTarget inst.doctestDrvs.pmd;
         "user's doctest is the target's" =
-          plan.doctests.d-user.platform == "target" && hasTarget inst.doctestDrvs.user;
+          plan.units.d-user.platform == "target" && hasTarget inst.doctestDrvs.user;
         "the proc macros' unit tests are the host's" =
           platformOf "pmd/lib-test/pmd" == "host" && platformOf "pmn/lib-test/pmn" == "host";
         "user's integration test is the target's" = platformOf "user/test/under_runner" == "target";

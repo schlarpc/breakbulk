@@ -14,11 +14,24 @@ fn example_json() -> String {
         r#"{{
   "version": 6,
   "kind": "build",
-  "cargo": "1.96.1", "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
-  "target": "wasm32-unknown-unknown",
+  "cargo": "1.96.1", "nightlyFeaturesAllowed": false,
+  "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
+  "target": {{
+    "arg": "wasm32-unknown-unknown", "shortName": "wasm32-unknown-unknown", "exeSuffix": ".wasm",
+    "debuginfo": {{ "splitDefault": "off", "artifacts": [] }}
+  }},
   "variant": {{ "profile": "release", "features": ["b", "a"], "mode": "build" }},
-  "skeletonRoot": "/build/skeleton", "trimPaths": false,
-  "targetDebuginfo": {{ "splitDefault": "off", "artifacts": [] }},
+  "skeletonRoot": "/build/skeleton", "remap": {{ "trimPaths": false }},
+  "packages": {{
+    "{RING}": {{
+      "targets": [{{ "name": "ring", "kind": ["lib"], "crateTypes": ["lib"] }}],
+      "rustVersion": "1.66", "links": "ring_core_0_17_14_"
+    }},
+    "cfg-if": {{ "targets": [{{ "name": "cfg-if", "kind": ["lib"], "crateTypes": ["lib"] }}] }},
+    "{APP}": {{
+      "targets": [{{ "name": "app", "kind": ["bin"], "crateTypes": ["bin"], "srcPath": "app/src/main.rs" }}]
+    }}
+  }},
   "units": {{
     "c-ring": {{
       "kind": "compile",
@@ -60,14 +73,10 @@ fn example_json() -> String {
       "outputs": {{ "bin": ["build_script_build-1"] }}
     }},
     "r-ring": {{
-      "kind": "run", "package": "{RING}", "platform": "target", "links": "ring_core_0_17_14_",
-      "script": {{ "out": "c-ring-build", "output": "bin" }},
+      "kind": "run", "package": "{RING}", "platform": "target",
+      "program": [[{{ "out": "c-ring-build", "output": "bin" }}]],
       "env": {{ "TARGET": "wasm32-unknown-unknown" }},
-      "cwd": {{ "crateSrc": "{RING}", "rel": "" }},
-      "metadataFrom": [],
-      "rustVersion": "1.66",
-      "targets": [{{ "name": "ring", "kind": ["lib"] }}],
-      "nightlyFeaturesAllowed": false
+      "cwd": {{ "crateSrc": "{RING}", "rel": "" }}
     }},
     "c-app": {{
       "kind": "compile",
@@ -92,14 +101,14 @@ fn example() -> Plan {
     Plan::from_json(&example_json()).unwrap()
 }
 
-fn compile<'a>(p: &'a mut Plan, id: &str) -> &'a mut CompileUnit {
+fn compile<'a>(p: &'a mut Plan, id: &str) -> &'a mut UnitBody {
     match p.units.get_mut(id) {
         Some(Unit::Compile(c)) => c,
         _ => panic!("{id} is not a compile unit"),
     }
 }
 
-fn run<'a>(p: &'a mut Plan, id: &str) -> &'a mut RunUnit {
+fn run<'a>(p: &'a mut Plan, id: &str) -> &'a mut UnitBody {
     match p.units.get_mut(id) {
         Some(Unit::Run(r)) => r,
         _ => panic!("{id} is not a run unit"),
@@ -171,11 +180,13 @@ fn canonical_json_is_sorted_compact_and_stable() {
     let mut q = example();
     let units: Vec<_> = std::mem::take(&mut q.units).into_iter().rev().collect();
     q.units.extend(units);
-    run(&mut q, "r-ring").targets.insert(
+    q.packages.get_mut(RING).unwrap().targets.insert(
         0,
-        PackageTarget {
+        PathTarget {
             name: "ring".into(),
             kind: vec!["lib".into()],
+            crate_types: vec!["lib".into()],
+            src_path: None,
         },
     );
     assert_eq!(q.to_canonical_json(), a);
@@ -362,7 +373,8 @@ fn uplifted_names_listed_files() {
 fn metadata_from_requires_links() {
     let mut p = example();
     let mut other = run(&mut p, "r-ring").clone();
-    other.links = None;
+    other.package = "other".into();
+    p.packages.insert("other".into(), PackageFacts::default());
     other.metadata_from.insert("r-ring".into());
     p.units.insert("r-other".into(), Unit::Run(other.clone()));
     assert_eq!(errors(&p), Vec::<String>::new());
@@ -378,11 +390,13 @@ fn metadata_from_requires_links() {
 #[test]
 fn run_script_must_be_compile_output() {
     let mut p = example();
-    run(&mut p, "r-ring").script = Reference::CrateSrc(CrateSrcRef {
-        crate_src: RING.into(),
-        rel: "build.rs".into(),
-    });
-    assert_error(&p, "script is not an output of a compile unit");
+    run(&mut p, "r-ring").program = vec![Text::Concat(vec![Piece::Ref(Reference::CrateSrc(
+        CrateSrcRef {
+            crate_src: RING.into(),
+            rel: "build.rs".into(),
+        },
+    ))])];
+    assert_error(&p, "a run's program must be its script");
 }
 
 #[test]
@@ -581,7 +595,7 @@ impl Resolve for Configured {
     fn remap_name(&self, base: &Reference) -> Result<String, String> {
         Fake.remap_name(base)
     }
-    fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {
+    fn remap_scope(&self, _: &UnitId, _: &Unit) -> Option<String> {
         Some("macro,diagnostics".into())
     }
     fn env_capture(&self, id: &UnitId, _: &Unit) -> Result<Option<String>, String> {
@@ -637,7 +651,7 @@ fn render_configuration_hooks() {
     assert_eq!(r.env["SPEC"], "1");
 
     // With Cargo's trim-paths, breakbulk adds no remaps.
-    p.trim_paths = true;
+    p.remap.trim_paths = true;
     let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
         panic!()
     };
@@ -646,7 +660,7 @@ fn render_configuration_hooks() {
 
     // When breakbulk turned trim-paths on, Cargo's remaps stay and the scope
     // is breakbulk's, per product kind.
-    p.trim_paths_default = true;
+    p.remap.trim_paths_default = true;
     let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
         panic!()
     };
@@ -703,7 +717,7 @@ fn run_prefix_maps_follow_cargo_under_trim_paths() {
         "{remap:?}"
     );
 
-    p.trim_paths = true;
+    p.remap.trim_paths = true;
     let up = "r-up".to_owned();
     p.units.insert(up.clone(), p.units["r-ring"].clone());
     let r = run(&mut p, "r-ring");
@@ -764,7 +778,7 @@ impl Resolve for Keep {
     fn remap_name(&self, base: &Reference) -> Result<String, String> {
         Fake.remap_name(base)
     }
-    fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {
+    fn remap_scope(&self, _: &UnitId, _: &Unit) -> Option<String> {
         Some("macro,diagnostics".into())
     }
     fn keep_source_paths(&self) -> bool {
@@ -778,7 +792,7 @@ impl Resolve for Keep {
 fn keep_source_paths_adds_no_remaps() {
     let mut p = example();
     for trim in [false, true] {
-        p.trim_paths = trim;
+        p.remap.trim_paths = trim;
         let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Keep).unwrap() else {
             panic!()
         };
@@ -800,8 +814,9 @@ fn dep_graph() -> Plan {
             Unit::Compile(c) => c.clone(),
             _ => unreachable!(),
         };
-        c.krate.name = name.into();
-        c.krate.types = types.iter().map(|t| t.to_string()).collect();
+        let k = c.krate.as_mut().unwrap();
+        k.name = name.into();
+        k.types = types.iter().map(|t| t.to_string()).collect();
         c.outputs = if types == ["proc-macro"] {
             BTreeMap::from([("rlib".into(), BTreeSet::from([format!("lib{name}-1.so")]))])
         } else {
@@ -879,15 +894,14 @@ fn transitive_crate_deps() {
     // A test unit that does not link (an rlib example) needs metadata only;
     // a `--test` compile of a library links.
     let mut p = p;
-    let mut example = compile(&mut p, "c-top").clone();
+    let mut example = Unit::Compile(compile(&mut p, "c-top").clone());
     example.test = true;
     assert!(!is_linking(&example));
-    p.units
-        .insert("c-example".into(), Unit::Compile(example.clone()));
+    p.units.insert("c-example".into(), example.clone());
     let mut harness = example;
     harness.args.push(Arg::Literal("--test".into()));
     assert!(is_linking(&harness));
-    p.units.insert("c-harness".into(), Unit::Compile(harness));
+    p.units.insert("c-harness".into(), harness);
     let files = |id: &str| -> Vec<String> {
         crate_deps(&p, &id.into())
             .into_iter()
@@ -930,7 +944,7 @@ impl Resolve for Weak {
 /// reference.
 fn naive_crate_deps(plan: &Plan, id: &UnitId, want: Option<&str>) -> BTreeSet<OutRef> {
     use crate::deps::{direct_crate_refs, is_proc_macro};
-    let Some(Unit::Compile(c)) = plan.units.get(id) else {
+    let Some(c) = plan.units.get(id).filter(|u| u.is_compile()) else {
         panic!("{id} is not a compile unit of the plan");
     };
     let want = want.unwrap_or(if is_linking(c) { "rlib" } else { "rmeta" });
@@ -944,14 +958,14 @@ fn naive_crate_deps(plan: &Plan, id: &UnitId, want: Option<&str>) -> BTreeSet<Ou
         }
     }
     while let Some(dep) = queue.pop_front() {
-        let Some(Unit::Compile(d)) = plan.units.get(dep) else {
+        let Some(d) = plan.units.get(dep).filter(|u| u.is_compile()) else {
             continue;
         };
         if is_proc_macro(d) {
             continue;
         }
         for o in direct_crate_refs(plan, d) {
-            let Some(Unit::Compile(e)) = plan.units.get(&o.out) else {
+            let Some(e) = plan.units.get(&o.out).filter(|u| u.is_compile()) else {
                 continue;
             };
             let chosen = match e.outputs.get(want) {
@@ -971,10 +985,10 @@ fn naive_crate_deps(plan: &Plan, id: &UnitId, want: Option<&str>) -> BTreeSet<Ou
     out
 }
 
-fn compile_unit<'a>(p: &'a Plan, id: &str) -> &'a CompileUnit {
+fn compile_unit<'a>(p: &'a Plan, id: &str) -> &'a Unit {
     match &p.units[id] {
-        Unit::Compile(c) => c,
-        Unit::Run(_) => panic!("{id} is a run"),
+        c @ Unit::Compile(_) => c,
+        _ => panic!("{id} is not a compile unit"),
     }
 }
 
@@ -1273,10 +1287,8 @@ fn rendered_unit_rejects_unknown_fields() {
 #[test]
 fn doctests_validate_like_compiles() {
     let mut p = example();
-    let mut d = Doctest {
-        package: compile(&mut p, "c-ring").package.clone(),
+    let mut d = UnitBody {
         krate: compile(&mut p, "c-ring").krate.clone(),
-        platform: Platform::Target,
         program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
         args: vec![
             Arg::Literal("--test".into()),
@@ -1286,12 +1298,11 @@ fn doctests_validate_like_compiles() {
             }),
             Arg::Splice(Splice::new("r-ring".into(), SpliceKind::RustcCfg)),
         ],
-        env: BTreeMap::new(),
-        env_splices: vec![],
         dylib_path_from: vec!["r-ring".into()],
         cwd: compile(&mut p, "c-ring").cwd.clone(),
+        ..UnitBody::empty(RING, Platform::Target)
     };
-    p.doctests.insert("d-ring".into(), d.clone());
+    p.units.insert("d-ring".into(), Unit::Doctest(d.clone()));
     assert_eq!(errors(&p), Vec::<String>::new());
     let back = Plan::from_json(&p.to_canonical_json()).unwrap();
     let mut normal = p.clone();
@@ -1304,12 +1315,12 @@ fn doctests_validate_like_compiles() {
     }));
     d.args
         .push(Arg::Literal("--test-run-directory=/build/x".into()));
-    p.doctests.insert("d-ring".into(), d);
+    p.units.insert("d-ring".into(), Unit::Doctest(d));
     assert_error(&p, "searchPathsOf names c-cfgif, which is not a run unit");
     assert_error(&p, "forbidden path `/build`");
     assert_error(
         &p,
-        "searchPathsOf literal contains the forbidden path `/build`",
+        "(searchPathsOf literal) contains the forbidden path `/build`",
     );
 
     let mut p = example();
@@ -1324,18 +1335,16 @@ fn doctests_validate_like_compiles() {
 
 /// A rustdoc command of a doc plan documenting `ring`, which reads
 /// `cfg_if`'s metadata.
-fn ring_doc(p: &mut Plan) -> Doc {
+fn ring_doc(p: &mut Plan) -> UnitBody {
     let c = compile(p, "c-ring").clone();
-    Doc {
-        package: c.package,
+    UnitBody {
         krate: c.krate,
-        platform: Platform::Target,
         program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
         args: c.args,
         env: c.env,
         env_splices: c.env_splices,
-        dylib_path_from: vec![],
         cwd: c.cwd,
+        ..UnitBody::empty(c.package, Platform::Target)
     }
 }
 
@@ -1345,13 +1354,19 @@ fn docs_validate_and_render_like_compiles() {
     p.kind = PlanKind::Doc;
     let d = ring_doc(&mut p);
     let mut app = d.clone();
-    app.krate.name = "app".into();
-    // Their order is kept: it is the order they run in.
-    p.docs = vec![d.clone(), app];
+    app.krate.as_mut().unwrap().name = "app".into();
+    // app runs after ring: by its edge, although `app` sorts first.
+    app.after = ["o-ring".to_owned()].into();
+    p.units.insert("o-ring".into(), Unit::Doc(d.clone()));
+    p.units.insert("o-app".into(), Unit::Doc(app.clone()));
     assert_eq!(errors(&p), Vec::<String>::new());
     let back = Plan::from_json(&p.to_canonical_json()).unwrap();
-    assert_eq!(back.docs[0].krate.name, "ring");
-    assert_eq!(back.docs[1].krate.name, "app");
+    assert_eq!(doc_order(&back).unwrap(), ["o-ring", "o-app"]);
+    let mut cycle = p.clone();
+    if let Some(Unit::Doc(r)) = cycle.units.get_mut("o-ring") {
+        r.after = ["o-app".to_owned()].into();
+    }
+    assert_error(&cycle, "in a cycle");
 
     let r = render_docs(&p, &Fake).unwrap();
     assert_eq!(r.commands.len(), 2);
@@ -1369,7 +1384,7 @@ fn docs_validate_and_render_like_compiles() {
 
     let mut bad = d;
     bad.args.push(Arg::Literal("-o/build/doc".into()));
-    p.docs = vec![bad];
+    p.units.insert("o-ring".into(), Unit::Doc(bad));
     assert_error(&p, "forbidden path `/build`");
 }
 
@@ -1546,7 +1561,7 @@ fn debug_output_only_where_side_files() {
 #[test]
 fn debug_side_files_from_the_plan() {
     let mut p = example();
-    p.target_debuginfo = elf_debuginfo();
+    p.target.debuginfo = elf_debuginfo();
     compile(&mut p, "c-ring").args.extend(
         ["-C", "debuginfo=2", "-C", "split-debuginfo=unpacked"].map(|s| Arg::Literal(s.into())),
     );
@@ -1568,7 +1583,7 @@ fn per_object_debug_files_only_with_unpacked() {
     let (elf, msvc) = (&elf_debuginfo(), &msvc_debuginfo());
     let below = |p: &Plan, d: &TargetDebuginfo| {
         let mut p = p.clone();
-        p.target_debuginfo = d.clone();
+        p.target.debuginfo = d.clone();
         crate::deps::debug_units_below(&p, &"c-ring".into())
     };
     let mut p = example();
@@ -1576,7 +1591,7 @@ fn per_object_debug_files_only_with_unpacked() {
     // (packed) or `.pdb` (msvc), neither of them per-object, so not a
     // debug unit below the library that uses it.
     let c = compile(&mut p, "c-cfgif");
-    c.krate.types = vec!["lib".into(), "cdylib".into()];
+    c.krate.as_mut().unwrap().types = vec!["lib".into(), "cdylib".into()];
     c.outputs
         .insert("bin".into(), ["libcfg_if.so".into()].into());
     c.args
@@ -1632,10 +1647,8 @@ fn units_below_follow_every_route() {
 fn doctests_keep_only_their_closures_runs() {
     let mut p = example();
     // As traced: Cargo's `-L` list and dynamic-library path name every run.
-    let doctest = |p: &mut Plan, of: &str, args: Vec<Arg>| Doctest {
-        package: compile(p, of).package.clone(),
+    let doctest = |p: &mut Plan, of: &str, args: Vec<Arg>| UnitBody {
         krate: compile(p, of).krate.clone(),
-        platform: Platform::Target,
         program: vec![Text::Literal("/nix/store/x-rustc/bin/rustdoc".into())],
         args: [
             vec![
@@ -1648,10 +1661,9 @@ fn doctests_keep_only_their_closures_runs() {
             args,
         ]
         .concat(),
-        env: BTreeMap::new(),
-        env_splices: vec![],
         dylib_path_from: vec!["r-ring".into()],
         cwd: compile(p, of).cwd.clone(),
+        ..UnitBody::empty(compile(p, of).package.clone(), Platform::Target)
     };
     // ring's doctest links ring, whose run is below it.
     let ring = doctest(
@@ -1668,8 +1680,8 @@ fn doctests_keep_only_their_closures_runs() {
     );
     // app's does not: the run is no input of it.
     let app = doctest(&mut p, "c-app", vec![]);
-    p.doctests.insert("d-ring".into(), ring);
-    p.doctests.insert("d-app".into(), app);
+    p.units.insert("d-ring".into(), Unit::Doctest(ring));
+    p.units.insert("d-app".into(), Unit::Doctest(app));
     let r = render_doctest(&p, "d-ring", &Fake).unwrap();
     assert_eq!(r.search_paths_of, ["/nix/store/r-ring-flags"]);
     // The traced dynamic-library path names host runs; r-ring is not one.

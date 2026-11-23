@@ -436,7 +436,7 @@ fn trim_paths_normal(
     traced: bool,
     pkg: Option<&Package>,
 ) -> Result<Vec<String>, String> {
-    if !plan.trim_paths {
+    if !plan.remap.trim_paths {
         return Ok(args.to_vec());
     }
     let mut out = Vec::new();
@@ -473,7 +473,7 @@ fn trim_paths_normal(
                 continue;
             }
         }
-        if !traced && plan.trim_paths_default && a.starts_with("--remap-path-scope=") {
+        if !traced && plan.remap.trim_paths_default && a.starts_with("--remap-path-scope=") {
             continue;
         }
         out.push(a.clone());
@@ -575,6 +575,7 @@ pub fn compare_with(
         let Unit::Run(r) = &plan.units[*id] else {
             continue;
         };
+        let facts = plan.packages.get(&r.package).cloned().unwrap_or_default();
         let text = std::fs::read(stdout).unwrap_or_default();
         let out_dir = PathBuf::from(&resolver.run_dirs[*id]);
         let upstream: Vec<PathBuf> = r
@@ -585,9 +586,9 @@ pub fn compare_with(
         let ctx = ParseContext {
             pkg_descr: &r.package,
             out_dir: &out_dir,
-            nightly_features_allowed: r.nightly_features_allowed,
-            targets: &r.targets,
-            rust_version: r.rust_version.as_deref(),
+            nightly_features_allowed: plan.nightly_features_allowed,
+            targets: &facts.run_targets(),
+            rust_version: facts.rust_version.as_deref(),
             upstream_out_dirs: &upstream,
         };
         match parse(&text, &ctx) {
@@ -627,7 +628,7 @@ pub fn compare_with(
         report.compared += 1;
         let pkg = match &plan.units[*id] {
             Unit::Compile(c) => resolver.packages.get(c.package.as_str()).copied(),
-            Unit::Run(_) => None,
+            _ => None,
         };
         let (got, want) = match (
             trim_paths_normal(&got, target, plan, true, pkg),
@@ -700,7 +701,7 @@ pub fn compare_with(
                         package: package.to_owned(),
                         version: version.to_owned(),
                         platform: u.platform,
-                        links: Some(u.links.clone()?),
+                        links: Some(plan.packages.get(&u.package)?.links.clone()?),
                         metadata: outputs.get(m)?.metadata.clone(),
                         out: resolver.run_dirs.get(m).cloned().unwrap_or_default(),
                     })
@@ -772,7 +773,12 @@ fn compare_doctests(
         };
         real.insert(format!("d-{name}"), p);
     }
-    let planned: BTreeSet<&String> = plan.doctests.keys().collect();
+    let planned: BTreeSet<&String> = plan
+        .units
+        .iter()
+        .filter(|(_, u)| matches!(u, Unit::Doctest(_)))
+        .map(|(id, _)| id)
+        .collect();
     let real_ids: BTreeSet<&String> = real.keys().collect();
     for id in planned.difference(&real_ids) {
         report
@@ -793,7 +799,7 @@ fn compare_doctests(
                 continue;
             }
         };
-        let traced = &plan.doctests[id.as_str()];
+        let traced = &plan.units[*id];
         let flags_of = |runs: &mut dyn Iterator<Item = &UnitId>| -> Result<Vec<String>, String> {
             runs.map(|u| resolver.flags(u)).collect()
         };
@@ -853,7 +859,7 @@ fn compare_doctests(
         // unit directory (`…/build/<pkg>/<hash>/out`) per dependency, the
         // build script's compile included. A build script's own
         // `rustc-link-search=dependency=…` is in the traced list too.
-        let r = &real[*id];
+        let r = &real[id.as_str()];
         let traced_deps: BTreeSet<&str> = got
             .windows(2)
             .filter(|w| w[0] == "-L")
@@ -881,7 +887,7 @@ fn compare_doctests(
         }
         let pkg = resolver
             .packages
-            .get(plan.doctests[id.as_str()].package.as_str())
+            .get(plan.units[*id].package.as_str())
             .copied();
         let (got, want) = match (
             trim_paths_normal(&got, target, plan, true, pkg),
@@ -980,11 +986,15 @@ mod tests {
     fn trim_paths_forms() {
         let mut plan: Plan = serde_json::from_value(serde_json::json!({
             "version": 6, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
-            "host": "h", "target": "t",
+            "nightlyFeaturesAllowed": false, "host": "h",
+            "target": {
+                "arg": "t", "shortName": "t",
+                "debuginfo": { "splitDefault": "off", "artifacts": [] }
+            },
             "variant": { "profile": "dev", "features": [], "mode": "build" },
-            "skeletonRoot": "/build/skeleton", "trimPaths": true, "trimPathsDefault": true,
-            "units": {}, "roots": [],
-            "targetDebuginfo": { "splitDefault": "off", "artifacts": [] }
+            "skeletonRoot": "/build/skeleton",
+            "remap": { "trimPaths": true, "trimPathsDefault": true },
+            "packages": {}, "units": {}, "roots": []
         }))
         .unwrap();
         let t = Path::new("/tmp/t");
@@ -1050,7 +1060,7 @@ mod tests {
             vendored
         );
         // The project's own setting: its scope is compared.
-        plan.trim_paths_default = false;
+        plan.remap.trim_paths_default = false;
         assert_eq!(
             trim_paths_normal(&real, t, &plan, false, None).unwrap()[0],
             "--remap-path-scope=all"

@@ -3388,12 +3388,12 @@ in
       stableAt = planAt "stable" pkgs.rust-bin.stable."1.99.0".minimal "$NIX_BUILD_TOP/a/skeleton";
     in
     assert lib.assertMsg (
-      plans.set.build.trimPaths && !(plans.set.build.trimPathsDefault or false)
-    ) "trim-paths: set's plan: trimPaths ${builtins.toJSON plans.set.build.trimPaths}";
+      plans.set.build.remap.trimPaths && !(plans.set.build.remap.trimPathsDefault or false)
+    ) "trim-paths: set's plan: remap ${builtins.toJSON plans.set.build.remap}";
     assert lib.assertMsg (
-      plans.default.build.trimPaths
-      && plans.default.build.trimPathsDefault
-      && plans.default.test.trimPathsDefault
+      plans.default.build.remap.trimPaths
+      && plans.default.build.remap.trimPathsDefault
+      && plans.default.test.remap.trimPathsDefault
     ) "trim-paths: the planner did not turn trim-paths on for default's plans";
     assert lib.assertMsg (
       setNoScope == { }
@@ -3517,7 +3517,7 @@ in
       product = repo.workspaces.main.packages.cfile;
     in
     assert lib.assertMsg (
-      (planOf repo).trimPaths && (planOf repo).trimPathsDefault
+      (planOf repo).remap.trimPaths && (planOf repo).remap.trimPathsDefault
     ) "trim-paths-cc: trim-paths is not on";
     assert lib.assertMsg (
       lib.all (p: cargoNamed (lib.elemAt p 1)) run.remap && run.remap != [ ]
@@ -3525,10 +3525,10 @@ in
     assert lib.assertMsg ((run.outDirRemap or "") == "/cargo/build-dir")
       "trim-paths-cc: outDirRemap ${builtins.toJSON (run.outDirRemap or null)}";
     assert lib.assertMsg (
-      !(planOf off).trimPaths && lib.hasPrefix "/breakbulk/build/" (offRun.outDirRemap or "")
+      !(planOf off).remap.trimPaths && lib.hasPrefix "/breakbulk/build/" (offRun.outDirRemap or "")
     ) "trim-paths-cc: sourcePaths = remap: ${builtins.toJSON offRun.outDirRemap}";
     assert lib.assertMsg (
-      !(planOf keep).trimPaths && keepRemaps == [ ]
+      !(planOf keep).remap.trimPaths && keepRemaps == [ ]
     ) "trim-paths-cc: sourcePaths = keep added remaps";
     assert lib.assertMsg (
       !(keep.workspaces.main.packages.cfile.checks ? noSourceReferences)
@@ -3588,7 +3588,7 @@ in
         )
       );
     in
-    assert lib.assertMsg (plan ? rustSrcRemap) "rust-src: the plan has no rustSrcRemap";
+    assert lib.assertMsg (plan.remap ? rustSrc) "rust-src: the plan has no remap.rustSrc";
     pkgs.runCommand "rust-src"
       {
         app = repo.workspaces.main.packages.stdpaths;

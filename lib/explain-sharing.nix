@@ -117,13 +117,20 @@ let
     else
       "${pkgNameOf u.package} ${u.crate.name} [${lib.concatStringsSep "," u.crate.types}]${lib.optionalString (isTestUnit u) " test"} (${u.platform})";
 
-  # Unit ids of one plan, by label, sorted, for one package (or all, when
-  # null).
+  # The ids of a plan's compile and run units, by label, sorted, for one
+  # package (or all, when null). Doctests and docs have no unit
+  # derivation of their own to share.
   grouped =
     plan: pkg:
     lib.mapAttrs (_: lib.sort (a: b: a < b)) (
       lib.groupBy (id: unitLabel plan.units.${id}) (
-        lib.filter (id: pkg == null || pkgNameOf plan.units.${id}.package == pkg) (lib.attrNames plan.units)
+        lib.filter (
+          id:
+          let
+            u = plan.units.${id};
+          in
+          (u.kind == "compile" || u.kind == "run") && (pkg == null || pkgNameOf u.package == pkg)
+        ) (lib.attrNames plan.units)
       )
     );
 

@@ -12,7 +12,9 @@ pub use breakbulk_unit::spec::{
 pub const PLAN_VERSION: u32 = 6;
 
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
-/// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`).
+/// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`), `d-<package
+/// name>` for doctests, `o-<package name>-<version>-<crate name>` for the
+/// rustdoc commands of a doc plan.
 pub type UnitId = String;
 
 /// A splice point in `plan.json`: names a run unit.
@@ -23,16 +25,59 @@ pub type Splice = breakbulk_unit::spec::Splice<UnitId>;
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Plan {
     pub version: u32,
+    /// The plan kind, a label: what Cargo ran is the variant's command for
+    /// it (`lib/cargo-commands.nix`). It decides which units are roots.
     pub kind: PlanKind,
     /// `cargo -V` version.
     pub cargo: String,
+    /// Cargo's `nightly_features_allowed` for the planning toolchain:
+    /// whether a build script's `rustc-env=RUSTC_BOOTSTRAP=…` is an error
+    /// or a warning.
+    pub nightly_features_allowed: bool,
     /// `rustc -vV` release line.
     pub rustc: String,
     pub host: String,
-    pub target: String,
+    pub target: PlanTarget,
     pub variant: Variant,
     /// The canonical absolute skeleton path planning ran at.
     pub skeleton_root: String,
+    pub remap: Remap,
+    /// The variables the project's `[env]` config table sets on the
+    /// processes Cargo starts. Units keep them in their recorded env;
+    /// test runs take their values from the test unit's recorded env, as
+    /// `cargo test` gives them to test processes.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub config_env: BTreeSet<String>,
+    /// What `cargo metadata` says about each package that has a unit in
+    /// the plan, by package id.
+    pub packages: BTreeMap<String, PackageFacts>,
+    pub units: BTreeMap<UnitId, Unit>,
+    /// The plan's products: a set, serialized as a sorted array.
+    pub roots: BTreeSet<Root>,
+}
+
+/// The planned target, as the planning toolchain describes it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PlanTarget {
+    /// What Cargo was given as `--target`: a triple, or a `.json` spec's
+    /// path.
+    pub arg: String,
+    /// Cargo's short name: the triple, or the spec's file stem.
+    pub short_name: String,
+    /// The spec's `exe-suffix`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exe_suffix: String,
+    /// The debuginfo side files the target's links write, from the
+    /// planning rustc's target spec. Required, so that no plan silently
+    /// gives its units another target's `debug` outputs.
+    pub debuginfo: TargetDebuginfo,
+}
+
+/// How the plan's source paths are remapped.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Remap {
     /// Whether Cargo's `trim-paths` was in effect: every compile unit
     /// carries Cargo's own remaps, and breakbulk adds none.
     pub trim_paths: bool,
@@ -43,23 +88,6 @@ pub struct Plan {
     /// sets the scope per product kind, as with its own remaps.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trim_paths_default: bool,
-    pub units: BTreeMap<UnitId, Unit>,
-    /// The plan's products: a set, serialized as a sorted array.
-    pub roots: BTreeSet<Root>,
-    /// Test plans: one traced `rustdoc --test` per library, keyed
-    /// `d-<package name>`.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub doctests: BTreeMap<String, Doctest>,
-    /// Doc plans: the traced `rustdoc` commands of `cargo doc`, in the
-    /// order the docs derivation runs them ([`Doc`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub docs: Vec<Doc>,
-    /// The variables the project's `[env]` config table sets on the
-    /// processes Cargo starts. Units keep them in their recorded env;
-    /// test runs take their values from the test unit's recorded env, as
-    /// `cargo test` gives them to test processes.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub config_env: BTreeSet<String>,
     /// When the toolchain ships the `rust-src` component: the remap
     /// `[<sysroot>/lib/rustlib/src/rust, /rustc/<commit-hash>]`. rustc
     /// rewrites standard-library paths (`/rustc/<hash>/library/…`) to that
@@ -69,31 +97,47 @@ pub struct Plan {
     /// the same remap (cargo 0.97.0, `core/compiler/mod.rs`,
     /// `sysroot_remap`); breakbulk adds it to its own remaps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rust_src_remap: Option<(String, String)>,
-    /// Test plans: every path package under the skeleton that the plan
-    /// compiles, by package id, with its Cargo targets and its dependencies
-    /// on the other packages listed here, as `cargo metadata` gives them.
-    /// The cargo metadata synthesized for nextest lists them, so its
-    /// `binary()` and `deps()` filtersets see what they would under Cargo.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub path_packages: BTreeMap<String, PathPackage>,
-    /// The debuginfo side files the target's links write, from the
-    /// planning rustc's target spec. Required, so that no plan silently
-    /// gives its units another target's `debug` outputs.
-    pub target_debuginfo: TargetDebuginfo,
+    pub rust_src: Option<(String, String)>,
 }
 
-/// A path package of a test plan ([`Plan::path_packages`]).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A package of the plan ([`Plan::packages`]), as `cargo metadata`
+/// describes it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct PathPackage {
-    /// Sorted.
+pub struct PackageFacts {
+    /// Every Cargo target of the package, built or not. Sorted. Build-script
+    /// runs check `rustc-link-arg-*` directives against them; the cargo
+    /// metadata synthesized for nextest lists them.
     pub targets: Vec<PathTarget>,
-    /// Sorted by package id.
+    /// The package's `rust-version`, for Cargo's `cargo::` syntax check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_version: Option<String>,
+    /// The package's `links`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<String>,
+    /// A path package under the skeleton: its dependency edges to the other
+    /// such packages that one of the plan's compile units uses, from the
+    /// resolve of `cargo metadata --all-features` (so not the optional
+    /// dependencies the variant's features leave off). Sorted by package
+    /// id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<PathDependency>,
 }
 
-/// One Cargo target of a path package, as `cargo metadata` lists it.
+impl PackageFacts {
+    /// The targets as build-script runs check directives against them.
+    pub fn run_targets(&self) -> Vec<PackageTarget> {
+        self.targets
+            .iter()
+            .map(|t| PackageTarget {
+                name: t.name.clone(),
+                kind: t.kind.clone(),
+            })
+            .collect()
+    }
+}
+
+/// One Cargo target of a package, as `cargo metadata` lists it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct PathTarget {
@@ -102,9 +146,11 @@ pub struct PathTarget {
     /// crate types.
     pub kind: Vec<String>,
     pub crate_types: Vec<String>,
-    /// The source path relative to the skeleton root (an absolute path when
-    /// it lies outside).
-    pub src_path: String,
+    /// For a path package under the skeleton: the source path relative to
+    /// the skeleton root. Other packages' sources are no paths a plan may
+    /// hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub src_path: Option<String>,
 }
 
 /// A dependency edge between two path packages: Cargo's resolve node `deps`
@@ -133,7 +179,8 @@ pub enum PlanKind {
     Test,
     /// `cargo bench --no-run`: bench binaries and harnesses in bench mode.
     Bench,
-    /// `cargo doc`: the check-mode units rustdoc reads, and [`Plan::docs`].
+    /// `cargo doc`: the check-mode units rustdoc reads, and its rustdoc
+    /// commands (`doc` units).
     Doc,
 }
 
@@ -259,7 +306,7 @@ pub enum Arg {
     Literal(String),
     Concat(Vec<Piece>),
     Splice(Splice),
-    /// Only in doctests.
+    /// Doctest units only.
     SearchPaths(SearchPathsSplice),
 }
 
@@ -279,106 +326,6 @@ pub struct SearchPathsSplice {
     pub literals: Vec<String>,
 }
 
-/// A traced `rustdoc --test` of one library, from `cargo test`. Run
-/// by the doctest derivation, which compiles and runs the examples in
-/// one process. Its shape is a compile unit's, without outputs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct Doctest {
-    pub package: String,
-    #[serde(rename = "crate")]
-    pub krate: CrateInfo,
-    /// The library's compile kind: `host` for a proc macro, whose doctest
-    /// Cargo builds and runs for the host (no `--target`, the host's runner
-    /// and linker).
-    pub platform: Platform,
-    pub program: Vec<Text>,
-    pub args: Vec<Arg>,
-    pub env: BTreeMap<String, Text>,
-    pub env_splices: Vec<Splice>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Cwd,
-}
-
-impl Doctest {
-    /// The doctest as a compile unit with no outputs, for the checks and
-    /// normalization compile units share. `searchPathsOf` splices are left
-    /// out.
-    pub fn as_compile(&self) -> CompileUnit {
-        CompileUnit {
-            package: self.package.clone(),
-            krate: self.krate.clone(),
-            platform: self.platform,
-            test: true,
-            cargo_target: None,
-            program: self.program.clone(),
-            args: self
-                .args
-                .iter()
-                .filter(|a| !matches!(a, Arg::SearchPaths(_)))
-                .cloned()
-                .collect(),
-            env: self.env.clone(),
-            env_splices: self.env_splices.clone(),
-            dylib_path_from: self.dylib_path_from.clone(),
-            cwd: self.cwd.clone(),
-            outputs: BTreeMap::new(),
-            uplifted: BTreeMap::new(),
-        }
-    }
-}
-
-/// A traced `rustdoc` of one Cargo target (a library or a bin), from
-/// `cargo doc`, without its output directory (`-o`): the docs derivation
-/// gives every command the same one. Its shape is a compile unit's, without
-/// outputs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct Doc {
-    pub package: String,
-    #[serde(rename = "crate")]
-    pub krate: CrateInfo,
-    /// The platform Cargo documented the target for: `host` for a proc
-    /// macro, which Cargo documents into its host directory (`target/doc`)
-    /// even with `--target`.
-    pub platform: Platform,
-    pub program: Vec<Text>,
-    pub args: Vec<Arg>,
-    pub env: BTreeMap<String, Text>,
-    pub env_splices: Vec<Splice>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Cwd,
-}
-
-impl Doc {
-    /// The command as a compile unit with no outputs, for the checks,
-    /// normalization and rendering compile units share.
-    pub fn as_compile(&self) -> CompileUnit {
-        CompileUnit {
-            package: self.package.clone(),
-            krate: self.krate.clone(),
-            platform: self.platform,
-            test: false,
-            cargo_target: None,
-            program: self.program.clone(),
-            args: self.args.clone(),
-            env: self.env.clone(),
-            env_splices: self.env_splices.clone(),
-            dylib_path_from: self.dylib_path_from.clone(),
-            cwd: self.cwd.clone(),
-            outputs: BTreeMap::new(),
-            uplifted: BTreeMap::new(),
-        }
-    }
-
-    /// A label for messages: `doc:<crate>` with `#<n>`, its index.
-    pub fn label(&self, index: usize) -> String {
-        format!("doc:{}#{index}", self.krate.name)
-    }
-}
-
 impl From<Text> for Arg {
     fn from(t: Text) -> Arg {
         match t {
@@ -388,20 +335,279 @@ impl From<Text> for Arg {
     }
 }
 
+/// What a unit is: the tool its program runs and the role its derivation
+/// has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UnitKind {
+    /// A rustc (or wrapper) invocation, with outputs.
+    Compile,
+    /// A traced `rustdoc --test` of one library, from `cargo test`, run by
+    /// the doctest derivation, which compiles and runs the examples in one
+    /// process. No outputs.
+    Doctest,
+    /// A traced `rustdoc` of one Cargo target (a library or a bin), from
+    /// `cargo doc`, without its output directory (`-o`): the docs
+    /// derivation runs every doc unit of the plan into one output. No
+    /// outputs.
+    Doc,
+    /// A build-script run: `program` is the script, an `out` reference to
+    /// its compile unit.
+    Run,
+}
+
+impl std::fmt::Display for UnitKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            UnitKind::Compile => "compile",
+            UnitKind::Doctest => "doctest",
+            UnitKind::Doc => "doc",
+            UnitKind::Run => "run",
+        })
+    }
+}
+
+/// One unit of the plan: its kind, the tag of one shape ([`UnitBody`]) for
+/// every kind.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Unit {
-    Compile(CompileUnit),
-    Run(RunUnit),
+    Compile(UnitBody),
+    Doctest(UnitBody),
+    Doc(UnitBody),
+    Run(UnitBody),
+}
+
+impl std::ops::Deref for Unit {
+    type Target = UnitBody;
+    fn deref(&self) -> &UnitBody {
+        match self {
+            Unit::Compile(b) | Unit::Doctest(b) | Unit::Doc(b) | Unit::Run(b) => b,
+        }
+    }
+}
+
+impl std::ops::DerefMut for Unit {
+    fn deref_mut(&mut self) -> &mut UnitBody {
+        match self {
+            Unit::Compile(b) | Unit::Doctest(b) | Unit::Doc(b) | Unit::Run(b) => b,
+        }
+    }
 }
 
 impl Unit {
-    pub fn package(&self) -> &str {
-        match self {
-            Unit::Compile(c) => &c.package,
-            Unit::Run(r) => &r.package,
+    /// A unit of `kind` with `body`.
+    pub fn new(kind: UnitKind, body: UnitBody) -> Unit {
+        match kind {
+            UnitKind::Compile => Unit::Compile(body),
+            UnitKind::Doctest => Unit::Doctest(body),
+            UnitKind::Doc => Unit::Doc(body),
+            UnitKind::Run => Unit::Run(body),
         }
     }
+
+    pub fn kind(&self) -> UnitKind {
+        match self {
+            Unit::Compile(_) => UnitKind::Compile,
+            Unit::Doctest(_) => UnitKind::Doctest,
+            Unit::Doc(_) => UnitKind::Doc,
+            Unit::Run(_) => UnitKind::Run,
+        }
+    }
+
+    pub fn package(&self) -> &str {
+        &self.package
+    }
+
+    pub fn is_compile(&self) -> bool {
+        matches!(self, Unit::Compile(_))
+    }
+
+    pub fn is_run(&self) -> bool {
+        matches!(self, Unit::Run(_))
+    }
+}
+
+/// The fields of a unit. Those that apply to some kinds only are empty on
+/// the others (validated).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UnitBody {
+    pub package: String,
+    /// The crate rustc or rustdoc compiles; none for a run.
+    #[serde(rename = "crate", default, skip_serializing_if = "Option::is_none")]
+    pub krate: Option<CrateInfo>,
+    /// Observed from Cargo's output layout for compiles, runs and docs (a
+    /// proc macro's docs are the host's, which Cargo documents into its
+    /// host directory even with `--target`); for a doctest, `host` when the
+    /// command has no `--target` (a proc macro's doctest, which Cargo builds
+    /// and runs for the host), else `target`. Instantiation picks the
+    /// matching toolchain spec, env capture and (doctests) runner.
+    pub platform: Platform,
+    /// Compile units: whether this is a test unit, one Cargo builds with
+    /// the package's dev-dependencies, from its Cargo target rather than
+    /// its arguments. That is a `--test` compile (a lib, bin, test or bench
+    /// harness), a test or bench target with or without the libtest
+    /// harness (`harness = false` compiles a plain bin, without `--test`),
+    /// or an example. Test units see the package's test view ("Source
+    /// views" in `docs/src/explanation/internals/sources.md`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub test: bool,
+    /// Compile units: the Cargo target the unit compiles, when the planner
+    /// could match it to one of the package's targets. Instantiation looks
+    /// up a view of the unit's own target by it, and falls back to the
+    /// package's view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_target: Option<CargoTarget>,
+    /// The program and wrapper chain, e.g. `[clippy-driver, rustc]`; a
+    /// run's build-script executable.
+    pub program: Vec<Text>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<Arg>,
+    pub env: BTreeMap<String, Text>,
+    /// Runs whose `rustc-env` values are added to `env`, in order; a later
+    /// run's value wins.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_splices: Vec<Splice>,
+    /// Dynamic-path splices: runs whose search paths inside their own `out`
+    /// go on the process's dynamic-library path (`LD_LIBRARY_PATH`), in this
+    /// order, before the recorded value. Cargo adds them for host plugin
+    /// dependencies (proc macros, build dependencies with build scripts),
+    /// and for a run, the runs of packages its build script depends on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dylib_path_from: Vec<UnitId>,
+    /// The working directory Cargo gave the process.
+    pub cwd: Cwd,
+    /// Compile units: output name to file names.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outputs: BTreeMap<String, BTreeSet<String>>,
+    /// Compile units: files of `outputs` that rustc writes under another
+    /// name: the name in `outputs` to rustc's. A bin or example Cargo
+    /// uplifts is stored under its uplifted name (`app`, not rustc's
+    /// `app-<hash>`), so the path a test gets in `CARGO_BIN_EXE_<name>` is
+    /// a file of that name, for `argv[0]` and `current_exe()`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub uplifted: BTreeMap<String, String>,
+    /// Runs: upstream runs whose `DEP_<links>_*` metadata this run receives.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub metadata_from: BTreeSet<UnitId>,
+    /// Runs, with Cargo's `trim-paths` ([`Remap::trim_paths`]): the name
+    /// Cargo's build-directory remap gives the `OUT_DIR` of each run this
+    /// run names (`/cargo/build-dir/<OUT_DIR relative to the build
+    /// directory>`), its own included. Its C prefix maps use them with the
+    /// pairs of `CARGO_TRIM_PATHS_REMAP`, so they agree with cc-rs's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub build_dir_remap: BTreeMap<UnitId, String>,
+    /// Runs: where `OUT_DIR` is inside the run's `out`: the traced
+    /// `OUT_DIR` relative to Cargo's target directory (`<triple>/<profile>/
+    /// build/<pkg>-<hash>/out`). A script that walks up from `OUT_DIR` to
+    /// Cargo's target directory then finds the `out` itself, as under Cargo
+    /// (#23). Empty: `OUT_DIR` is the `out`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub out_dir: String,
+    /// Doc units: the doc units that run before this one, because it reads
+    /// the crates they document (its `--extern`s). rustdoc links to a
+    /// crate's items only when the crate's directory is already in its
+    /// output directory, and Cargo runs a crate's rustdoc after its
+    /// dependencies' when it documents them ([`doc_order`]).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub after: BTreeSet<UnitId>,
+}
+
+/// An empty crate, for a run's [`UnitBody::krate`].
+static NO_CRATE: CrateInfo = CrateInfo {
+    name: String::new(),
+    types: Vec::new(),
+    edition: String::new(),
+};
+
+impl UnitBody {
+    /// The crate of a compile, doctest or doc unit; empty for a run.
+    pub fn krate(&self) -> &CrateInfo {
+        self.krate.as_ref().unwrap_or(&NO_CRATE)
+    }
+
+    /// A run's script: `program[0]`, an `out` reference to its compile
+    /// unit.
+    pub fn script(&self) -> Option<&OutRef> {
+        match self.program.as_slice() {
+            [Text::Concat(p)] => match p.as_slice() {
+                [Piece::Ref(Reference::Out(o))] => Some(o),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// A body with every field empty.
+    pub fn empty(package: impl Into<String>, platform: Platform) -> UnitBody {
+        UnitBody {
+            package: package.into(),
+            krate: None,
+            platform,
+            test: false,
+            cargo_target: None,
+            program: Vec::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            env_splices: Vec::new(),
+            dylib_path_from: Vec::new(),
+            cwd: Cwd::Literal(String::new()),
+            outputs: BTreeMap::new(),
+            uplifted: BTreeMap::new(),
+            metadata_from: BTreeSet::new(),
+            build_dir_remap: BTreeMap::new(),
+            out_dir: String::new(),
+            after: BTreeSet::new(),
+        }
+    }
+}
+
+/// The order the docs derivation runs a plan's doc units in: each after
+/// the units in its `after`, otherwise by crate name, then package, then
+/// id. `Err` names a cycle.
+pub fn doc_order(plan: &Plan) -> Result<Vec<UnitId>, String> {
+    let docs: BTreeMap<&UnitId, &Unit> = plan
+        .units
+        .iter()
+        .filter(|(_, u)| u.kind() == UnitKind::Doc)
+        .collect();
+    let mut waits_for: BTreeMap<&UnitId, usize> = docs.keys().map(|id| (*id, 0)).collect();
+    let mut unblocks: BTreeMap<&UnitId, Vec<&UnitId>> = BTreeMap::new();
+    for (id, u) in &docs {
+        for a in &u.after {
+            if docs.contains_key(a) && a != *id {
+                *waits_for.get_mut(id).expect("a doc unit") += 1;
+                unblocks.entry(a).or_default().push(id);
+            }
+        }
+    }
+    let key = |id: &&UnitId| {
+        let u = docs[id];
+        (u.krate().name.clone(), u.package.clone(), (*id).clone())
+    };
+    let mut ready: BTreeSet<_> = waits_for
+        .iter()
+        .filter(|(_, n)| **n == 0)
+        .map(|(id, _)| key(id))
+        .collect();
+    let mut order = Vec::with_capacity(docs.len());
+    while let Some((_, _, id)) = ready.pop_first() {
+        for j in unblocks.get(&id).into_iter().flatten() {
+            let n = waits_for.get_mut(j).expect("a doc unit");
+            *n -= 1;
+            if *n == 0 {
+                ready.insert(key(j));
+            }
+        }
+        order.push(id);
+    }
+    if order.len() != docs.len() {
+        return Err(
+            "the rustdoc commands of `cargo doc` read each other's crates in a cycle".into(),
+        );
+    }
+    Ok(order)
 }
 
 /// A Cargo target of a package, as source views name it.
@@ -421,54 +627,7 @@ impl CargoTarget {
     }
 }
 
-/// A rustc (or wrapper) invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct CompileUnit {
-    pub package: String,
-    #[serde(rename = "crate")]
-    pub krate: CrateInfo,
-    pub platform: Platform,
-    /// Whether this is a test unit: one Cargo builds with the package's
-    /// dev-dependencies, from its Cargo target rather than its arguments.
-    /// That is a `--test` compile (a lib, bin, test or bench harness), a
-    /// test or bench target with or without the libtest harness
-    /// (`harness = false` compiles a plain bin, without `--test`), or an
-    /// example. Test units see the package's test view ("Source views" in
-    /// `docs/src/explanation/internals/sources.md`).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub test: bool,
-    /// The Cargo target the unit compiles, when the planner could match
-    /// it to one of the package's targets. Instantiation looks up a view of
-    /// the unit's own target by it, and falls back to the package's view.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cargo_target: Option<CargoTarget>,
-    /// The program and wrapper chain, e.g. `[clippy-driver, rustc]`.
-    pub program: Vec<Text>,
-    pub args: Vec<Arg>,
-    pub env: BTreeMap<String, Text>,
-    /// Runs whose `rustc-env` values are added to `env`, in order; a later
-    /// run's value wins.
-    pub env_splices: Vec<Splice>,
-    /// Dynamic-path splices: runs whose search paths inside their own `out`
-    /// go on the process's dynamic-library path (`LD_LIBRARY_PATH`), in this
-    /// order, before the recorded value. Cargo adds them for host plugin
-    /// dependencies (proc macros, build dependencies with build scripts).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dylib_path_from: Vec<UnitId>,
-    pub cwd: Cwd,
-    /// Output name to file names.
-    pub outputs: BTreeMap<String, BTreeSet<String>>,
-    /// Files of `outputs` that rustc writes under another name: the name
-    /// in `outputs` to rustc's. A bin or example Cargo uplifts is stored
-    /// under its uplifted name (`app`, not rustc's `app-<hash>`), so the
-    /// path a test gets in `CARGO_BIN_EXE_<name>` is a file of that name,
-    /// for `argv[0]` and `current_exe()`.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub uplifted: BTreeMap<String, String>,
-}
-
-impl CompileUnit {
+impl UnitBody {
     /// Whether the unit gets a `debug` derivation output for the
     /// debuginfo side files rustc writes, by
     /// [`writes_debuginfo_side_files`] on a target with this `debuginfo`:
@@ -484,7 +643,8 @@ impl CompileUnit {
     /// Nix outputs are fixed before the build, so this is decided from the
     /// command line; host units (build scripts, proc macros) only run
     /// during the build, so theirs are discarded, and a metadata-only
-    /// library (`check`) compiles no objects.
+    /// library (`check`) compiles no objects. Only compile units have
+    /// outputs.
     pub fn has_debug_output(&self, debuginfo: &TargetDebuginfo) -> bool {
         if self.outputs.contains_key("bin") {
             self.writes_side_files(debuginfo, false)
@@ -516,7 +676,7 @@ impl CompileUnit {
                     Arg::Literal(s) => Some(s.as_str()),
                     _ => None,
                 }),
-                &self.krate.types,
+                &self.krate().types,
                 &TargetDebuginfo {
                     split_default: debuginfo.split_default,
                     artifacts: debuginfo
@@ -667,50 +827,6 @@ pub fn writes_debuginfo_side_files<'a>(
     })
 }
 
-/// A build-script run.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RunUnit {
-    pub package: String,
-    pub platform: Platform,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub links: Option<String>,
-    /// The build-script executable: an `out` reference to its compile unit.
-    pub script: Reference,
-    pub env: BTreeMap<String, Text>,
-    /// The working directory Cargo gave the script (the package directory).
-    pub cwd: Cwd,
-    /// Upstream runs whose `DEP_<links>_*` metadata this run receives.
-    pub metadata_from: BTreeSet<UnitId>,
-    /// Dynamic-path splices, as for compile units: the runs of packages the
-    /// build script depends on.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dylib_path_from: Vec<UnitId>,
-    /// The package's `rust-version`, for Cargo's `cargo::` syntax check.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rust_version: Option<String>,
-    /// The package's targets, for Cargo's `rustc-link-arg-*` validations.
-    /// Sorted.
-    pub targets: Vec<PackageTarget>,
-    /// Cargo's `nightly_features_allowed` for the planning toolchain.
-    pub nightly_features_allowed: bool,
-    /// With Cargo's `trim-paths` ([`Plan::trim_paths`]): the name Cargo's
-    /// build-directory remap gives the `OUT_DIR` of each run this run names
-    /// (`/cargo/build-dir/<OUT_DIR relative to the build directory>`), its
-    /// own included. Its C prefix maps use them with the pairs of
-    /// `CARGO_TRIM_PATHS_REMAP`, so they agree with cc-rs's (decision
-    /// 121). Empty without trim-paths.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub build_dir_remap: BTreeMap<UnitId, String>,
-    /// Where `OUT_DIR` is inside the run's `out`: the traced `OUT_DIR`
-    /// relative to Cargo's target directory (`<triple>/<profile>/build/
-    /// <pkg>-<hash>/out`). A script that walks up from `OUT_DIR` to Cargo's
-    /// target directory then finds the `out` itself, as under Cargo (#23).
-    /// Empty: `OUT_DIR` is the `out`.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub out_dir: String,
-}
-
 /// A product of the plan.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -748,7 +864,8 @@ impl Reference {
 }
 
 /// Visit every literal string of a unit that becomes part of a command, an
-/// env value or an env name, with a description of where it is.
+/// env value or an env name, with a description of where it is. The
+/// literals of a doctest's `searchPathsOf` splice are included.
 pub(crate) fn for_each_literal(unit: &Unit, f: &mut dyn FnMut(&str, &dyn Fn() -> String)) {
     fn text(t: &Text, what: &dyn Fn() -> String, f: &mut dyn FnMut(&str, &dyn Fn() -> String)) {
         match t {
@@ -760,35 +877,27 @@ pub(crate) fn for_each_literal(unit: &Unit, f: &mut dyn FnMut(&str, &dyn Fn() ->
             }),
         }
     }
-    let env = |env: &BTreeMap<String, Text>, f: &mut dyn FnMut(&str, &dyn Fn() -> String)| {
-        for (k, v) in env {
-            f(k, &|| format!("env name `{k}`"));
-            text(v, &|| format!("env `{k}`"), f);
-        }
-    };
-    match unit {
-        Unit::Compile(c) => {
-            for (i, p) in c.program.iter().enumerate() {
-                text(p, &|| format!("program[{i}]"), f);
-            }
-            for (i, a) in c.args.iter().enumerate() {
-                match a {
-                    Arg::Literal(s) => f(s, &|| format!("args[{i}]")),
-                    Arg::Concat(p) => text(&Text::Concat(p.clone()), &|| format!("args[{i}]"), f),
-                    Arg::Splice(_) | Arg::SearchPaths(_) => {}
+    for (i, p) in unit.program.iter().enumerate() {
+        text(p, &|| format!("program[{i}]"), f);
+    }
+    for (i, a) in unit.args.iter().enumerate() {
+        match a {
+            Arg::Literal(s) => f(s, &|| format!("args[{i}]")),
+            Arg::Concat(p) => text(&Text::Concat(p.clone()), &|| format!("args[{i}]"), f),
+            Arg::SearchPaths(s) => {
+                for l in &s.literals {
+                    f(l, &|| format!("args[{i}] (searchPathsOf literal)"));
                 }
             }
-            env(&c.env, f);
-            if let Cwd::Literal(s) = &c.cwd {
-                f(s, &|| "cwd".into());
-            }
+            Arg::Splice(_) => {}
         }
-        Unit::Run(r) => {
-            env(&r.env, f);
-            if let Cwd::Literal(s) = &r.cwd {
-                f(s, &|| "cwd".into());
-            }
-        }
+    }
+    for (k, v) in &unit.env {
+        f(k, &|| format!("env name `{k}`"));
+        text(v, &|| format!("env `{k}`"), f);
+    }
+    if let Cwd::Literal(s) = &unit.cwd {
+        f(s, &|| "cwd".into());
     }
 }
 
@@ -807,32 +916,18 @@ pub(crate) fn for_each_reference(unit: &Unit, f: &mut dyn FnMut(&Reference, &dyn
             }
         }
     }
-    let env = |env: &BTreeMap<String, Text>, f: &mut dyn FnMut(&Reference, &dyn Fn() -> String)| {
-        for (k, v) in env {
-            text(v, &|| format!("env `{k}`"), f);
+    for (i, p) in unit.program.iter().enumerate() {
+        text(p, &|| format!("program[{i}]"), f);
+    }
+    for (i, a) in unit.args.iter().enumerate() {
+        if let Arg::Concat(p) = a {
+            text(&Text::Concat(p.clone()), &|| format!("args[{i}]"), f);
         }
-    };
-    match unit {
-        Unit::Compile(c) => {
-            for (i, p) in c.program.iter().enumerate() {
-                text(p, &|| format!("program[{i}]"), f);
-            }
-            for (i, a) in c.args.iter().enumerate() {
-                if let Arg::Concat(p) = a {
-                    text(&Text::Concat(p.clone()), &|| format!("args[{i}]"), f);
-                }
-            }
-            env(&c.env, f);
-            if let Cwd::Ref(r) = &c.cwd {
-                f(r, &|| "cwd".into());
-            }
-        }
-        Unit::Run(r) => {
-            env(&r.env, f);
-            f(&r.script, &|| "script".into());
-            if let Cwd::Ref(c) = &r.cwd {
-                f(c, &|| "cwd".into());
-            }
-        }
+    }
+    for (k, v) in &unit.env {
+        text(v, &|| format!("env `{k}`"), f);
+    }
+    if let Cwd::Ref(r) = &unit.cwd {
+        f(r, &|| "cwd".into());
     }
 }

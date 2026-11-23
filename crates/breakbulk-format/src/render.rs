@@ -11,8 +11,8 @@ use breakbulk_unit::spec::{
 use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
-    Arg, CompileUnit, CrateSrcRef, EmptyRef, OutRef, Piece, Plan, Reference, RunUnit, SrcRef, Text,
-    Unit, UnitId, for_each_reference,
+    Arg, CrateSrcRef, EmptyRef, OutRef, Piece, Plan, Reference, SrcRef, Text, Unit, UnitId,
+    UnitKind, for_each_reference,
 };
 use crate::{CanonicalError, Splice, to_canonical_json};
 
@@ -40,7 +40,7 @@ pub trait Resolve {
     /// flag (every scope); `breakbulk-instantiate` gives shipped units
     /// `macro,diagnostics` when their product splits debug info ("Source
     /// paths at run time" in `docs/src/reference/unit-builder.md`).
-    fn remap_scope(&self, _id: &UnitId, _unit: &CompileUnit) -> Option<String> {
+    fn remap_scope(&self, _id: &UnitId, _unit: &Unit) -> Option<String> {
         None
     }
     /// `sourcePaths = "keep"`: breakbulk adds no remaps of
@@ -63,7 +63,7 @@ pub trait Resolve {
     fn link_captures(
         &self,
         _id: &UnitId,
-        _unit: &CompileUnit,
+        _unit: &Unit,
         _packages: &BTreeSet<String>,
     ) -> Result<Vec<String>, Self::Error> {
         Ok(Vec::new())
@@ -88,15 +88,18 @@ pub trait Resolve {
     fn wrapper_config_dir(
         &self,
         _id: &UnitId,
-        _unit: &CompileUnit,
+        _unit: &Unit,
     ) -> Result<Option<(String, String)>, Self::Error> {
         Ok(None)
     }
-    /// The rules for the files a compile unit run through a wrapper
-    /// writes beyond its outputs (`RenderedCompile::side_files`): what the
-    /// variant's rustc driver writes, such as files for its dependents to
-    /// read. They come after the debuginfo rules.
-    fn side_files(&self) -> Vec<SideFile> {
+    /// The rules for the files a compile unit writes beyond its outputs
+    /// (`RenderedCompile::side_files`) when one of the variant's wrappers
+    /// runs it (its program chain names the wrapper): what the variant's
+    /// rustc driver writes, such as files for its dependents to read.
+    /// Plain rustc writes nothing more, and units without a wrapper stay
+    /// the same as a plain variant's, and shared. They come after the
+    /// debuginfo rules.
+    fn side_files(&self, _unit: &Unit) -> Vec<SideFile> {
         Vec::new()
     }
     /// For a unit (or doctest) of a repository package: the source view it
@@ -185,11 +188,11 @@ pub(crate) fn flags<R: Resolve>(
 /// `test`: an example is a test unit, and one built as an `rlib` needs
 /// only metadata. Cargo's other test-mode compiles pass no crate type,
 /// which is a `bin`.
-pub fn is_linking(c: &CompileUnit) -> bool {
+pub fn is_linking(c: &Unit) -> bool {
     c.args
         .iter()
         .any(|a| matches!(a, Arg::Literal(s) if s == "--test"))
-        || c.krate
+        || c.krate()
             .types
             .iter()
             .any(|t| !matches!(t.as_str(), "lib" | "rlib"))
@@ -203,14 +206,15 @@ pub fn is_linking(c: &CompileUnit) -> bool {
 /// target link and the reverse.
 pub fn link_packages<'a>(
     plan: &Plan,
-    unit: &CompileUnit,
+    unit: &Unit,
     crates: impl IntoIterator<Item = &'a OutRef>,
 ) -> BTreeSet<String> {
     crates
         .into_iter()
         .filter_map(|o| match plan.units.get(&o.out) {
-            Some(Unit::Compile(d))
-                if d.platform == unit.platform
+            Some(d)
+                if d.is_compile()
+                    && d.platform == unit.platform
                     && !crate::deps::is_proc_macro(d)
                     && d.package != unit.package =>
             {
@@ -237,7 +241,7 @@ pub fn remap_bases(plan: &Plan, unit: &Unit) -> BTreeSet<Reference> {
                 crate_src: s.crate_src.clone(),
                 rel: String::new(),
             }),
-            Reference::Out(o) if matches!(plan.units.get(&o.out), Some(Unit::Run(_))) => {
+            Reference::Out(o) if plan.units.get(&o.out).is_some_and(Unit::is_run) => {
                 Reference::Out(OutRef {
                     out: o.out.clone(),
                     output: "out".into(),
@@ -399,7 +403,7 @@ pub fn render_unit<R: Resolve>(plan: &Plan, id: &UnitId, r: &R) -> Result<Render
 ///
 /// # Panics
 ///
-/// If `id` is not a unit of the graph's plan.
+/// If `id` is not a unit of the graph's plan, or is a doctest or doc unit.
 pub fn render_unit_in<R: Resolve>(
     graph: &Graph,
     id: &UnitId,
@@ -414,8 +418,9 @@ pub fn render_unit_in<R: Resolve>(
     normalize_unit(&mut unit);
     let overlay = r.env_overlay(id, &unit)?;
     let env_capture = r.env_capture(id, &unit)?;
-    Ok(match &unit {
-        Unit::Compile(c) => {
+    let c = &unit;
+    Ok(match unit.kind() {
+        UnitKind::Compile => {
             let deps = graph.unit_deps(id);
             let weak = &*deps.reachable_runs;
             let out = |o: OutRef| r.reference(&Reference::Out(o));
@@ -440,11 +445,11 @@ pub fn render_unit_in<R: Resolve>(
             };
             let (remap, remap_scope) = if r.keep_source_paths() {
                 (Vec::new(), None)
-            } else if plan.trim_paths {
+            } else if plan.remap.trim_paths {
                 // Cargo's remaps are in the arguments. With the project's
                 // own setting its scope is too; when breakbulk set it,
                 // the scope is breakbulk's, per product kind.
-                let scope = if plan.trim_paths_default {
+                let scope = if plan.remap.trim_paths_default {
                     r.remap_scope(id, c)
                 } else {
                     None
@@ -462,14 +467,14 @@ pub fn render_unit_in<R: Resolve>(
                         Ok((from, r.remap_name(b)?))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                remap.extend(plan.rust_src_remap.clone());
+                remap.extend(plan.remap.rust_src.clone());
                 remap.sort();
                 remap.dedup();
                 (remap, r.remap_scope(id, c))
             };
             RenderedUnit::Compile(RenderedCompile {
                 package: c.package.clone(),
-                krate: c.krate.clone(),
+                krate: c.krate().clone(),
                 platform: c.platform,
                 program: c
                     .program
@@ -509,19 +514,17 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                     .chain(
-                        c.has_debug_output(&plan.target_debuginfo)
+                        c.has_debug_output(&plan.target.debuginfo)
                             .then(|| (breakbulk_unit::spec::DEBUG_OUTPUT.to_owned(), Vec::new())),
                     )
                     .collect(),
                 uplifted: c.uplifted.clone(),
-                // The variant's rules apply where a wrapper runs: plain
-                // rustc writes nothing more, and units without one stay
-                // the same as a plain variant's, and shared.
                 side_files: c
-                    .has_debug_output(&plan.target_debuginfo)
+                    .has_debug_output(&plan.target.debuginfo)
                     .then(|| {
                         debug_side_files(
-                            plan.target_debuginfo
+                            plan.target
+                                .debuginfo
                                 .artifacts
                                 .iter()
                                 .map(|a| a.suffix.as_str()),
@@ -529,12 +532,7 @@ pub fn render_unit_in<R: Resolve>(
                     })
                     .into_iter()
                     .flatten()
-                    .chain(
-                        (c.program.len() > 1)
-                            .then(|| r.side_files())
-                            .into_iter()
-                            .flatten(),
-                    )
+                    .chain(r.side_files(c))
                     .collect(),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,
@@ -549,7 +547,15 @@ pub fn render_unit_in<R: Resolve>(
                 seed: Some(id.to_string()),
             })
         }
-        Unit::Run(run) => {
+        UnitKind::Doctest | UnitKind::Doc => {
+            panic!(
+                "{id} is a {} unit; render_doctest and render_docs render those",
+                unit.kind()
+            )
+        }
+        UnitKind::Run => {
+            let run = &unit;
+            let facts = plan.packages.get(&run.package);
             // breakbulk-unit sets OUT_DIR to the run's own `out`, which a
             // derivation cannot name in its own attributes. Dropped before
             // resolving, so the resolver never sees the self-reference.
@@ -560,7 +566,7 @@ pub fn render_unit_in<R: Resolve>(
             merge_layer_with(r, &mut env, overlay)?;
             let (remap, out_dir_remap) = if r.keep_source_paths() {
                 (Vec::new(), None)
-            } else if plan.trim_paths {
+            } else if plan.remap.trim_paths {
                 cargo_run_remap(id, run, r)?
             } else {
                 (
@@ -575,8 +581,11 @@ pub fn render_unit_in<R: Resolve>(
             RenderedUnit::Run(RenderedRun {
                 package: run.package.clone(),
                 platform: run.platform,
-                links: run.links.clone(),
-                script: r.reference(&run.script)?,
+                links: facts.and_then(|f| f.links.clone()),
+                script: match run.script() {
+                    Some(o) => r.reference(&Reference::Out(o.clone()))?,
+                    None => panic!("{id}: a run's program is its script (validated)"),
+                },
                 env,
                 out_dir: run.out_dir.clone(),
                 cwd: run.cwd.render(r)?,
@@ -590,9 +599,9 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|u| r.flags(u))
                     .collect::<Result<_, _>>()?,
-                rust_version: run.rust_version.clone(),
-                targets: run.targets.clone(),
-                nightly_features_allowed: run.nightly_features_allowed,
+                rust_version: facts.and_then(|f| f.rust_version.clone()),
+                targets: facts.map(|f| f.run_targets()).unwrap_or_default(),
+                nightly_features_allowed: plan.nightly_features_allowed,
                 env_capture,
                 // Prefix maps for C code the script compiles: breakbulk's
                 // names, or Cargo's under trim-paths (`cargo_run_remap`).
@@ -650,7 +659,7 @@ type RunRemap = (Vec<(String, String)>, Option<String>);
 /// own `out`). So `__FILE__` and C debug info read as under Cargo and
 /// breakbulk's maps agree with cc-rs's. Returns the pairs and the run's own
 /// `OUT_DIR` name.
-fn cargo_run_remap<R: Resolve>(id: &UnitId, run: &RunUnit, r: &R) -> Result<RunRemap, R::Error> {
+fn cargo_run_remap<R: Resolve>(id: &UnitId, run: &Unit, r: &R) -> Result<RunRemap, R::Error> {
     let mut remap = Vec::new();
     if let Some(v) = run.env.get("CARGO_TRIM_PATHS_REMAP") {
         for pair in text(v, r)?.split(':') {

@@ -3,8 +3,9 @@
 //! - In a concatenation, adjacent literals are merged and empty literals
 //!   dropped; a concatenation of literals only becomes a plain literal. A
 //!   concatenation with a reference stays an array.
-//! - Arrays that are sets are sorted and deduplicated: a run's `targets`
-//!   (and each target's kinds), a crate's `types`. Sets typed as
+//! - Arrays that are sets are sorted and deduplicated:
+//!   a package's `targets` (and each target's kinds), a crate's `types`,
+//!   a package's `dependencies`, a doctest's `searchPathsOf`. Sets typed as
 //!   `BTreeSet` (`roots`, `features`, `metadataFrom`, an output's files)
 //!   are kept sorted and deduplicated by their type. Arrays whose
 //!   order matters (`args`, `program`, `envSplices`) keep their order.
@@ -50,31 +51,26 @@ fn sort_dedup<T: Ord>(v: &mut Vec<T>) {
 }
 
 pub fn normalize_unit(unit: &mut Unit) {
-    let env = |env: &mut std::collections::BTreeMap<String, Text>| {
-        for v in env.values_mut() {
-            *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
-        }
-    };
-    match unit {
-        Unit::Compile(c) => {
-            c.program = std::mem::take(&mut c.program)
-                .into_iter()
-                .map(normalize_text)
-                .collect();
-            c.args = std::mem::take(&mut c.args)
-                .into_iter()
-                .map(normalize_arg)
-                .collect();
-            env(&mut c.env);
-            sort_dedup(&mut c.krate.types);
-        }
-        Unit::Run(r) => {
-            env(&mut r.env);
-            for t in &mut r.targets {
-                sort_dedup(&mut t.kind);
+    unit.program = std::mem::take(&mut unit.program)
+        .into_iter()
+        .map(normalize_text)
+        .collect();
+    unit.args = std::mem::take(&mut unit.args)
+        .into_iter()
+        .map(|a| match normalize_arg(a) {
+            Arg::SearchPaths(mut s) => {
+                sort_dedup(&mut s.search_paths_of);
+                sort_dedup(&mut s.literals);
+                Arg::SearchPaths(s)
             }
-            sort_dedup(&mut r.targets);
-        }
+            a => a,
+        })
+        .collect();
+    for v in unit.env.values_mut() {
+        *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
+    }
+    if let Some(k) = &mut unit.krate {
+        sort_dedup(&mut k.types);
     }
 }
 
@@ -84,42 +80,15 @@ impl Plan {
         for u in self.units.values_mut() {
             normalize_unit(u);
         }
-        for d in self.doctests.values_mut() {
-            d.program = std::mem::take(&mut d.program)
-                .into_iter()
-                .map(normalize_text)
-                .collect();
-            d.args = std::mem::take(&mut d.args)
-                .into_iter()
-                .map(|a| match normalize_arg(a) {
-                    Arg::SearchPaths(mut s) => {
-                        sort_dedup(&mut s.search_paths_of);
-                        sort_dedup(&mut s.literals);
-                        Arg::SearchPaths(s)
-                    }
-                    a => a,
-                })
-                .collect();
-            for v in d.env.values_mut() {
-                *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
+        for p in self.packages.values_mut() {
+            for t in &mut p.targets {
+                sort_dedup(&mut t.kind);
             }
-            sort_dedup(&mut d.krate.types);
-        }
-        // Their order is the order they run in; only their parts are
-        // normalized.
-        for d in &mut self.docs {
-            d.program = std::mem::take(&mut d.program)
-                .into_iter()
-                .map(normalize_text)
-                .collect();
-            d.args = std::mem::take(&mut d.args)
-                .into_iter()
-                .map(normalize_arg)
-                .collect();
-            for v in d.env.values_mut() {
-                *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
+            sort_dedup(&mut p.targets);
+            for d in &mut p.dependencies {
+                sort_dedup(&mut d.kinds);
             }
-            sort_dedup(&mut d.krate.types);
+            sort_dedup(&mut p.dependencies);
         }
     }
 }

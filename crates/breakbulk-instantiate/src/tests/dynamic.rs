@@ -239,8 +239,13 @@ fn units_output_depends_on_every_unit_output() {
         .find(|(k, _)| k == "wrapper:*units")
         .unwrap();
     assert_eq!(u.name, "ws-x86_64-unknown-linux-gnu-dev-units");
-    for (id, unit) in &inputs.plan.units {
-        for o in unit_outputs(unit, &inputs.plan.target_debuginfo) {
+    for (id, unit) in inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| u.is_compile() || u.is_run())
+    {
+        for o in unit_outputs(unit, &inputs.plan.target.debuginfo) {
             assert!(u.input_drvs[&drv_of(id)].contains(&o), "{id} {o}");
             assert!(u.env["units"].contains(&unit_path(id, &o)));
         }
@@ -263,7 +268,7 @@ fn runs_output_depends_on_every_run_flags_only() {
                 assert_eq!(r.input_drvs[&drv_of(id)], ["flags".to_owned()].into());
                 assert!(r.env["runs"].contains(&unit_path(id, "flags")));
             }
-            Unit::Compile(_) => assert!(!r.input_drvs.contains_key(&drv_of(id)), "{id}"),
+            _ => assert!(!r.input_drvs.contains_key(&drv_of(id)), "{id}"),
         }
     }
     assert!(runs > 0);
@@ -422,12 +427,12 @@ fn test_spec_of_a_test_root() {
         name: name.into(),
         kind: vec![kind.into()],
         crate_types: vec![if kind == "lib" { "lib" } else { "bin" }.into()],
-        src_path: src.into(),
+        src_path: Some(src.into()),
     };
-    plan.path_packages = BTreeMap::from([
+    plan.packages = BTreeMap::from([
         (
             app_id.clone(),
-            breakbulk_format::PathPackage {
+            breakbulk_format::PackageFacts {
                 targets: vec![
                     target("smokeapp", "bin", "smokeapp/src/main.rs"),
                     target("unbuilt", "test", "smokeapp/tests/unbuilt.rs"),
@@ -439,13 +444,14 @@ fn test_spec_of_a_test_root() {
                         target: None,
                     }],
                 }],
+                ..Default::default()
             },
         ),
         (
             lib_id.clone(),
-            breakbulk_format::PathPackage {
+            breakbulk_format::PackageFacts {
                 targets: vec![target("smokelib", "lib", "smokelib/src/lib.rs")],
-                dependencies: vec![],
+                ..Default::default()
             },
         ),
     ]);
@@ -541,16 +547,11 @@ fn path_graph_leaves_out_build_std_packages() {
     let core = "path+file:///nix/store/00000000000000000000000000000000-rust/lib/rustlib/src/rust/library/core#0.0.0";
     let app = plan.units[APP].package().to_owned();
     for id in [core, app.as_str()] {
-        plan.path_packages.insert(
-            id.into(),
-            breakbulk_format::PathPackage {
-                targets: vec![],
-                dependencies: vec![],
-            },
-        );
+        plan.packages
+            .insert(id.into(), breakbulk_format::PackageFacts::default());
     }
     let names: Vec<String> = crate::test_spec::path_packages(&plan).into_keys().collect();
-    assert_eq!(names, ["smokeapp"], "{app}");
+    assert_eq!(names, ["smokeapp", "smokelib"], "{app}");
 }
 
 /// The plan with a doctest for `smokelib`, made from its library unit.
@@ -558,19 +559,18 @@ fn with_doctest(mut inputs: Inputs) -> Inputs {
     let Some(breakbulk_format::Unit::Compile(c)) = inputs.plan.units.get(LIB).cloned() else {
         panic!()
     };
-    inputs.plan.doctests.insert(
+    inputs.plan.units.insert(
         "d-smokelib".into(),
-        breakbulk_format::Doctest {
-            package: c.package,
+        breakbulk_format::Unit::Doctest(breakbulk_format::UnitBody {
             krate: c.krate,
-            platform: c.platform,
             program: c.program,
             args: c.args,
             env: c.env,
             env_splices: c.env_splices,
             dylib_path_from: c.dylib_path_from,
             cwd: c.cwd,
-        },
+            ..breakbulk_format::UnitBody::empty(c.package, c.platform)
+        }),
     );
     inputs
 }
@@ -655,17 +655,19 @@ fn docs() {
     };
     inputs.plan.kind = breakbulk_format::PlanKind::Doc;
     inputs.plan.roots.clear();
-    inputs.plan.docs.push(breakbulk_format::Doc {
-        package: c.package,
-        krate: c.krate,
-        platform: c.platform,
-        program: c.program,
-        args: c.args,
-        env: c.env,
-        env_splices: c.env_splices,
-        dylib_path_from: c.dylib_path_from,
-        cwd: c.cwd,
-    });
+    inputs.plan.units.insert(
+        "o-smokelib".into(),
+        breakbulk_format::Unit::Doc(breakbulk_format::UnitBody {
+            krate: c.krate,
+            program: c.program,
+            args: c.args,
+            env: c.env,
+            env_splices: c.env_splices,
+            dylib_path_from: c.dylib_path_from,
+            cwd: c.cwd,
+            ..breakbulk_format::UnitBody::empty(c.package, c.platform)
+        }),
+    );
     let units = instantiate(&inputs).unwrap();
     let ifd = units.docs.as_ref().expect("a doc plan has docs");
     assert_eq!(attr(ifd, "name"), "x86_64-unknown-linux-gnu-doc");
@@ -753,7 +755,12 @@ fn leave_and_submit() {
         .insert("smokelib".into(), "smokelib.doctest.drv".into());
     let plan = dynamic_plan(&inputs, &units, &first).unwrap();
     let keys: BTreeSet<&str> = plan.nodes.iter().map(|n| n.key.as_str()).collect();
-    for id in inputs.plan.units.keys() {
+    for (id, _) in inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| u.is_compile() || u.is_run())
+    {
         assert_eq!(keys.contains(id.as_str()), !app_units.contains(id), "{id}");
     }
     assert!(!keys.iter().any(|k| k.contains("smokeapp/")), "{keys:?}");
@@ -780,7 +787,12 @@ fn leave_and_submit() {
         .insert("smokeapp".into(), "smokeapp.doctest.drv".into());
     let plan = dynamic_plan(&inputs, &units, &second).unwrap();
     let keys: BTreeSet<&str> = plan.nodes.iter().map(|n| n.key.as_str()).collect();
-    for id in inputs.plan.units.keys() {
+    for (id, _) in inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| u.is_compile() || u.is_run())
+    {
         assert!(keys.contains(id.as_str()), "{id}");
     }
     for r in ROOTS {

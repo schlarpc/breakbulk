@@ -2453,12 +2453,12 @@ in
         lib.filterAttrs (_: u: !(u.test or false) && lib.elem "tool.elf" (u.outputs.bin or [ ])) plan.units
       );
       got = {
-        target = lib.hasSuffix "/my-board.json" plan.target;
+        target = lib.hasSuffix "/my-board.json" plan.target.arg;
         planName = i.plans.test.name;
         binExe = lib.concatMap (u: lib.optional (u ? env.CARGO_BIN_EXE_tool) u.env.CARGO_BIN_EXE_tool) (
           lib.attrValues plan.units
         );
-        shellTarget = (w.devShell.CARGO_BUILD_TARGET or w.devShell.env.CARGO_BUILD_TARGET) == plan.target;
+        shellTarget = (w.devShell.CARGO_BUILD_TARGET or w.devShell.env.CARGO_BUILD_TARGET) == plan.target.arg;
       };
       want = {
         target = true;

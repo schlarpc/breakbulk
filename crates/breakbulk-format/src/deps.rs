@@ -28,24 +28,24 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-use crate::plan::{Arg, CompileUnit, OutRef, Piece, Plan, Reference, Unit, UnitId};
+use crate::plan::{Arg, OutRef, Piece, Plan, Reference, Unit, UnitId};
 use crate::render::is_linking;
 use breakbulk_unit::spec::SpliceKind;
 
-pub(crate) fn is_proc_macro(c: &CompileUnit) -> bool {
-    c.krate.types.iter().any(|t| t == "proc-macro")
+pub(crate) fn is_proc_macro(c: &Unit) -> bool {
+    c.krate().types.iter().any(|t| t == "proc-macro")
 }
 
 /// Whether a compile unit's `rmeta` output carries a manifest: a library
 /// (not a proc macro) with exactly one `rmeta` file. `breakbulk-unit`
 /// writes one for every unit with an `rmeta` output.
-pub fn has_manifest(c: &CompileUnit) -> bool {
+pub fn has_manifest(c: &Unit) -> bool {
     !is_proc_macro(c) && c.outputs.get("rmeta").is_some_and(|f| f.len() == 1)
 }
 
 /// Whether a library was compiled with `-Zembed-metadata=no` (nightly Cargo
 /// and rustc): its `rlib` has no metadata, which is only in its `rmeta`.
-pub fn embeds_no_metadata(c: &CompileUnit) -> bool {
+pub fn embeds_no_metadata(c: &Unit) -> bool {
     c.args.iter().any(
         |a| matches!(a, Arg::Literal(s) if s == "embed-metadata=no" || s == "-Zembed-metadata=no"),
     )
@@ -53,10 +53,7 @@ pub fn embeds_no_metadata(c: &CompileUnit) -> bool {
 
 /// The crate files a compile unit names directly in its arguments: `out`
 /// references to another compile unit's outputs other than `bin`.
-pub fn direct_crate_refs<'a>(
-    plan: &'a Plan,
-    c: &'a CompileUnit,
-) -> impl Iterator<Item = &'a OutRef> {
+pub fn direct_crate_refs<'a>(plan: &'a Plan, c: &'a Unit) -> impl Iterator<Item = &'a OutRef> {
     c.args.iter().flat_map(move |a| {
         let pieces: &[Piece] = match a {
             Arg::Concat(p) => p,
@@ -64,8 +61,7 @@ pub fn direct_crate_refs<'a>(
         };
         pieces.iter().filter_map(move |p| match p {
             Piece::Ref(Reference::Out(o))
-                if o.output != "bin"
-                    && matches!(plan.units.get(&o.out), Some(Unit::Compile(_))) =>
+                if o.output != "bin" && plan.units.get(&o.out).is_some_and(Unit::is_compile) =>
             {
                 Some(o)
             }
@@ -123,11 +119,8 @@ impl<'p> Graph<'p> {
         }
     }
 
-    fn compile(&self, id: &str) -> Option<&'p CompileUnit> {
-        match self.plan.units.get(id) {
-            Some(Unit::Compile(c)) => Some(c),
-            _ => None,
-        }
+    fn compile(&self, id: &str) -> Option<&'p Unit> {
+        self.plan.units.get(id).filter(|u| u.is_compile())
     }
 
     /// `o`, or the `want` output of the unit it names when that unit is a
@@ -189,8 +182,8 @@ impl<'p> Graph<'p> {
     }
 
     /// [`Graph::crate_deps`] of a compile unit that need not be one of the
-    /// plan's units (a doctest's [`crate::Doctest::as_compile`]).
-    pub fn crate_deps_of(&self, c: &CompileUnit) -> BTreeSet<OutRef> {
+    /// plan's units.
+    pub fn crate_deps_of(&self, c: &Unit) -> BTreeSet<OutRef> {
         let want = if is_linking(c) { "rlib" } else { "rmeta" };
         let mut out = BTreeSet::new();
         for o in direct_crate_refs(self.plan, c) {
@@ -227,7 +220,7 @@ impl<'p> Graph<'p> {
     }
 
     /// The direct dependencies of `c` that carry a manifest.
-    fn manifest_deps(&self, c: &CompileUnit) -> BTreeSet<UnitId> {
+    fn manifest_deps(&self, c: &Unit) -> BTreeSet<UnitId> {
         direct_crate_refs(self.plan, c)
             .filter(|o| self.compile(&o.out).is_some_and(has_manifest))
             .map(|o| o.out.clone())
@@ -303,7 +296,7 @@ pub fn crate_deps(plan: &Plan, id: &UnitId) -> BTreeSet<OutRef> {
 }
 
 /// [`Graph::crate_deps_of`] for one compile unit.
-pub fn crate_deps_of(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
+pub fn crate_deps_of(plan: &Plan, c: &Unit) -> BTreeSet<OutRef> {
     Graph::new(plan).crate_deps_of(c)
 }
 
@@ -312,7 +305,7 @@ pub fn crate_deps_of(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
 /// linking unit, plus every `rmeta` below it when its libraries' rlibs carry
 /// no metadata (nightly's `-Zembed-metadata=no`). Doctests name everything
 /// as inputs: they read no manifests.
-pub fn doctest_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
+pub fn doctest_deps(plan: &Plan, c: &Unit) -> BTreeSet<OutRef> {
     let g = Graph::new(plan);
     let mut deps = g.crate_deps_of(c);
     let no_embed =
@@ -331,7 +324,7 @@ pub fn doctest_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
 /// `rmeta` where a library has one, whatever the documented crate's type
 /// (rustdoc links nothing, so a bin's dependencies are read as metadata as
 /// well). Named as inputs: the docs derivation reads no manifests.
-pub fn doc_deps(plan: &Plan, c: &CompileUnit) -> BTreeSet<OutRef> {
+pub fn doc_deps(plan: &Plan, c: &Unit) -> BTreeSet<OutRef> {
     let g = Graph::new(plan);
     let mut deps = BTreeSet::new();
     for o in direct_crate_refs(plan, c) {
@@ -354,8 +347,7 @@ pub fn units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
     seen
 }
 
-/// [`units_below`] a unit that need not be in the plan (a doctest's
-/// [`crate::Doctest::as_compile`]).
+/// [`units_below`] a unit that need not be in the plan.
 pub fn units_below_unit(plan: &Plan, unit: &Unit) -> BTreeSet<UnitId> {
     fn direct(unit: &Unit) -> Vec<UnitId> {
         let mut out = Vec::new();
@@ -364,23 +356,17 @@ pub fn units_below_unit(plan: &Plan, unit: &Unit) -> BTreeSet<UnitId> {
                 out.push(o.out.clone());
             }
         });
-        match unit {
-            Unit::Compile(c) => {
-                for a in &c.args {
-                    match a {
-                        Arg::Splice(s) => out.push(s.splice.clone()),
-                        Arg::SearchPaths(s) => out.extend(s.search_paths_of.iter().cloned()),
-                        _ => {}
-                    }
-                }
-                out.extend(c.env_splices.iter().map(|s| s.splice.clone()));
-                out.extend(c.dylib_path_from.iter().cloned());
-            }
-            Unit::Run(r) => {
-                out.extend(r.metadata_from.iter().cloned());
-                out.extend(r.dylib_path_from.iter().cloned());
+        for a in &unit.args {
+            match a {
+                Arg::Splice(s) => out.push(s.splice.clone()),
+                Arg::SearchPaths(s) => out.extend(s.search_paths_of.iter().cloned()),
+                _ => {}
             }
         }
+        out.extend(unit.env_splices.iter().map(|s| s.splice.clone()));
+        out.extend(unit.dylib_path_from.iter().cloned());
+        out.extend(unit.metadata_from.iter().cloned());
+        out.extend(unit.after.iter().cloned());
         out
     }
     let mut seen = BTreeSet::new();
@@ -407,13 +393,17 @@ pub fn runs_of(
 ) -> BTreeSet<UnitId> {
     units
         .into_iter()
-        .filter(|u| matches!(plan.units.get(u), Some(Unit::Run(r)) if r.platform == platform))
+        .filter(|u| {
+            plan.units
+                .get(u)
+                .is_some_and(|r| r.is_run() && r.platform == platform)
+        })
         .collect()
 }
 
 /// The compile units among [`units_below`] `id` that write per-object
 /// debuginfo side files on the plan's target
-/// ([`CompileUnit::writes_per_object_debug_files`]): the libraries whose
+/// ([`Unit::writes_per_object_debug_files`]): the libraries whose
 /// `.dwo` files a binary linked from them names
 /// (`split-debuginfo=unpacked`). Not every unit below with a `debug`
 /// output: a library that also links a cdylib has one with `packed` (its
@@ -423,7 +413,9 @@ pub fn debug_units_below(plan: &Plan, id: &UnitId) -> BTreeSet<UnitId> {
     units_below(plan, id)
         .into_iter()
         .filter(|u| {
-            matches!(plan.units.get(u), Some(Unit::Compile(c)) if c.writes_per_object_debug_files(&plan.target_debuginfo))
+            plan.units.get(u).is_some_and(|c| {
+                c.is_compile() && c.writes_per_object_debug_files(&plan.target.debuginfo)
+            })
         })
         .collect()
 }

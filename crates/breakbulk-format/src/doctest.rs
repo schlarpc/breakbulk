@@ -1,20 +1,20 @@
-//! Rendering a plan's doctest into the `BREAKBULK_UNIT` of a doctest
+//! Rendering a plan's doctest unit into the `BREAKBULK_UNIT` of a doctest
 //! derivation (`breakbulk-unit doctest`, see `breakbulk_unit::doctest`).
 
-use breakbulk_unit::doctest::{DoctestKind, RenderedDoctest};
-use breakbulk_unit::spec::{RenderedArg, RenderedCompile};
-
-use crate::normalize::{normalize_arg, normalize_text};
-use crate::plan::{Arg, Doctest, Plan, Platform, Reference, Text, Unit};
 use std::collections::BTreeSet;
 
-use crate::deps::{doctest_deps, runs_of, units_below_unit};
-use crate::render::{Resolve, env, flags, link_packages, splice, text};
+use breakbulk_unit::doctest::{DoctestKind, RenderedDoctest};
 
-/// Render doctest `id` (`d-<package>`) of `plan`. The doctest is rendered as
-/// a linking compile unit with no outputs and no remapping (rustdoc keeps
-/// nothing it writes); its `searchPathsOf` splice becomes the list of runs'
-/// `flags` outputs and its position in the arguments.
+use crate::deps::{doctest_deps, runs_of, units_below_unit};
+use crate::docs::rustdoc_command;
+use crate::normalize::normalize_unit;
+use crate::plan::{Arg, Plan, Platform, Unit, UnitKind};
+use crate::render::{Resolve, link_packages};
+
+/// Render doctest unit `id` (`d-<package>`) of `plan`. The doctest is
+/// rendered as a linking compile unit with no outputs and no remapping
+/// (rustdoc keeps nothing it writes); its `searchPathsOf` splice becomes
+/// the list of runs' `flags` outputs and its position in the arguments.
 ///
 /// The traced `-L` list and dynamic-library path name every run of the
 /// invocation (Cargo's whole-build `native_dirs`). Rendered, they keep only
@@ -23,30 +23,19 @@ use crate::render::{Resolve, env, flags, link_packages, splice, text};
 ///
 /// # Panics
 ///
-/// If `id` is not a doctest of `plan`.
+/// If `id` is not a doctest unit of `plan`.
 pub fn render_doctest<R: Resolve>(
     plan: &Plan,
     id: &str,
     r: &R,
 ) -> Result<RenderedDoctest, R::Error> {
     let mut d = plan
-        .doctests
+        .units
         .get(id)
+        .filter(|u| u.kind() == UnitKind::Doctest)
         .unwrap_or_else(|| panic!("{id} is not a doctest of the plan"))
         .clone();
-    d.program = std::mem::take(&mut d.program)
-        .into_iter()
-        .map(normalize_text)
-        .collect();
-    d.args = std::mem::take(&mut d.args)
-        .into_iter()
-        .map(normalize_arg)
-        .collect();
-    for v in d.env.values_mut() {
-        *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
-    }
-    d.krate.types.sort();
-    d.krate.types.dedup();
+    normalize_unit(&mut d);
 
     let at = d
         .args
@@ -54,94 +43,30 @@ pub fn render_doctest<R: Resolve>(
         .position(|a| matches!(a, Arg::SearchPaths(_)))
         .unwrap_or(d.args.len());
     let (search_runs, dylib_runs) = closure_runs(plan, &d);
-    let mut runs: Vec<String> = d
-        .args
-        .iter()
-        .filter_map(|a| match a {
-            Arg::SearchPaths(s) => Some(s.search_paths_of.iter().cloned()),
-            _ => None,
-        })
-        .flatten()
-        .filter(|u| search_runs.contains(u))
-        .collect();
+    let mut runs: Vec<String> = Vec::new();
+    let mut literals: Vec<String> = Vec::new();
+    for a in &d.args {
+        if let Arg::SearchPaths(s) = a {
+            runs.extend(
+                s.search_paths_of
+                    .iter()
+                    .filter(|u| search_runs.contains(*u))
+                    .cloned(),
+            );
+            literals.extend(s.literals.iter().cloned());
+        }
+    }
     runs.sort();
     runs.dedup();
-    d.dylib_path_from.retain(|u| dylib_runs.contains(u));
-    let mut literals: Vec<String> = d
-        .args
-        .iter()
-        .filter_map(|a| match a {
-            Arg::SearchPaths(s) => Some(s.literals.iter().cloned()),
-            _ => None,
-        })
-        .flatten()
-        .collect();
     literals.sort();
     literals.dedup();
+    d.dylib_path_from.retain(|u| dylib_runs.contains(u));
+    d.args.retain(|a| !matches!(a, Arg::SearchPaths(_)));
 
-    let c = d.as_compile();
     let id = id.to_owned();
-    let unit = Unit::Compile(c.clone());
-    let overlay = r.env_overlay(&id, &unit)?;
-    let env_capture = r.env_capture(&id, &unit)?;
-    let deps = doctest_deps(plan, &c);
-    let link_captures = r.link_captures(&id, &c, &link_packages(plan, &c, &deps))?;
-    let mut env = env(&c.env, r)?;
-    crate::render::merge_layer_with(r, &mut env, overlay)?;
-    // A doctest reads no manifests: every run it splices is an input.
-    let strong = BTreeSet::new();
-    let compile = RenderedCompile {
-        package: c.package.clone(),
-        krate: c.krate.clone(),
-        platform: c.platform,
-        program: c
-            .program
-            .iter()
-            .map(|t| text(t, r))
-            .collect::<Result<_, _>>()?,
-        args: c
-            .args
-            .iter()
-            .map(|a| {
-                Ok(match a {
-                    Arg::Literal(s) => RenderedArg::Literal(s.clone()),
-                    Arg::Concat(p) => RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?),
-                    Arg::Splice(s) => RenderedArg::Splice(splice(s, r, &strong)?),
-                    Arg::SearchPaths(_) => unreachable!("as_compile drops searchPathsOf"),
-                })
-            })
-            .collect::<Result<_, _>>()?,
-        env,
-        env_splices: c
-            .env_splices
-            .iter()
-            .map(|s| splice(s, r, &strong))
-            .collect::<Result<_, _>>()?,
-        dylib_path_from: c
-            .dylib_path_from
-            .iter()
-            .map(|u| flags(u, r, &strong))
-            .collect::<Result<_, _>>()?,
-        cwd: c.cwd.render(r)?,
-        outputs: Default::default(),
-        uplifted: Default::default(),
-        side_files: Vec::new(),
-        deps: deps
-            .into_iter()
-            .map(|o| r.reference(&Reference::Out(o)))
-            .collect::<Result<_, _>>()?,
-        dep_manifests: Vec::new(),
-        link_manifest_crates: false,
-        manifest_crates: Vec::new(),
-        remap: Vec::new(),
-        remap_scope: None,
-        env_capture,
-        link_captures,
-        view: r.source_view(&id, &unit)?,
-        repository_paths: Vec::new(),
-        // rustdoc compiles no C; the doctest adds no C flags.
-        seed: None,
-    };
+    let deps = doctest_deps(plan, &d);
+    let link_captures = r.link_captures(&id, &d, &link_packages(plan, &d, &deps))?;
+    let compile = rustdoc_command(&id, &d, r, deps, link_captures, true)?;
     Ok(RenderedDoctest {
         kind: DoctestKind::Doctest,
         compile,
@@ -156,12 +81,13 @@ pub fn render_doctest<R: Resolve>(
 /// rustdoc loads). Cargo links a unit against the search paths of its
 /// closure's build scripts only (`add_native_deps`, over
 /// `build_scripts.to_link`), so the closure finds every library the
-/// examples link. The traced `dylibPathFrom` names every host run, so it
-/// is not followed.
-pub fn closure_runs(plan: &Plan, d: &Doctest) -> (BTreeSet<String>, BTreeSet<String>) {
-    let mut c = d.as_compile();
+/// examples link. The traced `dylibPathFrom` and `searchPathsOf` name every
+/// run of the invocation, so they are not followed.
+pub fn closure_runs(plan: &Plan, d: &Unit) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut c = d.clone();
     c.dylib_path_from.clear();
-    let below = units_below_unit(plan, &Unit::Compile(c));
+    c.args.retain(|a| !matches!(a, Arg::SearchPaths(_)));
+    let below = units_below_unit(plan, &c);
     (
         runs_of(plan, below.clone(), d.platform),
         runs_of(plan, below, Platform::Host),

@@ -29,8 +29,8 @@ use std::process::Command;
 
 use breakbulk_format::rendered::{SourceView, Widen, derivation_output};
 use breakbulk_format::{
-    CompileUnit, Plan, Reference, Resolve, Unit, UnitId, ValidationOptions, render_unit,
-    unit_env_value, validate,
+    Plan, Reference, Resolve, Unit, UnitId, ValidationOptions, render_unit, unit_env_value,
+    validate,
 };
 use serde::Serialize;
 
@@ -93,7 +93,7 @@ impl Resolve for Tokens<'_> {
             Reference::Out(o) => {
                 let output = match &self.plan.units[&o.out] {
                     Unit::Run(_) => "out",
-                    Unit::Compile(_) => derivation_output(&o.output),
+                    _ => derivation_output(&o.output),
                 };
                 let base = self.out(&o.out, output);
                 match &o.file {
@@ -115,7 +115,7 @@ impl Resolve for Tokens<'_> {
             Reference::CrateSrc(_) | Reference::Empty(_) => unreachable!(),
         })
     }
-    fn remap_scope(&self, _: &UnitId, _: &CompileUnit) -> Option<String> {
+    fn remap_scope(&self, _: &UnitId, _: &Unit) -> Option<String> {
         None
     }
     fn env_capture(&self, _: &UnitId, _: &Unit) -> Result<Option<String>, String> {
@@ -158,11 +158,11 @@ fn derivation_outputs(plan: &Plan, u: &Unit) -> Vec<String> {
             .keys()
             .map(|o| derivation_output(o).to_owned())
             .chain(
-                c.has_debug_output(&plan.target_debuginfo)
+                c.has_debug_output(&plan.target.debuginfo)
                     .then(|| "debug".to_owned()),
             )
             .collect(),
-        Unit::Run(_) => vec!["flags".into(), "out".into()],
+        _ => vec!["flags".into(), "out".into()],
     }
 }
 

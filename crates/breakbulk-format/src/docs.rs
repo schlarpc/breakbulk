@@ -1,25 +1,34 @@
-//! Rendering a doc plan's rustdoc commands into the `BREAKBULK_UNIT` of its
-//! docs derivation (`breakbulk-unit docs`, see `breakbulk_unit::docs`).
+//! Rendering a doc plan's `doc` units into the `BREAKBULK_UNIT` of its
+//! docs derivation (`breakbulk-unit docs`, see `breakbulk_unit::docs`), and
+//! the command part rustdoc units (docs and doctests) share.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::docs::{DocsKind, RenderedDocs};
 use breakbulk_unit::spec::{RenderedArg, RenderedCompile};
 
 use crate::deps::doc_deps;
-use crate::normalize::{normalize_arg, normalize_text};
-use crate::plan::{Arg, Doc, Plan, Reference, Text, Unit};
+use crate::normalize::normalize_unit;
+use crate::plan::{Arg, OutRef, Plan, Reference, Text, Unit, UnitId, doc_order};
 use crate::render::{Resolve, env, flags, splice, text};
 
-/// Render every rustdoc command of `plan`, in the plan's order. Each is
-/// rendered as a compile unit with no outputs and no remapping: rustdoc
-/// writes into the one output the derivation gives every command.
+/// Render every doc unit of `plan`, in [`doc_order`]. Each is rendered as
+/// a compile unit with no outputs and no remapping: rustdoc writes into
+/// the one output the derivation gives every command.
+///
+/// # Panics
+///
+/// If the doc units' `after` edges form a cycle (validated).
 pub fn render_docs<R: Resolve>(plan: &Plan, r: &R) -> Result<RenderedDocs, R::Error> {
-    let commands = plan
-        .docs
+    let order = doc_order(plan).unwrap_or_else(|e| panic!("{e} (validated)"));
+    let commands = order
         .iter()
-        .enumerate()
-        .map(|(i, d)| render_doc(plan, &d.label(i), d, r))
+        .map(|id| {
+            let mut d = plan.units[id].clone();
+            normalize_unit(&mut d);
+            let deps = doc_deps(plan, &d);
+            rustdoc_command(id, &d, r, deps, Vec::new(), false)
+        })
         .collect::<Result<_, _>>()?;
     Ok(RenderedDocs {
         kind: DocsKind::Docs,
@@ -27,76 +36,64 @@ pub fn render_docs<R: Resolve>(plan: &Plan, r: &R) -> Result<RenderedDocs, R::Er
     })
 }
 
-fn render_doc<R: Resolve>(
-    plan: &Plan,
-    id: &str,
-    d: &Doc,
+/// A rustdoc unit (a doc or a doctest, normalized) as a rendered compile
+/// with no outputs and no remapping: rustdoc keeps nothing it writes but
+/// what the derivation gives it. Its splices name every run they splice
+/// as an input, as it reads no manifests. `searchPathsOf` splices are left
+/// out (the doctest renders them itself). `deps` is its dependency
+/// directory, `link_captures` its linked packages' env captures, and
+/// `with_view` whether it names its source view, for hints.
+pub(crate) fn rustdoc_command<R: Resolve>(
+    id: &UnitId,
+    d: &Unit,
     r: &R,
+    deps: BTreeSet<OutRef>,
+    link_captures: Vec<String>,
+    with_view: bool,
 ) -> Result<RenderedCompile, R::Error> {
-    let mut d = d.clone();
-    d.program = std::mem::take(&mut d.program)
-        .into_iter()
-        .map(normalize_text)
-        .collect();
-    d.args = std::mem::take(&mut d.args)
-        .into_iter()
-        .map(normalize_arg)
-        .collect();
-    for v in d.env.values_mut() {
-        *v = normalize_text(std::mem::replace(v, Text::Literal(String::new())));
-    }
-    d.krate.types.sort();
-    d.krate.types.dedup();
-
-    let c = d.as_compile();
-    let id = id.to_owned();
-    let unit = Unit::Compile(c.clone());
-    let overlay = r.env_overlay(&id, &unit)?;
-    let env_capture = r.env_capture(&id, &unit)?;
-    let mut env = env(&c.env, r)?;
+    let overlay = r.env_overlay(id, d)?;
+    let env_capture = r.env_capture(id, d)?;
+    let mut env: BTreeMap<String, String> = env(&d.env, r)?;
     crate::render::merge_layer_with(r, &mut env, overlay)?;
-    // The docs derivation reads no manifests: every run it splices is an
-    // input.
     let strong = BTreeSet::new();
     Ok(RenderedCompile {
-        package: c.package.clone(),
-        krate: c.krate.clone(),
-        platform: c.platform,
-        program: c
+        package: d.package.clone(),
+        krate: d.krate().clone(),
+        platform: d.platform,
+        program: d
             .program
             .iter()
             .map(|t| text(t, r))
             .collect::<Result<_, _>>()?,
-        args: c
+        args: d
             .args
             .iter()
+            .filter(|a| !matches!(a, Arg::SearchPaths(_)))
             .map(|a| {
                 Ok(match a {
                     Arg::Literal(s) => RenderedArg::Literal(s.clone()),
                     Arg::Concat(p) => RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?),
                     Arg::Splice(s) => RenderedArg::Splice(splice(s, r, &strong)?),
-                    Arg::SearchPaths(_) => {
-                        unreachable!("searchPathsOf only in doctests (validated)")
-                    }
+                    Arg::SearchPaths(_) => unreachable!("filtered out"),
                 })
             })
             .collect::<Result<_, _>>()?,
         env,
-        env_splices: c
+        env_splices: d
             .env_splices
             .iter()
             .map(|s| splice(s, r, &strong))
             .collect::<Result<_, _>>()?,
-        dylib_path_from: c
+        dylib_path_from: d
             .dylib_path_from
             .iter()
             .map(|u| flags(u, r, &strong))
             .collect::<Result<_, _>>()?,
-        cwd: c.cwd.render(r)?,
+        cwd: d.cwd.render(r)?,
         outputs: Default::default(),
         uplifted: Default::default(),
         side_files: Vec::new(),
-        deps: doc_deps(plan, &c)
+        deps: deps
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))
             .collect::<Result<_, _>>()?,
@@ -106,9 +103,14 @@ fn render_doc<R: Resolve>(
         remap: Vec::new(),
         remap_scope: None,
         env_capture,
-        link_captures: Vec::new(),
-        view: None,
+        link_captures,
+        view: if with_view {
+            r.source_view(id, d)?
+        } else {
+            None
+        },
         repository_paths: Vec::new(),
+        // rustdoc compiles no C; the derivation adds no C flags.
         seed: None,
     })
 }

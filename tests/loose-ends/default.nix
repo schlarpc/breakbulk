@@ -487,8 +487,8 @@ let
         builtins.unsafeDiscardStringContext (builtins.readFile "${trimShellInst.plans.build}/plan.json")
       );
     in
-    assert lib.assertMsg (plan.trimPathsDefault or false
-    ) "devshell-trim-paths: the plan has no trimPathsDefault";
+    assert lib.assertMsg (plan.remap.trimPathsDefault or false
+    ) "devshell-trim-paths: the plan has no remap.trimPathsDefault";
     assert lib.assertMsg (
       shell.drvAttrs.CARGO_PROFILE_RELEASE_TRIM_PATHS or null == "all"
     ) "devshell-trim-paths: CARGO_PROFILE_RELEASE_TRIM_PATHS is not set";

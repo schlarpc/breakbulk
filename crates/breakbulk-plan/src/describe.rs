@@ -66,8 +66,8 @@ pub fn unit(id: &str, u: &Unit) -> String {
                 id,
                 name,
                 version,
-                &c.krate.name,
-                &c.krate.types,
+                &c.krate().name,
+                &c.krate().types,
                 test,
                 c.platform,
             )
@@ -75,6 +75,14 @@ pub fn unit(id: &str, u: &Unit) -> String {
         Unit::Run(r) => {
             let (name, version) = name_version(&r.package);
             run(id, name, version, r.platform)
+        }
+        Unit::Doctest(d) => {
+            let (name, version) = name_version(&d.package);
+            doctest(id, name, version)
+        }
+        Unit::Doc(d) => {
+            let (name, version) = name_version(&d.package);
+            doc(&d.krate().name, name, version)
         }
     }
 }

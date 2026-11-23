@@ -351,12 +351,13 @@ in
   directives =
     let
       testPlan = readPlan directives "test";
+      doctestUnits = lib.filterAttrs (_: u: u.kind == "doctest") testPlan.units;
       # One traced `rustdoc --test` per library (proc macro included), with
       # the search paths of every run as one searchPathsOf splice.
       doctestsOk =
-        lib.attrNames testPlan.doctests == map (p: "d-${p}") (lib.sort lib.lessThan directivesLibs)
+        lib.attrNames doctestUnits == map (p: "d-${p}") (lib.sort lib.lessThan directivesLibs)
         && lib.all (d: lib.length (lib.filter (a: builtins.isAttrs a && a ? searchPathsOf) d.args) == 1) (
-          lib.attrValues testPlan.doctests
+          lib.attrValues doctestUnits
         );
       directivesLibs = lib.remove "app" directivesPackages;
       ref = cargoBuild {
@@ -1132,7 +1133,7 @@ in
     feature-unification =
       let
         build = sharedFeatures "build";
-        doctests = lib.attrNames (readPlan fu "test").doctests;
+        doctests = lib.attrNames (lib.filterAttrs (_: u: u.kind == "doctest") (readPlan fu "test").units);
       in
       assert lib.assertMsg (
         build == [
@@ -1201,8 +1202,8 @@ in
         };
       in
       assert lib.assertMsg (
-        p.targetDebuginfo == expected
-      ) "custom-target-plan: targetDebuginfo is ${builtins.toJSON p.targetDebuginfo}";
+        p.target.debuginfo == expected
+      ) "custom-target-plan: target.debuginfo is ${builtins.toJSON p.target.debuginfo}";
       assert lib.assertMsg (
         bins == [ "walking-skeleton.elf" ]
       ) "custom-target-plan: stored bins ${builtins.toJSON bins}";

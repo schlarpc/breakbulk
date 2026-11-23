@@ -23,8 +23,8 @@ use breakbulk_format::rendered::{
     DEBUG_OUTPUT, SourceView, Widen, derivation_output, package_name_version,
 };
 use breakbulk_format::{
-    CargoTarget, CompileUnit, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind,
-    SrcRef, TargetDebuginfo, Unit, UnitId, ValidationOptions, merge_layer_with, render_docs,
+    CargoTarget, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind, SrcRef,
+    TargetDebuginfo, Unit, UnitBody, UnitId, ValidationOptions, merge_layer_with, render_docs,
     render_doctest, render_unit_in, to_canonical_json, unit_env_value, validate,
 };
 
@@ -419,7 +419,7 @@ impl Resolve for Tokens<'_> {
                 let output = match self.inputs.plan.units.get(&o.out) {
                     Some(Unit::Run(_)) => "out",
                     Some(Unit::Compile(_)) => derivation_output(&o.output),
-                    None => return err(format!("reference to unknown unit {}", o.out)),
+                    Some(_) | None => return err(format!("reference to unknown unit {}", o.out)),
                 };
                 (self.unit(&o.out, output), o.file.as_deref().unwrap_or(""))
             }
@@ -461,11 +461,19 @@ impl Resolve for Tokens<'_> {
         self.inputs.toolchains.keep_source_paths
     }
 
-    fn side_files(&self) -> Vec<breakbulk_format::rendered::SideFile> {
-        self.inputs.toolchains.side_files.clone()
+    fn side_files(&self, unit: &Unit) -> Vec<breakbulk_format::rendered::SideFile> {
+        let wrapped = ["rustc-wrapper", "rustc-workspace-wrapper"]
+            .iter()
+            .filter_map(|t| self.inputs.toolchains.tools.get(*t))
+            .any(|w| runs_program(unit, w));
+        if wrapped {
+            self.inputs.toolchains.side_files.clone()
+        } else {
+            Vec::new()
+        }
     }
 
-    fn remap_scope(&self, _id: &UnitId, unit: &CompileUnit) -> Option<String> {
+    fn remap_scope(&self, _id: &UnitId, unit: &Unit) -> Option<String> {
         // Test units remap every scope; so does everything with a rustc
         // that has no `--remap-path-scope` (toolchains.json's
         // `capabilities`).
@@ -500,7 +508,7 @@ impl Resolve for Tokens<'_> {
     fn link_captures(
         &self,
         _id: &UnitId,
-        unit: &CompileUnit,
+        unit: &Unit,
         packages: &BTreeSet<String>,
     ) -> Result<Vec<String>, Error> {
         let p = unit.platform;
@@ -545,7 +553,7 @@ impl Resolve for Tokens<'_> {
     fn wrapper_config_dir(
         &self,
         _id: &UnitId,
-        unit: &CompileUnit,
+        unit: &Unit,
     ) -> Result<Option<(String, String)>, Error> {
         let Some(var) = &self.inputs.toolchains.wrapper_config_var else {
             return Ok(None);
@@ -553,11 +561,7 @@ impl Resolve for Tokens<'_> {
         let Some(wrapper) = self.inputs.toolchains.tools.get("rustc-workspace-wrapper") else {
             return Ok(None);
         };
-        if !unit
-            .program
-            .iter()
-            .any(|p| matches!(p, breakbulk_format::Text::Literal(s) if s == wrapper))
-        {
+        if !runs_program(unit, wrapper) {
             return Ok(None);
         }
         let Some(dir) = workspace_dir(&self.inputs.plan, &unit.package) else {
@@ -634,10 +638,16 @@ impl Resolve for Tokens<'_> {
 }
 
 fn platform(unit: &Unit) -> Platform {
-    match unit {
-        Unit::Compile(c) => c.platform,
-        Unit::Run(r) => r.platform,
-    }
+    unit.platform
+}
+
+/// Whether `program` (a tool's store path) is in the unit's program
+/// chain: the chain is compared by path, as a variant's two wrappers
+/// make chains of the same length.
+fn runs_program(unit: &UnitBody, program: &str) -> bool {
+    unit.program
+        .iter()
+        .any(|p| matches!(p, breakbulk_format::Text::Literal(s) if s.as_str() == program))
 }
 
 /// A token prefix that occurs nowhere in the inputs, so that every
@@ -701,13 +711,15 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
     let (pkg, version) = package_name_version(unit.package()).unwrap_or((id, "0"));
     let kind = match unit {
         Unit::Run(_) => "build-run".to_owned(),
+        Unit::Doctest(_) => "doctest".to_owned(),
+        Unit::Doc(c) => format!("doc-{}", c.krate().name),
         Unit::Compile(c) => {
-            let krate = &c.krate.name;
+            let krate = &c.krate().name;
             let kind = if krate.starts_with("build_script_") {
                 "build-script"
             } else if c.test {
                 "test"
-            } else if c.krate.types.iter().any(|t| t == "bin") {
+            } else if c.krate().types.iter().any(|t| t == "bin") {
                 "bin"
             } else {
                 "lib"
@@ -724,7 +736,7 @@ pub fn unit_name(id: &str, unit: &Unit) -> String {
 
 /// A unit derivation's outputs: sorted, then `debug` last, so that it is
 /// never the default (first) output. `debuginfo` is the plan's
-/// ([`Plan::target_debuginfo`]).
+/// ([`breakbulk_format::PlanTarget::debuginfo`]).
 pub fn unit_outputs(unit: &Unit, debuginfo: &TargetDebuginfo) -> Vec<String> {
     match unit {
         Unit::Compile(c) => c
@@ -739,6 +751,7 @@ pub fn unit_outputs(unit: &Unit, debuginfo: &TargetDebuginfo) -> Vec<String> {
             )
             .collect(),
         Unit::Run(_) => vec!["flags".into(), "out".into()],
+        Unit::Doctest(_) | Unit::Doc(_) => vec!["out".into()],
     }
 }
 
@@ -747,13 +760,11 @@ pub fn unit_outputs(unit: &Unit, debuginfo: &TargetDebuginfo) -> Vec<String> {
 fn unit_target<'p>(plan: &'p Plan, unit: &'p Unit) -> Option<&'p CargoTarget> {
     match unit {
         Unit::Compile(c) => c.cargo_target.as_ref(),
-        Unit::Run(r) => match &r.script {
-            Reference::Out(o) => match plan.units.get(&o.out) {
-                Some(Unit::Compile(c)) => c.cargo_target.as_ref(),
-                _ => None,
-            },
+        Unit::Run(r) => match r.script().map(|o| plan.units.get(&o.out)) {
+            Some(Some(Unit::Compile(c))) => c.cargo_target.as_ref(),
             _ => None,
         },
+        Unit::Doctest(_) | Unit::Doc(_) => None,
     }
 }
 
@@ -792,7 +803,7 @@ fn instantiate_unit(
     );
     attrs.insert(
         "outputs".into(),
-        Value::Strings(unit_outputs(unit, &inputs.plan.target_debuginfo)),
+        Value::Strings(unit_outputs(unit, &inputs.plan.target.debuginfo)),
     );
     attrs.insert(
         "BREAKBULK_UNIT".into(),
@@ -807,7 +818,7 @@ fn instantiate_unit(
 /// doctest, named `<package>-<version>-doctest`, with the one output `out`
 /// (the log).
 fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, Error> {
-    let d = &inputs.plan.doctests[id];
+    let d = &inputs.plan.units[id];
     let mut tokens = Tokens::new(inputs, prefix);
     tokens.test_package = Some(d.package.clone());
     let rendered = render_doctest(&inputs.plan, id, &tokens)
@@ -851,12 +862,7 @@ fn instantiate_docs(inputs: &Inputs, prefix: &str) -> Result<Drv, Error> {
     let text = to_canonical_json(&rendered).map_err(|e| Error(format!("docs: {e}")))?;
     let text = tokens.tokenize_store_paths("docs", &text)?;
     let builder = tokens.input(keys::tool(TOOL_UNIT));
-    let target = &inputs.plan.target;
-    let stem = target
-        .rsplit('/')
-        .next()
-        .unwrap_or(target)
-        .trim_end_matches(".json");
+    let stem = &inputs.plan.target.short_name;
     let mut attrs = BTreeMap::new();
     attrs.insert(
         "name".into(),
@@ -918,7 +924,7 @@ fn root_output(plan: &Plan, r: &Root) -> Result<String, Error> {
     let Some(unit) = plan.units.get(&r.unit) else {
         return err(format!("root {} names unknown unit {}", r.target, r.unit));
     };
-    let outs = unit_outputs(unit, &plan.target_debuginfo);
+    let outs = unit_outputs(unit, &plan.target.debuginfo);
     outs.iter()
         .find(|o| *o == "out")
         .or(outs.first())
@@ -1110,7 +1116,12 @@ pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
     let graph = Graph::new(&inputs.plan);
     let mut units = BTreeMap::new();
     let mut errors = Vec::new();
-    for id in inputs.plan.units.keys() {
+    for (id, _) in inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| u.is_compile() || u.is_run())
+    {
         match instantiate_unit(inputs, &graph, &prefix, id) {
             Ok(d) => {
                 units.insert(id.clone(), d);
@@ -1119,7 +1130,12 @@ pub fn instantiate(inputs: &Inputs) -> Result<UnitsJson, Error> {
         }
     }
     let mut doctests = BTreeMap::new();
-    for id in inputs.plan.doctests.keys() {
+    for (id, _) in inputs
+        .plan
+        .units
+        .iter()
+        .filter(|(_, u)| matches!(u, Unit::Doctest(_)))
+    {
         match instantiate_doctest(inputs, &prefix, id) {
             Ok(d) => {
                 doctests.insert(id.clone(), d);

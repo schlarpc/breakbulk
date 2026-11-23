@@ -178,7 +178,7 @@ fn wrapper(
     // output, and of the libraries below a product root that have one
     // (`.dwo` with `split-debuginfo=unpacked`), for the
     // product's `linked` stage: one path per line.
-    let debuginfo = &inputs.plan.target_debuginfo;
+    let debuginfo = &inputs.plan.target.debuginfo;
     let debug = match &info.unit {
         Some(u) => {
             let own = matches!(inputs.plan.units.get(u), Some(Unit::Compile(c)) if c.has_debug_output(debuginfo));
@@ -334,10 +334,10 @@ fn all_units(
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
-        if left.contains(id) {
+        if left.contains(id) || !(unit.is_compile() || unit.is_run()) {
             continue;
         }
-        for o in unit_outputs(unit, &inputs.plan.target_debuginfo) {
+        for o in unit_outputs(unit, &inputs.plan.target.debuginfo) {
             list.push_str(&tokens.unit(id, &o));
             list.push('\n');
         }
