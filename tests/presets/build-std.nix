@@ -15,8 +15,9 @@
 #                    vendored copies, are planned, built, and linked into a
 #                    program that runs
 #   build-std-tests  both fixtures' test plans instantiate: each has its
-#                    test root with a test spec, and the cargo metadata
-#                    synthesized for nextest lists the fixture's own
+#                    test root's wrapper with a test spec, whose
+#                    path-package graph (what testRunners.nextest builds
+#                    its cargo metadata from) lists the fixture's own
 #                    package only, as `cargo metadata` does (the standard
 #                    library's packages are not in its resolve)
 {
@@ -128,19 +129,21 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
         ''
           set -euo pipefail
           check() {
-            # The metadata with its references (`{"input": …}` parts) blanked.
-            jq -e --arg root "$2" --arg pkg "$3" '
-              .roots[$root].testSpec.nextest.cargoMetadata
+            # The wrapper's breakbulk-root.json, its references (`{"unit": …}`
+            # and `{"input": …}` parts) blanked.
+            jq -e --arg wrapper "$2" --arg pkg "$3" --arg id "$4" '
+              .wrappers[$wrapper].attrs.rootJson
               | [.parts[] | if type == "string" then . else "X" end] | add | fromjson
-              | (.workspace_members == [$pkg]) and ([.packages[].id] == [$pkg])
+              | .testSpec
+              | (.packageId == $id) and ((.pathPackages | keys) == [$pkg])
             ' "$1" >/dev/null || {
-              echo "$1: the nextest metadata of $2 lists more than $3, or $2 is missing" >&2
-              jq '.roots | keys' "$1" >&2
+              echo "$1: the package graph of $2 lists more than $3, or $2 is missing" >&2
+              jq '.wrappers | keys' "$1" >&2
               exit 1
             }
           }
-          check $bare bare/bin-test/bare 'path+file:///build/skeleton#bare@0.1.0'
-          check $hosted app/bin-test/app 'path+file:///build/skeleton#app@0.1.0'
+          check $bare bare.bin-test.bare.drv bare 'path+file:///build/skeleton#bare@0.1.0'
+          check $hosted app.bin-test.app.drv app 'path+file:///build/skeleton#app@0.1.0'
           touch $out
         '';
 

@@ -606,7 +606,7 @@ let
         tr -d '\r' < out.txt | tee $out
         grep -qxF ${lib.escapeShellArg expect} $out
       '';
-      msvc-x86_64-test = x.testRuns.msvc-smoke."bin/msvc-smoke";
+      msvc-x86_64-test = x.variants.default.testRuns.msvc-smoke."bin/msvc-smoke";
       # With debug info on, lld-link writes a PDB. It lands in
       # the product's `debug` output next to where the .exe sits in the
       # main one (bin/), not in the main output; the main output's closure
