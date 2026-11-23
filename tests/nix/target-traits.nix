@@ -15,7 +15,9 @@
 #                        its file-name traits are `--print file-names`',
 #                        and objectFormat, isApple, isWasm, isMsvc/isUefi
 #                        (an MSVC-style linker), linksComponents and debugArtifacts are
-#                        what `--print all-target-specs-json` says
+#                        what `--print all-target-specs-json` says, and
+#                        the bare-metal targets that get presets.bareMetal
+#                        are those whose spec links with rust-lld
 #   linker-kind-rustc    the default Linux linker kind against the linker
 #                        flavor of rustc's own target specs, for several
 #                        rust-lang releases and nixpkgs' rustc
@@ -225,6 +227,16 @@ let
         isMsvcOrUefi = msvcLinker;
         debugArtifacts = artifacts;
         linksComponents = s "linker" null == "wasm-component-ld";
+        # presets.bareMetal links as rustc's spec does, with lld.
+        bareMetalPreset =
+          s "os" "none" == "none"
+          && !(s "is-like-wasm" false)
+          && s "linker-flavor" null == "gnu-lld"
+          # nixpkgs' rustc, which ships no rust-lld, names `lld`.
+          && lib.elem (s "linker" null) [
+            "rust-lld"
+            "lld"
+          ];
       };
       ours = {
         inherit (t)
@@ -235,6 +247,11 @@ let
           ;
         isMsvcOrUefi = t.isMsvc || t.isUefi;
         inherit (t) debugArtifacts;
+        bareMetalPreset =
+          (tt.presetRule {
+            inherit pkgs triple;
+            traits = t;
+          }).name or null == "bareMetal";
       };
       wrong = lib.filter (f: ours.${f} != expect.${f}) (lib.attrNames expect);
     in
@@ -570,6 +587,10 @@ in
             "aarch64-apple-darwin"
             "wasm32-unknown-unknown"
             "x86_64-unknown-none"
+            "thumbv7em-none-eabihf"
+            "riscv32imac-unknown-none-elf"
+            # Bare metal that rustc links through a C compiler.
+            "avr-none"
             "wasm32-wasip1"
             "aarch64-linux-android"
           ];
@@ -585,6 +606,9 @@ in
         "choose"
         "choose"
         "choose"
+        "bareMetal"
+        "bareMetal"
+        "bareMetal"
         null
         null
         null

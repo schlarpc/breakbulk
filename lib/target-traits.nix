@@ -847,6 +847,22 @@ let
   #
   #   presetRule { pkgs; triple; traits ? <built-in>; }
   #     -> { name; } | { choose; } | null
+  # The bare-metal architectures whose rustc target specs link through a
+  # C compiler driver or a linker of their own (`linker` avr-gcc,
+  # m68k-linux-gnu-ld, msp430-elf-gcc, sparc-elf-gcc, xtensa-*-elf-gcc;
+  # bpf's own), not with lld as every other bare-metal spec does (`rustc
+  # --print all-target-specs-json`, 1.101 nightly; `target-traits-rustc`
+  # compares it): no default preset.
+  ccLinkedBareMetal = [
+    "avr"
+    "m68k"
+    "msp430"
+    "sparc"
+    "xtensa"
+    "bpfeb"
+    "bpfel"
+  ];
+
   presetRule =
     {
       pkgs,
@@ -890,6 +906,8 @@ let
       choose "`breakbulk.presets.darwin { sdk = …; }` (the macOS SDK)"
     else if traits.isWasm && !traits.isWasi then
       choose "`breakbulk.presets.wasmWeb` (wasm-bindgen, for browsers) or `breakbulk.presets.wasmComponent` (a WebAssembly component)"
+    else if traits.isBareMetal && !elem traits.arch ccLinkedBareMetal then
+      name "bareMetal"
     else
       null;
 

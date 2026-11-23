@@ -8,7 +8,11 @@
 #                    compiler_builtins' build script run included); the
 #                    linked ELF has the fixture's `_start`, needs no
 #                    interpreter or libraries, and contains compiler_builtins'
-#                    128-bit division (__udivti3)
+#                    128-bit division (__udivti3). The target's default
+#                    preset is bareMetal: rust-overlay's toolchain links
+#                    with its own rust-lld; told it ships none
+#                    (`toolchain.facts.bundledLld = false`, as nixpkgs'
+#                    rustc), with nixpkgs' ld.lld of its LLVM major
 #   build-std-deps   std (`build-std = ["std", "panic_abort"]`) on the host
 #                    triple: the standard library's own crates.io
 #                    dependencies (hashbrown, libc, …) come from rust-src's
@@ -42,8 +46,8 @@ let
         {
           workspaces.main = {
             toolchain = {
-              rustc = rust;
-              cargo = rust;
+              rustc = lib.mkDefault rust;
+              cargo = lib.mkDefault rust;
             };
             targets.${triple} = { };
             variants.default.profile = "dev";
@@ -71,9 +75,13 @@ let
     );
 
   none = "x86_64-unknown-none";
-  # No preset: the target spec's own linker (rust-lld, self-contained);
-  # there is no C toolchain for this target.
+  # The default preset, bareMetal: the toolchain's own rust-lld, as the
+  # target spec has it; there is no C toolchain for this target.
   bare = mkRepo (fixtures + "/build-std") none [ ];
+  # The same toolchain taken for one without rust-lld: nixpkgs' ld.lld.
+  bareNixpkgsLld = mkRepo (fixtures + "/build-std") none [
+    { workspaces.main.toolchain.facts.bundledLld = false; }
+  ];
   barePlan = planOf bare none;
   bareCrates = cratesOf barePlan;
 
@@ -96,7 +104,7 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
 ]) "build-std-deps: crates ${builtins.toJSON hostedCrates}";
 {
   repos = {
-    inherit bare hosted;
+    inherit bare bareNixpkgsLld hosted;
   };
   checks = {
     build-std =
@@ -104,6 +112,7 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
         {
           nativeBuildInputs = [ pkgs.buildPackages.binutils ];
           bin = bare.workspaces.main.target.${none}.packages.bare;
+          nixpkgsLld = bareNixpkgsLld.workspaces.main.target.${none}.packages.bare;
         }
         ''
           set -euo pipefail
@@ -115,8 +124,17 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
           nm $f > syms.txt
           grep -q ' T _start$' syms.txt
           grep -q ' [Tt] __udivti3$' syms.txt
+          # rust-lld names Rust's LLVM fork in its .comment, nixpkgs' lld
+          # does not.
+          readelf -p .comment $f | tee comment.txt
+          grep -q 'Linker: LLD.*llvm-project' comment.txt
+          g=$(find -L $nixpkgsLld -type f -name bare | head -n1)
+          readelf -p .comment $g | tee comment-nixpkgs.txt
+          grep -q 'Linker: LLD' comment-nixpkgs.txt
+          if grep -q llvm-project comment-nixpkgs.txt; then echo "$g was linked by rust-lld" >&2; exit 1; fi
+          nm $g | grep -q ' T _start$'
           mkdir -p $out
-          cp header.txt syms.txt $out/
+          cp header.txt syms.txt comment.txt comment-nixpkgs.txt $out/
         '';
 
     build-std-tests =

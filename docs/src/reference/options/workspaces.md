@@ -281,7 +281,7 @@ null
 The linker kinds ` linkerKind ` may name: breakbulk’s own
 (` breakbulk.presetHelpers.builtinKinds `: ` cc `, ` lld `, ` mold `,
 ` clang-lld `, ` zig `, ` lld-link `, ` wasm-ld `, ` wasm-component-ld `,
-` mingw-lld `, ` rust-lld `, ` ld64.lld `), whose fields are set with
+` mingw-lld `, ` rust-lld `, ` ld64.lld `, ` ld.lld `), whose fields are set with
 ` lib.mkDefault `, and any added here or by a preset\. A kind is
 chosen only by name; the default kind for a target is
 breakbulk’s rule (` breakbulk.presetHelpers.linkerKind `)\.

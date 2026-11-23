@@ -17,7 +17,8 @@ given to mkRepository is Linux, gets ` presets.linux ` (glibc) or
 ` presets.linuxStatic ` (musl); another Linux ` -gnu ` triple
 ` presets.linux `, a ` -musl ` one ` presets.linuxStatic `, a Windows
 ` -gnu ` or ` -gnullvm ` one ` presets.windows `, ` wasm32-wasip2 `
-` presets.wasmComponent `, and a UEFI triple ` presets.uefi `\. A triple
+` presets.wasmComponent `, a UEFI triple ` presets.uefi `, and a
+bare-metal triple that rustc links with lld ` presets.bareMetal `\. A triple
 whose preset needs arguments or a choice (` -msvc `, macOS,
 wasm32 without WASI) fails at evaluation, naming the preset, unless
 the target sets a ` preset `, a ` linker `, or ` preset = null `\. Any
@@ -377,7 +378,7 @@ null
 The linker kinds ` linkerKind ` may name: breakbulk’s own
 (` breakbulk.presetHelpers.builtinKinds `: ` cc `, ` lld `, ` mold `,
 ` clang-lld `, ` zig `, ` lld-link `, ` wasm-ld `, ` wasm-component-ld `,
-` mingw-lld `, ` rust-lld `, ` ld64.lld `), whose fields are set with
+` mingw-lld `, ` rust-lld `, ` ld64.lld `, ` ld.lld `), whose fields are set with
 ` lib.mkDefault `, and any added here or by a preset\. A kind is
 chosen only by name; the default kind for a target is
 breakbulk’s rule (` breakbulk.presetHelpers.linkerKind `)\.
@@ -536,7 +537,8 @@ given to mkRepository is Linux with glibc,
 ` breakbulk.presets.linuxStatic `, a Windows ` -gnu ` or ` -gnullvm `
 triple ` breakbulk.presets.windows `, ` wasm32-wasip2 `
 ` breakbulk.presets.wasmComponent `, a UEFI triple
-` breakbulk.presets.uefi `; ` null ` otherwise, which is an
+` breakbulk.presets.uefi `, a bare-metal triple whose rustc spec
+links with lld ` breakbulk.presets.bareMetal `; ` null ` otherwise, which is an
 evaluation error for ` -msvc `, macOS and wasm32 without WASI unless
 ` linker ` is set
 

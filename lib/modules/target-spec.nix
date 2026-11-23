@@ -57,7 +57,8 @@ in
         `breakbulk.presets.linuxStatic`, a Windows `-gnu` or `-gnullvm`
         triple `breakbulk.presets.windows`, `wasm32-wasip2`
         `breakbulk.presets.wasmComponent`, a UEFI triple
-        `breakbulk.presets.uefi`; `null` otherwise, which is an
+        `breakbulk.presets.uefi`, a bare-metal triple whose rustc spec
+        links with lld `breakbulk.presets.bareMetal`; `null` otherwise, which is an
         evaluation error for `-msvc`, macOS and wasm32 without WASI unless
         `linker` is set
       '';

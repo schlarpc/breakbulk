@@ -88,9 +88,11 @@ target. Choose one from [Presets](../reference/presets.md):
 
 A triple whose preset needs no arguments gets it without any setting,
 marked "the default" above: `workspaces.default.targets.aarch64-unknown-linux-gnu = { };`
-is enough. So does a UEFI triple (`presets.uefi`), and so does a
-target whose linker rustc chooses itself (bare metal), which needs no
-preset.
+is enough. So does a UEFI triple (`presets.uefi`), and a bare-metal
+triple (`presets.bareMetal`: `x86_64-unknown-none`,
+`thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`, …), which links
+with the toolchain's own `rust-lld`, or nixpkgs' lld for a toolchain
+that ships none.
 
 A triple whose preset needs arguments or a choice has no default: an
 `-msvc` triple (the SDK), macOS (the SDK, `presets.darwin`) and

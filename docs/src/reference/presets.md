@@ -28,6 +28,7 @@ The preset is named for what you want; the target triple picks how:
 | `wasmWeb` | wasm for browsers and Node, through wasm-bindgen | `wasm32-unknown-unknown` |
 | `wasmComponent` | a WebAssembly component | `wasm32-unknown-unknown`, `wasm32-wasip2` |
 | `uefi` | a `.efi` program, its PDB in the `debug` output | `*-unknown-uefi` (`x86_64`, `aarch64`, `i686`) |
+| `bareMetal` | a bare-metal ELF program | `x86_64-unknown-none`, `thumbv*-none-eabi*`, `riscv*-unknown-none-elf`, `aarch64-unknown-none`, … |
 
 ## Defaults
 
@@ -42,6 +43,7 @@ The preset is named for what you want; the target triple picks how:
   | `*-pc-windows-gnu`, `*-gnullvm` | `windows` |
   | `wasm32-wasip2` | `wasmComponent` |
   | `*-unknown-uefi` | `uefi` |
+  | bare metal that rustc links with lld (`x86_64-unknown-none`, `thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`, …) | `bareMetal` |
 
   Options set on the target override the preset's, as with any preset;
   `preset = null` turns it off.
@@ -63,7 +65,6 @@ These targets build with no preset. rustc's target spec names its own
 
 | Triple | Product |
 | --- | --- |
-| bare metal (`x86_64-unknown-none`, …) | an ELF program |
 | `wasm32-wasip1` | a core module, with the WASI libc that ships with rustc |
 | `wasm32-unknown-unknown`, with `preset = null` | a core module, without wasm-bindgen or `wasm-opt` |
 
@@ -124,8 +125,9 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `mingw-lld` | Windows MinGW | the MinGW C compiler with lld from `llvmPackages_<major>`, rustc's LLVM major release |
 | `wasm-ld` | wasm, except `wasm32-wasip2` | `wasm-ld` from `llvmPackages_<major>`, not rustc's `rust-lld` |
 | `wasm-component-ld` | `wasm32-wasip2` | rustc's own `wasm-component-ld`, with `wasm-ld` from `llvmPackages_<major>` under it |
-| `rust-lld` | macOS on a Linux machine, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld` as `ld64.lld`, whose LLVM is rustc's |
+| `rust-lld` | macOS on a Linux machine, and bare metal, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld`, whose LLVM is rustc's: as `ld64.lld` on macOS, as rustc's bare-metal specs name it elsewhere |
 | `ld64.lld` | macOS on a Linux machine, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld64.lld` from `llvmPackages_<major>` |
+| `ld.lld` | bare metal, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld.lld` from `llvmPackages_<major>` |
 
 `linuxPortable` links with `zig cc` (the `zig` kind); it takes no other kind.
 

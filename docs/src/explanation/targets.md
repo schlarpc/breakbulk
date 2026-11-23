@@ -26,7 +26,7 @@ This page explains what each kind of target gets, and why.
 | `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), headless Chromium or Firefox, or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
 | `{x86_64,aarch64}-unknown-uefi` | yours, with the target | lld-link | none |
-| `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | rustc's own | none: no `test` crate, so test binaries do not compile |
+| `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | the toolchain's `rust-lld`, or nixpkgs' `ld.lld` | none: no `test` crate, so test binaries do not compile |
 
 For a preset's target, "none" means nothing on the build machine runs the target's programs.
 The test binaries and doctests still build, but their runs fail with a
@@ -148,9 +148,13 @@ uses (GNU ld, lld, mold, clang with lld, MinGW, zig) drops those two
 arguments, and the `lld` kind adds `-fuse-ld=lld` back with nixpkgs'
 lld behind the wrapper.
 
-The exception is bare metal (`x86_64-unknown-none`), which has no
-preset: nixpkgs has no linker wrapper for it, so it uses the linker
-rustc's own target spec names. UEFI targets get the `uefi` preset without
+The exception is bare metal (`x86_64-unknown-none`): rustc's target
+spec links with lld directly, and nixpkgs has no C toolchain or linker
+wrapper for it, so `presets.bareMetal` links as the spec does, with the
+toolchain's own `rust-lld`, or with nixpkgs' `ld.lld` of rustc's LLVM
+major for a toolchain that ships none (nixpkgs' rustc). The few
+bare-metal targets whose spec links through a C compiler (AVR, MSP430,
+Xtensa, …) get no preset. UEFI targets get the `uefi` preset without
 any setting. rustc's own linker there is `rust-lld` as `lld-link`, which
 puts the name of rustc's random temporary directory in the PDB, so the
 `.efi` would differ on every build; the preset uses the same wrapped

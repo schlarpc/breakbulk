@@ -27,8 +27,12 @@
 #                                                        lld of rustc's LLVM major
 #   rust-lld             isApple, a Linux build machine, the toolchain's own rust-lld as ld64.lld
 #                        rustc ships rust-lld
+#                        isBareMetal, rustc ships    the toolchain's own rust-lld (gnu
+#                        rust-lld                    flavor), as rustc's target spec does
 #   ld64.lld             isApple, a Linux build machine, nixpkgs' lld as ld64.lld, of
 #                        rustc ships none            rustc's LLVM major
+#   ld.lld               isBareMetal, rustc ships    nixpkgs' ld.lld of rustc's LLVM major
+#                        no rust-lld
 #   clang-lld            isLinux with lto                clang with -fuse-ld=lld
 #   lld                  isLinux, rustc picks lld        the wrapped cc with -fuse-ld=lld
 #                                                        (reads bitcode too: lto)
@@ -306,7 +310,7 @@ let
           exec "$d/rust-lld" "$@"
         fi
       done
-      echo "breakbulk: no rust-lld on PATH; the Rust toolchain ships it in lib/rustlib/<host>/bin (rustup's and rust-overlay's do); set \`linkerKind = \"ld64.lld\"\` for nixpkgs' lld instead" >&2
+      echo "breakbulk: no rust-lld on PATH; the Rust toolchain ships it in lib/rustlib/<host>/bin (rustup's and rust-overlay's do); set \`linkerKind\` to \"ld64.lld\" (Apple) or \"ld.lld\" (bare metal) for nixpkgs' lld instead, or the toolchain's \`facts.bundledLld = false\`" >&2
       exit 1
     ''}/bin/rust-lld";
 
@@ -442,14 +446,24 @@ let
         );
     };
     rust-lld = {
-      on = t: t.isApple;
-      what = "Apple";
+      on = t: t.isApple || t.isBareMetal;
+      what = "Apple and bare-metal";
       build = a: rustLldLinker a.pkgs.buildPackages;
       lld = a: {
         name = "rust-lld of rustc ${a.rustc.version}";
         version = a.rustc.llvmVersion;
         patches = [ ];
       };
+    };
+    # nixpkgs' lld for a bare-metal target, whose rustc spec links with
+    # lld directly (linker flavor gnu-lld): `ld.lld`, a name rustc and
+    # lld both take for the GNU flavor (rustc_target spec/mod.rs,
+    # `infer_linker_hints`; lld's driver reads its argv[0]).
+    "ld.lld" = {
+      on = t: t.isBareMetal;
+      what = "bare-metal";
+      bitcode = true;
+      build = a: "${(needs "ld.lld" "llvm" a.llvm).lld}/bin/ld.lld";
     };
     "ld64.lld" = {
       on = t: t.isApple;
@@ -536,6 +550,15 @@ let
           "rust-lld"
         else
           "ld64.lld"
+      )
+    else if t.isBareMetal then
+      (
+        if rustc == null then
+          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` depends on whether rustc ships its own rust-lld; give the toolchain's facts, or set `targets.${triple}.linkerKind`"
+        else if rustc.bundledLld then
+          "rust-lld"
+        else
+          "ld.lld"
       )
     else if t.isLinux then
       (

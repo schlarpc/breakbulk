@@ -544,6 +544,44 @@ let
         testSystem = mkDefault null;
       };
 
+    # Bare-metal targets (os none) whose rustc spec links with lld: the
+    # toolchain's own rust-lld, as the spec does, when it ships one
+    # (`facts.bundledLld`), else nixpkgs' ld.lld of rustc's LLVM major
+    # (./linker.nix). No C toolchain and no runner: nothing to set them
+    # from (a C compiler for the board is `targets.<t>.cc`).
+    bareMetal =
+      {
+        pkgs,
+        triple,
+        traits,
+        linkerKind ? null,
+        kinds,
+        facts,
+        ...
+      }:
+      guard traits.isBareMetal
+        "breakbulk.presets.bareMetal: `${triple}` is not a bare-metal triple (os none)"
+        {
+          packageSet = mkDefault null;
+          linker = mkDefault (chooseLinker {
+            inherit
+              pkgs
+              triple
+              traits
+              facts
+              kinds
+              ;
+            kind = linkerKind;
+          });
+          runner =
+            mkDefault
+              (chooseRunner {
+                inherit pkgs traits;
+                canExecute = false;
+              }).runner;
+          testSystem = mkDefault null;
+        };
+
     # wasm32-unknown-unknown for the browser: rustc's own wasm linker flavor,
     # with the version-matched `wasm-ld` instead of rustup's rust-lld; C code
     # with unwrapped clang targeting wasm32; tests under
@@ -756,6 +794,11 @@ in
     # UEFI applications (`*-unknown-uefi`): the default preset of every UEFI
     # triple, which only sets the linker.
     uefi = presetModule impl.uefi;
+
+    # Bare-metal programs (`x86_64-unknown-none`, `thumbv*-none-eabi*`,
+    # `riscv*-unknown-none-elf`, …): the default preset of the bare-metal
+    # triples whose rustc spec links with lld, which only sets the linker.
+    bareMetal = presetModule impl.bareMetal;
 
     # Not a preset: a C compiler driver as a linker, for the `build` of a
     # linker kind a user adds (`targets.<triple>.linkerKinds`), as the

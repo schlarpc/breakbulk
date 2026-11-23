@@ -50,7 +50,8 @@ in
       `presets.linuxStatic` (musl); another Linux `-gnu` triple
       `presets.linux`, a `-musl` one `presets.linuxStatic`, a Windows
       `-gnu` or `-gnullvm` one `presets.windows`, `wasm32-wasip2`
-      `presets.wasmComponent`, and a UEFI triple `presets.uefi`. A triple
+      `presets.wasmComponent`, a UEFI triple `presets.uefi`, and a
+      bare-metal triple that rustc links with lld `presets.bareMetal`. A triple
       whose preset needs arguments or a choice (`-msvc`, macOS,
       wasm32 without WASI) fails at evaluation, naming the preset, unless
       the target sets a `preset`, a `linker`, or `preset = null`. Any
