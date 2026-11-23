@@ -596,6 +596,24 @@ APK's or an Android library's `jniLibs/<abi>/`; a binary lands in
 the library with that build ID: `readelf -n lib/libapp.so` prints the
 build ID.
 
+C++ compiled with cc-rs (`.cpp(true)`) links the NDK's shared C++
+runtime, `libc++_shared.so`, which is cc-rs's default on Android. A
+product that needs it ships it: `lib/libc++_shared.so` sits next to
+`lib/libapp.so`, so copy both into `jniLibs/<abi>/`. Android's guide to
+[C++ library support](https://developer.android.com/ndk/guides/cpp-support)
+says when to use the static runtime instead: one shared library in the
+whole app at most. To link it statically, set cc-rs's `CXXSTDLIB` for
+the target:
+
+```nix
+targets.aarch64-linux-android.env.CXXSTDLIB_aarch64_linux_android = "c++_static";
+```
+
+bindgen works without settings of its own: the preset gives it the NDK's
+libclang, clang, sysroot and the API level, so a `-sys` crate's build
+script can generate bindings from the NDK's headers (`<android/log.h>`)
+as it is.
+
 ### Tests on a device or an emulator
 
 Nothing in the Nix sandbox runs Android programs, so the target's test
@@ -606,7 +624,9 @@ on a device or an emulator through adb. It copies the binary to
 `/data/local/tmp` and runs it there with the `RUST_*` and `CARGO_*`
 variables. The [test apps](../reference/outputs.md#test-apps-and-apps)
 (`target.aarch64-linux-android.variants.<v>.testApps.<pkg>.<binary>`) use that
-runner. They are not in `repo.apps`, so put the ones you want in a flake
+runner, which also copies the NDK's `libc++_shared.so` to the device
+for test binaries that need it. They are not in `repo.apps`, so put the
+ones you want in a flake
 output and run one with an emulator running or a device attached:
 
 ```sh

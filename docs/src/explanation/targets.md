@@ -256,6 +256,18 @@ an app loads native code as shared libraries for one API level, its
   so the `-ffile-prefix-map` flags each unit adds there apply and C code
   names no store path. nixpkgs' wrapped NDK compiler is not used: its
   linker wrapper adds store paths as run paths.
+- **C++.** cc-rs links its default C++ runtime for Android, the NDK's
+  `libc++_shared.so`, which suits an app with several native libraries
+  (the NDK's guidance). The device does not have it: an app ships it.
+  So the `bundleLibraries` stage, after `install`, copies it next to the
+  libraries that need it, and the test runner copies it to the device
+  with the test binary. The NDK's clang names the file
+  (`-print-file-name`), so breakbulk keeps no table of the NDK's layout.
+- **bindgen.** `LIBCLANG_PATH` is the NDK's own libclang, the clang
+  release that compiles the C code, and `CLANG_PATH` its clang, which
+  bindgen asks for the system include directories: another clang on
+  `PATH` would answer with a Linux C library's. The clang arguments are
+  the target with its API level and the NDK's sysroot.
 - **Debug information.** `debugInfo` is `"split"` by default, as on
   Linux: each library's and program's debug information goes to the
   `debug` output, by build ID, which is what Play Console's native debug

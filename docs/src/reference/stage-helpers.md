@@ -157,6 +157,41 @@ The version of `package`. `null`: the one version the product's roots depend on.
 
 *Example:* `"50.0.1"`
 
+### `bundleLibraries`
+
+Copies into the product the shared libraries its ELF files name
+in `NEEDED` that one of `from` holds, and those that the copies
+need in turn, into the install layout's library directory (the
+target's `sharedLibraryDir`). A library the product has already,
+or that no directory of `from` holds (the platform's own), is
+left alone. Runs after `install`, as a runtime that ships with
+the product: `presets.android` adds it for the NDK's
+`libc++_shared.so`, which an app ships next to the libraries
+that need it.
+
+#### `bundleLibraries.binutils`
+
+The binutils to run on ELF files; a wrapped cross bintools' prefixed
+tools are found by its `targetPrefix`. By default the C toolchain
+binutils of the stage target's package set
+(`targets.<triple>.packageSet`, which the stages of mkRepository's
+products and test runs get), else `binutils-unwrapped-all-targets`
+from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
+#### `bundleLibraries.from`
+
+The directories to take libraries from, in order.
+
+*Type:* list of (string or absolute path or package)
+
+*Default:* `[ ]`
+
+*Example:* `[ "${ndk.sysroot}/usr/lib/aarch64-linux-android" ]`
+
 ### `deterministicZip`
 
 Packs the input's files into one zip file whose bytes depend
