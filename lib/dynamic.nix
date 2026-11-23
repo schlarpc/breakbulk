@@ -72,7 +72,7 @@ let
     mode:
     if mode == "dynamic" && !available then
       throw "breakbulk: mode = \"dynamic\" needs an evaluator with the `dynamic-derivations` experimental feature (and `ca-derivations`), on Nix 2.36 or later (this is ${builtins.nixVersion}${
-        lib.optionalString (!featureGates.hasOutputOf) ", without `builtins.outputOf`"
+        lib.optionalString (!featureGates.hasOutputOf) ", without the feature"
       }); use mode = \"ifd\""
     else
       mode;
