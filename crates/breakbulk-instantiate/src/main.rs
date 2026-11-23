@@ -1,17 +1,21 @@
 //! `breakbulk-instantiate --emit json --plan <plan.json> --sources <file>
-//! --toolchains <file> --overrides <file> [--roots <file>] [--out <file>]`
+//! --toolchains <file> --overrides <file> [--roots <file>] [--outer <file>]
+//! [--out <file>]`
 //!
 //! Writes `units.json` (IFD mode) to `--out`, or to `$out` when run as a
-//! derivation builder.
+//! derivation builder. With `--outer` (`outer.json`, as dynamic mode's
+//! outer derivation reads it), it also describes the root shape: the
+//! wrappers and what they name ([`breakbulk_instantiate::shape`]).
 
 use std::process::ExitCode;
 
 use breakbulk_format::Plan;
+use breakbulk_instantiate::shape::{Outer, shape};
 use breakbulk_instantiate::{Inputs, instantiate, to_json};
 
 const USAGE: &str = "usage: breakbulk-instantiate --emit json --plan <plan.json> \
     --sources <sources.json> --toolchains <toolchains.json> --overrides <overrides.json> \
-    [--roots <roots.json>] [--out <units.json>]";
+    [--roots <roots.json>] [--outer <outer.json>] [--out <units.json>]";
 
 fn read(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))
@@ -30,7 +34,14 @@ fn run() -> Result<(), String> {
             .filter(|n| {
                 matches!(
                     *n,
-                    "emit" | "plan" | "sources" | "toolchains" | "overrides" | "roots" | "out"
+                    "emit"
+                        | "plan"
+                        | "sources"
+                        | "toolchains"
+                        | "overrides"
+                        | "roots"
+                        | "outer"
+                        | "out"
                 )
             })
             .ok_or_else(|| format!("unknown argument `{flag}`\n{USAGE}"))?;
@@ -59,7 +70,13 @@ fn run() -> Result<(), String> {
         overrides: parse(&need("overrides")?)?,
         roots: opts.get("roots").map(|p| parse(p)).transpose()?,
     };
-    let units = instantiate(&inputs).map_err(|e| e.to_string())?;
+    let mut units = instantiate(&inputs).map_err(|e| e.to_string())?;
+    if let Some(p) = opts.get("outer") {
+        let outer: Outer = parse(p)?;
+        let s = shape(&inputs, &units, &outer).map_err(|e| e.to_string())?;
+        units.nodes = s.nodes;
+        units.wrappers = s.wrappers.into_iter().map(|(_, d, o)| (o, d)).collect();
+    }
     let out = match opts.get("out") {
         Some(o) => o.clone(),
         None => std::env::var("out").map_err(|_| "neither --out nor $out is set".to_owned())?,

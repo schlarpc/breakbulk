@@ -39,7 +39,8 @@ use std::io::Cursor;
 use std::process::ExitCode;
 
 use breakbulk_format::Plan;
-use breakbulk_instantiate::dynamic::{self, Context, InputValue, Outer, Resolved, Values, Written};
+use breakbulk_instantiate::dynamic::{self, Context, InputValue, Resolved, Values, Written};
+use breakbulk_instantiate::shape::Outer;
 use breakbulk_instantiate::{Inputs, instantiate};
 use breakbulk_predict::view::{Outcome, ViewSpec, materialize, nar, outcome};
 use harmonia_protocol::types::DaemonStore as _;

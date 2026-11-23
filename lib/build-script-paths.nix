@@ -8,9 +8,8 @@
 #     pkgs;
 #     name;          # the derivation's name
 #     plan;          # the plan, in the failure message
-#     runs;          # the runs' `flags` outputs: a list (IFD mode, the
-#                    # instantiation's `buildScriptRuns`), or
-#                    # `{ runsFile; }`, a file listing them (dynamic mode)
+#     runs;          # `{ runsFile; }`: a file listing the runs' `flags`
+#                    # outputs (the instantiation's `buildScriptRuns`)
 #     targetName;    # the target platform, in the failure message
 #     allow = [ { package; version; path; } … ];
 #                    # missing paths the scripts do not need: `path` is a
@@ -35,11 +34,6 @@
     }:
     let
       jq = "${pkgs.buildPackages.jq}/bin/jq";
-      runWords =
-        if builtins.isList runs then
-          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}") runs
-        else
-          "$(cat ${runs.runsFile})";
     in
     pkgs.runCommand name
       {
@@ -52,7 +46,7 @@
         : > $out/allowed
         # package <TAB> version <TAB> platform <TAB> declared <TAB> hint, one
         # per missing path.
-        for f in ${runWords}; do
+        for f in $(cat ${runs.runsFile}); do
           [ -e "$f/missing-paths.json" ] || continue
           ${jq} -r --slurpfile md "$f/metadata.json" \
             '.[] | [$md[0].package, $md[0].version, $md[0].platform, .declared, .hint] | @tsv' "$f/missing-paths.json"

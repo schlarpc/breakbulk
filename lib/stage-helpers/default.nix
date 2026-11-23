@@ -1473,9 +1473,9 @@ let
 
   # The `flags` outputs of the build-script runs of the product's target
   # that its roots depend on, as shell words: `product.buildScriptFlags`
-  # is a list of them (IFD mode), or `{ rootInfo; }`, the roots'
-  # `breakbulk-root.json` files that list them (dynamic-derivation mode,
-  # known at build time).
+  # is `{ rootInfo; }`, the roots' `breakbulk-root.json` files that list
+  # them at build time (mkRepository's products), or a list of them (a
+  # product made with mkProduct directly).
   buildScriptFlagsWords =
     helperName: product: pkgs:
     let

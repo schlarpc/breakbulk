@@ -187,7 +187,7 @@ let
     in
     lib.listToAttrs (
       map (u: lib.nameValuePair (builtins.unsafeDiscardStringContext u.drvPath) u.name) (
-        lib.attrValues i.units.build ++ lib.attrValues i.units.test ++ lib.attrValues i.doctests
+        lib.attrValues i.units.build ++ lib.attrValues i.units.test ++ lib.attrValues i.doctestDrvs
       )
     );
   changed =

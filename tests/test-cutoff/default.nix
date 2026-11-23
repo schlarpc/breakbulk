@@ -8,7 +8,7 @@
 #   tests/test-cutoff/run.sh        content-addressed, in a private store
 #
 #   stable-inputs   (flake check) alpha's test passes with the stable
-#                   inputs of lib/test-runs.nix `stableSpec` (built here
+#                   inputs of lib/test-runs.nix `runInfo` (built here
 #                   input-addressed, as stock Nix cannot build CA): its
 #                   dynamic-library path holds copies of beta's library
 #                   files, not beta's OUT_DIR, and no subdirectory;
@@ -90,7 +90,7 @@ let
 
   # alpha's test with the stable inputs, input-addressed.
   plainRun = (runsOf before).alpha;
-  plainSpec = plainRun.passthru.breakbulkTest;
+  root = plainRun.passthru.root;
   # The names of the derivations a derivation's attributes refer to.
   inputNames =
     drv:
@@ -99,11 +99,15 @@ let
     );
   hasTool = n: lib.any (i: builtins.match "[a-z0-9]{32}-${n}-[0-9.]+\\.drv" i != null);
 
-  stable = breakbulk.testRuns.stableSpec {
+  stable = breakbulk.testRuns.runInfo {
     inherit pkgs;
-    spec = plainSpec;
-    caAttrs = { };
-    name = "test-cutoff";
+    name = "test-cutoff-test-spec";
+    inherit (root.breakbulkRoot) wrapper;
+    dylibPath = {
+      var = "LD_LIBRARY_PATH";
+      sep = ":";
+    };
+    stable = true;
   };
 in
 {
@@ -131,37 +135,45 @@ in
 
   stable-inputs =
     assert lib.assertMsg (
-      !(plainSpec.dylib ? stable) && plainSpec.dylib.flags != [ ]
+      !(plainRun.drvAttrs ? specDylibs)
     ) "test-cutoff: with ca off, the test run uses the stable inputs";
-    assert lib.assertMsg (
-      stable.dylib.flags == [ ] && stable.dylib.stable != null && lib.length stable.envFlags == 1
-    ) "test-cutoff: stableSpec did not replace the run inputs";
-    pkgs.runCommand "test-cutoff-stable-inputs" { } ''
-      ${breakbulk.testRuns.envScript {
-        spec = stable;
-        jq = "${pkgs.jq}/bin/jq";
-      }}
-      echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-      # Every entry is a copy (or the sysroot), holding beta's library file
-      # and no subdirectory.
-      IFS=: read -ra ps <<< "$LD_LIBRARY_PATH"
-      found=0
-      for p in "''${ps[@]}"; do
-        case $p in
-          ${stable.dylib.stable}/dylib/*)
-            [ -z "$(find "$p" -mindepth 1 -type d)" ]
-            [ -f "$p/libbeta_marker.so" ] && found=1 ;;
-          */lib/rustlib/*) ;;
-          *) echo "unexpected entry $p" >&2; exit 1 ;;
-        esac
-      done
-      [ $found = 1 ]
-      [ "$ALPHA_STAMP" = alpha-stamp ]
-      files=(${plainSpec.unitOut}/*)
-      cd ${lib.escapeShellArg plainSpec.sourceDir}
-      "''${files[0]}" | tee $TMPDIR/log
-      grep -q 'test tests::runtime_env ... ok' $TMPDIR/log
-      mkdir -p $out
-      cp $TMPDIR/log $out/
-    '';
+    pkgs.runCommand "test-cutoff-stable-inputs"
+      {
+        spec = stable.out;
+        specDylibs = stable.dylibs;
+        nativeBuildInputs = [ pkgs.jq ];
+      }
+      ''
+        info=$spec/breakbulk-root.json
+        # The run reads neither `flags` list, only the copies.
+        [ "$(jq -c '.testSpec | [.dylibFlags, .envFlags]' "$info")" = '[[],[]]' ]
+        [ -f $spec/rustc-env/directives.json ]
+        ${breakbulk.testRuns.envScript {
+          jq = "${pkgs.jq}/bin/jq";
+          extra = [ ];
+          stable = true;
+        }}
+        echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+        # Every entry is a copy (or the sysroot), holding beta's library file
+        # and no subdirectory.
+        IFS=: read -ra ps <<< "$LD_LIBRARY_PATH"
+        found=0
+        for p in "''${ps[@]}"; do
+          case $p in
+            $specDylibs/dylib/*)
+              [ -z "$(find "$p" -mindepth 1 -type d)" ]
+              [ -f "$p/libbeta_marker.so" ] && found=1 ;;
+            */lib/rustlib/*) ;;
+            *) echo "unexpected entry $p" >&2; exit 1 ;;
+          esac
+        done
+        [ $found = 1 ]
+        [ "$ALPHA_STAMP" = alpha-stamp ]
+        files=(${root}/*)
+        cd "$CARGO_MANIFEST_DIR"
+        "''${files[0]}" | tee $TMPDIR/log
+        grep -q 'test tests::runtime_env ... ok' $TMPDIR/log
+        mkdir -p $out
+        cp $TMPDIR/log $out/
+      '';
 }

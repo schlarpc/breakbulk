@@ -796,14 +796,11 @@ runTests "lib-unit" {
       };
     in
     {
-      expr = [
-        (of (bb.testRuns.mkTestRuns args))
-        (of (bb.dynamic.mkTestRuns args))
-      ];
-      expected = lib.genList (_: {
+      expr = of (bb.testRuns.mkTestRuns args);
+      expected = {
         marker = "overlay";
         system = other;
-      }) 2;
+      };
     };
 
   # mkRepository's `root`: a path stays a path; a flake's `self` (or its

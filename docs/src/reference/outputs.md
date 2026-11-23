@@ -155,8 +155,10 @@ variants have `products`, `tests` and `benches` off. Like any variant
 setting, the record can be set for every variant in
 `workspaces.<ws>.variantDefaults` and for one target in its
 `variantDefaults` (`checks.buildScriptPaths = false` there turns the
-plan checks off). A product whose roots Cargo all skipped is left out,
-and so is a run turned off with its `enable`
+plan checks off). A product whose roots Cargo all skipped is in, and
+holds only the no-binaries marker (`breakbulk-no-binaries`, with the
+reasons; whether Cargo built a root is known at build time only). A run
+turned off with its `enable` is left out
 ([run settings](../explanation/configuration.md#run-settings):
 [`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable),
 [`test.doctest.enable`](options/packages.md#packagesnametestdoctestenable),

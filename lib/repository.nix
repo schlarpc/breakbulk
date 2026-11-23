@@ -1395,11 +1395,10 @@ let
           "lib"
         else
           "${b.kind}-${b.target}";
-      install = r: if r.breakbulkRoot.unit == null then r else inst.installExecutable r;
     in
-    lib.mapAttrs (_: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (install r)) rs)) (
-      selectPkgs sel byPkg
-    );
+    lib.mapAttrs (
+      _: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (inst.installExecutable r)) rs)
+    ) (selectPkgs sel byPkg);
 
   # testRuns.<pkg>.<name>: test runs, named as `tests` names test
   # binaries; `.enabled` holds those whose run is enabled
@@ -1534,11 +1533,7 @@ let
               check = variantsLib.unitsCheck {
                 inherit pkgs;
                 name = "${wsName}-${triple}-${vName}-${v.mode}";
-                units =
-                  if inst.delivery == "dynamic" then
-                    map (k: inst.allUnits.${k}) traced
-                  else
-                    lib.concatMap (k: lib.attrValues inst.units.${k}) traced;
+                units = map (k: inst.allUnits.${k}) traced;
               };
             }
           ) vs;
@@ -1731,17 +1726,14 @@ let
             lib.optionalAttrs (building && c.products) (
               lib.concatMapAttrs (
                 pkg: p:
-                # IFD mode leaves out a product whose roots Cargo all skipped
-                # (it is a stub). Dynamic-derivation mode cannot tell at
-                # evaluation time: such a product holds only the no-binaries
-                # marker and its stages and checks pass it on, so it is in
-                # like any other.
-                lib.optionalAttrs (p.unbuilt == [ ] || lib.length p.unbuilt < lib.length (lib.attrNames p.roots)) (
-                  {
-                    "${prefix}/${pkg}/build" = p;
-                  }
-                  // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
-                )
+                # Whether Cargo built any of a product's roots is known at
+                # build time only: a product whose roots it all skipped
+                # holds only the no-binaries marker, and its stages and
+                # checks pass it on.
+                {
+                  "${prefix}/${pkg}/build" = p;
+                }
+                // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
               ) v.packages
             )
             // lib.optionalAttrs (building && c.tests && t.canRunTests) (

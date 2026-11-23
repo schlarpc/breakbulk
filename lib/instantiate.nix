@@ -1,18 +1,21 @@
 # Instantiation in IFD mode: run `breakbulk-instantiate --emit json` over a
 # plan in a derivation, import its `units.json`, and turn each entry into a
-# unit derivation.
+# unit derivation, and each root's wrapper into a derivation: the same
+# root shape as dynamic-derivation mode's (`rootShape`).
 #
 #   inst = breakbulk.instantiate { ... };
 #   inst.units.<unit id>        the unit derivations (fixed point)
 #   inst.roots."<package>/<kind>/<target>"
-#                               a root: the root unit's output, or a stub
-#                               (`.breakbulkRoot` says which)
+#                               a root (`rootShape`)
+#   inst.doctests.<package>     the predicted doctests (`rootShape`)
+#   inst.docs                   doc plans: the docs (`cargo doc`'s folder);
+#                               null for other plans
+#   inst.allUnits               a derivation on every output of every unit
+#   inst.buildScriptRuns        { runsFile; }: a file listing the `flags`
+#                               output of every build-script run, read at
+#                               build time
 #   inst.unitsJson              the instantiate derivation (its output is
 #                               units.json)
-#   inst.doctestAttrs.<package> the attributes of a library's doctest
-#                               derivation (test plans), before `derivation`
-#   inst.docs                   doc plans: the docs derivation (`cargo doc`'s
-#                               folder); null for other plans
 #
 # The instantiate derivation sees only names and tool paths, never a value
 # with string context: units.json names every input by key, and this file
@@ -150,6 +153,17 @@ rec {
       # `capabilities`): whether rustc takes `--remap-path-scope`.
       capabilities,
       name ? "breakbulk-units",
+      # What the root wrappers are named after (`<outerName>-<output>`, as
+      # dynamic-derivation mode's outer derivation names them), and the
+      # coreutils they run with.
+      outerName ? name,
+      coreutils,
+      # Test plans: the predicted doctests, package name -> the attributes
+      # its doctest derivation gets from the test configuration
+      # (testRuns.doctestConfig).
+      doctests ? { },
+      # Doc plans: the plan has a docs derivation.
+      docs ? false,
       storeDir ? builtins.storeDir,
       # The record importing units.json is checked against
       # (lib/nix-features.nix; repo.nixFeatures, from mkRepository).
@@ -223,6 +237,14 @@ rec {
         packages = lib.mapAttrs (_: o: lib.genAttrs platforms (p: platformJson (ovPlatform o p))) overrides;
       });
       rootsFile = toFile "roots.json" (toJSON roots);
+      rootList = if roots == null then [ ] else roots.roots;
+      outerFile = toFile "outer.json" (
+        toJSON (outerOf {
+          inherit outerName docs;
+          roots = rootList;
+          doctests = lib.attrNames doctests;
+        })
+      );
 
       unitsJson = derivation {
         name = "${name}.json";
@@ -243,6 +265,10 @@ rec {
         ++ lib.optionals (roots != null) [
           "--roots"
           rootsFile
+        ]
+        ++ [
+          "--outer"
+          outerFile
         ];
       };
 
@@ -267,7 +293,12 @@ rec {
         // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
         // {
           "empty-dir" = str emptyDir;
+          "wrapper:coreutils" = str coreutils;
         }
+        # Each doctest's test configuration (shape.rs `doctest_key`).
+        // lib.concatMapAttrs (
+          pkg: attrs: lib.mapAttrs' (k: v: lib.nameValuePair "doctest:${pkg}:${k}" (str v)) attrs
+        ) doctests
         // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
         // lib.concatMapAttrs (
           p: s:
@@ -299,7 +330,7 @@ rec {
         else if p ? unit then
           # A weak reference names a path the unit reaches through its
           # dependencies' references (their manifests), not as an input.
-          (if p.weak or false then unsafeDiscardStringContext else lib.id) units.${p.unit}.${p.output}.outPath
+          (if p.weak or false then unsafeDiscardStringContext else lib.id) drvs.${p.unit}.${p.output}.outPath
         else if p ? join then
           # A list-like variable set by several env layers: the non-empty
           # layers, joined (breakbulk_unit::env::append).
@@ -328,68 +359,54 @@ rec {
         };
       mkDrv = d: derivation (drvAttrs d);
 
-      testSpec = t: {
-        env = lib.mapAttrs (_: value) t.env;
-        configEnv = lib.mapAttrs (_: value) t.configEnv;
-        envFlags = map value t.envFlags;
-        dylibFlags = map value t.dylibFlags;
-        inherit (t) packageDir;
-        testOnly = t.testOnly or [ ];
-        junk = t.junk or [ ];
-        custom = t.custom or false;
-        nextest = {
-          inherit (t.nextest) binaryId;
-          cargoMetadata = value t.nextest.cargoMetadata;
-          binaries = value t.nextest.binaries;
-        };
-      };
-
       units =
         assert lib.assertMsg (
-          json.version == 3
+          json.version == 4
         ) "breakbulk: units.json version ${toString json.version} is not supported";
         lib.mapAttrs (_: mkDrv) json.units;
+      # What parts name: units, and the stubs, doctests and docs the
+      # wrappers link (`nodes`, whose keys are no unit ids).
+      drvs = units // lib.mapAttrs (_: mkDrv) (json.nodes or { });
+      wrappers = lib.mapAttrs (_: mkDrv) (json.wrappers or { });
+      shape = rootShape {
+        inherit
+          system
+          coreutils
+          outerName
+          docs
+          ;
+        roots = rootList;
+        shell = tools.shell;
+        doctests = lib.attrNames doctests;
+        wrapperOf =
+          _: what: output:
+          (wrappers.${output} or (throw "breakbulk: units.json has no wrapper for the ${what}")).outPath;
+      };
 
-      rootsOut = lib.mapAttrs (
-        _: r:
-        (if r ? unit then units.${r.unit}.${r.output} else mkDrv r.stub)
-        // {
-          breakbulkRoot = {
-            inherit (r)
-              package
-              target
-              kind
-              test
-              # "host" or "target": the root unit's (lib/test-runs.nix
-              # `testPlatforms` picks a test binary's runner, system and
-              # libraries by it).
-              platform
-              ;
-            unit = r.unit or null;
-            reason = r.reason or null;
-            # Test roots: what the test run needs (lib/test-runs.nix), as
-            # breakbulk-instantiate computes it for both delivery modes
-            # (`test_spec` in its dynamic.rs).
-            testSpec = if r ? testSpec then testSpec r.testSpec else null;
-            # Product roots: the target-platform runs below the unit (#23).
-            buildScriptRuns = r.buildScriptRuns or [ ];
-            # Product roots: the `debug` outputs of the units below (the
-            # libraries' `.dwo` files with split-debuginfo = "unpacked"),
-            # for the `linked` stage.
-            debugBelow = map (id: units.${id}.debug) (r.debugUnits or [ ]);
-          };
-        }
-      ) json.roots;
     in
     {
       inherit units unitsJson;
-      # The `flags` output of every build-script run of the plan, on both
-      # platforms (`buildScriptRuns` in lib/dynamic.nix).
-      buildScriptRuns = lib.concatLists (
-        lib.mapAttrsToList (
-          id: d: lib.optional (lib.elem "flags" d.attrs.outputs) units.${id}.flags
-        ) json.units
+      # The unit derivations, under the name dynamic-derivation mode gives
+      # them (explainSharing).
+      ifdUnits = units;
+      # Test plans: each doctest derivation the wrappers link, by package
+      # (their attributes, for tests that run one by hand).
+      doctestDrvs = lib.mapAttrs' (k: d: lib.nameValuePair (lib.removePrefix "doctest:" k) d) (
+        lib.filterAttrs (k: _: lib.hasPrefix "doctest:" k) drvs
       );
+      # Doc plans: the docs derivation the docs' wrapper links.
+      docsDrv = drvs.docs or null;
+      # Each root's unit output, or null for one Cargo did not build (its
+      # wrapper's `root`), for tests and debugging.
+      rootUnits = lib.mapAttrs (_: r: if r ? unit then units.${r.unit}.${r.output} else null) json.roots;
+      delivery = "ifd";
+      inherit (shape)
+        roots
+        doctests
+        docs
+        allUnits
+        buildScriptRuns
+        ;
       # For dynamic-derivation mode (lib/dynamic.nix), which runs the same
       # instantiation inside its outer derivation: the files given to
       # breakbulk-instantiate, and every input key's value with its context.
@@ -407,15 +424,188 @@ rec {
       # outer derivation, which makes those views itself: `inputs` has
       # them too, but from import from derivation.
       predictedSpecs = lib.mapAttrs (_: p: p.spec) predicted;
-      roots = rootsOut;
-      # Test plans: package name to the attributes of its doctest derivation
-      # (`breakbulk-unit doctest`), for lib/test-runs.nix to add the test
-      # configuration to before calling `derivation`.
-      doctestAttrs = lib.mapAttrs' (id: d: lib.nameValuePair (lib.removePrefix "d-" id) (drvAttrs d)) (
-        json.doctests or { }
+    };
+
+  # The output name of a root's or doctest's wrapper (`n` a root name, or
+  # `<package>/doctest`): `<package>.<kind>.<target>.drv`. A dynamic
+  # derivation's output must be a valid derivation name, and both modes
+  # name wrappers alike. Package and target names cannot contain `.` or
+  # `/`.
+  outputName =
+    n:
+    let
+      o = "${lib.replaceStrings [ "/" ] [ "." ] n}.drv";
+    in
+    if builtins.match "[A-Za-z0-9+._?=-]+" o != null && !(lib.hasPrefix "." o) then
+      o
+    else
+      throw "breakbulk: the root `${n}` has a name that cannot be a derivation output name";
+
+  # outer.json without `leave` or `submit`: every predicted root's wrapper
+  # (`roots`, in predictedRoots' shape), each predicted doctest's
+  # (`doctests`, package names), the docs' (`docs`), and the `units.drv`
+  # and `runs.drv` ones. Root outputs always have a `.` before `.drv`, and
+  # package names none, so no two can be named alike.
+  outerOf =
+    {
+      outerName,
+      roots,
+      doctests,
+      docs,
+    }:
+    {
+      name = outerName;
+      outputs = lib.listToAttrs (
+        map (
+          r:
+          let
+            n = rootName r;
+          in
+          lib.nameValuePair n (outputName n)
+        ) roots
       );
-      # Doc plans: `breakbulk-unit docs`, every traced rustdoc into its `out`.
-      docs = if json ? docs then mkDrv json.docs else null;
+      doctests = lib.genAttrs doctests (pkg: outputName "${pkg}/doctest");
+      units = "units.drv";
+      runs = "runs.drv";
+    }
+    // lib.optionalAttrs docs { docs = "docs.drv"; };
+
+  # What a plan's instantiation gives, from its wrappers, in both delivery
+  # modes: each wrapper's output (`wrapperOf package what output`, a store
+  # path string; `package` is null for the plan-wide ones) is a directory
+  # read at build time (crates/breakbulk-instantiate/src/shape.rs).
+  #
+  #   roots."<pkg>/<kind>/<target>"   a small derivation symlinking the
+  #                        wrapper's `root`, with `breakbulkRoot` = { package;
+  #                        target; kind; test; platform; requiredFeatures;
+  #                        wrapper; } (the prediction's, which
+  #                        instantiation checks against the plan; test runs
+  #                        pick their system by `platform`). A product root
+  #                        Cargo did not build (required features) fails
+  #                        with the reason; a test root's is the stub, which
+  #                        succeeds and logs it.
+  #   doctests.<pkg>       a small derivation linking the doctest's output
+  #                        (its `log`), or a log saying why the plan has no
+  #                        doctest for the package; `breakbulkDoctest`
+  #   docs                 the docs derivation's output, or null
+  #   allUnits             building it builds every unit of the plan
+  #                        (`$out/units` lists their outputs): what check
+  #                        and clippy variants build
+  #   buildScriptRuns      { runsFile; }: a file listing the `flags` output
+  #                        of every build-script run of the plan, on both
+  #                        platforms, and building nothing else
+  rootShape =
+    {
+      system,
+      shell,
+      coreutils,
+      outerName,
+      roots,
+      doctests,
+      docs,
+      wrapperOf,
+    }:
+    let
+      storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
+      link =
+        name: what: output:
+        derivation {
+          inherit name system;
+          target = wrapperOf null what output;
+          builder = shell;
+          args = [
+            "-c"
+            ''${coreutils}/bin/ln -s "$target" "$out"''
+          ];
+        };
+      mkRoot =
+        r:
+        let
+          n = rootName r;
+          wrapper = wrapperOf r.package "root `${n}`" (outputName n);
+        in
+        derivation {
+          name = storeName "${r.package}-${r.kind}${
+            lib.optionalString (r.test && r.kind != "test") "-test"
+          }-${r.target}";
+          inherit system wrapper;
+          builder = shell;
+          # A product root Cargo did not build has no `root`, only the
+          # reason (`not-built`): fail with it.
+          args = [
+            "-c"
+            ''
+              if [ ! -e "$wrapper/root" ]; then
+                printf 'error: %s\n' "$(<"$wrapper/not-built")" >&2
+                exit 1
+              fi
+              ${coreutils}/bin/ln -s "$wrapper/root" "$out"
+            ''
+          ];
+        }
+        // {
+          breakbulkRoot = {
+            inherit (r)
+              package
+              target
+              kind
+              test
+              platform
+              ;
+            # Whether Cargo builds the root is known at build time only
+            # (the wrapper's `not-built`).
+            requiredFeatures = r.requiredFeatures or null;
+            inherit wrapper;
+          };
+        };
+      mkDoctest =
+        pkg:
+        let
+          wrapper = wrapperOf pkg "doctest of `${pkg}`" (outputName "${pkg}/doctest");
+        in
+        derivation {
+          name = storeName "${pkg}-doctest";
+          inherit system wrapper;
+          builder = shell;
+          args = [
+            "-c"
+            ''
+              if [ -e "$wrapper/root" ]; then
+                ${coreutils}/bin/ln -s "$wrapper/root" "$out"
+              else
+                ${coreutils}/bin/mkdir "$out"
+                printf 'skipped: %s\n' "$(<"$wrapper/not-built")" > "$out/log"
+                ${coreutils}/bin/cat "$out/log"
+              fi
+            ''
+          ];
+        }
+        // {
+          breakbulkDoctest = {
+            package = pkg;
+            inherit wrapper;
+          };
+        };
+      docsOut = derivation {
+        name = outerName;
+        inherit system;
+        wrapper = wrapperOf null "docs" "docs.drv";
+        builder = shell;
+        args = [
+          "-c"
+          ''${coreutils}/bin/ln -s "$wrapper/root" "$out"''
+        ];
+      };
+      allRuns = link "${outerName}-runs" "runs" "runs.drv";
+    in
+    {
+      roots = lib.listToAttrs (map (r: lib.nameValuePair (rootName r) (mkRoot r)) roots);
+      doctests = lib.genAttrs doctests mkDoctest;
+      docs = if docs then docsOut else null;
+      allUnits = link "${outerName}-units" "units" "units.drv";
+      buildScriptRuns = {
+        runsFile = "${allRuns}/runs";
+      };
     };
 
   # A root name as instantiation names roots: `<package>/<kind>/<target>`,

@@ -17,7 +17,7 @@
 # Instantiation (IFD mode; no pkgs): breakbulk.instantiate { ... },
 # breakbulk.predictedRoots { ... }, breakbulk.planRoots { ... } (the
 # prediction, or the `roots` option's names). Dynamic-derivation mode:
-# breakbulk.dynamic.{instantiate, mkTestRuns, mkBreakbulkDrv, available}
+# breakbulk.dynamic.{instantiate, mkBreakbulkDrv, available}
 # (lib/dynamic.nix). The Nix features each uses, and their gates:
 # breakbulk.nixFeatures (lib/nix-features.nix).
 # Planning and the minimal end-to-end entry:
@@ -69,7 +69,8 @@ let
       roots
       ;
   };
-  inherit (import ./instantiate.nix { inherit lib featureGates util; })
+  instantiateLib = import ./instantiate.nix { inherit lib featureGates util; };
+  inherit (instantiateLib)
     instantiate
     predictedRoots
     planRoots
@@ -116,14 +117,10 @@ let
   dynamic = import ./dynamic.nix {
     inherit
       lib
-      instantiate
-      testRuns
-      stages
-      runners
+      instantiateLib
       util
       featureGates
       ;
-    breakbulkTraits = targetTraits;
   };
   llvmVersions = import ./llvm-versions.nix { inherit lib util toolchainFacts; };
   wasiSdk = import ./wasi-sdk.nix { inherit lib util toolchainFacts; };

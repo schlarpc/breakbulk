@@ -1207,25 +1207,17 @@ in
   ];
 
   # Targets skipped for missing features have attributes: the product
-  # root is a stub that fails with the reason, the test a stub that
-  # succeeds and says it was skipped. The variant with the features builds
-  # and runs them.
+  # root fails with the reason (its wrapper's `not-built`), the test a
+  # stub that succeeds and says it was skipped, and the product leaves
+  # the root out. The variant with the features builds and runs them.
   required-features =
     let
       admin = rfDefault.roots."bin/admin";
-      reason = admin.breakbulkRoot.reason;
     in
-    assert lib.assertMsg (
-      admin.breakbulkRoot.unit == null
-    ) "required-features: admin was built without `cli`";
-    assert lib.assertMsg (lib.hasInfix "cli" reason)
-      "required-features: the stub's reason does not name the feature: ${reason}";
-    assert lib.assertMsg (
-      map (u: u.root) rfDefault.unbuilt == [ "bin/admin" ]
-    ) "required-features: unbuilt ${builtins.toJSON rfDefault.unbuilt}";
     pkgs.runCommand "required-features"
       {
         rf = rfDefault;
+        adminWrapper = admin.breakbulkRoot.wrapper;
         skipped = rf.workspaces.main.tests.rft.needs-extra;
         plain = rf.workspaces.main.tests.rft.plain;
         adminFull = rfFull.packages.rf;
@@ -1235,6 +1227,7 @@ in
       ''
         [ "$($rf/bin/rf)" = rf ]
         [ ! -e $rf/bin/admin ]
+        grep -q cli $adminWrapper/not-built
         ls -R $skipped
         $plain/bin/plain
         [ "$($adminFull/bin/admin)" = "admin cli=true" ]
@@ -1695,15 +1688,18 @@ in
     ) "sources: the data edit left cli's test run unchanged";
     pkgs.runCommand "sources"
       {
+        nativeBuildInputs = [ pkgs.jq ];
         cliView = i.sources.workspace."";
         lintView = i.sources.workspace.lint;
         cliRun = runOf sources;
-        cliDir = (runOf sources).passthru.breakbulkTest.sourceDir;
+        cliSpec = (runOf sources).passthru.spec;
         inherit lintRun;
-        lintDir = lintRun.passthru.breakbulkTest.sourceDir;
+        lintSpec = lintRun.passthru.spec;
         app = sources.workspaces.main.packages.cli;
       }
       ''
+        cliDir=$(jq -r .testSpec.env.CARGO_MANIFEST_DIR $cliSpec/breakbulk-root.json)
+        lintDir=$(jq -r .testSpec.env.CARGO_MANIFEST_DIR $lintSpec/breakbulk-root.json)
         [ "$(cd $cliView && find . -type f | sort | tr '\n' ' ')" = "./Cargo.toml ./src/main.rs " ]
         [ "$(cd $lintView && find . -type f | sort | tr '\n' ' ')" = "./lint/src/lib.rs " ]
         [ -f $cliDir/data/input.txt ] && [ ! -e $cliDir/notes.md ]
@@ -1745,7 +1741,7 @@ in
         testRun = expectFailure "view-hints-test-run" i.testRuns.run-reads.reads [
           "${missing} `packages.run-reads.test.sourceScope`"
         ];
-        doctest = expectFailure "view-hints-doctest" i.doctests.doc-reads [
+        doctest = expectFailure "view-hints-doctest" i.doctestDrvs.doc-reads [
           "${missing} `packages.doc-reads.test.sourceScope`"
         ];
         libToTests = expectFailure "view-hints-lib-to-tests" i.testRuns.lib-to-tests.fixture [
@@ -1840,7 +1836,7 @@ in
       doctestEnv =
         inst: p:
         builtins.fromJSON (
-          builtins.unsafeDiscardStringContext inst.doctests.${p}.drvAttrs.BREAKBULK_TEST_ENV
+          builtins.unsafeDiscardStringContext inst.doctestDrvs.${p}.drvAttrs.BREAKBULK_TEST_ENV
         );
       testView = i: p: "${i.sources.workspaceTest."ws/crates/${p}"}";
       wsIn = v: "${v}/ws";
@@ -2802,7 +2798,7 @@ in
     ) "member-defaults: test env in ${script}";
     # The package's `test.runner = "libtest"` wins over the default nextest.
     assert lib.assertMsg (
-      !(run.drvAttrs ? nextestCargoMetadata)
+      !(lib.hasInfix "cargo-nextest nextest run" run.drvAttrs.buildCommand)
     ) "member-defaults: app-b runs under nextest";
     assert lib.assertMsg (lib.all (n: hasC i.sources.workspace.${n}) [
       "b"
@@ -2844,7 +2840,7 @@ in
       run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
       checks = {
         targetLayerWins = lib.hasInfix "--profile target-layer" run.drvAttrs.buildCommand;
-        forcedLowerWins = run.drvAttrs ? nextestCargoMetadata;
+        forcedLowerWins = lib.hasInfix "cargo-nextest nextest run" run.drvAttrs.buildCommand;
         defaultHigherLoses =
           lib.hasInfix "md-probe" run.drvAttrs.buildCommand
           && !(lib.hasInfix "pkg-probe" run.drvAttrs.buildCommand);

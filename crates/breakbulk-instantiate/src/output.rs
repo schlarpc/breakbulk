@@ -34,7 +34,7 @@ use breakbulk_format::{Platform, RootKind};
 use serde::Serialize;
 
 /// The version of the `units.json` format.
-pub const UNITS_VERSION: u32 = 3;
+pub const UNITS_VERSION: u32 = 4;
 
 /// `BREAKBULK_UNIT` values longer than this many bytes, after the Nix side
 /// has substituted every reference, are passed with `passAsFile`. Linux
@@ -54,12 +54,25 @@ pub struct UnitsJson {
     /// Root name to root.
     pub roots: BTreeMap<String, RootOut>,
     /// Test plans: the plan's doctest id (`d-<package>`) to its doctest
-    /// derivation (`breakbulk-unit doctest`, output `out`).
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    /// derivation (`breakbulk-unit doctest`, output `out`), without the
+    /// package's test configuration; the root shape's `doctest:<package>`
+    /// node has it ([`crate::shape`]).
+    #[serde(skip_serializing)]
     pub doctests: BTreeMap<String, Drv>,
-    /// Doc plans: the docs derivation (`breakbulk-unit docs`, output `out`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Doc plans: the docs derivation (`breakbulk-unit docs`, output `out`),
+    /// the root shape's `docs` node.
+    #[serde(skip_serializing)]
     pub docs: Option<Drv>,
+    /// With `--outer`: the derivations the wrappers name besides units, by
+    /// node key (`stub:<root>`, `doctest:<package>`, `docs`), which a part
+    /// names as it names a unit ([`crate::shape::Shape`]).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub nodes: BTreeMap<String, Drv>,
+    /// With `--outer`: each wrapper by the output name outer.json gives it
+    /// (`<package>.<kind>.<target>.drv`, `<package>.doctest.drv`,
+    /// `units.drv`, `runs.drv`, `docs.drv`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub wrappers: BTreeMap<String, Drv>,
 }
 
 /// The attributes of one derivation, passed to `derivation` after
@@ -111,58 +124,25 @@ pub struct RootOut {
     /// The platform of the root unit (a stub: the predicted one), which
     /// picks a test binary's runner, system and libraries.
     pub platform: Platform,
+    /// What the root's wrapper links. Everything after a root reads it
+    /// from the wrapper at build time; IFD mode keeps the unit's name
+    /// (`rootUnits` in `lib/instantiate.nix`) for tests and debugging.
     #[serde(flatten)]
     pub what: RootWhat,
-    /// For a test binary the plan has: what its test run and test app need
-    /// ([`crate::dynamic::TestSpec`], the same function dynamic mode's
-    /// `breakbulk-root.json` comes from), with references as parts.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub test_spec: Option<RootTestSpec>,
     /// For a product root the plan has: the target-platform runs it depends
     /// on (`deps::target_runs_below`), whose copies of Cargo's `<profile>`
     /// may hold files their scripts placed next to the binaries, for the
-    /// product's `buildScriptFiles` stage and check (#23). Sorted.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// product's `buildScriptFiles` stage and check (#23), through the
+    /// wrapper. Sorted.
+    #[serde(skip_serializing)]
     pub build_script_runs: Vec<String>,
     /// For a product root the plan has: the units below it that write
     /// per-object debuginfo side files (`deps::debug_units_below`), whose
     /// `debug` outputs hold the libraries' `.dwo` files, which
-    /// the root's binary names, for the product's `linked` stage (decision
-    /// 126). Sorted.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// the root's binary names, for the product's `linked` stage, through
+    /// the wrapper's `debug`. Sorted.
+    #[serde(skip_serializing)]
     pub debug_units: Vec<String>,
-}
-
-/// [`crate::dynamic::TestSpec`] in `units.json`: every string a value the
-/// Nix side resolves.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RootTestSpec {
-    pub env: BTreeMap<String, Value>,
-    pub config_env: BTreeMap<String, Value>,
-    pub env_flags: Vec<Value>,
-    pub dylib_flags: Vec<Value>,
-    pub package_dir: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub test_only: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub junk: Vec<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub custom: bool,
-    pub nextest: RootNextest,
-}
-
-/// [`crate::dynamic::Nextest`] with each document as compact JSON text.
-/// Placeholders left: `"@LIBDIR@"` (the whole JSON value of the sysroot
-/// library directory of the binary's platform), which the Nix side fills
-/// in at evaluation time, and `@BINARY@`, `@TARGET@` and `@WS@`, which the
-/// test run fills in at build time.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RootNextest {
-    pub binary_id: String,
-    pub cargo_metadata: Value,
-    pub binaries: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

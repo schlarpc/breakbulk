@@ -241,15 +241,11 @@ let
 
   wanted = triple: builtins.match targets triple != null;
 
-  # Products Cargo built at least one root of, and their stages.
+  # Products and their stages.
   productDrvs =
     packages:
     lib.concatMap (p: [ p ] ++ lib.filter lib.isDerivation (lib.attrValues (p.stages or { }))) (
-      lib.attrValues (
-        lib.filterAttrs (
-          _: d: !(d ? unbuilt) || lib.length d.unbuilt < lib.length (lib.attrNames d.roots)
-        ) packages
-      )
+      lib.attrValues packages
     );
 
   sample =

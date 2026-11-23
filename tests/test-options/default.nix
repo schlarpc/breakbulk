@@ -119,14 +119,14 @@ in
       plain = (runsOf (mkRepo fixture [ ]))."lib/app";
     in
     assert lib.assertMsg (
-      plain.passthru.binary == plain.passthru.breakbulkTest.unitOut
+      plain.passthru.binary == "${plain.passthru.spec}/root"
     ) "strip-stage: without a stage (and ca off) the run should use the unit's output";
     assert lib.assertMsg (lib.hasSuffix "-bin-strip" before.passthru.binary.name)
       "strip-stage: the run does not use a stripped copy";
     pkgs.runCommand "test-options-strip-stage"
       {
-        unstrippedBefore = before.passthru.breakbulkTest.unitOut;
-        unstrippedAfter = after.passthru.breakbulkTest.unitOut;
+        unstrippedBefore = before.passthru.root;
+        unstrippedAfter = after.passthru.root;
         strippedBefore = before.passthru.binary;
         strippedAfter = after.passthru.binary;
         run = before;
@@ -161,15 +161,17 @@ in
       repo = mkRepo fixture [ narrow ];
       runs = runsOf repo;
       fullView = (instOf repo).sources.workspace.app;
-      dir = runs.data.passthru.breakbulkTest.sourceDir;
-      editedDir = (runsOf (mkRepo notesEdited [ narrow ])).data.passthru.breakbulkTest.sourceDir;
+      dir = runs.data.passthru.breakbulkTest.runDir;
+      editedDir = (runsOf (mkRepo notesEdited [ narrow ])).data.passthru.breakbulkTest.runDir;
       inputs = directInputs runs.data;
+      # What the run reads of its root: its "run" view, not the whole one.
+      specInputs = directInputs runs.data.passthru.spec;
       viewOf = d: builtins.unsafeDiscardStringContext (lib.head (lib.splitString "/app" d));
     in
     assert lib.assertMsg (
       !(lib.elem (builtins.unsafeDiscardStringContext "${fullView}") inputs)
     ) "run-files: the data test run names app's source view";
-    assert lib.assertMsg (lib.elem (viewOf dir) inputs)
+    assert lib.assertMsg (lib.elem (viewOf dir) specInputs)
       "run-files: the data test run does not name the narrowed view";
     assert lib.assertMsg (
       builtins.unsafeDiscardStringContext dir == builtins.unsafeDiscardStringContext editedDir

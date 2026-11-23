@@ -1531,22 +1531,18 @@ in
   # two roots. The `linked` stage links each file once.
   stages-linked-crate-types =
     let
-      unitOut = pkgs.runCommand "fake-unit" { } ''
-        mkdir $out; echo so > $out/libfoo.so; echo a > $out/libfoo.a
+      wrapper = pkgs.runCommand "fake-wrapper" { } ''
+        mkdir -p $out/root; echo so > $out/root/libfoo.so; echo a > $out/root/libfoo.a
       '';
-      root =
-        kind:
-        unitOut
-        // {
-          breakbulkRoot = {
-            package = "foo";
-            target = "foo";
-            inherit kind;
-            test = false;
-            unit = "c-1";
-            reason = null;
-          };
+      root = kind: {
+        breakbulkRoot = {
+          package = "foo";
+          target = "foo";
+          inherit kind;
+          test = false;
+          inherit wrapper;
         };
+      };
       linked =
         (breakbulk.products.mkProducts {
           inherit pkgs;
@@ -1569,7 +1565,7 @@ in
       touch $out
     '';
 
-  # A dynamic-mode product whose roots Cargo all skipped. Its
+  # A product whose roots Cargo all skipped. Its
   # `linked` holds only the no-binaries marker, and every stage and check
   # (packDwo, splitDebug, a stage and a check that would fail, a stage with
   # structured attributes, a stage and a check written as bare `derivation`
@@ -1598,9 +1594,6 @@ in
           target = name;
           kind = "bin";
           test = false;
-          unit = "c-${name}";
-          reason = null;
-          dynamic = true;
           wrapper = wrapper name notBuilt;
           requiredFeatures = [ "cli" ];
         };

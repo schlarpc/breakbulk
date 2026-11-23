@@ -97,6 +97,7 @@ let
     host.envCapture = smoke.capture;
     target.envCapture = smoke.capture;
     roots = predicted;
+    inherit (pkgs) coreutils;
     # No `--remap-path-scope`, as in unit-smoke's direct rendering, which
     # gives no unit a scope (host units would otherwise get one).
     capabilities =
@@ -315,14 +316,12 @@ let
           platform = "host";
         }
       ];
-    stubs =
-      inst.roots."smokeapp/bin/admin-cli".breakbulkRoot.reason
-      == "`admin-cli` was not built by Cargo in variant `dev`: required features `[cli]` not enabled"
-      &&
-        inst.roots."smokeapp/test/it".breakbulkRoot.reason
-        == "`it` was skipped: not built by Cargo in variant `dev`: Cargo did not select it"
-      && app.breakbulkRoot.unit == "c-a6654c0a89d81026"
-      && app.outPath == inst.units.c-a6654c0a89d81026.out.outPath;
+    # Each root is its wrapper's `root`, named after the plan
+    # (`outerName`, as in dynamic-derivation mode); what Cargo built is
+    # known at build time (`check`).
+    wrappers =
+      lib.hasSuffix "-breakbulk-units-smokeapp.bin.smokeapp" app.breakbulkRoot.wrapper
+      && builtins.getContext app.breakbulkRoot.wrapper != { };
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) assertions);
 in
@@ -356,6 +355,9 @@ in
         $out/bin/smokeapp | tee $out/log
         grep -qx 'smoke ok: hello-from-build 42 c=6' $out/log
         grep -q 'smoke_cfg' ${run.flags}/directives.json
+        [ "$(readlink ${app.breakbulkRoot.wrapper}/root)" = ${inst.units.c-a6654c0a89d81026.out} ]
         grep -qx '`it` was skipped: .*' ${inst.roots."smokeapp/test/it"}
+        grep -qx '`admin-cli` was not built by Cargo in variant `dev`: required features `\[cli\]` not enabled' \
+          ${inst.roots."smokeapp/bin/admin-cli".breakbulkRoot.wrapper}/not-built
       '';
 }

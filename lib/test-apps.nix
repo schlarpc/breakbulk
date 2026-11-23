@@ -24,6 +24,13 @@
 # derivation with `meta.mainProgram` anywhere (Nix's src/nix/app.cc).
 # repo.apps gives them in the app shape for `apps`.
 #
+# Everything it takes from the plan is read at run time from the test
+# root's wrapper (`breakbulk-root.json`): the app script depends on the
+# wrapper, so in dynamic-derivation mode it is resolved at build time, and
+# `nix run` substitutes the script's real path for its placeholder (Nix's
+# `resolveString`, src/nix/app.cc). A test binary Cargo did not build gets
+# an app that fails with the reason.
+#
 # The app runs the test binary (not the output of its run's stages) in
 # the package's directory with the same dynamic-library path, `rustc-env`
 # values, `CARGO_*` runtime variables, `env`, `path` and `wrapper` (of
@@ -41,6 +48,9 @@
 # runs no `preRun` entries, so it keeps the user's `HOME` and has no
 # `RUST_TEST_THREADS`, as `cargo test`.
 { lib, testRunsLib }:
+let
+  storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
+in
 {
   mkTestApps =
     {
@@ -52,40 +62,54 @@
     }:
     let
       t = testRuns;
+      jq = "${pkgs.jq}/bin/jq";
       app =
-        spec:
+        r:
         let
-          cfg = testRunsLib.runConfig packages spec.package "test" spec.binary;
-          dir =
-            if checkout == null then
-              spec.sourceDir
-            else if spec.packageDir == null then
-              throw "breakbulk: cannot place ${spec.package} in the checkout: its CARGO_MANIFEST_DIR is not a source view path"
-            else
-              "${lib.removeSuffix "/" (toString checkout)}${
-                lib.optionalString (spec.packageDir != "") "/${spec.packageDir}"
-              }";
-          vars = lib.optionalAttrs (checkout != null) {
-            CARGO_MANIFEST_DIR = dir;
-            CARGO_MANIFEST_PATH = "${dir}/Cargo.toml";
-          };
-          script = pkgs.writeShellScriptBin "${name}-${spec.name}" ''
+          b = r.breakbulkRoot;
+          p = t.platforms.${b.platform};
+          n = storeName "${b.package}-${testRunsLib.binaryKey b}";
+          cfg = testRunsLib.runConfig packages b.package "test" (testRunsLib.binaryKey b);
+          wrapper = testRunsLib.wrapperOf pkgs cfg;
+          checkoutDir = lib.removeSuffix "/" (toString checkout);
+          script = pkgs.writeShellScriptBin "${name}-${n}" ''
             set -euo pipefail
+            info=${b.wrapper}/breakbulk-root.json
+            reason=$(${jq} -r '.reason // ""' "$info")
+            if [ -n "$reason" ]; then
+              printf 'breakbulk: %s\n' "$reason" >&2
+              exit 1
+            fi
             ${testRunsLib.envScript {
-              inherit spec vars;
-              jq = "${pkgs.jq}/bin/jq";
+              inherit jq;
+              inherit (p) dylibPath;
+              extra = lib.optional (p.libDir != null) p.libDir;
             }}
+            ${
+              if checkout == null then
+                "dir=$CARGO_MANIFEST_DIR"
+              else
+                ''
+                  if [ "$(${jq} -r '.testSpec.packageDir == null' "$info")" = true ]; then
+                    echo "breakbulk: cannot place ${b.package} in the checkout: its CARGO_MANIFEST_DIR is not a source view path" >&2
+                    exit 1
+                  fi
+                  dir=${lib.escapeShellArg checkoutDir}
+                  __bb_rel=$(${jq} -r '.testSpec.packageDir' "$info")
+                  if [ -n "$__bb_rel" ]; then dir=$dir/$__bb_rel; fi
+                  export CARGO_MANIFEST_DIR=$dir CARGO_MANIFEST_PATH=$dir/Cargo.toml
+                ''
+            }
             ${testRunsLib.configScript pkgs cfg}
-            files=(${spec.unitOut}/*)
+            ${lib.optionalString (wrapper != null) (testRunsLib.sourceRootExport jq checkout)}
+            files=(${b.wrapper}/root/*)
             ${testRunsLib.appRunScript {
               inherit pkgs;
-              dir = lib.escapeShellArg dir;
+              dir = ''"$dir"'';
               command = ''${pkgs.coreutils}/bin/env "''${__bb_env[@]}" ${
                 testRunsLib.launchWords {
-                  inherit pkgs;
-                  inherit (spec) runner;
-                  wrapper = testRunsLib.wrapperOf pkgs cfg;
-                  sourceRoot = testRunsLib.sourceRootOf spec checkout;
+                  inherit pkgs wrapper;
+                  inherit (p) runner;
                 }
               } "''${files[0]}" "$@"'';
             }}
@@ -93,5 +117,5 @@
         in
         script;
     in
-    lib.mapAttrs (_: lib.mapAttrs (_: app)) t.specs;
+    lib.mapAttrs (_: lib.mapAttrs (_: app)) t.roots;
 }

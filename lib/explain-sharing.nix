@@ -235,11 +235,10 @@ let
   rb = resolvePlan b;
   pa = readPlanOf ra;
   pb = readPlanOf rb;
-  # In dynamic-derivation mode the unit derivations are not known at
-  # evaluation time; IFD mode's are the same derivations (except
-  # downstream of an embedded product), so they are read through it.
-  unitsOf =
-    r: if r.inst.delivery == "dynamic" then r.inst.ifdUnits.${r.kind} else r.inst.units.${r.kind};
+  # Through IFD mode in both modes: in dynamic-derivation mode the unit
+  # derivations are not known at evaluation time, and IFD mode's are the
+  # same derivations (except downstream of an embedded product).
+  unitsOf = r: r.inst.ifdUnits.${r.kind};
   ua = unitsOf ra;
   ub = unitsOf rb;
   ga = grouped pa package;

@@ -59,8 +59,8 @@ attributes:
 | `lockfile` | stages and checks | The workspace's `Cargo.lock`, a path. `wasmBindgen` reads the wasm-bindgen version from it. |
 | `rootFiles` | stages and checks | Each root's file name in `linked`, mapped to its kind: `bin`, `staticlib`, `cdylib` or `dylib`. `install` lays the files out by kind. |
 | `sourcesAllowedIn` | stages and checks | File name globs whose own references to sources `noSourceReferences` allows: each staticlib root's archive name in `linked`. |
-| `buildScriptFlags` | stages and checks | The `flags` outputs of the build-script runs of the product's target that its roots depend on ([below](#build-script-runs)). A list in IFD mode. In dynamic-derivation mode `{ rootInfo; }`: the roots' `breakbulk-root.json` files, which list the outputs at build time. |
-| `linkedDebug` | stages and checks | The `debug` output of `linked`: the link units' debuginfo side files (`.pdb`, `.dwp`, `.dwo`). Only when `linked` has a `debug` output, which it always has in dynamic-derivation mode. |
+| `buildScriptFlags` | stages and checks | The `flags` outputs of the build-script runs of the product's target that its roots depend on ([below](#build-script-runs)). In mkRepository's products `{ rootInfo; }`: the roots' `breakbulk-root.json` files, which list the outputs at build time. A product made with `mkProduct` directly may give a list of the outputs. |
+| `linkedDebug` | stages and checks | The `debug` output of `linked`: the link units' debuginfo side files (`.pdb`, `.dwp`, `.dwo`). Only when `linked` has a `debug` output, which mkRepository's products always have. |
 | `earlierDebug` | stages | The `debug` output of the last earlier stage that has one, or null. A stage that writes its own `debug` output starts from it (`packDwo`, `splitDebug` and `strip` do), so a later stage's has every debug file so far. |
 | `debugSplit` | stages | Whether an earlier stage has a `debug` output (`earlierDebug` is not null). |
 | `stageOrder` | checks | The stage names after `linked`, in order. |

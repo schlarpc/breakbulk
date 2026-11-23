@@ -464,12 +464,11 @@ null
 
 The packages whose libraries ` cargo test ` doc-tests, in
 place of those breakbulk predicts from the manifests: the
-way around a bug in that prediction, which fails
-dynamic-derivation mode’s test plans with “the plan has
-doctests of …”\. ` null ` keeps the prediction\. Packages the
-test plan does not select are left out, as predicted ones
-are\. IFD mode takes the doctests from the plan and ignores
-this list\.
+way around a bug in that prediction, which fails test
+plans with “the plan has doctests of …”\. ` null ` keeps the
+prediction\. Packages the test plan does not select are
+left out, as predicted ones are\. Both delivery modes use
+the list\.
 
 *Type:*
 null or (list of string)

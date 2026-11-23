@@ -258,12 +258,6 @@ EOF
     [ -L "$p" ] || continue
     name=${p#"$(real "$dyn")/products/"}
     a=$(follow "$(real "$(readlink "$p")")")
-    if [ ! -L "$(real "$ifd")/products/$name" ] && [ -e "$a/breakbulk-no-binaries" ]; then
-      # Cargo built none of its binaries; IFD mode has no
-      # product for it.
-      echo "$f: product $name holds only the no-binaries marker (dynamic mode)" >&2
-      continue
-    fi
     b=$(follow "$(real "$(readlink "$(real "$ifd")/products/$name")")")
     ha=$(nix hash path "$a")
     hb=$(nix hash path "$b")
@@ -282,18 +276,6 @@ EOF
       d=$(real "${!m}")/$what
       if [ -d "$d" ]; then (cd "$d" && find . -mindepth 1 | sort); fi >"$WORK/$f-$what.$m"
     done
-    # Dynamic mode's checks of a product Cargo built nothing
-    # of hold the no-binaries marker; IFD mode has none for it.
-    if [ "$what" = checks ]; then
-      while IFS= read -r c; do
-        t=$(real "$(readlink "$(real "$dyn")/checks/$c")")
-        if [ -e "$t/breakbulk-no-binaries" ]; then
-          echo "$f: check $c holds only the no-binaries marker (dynamic mode)" >&2
-          grep -vxF "./$c" "$WORK/$f-$what.dyn" >"$WORK/$f-$what.dyn.tmp" || true
-          mv "$WORK/$f-$what.dyn.tmp" "$WORK/$f-$what.dyn"
-        fi
-      done < <(comm -13 "$WORK/$f-$what.ifd" "$WORK/$f-$what.dyn" | sed 's|^\./||')
-    fi
     if diff -u "$WORK/$f-$what.ifd" "$WORK/$f-$what.dyn"; then
       echo "$f: $(grep -c . "$WORK/$f-$what.ifd") $what entries built in both modes" >&2
     else
@@ -349,11 +331,9 @@ EOF
     status=1
   fi
   # Test-run input closures (`closures/` in build.<fixture>): the same
-  # paths in both modes, but for dynamic mode's run specs (`runInfo` in
-  # lib/dynamic.nix) and the jq it reads them with (`tools`, listed by
-  # the closure listing). A path of the same name with other bytes differs;
-  # one with the same bytes (a copy dynamic mode makes from the wrapper)
-  # is the same.
+  # paths in both modes. A path of the same name with other bytes differs;
+  # one with the same bytes (a run spec, `runInfo` in lib/test-runs.nix,
+  # copied from a wrapper) is the same.
   if [ -d "$(real "$ifd")/closures" ] || [ -d "$(real "$dyn")/closures" ]; then
     if ! python3 - "$WORK/store" "$(real "$ifd")/closures" "$(real "$dyn")/closures" <<'EOF'; then
 import os, subprocess, sys
@@ -361,21 +341,19 @@ store, ifd, dyn = sys.argv[1:]
 def closures(top):
     # Each run's entry links a closure listing's output (an absolute
     # /nix/store path, inside the private store).
-    out, tools = {}, set()
+    out = {}
     for d, ds, fs in os.walk(top):
         for n in ds + fs:
             p = os.path.join(d, n)
             if os.path.islink(p):
                 listing = store + os.readlink(p)
                 out[os.path.relpath(p, top)] = open(os.path.join(listing, "closure")).read().split()
-                if os.path.exists(os.path.join(listing, "tools")):
-                    tools |= set(open(os.path.join(listing, "tools")).read().split())
-    return out, tools
+    return out
 def name(p):
     return p.rsplit("/", 1)[-1].split("-", 1)[1]
 def nar(p):
     return subprocess.run(["nix", "hash", "path", store + p], check=True, capture_output=True, text=True).stdout.strip()
-(a, _), (b, tools) = closures(ifd), closures(dyn)
+a, b = closures(ifd), closures(dyn)
 bad = []
 if not a or set(a) != set(b):
     bad.append(f"  runs: IFD {sorted(a)}, dynamic {sorted(b)}")
@@ -386,8 +364,6 @@ for k in sorted(set(a) & set(b)):
     for n in sorted(set(nx) | set(ny)):
         p, q = nx.get(n), ny.get(n)
         if p and q and nar(p) == nar(q):
-            continue
-        if p is None and (n.endswith("-test-spec") or q in tools):
             continue
         bad.append(f"  {k}: IFD {p}, dynamic {q}")
 print(f"{len(a)} test-run closures: {'the same' if not bad else 'DIFFERENT'} in both modes", file=sys.stderr)

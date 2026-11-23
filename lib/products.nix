@@ -30,8 +30,7 @@
 #                                  debuginfo side files of the link units)
 #   products.<pkg>.checks.<name>   checks (`noSourceReferences` by default,
 #                                  `buildScriptFiles` on every product)
-#   products.<pkg>.roots."<kind>/<target>"   the raw roots (units or stubs)
-#   products.<pkg>.unbuilt         roots Cargo did not build, with reasons
+#   products.<pkg>.roots."<kind>/<target>"   the raw roots
 #
 # The stage set of a product is, merged in this order (later wins per
 # attribute; `null` removes a stage): the target's stage set
@@ -50,17 +49,15 @@
 # name (rustc's `-C extra-filename` hash removed, the extension kept); a
 # cdylib or dylib under rustc's name, which has no hash. `install` lays
 # them out by root kind (`rootFiles`): bin/, lib/, or the traits'
-# `sharedLibraryDir`. A package whose roots were all
-# skipped (required features) is the first root's stub, which fails with
-# the reason.
+# `sharedLibraryDir`.
 #
-# In dynamic-derivation mode whether Cargo built a root is known only at
-# build time, from its wrapper (`not-built`, lib/dynamic.nix): `linked`
-# leaves such roots out then. When it is left with none, it holds only
-# the no-binaries marker (`stages.noBinariesMarker`, with the reasons),
-# and every stage and check passes the marker on without running, so the
-# product and its checks build in repo.checks
-# whether or not Cargo built anything. `.unbuilt` is empty.
+# Whether Cargo built a root (required features) is known only at build
+# time, from its wrapper (`not-built`, instantiate.nix `rootShape`):
+# `linked` leaves such roots out. When it is left with none, it holds
+# only the no-binaries marker (`stages.noBinariesMarker`, with the
+# reasons), and every stage and check passes the marker on without
+# running, so the product and its checks build in repo.checks whether or
+# not Cargo built anything.
 {
   lib,
   stages,
@@ -94,30 +91,20 @@ let
 
   rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
 
-  # A root's debuginfo side files: its unit's
-  # `debug` output, and those of the libraries below it (`.dwo` files with
-  # split-debuginfo = "unpacked"), as paths that may not exist: in
-  # dynamic-derivation mode the wrapper's `debug` directory links them all.
-  debugOf =
-    r:
-    if r.breakbulkRoot.dynamic or false then
-      [ "${r.breakbulkRoot.wrapper}/debug" ]
-    else
-      lib.optional (r ? debug) "${r.debug}" ++ map toString (r.breakbulkRoot.debugBelow or [ ]);
-
-  isDynamic = r: r.breakbulkRoot.dynamic or false;
+  # A root's debuginfo side files: its unit's `debug` output, and those of
+  # the libraries below it (`.dwo` files with split-debuginfo =
+  # "unpacked"), which the wrapper's `debug` directory links, when there
+  # are any.
+  debugOf = r: "${r.breakbulkRoot.wrapper}/debug";
 
   # The `linked` stage of one package: a directory of symlinks (`out`), and
   # the root units' debuginfo side files (`debug`) under the names Cargo
   # uplifts them to: a bin's `.dwp` and Apple `.dSYM` renamed as the bin
   # is (`<bin>.dwp`, `<bin>.dSYM`),
   # `.pdb` and `.dwo` under rustc's names, which the binaries record, with
-  # the `.dwo` files of the libraries below each root.
-  # Dynamic-derivation roots are read through their wrappers and left out
-  # when not built. `debug` is declared only when a root can have side
-  # files: a root unit or a library below it with a `debug`
-  # output, or any dynamic-derivation root (its unit's outputs are not
-  # known at evaluation).
+  # the `.dwo` files of the libraries below each root. Roots are read
+  # through their wrappers and left out when not built; which have side
+  # files is known at build time only.
   mkLinked =
     pkgs: traits: pkg: built:
     let
@@ -132,18 +119,17 @@ let
       packedSuffixes = map (a: lib.escapeShellArg a.suffix) (
         lib.filter (a: a.when == "split-packed" && !(a.perObject or false)) traits.debugArtifacts
       );
-      # Only dynamic-derivation roots need the build-time bookkeeping; IFD
-      # mode's script stays as it was.
-      anyDyn = lib.any isDynamic built;
-      hasDebug = lib.any (r: debugOf r != [ ]) built;
     in
     pkgs.runCommand "${pkg}-linked"
       {
-        outputs = [ "out" ] ++ lib.optional hasDebug "debug";
+        outputs = [
+          "out"
+          "debug"
+        ];
       }
       (
         ''
-          mkdir -p $out ${lib.optionalString hasDebug "$debug"}
+          mkdir -p $out $debug
           link() {
             # A library with two linkable crate types (cdylib and staticlib)
             # is one unit and several roots: each root names every file.
@@ -158,7 +144,7 @@ let
             ln -s "$1" "$dir/$2"
           }
         ''
-        + lib.optionalString anyDyn ''
+        + ''
           linked=0
           skipped=()
         ''
@@ -168,20 +154,14 @@ let
             dbg = debugOf r;
             bin = r.breakbulkRoot.kind == "bin";
             target = lib.escapeShellArg r.breakbulkRoot.target;
-            dyn = isDynamic r;
-            w = r.breakbulkRoot.wrapper or null;
-            src = if dyn then "${w}/root" else "${r}";
+            w = r.breakbulkRoot.wrapper;
           in
-          lib.optionalString dyn ''
+          ''
             if [ -e ${w}/not-built ]; then
               skipped+=("$(<${w}/not-built)")
             else
-          ''
-          + lib.optionalString dyn ''
             linked=$((linked + 1))
-          ''
-          + ''
-            for f in ${src}/*; do
+            for f in ${w}/root/*; do
               b=''${f##*/}
               case "$b" in
                 ${staticPrefix}${target}-*${staticSuffix}) link "$f" ${staticPrefix}${target}${staticSuffix} ;;
@@ -189,7 +169,7 @@ let
               esac
             done
           ''
-          + concatMapStrings (dbg: ''
+          + ''
             if [ -d ${dbg} ]; then
               for f in ${dbg}/*; do
                 [ -e "$f" ] || continue
@@ -204,12 +184,10 @@ let
                 esac
               done
             fi
-          '') dbg
-          + lib.optionalString dyn ''
             fi
           ''
         ) built
-        + lib.optionalString anyDyn ''
+        + ''
           for s in "''${skipped[@]}"; do
             printf 'breakbulk: left out of ${pkg}: %s\n' "$s" >&2
           done
@@ -406,29 +384,20 @@ let
       product =
         pkg: rs:
         let
-          built = filter (r: r.breakbulkRoot.unit != null) rs;
+          built = rs;
           # The `flags` outputs of the target-platform runs the product's
           # roots depend on, whose `directives.json` names the files their
           # scripts placed next to the binaries (`targetDirs`, #23), for the
-          # `buildScriptFiles` stage and check: a list in IFD mode (each
-          # root's `buildScriptRuns` from units.json); in dynamic-derivation
-          # mode `{ rootInfo; }`, the roots' `breakbulk-root.json` files,
-          # which list them (`buildScriptFlags`) at build time.
-          dynamicRoots = filter (r: r.breakbulkRoot.dynamic or false) built;
-          buildScriptFlags =
-            if dynamicRoots != [ ] then
-              { rootInfo = map (r: "${r.breakbulkRoot.wrapper}/breakbulk-root.json") dynamicRoots; }
-            else
-              lib.unique (
-                lib.concatMap (
-                  r: map (id: inst.units.build.${id}.flags) (r.breakbulkRoot.buildScriptRuns or [ ])
-                ) built
-              );
-          unbuilt = filter (r: r.breakbulkRoot.unit == null) rs;
+          # `buildScriptFiles` stage and check: `{ rootInfo; }`, the roots'
+          # `breakbulk-root.json` files, which list them
+          # (`buildScriptFlags`) at build time.
+          buildScriptFlags = {
+            rootInfo = map (r: "${r.breakbulkRoot.wrapper}/breakbulk-root.json") built;
+          };
           # Each root's file in `linked`, by name, to its root kind, for
-          # `install` (and the same names in dynamic-derivation mode, whose
-          # predicted roots carry the kind and target). mkLinked fails when
-          # two roots produce one name, so the map is unambiguous.
+          # `install`, from the predicted roots' kind and target. mkLinked
+          # fails when two roots produce one name, so the map is
+          # unambiguous.
           rootFiles = lib.listToAttrs (
             lib.concatMap (
               r:
@@ -495,15 +464,8 @@ let
                 inherit rootFiles;
               };
           };
-          extra = {
-            inherit roots;
-            unbuilt = map (r: {
-              root = rootName r;
-              inherit (r.breakbulkRoot) reason;
-            }) unbuilt;
-          };
         in
-        (if built == [ ] then head rs else p) // extra;
+        p // { inherit roots; };
     in
     mapAttrs product selected;
 in

@@ -39,7 +39,7 @@
 #                             settings (`doctestConfig`)
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
 #                             every enabled run and doctest
-#   t.specs.<pkg>.<binary>    what a run needs (lib/test-apps.nix uses it)
+#   t.roots.<pkg>.<binary>    the test roots (lib/test-apps.nix uses them)
 #   t.platforms               how each platform's tests run (`testPlatforms`)
 #
 # Binary names within a package: an integration test by its name (`it`);
@@ -104,10 +104,12 @@
 #
 # What each run needs from the plan (env, `[env]` values, the runs for the
 # dynamic-library path and `rustc-env`, nextest's metadata) comes from
-# breakbulk-instantiate, through `units.json` (`runSpec`).
+# breakbulk-instantiate, through the root wrapper's `breakbulk-root.json`
+# (`TestSpec` in crates/breakbulk-instantiate/src/test_spec.rs), read at
+# build time in both delivery modes.
 #
-# Test binaries the plan lacks (required features) are instantiation's
-# stubs, which succeed and log why.
+# A test binary Cargo did not build (required features) is known at
+# build time only: its run succeeds and logs why.
 {
   lib,
   stages,
@@ -221,103 +223,6 @@ rec {
         done
       '';
 
-  # What one test binary needs to run, shared by test runs and test apps:
-  # the root's test spec as breakbulk-instantiate computes it for both
-  # delivery modes (`test_spec` in crates/breakbulk-instantiate/src/
-  # dynamic.rs; dynamic mode reads the same from breakbulk-root.json), and
-  # what only this side knows: its platform's runner, sysroot library
-  # directory and dylib variable.
-  runSpec =
-    {
-      units,
-      # The root's platform, as testPlatforms gives it.
-      platform,
-      root,
-    }:
-    let
-      t =
-        root.testSpec
-          or (throw "breakbulk: units.json has no test spec for ${root.package} ${root.target}");
-    in
-    {
-      package = root.package;
-      binary = binaryKey root;
-      name = storeName "${root.package}-${binaryKey root}";
-      # The unit's output: a directory holding the one binary.
-      unitOut = units.${root.unit}.out;
-      inherit (t) env configEnv envFlags;
-      # The package directory, relative to the repository root.
-      inherit (t) packageDir;
-      # Its test-only paths, relative to the repository root (`hintScript`).
-      testOnly = t.testOnly or [ ];
-      junk = t.junk or [ ];
-      custom = t.custom or false;
-      sourceDir =
-        t.env.CARGO_MANIFEST_DIR
-          or (throw "breakbulk: the test unit ${root.unit} has no CARGO_MANIFEST_DIR");
-      inherit (platform) runner;
-      dylib = {
-        flags = t.dylibFlags;
-        extra = lib.optional (platform.libDir != null) platform.libDir;
-        path = platform.dylibPath;
-      };
-    };
-
-  # A spec's dynamic-library variable ({ var; sep; } or null).
-  specDylib = spec: spec.dylib.path;
-
-  # Shell lines that set up a test process's environment from a spec, for
-  # bash. `jq` is the jq executable; `vars` replaces values of `spec.env`.
-  envScript =
-    {
-      spec,
-      jq,
-      vars ? { },
-    }:
-    let
-      dylibs = lib.concatMapStringsSep " " (
-        f: lib.escapeShellArg "${f}/directives.json"
-      ) spec.dylib.flags;
-      env = spec.env // vars;
-      d = specDylib spec;
-    in
-    ''
-      __bb_env=()
-    ''
-    + lib.optionalString (d != null) ''
-      __bb_dylib=${
-        if spec.dylib.flags == [ ] then
-          "''"
-        else
-          "$(${jq} -rn ${lib.escapeShellArg (dylibJqWith d.sep)} ${dylibs})"
-      }
-      ${
-        # Empty when off, so test runs without stable inputs are unchanged.
-        lib.optionalString (spec.dylib.stable or null != null) ''
-          for __bb_p in ${spec.dylib.stable}/dylib/*; do
-            __bb_dylib=''${__bb_dylib:+$__bb_dylib${d.sep}}$__bb_p
-          done
-        ''
-      }${exportDylib d spec.dylib.extra}unset __bb_dylib __bb_p
-    ''
-    + lib.concatStrings (
-      lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") (spec.configEnv or { })
-    )
-    + lib.concatMapStrings (f: ''
-      eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' ${lib.escapeShellArg "${f}/directives.json"})"
-    '') spec.envFlags
-    + lib.concatStrings (lib.mapAttrsToList exportOrEnv env);
-
-  # `export` for a name the shell takes, else an entry of `__bb_env`, which
-  # the run passes through `env`: Cargo's `CARGO_BIN_EXE_<bin>` keeps the
-  # bin's name, hyphens included.
-  exportOrEnv =
-    k: v:
-    if builtins.match "[A-Za-z_][A-Za-z0-9_]*" k != null then
-      "export ${k}=${lib.escapeShellArg v}\n"
-    else
-      "__bb_env+=(${lib.escapeShellArg "${k}=${v}"})\n";
-
   # `copyDylibsScript sep`: shell lines (bash, `jq` on PATH) that copy
   # the dynamic-library path of the `directives.json` files in the array
   # `__bb_flags` into `$dylibs/dylib/<NNNN>/` (default `$out`).
@@ -342,58 +247,6 @@ rec {
   # The `rustc-env` values of several `directives.json` files (`jq -s`), in
   # order, as one.
   mergeRustcEnvJq = "{env: (map(.env) | add)}";
-
-  # Stable inputs for content-addressed test runs. A run spec
-  # names the `flags` of the build-script runs of its platform in its
-  # closure (the dynamic-library path) and the `flags` of its
-  # package's build script (`rustc-env`). Those are input-addressed, so an
-  # edit to a package with a build script below the test gives them new
-  # paths and re-runs the test, even when nothing they hold changed. This returns
-  # the spec with both replaced by small content-addressed copies:
-  #
-  #   - `<name>-test-dylibs`: `dylib/<NNNN>/` per dynamic-library path entry,
-  #     in order, holding the entry's files (not its subdirectories, which
-  #     the dynamic loader never searches), symlinks resolved;
-  #     `spec.dylib.stable` (envScript puts each on the path);
-  #   - `<name>-<package>-rustc-env`: `directives.json` with only the
-  #     `rustc-env` values, in order (`spec.envFlags`).
-  #
-  # Identical contents give identical paths, so the test run (also
-  # content-addressed) is not re-run. Only used when `ca` is on.
-  # Dynamic-derivation mode makes the same copies at build time
-  # (lib/dynamic.nix `runInfo`).
-  stableSpec =
-    {
-      pkgs,
-      spec,
-      caAttrs,
-      name,
-    }:
-    let
-      dylibs = pkgs.runCommand "${name}-test-dylibs" (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; }) ''
-        __bb_flags=(${
-          lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.dylib.flags
-        })
-        ${copyDylibsScript (specDylib spec).sep}
-      '';
-      env =
-        pkgs.runCommand "${name}-${storeName spec.package}-rustc-env"
-          (caAttrs // { nativeBuildInputs = [ pkgs.jq ]; })
-          ''
-            mkdir -p $out
-            jq -s ${lib.escapeShellArg mergeRustcEnvJq} ${
-              lib.concatMapStringsSep " " (f: lib.escapeShellArg "${f}/directives.json") spec.envFlags
-            } > $out/directives.json
-          '';
-    in
-    spec
-    // {
-      dylib = spec.dylib // {
-        flags = [ ];
-        stable = if spec.dylib.flags == [ ] || specDylib spec == null then null else dylibs;
-      };
-      envFlags = lib.optional (spec.envFlags != [ ]) env;
-    };
 
   # A copy of a test binary, from `src` (a shell glob matching the one
   # file), content-addressed when `caAttrs` says so. `prelude` runs
@@ -455,20 +308,6 @@ rec {
         };
       };
 
-  # A spec whose working directory and runtime CARGO_MANIFEST_DIR are
-  # `dir`, the package directory of the package's "run" view
-  # (lib/workspace.nix `runDirs`), as `test.runFiles` narrows it.
-  narrowSpec =
-    dir: spec:
-    spec
-    // {
-      sourceDir = dir;
-      env = spec.env // {
-        CARGO_MANIFEST_DIR = dir;
-        CARGO_MANIFEST_PATH = "${dir}/Cargo.toml";
-      };
-    };
-
   # Packages' settings with every function value of their runs' `env`
   # applied to the facts of the runs that read them, `facts.<package>`
   # (`{ workspaceRoot }`). Each kind of run has its own facts: a test run
@@ -519,41 +358,6 @@ rec {
       p = root + "/${util.joinRel wsDir ".config/nextest.toml"}";
     in
     if builtins.pathExists p then p else null;
-
-  # What nextest's reuse-build mode reads for one test binary: the
-  # metadata breakbulk-instantiate synthesizes (`nextest_for` in
-  # crates/breakbulk-instantiate/src/dynamic.rs, which says why each field
-  # is what it is), with the sysroot library directory of the binary's
-  # platform (`"@LIBDIR@"`, `nextestLibdir`) filled in here. With a
-  # "run" view (`spec` narrowed), the tested package's manifest is in
-  # the narrowed view, as in dynamic mode. `@BINARY@`, `@TARGET@` and
-  # `@WS@` are filled in by the test run.
-  nextestSpec =
-    {
-      root,
-      spec,
-      # testPlatforms' `libDir` of the binary's platform.
-      libDir ? null,
-    }:
-    let
-      n = root.testSpec.nextest;
-      orig = root.testSpec.env.CARGO_MANIFEST_DIR;
-      libdir = nextestLibdir libDir;
-    in
-    {
-      inherit (n) binaryId;
-      cargoMetadata =
-        if spec.sourceDir == orig then
-          n.cargoMetadata
-        # The tested package's manifest is the only path of the whole view
-        # in it, so without it the view leaves the context too, which
-        # replaceStrings alone would keep.
-        else
-          replaceStrings [ (toJSON "${orig}/Cargo.toml") ] [ (toJSON "${spec.sourceDir}/Cargo.toml") ] (
-            builtins.unsafeDiscardStringContext n.cargoMetadata
-          );
-      binaries = replaceStrings [ "\"@LIBDIR@\"" ] [ (toJSON libdir) ] n.binaries;
-    };
 
   # nextest's `libdir` entry for a sysroot library directory (or null),
   # which the run's dynamic-library path already ends with; without it
@@ -656,23 +460,10 @@ rec {
         runner != [ ]
       ) "export ${var}=${lib.escapeShellArg (lib.concatStringsSep " " runner)}";
 
-  # The root of a run's source view, as a shell word, or null when its
-  # package directory is not inside one: the root of `checkout` (a string,
-  # or null for the spec's own view).
-  sourceRootOf =
-    spec: checkout:
-    if spec.packageDir == null then
-      null
-    else if checkout != null then
-      lib.escapeShellArg (lib.removeSuffix "/" (toString checkout))
-    else if spec.packageDir == "" then
-      lib.escapeShellArg spec.sourceDir
-    else
-      lib.escapeShellArg (lib.removeSuffix "/${spec.packageDir}" spec.sourceDir);
-
-  # The same for dynamic mode: shell lines that export
-  # BREAKBULK_SOURCE_ROOT from `breakbulk-root.json` (`$info`; `jq`, the
-  # jq executable), when known; `checkout` as in sourceRootOf.
+  # Shell lines that export BREAKBULK_SOURCE_ROOT, the root of a run's
+  # source view, from `breakbulk-root.json` (`$info`; `jq`, the jq
+  # executable), when its package directory is inside one: the root of
+  # `checkout` (a string), or with null of the root's own view.
   sourceRootExport =
     jq: checkout:
     let
@@ -740,20 +531,6 @@ rec {
       ''
         ${tools.breakbulk-hints} ${spec} "$log" || true
       '';
-
-  # The JSON `hintScript` takes, for a run spec.
-  hintSpec =
-    spec: cfg:
-    lib.escapeShellArg (toJSON {
-      inherit (spec)
-        package
-        packageDir
-        testOnly
-        junk
-        custom
-        ;
-      widen = hintWiden cfg;
-    });
 
   # What runs after a passing run, in order: breakbulk's own (coverage),
   # then the run's `postRun` (its layers' snippets, concatenated).
@@ -1025,6 +802,143 @@ rec {
   # Whether a package's doctest run is in the check set (its `enable`).
   doctestEnabled = packages: pkg: (runConfig packages pkg "doctest" null).enable;
 
+  # What a run reads from its wrapper, copied out of it, so that the run
+  # does not depend on the wrapper: the wrapper's closure holds the
+  # package's whole source view (its breakbulk-root.json names it) and
+  # the unit's debuginfo (`debug`), which a run does not need. `out`
+  # holds `breakbulk-root.json` with `reason` and `testSpec` only, its
+  # package directory narrowed to the "run" view (`narrowDir`), and
+  # without nextest's metadata for a libtest run (it names the package
+  # view).
+  #
+  # With `stable` (with `ca`, and content-addressed: `caAttrs`) it also
+  # stands in for the input-addressed paths the spec names: the `flags`
+  # of the runs below
+  # the test (the dynamic-library path) and of its package's build
+  # script (`rustc-env`) get new paths with every edit to a package
+  # with a build script below the test, even when nothing they hold
+  # changed. So the `flags` lists are empty, `rustc-env/directives.json`
+  # holds the `rustc-env` values, and `dylibs` the dynamic-library
+  # path's copies (`dylib/<NNNN>/` per entry, in order, holding the
+  # entry's files, not its subdirectories, which the dynamic loader
+  # never searches). The name is not per binary, so test binaries
+  # whose copies have the same contents share its path, and the copies
+  # are stored once.
+  #
+  # Without it, the `flags` stay, and with `linkRoot` `root` links the
+  # test binary (the unit's output), for a run that takes no copy of it.
+  runInfo =
+    {
+      pkgs,
+      name,
+      wrapper,
+      # The platform's dylibPathOf result.
+      dylibPath,
+      caAttrs ? { },
+      stable ? false,
+      narrowDir ? null,
+      keepNextest ? false,
+      linkRoot ? false,
+    }:
+    pkgs.runCommand name
+      (
+        caAttrs
+        // {
+          inherit wrapper;
+          outputs = [ "out" ] ++ lib.optional stable "dylibs";
+          nativeBuildInputs = [ pkgs.jq ];
+          narrowDir = if narrowDir == null then "" else narrowDir;
+          inherit keepNextest stable;
+        }
+      )
+      ''
+        info=$wrapper/breakbulk-root.json
+        mkdir -p $out ${lib.optionalString stable "$dylibs"}
+        if [ -n "$(jq -r '.reason // ""' "$info")" ]; then
+          jq '{reason}' "$info" > $out/breakbulk-root.json
+          exit 0
+        fi
+        ${
+          if stable then
+            ''
+              ${lib.optionalString (dylibPath != null) ''
+                mapfile -t __bb_flags < <(jq -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
+                ${copyDylibsScript dylibPath.sep}
+              ''}
+              mapfile -t envFlags < <(jq -r '.testSpec.envFlags[] | . + "/directives.json"' "$info")
+              if [ ''${#envFlags[@]} -gt 0 ]; then
+                mkdir -p $out/rustc-env
+                jq -s ${lib.escapeShellArg mergeRustcEnvJq} "''${envFlags[@]}" > $out/rustc-env/directives.json
+              fi
+            ''
+          else
+            lib.optionalString linkRoot ''
+              ln -s "$(readlink "$wrapper/root")" $out/root
+            ''
+        }
+        jq --arg dir "$narrowDir" --arg nextest "$keepNextest" --arg stable "$stable" '
+          .testSpec
+          | if $stable == "1" then .dylibFlags = [] | .envFlags = [] else . end
+          | (.env.CARGO_MANIFEST_DIR + "/Cargo.toml") as $orig
+          | if $dir == "" then . else
+              .env.CARGO_MANIFEST_DIR = $dir
+              | .env.CARGO_MANIFEST_PATH = ($dir + "/Cargo.toml")
+              | .nextest.cargoMetadata.packages |= map(
+                  if .manifest_path == $orig then .manifest_path = ($dir + "/Cargo.toml") else . end)
+            end
+          | if $nextest == "1" then . else del(.nextest) end
+          | {reason: null, testSpec: .}
+        ' "$info" > $out/breakbulk-root.json
+      '';
+
+  # Shell lines (bash) that set up a test process's environment from a
+  # test root's `breakbulk-root.json` at `$info`: the dynamic-library path
+  # (then `extra`),
+  # the project's `[env]`, the build script's `rustc-env`, then the runtime
+  # `CARGO_*` variables (names the shell cannot export go to `__bb_env`,
+  # for `env`).
+  envScript =
+    {
+      jq,
+      extra,
+      # dylibPathOf's result for the target.
+      dylibPath ? {
+        var = "LD_LIBRARY_PATH";
+        sep = ":";
+      },
+      # Whether `$info` is a stable copy's (`runInfo` with `ca`, in mkTestRuns),
+      # with the dynamic-library path in `$specDylibs/dylib/*` and the
+      # `rustc-env` values in `$spec/rustc-env`.
+      stable ? false,
+    }:
+    lib.optionalString (dylibPath != null) ''
+      mapfile -t __bb_flags < <(${jq} -r '.testSpec.dylibFlags[] | . + "/directives.json"' "$info")
+      __bb_dylib=
+      if [ ''${#__bb_flags[@]} -gt 0 ]; then
+        __bb_dylib=$(${jq} -rn ${lib.escapeShellArg (dylibJqWith dylibPath.sep)} "''${__bb_flags[@]}")
+      fi
+      ${lib.optionalString stable ''
+        for __bb_p in "$specDylibs"/dylib/*; do
+          [ -d "$__bb_p" ] || continue
+          __bb_dylib=''${__bb_dylib:+$__bb_dylib${dylibPath.sep}}$__bb_p
+        done
+      ''}${exportDylib dylibPath extra}unset __bb_dylib __bb_p __bb_flags
+    ''
+    + ''
+      eval "$(${jq} -r '.testSpec.configEnv // {} | to_entries[] | "export \(.key)=\(.value | @sh)"' "$info")"
+      for __bb_f in $(${jq} -r '.testSpec.envFlags[]' "$info"); do
+        eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$__bb_f/directives.json")"
+      done
+      unset __bb_f
+      ${lib.optionalString stable ''
+        if [ -e "$spec/rustc-env/directives.json" ]; then
+          eval "$(${jq} -r '.env[] | "export \(.[0])=\(.[1] | @sh)"' "$spec/rustc-env/directives.json")"
+        fi
+      ''}
+      __bb_env=()
+      eval "$(${jq} -r '.testSpec.env | to_entries[] | if (.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) then "export \(.key)=\(.value | @sh)" else "__bb_env+=(\("\(.key)=\(.value)" | @sh))" end' "$info")"
+    '';
+
   mkTestRuns =
     {
       pkgs,
@@ -1033,8 +947,12 @@ rec {
       target,
       runner ? null,
       testSystem ? null,
-      traits ? targetTraits.resolve { triple = target; },
-      dylibPath ? dylibPathOf { inherit traits runner; },
+      traits ? null,
+      # dylibPathOf's result (default: from the traits and runner).
+      dylibPath ? dylibPathOf {
+        traits = if traits != null then traits else targetTraits.resolve { triple = target; };
+        inherit runner;
+      },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
       # The target's package set, or null (testPlatforms).
       packageSet ? if target == targetTraits.nativeTriple pkgs then pkgs else null,
@@ -1048,9 +966,6 @@ rec {
           ;
       },
       packages ? { },
-      # The test settings for doctests, when their env differs
-      # (resolveTestEnv: a doctest reads the test view, not the "run" view).
-      doctestPackages ? packages,
       # runDirs.<package> = the package directory of its "run" view, or
       # null for the test binary's own view (lib/workspace.nix).
       runDirs ? { },
@@ -1058,16 +973,19 @@ rec {
       # for a bench plan's binaries.
       kind ? "test",
       ca ? featureGates.defaultCa,
-      nixFeatures ? featureGates.standalone { inherit ca; },
+      nixFeatures ? featureGates.standalone {
+        inherit ca;
+      },
       coverage ? false,
       name ? "breakbulk",
     }:
     let
-      inherit (inst) units;
       useCa = ca;
       caAttrs = lib.optionalAttrs useCa (
         featureGates.caAttrs nixFeatures "the test runs of `${name}` (`ca`)"
       );
+      # The predicted platform picks the run's system, so it must be known
+      # at evaluation time; instantiation checks it against the plan.
       platforms = testPlatforms {
         inherit pkgs tools host;
         target = {
@@ -1078,12 +996,12 @@ rec {
             dylibPath
             testPkgs
             packageSet
-            traits
             ;
-        };
+        }
+        // lib.optionalAttrs (traits != null) { inherit traits; };
       };
       platformOf = r: platforms.${r.breakbulkRoot.platform};
-
+      jqOf = p: "${p.testPkgs.jq}/bin/jq";
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
 
@@ -1103,204 +1021,225 @@ rec {
       ) byPackage;
       configOf = r: configs.${r.breakbulkRoot.package}.${binaryKey r.breakbulkRoot};
 
-      spec =
-        r:
-        runSpec {
-          inherit units;
-          platform = platformOf r;
-          root = r.breakbulkRoot;
+      # Whether a run executes something other than the binary its spec
+      # links: the output of its stages, or a content-addressed copy
+      # (runBinary).
+      copiesBinary = cfg: useCa || lib.any (v: v != null) (lib.attrValues cfg.stages);
+
+      # The binary, copied out of its wrapper; for a binary Cargo did not
+      # build, the marker that makes the stages skip
+      # (stages.noBinariesMarker; the run itself skips before it reads the
+      # binary).
+      copyOf =
+        r: n:
+        binaryCopy {
+          inherit pkgs caAttrs;
+          name = n;
+          src = "\"$wrapper\"/root/*";
+          attrs = { inherit (r.breakbulkRoot) wrapper; };
+          prelude = ''
+            reason=$(${pkgs.jq}/bin/jq -r '.reason // ""' "$wrapper/breakbulk-root.json")
+            if [ -n "$reason" ]; then
+              mkdir -p $out
+              printf '%s\n' "$reason" > $out/${stages.noBinariesMarker}
+              exit 0
+            fi
+          '';
         };
 
+      runDir = pkg: runDirs.${pkg} or null;
+
+      runInfoOf =
+        r: cfg:
+        runInfo {
+          inherit pkgs caAttrs;
+          inherit (r.breakbulkRoot) wrapper;
+          name = "${name}-test-spec";
+          stable = useCa;
+          dylibPath = (platformOf r).dylibPath;
+          narrowDir = runDir r.breakbulkRoot.package;
+          keepNextest = cfg.runner == "nextest";
+          linkRoot = !copiesBinary cfg;
+        };
+
+      # What both runners share: the skip check, the environment, the run's
+      # env, PATH and `preRun` entries.
+      prelude = p: cfg: ''
+        info=$spec/breakbulk-root.json
+        reason=$(${jqOf p} -r '.reason // ""' "$info")
+        if [ -n "$reason" ]; then
+          # As the test stub: the reason, in a file.
+          printf 'skipped: %s\n' "$reason"
+          printf '%s\n' "$reason" > $out
+          exit 0
+        fi
+        ${envScript {
+          jq = jqOf p;
+          inherit (p) dylibPath;
+          extra = lib.optional (p.libDir != null) p.libDir;
+          stable = useCa;
+        }}
+        ${configScript p.testPkgs cfg}
+        ${preRunScript cfg coverage}
+        log=${logFile}
+      '';
+
       # A test run through nextest's reuse-build mode: nextest reads the
-      # synthesized metadata (`nextestSpec`) and runs the one binary with
-      # the project's nextest configuration (retries, timeouts, default
-      # filter, test groups). libtest arguments go after `--`, which
-      # nextest emulates (`--skip`, `--exact`, `--include-ignored`, …).
-      nextestRun =
-        r: s: cfg: bin:
+      # metadata from the wrapper (TestSpec's `nextest`, with `"@LIBDIR@"`
+      # the sysroot library directory of the binary's platform) and runs
+      # the one binary with the project's nextest configuration (retries,
+      # timeouts, default filter, test groups). libtest arguments go after
+      # `--`, which nextest emulates (`--skip`, `--exact`,
+      # `--include-ignored`, …).
+      nextestScript =
+        p: b: cfg: bin:
         let
-          p = platformOf r;
-          nx = nextestSpec {
-            inherit (p) libDir;
-            spec = s;
-            root = r.breakbulkRoot;
-          };
+          jq = jqOf p;
           nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
+          libdir = toJSON (nextestLibdir p.libDir);
+          wrapper = wrapperOf p.testPkgs cfg;
         in
-        p.testPkgs.runCommand "${name}-${s.name}-run"
-          (
-            {
-              passthru = {
-                breakbulkTest = s // {
-                  inherit (cfg) args;
-                  inherit (nx) binaryId;
-                };
-                binary = bin;
-              };
-              nextestCargoMetadata = nx.cargoMetadata;
-              nextestBinaries = nx.binaries;
-              passAsFile = [
-                "nextestCargoMetadata"
-                "nextestBinaries"
-              ];
-            }
-            // caAttrs
-          )
-          ''
-            ${envScript {
-              spec = s;
-              jq = "${p.testPkgs.jq}/bin/jq";
-            }}
-            ${configScript p.testPkgs cfg}
-            ${preRunScript cfg coverage}
-            ${nextestRunnerScript {
+        ''
+          ${lib.optionalString (wrapper != null) (sourceRootExport jq null)}
+          ${nextestRunnerScript {
+            pkgs = p.testPkgs;
+            inherit (p) triple runner;
+            inherit wrapper;
+          }}
+          ws=$TMPDIR/nextest-ws
+          mkdir -p $out $ws/target
+          touch $ws/Cargo.toml
+          files=(${bin})
+          ${workdirScript p.testPkgs}
+          __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
+          libdir=${lib.escapeShellArg libdir}
+          subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" -e "s|\"@LIBDIR@\"|$libdir|g"; }
+          ${jq} -c '.testSpec.nextest.binaries' "$info" | subst > $TMPDIR/binaries-metadata.json
+          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst | ${nextestWorkdirJq jq ''"$CARGO_MANIFEST_DIR"''} > $TMPDIR/cargo-metadata.json
+          cd $TMPDIR
+          set +e
+          env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
+            --binaries-metadata $TMPDIR/binaries-metadata.json \
+            --cargo-metadata $TMPDIR/cargo-metadata.json \
+            ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
+            --profile ${lib.escapeShellArg cfg.nextest.profile} \
+            "''${__bb_nextest[@]}" \
+            --no-tests=warn --color never \
+            ${lib.optionalString (cfg.args != [ ]) "-- ${lib.escapeShellArgs cfg.args}"} 2>&1 | tee "$log"
+          status=''${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "test binary ${b.package} ${binaryKey b} failed under nextest (exit status $status)" >&2
+            ${hint p b cfg}
+            exit "$status"
+          fi
+          nextestDir=$ws/target/nextest
+          ${postRunScript { inherit cfg coverage; }}
+        '';
+
+      # hintScript, with the spec read from `$info`.
+      hint =
+        p: b: cfg:
+        hintScript
+          {
+            inherit tools pkgs;
+            inherit (p) testPkgs;
+          }
+          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), junk: (.junk // []), custom: (.custom // false), $widen}' "$info")"'';
+
+      libtestScript =
+        p: b: cfg: bin:
+        let
+          wrapper = wrapperOf p.testPkgs cfg;
+        in
+        ''
+          mkdir -p $out
+          files=(${bin})
+          ${lib.optionalString (wrapper != null) (sourceRootExport (jqOf p) null)}
+          ${workdirScript p.testPkgs}
+          __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
+          cd "$__bb_wd"
+          set +e
+          env "''${__bb_env[@]}" ${
+            launchWords {
               pkgs = p.testPkgs;
-              inherit (p) triple;
-              inherit (s) runner;
-              wrapper = wrapperOf p.testPkgs cfg;
-              sourceRoot = sourceRootOf s null;
-            }}
-            ws=$TMPDIR/nextest-ws
-            log=${logFile}
-            mkdir -p $out $ws/target
-            touch $ws/Cargo.toml
-            files=(${bin}/*)
-            ${workdirScript p.testPkgs}
-            __bb_workdir "''${files[0]}" ${lib.escapeShellArg s.sourceDir}
-            subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" "$1"; }
-            subst "$nextestBinariesPath" > $TMPDIR/binaries-metadata.json
-            subst "$nextestCargoMetadataPath" | ${nextestWorkdirJq "${p.testPkgs.jq}/bin/jq" (lib.escapeShellArg s.sourceDir)} > $TMPDIR/cargo-metadata.json
-            cd $TMPDIR
-            set +e
-            env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
-              --binaries-metadata $TMPDIR/binaries-metadata.json \
-              --cargo-metadata $TMPDIR/cargo-metadata.json \
-              ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
-              --profile ${lib.escapeShellArg cfg.nextest.profile} \
-              "''${__bb_nextest[@]}" \
-              --no-tests=warn --color never \
-              ${lib.optionalString (cfg.args != [ ]) "-- ${lib.escapeShellArgs cfg.args}"} 2>&1 | tee "$log"
-            status=''${PIPESTATUS[0]}
-            set -e
-            if [ "$status" -ne 0 ]; then
-              echo "test binary ${s.package} ${s.binary} failed under nextest (exit status $status)" >&2
-              ${hintScript {
-                inherit tools pkgs;
-                inherit (p) testPkgs;
-              } (hintSpec s cfg)}
-              exit "$status"
-            fi
-            nextestDir=$ws/target/nextest
-            ${postRunScript { inherit cfg coverage; }}
-          '';
+              inherit (p) runner;
+              inherit wrapper;
+            }
+          } "''${files[0]}" ${lib.escapeShellArgs cfg.args} 2>&1 | tee "$log"
+          status=''${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "test binary ${b.package} ${binaryKey b} failed (exit status $status)" >&2
+            ${hint p b cfg}
+            exit "$status"
+          fi
+          ${postRunScript { inherit cfg coverage; }}
+        '';
 
       run =
         r:
         let
+          b = r.breakbulkRoot;
+          p = platformOf r;
+          key = binaryKey b;
+          n = storeName "${b.package}-${key}";
           cfg = configOf r;
-          base = spec r;
-          runDir = runDirs.${base.package} or null;
-          narrowed = if runDir == null then base else narrowSpec runDir base;
-          s =
-            if useCa then
-              stableSpec {
-                inherit pkgs caAttrs name;
-                spec = narrowed;
+          info = runInfoOf r cfg;
+          bin =
+            if copiesBinary cfg then
+              runBinary {
+                inherit pkgs cfg nixFeatures;
+                name = n;
+                ca = useCa;
+                platform = p;
+                linked = copyOf r n;
+                copy = copyOf r n;
               }
             else
-              narrowed;
-          bin = runBinary {
-            inherit pkgs cfg nixFeatures;
-            inherit (s) name;
-            ca = useCa;
-            platform = platformOf r;
-            linked = s.unitOut;
-            copy = binaryCopy {
-              inherit pkgs caAttrs;
-              inherit (s) name;
-              src = "${s.unitOut}/*";
-            };
-          };
-          inherit (platformOf r) testPkgs;
+              "${info.out}/root";
+          inputs = {
+            spec = info.out;
+          }
+          // lib.optionalAttrs useCa { specDylibs = info.dylibs; };
         in
-        if cfg.runner == "nextest" then
-          nextestRun r s cfg bin
-        else
-          testPkgs.runCommand "${name}-${s.name}-run"
-            (
-              {
-                passthru = {
-                  breakbulkTest = s // {
-                    inherit (cfg) args;
-                  };
-                  binary = bin;
+        p.testPkgs.runCommand "${name}-${n}-run"
+          (
+            {
+              passthru = {
+                breakbulkTest = {
+                  package = b.package;
+                  binary = key;
+                  inherit (cfg) args;
+                  # The package directory of its "run" view, or null.
+                  runDir = runDir b.package;
                 };
-              }
-              // caAttrs
+                binary = bin;
+                # The test root, whose wrapper (`breakbulkRoot.wrapper`)
+                # says what the run reads, and what it reads of it
+                # (`runInfo`).
+                root = r;
+                spec = info;
+              };
+            }
+            // inputs
+            // caAttrs
+          )
+          (
+            prelude p cfg
+            + (
+              if cfg.runner == "nextest" then
+                nextestScript p b cfg "${bin}/*"
+              else
+                libtestScript p b cfg "${bin}/*"
             )
-            ''
-              ${envScript {
-                spec = s;
-                jq = "${testPkgs.jq}/bin/jq";
-              }}
-              ${configScript testPkgs cfg}
-              ${preRunScript cfg coverage}
-              mkdir -p $out
-              log=${logFile}
-              files=(${bin}/*)
-              ${workdirScript testPkgs}
-              __bb_workdir "''${files[0]}" ${lib.escapeShellArg s.sourceDir}
-              cd "$__bb_wd"
-              set +e
-              env "''${__bb_env[@]}" ${
-                launchWords {
-                  pkgs = testPkgs;
-                  inherit (s) runner;
-                  wrapper = wrapperOf testPkgs cfg;
-                  sourceRoot = sourceRootOf s null;
-                }
-              } "''${files[0]}" ${lib.escapeShellArgs cfg.args} 2>&1 | tee "$log"
-              status=''${PIPESTATUS[0]}
-              set -e
-              if [ "$status" -ne 0 ]; then
-                echo "test binary ${s.package} ${s.binary} failed (exit status $status)" >&2
-                ${hintScript { inherit tools pkgs testPkgs; } (hintSpec s cfg)}
-                exit "$status"
-              fi
-              ${postRunScript { inherit cfg coverage; }}
-            '';
+          );
 
       runs = lib.mapAttrs (
-        _: rs:
-        lib.listToAttrs (
-          map (
-            r: lib.nameValuePair (binaryKey r.breakbulkRoot) (if r.breakbulkRoot.unit == null then r else run r)
-          ) rs
-        )
+        _: rs: lib.listToAttrs (map (r: lib.nameValuePair (binaryKey r.breakbulkRoot) (run r)) rs)
       ) byPackage;
 
-      specs = lib.mapAttrs (
-        _: rs:
-        lib.listToAttrs (
-          map (r: lib.nameValuePair (binaryKey r.breakbulkRoot) (spec r)) (
-            lib.filter (r: r.breakbulkRoot.unit != null) rs
-          )
-        )
-      ) byPackage;
-
-      doctests = lib.optionalAttrs (kind == "test") (
-        lib.mapAttrs (
-          pkg: attrs:
-          derivation (
-            attrs
-            // doctestConfig {
-              inherit pkgs runner;
-              packages = doctestPackages;
-              hostRunner = host.runner;
-            } pkg
-          )
-        ) (inst.doctestAttrs or { })
-      );
+      doctests = lib.optionalAttrs (kind == "test") inst.doctests;
 
       checks =
         lib.concatMapAttrs (
@@ -1310,17 +1249,21 @@ rec {
           )
         ) runs
         // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) (
-          lib.filterAttrs (pkg: _: doctestEnabled doctestPackages pkg) doctests
+          lib.filterAttrs (pkg: _: doctestEnabled packages pkg) doctests
         );
     in
     {
       inherit
         runs
-        doctests
         checks
-        specs
         testPkgs
-        platforms
+        doctests
         ;
+      # Test roots by package and binary key, for mkTestApps.
+      roots = lib.mapAttrs (
+        _: rs: lib.listToAttrs (map (r: lib.nameValuePair (binaryKey r.breakbulkRoot) r) rs)
+      ) byPackage;
+      inherit platforms;
     };
+
 }

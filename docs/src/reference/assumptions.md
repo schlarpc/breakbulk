@@ -896,7 +896,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 - **Upstream.** cargo `0.100.0` `src/workspace/parser/targets.rs` (function by function), `src/workspace/manifest.rs`, `Target::doctestable`.
 - **Holds for.** 1.99.
 - **Pinned by.** `roots-metadata-fixtures`, `roots-metadata-crates-io`, `roots-plans`.
-- **If it changes.** An unpredicted root, or one predicted for the other platform, fails instantiation loudly, and so does an unpredicted doctest in dynamic-derivation mode. Until the prediction is fixed, the workspace's [`roots`](options/workspaces.md#workspacesnamerootsbuild) option (`roots.build`, `.test`, `.bench`, `.doctests`) replaces it (`repository-roots-override`, and `roots-override` in `nix run .#test-dynamic`).
+- **If it changes.** An unpredicted root, or one predicted for the other platform, fails instantiation loudly, and so does an unpredicted doctest. Until the prediction is fixed, the workspace's [`roots`](options/workspaces.md#workspacesnamerootsbuild) option (`roots.build`, `.test`, `.bench`, `.doctests`) replaces it (`repository-roots-override`, and `roots-override` in `nix run .#test-dynamic`).
 
 ### F7. build-std
 

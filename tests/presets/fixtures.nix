@@ -364,18 +364,13 @@ let
       linux = debugOutputs linuxRelease.workspaces.main.instances.${native}.default;
       linuxLinked = lib.filter (u: u.links && u.platform == "target") linux;
       linuxWithDebug = map (u: "${u.kind}/${u.id}") (lib.filter (u: u.debug) linux);
-      product = linuxRelease.workspaces.main.target.${native}.packages.app;
+      rootUnit = linuxRelease.workspaces.main.instances.${native}.default.rootUnits.build."app/bin/app";
     in
     assert lib.assertMsg (linuxLinked != [ ]) "debug-outputs: no linked target units in the Linux plan";
     assert lib.assertMsg (
       linuxWithDebug == [ ]
     ) "debug-outputs: Linux release units with a debug output: ${toString linuxWithDebug}";
-    assert lib.assertMsg (
-      !(product.roots."bin/app" ? debug)
-    ) "debug-outputs: the Linux root has a debug output";
-    assert lib.assertMsg (
-      !(product.stages.linked ? debug)
-    ) "debug-outputs: the Linux product's linked stage has a debug output";
+    assert lib.assertMsg (!(rootUnit ? debug)) "debug-outputs: the Linux root has a debug output";
     evalCheck "debug-outputs" "linked Linux release units without debug: ${toString (lib.length linuxLinked)}";
   msvcDebugOutputsEval =
     let

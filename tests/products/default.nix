@@ -1394,7 +1394,7 @@ in
       inputsOf =
         repo:
         let
-          docs = repo.workspaces.main.target.${native}.docs;
+          docs = (inst repo).docsDrv;
           ctx = lib.attrNames (builtins.getContext docs.drvAttrs.BREAKBULK_UNIT);
           units = drvSet (lib.attrValues (inst repo).units.doc);
         in
@@ -1443,7 +1443,7 @@ in
         # here, the vendor directory under Cargo).
         same() {
           for d in "$1" "$2"; do
-            rm -rf "$TMPDIR/cmp"; cp -r --no-preserve=mode "$d" "$TMPDIR/cmp"
+            rm -rf "$TMPDIR/cmp"; mkdir "$TMPDIR/cmp"; cp -r --no-preserve=mode "$d/." "$TMPDIR/cmp"
             find "$TMPDIR/cmp" -type f -exec sed -i -E \
               's#${builtins.storeDir}/[a-z0-9]{32}-(breakbulk-vendor/[0-9a-f]+/)?#/SOURCE/#g' {} +
             mv "$TMPDIR/cmp" "$TMPDIR/cmp-$(basename "$d")"
@@ -1951,10 +1951,11 @@ in
         );
       lib' = vt.variants.check-lib.check;
       all = vt.variants.check.check;
-      buildOuts = outsOf (
-        lib.attrValues variantsRepo.workspaces.main.instances.${native}.check.units.build
-      );
-      got = lib.sort lib.lessThan (map builtins.unsafeDiscardStringContext lib'.units);
+      ci = variantsRepo.workspaces.main.instances.${native}.check-lib;
+      buildOuts = outsOf (lib.attrValues ci.units.build);
+      # A check builds each plan's `allUnits`, which lists the plan's unit
+      # outputs at build time.
+      got = map builtins.unsafeDiscardStringContext lib'.units;
       allGot = map builtins.unsafeDiscardStringContext all.units;
       testsOnly = mkRepo (fixtures + "/variants") [
         {
@@ -1969,23 +1970,34 @@ in
         }
       ];
       tw = testsOnly.workspaces.main;
-      testOuts = outsOf (lib.attrValues tw.instances.${native}.default.units.test);
-      testsGot = lib.sort lib.lessThan (
-        map builtins.unsafeDiscardStringContext tw.target.${native}.variants.default.check.units
-      );
+      ti = tw.instances.${native}.default;
+      testOuts = outsOf (lib.attrValues ti.units.test);
+      testsGot = map builtins.unsafeDiscardStringContext tw.target.${native}.variants.default.check.units;
+      discardAll = map builtins.unsafeDiscardStringContext;
     in
     assert lib.assertMsg (
-      got == buildOuts
+      got == discardAll [ ci.allUnits.build.outPath ]
     ) "variants-all-targets: check-lib does not check exactly the build plan";
     assert lib.assertMsg (
       lib.length allGot > lib.length got
     ) "variants-all-targets: the default does not check more than the build plan";
     assert lib.assertMsg (
-      testsGot == testOuts && lib.attrNames tw.target.${native}.buildScriptPaths == [ "test" ]
+      testsGot == discardAll [ ti.allUnits.test.outPath ]
+      && lib.attrNames tw.target.${native}.buildScriptPaths == [ "test" ]
     ) "variants-all-targets: products = false does not check exactly the test plan";
-    pkgs.runCommand "variants-all-targets" { check = lib'; } ''
-      cp $check/units $out
-    '';
+    pkgs.runCommand "variants-all-targets"
+      {
+        check = lib';
+        buildUnits = ci.allUnits.build;
+        testUnits = ti.allUnits.test;
+        buildOuts = builtins.toFile "build-outs" (lib.concatLines buildOuts);
+        testOuts = builtins.toFile "test-outs" (lib.concatLines testOuts);
+      }
+      ''
+        sort $buildUnits/units | diff - $buildOuts
+        sort $testUnits/units | diff - $testOuts
+        cp $check/units $out
+      '';
 
   # `testProfile`: a build variant's test plan is `--profile test` by
   # default, where lib-a's `debug_assertions_on` passes, and shares no
@@ -2824,10 +2836,12 @@ in
       has =
         triple: vName: s:
         lib.hasInfix " ${s} " (planCmd triple vName "build");
-      unitsOf = triple: lib.length w.target.${triple}.variants.gate.check.units;
-      planUnits =
-        triple: kind:
-        lib.length (lib.concatMap (u: u.outputs) (lib.attrValues w.instances.${triple}.gate.units.${kind}));
+      # A check builds the `allUnits` of each plan it traces.
+      unitsOf =
+        triple: map builtins.unsafeDiscardStringContext w.target.${triple}.variants.gate.check.units;
+      planUnits = triple: kind: [
+        (builtins.unsafeDiscardStringContext w.instances.${triple}.gate.allUnits.${kind}.outPath)
+      ];
       fails =
         extra:
         !(builtins.tryEval (
@@ -2878,7 +2892,7 @@ in
               // hackProfiles;
             };
           gateWasm = unitsOf wasm == planUnits wasm "build";
-          gateNative = unitsOf native == planUnits native "build" + planUnits native "test";
+          gateNative = unitsOf native == planUnits native "build" ++ planUnits native "test";
           # A check variant cannot take `benches`, on one target either.
           rejectsCheckBenches = fails {
             variants.gate = {
@@ -3769,9 +3783,10 @@ in
       keep = mk [ { targets.${native}.debugInfo = "keep"; } ];
       strip = mk [ { targets.${native}.debugInfo = "strip"; } ];
       pk = r: r.workspaces.main.packages;
-      unitOf = r: p: (pk r).${p}.roots."bin/${p}".drvPath;
+      rootUnit = r: p: r.workspaces.main.instances.${native}.default.rootUnits.build."${p}/bin/${p}";
+      unitOf = r: p: (rootUnit r p).drvPath;
       fails = r: p: !(builtins.tryEval (pk r).${p}.stageOrder).success;
-      unitEnv = r: p: (pk r).${p}.roots."bin/${p}".drvAttrs.BREAKBULK_UNIT or "";
+      unitEnv = r: p: (rootUnit r p).drvAttrs.BREAKBULK_UNIT or "";
       report = {
         orders = map (r: (pk r).tool.stageOrder) [
           base

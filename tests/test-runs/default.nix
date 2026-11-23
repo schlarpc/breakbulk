@@ -381,9 +381,6 @@ let
       ]
     ) "test-control: unexpected test binaries ${toString (lib.attrNames r)}";
     assert lib.assertMsg (
-      stub.breakbulkRoot.unit == null
-    ) "test-control: needs_feat should be a skipped stub";
-    assert lib.assertMsg (
       lib.attrNames ctl.checks == [
         "doctest/ctl"
         "test/ctl/bin/ctl"
@@ -433,36 +430,46 @@ let
       '';
 
   # The env binary's dylib-path test with the stable inputs that
-  # content-addressed test runs use (testRuns.stableSpec),
-  # built input-addressed as stock Nix cannot build CA: the build script's
+  # content-addressed test runs use (testRuns.runInfo `stable`), built
+  # input-addressed as stock Nix cannot build CA: the build script's
   # library directory is on the path as a copy, which the test accepts.
   testControlStableDylibs =
     let
-      s = ctl.testRuns.ctl.env.passthru.breakbulkTest;
-      stable = breakbulk.testRuns.stableSpec {
+      root = ctl.testRuns.ctl.env.passthru.root;
+      stable = breakbulk.testRuns.runInfo {
         inherit pkgs;
-        spec = s;
-        caAttrs = { };
-        name = "test-control";
+        name = "test-control-test-spec";
+        inherit (root.breakbulkRoot) wrapper;
+        dylibPath = {
+          var = "LD_LIBRARY_PATH";
+          sep = ":";
+        };
+        stable = true;
       };
     in
-    assert lib.assertMsg (stable.dylib.stable != null) "test-control-stable-dylibs: no stable copy";
-    pkgs.runCommand "test-runs-test-control-stable-dylibs" { } ''
-      ${breakbulk.testRuns.envScript {
-        spec = stable;
-        jq = "${pkgs.jq}/bin/jq";
-      }}
-      case :$LD_LIBRARY_PATH: in
-        *:${stable.dylib.stable}/dylib/*) ;;
-        *) echo "no stable copy on $LD_LIBRARY_PATH" >&2; exit 1 ;;
-      esac
-      files=(${s.unitOut}/*)
-      cd ${lib.escapeShellArg s.sourceDir}
-      "''${files[0]}" --exact dylib_path_has_only_out_dir_search_paths | tee $TMPDIR/log
-      grep -q 'test dylib_path_has_only_out_dir_search_paths ... ok' $TMPDIR/log
-      mkdir -p $out
-      cp $TMPDIR/log $out/
-    '';
+    pkgs.runCommand "test-runs-test-control-stable-dylibs"
+      {
+        spec = stable.out;
+        specDylibs = stable.dylibs;
+      }
+      ''
+        info=$spec/breakbulk-root.json
+        ${breakbulk.testRuns.envScript {
+          jq = "${pkgs.jq}/bin/jq";
+          extra = [ ];
+          stable = true;
+        }}
+        case :$LD_LIBRARY_PATH: in
+          *:$specDylibs/dylib/*) ;;
+          *) echo "no stable copy on $LD_LIBRARY_PATH" >&2; exit 1 ;;
+        esac
+        files=(${root}/*)
+        cd "$CARGO_MANIFEST_DIR"
+        "''${files[0]}" --exact dylib_path_has_only_out_dir_search_paths | tee $TMPDIR/log
+        grep -q 'test dylib_path_has_only_out_dir_search_paths ... ok' $TMPDIR/log
+        mkdir -p $out
+        cp $TMPDIR/log $out/
+      '';
 
   # `--include-ignored` in test.args reaches every binary of the package.
   ctlIgnored = mk "test-control" {
@@ -534,7 +541,7 @@ let
         && piece.output == "bin"
         && lib.length ref == 1;
       binDrv = ctl.units.test.${piece.out};
-      buildBin = ctl.roots."ctl/bin/ctl";
+      buildBin = ctl.rootUnits.build."ctl/bin/ctl";
       extra = lib.head it.env."CARGO_BIN_EXE_ctl-extra";
       extraUnit = plan.units.${extra.out};
       names = [
@@ -665,6 +672,7 @@ let
         "env"
         "ignored"
         "lib"
+        "needs_feat"
         "net"
       ];
       want = lib.concatMap (p: map (t: "main/${native}/${p}ctl/test-${t}") tests) [
@@ -679,7 +687,6 @@ let
     assert lib.assertMsg (
       lib.attrNames apps == lib.sort lib.lessThan want
     ) "test-control-repo-apps: apps ${toString (lib.attrNames apps)}";
-    # IFD mode has no app for a binary Cargo did not build (needs_feat).
     assert lib.assertMsg (
       checkNames == [
         "main/${native}/ctl/test-bin-ctl"
@@ -731,7 +738,7 @@ let
     pkgs.runCommand "test-runs-runner"
       {
         quick = ctlRunner.testRuns.ctl.ignored;
-        unit = doctestsWs.doctests.helper.drvAttrs.BREAKBULK_UNIT;
+        unit = doctestsWs.doctestDrvs.helper.drvAttrs.BREAKBULK_UNIT;
         testRunner = builtins.toJSON {
           target = [
             "${failingRunner}"
@@ -1303,8 +1310,8 @@ let
         run = t.testRuns.th.home;
         doctest = t.doctests.th;
         strictRun = pkgs.testers.testBuildFailure strict.testRuns.th.home;
-        unit = strict.doctests.th.drvAttrs.BREAKBULK_UNIT;
-        testEnv = strict.doctests.th.drvAttrs.BREAKBULK_TEST_ENV;
+        unit = strict.doctestDrvs.th.drvAttrs.BREAKBULK_UNIT;
+        testEnv = strict.doctestDrvs.th.drvAttrs.BREAKBULK_TEST_ENV;
       }
       ''
         grep -q 'test writes_home_and_cache ... ok' $run/log
@@ -1348,13 +1355,11 @@ let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       t = testClosureRepo.workspaces.main.target.${native};
       quiet = t.testRuns.quiet."lib/quiet";
-      spec = quiet.passthru.breakbulkTest;
     in
-    assert lib.assertMsg (
-      spec.dylib.flags == [ ] && (spec.dylib.stable or null) == null && spec.envFlags == [ ]
-    ) "test-closure: quiet's test run names build-script runs";
     pkgs.runCommand "test-runs-test-closure"
       {
+        nativeBuildInputs = [ pkgs.jq ];
+        quietSpec = quiet.drvAttrs.spec;
         exportReferencesGraph = [
           "quiet-run"
           quiet.drvPath
@@ -1372,6 +1377,10 @@ let
             exit 1
           fi
         done
+        if ! jq -e '.testSpec | .dylibFlags == [] and .envFlags == []' $quietSpec/breakbulk-root.json; then
+          echo "quiet's test run names build-script runs" >&2
+          exit 1
+        fi
         grep -q 'test runs_bin ... ok' $greeter/log
         grep -q 'test tests::adds ... ok' $quietRun/log
         grep -q 'quiet/src/lib.rs - (line 3) ... ok' $quietDoctest/log
@@ -1437,9 +1446,8 @@ let
       failed good == [ ]
     ) "test-binary-keys: valid keys rejected: ${builtins.toJSON (failed good)}";
     assert lib.assertMsg (
-      variants.default.testRuns.ctl.needs_feat.breakbulkRoot.unit == null
-      && variants.extra.testRuns.ctl.needs_feat.passthru.breakbulkTest.args == [ "--exact" ]
-    ) "test-binary-keys: needs_feat should be a stub in default and a run with its args in extra";
+      variants.extra.testRuns.ctl.needs_feat.passthru.breakbulkTest.args == [ "--exact" ]
+    ) "test-binary-keys: needs_feat should be a run with its args in extra";
     assert lib.assertMsg (failed bad == want) "test-binary-keys: got ${builtins.toJSON (failed bad)}";
     assert lib.assertMsg (
       !(builtins.tryEval (lib.attrNames bad.checks)).success

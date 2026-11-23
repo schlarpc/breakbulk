@@ -602,8 +602,6 @@ let
     ];
   };
 
-  isDynamic = breakbulk.dynamic.checkMode mode == "dynamic";
-
   # Test apps run outside a test run (as tests/test-runs `test-control-app`):
   # the network binary with the skipped test filtered out, and the env
   # binary against a checkout of the fixture (mkWorkspace, for `checkout`).
@@ -627,14 +625,11 @@ let
       program = drv: "${drv.outPath}/bin/${drv.meta.mainProgram}";
     in
     pkgs.runCommand "test-control-apps-${mode}"
-      (
-        {
-          net = program ws.testApps.ctl.net;
-          envApp = program wsCheckout.testApps.ctl.env;
-        }
-        # IFD mode has no app for a test binary Cargo did not build.
-        // lib.optionalAttrs isDynamic { skipped = program ws.testApps.ctl.needs_feat; }
-      )
+      {
+        net = program ws.testApps.ctl.net;
+        envApp = program wsCheckout.testApps.ctl.env;
+        skipped = program ws.testApps.ctl.needs_feat;
+      }
       ''
         $net --skip needs_network | tee net.log
         grep -q 'test offline_ok ... ok' net.log
@@ -661,14 +656,12 @@ let
           echo "a test app left its working directory behind" >&2
           exit 1
         fi
-        ${lib.optionalString isDynamic ''
-          if $skipped 2> skipped.log; then
-            echo "the app of a skipped test succeeded" >&2
-            exit 1
-          fi
-          cat skipped.log
-          grep -q 'needs_feat. was skipped' skipped.log
-        ''}
+        if $skipped 2> skipped.log; then
+          echo "the app of a skipped test succeeded" >&2
+          exit 1
+        fi
+        cat skipped.log
+        grep -q 'needs_feat. was skipped' skipped.log
         mkdir -p $out
         grep -h '^test .* \.\.\. ' net.log env.log | sort > $out/tests
       '';
@@ -748,23 +741,13 @@ let
   # A test run's input closure, as its sandbox's store holds it: a
   # derivation with every attribute of the run, as one string with their
   # context (so with the same inputs), lists /nix/store in its own sandbox
-  # into `$out/closure`. In dynamic mode `$out/tools` lists the closure
-  # of the jq the run reads its spec with at build time (IFD mode's reads
-  # it at evaluation time), which run.sh lets only dynamic mode have.
+  # into `$out/closure`.
   closureOf =
     guard: key: run:
     pkgs.runCommand "closure-${lib.replaceStrings [ "/" ] [ "-" ] key}-${mode}"
-      (
-        {
-          runAttrs = builtins.toJSON run.drvAttrs;
-        }
-        // lib.optionalAttrs isDynamic {
-          exportReferencesGraph = [
-            "tools"
-            pkgs.jq
-          ];
-        }
-      )
+      {
+        runAttrs = builtins.toJSON run.drvAttrs;
+      }
       ''
         if [ -e /nix/var/nix ]; then
           echo "listing a closure needs the sandbox" >&2
@@ -787,9 +770,6 @@ let
         ''}
         mkdir $out
         cp $TMPDIR/closure $out/closure
-        ${lib.optionalString isDynamic ''
-          grep '^/nix/store/' "$NIX_BUILD_TOP/tools" | grep -v '\.drv$' | sort -u > $out/tools
-        ''}
       '';
 
   # Products differ between the modes (resolved at build time in dynamic
@@ -884,7 +864,7 @@ let
           lib.filterAttrs (k: _: lib.elem k i.kinds) (i.inst.allUnits or { })
         )
         + linkEach "$out/products/${i.key}" (
-          lib.filterAttrs (_: d: lib.length d.unbuilt < lib.length (lib.attrNames d.roots)) i.out.packages
+          i.out.packages
           # The docs, compared as a product.
           // lib.optionalAttrs (lib.elem "doc" i.kinds) { doc = i.out.docs; }
         )
@@ -945,10 +925,10 @@ let
                   i.inst.units.${kind}
                   # The test plan's outer derivation also writes the doctests.
                   // lib.optionalAttrs (kind == "test") (
-                    lib.mapAttrs' (p: d: lib.nameValuePair "doctest:${p}" d) i.inst.doctests
+                    lib.mapAttrs' (p: d: lib.nameValuePair "doctest:${p}" d) i.inst.doctestDrvs
                   )
                   # The doc plan's, its docs derivation.
-                  // lib.optionalAttrs (kind == "doc") { docs = i.inst.docs; }
+                  // lib.optionalAttrs (kind == "doc") { docs = i.inst.docsDrv; }
                 )
               )
             ) i.kinds

@@ -20,7 +20,7 @@
 #   };
 #
 #   ws.packages.<bin>          the bin, installed as $out/bin/<bin><exe suffix>
-#   ws.roots."<pkg>/<kind>/<target>"   build-plan roots (unit outputs or stubs),
+#   ws.roots."<pkg>/<kind>/<target>"   build-plan roots (instantiate.nix rootShape),
 #                              e.g. "c/cdylib/c" for a library's cdylib
 #   ws.tests."<pkg>/<kind>/<target>"   test-plan roots
 #   ws.testBins."<root>"       test-plan roots installed as $out/bin/<target><exe suffix>
@@ -618,14 +618,10 @@ let
 
   isDynamic = delivery == "dynamic";
   breakbulkDrv = tools.breakbulk-drv or (dynamic.mkBreakbulkDrv pkgs);
-  # Dynamic-derivation mode: the outer derivation is named
-  # `<ws>-<triple>-<variant>` for the build plan, with `-test`
-  # for the test plan, since each plan has its own.
   # The libraries `cargo test` doc-tests (roots.nix `doc`, or
-  # `rootNames.doctests`) among the selected packages: in
-  # dynamic-derivation mode the test plan's outer derivation writes their
-  # doctests, with the test configuration IFD mode
-  # gives them (testRuns.doctestConfig), so it must know them up front.
+  # `rootNames.doctests`) among the selected packages: the test plan's
+  # instantiation gives each a doctest wrapper, with its test
+  # configuration (testRuns.doctestConfig), so it must know them up front.
   predictedDoctests = lib.filterAttrs (n: _: testSelect == [ ] || lib.elem n testSelect) (
     if rootNames.doctests or null != null then
       lib.genAttrs rootNames.doctests (_: { })
@@ -801,34 +797,41 @@ let
         owner = valueOwner;
       };
 
+  # The root wrappers are named after `<ws>-<triple>-<variant>` for the
+  # build plan, with `-<kind>` for the others (in dynamic-derivation mode
+  # the name of each plan's outer derivation).
   instantiateWith =
     kind: args:
+    let
+      all = args // {
+        inherit (pkgs) coreutils;
+        outerName = if kind == "build" then name else "${name}-${kind}";
+        doctests = lib.optionalAttrs (kind == "test" && !checking) (
+          lib.mapAttrs (
+            pkg: _:
+            testRuns.doctestConfig {
+              inherit pkgs runner;
+              packages = viewPackages;
+              hostRunner = hostTest.runner;
+            } pkg
+          ) predictedDoctests
+        );
+        docs = kind == "doc";
+        inherit nixFeatures;
+      };
+    in
     if productInputConflicts != [ ] then
       throw (lib.concatStringsSep "\n" productInputConflicts)
     else if isDynamic then
       dynamic.instantiate (
-        args
+        all
         // {
           inherit breakbulkDrv;
-          inherit (pkgs) coreutils;
           split = splitOf kind;
-          outerName = if kind == "build" then name else "${name}-${kind}";
-          doctests = lib.optionalAttrs (kind == "test" && !checking) (
-            lib.mapAttrs (
-              pkg: _:
-              testRuns.doctestConfig {
-                inherit pkgs runner;
-                packages = viewPackages;
-                hostRunner = hostTest.runner;
-              } pkg
-            ) predictedDoctests
-          );
-          docs = kind == "doc";
-          inherit nixFeatures;
         }
       )
     else
-      instantiate (args // { inherit nixFeatures; });
+      instantiate all;
 
   inst =
     kind:
@@ -894,16 +897,13 @@ let
   installExecutable =
     r:
     pkgs.runCommand r.breakbulkRoot.target { } ''
-      ${
-        # Dynamic-derivation mode: a test binary Cargo did not build is its
-        # stub's output (a file with the reason), as in IFD mode.
-        lib.optionalString (r.breakbulkRoot.dynamic or false) ''
-          if [ ! -d ${r} ]; then
-            ln -s ${r} $out
-            exit 0
-          fi
-        ''
-      }files=(${r}/*)
+      # A test binary Cargo did not build is its stub's output (a file with
+      # the reason).
+      if [ ! -d ${r} ]; then
+        ln -s ${r} $out
+        exit 0
+      fi
+      files=(${r}/*)
       if [ ''${#files[@]} -ne 1 ]; then
         echo "expected one file in ${r}, found: ''${files[*]}" >&2
         exit 1
@@ -914,7 +914,7 @@ let
       install -D -m755 "''${files[0]}" "$out/bin/"${lib.escapeShellArg r.breakbulkRoot.target}"$suffix"
     '';
 
-  tr = (if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
+  tr = testRuns.mkTestRuns {
     inherit
       pkgs
       target
@@ -930,14 +930,13 @@ let
     packageSet = testPackageSet;
     host = hostTest;
     packages = runPackages;
-    doctestPackages = viewPackages;
     inst = tested;
     coverage = mode == "coverage";
     tools = testRunTools;
   };
 
   benchTr = lib.optionalAttrs bench (
-    (if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
+    testRuns.mkTestRuns {
       inherit
         pkgs
         target
@@ -1011,6 +1010,16 @@ in
   };
   roots = built.roots;
   tests = tested.roots;
+  # IFD mode: the test plan's doctest derivations (instantiate.nix
+  # `doctestDrvs`).
+  doctestDrvs = tested.doctestDrvs or { };
+  docsDrv = documented.docsDrv or null;
+  # IFD mode: each root's unit output, by root name (instantiate.nix
+  # `rootUnits`).
+  rootUnits = {
+    build = built.rootUnits or { };
+    test = tested.rootUnits or { };
+  };
   units = {
     build = built.units;
     test = tested.units;
@@ -1024,8 +1033,8 @@ in
   }
   // lib.optionalAttrs bench { bench = benched.unitsJson; };
   # The `flags` outputs of every build-script run of the build and test
-  # plans, on both platforms: a list (IFD mode), or `{ runsFile; }`, a
-  # file listing them at build time (lib/dynamic.nix).
+  # plans, on both platforms: `{ runsFile; }`, a file listing them at
+  # build time (instantiate.nix `rootShape`).
   buildScriptRuns = {
     build = built.buildScriptRuns;
     test = tested.buildScriptRuns;
@@ -1047,9 +1056,10 @@ in
     }
     // lib.optionalAttrs bench { bench = benched.outer; }
   );
-  # Dynamic-derivation mode: the unit derivations through IFD mode, for
-  # explainSharing (lib/dynamic.nix `ifdUnits`).
-  ifdUnits = lib.optionalAttrs isDynamic (
+  # The unit derivations through IFD mode, for explainSharing (in
+  # dynamic-derivation mode they import units.json: lib/dynamic.nix
+  # `ifdUnits`).
+  ifdUnits = (
     {
       build = built.ifdUnits;
       test = tested.ifdUnits;
@@ -1057,9 +1067,9 @@ in
     }
     // lib.optionalAttrs bench { bench = benched.ifdUnits; }
   );
-  # Dynamic-derivation mode: a derivation per plan kind that builds every
-  # unit (ws.units is not known at evaluation time).
-  allUnits = lib.optionalAttrs isDynamic (
+  # A derivation per plan kind that builds every unit (in
+  # dynamic-derivation mode ws.units is not known at evaluation time).
+  allUnits = (
     {
       build = built.allUnits;
       test = tested.allUnits;
@@ -1081,7 +1091,7 @@ in
     _: r: lib.nameValuePair r.breakbulkRoot.target (installExecutable r)
   ) bins;
   testRuns = tr.runs;
-  testApps = (if isDynamic then dynamic.mkTestApps else testApps.mkTestApps) {
+  testApps = testApps.mkTestApps {
     inherit
       pkgs
       checkout
@@ -1092,8 +1102,6 @@ in
   };
   inherit (tr) doctests checks;
   # Test binaries by root name, installed as $out/bin/<target><suffix>.
-  testBins = lib.mapAttrs (
-    _: r: if r.breakbulkRoot.unit == null then r else installExecutable r
-  ) tested.roots;
+  testBins = lib.mapAttrs (_: installExecutable) tested.roots;
   inherit installExecutable;
 }

@@ -488,9 +488,8 @@ let
             # directories, as Cargo does on a Linux host: wine does not
             # search it for DLLs.
             # (Without content addressing, which copies them elsewhere.)
-            dirs=$(jq -rn ${lib.escapeShellArg breakbulk.testRuns.dylibJq} ${
-              lib.concatMapStringsSep " " (f: "${f}/directives.json") run.breakbulkTest.dylib.flags
-            })
+            mapfile -t flags < <(jq -r '.testSpec.dylibFlags[] + "/directives.json"' ${run.spec}/breakbulk-root.json)
+            dirs=$(jq -rn ${lib.escapeShellArg breakbulk.testRuns.dylibJq} "''${flags[@]}")
             echo "LD_LIBRARY_PATH=$dirs"
             # OUT_DIR, and since #23 the copy of <profile> the build script
             # also put the DLL in.
