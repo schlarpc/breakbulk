@@ -212,13 +212,40 @@ submodule
 
 Environment added to the workspace’s host units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+A string (or path, package, number, boolean) replaces the
+variable’s value from the layers below, the env capture’s included; a
+list of them is appended to it, joined with the variable’s separator
+(` envSeparators `; by default ` : ` for search paths and unknown names, a
+space for flag lists such as ` NIX_CFLAGS_COMPILE `; see
+[the table](\.\./unit-builder\.md\#list-variables))\. Lists from every
+layer concatenate; ` lib.mkForce ` keeps only its own definition\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean) (replaces) or list of them (appends)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.envSeparators`
+
+The separator a variable’s lists are joined with, by name,
+for ` host.env `\. Without an entry, the built-in table’s
+([list variables](\.\./unit-builder\.md\#list-variables)), else
+` : `\.
+
+*Type:*
+lazy attribute set of string
 
 *Default:*
 
