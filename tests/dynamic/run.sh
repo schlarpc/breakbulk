@@ -442,15 +442,18 @@ for c in test-cutoff test-cutoff-source test-options; do
       echo "the kept run ($keptName) was re-run" >&2
       ok=0
     fi
+    # The binary's copy out of its wrapper (`-bin`) is the strip stage's
+    # input here; when the copy comes out the same, the stage is not
+    # rebuilt, and the copy alone shows the edit reached the binary.
     case $c in
       test-cutoff | test-cutoff-source)
-        grep -q 'alpha-lib-alpha-bin-strip\.drv' "$WORK/cutoff-after.built" || {
+        grep -Eq 'alpha-lib-alpha-bin(-strip)?\.drv' "$WORK/cutoff-after.built" || {
           echo "alpha's test binary was not copied again (vacuous)" >&2
           ok=0
         }
         ;;
       test-options)
-        grep -q 'app-data-bin-strip\.drv' "$WORK/cutoff-after.built" || {
+        grep -Eq 'app-data-bin(-strip)?\.drv' "$WORK/cutoff-after.built" || {
           echo "the stripped copy was not rebuilt (vacuous)" >&2
           ok=0
         }
