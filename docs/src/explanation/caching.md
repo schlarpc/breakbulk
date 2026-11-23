@@ -85,13 +85,13 @@ reads a test-only path fails with a hint: at compile time
 (`include_str!("../tests/…")`), or at run time, when a library builds a
 path into `tests/` from `CARGO_MANIFEST_DIR` and the package's test
 reads it. That path is in the library's view, which has no `tests/`.
-[`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
+Setting [`sources.testsDir = null`](../reference/options/packages.md#packagesnamesources)
 puts `tests/` back into every view.
 
 Each Cargo target's compiles also see only their own root among the
 package's bins, examples, tests and benches, and a library, bin or build
 script sees no `examples/` or `benches/` at all
-([`scopeTargetRoots`](../reference/options/packages.md#packagesnamescopetargetroots)):
+(the [`sources.targetRoots`](../reference/options/packages.md#packagesnamesources) step):
 
 | Edit | Rebuilds |
 | --- | --- |

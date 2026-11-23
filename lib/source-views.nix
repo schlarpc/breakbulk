@@ -946,8 +946,17 @@ rec {
             else
               withOverlay (realizeFiles own.files);
         };
-      runViews = lib.listToAttrs (map (t: lib.nameValuePair "${t.kind}/${t.name}" (runViewOf t)) testTargets);
-      dirIn = view: if view == null then null else if pkgDir == "" then "${view}" else "${view}/${pkgDir}";
+      runViews = lib.listToAttrs (
+        map (t: lib.nameValuePair "${t.kind}/${t.name}" (runViewOf t)) testTargets
+      );
+      dirIn =
+        view:
+        if view == null then
+          null
+        else if pkgDir == "" then
+          "${view}"
+        else
+          "${view}/${pkgDir}";
 
     in
     {

@@ -5,7 +5,7 @@
 # test's compile, `run-reads` from a test run, `doc-reads` from a doctest.
 # `lib-to-tests` is a library that hands its tests a path into its own
 # `tests/`, built from `CARGO_MANIFEST_DIR` in the library's view, which
-# leaves `tests/` out: its test run fails with the `scopeTestsDir` hint.
+# leaves `tests/` out: its test run fails with the hint naming `sources.testsDir`.
 # `chosen-reads` reads `data.txt` in its own directory, which the checks'
 # `sources` function leaves out of its "build" view.
 [workspace]

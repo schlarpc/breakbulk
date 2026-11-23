@@ -1148,7 +1148,9 @@ in
       '';
 }
 // goldenOn "walking-skeleton" { } { }
-// goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "../common" ]); } { }
+// goldenOn "directives" {
+  extraSources = lib.genAttrs directivesPackages (_: [ "../common" ]);
+} { }
 // goldenOn "build-dep-leak" { } { }
 // goldenOn "crate-types" { } { }
 // goldenOn "dev-dep-features" { } { }

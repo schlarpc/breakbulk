@@ -663,10 +663,7 @@ let
     { lib, ... }:
     let
       fs = lib.fileset;
-      onRun =
-        f:
-        { default, unit, ... }@a:
-        if unit == "test-run" then f a else default;
+      onRun = f: { default, unit, ... }@a: if unit == "test-run" then f a else default;
     in
     {
       packages.cli.sources = {

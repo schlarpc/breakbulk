@@ -1041,9 +1041,7 @@ rec {
             inherit tools pkgs;
             inherit (p) testPkgs;
           }
-          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --argjson removed ${
-            lib.escapeShellArg (builtins.toJSON (runRemovedOf b))
-          } '.testSpec | {$package, packageDir, $removed}' "$info")"'';
+          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --argjson removed ${lib.escapeShellArg (builtins.toJSON (runRemovedOf b))} '.testSpec | {$package, packageDir, $removed}' "$info")"'';
 
       # The run: the binary, the working directory, the wrapper and the
       # test runner's script (`facts`, lib/test-runners.nix), its output

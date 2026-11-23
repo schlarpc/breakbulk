@@ -879,7 +879,7 @@ let
         runner
         testSystem
         runDirs
-      runRemoved
+        runRemoved
         ca
         nixFeatures
         traits
