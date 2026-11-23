@@ -16,6 +16,21 @@
 # NDK is required: it is licensed under the Android SDK License Agreement,
 # so breakbulk never fetches it on its own (lib/android-ndk.nix).
 #
+# C++: cc-rs links its default C++ runtime for Android, the NDK's
+# libc++_shared.so (`CXXSTDLIB_<target>=c++_static` links libc++
+# statically instead). An app ships that library next to the libraries
+# that need it, so the `bundleLibraries` stage, after `install`, copies it
+# into a product whose files need it, and the test runner pushes it with
+# every test binary. The NDK's clang names the file
+# (`-print-file-name=libc++_shared.so`), so no table of its sysroot's
+# directories is kept here.
+#
+# bindgen: LIBCLANG_PATH is the NDK's own libclang, the clang release
+# that compiles the C code, and CLANG_PATH its clang, which bindgen asks
+# for the system include directories: another clang on PATH would give a
+# Linux libc's. Its clang arguments (BINDGEN_EXTRA_CLANG_ARGS_<target>)
+# are the target with the API level and the NDK's sysroot.
+#
 # Debug info: split into the `debug` output by default, as on Linux (the
 # traits' `debugInfo`); `debug/lib/debug/.build-id/<xx>/<rest>.debug` is
 # the `.so.dbg` Play Console takes for the library with that build ID.
@@ -41,6 +56,7 @@
   chooseLinker,
   chooseRunner,
   guard,
+  stageHelpers,
 }:
 {
   pkgs,
@@ -106,9 +122,19 @@ let
     };
   };
 
+  # The C++ runtime alone: its directory in the sysroot also holds the
+  # stub libc.so and the like, which the device has its own of.
+  cxxRuntime = bp.runCommand "ndk-cxx-runtime-${target}" { } ''
+    lib=$(${tc}/bin/clang --target=${target} -print-file-name=libc++_shared.so)
+    [ -f "$lib" ] || { echo "the NDK's clang finds no libc++_shared.so for ${target}" >&2; exit 1; }
+    mkdir $out
+    cp "$lib" $out/
+  '';
+
   r = chooseRunner {
     inherit pkgs traits adb;
     canExecute = false;
+    adbLibraries = [ cxxRuntime ];
   };
 
   minimum = (androidNdk.apiLevelsOf version).min;
@@ -131,6 +157,12 @@ guard traits.isAndroid "breakbulk.presets.android: `${triple}` is not an Android
         # file, ndk-build, cargo-ndk's conventions).
         ANDROID_NDK_ROOT = "${ndkPackage}";
         ANDROID_NDK_HOME = "${ndkPackage}";
+        LIBCLANG_PATH = "${tc}/lib";
+        CLANG_PATH = "${tc}/bin/clang";
+      };
+      stages.bundleLibraries = {
+        after = mkDefault "install";
+        run = mkDefault (stageHelpers.bundleLibraries { from = [ cxxRuntime ]; });
       };
       runner = mkDefault r.runner;
       # adb needs a device, which no build in the sandbox has.

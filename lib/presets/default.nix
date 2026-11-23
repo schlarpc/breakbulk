@@ -663,6 +663,7 @@ let
         chooseLinker
         chooseRunner
         guard
+        stageHelpers
         ;
     };
     windowsGnu = import ./windows-gnu.nix {

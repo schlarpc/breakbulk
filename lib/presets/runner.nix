@@ -88,8 +88,10 @@ let
       wine ? pkgs.wineWow64Packages.minimal,
       # wasmtime: the wasmtime package.
       wasmtime ? pkgs.buildPackages.wasmtime,
-      # adb: the package with bin/adb.
+      # adb: the package with bin/adb, and directories of shared
+      # libraries every program gets on the device.
       adb ? pkgs.buildPackages.android-tools,
+      adbLibraries ? [ ],
     }:
     let
       bp = pkgs.buildPackages;
@@ -125,6 +127,7 @@ let
         runner = runners.adb {
           pkgs = bp;
           inherit adb;
+          libraries = adbLibraries;
         };
       };
       wasmtime = direct // {

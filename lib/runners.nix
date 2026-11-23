@@ -157,10 +157,14 @@ in
   # A record whose `dylibPath` is BREAKBULK_ADB_LIBRARY_PATH: the test's
   # library directories are on the build machine, so the runner reads them
   # from there and gives the device its own copy as LD_LIBRARY_PATH.
+  # `libraries`: directories whose shared libraries every program gets
+  # too (presets.android: the NDK's libc++_shared.so, which an app ships
+  # and the device does not have).
   adb =
     {
       pkgs,
       adb ? pkgs.android-tools,
+      libraries ? [ ],
     }:
     {
       program = script pkgs "breakbulk-runner-adb" ''
@@ -177,6 +181,7 @@ in
         trap '$adb shell "rm -rf $dir" >/dev/null 2>&1 || true' EXIT
         $adb push -q "$prog" "$dir/" >/dev/null
         IFS=: read -ra libdirs <<< "''${BREAKBULK_ADB_LIBRARY_PATH:-}"
+        libdirs+=(${lib.escapeShellArgs (map toString libraries)})
         for d in "''${libdirs[@]}"; do
           for f in "$d"/*.so; do
             [ -e "$f" ] && $adb push -q "$f" "$dir/lib/" >/dev/null

@@ -2247,6 +2247,73 @@ let
             touch $out/needed
           ''
       );
+  bundleLibraries =
+    mkHelper
+      {
+        name = "bundleLibraries";
+        description = ''
+          Copies into the product the shared libraries its ELF files name
+          in `NEEDED` that one of `from` holds, and those that the copies
+          need in turn, into the install layout's library directory (the
+          target's `sharedLibraryDir`). A library the product has already,
+          or that no directory of `from` holds (the platform's own), is
+          left alone. Runs after `install`, as a runtime that ships with
+          the product: `presets.android` adds it for the NDK's
+          `libc++_shared.so`, which an app ships next to the libraries
+          that need it.
+        '';
+        options = {
+          from = mkOption {
+            type = types.listOf storePathType;
+            example = literalExpression ''[ "''${ndk.sysroot}/usr/lib/aarch64-linux-android" ]'';
+            description = "The directories to take libraries from, in order.";
+          };
+          binutils = binutilsOption;
+        };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          target ? { },
+          ...
+        }:
+        let
+          inherit (binutilsFor cfg pkgs target) package prefix;
+          libDir = (traitsOf target pkgs).sharedLibraryDir;
+        in
+        pkgs.runCommand (stageName product "bundleLibraries") { nativeBuildInputs = [ package ]; } ''
+          set -euo pipefail
+          ${copyIn input}
+          ${isElfFn}
+          copyIn "$out"
+          from=(${escapeShellArgs (map toString cfg.from)})
+          # Until a pass copies nothing: a copy may need more.
+          more=1
+          while [ "$more" = 1 ]; do
+            more=0
+            while IFS= read -r -d "" f; do
+              isElf "$f" || continue
+              while IFS= read -r lib; do
+                if [ -n "$(find "$out" -name "$lib" -print -quit)" ]; then continue; fi
+                for d in "''${from[@]}"; do
+                  if [ -f "$d/$lib" ]; then
+                    mkdir -p "$out/${libDir}"
+                    cp -L "$d/$lib" "$out/${libDir}/$lib"
+                    chmod u+w "$out/${libDir}/$lib"
+                    echo "bundleLibraries: ''${f#$out/} needs $lib, from $d"
+                    more=1
+                    break
+                  fi
+                done
+              done < <(${prefix}readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
+            done < <(find "$out" -type f -print0 | LC_ALL=C sort -z)
+          done
+        ''
+      );
+
   # Not Nix's reference scan, which sees only the hashes of the build's
   # inputs: this also finds paths outside the closure and paths whose
   # hash `remove-references-to` replaced with `eee…`.
@@ -2373,6 +2440,7 @@ in
     removeSourceReferences
     noSourceReferences
     neededLibraries
+    bundleLibraries
     glibcLibraries
     gccRuntimeLibraries
     ;
