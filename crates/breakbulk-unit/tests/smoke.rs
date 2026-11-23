@@ -13,7 +13,7 @@
 //! `tests/unit-smoke/units.json`, which `tests/unit-smoke/default.nix` turns
 //! into real derivations. (Set `BREAKBULK_BLESS=1` to rewrite it.) It then
 //! replaces the tokens with directories in a temporary "store", runs
-//! `breakbulk-unit unit` for each unit in dependency order with a cleared
+//! `breakbulk-unit` for each unit in dependency order with a cleared
 //! environment, as Nix would, and runs the resulting binary.
 //!
 //! The env capture here is the test's own `PATH`, `CC`, `AR` and nixpkgs'
@@ -27,7 +27,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use breakbulk_format::rendered::{SourceView, Widen, derivation_output};
+use breakbulk_format::derivation_output;
+use breakbulk_format::rendered::{SourceView, Widen};
 use breakbulk_format::{
     Plan, Reference, Resolve, Unit, UnitId, ValidationOptions, render_unit, unit_env_value,
     validate,
@@ -318,7 +319,6 @@ fn smoke() {
         let build = tmp.join(format!("build-{id}"));
         std::fs::create_dir_all(&build).unwrap();
         let status = Command::new(env!("CARGO_BIN_EXE_breakbulk-unit"))
-            .arg("unit")
             .env_clear()
             .env("BREAKBULK_UNIT", &text)
             .env("TMPDIR", &build)

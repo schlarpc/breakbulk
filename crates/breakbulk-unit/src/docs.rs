@@ -1,4 +1,4 @@
-//! `breakbulk-unit docs`: a plan's documentation, as `cargo doc` writes it.
+//! The `docs` kind: a plan's documentation, as `cargo doc` writes it.
 //!
 //! The docs derivation of a doc plan runs the plan's traced `rustdoc`
 //! commands one after another into one folder, its output `out`
@@ -17,34 +17,14 @@
 //! file (`.lock`, from `write_shared`) is removed at the end.
 
 use std::path::Path;
-use std::process::ExitCode;
-
-use serde::{Deserialize, Serialize};
 
 use crate::compile::{
     Invocation, check_args, fresh_dir, link_deps, load_directives, run_diagnosed,
 };
 use crate::env::{CFlags, Outer, capture_layer, layered};
-use crate::spec::{RenderedArg, RenderedCompile};
+use crate::spec::{RenderedArg, RenderedCompile, RenderedDocs};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
 use crate::{Error, io_err};
-
-/// `BREAKBULK_UNIT` of a docs derivation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RenderedDocs {
-    /// Always `"docs"`, so that the value cannot be mistaken for a unit.
-    pub kind: DocsKind,
-    /// The traced `rustdoc` commands, in the order they run. Without `-o`
-    /// and `-L dependency=`; `outputs` and `remap` are empty.
-    pub commands: Vec<RenderedCompile>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DocsKind {
-    Docs,
-}
 
 /// rustdoc's lock file in its output directory.
 const LOCK_FILE: &str = ".lock";
@@ -101,7 +81,7 @@ pub fn invocation(
     })
 }
 
-/// The whole `docs` mode.
+/// The whole `docs` kind.
 pub fn docs(d: &RenderedDocs, outer: &Outer) -> Result<(), Error> {
     let out = outer.output("out")?;
     fresh_dir(&out)?;
@@ -121,34 +101,6 @@ pub fn docs(d: &RenderedDocs, outer: &Outer) -> Result<(), Error> {
         std::fs::remove_file(&lock).map_err(|e| io_err("removing", &lock, e))?;
     }
     Ok(())
-}
-
-/// Read the docs from `BREAKBULK_UNIT` or the file `BREAKBULK_UNITPath`.
-pub fn read(outer: &Outer) -> Result<RenderedDocs, Error> {
-    let (text, whence) = if let Some(path) = outer.get("BREAKBULK_UNITPath") {
-        let text =
-            std::fs::read_to_string(path).map_err(|e| io_err("reading", Path::new(path), e))?;
-        (text, format!("the file {path}"))
-    } else if let Some(text) = outer.get("BREAKBULK_UNIT") {
-        (text.to_owned(), "BREAKBULK_UNIT".to_owned())
-    } else {
-        return Err(Error::new(
-            "neither BREAKBULK_UNIT nor BREAKBULK_UNITPath is set",
-        ));
-    };
-    serde_json::from_str(&text).map_err(|e| Error(format!("invalid docs in {whence}: {e}")))
-}
-
-/// `breakbulk-unit docs`.
-pub fn main() -> ExitCode {
-    let outer = Outer::from_process();
-    match read(&outer).and_then(|d| docs(&d, &outer)) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
-    }
 }
 
 #[cfg(test)]
@@ -172,9 +124,7 @@ mod tests {
             env_splices: vec![Splice::new("/f/a".into(), SpliceKind::RustcEnv)],
             dylib_path_from: vec![],
             cwd: "/src".into(),
-            outputs: BTreeMap::new(),
-            uplifted: BTreeMap::new(),
-            side_files: Vec::new(),
+            outputs: Vec::new(),
             deps: vec![],
             dep_manifests: vec![],
             link_manifest_crates: false,
@@ -183,8 +133,7 @@ mod tests {
             remap_scope: None,
             env_capture: None,
             link_captures: Vec::new(),
-            view: None,
-            repository_paths: Vec::new(),
+            hints: Default::default(),
             seed: None,
         }
     }
@@ -257,12 +206,14 @@ mod tests {
 
     #[test]
     fn parses_with_kind() {
-        let d = RenderedDocs {
-            kind: DocsKind::Docs,
+        let d = crate::spec::RenderedUnit::Docs(RenderedDocs {
             commands: vec![command(vec![lit("src/lib.rs")])],
-        };
+        });
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.starts_with("{\"kind\":\"docs\""), "{json}");
-        assert_eq!(serde_json::from_str::<RenderedDocs>(&json).unwrap(), d);
+        assert_eq!(
+            serde_json::from_str::<crate::spec::RenderedUnit>(&json).unwrap(),
+            d
+        );
     }
 }

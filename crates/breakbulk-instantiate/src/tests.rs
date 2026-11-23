@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use breakbulk_format::rendered::{RenderedUnit, derivation_output, package_name_version};
+use breakbulk_format::rendered::{RenderedUnit, package_name_version};
 use breakbulk_format::{
-    Plan, Reference, Resolve, RootKind, Unit, UnitId, render_unit, unit_env_value,
+    Plan, Reference, Resolve, RootKind, Unit, UnitId, derivation_output, render_unit,
+    unit_env_value,
 };
 
 use super::inputs::*;
@@ -312,7 +313,7 @@ fn substituted_units_equal_direct_rendering() {
             unit_env_value(&render_unit(&inputs.plan, id, &RealPaths(&inputs)).unwrap()).unwrap();
         assert_eq!(attr(d, "BREAKBULK_UNIT"), direct, "unit {id}");
         assert_eq!(attr(d, "builder"), UNIT);
-        assert_eq!(d.attrs["args"], Value::Strings(vec!["unit".into()]));
+        assert!(!d.attrs.contains_key("args"));
         assert_eq!(attr(d, "system"), "x86_64-linux");
     }
 }
@@ -599,6 +600,7 @@ fn versioned_override_wins() {
         let env = match serde_json::from_str(&attr(&out.units[id], "BREAKBULK_UNIT")).unwrap() {
             RenderedUnit::Compile(c) => c.env,
             RenderedUnit::Run(r) => r.env,
+            _ => unreachable!("units only"),
         };
         assert!(!env.contains_key("LIB_ONLY"), "{id}");
     }

@@ -63,7 +63,7 @@ let
       ''
         result=$out
         run() { BREAKBULK_UNIT="$1" out=$TMPDIR/$2-o rlib=$TMPDIR/$2-rlib rmeta=$TMPDIR/$2-rmeta flags=$TMPDIR/$2-f \
-          ${tools.breakbulk-unit}/bin/breakbulk-unit unit; }
+          ${tools.breakbulk-unit}/bin/breakbulk-unit; }
         run "$warns" warns 2> warns.log || { cat warns.log; echo "warns failed" >&2; exit 1; }
         if run "$broken" broken 2> broken.log; then
           echo "the broken unit succeeded; it must fail" >&2
@@ -560,7 +560,7 @@ in
     pkgs.runCommand "build-script-signal-check" { unit = run.drvAttrs.BREAKBULK_UNIT; } ''
       result=$out
       if BREAKBULK_UNIT="$unit" out=$TMPDIR/o flags=$TMPDIR/f \
-          ${tools.breakbulk-unit}/bin/breakbulk-unit unit 2> err; then
+          ${tools.breakbulk-unit}/bin/breakbulk-unit 2> err; then
         echo "the run unit succeeded; it must fail" >&2
         exit 1
       fi

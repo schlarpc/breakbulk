@@ -26,8 +26,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         }],
         nightly_features_allowed: false,
         env_capture: None,
-        view: None,
-        repository_paths: Vec::new(),
+        hints: Default::default(),
         seed: None,
         remap: vec![],
         out_dir_remap: None,
@@ -458,7 +457,7 @@ fn script_output_naming_a_path_outside_the_view() {
     let root = t.path().join("source");
     std::fs::create_dir_all(root.join("crates/foo-sys")).unwrap();
     let mut r = unit(&root.join("crates/foo-sys"));
-    r.view = Some(crate::spec::SourceView {
+    r.hints.view = Some(crate::spec::SourceView {
         root: root.display().to_string(),
         package_dir: "crates/foo-sys".into(),
         widen: crate::spec::Widen::ExtraSources,
@@ -581,7 +580,7 @@ fn missing_sources_name_the_option_of_the_view() {
     };
     let hint = |v| {
         let mut r = unit(t.path());
-        r.view = Some(v);
+        r.hints.view = Some(v);
         let s = judge_with(&r, 0, "cargo::rerun-if-changed=data/x.txt\n").unwrap();
         s.missing[0].hint.clone()
     };

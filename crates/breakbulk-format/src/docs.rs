@@ -1,16 +1,15 @@
 //! Rendering a doc plan's `doc` units into the `BREAKBULK_UNIT` of its
-//! docs derivation (`breakbulk-unit docs`, see `breakbulk_unit::docs`), and
+//! docs derivation (`kind: docs`, see `breakbulk_unit::docs`), and
 //! the command part rustdoc units (docs and doctests) share.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use breakbulk_unit::docs::{DocsKind, RenderedDocs};
-use breakbulk_unit::spec::{RenderedArg, RenderedCompile};
+use breakbulk_unit::spec::{Hints, RenderedArg, RenderedCompile, RenderedDocs, RenderedUnit};
 
 use crate::deps::doc_deps;
 use crate::normalize::normalize_unit;
 use crate::plan::{Arg, OutRef, Plan, Reference, Text, Unit, UnitId, doc_order};
-use crate::render::{Resolve, env, flags, splice, text};
+use crate::render::{Resolve, env, flags, search_paths, splice, text};
 
 /// Render every doc unit of `plan`, in [`doc_order`]. Each is rendered as
 /// a compile unit with no outputs and no remapping: rustdoc writes into
@@ -19,7 +18,7 @@ use crate::render::{Resolve, env, flags, splice, text};
 /// # Panics
 ///
 /// If the doc units' `after` edges form a cycle (validated).
-pub fn render_docs<R: Resolve>(plan: &Plan, r: &R) -> Result<RenderedDocs, R::Error> {
+pub fn render_docs<R: Resolve>(plan: &Plan, r: &R) -> Result<RenderedUnit, R::Error> {
     let order = doc_order(plan).unwrap_or_else(|e| panic!("{e} (validated)"));
     let commands = order
         .iter()
@@ -30,17 +29,13 @@ pub fn render_docs<R: Resolve>(plan: &Plan, r: &R) -> Result<RenderedDocs, R::Er
             rustdoc_command(id, &d, r, deps, Vec::new(), false)
         })
         .collect::<Result<_, _>>()?;
-    Ok(RenderedDocs {
-        kind: DocsKind::Docs,
-        commands,
-    })
+    Ok(RenderedUnit::Docs(RenderedDocs { commands }))
 }
 
 /// A rustdoc unit (a doc or a doctest, normalized) as a rendered compile
 /// with no outputs and no remapping: rustdoc keeps nothing it writes but
 /// what the derivation gives it. Its splices name every run they splice
-/// as an input, as it reads no manifests. `searchPathsOf` splices are left
-/// out (the doctest renders them itself). `deps` is its dependency
+/// as an input, as it reads no manifests. `deps` is its dependency
 /// directory, `link_captures` its linked packages' env captures, and
 /// `with_view` whether it names its source view, for hints.
 pub(crate) fn rustdoc_command<R: Resolve>(
@@ -68,13 +63,12 @@ pub(crate) fn rustdoc_command<R: Resolve>(
         args: d
             .args
             .iter()
-            .filter(|a| !matches!(a, Arg::SearchPaths(_)))
             .map(|a| {
                 Ok(match a {
                     Arg::Literal(s) => RenderedArg::Literal(s.clone()),
                     Arg::Concat(p) => RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?),
                     Arg::Splice(s) => RenderedArg::Splice(splice(s, r, &strong)?),
-                    Arg::SearchPaths(_) => unreachable!("filtered out"),
+                    Arg::SearchPaths(s) => RenderedArg::SearchPaths(search_paths(s, r)?),
                 })
             })
             .collect::<Result<_, _>>()?,
@@ -90,9 +84,7 @@ pub(crate) fn rustdoc_command<R: Resolve>(
             .map(|u| flags(u, r, &strong))
             .collect::<Result<_, _>>()?,
         cwd: d.cwd.render(r)?,
-        outputs: Default::default(),
-        uplifted: Default::default(),
-        side_files: Vec::new(),
+        outputs: Vec::new(),
         deps: deps
             .into_iter()
             .map(|o| r.reference(&Reference::Out(o)))
@@ -104,12 +96,14 @@ pub(crate) fn rustdoc_command<R: Resolve>(
         remap_scope: None,
         env_capture,
         link_captures,
-        view: if with_view {
-            r.source_view(id, d)?
-        } else {
-            None
+        hints: Hints {
+            view: if with_view {
+                r.source_view(id, d)?
+            } else {
+                None
+            },
+            repository_paths: Vec::new(),
         },
-        repository_paths: Vec::new(),
         // rustdoc compiles no C; the derivation adds no C flags.
         seed: None,
     })

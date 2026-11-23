@@ -529,7 +529,7 @@ let
       inst = crossDoctests.workspaces.main.internal.instances.${a64}.default;
       plan = planOf inst "test";
       unitOf = d: builtins.fromJSON (unitText d);
-      hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).compile.args);
+      hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).args);
       platformOf = name: inst.tests.${name}.breakbulkRoot.platform;
       checks = {
         "a runner" = t.runner != null;
@@ -727,7 +727,7 @@ let
             link() {
               rm -rf "$TMPDIR/unit-out" "$TMPDIR/unit-debug" "$TMPDIR/breakbulk-lld-link" /tmp/breakbulk-lld-link
               BREAKBULK_UNIT="$(cat "$2")" out=$TMPDIR/unit-out debug=$TMPDIR/unit-debug \
-                ${tools.breakbulk-unit}/bin/breakbulk-unit unit 2> "$1.log" || { cat "$1.log"; exit 1; }
+                ${tools.breakbulk-unit}/bin/breakbulk-unit 2> "$1.log" || { cat "$1.log"; exit 1; }
               mkdir "$1"
               cp -r "$TMPDIR/unit-out" "$1/out"
               cp -r "$TMPDIR/unit-debug" "$1/debug"

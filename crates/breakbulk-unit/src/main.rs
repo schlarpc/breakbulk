@@ -1,9 +1,9 @@
-//! `breakbulk-unit unit`: the builder of every unit derivation.
+//! `breakbulk-unit`: the builder of every unit, doctest and docs derivation.
 //!
-//! Reads the unit from `BREAKBULK_UNIT` (or, when the derivation passes it
-//! with `passAsFile`, from the file named by `BREAKBULK_UNITPath`) and runs it
-//! in `compile` or `run` mode according to its `kind`. Output paths come from
-//! the variables Nix names after the derivation's outputs.
+//! Reads what to do from `BREAKBULK_UNIT` (or, when the derivation passes it
+//! with `passAsFile`, from the file named by `BREAKBULK_UNITPath`) and does
+//! it according to its `kind`: `compile`, `run`, `doctest` or `docs`. Output
+//! paths come from the variables Nix names after the derivation's outputs.
 
 use std::process::ExitCode;
 
@@ -11,9 +11,9 @@ use breakbulk_unit::Error;
 use breakbulk_unit::env::Outer;
 use breakbulk_unit::spec::RenderedUnit;
 
-const USAGE: &str = "usage: breakbulk-unit unit|doctest|docs\n\n\
-    Builds the unit (or runs the doctests, or writes the documentation) described by \
-    $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath).";
+const USAGE: &str = "usage: breakbulk-unit\n\n\
+    Builds the unit, runs the doctests, or writes the documentation described by \
+    $BREAKBULK_UNIT (or the file $BREAKBULK_UNITPath), as its `kind` says.";
 
 fn read_unit(outer: &Outer) -> Result<RenderedUnit, Error> {
     let (text, whence) = if let Some(path) = outer.get("BREAKBULK_UNITPath") {
@@ -31,14 +31,7 @@ fn read_unit(outer: &Outer) -> Result<RenderedUnit, Error> {
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args == ["doctest"] {
-        return breakbulk_unit::doctest::main();
-    }
-    if args == ["docs"] {
-        return breakbulk_unit::docs::main();
-    }
-    if args != ["unit"] {
+    if std::env::args().len() > 1 {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
@@ -46,6 +39,8 @@ fn main() -> ExitCode {
     let result = read_unit(&outer).and_then(|unit| match &unit {
         RenderedUnit::Compile(c) => breakbulk_unit::compile::compile(c, &outer),
         RenderedUnit::Run(r) => breakbulk_unit::run::run(r, &outer),
+        RenderedUnit::Doctest(d) => breakbulk_unit::doctest::doctest(d, &outer),
+        RenderedUnit::Docs(d) => breakbulk_unit::docs::docs(d, &outer),
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,

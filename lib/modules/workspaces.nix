@@ -539,8 +539,9 @@ let
           );
           default = [ ];
           example = [ ".vir" ];
+          # breakbulk-unit's output rules (`OutputRule`).
           apply = map (r: {
-            inherit (r) suffix;
+            match.suffix = r.suffix;
             into = if r.into == "beside" then "beside" else { output = r.into; };
           });
           description = ''

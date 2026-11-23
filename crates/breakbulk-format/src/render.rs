@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{append, list_separator};
 use breakbulk_unit::spec::{
-    RenderedArg, RenderedCompile, RenderedRun, RenderedUnit, RepositoryPath, SideFile, SourceView,
-    debug_side_files,
+    Hints, OutputInto, OutputRule, RenderedArg, RenderedCompile, RenderedRun, RenderedUnit,
+    RepositoryPath, SearchPaths, SourceView,
 };
 
 use crate::deps::Graph;
 use crate::normalize::normalize_unit;
 use crate::plan::{
-    Arg, CrateSrcRef, EmptyRef, OutRef, Piece, Plan, Reference, SrcRef, Text, Unit, UnitId,
-    UnitKind, for_each_reference,
+    Arg, CrateSrcRef, DEBUG_OUTPUT, EmptyRef, OutRef, Piece, Plan, Reference, SrcRef, Text, Unit,
+    UnitId, UnitKind, derivation_output, for_each_reference,
 };
 use crate::{CanonicalError, Splice, to_canonical_json};
 
@@ -92,19 +92,19 @@ pub trait Resolve {
     ) -> Result<Option<(String, String)>, Self::Error> {
         Ok(None)
     }
-    /// The rules for the files a compile unit writes beyond its outputs
-    /// (`RenderedCompile::side_files`) when one of the variant's wrappers
+    /// The output rules for the files a compile unit writes beyond its
+    /// crate files and debuginfo ([`OutputRule`]) when one of the variant's wrappers
     /// runs it (its program chain names the wrapper): what the variant's
     /// rustc driver writes, such as files for its dependents to read.
     /// Plain rustc writes nothing more, and units without a wrapper stay
     /// the same as a plain variant's, and shared. They come after the
     /// debuginfo rules.
-    fn side_files(&self, _unit: &Unit) -> Vec<SideFile> {
+    fn side_files(&self, _unit: &Unit) -> Vec<OutputRule> {
         Vec::new()
     }
     /// For a unit (or doctest) of a repository package: the source view it
     /// sees, for the hints when it fails naming a path the view lacks
-    /// (`RenderedCompile::view`).
+    /// (`Hints::view`).
     fn source_view(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<SourceView>, Self::Error> {
         Ok(None)
     }
@@ -491,9 +491,7 @@ pub fn render_unit_in<R: Resolve>(
                                 RenderedArg::Literal(text(&Text::Concat(p.clone()), r)?)
                             }
                             Arg::Splice(s) => RenderedArg::Splice(splice(s, r, weak)?),
-                            Arg::SearchPaths(_) => {
-                                panic!("searchPathsOf splices appear only in doctests (validated)")
-                            }
+                            Arg::SearchPaths(s) => RenderedArg::SearchPaths(search_paths(s, r)?),
                         })
                     })
                     .collect::<Result<_, _>>()?,
@@ -509,31 +507,7 @@ pub fn render_unit_in<R: Resolve>(
                     .map(|u| flags(u, r, weak))
                     .collect::<Result<_, _>>()?,
                 cwd: c.cwd.render(r)?,
-                outputs: c
-                    .outputs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
-                    .chain(
-                        c.has_debug_output(&plan.target.debuginfo)
-                            .then(|| (breakbulk_unit::spec::DEBUG_OUTPUT.to_owned(), Vec::new())),
-                    )
-                    .collect(),
-                uplifted: c.uplifted.clone(),
-                side_files: c
-                    .has_debug_output(&plan.target.debuginfo)
-                    .then(|| {
-                        debug_side_files(
-                            plan.target
-                                .debuginfo
-                                .artifacts
-                                .iter()
-                                .map(|a| a.suffix.as_str()),
-                        )
-                    })
-                    .into_iter()
-                    .flatten()
-                    .chain(r.side_files(c))
-                    .collect(),
+                outputs: output_rules(plan, c, r),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
                 dep_manifests: sorted(deps.manifests.iter().map(rmeta_dir))?,
                 link_manifest_crates: deps.link_manifest_crates,
@@ -542,8 +516,10 @@ pub fn render_unit_in<R: Resolve>(
                 remap_scope,
                 env_capture,
                 link_captures,
-                view: r.source_view(id, &unit)?,
-                repository_paths,
+                hints: Hints {
+                    view: r.source_view(id, &unit)?,
+                    repository_paths,
+                },
                 seed: Some(id.to_string()),
             })
         }
@@ -607,11 +583,64 @@ pub fn render_unit_in<R: Resolve>(
                 // names, or Cargo's under trim-paths (`cargo_run_remap`).
                 remap,
                 out_dir_remap,
-                view: r.source_view(id, &unit)?,
-                repository_paths,
+                hints: Hints {
+                    view: r.source_view(id, &unit)?,
+                    repository_paths,
+                },
                 seed: Some(id.to_string()),
             })
         }
+    })
+}
+
+/// Where a compile unit's files go ([`OutputRule`]): each file of its
+/// `outputs` into its derivation output (a bin uplifted under its stored
+/// name), dep-info nowhere, the target's debuginfo side files into `debug`
+/// when the unit has that output, then the variant's rules for wrapper
+/// units, without those into an output the unit lacks.
+pub fn output_rules<R: Resolve>(plan: &Plan, c: &Unit, r: &R) -> Vec<OutputRule> {
+    let mut rules = Vec::new();
+    for (output, files) in &c.outputs {
+        for f in files {
+            let written = c.uplifted.get(f);
+            rules.push(OutputRule {
+                stored: written.map(|_| f.clone()),
+                ..OutputRule::file(written.unwrap_or(f), derivation_output(output))
+            });
+        }
+    }
+    rules.push(OutputRule::suffix(".d", OutputInto::Discard));
+    if c.has_debug_output(&plan.target.debuginfo) {
+        rules.extend(
+            plan.target.debuginfo.artifacts.iter().map(|a| {
+                OutputRule::suffix(&a.suffix, OutputInto::Output(DEBUG_OUTPUT.to_owned()))
+            }),
+        );
+    }
+    let outputs: BTreeSet<String> = rules
+        .iter()
+        .filter_map(|r| r.output().map(str::to_owned))
+        .collect();
+    rules.extend(
+        r.side_files(c)
+            .into_iter()
+            .filter(|rule| rule.output().is_none_or(|o| outputs.contains(o))),
+    );
+    rules
+}
+
+/// A `searchPathsOf` splice with each run as its `flags` directory.
+pub(crate) fn search_paths<R: Resolve>(
+    s: &crate::plan::SearchPathsSplice,
+    r: &R,
+) -> Result<SearchPaths, R::Error> {
+    Ok(SearchPaths {
+        search_paths_of: s
+            .search_paths_of
+            .iter()
+            .map(|u| r.flags(u))
+            .collect::<Result<_, _>>()?,
+        literals: s.literals.clone(),
     })
 }
 

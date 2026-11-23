@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::directives::{BuildOutput, LibraryPath};
-use breakbulk_unit::spec::{RenderedArg, RenderedUnit};
+use breakbulk_unit::spec::{OutputInto, OutputRule, RenderedArg, RenderedCompile, RenderedUnit};
 
 use super::*;
 
@@ -1007,7 +1007,7 @@ pub(crate) fn check_manifests(p: &Plan) -> Result<usize, String> {
         .filter(|(_, u)| matches!(u, Unit::Compile(_)))
         .map(|(id, _)| match render_unit_in(&graph, id, &Weak).unwrap() {
             RenderedUnit::Compile(c) => (id, c),
-            RenderedUnit::Run(_) => unreachable!(),
+            _ => unreachable!(),
         })
         .collect();
     let strip = |s: &str| s.strip_prefix("weak:").unwrap_or(s).to_owned();
@@ -1061,7 +1061,7 @@ pub(crate) fn check_manifests(p: &Plan) -> Result<usize, String> {
                 .iter()
                 .filter_map(|a| match a {
                     RenderedArg::Splice(s) => Some(s.splice.as_str()),
-                    RenderedArg::Literal(_) => None,
+                    _ => None,
                 })
                 .collect();
             flags.extend(c.env_splices.iter().map(|s| s.splice.as_str()));
@@ -1074,7 +1074,8 @@ pub(crate) fn check_manifests(p: &Plan) -> Result<usize, String> {
                     }
                 }
             }
-            if let Some(files) = c.outputs.get("rmeta") {
+            let files = breakbulk_unit::compile::stored_in(&c.outputs, "rmeta");
+            if !files.is_empty() {
                 let dir = Fake
                     .reference(&Reference::Out(OutRef {
                         out: (*id).clone(),
@@ -1182,7 +1183,7 @@ fn manifests_reach_what_crate_deps_lists() {
         .iter()
         .filter_map(|a| match a {
             RenderedArg::Splice(s) => Some(s.splice.as_str()),
-            RenderedArg::Literal(_) => None,
+            _ => None,
         })
         .collect();
     assert_eq!(
@@ -1368,7 +1369,9 @@ fn docs_validate_and_render_like_compiles() {
     }
     assert_error(&cycle, "in a cycle");
 
-    let r = render_docs(&p, &Fake).unwrap();
+    let RenderedUnit::Docs(r) = render_docs(&p, &Fake).unwrap() else {
+        panic!()
+    };
     assert_eq!(r.commands.len(), 2);
     let ring = &r.commands[0];
     // The crates it names, as metadata; no outputs, no remapping.
@@ -1568,9 +1571,18 @@ fn debug_side_files_from_the_plan() {
     let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Fake).unwrap() else {
         panic!()
     };
-    assert!(c.outputs.contains_key("debug"));
-    let suffixes: Vec<&str> = c.side_files.iter().map(|f| f.suffix.as_str()).collect();
-    assert_eq!(suffixes, [".dwp", ".dwo"]);
+    let debug: Vec<&OutputRule> = c
+        .outputs
+        .iter()
+        .filter(|r| r.output() == Some("debug"))
+        .collect();
+    assert_eq!(
+        debug,
+        [".dwp", ".dwo"]
+            .map(|s| OutputRule::suffix(s, OutputInto::Output("debug".into())))
+            .iter()
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -1682,11 +1694,25 @@ fn doctests_keep_only_their_closures_runs() {
     let app = doctest(&mut p, "c-app", vec![]);
     p.units.insert("d-ring".into(), Unit::Doctest(ring));
     p.units.insert("d-app".into(), Unit::Doctest(app));
-    let r = render_doctest(&p, "d-ring", &Fake).unwrap();
-    assert_eq!(r.search_paths_of, ["/nix/store/r-ring-flags"]);
+    let doctest = |id: &str| match render_doctest(&p, id, &Fake).unwrap() {
+        RenderedUnit::Doctest(c) => c,
+        _ => panic!(),
+    };
+    let runs = |c: &RenderedCompile| -> Vec<String> {
+        c.args
+            .iter()
+            .filter_map(|a| match a {
+                RenderedArg::SearchPaths(s) => Some(s.search_paths_of.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let r = doctest("d-ring");
+    assert_eq!(runs(&r), ["/nix/store/r-ring-flags"]);
     // The traced dynamic-library path names host runs; r-ring is not one.
-    assert!(r.compile.dylib_path_from.is_empty());
-    let a = render_doctest(&p, "d-app", &Fake).unwrap();
-    assert!(a.search_paths_of.is_empty());
-    assert!(a.compile.dylib_path_from.is_empty());
+    assert!(r.dylib_path_from.is_empty());
+    let a = doctest("d-app");
+    assert!(runs(&a).is_empty());
+    assert!(a.dylib_path_from.is_empty());
 }

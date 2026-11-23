@@ -28,12 +28,14 @@
 //!   run in printed order, and passes those that apply to the unit. One splice
 //!   per run carries the set of kinds that apply (`kinds`), and expands to the
 //!   run's link args of those kinds in printed order.
+//! - **`searchPathsOf`.** `rustdoc --test`'s `-L` list: every search path of
+//!   the listed runs, sorted by value ([`search_paths`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::directives::{BuildOutput, search_path_without_kind};
-use crate::spec::{RenderedArg, SearchIn, Splice, SpliceKind};
+use crate::spec::{RenderedArg, SearchIn, SearchPaths, Splice, SpliceKind};
 
 /// The arguments one directive value becomes, or `None` for `rustc-env`,
 /// which becomes an env var. The planner checks sentinel placement against
@@ -128,7 +130,7 @@ pub fn expand_args<'a>(
         .enumerate()
         .filter_map(|(i, a)| match a {
             RenderedArg::Splice(s) => Some((i, s)),
-            RenderedArg::Literal(_) => None,
+            RenderedArg::Literal(_) | RenderedArg::SearchPaths(_) => None,
         })
         .collect();
     check_arg_splices(&splices)?;
@@ -141,6 +143,12 @@ pub fn expand_args<'a>(
         let s = match arg {
             RenderedArg::Literal(l) => {
                 out.push(l.clone());
+                continue;
+            }
+            RenderedArg::SearchPaths(p) => {
+                for path in search_paths(p, &directives)? {
+                    out.extend(["-L".to_owned(), path]);
+                }
                 continue;
             }
             RenderedArg::Splice(s) => s,
@@ -177,6 +185,29 @@ pub fn expand_args<'a>(
         }
     }
     Ok(out)
+}
+
+/// Every search path of a [`SearchPaths`] splice's runs, both classes, and
+/// its `literals` (search paths of `links` overrides), sorted and without
+/// duplicates as Cargo's `BTreeSet<PathBuf>` holds them: by path
+/// component, with the value as printed (`native=` prefix included).
+pub fn search_paths<'a>(
+    p: &SearchPaths,
+    directives: impl Fn(&str) -> Option<&'a BuildOutput>,
+) -> Result<Vec<String>, SpliceError> {
+    let mut set: BTreeSet<std::path::PathBuf> = p.literals.iter().map(Into::into).collect();
+    for r in &p.search_paths_of {
+        let d = directives(r)
+            .ok_or_else(|| SpliceError(format!("no directives for the search paths of {r}")))?;
+        set.extend(d.library_paths.iter().map(|l| (&l.value).into()));
+    }
+    set.into_iter()
+        .map(|p| {
+            p.into_os_string()
+                .into_string()
+                .map_err(|p| SpliceError(format!("search path {p:?} is not UTF-8")))
+        })
+        .collect()
 }
 
 /// The dynamic-library path variable of the platform `breakbulk-unit` runs

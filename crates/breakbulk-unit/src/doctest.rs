@@ -1,4 +1,4 @@
-//! `breakbulk-unit doctest`: run one library's doctests.
+//! The `doctest` kind: run one library's doctests.
 //!
 //! The doctest derivation of a library runs the test plan's traced
 //! `rustdoc --test` command ("Tests" in
@@ -8,12 +8,10 @@
 //! cutoff.
 //!
 //! The command is a compile unit's ([`RenderedCompile`], with no outputs and
-//! no remapping), plus the one thing Cargo computes from values rather than
-//! positions: the `-L` list of every build-script run's search paths
-//! (`run_doc_tests` in Cargo's `src/cargo/ops/cargo_test.rs`, from
-//! `Compilation::native_dirs`, a `BTreeSet<PathBuf>`). It is rebuilt here at
-//! build time from the runs' `flags` outputs, sorted as Cargo sorts paths
-//! (by component) and without duplicates, at the position the trace showed.
+//! no remapping). Its `-L` list of every build-script run's search paths,
+//! which Cargo computes from values rather than positions (`run_doc_tests`
+//! in Cargo's `src/cargo/ops/cargo_test.rs`), is a `searchPathsOf` splice
+//! ([`crate::splice::search_paths`]) at the position the trace showed.
 //!
 //! Configuration from the derivation's environment, all optional:
 //!
@@ -25,7 +23,7 @@
 //!   --test-runtool-arg A …` right after `--test-run-directory D` and, for
 //!   the target, `--target T`.
 //! - [`TEST_ARGS_VAR`]: a JSON array of libtest arguments, each passed as
-//!   `--test-args A` after the `-L` list, where Cargo puts them.
+//!   `--test-args A` right after the `-L` list, where Cargo puts them.
 //! - [`TEST_ENV_VAR`]: a JSON object of variables merged over the command's
 //!   environment, list-like variables (`PATH`) appended
 //!   ([`crate::env::merge_layer`]).
@@ -43,20 +41,18 @@
 //! fails when rustdoc exits non-zero, with a hint for each path the log
 //! names that the source view lacks ([`crate::view_hints`]).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ExitCode, Stdio};
+use std::process::Stdio;
 
-use serde::{Deserialize, Serialize};
-
-use crate::compile::{Invocation, check_args, fresh_dir, link_deps};
+use crate::compile::{Invocation, check_args, fresh_dir, link_deps, load_directives};
 use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, capture_layer, layered_on, merge_layer};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{Platform, RenderedArg, RenderedCompile};
 use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
-use crate::{Error, io_err, read_directives, view_hints};
+use crate::{Error, io_err, view_hints};
 
 pub const RUNNERS_VAR: &str = "BREAKBULK_TEST_RUNNERS";
 pub const TEST_ARGS_VAR: &str = "BREAKBULK_TEST_ARGS";
@@ -66,33 +62,6 @@ pub const POST_RUN_VAR: &str = "BREAKBULK_TEST_POST_RUN";
 
 /// The log file in `$TMPDIR`.
 pub const LOG_FILE: &str = "breakbulk-doctest.log";
-
-/// `BREAKBULK_UNIT` of a doctest derivation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RenderedDoctest {
-    /// Always `"doctest"`, so that the value cannot be mistaken for a unit.
-    pub kind: DoctestKind,
-    /// The traced `rustdoc --test`, without its `searchPathsOf` splice.
-    /// `outputs` is empty and `remap` is empty: rustdoc writes nothing that
-    /// is kept.
-    pub compile: RenderedCompile,
-    /// The `flags` outputs of the runs whose search paths form the `-L`
-    /// list.
-    pub search_paths_of: Vec<String>,
-    /// Search paths that are no run's (`links` overrides), sorted into the
-    /// same list.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub search_paths_literals: Vec<String>,
-    /// Where in `compile.args` the `-L` list goes.
-    pub search_paths_at: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DoctestKind {
-    Doctest,
-}
 
 /// The configuration a doctest derivation adds to the traced command.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -127,71 +96,20 @@ impl TestConfig {
     }
 }
 
-/// Every search path of the given runs, both classes, and the `literals`
-/// (search paths of `links` overrides), sorted and without duplicates as
-/// Cargo's `BTreeSet<PathBuf>` holds them: by path component, with the
-/// value as printed (`native=` prefix included).
-pub fn search_paths<'a>(
-    runs: &[String],
-    literals: &[String],
-    directives: impl Fn(&str) -> Option<&'a BuildOutput>,
-) -> Result<Vec<String>, Error> {
-    let mut set: BTreeSet<PathBuf> = literals.iter().map(PathBuf::from).collect();
-    for r in runs {
-        let d = directives(r)
-            .ok_or_else(|| Error(format!("no directives for the search paths of {r}")))?;
-        set.extend(d.library_paths.iter().map(|p| PathBuf::from(&p.value)));
-    }
-    set.into_iter()
-        .map(|p| {
-            p.into_os_string()
-                .into_string()
-                .map_err(|p| Error(format!("search path {p:?} is not UTF-8")))
-        })
-        .collect()
-}
-
-/// Read the `directives.json` of every run the doctest names.
-fn load_directives(d: &RenderedDoctest) -> Result<BTreeMap<String, BuildOutput>, Error> {
-    let flags: BTreeSet<&str> = d
-        .compile
-        .args
-        .iter()
-        .filter_map(|a| match a {
-            RenderedArg::Splice(s) => Some(s.splice.as_str()),
-            RenderedArg::Literal(_) => None,
-        })
-        .chain(d.compile.env_splices.iter().map(|s| s.splice.as_str()))
-        .chain(d.compile.dylib_path_from.iter().map(String::as_str))
-        .chain(d.search_paths_of.iter().map(String::as_str))
-        .collect();
-    flags
-        .into_iter()
-        .map(|f| Ok((f.to_owned(), read_directives(Path::new(f))?)))
-        .collect()
-}
-
 /// The full command: the traced arguments with the doctest's platform's
-/// runner where Cargo puts it, the `-L` list and the test arguments at the
-/// traced position, and the dependency directory last.
+/// runner where Cargo puts it, the test arguments right after the
+/// `searchPathsOf` splice (or at the end without one), and the dependency
+/// directory last.
 pub fn invocation(
-    d: &RenderedDoctest,
+    c: &RenderedCompile,
     outer: &Outer,
     directives: &BTreeMap<String, BuildOutput>,
     config: &TestConfig,
     deps_dir: &Path,
 ) -> Result<Invocation, Error> {
-    let c = &d.compile;
     check_args(c)?;
     if c.program.is_empty() {
         return Err(Error::new("the doctest has an empty program"));
-    }
-    if d.search_paths_at > c.args.len() {
-        return Err(Error(format!(
-            "searchPathsAt {} is past the end of the {} arguments",
-            d.search_paths_at,
-            c.args.len()
-        )));
     }
     let splices: Vec<_> = c
         .args
@@ -199,13 +117,20 @@ pub fn invocation(
         .enumerate()
         .filter_map(|(i, a)| match a {
             RenderedArg::Splice(s) => Some((i, s)),
-            RenderedArg::Literal(_) => None,
+            _ => None,
         })
         .collect();
     check_arg_splices(&splices)?;
     let lookup = |f: &str| directives.get(f);
-    let (before, after) = c.args.split_at(d.search_paths_at);
+    let at = c
+        .args
+        .iter()
+        .position(|a| matches!(a, RenderedArg::SearchPaths(_)))
+        .unwrap_or(c.args.len());
+    let (before, after) = c.args.split_at(at);
+    let (search, after) = after.split_at(after.len().min(1));
     let mut before = expand_args(before, lookup)?;
+    let search = expand_args(search, lookup)?;
     let after = expand_args(after, lookup)?;
 
     let runner = config
@@ -233,9 +158,7 @@ pub fn invocation(
 
     let mut argv = c.program.clone();
     argv.extend(before);
-    for p in search_paths(&d.search_paths_of, &d.search_paths_literals, lookup)? {
-        argv.extend(["-L".to_owned(), p]);
-    }
+    argv.extend(search);
     for a in &config.args {
         argv.extend(["--test-args".to_owned(), a.clone()]);
     }
@@ -295,13 +218,13 @@ pub fn run_logged(inv: &Invocation, log: &Path) -> Result<std::process::ExitStat
         .map_err(|e| Error(format!("waiting for `{}`: {e}", inv.argv[0])))
 }
 
-/// The whole `doctest` mode.
-pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
+/// The whole `doctest` kind.
+pub fn doctest(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     let config = TestConfig::from_outer(outer)?;
     let deps = outer.tmpdir().join("deps");
-    let directives = load_directives(d)?;
-    let inv = invocation(d, outer, &directives, &config, &deps)?;
-    link_deps(&d.compile.deps, &[], &deps)?;
+    let directives = load_directives(c)?;
+    let inv = invocation(c, outer, &directives, &config, &deps)?;
+    link_deps(&c.deps, &[], &deps)?;
     let home = outer.test_home();
     std::fs::create_dir_all(&home).map_err(|e| io_err("creating", &home, e))?;
     let out = outer.output("out")?;
@@ -311,12 +234,11 @@ pub fn doctest(d: &RenderedDoctest, outer: &Outer) -> Result<(), Error> {
     if !status.success() {
         let mut msg = format!(
             "doctests of `{}` failed ({})",
-            d.compile.krate.name,
+            c.krate.name,
             describe_status(&status)
         );
         let text = String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
-        let c = &d.compile;
-        for h in view_hints::hints(&c.package, &text, c.view.as_ref(), &c.remap, &inv.cwd) {
+        for h in view_hints::hints(&c.package, &text, c.hints.view.as_ref(), &c.remap, &inv.cwd) {
             msg.push_str("\nhint: ");
             msg.push_str(&h);
         }
@@ -347,39 +269,12 @@ fn post_run(program: &str, outer: &Outer, log: &Path, out: &Path) -> Result<(), 
     Ok(())
 }
 
-/// Read the doctest from `BREAKBULK_UNIT` or the file `BREAKBULK_UNITPath`.
-pub fn read(outer: &Outer) -> Result<RenderedDoctest, Error> {
-    let (text, whence) = if let Some(path) = outer.get("BREAKBULK_UNITPath") {
-        let text =
-            std::fs::read_to_string(path).map_err(|e| io_err("reading", Path::new(path), e))?;
-        (text, format!("the file {path}"))
-    } else if let Some(text) = outer.get("BREAKBULK_UNIT") {
-        (text.to_owned(), "BREAKBULK_UNIT".to_owned())
-    } else {
-        return Err(Error::new(
-            "neither BREAKBULK_UNIT nor BREAKBULK_UNITPath is set",
-        ));
-    };
-    serde_json::from_str(&text).map_err(|e| Error(format!("invalid doctest in {whence}: {e}")))
-}
-
-/// `breakbulk-unit doctest`.
-pub fn main() -> ExitCode {
-    let outer = Outer::from_process();
-    match read(&outer).and_then(|d| doctest(&d, &outer)) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::directives::LibraryPath;
-    use crate::spec::{CrateInfo, Splice, SpliceKind};
+    use crate::spec::{CrateInfo, RenderedUnit, SearchPaths, Splice, SpliceKind};
+    use crate::splice::search_paths;
 
     fn out(paths: &[&str]) -> BuildOutput {
         BuildOutput {
@@ -395,10 +290,17 @@ mod tests {
         }
     }
 
-    fn doctest(args: Vec<RenderedArg>, at: usize, runs: &[&str]) -> RenderedDoctest {
-        RenderedDoctest {
-            kind: DoctestKind::Doctest,
-            compile: RenderedCompile {
+    /// A doctest whose `searchPathsOf` splice of `runs` is at `at`.
+    fn doctest(mut args: Vec<RenderedArg>, at: usize, runs: &[&str]) -> RenderedCompile {
+        args.insert(
+            at,
+            RenderedArg::SearchPaths(SearchPaths {
+                search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),
+                literals: vec![],
+            }),
+        );
+        {
+            RenderedCompile {
                 package: "path+file:///w/c#0.1.0".into(),
                 krate: CrateInfo {
                     name: "c".into(),
@@ -412,9 +314,7 @@ mod tests {
                 env_splices: vec![Splice::new("/f/a".into(), SpliceKind::RustcEnv)],
                 dylib_path_from: vec![],
                 cwd: "/src".into(),
-                outputs: BTreeMap::new(),
-                uplifted: BTreeMap::new(),
-                side_files: Vec::new(),
+                outputs: Vec::new(),
                 deps: vec![],
                 dep_manifests: vec![],
                 link_manifest_crates: false,
@@ -423,13 +323,9 @@ mod tests {
                 remap_scope: None,
                 env_capture: None,
                 link_captures: Vec::new(),
-                view: None,
-                repository_paths: Vec::new(),
+                hints: Default::default(),
                 seed: None,
-            },
-            search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),
-            search_paths_literals: vec![],
-            search_paths_at: at,
+            }
         }
     }
 
@@ -446,15 +342,17 @@ mod tests {
             ),
             ("/f/b".to_owned(), out(&["native=/n/b-c", "/n/a"])),
         ]);
-        let got = search_paths(&["/f/a".into(), "/f/b".into()], &[], |f| d.get(f)).unwrap();
+        let sp = |runs: &[&str], literals: &[&str]| SearchPaths {
+            search_paths_of: runs.iter().map(|s| (*s).to_owned()).collect(),
+            literals: literals.iter().map(|s| (*s).to_owned()).collect(),
+        };
+        let got = search_paths(&sp(&["/f/a", "/f/b"], &[]), |f| d.get(f)).unwrap();
         // Component order puts `b` before `b-c`; byte order would not.
         assert_eq!(got, ["/n/a", "/n/z", "native=/n/b/c", "native=/n/b-c"]);
         // A `links` override's paths sort into the same list.
-        let got = search_paths(
-            &["/f/b".into()],
-            &["/n/m".into(), "native=/n/a".into(), "/n/a".into()],
-            |f| d.get(f),
-        )
+        let got = search_paths(&sp(&["/f/b"], &["/n/m", "native=/n/a", "/n/a"]), |f| {
+            d.get(f)
+        })
         .unwrap();
         assert_eq!(got, ["/n/a", "/n/m", "native=/n/a", "native=/n/b-c"]);
     }
@@ -544,7 +442,7 @@ mod tests {
             4,
             &[],
         );
-        d.compile.platform = Platform::Host;
+        d.platform = Platform::Host;
         let dirs = BTreeMap::from([("/f/a".to_owned(), out(&[]))]);
         let target_only = TestConfig {
             runners: BTreeMap::from([(Platform::Target, vec!["qemu-aarch64".into()])]),
@@ -635,18 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_bad_position_and_config() {
-        let d = doctest(vec![lit("--test")], 2, &[]);
-        let dirs = BTreeMap::from([("/f/a".to_owned(), out(&[]))]);
-        let e = invocation(
-            &d,
-            &Outer::default(),
-            &dirs,
-            &TestConfig::default(),
-            Path::new("/d"),
-        )
-        .unwrap_err();
-        assert!(e.0.contains("past the end"), "{e}");
+    fn rejects_bad_config() {
         let outer = Outer {
             vars: BTreeMap::from([(TEST_ARGS_VAR.into(), "{\"a\": 1}".into())]),
         };
@@ -656,9 +543,10 @@ mod tests {
 
     #[test]
     fn parses_with_kind() {
-        let d = doctest(vec![lit("--test")], 1, &["/f/a"]);
+        let d = RenderedUnit::Doctest(doctest(vec![lit("--test")], 1, &["/f/a"]));
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.starts_with("{\"kind\":\"doctest\""), "{json}");
-        assert_eq!(serde_json::from_str::<RenderedDoctest>(&json).unwrap(), d);
+        assert!(json.contains("{\"searchPathsOf\":[\"/f/a\"]}"), "{json}");
+        assert_eq!(serde_json::from_str::<RenderedUnit>(&json).unwrap(), d);
     }
 }

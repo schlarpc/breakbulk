@@ -106,10 +106,10 @@ pub struct Toolchains {
     /// own, Rust or C ([`breakbulk_format::Resolve::keep_source_paths`]).
     #[serde(default)]
     pub keep_source_paths: bool,
-    /// The rules for the side files of compile units run through a wrapper
-    /// ([`breakbulk_format::Resolve::side_files`]).
+    /// The output rules for the side files of compile units run through a
+    /// wrapper ([`breakbulk_format::Resolve::side_files`]).
     #[serde(default)]
-    pub side_files: Vec<breakbulk_format::rendered::SideFile>,
+    pub side_files: Vec<breakbulk_format::rendered::OutputRule>,
     /// The variable that gives a unit the workspace wrapper runs on (its
     /// program chain names the `rustc-workspace-wrapper` tool) its
     /// package's directory in the package's tree of wrapper config files

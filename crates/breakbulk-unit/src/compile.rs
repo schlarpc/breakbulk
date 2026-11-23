@@ -10,10 +10,10 @@
 //! 5. Point `--out-dir` at `$TMPDIR/out` and run the program.
 //! 6. Print the `rendered` text of rustc's JSON diagnostics; drop artifact
 //!    notifications.
-//! 7. Move the listed outputs to their derivation outputs (a bin under
-//!    Cargo's uplifted name, `uplifted`), and other files where the unit's
-//!    side-file rules send them (debuginfo to `debug`, a driver's files
-//!    beside their crate file); discard the rest (dep-info).
+//! 7. Move every file rustc wrote where the unit's first matching output
+//!    rule sends it ([`OutputRule`]): a crate file into its output (a bin
+//!    under Cargo's uplifted name), debuginfo into `debug`, a driver's
+//!    files beside their crate file, dep-info nowhere.
 //! 8. For a library, write its own manifest into its `rmeta` output.
 //!
 //! The plan carries no `--out-dir`, no `-L dependency=` and no
@@ -29,9 +29,7 @@ use crate::diag::{Line, classify};
 use crate::directives::BuildOutput;
 use crate::env::{CFlags, Outer, capture_layer, layered};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{
-    RenderedArg, RenderedCompile, SideFile, SideInto, SpliceKind, derivation_output,
-};
+use crate::spec::{FileMatch, OutputInto, OutputRule, RenderedArg, RenderedCompile, SpliceKind};
 use crate::splice::{expand_args, expand_dylib_path, expand_env};
 use crate::{Error, io_err, manifest, read_directives, repository_paths, view_hints};
 
@@ -67,7 +65,7 @@ pub fn check_args(c: &RenderedCompile) -> Result<(), Error> {
         .iter()
         .map(|a| match a {
             RenderedArg::Literal(s) => s.as_str(),
-            RenderedArg::Splice(_) => "",
+            RenderedArg::Splice(_) | RenderedArg::SearchPaths(_) => "",
         })
         .collect();
     let bad = |what: &str, arg: &str| {
@@ -133,9 +131,10 @@ pub fn load_directives(c: &RenderedCompile) -> Result<BTreeMap<String, BuildOutp
     let flags: BTreeSet<&str> = c
         .args
         .iter()
-        .filter_map(|a| match a {
-            RenderedArg::Splice(s) => Some(s.splice.as_str()),
-            RenderedArg::Literal(_) => None,
+        .flat_map(|a| match a {
+            RenderedArg::Splice(s) => vec![s.splice.as_str()],
+            RenderedArg::SearchPaths(p) => p.search_paths_of.iter().map(String::as_str).collect(),
+            RenderedArg::Literal(_) => vec![],
         })
         .chain(c.env_splices.iter().map(|s| s.splice.as_str()))
         .chain(c.dylib_path_from.iter().map(String::as_str))
@@ -177,7 +176,7 @@ pub fn invocation(
 
 /// Create `dir` afresh, holding a symlink to each dependency file, and to
 /// each file beside it whose name is its stem and one of `beside` (the
-/// unit's [`SideInto::Beside`] suffixes). rustc records a crate it finds
+/// suffixes of the unit's [`OutputInto::Beside`] rules). rustc records a crate it finds
 /// here under this directory's path, not the real one, and a driver
 /// that looks beside a loaded crate (Verus's `<stem>.vir`, through
 /// `used_crate_source`) looks here.
@@ -215,12 +214,28 @@ pub fn link_deps(deps: &[String], beside: &[&str], dir: &Path) -> Result<(), Err
     Ok(())
 }
 
-/// The suffixes of a unit's [`SideInto::Beside`] rules, for [`link_deps`].
-pub fn beside_suffixes(side_files: &[SideFile]) -> Vec<&str> {
-    side_files
+/// The suffixes of a unit's [`OutputInto::Beside`] rules, for [`link_deps`].
+pub fn beside_suffixes(rules: &[OutputRule]) -> Vec<&str> {
+    rules
         .iter()
-        .filter(|r| r.into == SideInto::Beside)
-        .map(|r| r.suffix.as_str())
+        .filter_map(|r| match (&r.matches, &r.into) {
+            (FileMatch::Suffix(s), OutputInto::Beside) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The files the unit stores in derivation output `output`, under their
+/// stored names.
+pub fn stored_in<'a>(rules: &'a [OutputRule], output: &str) -> Vec<&'a str> {
+    rules
+        .iter()
+        .filter_map(|r| match &r.matches {
+            FileMatch::File(f) if r.output() == Some(output) => {
+                Some(r.stored.as_deref().unwrap_or(f))
+            }
+            _ => None,
+        })
         .collect()
 }
 
@@ -308,50 +323,55 @@ pub fn run_diagnosed(
     Ok(())
 }
 
-/// Move each listed output file into its derivation output, under the
-/// listed name; rustc's name for it is its entry in `uplifted`, if any.
-/// Every output named in `outputs` is created, even if it lists no files.
-/// Unlisted files and directories go where the first `side_files` rule
-/// whose suffix they end in sends them ([`SideFile`]); the rest, dep-info
-/// aside, are reported and left behind.
+/// Move what the program wrote into `from` where the rules send it
+/// ([`OutputRule`]): first every [`FileMatch::File`], which must exist,
+/// then each other file or directory by the first rule it matches, in
+/// name order. Every output a rule names is created, even if nothing goes
+/// there. A file no rule takes is reported and left behind.
 pub fn collect_outputs(
-    outputs: &BTreeMap<String, Vec<String>>,
-    uplifted: &BTreeMap<String, String>,
-    side_files: &[SideFile],
+    rules: &[OutputRule],
     from: &Path,
     dest: impl Fn(&str) -> Result<PathBuf, Error>,
 ) -> Result<(), Error> {
     let stem = |f: &str| f.rsplit_once('.').map_or(f, |(s, _)| s).to_owned();
+    let mut dirs: BTreeMap<&str, PathBuf> = BTreeMap::new();
+    for o in rules.iter().filter_map(OutputRule::output) {
+        if !dirs.contains_key(o) {
+            let dir = dest(o)?;
+            std::fs::create_dir_all(&dir).map_err(|e| io_err("creating", &dir, e))?;
+            dirs.insert(o, dir);
+        }
+    }
     let mut listed = BTreeSet::new();
     // rustc's stem of a listed file, to the (directory, stored stem) pairs
     // its side files go to.
     let mut stems: BTreeMap<String, Vec<(PathBuf, String)>> = BTreeMap::new();
-    for (output, files) in outputs {
-        let dir = dest(derivation_output(output))?;
-        std::fs::create_dir_all(&dir).map_err(|e| io_err("creating", &dir, e))?;
-        for f in files {
-            let written = uplifted.get(f).unwrap_or(f);
-            let src = from.join(written);
-            if src.symlink_metadata().is_err() {
-                let mut found: Vec<String> = std::fs::read_dir(from)
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .collect();
-                found.sort();
-                return Err(Error(format!(
-                    "rustc did not write `{written}` (output `{output}`); it wrote: {}",
-                    found.join(", ")
-                )));
-            }
-            move_file(&src, &dir.join(f))?;
-            listed.insert(written.as_str());
-            stems
-                .entry(stem(written))
-                .or_default()
-                .push((dir.clone(), stem(f)));
+    for r in rules {
+        let (FileMatch::File(written), Some(output)) = (&r.matches, r.output()) else {
+            continue;
+        };
+        let stored = r.stored.as_deref().unwrap_or(written);
+        let src = from.join(written);
+        if src.symlink_metadata().is_err() {
+            let mut found: Vec<String> = std::fs::read_dir(from)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            found.sort();
+            return Err(Error(format!(
+                "rustc did not write `{written}` (output `{output}`); it wrote: {}",
+                found.join(", ")
+            )));
         }
+        let dir = &dirs[output];
+        move_file(&src, &dir.join(stored))?;
+        listed.insert(written.as_str());
+        stems
+            .entry(stem(written))
+            .or_default()
+            .push((dir.clone(), stem(stored)));
     }
     let mut names: Vec<String> = Vec::new();
     for e in std::fs::read_dir(from).map_err(|e| io_err("reading", from, e))? {
@@ -360,34 +380,35 @@ pub fn collect_outputs(
     }
     names.sort();
     'names: for name in names {
-        if listed.contains(name.as_str()) || name.ends_with(".d") {
+        if listed.contains(name.as_str()) {
             continue;
         }
         let path = from.join(&name);
-        for rule in side_files {
-            let Some(stem) = name.strip_suffix(&rule.suffix) else {
+        for rule in rules {
+            let FileMatch::Suffix(suffix) = &rule.matches else {
+                continue;
+            };
+            let Some(stem) = name.strip_suffix(suffix.as_str()) else {
                 continue;
             };
             match &rule.into {
-                SideInto::Beside => {
+                OutputInto::Beside => {
                     let Some(places) = stems.get(stem) else {
                         continue;
                     };
                     for (dir, stored) in places {
-                        copy_tree(&path, &dir.join(format!("{stored}{}", rule.suffix)))?;
+                        copy_tree(&path, &dir.join(format!("{stored}{suffix}")))?;
                     }
                 }
-                SideInto::Output(o) => {
-                    if !outputs.contains_key(o) {
-                        continue;
-                    }
-                    let to = dest(derivation_output(o))?.join(&name);
+                OutputInto::Output(o) => {
+                    let to = dirs[o.as_str()].join(&name);
                     if path.is_dir() {
                         move_dir(&path, &to)?;
                     } else {
                         move_file(&path, &to)?;
                     }
                 }
+                OutputInto::Discard => {}
             }
             continue 'names;
         }
@@ -458,7 +479,10 @@ pub fn own_manifest(
     rmeta_dir: &Path,
     below: &manifest::Below,
 ) -> Option<manifest::Manifest> {
-    let files = c.outputs.get("rmeta")?;
+    let files = stored_in(&c.outputs, "rmeta");
+    if files.is_empty() {
+        return None;
+    }
     let mut m = manifest::Manifest {
         crates: files
             .iter()
@@ -487,7 +511,7 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
     let inv = invocation(c, outer, &directives, &dirs)?;
     link_deps(
         &all_deps(c, &below),
-        &beside_suffixes(&c.side_files),
+        &beside_suffixes(&c.outputs),
         &dirs.deps,
     )?;
     fresh_dir(&dirs.out)?;
@@ -495,17 +519,18 @@ pub fn compile(c: &RenderedCompile, outer: &Outer) -> Result<(), Error> {
         let mut hints = view_hints::hints(
             &c.package,
             text,
-            c.view.as_ref(),
+            c.hints.view.as_ref(),
             &c.remap,
             Path::new(&c.cwd),
         );
-        hints.extend(repository_paths::hints(&c.package, &c.repository_paths));
+        hints.extend(repository_paths::hints(
+            &c.package,
+            &c.hints.repository_paths,
+        ));
         hints
     })?;
-    collect_outputs(&c.outputs, &c.uplifted, &c.side_files, &dirs.out, |o| {
-        outer.output(o)
-    })?;
-    if c.outputs.contains_key("rmeta") {
+    collect_outputs(&c.outputs, &dirs.out, |o| outer.output(o))?;
+    if !stored_in(&c.outputs, "rmeta").is_empty() {
         let dir = outer.output("rmeta")?;
         if let Some(m) = own_manifest(c, &dir, &below) {
             manifest::write(&dir, &m)?;

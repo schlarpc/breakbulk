@@ -54,12 +54,12 @@ pub struct UnitsJson {
     /// Root name to root.
     pub roots: BTreeMap<String, RootOut>,
     /// Test plans: the plan's doctest id (`d-<package>`) to its doctest
-    /// derivation (`breakbulk-unit doctest`, output `out`), without the
+    /// derivation (`kind: doctest`, output `out`), without the
     /// package's test configuration; the root shape's `doctest:<package>`
     /// node has it ([`crate::shape`]).
     #[serde(skip_serializing)]
     pub doctests: BTreeMap<String, Drv>,
-    /// Doc plans: the docs derivation (`breakbulk-unit docs`, output `out`),
+    /// Doc plans: the docs derivation (`kind: docs`, output `out`),
     /// the root shape's `docs` node.
     #[serde(skip_serializing)]
     pub docs: Option<Drv>,

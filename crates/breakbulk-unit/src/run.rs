@@ -360,7 +360,7 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
     let stdout = String::from_utf8_lossy(f.stdout);
     let stderr = String::from_utf8_lossy(f.stderr_tail);
     let missing = parsed.map(|p| missing_paths(p, cwd)).unwrap_or_default();
-    let mut hints = path_hints(&f.run.package, cwd, f.run.view.as_ref(), &missing);
+    let mut hints = path_hints(&f.run.package, cwd, f.run.hints.view.as_ref(), &missing);
     hints.extend(recognize::hints(
         &option_prefix(&f.run.package),
         parsed.map_or(&[][..], |p| &p.rerun_if_env_changed),
@@ -370,7 +370,7 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
     // Paths the script's output names, and the declared ones, that its view
     // lacks; a declared path missing from the view has its hint already,
     // unless it is test-only.
-    if let Some(view) = &f.run.view {
+    if let Some(view) = &f.run.hints.view {
         let mut text = format!("{stdout}\n{stderr}");
         for m in &missing {
             text.push('\n');
@@ -394,7 +394,7 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
     }
     hints.extend(crate::repository_paths::hints(
         &f.run.package,
-        &f.run.repository_paths,
+        &f.run.hints.repository_paths,
     ));
     for h in hints {
         msg.push_str("\nhint: ");
@@ -468,7 +468,7 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Failure> {
     let missing = missing_path_entries(
         &f.run.package,
         cwd,
-        f.run.view.as_ref(),
+        f.run.hints.view.as_ref(),
         &missing_paths(&output, cwd),
     );
     let mut warnings: Vec<String> = output

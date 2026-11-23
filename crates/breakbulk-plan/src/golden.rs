@@ -24,9 +24,8 @@ use std::path::{Path, PathBuf};
 
 use breakbulk_format::{Plan, Reference, Resolve, Unit, UnitId, render_doctest, render_unit};
 use breakbulk_unit::directives::{BuildOutput, MetadataFile, ParseContext, parse};
-use breakbulk_unit::doctest;
 use breakbulk_unit::run::run_env;
-use breakbulk_unit::spec::{RenderedUnit, package_name_version};
+use breakbulk_unit::spec::{RenderedArg, RenderedUnit, SearchPaths, package_name_version};
 use breakbulk_unit::splice::{
     DYLIB_PATH_VAR, expand_args, expand_dylib_path, expand_env, prepend_dylib_path,
 };
@@ -745,7 +744,7 @@ pub fn compare_with(
 /// The doctest half of [`compare_with`]: each traced `rustdoc --test` against
 /// the one a real `cargo test -vv` ran (`doc_log`), keyed by
 /// `CARGO_PKG_NAME`. The `-L` list of every run's search paths is rebuilt
-/// with `breakbulk-unit`'s own [`doctest::search_paths`] and the env with its
+/// with `breakbulk-unit`'s own [`breakbulk_unit::splice::search_paths`] and the env with its
 /// dynamic-library path rule, from the traced runs (Cargo's whole-build
 /// set). The rendered doctest keeps only its closure's runs of those
 /// ([`breakbulk_format::closure_runs`]): each must be a traced one.
@@ -793,7 +792,8 @@ fn compare_doctests(
     let lookup = |f: &str| outputs.get(f);
     for id in planned.intersection(&real_ids) {
         let d = match render_doctest(plan, id, resolver) {
-            Ok(d) => d,
+            Ok(RenderedUnit::Doctest(d)) => d,
+            Ok(_) => unreachable!("render_doctest renders a doctest"),
             Err(e) => {
                 report.problems.push(format!("{id}: {e}"));
                 continue;
@@ -821,13 +821,18 @@ fn compare_doctests(
                 continue;
             }
         };
+        let rendered_runs: Vec<String> = d
+            .args
+            .iter()
+            .filter_map(|a| match a {
+                RenderedArg::SearchPaths(s) => Some(s.search_paths_of.iter().cloned()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
         for (what, rendered, all) in [
-            ("-L list", &d.search_paths_of, &traced_runs),
-            (
-                "dynamic-library path",
-                &d.compile.dylib_path_from,
-                &traced_dylib,
-            ),
+            ("-L list", &rendered_runs, &traced_runs),
+            ("dynamic-library path", &d.dylib_path_from, &traced_dylib),
         ] {
             if let Some(f) = rendered.iter().find(|f| !all.contains(f)) {
                 report.problems.push(format!(
@@ -835,17 +840,20 @@ fn compare_doctests(
                 ));
             }
         }
-        let (before, after) = d.compile.args.split_at(d.search_paths_at);
-        let got = (|| -> Result<Vec<String>, String> {
-            let mut a = expand_args(before, lookup).map_err(|e| e.0)?;
-            for p in doctest::search_paths(&traced_runs, &d.search_paths_literals, lookup)
-                .map_err(|e| e.0)?
-            {
-                a.extend(["-L".to_owned(), p]);
-            }
-            a.extend(expand_args(after, lookup).map_err(|e| e.0)?);
-            Ok(a)
-        })();
+        // The rendered list keeps the doctest's own closure's runs; Cargo
+        // passes every run of the invocation.
+        let args: Vec<RenderedArg> = d
+            .args
+            .iter()
+            .map(|a| match a {
+                RenderedArg::SearchPaths(s) => RenderedArg::SearchPaths(SearchPaths {
+                    search_paths_of: traced_runs.clone(),
+                    literals: s.literals.clone(),
+                }),
+                a => a.clone(),
+            })
+            .collect();
+        let got = expand_args(&args, lookup).map_err(|e| e.0);
         let got = match got {
             Ok(a) => a,
             Err(e) => {
@@ -907,11 +915,10 @@ fn compare_doctests(
             ));
         }
         if opts.env {
-            let env =
-                expand_env(&d.compile.env, &d.compile.env_splices, lookup).and_then(|mut e| {
-                    prepend_dylib_path(&mut e, &traced_dylib, lookup)?;
-                    Ok(e)
-                });
+            let env = expand_env(&d.env, &d.env_splices, lookup).and_then(|mut e| {
+                prepend_dylib_path(&mut e, &traced_dylib, lookup)?;
+                Ok(e)
+            });
             match env {
                 Ok(e) => {
                     let diff = env_diff(

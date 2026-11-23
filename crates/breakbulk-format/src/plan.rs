@@ -11,6 +11,19 @@ pub use breakbulk_unit::spec::{
 /// The only plan format version this crate reads and writes.
 pub const PLAN_VERSION: u32 = 6;
 
+/// The derivation output of a unit's output name: a compile unit's `bin`
+/// (everything linked) is its `out`; every other name is its own.
+pub fn derivation_output(output: &str) -> &str {
+    match output {
+        "bin" => "out",
+        o => o,
+    }
+}
+
+/// The derivation output of a linking unit that receives its debuginfo
+/// side files (`.pdb`, `.dwp`, `.dwo`, `.dSYM`).
+pub const DEBUG_OUTPUT: &str = "debug";
+
 /// A unit's key: `c-<hash>` for compile units (Cargo's `-C metadata`),
 /// `r-<pkg>-<hash>` for build-script runs (from `OUT_DIR`), `d-<package
 /// name>` for doctests, `o-<package name>-<version>-<crate name>` for the

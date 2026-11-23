@@ -339,12 +339,29 @@ pub enum Platform {
     Target,
 }
 
-/// One argument of a rendered compile: a literal, or a splice point.
+/// One argument of a rendered command: a literal, or a splice point.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RenderedArg {
     Literal(String),
     Splice(Splice<String>),
+    SearchPaths(SearchPaths),
+}
+
+/// `{ "searchPathsOf": [F, …], "literals": [ … ] }`: `-L P` for every
+/// search path of the runs whose `flags` directories are listed, both
+/// classes, and for each of `literals`, sorted and without duplicates as
+/// Cargo's `BTreeSet<PathBuf>` holds them. Cargo gives `rustdoc --test`
+/// its `-L` list this way (`run_doc_tests`, from
+/// `Compilation::native_dirs`): computed from values rather than printed
+/// positions, so it is one splice rather than one per run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SearchPaths {
+    pub search_paths_of: Vec<String>,
+    /// Search paths that are no run's (`links` overrides in config).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub literals: Vec<String>,
 }
 
 /// The crate a compile unit builds.
@@ -356,12 +373,52 @@ pub struct CrateInfo {
     pub edition: String,
 }
 
-/// `BREAKBULK_UNIT`: one unit with every reference rendered.
+/// `BREAKBULK_UNIT`: what one derivation runs, every reference rendered.
+/// `breakbulk-unit` does what its `kind` says.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum RenderedUnit {
+    /// One rustc (or wrapper) invocation.
     Compile(RenderedCompile),
+    /// One build-script run.
     Run(RenderedRun),
+    /// One library's `rustdoc --test`, which compiles and runs its
+    /// examples (`crate::doctest`). Its `outputs` is empty: rustdoc
+    /// writes nothing that is kept.
+    Doctest(RenderedCompile),
+    /// A doc plan's rustdoc commands, run in order into one folder
+    /// (`crate::docs`).
+    Docs(RenderedDocs),
+}
+
+/// A docs derivation's commands.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenderedDocs {
+    /// The traced `rustdoc` commands, in the order they run. Without `-o`
+    /// and `-L dependency=`; `outputs` and `remap` are empty.
+    pub commands: Vec<RenderedCompile>,
+}
+
+/// What a unit keeps only to explain a failure ([`crate::view_hints`],
+/// [`crate::repository_paths`]); nothing in it changes what runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Hints {
+    /// For a unit of a repository package: its source view, for the hints
+    /// when it fails naming a path the view lacks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<SourceView>,
+    /// For a unit of a registry or git package: the repository paths its
+    /// env values and arguments name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repository_paths: Vec<RepositoryPath>,
+}
+
+impl Hints {
+    pub fn is_empty(&self) -> bool {
+        self.view.is_none() && self.repository_paths.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -380,19 +437,11 @@ pub struct RenderedCompile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<String>,
     pub cwd: String,
-    /// Output name (`rmeta`, `rlib`, `bin`) to the file names it holds.
-    /// `bin` files go to the derivation output `out`; every other name is
-    /// its own derivation output.
-    pub outputs: BTreeMap<String, Vec<String>>,
-    /// Files of `outputs` that rustc writes under another name: the name
-    /// in `outputs` to rustc's (a bin stored under Cargo's uplifted name).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub uplifted: BTreeMap<String, String>,
-    /// Where the files the program writes that `outputs` does not list
-    /// go, first matching rule first ([`SideFile`]); the rest, dep-info
-    /// aside, are discarded.
+    /// Where each file the program writes goes ([`OutputRule`]), first
+    /// matching rule first. Every derivation output a rule names is
+    /// created, even when no file goes there.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub side_files: Vec<SideFile>,
+    pub outputs: Vec<OutputRule>,
     /// Crate files (`.rmeta`, `.rlib` or a proc macro's shared library)
     /// that `breakbulk-unit` symlinks into one directory, passed as the only
     /// `-L dependency=`: the files the arguments name, and for a unit that
@@ -437,16 +486,8 @@ pub struct RenderedCompile {
     /// a `-sys` crate below names with `rustc-link-lib` alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_captures: Vec<String>,
-    /// For a unit of a repository package: its source view, only for the
-    /// hints when the unit fails naming a path the view lacks
-    /// ([`crate::view_hints`]).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub view: Option<SourceView>,
-    /// For a unit of a registry or git package: the repository paths its
-    /// env values and arguments name, only for a hint when the unit fails
-    /// ([`crate::repository_paths`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub repository_paths: Vec<RepositoryPath>,
+    #[serde(default, skip_serializing_if = "Hints::is_empty")]
+    pub hints: Hints,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change
@@ -511,56 +552,79 @@ pub fn package_spec(id: &str) -> String {
     }
 }
 
-/// The derivation output a compile output name goes to: `bin` → `out`.
-/// The output of a linking unit that receives its debuginfo side files
-/// (`.pdb`, `.dwp`, `.dwo`). The unit lists it in `outputs` with no files.
-pub const DEBUG_OUTPUT: &str = "debug";
+/// Where a file the program writes goes: the first rule whose `match` it
+/// meets decides.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutputRule {
+    #[serde(rename = "match")]
+    pub matches: FileMatch,
+    pub into: OutputInto,
+    /// The name a [`FileMatch::File`] is stored under, when not its own: a
+    /// bin Cargo uplifts (`app`, not rustc's `app-<hash>`), so the path a
+    /// test gets in `CARGO_BIN_EXE_<name>` names a file of that name.
+    #[serde(rename = "as", default, skip_serializing_if = "Option::is_none")]
+    pub stored: Option<String>,
+}
 
-/// A rule for a file the program writes into its output directory that
-/// no output lists: a name ending in `suffix` goes `into` a place.
+/// Which files an [`OutputRule`] is for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SideFile {
-    pub suffix: String,
-    pub into: SideInto,
+pub enum FileMatch {
+    /// The file of this name, which the program must write: the unit
+    /// fails when it is missing.
+    File(String),
+    /// Any file or directory whose name ends in this.
+    Suffix(String),
 }
 
+/// Where the files of an [`OutputRule`] go.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum SideInto {
-    /// Beside a listed file: `<stem><suffix>`, where `<stem>` is a listed
-    /// file's name without its extension, goes into that file's output
-    /// (each of them, when an `rlib` and an `rmeta` share the stem), under
-    /// its stored stem. A dependent's compile sees it beside the crate
-    /// file wherever it sees the crate file: at its real path, in that
-    /// output, and in the dependency directory, where `breakbulk-unit`
-    /// links it beside the crate file's link (`compile::link_deps`).
-    /// Verus reads a `.vir` beside each `--extern`'s real path and beside
-    /// the path rustc loaded each other crate from, the link.
-    Beside,
-    /// Into this derivation output, under the program's name, when the
-    /// unit has that output; otherwise the file is discarded.
+pub enum OutputInto {
+    /// Into this derivation output.
     Output(String),
+    /// Beside a file a [`FileMatch::File`] rule stores: `<stem><suffix>`,
+    /// where `<stem>` is that file's name without its extension, goes into
+    /// its output (each of them, when an `rlib` and an `rmeta` share the
+    /// stem), under its stored stem. A dependent's compile sees it beside
+    /// the crate file wherever it sees the crate file: at its real path, in
+    /// that output, and in the dependency directory, where `breakbulk-unit`
+    /// links it beside the crate file's link (`compile::link_deps`). Verus
+    /// reads a `.vir` beside each `--extern`'s real path and beside the
+    /// path rustc loaded each other crate from, the link. A file with no
+    /// such stem goes on to the next rule.
+    Beside,
+    /// Nowhere, without a word (rustc's dep-info). A file no rule matches
+    /// is discarded with a warning.
+    Discard,
 }
 
-/// The rules that send the debuginfo files and directories rustc writes
-/// next to an output but `--print=file-names` does not name into a unit's
-/// [`DEBUG_OUTPUT`], one per suffix: the target's, from the plan
-/// (`.pdb` on msvc, `.dwp` and `.dwo` on Linux, Apple's `.dSYM` bundle).
-pub fn debug_side_files<'a>(suffixes: impl IntoIterator<Item = &'a str>) -> Vec<SideFile> {
-    suffixes
-        .into_iter()
-        .map(|suffix| SideFile {
-            suffix: suffix.to_owned(),
-            into: SideInto::Output(DEBUG_OUTPUT.to_owned()),
-        })
-        .collect()
-}
+impl OutputRule {
+    /// A required file, stored under its own name.
+    pub fn file(name: impl Into<String>, output: impl Into<String>) -> Self {
+        OutputRule {
+            matches: FileMatch::File(name.into()),
+            into: OutputInto::Output(output.into()),
+            stored: None,
+        }
+    }
 
-pub fn derivation_output(output: &str) -> &str {
-    match output {
-        "bin" => "out",
-        o => o,
+    /// Every file ending in `suffix`.
+    pub fn suffix(suffix: impl Into<String>, into: OutputInto) -> Self {
+        OutputRule {
+            matches: FileMatch::Suffix(suffix.into()),
+            into,
+            stored: None,
+        }
+    }
+
+    /// The derivation output the rule sends files into, if any.
+    pub fn output(&self) -> Option<&str> {
+        match &self.into {
+            OutputInto::Output(o) => Some(o),
+            _ => None,
+        }
     }
 }
 
@@ -613,12 +677,8 @@ pub struct RenderedRun {
     /// in its attributes) is remapped to, as with `remap`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_dir_remap: Option<String>,
-    /// As for compile units.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub view: Option<SourceView>,
-    /// As for compile units.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub repository_paths: Vec<RepositoryPath>,
+    #[serde(default, skip_serializing_if = "Hints::is_empty")]
+    pub hints: Hints,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
     /// (Cargo's `-C metadata` hash for a compile, its `OUT_DIR` hash for a
     /// run). Unlike stdenv's seed from the output path, it does not change

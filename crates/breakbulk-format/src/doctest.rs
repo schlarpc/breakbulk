@@ -1,20 +1,20 @@
 //! Rendering a plan's doctest unit into the `BREAKBULK_UNIT` of a doctest
-//! derivation (`breakbulk-unit doctest`, see `breakbulk_unit::doctest`).
+//! derivation (`kind: doctest`, see `breakbulk_unit::doctest`).
 
 use std::collections::BTreeSet;
 
-use breakbulk_unit::doctest::{DoctestKind, RenderedDoctest};
+use breakbulk_unit::spec::RenderedUnit;
 
 use crate::deps::{doctest_deps, runs_of, units_below_unit};
 use crate::docs::rustdoc_command;
 use crate::normalize::normalize_unit;
-use crate::plan::{Arg, Plan, Platform, Unit, UnitKind};
+use crate::plan::{Arg, Plan, Platform, SearchPathsSplice, Unit, UnitKind};
 use crate::render::{Resolve, link_packages};
 
 /// Render doctest unit `id` (`d-<package>`) of `plan`. The doctest is
 /// rendered as a linking compile unit with no outputs and no remapping
-/// (rustdoc keeps nothing it writes); its `searchPathsOf` splice becomes
-/// the list of runs' `flags` outputs and its position in the arguments.
+/// (rustdoc keeps nothing it writes), with one `searchPathsOf` splice
+/// where the first was.
 ///
 /// The traced `-L` list and dynamic-library path name every run of the
 /// invocation (Cargo's whole-build `native_dirs`). Rendered, they keep only
@@ -24,11 +24,7 @@ use crate::render::{Resolve, link_packages};
 /// # Panics
 ///
 /// If `id` is not a doctest unit of `plan`.
-pub fn render_doctest<R: Resolve>(
-    plan: &Plan,
-    id: &str,
-    r: &R,
-) -> Result<RenderedDoctest, R::Error> {
+pub fn render_doctest<R: Resolve>(plan: &Plan, id: &str, r: &R) -> Result<RenderedUnit, R::Error> {
     let mut d = plan
         .units
         .get(id)
@@ -37,11 +33,7 @@ pub fn render_doctest<R: Resolve>(
         .clone();
     normalize_unit(&mut d);
 
-    let at = d
-        .args
-        .iter()
-        .position(|a| matches!(a, Arg::SearchPaths(_)))
-        .unwrap_or(d.args.len());
+    let at = d.args.iter().position(|a| matches!(a, Arg::SearchPaths(_)));
     let (search_runs, dylib_runs) = closure_runs(plan, &d);
     let mut runs: Vec<String> = Vec::new();
     let mut literals: Vec<String> = Vec::new();
@@ -62,18 +54,27 @@ pub fn render_doctest<R: Resolve>(
     literals.dedup();
     d.dylib_path_from.retain(|u| dylib_runs.contains(u));
     d.args.retain(|a| !matches!(a, Arg::SearchPaths(_)));
+    if let Some(at) = at {
+        d.args.insert(
+            at,
+            Arg::SearchPaths(SearchPathsSplice {
+                search_paths_of: runs,
+                literals,
+            }),
+        );
+    }
 
     let id = id.to_owned();
     let deps = doctest_deps(plan, &d);
     let link_captures = r.link_captures(&id, &d, &link_packages(plan, &d, &deps))?;
-    let compile = rustdoc_command(&id, &d, r, deps, link_captures, true)?;
-    Ok(RenderedDoctest {
-        kind: DoctestKind::Doctest,
-        compile,
-        search_paths_of: runs.iter().map(|u| r.flags(u)).collect::<Result<_, _>>()?,
-        search_paths_literals: literals,
-        search_paths_at: at,
-    })
+    Ok(RenderedUnit::Doctest(rustdoc_command(
+        &id,
+        &d,
+        r,
+        deps,
+        link_captures,
+        true,
+    )?))
 }
 
 /// The runs a doctest depends on: those of its platform, for its `-L`

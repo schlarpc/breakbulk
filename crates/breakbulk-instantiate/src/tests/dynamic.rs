@@ -159,7 +159,7 @@ fn resolved_units_equal_nix_substitution() {
         );
         assert_eq!(r.builder, UNIT);
         assert_eq!(r.env["builder"], UNIT);
-        assert_eq!(r.args, ["unit"]);
+        assert!(r.args.is_empty());
         assert_eq!(r.system, "x86_64-linux");
         assert_eq!(r.env["name"], r.name);
         assert!(!r.env.contains_key("args"));
@@ -622,7 +622,7 @@ fn doctests() {
             assert_eq!(d.env[k], attr(ifd, k), "{k}");
         }
     }
-    assert_eq!(d.args, ["doctest"]);
+    assert!(d.args.is_empty());
     for a in DOCTEST_CONFIG {
         assert_eq!(d.env[a], format!("smokelib {a}"));
     }
@@ -701,7 +701,7 @@ fn docs() {
             assert_eq!(d.env[k], attr(ifd, k), "{k}");
         }
     }
-    assert_eq!(d.args, ["docs"]);
+    assert!(d.args.is_empty());
     // Its wrapper, submitted as `docs.drv`.
     let (w, submit) = &by_key["wrapper:docs"];
     assert_eq!(submit.as_deref(), Some("docs.drv"));

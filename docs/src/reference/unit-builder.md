@@ -1,16 +1,21 @@
 # The unit builder
 
 `breakbulk-unit` is the builder of every unit. It is a small Rust binary
-with few dependencies and two modes:
+with few dependencies. It takes no arguments: it reads one rendered value
+from `BREAKBULK_UNIT` (or the file `BREAKBULK_UNITPath`, when the
+derivation passes it with `passAsFile`) and does what its `kind` says:
 
 - `compile`: one rustc call;
-- `run`: one build-script run.
+- `run`: one build-script run;
+- `doctest`: a library's doctests, one `rustdoc --test`;
+- `docs`: a doc plan's documentation, every traced `rustdoc` command in
+  turn, each as a compile with no outputs, with `-o $out` and its own
+  dependency directory
+  ([Documentation](../explanation/internals/products.md#documentation)).
 
-The same binary runs a library's doctests (`breakbulk-unit doctest`) and
-writes a doc plan's documentation (`breakbulk-unit docs`): every traced
-`rustdoc` command in turn, each as a compile with no outputs, with
-`-o $out` and its own dependency directory
-([Documentation](../explanation/internals/products.md#documentation)).
+Everything a value carries only to explain a failure (the unit's source
+view, the repository paths of a registry or git crate) is under its
+`hints`.
 
 Test runs are not units; they belong to [products](../explanation/products.md).
 
@@ -68,17 +73,37 @@ set up the same home with the `home` entry of
    unreadable JSON. If rustc fails, add a hint for each path its output
    names that the unit's source view lacks
    ([Missing paths](#missing-paths)).
-7. Move outputs into place (details below): `.rmeta` to `$rmeta`, `.rlib`
-   to `$rlib`, binaries and cdylibs to `$out` (a bin under the name the
-   plan's `uplifted` gives it). Other files go where the unit's side-file
-   rules send them, the first rule whose suffix the name ends in winning:
-   breakbulk's own rules send the target's debuginfo side files (the
-   suffixes of the plan's `target.debuginfo`: `.pdb`, `.dwp`, `.dwo`,
-   `.dSYM`) to `$debug` when the unit has it, and a variant's
-   [`sideFiles`](options/workspaces.md#workspacesnamevariantsnamesidefiles)
-   rules, on units a wrapper runs on, send a file into a named output or
-   beside the output file of the same stem. Discard the rest, dep-info
-   included.
+7. Move every file rustc wrote where the unit's output rules send it
+   ([Output rules](#output-rules)).
+
+### Output rules
+
+A compile's `outputs` is an ordered list of rules, each
+`{ "match": M, "into": I, "as"?: N }`. `M` is `{ "file": F }`, the file
+rustc writes under the name `F`, which must exist, or `{ "suffix": S }`,
+any file or directory whose name ends in `S`. `I` is `{ "output": O }`, a
+derivation output; `"beside"`, next to the file of the same stem that a
+`file` rule stores (into each of its outputs, under its stored stem), or
+on to the next rule when there is none; or `"discard"`. `as` is the name
+a `file` is stored under, when not its own. Every output a rule names is
+created, even when nothing goes there.
+
+`file` rules apply first; each other file goes by the first rule it
+matches, and a file no rule matches is discarded with a warning. The
+renderer writes, in order:
+
+1. a `file` rule for each file of the plan unit's `outputs`: `.rmeta` to
+   `rmeta`, `.rlib` to `rlib`, binaries and cdylibs to `out`, a bin
+   uplifted under the name the plan's `uplifted` gives it (`as`);
+2. dep-info (`.d`) discarded;
+3. for a unit with a `debug` output, the target's debuginfo side files
+   (the suffixes of the plan's `target.debuginfo`: `.pdb`, `.dwp`, `.dwo`,
+   `.dSYM`) into `debug`;
+4. on units a wrapper runs on, the variant's
+   [`sideFiles`](options/workspaces.md#workspacesnamevariantsnamesidefiles),
+   which send a file into a named output (a rule into an output the unit
+   does not have is left out) or beside the output file of the same
+   stem.
 
 ### Working directory
 
@@ -303,7 +328,7 @@ re-run every test run.
 A registry or git crate has no source view: a repository path that
 Cargo config gives its units (`[env]` with `relative = true`, or
 `build.rustflags`) points into an empty directory. The rendered unit
-lists such paths (`repositoryPaths`). When the unit fails, each gets a
+lists such paths (`hints.repositoryPaths`). When the unit fails, each gets a
 hint, whatever the failure's message says:
 
 - in a variable: set it with
@@ -405,7 +430,7 @@ Each is implemented explicitly and tested.
 | --- | --- |
 | Search-path order | For one compile, Cargo collects the search paths of every run in dependency order, then stable-sorts them: paths inside the printing run's own `OUT_DIR` first, all others after. Search paths from `links` overrides always count as outside. At an inside splice, put R's values that lie inside R's `out`, in printed order; at an outside splice, R's other values, in printed order. |
 | Link arguments | All `rustc-link-arg*` kinds of one run share one list in printed order. A link-arg splice emits the run's values whose kind is in its `kinds`, in that order. |
-| Doctest search paths | A `searchPathsOf` splice emits the search paths of all listed runs, both classes, deduplicated and sorted by value. The values are the real store paths at build time, so the order is computed then, not copied from the trace. |
+| Doctest search paths | A `searchPathsOf` splice (`{ "searchPathsOf": [F, …], "literals": [ … ] }`, the runs' `flags` directories) emits `-L P` for every search path of the listed runs, both classes, and each literal, deduplicated and sorted by value; a doctest's test arguments (`--test-args`) follow it. The values are the real store paths at build time, so the order is computed then, not copied from the trace. |
 | Dynamic-library paths | Keep only values inside the printing run's own `out`, or inside the `out` of a run whose `DEP_*` metadata it received, decided once when the run's output is parsed (`LibraryPath::for_dylib_path`). |
 | Duplicates | Duplicate values within one kind are kept in printed order, as Cargo does. |
 | `rustc-flags` | Split as in the table above. |

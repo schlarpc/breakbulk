@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::directives::LibraryPath;
-use crate::spec::{CrateInfo, Platform, Splice, SpliceKind, debug_side_files};
+use crate::spec::{CrateInfo, Platform, Splice, SpliceKind};
 use crate::test_util::TempDir;
 
 fn unit(args: &[&str]) -> RenderedCompile {
@@ -23,9 +23,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         env_splices: vec![],
         dylib_path_from: vec![],
         cwd: "/nix/store/x-src".into(),
-        outputs: BTreeMap::from([("bin".into(), vec!["app-1".into()])]),
-        uplifted: BTreeMap::new(),
-        side_files: Vec::new(),
+        outputs: vec![OutputRule::file("app-1", "out")],
         deps: vec![],
         dep_manifests: vec![],
         link_manifest_crates: false,
@@ -34,8 +32,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         remap_scope: None,
         env_capture: None,
         link_captures: Vec::new(),
-        view: None,
-        repository_paths: Vec::new(),
+        hints: Default::default(),
         seed: None,
     }
 }
@@ -267,6 +264,33 @@ fn deps_directory_links_side_files() {
     assert!(!deps.join("libx-1.vir").exists());
 }
 
+fn file(name: &str, output: &str) -> OutputRule {
+    OutputRule::file(name, output)
+}
+
+/// A file rustc writes as `written`, stored as `stored`.
+fn uplifted(written: &str, stored: &str, output: &str) -> OutputRule {
+    OutputRule {
+        stored: Some(stored.to_owned()),
+        ..OutputRule::file(written, output)
+    }
+}
+
+fn beside(suffix: &str) -> OutputRule {
+    OutputRule::suffix(suffix, OutputInto::Beside)
+}
+
+fn dep_info() -> OutputRule {
+    OutputRule::suffix(".d", OutputInto::Discard)
+}
+
+/// Every target's debuginfo side files at once, into `debug`.
+fn debug_rules() -> Vec<OutputRule> {
+    [".pdb", ".dwp", ".dwo", ".dSYM"]
+        .map(|s| OutputRule::suffix(s, OutputInto::Output("debug".into())))
+        .into()
+}
+
 #[test]
 fn outputs_are_moved() {
     let t = TempDir::new("outputs");
@@ -275,45 +299,39 @@ fn outputs_are_moved() {
     for f in ["libx-1.rmeta", "libx-1.rlib", "x-1.d", "stray.o"] {
         std::fs::write(from.join(f), f).unwrap();
     }
-    let outputs = BTreeMap::from([
-        ("rmeta".to_owned(), vec!["libx-1.rmeta".to_owned()]),
-        ("rlib".to_owned(), vec!["libx-1.rlib".to_owned()]),
-    ]);
+    let rules = [
+        file("libx-1.rmeta", "rmeta"),
+        file("libx-1.rlib", "rlib"),
+        dep_info(),
+    ];
     let root = t.path().to_owned();
     let dest = |o: &str| Ok(root.join(format!("drv-{o}")));
-    collect_outputs(&outputs, &BTreeMap::new(), &[], &from, dest).unwrap();
+    collect_outputs(&rules, &from, dest).unwrap();
     assert_eq!(
         std::fs::read_to_string(t.path().join("drv-rmeta/libx-1.rmeta")).unwrap(),
         "libx-1.rmeta"
     );
     assert!(t.path().join("drv-rlib/libx-1.rlib").exists());
     assert!(!from.join("libx-1.rlib").exists());
+    // Dep-info is discarded; an unmatched file stays behind.
+    assert!(from.join("x-1.d").exists());
+    assert!(!t.path().join("drv-rmeta/x-1.d").exists());
 
-    // `bin` goes to `out`; an output listing no file is still created.
-    let outputs = BTreeMap::from([
-        ("bin".to_owned(), vec!["stray.o".to_owned()]),
-        ("rmeta".to_owned(), vec![]),
-    ]);
+    // An output that a suffix rule names is created though nothing goes
+    // there.
+    let rules = [
+        file("stray.o", "out"),
+        OutputRule::suffix(".none", OutputInto::Output("rmeta".into())),
+    ];
     let root2 = t.path().join("second");
     let dest = |o: &str| Ok(root2.join(o));
-    collect_outputs(&outputs, &BTreeMap::new(), &[], &from, dest).unwrap();
+    collect_outputs(&rules, &from, dest).unwrap();
     assert!(t.path().join("second/out/stray.o").exists());
     assert!(t.path().join("second/rmeta").is_dir());
 
-    let outputs = BTreeMap::from([("bin".to_owned(), vec!["app-1".to_owned()])]);
-    let e = collect_outputs(&outputs, &BTreeMap::new(), &[], &from, |o| {
-        Ok(t.path().join(o))
-    })
-    .unwrap_err();
+    let e = collect_outputs(&[file("app-1", "out")], &from, |o| Ok(t.path().join(o))).unwrap_err();
     assert!(e.0.contains("did not write `app-1`"), "{e}");
     assert!(e.0.contains("x-1.d"), "{e}");
-}
-
-fn beside(suffix: &str) -> SideFile {
-    SideFile {
-        suffix: suffix.to_owned(),
-        into: SideInto::Beside,
-    }
 }
 
 #[test]
@@ -331,19 +349,13 @@ fn side_files_go_beside_their_crate_file() {
     ] {
         std::fs::write(from.join(f), f).unwrap();
     }
-    let outputs = BTreeMap::from([
-        ("rmeta".to_owned(), vec!["libx-1.rmeta".to_owned()]),
-        ("rlib".to_owned(), vec!["libx-1.rlib".to_owned()]),
-    ]);
+    let rules = [
+        file("libx-1.rmeta", "rmeta"),
+        file("libx-1.rlib", "rlib"),
+        beside(".vir"),
+    ];
     let root = t.path().join("drv");
-    collect_outputs(
-        &outputs,
-        &BTreeMap::new(),
-        &[beside(".vir")],
-        &from,
-        |o: &str| Ok(root.join(o)),
-    )
-    .unwrap();
+    collect_outputs(&rules, &from, |o: &str| Ok(root.join(o))).unwrap();
     // Into every output whose file has the stem: an rlib dependent finds
     // it too.
     for o in ["rmeta", "rlib"] {
@@ -358,17 +370,15 @@ fn side_files_go_beside_their_crate_file() {
             assert!(!root.join(o).join(f).exists(), "{o}/{f}");
         }
     }
+    assert_eq!(beside_suffixes(&rules), [".vir"]);
+    assert_eq!(stored_in(&rules, "rmeta"), ["libx-1.rmeta"]);
 
     // An uplifted file's side file takes its stored stem.
     std::fs::write(from.join("my_app-1"), "bin").unwrap();
     std::fs::write(from.join("my_app-1.vir"), "vir").unwrap();
-    let outputs = BTreeMap::from([("bin".to_owned(), vec!["my-app".to_owned()])]);
-    let uplifted = BTreeMap::from([("my-app".to_owned(), "my_app-1".to_owned())]);
+    let rules = [uplifted("my_app-1", "my-app", "out"), beside(".vir")];
     let root = t.path().join("drv-bin");
-    collect_outputs(&outputs, &uplifted, &[beside(".vir")], &from, |o: &str| {
-        Ok(root.join(o))
-    })
-    .unwrap();
+    collect_outputs(&rules, &from, |o: &str| Ok(root.join(o))).unwrap();
     assert!(root.join("out/my-app.vir").is_file());
 }
 
@@ -380,20 +390,10 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     for f in ["my_app-1", "my_app-1.dwp", "my_app-1.d"] {
         std::fs::write(from.join(f), f).unwrap();
     }
-    let outputs = BTreeMap::from([
-        ("bin".to_owned(), vec!["my-app".to_owned()]),
-        ("debug".to_owned(), vec![]),
-    ]);
-    let uplifted = BTreeMap::from([("my-app".to_owned(), "my_app-1".to_owned())]);
+    let mut rules = vec![uplifted("my_app-1", "my-app", "out"), dep_info()];
+    rules.extend(debug_rules());
     let root = t.path().join("drv");
-    collect_outputs(
-        &outputs,
-        &uplifted,
-        &debug_side_files(ALL_DEBUG),
-        &from,
-        |o: &str| Ok(root.join(o)),
-    )
-    .unwrap();
+    collect_outputs(&rules, &from, |o: &str| Ok(root.join(o))).unwrap();
     assert_eq!(
         std::fs::read_to_string(root.join("out/my-app")).unwrap(),
         "my_app-1"
@@ -402,20 +402,11 @@ fn uplifted_bin_is_stored_under_its_cargo_name() {
     // Side files keep rustc's names; the bin is not reported as unlisted.
     assert!(root.join("debug/my_app-1.dwp").exists());
     assert!(!from.join("my_app-1").exists());
+    assert_eq!(stored_in(&rules, "out"), ["my-app"]);
 
-    let e = collect_outputs(
-        &outputs,
-        &uplifted,
-        &debug_side_files(ALL_DEBUG),
-        &from,
-        |o: &str| Ok(root.join(o)),
-    )
-    .unwrap_err();
+    let e = collect_outputs(&rules, &from, |o: &str| Ok(root.join(o))).unwrap_err();
     assert!(e.0.contains("did not write `my_app-1`"), "{e}");
 }
-
-/// Every target's debuginfo side files at once.
-const ALL_DEBUG: [&str; 4] = [".pdb", ".dwp", ".dwo", ".dSYM"];
 
 #[test]
 fn debug_side_files_go_to_debug() {
@@ -432,20 +423,11 @@ fn debug_side_files_go_to_debug() {
     ] {
         std::fs::write(from.join(f), f).unwrap();
     }
-    let outputs = BTreeMap::from([
-        ("bin".to_owned(), vec!["app.exe".to_owned()]),
-        ("debug".to_owned(), vec![]),
-    ]);
+    let mut rules = vec![file("app.exe", "out"), dep_info()];
+    rules.extend(debug_rules());
     let root = t.path().join("drv");
     let dest = |o: &str| Ok(root.join(o));
-    collect_outputs(
-        &outputs,
-        &BTreeMap::new(),
-        &debug_side_files(ALL_DEBUG),
-        &from,
-        dest,
-    )
-    .unwrap();
+    collect_outputs(&rules, &from, dest).unwrap();
     assert!(root.join("out/app.exe").exists());
     let mut debug: Vec<String> = std::fs::read_dir(root.join("debug"))
         .unwrap()
@@ -463,16 +445,8 @@ fn debug_side_files_go_to_debug() {
     std::fs::create_dir_all(&dwarf).unwrap();
     std::fs::write(dwarf.join("app-1"), "dwarf").unwrap();
     std::fs::write(from.join("app-1.dSYM/Contents/Info.plist"), "plist").unwrap();
-    let outputs = BTreeMap::from([("debug".to_owned(), vec![])]);
     let root = t.path().join("drv-dsym");
-    collect_outputs(
-        &outputs,
-        &BTreeMap::new(),
-        &debug_side_files(ALL_DEBUG),
-        &from,
-        |o: &str| Ok(root.join(o)),
-    )
-    .unwrap();
+    collect_outputs(&debug_rules(), &from, |o: &str| Ok(root.join(o))).unwrap();
     assert_eq!(
         std::fs::read_to_string(root.join("debug/app-1.dSYM/Contents/Resources/DWARF/app-1"))
             .unwrap(),
@@ -481,18 +455,11 @@ fn debug_side_files_go_to_debug() {
     assert!(root.join("debug/app-1.dSYM/Contents/Info.plist").is_file());
     assert!(!from.join("app-1.dSYM").exists());
 
-    // Without a `debug` output, side files are discarded as before.
+    // Without debug rules (a unit without a `debug` output), side files
+    // stay behind.
     std::fs::write(from.join("lib.pdb"), "").unwrap();
-    let outputs = BTreeMap::from([("bin".to_owned(), vec!["x.o".to_owned()])]);
     let root = t.path().join("drv2");
-    collect_outputs(
-        &outputs,
-        &BTreeMap::new(),
-        &debug_side_files(ALL_DEBUG),
-        &from,
-        |o: &str| Ok(root.join(o)),
-    )
-    .unwrap();
+    collect_outputs(&[file("x.o", "out")], &from, |o: &str| Ok(root.join(o))).unwrap();
     assert!(!root.join("debug").exists());
     assert!(from.join("lib.pdb").exists());
 }

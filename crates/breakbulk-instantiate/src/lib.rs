@@ -19,13 +19,12 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use breakbulk_format::rendered::{
-    DEBUG_OUTPUT, SourceView, Widen, derivation_output, package_name_version,
-};
+use breakbulk_format::rendered::{OutputRule, SourceView, Widen, package_name_version};
 use breakbulk_format::{
-    CargoTarget, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind, SrcRef,
-    TargetDebuginfo, Unit, UnitBody, UnitId, ValidationOptions, merge_layer_with, render_docs,
-    render_doctest, render_unit_in, to_canonical_json, unit_env_value, validate,
+    CargoTarget, DEBUG_OUTPUT, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind,
+    SrcRef, TargetDebuginfo, Unit, UnitBody, UnitId, ValidationOptions, derivation_output,
+    merge_layer_with, render_docs, render_doctest, render_unit_in, to_canonical_json,
+    unit_env_value, validate,
 };
 
 use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
@@ -461,7 +460,7 @@ impl Resolve for Tokens<'_> {
         self.inputs.toolchains.keep_source_paths
     }
 
-    fn side_files(&self, unit: &Unit) -> Vec<breakbulk_format::rendered::SideFile> {
+    fn side_files(&self, unit: &Unit) -> Vec<OutputRule> {
         let wrapped = ["rustc-wrapper", "rustc-workspace-wrapper"]
             .iter()
             .filter_map(|t| self.inputs.toolchains.tools.get(*t))
@@ -787,34 +786,49 @@ fn instantiate_unit(
         render_unit_in(graph, id, &tokens).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = unit_env_value(&rendered).map_err(|e| Error(format!("unit {id}: {e}")))?;
     let text = tokens.tokenize_store_paths(id, &text)?;
-    let builder = tokens.input(keys::tool(TOOL_UNIT));
-    let mut attrs = BTreeMap::new();
-    attrs.insert("name".into(), Value::String(unit_name(id, unit)));
-    attrs.insert(
-        "builder".into(),
-        Value::Parts {
-            parts: tokens.split(&builder)?,
-        },
-    );
-    attrs.insert("args".into(), Value::Strings(vec!["unit".into()]));
-    attrs.insert(
-        "system".into(),
-        Value::String(inputs.toolchains.system.clone()),
-    );
-    attrs.insert(
-        "outputs".into(),
+    unit_drv(
+        inputs,
+        &tokens,
+        Value::String(unit_name(id, unit)),
         Value::Strings(unit_outputs(unit, &inputs.plan.target.debuginfo)),
-    );
-    attrs.insert(
-        "BREAKBULK_UNIT".into(),
-        Value::Parts {
-            parts: tokens.split(&text)?,
-        },
-    );
+        &text,
+    )
+}
+
+/// A derivation that `breakbulk-unit` builds from `text`, its rendered
+/// `BREAKBULK_UNIT`, which says what to do by its `kind`.
+fn unit_drv(
+    inputs: &Inputs,
+    tokens: &Tokens,
+    name: Value,
+    outputs: Value,
+    text: &str,
+) -> Result<Drv, Error> {
+    let builder = tokens.input(keys::tool(TOOL_UNIT));
+    let attrs = BTreeMap::from([
+        ("name".into(), name),
+        (
+            "builder".into(),
+            Value::Parts {
+                parts: tokens.split(&builder)?,
+            },
+        ),
+        (
+            "system".into(),
+            Value::String(inputs.toolchains.system.clone()),
+        ),
+        ("outputs".into(), outputs),
+        (
+            "BREAKBULK_UNIT".into(),
+            Value::Parts {
+                parts: tokens.split(text)?,
+            },
+        ),
+    ]);
     Ok(Drv { attrs })
 }
 
-/// A doctest's derivation: `breakbulk-unit doctest` over the rendered
+/// A doctest's derivation: `breakbulk-unit` over the rendered
 /// doctest, named `<package>-<version>-doctest`, with the one output `out`
 /// (the log).
 fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, Error> {
@@ -825,35 +839,17 @@ fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, E
         .map_err(|e| Error(format!("doctest {id}: {e}")))?;
     let text = to_canonical_json(&rendered).map_err(|e| Error(format!("doctest {id}: {e}")))?;
     let text = tokens.tokenize_store_paths(id, &text)?;
-    let builder = tokens.input(keys::tool(TOOL_UNIT));
     let (pkg, version) = package_name_version(&d.package).unwrap_or((id, "0"));
-    let mut attrs = BTreeMap::new();
-    attrs.insert(
-        "name".into(),
+    unit_drv(
+        inputs,
+        &tokens,
         Value::String(store_name(&format!("{pkg}-{version}-doctest"))),
-    );
-    attrs.insert(
-        "builder".into(),
-        Value::Parts {
-            parts: tokens.split(&builder)?,
-        },
-    );
-    attrs.insert("args".into(), Value::Strings(vec!["doctest".into()]));
-    attrs.insert(
-        "system".into(),
-        Value::String(inputs.toolchains.system.clone()),
-    );
-    attrs.insert("outputs".into(), Value::Strings(vec!["out".into()]));
-    attrs.insert(
-        "BREAKBULK_UNIT".into(),
-        Value::Parts {
-            parts: tokens.split(&text)?,
-        },
-    );
-    Ok(Drv { attrs })
+        Value::Strings(vec!["out".into()]),
+        &text,
+    )
 }
 
-/// A doc plan's docs derivation: `breakbulk-unit docs` over its rendered
+/// A doc plan's docs derivation: `breakbulk-unit` over its rendered
 /// rustdoc commands, named `<target>-doc` after Cargo's `target/<triple>/doc`
 /// (a target spec file by its stem), with the one output `out`.
 fn instantiate_docs(inputs: &Inputs, prefix: &str) -> Result<Drv, Error> {
@@ -861,32 +857,14 @@ fn instantiate_docs(inputs: &Inputs, prefix: &str) -> Result<Drv, Error> {
     let rendered = render_docs(&inputs.plan, &tokens).map_err(|e| Error(format!("docs: {e}")))?;
     let text = to_canonical_json(&rendered).map_err(|e| Error(format!("docs: {e}")))?;
     let text = tokens.tokenize_store_paths("docs", &text)?;
-    let builder = tokens.input(keys::tool(TOOL_UNIT));
     let stem = &inputs.plan.target.short_name;
-    let mut attrs = BTreeMap::new();
-    attrs.insert(
-        "name".into(),
+    unit_drv(
+        inputs,
+        &tokens,
         Value::String(store_name(&format!("{stem}-doc"))),
-    );
-    attrs.insert(
-        "builder".into(),
-        Value::Parts {
-            parts: tokens.split(&builder)?,
-        },
-    );
-    attrs.insert("args".into(), Value::Strings(vec!["docs".into()]));
-    attrs.insert(
-        "system".into(),
-        Value::String(inputs.toolchains.system.clone()),
-    );
-    attrs.insert("outputs".into(), Value::Strings(vec!["out".into()]));
-    attrs.insert(
-        "BREAKBULK_UNIT".into(),
-        Value::Parts {
-            parts: tokens.split(&text)?,
-        },
-    );
-    Ok(Drv { attrs })
+        Value::Strings(vec!["out".into()]),
+        &text,
+    )
 }
 
 /// How a root is matched between the plan and the prediction.

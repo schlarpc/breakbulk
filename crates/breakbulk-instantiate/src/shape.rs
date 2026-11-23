@@ -382,8 +382,9 @@ fn all_runs(
     )
 }
 
-/// The ids of the units of the packages outer.json leaves to another outer
-/// derivation.
+/// The ids of the compile and run units of the packages outer.json leaves
+/// to another outer derivation. Not their doctests or docs: no build plan,
+/// the only one split, has those.
 pub(crate) fn left_units(inputs: &Inputs, outer: &Outer) -> BTreeSet<String> {
     if outer.leave.is_empty() {
         return BTreeSet::new();
@@ -393,7 +394,8 @@ pub(crate) fn left_units(inputs: &Inputs, outer: &Outer) -> BTreeSet<String> {
         .units
         .iter()
         .filter(|(_, u)| {
-            package_name_version(u.package()).is_some_and(|(n, _)| outer.leave.contains(n))
+            (u.is_compile() || u.is_run())
+                && package_name_version(u.package()).is_some_and(|(n, _)| outer.leave.contains(n))
         })
         .map(|(id, _)| id.clone())
         .collect()
