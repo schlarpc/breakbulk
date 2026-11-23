@@ -34,6 +34,9 @@ differs in the output.
 | `overrideToolchain` | [`workspaces.<ws>.toolchain`](../reference/options/workspaces.md#workspacesnametoolchain) |
 | `mkCrossToolchainEnv`, `CARGO_BUILD_TARGET` | the workspace's [`targets`](../reference/options/workspaces.md#workspacesnametargets) and a [preset](../reference/presets.md) per triple ([`targets.<triple>.preset`](../reference/options/targets.md#targetsnamepreset)) |
 | `vendorCargoDeps` | [`repo.workspaces.<ws>.vendor`](../reference/outputs.md#vendor) |
+| `outputHashes` | [`git."<source>".hash`](../reference/options/repository.md#gitnamehash), a NAR hash of the fetched tree; optional ([Use git dependencies](git-dependencies.md)) |
+| `appendCrateRegistries`, `registryFromDownloadUrl` | [`registries.<name>`](../reference/options/repository.md#registries) with `index` and `dl`; `fetchurlExtraArgs` becomes [`fetch`](../reference/options/repository.md#registriesnamefetch) ([Fetch from a mirror or a private registry](registries.md)) |
+| `overrideVendorCargoPackage`, `overrideVendorGitCheckout` | [`crateSources`](../reference/options/repository.md#cratesources), with the unchanged source in `entry.defaultSource` ([Supply or patch a crate's source](crate-sources.md)) |
 | `devShell` | `repo.workspaces.<ws>.devShell` ([The dev shell](../explanation/configuration.md#the-dev-shell)) |
 
 A product never runs tests, so `doCheck = false` has no counterpart. To

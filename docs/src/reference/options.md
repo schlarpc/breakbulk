@@ -4,7 +4,7 @@ Every option of `mkRepository`, generated from the module declarations, in
 four groups:
 
 - [Repository-wide options](options/repository.md): `mode`, `ca`,
-  `sysDefaults`, registries and git sources.
+  `sysDefaults`, registries, git sources and `crateSources`.
 - [Workspace options](options/workspaces.md): `workspaces.<name>`, one
   Cargo workspace each.
 - [Target options](options/targets.md): `targets.<triple>`, a target's

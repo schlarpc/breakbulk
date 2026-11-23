@@ -215,7 +215,7 @@ derivation.
 
 It depends only on `Cargo.lock` and the fetch settings
 ([`registries`](options/repository.md#registries),
-[`gitHashes`](options/repository.md#githashes), …), not
+[`git`](options/repository.md#git), [`crateSources`](options/repository.md#cratesources)), not
 on any plan or package setting. So a package setting can name the
 vendor directory of its own workspace without an infinite recursion, in
 both delivery modes.

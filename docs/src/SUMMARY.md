@@ -10,6 +10,9 @@
 
 - [Port a crane flake](how-to/port-from-crane.md)
 - [Add a native library](how-to/native-library.md)
+- [Fetch from a mirror or a private registry](how-to/registries.md)
+- [Use git dependencies](how-to/git-dependencies.md)
+- [Supply or patch a crate's source](how-to/crate-sources.md)
 - [A build script runs Cargo](how-to/nested-cargo.md)
 - [Build for another target](how-to/targets.md)
 - [Wrap or package a binary](how-to/wrap-package.md)

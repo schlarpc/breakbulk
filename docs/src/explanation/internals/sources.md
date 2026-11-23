@@ -4,19 +4,24 @@ Crates are fetched from the lockfiles: registry crates at build time, git source
 
 Fetch derivations are created from the lockfiles at evaluation time. Registry crates download at build time. Git sources are fetched during evaluation.
 
+Every `Cargo.lock` in the repository is read with `builtins.fromTOML`. Entries are merged by (source, name, version, checksum), so a crate locked by several workspaces is fetched once.
+
+Each remote entry first goes through [`crateSources`](../../reference/options/repository.md#cratesources), in order. The first function that returns `{ path; subdir; }` supplies the crate, and the built-in fetchers below are not used for it. The function gets the built-in result as `entry.defaultSource`, which is only fetched if the function reads it. See [Supply or patch a crate's source](../../how-to/crate-sources.md).
+
 ## Registry crates
 
-- Every `Cargo.lock` in the repository is read with `builtins.fromTOML`. Entries are merged by (source, name, version, checksum), so a crate locked by several workspaces is fetched once.
-- A crates.io entry becomes `fetchurl` of `https://static.crates.io/crates/<name>/<name>-<version>.crate`, using the lockfile's SHA-256 checksum. An unpack derivation then writes the `.cargo-checksum.json` (`{"files":{},"package":"<checksum>"}`) that Cargo's directory sources require.
-- Other registries need their download URL template from [`registries.<name>.dl`](../../reference/options/repository.md#registriesnamedl), because reading the registry's `config.json` would need a fetch at evaluation time.
+- A registry entry is served by the [`registries`](../../reference/options/repository.md#registries) entry whose `index` is the entry's index URL. crates.io is `registries.crates-io`, and its sparse index counts as its git one.
+- The crate becomes `registries.<name>.fetch` (by default `fetchurl`) of the URL from the `dl` template, using the lockfile's SHA-256 checksum. For crates.io, that is `https://static.crates.io/crates/<name>/<name>-<version>.crate`. An unpack derivation then writes the `.cargo-checksum.json` (`{"files":{},"package":"<checksum>"}`) that Cargo's directory sources require.
+- Other registries need their download URL template from [`registries.<name>.dl`](../../reference/options/repository.md#registriesnamedl), because reading the registry's `config.json` would need a fetch at evaluation time. A mirror changes `dl`; credentials go through `fetch` ([Fetch from a mirror or a private registry](../../how-to/registries.md)).
 
 ## Git dependencies
 
-- A `git+<url>?…#<rev>` entry becomes `builtins.fetchGit { url; rev; allRefs = true; shallow = true; }`. A full revision makes the input locked, so this works in pure evaluation without a hash. Submodules are an option per URL.
-- Without a content hash, every fresh machine clones the source during evaluation, and evaluation fails if the remote is unreachable. `gitHashes.<source url>` (optional) switches that source to a fixed-output fetch, which a binary cache can serve. This follows crane's `outputHashes`.
-- The crate inside the repository is found by walking the fetched tree's `Cargo.toml` files, stopping at the first match. A `subdir` hint per URL skips the walk.
+- A `git+<url>?…#<rev>` entry becomes `builtins.fetchGit { url; rev; allRefs = true; shallow = true; }`. A full revision makes the input locked, so this works in pure evaluation without a hash.
+- The settings of a source are the [`git`](../../reference/options/repository.md#git) entry under its full source string, else the one under its URL ([Use git dependencies](../../how-to/git-dependencies.md)).
+- Without a content hash, every fresh machine clones the source during evaluation, and evaluation fails if the remote is unreachable. `git.<source>.hash` (optional) switches that source to a fixed-output fetch, which a binary cache can serve. This follows crane's `outputHashes`.
+- The crate inside the repository is found by walking the fetched tree's `Cargo.toml` files, stopping at the first match. `git.<source>.subdirs.<crate>` skips the walk.
 - Fetches are keyed by URL and locked revision, because two workspaces can lock the same git source at different revisions.
-- With `lazy-trees = true` (Determinate Nix), `builtins.fetchGit` returns a virtual store path. That path does not exist, and it changes with every evaluation. So breakbulk copies each fetched tree to its real store path with `builtins.path` and the tree's NAR hash. Nix skips the copy when the path is already in the store. A crate's source path then names a real path, also where breakbulk writes it without string context, such as the source list of `noSourceReferences`. `gitTrees` values that are fetched trees (a `fetchGit` or `fetchTree` result, or a flake input) get the same treatment.
+- With `lazy-trees = true` (Determinate Nix), `builtins.fetchGit` returns a virtual store path. That path does not exist, and it changes with every evaluation. So breakbulk copies each fetched tree to its real store path with `builtins.path` and the tree's NAR hash. Nix skips the copy when the path is already in the store. A crate's source path then names a real path, also where breakbulk writes it without string context, such as the source list of `noSourceReferences`. A `git.<source>.tree` or a `crateSources` path that is a fetched tree (a `fetchGit` or `fetchTree` result, or a flake input) gets the same treatment.
 
 ### Settings that name a fetched tree
 
@@ -26,7 +31,7 @@ So at each of those places, breakbulk replaces every virtual path in the string 
 
 - **Finding a virtual path:** no builtin returns the real path of a virtual one. But Determinate Nix's `builtins.hashString` hashes a string with its virtual paths replaced by the real ones. So a store path in the string's context whose hash with its context differs from its hash without context is virtual. On Nix without lazy trees, and on Lix, the two hashes always agree, and the string is unchanged.
 - **The real path:** `builtins.path` copies the virtual path's tree under the same name, as Nix does when the path reaches a derivation, so it is the same store path. This copies the tree during evaluation. Any unit that reads the value would copy it anyway.
-- A `gitTrees` value that is such a string (`"${inputs.foo}"`, with no NAR hash) gets the same treatment.
+- A `git.<source>.tree` or `crateSources` path that is such a string (`"${inputs.foo}"`, with no NAR hash) gets the same treatment.
 
 ## Vendoring for planning
 
@@ -34,7 +39,7 @@ Each workspace gets a vendor directory with one subdirectory per source, followi
 
 - **Registries:** one directory per registry, named by a hash of its URL.
 - **Git:** one directory per source id (URL plus `branch`, `tag` or `rev` query, without the locked revision), named by a hash of the id.
-- **Inside each:** `<name>-<version>` symlinks to the fetched crates, for crates in this workspace's lockfile only.
+- **Inside each:** `<name>-<version>` symlinks to the fetched crates, for crates in this workspace's lockfile only. A git crate, or a crate from `crateSources`, is a directory of symlinks to its files instead, with a `.cargo-checksum.json` that lists no files and has the lockfile's checksum (none for git).
 
 Generated config, passed as a file (`--config <file>`; an inline `--config` value may hold only one dotted key), replaces each source with its directory:
 
