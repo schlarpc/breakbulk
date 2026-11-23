@@ -1,5 +1,5 @@
 # The Android NDK for Android targets ("Android" in
-# docs/src/explanation/internals/toolchains.md).
+# docs/src/explanation/targets.md).
 #
 #   ndk = breakbulk.androidNdk { inherit pkgs; version = "29.0.14206865"; };
 #   breakbulk.androidNdk.versionOf ndk            # "29.0.14206865"

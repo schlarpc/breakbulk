@@ -23,8 +23,8 @@
 # Tests: through adb on a device or emulator (`breakbulk.runners.adb`),
 # which the Nix sandbox has none of, so `canRunTests` is false: test runs
 # are not checks, and a target's test apps
-# (`repo.workspaces.<ws>.target.<triple>.testApps`) run them with a device
-# attached.
+# (`repo.workspaces.<ws>.target.<triple>.variants.<v>.testApps`) run them
+# with a device attached.
 #
 # Options:
 #   ndk          an NDK package (breakbulk.androidNdk, or a directory with

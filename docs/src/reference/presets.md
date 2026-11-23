@@ -25,6 +25,7 @@ The preset is named for what you want; the target triple picks how:
 | `linuxPortable` | a program for any Linux with glibc at least a given version | your own `-gnu` triple |
 | `windows` | a Windows program | `*-pc-windows-msvc` (MSVC), `*-pc-windows-gnu` and `*-gnullvm` (MinGW) |
 | `darwin` | a macOS program, built on Linux | `aarch64-apple-darwin`, `x86_64-apple-darwin` |
+| `android` | an Android shared library or program, with the NDK | `*-linux-android*` (`aarch64`, `armv7`, `x86_64`, `i686`) |
 | `wasmWeb` | wasm for browsers and Node, through wasm-bindgen | `wasm32-unknown-unknown` |
 | `wasmComponent` | a WebAssembly component | `wasm32-unknown-unknown`, `wasm32-wasip2` |
 | `uefi` | a `.efi` program, its PDB in the `debug` output | `*-unknown-uefi` (`x86_64`, `aarch64`, `i686`) |
@@ -48,8 +49,9 @@ The preset is named for what you want; the target triple picks how:
   Options set on the target override the preset's, as with any preset;
   `preset = null` turns it off.
 - A triple whose preset needs arguments or a choice has no default:
-  `*-pc-windows-msvc` and macOS (their presets need the SDK), and
-  `wasm32-unknown-unknown` (`wasmWeb` or `wasmComponent`). Such a target
+  `*-pc-windows-msvc` and macOS (their presets need the SDK), Android
+  (its preset needs the NDK), and `wasm32-unknown-unknown` (`wasmWeb` or
+  `wasmComponent`). Such a target
   with no preset and no
   [`linker`](options/targets.md#targetsnamelinker) fails at
   evaluation, naming the preset to set.
@@ -88,6 +90,7 @@ for `wasm32-wasip1`).
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |
 | `darwin` | `sdk`: the macOS SDK, a package or a version for `breakbulk.lib.appleSdk` (required on Linux), `sdkVersion`: its version when the package has no `version`, `deploymentTarget`: the oldest macOS to run on, as `MACOSX_DEPLOYMENT_TARGET` for rustc and C build systems (default: rustc's, read at build time: `11.0` on arm64, `10.12` on x86\_64), `nativeBuilder`: run tests on a Mac builder |
+| `android` | `ndk`: the Android NDK, a package or a version for `breakbulk.lib.androidNdk` (required), `ndkVersion`: its version when the package has no `version`, `apiLevel`: the oldest Android API level to run on (default: the NDK's oldest, 21 for NDK 26 and later), `adb`: the package whose `bin/adb` the test runner uses (default: nixpkgs' `android-tools`) |
 | `wasmWeb` | `browser`: where tests run, `"node"` (default), `"chromium"` or `"firefox"` (headless) |
 | `wasmComponent` | `withC`: compile C code for the component |
 
@@ -95,7 +98,8 @@ The MSVC toolchain needs Microsoft's CRT and Windows SDK, which are
 unfree; [Build for another target](../how-to/targets.md#windows-msvc)
 shows how to get them. The `darwin` preset needs Apple's macOS SDK, which
 is unfree too and which breakbulk never fetches on its own on Linux
-([macOS](../how-to/targets.md#macos)). [Targets and
+([macOS](../how-to/targets.md#macos)). So is the Android NDK, which the
+`android` preset needs ([Android](../how-to/targets.md#android)). [Targets and
 toolchains](../explanation/targets.md) explains what each preset sets up.
 
 ## Linkers
@@ -128,6 +132,7 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `rust-lld` | macOS on a Linux machine, and bare metal, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld`, whose LLVM is rustc's: as `ld64.lld` on macOS, as rustc's bare-metal specs name it elsewhere |
 | `ld64.lld` | macOS on a Linux machine, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld64.lld` from `llvmPackages_<major>` |
 | `ld.lld` | bare metal, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld.lld` from `llvmPackages_<major>` |
+| `ndk` | Android | the NDK's clang with `--target=<triple><apiLevel>` and its lld, always with a build ID; only with `presets.android`, which gives it the NDK |
 
 `linuxPortable` links with `zig cc` (the `zig` kind); it takes no other kind.
 

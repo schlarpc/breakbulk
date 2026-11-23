@@ -20,7 +20,7 @@ given to mkRepository is Linux, gets ` presets.linux ` (glibc) or
 ` presets.wasmComponent `, a UEFI triple ` presets.uefi `, and a
 bare-metal triple that rustc links with lld ` presets.bareMetal `\. A triple
 whose preset needs arguments or a choice (` -msvc `, macOS,
-wasm32 without WASI) fails at evaluation, naming the preset, unless
+Android, wasm32 without WASI) fails at evaluation, naming the preset, unless
 the target sets a ` preset `, a ` linker `, or ` preset = null `\. Any
 other triple, and one with ` preset = null `, uses an empty spec (the
 toolchain as Cargo finds it)\.
@@ -293,7 +293,7 @@ The built-in entries:
 ` packDwo ` packs the ` .dwo ` files of ` split-debuginfo = "unpacked" ` into ` <file>.dwp ` in the ` debug ` output\.
 
 ` null `: the target’s traits’ ` debugInfo `: ` "split" ` on Linux
-ELF targets and Apple targets, ` "keep" ` elsewhere\.
+and Android ELF targets and Apple targets, ` "keep" ` elsewhere\.
 
 *Type:*
 null or one of “split”, “keep”, “strip”
@@ -402,7 +402,8 @@ lld, ` cc ` (the C compiler’s default, GNU ld) on other Linux
 targets; ` lld-link `, ` wasm-ld `, ` wasm-component-ld ` or
 ` mingw-lld ` on Windows, UEFI and wasm; on macOS from a Linux
 machine, ` rust-lld ` (the toolchain’s own) or ` ld64.lld ` (nixpkgs’,
-for a toolchain without one)\. A kind that cannot link for this
+for a toolchain without one); ` ndk ` (the NDK’s clang) on Android\.
+A kind that cannot link for this
 target, or with the preset’s other settings (` mold ` with
 ` crossLanguageLto `), is an evaluation error\. The preset reads it,
 so it needs a ` preset `\. A name in ` linkerKinds `\.
@@ -482,11 +483,12 @@ false
 
 ## `targets.<name>.linkerKinds.<name>.build`
 
-` args: path `: the linker\. ` args ` is ` { pkgs; packageSet; llvm; lld; zig; triple; traits; } `: mkRepository’s
+` args: path `: the linker\. ` args ` is ` { pkgs; packageSet; llvm; lld; zig; ndk; triple; traits; } `: mkRepository’s
 ` pkgs `, the package set whose C toolchain drives the link,
 nixpkgs’ LLVM packages of rustc’s major release (the
 toolchain’s facts), an ` lld ` package a preset passes, or
-null, and linuxPortable’s ` zig cc `\. A C compiler driver
+null, linuxPortable’s ` zig cc `, and presets\.android’s
+` { clang; target; } `\. A C compiler driver
 with a flag is ` breakbulk.presets.ccDriverLinker { packageSet; flag; } `\.
 
 *Type:*
@@ -499,9 +501,11 @@ raw value
 
 ` ctx: null or message `: why the kind cannot link in this
 context, which is an evaluation error naming the kind\.
-` ctx ` is ` { triple; traits; lto; staticNonPie; zig; } `
+` ctx ` is ` { triple; traits; lto; staticNonPie; zig; ndk; } `
 (` staticNonPie `: the link makes non-PIE static glibc
-executables; ` zig `: linuxPortable’s ` zig cc `, or null)\.
+executables; ` zig `: linuxPortable’s ` zig cc `, or null;
+` ndk `: presets\.android’s NDK clang and ` --target `, or
+null)\.
 
 *Type:*
 raw value
@@ -591,8 +595,8 @@ triple ` breakbulk.presets.windows `, ` wasm32-wasip2 `
 ` breakbulk.presets.wasmComponent `, a UEFI triple
 ` breakbulk.presets.uefi `, a bare-metal triple whose rustc spec
 links with lld ` breakbulk.presets.bareMetal `; ` null ` otherwise, which is an
-evaluation error for ` -msvc `, macOS and wasm32 without WASI unless
-` linker ` is set
+evaluation error for ` -msvc `, macOS, Android and wasm32 without
+WASI unless ` linker ` is set
 
 *Example:*
 

@@ -362,11 +362,12 @@ false
 
 ## `workspaces.<name>.host.linkerKinds.<name>.build`
 
-` args: path `: the linker\. ` args ` is ` { pkgs; packageSet; llvm; lld; zig; triple; traits; } `: mkRepository’s
+` args: path `: the linker\. ` args ` is ` { pkgs; packageSet; llvm; lld; zig; ndk; triple; traits; } `: mkRepository’s
 ` pkgs `, the package set whose C toolchain drives the link,
 nixpkgs’ LLVM packages of rustc’s major release (the
 toolchain’s facts), an ` lld ` package a preset passes, or
-null, and linuxPortable’s ` zig cc `\. A C compiler driver
+null, linuxPortable’s ` zig cc `, and presets\.android’s
+` { clang; target; } `\. A C compiler driver
 with a flag is ` breakbulk.presets.ccDriverLinker { packageSet; flag; } `\.
 
 *Type:*
@@ -379,9 +380,11 @@ raw value
 
 ` ctx: null or message `: why the kind cannot link in this
 context, which is an evaluation error naming the kind\.
-` ctx ` is ` { triple; traits; lto; staticNonPie; zig; } `
+` ctx ` is ` { triple; traits; lto; staticNonPie; zig; ndk; } `
 (` staticNonPie `: the link makes non-PIE static glibc
-executables; ` zig `: linuxPortable’s ` zig cc `, or null)\.
+executables; ` zig `: linuxPortable’s ` zig cc `, or null;
+` ndk `: presets\.android’s NDK clang and ` --target `, or
+null)\.
 
 *Type:*
 raw value

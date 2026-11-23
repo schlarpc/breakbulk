@@ -59,8 +59,8 @@ in
         `breakbulk.presets.wasmComponent`, a UEFI triple
         `breakbulk.presets.uefi`, a bare-metal triple whose rustc spec
         links with lld `breakbulk.presets.bareMetal`; `null` otherwise, which is an
-        evaluation error for `-msvc`, macOS and wasm32 without WASI unless
-        `linker` is set
+        evaluation error for `-msvc`, macOS, Android and wasm32 without
+        WASI unless `linker` is set
       '';
       example = lib.literalExpression "breakbulk.presets.windows { inherit sdk; }";
       description = ''
@@ -185,7 +185,8 @@ in
         targets; `lld-link`, `wasm-ld`, `wasm-component-ld` or
         `mingw-lld` on Windows, UEFI and wasm; on macOS from a Linux
         machine, `rust-lld` (the toolchain's own) or `ld64.lld` (nixpkgs',
-        for a toolchain without one). A kind that cannot link for this
+        for a toolchain without one); `ndk` (the NDK's clang) on Android.
+        A kind that cannot link for this
         target, or with the preset's other settings (`mold` with
         `crossLanguageLto`), is an evaluation error. The preset reads it,
         so it needs a `preset`. A name in `linkerKinds`.
@@ -405,7 +406,7 @@ in
         "unpacked"` into `<file>.dwp` in the `debug` output.
 
         `null`: the target's traits' `debugInfo`: `"split"` on Linux
-        ELF targets and Apple targets, `"keep"` elsewhere.
+        and Android ELF targets and Apple targets, `"keep"` elsewhere.
       '';
     };
   };

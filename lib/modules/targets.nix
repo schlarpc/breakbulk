@@ -53,7 +53,7 @@ in
       `presets.wasmComponent`, a UEFI triple `presets.uefi`, and a
       bare-metal triple that rustc links with lld `presets.bareMetal`. A triple
       whose preset needs arguments or a choice (`-msvc`, macOS,
-      wasm32 without WASI) fails at evaluation, naming the preset, unless
+      Android, wasm32 without WASI) fails at evaluation, naming the preset, unless
       the target sets a `preset`, a `linker`, or `preset = null`. Any
       other triple, and one with `preset = null`, uses an empty spec (the
       toolchain as Cargo finds it).

@@ -1,7 +1,8 @@
 # Build for another target
 
 This page builds a workspace for a target other than the machine you are
-on: a static musl binary, another architecture, Windows or wasm.
+on: a static musl binary, another architecture, Windows, macOS, Android
+or wasm.
 
 ## A complete example
 
@@ -82,6 +83,7 @@ target. Choose one from [Presets](../reference/presets.md):
 | A Linux binary for old distributions | your own triple | `presets.linuxPortable { glibc = "2.17"; }` |
 | A Windows program | `x86_64-pc-windows-gnu` | `presets.windows` (the default) |
 | A Windows program (MSVC) | `x86_64-pc-windows-msvc` | `presets.windows { inherit sdk; }` (below) |
+| An Android library or program | `aarch64-linux-android` | `presets.android { inherit ndk; }` (below) |
 | A WebAssembly component | `wasm32-wasip2` | `presets.wasmComponent` (the default) |
 | wasm for browsers | `wasm32-unknown-unknown` | `presets.wasmWeb` |
 | wasm for browsers, tests in headless Chromium | `wasm32-unknown-unknown` | `presets.wasmWeb { browser = "chromium"; }` |
@@ -95,9 +97,9 @@ with the toolchain's own `rust-lld`, or nixpkgs' lld for a toolchain
 that ships none.
 
 A triple whose preset needs arguments or a choice has no default: an
-`-msvc` triple (the SDK), macOS (the SDK, `presets.darwin`) and
-`wasm32-unknown-unknown` (`presets.wasmWeb` or
-`presets.wasmComponent`). Building one with no preset and no `linker`
+`-msvc` triple (the SDK), macOS (the SDK, `presets.darwin`), Android
+(the NDK, `presets.android`) and `wasm32-unknown-unknown`
+(`presets.wasmWeb` or `presets.wasmComponent`). Building one with no preset and no `linker`
 fails at evaluation, naming the preset to set. To build any target with
 the toolchain as Cargo finds it, set `preset = null`.
 
@@ -543,3 +545,75 @@ programs, so test binaries build but do not run unless
 `nativeBuilder = true` sends them to a Mac builder. See [Targets and
 toolchains](../explanation/targets.md#macos) for what the preset sets
 up.
+
+## Android
+
+`presets.android` builds `*-linux-android*` programs and libraries
+(`aarch64-linux-android`, `armv7-linux-androideabi`,
+`x86_64-linux-android`, `i686-linux-android`) with the Android NDK. The
+NDK is licensed under the
+[Android Software Development Kit License Agreement](https://developer.android.com/studio/terms),
+so breakbulk never downloads it by default, and without `ndk` the preset
+fails at evaluation. `breakbulk.lib.androidNdk` downloads the NDK
+release that nixpkgs' `androidenv` pins, marked unfree; calling it
+accepts that licence:
+
+```nix
+let
+  ndk = breakbulk.lib.androidNdk {
+    pkgs = import nixpkgs {
+      inherit system;
+      config.allowUnfreePredicate = p: nixpkgs.lib.getName p == "android-ndk";
+    };
+    version = "29.0.14206865";
+  };
+in
+modules = [{
+  workspaces.default.targets.aarch64-linux-android = { };
+  targets.aarch64-linux-android.preset = breakbulk.lib.presets.android {
+    inherit ndk;
+    apiLevel = 26;
+  };
+}];
+```
+
+`version` is one that nixpkgs pins: the `ndk` entries of
+`pkgs/development/mobile/androidenv/repo.json`. The NDK runs on x86\_64
+Linux build machines only. `ndk` can also be your own package of an NDK
+directory; give `ndkVersion` with it when it has no `version` attribute.
+The toolchain needs the target (`targets = [ "aarch64-linux-android" ]`
+in rust-overlay).
+
+`apiLevel` is the oldest Android version the native code runs on, the
+`minSdkVersion` of the app that loads it. Without it, the preset uses
+the oldest one the NDK supports (21 for NDK 26 and later).
+
+A `cdylib` lands in `lib/` (`lib/libapp.so`), ready to copy into an
+APK's or an Android library's `jniLibs/<abi>/`; a binary lands in
+`bin/`. Each product's debug information is in its `debug` output, at
+`lib/debug/.build-id/<xx>/<rest>.debug`. That file is the
+`<abi>/libapp.so.dbg` that Play Console's native debug symbols take for
+the library with that build ID: `readelf -n lib/libapp.so` prints the
+build ID.
+
+### Tests on a device or an emulator
+
+Nothing in the Nix sandbox runs Android programs, so the target's test
+runs are not checks: the preset sets
+[`canRunTests`](../reference/options/targets.md#targetsnamecanruntests)
+to `false`. Its runner, `breakbulk.lib.runners.adb`, runs a test binary
+on a device or an emulator through adb. It copies the binary to
+`/data/local/tmp` and runs it there with the `RUST_*` and `CARGO_*`
+variables. The [test apps](../reference/outputs.md#test-apps-and-apps)
+(`target.aarch64-linux-android.variants.<v>.testApps.<pkg>.<binary>`) use that
+runner. They are not in `repo.apps`, so put the ones you want in a flake
+output and run one with an emulator running or a device attached:
+
+```sh
+emulator -avd my-device -no-window &
+nix run '.#<…>.testApps.app."lib/app"' -- --nocapture
+```
+
+adb picks the device: `ANDROID_SERIAL`, else the only one attached. An
+x86\_64 emulator image with Google APIs (API level 30 or later) runs
+arm64 programs too, through its ARM translation.

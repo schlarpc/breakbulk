@@ -23,6 +23,7 @@ This page explains what each kind of target gets, and why.
 | `x86_64-pc-windows-gnu`, `-gnullvm` | yours + nixpkgs mingw-w64 cross | lld, through the MinGW C driver | wine |
 | `aarch64-pc-windows-gnullvm` | yours + nixpkgs LLVM mingw-w64 cross | lld, through the MinGW C driver | none |
 | `{aarch64,x86_64}-apple-darwin`, on Linux | yours + Apple's macOS SDK (unfree, yours to pass) + nixpkgs' clang | `rust-lld` (or nixpkgs' `ld64.lld`) | none, or a Mac builder (`nativeBuilder`) |
+| `{aarch64,armv7,x86_64,i686}-linux-android*` | yours + the Android NDK (unfree, yours to pass) | the NDK's clang and lld | a device or emulator through adb, outside the sandbox only |
 | `wasm32-unknown-unknown` | yours, with the target | wasm-ld | Node (wasm-bindgen's runner), headless Chromium or Firefox, or wasmtime |
 | `wasm32-wasip2` | yours, with the target | rustc's wasm-component-ld | wasmtime |
 | `{x86_64,aarch64}-unknown-uefi` | yours, with the target | lld-link | none |
@@ -231,6 +232,41 @@ not build for a Linux host), so the pieces come from elsewhere:
 
 breakbulk's own checks inspect the products on Linux; none runs them on a Mac
 yet ([#13](https://github.com/schlarpc/breakbulk/issues/13)).
+
+## Android
+
+Android has the Linux kernel but not a Linux userland: its C library is
+bionic, its programs name its own loader (`/system/bin/linker64`), and
+an app loads native code as shared libraries for one API level, its
+`minSdkVersion`. So the target traits keep it apart (`isLinux` is false,
+`kernel` is `linux`), and nixpkgs' Linux toolchains are not used:
+
+- **The NDK.** The Android NDK, which you pass as `ndk`. It is licensed
+  under the Android SDK License Agreement, so breakbulk never fetches it
+  by default. `breakbulk.lib.androidNdk` downloads the release nixpkgs'
+  `androidenv` pins, marked unfree, without the rest of the SDK.
+- **C code and the linker.** The NDK's own clang, with
+  `--target=<triple><apiLevel>`: the API level picks the sysroot's
+  libraries and the `__ANDROID_API__` the headers see. The NDK's lld
+  links, through that clang, always with a build ID, as the NDK's own
+  build systems do. The compiler is named as the NDK's drivers
+  (`aarch64-linux-android26-clang`), which tells cc-rs that it passes
+  `--target` itself, so cc-rs adds none that would drop the API level.
+  It also reads `NIX_CFLAGS_COMPILE`, as nixpkgs' wrapped compilers do,
+  so the `-ffile-prefix-map` flags each unit adds there apply and C code
+  names no store path. nixpkgs' wrapped NDK compiler is not used: its
+  linker wrapper adds store paths as run paths.
+- **Debug information.** `debugInfo` is `"split"` by default, as on
+  Linux: each library's and program's debug information goes to the
+  `debug` output, by build ID, which is what Play Console's native debug
+  symbols and crash reporters match.
+- **Tests.** Nothing in the sandbox runs Android programs: qemu-user has
+  no bionic and no Android loader. The runner is adb
+  (`breakbulk.lib.runners.adb`), which needs a device or an emulator, so
+  `canRunTests` is false: the test binaries build, their runs are not
+  checks, and the test apps run them on a device. This repository's own
+  `nix run .#test-android-emulator` runs the Android fixture's tests on
+  an emulator.
 
 ## wasm
 
