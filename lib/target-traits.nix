@@ -816,7 +816,12 @@ let
       name = n: { name = n; };
       choose = m: { choose = m; };
     in
-    if triple == nativeTriple pkgs then
+    # A target rustc does not ship (a `.json` spec, a name the user
+    # declared traits for) states its own linker; nixpkgs and the presets
+    # do not know its platform.
+    if parse triple == null then
+      null
+    else if triple == nativeTriple pkgs then
       (
         if !h.isLinux then
           null

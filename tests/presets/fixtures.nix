@@ -1203,7 +1203,7 @@ let
   # and each gets its own clang, wasm-ld and wasi-sdk headers. A
   # workspace's own `targets.<triple>` merges over the repository's for it
   # alone; an explicit `rustc` still wins; an entry with only `packages`
-  # and no repository-wide spec has no spec, as before; and the wasm
+  # gets the triple's default preset (presets.linux); and the wasm
   # component fixture's products are the same derivations whether the
   # preset is given `rustc` or takes the workspace's.
   perWorkspace =
@@ -1304,7 +1304,7 @@ let
           ]
           && (spec r "b" wasip2).rustflags == [ ];
         explicitRustcWins = majorIn (spec explicit "b" wasm).linker == 23;
-        packagesOnlyHasNoSpec = spec r "b" "aarch64-unknown-linux-gnu" == null;
+        packagesOnlyGetsDefaultPreset = spec r "b" "aarch64-unknown-linux-gnu" != null;
         sameDrvs = drvsOf wasmComponent == drvsOf componentExplicit;
       };
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
