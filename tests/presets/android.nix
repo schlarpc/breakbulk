@@ -20,6 +20,13 @@
 #                       products' noSourceReferences checks pass; the test
 #                       binaries link. Determinism:
 #                       `nix run .#test-rebuild -- android`
+#   android-symbols     Play Console's native debug symbols in each
+#                       product's `debug` output (the nativeDebugSymbols
+#                       stage): `native-debug-symbols/arm64-v8a/<lib>.so.dbg`
+#                       for each cdylib only, relative symlinks to build-ID
+#                       files with the library's build ID, and
+#                       `native-debug-symbols.zip` with the same entries
+#                       and fixed times
 #   android-no-runner   nothing runs Android programs in the sandbox:
 #                       canRunTests is false, repo.checks has no test runs,
 #                       and a run built anyway fails naming the device it
@@ -138,6 +145,47 @@ let
         cp file.txt $out/
       '';
 
+  # Play Console's native debug symbols, by the nativeDebugSymbols stage.
+  symbols =
+    pkgs.runCommand "android-symbols"
+      {
+        nativeBuildInputs = [
+          pkgs.binutils-unwrapped-all-targets
+          pkgs.unzip
+        ];
+      }
+      ''
+        set -euo pipefail
+        buildId() { readelf -n "$1" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p'; }
+        # checkSymbols <product> <debug output> <the libraries>
+        checkSymbols() {
+          local out=$1 debug=$2 libs=$3 d=$2/native-debug-symbols/arm64-v8a
+          # Exactly the product's own shared libraries: not the bundled
+          # C++ runtime, not the binary.
+          [ "$(ls "$d" | LC_ALL=C sort | tr '\n' ' ')" = "$libs " ]
+          for l in $libs; do
+            so=$out/lib/''${l%.dbg}
+            # A relative symlink to the build-ID file of the same build ID.
+            [ -L "$d/$l" ]
+            case "$(readlink "$d/$l")" in ../../lib/debug/.build-id/*) ;; *) exit 1 ;; esac
+            [ "$(buildId "$d/$l")" = "$(buildId "$so")" ]
+            readelf -S -W "$d/$l" > sections.txt
+            grep -q ' \.debug_info ' sections.txt
+            echo "$l: build ID $(buildId "$so")"
+          done
+          # The zip: the same entries, the same bytes.
+          [ "$(unzip -Z1 "$debug/native-debug-symbols.zip" | tr '\n' ' ')" = "$(for l in $libs; do printf 'arm64-v8a/%s ' "$l"; done)" ]
+          for l in $libs; do
+            unzip -p "$debug/native-debug-symbols.zip" "arm64-v8a/$l" | cmp - "$d/$l"
+          done
+          unzip -Z -T "$debug/native-debug-symbols.zip" > zipinfo.txt
+          grep -q '19800101.000000' zipinfo.txt
+        }
+        checkSymbols ${c} ${c.debug} "libcpp.so.dbg"
+        checkSymbols ${p} ${p.debug} "libnative.so.dbg"
+        touch $out
+      '';
+
   noRunner =
     let
       checkNames = lib.attrNames repo.checks;
@@ -228,6 +276,7 @@ in
   checks = {
     android-aarch64 = aarch64;
     android-no-runner = noRunner;
+    android-symbols = symbols;
     android-eval =
       if failedEval == { } then
         pkgs.runCommand "android-eval" { } "touch $out"

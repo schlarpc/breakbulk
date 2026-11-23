@@ -591,10 +591,21 @@ the oldest one the NDK supports (21 for NDK 26 and later).
 A `cdylib` lands in `lib/` (`lib/libapp.so`), ready to copy into an
 APK's or an Android library's `jniLibs/<abi>/`; a binary lands in
 `bin/`. Each product's debug information is in its `debug` output, at
-`lib/debug/.build-id/<xx>/<rest>.debug`. That file is the
-`<abi>/libapp.so.dbg` that Play Console's native debug symbols take for
-the library with that build ID: `readelf -n lib/libapp.so` prints the
-build ID.
+`lib/debug/.build-id/<xx>/<rest>.debug`, where gdb and debuginfod look.
+The `nativeDebugSymbols` stage also names each shared library's debug
+file as the Android Gradle Plugin does with `debugSymbolLevel = FULL`:
+
+```
+result-debug/native-debug-symbols/arm64-v8a/libapp.so.dbg   (a symlink to the build-ID file)
+result-debug/native-debug-symbols.zip                       (the same entries)
+```
+
+Upload `native-debug-symbols.zip` to Play Console as the app bundle's
+native debug symbols, or add the `.so.dbg` files to an app bundle's
+metadata under `com.android.tools.build.debugsymbols`. The zip's bytes
+depend only on the debug files, so a rebuild gives the same zip. To
+leave the stage out, set
+`targets.aarch64-linux-android.stages.nativeDebugSymbols = null`.
 
 C++ compiled with cc-rs (`.cpp(true)`) links the NDK's shared C++
 runtime, `libc++_shared.so`, which is cc-rs's default on Android. A

@@ -246,6 +246,71 @@ for wasm.
 
 It has no options.
 
+### `nativeDebugSymbols`
+
+Names the debug files of the product's shared libraries as
+Play Console and the Android Gradle Plugin's
+`debugSymbolLevel = FULL` do: `<dir>/<abi>/<lib>.so.dbg` in the
+`debug` output, a relative symlink to the build-ID file
+`splitDebug` wrote for that library (`lib/debug/.build-id/…`,
+already the `--only-keep-debug` file AGP writes), and with `zip`,
+`<dir>.zip` holding those entries, the file Play Console's
+"native debug symbols" upload takes. The zip's bytes depend only
+on the files' contents and names, as `deterministicZip`'s do.
+
+Each cdylib and dylib root (`product.rootFiles`) is looked up by
+its GNU build ID; one without a build-ID debug file (no debug
+info, or `debugInfo` other than `"split"`) is left out, with a
+message. The product's files are left as they are.
+`presets.android` adds this stage after `install`.
+
+#### `nativeDebugSymbols.abi`
+
+The ABI directory. `null`: the target traits' `androidAbi`.
+
+*Type:* null or string
+
+*Default:* `null`
+
+*Example:* `"arm64-v8a"`
+
+#### `nativeDebugSymbols.binutils`
+
+The binutils to run on ELF files; a wrapped cross bintools' prefixed
+tools are found by its `targetPrefix`. By default the C toolchain
+binutils of the stage target's package set
+(`targets.<triple>.packageSet`, which the stages of mkRepository's
+products and test runs get), else `binutils-unwrapped-all-targets`
+from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
+#### `nativeDebugSymbols.dir`
+
+The directory in the `debug` output, and the zip file's name without `.zip`.
+
+*Type:* string
+
+*Default:* `"native-debug-symbols"`
+
+#### `nativeDebugSymbols.zip`
+
+Whether to write `<dir>.zip` too.
+
+*Type:* boolean
+
+*Default:* `true`
+
+#### `nativeDebugSymbols.zipPackage`
+
+The package to run instead of `zip` from the stage's `pkgs`.
+
+*Type:* null or package
+
+*Default:* `null`
+
 ### `packDwo`
 
 Packs the `.dwo` files that each ELF file and each `ar` archive

@@ -271,7 +271,12 @@ an app loads native code as shared libraries for one API level, its
 - **Debug information.** `debugInfo` is `"split"` by default, as on
   Linux: each library's and program's debug information goes to the
   `debug` output, by build ID, which is what Play Console's native debug
-  symbols and crash reporters match.
+  symbols and crash reporters match. The `nativeDebugSymbols` stage adds
+  the names Play Console takes, `native-debug-symbols/<abi>/<lib>.so.dbg`
+  (symlinks to the build-ID files, with the ABI from the `androidAbi`
+  trait), and `native-debug-symbols.zip` of them. The zip is built as
+  `deterministicZip` builds one (fixed times and modes, entries in byte
+  order), so it is reproducible and can be a build output.
 - **Tests.** Nothing in the sandbox runs Android programs: qemu-user has
   no bionic and no Android loader. The runner is adb
   (`breakbulk.lib.runners.adb`), which needs a device or an emulator, so

@@ -32,8 +32,11 @@
 # are the target with the API level and the NDK's sysroot.
 #
 # Debug info: split into the `debug` output by default, as on Linux (the
-# traits' `debugInfo`); `debug/lib/debug/.build-id/<xx>/<rest>.debug` is
-# the `.so.dbg` Play Console takes for the library with that build ID.
+# traits' `debugInfo`), at `lib/debug/.build-id/<xx>/<rest>.debug`; the
+# `nativeDebugSymbols` stage names each shared library's file as Play
+# Console takes it, `native-debug-symbols/<abi>/<lib>.so.dbg`, and zips
+# them (`native-debug-symbols.zip`). `stages.nativeDebugSymbols = null`
+# removes it.
 #
 # Tests: through adb on a device or emulator (`breakbulk.runners.adb`),
 # which the Nix sandbox has none of, so `canRunTests` is false: test runs
@@ -163,6 +166,13 @@ guard traits.isAndroid "breakbulk.presets.android: `${triple}` is not an Android
       stages.bundleLibraries = {
         after = mkDefault "install";
         run = mkDefault (stageHelpers.bundleLibraries { from = [ cxxRuntime ]; });
+      };
+      stages.nativeDebugSymbols = {
+        after = mkDefault [
+          "install"
+          "bundleLibraries"
+        ];
+        run = mkDefault (stageHelpers.nativeDebugSymbols { });
       };
       runner = mkDefault r.runner;
       # adb needs a device, which no build in the sandbox has.

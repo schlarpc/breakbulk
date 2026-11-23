@@ -2314,6 +2314,134 @@ let
         ''
       );
 
+  nativeDebugSymbols =
+    mkHelper
+      {
+        name = "nativeDebugSymbols";
+        description = ''
+          Names the debug files of the product's shared libraries as
+          Play Console and the Android Gradle Plugin's
+          `debugSymbolLevel = FULL` do: `<dir>/<abi>/<lib>.so.dbg` in the
+          `debug` output, a relative symlink to the build-ID file
+          `splitDebug` wrote for that library (`lib/debug/.build-id/…`,
+          already the `--only-keep-debug` file AGP writes), and with `zip`,
+          `<dir>.zip` holding those entries, the file Play Console's
+          "native debug symbols" upload takes. The zip's bytes depend only
+          on the files' contents and names, as `deterministicZip`'s do.
+
+          Each cdylib and dylib root (`product.rootFiles`) is looked up by
+          its GNU build ID; one without a build-ID debug file (no debug
+          info, or `debugInfo` other than `"split"`) is left out, with a
+          message. The product's files are left as they are.
+          `presets.android` adds this stage after `install`.
+        '';
+        options = {
+          dir = mkOption {
+            type = types.str;
+            default = "native-debug-symbols";
+            description = "The directory in the `debug` output, and the zip file's name without `.zip`.";
+          };
+          abi = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "arm64-v8a";
+            description = "The ABI directory. `null`: the target traits' `androidAbi`.";
+          };
+          zip = mkOption {
+            type = types.bool;
+            default = true;
+            description = "Whether to write `<dir>.zip` too.";
+          };
+          binutils = binutilsOption;
+          zipPackage = toolOption "zip";
+        };
+      }
+      (
+        cfg:
+        {
+          input,
+          product,
+          pkgs,
+          target ? { },
+          ...
+        }:
+        let
+          t = traitsOf target pkgs;
+          inherit (binutilsFor cfg pkgs target) package prefix;
+          abi =
+            if cfg.abi != null then
+              cfg.abi
+            else if t.androidAbi != null then
+              t.androidAbi
+            else
+              throw "breakbulk.stageHelpers.nativeDebugSymbols: `${t.triple}` has no `androidAbi` trait; give the helper `abi`";
+          libs = lib.attrNames (
+            lib.filterAttrs (
+              _: k:
+              lib.elem k [
+                "cdylib"
+                "dylib"
+              ]
+            ) (product.rootFiles or { })
+          );
+          debug = hasDebugFiles product;
+        in
+        pkgs.runCommand (stageName product "nativeDebugSymbols")
+          (
+            {
+              nativeBuildInputs = [ package ] ++ lib.optional cfg.zip (toolOf cfg.zipPackage pkgs "zip");
+            }
+            // lib.optionalAttrs debug {
+              outputs = [
+                "out"
+                "debug"
+              ];
+            }
+          )
+          ''
+            set -euo pipefail
+            ${copyIn input}
+            ${placeDebugFn product target pkgs}
+            copyIn "$out"
+            ${lib.optionalString debug ''
+              mkdir -p "$debug"
+              placeDebug "$debug"
+              sym=${escapeShellArg cfg.dir}/${escapeShellArg abi}
+              for name in ${escapeShellArgs libs}; do
+                f=$(find "$out" -type f -name "$name" -print -quit)
+                if [ -z "$f" ]; then
+                  echo "nativeDebugSymbols: $name is not in the product" >&2
+                  exit 1
+                fi
+                id=$(${prefix}readelf -n "$f" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p' | head -n1)
+                dbg=lib/debug/.build-id/''${id:0:2}/''${id:2}.debug
+                if [ "''${#id}" -lt 3 ] || [ ! -f "$debug/$dbg" ]; then
+                  echo "nativeDebugSymbols: $name has no build-ID debug file, left out"
+                  continue
+                fi
+                mkdir -p "$debug/$sym"
+                # Relative: from <dir>/<abi>/ back to the output's top.
+                ln -s "../../$dbg" "$debug/$sym/$name.dbg"
+                echo "nativeDebugSymbols: $sym/$name.dbg (build ID $id)"
+              done
+              ${lib.optionalString cfg.zip ''
+                if [ -d "$debug/${cfg.dir}" ]; then
+                  # deterministicZip's normalisation: 0644, the DOS epoch,
+                  # byte order of the paths, no extra fields or directory
+                  # entries; zip stores the symlinks' targets.
+                  tree=$TMPDIR/symbols
+                  cp -RL "$debug/${cfg.dir}" "$tree"
+                  find "$tree" -type d -exec chmod 0755 {} +
+                  find "$tree" -type f -exec chmod 0644 {} +
+                  find "$tree" -exec touch -h -d @${zipEpoch} {} +
+                  (cd "$tree" && find . -type f | sed 's|^\./||' | LC_ALL=C sort \
+                    | TZ=UTC zip -X -D -q -@ "$debug"/${escapeShellArg "${cfg.dir}.zip"})
+                fi
+              ''}
+            ''}
+          ''
+      );
+
   # Not Nix's reference scan, which sees only the hashes of the build's
   # inputs: this also finds paths outside the closure and paths whose
   # hash `remove-references-to` replaced with `eee…`.
@@ -2441,6 +2569,7 @@ in
     noSourceReferences
     neededLibraries
     bundleLibraries
+    nativeDebugSymbols
     glibcLibraries
     gccRuntimeLibraries
     ;
