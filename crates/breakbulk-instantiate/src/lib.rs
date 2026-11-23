@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use breakbulk_format::rendered::{
-    DoctestConfig, DylibPath, OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
+    DoctestConfig, DylibPath, OutDirRemove, OutputRule, Removed, SourceView, package_name_version,
 };
 use breakbulk_format::{
     CargoTarget, DEBUG_OUTPUT, EnvLayer, Graph, LayerValue, Plan, PlanKind, Platform, Reference,
@@ -244,42 +244,21 @@ impl<'a> Tokens<'a> {
         }
     }
 
-    /// The roots of other Cargo targets that the view of this unit leaves
-    /// out, when it has a view of its own target, relative to the
-    /// repository root.
-    fn target_roots(&self, package: &str, dir: &str) -> Vec<String> {
-        if !self.run && self.view_key(package, dir).contains('#') {
-            self.inputs
-                .sources
-                .target_roots
-                .get(dir)
-                .cloned()
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+    /// What the steps left out of the view `package` (at `dir`) has for
+    /// this unit, and, marked `elsewhere`, of the package's view for its
+    /// non-test units, when that is another.
+    pub(crate) fn removed(&self, package: &str, dir: &str) -> Vec<Removed> {
+        let removed = &self.inputs.sources.removed;
+        let own = self.view_key(package, dir);
+        let src = keys::src(dir);
+        let mut out = removed.get(&own).cloned().unwrap_or_default();
+        if own != src {
+            out.extend(removed.get(&src).into_iter().flatten().map(|r| Removed {
+                elsewhere: true,
+                ..r.clone()
+            }));
         }
-    }
-
-    /// The test-only paths of the package at `dir`, relative to the
-    /// repository root.
-    pub(crate) fn test_only(&self, dir: &str) -> Vec<String> {
-        self.inputs
-            .sources
-            .test_only
-            .get(dir)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// What every view of the package at `dir` leaves out as junk,
-    /// relative to the repository root.
-    pub(crate) fn junk(&self, dir: &str) -> Vec<String> {
-        self.inputs
-            .sources
-            .junk
-            .get(dir)
-            .cloned()
-            .unwrap_or_default()
+        out
     }
 
     fn json_input(&self, key: String) -> String {
@@ -645,20 +624,7 @@ impl Resolve for Tokens<'_> {
         Ok(Some(SourceView {
             root,
             package_dir: dir.to_owned(),
-            widen: if self.test_package.is_some() {
-                Widen::TestSourceScope
-            } else {
-                Widen::ExtraSources
-            },
-            test_only: self.test_only(dir),
-            target_roots: self.target_roots(unit.package(), dir),
-            junk: self.junk(dir),
-            custom: self.inputs.sources.custom.contains(dir),
-            predicted: self
-                .inputs
-                .sources
-                .predicted
-                .contains(&self.view_key(unit.package(), dir)),
+            removed: self.removed(unit.package(), dir),
         }))
     }
 }

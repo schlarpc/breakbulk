@@ -604,7 +604,7 @@ pub struct RenderedCompile {
     pub seed: Option<String>,
 }
 
-pub use breakbulk_hints::{SourceView, Widen, package_name_version};
+pub use breakbulk_hints::{Removed, SourceView, package_name_version};
 
 /// A repository path in a unit of a package outside the repository: Cargo
 /// config `[env]` with `relative = true`, or `build.rustflags`. Such a

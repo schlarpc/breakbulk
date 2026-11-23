@@ -6,28 +6,19 @@
 //! relative to the working directory, or as a remap names them
 //! (`--remap-path-prefix`, so `crates/x/src/../../docs/a.md` in a
 //! diagnostic). Each that resolves to a place that does not exist gets a
-//! hint naming the option that adds it:
+//! hint:
 //!
-//! - under one of the package's test-only paths, in a view that leaves it
-//!   out (the view of the package's non-test units, wherever the path came
-//!   from): `sources.testsDir` or `extraSources`;
-//! - under the root of another Cargo target of the package (a bin's,
-//!   example's, test's or bench's), in the view of one target's units:
-//!   `sources.targetRoots`;
 //! - inside the package directory, repeating its end (`crates/x/crates/x/…`):
 //!   a library that takes the topmost directory with a `Cargo.toml` as the
 //!   workspace root found the package's own, so the hint names a
 //!   `sources` entry that adds the workspace's root `Cargo.toml`;
-//! - under what every view of the package leaves out as junk (`target/`,
-//!   `.git`, Nix's `result` symlinks): the cause, and the view's [`Widen`]
-//!   option;
-//! - otherwise inside the unit's own view root: the view's [`Widen`]
-//!   option, the one for the unit's kind (with `sources` functions, those
-//!   too). Paths in the package directory count only when something
-//!   other than the built-in steps chose its files (`test.runFiles`,
-//!   source prediction, a `sources` function); else the view holds the
-//!   whole directory, and a file missing there is not in the repository
-//!   either.
+//! - under a path a step left out ([`Removed`]): that step, `sources.<name>`
+//!   (or source prediction, whose fix is `predictSources.keep`). The view
+//!   carries what each step of its pipeline left out, and the path the
+//!   most specific report names wins;
+//! - otherwise outside the package directory: `extraSources`, or
+//!   `test.sourceScope` for the package's test units. Inside it, a path no
+//!   step left out is not in the repository either.
 //!
 //! Only the path decides, not who printed it, so one rule covers rustc,
 //! proc macros and test output. A message without a path gets no hint.
@@ -54,62 +45,30 @@ pub struct SourceView {
     /// the root).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub package_dir: String,
-    /// The option that adds a path to this view.
-    pub widen: Widen,
-    /// The package's test-only paths (its `tests/` directory, the
-    /// `test.sourceScope` entries inside it), relative to the repository
-    /// root, which the view of its non-test units leaves out. Every unit
-    /// carries them: a path into that view (a library's
-    /// `CARGO_MANIFEST_DIR`, a build script's `rustc-env`) can reach a
-    /// test unit too.
+    /// What the steps of the view's pipeline left out, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub test_only: Vec<String>,
-    /// The roots of the package's other Cargo targets (bins, examples,
-    /// tests, benches), relative to the repository root, which this view
-    /// of one target's units leaves out (`sources.targetRoots`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub target_roots: Vec<String>,
-    /// What every view of the package leaves out as junk at its top level
-    /// (`target/`, `.git`, Nix's `result` symlinks), relative to the
-    /// repository root.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub junk: Vec<String>,
-    /// Whether the package's `sources` functions chose the view's files:
-    /// then even a path in the package directory can be left out.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub custom: bool,
-    /// Whether source prediction narrowed the view to the files it found
-    /// (`predictSources`): then a path in the package directory can be
-    /// left out, and the option that adds it is `predictSources.keep`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub predicted: bool,
+    pub removed: Vec<Removed>,
 }
 
-/// The option that adds a path to a unit's source view.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Widen {
-    /// The view of a package's non-test units.
-    #[serde(rename = "extraSources")]
-    ExtraSources,
-    /// The view of its test units: test compiles, doctests, test runs.
-    #[serde(rename = "test.sourceScope")]
-    TestSourceScope,
-    /// The narrowed view of its test runs, whose paths are relative to the
-    /// package directory.
-    #[serde(rename = "test.runFiles")]
-    TestRunFiles,
+/// What one step left out of a view (`lib/source-views.nix` `pipeline`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Removed {
+    /// The `sources` entry, or [`PREDICT`].
+    pub step: String,
+    /// Paths relative to the repository root, everything under each
+    /// included; `""` for every path.
+    pub paths: Vec<String>,
+    /// A step of the package's non-test units' view, not of this unit's:
+    /// it counts for a path into that view (a library's
+    /// `CARGO_MANIFEST_DIR`, a build script's `rustc-env`), which a unit
+    /// with another view can name too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub elsewhere: bool,
 }
 
-impl Widen {
-    /// The option, under `packages.<name>`.
-    pub fn option(self) -> &'static str {
-        match self {
-            Widen::ExtraSources => "extraSources",
-            Widen::TestSourceScope => "test.sourceScope",
-            Widen::TestRunFiles => "test.runFiles",
-        }
-    }
-}
+/// The step name of source prediction in [`Removed::step`].
+pub const PREDICT: &str = "predictSources";
 
 /// The name and version in a Cargo package id spec, as `cargo metadata`
 /// writes them: `registry+https://…#ring@0.17.14`, or `path+file:///…/app#0.1.0`
@@ -200,39 +159,25 @@ fn words(text: &str) -> Vec<&str> {
 /// A path a unit's output names that its view lacks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Found {
-    /// Under the test-only path `entry`, in a view that leaves it out.
-    TestOnly {
+    /// Under `entry`, which the step `step` left out.
+    Removed {
         path: PathBuf,
         rel: String,
-        entry: String,
-    },
-    /// Under the root `entry` of another target of the package, in a view
-    /// of one target's units.
-    TargetRoot {
-        path: PathBuf,
-        rel: String,
-        entry: String,
-    },
-    /// Under `entry`, which every view of the package leaves out as junk.
-    Junk {
-        path: PathBuf,
-        rel: String,
+        step: String,
         entry: String,
     },
     /// In the package directory, repeating its end: resolved against the
     /// package directory where the workspace root was meant.
     WorkspaceRoot { path: PathBuf, rel: String },
-    /// Inside the unit's view, outside the package directory (or anywhere,
-    /// in a `test.runFiles` view), and not there.
+    /// Inside the unit's view, outside the package directory, and no step
+    /// left it out.
     Missing { path: PathBuf, rel: String },
 }
 
 impl Found {
     pub fn path(&self) -> &Path {
         match self {
-            Found::TestOnly { path, .. }
-            | Found::TargetRoot { path, .. }
-            | Found::Junk { path, .. }
+            Found::Removed { path, .. }
             | Found::WorkspaceRoot { path, .. }
             | Found::Missing { path, .. } => path,
         }
@@ -260,79 +205,77 @@ fn candidates(word: &str, remap: &[(String, String)], cwd: &Path) -> Vec<PathBuf
     out
 }
 
-fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Option<Found> {
-    let root = normalize(Path::new(&view.root));
-    // Any store path: the path may point into the view of the package's
-    // non-test units from a unit with another view.
-    if let Some(store) = root.parent()
-        && let Ok(inside) = p.strip_prefix(store)
-    {
-        let mut comps = inside.components();
-        if let Some(Component::Normal(name)) = comps.next() {
-            let base = store.join(name);
-            let rel = comps.as_path();
-            for entry in &view.test_only {
-                let e = normalize(Path::new(entry));
-                if !e.as_os_str().is_empty()
-                    && rel.starts_with(&e)
-                    && !exists(&base.join(&e))
-                    && !exists(p)
-                {
-                    return Some(Found::TestOnly {
-                        path: p.to_owned(),
-                        rel: rel.display().to_string(),
-                        entry: e.display().to_string(),
-                    });
-                }
+/// The step that left `rel` out, with the path of its report: the most
+/// specific path that holds `rel`, of the later step on a tie. `keep`
+/// decides which reports count, and whether one of them does here.
+fn left_out_by<'v>(
+    rel: &Path,
+    view: &'v SourceView,
+    keep: &dyn Fn(&Removed, &Path) -> bool,
+) -> Option<(&'v Removed, PathBuf)> {
+    let mut best: Option<(&Removed, PathBuf)> = None;
+    for r in &view.removed {
+        for p in &r.paths {
+            let e = normalize(Path::new(p));
+            if rel.starts_with(&e)
+                && keep(r, &e)
+                && best
+                    .as_ref()
+                    .is_none_or(|(_, b)| e.components().count() >= b.components().count())
+            {
+                best = Some((r, e));
             }
         }
     }
-    let rel = p.strip_prefix(&root).ok()?;
-    if rel.as_os_str().is_empty() || rel.starts_with("..") {
+    best
+}
+
+fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Option<Found> {
+    if exists(p) {
         return None;
     }
-    let under = |entries: &[String]| {
-        entries
-            .iter()
-            .map(|e| normalize(Path::new(e)))
-            .find(|e| !e.as_os_str().is_empty() && rel.starts_with(e))
-    };
-    if !exists(p)
-        && let Some(e) = under(&view.junk)
-    {
-        return Some(Found::Junk {
-            path: p.to_owned(),
-            rel: rel.display().to_string(),
-            entry: e.display().to_string(),
-        });
-    }
-    if !exists(p)
-        && let Some(e) = view
-            .target_roots
-            .iter()
-            .map(|e| normalize(Path::new(e)))
-            .find(|e| !e.as_os_str().is_empty() && rel.starts_with(e))
-    {
-        return Some(Found::TargetRoot {
-            path: p.to_owned(),
-            rel: rel.display().to_string(),
-            entry: e.display().to_string(),
-        });
-    }
-    if !exists(p) && repeats_package_dir(rel, &view.package_dir) {
-        return Some(Found::WorkspaceRoot {
-            path: p.to_owned(),
-            rel: rel.display().to_string(),
-        });
-    }
-    let whole_package = !view.custom && !view.predicted && view.widen != Widen::TestRunFiles;
-    if whole_package && rel.starts_with(&view.package_dir) || exists(p) {
-        return None;
-    }
-    Some(Found::Missing {
+    let root = normalize(Path::new(&view.root));
+    let removed = |rel: &Path, r: &Removed, e: &PathBuf| Found::Removed {
         path: p.to_owned(),
         rel: rel.display().to_string(),
-    })
+        step: r.step.clone(),
+        entry: e.display().to_string(),
+    };
+    if let Ok(rel) = p.strip_prefix(&root) {
+        if rel.as_os_str().is_empty() || rel.starts_with("..") {
+            return None;
+        }
+        if repeats_package_dir(rel, &view.package_dir) {
+            return Some(Found::WorkspaceRoot {
+                path: p.to_owned(),
+                rel: rel.display().to_string(),
+            });
+        }
+        if let Some((r, e)) = left_out_by(rel, view, &|r, _| !r.elsewhere) {
+            return Some(removed(rel, r, &e));
+        }
+        if rel.starts_with(&view.package_dir) {
+            return None;
+        }
+        return Some(Found::Missing {
+            path: p.to_owned(),
+            rel: rel.display().to_string(),
+        });
+    }
+    // Another store path: the path may point into the view of the
+    // package's non-test units from a unit with another view.
+    let store = root.parent()?;
+    let inside = p.strip_prefix(store).ok()?;
+    let mut comps = inside.components();
+    let Some(Component::Normal(name)) = comps.next() else {
+        return None;
+    };
+    let base = store.join(name);
+    let rel = comps.as_path();
+    let (r, e) = left_out_by(rel, view, &|r, e| {
+        r.elsewhere && !e.as_os_str().is_empty() && !exists(&base.join(e))
+    })?;
+    Some(removed(rel, r, &e))
 }
 
 /// Whether `rel` (relative to the repository root) is in the package
@@ -378,100 +321,63 @@ pub fn find(
     found
 }
 
-/// What [`Found::Junk`] hints say junk is.
-const JUNK: &str = "a package's top-level `target/`, `.git`, and `result` symlinks of `nix build`";
+/// The step that left `rel` (relative to the repository root) out of
+/// `view`, when one did.
+pub fn step_of<'v>(view: &'v SourceView, rel: &str) -> Option<&'v str> {
+    left_out_by(Path::new(rel), view, &|r, _| !r.elsewhere).map(|(r, _)| r.step.as_str())
+}
 
 /// How many paths get a hint; the rest are counted.
 const MAX_HINTS: usize = 10;
-
-/// `rel` (relative to the repository root) relative to the package
-/// directory `dir`, as `test.runFiles` takes it.
-fn package_relative(rel: &str, dir: &str) -> String {
-    let rel: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
-    let dir: Vec<&str> = dir.split('/').filter(|c| !c.is_empty()).collect();
-    let common = rel.iter().zip(&dir).take_while(|(a, b)| a == b).count();
-    let mut out: Vec<&str> = vec![".."; dir.len() - common];
-    out.extend(&rel[common..]);
-    out.join("/")
-}
 
 /// What adds the missing path `rel` (relative to the repository root) to
 /// `view`, as a clause after "if it is in the repository, ". `opt`: the
 /// package's options ([`option_prefix`]).
 pub fn adds(opt: &str, view: &SourceView, rel: &str) -> String {
-    let widen = view.widen.option();
-    if view.widen == Widen::TestRunFiles {
-        format!(
-            "add `{}` to `{opt}.{widen}`",
-            package_relative(rel, &view.package_dir)
-        )
-    } else if view.predicted {
-        format!("add it to `{opt}.predictSources.keep`")
-    } else if view.custom {
-        // The functions run after the built-in steps, so they can take
-        // out again what the option adds.
-        format!(
-            "have the functions in `{opt}.sources` keep it, or add it to `{opt}.{widen}` if they \
-             keep what that adds"
-        )
-    } else {
-        format!("add it to `{opt}.{widen}`")
+    match step_of(view, rel) {
+        Some(PREDICT) => format!("add it to `{opt}.predictSources.keep`"),
+        Some(step) => {
+            format!("add it in a `{opt}.sources` entry after `{step}`, or change that entry")
+        }
+        None => format!(
+            "add it to `{opt}.extraSources`, or to `{opt}.test.sourceScope` for the package's \
+             test units only"
+        ),
     }
 }
 
 /// One hint line per path [`find`] finds, at most [`MAX_HINTS`].
 pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<String> {
     let opt = option_prefix(package);
+    let at = |rel: &str, entry: &str| {
+        if rel == entry || entry.is_empty() {
+            format!("`{rel}` is")
+        } else {
+            format!("`{rel}` is under `{entry}`, which is")
+        }
+    };
     let mut out: Vec<String> = found
         .iter()
         .take(MAX_HINTS)
         .map(|f| match f {
-            Found::TestOnly { rel, entry, .. }
-                if Path::new(entry) == Path::new(&view.package_dir).join("tests") =>
-            {
-                format!(
-                    "`{rel}` is in the package's `tests/` directory, which only its test units \
-                     see; if non-test code reads it, set `{opt}.sources.testsDir = null`"
-                )
-            }
-            Found::TestOnly { rel, .. } => format!(
-                "`{rel}` is in `{opt}.test.sourceScope`, which only the package's test units \
-                 see; if non-test code reads it, move it to `{opt}.extraSources`"
+            Found::Removed { rel, step, .. } if step == PREDICT => format!(
+                "`{rel}` is not in this unit's predicted view: source prediction finds the files \
+                 of `mod` items, `#[path]` and `include*!` with literal paths, not files a proc \
+                 macro or build script reads; if it is in the repository, add it to \
+                 `{opt}.predictSources.keep`"
             ),
-            Found::TargetRoot { rel, entry, .. } if rel == entry => format!(
-                "`{rel}` is the root of another Cargo target of the package, which only that \
-                 target's units see; if this target reads it, set \
-                 `{opt}.sources.targetRoots = null`"
-            ),
-            Found::TargetRoot { rel, entry, .. } => format!(
-                "`{rel}` is under `{entry}`, which only other Cargo targets of the package see; \
-                 if this target reads it, set `{opt}.sources.targetRoots = null`"
-            ),
-            Found::Junk { rel, entry, .. } if rel == entry => format!(
-                "`{rel}` is left out of source views as junk ({JUNK}); if the unit reads it, {}",
-                adds(&opt, view, rel)
-            ),
-            Found::Junk { rel, entry, .. } => format!(
-                "`{rel}` is under `{entry}`, which source views leave out as junk ({JUNK}); if \
-                 the unit reads it, {}",
-                adds(&opt, view, rel)
+            Found::Removed {
+                rel, step, entry, ..
+            } => format!(
+                "{} left out by `{opt}.sources.{step}`; if the unit reads it, add it in an entry \
+                 after that one, or change that entry",
+                at(rel, entry)
             ),
             Found::WorkspaceRoot { rel, .. } => format!(
                 "`{rel}` repeats the package directory: a library that takes the topmost \
                  directory with a `Cargo.toml` as the workspace root found the package's own; if \
                  so, add the workspace's root `Cargo.toml` to the package's test views with an \
                  entry of `{opt}.sources`, as `sysDefaults.dependents.snapbox` does"
-            ),
-            Found::Missing { rel, .. } if view.widen == Widen::TestRunFiles => format!(
-                "`{rel}` is not in this test run's `{opt}.test.runFiles`; if it is in the \
-                 repository, add `{}` to it",
-                package_relative(rel, &view.package_dir)
-            ),
-            Found::Missing { rel, .. } if view.predicted => format!(
-                "`{rel}` is not in this unit's predicted view: source prediction finds the files \
-                 of `mod` items, `#[path]` and `include*!` with literal paths, not files a proc \
-                 macro or build script reads; if it is in the repository, add it to \
-                 `{opt}.predictSources.keep`"
             ),
             Found::Missing { rel, .. } => format!(
                 "`{rel}` is not in this unit's source view; if it is in the repository, {}",
@@ -513,12 +419,7 @@ pub struct TestRun {
     /// `None` when the binary's package has no source view.
     pub package_dir: Option<String>,
     #[serde(default)]
-    pub test_only: Vec<String>,
-    #[serde(default)]
-    pub junk: Vec<String>,
-    pub widen: Widen,
-    #[serde(default)]
-    pub custom: bool,
+    pub removed: Vec<Removed>,
 }
 
 impl TestRun {
@@ -533,20 +434,11 @@ impl TestRun {
         (root.join(dir) == manifest_dir).then(|| SourceView {
             root: root.display().to_string(),
             package_dir: dir.to_owned(),
-            widen: self.widen,
-            test_only: self.test_only.clone(),
-            target_roots: Vec::new(),
-            junk: self.junk.clone(),
-            custom: self.custom,
-            // Test runs read the package's views, never a predicted one.
-            predicted: false,
+            removed: self.removed.clone(),
         })
     }
 }
 
-/// `breakbulk-hints SPEC LOG`: after a failed test run, print
-/// the hints for its log (`SPEC` is a [`TestRun`] as JSON). Prints nothing
-/// it cannot work out, and always succeeds: the run's own failure stands.
 pub fn main(args: &[String]) -> ExitCode {
     let [spec, log] = args else {
         eprintln!("usage: breakbulk-hints SPEC LOG");
@@ -580,16 +472,33 @@ mod tests {
     const VIEW: &str = "/nix/store/00000000000000000000000000000000-source";
     const TEST_VIEW: &str = "/nix/store/11111111111111111111111111111111-source";
 
-    fn view(root: &str, dir: &str, widen: Widen) -> SourceView {
+    fn step(step: &str, paths: &[&str]) -> Removed {
+        Removed {
+            step: step.into(),
+            paths: paths.iter().map(|p| (*p).to_owned()).collect(),
+            elsewhere: false,
+        }
+    }
+
+    /// A view of `dir`'s non-test units, as the built-in steps leave it:
+    /// `tests/` and an in-package `test.sourceScope` path out.
+    fn view(root: &str, dir: &str) -> SourceView {
         SourceView {
             root: root.into(),
             package_dir: dir.into(),
-            widen,
-            test_only: vec![format!("{dir}/tests"), format!("{dir}/testdata")],
-            target_roots: Vec::new(),
-            junk: Vec::new(),
-            custom: false,
-            predicted: false,
+            removed: vec![
+                step("sourceScope", &[&format!("{dir}/testdata")]),
+                step("testsDir", &[&format!("{dir}/tests")]),
+            ],
+        }
+    }
+
+    /// A view of its test units: nothing left out.
+    fn test_view(root: &str, dir: &str) -> SourceView {
+        SourceView {
+            root: root.into(),
+            package_dir: dir.into(),
+            removed: Vec::new(),
         }
     }
 
@@ -612,6 +521,9 @@ mod tests {
         vec![(root.to_owned(), ".".to_owned())]
     }
 
+    const ADD: &str = "add it to `packages.x.extraSources`, or to `packages.x.test.sourceScope` \
+                       for the package's test units only";
+
     #[test]
     fn words_skip_locations_and_sentence_ends() {
         assert_eq!(
@@ -624,22 +536,22 @@ mod tests {
     // it with the view remapped to `.`.
     #[test]
     fn rustc_include_outside_the_package() {
-        let v = view(VIEW, "crates/ruff_dev", Widen::ExtraSources);
+        let v = view(VIEW, "crates/ruff_dev");
         let text = "error: couldn't read `crates/ruff_dev/src/../../../docs/.overrides/partials/rule-filters.html`: No such file or directory (os error 2)\n  --> crates/ruff_dev/src/generate_rules_table.rs:12:5";
         let (_, h) = run(text, &v, &remap_to_dot(VIEW), VIEW, &[]);
         assert_eq!(
             h,
-            [
+            [format!(
                 "`docs/.overrides/partials/rule-filters.html` is not in this unit's source view; \
-              if it is in the repository, add it to `packages.x.extraSources`"
-            ]
+                 if it is in the repository, {ADD}"
+            )]
         );
     }
 
     // wasmtime: wit-bindgen's proc macro, with an absolute path.
     #[test]
     fn proc_macro_absolute_path() {
-        let v = view(VIEW, "crates/test-programs", Widen::ExtraSources);
+        let v = view(VIEW, "crates/test-programs");
         let text = format!(
             "error: failed to read path for WIT [{VIEW}/crates/test-programs/../wasi-http/src/p3/wit]\n\nCaused by:\n    No such file or directory (os error 2)"
         );
@@ -651,10 +563,10 @@ mod tests {
         );
     }
 
-    // ruff: snapbox in a test run, which names `test.sourceScope`.
+    // ruff: snapbox in a test run, reading a sibling's fixture.
     #[test]
     fn test_run_output() {
-        let v = view(TEST_VIEW, "crates/ruff", Widen::TestSourceScope);
+        let v = test_view(TEST_VIEW, "crates/ruff");
         let text = format!(
             "thread 'format' panicked at crates/ruff/tests/format.rs:20:9:\n\
              Failed to read {TEST_VIEW}/crates/ruff/../ruff_python_formatter/resources/test/fixtures/a.py: No such file or directory (os error 2)"
@@ -662,10 +574,10 @@ mod tests {
         let (_, h) = run(&text, &v, &[], &format!("{TEST_VIEW}/crates/ruff"), &[]);
         assert_eq!(
             h,
-            [
-                "`crates/ruff_python_formatter/resources/test/fixtures/a.py` is not in this unit's \
-              source view; if it is in the repository, add it to `packages.x.test.sourceScope`"
-            ]
+            [format!(
+                "`crates/ruff_python_formatter/resources/test/fixtures/a.py` is not in this \
+                 unit's source view; if it is in the repository, {ADD}"
+            )]
         );
     }
 
@@ -674,7 +586,7 @@ mod tests {
     fn test_run_relative_path() {
         assert_eq!(normalize(Path::new("../../a/./b")), Path::new("../../a/b"));
         assert_eq!(normalize(Path::new("/x/../../a")), Path::new("/a"));
-        let v = view(TEST_VIEW, "crates/x", Widen::TestSourceScope);
+        let v = test_view(TEST_VIEW, "crates/x");
         let text = "reading ../../shared/data.txt: No such file or directory (os error 2)";
         let (_, h) = run(text, &v, &[], &format!("{TEST_VIEW}/crates/x"), &[]);
         assert_eq!(h.len(), 1, "{h:?}");
@@ -684,7 +596,7 @@ mod tests {
     // wasmtime: a bare name is no path.
     #[test]
     fn no_path_no_hint() {
-        let v = view(TEST_VIEW, "crates/x", Widen::TestSourceScope);
+        let v = test_view(TEST_VIEW, "crates/x");
         let (f, _) = run(
             "filetests: No such file or directory (os error 2)",
             &v,
@@ -695,119 +607,76 @@ mod tests {
         assert!(f.is_empty(), "{f:?}");
     }
 
-    // deno: a test's `include_bytes!` of a sibling package's test data,
-    // relative to the source file.
-    #[test]
-    fn test_compile_include() {
-        let v = view(TEST_VIEW, "ext/net", Widen::TestSourceScope);
-        let text = "error: couldn't read `ext/net/../tls/testdata/example1_cert.der`: No such file or directory (os error 2)";
-        let (_, h) = run(text, &v, &remap_to_dot(TEST_VIEW), TEST_VIEW, &[]);
-        assert!(
-            h[0].starts_with("`ext/tls/testdata/example1_cert.der`"),
-            "{h:?}"
-        );
-        assert!(h[0].ends_with("`packages.x.test.sourceScope`"), "{h:?}");
-    }
-
     #[test]
     fn present_paths_and_the_package_directory_give_nothing() {
-        let v = view(VIEW, "crates/x", Widen::ExtraSources);
+        let v = view(VIEW, "crates/x");
         let text = format!(
             "couldn't read `{VIEW}/crates/x/src/missing.txt` or `{VIEW}/assets/here.txt` \
              or `{VIEW}/../elsewhere/a` or `/tmp/x/y`"
         );
         let (f, _) = run(&text, &v, &[], VIEW, &[&format!("{VIEW}/assets/here.txt")]);
         assert!(f.is_empty(), "{f:?}");
-        // A `test.runFiles` view counts the package directory too, relative
-        // to it.
-        let v = view(TEST_VIEW, "crates/x", Widen::TestRunFiles);
-        let text = format!("reading {TEST_VIEW}/crates/x/fixtures/a and {TEST_VIEW}/shared/b");
-        let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
-        assert!(h[0].contains("add `fixtures/a` to it"), "{h:?}");
-        assert!(h[1].contains("add `../../shared/b` to it"), "{h:?}");
-        // In a view of one target, another target's root names
-        // scopeTargetRoots.
-        let v = SourceView {
-            target_roots: vec![
-                "crates/x/tests/other.rs".into(),
-                "crates/x/src/bin/tool".into(),
-            ],
-            ..view(TEST_VIEW, "crates/x", Widen::TestSourceScope)
-        };
-        let text = format!("couldn't read `{TEST_VIEW}/crates/x/src/bin/tool/cli.rs`");
-        let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
-        assert_eq!(
-            h,
-            [
-                "`crates/x/src/bin/tool/cli.rs` is under `crates/x/src/bin/tool`, which only other \
-                 Cargo targets of the package see; if this target reads it, set \
-                 `packages.x.sources.targetRoots = null`"
-            ]
-        );
-        // So does a view a `sources` function chose, with the kind's option.
-        let v = SourceView {
-            custom: true,
-            ..view(VIEW, "crates/x", Widen::ExtraSources)
-        };
-        let text = format!("couldn't read `{VIEW}/crates/x/README.md`");
-        let (_, h) = run(&text, &v, &[], VIEW, &[]);
-        assert_eq!(
-            h,
-            [
-                "`crates/x/README.md` is not in this unit's source view; if it is in the \
-                 repository, have the functions in `packages.x.sources` keep it, or add it to \
-                 `packages.x.extraSources` if they keep what that adds"
-            ]
-        );
     }
 
+    // Each step's report names the step; the most specific path wins.
     #[test]
-    fn junk_names_the_cause() {
+    fn a_step_that_left_it_out() {
         let v = SourceView {
-            junk: vec!["crates/x/result".into(), "crates/x/target".into()],
-            ..view(VIEW, "crates/x", Widen::ExtraSources)
+            removed: vec![
+                step("package", &["crates/x/target", "crates/x/result"]),
+                step("runFiles", &[""]),
+            ],
+            ..test_view(TEST_VIEW, "crates/x")
         };
-        // `results/` is not junk: in a view of the whole package, a path
-        // missing there is missing from the repository.
         let text = format!(
-            "couldn't read `{VIEW}/crates/x/result/a.txt`, `{VIEW}/crates/x/target` or \
-             `{VIEW}/crates/x/results/b.txt`"
+            "reading {TEST_VIEW}/crates/x/fixtures/a, {TEST_VIEW}/shared/b and \
+             {TEST_VIEW}/crates/x/result/c"
         );
-        let (_, h) = run(&text, &v, &[], VIEW, &[]);
+        let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
         assert_eq!(
             h,
             [
-                "`crates/x/result/a.txt` is under `crates/x/result`, which source views leave out \
-                 as junk (a package's top-level `target/`, `.git`, and `result` symlinks of `nix \
-                 build`); if the unit reads it, add it to `packages.x.extraSources`",
-                "`crates/x/target` is left out of source views as junk (a package's top-level \
-                 `target/`, `.git`, and `result` symlinks of `nix build`); if the unit reads it, \
-                 add it to `packages.x.extraSources`",
+                "`crates/x/fixtures/a` is left out by `packages.x.sources.runFiles`; if the unit \
+                 reads it, add it in an entry after that one, or change that entry",
+                "`shared/b` is left out by `packages.x.sources.runFiles`; if the unit reads it, \
+                 add it in an entry after that one, or change that entry",
+                "`crates/x/result/c` is under `crates/x/result`, which is left out by \
+                 `packages.x.sources.package`; if the unit reads it, add it in an entry after \
+                 that one, or change that entry",
             ]
         );
-        // A test run's spec carries them.
-        let spec: TestRun = serde_json::from_str(
-            r#"{"package": "x", "packageDir": "crates/x", "junk": ["crates/x/result"], "widen": "test.runFiles"}"#,
-        )
-        .unwrap();
-        let v = spec
-            .view(Path::new(&format!("{TEST_VIEW}/crates/x")))
-            .unwrap();
-        let text = format!("reading {TEST_VIEW}/crates/x/result/a.txt");
+        // A step of the user's, and another target's root.
+        let v = SourceView {
+            removed: vec![
+                step("targetRoots", &["crates/x/src/bin/tool"]),
+                step("noDocs", &["crates/x/docs"]),
+            ],
+            ..test_view(TEST_VIEW, "crates/x")
+        };
+        let text = format!(
+            "couldn't read `{TEST_VIEW}/crates/x/src/bin/tool/cli.rs` or `{TEST_VIEW}/crates/x/docs`"
+        );
         let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
         assert!(
-            h[0].ends_with("add `result/a.txt` to `packages.x.test.runFiles`"),
+            h[0].starts_with(
+                "`crates/x/src/bin/tool/cli.rs` is under `crates/x/src/bin/tool`, which is left \
+                 out by `packages.x.sources.targetRoots`"
+            ),
+            "{h:?}"
+        );
+        assert!(
+            h[1].starts_with("`crates/x/docs` is left out by `packages.x.sources.noDocs`"),
             "{h:?}"
         );
     }
 
     #[test]
     fn predicted_view_names_keep() {
-        // A module file a proc macro generates the `mod` of, missing from
-        // a predicted view: in the package directory, so it counts.
+        // A file a proc macro reads, missing from a predicted view: in the
+        // package directory, so it counts.
         let v = SourceView {
-            predicted: true,
-            ..view(VIEW, "crates/x", Widen::ExtraSources)
+            removed: vec![step(PREDICT, &[""])],
+            ..view(VIEW, "crates/x")
         };
         let text = format!(
             "error: couldn't read `{VIEW}/crates/x/templates/page.html`: No such file or directory"
@@ -822,11 +691,15 @@ mod tests {
                  add it to `packages.x.predictSources.keep`"
             ]
         );
+        assert_eq!(
+            adds("packages.x", &v, "crates/x/a"),
+            "add it to `packages.x.predictSources.keep`"
+        );
     }
 
     #[test]
     fn test_only_paths_of_the_unit_view() {
-        let v = view(VIEW, "crates/x", Widen::ExtraSources);
+        let v = view(VIEW, "crates/x");
         let text = format!(
             "error: couldn't read `{VIEW}/crates/x/src/../tests/data.txt`: No such file or directory (os error 2)"
         );
@@ -834,17 +707,17 @@ mod tests {
         assert_eq!(
             h,
             [
-                "`crates/x/tests/data.txt` is in the package's `tests/` directory, which only its \
-              test units see; if non-test code reads it, set `packages.x.sources.testsDir = null`"
+                "`crates/x/tests/data.txt` is under `crates/x/tests`, which is left out by \
+                 `packages.x.sources.testsDir`; if the unit reads it, add it in an entry after \
+                 that one, or change that entry"
             ]
         );
         // Remapped, and relative to the working directory, as a build
         // script's paths are.
         let text = "couldn't read `crates/x/src/../testdata/a.bin`";
         let (_, h) = run(text, &v, &remap_to_dot(VIEW), "/elsewhere", &[]);
-        assert!(h[0].starts_with("`crates/x/testdata/a.bin` is in `packages.x.test.sourceScope`"));
         assert!(
-            h[0].ends_with("move it to `packages.x.extraSources`"),
+            h[0].ends_with("left out by `packages.x.sources.sourceScope`; if the unit reads it, add it in an entry after that one, or change that entry"),
             "{h:?}"
         );
         let (f, _) = run(
@@ -861,7 +734,17 @@ mod tests {
     // `CARGO_MANIFEST_DIR` in the view of the package's non-test units.
     #[test]
     fn test_run_reads_the_library_view() {
-        let v = view(TEST_VIEW, "crates/x", Widen::TestSourceScope);
+        let v = SourceView {
+            removed: view(VIEW, "crates/x")
+                .removed
+                .into_iter()
+                .map(|r| Removed {
+                    elsewhere: true,
+                    ..r
+                })
+                .collect(),
+            ..test_view(TEST_VIEW, "crates/x")
+        };
         let text = format!("reading {VIEW}/crates/x/tests/fixtures/input.txt: No such file");
         let present = format!("{TEST_VIEW}/crates/x/tests/fixtures/input.txt");
         let (_, h) = run(
@@ -873,7 +756,7 @@ mod tests {
         );
         assert_eq!(h.len(), 1, "{h:?}");
         assert!(
-            h[0].contains("set `packages.x.sources.testsDir = null`"),
+            h[0].contains("left out by `packages.x.sources.testsDir`"),
             "{h:?}"
         );
         // In the test view itself, `tests/` is there: a missing fixture is
@@ -887,7 +770,7 @@ mod tests {
     // workspace root joins `file!()` to the package directory.
     #[test]
     fn workspace_root_missing() {
-        let v = view(TEST_VIEW, "ws/crates/x", Widen::TestSourceScope);
+        let v = test_view(TEST_VIEW, "ws/crates/x");
         let text = format!(
             "Failed to read {TEST_VIEW}/ws/crates/x/crates/x/tests/snapshots/a.txt: No such file"
         );
@@ -908,7 +791,7 @@ mod tests {
 
     #[test]
     fn many_paths_are_counted() {
-        let v = view(VIEW, "crates/x", Widen::ExtraSources);
+        let v = view(VIEW, "crates/x");
         let text: String = (0..12)
             .map(|i| format!("{VIEW}/assets/{i}.txt\n"))
             .collect();
@@ -920,17 +803,16 @@ mod tests {
     #[test]
     fn test_run_view_from_the_manifest_dir() {
         let spec: TestRun = serde_json::from_str(
-            r#"{"package": "x", "packageDir": "crates/x", "widen": "test.sourceScope"}"#,
+            r#"{"package": "x", "packageDir": "crates/x", "removed": [{"step": "runFiles", "paths": [""]}]}"#,
         )
         .unwrap();
         let v = spec
             .view(Path::new(&format!("{TEST_VIEW}/crates/x")))
             .unwrap();
         assert_eq!(v.root, TEST_VIEW);
+        assert_eq!(v.removed, [step("runFiles", &[""])]);
         assert!(spec.view(Path::new("/elsewhere/crates/y")).is_none());
-        let root: TestRun =
-            serde_json::from_str(r#"{"package": "x", "packageDir": "", "widen": "test.runFiles"}"#)
-                .unwrap();
+        let root: TestRun = serde_json::from_str(r#"{"package": "x", "packageDir": ""}"#).unwrap();
         assert_eq!(root.view(Path::new(TEST_VIEW)).unwrap().root, TEST_VIEW);
     }
 }

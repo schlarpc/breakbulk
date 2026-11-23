@@ -437,11 +437,12 @@ For tests:
   to.
 
 When a unit fails and its output names a repository path that its source
-view lacks, the message names the path and the option that adds it:
-`extraSources` for a library, bin or build script, `test.sourceScope`
-for a test, a doctest or a test run, `sources.testsDir` for a
-test-only path that non-test code reads, and `sources.targetRoots` for
-another target's root
+view lacks, the message names the path and the
+[`sources`](../reference/options/packages.md#packagesnamesources) entry
+that left it out (`sources.testsDir` for a test-only path that non-test
+code reads, `sources.targetRoots` for another target's root), or, for a
+path outside the package that no entry left out, `extraSources` or
+`test.sourceScope`
 ([Missing paths](../reference/unit-builder.md#missing-paths)). So does a
 build script that fails while it names a `rerun-if-changed` path that is
 missing from its sandbox. A build script that succeeds without such a

@@ -900,8 +900,9 @@ result of the one before, from the empty set; source prediction
 [` sourceOverlay `](\#packagesnamesourceoverlay) act on the result\.
 An entry is a function, or ` { step; after; before; } `; ` null `
 removes it\. A step gets an attribute set and returns a
-` lib.fileset ` value inside the repository root: ` default `, the
-files chosen so far, and the unit’s descriptor:
+` lib.fileset ` value inside the repository root, or ` { files; removed; } ` with the paths (relative to the root) it left out,
+for hints; it gets ` default `, the files chosen so far, and the
+unit’s descriptor:
 
  - ` unit `: ` "compile" `, ` "build-script-run" `, ` "doctest" ` or
    ` "test-run" `\. More may be added: return ` default ` for one you do
@@ -964,7 +965,9 @@ those its ` before ` names; one with neither runs after every
 built-in entry\. Entries left unordered run built-in ones first,
 in their order, then by name\. A reference to a removed entry is
 dropped\. A unit that fails naming a path its view lacks ends with a
-hint naming the entry that left it out, where one did\. Each
+hint naming the entry that left it out, where one did (for a step
+that returns a bare file set: under the deepest directory that
+holds every file it took away)\. Each
 entry is one value: of two
 [layers](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)
 that set it, the higher one’s wins\. An attribute set given for

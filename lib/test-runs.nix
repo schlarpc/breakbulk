@@ -440,11 +440,6 @@ rec {
   # A run's raw output, besides the build log: `$log` in `test.postRun`.
   logFile = "$TMPDIR/breakbulk-test.log";
 
-  # The option that adds a path to a test run's view: `test.runFiles` when
-  # the run is narrowed to it, else the option of the "test" kind, also
-  # when a `sources` function chose the run's files.
-  hintWiden = cfg: if cfg.runFiles or null == null then "test.sourceScope" else "test.runFiles";
-
   # Shell lines (bash, `$log` set) for a failed run: a hint for each path
   # the log names that the run's source view lacks
   # (`breakbulk-hints`, which finds the view from `CARGO_MANIFEST_DIR`).
@@ -917,6 +912,10 @@ rec {
       # test binary's run view, or null for its package's test view
       # (lib/workspace.nix).
       runDirs ? { },
+      # runRemoved.<package>."<kind>/<name>" = what that test binary's run
+      # view left out (`{ step; paths; elsewhere; }`, breakbulk-hints'
+      # `Removed`), for the hints of a failed run (lib/workspace.nix).
+      runRemoved ? { },
       # Whose run settings the runs take (`runConfig`): "test", or "bench"
       # for a bench plan's binaries.
       kind ? "test",
@@ -998,6 +997,7 @@ rec {
         };
 
       runDir = b: (runDirs.${b.package} or { })."${b.kind}/${b.target}" or null;
+      runRemovedOf = b: (runRemoved.${b.package} or { })."${b.kind}/${b.target}" or [ ];
 
       runInfoOf =
         r: cfg:
@@ -1041,7 +1041,9 @@ rec {
             inherit tools pkgs;
             inherit (p) testPkgs;
           }
-          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), junk: (.junk // []), custom: (.custom // false), $widen}' "$info")"'';
+          ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --argjson removed ${
+            lib.escapeShellArg (builtins.toJSON (runRemovedOf b))
+          } '.testSpec | {$package, packageDir, $removed}' "$info")"'';
 
       # The run: the binary, the working directory, the wrapper and the
       # test runner's script (`facts`, lib/test-runners.nix), its output

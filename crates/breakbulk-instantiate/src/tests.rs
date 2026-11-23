@@ -39,12 +39,8 @@ fn smoke_inputs() -> Inputs {
             workspace_test: Default::default(),
             workspace_targets: Default::default(),
             workspace_test_targets: Default::default(),
-            target_roots: Default::default(),
-            predicted: Default::default(),
             wrapper_config: Default::default(),
-            test_only: Default::default(),
-            junk: Default::default(),
-            custom: Default::default(),
+            removed: Default::default(),
             crates: Default::default(),
         },
         toolchains: Toolchains {
@@ -324,18 +320,13 @@ impl Resolve for RealPaths<'_> {
         Ok(Some(breakbulk_format::rendered::SourceView {
             root: input_value(&keys::src(dir)),
             package_dir: dir.to_owned(),
-            widen: breakbulk_format::rendered::Widen::ExtraSources,
-            test_only: self
+            removed: self
                 .0
                 .sources
-                .test_only
-                .get(dir)
+                .removed
+                .get(&keys::src(dir))
                 .cloned()
                 .unwrap_or_default(),
-            target_roots: Vec::new(),
-            junk: Vec::new(),
-            custom: self.0.sources.custom.contains(dir),
-            predicted: false,
         }))
     }
 }
@@ -789,8 +780,22 @@ fn units_use_their_targets_view() {
     .into();
     inputs.sources.workspace_test_targets =
         [("smokeapp".into(), ["bin/smokeapp".into()].into())].into();
-    inputs.sources.target_roots =
-        [("smokeapp".into(), vec!["smokeapp/src/bin/other.rs".into()])].into();
+    let removed = |step: &str, path: &str| breakbulk_format::rendered::Removed {
+        step: step.into(),
+        paths: vec![path.into()],
+        elsewhere: false,
+    };
+    inputs.sources.removed = [
+        (
+            "test-src:smokeapp#bin/smokeapp".into(),
+            vec![removed("targetRoots", "smokeapp/src/bin/other.rs")],
+        ),
+        (
+            "src:smokeapp".into(),
+            vec![removed("testsDir", "smokeapp/tests")],
+        ),
+    ]
+    .into();
     let out = instantiate(&inputs).unwrap();
     let keys_of = |d: &Drv| -> BTreeSet<String> {
         let Value::Parts { parts } = &d.attrs["BREAKBULK_UNIT"] else {
@@ -824,14 +829,16 @@ fn units_use_their_targets_view() {
             _ => None,
         })
         .collect();
+    // Its own view's steps, and those of the package's non-test view, for
+    // a path into that.
     assert!(
-        text.contains(r#""targetRoots":["smokeapp/src/bin/other.rs"]"#),
+        text.contains(r#""removed":[{"paths":["smokeapp/src/bin/other.rs"],"step":"targetRoots"},{"elsewhere":true,"paths":["smokeapp/tests"],"step":"testsDir"}]"#),
         "{text}"
     );
     assert!(!text.contains("predicted"), "{text}");
 
     // A build-script run with a view of its own takes it over the
-    // package's; a predicted view is marked for the hints.
+    // package's; a predicted view's report names prediction.
     let run = "src:smokelib#run/custom-build/build-script-build";
     inputs
         .sources
@@ -839,7 +846,10 @@ fn units_use_their_targets_view() {
         .get_mut("smokelib")
         .unwrap()
         .insert("run/custom-build/build-script-build".into());
-    inputs.sources.predicted = [run.to_owned()].into();
+    inputs
+        .sources
+        .removed
+        .insert(run.to_owned(), vec![removed("predictSources", "")]);
     let out = instantiate(&inputs).unwrap();
     assert_eq!(keys_of(&out.units[SCRIPT]), one(script));
     assert_eq!(keys_of(&out.units[RUN]), one(run));
@@ -856,7 +866,7 @@ fn units_use_their_targets_view() {
             .collect()
     };
     assert!(
-        literal(RUN).contains(r#""predicted":true"#),
+        literal(RUN).contains(r#""step":"predictSources""#),
         "{}",
         literal(RUN)
     );
@@ -904,8 +914,8 @@ fn wrapper_units_get_the_config_tree() {
 }
 
 /// Every unit of a repository package carries its source view, for the
-/// hints: the view's root, the option that widens it (by unit kind) and
-/// the package's test-only paths.
+/// hints: the view's root, and what each step left out of it and, for a
+/// unit with another view, of the package's non-test view.
 #[test]
 fn source_views_reach_units() {
     let mut inputs = smoke_inputs();
@@ -914,11 +924,25 @@ fn source_views_reach_units() {
     };
     c.test = true;
     inputs.sources.workspace_test = ["smokeapp".into()].into();
-    inputs.sources.test_only = BTreeMap::from([
-        ("smokeapp".into(), vec!["smokeapp/tests".into()]),
-        ("smokelib".into(), vec!["smokelib/tests".into()]),
+    let removed = |step: &str, path: &str| breakbulk_format::rendered::Removed {
+        step: step.into(),
+        paths: vec![path.into()],
+        elsewhere: false,
+    };
+    inputs.sources.removed = BTreeMap::from([
+        (
+            "src:smokeapp".into(),
+            vec![removed("testsDir", "smokeapp/tests")],
+        ),
+        (
+            "src:smokelib".into(),
+            vec![removed("testsDir", "smokelib/tests")],
+        ),
+        (
+            "test-src:smokeapp".into(),
+            vec![removed("mine", "smokeapp/docs")],
+        ),
     ]);
-    inputs.sources.custom = ["smokeapp".into()].into();
     let out = instantiate(&inputs).unwrap();
     let text = |id: &str| {
         let Value::Parts { parts } = &out.units[id].attrs["BREAKBULK_UNIT"] else {
@@ -935,14 +959,14 @@ fn source_views_reach_units() {
     };
     assert!(
         text(LIB).contains(
-            r#""view":{"packageDir":"smokelib","root":"<src:smokelib>","testOnly":["smokelib/tests"],"widen":"extraSources"}"#
+            r#""view":{"packageDir":"smokelib","removed":[{"paths":["smokelib/tests"],"step":"testsDir"}],"root":"<src:smokelib>"}"#
         ),
         "{}",
         text(LIB)
     );
     assert!(
         text(APP).contains(
-            r#""view":{"custom":true,"packageDir":"smokeapp","root":"<test-src:smokeapp>","testOnly":["smokeapp/tests"],"widen":"test.sourceScope"}"#
+            r#""view":{"packageDir":"smokeapp","removed":[{"paths":["smokeapp/docs"],"step":"mine"},{"elsewhere":true,"paths":["smokeapp/tests"],"step":"testsDir"}],"root":"<test-src:smokeapp>"}"#
         ),
         "{}",
         text(APP)

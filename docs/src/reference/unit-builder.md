@@ -319,16 +319,6 @@ diagnostic). A source location (`src/lib.rs:3:5`) is not searched: it
 names a file that was read. A hint is added, naming the path relative to
 the repository root, for each path that does not exist and is
 
-- under one of the package's test-only paths, in a view that leaves it
-  out: [`sources.testsDir = null`](options/packages.md#packagesnamesources)
-  for `tests/`, or a move from
-  [`test.sourceScope`](options/packages.md#packagesnametestsourcescope)
-  to [`extraSources`](options/packages.md#packagesnameextrasources). The
-  path can come from another view: a library builds a path into its
-  `tests/` from `CARGO_MANIFEST_DIR`, and its test run reads it;
-- under the root of another Cargo target of the package, or under
-  `examples/` or `benches/`, in the view of one target's units:
-  [`sources.targetRoots = null`](options/packages.md#packagesnamesources);
 - inside the package directory, going on with the end of the package
   directory again (`crates/x/crates/x/tests/…`): a library that takes the
   topmost directory with a `Cargo.toml` as the workspace root found the
@@ -336,33 +326,32 @@ the repository root, for each path that does not exist and is
   [`sources`](options/packages.md#packagesnamesources) entry adding the
   workspace's root `Cargo.toml`, as the curated snapbox entry does
   ([Run snapshot tests](../how-to/snapshot-tests.md#snapbox-and-expect-test));
-- under what every view of the package leaves out at its top level
-  (`target/`, `.git`, and the `result` and `result-*` symlinks of `nix
-  build`): that cause, and the option for the unit's kind (below);
-- otherwise, in a predicted view (`predictSources`), anywhere inside the
-  view root, the package directory included:
+- under a path a step of the view's pipeline left out: "left out by
+  `packages.<name>.sources.<entry>`", and to add the path in an entry
+  after that one or change that entry. The unit's rendered view
+  (`hints.view.removed`) carries what each step left out: the built-in
+  steps say what they took away (`package` the top-level `target/`,
+  `.git` and `result` symlinks and nested members, `sourceScope` and
+  `testsDir` the test-only paths, `targetRoots` the other targets'
+  roots, `runFiles` everything), and for a step that returns a bare file
+  set, the deepest directory that holds every file it took away. Of
+  several, the most specific path wins. In a predicted view, prediction
+  may have left out anything: the hint names
   [`predictSources.keep`](options/packages.md#packagesnamepredictsourceskeep),
   saying that source prediction does not see files a proc macro or build
-  script reads;
-- otherwise inside the unit's view. The option is
-  [`extraSources`](options/packages.md#packagesnameextrasources) for a
-  library, bin or build script, and
+  script reads. The path can come from another view of the package: a
+  library builds a path into its `tests/` from `CARGO_MANIFEST_DIR`, and
+  its test run reads it, so every unit also carries what the view of the
+  package's non-test units left out, for paths into that view;
+- otherwise outside the package directory, in the unit's view:
+  [`extraSources`](options/packages.md#packagesnameextrasources), or
   [`test.sourceScope`](options/packages.md#packagesnametestsourcescope)
-  for a test compile, a doctest or a test run. A test run narrowed by
-  [`test.runFiles`](options/packages.md#packagesnametestrunfiles) names
-  that option, with the path relative to the package directory. Paths in
-  the package directory count only for such a run and for a package with
-  [`sources`](options/packages.md#packagesnamesources) entries of its
-  own: the built-in steps keep the whole directory otherwise, so a file
-  missing there is missing from the repository too. With entries of its
-  own, breakbulk cannot tell whether one left the path out, so the hint
-  names `sources` and the option for the unit, which helps only if the
-  entries keep what it adds.
+  for the package's test units only. A path in the package directory
+  that no step left out is missing from the repository too.
 
 A build-script run that succeeds without a `rerun-if-changed` path it
-declared names the option the same way: `extraSources`, or, with
-`sources` entries of its own, those too; in a predicted view,
-`predictSources.keep` or
+declared names the step the same way, or `extraSources`; in a predicted
+view, `predictSources.keep` or
 [`predictSources.buildScriptRuns = false`](options/packages.md#packagesnamepredictsourcesbuildscriptruns).
 
 The unit cannot see the repository, so the hint says "if it is in the

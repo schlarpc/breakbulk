@@ -42,12 +42,11 @@ To find them, build: a unit that fails reading a path outside its view
 with the path) ends with a hint naming the path and the option, as in
 
 ```text
-hint: `docs/partials/rules.html` is not in this unit's source view; if it is in the repository, add it to `packages.app.extraSources`
+hint: `docs/partials/rules.html` is not in this unit's source view; if it is in the repository, add it to `packages.app.extraSources`, or to `packages.app.test.sourceScope` for the package's test units only
 ```
 
-A test, doctest or test run names
 [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
-instead, which adds the path for the package's tests only. A message
+adds the path for the package's tests only. A message
 without a path gets no hint.
 
 The same applies to a path from Cargo config, such as an `[env]` entry
@@ -277,10 +276,14 @@ step changes from its package's shares the package's view.
 
 ### When a unit misses a file
 
-If a unit fails because a file is missing from its view, add the file
-for that unit. A file that `test.sourceScope` or the `testsDir` or
-`targetRoots` step left out gets a hint that names the setting.
-breakbulk does not know which files a step of yours left out, so for any
-other missing file the hint names the package's `sources` and the option
-for the unit (`extraSources` or `test.sourceScope`), which works only if
-the steps keep what it adds.
+If a unit fails because a file is missing from its view, the hint names
+the step that left it out:
+
+```text
+hint: `crates/app/docs/a.md` is under `crates/app/docs`, which is left out by `packages.app.sources.noDocs`; if the unit reads it, add it in an entry after that one, or change that entry
+```
+
+For a step that returns a bare file set, breakbulk records the deepest
+directory that holds every file the step took away, so the hint names it
+for any missing path there. A path outside the package directory that no
+step left out gets a hint naming `extraSources` or `test.sourceScope`.

@@ -363,13 +363,19 @@ let
       workspaceTestTargets = lib.filterAttrs (_: ts: ts != { }) (
         lib.mapAttrs (_: v: v.targetTestSrc or { }) keep
       );
-      # The keys of predicted views that are derivations (`predictOne`),
-      # listed with their values above, for hints.
-      predictedDerived = lib.concatLists (
-        lib.mapAttrsToList (
+      # What each view left out, by key (instantiate's
+      # `sources.removed`), for hints.
+      removed = lib.filterAttrs (_: r: r != [ ]) (
+        lib.concatMapAttrs (
           dir: v:
-          map (i: "src:${dir}#${i}") v.predictedDerived.build
-          ++ map (i: "test-src:${dir}#${i}") v.predictedDerived.test
+          let
+            at =
+              prefix: rs:
+              lib.mapAttrs' (
+                i: r: lib.nameValuePair (if i == "" then "${prefix}:${dir}" else "${prefix}:${dir}#${i}") r
+              ) rs;
+          in
+          at "src" v.removed.build // at "test-src" (v.removed.test or { })
         ) keep
       );
     };
@@ -443,21 +449,6 @@ let
           lib.elem (lib.elemAt m 1) dirs && (lib.head m == "src" || kind == "test" || kind == "bench")
         ) predictedAll
       );
-  # Test-only paths by directory (instantiate's `sources.testOnly`), for
-  # the hint when a non-test unit misses one.
-  testOnly = lib.mapAttrs (_: v: v.testOnly) (lib.filterAttrs (_: v: v.testOnly != [ ]) allViews);
-  # The paths per-target views leave out, by directory (instantiate's
-  # `sources.targetRoots`), for the hint when a unit misses one.
-  targetRoots = lib.mapAttrs (_: v: v.targetRoots) (
-    lib.filterAttrs (_: v: v.targetRoots != [ ]) allViews
-  );
-  # The junk paths views leave out (sourceViews.junkPaths), by directory
-  # (instantiate's `sources.junk`), for the hint when a unit misses one.
-  junk = lib.mapAttrs (_: v: v.junk) (lib.filterAttrs (_: v: v.junk != [ ]) allViews);
-  # Directories of the packages whose `sources` functions choose files
-  # (instantiate's `sources.custom`), for the same hints.
-  custom = lib.attrNames (lib.filterAttrs (_: v: v.custom) allViews);
-
   # With a workspace wrapper whose `wrapperConfig` names a variable: each
   # member's tree of the wrapper's config files, by directory
   # (instantiate's `sources.wrapperConfig`).
@@ -479,6 +470,15 @@ let
   # view. Test runs use it as their working directory and runtime
   # CARGO_MANIFEST_DIR.
   runDirs = lib.mapAttrs (_: v: v.runDirs) views;
+  # What each test binary's run view left out, by package name and
+  # `<kind>/<name>`, for the hints of a failed run.
+  runRemoved = lib.mapAttrs (
+    _: v: lib.mapAttrs (_: own: own ++ elsewhere v.removed.build."") v.runRemoved
+  ) views;
+  # What the view of a package's non-test units left out, for a path into
+  # that view from a unit with another view (a library builds a path from
+  # its `CARGO_MANIFEST_DIR`, and its test reads it).
+  elsewhere = map (r: r // { elsewhere = true; });
 
   # `packages` with the function values of their test env applied
   # (testRuns.resolveTestEnv) for one kind of run. `filesOf` gives the
@@ -777,15 +777,9 @@ let
       plan = "${plans.${kind}}/plan.json";
       sources = {
         inherit (viewsFor kind) workspace workspaceTargets;
-        inherit
-          crates
-          testOnly
-          targetRoots
-          custom
-          junk
-          ;
+        inherit crates;
         predicted = predictedFor kind;
-        inherit (viewsFor kind) predictedDerived;
+        inherit (viewsFor kind) removed;
         wrapperConfig = wrapperConfigTrees;
       }
       # The build and doc plans have no test units; the bench plan's
@@ -862,6 +856,7 @@ let
       runner
       testSystem
       runDirs
+      runRemoved
       ca
       nixFeatures
       name
@@ -884,6 +879,7 @@ let
         runner
         testSystem
         runDirs
+      runRemoved
         ca
         nixFeatures
         traits

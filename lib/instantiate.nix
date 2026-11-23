@@ -102,28 +102,17 @@ rec {
       #   build-script run's is its script's target)
       # sources.workspaceTestTargets."<dir>"."<kind>/<name>" = the same
       #   in place of `workspaceTest`
-      # sources.targetRoots."<dir>" = [ "<path relative to the root>" ... ]
-      #   the paths per-target views of that package leave out, for a hint
       # sources.predicted."<key>" = { spec; value; }: the keys (listed in
       #   workspaceTargets or workspaceTestTargets) whose views source
       #   prediction narrows (`predictSources`): `spec`, breakbulk-predict's
       #   ViewSpec (dynamic-derivation mode makes the view from it), and
       #   `value`, the view (IFD mode; never read in dynamic mode)
-      # sources.predictedDerived = [ "<key>" ... ]: keys listed in
-      #   workspaceTargets or workspaceTestTargets whose predicted views
-      #   are derivations there (a package with a `sourceOverlay`), for
-      #   hints
       # sources.wrapperConfig."<dir>" = a member's tree of the workspace
       #   wrapper's config files (sourceViews.wrapperConfigTree), for `wrapperConfigVar`
-      # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
-      #   the paths left out of that package's normal view
-      #   (sourceViews.testOnlyPaths), for a hint when a unit or test run
-      #   fails reading one
-      # sources.junk."<dir>" = [ "<path relative to the root>" ... ]: what
-      #   every view of that package leaves out (sourceViews.junkPaths),
-      #   for the same hints
-      # sources.custom = [ "<dir>" ... ]: the packages whose `sources`
-      #   functions choose their views' files, for the same hints
+      # sources.removed."<key>" = [ { step; paths; } ... ]: what each
+      #   `sources` step (or `predictSources`) left out of the view of
+      #   that key, the paths relative to the root (sourceViews.pipeline),
+      #   for a hint when a unit fails reading one
       # sources.crates."<Cargo package id>" = fetched crate source
       sources ? { },
       # Tool name to a store path or a path inside one. Must include
@@ -191,13 +180,9 @@ rec {
       workspaceTest = sources.workspaceTest or { };
       workspaceTargets = sources.workspaceTargets or { };
       workspaceTestTargets = sources.workspaceTestTargets or { };
-      targetRoots = sources.targetRoots or { };
       wrapperConfig = sources.wrapperConfig or { };
-      testOnly = sources.testOnly or { };
-      junk = sources.junk or { };
-      custom = sources.custom or [ ];
       predicted = sources.predicted or { };
-      predictedDerived = sources.predictedDerived or [ ];
+      removed = sources.removed or { };
       crates = sources.crates or { };
       spec =
         p:
@@ -242,14 +227,8 @@ rec {
           // lib.optionalAttrs (workspaceTestTargets != { }) {
             workspaceTestTargets = lib.mapAttrs (_: lib.attrNames) workspaceTestTargets;
           }
-          // lib.optionalAttrs (targetRoots != { }) { inherit targetRoots; }
           // lib.optionalAttrs (wrapperConfig != { }) { wrapperConfig = lib.attrNames wrapperConfig; }
-          // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
-          // lib.optionalAttrs (junk != { }) { inherit junk; }
-          // lib.optionalAttrs (custom != [ ]) { inherit custom; }
-          // lib.optionalAttrs (predicted != { } || predictedDerived != [ ]) {
-            predicted = lib.attrNames predicted ++ predictedDerived;
-          }
+          // lib.optionalAttrs (removed != { }) { inherit removed; }
         )
       );
       toolchainsFile = toFile "toolchains.json" (

@@ -37,17 +37,6 @@ pub struct Sources {
     /// The same for the test view.
     #[serde(default)]
     pub workspace_test_targets: BTreeMap<String, BTreeSet<String>>,
-    /// The roots of a package's targets that the views of its other
-    /// targets leave out (relative to the repository root), by directory.
-    /// Only for hints, as `test_only`.
-    #[serde(default)]
-    pub target_roots: BTreeMap<String, Vec<String>>,
-    /// The view keys (`src:<dir>#<kind>/<name>`, listed in
-    /// `workspace_targets` or `workspace_test_targets`) whose views source
-    /// prediction narrows. Only for hints: a unit with one names
-    /// `predictSources.keep` for a path its view lacks.
-    #[serde(default)]
-    pub predicted: BTreeSet<String>,
     /// Workspace members with a tree of the workspace wrapper's config
     /// files (`variants.<v>.wrapperConfig.search`: clippy's `.clippy.toml`
     /// and `clippy.toml`) of the package directory and its ancestors up to
@@ -55,20 +44,11 @@ pub struct Sources {
     /// The variable that names it is the toolchains' `wrapperConfigVar`.
     #[serde(default)]
     pub wrapper_config: BTreeSet<String>,
-    /// Path packages' test-only paths (relative to the repository root),
-    /// which their normal source views leave out, by directory. Only for
-    /// hints ([`breakbulk_format::Resolve::source_view`]).
+    /// What the steps of each view's pipeline left out (`sources`
+    /// entries, and source prediction), by view key. Only for hints
+    /// ([`breakbulk_format::Resolve::source_view`]).
     #[serde(default)]
-    pub test_only: BTreeMap<String, Vec<String>>,
-    /// What every view of a path package leaves out as junk (`target/`,
-    /// `.git`, Nix's `result` symlinks), relative to the repository root,
-    /// by directory. Only for hints, as `test_only`.
-    #[serde(default)]
-    pub junk: BTreeMap<String, Vec<String>>,
-    /// Path packages whose `sources` functions choose their views' files,
-    /// by directory. Only for hints, as `test_only`.
-    #[serde(default)]
-    pub custom: BTreeSet<String>,
+    pub removed: BTreeMap<String, Vec<breakbulk_format::rendered::Removed>>,
     /// Fetched crate sources, by Cargo package id.
     #[serde(default)]
     pub crates: BTreeSet<String>,

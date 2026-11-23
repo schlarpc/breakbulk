@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use breakbulk_format::derivation_output;
-use breakbulk_format::rendered::{SourceView, Widen};
+use breakbulk_format::rendered::SourceView;
 use breakbulk_format::{
     Plan, Reference, Resolve, Unit, UnitId, ValidationOptions, render_unit, unit_env_value,
     validate,
@@ -135,12 +135,7 @@ impl Resolve for Tokens<'_> {
         Ok(Some(SourceView {
             root: BB_SRC.into(),
             package_dir: dir.split(['#', '?']).next().unwrap_or(dir).to_owned(),
-            widen: Widen::ExtraSources,
-            test_only: Vec::new(),
-            target_roots: Vec::new(),
-            junk: Vec::new(),
-            custom: false,
-            predicted: false,
+            removed: Vec::new(),
         }))
     }
 }

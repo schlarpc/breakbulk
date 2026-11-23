@@ -476,12 +476,7 @@ fn script_output_naming_a_path_outside_the_view() {
     r.hints.view = Some(crate::spec::SourceView {
         root: root.display().to_string(),
         package_dir: "crates/foo-sys".into(),
-        widen: crate::spec::Widen::ExtraSources,
-        test_only: Vec::new(),
-        target_roots: Vec::new(),
-        junk: Vec::new(),
-        custom: false,
-        predicted: false,
+        removed: Vec::new(),
     });
     let e = judge_with_stderr(
         &r,
@@ -584,15 +579,17 @@ fn failures_print_streamed_messages_first() {
 #[test]
 fn missing_sources_name_the_option_of_the_view() {
     let t = TempDir::new("missing-view");
-    let view = |predicted, custom| crate::spec::SourceView {
+    let view = |step: Option<&str>| crate::spec::SourceView {
         root: t.path().display().to_string(),
         package_dir: String::new(),
-        widen: crate::spec::Widen::ExtraSources,
-        test_only: Vec::new(),
-        target_roots: Vec::new(),
-        junk: Vec::new(),
-        custom,
-        predicted,
+        removed: step
+            .map(|s| crate::spec::Removed {
+                step: s.into(),
+                paths: vec![String::new()],
+                elsewhere: false,
+            })
+            .into_iter()
+            .collect(),
     };
     let hint = |v| {
         let mut r = unit(t.path());
@@ -600,7 +597,7 @@ fn missing_sources_name_the_option_of_the_view() {
         let s = judge_with(&r, 0, "cargo::rerun-if-changed=data/x.txt\n").unwrap();
         s.missing[0].hint.clone()
     };
-    let h = hint(view(true, false));
+    let h = hint(view(Some("predictSources")));
     assert!(
         h.ends_with(
             "if the script needs it, add it to `packages.foo-sys.predictSources.keep`, or set \
@@ -608,15 +605,15 @@ fn missing_sources_name_the_option_of_the_view() {
         ),
         "{h}"
     );
-    let h = hint(view(false, true));
+    let h = hint(view(Some("mine")));
     assert!(
         h.ends_with(
-            "if the script needs it, have the functions in `packages.foo-sys.sources` keep it, \
-             or add it to `packages.foo-sys.extraSources` if they keep what that adds"
+            "if the script needs it, add it in a `packages.foo-sys.sources` entry after `mine`, \
+             or change that entry"
         ),
         "{h}"
     );
-    let h = hint(view(false, false));
+    let h = hint(view(None));
     assert!(
         h.ends_with("if the script needs it, add it to `packages.foo-sys.extraSources`"),
         "{h}"

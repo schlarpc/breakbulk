@@ -39,17 +39,6 @@ pub struct TestSpec {
     /// `CARGO_MANIFEST_DIR` is not in a source view. Also for the hints of
     /// a failed run (`breakbulk-hints`).
     pub package_dir: Option<String>,
-    /// The package's test-only paths, relative to the repository root, for
-    /// those hints: as a rendered unit's `view.testOnly`, without store
-    /// paths, which a content-addressed run must not depend on.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub test_only: Vec<String>,
-    /// As a rendered unit's `view.junk`, for those hints.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub junk: Vec<String>,
-    /// As a rendered unit's `view.custom`, for those hints.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub custom: bool,
     /// The tested package's id.
     pub package_id: String,
     /// Every path package the plan compiles ([`Plan::path_packages`]), by
@@ -147,16 +136,12 @@ pub(crate) fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<Test
         }),
         _ => None,
     };
-    let dir = workspace_dir(plan, &c.package);
     Ok(TestSpec {
         env,
         config_env,
         env_flags,
         dylib_flags: runs.iter().map(|id| tokens.unit(id, "flags")).collect(),
         package_dir,
-        test_only: dir.map(|d| tokens.test_only(d)).unwrap_or_default(),
-        junk: dir.map(|d| tokens.junk(d)).unwrap_or_default(),
-        custom: dir.is_some_and(|d| tokens.inputs.sources.custom.contains(d)),
         package_id: c.package.clone(),
         path_packages: path_packages(plan),
     })

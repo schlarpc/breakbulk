@@ -233,14 +233,19 @@ pub fn path_hints(
             let inside = Path::new(&m.declared).is_relative() || m.path.starts_with(cwd);
             if inside {
                 let adds = match view {
-                    // A run's own view is predicted only when its run is.
-                    Some(v) if v.predicted => format!(
-                        "add it to `{opt}.predictSources.keep`, or set \
-                         `{opt}.predictSources.buildScriptRuns = false`"
-                    ),
                     Some(v) => {
                         let rel = m.path.strip_prefix(&v.root).unwrap_or(&m.path);
-                        view_hints::adds(&opt, v, &rel.display().to_string())
+                        let rel = rel.display().to_string();
+                        match view_hints::step_of(v, &rel) {
+                            // A run's own view is predicted only when its run is.
+                            Some(view_hints::PREDICT) => format!(
+                                "{}, or set `{opt}.predictSources.buildScriptRuns = false`",
+                                view_hints::adds(&opt, v, &rel)
+                            ),
+                            Some(_) => view_hints::adds(&opt, v, &rel),
+                            // A build script is no test unit.
+                            None => format!("add it to `{opt}.extraSources`"),
+                        }
                     }
                     None => format!("add it to `{opt}.extraSources`"),
                 };
@@ -380,8 +385,7 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
         stdout.lines().chain(stderr.lines()),
     ));
     // Paths the script's output names, and the declared ones, that its view
-    // lacks; a declared path missing from the view has its hint already,
-    // unless it is test-only.
+    // lacks; a declared path missing from the view has its hint already.
     if let Some(view) = &f.run.hints.view {
         let mut text = format!("{stdout}\n{stderr}");
         for m in &missing {
@@ -397,10 +401,7 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
                 p.symlink_metadata().is_ok()
             })
             .into_iter()
-            .filter(|found| {
-                matches!(found, view_hints::Found::TestOnly { .. })
-                    || !declared.iter().any(|d| d == found.path())
-            })
+            .filter(|found| !declared.iter().any(|d| d == found.path()))
             .collect();
         hints.extend(view_hints::hint_lines(&f.run.package, view, &found));
     }

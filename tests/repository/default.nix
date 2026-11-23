@@ -1456,7 +1456,7 @@ in
         tool = targetViews.workspaces.main.packages.tv;
         hint = expectFailure "target-views-hint" readerUnit [
           "tests/bar.rs"
-          "packages.tv.sources.targetRoots = null"
+          "left out by `packages.tv.sources.targetRoots`"
         ];
       }
       ''
@@ -1717,14 +1717,13 @@ in
             (protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ ]))
             [
               "proto/tests/fixtures/input.txt"
-              "packages.proto.sources.testsDir = null"
+              "which is left out by `packages.proto.sources.testsDir`"
             ];
         scope =
           expectFailure "test-only-scope" (protoLib (testOnlyRepo (includeFrom "testdata/more.txt") [ ]))
             [
               "proto/testdata/more.txt"
-              "packages.proto.test.sourceScope"
-              "packages.proto.extraSources"
+              "left out by `packages.proto.sources.sourceScope`"
             ];
         optOut = protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ testOnlyOptOut ]);
         # Source prediction reads the package's widest view: the read wins
@@ -1826,23 +1825,23 @@ in
         # A `sources` function left the file out: the functions, and the
         # option for the kind.
         chosen = expectFailure "view-hints-chosen" build."chosen-reads-0.1.0-lib" [
-          "`crates/chosen-reads/data.txt` is not in this unit's source view; if it is in the repository, have the functions in `packages.chosen-reads.sources` keep it, or add it to `packages.chosen-reads.extraSources` if they keep what that adds"
+          "`crates/chosen-reads/data.txt` is left out by `packages.chosen-reads.sources.noData`; if the unit reads it, add it in an entry after that one, or change that entry"
         ];
         run = expectFailure "view-hints-run" build."script-reads-0.1.0-build-run" [
           "${missing} `packages.script-reads.extraSources`"
         ];
         testCompile = expectFailure "view-hints-test" test."test-reads-0.1.0-test-reads" [
-          "${missing} `packages.test-reads.test.sourceScope`"
+          "${missing} `packages.test-reads.extraSources`, or to `packages.test-reads.test.sourceScope`"
         ];
         testRun = expectFailure "view-hints-test-run" i.testRuns.run-reads.reads [
-          "${missing} `packages.run-reads.test.sourceScope`"
+          "${missing} `packages.run-reads.extraSources`, or to `packages.run-reads.test.sourceScope`"
         ];
         doctest = expectFailure "view-hints-doctest" i.doctestDrvs.doc-reads [
-          "${missing} `packages.doc-reads.test.sourceScope`"
+          "${missing} `packages.doc-reads.extraSources`, or to `packages.doc-reads.test.sourceScope`"
         ];
         libToTests = expectFailure "view-hints-lib-to-tests" i.testRuns.lib-to-tests.fixture [
-          "`crates/lib-to-tests/tests/fixtures/input.txt` is in the package's `tests/` directory"
-          "`packages.lib-to-tests.sources.testsDir = null`"
+          "`crates/lib-to-tests/tests/fixtures/input.txt` is under `crates/lib-to-tests/tests`"
+          "which is left out by `packages.lib-to-tests.sources.testsDir`"
         ];
         fixedLib = (unitsNamed fixed "build")."lib-reads-0.1.0-lib";
         fixedRun = (unitsNamed fixed "build")."script-reads-0.1.0-build-run";
@@ -1868,8 +1867,7 @@ in
       {
         reads = build."reads-0.1.0-lib";
         link = expectFailure "result-names-link" build."via-link-0.1.0-lib" [
-          "`crates/via-link/result/linked.txt` is under `crates/via-link/result`, which source views leave out"
-          "`packages.via-link.extraSources`"
+          "`crates/via-link/result/linked.txt` is under `crates/via-link/result`, which is left out by `packages.via-link.sources.package`"
         ];
         fixed = (unitsNamed (inst resultNamesFixed) "build")."via-link-0.1.0-lib";
       }
