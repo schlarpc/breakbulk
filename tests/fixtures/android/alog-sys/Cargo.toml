@@ -1,0 +1,9 @@
+[package]
+name = "alog-sys"
+version = "0.1.0"
+edition = "2024"
+publish = false
+links = "log"
+
+[build-dependencies]
+bindgen = "0.72"

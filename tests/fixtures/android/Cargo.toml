@@ -1,11 +1,18 @@
 # android: aarch64-linux-android with presets.android and the NDK
-# (tests/presets/android.nix). `native` is a cdylib (and an rlib, for its
-# binary and tests) and a binary, with C compiled by cc-rs through the
-# NDK's clang; its unit tests run on an emulator
+# (tests/presets/android.nix). Its tests run on an emulator
 # (`nix run .#test-android-emulator`).
+#
+#  - native: a cdylib (and an rlib, for its binary and tests) and a
+#    binary, with C compiled by cc-rs through the NDK's clang.
+#  - alog-sys: bindings that bindgen generates in the build script from
+#    the NDK's <android/log.h>, with the preset's libclang and clang
+#    arguments only; links the platform's liblog.
+#  - cpp: a cdylib with C++ compiled by cc-rs (`.cpp(true)`), linked
+#    against cc-rs's default C++ runtime for Android, libc++_shared.so,
+#    which the product ships; calls alog-sys.
 [workspace]
 resolver = "3"
-members = ["native"]
+members = ["native", "alog-sys", "cpp"]
 
 # Debug info, so the products have a `debug` output.
 [profile.release]

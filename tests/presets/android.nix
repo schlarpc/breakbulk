@@ -8,13 +8,17 @@
 # breakbulk default: the preset requires `ndk`. `ndkPkgs` is the package
 # set admitting it, and only it.
 #
-#   android-aarch64     aarch64-linux-android, API level 26: the cdylib
+#   android-aarch64     aarch64-linux-android, API level 26: the cdylibs
 #                       and the binary are aarch64 ELF files for Android's
-#                       loader (/system/bin/linker64), needing only the
-#                       platform's libraries, with no RUNPATH; cc-rs's C is
-#                       in both; their debug info is in the `debug` output
-#                       by build ID; the products' noSourceReferences
-#                       checks pass; the test binary links. Determinism:
+#                       loader (/system/bin/linker64), needing exactly the
+#                       libraries listed (readelf NEEDED), with no RUNPATH;
+#                       cc-rs's C is in `native`, its C++ in `cpp`, whose
+#                       product ships the NDK's libc++_shared.so and no
+#                       other library; `cpp` calls bindings bindgen made
+#                       from the NDK's <android/log.h> (alog-sys); debug
+#                       info is in the `debug` outputs by build ID; the
+#                       products' noSourceReferences checks pass; the test
+#                       binaries link. Determinism:
 #                       `nix run .#test-rebuild -- android`
 #   android-no-runner   nothing runs Android programs in the sandbox:
 #                       canRunTests is false, repo.checks has no test runs,
@@ -69,6 +73,7 @@ let
   };
   t = repo.workspaces.main.target.${triple};
   p = t.packages.native;
+  c = t.packages.cpp;
 
   aarch64 =
     pkgs.runCommand "android-aarch64"
@@ -77,36 +82,55 @@ let
           pkgs.binutils-unwrapped-all-targets
           pkgs.file
         ];
-        testBins = lib.attrValues t.variants.default.tests.native;
-        checks = lib.attrValues p.checks;
+        testBins = lib.concatMap lib.attrValues (lib.attrValues t.variants.default.tests);
+        checks = lib.concatMap (q: lib.attrValues q.checks) [
+          p
+          c
+        ];
       }
       ''
         set -euo pipefail
+        # checkFile <file> <debug output> <the sonames it needs, sorted>
         checkFile() {
-          local f=$1
+          local f=$1 debug=$2 needed=$3
           echo "== $f"
           file "$f" | tee -a file.txt | grep 'ELF 64-bit LSB .*ARM aarch64' > /dev/null
           readelf -d "$f" > dyn.txt
           if grep -E 'RUNPATH|RPATH' dyn.txt; then echo "$f has a run path"; exit 1; fi
-          # The platform's libraries only, by soname.
-          grep NEEDED dyn.txt | sed 's/.*\[\(.*\)\]/\1/' | tee needed.txt
-          if grep -v -x -E 'lib(c|dl|m|log)\.so' needed.txt; then echo "$f needs more than the platform's libraries"; exit 1; fi
+          # Exactly these libraries, by soname.
+          got=$(grep NEEDED dyn.txt | sed 's/.*\[\(.*\)\]/\1/' | LC_ALL=C sort | tr '\n' ' ')
+          echo "needs: $got"
+          [ "$got" = "$needed " ] || { echo "$f needs $got, expected $needed"; exit 1; }
           # The NDK's crtbegin notes the API level.
           readelf -n "$f" | grep -A2 'Android' | tee note.txt | grep -q 'description data: 1a 00 00 00'
           # Debug info is in the debug output, by build ID.
           id=$(readelf -n "$f" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p')
-          [ -f ${p.debug}/lib/debug/.build-id/''${id:0:2}/''${id:2}.debug ]
+          [ -f $debug/lib/debug/.build-id/''${id:0:2}/''${id:2}.debug ]
           if readelf -S -W "$f" | grep -q ' \.debug_info '; then echo "$f keeps its debug info"; exit 1; fi
         }
-        checkFile ${p}/bin/native
+        checkFile ${p}/bin/native ${p.debug} "libc.so libdl.so"
         readelf -l ${p}/bin/native | grep -q '/system/bin/linker64'
         # cc-rs's C, compiled by the NDK's clang against bionic's stdio.h.
         nm ${p}/bin/native | grep -q ' T describe$'
         grep -qa 'c scales %d to %d' ${p}/bin/native
-        checkFile ${p}/lib/libnative.so
+        checkFile ${p}/lib/libnative.so ${p.debug} "libc.so libdl.so"
         nm -D --defined-only ${p}/lib/libnative.so | grep -q ' T native_scale$'
         nm ${p}/lib/libnative.so | grep -q ' t scale$'
-        # The test binary links for the target too.
+        # No C++, so no C++ runtime.
+        [ ! -e ${p}/lib/libc++_shared.so ]
+
+        # C++ through cc-rs, against libc++_shared.so, which the product
+        # ships next to it; liblog for alog-sys, whose bindings bindgen
+        # generated from the NDK's <android/log.h>.
+        checkFile ${c}/lib/libcpp.so ${c.debug} "libc++_shared.so libc.so libdl.so liblog.so"
+        nm -D --defined-only ${c}/lib/libcpp.so | grep -q ' T cpp_count_words$'
+        nm -D ${c}/lib/libcpp.so | grep -q ' U __android_log_write$'
+        file ${c}/lib/libc++_shared.so | grep 'ELF 64-bit LSB shared object, ARM aarch64' > /dev/null
+        readelf -d ${c}/lib/libc++_shared.so | grep -q 'SONAME.*\[libc++_shared.so\]'
+        ls ${c}/lib > cpp-lib.txt
+        [ "$(LC_ALL=C sort cpp-lib.txt | tr '\n' ' ')" = "libc++_shared.so libcpp.so " ]
+
+        # The test binaries link for the target too.
         find -L $testBins -type f -perm -u+x > tests.txt
         [ -s tests.txt ]
         while read -r f; do file -L "$f" | grep 'ELF 64-bit LSB .*ARM aarch64' > /dev/null; done < tests.txt
