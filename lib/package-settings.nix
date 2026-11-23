@@ -103,6 +103,9 @@ in
       };
       # Each level of sub-layers between a layer and the next, a quarter
       # of the room the level above has: `target` first, then `variant`.
+      # Not one evaluation of every module: a layer's sub-layers are
+      # known only from its evaluated `target` and `variant` (a layer can
+      # be a function of `package`), so each level extends the one above.
       on =
         { triple, variant }:
         let
