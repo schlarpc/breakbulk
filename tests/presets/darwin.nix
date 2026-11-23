@@ -23,6 +23,11 @@
 #   darwin-no-runner      nothing runs macOS code here: canRunTests is
 #                         false, repo.checks has no test runs, and a run
 #                         fails naming targets.<t>.runner and testSystem
+#   darwin-test-strip     test.stages' default strip (`buildId = false`)
+#                         gives the same bytes for the test binary and
+#                         a copy whose debug map and linker UUID differ:
+#                         the UUID is computed from the stripped bytes,
+#                         and the ad hoc signature written again
 #   darwin-eval           evaluation: the linker rule (rust-lld for a
 #                         rust-lang toolchain, ld64.lld for nixpkgs'), the
 #                         SDK requirement (27.0 needs LLD 23.1.3 or
@@ -160,6 +165,76 @@ let
     mkdir -p $out
     cp file.txt $out/
   '';
+
+  # test.stages' default strip on a Mach-O test binary. `other` is the
+  # binary as a link whose debug map alone differed would write it: one
+  # character of an object path in the debug map and the UUID changed.
+  testStrip =
+    let
+      bins = lib.head (lib.attrValues ta.variants.default.tests.pure);
+      other = pkgs.runCommand "pure-test-other" { nativeBuildInputs = tools; } ''
+        set -euo pipefail
+        cp -rL --no-preserve=mode ${bins} $out
+        f=$(find $out -type f)
+        # Files between the steps: `head` closing a pipe fails it.
+        llvm-nm -a "$f" > nm.txt
+        grep ' OSO /nix/store/' nm.txt > oso.txt
+        oso=$(head -n1 oso.txt | sed 's/.* OSO //')
+        grep -obaF "$oso" "$f" > at.txt
+        at=$(head -n1 at.txt | cut -d: -f1)
+        # The first character of the store path's hash.
+        c=$(od -An -c -j$((at + 11)) -N1 "$f" | tr -d ' ')
+        printf '%s' "$([ "$c" = 0 ] && echo 1 || echo 0)" | dd of="$f" bs=1 seek=$((at + 11)) conv=notrunc status=none
+        uuid=$(llvm-dwarfdump --uuid "$f" | cut -d' ' -f2 | tr -d - | tr A-F a-f)
+        od -An -tx1 -v "$f" | tr -d ' \n' > hex.txt
+        grep -ob "$uuid" hex.txt > at.txt
+        at=$(head -n1 at.txt | cut -d: -f1)
+        printf '\xff' | dd of="$f" bs=1 seek=$((at / 2 + 15)) conv=notrunc status=none
+        [ "$(llvm-dwarfdump --uuid "$f" | cut -d' ' -f2)" != "$(llvm-dwarfdump --uuid "$(find -L ${bins} -type f)" | cut -d' ' -f2)" ]
+      '';
+      stripWith =
+        helper: input:
+        helper {
+          inherit input pkgs;
+          product.name = "pure-test";
+          target.triple = a64;
+        };
+      stable = breakbulk.stageHelpers.strip { buildId = false; };
+      kept = breakbulk.stageHelpers.strip;
+    in
+    pkgs.runCommand "darwin-test-strip"
+      {
+        nativeBuildInputs = tools;
+        a = stripWith stable bins;
+        b = stripWith stable other;
+        keptA = stripWith kept bins;
+        keptB = stripWith kept other;
+      }
+      ''
+        set -euo pipefail
+        a=$(find $a -type f) b=$(find $b -type f)
+        # The linker's UUID tells them apart after `llvm-strip -S` alone.
+        if cmp -s "$(find $keptA -type f)" "$(find $keptB -type f)"; then
+          echo "the UUID alone did not tell them apart: the check proves nothing"; exit 1
+        fi
+        cmp "$a" "$b"
+        orig=$(llvm-dwarfdump --uuid "$(find -L ${bins} -type f)" | cut -d' ' -f2)
+        new=$(llvm-dwarfdump --uuid "$a" | cut -d' ' -f2)
+        echo "UUID $orig -> $new"
+        [ "$new" != "$orig" ]
+        if llvm-nm -a "$a" | grep '^[0-9a-f]* - '; then echo "$a keeps a debug map"; exit 1; fi
+        # The signature is the linker's form again, and its first page's
+        # hash (4 KiB pages) is that of the new header.
+        rcodesign print-signature-info "$a" > sig.txt
+        grep -q 'ADHOC | LINKER_SIGNED' sig.txt
+        sigoff=$(sed -n 's/.*macho_signature_start_offset: \([0-9]*\) .*/\1/p' sig.txt)
+        page=$(head -c 4096 "$a" | sha256sum | cut -c1-64)
+        od -An -tx1 -v "$a" | tr -d ' \n' > hex.txt
+        grep -ob "$page" hex.txt > at.txt
+        at=$(head -n1 at.txt | cut -d: -f1)
+        [ -n "$at" ] && [ $((at / 2)) -gt "$sigoff" ]
+        touch $out
+      '';
 
   # rustc's default, exported by the target capture every target unit
   # replays (layer 2).
@@ -303,6 +378,7 @@ in
     darwin-aarch64 = aarch64;
     darwin-x86_64 = x86_64;
     darwin-no-runner = noRunner;
+    darwin-test-strip = testStrip;
     darwin-deployment-target = deploymentTarget;
     darwin-eval =
       if failedEval == { } then

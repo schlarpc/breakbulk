@@ -256,6 +256,48 @@ let
     isMacho() { [ -n "$(machoType "$1")" ]; }
   '';
 
+  # `contentUuid <file>` replaces a thin Mach-O file's UUID with one
+  # computed from its bytes (the UUID zeroed, up to the code signature)
+  # and its name, as the linker computes it from the whole file, and then
+  # writes the file's signature again. Not removing the UUID: LLVM's
+  # tools cannot, and dyld refuses a dylib without one, and an executable
+  # without one once its SDK is macOS 26. The signature is written by
+  # `llvm-objcopy`, in the form `llvm-strip` leaves (ad hoc, linker-signed,
+  # under the file's name), not by `rcodesign`, one tool fewer.
+  contentUuidFn = ''
+    contentUuid() {
+      local f=$1 hdr ncmds size off=0 i n cmd uuid="" sig="" end h b6 b8
+      case "$(head -c4 "$f" | od -An -tx1 | tr -d ' \n')" in
+        cffaedfe) hdr=32 ;;
+        cefaedfe) hdr=28 ;;
+        *) return 0 ;;
+      esac
+      read -r ncmds size < <(od -An -tu4 -j16 -N8 "$f")
+      local -a w
+      # Numbers only, so word splitting is the parse.
+      w=($(od -An -tu4 -v -j"$hdr" -N"$size" "$f"))
+      for ((n = 0; n < ncmds; n++)); do
+        i=$((off / 4))
+        cmd=''${w[i]}
+        case "$cmd" in
+          27) uuid=$((hdr + off + 8)) ;;
+          29) sig=''${w[i + 2]} ;;
+        esac
+        off=$((off + w[i + 1]))
+      done
+      [ -n "$uuid" ] || return 0
+      end=''${sig:-$(stat -c %s "$f")}
+      head -c16 /dev/zero | dd of="$f" bs=1 seek="$uuid" conv=notrunc status=none
+      h=$({ printf '%s\0' "''${f##*/}"; head -c "$end" "$f"; } | sha256sum | cut -c1-32)
+      # RFC 9562 version 8 (custom) and variant bits.
+      b6=$(printf '%02x' $(((0x''${h:12:2} & 0x0f) | 0x80)))
+      b8=$(printf '%02x' $(((0x''${h:16:2} & 0x3f) | 0x80)))
+      h=''${h:0:12}$b6''${h:14:2}$b8''${h:18}
+      printf "$(printf '%s' "$h" | sed 's/../\\x&/g')" | dd of="$f" bs=1 seek="$uuid" conv=notrunc status=none
+      [ -z "$sig" ] || llvm-objcopy "$f"
+    }
+  '';
+
   # Whether a stage that writes the debug files so far (`placeDebug`)
   # has any: its `debug` output is declared only then.
   hasDebugFiles =
@@ -585,9 +627,13 @@ let
               file. The linker computes it over the whole file, debug
               information included, so without it a file whose debug
               information alone changed strips to the same bytes, which
-              lets a content-addressed test run skip a re-run. A Mach-O
-              file keeps its UUID either way: LLVM's tools cannot remove
-              it.
+              lets a content-addressed test run skip a re-run. The Mach-O
+              counterpart is the UUID (`LC_UUID`), which the linker also
+              computes over the whole file, debug map included. LLVM's
+              tools cannot remove it, and dyld needs it, so without
+              `buildId` a thin Mach-O file gets a UUID computed from its
+              stripped bytes and name instead, and its ad hoc signature
+              is written again. A universal file keeps its UUIDs.
             '';
           };
           binutils = binutilsOption;
@@ -630,6 +676,7 @@ let
             ${copyIn input}
             ${isElfFn}
             ${isMachoFn}
+            ${contentUuidFn}
             ${placeDebugFn product target pkgs}
             copyIn "$out"
             ${lib.optionalString debug ''
@@ -637,10 +684,17 @@ let
               placeDebug "$debug"
             ''}
             find "$out" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d "" f; do
-              case "$(machoType "$f")" in
+              t=$(machoType "$f" || true)
+              case "$t" in
                 "") ;;
-                2) llvm-strip ${if cfg.all then "--strip-all" else "-S"} "$f"; continue ;;
-                6|8|fat) llvm-strip ${if cfg.all then "-x" else "-S"} "$f"; continue ;;
+                2|6|8|fat)
+                  if [ "$t" = 2 ]; then
+                    llvm-strip ${if cfg.all then "--strip-all" else "-S"} "$f"
+                  else
+                    llvm-strip ${if cfg.all then "-x" else "-S"} "$f"
+                  fi
+                  ${lib.optionalString (!cfg.buildId) ''[ "$t" = fat ] || contentUuid "$f"''}
+                  continue ;;
                 *) continue ;;
               esac
               isElf "$f" || continue

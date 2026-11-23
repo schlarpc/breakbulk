@@ -501,9 +501,13 @@ Keep the GNU build ID (`.note.gnu.build-id`) of each ELF
 file. The linker computes it over the whole file, debug
 information included, so without it a file whose debug
 information alone changed strips to the same bytes, which
-lets a content-addressed test run skip a re-run. A Mach-O
-file keeps its UUID either way: LLVM's tools cannot remove
-it.
+lets a content-addressed test run skip a re-run. The Mach-O
+counterpart is the UUID (`LC_UUID`), which the linker also
+computes over the whole file, debug map included. LLVM's
+tools cannot remove it, and dyld needs it, so without
+`buildId` a thin Mach-O file gets a UUID computed from its
+stripped bytes and name instead, and its ad hoc signature
+is written again. A universal file keeps its UUIDs.
 
 *Type:* boolean
 

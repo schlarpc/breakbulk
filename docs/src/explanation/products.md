@@ -185,8 +185,9 @@ their file and line; backtraces keep function names but lose files, lines
 and inlined frames. For debugging, the unstripped binary is
 `tests.<pkg>.<binary>`. Without `ca` the run is not stripped: its input
 changes with the binary anyway. On Apple targets the stage removes the
-debug map, but the Mach-O UUID, which the linker computes over the whole
-file, stays, so the cutoff holds only when the debug map did not change.
+debug map, and replaces the Mach-O UUID, which the linker computes over
+the whole file, debug map included, with one computed from the stripped
+bytes; it then signs the binary ad hoc again.
 
 ### Cargo's trim-paths
 
