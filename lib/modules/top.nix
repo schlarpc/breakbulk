@@ -310,20 +310,22 @@ in
         }
       '';
       description = ''
-        Default settings for the workspace members that depend on a
-        crate, by the crate's name: a function of the crate's lockfile
-        entry (`{ name, version, buildDependency, ... }`) that returns a
-        module with the options of `packages.<name>` (whose `package`
-        argument is the member's lockfile entry). They apply to
-        every path package of a workspace whose `Cargo.lock` has the
-        crate among its dependencies of any kind (dev-dependencies too),
-        directly or through other crates. `buildDependency` narrows that:
-        it is `true` when the package's own `Cargo.toml` names the crate
-        under `[build-dependencies]` (or a
-        `[target.<cfg>.build-dependencies]` table, renamed with
-        `package` too); the manifest is read only by a function that uses
-        it. They are a layer over `sysDefaults.packages`
-        and under `memberDefaults`
+        Default settings for the packages that depend on a crate, by the
+        crate's name: a function of the crate's lockfile entry (`{ name,
+        version, direct, buildDependency, ... }`) that returns a module
+        with the options of `packages.<name>` (whose `package` argument is
+        the dependent's lockfile entry). They apply to every package of a
+        workspace's `Cargo.lock`, from the registry, git or a path, that
+        has the crate among its dependencies of any kind
+        (dev-dependencies too), directly or through other crates. Two
+        arguments narrow that: `direct` is `true` when the dependent's
+        `Cargo.lock` entry names the crate itself, and `buildDependency`
+        when a path package's own `Cargo.toml` names the crate under
+        `[build-dependencies]` (or a `[target.<cfg>.build-dependencies]`
+        table, renamed with `package` too; always `false` for a registry
+        or git package, whose manifest is not read at evaluation); the
+        manifest is read only by a function that uses it. They are a layer
+        over `sysDefaults.packages` and under `memberDefaults`
         ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)).
 
         The curated entries are defined at `mkDefault` priority, so a
@@ -339,7 +341,11 @@ in
         source prediction cannot read: for a package that build-depends
         on one, they set
         [`predictSources.buildScriptRuns`](packages.md#packagesnamepredictsourcesbuildscriptruns)
-        to `false`.
+        to `false`. `cmake` gives each package that depends on it
+        directly a
+        [`buildScript.outDirRemove`](packages.md#packagesnamebuildscriptoutdirremove)
+        rule that deletes CMake's `CMakeFiles` beside its
+        `CMakeCache.txt`.
       '';
     };
 

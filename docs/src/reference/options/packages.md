@@ -225,6 +225,79 @@ null or raw value
 *Default:*
 ` test.wrapper `’s
 
+## `packages.<name>.buildScript.outDirRemove`
+
+State a tool leaves in this package’s build-script output that
+nothing reads after the run and that differs between runs: after
+each successful run of the build script (on both [sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides)), in
+every directory of the output that holds a file named ` beside `,
+` path ` is deleted\. Lists concatenate over the layers\.
+
+The curated [` sysDefaults.dependents `](repository\.md\#sysdefaultsdependents)
+entry of the ` cmake ` crate gives every package that depends on it
+directly ` { beside = "CMakeCache.txt"; path = "CMakeFiles"; } `:
+CMake’s configure log there names randomly named try-compile
+directories, and the ` cmake ` crate reads only ` CMakeCache.txt `
+and ` Makefile ` of its build tree, within the run
+([assumption E3](\.\./assumptions\.md\#e3-cmake-rs-reads-nothing-from-cmakefiles-after-the-run))\.
+` lib.mkForce [ ] ` turns it off for a package that reads
+` CMakeFiles ` later\.
+
+*Type:*
+list of (submodule)
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Example:*
+
+```nix
+[
+  {
+    beside = "meson-info";
+    path = "meson-logs";
+  }
+]
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.buildScript.outDirRemove.*.beside`
+
+The file name that marks a directory the rule applies in\.
+
+*Type:*
+string
+
+*Example:*
+
+```nix
+"CMakeCache.txt"
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.buildScript.outDirRemove.*.path`
+
+What to delete there: a file or a directory, relative to it\.
+
+*Type:*
+string
+
+*Example:*
+
+```nix
+"CMakeFiles"
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.buildScriptPaths.allow`
 
 ` rerun-if-changed ` paths this package’s build script declares

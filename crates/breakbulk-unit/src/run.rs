@@ -20,8 +20,8 @@
 //!    which the plan's `buildScriptPaths` check reads. The run itself
 //!    does not fail on them: a check fails without blocking what is built
 //!    above it, and names every missing path of the plan at once.
-//! 7. After a successful run, remove CMake's internal state from `OUT_DIR`
-//!    ([`remove_cmake_state`]).
+//! 7. After a successful run, delete what the package's `outDirRemove`
+//!    rules name ([`remove_out_dir_state`]).
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -36,7 +36,9 @@ use crate::directives::{
 };
 use crate::env::{CFlags, Outer, layered, read_capture};
 use crate::process::{command, describe_status, shell_words};
-use crate::spec::{RenderedRun, SourceView, package_descr, package_name_version, package_spec};
+use crate::spec::{
+    OutDirRemove, RenderedRun, SourceView, package_descr, package_name_version, package_spec,
+};
 use crate::splice::expand_dylib_path;
 use crate::view_hints;
 use crate::{
@@ -488,35 +490,32 @@ pub fn judge(f: &Finished<'_>) -> Result<Success, Failure> {
     })
 }
 
-/// Remove the `CMakeFiles` directory of every CMake build tree under `out`
-/// (a directory holding both `CMakeCache.txt` and `CMakeFiles/`), and
-/// return what was removed.
-///
-/// CMake writes its configure log there (`CMakeConfigureLog.yaml`, or
-/// `CMakeOutput.log` and `CMakeError.log` before CMake 3.26). It names the
-/// randomly named try-compile directories under `CMakeFiles/CMakeScratch`,
-/// so a run that builds with CMake (the `cmake` crate builds in
-/// `$OUT_DIR/build`) is not reproducible: for cm-sys in the sys-native
-/// fixture, `CMakeConfigureLog.yaml` is the only file `nix build --rebuild`
-/// finds different. Nothing reads `CMakeFiles` after the build script: the
-/// `cmake` crate reads `CMakeCache.txt` and `Makefile` back only within the
-/// same run (cmake-rs 0.1.58, `Config::build` and `maybe_clear` in
-/// `src/lib.rs`), and consumers link the installed or built libraries,
-/// which lie outside it (inside are object files and generator
-/// bookkeeping). The rest of the tree (`CMakeCache.txt`, `Makefile`, built
-/// libraries) stays, because crates do link from `$OUT_DIR/build`. Nested
-/// project directories' own `CMakeFiles` (no `CMakeCache.txt` next to
-/// them) hold no configure log and stay too.
-pub fn remove_cmake_state(out: &Path) -> Result<Vec<PathBuf>, Error> {
+/// Apply `rules` to the run's output `out`: for each rule, in every
+/// directory under `out` that holds a file named `beside`, remove `path`
+/// (a file, a symbolic link or a directory) when it exists. Returns what
+/// was removed, sorted. A removed directory is not walked further.
+pub fn remove_out_dir_state(out: &Path, rules: &[OutDirRemove]) -> Result<Vec<PathBuf>, Error> {
     let mut removed = Vec::new();
+    if rules.is_empty() {
+        return Ok(removed);
+    }
     let mut stack = vec![out.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let state = dir.join("CMakeFiles");
-        let is_tree = dir.join("CMakeCache.txt").is_file()
-            && state.symlink_metadata().is_ok_and(|m| m.is_dir());
-        if is_tree {
-            std::fs::remove_dir_all(&state).map_err(|e| io_err("removing", &state, e))?;
-            removed.push(state);
+        for rule in rules {
+            let target = dir.join(&rule.path);
+            let Ok(meta) = target.symlink_metadata() else {
+                continue;
+            };
+            if !dir.join(&rule.beside).is_file() {
+                continue;
+            }
+            if meta.is_dir() {
+                std::fs::remove_dir_all(&target)
+            } else {
+                std::fs::remove_file(&target)
+            }
+            .map_err(|e| io_err("removing", &target, e))?;
+            removed.push(target);
         }
         let entries = std::fs::read_dir(&dir).map_err(|e| io_err("reading", &dir, e))?;
         for entry in entries {
@@ -613,11 +612,8 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
     for w in &success.warnings {
         eprintln!("{w}");
     }
-    for removed in remove_cmake_state(&out)? {
-        eprintln!(
-            "     Removed CMake's internal state `{}`",
-            removed.display()
-        );
+    for removed in remove_out_dir_state(&out, &r.out_dir_remove)? {
+        eprintln!("     Removed `{}` (outDirRemove)", removed.display());
     }
     let outside = files_outside(&out, &out_dir)?;
     let mut output = success.output;

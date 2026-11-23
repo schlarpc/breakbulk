@@ -677,6 +677,10 @@ pub struct RenderedRun {
     /// in its attributes) is remapped to, as with `remap`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_dir_remap: Option<String>,
+    /// What to delete from `$out` after a successful run
+    /// ([`OutDirRemove`]), in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub out_dir_remove: Vec<OutDirRemove>,
     #[serde(default, skip_serializing_if = "Hints::is_empty")]
     pub hints: Hints,
     /// The value of `-frandom-seed` for C code: the unit's key in the plan
@@ -688,6 +692,19 @@ pub struct RenderedRun {
     /// it; `None` adds no seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+}
+
+/// A removal rule for a build-script run's output
+/// (`packages.<name>.buildScript.outDirRemove`): in every directory under
+/// `$out` that holds a file named `beside`, the entry `path` (a file or a
+/// directory, relative to that directory) is deleted after the script
+/// succeeds. For state a tool leaves in `OUT_DIR` that nothing reads after
+/// the run and that differs between runs, such as CMake's configure log.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutDirRemove {
+    pub beside: String,
+    pub path: String,
 }
 
 #[cfg(test)]

@@ -126,8 +126,9 @@ sure that:
   part of every unit's `-C metadata`.
 - Binaries get a content-derived `--build-id`.
 - CMake's internal state (`CMakeFiles`, with its configure log) is removed
-  from build-script output after the run; the rest of the build tree is
-  kept.
+  from the build-script output of the `cmake` crate's direct dependents
+  after the run (a curated `buildScript.outDirRemove` rule); the rest of
+  the build tree is kept.
 
 `nix run .#test-rebuild` builds every fixture's products and a sample
 of its units twice and compares the bytes (see

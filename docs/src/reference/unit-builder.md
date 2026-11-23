@@ -378,16 +378,24 @@ runs put those on the dynamic-library path after the search paths, as
 (`Compilation::fill_env`), so a library a script copies next to the
 binaries is found.
 
-### CMake state
+### Removal rules
 
-In every directory of `$out` that holds both `CMakeCache.txt` and
-`CMakeFiles/` (the `cmake` crate's `$OUT_DIR/build`), `CMakeFiles` is
-deleted:
+After a successful run, the run spec's `outDirRemove` rules
+(`packages.<name>.buildScript.outDirRemove`) apply: for each rule
+`{ beside, path }`, in every directory of `$out` that holds a file named
+`beside`, `path` (a file or a directory) is deleted. A deleted directory is
+not searched further. They are for state a tool leaves in `OUT_DIR` that
+differs between runs and that nothing reads afterwards.
 
-- its configure log names randomly named try-compile directories, so the
-  run would not be reproducible;
+The curated `sysDefaults.dependents.cmake` entry gives each direct
+dependent of the `cmake` crate `{ beside = "CMakeCache.txt"; path =
+"CMakeFiles"; }`:
+
+- CMake's configure log there names randomly named try-compile
+  directories, so the run would not be reproducible;
 - nothing reads it after the script (the `cmake` crate reads its build tree
-  back only within one run).
+  back only within one run,
+  [E3](assumptions.md#e3-cmake-rs-reads-nothing-from-cmakefiles-after-the-run)).
 
 The rest of the tree stays, because crates link from it.
 

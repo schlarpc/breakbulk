@@ -19,7 +19,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use breakbulk_format::rendered::{OutputRule, SourceView, Widen, package_name_version};
+use breakbulk_format::rendered::{
+    OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
+};
 use breakbulk_format::{
     CargoTarget, DEBUG_OUTPUT, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind,
     SrcRef, TargetDebuginfo, Unit, UnitBody, UnitId, ValidationOptions, derivation_output,
@@ -547,6 +549,12 @@ impl Resolve for Tokens<'_> {
             merge_layer_with(self, &mut env, layer)?;
         }
         Ok(env)
+    }
+
+    fn out_dir_remove(&self, _id: &UnitId, unit: &Unit) -> Vec<OutDirRemove> {
+        self.package_override(unit.package())
+            .map(|(_, o)| o.out_dir_remove.clone())
+            .unwrap_or_default()
     }
 
     fn wrapper_config_dir(

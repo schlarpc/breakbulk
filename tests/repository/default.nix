@@ -1970,6 +1970,37 @@ in
     ) "overrides: no warning for a variant layer that names no variant: ${builtins.toJSON ws}";
     evalCheck "overrides" (builtins.toJSON ws);
 
+  # The curated `sysDefaults.dependents.cmake` gives a direct dependent of
+  # the cmake crate (cm-sys) its `outDirRemove` rule, and no other run;
+  # `lib.mkForce [ ]` takes it away again.
+  cmake-out-dir-remove =
+    let
+      runOf =
+        repo: n:
+        (builtins.fromJSON (
+          builtins.unsafeDiscardStringContext
+            (unitsNamed (inst repo) "build")."${n}-0.1.0-build-run".drvAttrs.BREAKBULK_UNIT
+        )).outDirRemove or [ ];
+      repo = mkRepo (fixtures + "/sys-native") [ (oneWs ".") ];
+      off = mkRepo (fixtures + "/sys-native") [
+        (oneWs ".")
+        { packages.cm-sys.buildScript.outDirRemove = lib.mkForce [ ]; }
+      ];
+      rule = [
+        {
+          beside = "CMakeCache.txt";
+          path = "CMakeFiles";
+        }
+      ];
+    in
+    assert lib.assertMsg (runOf repo "cm-sys" == rule)
+      "cmake-out-dir-remove: cm-sys ${builtins.toJSON (runOf repo "cm-sys")}";
+    assert lib.assertMsg (
+      runOf repo "bg-sys" == [ ] && runOf repo "plain" == [ ]
+    ) "cmake-out-dir-remove: reached a package that does not depend on cmake";
+    assert lib.assertMsg (runOf off "cm-sys" == [ ]) "cmake-out-dir-remove: mkForce kept the rule";
+    evalCheck "cmake-out-dir-remove" "";
+
   # Version requirements, against the semver crate's rules.
   version-req =
     let

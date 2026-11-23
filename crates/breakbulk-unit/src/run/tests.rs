@@ -30,6 +30,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         seed: None,
         remap: vec![],
         out_dir_remap: None,
+        out_dir_remove: Vec::new(),
     }
 }
 
@@ -782,7 +783,7 @@ fn run_mode_end_to_end() {
 }
 
 #[test]
-fn cmake_state_is_removed_from_build_trees_only() {
+fn out_dir_remove_rules_apply_beside_their_file_only() {
     let t = TempDir::new("cmake");
     let out = t.path();
     let mk = |rel: &str, body: &str| {
@@ -806,7 +807,11 @@ fn cmake_state_is_removed_from_build_trees_only() {
     mk("lib/libcm.a", "lib");
     // A `CMakeFiles` that is not next to a cache is left alone.
     mk("other/CMakeFiles/keep", "");
-    let removed = remove_cmake_state(out).unwrap();
+    let rules = [OutDirRemove {
+        beside: "CMakeCache.txt".into(),
+        path: "CMakeFiles".into(),
+    }];
+    let removed = remove_out_dir_state(out, &rules).unwrap();
     assert_eq!(removed, [out.join("build/CMakeFiles")]);
     assert!(!out.join("build/CMakeFiles").exists());
     for kept in [
@@ -818,7 +823,11 @@ fn cmake_state_is_removed_from_build_trees_only() {
     ] {
         assert!(out.join(kept).exists(), "{kept} was removed");
     }
-    assert_eq!(remove_cmake_state(out).unwrap(), Vec::<PathBuf>::new());
+    assert_eq!(
+        remove_out_dir_state(out, &rules).unwrap(),
+        Vec::<PathBuf>::new()
+    );
+    assert!(remove_out_dir_state(out, &[]).unwrap().is_empty());
 }
 
 #[test]

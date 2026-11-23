@@ -473,6 +473,48 @@ let
           `inputs` (outside it) instead.
         '';
       };
+      buildScript.outDirRemove = mkOption {
+        type = types.listOf (
+          types.submodule {
+            options = {
+              beside = mkOption {
+                type = types.str;
+                example = "CMakeCache.txt";
+                description = "The file name that marks a directory the rule applies in.";
+              };
+              path = mkOption {
+                type = types.str;
+                example = "CMakeFiles";
+                description = "What to delete there: a file or a directory, relative to it.";
+              };
+            };
+          }
+        );
+        default = [ ];
+        example = [
+          {
+            beside = "meson-info";
+            path = "meson-logs";
+          }
+        ];
+        description = ''
+          State a tool leaves in this package's build-script output that
+          nothing reads after the run and that differs between runs: after
+          each successful run of the build script (on both ${sides}), in
+          every directory of the output that holds a file named `beside`,
+          `path` is deleted. Lists concatenate over the layers.
+
+          The curated [`sysDefaults.dependents`](repository.md#sysdefaultsdependents)
+          entry of the `cmake` crate gives every package that depends on it
+          directly `{ beside = "CMakeCache.txt"; path = "CMakeFiles"; }`:
+          CMake's configure log there names randomly named try-compile
+          directories, and the `cmake` crate reads only `CMakeCache.txt`
+          and `Makefile` of its build tree, within the run
+          ([assumption E3](../assumptions.md#e3-cmake-rs-reads-nothing-from-cmakefiles-after-the-run)).
+          `lib.mkForce [ ]` turns it off for a package that reads
+          `CMakeFiles` later.
+        '';
+      };
       sourceOverlay = mkOption {
         type = types.lazyAttrsOf (
           types.oneOf [

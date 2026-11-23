@@ -1,9 +1,9 @@
-# Curated settings for the workspace members that depend on a crate, by
-# the crate's name: what a library needs from its dependents' test runs
-# rather than from its own units (lib/sys-defaults.nix). Each value is the
+# Curated settings for the packages that depend on a crate, by the
+# crate's name: what a library needs from its dependents' units and test
+# runs rather than from its own (lib/sys-defaults.nix). Each value is the
 # `sysDefaults.dependents.<name>` settings module, or a function of the
-# crate's lockfile entry and `buildDependency` (`{ version,
-# buildDependency, ... }`) that returns one. lib/modules/top.nix defines
+# crate's lockfile entry, `direct` and `buildDependency` (`{ version,
+# direct, buildDependency, ... }`) that returns one. lib/modules/top.nix defines
 # them at `mkDefault` priority.
 { lib }:
 let
@@ -75,6 +75,28 @@ in
   bevy_macro_utils = {
     predictSources.keep = [ "Cargo.toml" ];
   };
+
+  # CMake's configure log in `CMakeFiles` names randomly named
+  # try-compile directories, so a run that configures a CMake project is
+  # not reproducible with it. The cmake crate builds in `$OUT_DIR/build`
+  # and reads back only `CMakeCache.txt` and `Makefile` there, within the
+  # run (assumption E3 in docs/src/reference/assumptions.md), and
+  # dependents link the libraries outside `CMakeFiles`. Nested projects'
+  # own `CMakeFiles` (no `CMakeCache.txt` beside them) hold no configure
+  # log and stay. Only for direct dependents: a crate that reaches cmake
+  # through another runs no CMake of its own.
+  cmake =
+    { direct, ... }:
+    {
+      config = lib.mkIf direct {
+        buildScript.outDirRemove = [
+          {
+            beside = "CMakeCache.txt";
+            path = "CMakeFiles";
+          }
+        ];
+      };
+    };
 
   autocfg = directivePrinter;
   bindgen = directivePrinter;

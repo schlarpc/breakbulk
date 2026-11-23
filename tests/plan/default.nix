@@ -179,7 +179,8 @@ let
     lib.mapAttrs
       (
         name: o:
-        lib.genAttrs [ "host" "target" ] (platform: {
+        lib.optionalAttrs (o ? outDirRemove) { inherit (o) outDirRemove; }
+        // lib.genAttrs [ "host" "target" ] (platform: {
           env = o.env or { };
           envCapture = breakbulk.envCapture.forPackage {
             inherit pkgs platform name;
@@ -194,7 +195,16 @@ let
           inputs = p: [ p.openssl ];
           env.BB_MARKER = "ssl";
         };
-        cm-sys.nativeInputs = p: [ p.cmake ];
+        # As `sysDefaults.dependents.cmake` gives a direct dependent.
+        cm-sys = {
+          nativeInputs = p: [ p.cmake ];
+          outDirRemove = [
+            {
+              beside = "CMakeCache.txt";
+              path = "CMakeFiles";
+            }
+          ];
+        };
         bg-sys.nativeInputs = p: [ p.rustPlatform.bindgenHook ];
       };
   sysNativeArgs.packageOverrides = sysNativeOverrides;

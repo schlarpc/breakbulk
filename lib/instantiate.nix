@@ -133,6 +133,7 @@ rec {
       # overrides."<name>" or ."<name>@<version>" = {
       #   host = { env = { }; envCapture = null; };
       #   target = { env = { }; envCapture = null; };
+      #   outDirRemove = [ { beside; path; } ];  # buildScript.outDirRemove
       # }
       # with package-wide and per-triple settings already merged per platform.
       overrides ? { },
@@ -239,7 +240,11 @@ rec {
         )
       );
       overridesFile = toFile "overrides.json" (toJSON {
-        packages = lib.mapAttrs (_: o: lib.genAttrs platforms (p: platformJson (ovPlatform o p))) overrides;
+        packages = lib.mapAttrs (
+          _: o:
+          lib.genAttrs platforms (p: platformJson (ovPlatform o p))
+          // lib.optionalAttrs ((o.outDirRemove or [ ]) != [ ]) { inherit (o) outDirRemove; }
+        ) overrides;
       });
       rootsFile = toFile "roots.json" (toJSON roots);
       rootList = if roots == null then [ ] else roots.roots;

@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{append, list_separator};
 use breakbulk_unit::spec::{
-    Hints, OutputInto, OutputRule, RenderedArg, RenderedCompile, RenderedRun, RenderedUnit,
-    RepositoryPath, SearchPaths, SourceView,
+    Hints, OutDirRemove, OutputInto, OutputRule, RenderedArg, RenderedCompile, RenderedRun,
+    RenderedUnit, RepositoryPath, SearchPaths, SourceView,
 };
 
 use crate::deps::Graph;
@@ -91,6 +91,11 @@ pub trait Resolve {
         _unit: &Unit,
     ) -> Result<Option<(String, String)>, Self::Error> {
         Ok(None)
+    }
+    /// For a build-script run: what to delete from its output after it
+    /// succeeds (`packages.<name>.buildScript.outDirRemove`).
+    fn out_dir_remove(&self, _id: &UnitId, _unit: &Unit) -> Vec<OutDirRemove> {
+        Vec::new()
     }
     /// The output rules for the files a compile unit writes beyond its
     /// crate files and debuginfo ([`OutputRule`]) when one of the variant's wrappers
@@ -583,6 +588,7 @@ pub fn render_unit_in<R: Resolve>(
                 // names, or Cargo's under trim-paths (`cargo_run_remap`).
                 remap,
                 out_dir_remap,
+                out_dir_remove: r.out_dir_remove(id, &unit),
                 hints: Hints {
                     view: r.source_view(id, &unit)?,
                     repository_paths,

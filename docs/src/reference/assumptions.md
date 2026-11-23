@@ -957,11 +957,11 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 ### E3. cmake-rs reads nothing from `CMakeFiles` after the run
 
 - **Assumption.** Nothing reads a CMake build tree's `CMakeFiles` directory after the build script that configured it: the `cmake` crate reads `CMakeCache.txt` and `Makefile` back only within the same run, and dependents link the installed or built libraries, which lie outside it.
-- **Where.** `crates/breakbulk-unit/src/run.rs`: `remove_cmake_state` (removes `CMakeFiles` next to a `CMakeCache.txt`, because CMake's configure log names randomly named try-compile directories).
+- **Where.** `lib/sys-defaults-dependents.nix`: the curated `cmake` entry, whose `buildScript.outDirRemove` rule makes `breakbulk-unit` (`run::remove_out_dir_state`) delete `CMakeFiles` next to a `CMakeCache.txt` in a direct dependent's run output, because CMake's configure log names randomly named try-compile directories.
 - **Upstream.** cmake-rs 0.1.58 (`6319069`) `src/lib.rs`: `Config::build` (`CMakeCache.txt` to decide whether to configure, `Makefile` for the jobserver), `maybe_clear` (`CMakeCache.txt`); no other read of the build tree. Checked for this page.
 - **Holds for.** cmake 0.1.58, as locked by the `sys-native` fixture.
-- **Pinned by.** `plan-cmake-reproducible` (cm-sys's run without `CMakeFiles`, with its built and installed `libcm.a`, and two builds of the run equal); `plan-sys-native` (the product, which links cm-sys's library, runs as plain Cargo's does). Rust: `run::tests::cmake_state_is_removed_from_build_trees_only`.
-- **If it changes.** A build script or dependent that reads `CMakeFiles` fails on a missing file; the checks fail when cm-sys is affected.
+- **Pinned by.** `plan-cmake-reproducible` (cm-sys's run without `CMakeFiles`, with its built and installed `libcm.a`, and two builds of the run equal); `plan-sys-native` (the product, which links cm-sys's library, runs as plain Cargo's does). `repository-cmake-out-dir-remove` (the rule reaches cm-sys's run and no other). Rust: `run::tests::out_dir_remove_rules_apply_beside_their_file_only`.
+- **If it changes.** A build script or dependent that reads `CMakeFiles` fails on a missing file; the checks fail when cm-sys is affected. Such a package turns the rule off with `packages.<name>.buildScript.outDirRemove = lib.mkForce [ ];`.
 
 ## nixpkgs' compiler wrappers
 

@@ -48,7 +48,6 @@ let
       name = "unit-smoke-${id}";
       system = pkgs.stdenv.buildPlatform.system;
       builder = "${breakbulk-unit}/bin/breakbulk-unit";
-      args = [ "unit" ];
       inherit (u) outputs;
       BREAKBULK_UNIT = builtins.replaceStrings (map (r: r.token) u.refs) (map resolve u.refs) u.unit;
     }

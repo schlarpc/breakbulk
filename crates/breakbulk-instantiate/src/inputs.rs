@@ -165,6 +165,10 @@ pub struct PackageOverride {
     pub host: PlatformSpec,
     #[serde(default)]
     pub target: PlatformSpec,
+    /// `packages.<name>.buildScript.outDirRemove`, for the package's
+    /// build-script runs on either platform.
+    #[serde(default)]
+    pub out_dir_remove: Vec<breakbulk_format::rendered::OutDirRemove>,
 }
 
 impl PackageOverride {

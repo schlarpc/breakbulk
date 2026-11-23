@@ -224,9 +224,9 @@ let
   entryKey = e: "${e.name} ${e.version}${lib.optionalString (!isPathEntry e) " ${e.source}"}";
 
   # The settings layers of one lockfile entry of workspace `wsName`,
-  # lowest first: the curated defaults (`sysDefaults.packages`), for a
-  # path package those of the crates it depends on for their dependents
-  # (`sysDefaults.dependents`) and the workspace's `memberDefaults`, then
+  # lowest first: the curated defaults (`sysDefaults.packages`), those of
+  # the crates it depends on for their dependents (`sysDefaults.dependents`),
+  # for a path package the workspace's `memberDefaults`, then
   # `packages.<name>`. lib/package-settings.nix adds each one's `target`
   # and `variant` layers. `hostOnly`: the plan's target has no package
   # set, so the curated layers reach host units only. For warnings:
@@ -244,19 +244,19 @@ let
       };
     in
     lib.optional (sys != null) (curated "sysDefaults.packages.${esc e.name}" sys)
-    ++ lib.optionals (isPathEntry e) (
-      map (
-        d:
-        curated "sysDefaults.dependents.${esc d.name}" (
-          cfg.sysDefaults.dependents.${d.name} (
-            d
-            // {
-              buildDependency = lib.elem d.name (buildDependencyNames.${wsName}.${e.name} or [ ]);
-            }
-          )
+    ++ map (
+      d:
+      curated "sysDefaults.dependents.${esc d.name}" (
+        cfg.sysDefaults.dependents.${d.name} (
+          d
+          // {
+            direct = lib.any (n: lib.head (lib.splitString " " n) == d.name) (e.dependencies or [ ]);
+            buildDependency =
+              isPathEntry e && lib.elem d.name (buildDependencyNames.${wsName}.${e.name} or [ ]);
+          }
         )
-      ) (curatedDeps wsName e.name)
-    )
+      )
+    ) (curatedDeps wsName e.name)
     ++ lib.optional (isPathEntry e && md.imports != [ ]) {
       label = "workspaces.${wsName}.memberDefaults";
       module = md;
@@ -997,12 +997,15 @@ let
               );
             };
           };
+          outDirRemove = map (r: { inherit (r) beside path; }) o.buildScript.outDirRemove;
           # Settings that give units nothing (test settings only) are left
           # out, so instantiation's inputs do not change.
           empty = s: s.env == { } && s.envCapture == null;
         in
-        lib.optional (o != null && !(empty ov.host && empty ov.target)) (
-          lib.nameValuePair "${e.name}@${e.version}" ov
+        lib.optional (o != null && !(empty ov.host && empty ov.target && outDirRemove == [ ])) (
+          lib.nameValuePair "${e.name}@${e.version}" (
+            ov // lib.optionalAttrs (outDirRemove != [ ]) { inherit outDirRemove; }
+          )
         )
       ) entries
     );
