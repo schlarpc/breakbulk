@@ -182,9 +182,9 @@ let
           test -f ${sysroot}/include/wasm32-wasip2/stdio.h
           touch $out
         '';
-      wasip2-test-lib = t.testRuns.app."lib/app";
-      wasip2-test-bin = t.testRuns.app."bin/app";
-      wasip2-test-it = t.testRuns.app.it;
+      wasip2-test-lib = t.variants.default.testRuns.app."lib/app";
+      wasip2-test-bin = t.variants.default.testRuns.app."bin/app";
+      wasip2-test-it = t.variants.default.testRuns.app.it;
     };
 
   # --- riscv64 -------------------------------------------------------------------
@@ -223,7 +223,7 @@ let
             mkdir -p $out
             cp needed.txt out.txt $out/
           '';
-      riscv64-test-lib = t.testRuns.app."lib/app";
+      riscv64-test-lib = t.variants.default.testRuns.app."lib/app";
     };
 
   # --- windows-gnu ---------------------------------------------------------------
@@ -275,7 +275,7 @@ let
             mkdir -p $out
             cp file.txt dlls.txt out2.txt $out/
           '';
-      "${name}-test" = t.testRuns.gnu-smoke."bin/gnu-smoke";
+      "${name}-test" = t.variants.default.testRuns.gnu-smoke."bin/gnu-smoke";
     };
   windowsGnuChecks =
     windowsGnuChecksFor "windows-gnu" "x86_64-pc-windows-gnu"
@@ -299,9 +299,9 @@ let
       exe = "${t.packages.gnu-smoke}/bin/gnu-smoke.exe";
       checkNames = lib.attrNames windowsGnullvmA64Repo.checks;
       runChecks = lib.filter (
-        n: lib.hasInfix "/${wgnuA64}/" n && (lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n)
+        n: lib.hasInfix "/${wgnuA64}/" n && (lib.hasInfix "/test/" n || lib.hasSuffix "/doctest" n)
       ) checkNames;
-      run = lib.head (lib.attrValues t.testRuns.gnu-smoke);
+      run = lib.head (lib.attrValues t.variants.default.testRuns.gnu-smoke);
     in
     assert lib.assertMsg (!t.canRunTests) "windows-gnullvm-aarch64: canRunTests is true";
     assert lib.assertMsg (
@@ -332,7 +332,7 @@ let
               pkgs.file
               pkgs.llvmPackages.llvm
             ];
-            tests = lib.attrValues t.tests.gnu-smoke;
+            tests = lib.attrValues t.variants.default.tests.gnu-smoke;
           }
           ''
             set -euo pipefail
@@ -435,7 +435,7 @@ let
   windowsDllChecks =
     let
       t = windowsDllRepo.workspaces.main.target."x86_64-pc-windows-gnu";
-      run = t.testRuns.windows-dll."lib/windows_dll";
+      run = t.variants.default.testRuns.windows-dll."lib/windows_dll";
       plain = t.packages.windows-dll;
       staged = windowsDllStagedRepo.workspaces.main.target."x86_64-pc-windows-gnu".packages.windows-dll;
     in
@@ -504,7 +504,7 @@ let
             grep -q 'test result: ok' ${run}/log
             # The test binary attribute is named as Cargo names it, with the
             # target's executable suffix (from the binary's own file name).
-            test -x ${t.tests.windows-dll.lib}/bin/windows_dll.exe
+            test -x ${t.variants.default.tests.windows-dll."lib/windows_dll"}/bin/windows_dll.exe
             mkdir -p $out
             cp dlls.txt $out/
           '';
@@ -524,7 +524,7 @@ let
     let
       t = zigRepo.workspaces.main.target.${native};
       bin = "${t.packages.app}/bin/app";
-      inst = zigRepo.workspaces.main.instances.${native}.default;
+      inst = zigRepo.workspaces.main.internal.instances.${native}.default;
       plan = builtins.fromJSON (
         builtins.unsafeDiscardStringContext (builtins.readFile "${inst.plans.build}/plan.json")
       );
@@ -554,7 +554,7 @@ let
             mkdir -p $out
             cp versions.txt out.txt $out/
           '';
-      linux-portable-test = t.testRuns.app."bin/app";
+      linux-portable-test = t.variants.default.testRuns.app."bin/app";
       # The preset's check: NEEDED names only glibc's libraries.
       linux-portable-libraries = t.packages.app.checks.portableLibraries;
       # The product names no Nix store path.
@@ -607,8 +607,8 @@ let
       # Evaluation only: the container runner reaches test runs, not units.
       linux-portable-container-eval =
         assert lib.assertMsg (
-          zigContainerRepo.workspaces.main.target.${native}.tests.app.bin-app.drvPath
-          == t.tests.app.bin-app.drvPath
+          zigContainerRepo.workspaces.main.target.${native}.variants.default.tests.app."bin/app".drvPath
+          == t.variants.default.tests.app."bin/app".drvPath
         ) "zig: the container runner changed the test binary";
         # The removed `rebuildInputs`/`rebuildOverrides` fail, not ignored.
         assert lib.assertMsg (lib.all
@@ -697,7 +697,7 @@ let
         grep -qx "zig: headers=2.17 args=3 runtime=2.17" $out/out.txt
       '';
       # libtest under CentOS 7, `runs_on_expected_glibc` included.
-      linux-portable-centos7-test = t.testRuns.app."bin/app";
+      linux-portable-centos7-test = t.variants.default.testRuns.app."bin/app";
     }
     // zigNativeContainerChecks;
 
@@ -787,7 +787,7 @@ let
         grep -qx "zig-native: OpenSSL 3\.[0-9.]* sha256(abc)=ba7816bf zlib=1\.[0-9.]* adler32=11e60398" $out/out.txt
         grep -q "^curl: libcurl/8\..* nghttp2/" $out/out.txt
       '';
-      linux-portable-native-centos7-test = t.testRuns.app."lib/app";
+      linux-portable-native-centos7-test = t.variants.default.testRuns.app."lib/app";
     };
 in
 {

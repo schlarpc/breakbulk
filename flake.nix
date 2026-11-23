@@ -372,7 +372,7 @@
                       modules = [ { workspaces.main.variants.default.profile = "dev"; } ];
                     }
                     // extra
-                  )).workspaces.main.instances.${native}.default.units.build;
+                  )).workspaces.main.internal.instances.${native}.default.units.build;
             in
             assert lib.assertMsg (
               paths (self.lib.defaultTools pkgs) == paths (self.lib.defaultTools other)

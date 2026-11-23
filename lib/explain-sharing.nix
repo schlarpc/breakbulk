@@ -1,7 +1,7 @@
 # repo.explainSharing: why the units of two plans are or are not shared.
 #
 #   repo.explainSharing {
-#     a = repo.workspaces.one.plans.x86_64-unknown-linux-gnu.default.build;
+#     a = repo.workspaces.one.target.x86_64-unknown-linux-gnu.variants.default.plans.build;
 #     b = "two/x86_64-unknown-linux-gnu/default/build";   # or { workspace; target; variant; kind; }
 #     package = "shared";      # or null (the default): every unit
 #   }
@@ -51,7 +51,7 @@ let
           }
         ) inst.plans
       ) vs
-    ) w.instances
+    ) w.internal.instances
   ) workspaces;
 
   resolvePlan =
@@ -66,7 +66,7 @@ let
         }:
         {
           inst =
-            workspaces.${workspace}.instances.${target}.${variant}
+            workspaces.${workspace}.internal.instances.${target}.${variant}
               or (throw "breakbulk: explainSharing: no plan ${workspace}/${target}/${variant}");
           inherit kind;
           label = "${workspace}/${target}/${variant}/${kind}";

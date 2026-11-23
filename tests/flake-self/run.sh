@@ -93,7 +93,7 @@ for lazy in true false; do
   "${nix[@]}" build "${opts[@]}" --no-link "path:$work/zero#packages.x86_64-linux.walking-skeleton"
   "${nix[@]}" build "${opts[@]}" --no-link "path:$work/zero#packages.x86_64-linux.default-docs"
   zeroApps=$("${nix[@]}" eval "${opts[@]}" --json "path:$work/zero#apps.x86_64-linux" --apply builtins.attrNames)
-  jq -e 'index("default/x86_64-unknown-linux-gnu/walking-skeleton/test-bin-walking-skeleton")' <<< "$zeroApps" > /dev/null || {
+  jq -e 'index("default/x86_64-unknown-linux-gnu/walking-skeleton/test/bin/walking-skeleton")' <<< "$zeroApps" > /dev/null || {
     echo "flake-self: zero-config apps $zeroApps" >&2
     exit 1
   }
@@ -101,9 +101,9 @@ for lazy in true false; do
 
   # `nix run` on a test app: at its attribute path (a derivation), and by
   # its name in `apps`, which needs no quoting.
-  testApp="path:$work/apps#repo.workspaces.main.target.x86_64-unknown-linux-gnu.testApps.ctl.net"
+  testApp="path:$work/apps#repo.workspaces.main.target.x86_64-unknown-linux-gnu.variants.default.testApps.ctl.net"
   "${nix[@]}" run "${opts[@]}" "$testApp" -- --skip needs_network > "$work/run-attr.log"
-  "${nix[@]}" run "${opts[@]}" "path:$work/apps#main/x86_64-unknown-linux-gnu/ctl/test-net" \
+  "${nix[@]}" run "${opts[@]}" "path:$work/apps#main/x86_64-unknown-linux-gnu/ctl/test/net" \
     -- --skip needs_network > "$work/run-app.log"
   for log in run-attr run-app; do
     grep -q 'test offline_ok ... ok' "$work/$log.log" || {

@@ -33,10 +33,11 @@
 #     name = "breakbulk";
 #   };
 #
-#   t.runs.<pkg>.<binary>     one test-run derivation per test binary
+#   t.runs.<pkg>.<binary>     one test-run derivation per test binary;
+#                             `.enabled` says whether it is in the checks
 #   t.doctests.<pkg>          one doctest derivation per library, with its
-#                             platform's runner and the doctest run's
-#                             settings (`doctestConfig`)
+#                             platform's target runner and the doctest
+#                             run's settings (`doctestConfig`); `.enabled`
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
 #                             every enabled run and doctest
 #   t.roots.<pkg>.<binary>    the test roots (lib/test-apps.nix uses them)
@@ -1148,6 +1149,8 @@ rec {
               # (`runInfo`).
               root = r;
               spec = info;
+              # Whether the run is in repo.checks (its `enable`).
+              enabled = cfg.enable;
             };
           }
           // inputs
@@ -1158,7 +1161,11 @@ rec {
         _: rs: lib.listToAttrs (map (r: lib.nameValuePair (binaryKey r.breakbulkRoot) (run r)) rs)
       ) byPackage;
 
-      doctests = lib.optionalAttrs (kind == "test") inst.doctests;
+      # Each with `enabled`: whether it is in repo.checks
+      # (`test.doctest.enable`).
+      doctests = lib.optionalAttrs (kind == "test") (
+        lib.mapAttrs (pkg: d: d // { enabled = doctestEnabled packages pkg; }) inst.doctests
+      );
 
       checks =
         lib.concatMapAttrs (

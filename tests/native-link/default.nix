@@ -74,7 +74,7 @@ let
   } (libfoo 42);
   changedRepo = mkRepo (libfoo 43);
   ws = repo.workspaces.main;
-  instOf = r: r.workspaces.main.instances.${native}.default;
+  instOf = r: r.workspaces.main.internal.instances.${native}.default;
 
   # Unit .drv path -> derivation name, for both plan kinds, plus doctests.
   drvNames =
@@ -125,7 +125,7 @@ let
       units = rendered r;
       linkCaps = n: units.${n}.linkCaptures or [ ];
       app = ws.packages.app;
-      t = ws.testRuns;
+      t = ws.target.${native}.variants.default.testRuns;
     in
     # The bin links foo-sys through mid: it gets foo-sys's capture. mid's
     # library compile does not link; foo-sys's own units have the capture
@@ -147,7 +147,7 @@ let
         inherit app;
         appTest = t.app."bin/app";
         midTest = t.mid."lib/mid";
-        midDoctest = ws.target.${native}.doctests.mid;
+        midDoctest = ws.target.${native}.variants.default.doctests.mid;
         foo = libfoo 42;
       }
       ''

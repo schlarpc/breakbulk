@@ -314,7 +314,7 @@ let
     in
     builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
 
-  inst = repo: repo.workspaces.main.instances.${native}.default;
+  inst = repo: repo.workspaces.main.internal.instances.${native}.default;
 
   # Rendered BREAKBULK_UNIT of each unit of a plan kind, by derivation name.
   renderedUnits =
@@ -382,7 +382,7 @@ let
     repo: vName: kind:
     lib.listToAttrs (
       map (u: lib.nameValuePair u.name u) (
-        lib.attrValues repo.workspaces.main.instances.${native}.${vName}.units.${kind}
+        lib.attrValues repo.workspaces.main.internal.instances.${native}.${vName}.units.${kind}
       )
     );
   drvsOf =
@@ -964,7 +964,7 @@ let
     ];
   embed = embedRepo (fixtures + "/embed");
   embedEdited = embedRepo (edited "embed" "echo '// v2' >> payload/src/main.rs");
-  hostInst = repo: repo.workspaces.host.instances.${native}.default;
+  hostInst = repo: repo.workspaces.host.internal.instances.${native}.default;
   # A derivation's .drv file without its outputs: exportReferencesGraph of
   # it is the closure of build inputs, and building it builds nothing.
   drvOnly = d: builtins.unsafeDiscardOutputDependency d.drvPath;
@@ -1370,7 +1370,7 @@ in
 
   docs =
     let
-      check = repo: repo.workspaces.main.instances.${native}.check;
+      check = repo: repo.workspaces.main.internal.instances.${native}.check;
       drvSet = us: lib.genAttrs (map (u: builtins.unsafeDiscardStringContext u.drvPath) us) (_: true);
       # The doc plan's units against the check variant's build plan: each
       # is shared (the check plan also has the members' own units, which
@@ -1421,7 +1421,7 @@ in
         docsCheck = docsNoDeps.checks."main/${native}/docs";
         # The default target's, as `repo.workspaces.<ws>.docs`.
         wsDocs = docsNoDeps.workspaces.main.docs;
-        noDeps = docsNoDeps.workspaces.main.target.${native}.docs;
+        noDeps = docsNoDeps.workspaces.main.target.${native}.variants.default.docs;
         noDepsRef = cargoDoc docsNoDeps (
           map (p: "--no-deps --release -p ${p}") [
             "base"
@@ -1430,7 +1430,7 @@ in
             "app"
           ]
         );
-        deps = docsDeps.workspaces.main.target.${native}.docs;
+        deps = docsDeps.workspaces.main.target.${native}.variants.default.docs;
         depsRef = cargoDoc docsDeps [ "-j1" ];
         # The default target's, and the default variant's.
         variantDocs = docsNoDeps.workspaces.main.target.${native}.variants.default.docs;
@@ -1475,7 +1475,7 @@ in
 
   source-overlay =
     let
-      i = sourceOverlayRepo.workspaces.main.instances.${native}.default;
+      i = sourceOverlayRepo.workspaces.main.internal.instances.${native}.default;
       units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
       member =
         u:
@@ -1547,7 +1547,7 @@ in
         (oneWs "." "dev")
         sameWsUses
       ];
-      errorsOf = r: r.workspaces.main.target.${native}.variants.default.productInputErrors;
+      errorsOf = r: r.workspaces.main.internal.productInputErrors.${native}.default;
       got = errorsOf undeclared;
       want = [
         "breakbulk: the settings of `app` use products of the plan that builds it (workspace main, target ${native}, variant default) that `packages.app.productInputs` does not name: `env.TOOL_BIN` uses `tool`; `inputs` uses `shared`; `nativeInputs` uses `tool`. Dynamic-derivation mode needs them named (it cannot find them: there, this is an infinite recursion). Add: packages.app.productInputs = [ \"shared\" \"tool\" ];"
@@ -1648,7 +1648,7 @@ in
       {
         run = nestedCargoRun "nested-cargo-run" p "inner says 42, nested_cfg false" false;
         failure = pkgs.testers.testBuildFailure p.checks.noSourceReferences;
-        testRun = nestedCargo.workspaces.main.testRuns.inner.nested;
+        testRun = nestedCargo.workspaces.main.target.${native}.variants.default.testRuns.inner.nested;
       }
       ''
         set -euo pipefail
@@ -1670,8 +1670,8 @@ in
     in
     pkgs.runCommand "rustc-private"
       {
-        run = w.testRuns.driver-user.driver;
-        test = w.tests.driver-user.driver;
+        run = w.target.${native}.variants.default.testRuns.driver-user.driver;
+        test = w.target.${native}.variants.default.tests.driver-user.driver;
         nativeBuildInputs = [ pkgs.binutils-unwrapped ];
       }
       ''
@@ -1692,10 +1692,11 @@ in
     let
       w = benchesRepo.workspaces.main;
       t = w.target.${native};
+      b = t.variants.bench;
       readPlan =
         drv: builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile "${drv}/plan.json"));
-      benchPlan = readPlan w.plans.${native}.bench.bench;
-      testPlans = map (v: readPlan w.plans.${native}.${v}.test) [
+      benchPlan = readPlan b.plans.bench;
+      testPlans = map (v: readPlan t.variants.${v}.plans.test) [
         "default"
         "bench"
       ];
@@ -1704,7 +1705,9 @@ in
       critArgs = lib.filter builtins.isString (
         (builtins.fromJSON (builtins.unsafeDiscardStringContext critUnit.drvAttrs.BREAKBULK_UNIT)).args
       );
-      smoke = lib.filterAttrs (n: _: lib.hasInfix "/bench-" n) benchesRepo.checks;
+      smoke = lib.filterAttrs (
+        n: c: lib.hasInfix "/bench/" n && !(c.breakbulkCheckGroup or false)
+      ) benchesRepo.checks;
       # `checks.benches = false` leaves the bench runs out of repo.checks,
       # not out of `benchRuns`; the bench plan selected by a list.
       viaRecord = mkRepo (fixtures + "/benches") [
@@ -1723,15 +1726,17 @@ in
           };
         }
       ];
-      recordRuns = lib.filterAttrs (n: _: lib.hasInfix "/bench-" n) viaRecord.checks;
+      recordRuns = lib.filterAttrs (
+        n: c: lib.hasInfix "/bench/" n && !(c.breakbulkCheckGroup or false)
+      ) viaRecord.checks;
     in
     assert lib.assertMsg (
-      lib.attrNames t.benches.bencher == [
-        "crit"
-        "lib"
-        "libtest"
+      lib.attrNames b.benches.bencher == [
+        "bench/crit"
+        "bench/libtest"
+        "lib/bencher"
       ]
-    ) "benches: ${builtins.toJSON (lib.attrNames t.benches.bencher)}";
+    ) "benches: ${builtins.toJSON (lib.attrNames b.benches.bencher)}";
     assert lib.assertMsg (lib.all (
       p: !(lib.elem "bench" (kinds p))
     ) testPlans) "benches: a test plan has bench roots";
@@ -1750,27 +1755,29 @@ in
     ) "benches: crit unit args ${builtins.toJSON critArgs}";
     assert lib.assertMsg (
       lib.attrNames smoke == [
-        "main/${native}/variant-bench/bencher/bench-crit"
-        "main/${native}/variant-bench/bencher/bench-lib"
+        "main/${native}/variant-bench/bencher/bench/bench/crit"
+        "main/${native}/variant-bench/bencher/bench/lib/bencher"
       ]
     ) "benches: bench-run checks ${builtins.toJSON (lib.attrNames smoke)}";
     assert lib.assertMsg (
-      t.benchRuns.bencher ? "bench/libtest"
+      b.benchRuns.bencher ? "bench/libtest"
     ) "benches: the disabled bench run is gone from benchRuns";
     assert lib.assertMsg (
       lib.all (d: lib.hasInfix "export BENCHER_RUN=bench" d.drvAttrs.buildCommand) (lib.attrValues smoke)
       && lib.all (r: !(lib.hasInfix "BENCHER_RUN" r.drvAttrs.buildCommand)) (
-        lib.attrValues (lib.filterAttrs (n: _: lib.hasPrefix "test/" n) w.instances.${native}.bench.checks)
+        lib.attrValues (
+          lib.filterAttrs (n: _: lib.hasPrefix "test/" n) w.internal.instances.${native}.bench.checks
+        )
       )
     ) "benches: `bench` env reaches bench runs only";
     assert lib.assertMsg (
-      recordRuns == { } && viaRecord.workspaces.main.target.${native}.benchRuns ? bencher
+      recordRuns == { } && viaRecord.workspaces.main.target.${native}.variants.bench.benchRuns ? bencher
     ) "benches: checks.benches = false kept ${builtins.toJSON (lib.attrNames recordRuns)}";
     pkgs.runCommand "benches"
       (
         {
-          crit = t.benches.bencher.crit;
-          libtest = t.benches.bencher.libtest;
+          crit = b.benches.bencher."bench/crit";
+          libtest = b.benches.bencher."bench/libtest";
         }
         // lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) smoke
       )
@@ -1779,7 +1786,7 @@ in
         [ -x $crit/bin/crit ]
         [ -x $libtest/bin/libtest ]
         cat ${lib.concatMapStringsSep " " (d: "${d}/log") (lib.attrValues smoke)}
-        grep -q Success ${smoke."main/${native}/variant-bench/bencher/bench-crit"}/log
+        grep -q Success ${smoke."main/${native}/variant-bench/bencher/bench/bench/crit"}/log
         touch $out
       '';
 
@@ -1909,7 +1916,7 @@ in
     assert lib.assertMsg (
       lib.filter (lib.hasInfix "/variant-fp-") (lib.attrNames variantsRepo.checks) == [ ]
     ) "variants: powerset variants in repo.checks";
-    assert lib.assertMsg (lib.any (lib.hasPrefix "main/${native}/variant-coverage/lib-a/test-") (
+    assert lib.assertMsg (lib.any (lib.hasPrefix "main/${native}/variant-coverage/lib-a/test/") (
       lib.attrNames variantsRepo.checks
     )) "variants: the coverage variant's test runs are not in repo.checks";
     # Its products and their checks too, and the custom build variant's.
@@ -1951,7 +1958,7 @@ in
         );
       lib' = vt.variants.check-lib.check;
       all = vt.variants.check.check;
-      ci = variantsRepo.workspaces.main.instances.${native}.check-lib;
+      ci = variantsRepo.workspaces.main.internal.instances.${native}.check-lib;
       buildOuts = outsOf (lib.attrValues ci.units.build);
       # A check builds each plan's `allUnits`, which lists the plan's unit
       # outputs at build time.
@@ -1970,7 +1977,7 @@ in
         }
       ];
       tw = testsOnly.workspaces.main;
-      ti = tw.instances.${native}.default;
+      ti = tw.internal.instances.${native}.default;
       testOuts = outsOf (lib.attrValues ti.units.test);
       testsGot = map builtins.unsafeDiscardStringContext tw.target.${native}.variants.default.check.units;
       discardAll = map builtins.unsafeDiscardStringContext;
@@ -1983,7 +1990,7 @@ in
     ) "variants-all-targets: the default does not check more than the build plan";
     assert lib.assertMsg (
       testsGot == discardAll [ ti.allUnits.test.outPath ]
-      && lib.attrNames tw.target.${native}.buildScriptPaths == [ "test" ]
+      && lib.attrNames tw.target.${native}.variants.default.buildScriptPaths == [ "test" ]
     ) "variants-all-targets: products = false does not check exactly the test plan";
     pkgs.runCommand "variants-all-targets"
       {
@@ -2007,7 +2014,7 @@ in
   variants-test-profile =
     let
       d = drvsOf variantsRepo;
-      i = variantsRepo.workspaces.main.instances.${native};
+      i = variantsRepo.workspaces.main.internal.instances.${native};
       common = vName: lib.filter (n: (d vName "build") ? ${n}) (lib.attrNames (d vName "test"));
       same = vName: lib.filter (n: (d vName "build").${n} == (d vName "test").${n}) (common vName);
       deps = lib.filter (n: lib.hasPrefix "pm-" n || lib.hasPrefix "hostdep-" n);
@@ -2040,7 +2047,7 @@ in
       (lib.length (deps (common "release-tests")) >= 3 && same "release-tests" == common "release-tests")
       "variants-test-profile: release-tests' plans differ in ${builtins.toJSON (lib.subtractLists (same "release-tests") (common "release-tests"))}";
     pkgs.runCommand "variants-test-profile"
-      { run = variantsRepo.checks."main/${native}/lib-a/test-lib"; }
+      { run = variantsRepo.checks."main/${native}/lib-a/test/lib/lib_a"; }
       ''
         echo "$run" > $out
       '';
@@ -2076,12 +2083,13 @@ in
         lib.sort lib.lessThan (
           lib.attrNames (lib.filterAttrs (_: u: u.platform == "target") (compiles vName kind))
         );
-      planCmd = vName: w.instances.${native}.${vName}.plans.build.drvAttrs.buildCommand;
+      planCmd = vName: w.internal.instances.${native}.${vName}.plans.build.drvAttrs.buildCommand;
       refused =
         modules:
         !(builtins.tryEval (
           builtins.deepSeq
-            (mkRepo (fixtures + "/cargo-config") (cargoConfigModules ++ modules)).workspaces.main.plans
+            (mkRepo (fixtures + "/cargo-config") (cargoConfigModules ++ modules))
+            .workspaces.main.target.${native}.variants.default.plans
             true
         )).success;
       bad = lib.attrNames (
@@ -2117,8 +2125,8 @@ in
       {
         dist = t.variants.dist.packages.app;
         default = t.packages.app;
-        distTest = cargoConfigRepo.checks."main/${native}/variant-dist/app/test-bin-app";
-        defaultTest = cargoConfigRepo.checks."main/${native}/app/test-bin-app";
+        distTest = cargoConfigRepo.checks."main/${native}/variant-dist/app/test/bin/app";
+        defaultTest = cargoConfigRepo.checks."main/${native}/app/test/bin/app";
       }
       ''
         set -euo pipefail
@@ -2144,7 +2152,7 @@ in
               variants.clippy.mode = "clippy";
             };
           }
-        ]).workspaces.main.instances.${native}.clippy.plans.build;
+        ]).workspaces.main.internal.instances.${native}.clippy.plans.build;
     in
     pkgs.runCommand "variants-clippy-toolchain"
       {
@@ -2177,7 +2185,7 @@ in
     pkgs.runCommand "variants-coverage"
       {
         app = t.packages.app;
-        run = t.testRuns.lib-a."lib/lib_a";
+        run = t.variants.default.testRuns.lib-a."lib/lib_a";
       }
       ''
         set -euo pipefail
@@ -2216,7 +2224,7 @@ in
             mode = "clippy";
             rustcWorkspaceWrapper = "${toyDriver}";
           };
-        }).workspaces.main.instances.${native}.clippy.units.build
+        }).workspaces.main.internal.instances.${native}.clippy.units.build
       );
     in
     assert lib.assertMsg (deps != [ ] && members != [ ]) "variants-driver: no units ${toString deps}";
@@ -2362,7 +2370,8 @@ in
         predict: ws: kind:
         lib.listToAttrs (
           map (u: lib.nameValuePair u.name u) (
-            lib.attrValues (lintGroupsRepo predict).workspaces.${ws}.instances.${native}.clippy.units.${kind}
+            lib.attrValues
+              (lintGroupsRepo predict).workspaces.${ws}.internal.instances.${native}.clippy.units.${kind}
           )
         );
       message = "lint group `pedantic` has the same priority (0) as a lint";
@@ -2407,10 +2416,10 @@ in
       names = lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) r.checks);
       expected = [
         "greet/wasm32-unknown-unknown/greet/build"
-        "greet/${native}/greet/test-lib"
+        "greet/${native}/greet/test/lib/greet"
         "host/fmt"
         "host/${native}/server/build"
-        "host/${native}/server/test-bin-server"
+        "host/${native}/server/test/bin/server"
         "host/${native}/variant-clippy/check"
         "squares/${native}/squares/build"
       ];
@@ -2418,7 +2427,7 @@ in
       # Built for wasm32 only, tested natively only.
       unexpected = lib.filter (
         n:
-        lib.hasPrefix "greet/wasm32-unknown-unknown/greet/test-" n
+        lib.hasPrefix "greet/wasm32-unknown-unknown/greet/test/" n
         || lib.hasPrefix "greet/${native}/greet/build" n
       ) names;
     in
@@ -2442,7 +2451,8 @@ in
   # sides, linted twice).
   variants-clippy-host =
     let
-      unitsIn = repo: vName: lib.attrValues repo.workspaces.main.instances.${native}.${vName}.units.build;
+      unitsIn =
+        repo: vName: lib.attrValues repo.workspaces.main.internal.instances.${native}.${vName}.units.build;
       platformOf =
         u: (builtins.fromJSON (builtins.unsafeDiscardStringContext u.drvAttrs.BREAKBULK_UNIT)).platform;
       runtimeLibs = repo: vName: lib.filter (u: u.name == "runtime-0.1.0-lib") (unitsIn repo vName);
@@ -2570,12 +2580,12 @@ in
       m = w.target.${musl};
       names = lib.attrNames (lib.filterAttrs (_: c: !(c.breakbulkCheckGroup or false)) repo.checks);
       under = prefix: lib.filter (lib.hasPrefix prefix) names;
-      planCmd = vName: kind: w.instances.${native}.${vName}.plans.${kind}.drvAttrs.buildCommand;
+      planCmd = vName: kind: w.internal.instances.${native}.${vName}.plans.${kind}.drvAttrs.buildCommand;
       selects =
         vName: kind: pkg:
         lib.hasInfix " -p ${lib.escapeShellArg pkg} " (planCmd vName kind);
-      yRun = repo.checks."main/${native}/variant-y-only/lib-a/test-lib";
-      defaultRun = repo.checks."main/${native}/lib-a/test-lib";
+      yRun = repo.checks."main/${native}/variant-y-only/lib-a/test/lib/lib_a";
+      defaultRun = repo.checks."main/${native}/lib-a/test/lib/lib_a";
       bad = lib.attrNames (
         lib.filterAttrs (_: ok: !ok) {
           nativeVariants =
@@ -2597,7 +2607,7 @@ in
             && lib.hasInfix " --no-default-features " (planCmd "hack-lib-a.y" "build");
           hackInChecks = repo.checks ? "main/${native}/variant-hack-lib-a.y/check";
           muslVariants = lib.attrNames m.variants == [ "musl-check" ];
-          muslEmpty = m.packages == { } && m.tests == { } && m.testRuns == { } && m.doctests == { };
+          muslEmpty = m.packages == { };
           muslChecks =
             under "main/${musl}/" == [
               "main/${musl}/variant-musl-check/buildScriptPaths/build"
@@ -2605,15 +2615,17 @@ in
             ];
           # `tests = [ "lib-a" ]`: the test plan is `-p lib-a`, the build
           # plan stays `--workspace`.
-          testsNarrowed = lib.attrNames n.tests == [ "lib-a" ] && lib.attrNames n.testRuns == [ "lib-a" ];
+          testsNarrowed =
+            lib.attrNames n.variants.default.tests == [ "lib-a" ]
+            && lib.attrNames n.variants.default.testRuns == [ "lib-a" ];
           testPlanSelects = selects "default" "test" "lib-a" && !(selects "default" "build" "lib-a");
           productsKept = n.packages ? app;
           # `packages` narrows both plans of a variant.
           variantSelects = selects "y-only" "build" "lib-a" && !(selects "y-only" "build" "app");
-          yInChecks = repo.checks ? "main/${native}/variant-y-only/lib-a/test-lib";
+          yInChecks = repo.checks ? "main/${native}/variant-y-only/lib-a/test/lib/lib_a";
           yDiffers = yRun.drvPath != defaultRun.drvPath;
           quietOut = under "main/${native}/variant-quiet/" == [ ] && n.variants.quiet.packages ? app;
-          defaultKept = repo.checks ? "main/${native}/lib-a/test-lib";
+          defaultKept = repo.checks ? "main/${native}/lib-a/test/lib/lib_a";
           testOnly =
             let
               t = n.variants.test-only;
@@ -2624,7 +2636,7 @@ in
             && lib.attrNames t.buildScriptPaths == [ "test" ]
             && c != [ ]
             && lib.all (
-              x: lib.hasInfix "/test-" x || lib.hasSuffix "/doctest" x || lib.hasSuffix "/buildScriptPaths/test" x
+              x: lib.hasInfix "/test/" x || lib.hasSuffix "/doctest" x || lib.hasSuffix "/buildScriptPaths/test" x
             ) c;
           nothing =
             let
@@ -2721,7 +2733,7 @@ in
       # The test plan's buildScriptPaths check comes with the test runs.
       isRun =
         n:
-        lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n || lib.hasSuffix "/buildScriptPaths/test" n;
+        lib.hasInfix "/test/" n || lib.hasSuffix "/doctest" n || lib.hasSuffix "/buildScriptPaths/test" n;
       t = repo.workspaces.main.target;
     in
     assert lib.assertMsg (t.${native}.packages == { })
@@ -2828,11 +2840,11 @@ in
       # The package runs are check variants: their test plans keep
       # `profile`.
       hackProfiles = lib.mapAttrs (_: _: "release") (
-        lib.filterAttrs (n: _: lib.hasPrefix "hack-" n) w.instances.${native}
+        lib.filterAttrs (n: _: lib.hasPrefix "hack-" n) w.internal.instances.${native}
       );
       planCmd =
         triple: vName: kind:
-        w.instances.${triple}.${vName}.plans.${kind}.drvAttrs.buildCommand;
+        w.internal.instances.${triple}.${vName}.plans.${kind}.drvAttrs.buildCommand;
       has =
         triple: vName: s:
         lib.hasInfix " ${s} " (planCmd triple vName "build");
@@ -2840,14 +2852,14 @@ in
       unitsOf =
         triple: map builtins.unsafeDiscardStringContext w.target.${triple}.variants.gate.check.units;
       planUnits = triple: kind: [
-        (builtins.unsafeDiscardStringContext w.instances.${triple}.gate.allUnits.${kind}.outPath)
+        (builtins.unsafeDiscardStringContext w.internal.instances.${triple}.gate.allUnits.${kind}.outPath)
       ];
       fails =
         extra:
         !(builtins.tryEval (
-          builtins.deepSeq (lib.mapAttrs (_: lib.mapAttrs (_: p: p.build.drvPath))
-            (repoWith extra).workspaces.main.plans
-          ) true
+          builtins.deepSeq (lib.mapAttrs (
+            _: t: lib.mapAttrs (_: v: v.plans.build.drvPath) t.variants
+          ) (repoWith extra).workspaces.main.target) true
         )).success;
       bad = lib.attrNames (
         lib.filterAttrs (_: ok: !ok) {
@@ -2877,7 +2889,7 @@ in
           # `testProfile` from wasm's defaults, and `own`'s layer over it;
           # the check variant keeps `profile`.
           testProfiles =
-            lib.mapAttrs (_: t: lib.mapAttrs (_: i: i.plans.test.profile) t) w.instances == {
+            lib.mapAttrs (_: t: lib.mapAttrs (_: i: i.plans.test.profile) t) w.internal.instances == {
               ${native} = {
                 default = "test";
                 own = "test";
@@ -2920,7 +2932,7 @@ in
                 };
                 targets.${wasm}.variantDefaults.profile = "bench";
               };
-              p = t: r.workspaces.main.instances.${t}.default.plans.build.drvAttrs.buildCommand;
+              p = t: r.workspaces.main.internal.instances.${t}.default.plans.build.drvAttrs.buildCommand;
             in
             lib.hasInfix " --profile dev " (p wasm) && lib.hasInfix " --profile release " (p native);
           forcedWins =
@@ -2933,7 +2945,7 @@ in
               };
             in
             lib.hasInfix " --profile release "
-              r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+              r.workspaces.main.internal.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
           mkDefaultLoses =
             let
               r = repoWith {
@@ -2944,7 +2956,7 @@ in
               };
             in
             lib.hasInfix " --profile release "
-              r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+              r.workspaces.main.internal.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
           # The variant's own plain value wins over a plain value in the
           # target's `variantDefaults`; mkForce there wins over it.
           defaultsLose =
@@ -2954,7 +2966,7 @@ in
                 (repoWith {
                   variants.default.profile = "release";
                   targets.${wasm}.variantDefaults.profile = d;
-                }).workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+                }).workspaces.main.internal.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
             in
             lib.hasInfix " --profile release " (p "bench")
             && lib.hasInfix " --profile bench " (p (lib.mkForce "bench"));
@@ -2977,7 +2989,7 @@ in
                   target.${wasm}.mode = "check";
                 };
               };
-              p = t: v: r.workspaces.main.instances.${t}.${v}.plans.build.drvAttrs.buildCommand;
+              p = t: v: r.workspaces.main.internal.instances.${t}.${v}.plans.build.drvAttrs.buildCommand;
             in
             lib.hasInfix " --profile dev " (p native "default")
             && lib.hasInfix " --profile bench " (p wasm "default")
@@ -3056,7 +3068,7 @@ in
         noSrc = spApp.checks.noSourceReferences;
         depView = builtins.unsafeDiscardStringContext "${depView}";
         itoaSrc = builtins.unsafeDiscardStringContext "${itoaSrc}";
-        depTests = sourcePaths.workspaces.main.testRuns.dep."lib/dep";
+        depTests = sourcePaths.workspaces.main.target.${native}.variants.default.testRuns.dep."lib/dep";
       }
       ''
         set -euo pipefail
@@ -3285,7 +3297,7 @@ in
   trim-paths =
     let
       wsOf = w: trimPathsRepo.workspaces.${w};
-      instOf = w: (wsOf w).instances.${native}.default;
+      instOf = w: (wsOf w).internal.instances.${native}.default;
       planOf =
         w: kind:
         builtins.fromJSON (
@@ -3431,7 +3443,7 @@ in
         noSrcSet = (app "set").checks.noSourceReferences;
         noSrcDefault = (app "default").checks.noSourceReferences;
         sharedView = builtins.unsafeDiscardStringContext "${(instOf "default").sources.workspace.shared}";
-        tests = (wsOf "default").testRuns.lib."lib/lib";
+        tests = (wsOf "default").target.${native}.variants.default.testRuns.lib."lib/lib";
         inherit stableAt;
       }
       ''
@@ -3552,8 +3564,8 @@ in
 
   source-paths-readme =
     let
-      before = sourcePaths.workspaces.main.tests.dep.lib;
-      after = sourcePathsReadme.workspaces.main.tests.dep.lib;
+      before = sourcePaths.workspaces.main.target.${native}.variants.default.tests.dep."lib/dep";
+      after = sourcePathsReadme.workspaces.main.target.${native}.variants.default.tests.dep."lib/dep";
     in
     assert lib.assertMsg (
       before.drvPath != after.drvPath
@@ -3573,7 +3585,7 @@ in
       repo = rustSrcRepo;
       plan = builtins.fromJSON (
         builtins.unsafeDiscardStringContext (
-          builtins.readFile "${repo.workspaces.main.plans.${native}.default.build}/plan.json"
+          builtins.readFile "${repo.workspaces.main.target.${native}.variants.default.plans.build}/plan.json"
         )
       );
     in
@@ -3783,7 +3795,8 @@ in
       keep = mk [ { targets.${native}.debugInfo = "keep"; } ];
       strip = mk [ { targets.${native}.debugInfo = "strip"; } ];
       pk = r: r.workspaces.main.packages;
-      rootUnit = r: p: r.workspaces.main.instances.${native}.default.rootUnits.build."${p}/bin/${p}";
+      rootUnit =
+        r: p: r.workspaces.main.internal.instances.${native}.default.rootUnits.build."${p}/bin/${p}";
       unitOf = r: p: (rootUnit r p).drvPath;
       fails = r: p: !(builtins.tryEval (pk r).${p}.stageOrder).success;
       unitEnv = r: p: (rootUnit r p).drvAttrs.BREAKBULK_UNIT or "";

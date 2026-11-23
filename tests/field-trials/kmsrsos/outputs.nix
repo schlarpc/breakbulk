@@ -44,7 +44,7 @@ in
         (
           lib.hasPrefix "main/x86_64-unknown-linux-musl/" n || lib.hasPrefix "main/x86_64-pc-windows-msvc/" n
         )
-        && lib.hasInfix "/test-" n
+        && lib.hasInfix "/test/" n
       ) repo.checks
     )
   );
@@ -54,7 +54,7 @@ in
   policy-features = pkgs.linkFarm "kmsrsos-policy-features" (
     flat (
       lib.filterAttrs (
-        n: _: lib.hasPrefix "main/${native}/variant-policy/" n && lib.hasInfix "/test-" n
+        n: _: lib.hasPrefix "main/${native}/variant-policy/" n && lib.hasInfix "/test/" n
       ) repo.checks
     )
   );

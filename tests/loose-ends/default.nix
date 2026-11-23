@@ -117,7 +117,7 @@ let
           };
         }
       ];
-    }).workspaces.main.instances.${native}.default;
+    }).workspaces.main.internal.instances.${native}.default;
 
   configEnv =
     let
@@ -177,7 +177,7 @@ let
     scopeBase
     { packages.a.test.sourceScope = [ "testdata" ]; }
   ];
-  instOf = repo: repo.workspaces.main.instances.${native}.default;
+  instOf = repo: repo.workspaces.main.internal.instances.${native}.default;
 
   # Unit .drv path -> derivation name, for both plan kinds, plus doctests.
   drvNames =
@@ -249,7 +249,7 @@ let
       }
     ];
   };
-  shellInst = shellRepo.workspaces.main.instances.${native}.default;
+  shellInst = shellRepo.workspaces.main.internal.instances.${native}.default;
   devShell = shellRepo.workspaces.main.devShell;
 
   # Local `cargo build -v --release` in the dev shell's environment (the
@@ -479,7 +479,7 @@ let
       }
     ];
   };
-  trimShellInst = trimShellRepo.workspaces.main.instances.${native}.default;
+  trimShellInst = trimShellRepo.workspaces.main.internal.instances.${native}.default;
   devshellTrimPaths =
     let
       shell = trimShellRepo.workspaces.main.devShell;
@@ -558,7 +558,7 @@ let
 
   wasmEmbedCheck =
     let
-      i = wasmEmbed.workspaces.host.instances.${native}.default;
+      i = wasmEmbed.workspaces.host.internal.instances.${native}.default;
       ui = wasmEmbed.workspaces.ui.target.${wasm}.packages.ui;
       uiOut = builtins.unsafeDiscardStringContext ui.outPath;
       units = lib.attrValues i.units.build ++ lib.attrValues i.units.test;
@@ -646,7 +646,7 @@ let
           }
         ];
       };
-      i = repo.workspaces.ui.instances.${wasm}.default;
+      i = repo.workspaces.ui.internal.instances.${wasm}.default;
       unit = lib.findFirst (u: u.name == "ui-0.1.0-lib") (throw "no ui lib unit") (
         lib.attrValues i.units.build
       );
@@ -708,8 +708,8 @@ let
 
   # Two members with a bin `tool` each: each package's integration test
   # gets its own bin as CARGO_BIN_EXE_tool (Cargo sets it for the test's
-  # own package's bins). A bench with `test = true` is `bench-speed` in
-  # `tests`, in `testRuns` and in `repo.checks` (`test-bench-speed`).
+  # own package's bins). A bench with `test = true` is `bench/speed` in
+  # `tests`, in `testRuns` and in `repo.checks` (`test/bench/speed`).
   namesRepo = breakbulk.mkRepository {
     inherit pkgs tools;
     root = fixtures + "/names";
@@ -725,23 +725,23 @@ let
   names =
     let
       t = namesRepo.workspaces.main.target.${native};
-      runs = t.namedTestRuns.a;
-      check = "main/${native}/a/test-bench-speed";
+      runs = t.variants.default.testRuns.a;
+      check = "main/${native}/a/test/bench/speed";
     in
     assert lib.assertMsg (
-      t.tests.a ? bench-speed
-    ) "names: tests.a has ${toString (lib.attrNames t.tests.a)}";
+      t.variants.default.tests.a ? "bench/speed"
+    ) "names: tests.a has ${toString (lib.attrNames t.variants.default.tests.a)}";
     assert lib.assertMsg (
-      runs ? bench-speed
-    ) "names: the named test runs of a are ${toString (lib.attrNames runs)}";
+      runs ? "bench/speed"
+    ) "names: the test runs of a are ${toString (lib.attrNames runs)}";
     assert lib.assertMsg (
       namesRepo.checks ? ${check}
     ) "names: no check ${check} among ${toString (lib.attrNames namesRepo.checks)}";
     pkgs.runCommand "loose-ends-names"
       {
         a = runs.runs_tool;
-        b = t.namedTestRuns.b.runs_tool;
-        bench = runs.bench-speed;
+        b = t.variants.default.testRuns.b.runs_tool;
+        bench = runs."bench/speed";
       }
       ''
         grep -q 'test own_tool ... ok' $a/log
@@ -777,7 +777,7 @@ let
         "BB_RUNNER=1"
       ]
     ) "runner-list: the runner is ${builtins.toJSON t.runner}";
-    t.namedTestRuns.a.runs_tool;
+    t.variants.default.testRuns.a.runs_tool;
 
   # --- test-libs --------------------------------------------------------------
 
@@ -788,7 +788,7 @@ let
   testLibs =
     let
       t = namesRepo.workspaces.main.target.${native};
-      run = t.namedTestRuns.a.runs_tool;
+      run = t.variants.default.testRuns.a.runs_tool;
       sysroot = pkgs.rustc.unwrapped or pkgs.rustc;
       libs = breakbulk.testRuns.testLibs pkgs sysroot (
         breakbulk.targetTraits.resolve { triple = native; }

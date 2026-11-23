@@ -170,7 +170,7 @@ let
       };
     }
   ];
-  stInst = sameTriple.workspaces.main.instances.${native}.default;
+  stInst = sameTriple.workspaces.main.internal.instances.${native}.default;
   stUnits = unitsOf stInst;
   stHostLinker = discard sameTriple.workspaces.main.target.${native}.spec.host.linker;
   sameTripleEval =
@@ -361,10 +361,11 @@ let
       ];
   debugOutputsEval =
     let
-      linux = debugOutputs linuxRelease.workspaces.main.instances.${native}.default;
+      linux = debugOutputs linuxRelease.workspaces.main.internal.instances.${native}.default;
       linuxLinked = lib.filter (u: u.links && u.platform == "target") linux;
       linuxWithDebug = map (u: "${u.kind}/${u.id}") (lib.filter (u: u.debug) linux);
-      rootUnit = linuxRelease.workspaces.main.instances.${native}.default.rootUnits.build."app/bin/app";
+      rootUnit =
+        linuxRelease.workspaces.main.internal.instances.${native}.default.rootUnits.build."app/bin/app";
     in
     assert lib.assertMsg (linuxLinked != [ ]) "debug-outputs: no linked target units in the Linux plan";
     assert lib.assertMsg (
@@ -374,7 +375,7 @@ let
     evalCheck "debug-outputs" "linked Linux release units without debug: ${toString (lib.length linuxLinked)}";
   msvcDebugOutputsEval =
     let
-      units = debugOutputs msvc.workspaces.main.instances.x86_64-pc-windows-msvc.default;
+      units = debugOutputs msvc.workspaces.main.internal.instances.x86_64-pc-windows-msvc.default;
       linked = lib.filter (u: u.links && u.platform == "target") units;
       # Release (no debuginfo, `-C strip=debuginfo`): still a PDB.
       bad = map (u: "${u.kind}/${u.id}") (
@@ -404,7 +405,7 @@ let
     prefix: repo: triple: linkers:
     let
       t = repo.workspaces.main.target.${triple};
-      inst = repo.workspaces.main.instances.${triple}.default;
+      inst = repo.workspaces.main.internal.instances.${triple}.default;
     in
     {
       "${prefix}-product" =
@@ -413,7 +414,7 @@ let
       "${prefix}-build-script" = elfCheck "${prefix}-build-script" "dynamic" linkers.buildScript (
         oneFile (buildScriptOf inst)
       );
-      "${prefix}-test" = t.testRuns.app."bin/app";
+      "${prefix}-test" = t.variants.default.testRuns.app."bin/app";
     }
     // lib.optionalAttrs (t.runner == null) {
       "${prefix}-run" = pkgs.runCommand "${prefix}-run" { } ''
@@ -496,7 +497,7 @@ let
   crossDoctestsCheck =
     let
       t = crossDoctests.workspaces.main.target.${a64};
-      inst = crossDoctests.workspaces.main.instances.${a64}.default;
+      inst = crossDoctests.workspaces.main.internal.instances.${a64}.default;
       plan = planOf inst "test";
       unitOf = d: builtins.fromJSON (unitText d);
       hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).compile.args);
@@ -511,7 +512,7 @@ let
           platformOf "pmd/lib-test/pmd" == "host" && platformOf "pmn/lib-test/pmn" == "host";
         "user's integration test is the target's" = platformOf "user/test/under_runner" == "target";
         "the test binaries" =
-          lib.mapAttrs (_: lib.attrNames) t.testRuns == {
+          lib.mapAttrs (_: lib.attrNames) t.variants.default.testRuns == {
             pmd = [ "lib/pmd" ];
             pmn = [ "lib/pmn" ];
             user = [ "under_runner" ];
@@ -522,12 +523,12 @@ let
     assert lib.assertMsg (failed == [ ]) "cross-doctests-aarch64: ${lib.concatStringsSep ", " failed}";
     pkgs.runCommand "cross-doctests-aarch64"
       {
-        pmd = t.doctests.pmd;
-        user = t.doctests.user;
-        pmdTest = t.testRuns.pmd."lib/pmd";
-        pmnTest = t.testRuns.pmn."lib/pmn";
-        userTest = t.testRuns.user.under_runner;
-        pmdApp = lib.getExe t.testApps.pmd."lib/pmd";
+        pmd = t.variants.default.doctests.pmd;
+        user = t.variants.default.doctests.user;
+        pmdTest = t.variants.default.testRuns.pmd."lib/pmd";
+        pmnTest = t.variants.default.testRuns.pmn."lib/pmn";
+        userTest = t.variants.default.testRuns.user.under_runner;
+        pmdApp = lib.getExe t.variants.default.testApps.pmd."lib/pmd";
       }
       ''
         grep -q 'pmd/src/lib.rs - (line 4) ... ok' $pmd/log
@@ -681,7 +682,7 @@ let
         let
           unit =
             (lib.findFirst (u: u.name == "msvc-smoke-0.1.0-bin") (throw "msvc-x86_64-relink: no bin unit") (
-              lib.attrValues msvc.workspaces.main.instances.x86_64-pc-windows-msvc.debuginfo.units.build
+              lib.attrValues msvc.workspaces.main.internal.instances.x86_64-pc-windows-msvc.debuginfo.units.build
             )).drvAttrs.BREAKBULK_UNIT;
         in
         pkgs.runCommand "msvc-x86_64-relink"
@@ -921,7 +922,7 @@ let
       unit =
         name:
         lib.findFirst (u: u.name == name) (throw "cross-lto: no unit ${name}") (
-          lib.attrValues ws.instances.${native}.default.units.build
+          lib.attrValues ws.internal.instances.${native}.default.units.build
         );
       run = unit "cross-lto-0.1.0-build-run";
       bin = unit "cross-lto-0.1.0-bin";
@@ -1015,7 +1016,7 @@ let
   ];
   wasmHostInputsCheck =
     let
-      i = wasmHostInputs.workspaces.main.instances.${wasm}.default;
+      i = wasmHostInputs.workspaces.main.internal.instances.${wasm}.default;
       macro = lib.filter (u: u.name == "wasm-bindgen-macro-0.2.130-lib") (lib.attrValues i.units.build);
       capture = builtins.fromJSON (unitText (lib.head macro));
     in
@@ -1035,7 +1036,8 @@ let
         inherit browser;
       };
     };
-  wasmBrowserIn = browser: (wasmBrowserOn browser).workspaces.main.target.${wasm}.testRuns.ui.web;
+  wasmBrowserIn =
+    browser: (wasmBrowserOn browser).workspaces.main.target.${wasm}.variants.default.testRuns.ui.web;
   # Compile and build-script units by drvPath, for configurations of the
   # wasm-browser fixture that differ only in the test runner.
   wasmBrowserWith =
@@ -1047,7 +1049,7 @@ let
   wasmBrowserUnits =
     repo:
     let
-      i = repo.workspaces.main.instances.${wasm}.default;
+      i = repo.workspaces.main.internal.instances.${wasm}.default;
     in
     map (u: discard u.drvPath) (lib.attrValues i.units.build ++ lib.attrValues i.units.test);
   wasmRunnerSharing =
@@ -1066,7 +1068,7 @@ let
       units = lib.mapAttrs (_: wasmBrowserUnits) configs;
       differing = lib.filterAttrs (_: u: u != units.node) units;
       runs = lib.mapAttrs (
-        _: r: discard r.workspaces.main.target.${wasm}.testRuns.ui.web.drvPath
+        _: r: discard r.workspaces.main.target.${wasm}.variants.default.testRuns.ui.web.drvPath
       ) configs;
     in
     # Guards against a runner setting that never takes effect.
@@ -1090,7 +1092,7 @@ let
       };
     in
     {
-      wasm-web-test = t.testRuns.ui.web;
+      wasm-web-test = t.variants.default.testRuns.ui.web;
       wasm-web-test-chromium = wasmBrowserIn "chromium";
       wasm-web-test-firefox = wasmBrowserIn "firefox";
       wasm-web-runner-sharing = wasmRunnerSharing;
@@ -1629,7 +1631,8 @@ in
       ${sameTriple.workspaces.main.packages.app}/bin/app | tee $out
       grep -qx "marker=target-only shared=target shared-in-build-script=host" $out
     '';
-    same-triple-test = sameTriple.workspaces.main.target.${native}.testRuns.app."bin/app";
+    same-triple-test =
+      sameTriple.workspaces.main.target.${native}.variants.default.testRuns.app."bin/app";
     # nixpkgs' rustc: GNU ld for the host side (the target side is the
     # marker linker, plain cc).
     same-triple-build-script = elfCheck "same-triple-build-script" "dynamic" "cc" (
@@ -1639,7 +1642,7 @@ in
       elfCheck "linker-kind-mold-product" "dynamic" "mold"
         "${moldKind.workspaces.main.target.${native}.packages.app}/bin/app";
     linker-kind-mold-build-script = elfCheck "linker-kind-mold-build-script" "dynamic" "mold" (
-      oneFile (buildScriptOf moldKind.workspaces.main.instances.${native}.default)
+      oneFile (buildScriptOf moldKind.workspaces.main.internal.instances.${native}.default)
     );
   }
   # rust-overlay's 1.99 on x86_64-unknown-linux-gnu links -gnu targets with

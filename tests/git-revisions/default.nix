@@ -146,7 +146,7 @@ let
     ++ extraModules;
   };
 
-  inst = ws: repository.workspaces.${ws}.instances.${native}.default;
+  inst = ws: repository.workspaces.${ws}.internal.instances.${native}.default;
   readPlan =
     ws:
     builtins.fromJSON (

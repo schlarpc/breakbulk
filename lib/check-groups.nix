@@ -61,9 +61,14 @@ let
     }:
     let
       leafNames = attrNames checks;
-      prefixNames = lib.unique (lib.concatMap properPrefixes leafNames);
+      # A prefix that is itself a check stays that check: a test binary's
+      # key may be another's prefix (an integration test `lib` and the
+      # library's unit tests `lib/<crate>`).
+      prefixNames = lib.filter (n: !(checks ? ${n})) (
+        lib.unique (lib.concatMap properPrefixes leafNames)
+      );
       builtIn = prefixNames ++ [ "all" ];
-      clash = lib.filter (n: checks ? ${n}) builtIn;
+      clash = lib.filter (n: checks ? ${n}) [ "all" ];
       userClash = lib.filter (n: lib.elem n builtIn || checks ? ${n}) (attrNames user);
 
       under = p: filterAttrs (n: _: lib.hasPrefix "${p}/" n) checks;
@@ -92,7 +97,7 @@ let
         );
     in
     if clash != [ ] then
-      throw "breakbulk: the check names ${concatStringsSep ", " clash} are also group names (a prefix of another check, or `all`); rename the workspace or check"
+      throw "breakbulk: a check is named `all`, the group of every check; rename the workspace or check"
     else if userClash != [ ] then
       throw "breakbulk: checkGroups ${concatStringsSep ", " userClash}: the name is already a check, a group of every check under that prefix, or `all`; choose another"
     else

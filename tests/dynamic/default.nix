@@ -667,7 +667,7 @@ let
   wrapperApps =
     repo:
     pkgs.runCommand "test-wrapper-apps-${mode}"
-      { app = repo.apps."main/${native}/locate/test-locate".program; }
+      { app = repo.apps."main/${native}/locate/test/locate".program; }
       ''
         $app | tee app.log
         grep -q 'test result: ok. 3 passed' app.log
@@ -827,7 +827,7 @@ let
                 ) (lib.attrNames inst.units);
               }
             ) vs
-          ) w.instances
+          ) w.internal.instances
         )
       ) repo.workspaces
     );
@@ -1030,7 +1030,7 @@ let
             oneWs
           ]
           ++ modules;
-        }).workspaces.main.instances.${native}.default.testRuns;
+        }).workspaces.main.internal.instances.${native}.default.testRuns;
       cutoffRuns = sub: {
         kept = (runsOf cutoffFixture [ { packages.beta.env.BETA_SUB = sub; } ]).alpha."lib/alpha";
       };

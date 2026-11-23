@@ -39,12 +39,18 @@ perSystem = { ... }: {
 ```
 
 `root` defaults to the flake's `self`. Per system it sets
-`breakbulk.repo` (the `mkRepository` result) and adds `repo.checks` to
-`checks`, the default target's products to `packages`, each
-workspace's `docs` to `packages` as `<ws>-docs`, `repo.apps` to `apps`,
-and each workspace's dev shell to `devShells`. Each of these
-has a switch under `breakbulk.expose`, `true` by default: `checks`,
-`packages`, `apps`, `devShells`.
+`breakbulk.repo` (the `mkRepository` result) and the flake's `checks`,
+`packages`, `apps` and `devShells` from
+[`repo.flake`](#the-result). Each of these has a switch under
+`breakbulk.expose`, `true` by default. A flake without flake-parts
+uses `repo.flake` the same way:
+
+```nix
+checks.${system} = repo.flake.checks;
+packages.${system} = repo.flake.packages;
+apps.${system} = repo.flake.apps;
+devShells.${system} = repo.flake.devShells;
+```
 
 ## The result
 
@@ -54,34 +60,28 @@ has a switch under `breakbulk.expose`, `true` by default: `checks`,
 ```nix
 repo = {
   workspaces.<ws> = {
-    # Shortcuts for the default target (defaultTarget) and variant:
+    # The default target's (defaultTarget) default variant's:
     packages.<pkg>;          # a product: the build after the default stages
-    tests.<pkg>.<test>;      # a test binary
-    testRuns.<pkg>.<binary>; # a test run
     docs;                    # `cargo doc`'s folder, or null
     devShell;                # a shell matching the planner's Cargo invocation
     toolchain = { rustc; cargo; clippy; rustfmt; };   # resolved
+    vendor = { dir; configFile; cargoHome; };  # Cargo.lock's dependencies, for Cargo offline
 
     target.<triple> = {
       variants.<v> = {
         packages.<pkg>;              # products for this target
-        tests.<pkg>.<test>;          # test binaries, e.g. for VM tests
-        testRuns.<pkg>.<binary>;     # derivations that run them
-        namedTestRuns.<pkg>.<test>;  # the same, named as in tests; .enabled
+        tests.<pkg>.<binary>;        # test binaries, e.g. for VM tests
+        testRuns.<pkg>.<binary>;     # derivations that run them; .enabled
         testApps.<pkg>.<binary>;     # the same, for nix run outside the sandbox
-        doctests.<pkg>;              # each library's doctests
-        benches.<pkg>.<bench>;       # bench binaries, in a bench variant
-        benchRuns.<pkg>.<binary>;    # each bench binary run once in test mode
-        namedBenchRuns.<pkg>.<bench>;  # the same, named as in benches; .enabled
+        doctests.<pkg>;              # each library's doctests; .enabled
+        benches.<pkg>.<binary>;      # bench binaries, in a bench variant
+        benchRuns.<pkg>.<binary>;    # each bench binary run once in test mode; .enabled
         docs;                        # `cargo doc`'s folder
         buildScriptPaths.<plan>;     # each plan's check (build, test)
+        plans = { build; test; doc; };   # plan.json, for debugging and explainSharing
         check;                       # check and clippy variants only
       };
-      # The default variant's, as above:
-      packages; tests; testRuns; namedTestRuns; testApps; doctests; docs;
-      buildScriptPaths;
-      # The bench variant's (the default variant, or the only one with benches):
-      benches; benchRuns; namedBenchRuns;
+      packages.<pkg>;        # the default variant's products
       runner;                # the target runner (a list), or null
       testSystem;            # the system test runs build on, or null
       spec;                  # the resolved target spec
@@ -89,19 +89,39 @@ repo = {
       canRunTests;           # false: no target runner; its runs not in checks, its apps not in apps
     };
 
-    plans.<triple>.<v> = { build; test; doc; };   # plan.json, for debugging
-    vendor = { dir; configFile; cargoHome; };  # Cargo.lock's dependencies, for Cargo offline
+    internal;                # what the outputs are made of; not an interface
   };
 
   checks."<ws>/<triple>/<pkg>/<name>";   # everything to check, for checks.<system>
   checks.all; checks."<prefix>";         # groups: every check, everything under a prefix
-  apps."<ws>/<triple>/<pkg>/test-<name>";  # every test app, for apps.<system>
+  apps."<ws>/<triple>/<pkg>/test/<binary>";  # every test app, for apps.<system>
+  flake = { checks; packages; apps; devShells; };   # the flake outputs
   sources.<crate>;                       # fetched crate sources
   explainSharing;                        # why two plans' units differ
   nixFeatures;                           # the Nix features this evaluation may use
   config; options; optionsDoc;           # the evaluated modules
 };
 ```
+
+`<binary>` is a test or bench binary's key, the one name it has in
+`tests`, `testRuns`, `testApps`, `benches`, `benchRuns`, `checks` and
+`apps` (and in
+[`test.binaries`](options/packages.md#packagesnametestbinaries)): an
+integration test or bench target by its name (`cli`), the library's
+unit tests as `lib/<crate name>`, a bin's as `bin/<name>`, an example or
+a bench built as a test as `example/<name>`, `bench/<name>`. Keys never
+collide, and a name never changes when another target is added. In Nix,
+quote a key with a `/`: `testRuns.app."lib/app"`.
+
+`repo.flake` is the repository in a flake's output shape:
+
+- `checks`: `repo.checks`, groups included;
+- `packages`: each workspace's `packages`, by package name, or
+  `<ws>-<pkg>` when two workspaces have a package of that name, and each
+  workspace's `docs` as `<ws>-docs`;
+- `apps`: `repo.apps`;
+- `devShells`: each workspace's dev shell by name, and `default` when
+  there is one workspace.
 
 ### Products
 
@@ -121,7 +141,7 @@ the target: a directory per documented crate (`<crate>/index.html`),
 [`docs.noDeps`](options/workspaces.md#workspacesnamevariantsnamedocsnodeps) (`true`
 by default) documents the planned packages only (`cargo doc --no-deps`);
 `false` documents their dependencies too. Proc macros are in the same
-folder. The doc plan (`plans.<triple>.<v>.doc`) is traced only when
+folder. The doc plan (`target.<triple>.variants.<v>.plans.doc`) is traced only when
 `docs` is used. A variant's docs are in `checks` only with
 [`checks.docs`](options/workspaces.md#workspacesnamevariantsnamechecksdocs)
 (`false` by default), as `<ws>/<triple>/docs` for the default variant.
@@ -136,9 +156,9 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 |---|---|---|
 | product | `<ws>/<triple>/<pkg>/build` | `<ws>/<triple>/variant-<v>/<pkg>/build` |
 | product check | `…/<pkg>/<check>` | `…/variant-<v>/<pkg>/<check>` |
-| test run | `…/<pkg>/test-<name>` | `…/variant-<v>/<pkg>/test-<name>` |
+| test run | `…/<pkg>/test/<binary>` | `…/variant-<v>/<pkg>/test/<binary>` |
 | doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
-| bench run | `…/<pkg>/bench-<name>` | `…/variant-<v>/<pkg>/bench-<name>` |
+| bench run | `…/<pkg>/bench/<binary>` | `…/variant-<v>/<pkg>/bench/<binary>` |
 | plan check | `…/buildScriptPaths/<plan>` | `…/variant-<v>/buildScriptPaths/<plan>` |
 | check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
 | docs | `<ws>/<triple>/docs` | `<ws>/<triple>/variant-<v>/docs` |
@@ -177,7 +197,10 @@ holds) that builds them as one installable
 ([Run the checks in CI](../how-to/ci.md)):
 
 - every proper prefix of a check name: `<ws>`, `<ws>/<triple>`,
-  `<ws>/<triple>/<pkg>`, `<ws>/<triple>/variant-<v>`, and so on;
+  `<ws>/<triple>/<pkg>`, `<ws>/<triple>/<pkg>/test`,
+  `<ws>/<triple>/variant-<v>`, and so on, except a prefix that is itself
+  a check (an integration test `lib` next to `lib/<crate>`), which stays
+  that check;
 - `all`, every check (so a workspace may not be named `all`);
 - each of [`checkGroups`](options/repository.md#checkgroups).
 
@@ -190,9 +213,7 @@ and build nothing the checks themselves do not. A group has
 A test app (`testApps.<pkg>.<binary>`) is a derivation whose
 `meta.mainProgram` runs the test binary with its test run's working
 directory, environment and target runner, on your machine, so `nix run` takes
-it at its attribute path. `<binary>` is the test binary's key, as in
-`testRuns`: an integration test by its name, the others as
-`<kind>/<name>` (`lib/<crate>`, `bin/<name>`).
+it at its attribute path. `<binary>` is the test binary's key.
 
 A binary that uses `CARGO_TARGET_TMPDIR` runs in a private working
 directory, which the app removes when the binary exits. That app waits
@@ -202,13 +223,13 @@ its own process with the binary.
 `repo.apps` has every test app of every build or coverage variant, in
 the shape of a flake's `apps` output (`{ type = "app"; program; meta; }`),
 for `apps.<system> = repo.apps;`. Each is named as its test run's check
-in the table above (`…/<pkg>/test-<name>`,
-`…/variant-<v>/<pkg>/test-<name>`), also when the variant has
+in the table above (`…/<pkg>/test/<binary>`,
+`…/variant-<v>/<pkg>/test/<binary>`), also when the variant has
 `checks.tests = false` or the run is disabled. A target with
 `canRunTests = false` has none.
 
 ```
-nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
+nix run .#default/x86_64-unknown-linux-gnu/app/test/e2e -- --nocapture
 ```
 
 ### `vendor`

@@ -621,7 +621,7 @@ let
             default = true;
             description = ''
               Put this build or coverage variant's enabled test runs
-              (`<pkg>/test-<name>`, `test.binaries.<key>.enable`) and
+              (`<pkg>/test/<binary>`, `test.binaries.<key>.enable`) and
               doctests (`<pkg>/doctest`, `test.doctest.enable`) in
               `repo.checks`, on a target that can run tests
               (`canRunTests`).
@@ -632,7 +632,7 @@ let
             default = true;
             description = ''
               Put this build or coverage variant's enabled bench runs
-              (`<pkg>/bench-<name>`, each bench binary of
+              (`<pkg>/bench/<binary>`, each bench binary of
               [`benches`](#workspacesnamevariantsnamebenches) once in test
               mode, `bench.enable`) in `repo.checks`, on a target that can
               run tests. Timed runs never happen inside Nix.
@@ -738,12 +738,11 @@ let
             The bench plan, `cargo bench --no-run` with this variant's
             settings (use `profile = "bench"`): bench binaries, and lib
             and bin harnesses in bench mode, at
-            `target.<triple>.variants.<v>.benches.<pkg>.<bench>`. `false`:
+            `target.<triple>.variants.<v>.benches.<pkg>.<binary>`. `false`:
             none, the plan is not traced. `true`: those of the `packages`
             selection. A list of packages, or the exclude form: `cargo
             bench -p <pkg> …` for those only. Build and coverage variants
-            only. `target.<triple>.benches` is the default variant's when
-            it has benches, else the one variant's that has. The test plan
+            only. The test plan
             builds no benches (`cargo test --no-run` does not). Each
             bench binary also runs once, with `--test`, as a check of the
             variant, under the package's

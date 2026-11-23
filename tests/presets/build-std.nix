@@ -57,7 +57,7 @@ let
     repo: triple:
     builtins.fromJSON (
       builtins.unsafeDiscardStringContext (
-        builtins.readFile "${repo.workspaces.main.plans.${triple}.default.build}/plan.json"
+        builtins.readFile "${repo.workspaces.main.target.${triple}.variants.default.plans.build}/plan.json"
       )
     );
   # Compile units by crate name, and runs by package name.
@@ -122,8 +122,8 @@ assert lib.assertMsg (lib.all (c: lib.elem c hostedCrates) [
       pkgs.runCommand "build-std-tests"
         {
           nativeBuildInputs = [ pkgs.buildPackages.jq ];
-          bare = "${bare.workspaces.main.instances.${none}.default.unitsJson.test}";
-          hosted = "${hosted.workspaces.main.instances.${native}.default.unitsJson.test}";
+          bare = "${bare.workspaces.main.internal.instances.${none}.default.unitsJson.test}";
+          hosted = "${hosted.workspaces.main.internal.instances.${native}.default.unitsJson.test}";
         }
         ''
           set -euo pipefail

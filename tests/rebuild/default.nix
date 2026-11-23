@@ -295,7 +295,7 @@ let
                   }
                 ) (removeAttrs variants (except.variants or [ ]))
               )
-            ) w.instances
+            ) w.internal.instances
           )
         ) repo.workspaces
       );

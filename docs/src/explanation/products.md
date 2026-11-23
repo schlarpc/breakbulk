@@ -256,7 +256,9 @@ package and succeeds.
 ## Tests
 
 Every test, bench and example binary is an attribute
-(`target.<triple>.tests.<pkg>.<test>`), so VM tests and system tests can
+(`target.<triple>.variants.<v>.tests.<pkg>.<binary>`, by its
+[key](../reference/outputs.md#the-result): `lib/<crate>`, `bin/<name>`,
+an integration test's name), so VM tests and system tests can
 use it. Each test binary also gets:
 
 - **a test run**, a derivation that runs it under the target runner
@@ -427,23 +429,23 @@ attribute path, wherever a flake output puts it. Arguments after `--` go
 to the test binary:
 
 ```
-nix run .#<…>.testApps.<pkg>.<binary> -- --exact net::fetches --nocapture
+nix run '.#<…>.testApps.<pkg>."<binary>"' -- --exact net::fetches --nocapture
 ```
 
 `repo.apps` has every test app in the shape of a flake's `apps` output,
 named as its test run's [check](../reference/outputs.md#checks)
-(`<ws>/<triple>/<pkg>/test-<name>`). It includes the test binaries whose
+(`<ws>/<triple>/<pkg>/test/<binary>`). It includes the test binaries whose
 runs are disabled, or whose tests the sandbox skips, which are the main
 reason to run a test app. With `apps.${system} = repo.apps;` in the
 flake (the flake-parts module adds it), `nix flake show` lists them, and:
 
 ```
-nix run .#default/x86_64-unknown-linux-gnu/app/test-e2e -- --nocapture
+nix run .#default/x86_64-unknown-linux-gnu/app/test/e2e -- --nocapture
 ```
 
 `nix run` splits an attribute path at `.` only, so `/` needs no quoting.
 A name with a `.` in it (from a workspace named `api.v2`, say) is
-quoted: `nix run '.#"api.v2/…/test-e2e"'`.
+quoted: `nix run '.#"api.v2/…/test/e2e"'`.
 
 **Test wrappers.** Some tests find files from the test binary's own
 path: they walk up from `std::env::current_exe()` to a directory named
@@ -509,7 +511,7 @@ by its name (`--skip "src/lib.rs - net::connect"`); per-binary
 **Benches** come only from a bench variant (`cargo bench --no-run`, bench
 profile), which gives optimized bench binaries to run outside Nix.
 `cargo test --no-run` builds no benches. Each bench binary also runs
-once in test mode, as a check of that variant (`<pkg>/bench-<name>`,
+once in test mode, as a check of that variant (`<pkg>/bench/<binary>`,
 [`checks.benches`](../reference/options/workspaces.md#workspacesnamevariantsnamechecksbenches)),
 so that a bench that no longer runs fails CI; timed runs never happen
 inside Nix. Bench runs are runs like the others, with their own layer of
@@ -521,11 +523,11 @@ run settings,
 
 ## Documentation
 
-`target.<triple>.docs` is what `cargo doc` writes: one folder with a
-directory per documented crate (`base/index.html`), the shared search
-index, `crates.js` and `static.files/`. Each variant has its own
-(`target.<triple>.variants.<v>.docs`); `target.<triple>.docs` is the
-default variant's. Open `<crate>/index.html` in it, as in Cargo's
+`target.<triple>.variants.<v>.docs` is what `cargo doc` writes: one
+folder with a directory per documented crate (`base/index.html`), the
+shared search index, `crates.js` and `static.files/`. Each variant has
+its own; `workspaces.<ws>.docs` is the default target's default
+variant's. Open `<crate>/index.html` in it, as in Cargo's
 `target/doc`.
 
 - By default only the planned packages are documented, as with

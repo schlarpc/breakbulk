@@ -55,7 +55,7 @@ The name: [break-bulk cargo](https://en.wikipedia.org/wiki/Breakbulk_cargo) is l
 
 - `nix build` builds the `app` package.
 - `nix flake check` builds every product and runs every test.
-- `nix run .#default/x86_64-unknown-linux-gnu/app/test-bin-app` runs one
+- `nix run .#default/x86_64-unknown-linux-gnu/app/test/bin/app` runs one
   test binary on your machine, outside the sandbox.
 - `nix develop` gives a shell where plain `cargo` behaves like breakbulk's
   planner.

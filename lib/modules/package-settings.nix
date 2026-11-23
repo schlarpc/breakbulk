@@ -669,16 +669,19 @@ let
             (and the name of its check, `<ws>/<triple>/<pkg>/…`):
 
             - an integration test (`[[test]]`, `tests/cli.rs`): its name,
-              `cli` (check `test-cli`);
+              `cli` (check `test/cli`);
             - the library's unit tests: `lib/` and the library's crate
-              name, `lib/my_crate` (check `test-lib`, and `bench-lib` for
-              its bench run);
+              name, `lib/my_crate` (check `test/lib/my_crate`, and
+              `bench/lib/my_crate` for its bench run);
             - a bin's unit tests: `bin/` and the bin's name, `bin/my-tool`
-              (check `test-bin-my-tool`, `bench-bin-my-tool`);
+              (check `test/bin/my-tool`, `bench/bin/my-tool`);
             - an example, or a bench with `test = true`: `example/<name>`,
-              `bench/<name>` (check `test-example-<name>`,
-              `test-bench-<name>`);
-            - a bench: `bench/<name>` (check `bench-<name>`).
+              `bench/<name>` (check `test/example/<name>`,
+              `test/bench/<name>`);
+            - a bench: `bench/<name>` (check `bench/bench/<name>`).
+
+            The key is the binary's one name: in `tests`, `testRuns`,
+            `testApps`, `benches`, `benchRuns`, checks and apps.
 
             A key that names no test or bench binary of the package is an
             evaluation error listing the package's keys. The keys come from
@@ -721,7 +724,7 @@ let
           A variant with [`benches`](workspaces.md#workspacesnamevariantsnamebenches)
           builds them with `cargo bench --no-run`, and each enabled one
           runs once with `--test`, as a check of that variant
-          (`<pkg>/bench-<name>`), so that a bench that no longer runs
+          (`<pkg>/bench/<binary>`), so that a bench that no longer runs
           fails CI. Timed runs never happen inside Nix. A package whose
           `test.runner` is `testRunners.nextest` sets `bench.runner =
           breakbulk.lib.testRunners.direct` for a bench without the libtest

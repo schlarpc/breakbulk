@@ -53,7 +53,9 @@ let
   check =
     label: toolchain:
     let
-      units = lib.attrValues (repoFor toolchain).workspaces.main.instances.${native}.default.units.build;
+      units =
+        lib.attrValues
+          (repoFor toolchain).workspaces.main.internal.instances.${native}.default.units.build;
       # The rendered BREAKBULK_UNIT of the case's run unit.
       runOf =
         case:

@@ -69,7 +69,7 @@ let
     in
     builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
 
-  inst = repo: repo.workspaces.main.instances.${native}.default;
+  inst = repo: repo.workspaces.main.internal.instances.${native}.default;
 
   # Unit .drv path -> "<derivation name>" for both plan kinds.
   unitDrvs =
@@ -168,7 +168,7 @@ let
       });
     }
   ];
-  mwInst = ws: multiWs.workspaces.${ws}.instances.${native}.default;
+  mwInst = ws: multiWs.workspaces.${ws}.internal.instances.${native}.default;
   mwDrvs =
     ws:
     lib.mapAttrs' (
@@ -346,12 +346,12 @@ let
     ) "declared-paths: the product still has a buildScriptPaths check";
     assert lib.assertMsg
       (
-        lib.attrNames missing.buildScriptPaths == [
+        lib.attrNames missing.variants.default.buildScriptPaths == [
           "build"
           "test"
         ]
       )
-      "declared-paths: expected a check per plan, got ${toString (lib.attrNames missing.buildScriptPaths)}";
+      "declared-paths: expected a check per plan, got ${toString (lib.attrNames missing.variants.default.buildScriptPaths)}";
     assert lib.assertMsg (
       declaredMissing.checks ? "main/${native}/buildScriptPaths/build"
       && declaredMissing.checks ? "main/${native}/buildScriptPaths/test"
@@ -360,10 +360,10 @@ let
       {
         missingApp = missing.packages.app;
         providedApp = provided.packages.app;
-        buildFailure = pkgs.testers.testBuildFailure missing.buildScriptPaths.build;
-        testFailure = pkgs.testers.testBuildFailure missing.buildScriptPaths.test;
-        buildPassing = provided.buildScriptPaths.build;
-        testPassing = provided.buildScriptPaths.test;
+        buildFailure = pkgs.testers.testBuildFailure missing.variants.default.buildScriptPaths.build;
+        testFailure = pkgs.testers.testBuildFailure missing.variants.default.buildScriptPaths.test;
+        buildPassing = provided.variants.default.buildScriptPaths.build;
+        testPassing = provided.variants.default.buildScriptPaths.test;
         inherit native;
       }
       ''
@@ -744,7 +744,7 @@ let
     );
   snapshots = snapshotsRepo null [ ];
 
-  inst' = repo: ws: repo.workspaces.${ws}.instances.${native}.default;
+  inst' = repo: ws: repo.workspaces.${ws}.internal.instances.${native}.default;
 
   # --- view-hints ----------------------------------------------------------------
 
@@ -1022,7 +1022,7 @@ in
         "b"
       ];
       inner = multiWs.explainSharing {
-        a = multiWs.workspaces.a.plans.${native}.default.build;
+        a = multiWs.workspaces.a.target.${native}.variants.default.plans.build;
         b = "b";
         package = "inner";
       };
@@ -1108,7 +1108,9 @@ in
         let
           plan = builtins.fromJSON (
             builtins.unsafeDiscardStringContext (
-              builtins.readFile "${ownView.workspaces.${ws}.instances.${native}.default.plans.build}/plan.json"
+              builtins.readFile "${
+                ownView.workspaces.${ws}.internal.instances.${native}.default.plans.build
+              }/plan.json"
             )
           );
         in
@@ -1218,8 +1220,8 @@ in
       {
         rf = rfDefault;
         adminWrapper = admin.breakbulkRoot.wrapper;
-        skipped = rf.workspaces.main.tests.rft.needs-extra;
-        plain = rf.workspaces.main.tests.rft.plain;
+        skipped = rf.workspaces.main.target.${native}.variants.default.tests.rft.needs-extra;
+        plain = rf.workspaces.main.target.${native}.variants.default.tests.rft.plain;
         adminFull = rfFull.packages.rf;
         testFull = rfFull.tests.rft.needs-extra;
         adminStub = expectFailure "rf-admin" admin [ "cli" ];
@@ -1476,7 +1478,8 @@ in
       };
       off = psUnits (changedBy readme [ { packages.ps.predictSources.enable = lib.mkForce false; } ]);
       missing = predictSourcesRepo null [ { packages.ps.predictSources.keep = lib.mkForce [ ]; } ];
-      specsOf = repo: variant: repo.workspaces.main.instances.${native}.${variant}.sources.predictedSpecs;
+      specsOf =
+        repo: variant: repo.workspaces.main.internal.instances.${native}.${variant}.sources.predictedSpecs;
       specs = specsOf predictSources "default";
       runKey = "src:ps#run/custom-build/build-script-build";
       # A clippy variant keeps the workspace's Cargo.toml (the compiles'
@@ -1593,7 +1596,7 @@ in
           };
         }
       ];
-      i = repo.workspaces.main.instances.${native};
+      i = repo.workspaces.main.internal.instances.${native};
       t = repo.workspaces.main.target.${native};
       clippyTest = lib.attrNames (unitsNamed i.clippy "test");
       benchUnits = lib.attrNames (unitsNamed i.bench "bench");
@@ -1608,7 +1611,7 @@ in
     pkgs.runCommand "test-only-variants"
       {
         clippy = t.variants.clippy.check;
-        bench = t.variants.bench.benches.proto.unharnessed;
+        bench = t.variants.bench.benches.proto."bench/unharnessed";
       }
       ''
         [ "$($bench/bin/unharnessed)" = "unharnessed: ok" ]
@@ -2256,7 +2259,7 @@ in
         cargoEnvWarnings =
           (builtins.fromJSON (
             builtins.unsafeDiscardStringContext (
-              builtins.readFile "${ws.instances.${native}.default.cargoEnv}/cargo-env.json"
+              builtins.readFile "${ws.internal.instances.${native}.default.cargoEnv}/cargo-env.json"
             )
           )).warnings;
       };
@@ -2303,7 +2306,7 @@ in
         kind:
         builtins.fromJSON (
           builtins.unsafeDiscardStringContext (
-            builtins.readFile "${ws.instances.${native}.default.plans.${kind}}/plan.json"
+            builtins.readFile "${ws.internal.instances.${native}.default.plans.${kind}}/plan.json"
           )
         );
       got =
@@ -2369,7 +2372,7 @@ in
         w:
         builtins.fromJSON (
           builtins.unsafeDiscardStringContext (
-            builtins.readFile "${w.instances.${native}.default.cargoEnv}/cargo-env.json"
+            builtins.readFile "${w.internal.instances.${native}.default.cargoEnv}/cargo-env.json"
           )
         );
       broken = ws brokenRoot { };
@@ -2439,7 +2442,7 @@ in
         }
       ];
       w = repo.workspaces.main;
-      i = w.instances.my-board.default;
+      i = w.internal.instances.my-board.default;
       plan = builtins.fromJSON (
         builtins.unsafeDiscardStringContext (builtins.readFile "${i.plans.test}/plan.json")
       );
@@ -2531,25 +2534,26 @@ in
         name: repo:
         let
           w = repo.workspaces.main;
+          v = w.target.${native}.variants.default;
         in
         assert lib.assertMsg (
           repo.warnings or [ ] == [ ]
         ) "${name}: warnings ${builtins.toJSON repo.warnings}";
         assert lib.assertMsg (
-          lib.mapAttrs (_: lib.attrNames) w.tests == {
-            app = [ "bin-app" ];
+          lib.mapAttrs (_: lib.attrNames) v.tests == {
+            app = [ "bin/app" ];
             tool = [
-              "bin-tool"
-              "lib"
+              "bin/tool"
+              "lib/tool"
             ];
           }
-        ) "${name}: tests ${builtins.toJSON (lib.mapAttrs (_: lib.attrNames) w.tests)}";
+        ) "${name}: tests ${builtins.toJSON (lib.mapAttrs (_: lib.attrNames) v.tests)}";
         {
           "${name}_app" = w.packages.app;
           "${name}_tool" = w.packages.tool;
-          "${name}_toolLib" = w.tests.tool.lib;
-          "${name}_toolBin" = w.tests.tool.bin-tool;
-          "${name}_doctest" = w.target.${native}.doctests.tool;
+          "${name}_toolLib" = v.tests.tool."lib/tool";
+          "${name}_toolBin" = v.tests.tool."bin/tool";
+          "${name}_doctest" = v.doctests.tool;
         };
     in
     assert lib.assertMsg
@@ -2729,7 +2733,7 @@ in
           sysDefaults.packages.libsqlite3-sys = null;
         }
       ];
-      units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
+      units = unitsNamed (repo.workspaces.main.internal.instances.${native}.default) "build";
       envOf =
         n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       itoa = envOf "itoa-1.0.11-lib";
@@ -2781,9 +2785,9 @@ in
             md
             { packages.app-b.extraSources = lib.mkForce [ ]; }
           ]
-        )).workspaces.main.instances.${native}.default.sources.workspace;
-      i = repo.workspaces.main.instances.${native}.default;
-      run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
+        )).workspaces.main.internal.instances.${native}.default.sources.workspace;
+      i = repo.workspaces.main.internal.instances.${native}.default;
+      run = repo.workspaces.main.target.${native}.variants.default.testRuns.app-b."bin/app-b";
       script = run.drvAttrs.buildCommand;
       hasC = view: (builtins.readDir view) ? c;
       units = unitsNamed i "build";
@@ -2807,7 +2811,7 @@ in
       !(hasC cleared.b) && hasC cleared.shared
     ) "member-defaults: mkForce [ ] in packages.app-b did not clear its extraSources only";
     assert lib.assertMsg (
-      i.sources.crates == (plain.workspaces.main.instances.${native}.default).sources.crates
+      i.sources.crates == (plain.workspaces.main.internal.instances.${native}.default).sources.crates
     ) "member-defaults: registry crate sources changed";
     assert lib.assertMsg (
       (envOf "shared-0.1.0-lib").MD_UNIT or null == "md" && !((envOf "libc-0.2.191-lib") ? MD_UNIT)
@@ -2835,7 +2839,7 @@ in
           };
         }
       ];
-      run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
+      run = repo.workspaces.main.target.${native}.variants.default.testRuns.app-b."bin/app-b";
       checks = {
         targetLayerWins =
           lib.hasInfix "echo target-layer" run.drvAttrs.buildCommand
@@ -2898,12 +2902,12 @@ in
         }
       ];
       t = repo.workspaces.main.target.${native};
-      units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
+      units = unitsNamed (repo.workspaces.main.internal.instances.${native}.default) "build";
       envOf =
         n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       bin = envOf "shared-0.1.0-lib";
       appB = envOf "app-b-0.1.0-bin";
-      run = t.testRuns.app-b."bin/app-b".drvAttrs.buildCommand;
+      run = t.variants.default.testRuns.app-b."bin/app-b".drvAttrs.buildCommand;
       product = t.packages.app-b;
       checks = {
         env = bin.FORCED == "low" && bin.PLAIN == "high" && bin.HIGH_ONLY == "high";
@@ -2943,7 +2947,7 @@ in
           sysDefaults.packages.itoa.target.${native}.forTarget.env.SYST = "1";
         }
       ];
-      units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
+      units = unitsNamed (repo.workspaces.main.internal.instances.${native}.default) "build";
       envOf =
         n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       lib' = envOf "libc-0.2.191-lib";
@@ -3258,7 +3262,7 @@ in
           }
         ];
       t = r: r.workspaces.main.target.${native};
-      testPkgs = r: lib.attrNames (t r).tests;
+      testPkgs = r: lib.attrNames (t r).variants.default.tests;
       # The exclude lists compared with `cargo tree --workspace --exclude`.
       cargoCases = {
         globs = [
@@ -3403,7 +3407,7 @@ in
         (oneWs "a")
         { targets.${native}.host.stdenv = pkgs.clangStdenv; }
       ];
-      i = r: r.workspaces.main.instances.${native}.default;
+      i = r: r.workspaces.main.internal.instances.${native}.default;
       stdenvOf = d: builtins.unsafeDiscardStringContext d.drvAttrs.stdenv.outPath;
       drv = d: builtins.unsafeDiscardStringContext d.drvPath;
       out = d: builtins.unsafeDiscardStringContext d.outPath;
@@ -3457,7 +3461,7 @@ in
         (mkRepo (fixtures + "/feature-unification") [
           (oneWs ".")
           { packages = lib.mapAttrs (_: l: { productInputs = l; }) decls; }
-        ]).workspaces.main.instances.${native}.default.productInputConflicts;
+        ]).workspaces.main.internal.instances.${native}.default.productInputConflicts;
       cases = [
         {
           decls.shared = [ "a" ];
@@ -3547,8 +3551,10 @@ in
         repo:
         lib.genAttrs [ "tool" "shared" ] (p: drv repo.workspaces.main.packages.${p})
         // {
-          tool-test = drv repo.workspaces.main.testRuns.tool."bin/tool";
-          shared-test = drv repo.workspaces.main.testRuns.shared."lib/shared";
+          tool-test = drv repo.workspaces.main.target.${native}.variants.default.testRuns.tool."bin/tool";
+          shared-test =
+            drv
+              repo.workspaces.main.target.${native}.variants.default.testRuns.shared."lib/shared";
         };
       got = drvsOf poisoned;
     in

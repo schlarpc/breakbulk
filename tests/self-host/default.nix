@@ -129,7 +129,7 @@ in
         # The self-built programs are really breakbulk's builds.
         units = lib.concatStringsSep " " (
           lib.attrNames
-            repo.workspaces.breakbulk.instances.${pkgs.stdenv.hostPlatform.rust.rustcTarget}.default.units.build
+            repo.workspaces.breakbulk.internal.instances.${pkgs.stdenv.hostPlatform.rust.rustcTarget}.default.units.build
         );
       }
       ''

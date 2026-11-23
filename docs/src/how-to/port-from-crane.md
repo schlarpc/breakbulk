@@ -204,7 +204,7 @@ build machine's triple. Other targets are under
   ([Tests](../explanation/products.md#tests)).
 - **There are more checks.** crane makes one check per function you
   call. breakbulk makes one per product, test binary, doctest, and check
-  or clippy variant, named `<ws>/<triple>/<pkg>/test-<name>` and so on
+  or clippy variant, named `<ws>/<triple>/<pkg>/test/<binary>` and so on
   ([`checks`](../reference/outputs.md#checks)). Build them as groups:
   `checks.<system>.all`, one workspace, or your own patterns
   ([Run the checks in CI](ci.md)).

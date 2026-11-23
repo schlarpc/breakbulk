@@ -1239,8 +1239,8 @@ runTests "lib-unit" {
         "main/x86_64-unknown-linux-gnu/app/build"
       ]
       [
-        "**/test-*"
-        "main/x86_64-unknown-linux-gnu/app/test-it"
+        "**/test/*"
+        "main/x86_64-unknown-linux-gnu/app/test/it"
       ]
       [
         "main/**"

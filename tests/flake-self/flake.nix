@@ -31,7 +31,7 @@
       describe =
         repo:
         let
-          i = repo.workspaces.main.instances.${native}.default;
+          i = repo.workspaces.main.internal.instances.${native}.default;
           drvs = us: lib.mapAttrs (_: u: builtins.unsafeDiscardStringContext u.drvPath) us;
         in
         {

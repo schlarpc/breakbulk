@@ -118,7 +118,7 @@ let
   aarch64 =
     let
       p = ta.packages;
-      testBins = lib.attrValues ta.tests.pure;
+      testBins = lib.attrValues ta.variants.default.tests.pure;
     in
     pkgs.runCommand "darwin-aarch64"
       {
@@ -165,7 +165,7 @@ let
   # replays (layer 2).
   deploymentTarget =
     let
-      captureOf = t: repo.workspaces.main.instances.${t}.default.captures.target;
+      captureOf = t: repo.workspaces.main.internal.instances.${t}.default.captures.target;
     in
     pkgs.runCommand "darwin-deployment-target"
       {
@@ -184,9 +184,9 @@ let
     let
       checkNames = lib.attrNames repo.checks;
       runChecks = lib.filter (
-        n: lib.hasInfix "/${a64}/" n && (lib.hasInfix "/test-" n || lib.hasSuffix "/doctest" n)
+        n: lib.hasInfix "/${a64}/" n && (lib.hasInfix "/test/" n || lib.hasSuffix "/doctest" n)
       ) checkNames;
-      run = lib.head (lib.attrValues ta.testRuns.pure);
+      run = lib.head (lib.attrValues ta.variants.default.testRuns.pure);
     in
     assert lib.assertMsg (!ta.canRunTests) "darwin: canRunTests is true";
     assert lib.assertMsg (runChecks == [ ]) "darwin: repo.checks has test runs: ${toString runChecks}";

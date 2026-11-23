@@ -667,21 +667,23 @@ let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       apps = ctlRepo.apps;
       tests = [
-        "bin-ctl"
+        "bin/ctl"
         "bin_exe"
         "env"
         "ignored"
-        "lib"
+        "lib/ctl"
         "needs_feat"
         "net"
       ];
-      want = lib.concatMap (p: map (t: "main/${native}/${p}ctl/test-${t}") tests) [
+      want = lib.concatMap (p: map (t: "main/${native}/${p}ctl/test/${t}") tests) [
         ""
         "variant-unchecked/"
       ];
-      checkNames = lib.filter (n: lib.hasInfix "/test-" n) (lib.attrNames ctlRepo.checks);
+      checkNames = lib.attrNames (
+        lib.filterAttrs (n: c: lib.hasInfix "/test/" n && !(c.breakbulkCheckGroup or false)) ctlRepo.checks
+      );
       discard = builtins.unsafeDiscardStringContext;
-      net = apps."main/${native}/ctl/test-net";
+      net = apps."main/${native}/ctl/test/net";
       variantNet = ctlRepo.workspaces.main.target.${native}.variants.default.testApps.ctl.net;
     in
     assert lib.assertMsg (
@@ -689,12 +691,12 @@ let
     ) "test-control-repo-apps: apps ${toString (lib.attrNames apps)}";
     assert lib.assertMsg (
       checkNames == [
-        "main/${native}/ctl/test-bin-ctl"
-        "main/${native}/ctl/test-bin_exe"
-        "main/${native}/ctl/test-env"
-        "main/${native}/ctl/test-lib"
-        "main/${native}/ctl/test-needs_feat"
-        "main/${native}/ctl/test-net"
+        "main/${native}/ctl/test/bin/ctl"
+        "main/${native}/ctl/test/bin_exe"
+        "main/${native}/ctl/test/env"
+        "main/${native}/ctl/test/lib/ctl"
+        "main/${native}/ctl/test/needs_feat"
+        "main/${native}/ctl/test/net"
       ]
     ) "test-control-repo-apps: test-run checks ${toString checkNames}";
     assert lib.assertMsg (lib.all (
@@ -706,7 +708,7 @@ let
     pkgs.runCommand "test-runs-test-control-repo-apps"
       {
         net = net.program;
-        ignored = apps."main/${native}/variant-unchecked/ctl/test-ignored".program;
+        ignored = apps."main/${native}/variant-unchecked/ctl/test/ignored".program;
       }
       ''
         $net --skip needs_network | tee net.log
@@ -864,7 +866,7 @@ let
   nextestRepo =
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
-      r = nxRepo.workspaces.main.target.${native}.testRuns;
+      r = nxRepo.workspaces.main.target.${native}.variants.default.testRuns;
     in
     pkgs.runCommand "test-runs-nextest-repo"
       {
@@ -959,7 +961,7 @@ let
   nextestWorkspaceDefault =
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
-      r = nxWsRepo.workspaces.main.target.${native}.testRuns;
+      r = nxWsRepo.workspaces.main.target.${native}.variants.default.testRuns;
     in
     pkgs.runCommand "test-runs-nextest-workspace-default"
       {
@@ -1039,7 +1041,7 @@ let
       runs = lib.concatMapAttrs (
         w: v:
         lib.mapAttrs' (n: d: lib.nameValuePair (lib.replaceStrings [ "-" ] [ "_" ] "${w}_${n}") d) (
-          removeAttrs v.target.${native}.testRuns.tt [ "lib/tt" ]
+          removeAttrs v.target.${native}.variants.default.testRuns.tt [ "lib/tt" ]
         )
       ) testThreadsRepo.workspaces;
     in
@@ -1109,9 +1111,9 @@ let
       {
         plain =
           (mk "test-control" { packages.ctl.test = removeAttrs ctlTest [ "postRun" ]; }).testRuns.ctl.env;
-        envRun = t.testRuns.ctl.env;
-        net = t.testRuns.ctl.net;
-        doctest = t.doctests.ctl;
+        envRun = t.variants.default.testRuns.ctl.env;
+        net = t.variants.default.testRuns.ctl.net;
+        doctest = t.variants.default.doctests.ctl;
       }
       ''
         # Without postRun, the output is an empty directory.
@@ -1181,9 +1183,9 @@ let
     in
     pkgs.runCommand "test-runs-test-wrapper"
       {
-        lib_ = t.testRuns.locate."lib/locate";
-        it = t.testRuns.locate.locate;
-        app = nixRunProgram t.testApps.locate.locate;
+        lib_ = t.variants.default.testRuns.locate."lib/locate";
+        it = t.variants.default.testRuns.locate.locate;
+        app = nixRunProgram t.variants.default.testApps.locate.locate;
         runnerRun = withRunner.testRuns.locate.locate;
         nxLib = nx.testRuns.locate."lib/locate";
         nxIt = nx.testRuns.locate.locate;
@@ -1307,8 +1309,8 @@ let
     in
     pkgs.runCommand "test-runs-home"
       {
-        run = t.testRuns.th.home;
-        doctest = t.doctests.th;
+        run = t.variants.default.testRuns.th.home;
+        doctest = t.variants.default.doctests.th;
         strictRun = pkgs.testers.testBuildFailure strict.testRuns.th.home;
         unit = strict.doctestDrvs.th.drvAttrs.BREAKBULK_UNIT;
         testEnv = strict.doctestDrvs.th.drvAttrs.BREAKBULK_TEST_ENV;
@@ -1354,7 +1356,7 @@ let
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       t = testClosureRepo.workspaces.main.target.${native};
-      quiet = t.testRuns.quiet."lib/quiet";
+      quiet = t.variants.default.testRuns.quiet."lib/quiet";
     in
     pkgs.runCommand "test-runs-test-closure"
       {
@@ -1364,11 +1366,11 @@ let
           "quiet-run"
           quiet.drvPath
           "quiet-doctest"
-          t.doctests.quiet.drvPath
+          t.variants.default.doctests.quiet.drvPath
         ];
-        greeter = t.testRuns.greeter.runs_bin;
+        greeter = t.variants.default.testRuns.greeter.runs_bin;
         quietRun = quiet;
-        quietDoctest = t.doctests.quiet;
+        quietDoctest = t.variants.default.doctests.quiet;
       }
       ''
         for g in quiet-run quiet-doctest; do
@@ -1529,14 +1531,16 @@ let
     assert lib.assertMsg (
       lib.attrNames c.all.passthru.entries == leaves c
     ) "doctest-settings: all holds ${toString (lib.attrNames c.all.passthru.entries)}";
-    assert lib.assertMsg (t.doctests ? unchecked) "doctest-settings: doctests.unchecked is gone";
+    assert lib.assertMsg (
+      t.variants.default.doctests ? unchecked
+    ) "doctest-settings: doctests.unchecked is gone";
     assert lib.assertMsg (
       failed refused == refusedWant
     ) "doctest-settings: refused settings: ${builtins.toJSON (failed refused)}";
     pkgs.runCommand "test-runs-doctest-settings"
       {
         all = c.all;
-        checked = t.doctests.checked;
+        checked = t.variants.default.doctests.checked;
       }
       ''
         cat $checked/log
@@ -1556,8 +1560,8 @@ let
           packages.checked.test.binaries.smoke.enable = true;
         }
       ];
-      smoke = lib.filter (lib.hasSuffix "/test-smoke") (lib.attrNames repo.checks);
-      runs = repo.workspaces.main.target.${native}.testRuns;
+      smoke = lib.filter (lib.hasSuffix "/test/smoke") (lib.attrNames repo.checks);
+      runs = repo.workspaces.main.target.${native}.variants.default.testRuns;
       # `lib.mkForce` in memberDefaults wins over a package's plain `true`,
       # for test binaries and doctests alike.
       forced = doctestRepo [
@@ -1572,7 +1576,7 @@ let
           };
         }
       ];
-      forcedOff = lib.filter (n: lib.hasSuffix "/test-smoke" n || lib.hasSuffix "/doctest" n) (
+      forcedOff = lib.filter (n: lib.hasSuffix "/test/smoke" n || lib.hasSuffix "/doctest" n) (
         lib.attrNames forced.checks
       );
     in
@@ -1580,12 +1584,12 @@ let
       forcedOff == [ ]
     ) "binary-enable: forced off, yet in repo.checks: ${toString forcedOff}";
     assert lib.assertMsg (
-      smoke == [ "${p}/checked/test-smoke" ]
+      smoke == [ "${p}/checked/test/smoke" ]
     ) "binary-enable: smoke runs in repo.checks: ${toString smoke}";
     assert lib.assertMsg (
       runs.checked ? smoke && runs.unchecked ? smoke
     ) "binary-enable: a smoke run is gone";
-    pkgs.runCommand "test-runs-binary-enable" { run = repo.checks."${p}/checked/test-smoke"; } ''
+    pkgs.runCommand "test-runs-binary-enable" { run = repo.checks."${p}/checked/test/smoke"; } ''
       touch $out
     '';
 in

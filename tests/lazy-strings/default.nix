@@ -66,7 +66,7 @@ let
   repo = mk (fetch 1);
   other = mk (fetch 2);
 
-  instance = r: r.workspaces.main.instances.${native}.default;
+  instance = r: r.workspaces.main.internal.instances.${native}.default;
   drvs = lib.mapAttrs (_: d: builtins.unsafeDiscardStringContext d.drvPath);
   plansOf = r: drvs (instance r).plans;
   unitsOf = r: drvs (instance r).units.build;

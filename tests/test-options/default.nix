@@ -79,7 +79,7 @@ let
       ]
       ++ modules;
     };
-  instOf = r: r.workspaces.main.instances.${native}.default;
+  instOf = r: r.workspaces.main.internal.instances.${native}.default;
   runsOf = r: (instOf r).testRuns.app;
 
   strip = {

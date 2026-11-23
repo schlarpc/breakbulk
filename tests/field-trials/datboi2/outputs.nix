@@ -38,7 +38,7 @@ in
       keep =
         n:
         !(lib.hasSuffix "/doctest" n)
-        && (lib.hasPrefix "host/" n || (lib.hasInfix "/${native}/" n && lib.hasInfix "/test-" n));
+        && (lib.hasPrefix "host/" n || (lib.hasInfix "/${native}/" n && lib.hasInfix "/test/" n));
     in
     pkgs.linkFarm "datboi2-ci" (
       lib.mapAttrs' (n: v: lib.nameValuePair (lib.replaceStrings [ "/" ] [ "_" ] n) v) (

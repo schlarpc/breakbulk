@@ -1324,8 +1324,6 @@ let
       }
     );
 
-  rootName = r: "${r.breakbulkRoot.kind}/${r.breakbulkRoot.target}";
-
   # One product per package: its build-plan roots through the target's
   # stages (lib/products.nix).
   productsOf =
@@ -1356,111 +1354,23 @@ let
       }
     );
 
-  testName =
-    r:
-    let
-      b = r.breakbulkRoot;
-    in
-    if b.kind == "test" then
-      b.target
-    else if b.kind == "lib" then
-      "lib"
-    else
-      "${b.kind}-${b.target}";
-
   selectPkgs =
     sel: attrs: if sel == null then attrs else lib.filterAttrs (n: _: lib.elem n sel) attrs;
 
-  # benches.<pkg>.<name>: bench-plan roots installed as
-  # $out/bin/<target><exe suffix> (stubs as they are): a bench by its name,
-  # the lib harness in bench mode as `lib`, a bin's as `bin-<name>`.
-  benchesOf =
-    inst: sel:
-    let
-      byPkg = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues inst.benches);
-      nameOf =
-        r:
-        let
-          b = r.breakbulkRoot;
-        in
-        if b.kind == "bench" then
-          b.target
-        else if b.kind == "lib" then
-          "lib"
-        else
-          "${b.kind}-${b.target}";
-    in
+  # A plan's roots (`roots`, by root name) as `<pkg>.<binary key>`
+  # (lib/test-runs.nix `binaryKey`: `lib/<crate>`, `bin/<name>`, `<test>`,
+  # …), each installed as $out/bin/<target><exe suffix>: the names test
+  # runs, test apps and checks use, which never collide.
+  byBinaryKey =
+    inst: roots: sel:
     lib.mapAttrs (
-      _: rs: lib.listToAttrs (map (r: lib.nameValuePair (nameOf r) (inst.installExecutable r)) rs)
-    ) (selectPkgs sel byPkg);
-
-  # testRuns.<pkg>.<name>: test runs, named as `tests` names test
-  # binaries; `.enabled` holds those whose run is enabled
-  # (`test.binaries.<binary>.enable`).
-  namedRuns = inst: namedRuns' false inst.testRuns (pkg: k: inst.checks ? "test/${pkg}/${k}");
-  # `benchPlan`: the runs are a bench plan's (benchRuns), where a bench is
-  # named as in `benches` (by its name); in a test plan a bench built as a
-  # test (`test = true`) is `bench-<name>`, as in `tests`.
-  namedRuns' =
-    benchPlan: allRuns: isEnabled: sel:
-    let
-      split = key: builtins.match "([a-z]+)/(.*)" key;
-      short =
-        key:
-        let
-          m = split key;
-        in
-        if m == null then
-          key
-        else if lib.head m == "lib" then
-          "lib"
-        else if benchPlan && lib.head m == "bench" then
-          lib.last m
-        else
-          "${lib.head m}-${lib.last m}";
-      long = key: if split key == null then "test/${key}" else key;
-    in
-    lib.mapAttrs (
-      pkg: runs:
-      let
-        keys = lib.attrNames runs;
-        counts = lib.groupBy short keys;
-        nameOf = k: if lib.length counts.${short k} > 1 then long k else short k;
-        pick = ks: lib.listToAttrs (map (k: lib.nameValuePair (nameOf k) runs.${k}) ks);
-      in
-      pick keys
-      // {
-        enabled = pick (lib.filter (isEnabled pkg) keys);
-      }
-    ) (selectPkgs sel allRuns);
-
-  # tests.<pkg>.<name>: test-plan roots installed as
-  # $out/bin/<target><exe suffix> (stubs as they are).
-  testsOf =
-    inst: sel:
-    let
-      byPkg = lib.groupBy (r: inst.tests.${r}.breakbulkRoot.package) (lib.attrNames inst.tests);
-      selected = if sel == null then byPkg else lib.filterAttrs (n: _: lib.elem n sel) byPkg;
-    in
-    lib.mapAttrs (
-      _: names:
-      let
-        named = map (n: {
-          root = n;
-          short = testName inst.tests.${n};
-          long = rootName inst.tests.${n};
-        }) names;
-        counts = lib.groupBy (x: x.short) named;
-      in
+      _: rs:
       lib.listToAttrs (
         map (
-          x:
-          lib.nameValuePair (
-            if lib.length counts.${x.short} > 1 then x.long else x.short
-          ) inst.testBins.${x.root}
-        ) named
+          r: lib.nameValuePair (breakbulkLib.testRuns.binaryKey r.breakbulkRoot) (inst.installExecutable r)
+        ) rs
       )
-    ) selected;
+    ) (selectPkgs sel (lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues roots)));
 
   workspaceOut =
     wsName: ws:
@@ -1492,30 +1402,21 @@ let
             in
             {
               inherit packages;
-              # IFD mode: the undeclared products as inputs, a message per
-              # package (undeclaredProductInputs); repo.checks fails with
-              # them. null in dynamic-derivation mode.
-              productInputErrors = undeclaredProductInputs wsName triple vName inst packages;
+              # The plan derivations ($out/plan.json), for debugging and
+              # explainSharing.
+              inherit (inst) plans;
               # The `buildScriptPaths` check of each plan the variant
               # traces.
               buildScriptPaths = lib.genAttrs traced (kind: planPathsCheck wsName triple vName inst kind);
-              tests = ifTests (testsOf inst tSel);
+              # Test binaries, their runs and apps, by binary key; each run
+              # and doctest says whether it is in repo.checks (`enabled`,
+              # its run settings' `enable`).
+              tests = ifTests (byBinaryKey inst inst.tests tSel);
               testRuns = ifTests (selectPkgs tSel inst.testRuns);
-              # testRuns named as `tests` names test binaries, for repo.checks.
-              namedTestRuns = ifTests (namedRuns inst tSel);
               testApps = ifTests (selectPkgs tSel inst.testApps);
               doctests = ifTests (selectPkgs tSel inst.doctests);
-              # Those in repo.checks (`test.doctest.enable`).
-              enabledDoctests = ifTests (
-                lib.filterAttrs (pkg: _: inst.checks ? "doctest/${pkg}") (selectPkgs tSel inst.doctests)
-              );
-              benches = ifBenches (benchesOf inst bSel);
+              benches = ifBenches (byBinaryKey inst inst.benches bSel);
               benchRuns = ifBenches (selectPkgs bSel inst.benchRuns);
-              # benchRuns named as `benches` names bench binaries; `.enabled`
-              # holds those in repo.checks (`bench.enable`).
-              namedBenchRuns = ifBenches (
-                namedRuns' true inst.benchRuns (pkg: k: inst.benchChecks ? "test/${pkg}/${k}") bSel
-              );
               # `cargo doc` of the variant's packages (lib/workspace.nix).
               inherit (inst) docs;
             }
@@ -1531,53 +1432,15 @@ let
               };
             }
           ) vs;
-          # The default variant's outputs; empty when it is not planned for
-          # this target (`variants.<v>.targets`).
-          dflt =
-            variants.${ws.defaultVariant} or {
-              packages = { };
-              tests = { };
-              testRuns = { };
-              namedTestRuns = { };
-              testApps = { };
-              doctests = { };
-              docs = null;
-              buildScriptPaths = { };
-            };
-          cells = variantCells.${wsName}.${triple};
-          benchVariants = lib.attrNames (lib.filterAttrs (_: v: benchSelOf wsName v != false) cells);
-          benchVariant =
-            if lib.elem ws.defaultVariant benchVariants then
-              ws.defaultVariant
-            else if lib.length benchVariants == 1 then
-              lib.head benchVariants
-            else
-              null;
           s = specFor wsName triple;
         in
         {
           inherit variants;
-          benches =
-            if benchVariant != null then
-              variants.${benchVariant}.benches
-            else if benchVariants == [ ] then
-              { }
-            else
-              throw "breakbulk: workspaces.${wsName}: several variants have benches (${lib.concatStringsSep ", " benchVariants}) and the default variant does not; use target.<triple>.variants.<v>.benches";
-          benchRuns = if benchVariant != null then variants.${benchVariant}.benchRuns else { };
-          namedBenchRuns = if benchVariant != null then variants.${benchVariant}.namedBenchRuns else { };
-          inherit (dflt)
-            packages
-            tests
-            testRuns
-            namedTestRuns
-            testApps
-            doctests
-            docs
-            buildScriptPaths
-            ;
-          # The target spec's runner (a list: program and arguments, or
-          # null) and test system, as test runs use them.
+          # The default variant's products; empty when it is not planned
+          # for this target (`variants.<v>.targets`).
+          packages = variants.${ws.defaultVariant}.packages or { };
+          # The target spec's target runner (a list: program and
+          # arguments, or null) and test system, as test runs use them.
           inherit (s) runner testSystem;
           # false when the target's runner is `runners.none` (a preset
           # found nothing that runs its programs): its test runs and
@@ -1593,17 +1456,34 @@ let
       ) instances;
     in
     {
-      inherit instances;
+      # What the outputs are made of: the mkWorkspace result of each
+      # target and variant (lib/workspace.nix), and IFD mode's undeclared
+      # products as inputs (undeclaredProductInputs: a message per
+      # package, which repo.checks fails with; null in
+      # dynamic-derivation mode), by target and variant.
+      internal = {
+        inherit instances;
+        productInputErrors = lib.mapAttrs (
+          triple:
+          lib.mapAttrs (
+            vName: inst:
+            undeclaredProductInputs wsName triple vName inst perTarget.${triple}.variants.${vName}.packages
+          )
+        ) instances;
+      };
       vendor = vendors.${wsName};
       # The resolved toolchain (rustc, cargo, clippy, rustfmt), for wiring
       # the same programs elsewhere (treefmt's rustfmt).
       inherit (ws) toolchain;
       target = perTarget;
+      # The default target's (`defaultTarget`) default variant's
+      # products and docs.
       packages = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.packages;
-      tests = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.tests;
-      testRuns = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.testRuns;
-      docs = if ws.defaultTarget == null then null else perTarget.${ws.defaultTarget}.docs;
-      plans = lib.mapAttrs (_: lib.mapAttrs (_: inst: inst.plans)) instances;
+      docs =
+        if ws.defaultTarget == null then
+          null
+        else
+          perTarget.${ws.defaultTarget}.variants.${ws.defaultVariant}.docs or null;
       devShell = mkDevShell {
         inherit pkgs nativeTriple;
         name = wsName;
@@ -1678,9 +1558,9 @@ let
   # repo.checks, for every workspace and target, from each variant, as
   # its `checks` record says (the default variant's under the target, the
   # others' under `variant-<v>/`): a build or coverage variant's products
-  # that built something (`<pkg>/build`) and their checks (`products`),
-  # every enabled test run (`<pkg>/test-<name>`, named as in `tests`) and
-  # doctest (`tests`), and bench run (`benches`); a check or clippy
+  # (`<pkg>/build`) and their checks (`products`), every enabled test run
+  # (`<pkg>/test/<binary key>`) and doctest (`tests`), and bench run
+  # (`<pkg>/bench/<binary key>`, `benches`); a check or clippy
   # variant's `check` (`check`); the `buildScriptPaths/<plan>` of the
   # plans whose outputs are in (`buildScriptPaths`); and the docs
   # (`docs`). Then the user's own (`checks.<name>`).
@@ -1709,12 +1589,10 @@ let
               lib.filterAttrs (kind: _: lib.elem kind plansIn) v.buildScriptPaths
             );
             # IFD mode checks the variant's `productInputs` here.
+            errors = w.internal.productInputErrors.${triple}.${vName};
             verified =
-              d:
-              if v.productInputErrors == null || v.productInputErrors == [ ] then
-                d
-              else
-                throw (lib.concatStringsSep "\n" v.productInputErrors);
+              d: if errors == null || errors == [ ] then d else throw (lib.concatStringsSep "\n" errors);
+            enabled = lib.filterAttrs (_: d: d.enabled);
           in
           lib.mapAttrs (_: verified) (
             lib.optionalAttrs (building && c.products) (
@@ -1732,14 +1610,14 @@ let
             )
             // lib.optionalAttrs (building && c.tests && t.canRunTests) (
               lib.concatMapAttrs (
-                pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
-              ) v.namedTestRuns
-              // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
+                pkg: rs: lib.mapAttrs' (k: d: lib.nameValuePair "${prefix}/${pkg}/test/${k}" d) (enabled rs)
+              ) v.testRuns
+              // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) (enabled v.doctests)
             )
             // lib.optionalAttrs (building && c.benches && t.canRunTests) (
               lib.concatMapAttrs (
-                pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/bench-${n}" d) rs.enabled
-              ) v.namedBenchRuns
+                pkg: rs: lib.mapAttrs' (k: d: lib.nameValuePair "${prefix}/${pkg}/bench/${k}" d) (enabled rs)
+              ) v.benchRuns
             )
             // lib.optionalAttrs building (
               lib.mapAttrs' (kind: d: lib.nameValuePair "${prefix}/buildScriptPaths/${kind}" d) planChecks
@@ -1780,7 +1658,7 @@ let
 
   # repo.apps: every test app of every build or coverage variant, in a
   # flake's `apps` shape, named as its test run's check
-  # (`<prefix>/<pkg>/test-<name>`). Unlike repo.checks, it does not ask
+  # (`<prefix>/<pkg>/test/<binary key>`). Unlike repo.checks, it does not ask
   # for `checks.tests` or an enabled run: the sandbox's skip lists and
   # disabled runs are what a test app is for. A target that cannot run
   # tests here (`canRunTests`) has none, as its apps would only fail.
@@ -1794,25 +1672,19 @@ let
           let
             vc = variantCells.${wsName}.${triple}.${vName};
             prefix = variantPrefix wsName triple vName;
-            # Named over the test runs' binaries, not the apps': IFD mode
-            # has no app for a binary Cargo did not build, and a name
-            # depends on the names it collides with.
-            named = namedRuns' false (lib.mapAttrs (
-              pkg: lib.mapAttrs (k: _: v.testApps.${pkg}.${k} or null)
-            ) v.testRuns) (_: _: false) null;
           in
           lib.optionalAttrs (vc.mode == "build" || vc.mode == "coverage") (
             lib.concatMapAttrs (
               pkg: as:
               lib.mapAttrs' (
-                n: drv:
-                lib.nameValuePair "${prefix}/${pkg}/test-${n}" {
+                k: drv:
+                lib.nameValuePair "${prefix}/${pkg}/test/${k}" {
                   type = "app";
                   program = "${drv}/bin/${drv.meta.mainProgram}";
-                  meta.description = "Test binary ${n} of ${pkg} on ${triple}, variant ${vName}, outside the sandbox";
+                  meta.description = "Test binary ${k} of ${pkg} on ${triple}, variant ${vName}, outside the sandbox";
                 }
-              ) (lib.filterAttrs (_: drv: drv != null) (removeAttrs as [ "enabled" ]))
-            ) named
+              ) as
+            ) v.testApps
           )
         ) t.variants
       )
@@ -1926,6 +1798,57 @@ let
   guard =
     x: if failedAssertions == [ ] then warned x else throw (lib.concatStringsSep "\n" failedAssertions);
 
+  # repo.flake: the repository as a flake's outputs, by kind, for
+  # `checks.<system>`, `packages.<system>`, `apps.<system>` and
+  # `devShells.<system>` (the flake-parts module sets them from it):
+  #  - checks: repo.checks, groups included;
+  #  - packages: each workspace's products of its default variant on its
+  #    default target, by package name (`<ws>-<pkg>` when two workspaces
+  #    have a package of that name), and `<ws>-docs`, those docs;
+  #  - apps: repo.apps;
+  #  - devShells: each workspace's dev shell by name, and `default` when
+  #    there is one workspace.
+  flake =
+    let
+      wsNames = lib.attrNames workspaces;
+      allPkgs = lib.concatMap (
+        ws: map (p: { inherit ws p; }) (lib.attrNames workspaces.${ws}.packages)
+      ) wsNames;
+      counts = lib.groupBy (x: x.p) allPkgs;
+      pkgName = x: if lib.length counts.${x.p} > 1 then "${x.ws}-${x.p}" else x.p;
+      products = lib.listToAttrs (
+        map (x: lib.nameValuePair (pkgName x) workspaces.${x.ws}.packages.${x.p}) allPkgs
+      );
+      docs = lib.listToAttrs (
+        lib.concatMap (
+          ws:
+          let
+            c = cfg.workspaces.${ws};
+          in
+          # Not `docs != null`: that evaluates the docs derivation, which
+          # in IFD mode plans `cargo doc` to list `packages`.
+          lib.optional (
+            c.defaultTarget != null && workspaces.${ws}.target.${c.defaultTarget}.variants ? ${c.defaultVariant}
+          ) (lib.nameValuePair "${ws}-docs" workspaces.${ws}.docs)
+        ) wsNames
+      );
+      clash = lib.attrNames (builtins.intersectAttrs products docs);
+    in
+    {
+      checks = result.checks;
+      packages =
+        if clash != [ ] then
+          throw "breakbulk: repo.flake.packages names both a product and a workspace's docs ${lib.concatStringsSep ", " clash}; rename the package"
+        else
+          products // docs;
+      apps = result.apps;
+      devShells =
+        lib.genAttrs wsNames (ws: workspaces.${ws}.devShell)
+        // lib.optionalAttrs (lib.length wsNames == 1) {
+          default = workspaces.${lib.head wsNames}.devShell;
+        };
+    };
+
   explainSharing = mkExplainSharing {
     inherit workspaces nativeTriple nixFeatures;
     defaultVariantOf = ws: cfg.workspaces.${ws}.defaultVariant;
@@ -1947,6 +1870,7 @@ let
         }
     );
     apps = guard apps;
+    flake = guard flake;
     sources = fetch.byName (fetch.sourcesFor (lockfile.merge (lib.attrValues locks)));
     inherit explainSharing warnings;
     inherit (eval) config options;

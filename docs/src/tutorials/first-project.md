@@ -107,7 +107,7 @@ its app from `repo.apps`. It is named as its check; arguments after `--`
 go to the test binary:
 
 ```sh
-nix run .#default/x86_64-unknown-linux-gnu/app/test-bin-app -- adds
+nix run .#default/x86_64-unknown-linux-gnu/app/test/bin/app -- adds
 ```
 
 ## 5. Use the development shell

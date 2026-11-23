@@ -15,16 +15,9 @@
 # moduleLocation; inputs = …; }`), so this module reads it there.
 #
 # Per system it sets `breakbulk.repo` (the mkRepository result) and, unless
-# turned off (`breakbulk.expose.<output> = false`), adds:
-#  - checks."<ws>/<triple>/<pkg>/<name>": repo.checks, groups included
-#    (`all`, every prefix, `checkGroups`);
-#  - packages."<pkg>" for each product of the default variant on the
-#    workspace's default target (`defaultTarget`)
-#    ("<ws>-<pkg>" when two workspaces have a package of that name), and
-#    packages."<ws>-docs", the default variant's docs on that target;
-#  - apps."<ws>/<triple>/<pkg>/test-<name>": repo.apps, every test app;
-#  - devShells."<ws>" for each workspace, and devShells.default when there
-#    is exactly one.
+# turned off (`breakbulk.expose.<output> = false`), each of `checks`,
+# `packages`, `apps` and `devShells` from `repo.flake` (lib/repository.nix,
+# which names them for a flake without flake-parts too).
 breakbulkLib:
 {
   lib,
@@ -41,12 +34,6 @@ in
     let
       cfg = config.breakbulk;
       repo = cfg.repo;
-      wsNames = lib.attrNames repo.workspaces;
-      allPkgs = lib.concatMap (
-        ws: map (p: { inherit ws p; }) (lib.attrNames repo.workspaces.${ws}.packages)
-      ) wsNames;
-      counts = lib.groupBy (x: x.p) allPkgs;
-      pkgName = x: if lib.length counts.${x.p} > 1 then "${x.ws}-${x.p}" else x.p;
     in
     {
       options.breakbulk = {
@@ -104,40 +91,10 @@ in
           pkgs = cfg.pkgs;
           inherit (cfg) root modules;
         };
-        checks = lib.mkIf cfg.expose.checks repo.checks;
-        packages = lib.mkIf cfg.expose.packages (
-          let
-            products = lib.listToAttrs (
-              map (x: lib.nameValuePair (pkgName x) repo.workspaces.${x.ws}.packages.${x.p}) allPkgs
-            );
-            docs = lib.listToAttrs (
-              lib.concatMap (
-                ws:
-                let
-                  c = repo.config.workspaces.${ws};
-                in
-                # Not `docs != null`: that evaluates the docs derivation,
-                # which in IFD mode plans `cargo doc` to list `packages`.
-                lib.optional (
-                  c.defaultTarget != null
-                  && repo.workspaces.${ws}.target.${c.defaultTarget}.variants ? ${c.defaultVariant}
-                ) (lib.nameValuePair "${ws}-docs" repo.workspaces.${ws}.docs)
-              ) wsNames
-            );
-            clash = lib.attrNames (builtins.intersectAttrs products docs);
-          in
-          if clash != [ ] then
-            throw "breakbulk: the flake-parts module names both a product and a workspace's docs ${lib.concatStringsSep ", " clash} in `packages`; rename the package or set `perSystem.breakbulk.expose.packages = false`"
-          else
-            products // docs
-        );
-        apps = lib.mkIf cfg.expose.apps repo.apps;
-        devShells = lib.mkIf cfg.expose.devShells (
-          lib.genAttrs wsNames (ws: repo.workspaces.${ws}.devShell)
-          // lib.optionalAttrs (lib.length wsNames == 1) {
-            default = repo.workspaces.${lib.head wsNames}.devShell;
-          }
-        );
+        checks = lib.mkIf cfg.expose.checks repo.flake.checks;
+        packages = lib.mkIf cfg.expose.packages repo.flake.packages;
+        apps = lib.mkIf cfg.expose.apps repo.flake.apps;
+        devShells = lib.mkIf cfg.expose.devShells repo.flake.devShells;
       };
     }
   );
