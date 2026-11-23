@@ -79,11 +79,11 @@ let
     {
       triple,
       preset,
-      rustc ? null,
+      rustc ? pkgs.rustc,
     }:
     (breakbulk.evalTargetSpec {
       inherit pkgs triple;
-      toolchain = if rustc == null then null else { inherit rustc; };
+      toolchain = { inherit rustc; };
       modules = [ { inherit preset; } ];
     }).config;
 
@@ -116,10 +116,7 @@ let
   wasip2Repo = mkRepo (fixtures + "/wasip2") [
     {
       workspaces.main = wsWith wasip2Rust [ wasip2 ];
-      targets.${wasip2}.preset = presets.wasmComponent {
-        rustc = wasip2Rust;
-        withC = true;
-      };
+      targets.${wasip2}.preset = presets.wasmComponent { withC = true; };
     }
   ];
   wasip2Checks =

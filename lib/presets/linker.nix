@@ -8,12 +8,13 @@
 #   linkerKind { triple; traits ? <built-in>; lto ? false; flavor ? null;
 #                kind ? null; rustc ? null; staticNonPie ? false; }
 #                                                        -> a kind name
-#   chooseLinker { pkgs; triple; traits; lto; flavor; kind; rustc; … }
+#   chooseLinker { pkgs; triple; traits; lto; flavor; kind; facts; … }
 #                                                        -> a linker path
 #
 # `linkerKind` is the decision, a pure function of the target's traits
 # (lib/target-traits.nix; a user's `targets.<triple>.traits` included),
-# what rustc itself would do (`rustc`, from `rustcFacts`), the LTO mode
+# what rustc itself would do (`rustc`, from `rustcFacts`: the toolchain's
+# facts, lib/toolchain-facts.nix), the LTO mode
 # and the flavor:
 #
 #   kind                 default when (traits)           linker
@@ -65,8 +66,8 @@
 # to the other kind.
 #
 # Every LLVM tool (lld, wasm-ld, lld-link, clang) comes from the LLVM
-# release matching rustc's (`llvm`, chosen by the preset through
-# breakbulk.llvmVersions), never rustup's self-contained rust-lld. Where
+# release matching rustc's (`llvm`, the toolchain facts' `llvmPackages`),
+# never rustup's self-contained rust-lld. Where
 # rustc's target spec names the linker flavor itself (wasm, msvc), the
 # linker keeps the name that selects that flavor.
 #
@@ -85,7 +86,6 @@
   util,
   targetTraits,
   toolchainFacts,
-  llvmVersions,
 }:
 let
   # A C compiler driver wrapper that drops rustc's self-contained-lld
@@ -407,7 +407,7 @@ let
     else if t.isApple then
       (
         if rustc == null then
-          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` depends on whether rustc ships its own rust-lld; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
+          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` depends on whether rustc ships its own rust-lld; give the toolchain's facts, or set `targets.${triple}.linkerKind`"
         else if (targetTraits.resolve { triple = rustc.host; }).isApple then
           throw "breakbulk.presetHelpers.chooseLinker: no linker rule for `${triple}` on a Mac build machine yet (issue #13); set `targets.${triple}.linker`"
         else if rustc.bundledLld then
@@ -420,7 +420,7 @@ let
         if lto then
           "clang-lld"
         else if rustc == null then
-          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` is the one rustc picks, which depends on its release and build; pass `rustc` to the preset, or set `targets.${triple}.linkerKind`"
+          throw "breakbulk.presetHelpers.chooseLinker: the default linker for `${triple}` is the one rustc picks, which depends on its release and build; give the toolchain's facts, or set `targets.${triple}.linkerKind`"
         else if rustcPicksLld { inherit triple traits rustc; } then
           "lld"
         else
@@ -480,18 +480,20 @@ let
     else
       kind;
 
-  # What `linkerKind` needs to know about `rustc`, a Rust toolchain
-  # running on `pkgs`' build platform.
+  # What `linkerKind` needs to know about a Rust toolchain running on
+  # `pkgs`' build platform: from its `facts` (toolchainFacts.of), or
+  # those of `rustc`.
   rustcFacts =
-    { pkgs, rustc }:
-    let
-      f = toolchainFacts.of {
+    {
+      pkgs,
+      rustc ? null,
+      facts ? toolchainFacts.of {
         pkgs = pkgs.buildPackages;
         inherit rustc;
-      };
-    in
+      },
+    }:
     {
-      inherit (f) version bundledLld llvmVersion;
+      inherit (facts) version bundledLld llvmVersion;
       host = targetTraits.nativeTriple pkgs.buildPackages;
     };
 
@@ -514,23 +516,17 @@ let
       flavor ? null,
       # The kind asked for (`targets.<triple>.linkerKind`); null: the default.
       kind ? null,
-      # The Rust toolchain (rustc) that links: its release and build
-      # decide the Linux default, and its LLVM the lld kinds' lld.
-      rustc ? null,
+      # The facts of the Rust toolchain that links
+      # (lib/toolchain-facts.nix): its release and build decide the Linux
+      # default, and its LLVM the lld kinds' lld.
+      facts ? null,
       staticNonPie ? false,
       # The package set whose C toolchain drives the link (cc, lld, mold,
       # clang-lld, mingw-lld); default: pkgs.
       packageSet ? pkgs,
       # LLVM packages matching rustc (lld, clang-lld, lld-link, wasm-ld,
-      # wasm-component-ld); default: from `rustc`.
-      llvm ?
-        if rustc == null then
-          null
-        else
-          llvmVersions.packagesFor {
-            pkgs = packageSet.buildPackages;
-            inherit rustc;
-          },
+      # wasm-component-ld); default: the facts'.
+      llvm ? if facts == null then null else facts.llvmPackages,
       # mingw-lld: the lld package; default: `llvm`'s.
       lld ? null,
       # zig: { cc = <zig cc wrapper>; target = "<arch>-linux-gnu.<glibc>"; }.
@@ -546,24 +542,24 @@ let
           kind
           staticNonPie
           ;
-        rustc = if rustc == null then null else rustcFacts { inherit pkgs rustc; };
+        rustc = if facts == null then null else rustcFacts { inherit pkgs facts; };
       };
       bp = pkgs.buildPackages;
     in
     {
       cc = ccLinker packageSet;
-      lld = ccLldLinker packageSet (needs k "rustc or llvm" llvm);
+      lld = ccLldLinker packageSet (needs k "facts or llvm" llvm);
       mold = moldLinker packageSet;
       clang-lld = lldLinker packageSet (needs k "llvm" llvm);
       lld-link = lldLinkLinker bp (needs k "llvm" llvm);
       wasm-ld = "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
       wasm-component-ld = componentLinker bp "${(needs k "llvm" llvm).lld}/bin/wasm-ld";
       mingw-lld = mingwLinker pkgs packageSet (
-        if lld != null then lld else (needs k "rustc or llvm" llvm).lld
+        if lld != null then lld else (needs k "facts or llvm" llvm).lld
       );
       zig = zigLinker pkgs (needs k "zig" zig);
       rust-lld = rustLldLinker bp;
-      "ld64.lld" = ld64LldLinker (needs k "rustc or llvm" llvm);
+      "ld64.lld" = ld64LldLinker (needs k "facts or llvm" llvm);
     }
     .${k};
 in

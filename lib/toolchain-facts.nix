@@ -7,6 +7,9 @@
 #                        table, else `rustc -vV`)
 #   facts.llvmVersion    "23.1.1" (rustc.llvmPackages, else `rustc -vV`;
 #                        the table has majors only)
+#   facts.llvmPackages   nixpkgs' LLVM packages of that major, for the
+#                        build machine (`pkgs`): rustc.llvmPackages for
+#                        nixpkgs' rustc, else `pkgs.llvmPackages_<major>`
 #   facts.wasiSdkVersion "33" (lib/wasi-sdk.nix's table)
 #   facts.bundledLld     true: rustc is a rust-lang build (rustup,
 #                        rust-overlay, fenix), which ships its own lld and
@@ -15,6 +18,13 @@
 #                        for nixpkgs' rustc (`rustc.llvmPackages`), built
 #                        with `--disable-lld` against nixpkgs' LLVM
 #   facts.capabilities   { remapPathScope; trimPaths; } (below)
+#
+# `facts` (`workspaces.<ws>.toolchain.facts`: `llvmMajor`, `llvmPackages`,
+# `bundledLld`, `wasiSdkVersion`, `capabilities`; `null` values are
+# ignored) overrides any of them, for a source-built, forked or patched
+# toolchain the attributes and tables misjudge. An overridden
+# `llvmPackages` gives `llvmMajor` and `llvmVersion` too, an overridden
+# `llvmMajor` the packages of that major.
 #
 # Each fact comes from the toolchain's attributes and breakbulk's tables
 # when they can say, and otherwise from the toolchain itself, read by one
@@ -47,10 +57,8 @@
 # does not say it (nixpkgs' cargo has no release channel, so it is a `dev`
 # build).
 #
-# `capabilities` (an attribute set; `null` values are ignored) overrides
-# any of them, for a forked or patched toolchain whose version says
-# otherwise: `workspaces.<ws>.toolchain.capabilities`. `cargo` is needed
-# only for trimPaths.
+# `facts.capabilities` (or `capabilities`, for callers that have only
+# those) overrides any of them. `cargo` is needed only for trimPaths.
 #
 # `nixFeatures` (lib/nix-features.nix; default: import from derivation
 # allowed) is the record the probes are checked against; `mayProbe {
@@ -175,15 +183,30 @@ let
     || (!(rustc ? llvmPackages) && llvmVersions.lookup release == null)
     || (cargo != null && releaseOf cargo == null);
 
+  # The facts `of` takes as overrides.
+  factNames = [
+    "llvmMajor"
+    "llvmPackages"
+    "bundledLld"
+    "wasiSdkVersion"
+    "capabilities"
+  ];
+
   of =
     {
       pkgs,
       rustc,
       cargo ? null,
+      facts ? { },
       capabilities ? { },
       nixFeatures ? featureGates.standalone { },
     }:
     let
+      unknownFacts = lib.subtractLists factNames (lib.attrNames facts);
+      given = lib.filterAttrs (_: v: v != null) (removeAttrs facts [ "capabilities" ]);
+      givenCapabilities = lib.filterAttrs (_: v: v != null) (
+        (if facts.capabilities or null == null then { } else facts.capabilities) // capabilities
+      );
       probed = probe { inherit pkgs rustc nixFeatures; };
       rustcRelease = releaseOf rustc;
       version = if rustcRelease != null then rustcRelease else probed.release;
@@ -196,7 +219,18 @@ let
             r = releaseOf cargo;
           in
           if r != null then r else (probeCargo { inherit pkgs cargo nixFeatures; }).release;
-      unknown = lib.subtractLists capabilityNames (lib.attrNames capabilities);
+      unknown = lib.subtractLists capabilityNames (lib.attrNames givenCapabilities);
+      llvmMajor =
+        if given ? llvmMajor then
+          given.llvmMajor
+        else if given ? llvmPackages then
+          lib.toInt (lib.versions.major given.llvmPackages.llvm.version)
+        else if rustc ? llvmPackages then
+          lib.toInt (lib.versions.major rustc.llvmPackages.llvm.version)
+        else if fromTable != null then
+          fromTable
+        else
+          probed.llvmMajor;
       detected = {
         remapPathScope =
           if rustcRelease != null then
@@ -205,28 +239,40 @@ let
             probed.remapPathScope;
         trimPaths = util.rustVersion.atLeast capabilitySince.trimPaths cargoVersion;
       };
+      result = {
+        inherit version llvmMajor;
+        majorMinor = util.rustVersion.majorMinor version;
+        # nixpkgs' own rustc names its LLVM, which may differ from the
+        # official builds' (nixpkgs' 1.99.0 used LLVM 21, rustup's 23).
+        llvmVersion =
+          if given ? llvmPackages then
+            given.llvmPackages.llvm.version
+          else if rustc ? llvmPackages then
+            rustc.llvmPackages.llvm.version
+          else
+            probed.llvmVersion;
+        llvmPackages =
+          if given ? llvmPackages then
+            given.llvmPackages
+          else if !(given ? llvmMajor) && rustc ? llvmPackages then
+            rustc.llvmPackages
+          else
+            llvmVersions.packagesFor {
+              inherit pkgs llvmMajor;
+            };
+        wasiSdkVersion = given.wasiSdkVersion or (wasiSdk.versionFor version);
+        bundledLld = given.bundledLld or (!(rustc ? llvmPackages));
+        capabilities =
+          if unknown != [ ] then
+            throw "breakbulk.toolchainFacts: unknown capabilities ${lib.concatStringsSep ", " unknown}; known: ${lib.concatStringsSep ", " capabilityNames}"
+          else
+            detected // givenCapabilities;
+      };
     in
-    {
-      inherit version;
-      majorMinor = util.rustVersion.majorMinor version;
-      # nixpkgs' own rustc names its LLVM, which may differ from the
-      # official builds' (nixpkgs' 1.99.0 used LLVM 21, rustup's 23).
-      llvmMajor =
-        if rustc ? llvmPackages then
-          lib.toInt (lib.versions.major rustc.llvmPackages.llvm.version)
-        else if fromTable != null then
-          fromTable
-        else
-          probed.llvmMajor;
-      llvmVersion = if rustc ? llvmPackages then rustc.llvmPackages.llvm.version else probed.llvmVersion;
-      wasiSdkVersion = wasiSdk.versionFor version;
-      bundledLld = !(rustc ? llvmPackages);
-      capabilities =
-        if unknown != [ ] then
-          throw "breakbulk.toolchainFacts: unknown capabilities ${lib.concatStringsSep ", " unknown}; known: ${lib.concatStringsSep ", " capabilityNames}"
-        else
-          detected // lib.filterAttrs (_: v: v != null) capabilities;
-    };
+    if unknownFacts != [ ] then
+      throw "breakbulk.toolchainFacts: unknown facts ${lib.concatStringsSep ", " unknownFacts}; known: ${lib.concatStringsSep ", " factNames}"
+    else
+      result;
 
   # The capabilities as the planner's `--capabilities` file (every field, a
   # boolean; breakbulk-format `Capabilities`).
@@ -253,5 +299,6 @@ in
     of
     capabilitySince
     capabilityNames
+    factNames
     ;
 }

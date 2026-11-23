@@ -50,17 +50,17 @@ let
   presets = breakbulk.presets;
   presetHelpers = breakbulk.presetHelpers;
   # A preset's target spec as mkRepository evaluates it for a workspace
-  # whose toolchain is `rustc`, with `modules` (target options).
+  # with `toolchain` (default: nixpkgs' rustc), with `modules` (target
+  # options).
   presetSpec =
     {
       triple,
       preset,
-      rustc ? null,
+      toolchain ? { },
       modules ? [ ],
     }:
     (breakbulk.evalTargetSpec {
-      inherit pkgs triple;
-      toolchain = if rustc == null then null else { inherit rustc; };
+      inherit pkgs triple toolchain;
       modules = [ { inherit preset; } ] ++ modules;
     }).config;
 
@@ -908,7 +908,7 @@ let
 
   crossLtoRust = rustWith [ ];
   crossLtoWith =
-    preset:
+    preset: target:
     mkRepo (fixtures + "/cross-lto") [
       {
         workspaces.main = {
@@ -919,16 +919,16 @@ let
           targets.${native} = { };
           variants.default.profile = "release";
         };
-        targets.${native}.preset = preset;
+        targets.${native} = target // {
+          inherit preset;
+        };
       }
     ];
   crossLtoPreset = presets.linux { crossLanguageLto = true; };
-  crossLto = crossLtoWith crossLtoPreset;
+  crossLto = crossLtoWith crossLtoPreset { };
   # The same through `linkerKind = "lld"`: the wrapped cc driving lld.
-  crossLtoLld = crossLtoWith (crossLtoPreset {
-    linkerKind = "lld";
-  });
-  crossLtoOff = crossLtoWith presets.linux;
+  crossLtoLld = crossLtoWith crossLtoPreset { linkerKind = "lld"; };
+  crossLtoOff = crossLtoWith presets.linux { };
   crossLtoCheck =
     name: repo:
     let
@@ -1014,7 +1014,7 @@ let
   wasmBrowser = mkRepo (fixtures + "/wasm-browser") [
     {
       workspaces.main = wasmWs;
-      targets.${wasm}.preset = presets.wasmWeb { rustc = wasmRust; };
+      targets.${wasm}.preset = presets.wasmWeb;
     }
   ];
   # Package inputs on a target without a package set (field trials: the
@@ -1024,7 +1024,7 @@ let
   wasmHostInputs = mkRepo (fixtures + "/wasm-browser") [
     {
       workspaces.main = wasmWs;
-      targets.${wasm}.preset = presets.wasmWeb { rustc = wasmRust; };
+      targets.${wasm}.preset = presets.wasmWeb;
       packages.wasm-bindgen-macro.inputs = p: [ p.zlib ];
     }
   ];
@@ -1045,10 +1045,7 @@ let
   wasmBrowserOn =
     browser:
     wasmBrowserWith {
-      targets.${wasm}.preset = presets.wasmWeb {
-        rustc = wasmRust;
-        inherit browser;
-      };
+      targets.${wasm}.preset = presets.wasmWeb { inherit browser; };
     };
   wasmBrowserIn =
     browser: (wasmBrowserOn browser).workspaces.main.target.${wasm}.variants.default.testRuns.ui.web;
@@ -1074,7 +1071,7 @@ let
         firefox = wasmBrowserOn "firefox";
         override = wasmBrowserWith {
           targets.${wasm} = {
-            preset = presets.wasmWeb { rustc = wasmRust; };
+            preset = presets.wasmWeb;
             runner = lib.mkForce "${pkgs.coreutils}/bin/true";
           };
         };
@@ -1290,18 +1287,20 @@ let
           m = builtins.match ".*-wasi-sysroot-([0-9]+)/.*" (discard (lib.concatStringsSep " " s));
         in
         if m == null then null else lib.head m;
-      explicit = repo [
-        {
-          targets.${wasm}.preset = lib.mkForce (presets.wasmComponent { inherit (tc "1.99.0") rustc; });
-        }
-      ];
+      # A workspace's toolchain facts reach every preset it uses.
+      explicit = repo [ { workspaces.b.toolchain.facts.llvmMajor = 23; } ];
+      # Stating the facts breakbulk finds changes nothing.
       componentExplicit = mkRepo (fixtures + "/wasm-component") [
         {
-          workspaces.main = wasmWs;
-          targets.${wasm}.preset = presets.wasmComponent {
-            rustc = wasmRust;
-            withC = true;
+          workspaces.main = wasmWs // {
+            toolchain = wasmWs.toolchain // {
+              facts = {
+                llvmPackages = pkgs.llvmPackages_23;
+                wasiSdkVersion = "33";
+              };
+            };
           };
+          targets.${wasm}.preset = presets.wasmComponent { withC = true; };
         }
       ];
       drvsOf = repo': map (d: d.drvPath) (lib.attrValues repo'.workspaces.main.target.${wasm}.packages);
@@ -1322,7 +1321,8 @@ let
             "only_c"
           ]
           && (spec r "b" wasip2).rustflags == [ ];
-        explicitRustcWins = majorIn (spec explicit "b" wasm).linker == 23;
+        factsWin =
+          majorIn (spec explicit "b" wasm).linker == 23 && majorIn (spec explicit "b" wasm).cc == 23;
         packagesOnlyGetsDefaultPreset = spec r "b" "aarch64-unknown-linux-gnu" != null;
         sameDrvs = drvsOf wasmComponent == drvsOf componentExplicit;
       };
@@ -1337,12 +1337,12 @@ let
     let
       gnu = presetSpec {
         triple = native;
-        rustc = staticRust;
+        toolchain.rustc = staticRust;
         preset = presets.linux;
       };
       cross = presetSpec {
         triple = "aarch64-unknown-linux-gnu";
-        rustc = staticRust;
+        toolchain.rustc = staticRust;
         preset = presets.linux;
       };
       bound = presets.windows { crtStatic = true; };
@@ -1379,18 +1379,14 @@ let
         mingwLldOfRustc =
           let
             linker =
-              args:
+              llvmMajor: args:
               (presetSpec {
                 triple = "x86_64-pc-windows-gnu";
+                toolchain.facts = { inherit llvmMajor; };
                 preset = presets.windows args;
               }).linker;
           in
-          linker { llvmMajor = 22; } != linker { llvmMajor = 23; }
-          &&
-            linker {
-              llvmMajor = 22;
-              lld = pkgs.llvmPackages_23.lld;
-            } == linker { llvmMajor = 23; };
+          linker 22 { } != linker 23 { } && linker 22 { lld = pkgs.llvmPackages_23.lld; } == linker 23 { };
         llvmTable =
           llvm.majorFor "1.95.0" == 22
           && llvm.majorFor "1.98.1" == 22
@@ -1566,19 +1562,16 @@ let
             discard
               (presetSpec {
                 triple = "aarch64-unknown-linux-gnu";
-                rustc = staticRust;
+                toolchain.rustc = staticRust;
                 preset = presets.linux;
                 modules = [ { linkerKind = "mold"; } ];
               }).host.linker
           )
-          &&
-            fails
-              (mold native (
-                presets.linux {
-                  crossLanguageLto = true;
-                  llvmMajor = 23;
-                }
-              )).linker
+          && fails (mold native (presets.linux { crossLanguageLto = true; })).linker
+          # Options that are the target's or the toolchain's are not the
+          # preset's.
+          && fails (presets.linux { llvmMajor = 23; })
+          && fails (presets.windows { linkerKind = "mold"; })
           && fails (mold native (presets.linuxStatic { relocationModel = "static"; })).linker;
         # `crtStatic = true` adds the flag (the option once shadowed the
         # flag list, and the preset failed with "expected a list but found
@@ -1587,8 +1580,8 @@ let
           let
             p = presetSpec {
               triple = "x86_64-pc-windows-msvc";
+              toolchain.facts.llvmMajor = 22;
               preset = presets.windows {
-                llvmMajor = 22;
                 crtStatic = true;
                 sdk = {
                   includeDirs = [ "/inc" ];

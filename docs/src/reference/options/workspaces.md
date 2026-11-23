@@ -644,74 +644,6 @@ in { rustc = tc; cargo = tc; }
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
-## `workspaces.<name>.toolchain.capabilities`
-
-What this toolchain can do, where breakbulk would otherwise
-decide it from the rustc and cargo versions (or, for a
-toolchain whose ` version ` attribute is missing or not a
-Rust release, such as fenix’s, by asking them
-through import-from-derivation)\. Set one only for a
-forked or patched toolchain whose version says otherwise;
-` null ` keeps breakbulk’s own answer\. The planner and the
-instantiator read nothing else
-(` breakbulk.toolchainFacts.of `)\. Whether Cargo allows
-unstable features is not one of them: the planner asks
-the cargo it runs\.
-
-*Type:*
-submodule
-
-*Default:*
-
-```nix
-{ }
-```
-
-*Example:*
-
-```nix
-{ remapPathScope = false; }
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.toolchain.capabilities.remapPathScope`
-
-rustc takes ` --remap-path-scope ` (default: rustc 1\.95 or later)\.
-Without it, every unit remaps every path scope, so debug info names
-no real source paths even where it is split off\.
-
-*Type:*
-null or boolean
-
-*Default:*
-
-```nix
-null
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.toolchain.capabilities.trimPaths`
-
-Cargo has the ` trim-paths ` profile setting (default: Cargo 1\.101 or
-later, nightly 1\.101 included)\. The planner then turns it on when the
-project has not\.
-
-*Type:*
-null or boolean
-
-*Default:*
-
-```nix
-null
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
 ## `workspaces.<name>.toolchain.cargo`
 
 cargo (with ` bin/cargo `)\.
@@ -746,6 +678,202 @@ package
 
 ```nix
 if rustc == pkgs.rustc then pkgs.clippy else rustc
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts`
+
+Facts about this toolchain that breakbulk would
+otherwise read from its attributes, its own tables or
+the toolchain itself (` breakbulk.toolchainFacts.of `)\.
+Set one only for a source-built, forked or patched
+toolchain those misjudge; ` null ` keeps breakbulk’s own
+answer\. Presets read the result as ` toolchain.facts `,
+so one setting here serves every target\.
+
+*Type:*
+submodule
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{ llvmMajor = 22; bundledLld = false; }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.bundledLld`
+
+Whether the toolchain ships its own lld
+(` rust-lld `, and ` gcc-ld ` for the C driver), as
+rust-lang’s builds do: where rustc then links
+Linux targets with it, the presets link with
+nixpkgs’ lld (the ` lld ` linker kind), and macOS
+targets link with the toolchain’s ` rust-lld `\.
+` null `: false for a rustc with ` llvmPackages `
+(nixpkgs’, built with ` --disable-lld `), true
+otherwise\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.capabilities`
+
+What this toolchain can do, where breakbulk would
+otherwise decide it from the rustc and cargo
+versions (or, for a toolchain whose ` version `
+attribute is missing or not a Rust release, such
+as fenix’s, by asking them through
+import-from-derivation)\. The planner and the
+instantiator read nothing else\. Whether Cargo
+allows unstable features is not one of them: the
+planner asks the cargo it runs\.
+
+*Type:*
+submodule
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{ remapPathScope = false; }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.capabilities.remapPathScope`
+
+rustc takes ` --remap-path-scope ` (default: rustc 1\.95 or later)\.
+Without it, every unit remaps every path scope, so debug info names
+no real source paths even where it is split off\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.capabilities.trimPaths`
+
+Cargo has the ` trim-paths ` profile setting (default: Cargo 1\.101 or
+later, nightly 1\.101 included)\. The planner then turns it on when the
+project has not\.
+
+*Type:*
+null or boolean
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.llvmMajor`
+
+The major release of the LLVM inside rustc: the
+LLVM tools presets take from nixpkgs (lld,
+clang, lld-link, llvm-ar) are of this release\.
+` null `: nixpkgs’ rustc’s own ` llvmPackages `, else
+breakbulk’s table of Rust releases
+(` breakbulk.llvmVersions `), else ` rustc -vV `\.
+
+*Type:*
+null or signed integer
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+23
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.llvmPackages`
+
+The nixpkgs LLVM package set those tools come from
+(it also gives ` llvmMajor `)\. ` null `: nixpkgs’
+rustc’s own, else ` pkgs.llvmPackages_<llvmMajor> `\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+pkgs.llvmPackages_23
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolchain.facts.wasiSdkVersion`
+
+The wasi-sdk release whose wasi-libc the
+toolchain bundles for ` wasm32-wasip2 `: C code
+compiles against its headers
+(` presets.wasmComponent { withC = true; } `)\.
+` null `: from breakbulk’s table of Rust releases
+(lib/wasi-sdk\.nix)\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+"33"
 ```
 
 *Declared by:*

@@ -204,16 +204,25 @@ let
     outPath = "/nix/store/00000000000000000000000000000000-macOS-SDK-${v}";
   };
   # The preset's spec for a workspace on `rust`: `linkerKind` is the
-  # target's, the rest the preset's options.
+  # target's, `llvmPackages` the toolchain's, the rest the preset's
+  # options.
   direct =
     args:
     (breakbulk.evalTargetSpec {
       inherit pkgs;
       triple = a64;
-      toolchain.rustc = rust;
+      toolchain = {
+        rustc = rust;
+        facts.llvmPackages = args.llvmPackages or null;
+      };
       modules = [
         {
-          preset = presets.darwin (removeAttrs args [ "linkerKind" ]);
+          preset = presets.darwin (
+            removeAttrs args [
+              "linkerKind"
+              "llvmPackages"
+            ]
+          );
           linkerKind = args.linkerKind or null;
         }
       ];

@@ -29,11 +29,11 @@
 # instantiation, never through Cargo's `[env]`.
 #
 # Presets that use LLVM tools (windows, uefi, wasm, the Linux presets
-# with crossLanguageLto or the lld linker kind) need the LLVM matching
-# rustc: the workspace's `rustc` by default, or one
-# passed as `rustc` (its version is looked up in breakbulk.llvmVersions,
-# read from `rustc -vV` (IFD) when the table does not cover it, or nixpkgs'
-# rustc.llvmPackages is used), `llvmMajor`, or `llvmPackages`.
+# with crossLanguageLto or the lld linker kind) take the LLVM matching
+# rustc from the workspace's toolchain facts (`toolchain.facts`,
+# lib/toolchain-facts.nix): nixpkgs' rustc.llvmPackages, else the major
+# from breakbulk.llvmVersions' table or `rustc -vV` (IFD), unless
+# `workspaces.<ws>.toolchain.facts` says otherwise.
 {
   lib,
   util,
@@ -50,8 +50,9 @@ let
   inherit (lib) mkDefault;
 
   # A preset made from `body`, a function of the preset's options and the
-  # target's facts (`{ pkgs; triple; traits; linkerKind; rustc; … }`) to
-  # the module's definitions. The module system calls a module with its
+  # target's facts (`{ pkgs; config; triple; traits; linkerKind;
+  # toolchain; facts; }`, `facts` the toolchain's) to the module's
+  # definitions. The module system calls a module with its
   # arguments, which have `config` and `options`; any other attribute set
   # binds options. The definitions' names must not depend on the
   # target's options (`config.traits`, read lazily here): the module system
@@ -66,21 +67,41 @@ let
           _: args:
           if args ? config && args ? options then
             body (
-              {
-                rustc = if args.toolchain or null == null then null else args.toolchain.rustc;
-              }
-              // opts
+              opts
               // {
-                inherit (args) pkgs config;
+                inherit (args) pkgs config toolchain;
+                inherit (args.toolchain) facts;
                 triple = args.name;
                 inherit (args.config) traits linkerKind;
               }
             )
           else
-            bind (opts // args);
+            let
+              moved = lib.attrNames (builtins.intersectAttrs targetArgs args);
+            in
+            if moved != [ ] then
+              throw "breakbulk.presets: ${
+                lib.concatMapStringsSep ", " (n: "`${n}`") moved
+              } is not a preset option: ${lib.concatMapStringsSep "; " (n: targetArgs.${n}) moved}"
+            else
+              bind (opts // args);
       };
     in
     bind { };
+
+  # What a preset reads from the target and the workspace, never from
+  # its options, and where each is set.
+  targetArgs = {
+    pkgs = "the preset gets mkRepository's `pkgs`";
+    triple = "the preset gets the target's name";
+    traits = "set `targets.<triple>.traits`";
+    linkerKind = "set `targets.<triple>.linkerKind`";
+    rustc = "set `workspaces.<ws>.toolchain.rustc`";
+    llvmMajor = "set `workspaces.<ws>.toolchain.facts.llvmMajor`";
+    llvmPackages = "set `workspaces.<ws>.toolchain.facts.llvmPackages`";
+    wasiSdkVersion = "set `workspaces.<ws>.toolchain.facts.wasiSdkVersion`";
+    packageSet = "set `targets.<triple>.packageSet`";
+  };
 
   # Definitions `attrs` with every value failing with `msg` unless
   # `cond`. Plain attribute sets keep their names, down to the values:
@@ -156,7 +177,6 @@ let
       util
       targetTraits
       toolchainFacts
-      llvmVersions
       ;
   };
   inherit (linkers) chooseLinker;
@@ -173,7 +193,7 @@ let
   hostSpec =
     {
       pkgs,
-      rustc ? null,
+      facts,
       triple ? null,
       linkerKind ? null,
     }:
@@ -184,7 +204,7 @@ let
       linker = mkDefault (chooseLinker {
         pkgs = pkgs.buildPackages;
         triple = host;
-        inherit rustc;
+        inherit facts;
         kind = if triple == host then linkerKind else null;
       });
       env = { };
@@ -199,17 +219,12 @@ let
       triple,
       traits ? targetTraits.resolve { inherit triple; },
       linkerKind ? null,
-      rustc ? null,
-      llvmMajor ? null,
-      llvmPackages ? null,
+      facts,
       ...
     }:
     let
       bp = pkgs.buildPackages;
-      llvm = llvmVersions.packagesFor {
-        pkgs = bp;
-        inherit rustc llvmMajor llvmPackages;
-      };
+      llvm = facts.llvmPackages;
       clang = llvm.clang-unwrapped;
     in
     {
@@ -219,7 +234,7 @@ let
           pkgs
           triple
           traits
-          rustc
+          facts
           llvm
           ;
         kind = linkerKind;
@@ -232,7 +247,7 @@ let
       host = hostSpec {
         inherit
           pkgs
-          rustc
+          facts
           triple
           linkerKind
           ;
@@ -249,9 +264,7 @@ let
       linkerKind ? null,
       crossLanguageLto ? false,
       nativeBuilder ? false,
-      rustc ? null,
-      llvmMajor ? null,
-      llvmPackages ? null,
+      facts,
       ...
     }:
     let
@@ -262,10 +275,7 @@ let
       prefix = cc.targetPrefix;
       # The LLVM matching rustc: for crossLanguageLto's C toolchain, and the
       # linker kinds with lld.
-      llvm = llvmVersions.packagesFor {
-        pkgs = tp.buildPackages;
-        inherit rustc llvmMajor llvmPackages;
-      };
+      llvm = facts.llvmPackages;
       # Natively when the build machine runs the target's programs; else
       # on a native builder when nativeBuilder (testSystem), else under
       # qemu-user.
@@ -286,7 +296,7 @@ let
           pkgs
           triple
           traits
-          rustc
+          facts
           llvm
           ;
         kind = linkerKind;
@@ -325,7 +335,7 @@ let
       host = hostSpec {
         inherit
           pkgs
-          rustc
+          facts
           triple
           linkerKind
           ;
@@ -409,9 +419,7 @@ let
         # rejects that pair.
         relocationModel ? null,
         linkerKind ? null,
-        rustc ? null,
-        llvmMajor ? null,
-        llvmPackages ? null,
+        facts,
         ...
       }:
       let
@@ -427,14 +435,11 @@ let
               pkgs
               triple
               traits
-              rustc
+              facts
               ;
             kind = linkerKind;
             staticNonPie = relocationModel == "static";
-            llvm = llvmVersions.packagesFor {
-              pkgs = pkgs.buildPackages;
-              inherit rustc llvmMajor llvmPackages;
-            };
+            llvm = facts.llvmPackages;
           });
           cc = mkDefault "${cc}/bin/cc";
           cxx = mkDefault "${cc}/bin/c++";
@@ -455,7 +460,7 @@ let
           host = hostSpec {
             inherit
               pkgs
-              rustc
+              facts
               triple
               linkerKind
               ;
@@ -478,18 +483,13 @@ let
         crtStatic ? false,
         extraSdks ? [ ],
         linkerKind ? null,
-        rustc ? null,
-        llvmMajor ? null,
-        llvmPackages ? null,
+        facts,
         wine ? pkgs.wineWow64Packages.minimal,
         ...
       }:
       let
         bp = pkgs.buildPackages;
-        llvm = llvmVersions.packagesFor {
-          pkgs = bp;
-          inherit rustc llvmMajor llvmPackages;
-        };
+        llvm = facts.llvmPackages;
         clang = llvm.clang-unwrapped;
         tools = "${llvm.llvm}/bin";
         incdirs = sdk.includeDirs ++ lib.concatMap (s: s.includeDirs or [ ]) extraSdks;
@@ -514,7 +514,7 @@ let
             pkgs
             triple
             traits
-            rustc
+            facts
             llvm
             ;
           kind = linkerKind;
@@ -553,7 +553,7 @@ let
         host = hostSpec {
           inherit
             pkgs
-            rustc
+            facts
             triple
             linkerKind
             ;
@@ -571,9 +571,7 @@ let
         triple,
         traits,
         linkerKind ? null,
-        rustc ? null,
-        llvmMajor ? null,
-        llvmPackages ? null,
+        facts,
         ...
       }:
       guard traits.isUefi "breakbulk.presets.uefi: `${triple}` is not a UEFI triple" {
@@ -583,20 +581,17 @@ let
             pkgs
             triple
             traits
-            rustc
+            facts
             ;
           kind = linkerKind;
-          llvm = llvmVersions.packagesFor {
-            pkgs = pkgs.buildPackages;
-            inherit rustc llvmMajor llvmPackages;
-          };
+          llvm = facts.llvmPackages;
         });
         runner = mkDefault null;
         testSystem = mkDefault null;
         host = hostSpec {
           inherit
             pkgs
-            rustc
+            facts
             triple
             linkerKind
             ;
@@ -657,7 +652,6 @@ let
       inherit
         lib
         targetTraits
-        llvmVersions
         appleSdk
         linkers
         chooseRunner
@@ -670,7 +664,6 @@ let
       inherit
         lib
         targetPkgsFor
-        llvmVersions
         chooseLinker
         chooseRunner
         hostSpec

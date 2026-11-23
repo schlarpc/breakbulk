@@ -1233,7 +1233,8 @@ let
         vendor = vendors.${wsName};
         path = ws.path;
         toolchain = {
-          inherit (ws.toolchain) rustc cargo capabilities;
+          inherit (ws.toolchain) rustc cargo;
+          inherit (ws.toolchain.facts) capabilities;
         };
         target = triple;
         inherit (targetSpecs.${wsName}.${triple}.config) rustcTarget;

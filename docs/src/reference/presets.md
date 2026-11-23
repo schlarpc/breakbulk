@@ -135,7 +135,10 @@ is built without lld.
 
 `rustc.llvmPackages` names the LLVM of nixpkgs' rustc. For other
 toolchains the LLVM major release comes from a table of Rust releases, or
-from `rustc -vV`. The lld is then nixpkgs' build of upstream LLVM with
+from `rustc -vV`. For a toolchain these misjudge (one built from source,
+a fork), set the workspace's
+[`toolchain.facts`](options/workspaces.md#workspacesnametoolchainfacts)
+(`llvmMajor`, `llvmPackages`, `bundledLld`) once; every target follows. The lld is then nixpkgs' build of upstream LLVM with
 that major release, not Rust's LLVM fork: its output is close to
 `rust-lld`'s, but not byte-identical. To reproduce a build made with
 `rust-lld` byte for byte, set

@@ -33,7 +33,7 @@ let
     warns).
   '';
 
-  # `workspaces.<ws>.toolchain.capabilities.<name>` (lib/toolchain-facts.nix).
+  # `workspaces.<ws>.toolchain.facts.capabilities.<name>` (lib/toolchain-facts.nix).
   capabilityDocs = {
     remapPathScope = ''
       rustc takes `--remap-path-scope` (default: rustc 1.95 or later).
@@ -910,37 +910,103 @@ let
                   component has both programs).
                 '';
               };
-              capabilities = mkOption {
+              facts = mkOption {
                 type = types.submodule {
-                  options =
-                    lib.genAttrs
-                      [
-                        "remapPathScope"
-                        "trimPaths"
-                      ]
-                      (
-                        n:
-                        mkOption {
-                          type = types.nullOr types.bool;
-                          default = null;
-                          description = capabilityDocs.${n};
-                        }
-                      );
+                  options = {
+                    llvmMajor = mkOption {
+                      type = types.nullOr types.int;
+                      default = null;
+                      example = 23;
+                      description = ''
+                        The major release of the LLVM inside rustc: the
+                        LLVM tools presets take from nixpkgs (lld,
+                        clang, lld-link, llvm-ar) are of this release.
+                        `null`: nixpkgs' rustc's own `llvmPackages`, else
+                        breakbulk's table of Rust releases
+                        (`breakbulk.llvmVersions`), else `rustc -vV`.
+                      '';
+                    };
+                    llvmPackages = mkOption {
+                      type = types.nullOr types.raw;
+                      default = null;
+                      example = lib.literalExpression "pkgs.llvmPackages_23";
+                      description = ''
+                        The nixpkgs LLVM package set those tools come from
+                        (it also gives `llvmMajor`). `null`: nixpkgs'
+                        rustc's own, else `pkgs.llvmPackages_<llvmMajor>`.
+                      '';
+                    };
+                    bundledLld = mkOption {
+                      type = types.nullOr types.bool;
+                      default = null;
+                      description = ''
+                        Whether the toolchain ships its own lld
+                        (`rust-lld`, and `gcc-ld` for the C driver), as
+                        rust-lang's builds do: where rustc then links
+                        Linux targets with it, the presets link with
+                        nixpkgs' lld (the `lld` linker kind), and macOS
+                        targets link with the toolchain's `rust-lld`.
+                        `null`: false for a rustc with `llvmPackages`
+                        (nixpkgs', built with `--disable-lld`), true
+                        otherwise.
+                      '';
+                    };
+                    wasiSdkVersion = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      example = "33";
+                      description = ''
+                        The wasi-sdk release whose wasi-libc the
+                        toolchain bundles for `wasm32-wasip2`: C code
+                        compiles against its headers
+                        (`presets.wasmComponent { withC = true; }`).
+                        `null`: from breakbulk's table of Rust releases
+                        (lib/wasi-sdk.nix).
+                      '';
+                    };
+                    capabilities = mkOption {
+                      type = types.submodule {
+                        options =
+                          lib.genAttrs
+                            [
+                              "remapPathScope"
+                              "trimPaths"
+                            ]
+                            (
+                              n:
+                              mkOption {
+                                type = types.nullOr types.bool;
+                                default = null;
+                                description = capabilityDocs.${n};
+                              }
+                            );
+                      };
+                      default = { };
+                      example = lib.literalExpression "{ remapPathScope = false; }";
+                      description = ''
+                        What this toolchain can do, where breakbulk would
+                        otherwise decide it from the rustc and cargo
+                        versions (or, for a toolchain whose `version`
+                        attribute is missing or not a Rust release, such
+                        as fenix's, by asking them through
+                        import-from-derivation). The planner and the
+                        instantiator read nothing else. Whether Cargo
+                        allows unstable features is not one of them: the
+                        planner asks the cargo it runs.
+                      '';
+                    };
+                  };
                 };
                 default = { };
-                example = lib.literalExpression "{ remapPathScope = false; }";
+                example = lib.literalExpression "{ llvmMajor = 22; bundledLld = false; }";
                 description = ''
-                  What this toolchain can do, where breakbulk would otherwise
-                  decide it from the rustc and cargo versions (or, for a
-                  toolchain whose `version` attribute is missing or not a
-                  Rust release, such as fenix's, by asking them
-                  through import-from-derivation). Set one only for a
-                  forked or patched toolchain whose version says otherwise;
-                  `null` keeps breakbulk's own answer. The planner and the
-                  instantiator read nothing else
-                  (`breakbulk.toolchainFacts.of`). Whether Cargo allows
-                  unstable features is not one of them: the planner asks
-                  the cargo it runs.
+                  Facts about this toolchain that breakbulk would
+                  otherwise read from its attributes, its own tables or
+                  the toolchain itself (`breakbulk.toolchainFacts.of`).
+                  Set one only for a source-built, forked or patched
+                  toolchain those misjudge; `null` keeps breakbulk's own
+                  answer. Presets read the result as `toolchain.facts`,
+                  so one setting here serves every target.
                 '';
               };
             };

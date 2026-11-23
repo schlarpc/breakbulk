@@ -820,10 +820,10 @@ in
         (bb.evalTargetSpec {
           inherit pkgs;
           triple = "i686-pc-windows-msvc";
+          toolchain.facts.llvmMajor = 22;
           modules = [
             {
               preset = bb.presets.windows {
-                llvmMajor = 22;
                 sdk = {
                   includeDirs = [ ];
                   libDirs.x86 = [ "/sdk/x86" ];
@@ -849,10 +849,28 @@ in
           rust = pkgs.rust-bin.stable."1.97.0".minimal;
           f =
             r:
-            removeAttrs (bb.toolchainFacts.of {
-              inherit pkgs;
-              rustc = r;
-            }) [ "capabilities" ];
+            removeAttrs
+              (bb.toolchainFacts.of {
+                inherit pkgs;
+                rustc = r;
+              })
+              [
+                "capabilities"
+                "llvmPackages"
+              ];
+          # `workspaces.<ws>.toolchain.facts`: null keeps the found fact.
+          given =
+            facts:
+            bb.toolchainFacts.of {
+              inherit pkgs facts;
+              rustc = rust;
+            };
+          overridden = given {
+            llvmMajor = 23;
+            llvmPackages = null;
+            bundledLld = false;
+            wasiSdkVersion = "34";
+          };
         in
         [
           (f rust)
@@ -861,6 +879,31 @@ in
           (f pkgs.rustc).llvmMajor
           (f pkgs.rustc).bundledLld
           (f pkgs.rustc).llvmVersion
+          ((given { }).llvmPackages == pkgs.llvmPackages_22)
+          (
+            (bb.toolchainFacts.of {
+              inherit pkgs;
+              rustc = pkgs.rustc;
+            }).llvmPackages == pkgs.rustc.llvmPackages
+          )
+          [
+            overridden.llvmMajor
+            (overridden.llvmPackages == pkgs.llvmPackages_23)
+            overridden.bundledLld
+            overridden.wasiSdkVersion
+          ]
+          (
+            let
+              p = given { llvmPackages = pkgs.llvmPackages_21; };
+            in
+            [
+              (p.llvmMajor == lib.toInt (lib.versions.major pkgs.llvmPackages_21.llvm.version))
+              (p.llvmPackages == pkgs.llvmPackages_21)
+            ]
+          )
+          (fails (given {
+            llvmMayor = 23;
+          }))
         ];
       expected = [
         {
@@ -890,6 +933,19 @@ in
         (lib.toInt (lib.versions.major pkgs.rustc.llvmPackages.llvm.version))
         false
         pkgs.rustc.llvmPackages.llvm.version
+        true
+        true
+        [
+          23
+          true
+          false
+          "34"
+        ]
+        [
+          true
+          true
+        ]
+        true
       ];
     };
     # Toolchain capabilities (lib/toolchain-facts.nix): from the rustc and

@@ -14,8 +14,9 @@
 # is a fixed-output download of that wasi-sdk release's sysroot
 # (lib/wasi-sdk.nix: a table from Rust release to wasi-sdk release, checked
 # byte for byte against the toolchains' libc.a). A Rust release the table
-# does not know is an evaluation error; pass `wasiSdkVersion` (a release the
-# table has a hash for) or `wasiSdk` (a sysroot directory) to override.
+# does not know is an evaluation error; set the workspace's
+# `toolchain.facts.wasiSdkVersion` (a release the table has a hash for),
+# or pass `wasiSdk` (a sysroot directory) to override.
 {
   lib,
   wasmCommon,
@@ -28,17 +29,12 @@
   triple,
   traits,
   withC ? false,
-  rustc ? null,
-  wasiSdkVersion ? null,
-  wasiSdk ? wasiSdkLib.sysrootFor (
-    {
-      inherit pkgs rustc;
-    }
-    // lib.optionalAttrs (wasiSdkVersion != null) { version = wasiSdkVersion; }
-  ),
+  facts,
+  wasiSdk ? wasiSdkLib.sysrootFor {
+    inherit pkgs;
+    version = facts.wasiSdkVersion;
+  },
   wasmtime ? pkgs.buildPackages.wasmtime,
-  llvmMajor ? null,
-  llvmPackages ? null,
   ...
 }@args:
 let

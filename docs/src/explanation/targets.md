@@ -68,7 +68,7 @@ of stable, plus the current nightly.
 
 - Newer features (`--remap-path-scope`, `trim-paths`) have fallbacks.
   Whether a toolchain has them is decided once, as its
-  [`capabilities`](../reference/options/workspaces.md#workspacesnametoolchaincapabilities),
+  [`capabilities`](../reference/options/workspaces.md#workspacesnametoolchainfactscapabilities),
   from its version or by asking it. A patched or forked toolchain can
   override them.
 - Older toolchains, MSRV builds and forked toolchains may work, but are

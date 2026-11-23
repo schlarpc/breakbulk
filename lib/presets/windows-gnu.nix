@@ -8,7 +8,7 @@
 #
 # Linker: the toolchain's C driver (rustc's windows-gnu specs link through
 # a gcc-style driver), with lld of rustc's LLVM major (./linker.nix, kind
-# mingw-lld; `llvmMajor` or `llvmPackages` without `rustc`, `lld` to
+# mingw-lld; `lld` to
 # replace it).
 #
 # crtStatic (default true): `+crt-static` links libgcc_eh and winpthread
@@ -18,7 +18,6 @@
 {
   lib,
   targetPkgsFor,
-  llvmVersions,
   chooseLinker,
   chooseRunner,
   hostSpec,
@@ -31,9 +30,7 @@
   traits,
   crtStatic ? true,
   linkerKind ? null,
-  rustc ? null,
-  llvmMajor ? null,
-  llvmPackages ? null,
+  facts,
   lld ? null,
   wine ? pkgs.wineWow64Packages.minimal,
   ...
@@ -51,13 +48,10 @@ let
       pkgs
       triple
       traits
-      rustc
+      facts
       lld
       ;
-    llvm = llvmVersions.packagesFor {
-      pkgs = pkgs.buildPackages;
-      inherit rustc llvmMajor llvmPackages;
-    };
+    llvm = facts.llvmPackages;
     kind = linkerKind;
     packageSet = tp;
   };
@@ -88,7 +82,7 @@ in
   host = hostSpec {
     inherit
       pkgs
-      rustc
+      facts
       triple
       linkerKind
       ;

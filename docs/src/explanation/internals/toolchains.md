@@ -31,11 +31,11 @@ Every decision that depends on the target platform reads one record, the target'
 
 ## Toolchain presets
 
-The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain (`llvmMajor`, `llvmPackages`).
+The LLVM version matching rustc comes from `rustc.llvmPackages` only for nixpkgs' own rustc; rust-overlay and fenix toolchains do not carry it. The library ships a table from Rust version to LLVM major version, overridable per toolchain ([`workspaces.<ws>.toolchain.facts`](../../reference/options/workspaces.md#workspacesnametoolchainfacts): `llvmMajor`, `llvmPackages`).
 
 The table is the fast path; for a rustc it does not cover (older than its first release, newer than the last release checked, or without a version), a tiny derivation reads the major from `rustc -vV`, through import-from-derivation.
 
-Every fact about a toolchain comes from one function, `breakbulk.toolchainFacts.of { pkgs; rustc; }` (`lib/toolchain-facts.nix`): `version`, `majorMinor`, `llvmMajor`, `wasiSdkVersion` and `capabilities` (see [Toolchain capabilities](planner.md#toolchain-capabilities)), each from the toolchain's attributes and breakbulk's tables when they can say, else from one `rustc -vV` probe (release and LLVM major), so the wasi-sdk choice now also works for a rustc without a `version` attribute.
+Every fact about a toolchain comes from one function, `breakbulk.toolchainFacts.of { pkgs; rustc; facts; }` (`lib/toolchain-facts.nix`): `version`, `majorMinor`, `llvmMajor`, `llvmVersion`, `llvmPackages`, `wasiSdkVersion`, `bundledLld` and `capabilities` (see [Toolchain capabilities](planner.md#toolchain-capabilities)), each from the toolchain's attributes and breakbulk's tables when they can say, else from one `rustc -vV` probe (release and LLVM major), so the wasi-sdk choice also works for a rustc without a `version` attribute. `facts` is `workspaces.<ws>.toolchain.facts`: a non-null value there replaces the found one, for a source-built, forked or patched toolchain. `bundledLld` otherwise is a guess from the toolchain's attributes (a rustc with `llvmPackages` is nixpkgs', built without lld), so a source-built rustc with its own lld, or a rust-lang one that carries `llvmPackages`, is corrected there once for every target. Presets read the result as the module argument `toolchain.facts`; none takes `rustc`, `llvmMajor` or `llvmPackages` itself.
 
 `llvmVersions.packagesFor` and `wasiSdk.sysrootFor` read their rustc through it.
 

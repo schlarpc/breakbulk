@@ -35,13 +35,11 @@
 #                     breakbulk.appleSdk with this preset's `pkgs`.
 #                     Required on a build machine that is not a Mac.
 #   sdkVersion        the SDK's version, for a package without `version`
-#   deploymentTarget  e.g. "11.0"; null: rustc's default (needs `rustc`)
+#   deploymentTarget  e.g. "11.0"; null: rustc's default
 #   nativeBuilder     tests run on a Mac builder (testSystem)
-#   linkerKind, rustc, llvmMajor, llvmPackages   as for the other presets
 {
   lib,
   targetTraits,
-  llvmVersions,
   appleSdk,
   linkers,
   chooseRunner,
@@ -58,9 +56,8 @@
   deploymentTarget ? null,
   nativeBuilder ? false,
   linkerKind ? null,
-  rustc ? null,
-  llvmMajor ? null,
-  llvmPackages ? null,
+  toolchain,
+  facts,
   ...
 }:
 let
@@ -88,17 +85,14 @@ let
       sdk;
   version = if sdkVersion != null then sdkVersion else appleSdk.versionOf sdkPackage;
 
-  llvm = llvmVersions.packagesFor {
-    pkgs = bp;
-    inherit rustc llvmMajor llvmPackages;
-  };
+  llvm = facts.llvmPackages;
   clang = llvm.clang-unwrapped;
-  facts = if rustc == null then null else linkers.rustcFacts { inherit pkgs rustc; };
+  rustcFacts = linkers.rustcFacts { inherit pkgs facts; };
 
   kind = linkers.linkerKind {
     inherit triple traits;
     kind = linkerKind;
-    rustc = facts;
+    rustc = rustcFacts;
   };
 
   # The SDK's requirements (lib/apple-sdk.nix) against the linker's LLD
@@ -107,11 +101,7 @@ let
   # rustc's.
   lld = linkers.lldOf {
     inherit kind llvm;
-    rustc =
-      if facts == null then
-        throw "breakbulk.presets.darwin: the `rust-lld` linker's LLVM is rustc's; pass `rustc` to the preset"
-      else
-        facts;
+    rustc = rustcFacts;
   };
   missing = lib.filter (r: !(linkers.lldHas lld r.feature)) (appleSdk.requirementsOf version);
   checked =
@@ -134,7 +124,7 @@ let
       pkgs
       triple
       traits
-      rustc
+      facts
       llvm
       ;
     kind = linkerKind;
@@ -162,11 +152,9 @@ let
   # `MACOSX_DEPLOYMENT_TARGET=<version>`, from that variable when it is
   # set, else from its own table (rustc 1.99). Read at build time rather
   # than copied into breakbulk, where the table would drift from rustc's.
-  # Without the workspace's rustc the variable stays unset, which rustc
-  # and cc-rs treat the same way.
   captureStdenv = pkgs.stdenvAdapters.addAttrsToDerivation {
     preHook = ''
-      MACOSX_DEPLOYMENT_TARGET=$(${rustc}/bin/rustc --print deployment-target --target ${triple})
+      MACOSX_DEPLOYMENT_TARGET=$(${toolchain.rustc}/bin/rustc --print deployment-target --target ${triple})
       export MACOSX_DEPLOYMENT_TARGET=''${MACOSX_DEPLOYMENT_TARGET#MACOSX_DEPLOYMENT_TARGET=}
     '';
   } pkgs.stdenv;
@@ -217,7 +205,7 @@ guard (traits.isApple && traits.os == "macos")
           host = hostSpec {
             inherit
               pkgs
-              rustc
+              facts
               triple
               linkerKind
               ;
@@ -225,7 +213,7 @@ guard (traits.isApple && traits.os == "macos")
         }
         # The capture's stdenv is the build machine's: the target has no package
         # set.
-        // lib.optionalAttrs (deploymentTarget == null && rustc != null) {
+        // lib.optionalAttrs (deploymentTarget == null) {
           stdenv = mkDefault captureStdenv;
         }
       )

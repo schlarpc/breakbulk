@@ -548,7 +548,7 @@ let
                 variants.default.profile = "dev";
               };
             };
-            targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = wasmRust; };
+            targets.${wasm}.preset = breakbulk.presets.wasmComponent;
             packages.host.env.UI_WASM = "${repo.workspaces.ui.target.${wasm}.packages.ui}/lib/ui.wasm";
           }
         ];
@@ -637,7 +637,7 @@ let
               targets = lib.mkForce { ${wasm} = { }; };
               variants.default.profile = "release";
             };
-            targets.${wasm}.preset = breakbulk.presets.wasmComponent { rustc = wasmRust; };
+            targets.${wasm}.preset = breakbulk.presets.wasmComponent;
             sysDefaults.packages.ui = _: {
               env.SYS_UI = "curated";
               inputs = p: [ p.zlib ];

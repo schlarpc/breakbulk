@@ -60,7 +60,7 @@
   # e.g. to change how a library is configured.
   overlays ? [ ],
   linkerKind ? null,
-  rustc ? null,
+  facts,
   ...
 }@args:
 let
@@ -369,7 +369,7 @@ else
     host = hostSpec {
       inherit
         pkgs
-        rustc
+        facts
         triple
         linkerKind
         ;

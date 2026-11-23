@@ -143,7 +143,7 @@ pub fn plan_with_cargo_env(opts: &trace::Options) -> Result<(Plan, spec::CargoEn
             Error(format!(
                 "{e}\nbreakbulk passed `--config profile.{}.trim-paths=\"all\"` because the \
                  toolchain's `trimPaths` capability says its Cargo has the setting; for a Cargo \
-                 that rejects it, set `workspaces.<ws>.toolchain.capabilities.trimPaths = false`",
+                 that rejects it, set `workspaces.<ws>.toolchain.facts.capabilities.trimPaths = false`",
                 opts.profile
             ))
         } else {

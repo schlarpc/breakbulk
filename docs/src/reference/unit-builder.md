@@ -422,7 +422,7 @@ other than `DEP_*` would be missed; a survey of popular crates found none
 
 Path remapping uses rustc's `--remap-path-scope` (stable since 1.95; the
 toolchain's
-[`remapPathScope`](options/workspaces.md#workspacesnametoolchaincapabilitiesremappathscope)
+[`remapPathScope`](options/workspaces.md#workspacesnametoolchainfactscapabilitiesremappathscope)
 capability):
 
 | Unit | Scope |

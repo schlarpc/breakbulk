@@ -542,7 +542,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 ### P1. trim-paths availability and default
 
 - **Assumption.** The `trim-paths` profile setting is stable from Cargo 1.101 (nightly 1.101 included) and a hard error before; its values are `none`, `object` and `all`, and its default is `none` for every profile, `release` included.
-- **Where.** `lib/toolchain-facts.nix`: `capabilitySince.trimPaths`; `crates/breakbulk-plan/src/trim_paths.rs`: `decide`; `lib.rs`: `plan_with_cargo_env` (a Cargo that rejects the setting fails planning, and the error names `workspaces.<ws>.toolchain.capabilities.trimPaths = false`).
+- **Where.** `lib/toolchain-facts.nix`: `capabilitySince.trimPaths`; `crates/breakbulk-plan/src/trim_paths.rs`: `decide`; `lib.rs`: `plan_with_cargo_env` (a Cargo that rejects the setting fails planning, and the error names `workspaces.<ws>.toolchain.facts.capabilities.trimPaths = false`).
 - **Upstream.** cargo `3c747ea3e` `src/workspace/features.rs` (`stable, trim_paths, "1.101"`), `Profile::default_release`; cargo `TomlTrimPaths`; spike A, "trim-paths".
 - **Holds for.** 1.95–1.99 (rejected), nightly 1.101.
 - **Pinned by.** `products-trim-paths`, `loose-ends-devshell-trim-paths` (nightly sets it, 1.99 does not); `target-traits` (`testToolchainCapabilities`). A nightly 1.101 from before stabilization has the capability by its version but rejects the setting; it is outside the window and needs the override.
@@ -781,7 +781,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 
 ### L10. Toolchain capabilities from versions and probes
 
-- **Assumption.** A cargo allows unstable features exactly when `cargo -Zunstable-options help` succeeds, run as the planner runs Cargo (without `RUSTC_BOOTSTRAP`); [`remapPathScope`](options/workspaces.md#workspacesnametoolchaincapabilitiesremappathscope) (P6) and [`trimPaths`](options/workspaces.md#workspacesnametoolchaincapabilitiestrimpaths) (P1) follow the versions given there. A package's `version` is read as the release only when it looks like one (`<major>.<minor>.<patch>[-…]`); otherwise the toolchain is probed. fenix's component packages carry the channel manifest's date as `version` (fenix `5161c3b`, `lib/mk-toolchain.nix`), and its combined toolchains carry none.
+- **Assumption.** A cargo allows unstable features exactly when `cargo -Zunstable-options help` succeeds, run as the planner runs Cargo (without `RUSTC_BOOTSTRAP`); [`remapPathScope`](options/workspaces.md#workspacesnametoolchainfactscapabilitiesremappathscope) (P6) and [`trimPaths`](options/workspaces.md#workspacesnametoolchainfactscapabilitiestrimpaths) (P1) follow the versions given there. A package's `version` is read as the release only when it looks like one (`<major>.<minor>.<patch>[-…]`); otherwise the toolchain is probed. fenix's component packages carry the channel manifest's date as `version` (fenix `5161c3b`, `lib/mk-toolchain.nix`), and its combined toolchains carry none.
 - **Where.** `lib/toolchain-facts.nix`: `releaseOf`, `capabilitySince`, `of`; `crates/breakbulk-format/src/capabilities.rs`; `crates/breakbulk-plan/src/trace.rs`: `nightly_features_allowed`.
 - **Upstream.** cargo `src/workspace/features.rs`: `channel()` (release channel, `RUSTC_BOOTSTRAP=1` as `dev`, `dev` without a channel) and `CliUnstable::parse` (any `-Z` flag fails unless `nightly_features_allowed`); `src/bin/cargo/cli.rs` (`-Zhelp` and `-V` print before that check).
 - **Holds for.** The window.

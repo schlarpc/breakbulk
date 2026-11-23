@@ -155,24 +155,38 @@ let
   appleSdk = import ./apple-sdk.nix { inherit lib; };
 
   # The spec of one target (lib/modules/target-spec.nix) with `toolchain`
-  # (a workspace's: `{ rustc; cargo; … }`, or null): `modules` (the
+  # (a workspace's: `{ rustc; cargo; facts; … }`): `modules` (the
   # repository's and the workspace's definitions) evaluated, then again
   # with the `preset` they chose imported. Not one evaluation: a module's
   # imports cannot depend on the options it defines. `first` is the
-  # evaluation before the preset.
+  # evaluation before the preset. The module argument `toolchain` has
+  # the facts resolved (`toolchainFacts.of`, with `facts` as overrides).
   evalTargetSpec =
     {
       pkgs,
       triple,
-      toolchain ? null,
+      toolchain ? { },
       modules ? [ ],
       specialArgs ? { },
     }:
     let
+      tc = {
+        rustc = pkgs.rustc;
+        cargo = pkgs.cargo;
+      }
+      // toolchain;
+      resolved = tc // {
+        facts = toolchainFacts.of {
+          pkgs = pkgs.buildPackages;
+          inherit (tc) rustc cargo;
+          facts = tc.facts or { };
+        };
+      };
       first = lib.evalModules {
         modules = [ ./modules/target-spec.nix ] ++ modules;
         specialArgs = {
-          inherit pkgs toolchain;
+          inherit pkgs;
+          toolchain = resolved;
           name = triple;
           breakbulk = self;
           breakbulkPresets = presets;
