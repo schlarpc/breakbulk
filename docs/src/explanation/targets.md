@@ -105,8 +105,11 @@ targets, rust-lang's builds for other build machines, and nixpkgs' rustc
 (built without lld) use the C compiler's default linker.
 
 [`targets.<triple>.linkerKind`](../reference/options/targets.md#targetsnamelinkerkind)
-switches to another kind, `mold` for example, for the target's units and,
-on your own machine's triple, for build scripts and proc macros too. A
+switches to another kind, `mold` for example, for the target's units
+only. Build scripts and proc macros, the host units, have one linker per
+workspace, the same in every plan:
+[`workspaces.<ws>.host.linkerKind`](../reference/options/workspaces.md#workspacesnamehostlinkerkind)
+picks its kind. A
 kind that cannot work with the target or the preset's settings is an
 evaluation error: mold with `crossLanguageLto` (it does not read LLVM
 bitcode), or mold with `linuxStatic`'s `relocationModel = "static"`
@@ -114,7 +117,7 @@ bitcode), or mold with `linuxStatic`'s `relocationModel = "static"`
 startup).
 [`targets.<triple>.linker`](../reference/options/targets.md#targetsnamelinker)
 and
-[`host.linker`](../reference/options/targets.md#targetsnamehostlinker)
+[`workspaces.<ws>.host.linker`](../reference/options/workspaces.md#workspacesnamehostlinker)
 override both with a program of your own.
 
 The linker shows in the product. It records itself in the ELF

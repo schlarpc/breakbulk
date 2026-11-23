@@ -274,6 +274,31 @@ let
     else
       result;
 
+  # A toolchain (`workspaces.<ws>.toolchain`: `rustc`, `cargo`, `facts`
+  # as overrides; nixpkgs' by default) with its facts resolved for
+  # `pkgs`' build machine, as presets and the workspace's host spec read
+  # it.
+  resolve =
+    {
+      pkgs,
+      toolchain ? { },
+    }:
+    let
+      tc = {
+        rustc = pkgs.rustc;
+        cargo = pkgs.cargo;
+      }
+      // toolchain;
+    in
+    tc
+    // {
+      facts = of {
+        pkgs = pkgs.buildPackages;
+        inherit (tc) rustc cargo;
+        facts = tc.facts or { };
+      };
+    };
+
   # The capabilities as the planner's `--capabilities` file (every field, a
   # boolean; breakbulk-format `Capabilities`).
   capabilitiesFile =
@@ -297,6 +322,7 @@ in
     probeCargo
     mayProbe
     of
+    resolve
     capabilitySince
     capabilityNames
     factNames

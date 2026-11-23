@@ -287,6 +287,89 @@ rec {
   );
   checks = types.attrsOf check;
 
+  # `linkerKinds` of a target spec and of a workspace's host
+  # (lib/presets/linker.nix `builtinKinds`, the table they start from).
+  linkerKindsOption = mkOption {
+    type = types.attrsOf (
+      types.submodule {
+        options = {
+          on = mkOption {
+            type = types.raw;
+            description = "`traits: bool`: whether the kind links for a target with these [traits](../../explanation/internals/toolchains.md#target-traits).";
+          };
+          what = mkOption {
+            type = types.str;
+            default = "some";
+            description = "The targets `on` accepts, as messages name them (`\"Linux\"`).";
+          };
+          bitcode = mkOption {
+            type = types.bool;
+            default = false;
+            description = "Whether the linker reads rustc's LLVM bitcode, as `crossLanguageLto` (`-C linker-plugin-lto`) needs.";
+          };
+          incompatible = mkOption {
+            type = types.raw;
+            default = _: null;
+            defaultText = lib.literalExpression "_: null";
+            description = ''
+              `ctx: null or message`: why the kind cannot link in this
+              context, which is an evaluation error naming the kind.
+              `ctx` is `{ triple; traits; lto; staticNonPie; zig; }`
+              (`staticNonPie`: the link makes non-PIE static glibc
+              executables; `zig`: linuxPortable's `zig cc`, or null).
+            '';
+          };
+          build = mkOption {
+            type = types.raw;
+            description = ''
+              `args: path`: the linker. `args` is `{ pkgs; packageSet;
+              llvm; lld; zig; triple; traits; }`: mkRepository's
+              `pkgs`, the package set whose C toolchain drives the link,
+              nixpkgs' LLVM packages of rustc's major release (the
+              toolchain's facts), an `lld` package a preset passes, or
+              null, and linuxPortable's `zig cc`. A C compiler driver
+              with a flag is `breakbulk.presets.ccDriverLinker {
+              packageSet; flag; }`.
+            '';
+          };
+          lld = mkOption {
+            type = types.nullOr types.raw;
+            default = null;
+            description = ''
+              `args: { name; version; patches; }`, the LLD the kind links
+              with, for the macOS SDK's linker requirements (`args`:
+              `{ rustc; llvm; }`), or null for a kind that is not an
+              Apple linker.
+            '';
+          };
+        };
+      }
+    );
+    default = { };
+    example = lib.literalExpression ''
+      {
+        wild = {
+          on = traits: traits.isLinux;
+          what = "Linux";
+          build = { packageSet, ... }: breakbulk.presets.ccDriverLinker {
+            inherit packageSet;
+            cc = (packageSet.stdenvAdapters.useWildLinker packageSet.stdenv).cc;
+            flag = "-fuse-ld=wild";
+          };
+        };
+      }
+    '';
+    description = ''
+      The linker kinds `linkerKind` may name: breakbulk's own
+      (`breakbulk.presetHelpers.builtinKinds`: `cc`, `lld`, `mold`,
+      `clang-lld`, `zig`, `lld-link`, `wasm-ld`, `wasm-component-ld`,
+      `mingw-lld`, `rust-lld`, `ld64.lld`), whose fields are set with
+      `lib.mkDefault`, and any added here or by a preset. A kind is
+      chosen only by name; the default kind for a target is
+      breakbulk's rule (`breakbulk.presetHelpers.linkerKind`).
+    '';
+  };
+
   # Whether an option type keeps one definition's value, where several
   # definitions at one priority conflict, rather than combining them
   # (lists concatenate, attribute sets and modules merge). A function's

@@ -22,11 +22,11 @@
 # toolchain, so presets that need rustc's LLVM or wasi-sdk version follow
 # each workspace's rustc.
 #
-# Every preset sets the host spec (`host.linker`, `host.env`) from
-# `pkgs.buildPackages`, so host units (build scripts, proc macros and their
-# dependencies) always get the build machine's tools, and target settings
-# never reach them: target env is added only to target units at
-# instantiation, never through Cargo's `[env]`.
+# A preset sets up the target's units only. Host units (build scripts,
+# proc macros and their dependencies) take their linker, env and stdenv
+# from the workspace's host spec (`workspaces.<ws>.host`), the same in
+# every plan; target env is added only to target units at instantiation,
+# never through Cargo's `[env]`.
 #
 # Presets that use LLVM tools (windows, uefi, wasm, the Linux presets
 # with crossLanguageLto or the lld linker kind) take the LLVM matching
@@ -186,33 +186,6 @@ let
   runnerChoice = import ./runner.nix { inherit lib runners wasmBindgen; };
   inherit (runnerChoice) chooseRunner;
 
-  # The host spec every preset sets: the build machine's linker, for the
-  # workspace's rustc. A target on the build machine's own triple (`triple`)
-  # gives its `linkerKind` to host units too; otherwise the host linker is
-  # the same derivation for every target, so host units are identical
-  # whatever the target.
-  hostSpec =
-    {
-      pkgs,
-      facts,
-      triple ? null,
-      linkerKind ? null,
-      kinds,
-    }:
-    let
-      host = nativeTriple pkgs.buildPackages;
-    in
-    {
-      linker = mkDefault (chooseLinker {
-        pkgs = pkgs.buildPackages;
-        triple = host;
-        inherit facts;
-        kind = if triple == host then linkerKind else null;
-        inherit kinds;
-      });
-      env = { };
-    };
-
   defaultEnv = lib.mapAttrs (_: mkDefault);
 
   # Shared by the wasm presets.
@@ -249,15 +222,6 @@ let
       cxx = mkDefault "${clang}/bin/clang++";
       ar = mkDefault "${llvm.llvm}/bin/llvm-ar";
       testSystem = mkDefault null;
-      host = hostSpec {
-        inherit
-          pkgs
-          facts
-          triple
-          linkerKind
-          kinds
-          ;
-      };
     };
 
   linuxGnuWith =
@@ -340,15 +304,6 @@ let
       env = defaultEnv st.env;
       runner = mkDefault r.runner;
       testSystem = mkDefault r.testSystem;
-      host = hostSpec {
-        inherit
-          pkgs
-          facts
-          triple
-          linkerKind
-          kinds
-          ;
-      };
     };
 
   # Static linking, one rule for every preset: `+crt-static` in the target
@@ -468,15 +423,6 @@ let
           env = defaultEnv st.env;
           runner = mkDefault null;
           testSystem = mkDefault null;
-          host = hostSpec {
-            inherit
-              pkgs
-              facts
-              triple
-              linkerKind
-              kinds
-              ;
-          };
         };
 
     # Windows msvc through xwin: lld-link (wrapped so
@@ -564,15 +510,6 @@ let
               canExecute = false;
             }).runner;
         testSystem = mkDefault null;
-        host = hostSpec {
-          inherit
-            pkgs
-            facts
-            triple
-            linkerKind
-            kinds
-            ;
-        };
       };
 
     # UEFI applications: lld-link from the LLVM matching rustc, wrapped
@@ -605,15 +542,6 @@ let
         });
         runner = mkDefault null;
         testSystem = mkDefault null;
-        host = hostSpec {
-          inherit
-            pkgs
-            facts
-            triple
-            linkerKind
-            kinds
-            ;
-        };
       };
 
     # wasm32-unknown-unknown for the browser: rustc's own wasm linker flavor,
@@ -662,7 +590,6 @@ let
         stageHelpers
         chooseLinker
         chooseRunner
-        hostSpec
         nativeTriple
         ;
     };
@@ -673,7 +600,6 @@ let
         appleSdk
         linkers
         chooseRunner
-        hostSpec
         guard
         stageHelpers
         ;
@@ -684,7 +610,6 @@ let
         targetPkgsFor
         chooseLinker
         chooseRunner
-        hostSpec
         staticLinking
         ;
     };
@@ -748,7 +673,6 @@ in
       targetPkgsFor
       chooseLinker
       chooseRunner
-      hostSpec
       staticLinking
       ;
     inherit (linkers)

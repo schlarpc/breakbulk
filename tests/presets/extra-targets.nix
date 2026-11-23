@@ -390,7 +390,7 @@ let
       toString t.spec.linker
     )) "uefi: ${triple} links with ${toString t.spec.linker}, not the uefi preset's lld-link-stable";
     assert lib.assertMsg (
-      o.linker == "/custom/lld-link" && o.host.linker != null
+      o.linker == "/custom/lld-link" && o.cc == null
     ) "uefi: targets.<t>.linker does not override the uefi preset's linker alone";
     pkgs.runCommand "uefi-${triple}"
       {

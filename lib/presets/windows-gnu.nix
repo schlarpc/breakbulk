@@ -20,7 +20,6 @@
   targetPkgsFor,
   chooseLinker,
   chooseRunner,
-  hostSpec,
   staticLinking,
 }:
 {
@@ -81,13 +80,4 @@ in
         canExecute = false;
       }).runner;
   testSystem = mkDefault null;
-  host = hostSpec {
-    inherit
-      pkgs
-      facts
-      triple
-      linkerKind
-      kinds
-      ;
-  };
 }

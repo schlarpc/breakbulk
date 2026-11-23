@@ -36,7 +36,7 @@
 # platform's stdenv (pkgs.stdenv or pkgs.buildPackages.stdenv), for example
 # with pkgs.clangStdenv or a stdenv adapter's result; it must build for the
 # same platform. mkRepository passes `targets.<t>.stdenv` and
-# `targets.<t>.host.stdenv`.
+# `workspaces.<ws>.host.stdenv`.
 # `inputs` and `nativeInputs` are functions of a package set, so one
 # declaration serves both platforms. A plain list is accepted and used as
 # given; it is then the caller's job to pick packages of the right platform.

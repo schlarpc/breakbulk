@@ -6,6 +6,7 @@
   root,
   projectBuildTarget,
   targetsDefaultTarget,
+  breakbulk,
   ...
 }:
 let
@@ -164,14 +165,14 @@ let
             "host"
             "linker"
           ];
-          use = "set `targets.<triple>.host.linker`";
+          use = "set `workspaces.<ws>.host.linker`";
         }
         {
           path = [
             "host"
             "runner"
           ];
-          use = "set `targets.<triple>.runner`";
+          use = "set `workspaces.<ws>.host.runner`";
         }
       ];
       perTarget = lib.concatMap (
@@ -1020,6 +1021,110 @@ let
             The toolchain this workspace is planned and built with. Any
             rustc/cargo pair works: nixpkgs, rust-overlay, fenix. A single
             package that provides both may be given for both.
+          '';
+        };
+
+        host = mkOption {
+          type = types.submodule (h: {
+            options = {
+              linker = mkOption {
+                type = types.oneOf [
+                  types.str
+                  types.path
+                  types.package
+                ];
+                default = breakbulk.presetHelpers.chooseLinker {
+                  pkgs = pkgs.buildPackages;
+                  triple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs.buildPackages;
+                  inherit
+                    (breakbulk.toolchainFacts.resolve {
+                      inherit pkgs;
+                      inherit (config) toolchain;
+                    })
+                    facts
+                    ;
+                  kind = h.config.linkerKind;
+                  kinds = h.config.linkerKinds;
+                };
+                defaultText = lib.literalMD "the build machine's linker of kind `linkerKind` (`breakbulk.presetHelpers.chooseLinker`)";
+                description = ''
+                  The linker of the workspace's host units (build
+                  scripts, proc macros and their dependencies), in every
+                  plan whatever its target: given to Cargo as
+                  `target.<build machine's triple>.linker` when the
+                  plan's target is another triple; on the build machine's
+                  own triple, host units' `-C linker` and `RUSTC_LINKER`
+                  are rewritten to it. One linker for every plan, so the
+                  host units of a native plan and of a cross plan are the
+                  same derivations.
+                '';
+              };
+              linkerKind = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                example = "mold";
+                apply =
+                  k:
+                  if k == null || h.config.linkerKinds ? ${k} then
+                    k
+                  else
+                    throw "breakbulk: workspaces.${name}.host.linkerKind = \"${k}\" is not a linker kind; known: ${lib.concatStringsSep ", " (lib.attrNames h.config.linkerKinds)}";
+                description = ''
+                  Which kind of linker `linker` is, as
+                  [`targets.<triple>.linkerKind`](targets.md#targetsnamelinkerkind)
+                  picks one for a target. `null`: the one rustc itself
+                  picks for the build machine and the workspace's Rust
+                  release, through nixpkgs' wrapped C compiler.
+                '';
+              };
+              linkerKinds = bt.linkerKindsOption;
+              env = mkOption {
+                type = bt.envAttrs;
+                default = { };
+                description = ''
+                  Environment added to the workspace's host units only ([sides](../../explanation/configuration.md#host-and-target-sides)).
+
+                  ${bt.envNote}
+                '';
+              };
+              stdenv = mkOption {
+                type = types.nullOr types.raw;
+                default = null;
+                example = lib.literalExpression "pkgs.clangStdenv";
+                description = ''
+                  The stdenv of the host units' environment capture.
+                  `null`: the build machine's. It must build for the
+                  build machine.
+                '';
+              };
+              runner = mkOption {
+                type = types.nullOr types.raw;
+                default = null;
+                description = ''
+                  The runner of the host units' tests (a proc macro's
+                  unit tests and doctests, which Cargo builds for the
+                  build machine), as
+                  [`targets.<triple>.runner`](targets.md#targetsnamerunner)
+                  is a target's. `null`: run directly.
+                '';
+              };
+              testSystem = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                description = "The Nix system that runs the host units' test runs. `null`: the build machine's.";
+              };
+            };
+            config.linkerKinds = lib.mapAttrs (
+              _: lib.mapAttrs (_: lib.mkDefault)
+            ) breakbulk.presetHelpers.builtinKinds;
+          });
+          default = { };
+          description = ''
+            The workspace's host side: build scripts, proc macros and
+            their dependencies, built for and run on the build machine in
+            every plan whatever the plan's target. Target settings
+            (`targets.<triple>.*`) never reach these units, the native
+            target's included.
           '';
         };
 

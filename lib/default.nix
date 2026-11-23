@@ -170,23 +170,11 @@ let
       specialArgs ? { },
     }:
     let
-      tc = {
-        rustc = pkgs.rustc;
-        cargo = pkgs.cargo;
-      }
-      // toolchain;
-      resolved = tc // {
-        facts = toolchainFacts.of {
-          pkgs = pkgs.buildPackages;
-          inherit (tc) rustc cargo;
-          facts = tc.facts or { };
-        };
-      };
       first = lib.evalModules {
         modules = [ ./modules/target-spec.nix ] ++ modules;
         specialArgs = {
           inherit pkgs;
-          toolchain = resolved;
+          toolchain = toolchainFacts.resolve { inherit pkgs toolchain; };
           name = triple;
           breakbulk = self;
           breakbulkPresets = presets;

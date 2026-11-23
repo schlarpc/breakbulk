@@ -19,7 +19,8 @@
 #   presets-eval      evaluation-time assertions on preset values (and the
 #                     linker choice, lib/presets/linker.nix)
 #   linker-kind-mold-*  `targets.<native>.linkerKind = "mold"`: the product
-#                     and the build script are linked by mold
+#                     is linked by mold; `workspaces.<ws>.host.linkerKind
+#                     = "mold"`: the build script is
 #   static-glibc-nonpie-*  linuxStatic { relocationModel = "static"; } with
 #                     the default linker (lld for rust-overlay's rustc, GNU
 #                     ld for nixpkgs'): a non-PIE static executable that
@@ -186,7 +187,7 @@ let
   ];
   stInst = sameTriple.workspaces.main.internal.instances.${native}.default;
   stUnits = unitsOf stInst;
-  stHostLinker = discard sameTriple.workspaces.main.target.${native}.spec.host.linker;
+  stHostLinker = discard sameTriple.config.workspaces.main.host.linker;
   sameTripleEval =
     let
       host = lib.filter (u: u.platform == "host") stUnits;
@@ -334,8 +335,22 @@ let
       '';
     };
 
-  # `linkerKind = "mold"` on the native triple: target and host units.
+  # `linkerKind = "mold"` on the native triple (target units) and on the
+  # workspace's host (host units).
   moldKind = mkRepo (fixtures + "/static") [
+    {
+      workspaces.main = staticWs // {
+        host.linkerKind = "mold";
+      };
+      targets.${native} = {
+        preset = presets.linux;
+        linkerKind = "mold";
+      };
+    }
+  ];
+  # The native target's kind stays on its own units: host units keep the
+  # workspace's host linker.
+  moldTargetOnly = mkRepo (fixtures + "/static") [
     {
       workspaces.main = staticWs;
       targets.${native} = {
@@ -1428,8 +1443,16 @@ let
             inherit pkgs;
             rustc = staticRust;
           }).llvm.version == pkgs.llvmPackages_23.llvm.version;
-        sameHostLinker = discard gnu.host.linker == discard cross.host.linker;
-        hostLinkerIsLld = lib.hasSuffix "cc-lld" (discard gnu.host.linker);
+        # One host linker per workspace, whatever the target: the
+        # build machine's for the workspace's rustc (rust-overlay's 1.99:
+        # lld; nixpkgs': GNU ld), and the native target's kind stays off it.
+        hostLinkerIsLld =
+          lib.hasSuffix "cc-lld" (discard moldTargetOnly.config.workspaces.main.host.linker)
+          && lib.hasSuffix "cc-default" (discard sameTriple.config.workspaces.main.host.linker);
+        hostKindIsTargetOnly =
+          lib.hasSuffix "cc-mold" (discard moldTargetOnly.workspaces.main.target.${native}.spec.linker)
+          && !(lib.hasSuffix "cc-mold" (discard moldTargetOnly.config.workspaces.main.host.linker))
+          && lib.hasSuffix "cc-mold" (discard moldKind.config.workspaces.main.host.linker);
         # The Rust to wasi-sdk table (lib/wasi-sdk.nix): an
         # unknown Rust release fails evaluation, naming the file.
         wasiSdkTable =
@@ -1587,17 +1610,6 @@ let
                 preset = presets.linux;
                 modules = [ { linkerKind = "gold"; } ];
               }).linker
-          && lib.hasSuffix "cc-mold" (discard (mold native presets.linux).host.linker)
-          # Another triple's kind stays on its own units.
-          && lib.hasSuffix "cc-lld" (
-            discard
-              (presetSpec {
-                triple = "aarch64-unknown-linux-gnu";
-                toolchain.rustc = staticRust;
-                preset = presets.linux;
-                modules = [ { linkerKind = "mold"; } ];
-              }).host.linker
-          )
           && fails (mold native (presets.linux { crossLanguageLto = true; })).linker
           # Options that are the target's or the toolchain's are not the
           # preset's.

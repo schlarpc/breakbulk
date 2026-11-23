@@ -614,7 +614,8 @@ rec {
   # host unit's runner under the host triple (`target.<host>.runner`, with
   # the default `target-applies-to-host`), so in a native plan they are the
   # target's own; otherwise no runner, the build machine, and the variable
-  # of the host triple's traits. mkRepository passes the native target's.
+  # of the host triple's traits. mkRepository passes the workspace's host
+  # spec's (`workspaces.<ws>.host`).
   defaultHost =
     {
       pkgs,

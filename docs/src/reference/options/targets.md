@@ -312,71 +312,6 @@ lazy attribute set of (string or absolute path or package or signed integer or b
 *Declared by:*
  - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
 
-## `targets.<name>.host.env`
-
-Environment added to host units of this target’s plans only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
-
-The variables’ names are read before their values, so ` lib.mkIf `
-goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
-one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
-variable, and reading it is an error\.
-
-*Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
-
-*Default:*
-
-```nix
-{ }
-```
-
-*Declared by:*
- - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
-
-## `targets.<name>.host.linker`
-
-The linker for host units of this target’s plans: given to
-Cargo as ` target.<host triple>.linker ` when the triples
-differ; when they are the same, host units’ ` -C linker ` and
-` RUSTC_LINKER ` are rewritten to it\.
-
-*Type:*
-null or string or absolute path or package
-
-*Default:*
-
-```nix
-null
-```
-
-*Declared by:*
- - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
-
-## `targets.<name>.host.stdenv`
-
-The stdenv of the host units’ environment capture (build
-scripts, proc macros and their dependencies) of this target’s
-plans\. ` null `: the build machine’s (` buildPackages.stdenv ` of
-the target’s package set)\. It must build for the build machine\.
-
-*Type:*
-null or raw value
-
-*Default:*
-
-```nix
-null
-```
-
-*Example:*
-
-```nix
-pkgs.clangStdenv
-```
-
-*Declared by:*
- - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
-
 ## `targets.<name>.linker`
 
 The linker for this target’s units (` target.<triple>.linker ` in
@@ -397,9 +332,10 @@ null
 
 ## `targets.<name>.linkerKind`
 
-Which kind of linker the preset builds for this target’s units,
-and for host units (build scripts, proc macros) when this is the
-build machine’s own triple\. ` null `: the linker rustc itself picks
+Which kind of linker the preset builds for this target’s units
+only: host units (build scripts, proc macros) take theirs from
+[` workspaces.<ws>.host `](workspaces\.md\#workspacesnamehost), even
+on the build machine’s own triple\. ` null `: the linker rustc itself picks
 for the triple and Rust release, always through nixpkgs’ wrapped
 C compiler: ` lld ` on Linux where rustc links with its bundled
 lld, ` cc ` (the C compiler’s default, GNU ld) on other Linux

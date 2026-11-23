@@ -188,6 +188,289 @@ false
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.host`
+
+The workspace’s host side: build scripts, proc macros and
+their dependencies, built for and run on the build machine in
+every plan whatever the plan’s target\. Target settings
+(` targets.<triple>.* `) never reach these units, the native
+target’s included\.
+
+*Type:*
+submodule
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.env`
+
+Environment added to the workspace’s host units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
+
+The variables’ names are read before their values, so ` lib.mkIf `
+goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
+one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
+variable, and reading it is an error\.
+
+*Type:*
+lazy attribute set of (string or absolute path or package or signed integer or boolean)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linker`
+
+The linker of the workspace’s host units (build
+scripts, proc macros and their dependencies), in every
+plan whatever its target: given to Cargo as
+` target.<build machine's triple>.linker ` when the
+plan’s target is another triple; on the build machine’s
+own triple, host units’ ` -C linker ` and ` RUSTC_LINKER `
+are rewritten to it\. One linker for every plan, so the
+host units of a native plan and of a cross plan are the
+same derivations\.
+
+*Type:*
+string or absolute path or package
+
+*Default:*
+the build machine’s linker of kind ` linkerKind ` (` breakbulk.presetHelpers.chooseLinker `)
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKind`
+
+Which kind of linker ` linker ` is, as
+[` targets.<triple>.linkerKind `](targets\.md\#targetsnamelinkerkind)
+picks one for a target\. ` null `: the one rustc itself
+picks for the build machine and the workspace’s Rust
+release, through nixpkgs’ wrapped C compiler\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+"mold"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds`
+
+The linker kinds ` linkerKind ` may name: breakbulk’s own
+(` breakbulk.presetHelpers.builtinKinds `: ` cc `, ` lld `, ` mold `,
+` clang-lld `, ` zig `, ` lld-link `, ` wasm-ld `, ` wasm-component-ld `,
+` mingw-lld `, ` rust-lld `, ` ld64.lld `), whose fields are set with
+` lib.mkDefault `, and any added here or by a preset\. A kind is
+chosen only by name; the default kind for a target is
+breakbulk’s rule (` breakbulk.presetHelpers.linkerKind `)\.
+
+*Type:*
+attribute set of (submodule)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  wild = {
+    on = traits: traits.isLinux;
+    what = "Linux";
+    build = { packageSet, ... }: breakbulk.presets.ccDriverLinker {
+      inherit packageSet;
+      cc = (packageSet.stdenvAdapters.useWildLinker packageSet.stdenv).cc;
+      flag = "-fuse-ld=wild";
+    };
+  };
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds.<name>.bitcode`
+
+Whether the linker reads rustc’s LLVM bitcode, as ` crossLanguageLto ` (` -C linker-plugin-lto `) needs\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds.<name>.build`
+
+` args: path `: the linker\. ` args ` is ` { pkgs; packageSet; llvm; lld; zig; triple; traits; } `: mkRepository’s
+` pkgs `, the package set whose C toolchain drives the link,
+nixpkgs’ LLVM packages of rustc’s major release (the
+toolchain’s facts), an ` lld ` package a preset passes, or
+null, and linuxPortable’s ` zig cc `\. A C compiler driver
+with a flag is ` breakbulk.presets.ccDriverLinker { packageSet; flag; } `\.
+
+*Type:*
+raw value
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds.<name>.incompatible`
+
+` ctx: null or message `: why the kind cannot link in this
+context, which is an evaluation error naming the kind\.
+` ctx ` is ` { triple; traits; lto; staticNonPie; zig; } `
+(` staticNonPie `: the link makes non-PIE static glibc
+executables; ` zig `: linuxPortable’s ` zig cc `, or null)\.
+
+*Type:*
+raw value
+
+*Default:*
+
+```nix
+_: null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds.<name>.lld`
+
+` args: { name; version; patches; } `, the LLD the kind links
+with, for the macOS SDK’s linker requirements (` args `:
+` { rustc; llvm; } `), or null for a kind that is not an
+Apple linker\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds.<name>.on`
+
+` traits: bool `: whether the kind links for a target with these [traits](\.\./\.\./explanation/internals/toolchains\.md\#target-traits)\.
+
+*Type:*
+raw value
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.linkerKinds.<name>.what`
+
+The targets ` on ` accepts, as messages name them (` "Linux" `)\.
+
+*Type:*
+string
+
+*Default:*
+
+```nix
+"some"
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.runner`
+
+The runner of the host units’ tests (a proc macro’s
+unit tests and doctests, which Cargo builds for the
+build machine), as
+[` targets.<triple>.runner `](targets\.md\#targetsnamerunner)
+is a target’s\. ` null `: run directly\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.stdenv`
+
+The stdenv of the host units’ environment capture\.
+` null `: the build machine’s\. It must build for the
+build machine\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+pkgs.clangStdenv
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.host.testSystem`
+
+The Nix system that runs the host units’ test runs\. ` null `: the build machine’s\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.memberDefaults`
 
 Settings for every member of this workspace (the path packages

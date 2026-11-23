@@ -839,75 +839,91 @@ let
   # A target's spec as mkWorkspace takes it: the planner's part (rustflags
   # and linkers, through `--config`), the env of each platform's units, the
   # store paths the plan will name, the target capture's package set, and
-  # the runner.
+  # the runner. The host units' part is the workspace's host spec, the
+  # same in every plan, whether the target has a spec or not.
   inherit (util) storePathsIn;
+  # A runner option's value (`targets.<t>.runner`, `workspaces.<ws>.host.runner`),
+  # a function called with the workspace's lockfile.
+  runnerValue =
+    wsName: r:
+    if builtins.isFunction r then
+      r {
+        lockfile = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) "Cargo.lock"}";
+        workspace = wsName;
+      }
+    else
+      r;
+  # It as test runs take it: a list, program and arguments (as Cargo's
+  # `target.<triple>.runner` takes a string or an array), or null.
+  runnerOf =
+    wsName: r:
+    let
+      v = runnerValue wsName r;
+    in
+    if v == null then null else map (x: "${x}") (lib.toList v);
+  # The workspace's host spec (`workspaces.<ws>.host`).
+  hostOf =
+    wsName:
+    let
+      h = cfg.workspaces.${wsName}.host;
+    in
+    {
+      linker = "${h.linker}";
+      env = envStrings h.env;
+      inherit (h) stdenv testSystem;
+      runner = runnerOf wsName h.runner;
+    };
   specFor =
     wsName: triple:
     let
       t = targetCfgOf wsName triple;
-      inherit (t) cEnv;
+      h = hostOf wsName;
       str = v: if v == null then null else "${v}";
-      linker = str t.linker;
-      hostLinker = str t.host.linker;
+      linker = if t == null then null else str t.linker;
+      rustflags = if t == null then [ ] else t.rustflags;
       named =
         prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
-      runner =
-        if t.runner == null then
-          null
-        else if builtins.isFunction t.runner then
-          t.runner {
-            lockfile = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) "Cargo.lock"}";
-            workspace = wsName;
-          }
-        else
-          t.runner;
+      runner = if t == null then null else runnerOf wsName t.runner;
       # The package set the stages of its test binaries get (`strip`
       # takes its C toolchain's binutils from it).
       testPackageSet = packageSetOf wsName triple;
     in
-    if t == null then
-      {
-        inherit testPackageSet;
-        mkWorkspace = { };
-        canRunTests = true;
-        runner = null;
-        testDylibPath = breakbulkLib.testRuns.dylibPathOf { traits = traitsOf wsName triple; };
-        testSystem = null;
+    {
+      inherit testPackageSet runner;
+      mkWorkspace = {
+        spec = {
+          inherit rustflags linker;
+          hostLinker = h.linker;
+        };
+        specTools =
+          named "spec-linker" (
+            lib.filter (x: x != null) [
+              linker
+              h.linker
+            ]
+          )
+          // named "spec-rustflags" (lib.concatMap storePathsIn rustflags);
+        hostEnv = h.env;
+        hostStdenv = h.stdenv;
       }
-    else
-      {
-        inherit testPackageSet;
-        mkWorkspace = {
-          spec = {
-            inherit (t) rustflags;
-            inherit linker hostLinker;
-          };
-          specTools =
-            named "spec-linker" (
-              lib.filter (x: x != null) [
-                linker
-                hostLinker
-              ]
-            )
-            // named "spec-rustflags" (lib.concatMap storePathsIn t.rustflags);
-          hostEnv = envStrings t.host.env;
-          targetPackageSet = captureSetOf wsName triple;
-          targetStdenv = t.stdenv;
-          hostStdenv = t.host.stdenv;
-          targetEnv = envStrings (cEnv // t.env);
-        };
-        # A program, or a list: program and arguments (as Cargo's
-        # `target.<triple>.runner` takes a string or an array).
-        runner = if runner == null then null else map (x: "${x}") (lib.toList runner);
-        canRunTests = !(lib.any (x: x.breakbulkNoRunner or false) (lib.toList runner));
-        # How its test processes find shared libraries: the runner's way
-        # (wine: WINEPATH), else the target's traits.
-        testDylibPath = breakbulkLib.testRuns.dylibPathOf {
-          traits = traitsOf wsName triple;
-          inherit runner;
-        };
-        inherit (t) testSystem;
+      // lib.optionalAttrs (t != null) {
+        targetPackageSet = captureSetOf wsName triple;
+        targetStdenv = t.stdenv;
+        targetEnv = envStrings (t.cEnv // t.env);
       };
+      # `runners.none` (a preset found nothing that runs the target's
+      # programs) says so as an attribute, which the list above drops.
+      canRunTests =
+        t == null
+        || !(lib.any (x: x.breakbulkNoRunner or false) (lib.toList (runnerValue wsName t.runner)));
+      # How its test processes find shared libraries: the runner's way
+      # (wine: WINEPATH), else the target's traits.
+      testDylibPath = breakbulkLib.testRuns.dylibPathOf {
+        traits = traitsOf wsName triple;
+        inherit runner;
+      };
+      testSystem = if t == null then null else t.testSystem;
+    };
 
   # instantiate's overrides for one workspace on one target, keyed
   # "<name>@<version>".
@@ -953,17 +969,18 @@ let
                 pkgs = p;
                 inherit platform nativeInputs inputs;
                 name = e.name;
-                # targets.<t>.stdenv / host.stdenv (null: the set's).
+                # targets.<t>.stdenv / workspaces.<ws>.host.stdenv (null:
+                # the set's).
                 stdenv =
                   let
                     t = targetCfgOf wsName triple;
                   in
-                  if t == null then
+                  if platform == "host" then
+                    cfg.workspaces.${wsName}.host.stdenv
+                  else if t == null then
                     null
-                  else if platform == "target" then
-                    t.stdenv
                   else
-                    t.host.stdenv;
+                    t.stdenv;
               };
           ov = {
             host = {
@@ -1279,17 +1296,20 @@ let
           testDylibPath
           testPackageSet
           ;
-        # Host units' tests run with the native target's settings, as Cargo
-        # gives them `target.<host>.runner`.
+        # Host units' tests run with the workspace's host spec, never a
+        # target's (the native one's included).
         hostTest =
           let
-            h = specFor wsName nativeTriple;
+            h = hostOf wsName;
           in
           {
             triple = nativeTriple;
             inherit (h) runner testSystem;
-            dylibPath = h.testDylibPath;
-            packageSet = h.testPackageSet;
+            dylibPath = breakbulkLib.testRuns.dylibPathOf {
+              traits = targetTraits.resolve { triple = nativeTriple; };
+              inherit (h) runner;
+            };
+            packageSet = pkgs;
           };
       }
       // s.mkWorkspace

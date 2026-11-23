@@ -105,8 +105,10 @@ with rustc's bundled `rust-lld`. macOS from Linux is the exception:
 rustc's own linker there is Apple's, which does not run on Linux, so the
 default is `rust-lld` when the toolchain ships it.
 [`targets.<triple>.linkerKind`](options/targets.md#targetsnamelinkerkind)
-picks another kind. It applies to the target's units, and to build
-scripts and proc macros when the triple is your own machine's.
+picks another kind. It applies to the target's units only: build
+scripts and proc macros have the workspace's host linker,
+[`workspaces.<ws>.host.linkerKind`](options/workspaces.md#workspacesnamehostlinkerkind),
+the same in every plan.
 
 ```nix
 targets.x86_64-unknown-linux-gnu.linkerKind = "mold";

@@ -35,7 +35,6 @@
   lib,
   targetTraits,
   stageHelpers,
-  hostSpec,
   chooseLinker,
   chooseRunner,
   nativeTriple,
@@ -371,13 +370,4 @@ else
           inherit canExecute;
         }).runner;
     testSystem = mkDefault null;
-    host = hostSpec {
-      inherit
-        pkgs
-        facts
-        triple
-        linkerKind
-        kinds
-        ;
-    };
   }

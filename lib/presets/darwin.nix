@@ -43,7 +43,6 @@
   appleSdk,
   linkers,
   chooseRunner,
-  hostSpec,
   guard,
   stageHelpers,
 }:
@@ -205,15 +204,6 @@ guard (traits.isApple && traits.os == "macos")
           };
           runner = mkDefault r.runner;
           testSystem = mkDefault r.testSystem;
-          host = hostSpec {
-            inherit
-              pkgs
-              facts
-              triple
-              linkerKind
-              kinds
-              ;
-          };
         }
         # The capture's stdenv is the build machine's: the target has no package
         # set.

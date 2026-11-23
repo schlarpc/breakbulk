@@ -1,10 +1,10 @@
 # The linker choice ("Linker selection" in docs/src/explanation/targets.md):
 # one function,
-# called by every preset and by the host spec, from the target triple, the
+# called by every preset and by the workspace's host spec, from the target triple, the
 # Rust toolchain and the LTO mode to a linker, of a kind from a table a
 # user or a preset can add to (`targets.<t>.linkerKinds`, starting from
 # `builtinKinds` below). `targets.<t>.linkerKind` picks another kind;
-# `targets.<t>.linker` (or `host.linker`) overrides it like any preset
+# `targets.<t>.linker` (or `workspaces.<ws>.host.linker`) overrides it like any preset
 # field.
 #
 #   linkerKind { triple; traits ? <built-in>; lto ? false; kind ? null;

@@ -174,9 +174,10 @@ in
         else
           throw "breakbulk: targets.\"${name}\".linkerKind = \"${k}\" is not a linker kind; known: ${lib.concatStringsSep ", " (lib.attrNames config.linkerKinds)} (add one to `targets.\"${name}\".linkerKinds`)";
       description = ''
-        Which kind of linker the preset builds for this target's units,
-        and for host units (build scripts, proc macros) when this is the
-        build machine's own triple. `null`: the linker rustc itself picks
+        Which kind of linker the preset builds for this target's units
+        only: host units (build scripts, proc macros) take theirs from
+        [`workspaces.<ws>.host`](workspaces.md#workspacesnamehost), even
+        on the build machine's own triple. `null`: the linker rustc itself picks
         for the triple and Rust release, always through nixpkgs' wrapped
         C compiler: `lld` on Linux where rustc links with its bundled
         lld, `cc` (the C compiler's default, GNU ld) on other Linux
@@ -189,86 +190,7 @@ in
         so it needs a `preset`. A name in `linkerKinds`.
       '';
     };
-    linkerKinds = mkOption {
-      type = types.attrsOf (
-        types.submodule {
-          options = {
-            on = mkOption {
-              type = types.raw;
-              description = "`traits: bool`: whether the kind links for a target with these [traits](../../explanation/internals/toolchains.md#target-traits).";
-            };
-            what = mkOption {
-              type = types.str;
-              default = "some";
-              description = "The targets `on` accepts, as messages name them (`\"Linux\"`).";
-            };
-            bitcode = mkOption {
-              type = types.bool;
-              default = false;
-              description = "Whether the linker reads rustc's LLVM bitcode, as `crossLanguageLto` (`-C linker-plugin-lto`) needs.";
-            };
-            incompatible = mkOption {
-              type = types.raw;
-              default = _: null;
-              defaultText = lib.literalExpression "_: null";
-              description = ''
-                `ctx: null or message`: why the kind cannot link in this
-                context, which is an evaluation error naming the kind.
-                `ctx` is `{ triple; traits; lto; staticNonPie; zig; }`
-                (`staticNonPie`: the link makes non-PIE static glibc
-                executables; `zig`: linuxPortable's `zig cc`, or null).
-              '';
-            };
-            build = mkOption {
-              type = types.raw;
-              description = ''
-                `args: path`: the linker. `args` is `{ pkgs; packageSet;
-                llvm; lld; zig; triple; traits; }`: mkRepository's
-                `pkgs`, the package set whose C toolchain drives the link,
-                nixpkgs' LLVM packages of rustc's major release (the
-                toolchain's facts), an `lld` package a preset passes, or
-                null, and linuxPortable's `zig cc`. A C compiler driver
-                with a flag is `breakbulk.presets.ccDriverLinker {
-                packageSet; flag; }`.
-              '';
-            };
-            lld = mkOption {
-              type = types.nullOr types.raw;
-              default = null;
-              description = ''
-                `args: { name; version; patches; }`, the LLD the kind links
-                with, for the macOS SDK's linker requirements (`args`:
-                `{ rustc; llvm; }`), or null for a kind that is not an
-                Apple linker.
-              '';
-            };
-          };
-        }
-      );
-      default = { };
-      example = lib.literalExpression ''
-        {
-          wild = {
-            on = traits: traits.isLinux;
-            what = "Linux";
-            build = { packageSet, ... }: breakbulk.presets.ccDriverLinker {
-              inherit packageSet;
-              cc = (packageSet.stdenvAdapters.useWildLinker packageSet.stdenv).cc;
-              flag = "-fuse-ld=wild";
-            };
-          };
-        }
-      '';
-      description = ''
-        The linker kinds `linkerKind` may name: breakbulk's own
-        (`breakbulk.presetHelpers.builtinKinds`: `cc`, `lld`, `mold`,
-        `clang-lld`, `zig`, `lld-link`, `wasm-ld`, `wasm-component-ld`,
-        `mingw-lld`, `rust-lld`, `ld64.lld`), whose fields are set with
-        `lib.mkDefault`, and any added here or by a preset. A kind is
-        chosen only by name; the default kind for a target is
-        breakbulk's rule (`breakbulk.presetHelpers.linkerKind`).
-      '';
-    };
+    linkerKinds = bt.linkerKindsOption;
     cc = mkOption {
       type = tool;
       default = null;
@@ -367,38 +289,6 @@ in
         the build machine's with a hook that exports rustc's
         `MACOSX_DEPLOYMENT_TARGET`; a stdenv set here replaces that.
       '';
-    };
-    host = {
-      stdenv = mkOption {
-        type = types.nullOr types.raw;
-        default = null;
-        example = lib.literalExpression "pkgs.clangStdenv";
-        description = ''
-          The stdenv of the host units' environment capture (build
-          scripts, proc macros and their dependencies) of this target's
-          plans. `null`: the build machine's (`buildPackages.stdenv` of
-          the target's package set). It must build for the build machine.
-        '';
-      };
-      linker = mkOption {
-        type = tool;
-        default = null;
-        description = ''
-          The linker for host units of this target's plans: given to
-          Cargo as `target.<host triple>.linker` when the triples
-          differ; when they are the same, host units' `-C linker` and
-          `RUSTC_LINKER` are rewritten to it.
-        '';
-      };
-      env = mkOption {
-        type = bt.envAttrs;
-        default = { };
-        description = ''
-          Environment added to host units of this target's plans only ([sides](../../explanation/configuration.md#host-and-target-sides)).
-
-          ${bt.envNote}
-        '';
-      };
     };
     stages = mkOption {
       type = bt.stages;

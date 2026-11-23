@@ -3381,7 +3381,7 @@ in
       '';
 
   # `targets.<t>.stdenv` replaces the target
-  # captures' stdenv (base and per-package), `host.stdenv` the host
+  # captures' stdenv (base and per-package), `workspaces.<ws>.host.stdenv` the host
   # captures'; unset, both are the package set's. The capture then records
   # clang's wrapper as `cc`, and the product still builds.
   stdenv-override =
@@ -3400,7 +3400,7 @@ in
       ];
       hostClang = mkRepo (fixtures + "/multi-ws") [
         (oneWs "a")
-        { targets.${native}.host.stdenv = pkgs.clangStdenv; }
+        { workspaces.main.host.stdenv = pkgs.clangStdenv; }
       ];
       i = r: r.workspaces.main.internal.instances.${native}.default;
       stdenvOf = d: builtins.unsafeDiscardStringContext d.drvAttrs.stdenv.outPath;
