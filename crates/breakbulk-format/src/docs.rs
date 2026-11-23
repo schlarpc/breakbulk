@@ -104,7 +104,7 @@ pub(crate) fn rustdoc_command<R: Resolve>(
             } else {
                 None
             },
-            repository_paths: Vec::new(),
+            ..Hints::default()
         },
         // rustdoc compiles no C; the derivation adds no C flags.
         seed: None,

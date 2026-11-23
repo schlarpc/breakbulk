@@ -1,6 +1,7 @@
 # Repository-wide options: delivery mode, source strictness, fetching,
-# and the curated defaults for -sys crates (lib/sys-defaults.nix) and for
-# the dependents of crates (lib/sys-defaults-dependents.nix).
+# and the curated defaults for -sys crates (lib/sys-defaults.nix), for
+# the dependents of crates (lib/sys-defaults-dependents.nix) and for the
+# hints of failed build scripts (lib/build-script-hints.json).
 { lib, config, ... }:
 let
   inherit (lib) types mkOption;
@@ -8,6 +9,7 @@ let
   inherit (import ./package-settings.nix { inherit lib; }) settingsModule;
   curated = import ../sys-defaults.nix { inherit lib; };
   curatedDependents = import ../sys-defaults-dependents.nix { inherit lib; };
+  curatedHints = lib.importJSON ../build-script-hints.json;
   gates = import ../nix-features.nix { inherit lib; };
   registryDefaults = import ../registries.nix;
 in
@@ -19,6 +21,9 @@ in
     dependents = lib.mapAttrs (
       _: v: lib.mkDefault (if builtins.isFunction v then v else _: v)
     ) curatedDependents;
+    buildScriptHints = lib.mapAttrs (
+      _: v: if builtins.isAttrs v then lib.mapAttrs (_: lib.mkDefault) v else lib.mkDefault v
+    ) curatedHints;
   };
 
   options = {
@@ -346,6 +351,107 @@ in
         [`buildScript.outDirRemove`](packages.md#packagesnamebuildscriptoutdirremove)
         rule that deletes CMake's `CMakeFiles` beside its
         `CMakeCache.txt`.
+      '';
+    };
+
+    sysDefaults.buildScriptHints = mkOption {
+      type = types.submodule {
+        options = {
+          recognizers = mkOption {
+            type = types.attrsOf (
+              types.nullOr (
+                types.submodule {
+                  options = {
+                    about = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "What the entry recognizes, for its readers; not used.";
+                    };
+                    fingerprint.vars = mkOption {
+                      type = types.listOf types.str;
+                      default = [ ];
+                      description = "Variable patterns: the crate ran when the script declared a matching `rerun-if-env-changed` variable.";
+                    };
+                    fingerprint.lines = mkOption {
+                      type = types.listOf types.str;
+                      default = [ ];
+                      description = "Line patterns: the crate ran when the script printed a matching line.";
+                    };
+                    errors = mkOption {
+                      type = types.listOf (
+                        types.submodule {
+                          options = {
+                            pattern = mkOption {
+                              type = types.str;
+                              description = "A line pattern; `{}` captures text the hint names as `{0}`.";
+                            };
+                            hint = mkOption {
+                              type = types.str;
+                              description = "The hint; `{opt}` is the package's option prefix (`packages.<name>`).";
+                            };
+                          };
+                        }
+                      );
+                      default = [ ];
+                      description = "Error lines and their hints; the first pattern a line matches decides its hint.";
+                    };
+                    covers = mkOption {
+                      type = types.listOf types.str;
+                      default = [ ];
+                      description = "Variable patterns of the variables the crate declares and normally leaves unset: counted, not listed, after its failure.";
+                    };
+                  };
+                }
+              )
+            );
+            default = { };
+            description = "Failures of common crates, by the crate name the hints name.";
+          };
+          notFound = mkOption {
+            type = types.listOf types.str;
+            description = "Text of a line that says a program was not found.";
+          };
+          tools = mkOption {
+            type = types.attrsOf (types.nullOr types.str);
+            default = { };
+            description = "Programs build scripts run, by the name they run, and the attribute of the package set that provides each.";
+          };
+          toolHint = mkOption {
+            type = types.str;
+            description = "The hint for a tool not found: `{tool}`, `{attr}` and `{opt}` name the tool, its attribute and the package's option prefix.";
+          };
+          network = mkOption {
+            type = types.listOf types.str;
+            description = "Lowercase text of a line that shows a build script downloading or failing to reach the network.";
+          };
+          downloaders = mkOption {
+            type = types.listOf types.str;
+            description = "Programs whose name, as a word outside a `cargo:` directive, shows a download.";
+          };
+          networkHint = mkOption {
+            type = types.str;
+            description = "The hint for a download; `{opt}` is the package's option prefix.";
+          };
+        };
+      };
+      default = { };
+      description = ''
+        What a failed build-script run is searched for, to add hints
+        after its output: failures of common crates when a tool or
+        library is missing from the sandbox (`recognizers`), a program
+        not found that a known package provides (`notFound`, `tools`),
+        and a download (`network`, `downloaders`). The hints never
+        change the result. Patterns: `*` matches any text and `{}` any
+        non-empty text, which a hint names as `{0}`; variable patterns
+        also match after a `HOST_` or `TARGET_` prefix.
+
+        The table reaches every build-script run as one file, read only
+        after a failure: changing it rebuilds build-script runs, not
+        compiles. The curated entries are defined at `mkDefault`
+        priority, so a plain definition replaces one: a recognizer or
+        tool set to `null` is turned off, and a list or hint replaces
+        the curated one. They are listed in
+        [Build-script failure hints](../build-script-hints.md).
       '';
     };
 

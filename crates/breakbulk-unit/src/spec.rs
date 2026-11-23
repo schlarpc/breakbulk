@@ -476,7 +476,8 @@ pub struct RenderedDocs {
 }
 
 /// What a unit keeps only to explain a failure ([`crate::view_hints`],
-/// [`crate::repository_paths`]); nothing in it changes what runs.
+/// [`crate::repository_paths`], [`crate::run::recognize`]); nothing in it
+/// changes what runs.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Hints {
@@ -488,11 +489,16 @@ pub struct Hints {
     /// env values and arguments name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repository_paths: Vec<RepositoryPath>,
+    /// For a build-script run: a JSON file, the table of failures of
+    /// common crates it recognizes (`crate::run::recognize::Table`, the
+    /// repository's `sysDefaults.buildScriptHints`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_script_hints: Option<String>,
 }
 
 impl Hints {
     pub fn is_empty(&self) -> bool {
-        self.view.is_none() && self.repository_paths.is_empty()
+        self.view.is_none() && self.repository_paths.is_empty() && self.build_script_hints.is_none()
     }
 }
 

@@ -558,10 +558,25 @@ in
 
   # A build script killed by a signal fails its run unit, naming the
   # signal. The run unit's BREAKBULK_UNIT is executed by hand, so the check
-  # can expect the failure.
+  # can expect the failure. Its table of failure hints is a custom one,
+  # which recognizes the line the script prints before it aborts.
   build-script-signal =
     let
-      ws = mk "build-script-signal" { };
+      ws = mk "build-script-signal" {
+        buildScriptHints = builtins.toFile "build-script-hints.json" (
+          builtins.toJSON {
+            recognizers.abort-crate = {
+              fingerprint.lines = [ "cargo::rustc-cfg=*" ];
+              errors = [
+                {
+                  pattern = "*never_{}";
+                  hint = "the script printed never_{0}; see `{opt}.env`";
+                }
+              ];
+            };
+          }
+        );
+      };
       runs = lib.filter (u: lib.hasSuffix "-build-run" u.name) (lib.attrValues ws.units.build);
       run =
         assert lib.length runs == 1;
@@ -577,6 +592,7 @@ in
       cat err
       grep -q 'failed to run custom build command for `build-script-signal v0.1.0`' err
       grep -q 'signal: 6, SIGABRT' err
+      grep -q 'hint: the script printed never_reached; see `packages.build-script-signal.env`' err
       mkdir -p $result
       cp err $result/
     '';

@@ -26,7 +26,10 @@ fn unit(cwd: &Path) -> RenderedRun {
         }],
         nightly_features_allowed: false,
         env_capture: None,
-        hints: Default::default(),
+        hints: crate::spec::Hints {
+            build_script_hints: Some(curated_table()),
+            ..Default::default()
+        },
         seed: None,
         remap: vec![],
         out_dir_remap: None,
@@ -34,6 +37,15 @@ fn unit(cwd: &Path) -> RenderedRun {
         env_append: Default::default(),
         env_layers: Vec::new(),
     }
+}
+
+/// The curated table of failure hints, `sysDefaults.buildScriptHints`'s
+/// default.
+fn curated_table() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../lib/build-script-hints.json")
+        .display()
+        .to_string()
 }
 
 fn judge_with(r: &RenderedRun, status: i32, stdout: &str) -> Result<Success, Error> {

@@ -144,6 +144,9 @@ pkgs:
   # `--remap-path-scope` for non-test target compile units (lib/instantiate.nix
   # `shippedRemapScope`); null remaps every scope.
   shippedRemapScope ? null,
+  # The table of build-script failure hints, a JSON file
+  # (`sysDefaults.buildScriptHints`; lib/instantiate.nix).
+  buildScriptHints ? ./build-script-hints.json,
   # How source paths are hidden (`workspaces.<ws>.sourcePaths`): "auto",
   # "cargo", "remap" or "keep".
   sourcePaths ? "auto",
@@ -732,7 +735,7 @@ let
         env = targetEnv;
       };
       overrides = overridesFor kind;
-      inherit shippedRemapScope sideFiles;
+      inherit shippedRemapScope sideFiles buildScriptHints;
       wrapperConfigVar = if wrapperConfigTrees == { } then null else wrapperConfig.dirVar;
       keepSourcePaths = sourcePaths == "keep";
       inherit capabilities;

@@ -1,0 +1,198 @@
+{
+  "recognizers": {
+    "bindgen/clang-sys": {
+      "about": "bindgen's `Unable to find libclang` panic (with the `runtime` feature) and clang-sys's own search error, which it wraps; both print clang-sys's `llvm-config` warning first when it is missing. bindgen can panic before it declares any variable, and the error text is its own, so it is a fingerprint too.",
+      "fingerprint": {
+        "vars": ["BINDGEN_EXTRA_CLANG_ARGS*", "LIBCLANG_PATH"],
+        "lines": [
+          "*could not execute `llvm-config` one or more times*",
+          "*Unable to find libclang*",
+          "*couldn't find any valid shared libraries matching:*`LIBCLANG_PATH`*"
+        ]
+      },
+      "errors": [
+        {
+          "pattern": "*Unable to find libclang*",
+          "hint": "libclang is not in the sandbox; add `{opt}.nativeInputs = p: [ p.rustPlatform.bindgenHook ];`"
+        },
+        {
+          "pattern": "*couldn't find any valid shared libraries matching:*`LIBCLANG_PATH`*",
+          "hint": "libclang is not in the sandbox; add `{opt}.nativeInputs = p: [ p.rustPlatform.bindgenHook ];`"
+        }
+      ],
+      "covers": [
+        "BINDGEN_EXTRA_CLANG_ARGS*",
+        "LIBCLANG_PATH",
+        "LIBCLANG_STATIC_PATH",
+        "LLVM_CONFIG_PATH"
+      ]
+    },
+    "cc": {
+      "about": "cc-rs: `ToolNotFound`, as later versions word it and as 1.0 to 1.2 did. It declares its tools and flags (each also with a `_<target>` suffix), its switches, and the variables the compilers it runs read.",
+      "fingerprint": {
+        "vars": ["CC*", "CFLAGS*", "CXX*"]
+      },
+      "errors": [
+        {
+          "pattern": "*failed to find tool \"{}\"*",
+          "hint": "the `cc` crate could not run `{0}`; add the package that provides it to `{opt}.nativeInputs`"
+        },
+        {
+          "pattern": "*Failed to find tool. Is `{}` installed?*",
+          "hint": "the `cc` crate could not run `{0}`; add the package that provides it to `{opt}.nativeInputs`"
+        }
+      ],
+      "covers": [
+        "CC",
+        "CC_*",
+        "CFLAGS",
+        "CFLAGS_*",
+        "CXX",
+        "CXX_*",
+        "CXXFLAGS",
+        "CXXFLAGS_*",
+        "CXXSTDLIB*",
+        "AR",
+        "AR_*",
+        "ARFLAGS",
+        "ARFLAGS_*",
+        "RANLIB",
+        "RANLIB_*",
+        "RANLIBFLAGS",
+        "RANLIBFLAGS_*",
+        "CRATE_CC_NO_DEFAULTS",
+        "CROSS_COMPILE",
+        "CPATH",
+        "C_INCLUDE_PATH",
+        "CPLUS_INCLUDE_PATH",
+        "OBJC_INCLUDE_PATH",
+        "OBJCPLUS_INCLUDE_PATH",
+        "COMPILER_PATH",
+        "GCC_EXEC_PREFIX",
+        "CCC_OVERRIDE_OPTIONS",
+        "CLANG_NO_DEFAULT_CONFIG"
+      ]
+    },
+    "cmake": {
+      "about": "cmake-rs prints each variable it reads as `NAME = value` and declares none; `run`'s `NotFound` and exit-127 messages.",
+      "fingerprint": {
+        "lines": ["*CMAKE* = *"]
+      },
+      "errors": [
+        {
+          "pattern": "*is `cmake` not installed?*",
+          "hint": "`cmake` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.cmake ];`"
+        },
+        {
+          "pattern": "*is `{}` not installed?*",
+          "hint": "the `cmake` crate could not run `{0}`; add the package that provides it to `{opt}.nativeInputs`"
+        }
+      ]
+    },
+    "openssl-sys": {
+      "about": "openssl-sys's `find_openssl_dir`, printed to stderr and as a warning. It reads each of its variables plain and with the target as a prefix (`X86_64_UNKNOWN_LINUX_GNU_OPENSSL_DIR`).",
+      "fingerprint": {
+        "vars": ["*OPENSSL_*"]
+      },
+      "errors": [
+        {
+          "pattern": "*Could not find directory of OpenSSL installation*",
+          "hint": "OpenSSL is not in the sandbox; add `{opt}.inputs = p: [ p.openssl ];` and `{opt}.nativeInputs = p: [ p.pkg-config ];`"
+        }
+      ],
+      "covers": ["*OPENSSL_*"]
+    },
+    "pkg-config": {
+      "about": "pkg-config-rs: `Error::Command` with `NotFound` (0.3.25 on), and its older `Failed to run` form; `Error::ProbeFailure`, and pkg-config's own message, which it quotes (and which older versions print alone).",
+      "fingerprint": {
+        "vars": ["PKG_CONFIG*", "*_NO_PKG_CONFIG"]
+      },
+      "errors": [
+        {
+          "pattern": "*The pkg-config command could not be found.*",
+          "hint": "`pkg-config` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.pkg-config ];`"
+        },
+        {
+          "pattern": "*Failed to run `*pkg-config*`: No such file or directory*",
+          "hint": "`pkg-config` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.pkg-config ];`"
+        },
+        {
+          "pattern": "*The system library `{}` required by crate*was not found*",
+          "hint": "pkg-config found no `{0}.pc`; add the package that provides `{0}` to `{opt}.inputs` (`inputs = p: [ p.<package> ];`)"
+        },
+        {
+          "pattern": "*Package {} was not found in the pkg-config search path*",
+          "hint": "pkg-config found no `{0}.pc`; add the package that provides `{0}` to `{opt}.inputs` (`inputs = p: [ p.<package> ];`)"
+        }
+      ],
+      "covers": ["PKG_CONFIG*", "*_NO_PKG_CONFIG"]
+    },
+    "prost-build": {
+      "about": "prost-build declares no variables; its message links its own docs.",
+      "fingerprint": {
+        "lines": ["*docs.rs/prost-build/#sourcing-protoc*"]
+      },
+      "errors": [
+        {
+          "pattern": "*Could not find `protoc`*",
+          "hint": "`protoc` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.protobuf ];`"
+        }
+      ]
+    }
+  },
+  "notFound": [
+    "NotFound",
+    "os error 2",
+    "No such file or directory",
+    "command not found",
+    ": not found"
+  ],
+  "tools": {
+    "autoconf": "autoconf",
+    "autoreconf": "autoconf",
+    "automake": "automake",
+    "bison": "bison",
+    "clang": "clang",
+    "cmake": "cmake",
+    "curl": "curl",
+    "flex": "flex",
+    "gcc": "gcc",
+    "git": "git",
+    "glslc": "shaderc",
+    "go": "go",
+    "gperf": "gperf",
+    "libtool": "libtool",
+    "m4": "m4",
+    "make": "gnumake",
+    "meson": "meson",
+    "nasm": "nasm",
+    "ninja": "ninja",
+    "node": "nodejs",
+    "npm": "nodejs",
+    "patch": "patch",
+    "perl": "perl",
+    "pkg-config": "pkg-config",
+    "protoc": "protobuf",
+    "python": "python3",
+    "python3": "python3",
+    "swig": "swig",
+    "tar": "gnutar",
+    "unzip": "unzip",
+    "wget": "wget",
+    "yasm": "yasm"
+  },
+  "toolHint": "`{tool}` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.{attr} ];`",
+  "network": [
+    "downloading http",
+    "failed to download",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "name or service not known",
+    "failed to lookup address information",
+    "dns error",
+    "network is unreachable",
+    "urlopen error"
+  ],
+  "downloaders": ["curl", "wget"],
+  "networkHint": "the build script seems to download; the sandbox has no network. If the crate can use a local copy, pass it in, usually through a variable it reads (`{opt}.env.<NAME>`, a `fetchurl` path)"
+}

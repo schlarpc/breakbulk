@@ -123,6 +123,9 @@ pub mod keys {
     }
     /// The constant empty directory of `empty` references.
     pub const EMPTY_DIR: &str = "empty-dir";
+    /// The table of build-script failure hints
+    /// (`sysDefaults.buildScriptHints`), a JSON file.
+    pub const BUILD_SCRIPT_HINTS: &str = "build-script-hints";
     pub fn tool(name: &str) -> String {
         format!("tool:{name}")
     }
@@ -602,6 +605,14 @@ impl Resolve for Tokens<'_> {
                 format!("{tree}/{dir}")
             },
         )))
+    }
+
+    fn build_script_hints(&self) -> Result<Option<String>, Error> {
+        Ok(self
+            .inputs
+            .toolchains
+            .build_script_hints
+            .then(|| self.input(keys::BUILD_SCRIPT_HINTS.into())))
     }
 
     fn doctest_config(&self, _id: &UnitId, unit: &Unit) -> Result<DoctestConfig, Error> {

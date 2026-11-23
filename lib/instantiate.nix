@@ -150,6 +150,10 @@ rec {
       # The extensions of the side files that compile units run through a
       # wrapper keep beside their crate files (`variants.<v>.sideFiles`).
       sideFiles ? [ ],
+      # The table of build-script failure hints (a JSON file,
+      # breakbulk_unit::run::recognize::Table), which every build-script run
+      # names, or null for none.
+      buildScriptHints ? null,
       # The variable that names a unit's directory in its package's tree of
       # wrapper config files (`sources.wrapperConfig`), on the units the
       # workspace wrapper (the `rustc-workspace-wrapper` tool) runs on.
@@ -252,6 +256,7 @@ rec {
           // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }
           // lib.optionalAttrs (sideFiles != [ ]) { inherit sideFiles; }
           // lib.optionalAttrs (wrapperConfigVar != null) { inherit wrapperConfigVar; }
+          // lib.optionalAttrs (buildScriptHints != null) { buildScriptHints = true; }
         )
       );
       overridesFile = toFile "overrides.json" (toJSON {
@@ -319,6 +324,9 @@ rec {
         // {
           "empty-dir" = str emptyDir;
           "wrapper:coreutils" = str coreutils;
+        }
+        // lib.optionalAttrs (buildScriptHints != null) {
+          "build-script-hints" = str buildScriptHints;
         }
         # Each doctest's test configuration (lib.rs `keys::doctest`).
         // lib.concatMapAttrs (

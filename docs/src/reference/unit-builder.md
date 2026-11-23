@@ -19,7 +19,8 @@ unit:
   (`breakbulk-docs`).
 
 Everything a value carries only to explain a failure (the unit's source
-view, the repository paths of a registry or git crate) is under its
+view, the repository paths of a registry or git crate, a build-script
+run's table of [failure hints](#failure-hints)) is under its
 `hints`.
 
 Test runs are not units; they belong to [products](../explanation/products.md).
@@ -269,39 +270,35 @@ streamed stderr and the repeated stderr tail are never changed.
 
 Some crates fail in a recognizable way when a tool or library is missing
 from the sandbox. A hint is added when the script printed the crate's
-error and the crate also left its fingerprint. The hint quotes the line
-it matched:
+error and the crate also left its fingerprint (a variable it declares, or
+a line it prints). The hint quotes the line it matched, as in
 
-| Crate | Error | Fingerprint | Hint |
-| --- | --- | --- | --- |
-| `pkg-config` | `The pkg-config command could not be found.` | declares `PKG_CONFIG*` or `*_NO_PKG_CONFIG` | `nativeInputs = p: [ p.pkg-config ];` |
-| `pkg-config` | ``The system library `X` … was not found`` | as above | add the package that provides `X` to `inputs` |
-| `cc` | `failed to find tool "X"` | declares `CC*`, `CFLAGS*` or `CXX*` | add the package that provides `X` to `nativeInputs` |
-| `bindgen`, `clang-sys` | `Unable to find libclang` | declares `BINDGEN_EXTRA_CLANG_ARGS*` or `LIBCLANG_PATH`, clang-sys's `llvm-config` warning, or the error itself (bindgen can fail before it declares anything) | `nativeInputs = p: [ p.rustPlatform.bindgenHook ];` |
-| `openssl-sys` | `Could not find directory of OpenSSL installation` | declares `*OPENSSL_*` | `inputs = p: [ p.openssl ];` and `nativeInputs = p: [ p.pkg-config ];` |
-| `prost-build` | ``Could not find `protoc` `` | its `docs.rs/prost-build` link | `nativeInputs = p: [ p.protobuf ];` |
-| `cmake` | ``is `cmake` not installed?`` | its `CMAKE… = …` lines | `nativeInputs = p: [ p.cmake ];` |
+```text
+hint: `pkg-config` is not in the sandbox; add it with `packages.foo-sys.nativeInputs = p: [ p.pkg-config ];`
+      (the build script printed: The pkg-config command could not be found.)
+```
 
 Two general rules follow, for any crate. Each quotes the line it matched:
 
 - **A tool not found.** A line that says a program was not found
-  (`NotFound`, `os error 2`, `No such file or directory`,
-  `command not found`, `: not found`) and names a known tool gets
-  `nativeInputs = p: [ p.<package> ];`. The tool must be quoted, end a
-  path, or come before a `:`, as in ``failed to spawn `cmake` `` or
-  `sh: 1: nasm: not found`. The tools: `autoconf`, `autoreconf`,
-  `automake`, `bison`, `clang`, `cmake`, `curl`, `flex`, `gcc`, `git`,
-  `glslc` (`shaderc`), `go`, `gperf`, `libtool`, `m4`, `make` (`gnumake`),
-  `meson`, `nasm`, `ninja`, `node` and `npm` (`nodejs`), `patch`, `perl`,
-  `pkg-config`, `protoc` (`protobuf`), `python` and `python3` (`python3`),
-  `swig`, `tar` (`gnutar`), `unzip`, `wget`, `yasm`. Other wordings, and
-  messages that name no tool, get no hint.
+  (`os error 2`, `command not found`, and the like) and names a known
+  tool gets `nativeInputs = p: [ p.<package> ];`. The tool must be
+  quoted, end a path, or come before a `:`, as in
+  ``failed to spawn `cmake` `` or `sh: 1: nasm: not found`. Other
+  wordings, and messages that name no tool, get no hint.
 - **A download.** A line that shows the script downloading
   (`Downloading http…`, `curl` or `wget` as a word, `Could not resolve
-  host`, `Temporary failure in name resolution`, `dns error`, and the
-  like) gets one hint: the sandbox has no network, so give the crate a
-  local copy, usually through a variable it reads
+  host`, and the like) gets one hint: the sandbox has no network, so give
+  the crate a local copy, usually through a variable it reads
   (`packages.<name>.env.<NAME>`, a `fetchurl` path).
+
+The crates, tools and texts are data: the repository option
+[`sysDefaults.buildScriptHints`](options/repository.md#sysdefaultsbuildscripthints),
+whose curated entries are listed in
+[Build-script failure hints](build-script-hints.md). Every build-script
+run names the table as one file (`hints.buildScriptHints`) and reads it
+only after a failure, so changing it rebuilds build-script runs but no
+compile; only the matching is in `breakbulk-unit`.
 
 Unset `rerun-if-env-changed` variables come last:
 
@@ -311,9 +308,6 @@ Unset `rerun-if-env-changed` variables come last:
   normally left unset.
 - The rest go on one line, with the `packages.<name>.env` option to set
   them.
-
-The tables are built into `breakbulk-unit` and are not configurable: a
-user table would be an input of every build-script run.
 
 ### Missing paths
 

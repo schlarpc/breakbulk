@@ -20,7 +20,7 @@ fn drv_of(key: &str) -> String {
 /// The context Nix would give each value in these tests: tools and
 /// captures are derivation outputs, sources are plain paths.
 fn context_of(key: &str) -> Vec<Context> {
-    if key.starts_with("src:") {
+    if key.starts_with("src:") || key == keys::BUILD_SCRIPT_HINTS {
         vec![Context::Opaque {
             path: input_value(key),
         }]
@@ -35,7 +35,7 @@ fn context_of(key: &str) -> Vec<Context> {
 }
 
 fn values(inputs: &Inputs) -> Values {
-    let mut keys: Vec<String> = vec![COREUTILS_KEY.into()];
+    let mut keys: Vec<String> = vec![COREUTILS_KEY.into(), keys::BUILD_SCRIPT_HINTS.into()];
     keys.extend(inputs.sources.workspace.iter().map(|d| keys::src(d)));
     keys.extend(inputs.toolchains.tools.keys().map(|t| keys::tool(t)));
     for p in [Platform::Host, Platform::Target] {

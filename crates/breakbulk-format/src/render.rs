@@ -110,6 +110,11 @@ pub trait Resolve {
     fn source_view(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<SourceView>, Self::Error> {
         Ok(None)
     }
+    /// For a build-script run: the file holding the table of its failure
+    /// hints (`Hints::build_script_hints`), or none.
+    fn build_script_hints(&self) -> Result<Option<String>, Self::Error> {
+        Ok(None)
+    }
     /// For a doctest: its package's test configuration (runners, test
     /// arguments, env, post-run program), as text. The default has none.
     fn doctest_config(
@@ -519,6 +524,7 @@ pub fn render_unit_in<R: Resolve>(
                 hints: Hints {
                     view: r.source_view(id, &unit)?,
                     repository_paths,
+                    ..Hints::default()
                 },
                 seed: Some(id.to_string()),
             })
@@ -588,6 +594,7 @@ pub fn render_unit_in<R: Resolve>(
                 hints: Hints {
                     view: r.source_view(id, &unit)?,
                     repository_paths,
+                    build_script_hints: r.build_script_hints()?,
                 },
                 seed: Some(id.to_string()),
             })

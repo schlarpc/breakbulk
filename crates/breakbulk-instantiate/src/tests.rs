@@ -69,6 +69,7 @@ fn smoke_inputs() -> Inputs {
             keep_source_paths: false,
             side_files: Vec::new(),
             wrapper_config_var: None,
+            build_script_hints: true,
             capabilities: breakbulk_format::Capabilities {
                 remap_path_scope: true,
                 trim_paths: false,
@@ -109,6 +110,9 @@ fn input_value(key: &str) -> String {
         "src:smokelib" => "/nix/store/33333333333333333333333333333333-source".into(),
         "src:smokeapp" => "/nix/store/44444444444444444444444444444444-source".into(),
         keys::EMPTY_DIR => "/nix/store/99999999999999999999999999999999-empty".into(),
+        keys::BUILD_SCRIPT_HINTS => {
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-build-script-hints.json".into()
+        }
         "tool:rustc" => RUSTC.into(),
         "tool:breakbulk-unit" => UNIT.into(),
         "tool:shell" => SHELL.into(),
@@ -182,6 +186,9 @@ impl RealPaths<'_> {
 
 impl Resolve for RealPaths<'_> {
     type Error = String;
+    fn build_script_hints(&self) -> Result<Option<String>, String> {
+        Ok(Some(input_value(keys::BUILD_SCRIPT_HINTS)))
+    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         let (base, rel) = match r {
             Reference::Src(s) => (

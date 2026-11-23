@@ -363,7 +363,17 @@ fn diagnostics(f: &Finished<'_>, parsed: Option<&BuildOutput>) -> String {
     let stderr = String::from_utf8_lossy(f.stderr_tail);
     let missing = parsed.map(|p| missing_paths(p, cwd)).unwrap_or_default();
     let mut hints = path_hints(&f.run.package, cwd, f.run.hints.view.as_ref(), &missing);
+    let table = match &f.run.hints.build_script_hints {
+        Some(path) => recognize::Table::read(Path::new(path)).unwrap_or_else(|e| {
+            hints.push(format!(
+                "(the table of build-script failure hints is unreadable: {e})"
+            ));
+            recognize::Table::default()
+        }),
+        None => recognize::Table::default(),
+    };
     hints.extend(recognize::hints(
+        &table,
         &option_prefix(&f.run.package),
         parsed.map_or(&[][..], |p| &p.rerun_if_env_changed),
         &parsed.map(|p| unset_vars(p, f.env)).unwrap_or_default(),
@@ -759,7 +769,7 @@ fn tee_stderr(mut from: std::process::ChildStderr) -> std::thread::JoinHandle<Ve
     })
 }
 
-mod recognize;
+pub mod recognize;
 
 #[cfg(test)]
 mod tests;

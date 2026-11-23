@@ -137,6 +137,23 @@ let
   // specialArgs;
   cfg = eval.config;
 
+  # `sysDefaults.buildScriptHints` without the entries turned off, as the
+  # file every build-script run names.
+  buildScriptHints =
+    let
+      h = cfg.sysDefaults.buildScriptHints;
+      on = lib.filterAttrs (_: v: v != null);
+    in
+    builtins.toFile "build-script-hints.json" (
+      builtins.toJSON (
+        h
+        // {
+          recognizers = on h.recognizers;
+          tools = on h.tools;
+        }
+      )
+    );
+
   # Checks of the options against the project's files (lockfiles,
   # manifests), which the modules do not read. A module rather than a
   # list `guard` adds, so that `repo.config.assertions` holds them with
@@ -1172,6 +1189,7 @@ let
         name = "${wsName}-${triple}-${vName}";
         inherit delivery;
         shippedRemapScope = products.shippedRemapScope (stageSetArgs wsName triple);
+        inherit buildScriptHints;
         inherit (v) sourcePaths;
         traits = traitsOf wsName triple;
         packages = memberConfigs wsName triple vName;

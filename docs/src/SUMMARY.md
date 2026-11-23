@@ -43,6 +43,7 @@
 - [Plan format](reference/plan-format.md)
 - [Sentinel directives](reference/sentinels.md)
 - [The unit builder](reference/unit-builder.md)
+  - [Build-script failure hints](reference/build-script-hints.md)
 
 # Explanation
 

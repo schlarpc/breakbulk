@@ -2,6 +2,12 @@
 //! (pkg-config, cc, libclang, OpenSSL, protoc, CMake missing), and the
 //! summary of the `rerun-if-env-changed` variables the script left unset.
 //!
+//! What to recognize is data ([`Table`]): the repository's
+//! `sysDefaults.buildScriptHints`, which the run names as a file
+//! (`hints.buildScriptHints`), read only after a failure. So a change to
+//! the table rebuilds build-script runs, not compiles, and a user can add
+//! to it. Only the matching is code.
+//!
 //! A recognizer fires only with both the crate's own error text in the
 //! script's output and evidence that the crate ran (its fingerprint). It
 //! adds a hint quoting the line it matched. The variables it covers are
@@ -9,298 +15,139 @@
 //! line.
 //!
 //! Two general rules follow, for any crate: a line that says a program was
-//! not found and names a known tool ([`TOOLS`]) suggests the package that
-//! provides it, and a line that shows the script downloading
-//! ([`NETWORK`]) says the sandbox has no network.
-//!
-//! The tables are not user-extensible: recognizers run inside the unit
-//! builder, so a user table would be an input of every run unit.
+//! not found (`notFound`) and names a known tool (`tools`) suggests the
+//! package that provides it, and a line that shows the script downloading
+//! (`network`, `downloaders`) says the sandbox has no network.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
-/// One crate's failure. Patterns: `*` matches any text, `{}` any non-empty
-/// text, which the hint can name as `{0}` (at most one per pattern).
-/// Variable patterns also match after a `HOST_` or `TARGET_` prefix, as the
-/// crates read `HOST_PKG_CONFIG`, `TARGET_CC` and the like.
-struct Recognizer {
-    /// What the summary of covered variables names.
-    crate_name: &'static str,
-    /// Evidence that the crate ran: a declared variable or an output line.
-    fingerprint: &'static [Evidence],
+use serde::Deserialize;
+
+/// `sysDefaults.buildScriptHints`, as the Nix side writes it.
+///
+/// Patterns: `*` matches any text, `{}` any non-empty text, which a hint
+/// can name as `{0}` (at most one per pattern). Variable patterns also
+/// match after a `HOST_` or `TARGET_` prefix, as the crates read
+/// `HOST_PKG_CONFIG`, `TARGET_CC` and the like. In a hint, `{opt}` is the
+/// package's option prefix (`packages.<name>`).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Table {
+    /// By the crate name the summary of covered variables names.
+    #[serde(default)]
+    pub recognizers: BTreeMap<String, Recognizer>,
+    /// What a line says when a program was not found.
+    #[serde(default)]
+    pub not_found: Vec<String>,
+    /// Programs build scripts run, by the name they run, and the nixpkgs
+    /// attribute that provides each.
+    #[serde(default)]
+    pub tools: BTreeMap<String, String>,
+    /// The hint for a tool not found: `{tool}` and `{attr}` name it.
+    #[serde(default)]
+    pub tool_hint: String,
+    /// Lowercased text of lines that show a build script downloading or
+    /// failing to reach the network.
+    #[serde(default)]
+    pub network: Vec<String>,
+    /// Programs whose name, as a word outside a `cargo:` directive, shows
+    /// a download.
+    #[serde(default)]
+    pub downloaders: Vec<String>,
+    /// The hint for a download.
+    #[serde(default)]
+    pub network_hint: String,
+}
+
+/// One crate's failure.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recognizer {
+    /// What the entry is for; documentation only.
+    #[serde(default)]
+    pub about: Option<String>,
+    /// Evidence that the crate ran.
+    #[serde(default)]
+    pub fingerprint: Fingerprint,
     /// Error lines and their hints, in order; the first pattern a line
-    /// matches decides its hint. `{opt}` in a hint is the package's option
-    /// prefix (`packages.<name>`).
-    errors: &'static [(&'static str, &'static str)],
+    /// matches decides its hint.
+    #[serde(default)]
+    pub errors: Vec<ErrorRule>,
     /// The variables the crate declares, which are normally left unset.
-    covers: &'static [&'static str],
+    #[serde(default)]
+    pub covers: Vec<String>,
 }
 
-enum Evidence {
-    /// A `rerun-if-env-changed` variable, set or not.
-    Var(&'static str),
-    /// A line of stdout or stderr.
-    Line(&'static str),
+/// Either is enough.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Fingerprint {
+    /// `rerun-if-env-changed` variables, set or not.
+    #[serde(default)]
+    pub vars: Vec<String>,
+    /// Lines of stdout or stderr.
+    #[serde(default)]
+    pub lines: Vec<String>,
 }
 
-const PKG_CONFIG_VARS: &[&str] = &["PKG_CONFIG*", "*_NO_PKG_CONFIG"];
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ErrorRule {
+    pub pattern: String,
+    pub hint: String,
+}
 
-/// The variables cc-rs declares: its tools and flags (each also with a
-/// `_<target>` suffix), its switches, and those the compilers it runs read.
-const CC_VARS: &[&str] = &[
-    "CC",
-    "CC_*",
-    "CFLAGS",
-    "CFLAGS_*",
-    "CXX",
-    "CXX_*",
-    "CXXFLAGS",
-    "CXXFLAGS_*",
-    "CXXSTDLIB*",
-    "AR",
-    "AR_*",
-    "ARFLAGS",
-    "ARFLAGS_*",
-    "RANLIB",
-    "RANLIB_*",
-    "RANLIBFLAGS",
-    "RANLIBFLAGS_*",
-    "CRATE_CC_NO_DEFAULTS",
-    "CROSS_COMPILE",
-    "CPATH",
-    "C_INCLUDE_PATH",
-    "CPLUS_INCLUDE_PATH",
-    "OBJC_INCLUDE_PATH",
-    "OBJCPLUS_INCLUDE_PATH",
-    "COMPILER_PATH",
-    "GCC_EXEC_PREFIX",
-    "CCC_OVERRIDE_OPTIONS",
-    "CLANG_NO_DEFAULT_CONFIG",
-];
-
-const LIBCLANG_VARS: &[&str] = &[
-    "BINDGEN_EXTRA_CLANG_ARGS*",
-    "LIBCLANG_PATH",
-    "LIBCLANG_STATIC_PATH",
-    "LLVM_CONFIG_PATH",
-];
-
-/// openssl-sys reads each of its variables plain and with the target as a
-/// prefix (`X86_64_UNKNOWN_LINUX_GNU_OPENSSL_DIR`).
-const OPENSSL_VARS: &[&str] = &["*OPENSSL_*"];
-
-const RECOGNIZERS: &[Recognizer] = &[
-    // pkg-config-rs: `Error::Command` with `NotFound` (0.3.25 on), and its
-    // older `Failed to run` form; `Error::ProbeFailure`, and pkg-config's own
-    // message, which it quotes (and which older versions print alone).
-    Recognizer {
-        crate_name: "pkg-config",
-        fingerprint: &[
-            Evidence::Var("PKG_CONFIG*"),
-            Evidence::Var("*_NO_PKG_CONFIG"),
-        ],
-        errors: &[
-            (
-                "*The pkg-config command could not be found.*",
-                "`pkg-config` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.pkg-config ];`",
-            ),
-            (
-                "*Failed to run `*pkg-config*`: No such file or directory*",
-                "`pkg-config` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.pkg-config ];`",
-            ),
-            (
-                "*The system library `{}` required by crate*was not found*",
-                "pkg-config found no `{0}.pc`; add the package that provides `{0}` to `{opt}.inputs` (`inputs = p: [ p.<package> ];`)",
-            ),
-            (
-                "*Package {} was not found in the pkg-config search path*",
-                "pkg-config found no `{0}.pc`; add the package that provides `{0}` to `{opt}.inputs` (`inputs = p: [ p.<package> ];`)",
-            ),
-        ],
-        covers: PKG_CONFIG_VARS,
-    },
-    // cc-rs: `ToolNotFound`, as later versions word it and as 1.0 to 1.2 did.
-    Recognizer {
-        crate_name: "cc",
-        fingerprint: &[
-            Evidence::Var("CC*"),
-            Evidence::Var("CFLAGS*"),
-            Evidence::Var("CXX*"),
-        ],
-        errors: &[
-            (
-                "*failed to find tool \"{}\"*",
-                "the `cc` crate could not run `{0}`; add the package that provides it to `{opt}.nativeInputs`",
-            ),
-            (
-                "*Failed to find tool. Is `{}` installed?*",
-                "the `cc` crate could not run `{0}`; add the package that provides it to `{opt}.nativeInputs`",
-            ),
-        ],
-        covers: CC_VARS,
-    },
-    // bindgen's `Unable to find libclang` panic (with the `runtime` feature)
-    // and clang-sys's own search error, which it wraps; both print
-    // clang-sys's `llvm-config` warning first when it is missing. bindgen
-    // can panic before it declares any variable, and the error text is
-    // its own, so it is a fingerprint too.
-    Recognizer {
-        crate_name: "bindgen/clang-sys",
-        fingerprint: &[
-            Evidence::Var("BINDGEN_EXTRA_CLANG_ARGS*"),
-            Evidence::Var("LIBCLANG_PATH"),
-            Evidence::Line("*could not execute `llvm-config` one or more times*"),
-            Evidence::Line("*Unable to find libclang*"),
-            Evidence::Line("*couldn't find any valid shared libraries matching:*`LIBCLANG_PATH`*"),
-        ],
-        errors: &[
-            (
-                "*Unable to find libclang*",
-                "libclang is not in the sandbox; add `{opt}.nativeInputs = p: [ p.rustPlatform.bindgenHook ];`",
-            ),
-            (
-                "*couldn't find any valid shared libraries matching:*`LIBCLANG_PATH`*",
-                "libclang is not in the sandbox; add `{opt}.nativeInputs = p: [ p.rustPlatform.bindgenHook ];`",
-            ),
-        ],
-        covers: LIBCLANG_VARS,
-    },
-    // openssl-sys's `find_openssl_dir`, printed to stderr and as a warning.
-    Recognizer {
-        crate_name: "openssl-sys",
-        fingerprint: &[Evidence::Var("*OPENSSL_*")],
-        errors: &[(
-            "*Could not find directory of OpenSSL installation*",
-            "OpenSSL is not in the sandbox; add `{opt}.inputs = p: [ p.openssl ];` and `{opt}.nativeInputs = p: [ p.pkg-config ];`",
-        )],
-        covers: OPENSSL_VARS,
-    },
-    // prost-build declares no variables; its message links its own docs.
-    Recognizer {
-        crate_name: "prost-build",
-        fingerprint: &[Evidence::Line("*docs.rs/prost-build/#sourcing-protoc*")],
-        errors: &[(
-            "*Could not find `protoc`*",
-            "`protoc` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.protobuf ];`",
-        )],
-        covers: &[],
-    },
-    // cmake-rs prints each variable it reads as `NAME = value` and declares
-    // none; `run`'s `NotFound` and exit-127 messages.
-    Recognizer {
-        crate_name: "cmake",
-        fingerprint: &[Evidence::Line("*CMAKE* = *")],
-        errors: &[
-            (
-                "*is `cmake` not installed?*",
-                "`cmake` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.cmake ];`",
-            ),
-            (
-                "*is `{}` not installed?*",
-                "the `cmake` crate could not run `{0}`; add the package that provides it to `{opt}.nativeInputs`",
-            ),
-        ],
-        covers: &[],
-    },
-];
-
-/// What a line says when a program was not found: Rust's `io::Error`
-/// (`Debug` and `Display`), C's `strerror`, bash and dash.
-const NOT_FOUND: &[&str] = &[
-    "NotFound",
-    "os error 2",
-    "No such file or directory",
-    "command not found",
-    ": not found",
-];
-
-/// Programs build scripts run, by the name they run, and the nixpkgs
-/// attribute that provides each.
-const TOOLS: &[(&str, &str)] = &[
-    ("autoconf", "autoconf"),
-    ("autoreconf", "autoconf"),
-    ("automake", "automake"),
-    ("bison", "bison"),
-    ("clang", "clang"),
-    ("cmake", "cmake"),
-    ("curl", "curl"),
-    ("flex", "flex"),
-    ("gcc", "gcc"),
-    ("git", "git"),
-    ("glslc", "shaderc"),
-    ("go", "go"),
-    ("gperf", "gperf"),
-    ("libtool", "libtool"),
-    ("m4", "m4"),
-    ("make", "gnumake"),
-    ("meson", "meson"),
-    ("nasm", "nasm"),
-    ("ninja", "ninja"),
-    ("node", "nodejs"),
-    ("npm", "nodejs"),
-    ("patch", "patch"),
-    ("perl", "perl"),
-    ("pkg-config", "pkg-config"),
-    ("protoc", "protobuf"),
-    ("python", "python3"),
-    ("python3", "python3"),
-    ("swig", "swig"),
-    ("tar", "gnutar"),
-    ("unzip", "unzip"),
-    ("wget", "wget"),
-    ("yasm", "yasm"),
-];
-
-/// The tool of [`TOOLS`] a not-found line names, with its attribute: as a
-/// whole word, quoted, at the end of a path, or before a `:` (as shells
-/// name it). A bare word is not enough: "make sure", "go to".
-fn named_tool(line: &str) -> Option<(&'static str, &'static str)> {
-    if !NOT_FOUND.iter().any(|m| line.contains(m)) {
-        return None;
+impl Table {
+    /// The table in the file `path`.
+    pub fn read(path: &Path) -> Result<Table, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
-    let name_char = |c: char| c.is_ascii_alphanumeric() || "-_.+".contains(c);
-    TOOLS.iter().copied().find(|(tool, _)| {
-        line.match_indices(tool).any(|(i, _)| {
-            let before = line[..i].chars().next_back();
-            let after = line[i + tool.len()..].chars().next();
-            !before.is_some_and(name_char)
-                && !after.is_some_and(name_char)
-                && (before.is_some_and(|c| "`'\"/".contains(c))
-                    || after.is_some_and(|c| "`'\":".contains(c)))
+
+    /// The tool of [`Table::tools`] a not-found line names, with its
+    /// attribute: as a whole word, quoted, at the end of a path, or before
+    /// a `:` (as shells name it). A bare word is not enough: "make sure",
+    /// "go to".
+    fn named_tool(&self, line: &str) -> Option<(&str, &str)> {
+        if !self.not_found.iter().any(|m| line.contains(m.as_str())) {
+            return None;
+        }
+        let name_char = |c: char| c.is_ascii_alphanumeric() || "-_.+".contains(c);
+        self.tools
+            .iter()
+            .find(|(tool, _)| {
+                line.match_indices(tool.as_str()).any(|(i, _)| {
+                    let before = line[..i].chars().next_back();
+                    let after = line[i + tool.len()..].chars().next();
+                    !before.is_some_and(name_char)
+                        && !after.is_some_and(name_char)
+                        && (before.is_some_and(|c| "`'\"/".contains(c))
+                            || after.is_some_and(|c| "`'\":".contains(c)))
+                })
+            })
+            .map(|(t, a)| (t.as_str(), a.as_str()))
+    }
+
+    /// Whether `line` shows the script downloading: [`Table::network`], or
+    /// a downloader as a word outside a `cargo:` directive
+    /// (`rustc-link-lib=curl`).
+    fn downloads(&self, line: &str) -> bool {
+        let lower = line.to_lowercase();
+        if self.network.iter().any(|n| lower.contains(n.as_str())) {
+            return true;
+        }
+        if lower.starts_with("cargo:") {
+            return false;
+        }
+        let name_char = |c: char| c.is_ascii_alphanumeric() || "-_".contains(c);
+        self.downloaders.iter().any(|t| {
+            lower.match_indices(t.as_str()).any(|(i, _)| {
+                !lower[..i].chars().next_back().is_some_and(name_char)
+                    && !lower[i + t.len()..].chars().next().is_some_and(name_char)
+            })
         })
-    })
-}
-
-/// Lowercased text of lines that show a build script downloading or
-/// failing to reach the network.
-const NETWORK: &[&str] = &[
-    "downloading http",
-    "failed to download",
-    "could not resolve host",
-    "temporary failure in name resolution",
-    "name or service not known",
-    "failed to lookup address information",
-    "dns error",
-    "network is unreachable",
-    "urlopen error",
-];
-
-/// Whether `line` shows the script downloading: [`NETWORK`], or `curl` or
-/// `wget` as a word outside a `cargo:` directive (`rustc-link-lib=curl`).
-fn downloads(line: &str) -> bool {
-    let lower = line.to_lowercase();
-    if NETWORK.iter().any(|n| lower.contains(n)) {
-        return true;
     }
-    if lower.starts_with("cargo:") {
-        return false;
-    }
-    let name_char = |c: char| c.is_ascii_alphanumeric() || "-_".contains(c);
-    ["curl", "wget"].iter().any(|t| {
-        lower.match_indices(t).any(|(i, _)| {
-            !lower[..i].chars().next_back().is_some_and(name_char)
-                && !lower[i + t.len()..].chars().next().is_some_and(name_char)
-        })
-    })
 }
 
 /// Matches `pattern` against `text`, returning the `{}` capture (empty
@@ -356,6 +203,7 @@ fn quote(line: &str) -> String {
 /// `declared` are the run's `rerun-if-env-changed` variables, `lines` its
 /// stdout and stderr, and `opt` the package's option prefix.
 pub fn hints<'a>(
+    table: &Table,
     opt: &str,
     declared: &[String],
     unset: &[&str],
@@ -373,11 +221,15 @@ pub fn hints<'a>(
             ));
         }
     };
-    for r in RECOGNIZERS {
-        let ran = r.fingerprint.iter().any(|e| match e {
-            Evidence::Var(p) => declared.iter().any(|v| var_matches(p, v)),
-            Evidence::Line(p) => lines.clone().any(|l| glob(p, l.trim()).is_some()),
-        });
+    for (crate_name, r) in &table.recognizers {
+        let f = &r.fingerprint;
+        let ran = f
+            .vars
+            .iter()
+            .any(|p| declared.iter().any(|v| var_matches(p, v)))
+            || f.lines
+                .iter()
+                .any(|p| lines.clone().any(|l| glob(p, l.trim()).is_some()));
         if !ran {
             continue;
         }
@@ -386,7 +238,7 @@ pub fn hints<'a>(
             let Some((hint, cap)) = r
                 .errors
                 .iter()
-                .find_map(|(p, h)| glob(p, line).map(|c| (h, c)))
+                .find_map(|e| glob(&e.pattern, line).map(|c| (&e.hint, c)))
             else {
                 continue;
             };
@@ -411,7 +263,7 @@ pub fn hints<'a>(
             // its first: listing all of them reads as a list of the
             // variables, longer than the count.
             let first = |v: &&str| r.covers.iter().find(|p| var_matches(p, v));
-            let matched: BTreeSet<&&str> = mine.iter().filter_map(first).collect();
+            let matched: BTreeSet<&String> = mine.iter().filter_map(first).collect();
             let patterns = r
                 .covers
                 .iter()
@@ -426,9 +278,8 @@ pub fn hints<'a>(
                 ("s", "they are")
             };
             out.push(format!(
-                "({n} unset variable{s} of the `{}` crate omitted, matching {patterns}; \
-                 {they} normally left unset)",
-                r.crate_name
+                "({n} unset variable{s} of the `{crate_name}` crate omitted, matching {patterns}; \
+                 {they} normally left unset)"
             ));
             covered.extend(mine);
         }
@@ -437,26 +288,20 @@ pub fn hints<'a>(
         if recognized.contains(line) {
             continue;
         }
-        if let Some((tool, attr)) = named_tool(line) {
+        if let Some((tool, attr)) = table.named_tool(line) {
             push(
                 &mut out,
-                format!(
-                    "`{tool}` is not in the sandbox; add it with `{opt}.nativeInputs = p: [ p.{attr} ];`"
-                ),
+                table
+                    .tool_hint
+                    .replace("{tool}", tool)
+                    .replace("{attr}", attr)
+                    .replace("{opt}", opt),
                 line,
             );
         }
     }
-    if let Some(line) = lines.clone().map(str::trim).find(|l| downloads(l)) {
-        push(
-            &mut out,
-            format!(
-                "the build script seems to download; the sandbox has no network. If the crate \
-                 can use a local copy, pass it in, usually through a variable it reads \
-                 (`{opt}.env.<NAME>`, a `fetchurl` path)"
-            ),
-            line,
-        );
+    if let Some(line) = lines.clone().map(str::trim).find(|l| table.downloads(l)) {
+        push(&mut out, table.network_hint.replace("{opt}", opt), line);
     }
     let rest: Vec<&str> = unset
         .iter()

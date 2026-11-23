@@ -2,14 +2,17 @@
 # pages, committed so a checkout, the flake input and GitHub have them
 # too: the module options pages (docs/src/reference/options/), from
 # `optionsCommonMark` (a repository's `optionsDoc.optionsCommonMark`,
-# split by options-pages.py), and the stage helpers page
+# split by options-pages.py), the stage helpers page
 # (docs/src/reference/stage-helpers.md), from the helpers' declarations
-# (stage-helpers.nix).
+# (stage-helpers.nix), and the build-script failure hints page
+# (docs/src/reference/build-script-hints.md), from the curated table
+# (build-script-hints.nix, lib/build-script-hints.json).
 #
 #   site            the built site (packages.<system>.docs-site)
 #   links           a check that every internal link and fragment resolves
 #   optionsPages    the options pages as the modules generate them
 #   stageHelpersPage  the stage helpers page as the helpers generate it
+#   buildScriptHintsPage  the failure hints page as the table generates it
 #   optionsFresh    a check that the committed pages are the generated ones
 #   assumptionsSummary  a check that assumptions.md's summary table and
 #                   status line agree with its entries
@@ -33,6 +36,7 @@ let
   };
   optionsDir = "docs/src/reference/options";
   helpersFile = "docs/src/reference/stage-helpers.md";
+  hintsFile = "docs/src/reference/build-script-hints.md";
 in
 rec {
   site = pkgs.runCommand "breakbulk-docs-site" { nativeBuildInputs = [ pkgs.mdbook ]; } ''
@@ -70,6 +74,13 @@ rec {
       cp ${page} $out
     '';
 
+  buildScriptHintsPage = pkgs.writeText "build-script-hints.md" (
+    import ./build-script-hints.nix {
+      inherit lib;
+      table = lib.importJSON ../lib/build-script-hints.json;
+    }
+  );
+
   optionsFresh = pkgs.runCommand "docs-options-fresh" { nativeBuildInputs = [ pkgs.diffutils ]; } ''
     status=0
     if ! diff -ru ${./src/reference/options} ${optionsPages}; then
@@ -78,6 +89,10 @@ rec {
     fi
     if ! diff -u ${./src/reference/stage-helpers.md} ${stageHelpersPage}; then
       echo "${helpersFile} is not what the stage helpers generate; run: nix run .#update-docs-options" >&2
+      status=1
+    fi
+    if ! diff -u ${./src/reference/build-script-hints.md} ${buildScriptHintsPage}; then
+      echo "${hintsFile} is not what lib/build-script-hints.json generates; run: nix run .#update-docs-options" >&2
       status=1
     fi
     [ $status = 0 ]
@@ -97,6 +112,9 @@ rec {
     cp ${stageHelpersPage} ${helpersFile}
     chmod u+w ${helpersFile}
     echo "wrote ${helpersFile}"
+    cp ${buildScriptHintsPage} ${hintsFile}
+    chmod u+w ${hintsFile}
+    echo "wrote ${hintsFile}"
   '';
 
   assumptionsSummary =

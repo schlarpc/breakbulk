@@ -116,6 +116,11 @@ pub struct Toolchains {
     /// (`sources.wrapperConfig`; `variants.<v>.wrapperConfig.dirVar`).
     #[serde(default)]
     pub wrapper_config_var: Option<String>,
+    /// Whether the input `build-script-hints` holds the table of
+    /// build-script failure hints, which every build-script run names
+    /// (`Hints::build_script_hints`).
+    #[serde(default)]
+    pub build_script_hints: bool,
     /// What the toolchain can do (the Nix library's `toolchainFacts`):
     /// whether rustc takes `--remap-path-scope`. Required, so a caller
     /// cannot silently get another toolchain's behaviour.

@@ -464,6 +464,237 @@ attribute set of (null or module)
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
+## `sysDefaults.buildScriptHints`
+
+What a failed build-script run is searched for, to add hints
+after its output: failures of common crates when a tool or
+library is missing from the sandbox (` recognizers `), a program
+not found that a known package provides (` notFound `, ` tools `),
+and a download (` network `, ` downloaders `)\. The hints never
+change the result\. Patterns: ` * ` matches any text and ` {} ` any
+non-empty text, which a hint names as ` {0} `; variable patterns
+also match after a ` HOST_ ` or ` TARGET_ ` prefix\.
+
+The table reaches every build-script run as one file, read only
+after a failure: changing it rebuilds build-script runs, not
+compiles\. The curated entries are defined at ` mkDefault `
+priority, so a plain definition replaces one: a recognizer or
+tool set to ` null ` is turned off, and a list or hint replaces
+the curated one\. They are listed in
+[Build-script failure hints](\.\./build-script-hints\.md)\.
+
+*Type:*
+submodule
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.downloaders`
+
+Programs whose name, as a word outside a ` cargo: ` directive, shows a download\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.network`
+
+Lowercase text of a line that shows a build script downloading or failing to reach the network\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.networkHint`
+
+The hint for a download; ` {opt} ` is the package’s option prefix\.
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.notFound`
+
+Text of a line that says a program was not found\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers`
+
+Failures of common crates, by the crate name the hints name\.
+
+*Type:*
+attribute set of (null or (submodule))
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.about`
+
+What the entry recognizes, for its readers; not used\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.covers`
+
+Variable patterns of the variables the crate declares and normally leaves unset: counted, not listed, after its failure\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.errors`
+
+Error lines and their hints; the first pattern a line matches decides its hint\.
+
+*Type:*
+list of (submodule)
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.errors.*.hint`
+
+The hint; ` {opt} ` is the package’s option prefix (` packages.<name> `)\.
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.errors.*.pattern`
+
+A line pattern; ` {} ` captures text the hint names as ` {0} `\.
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.fingerprint.lines`
+
+Line patterns: the crate ran when the script printed a matching line\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.recognizers.<name>.fingerprint.vars`
+
+Variable patterns: the crate ran when the script declared a matching ` rerun-if-env-changed ` variable\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.toolHint`
+
+The hint for a tool not found: ` {tool} `, ` {attr} ` and ` {opt} ` name the tool, its attribute and the package’s option prefix\.
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `sysDefaults.buildScriptHints.tools`
+
+Programs build scripts run, by the name they run, and the attribute of the package set that provides each\.
+
+*Type:*
+attribute set of (null or string)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
 ## `sysDefaults.dependents`
 
 Default settings for the packages that depend on a crate, by the
