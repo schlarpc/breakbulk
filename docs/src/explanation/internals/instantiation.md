@@ -50,7 +50,11 @@ The cost is one small derivation per root more than linking the unit's output di
 
 ## IFD mode
 
-The instantiate derivation runs `breakbulk-instantiate` and writes `units.json`, mapping each unit to its complete derivation attributes, and with `--outer` the root shape: the wrappers by output name, and the stubs, doctests and docs they link (`nodes`, which a reference names as it names a unit). The Nix side imports it and applies `derivation` to each entry. Nix computes output paths. A unit's attribute names do not depend on its substituted values: `passAsFile` is always there, naming `BREAKBULK_UNIT` when that is long and empty otherwise. So selecting one unit's output does not evaluate the values of any unit, and a package's `env` can name a product of the same plan.
+The instantiate derivation runs `breakbulk-instantiate` and writes `units.json`, mapping each unit to its complete derivation attributes, and with `--outer` the root shape: the wrappers by output name, and the stubs, doctests and docs they link (`nodes`, which a reference names as it names a unit). The Nix side imports it and applies `derivation` to each entry. Nix computes output paths. A unit's attribute names do not depend on its substituted values: `passAsFile` is always there, naming `BREAKBULK_UNIT` when that is long and empty otherwise. So selecting one unit's output does not evaluate the values of any unit.
+
+`units.json` is made from the names of the settings only, and each unit takes its values afterwards, so nothing in that path stops a package's settings from naming a product of the plan that builds the package. Dynamic-derivation mode cannot build that ([below](#dynamic-derivation-mode)), so IFD mode rejects it when a unit takes the value (`samePlanCheck` in `lib/instantiate.nix`). It reads the string context of the value (`builtins.getContext`): a package's `env` value, the values an env capture is made from (`inputs`, `nativeInputs`), and the values a `sourceOverlay` view links. The capture and the view carry those values as `breakbulkMadeFrom`, because their own context names only the capture or the view. A context that names an output of one of the plan's roots, products or stages is an evaluation error that points at `breakbulk.variants.tools`.
+
+The check must not force what it guards against. The products are made from the roots, and the roots from the units, so making the plan's derivations from the units being checked would force this same check again. `lib/instantiate.nix` therefore substitutes `units.json` twice: once with the checked values, which the result gives, and once with the unchecked ones (`raw`), which give the same derivations, and the check compares with the unchecked roots and the products mkRepository makes from them (`planProducts`). Names are known without making a derivation: the check reads the names of the plan's roots, products and stages (which evaluates the products, but makes none of them), and makes a derivation of the plan only when the value names a derivation of the same name, as the tools variant's `tool` and the default variant's are. A plan derivation whose own units take the value cannot be named at all: making the value is already an infinite recursion. The instantiate derivation is unchanged: `units.json` still depends only on the plan and the names, never on an input's `.drv`.
 
 ## Dynamic-derivation mode
 
@@ -66,7 +70,7 @@ Its builder is `breakbulk-drv`, a separate binary (`crates/breakbulk-drv/`), so 
 
 The outer derivation's inputs are the plan, `breakbulk-drv`, the files above, and every `.drv` that a value's context names, as a plain path: the builder needs those `.drv` files to hash the units, but nothing is built before it runs except the plan. It prints one `breakbulk-drv: wrote <unit> <.drv path>` line per derivation; the dynamic-mode test compares them with IFD mode's.
 
-The outer derivation takes every input of its plan, the settings of every package the plan can contain among them. So a package's settings cannot name a product of the same plan: the outer derivation would depend on its own output. Such a product comes from another variant (`breakbulk.variants.tools`, [Products as inputs](../configuration.md#products-as-inputs)). IFD mode does not detect such a product: `units.json` is made from the names of the settings only, and each unit takes its values afterwards, so the build works there and is an infinite recursion in dynamic-derivation mode (#152).
+The outer derivation takes every input of its plan, the settings of every package the plan can contain among them. So a package's settings cannot name a product of the same plan: the outer derivation would depend on its own output. Such a product comes from another variant (`breakbulk.variants.tools`, [Products as inputs](../configuration.md#products-as-inputs)). Here it is an infinite recursion; IFD mode rejects it with an error ([IFD mode](#ifd-mode)).
 
 On the evaluation side, each wrapper of the root shape is `builtins.outputOf <outer>."<output>".outPath "out"`. Unit derivations (`ws.units`) are not available; reading them is an error. Check variants, which have no roots, build their plans through `units.drv` (`ws.allUnits.<kind>`), as in IFD mode. `explainSharing` reads the units through IFD mode (`ifdUnits`: importing `units.json`, which builds `breakbulk-instantiate` and the plans): they are the same derivations, except downstream of an embedded product, where it describes IFD mode's.
 
@@ -87,12 +91,12 @@ say. Both check the same things, at the same point:
   of a derivation (a `drvPath` string) is an error when a unit takes it
   (`checkInput` in `lib/instantiate.nix`), because the outer derivation
   cannot pass such a value on.
+- **Products of the same plan**: a package's settings that name a
+  root, product or stage of the plan that builds the package fail to
+  evaluate: an infinite recursion in dynamic-derivation mode, an error
+  naming `breakbulk.variants.tools` in IFD mode (`samePlanCheck`).
 - **Checks**: `repo.checks` has the same members; a product whose roots
   Cargo all skipped is in both, and holds the no-binaries marker.
-
-One difference is left: a package's settings that name a product of the
-plan that builds the package are an infinite recursion in
-dynamic-derivation mode and are not detected in IFD mode (#152).
 
 ## Mode selection
 

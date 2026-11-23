@@ -512,8 +512,9 @@ does not depend on `app`'s `env`.
 
 A product of the plan that builds the package cannot be used: that
 plan's units depend on the package's settings, so the plan would depend
-on itself: an infinite recursion in dynamic-derivation mode, which IFD
-mode does not detect. A product of the same workspace and target comes from
+on itself: an infinite recursion in dynamic-derivation mode, and an
+evaluation error in IFD mode when a unit takes the value. A product of
+the same workspace and target comes from
 another variant instead, and `breakbulk.variants.tools` makes one that
 plans only the packages other builds use, on the build machine's triple
 ([Use a workspace binary in another package's build](../how-to/workspace-tools.md)).

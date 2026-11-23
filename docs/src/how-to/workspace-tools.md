@@ -53,7 +53,8 @@ at once.
 `repo.workspaces.main.packages.codegen` comes from the plan that also
 builds `app`. That plan's units depend on `app`'s settings, so a setting
 that names a product of the same plan makes the plan depend on itself:
-an infinite recursion in dynamic-derivation mode. The tools variant is
+an infinite recursion in dynamic-derivation mode, and in IFD mode an
+error that names the setting and the product and points here. The tools variant is
 another plan, which does not take `app`'s settings (it selects only
 `codegen` and what it depends on).
 
