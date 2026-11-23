@@ -97,3 +97,27 @@ targets.x86_64-unknown-linux-gnu.preset = { lib, ... }: {
   rustflags = [ "-C" "target-cpu=x86-64-v3" ];
 };
 ```
+
+## Add a linker kind
+
+A preset may add to the target's
+[`linkerKinds`](../reference/options/targets.md#targetsnamelinkerkinds)
+and pick its own kind:
+
+```nix
+{ lib, breakbulk, ... }: {
+  linkerKinds.vendor-ld = {
+    on = traits: traits.isLinux;
+    what = "Linux";
+    build = { packageSet, ... }: breakbulk.presets.ccDriverLinker {
+      inherit packageSet;
+      flag = "-fuse-ld=${vendorLd}/bin/ld.vendor";
+      name = "cc-vendor";
+    };
+  };
+  linkerKind = lib.mkDefault "vendor-ld";
+}
+```
+
+A built-in preset builds its linker with the target's `linkerKind`, so
+this kind also works with `presets.linux`.

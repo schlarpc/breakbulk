@@ -30,6 +30,7 @@
   traits,
   crtStatic ? true,
   linkerKind ? null,
+  kinds,
   facts,
   lld ? null,
   wine ? pkgs.wineWow64Packages.minimal,
@@ -53,6 +54,7 @@ let
       ;
     llvm = facts.llvmPackages;
     kind = linkerKind;
+    inherit kinds;
     packageSet = tp;
   };
 in
@@ -85,6 +87,7 @@ in
       facts
       triple
       linkerKind
+      kinds
       ;
   };
 }

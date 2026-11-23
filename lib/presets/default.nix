@@ -71,6 +71,7 @@ let
               // {
                 inherit (args) pkgs config toolchain;
                 inherit (args.toolchain) facts;
+                kinds = args.config.linkerKinds;
                 triple = args.name;
                 inherit (args.config) traits linkerKind;
               }
@@ -196,6 +197,7 @@ let
       facts,
       triple ? null,
       linkerKind ? null,
+      kinds,
     }:
     let
       host = nativeTriple pkgs.buildPackages;
@@ -206,6 +208,7 @@ let
         triple = host;
         inherit facts;
         kind = if triple == host then linkerKind else null;
+        inherit kinds;
       });
       env = { };
     };
@@ -219,6 +222,7 @@ let
       triple,
       traits ? targetTraits.resolve { inherit triple; },
       linkerKind ? null,
+      kinds,
       facts,
       ...
     }:
@@ -238,6 +242,7 @@ let
           llvm
           ;
         kind = linkerKind;
+        inherit kinds;
       });
       # Unwrapped: a wrapped compiler can silently emit host objects.
       cc = mkDefault "${clang}/bin/clang";
@@ -250,6 +255,7 @@ let
           facts
           triple
           linkerKind
+          kinds
           ;
       };
     };
@@ -262,6 +268,7 @@ let
       triple,
       traits,
       linkerKind ? null,
+      kinds,
       crossLanguageLto ? false,
       nativeBuilder ? false,
       facts,
@@ -300,6 +307,7 @@ let
           llvm
           ;
         kind = linkerKind;
+        inherit kinds;
         lto = crossLanguageLto;
         packageSet = tp;
       });
@@ -338,6 +346,7 @@ let
           facts
           triple
           linkerKind
+          kinds
           ;
       };
     };
@@ -419,6 +428,7 @@ let
         # rejects that pair.
         relocationModel ? null,
         linkerKind ? null,
+        kinds,
         facts,
         ...
       }:
@@ -438,6 +448,7 @@ let
               facts
               ;
             kind = linkerKind;
+            inherit kinds;
             staticNonPie = relocationModel == "static";
             llvm = facts.llvmPackages;
           });
@@ -463,6 +474,7 @@ let
               facts
               triple
               linkerKind
+              kinds
               ;
           };
         };
@@ -483,6 +495,7 @@ let
         crtStatic ? false,
         extraSdks ? [ ],
         linkerKind ? null,
+        kinds,
         facts,
         wine ? pkgs.wineWow64Packages.minimal,
         ...
@@ -518,6 +531,7 @@ let
             llvm
             ;
           kind = linkerKind;
+          inherit kinds;
         });
         cc = mkDefault "${clang}/bin/clang-cl";
         cxx = mkDefault "${clang}/bin/clang-cl";
@@ -556,6 +570,7 @@ let
             facts
             triple
             linkerKind
+            kinds
             ;
         };
       };
@@ -571,6 +586,7 @@ let
         triple,
         traits,
         linkerKind ? null,
+        kinds,
         facts,
         ...
       }:
@@ -584,6 +600,7 @@ let
             facts
             ;
           kind = linkerKind;
+          inherit kinds;
           llvm = facts.llvmPackages;
         });
         runner = mkDefault null;
@@ -594,6 +611,7 @@ let
             facts
             triple
             linkerKind
+            kinds
             ;
         };
       };
@@ -738,9 +756,10 @@ in
       linkerFeatures
       rustcFacts
       lldLinker
+      ccDriverLinker
+      # The linker kinds `targets.<triple>.linkerKinds` starts from.
+      builtinKinds
       ;
-    # The kinds `targets.<triple>.linkerKind` may name.
-    linkerKindNames = linkers.kindNames;
     inherit (runnerChoice) runnerKind;
   };
 
@@ -813,6 +832,11 @@ in
     # UEFI applications (`*-unknown-uefi`): the default preset of every UEFI
     # triple, which only sets the linker.
     uefi = presetModule impl.uefi;
+
+    # Not a preset: a C compiler driver as a linker, for the `build` of a
+    # linker kind a user adds (`targets.<triple>.linkerKinds`), as the
+    # cc, lld and mold kinds are built (./linker.nix).
+    inherit (linkers) ccDriverLinker;
 
     # wasm components: `wasm32-wasip2` links them directly with rustc's
     # wasm-component-ld (./wasip2.nix; `withC`, `wasiSdk`);

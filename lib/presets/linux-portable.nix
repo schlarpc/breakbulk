@@ -60,6 +60,7 @@
   # e.g. to change how a library is configured.
   overlays ? [ ],
   linkerKind ? null,
+  kinds,
   facts,
   ...
 }@args:
@@ -316,11 +317,15 @@ else
   {
     packageSet = mkDefault packageSet;
     # ./linker.nix, kind zig: zig cc, minus the `-fuse-ld=lld -B…/gcc-ld`
-    # rustc adds on x86_64; zig links with its own lld.
+    # rustc adds on x86_64; zig links with its own lld. Another kind
+    # would link against the build machine's glibc, not `glibc`.
     linker = mkDefault (chooseLinker {
-      inherit pkgs triple;
-      kind = linkerKind;
-      flavor = "zig";
+      inherit pkgs triple kinds;
+      kind =
+        if linkerKind == null || linkerKind == "zig" then
+          "zig"
+        else
+          throw "breakbulk.presets.linuxPortable: `linkerKind = \"${linkerKind}\"` cannot link for `${triple}`: linuxPortable links with `zig cc` against its old glibc";
       zig = {
         cc = zigCc;
         target = zigTarget;
@@ -372,6 +377,7 @@ else
         facts
         triple
         linkerKind
+        kinds
         ;
     };
   }

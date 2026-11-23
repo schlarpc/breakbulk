@@ -125,7 +125,35 @@ targets.x86_64-unknown-linux-gnu.linkerKind = "mold";
 | `rust-lld` | macOS on a Linux machine, with a rust-lang toolchain (rustup, rust-overlay, fenix) | the toolchain's own `rust-lld` as `ld64.lld`, whose LLVM is rustc's |
 | `ld64.lld` | macOS on a Linux machine, with a toolchain that ships no `rust-lld` (nixpkgs' rustc) | `ld64.lld` from `llvmPackages_<major>` |
 
-`linuxPortable` links with `zig cc`; it takes no other kind.
+`linuxPortable` links with `zig cc` (the `zig` kind); it takes no other kind.
+
+### Your own linker kind
+
+[`targets.<triple>.linkerKinds`](options/targets.md#targetsnamelinkerkinds)
+holds the kinds `linkerKind` may name, and takes more. A linker that a C
+compiler driver runs with a flag is built with
+`breakbulk.lib.presets.ccDriverLinker`, as the `cc`, `lld` and `mold`
+kinds are, so rustc's own `-fuse-ld=lld` never bypasses nixpkgs' linker
+wrapper:
+
+```nix
+targets.x86_64-unknown-linux-gnu = {
+  linkerKinds.wild = {
+    on = traits: traits.isLinux;
+    what = "Linux";
+    build = { packageSet, ... }: breakbulk.lib.presets.ccDriverLinker {
+      inherit packageSet;
+      cc = (packageSet.stdenvAdapters.useWildLinker packageSet.stdenv).cc;
+      flag = "-fuse-ld=wild";
+    };
+  };
+  linkerKind = "wild";
+};
+```
+
+A kind may also say when it cannot link (`incompatible`) and whether it
+reads LLVM bitcode (`bitcode`); a preset may add kinds to the targets it
+sets up.
 
 rustc links with its bundled lld where its build turns that on: the
 rust-lang builds (rustup, rust-overlay, fenix) for an x86\_64 Linux build

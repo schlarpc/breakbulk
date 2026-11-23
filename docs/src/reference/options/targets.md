@@ -409,10 +409,10 @@ machine, ` rust-lld ` (the toolchain’s own) or ` ld64.lld ` (nixpkgs’,
 for a toolchain without one)\. A kind that cannot link for this
 target, or with the preset’s other settings (` mold ` with
 ` crossLanguageLto `), is an evaluation error\. The preset reads it,
-so it needs a ` preset `\.
+so it needs a ` preset `\. A name in ` linkerKinds `\.
 
 *Type:*
-null or one of “cc”, “clang-lld”, “ld64\.lld”, “lld”, “lld-link”, “mingw-lld”, “mold”, “rust-lld”, “wasm-component-ld”, “wasm-ld”
+null or string
 
 *Default:*
 
@@ -424,6 +424,141 @@ null
 
 ```nix
 "mold"
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds`
+
+The linker kinds ` linkerKind ` may name: breakbulk’s own
+(` breakbulk.presetHelpers.builtinKinds `: ` cc `, ` lld `, ` mold `,
+` clang-lld `, ` zig `, ` lld-link `, ` wasm-ld `, ` wasm-component-ld `,
+` mingw-lld `, ` rust-lld `, ` ld64.lld `), whose fields are set with
+` lib.mkDefault `, and any added here or by a preset\. A kind is
+chosen only by name; the default kind for a target is
+breakbulk’s rule (` breakbulk.presetHelpers.linkerKind `)\.
+
+*Type:*
+attribute set of (submodule)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  wild = {
+    on = traits: traits.isLinux;
+    what = "Linux";
+    build = { packageSet, ... }: breakbulk.presets.ccDriverLinker {
+      inherit packageSet;
+      cc = (packageSet.stdenvAdapters.useWildLinker packageSet.stdenv).cc;
+      flag = "-fuse-ld=wild";
+    };
+  };
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds.<name>.bitcode`
+
+Whether the linker reads rustc’s LLVM bitcode, as ` crossLanguageLto ` (` -C linker-plugin-lto `) needs\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds.<name>.build`
+
+` args: path `: the linker\. ` args ` is ` { pkgs; packageSet; llvm; lld; zig; triple; traits; } `: mkRepository’s
+` pkgs `, the package set whose C toolchain drives the link,
+nixpkgs’ LLVM packages of rustc’s major release (the
+toolchain’s facts), an ` lld ` package a preset passes, or
+null, and linuxPortable’s ` zig cc `\. A C compiler driver
+with a flag is ` breakbulk.presets.ccDriverLinker { packageSet; flag; } `\.
+
+*Type:*
+raw value
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds.<name>.incompatible`
+
+` ctx: null or message `: why the kind cannot link in this
+context, which is an evaluation error naming the kind\.
+` ctx ` is ` { triple; traits; lto; staticNonPie; zig; } `
+(` staticNonPie `: the link makes non-PIE static glibc
+executables; ` zig `: linuxPortable’s ` zig cc `, or null)\.
+
+*Type:*
+raw value
+
+*Default:*
+
+```nix
+_: null
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds.<name>.lld`
+
+` args: { name; version; patches; } `, the LLD the kind links
+with, for the macOS SDK’s linker requirements (` args `:
+` { rustc; llvm; } `), or null for a kind that is not an
+Apple linker\.
+
+*Type:*
+null or raw value
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds.<name>.on`
+
+` traits: bool `: whether the kind links for a target with these [traits](\.\./\.\./explanation/internals/toolchains\.md\#target-traits)\.
+
+*Type:*
+raw value
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
+## `targets.<name>.linkerKinds.<name>.what`
+
+The targets ` on ` accepts, as messages name them (` "Linux" `)\.
+
+*Type:*
+string
+
+*Default:*
+
+```nix
+"some"
 ```
 
 *Declared by:*

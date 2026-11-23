@@ -56,6 +56,7 @@
   deploymentTarget ? null,
   nativeBuilder ? false,
   linkerKind ? null,
+  kinds,
   toolchain,
   facts,
   ...
@@ -92,6 +93,7 @@ let
   kind = linkers.linkerKind {
     inherit triple traits;
     kind = linkerKind;
+    inherit kinds;
     rustc = rustcFacts;
   };
 
@@ -100,7 +102,7 @@ let
   # never a switch to the other linker kind, whose LLVM may not match
   # rustc's.
   lld = linkers.lldOf {
-    inherit kind llvm;
+    inherit kind kinds llvm;
     rustc = rustcFacts;
   };
   missing = lib.filter (r: !(linkers.lldHas lld r.feature)) (appleSdk.requirementsOf version);
@@ -128,6 +130,7 @@ let
       llvm
       ;
     kind = linkerKind;
+    inherit kinds;
   };
 
   # dsymutil for rustc's `.dSYM` (split-debuginfo=packed); rust-objcopy,
@@ -208,6 +211,7 @@ guard (traits.isApple && traits.os == "macos")
               facts
               triple
               linkerKind
+              kinds
               ;
           };
         }

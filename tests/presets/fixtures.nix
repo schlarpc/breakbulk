@@ -1493,7 +1493,6 @@ let
             }).bundledLld
             && fails (k native { })
             && k native { lto = true; } == "clang-lld"
-            && k native { flavor = "zig"; } == "zig"
             && k "x86_64-pc-windows-msvc" { } == "lld-link"
             && k "aarch64-pc-windows-msvc" { lto = true; } == "lld-link"
             && k "x86_64-pc-windows-gnu" { } == "mingw-lld"
@@ -1502,7 +1501,6 @@ let
             && k "wasm32-wasip1" { } == "wasm-ld"
             && k "wasm32-wasip2" { } == "wasm-component-ld"
             && fails (k "aarch64-apple-darwin" { })
-            && fails (k native { flavor = "gold"; })
           );
         # `kind` (`targets.<triple>.linkerKind`) replaces the default, and
         # an impossible combination fails, naming both.
@@ -1538,12 +1536,13 @@ let
               kind = "lld";
               lto = true;
             } == "lld"
-          && fails (
+          # zig is linuxPortable's, and linuxPortable links with zig only.
+          &&
             k native {
-              kind = "mold";
-              flavor = "zig";
-            }
-          )
+              kind = "zig";
+              zig = { };
+            } == "zig"
+          && fails (mold native (presets.linuxPortable { })).linker
           && fails (
             k native {
               kind = "mold";
@@ -1556,6 +1555,38 @@ let
               staticNonPie = true;
             } == "lld"
           && lib.hasSuffix "cc-mold" (discard (mold native presets.linux).linker)
+          # A kind of the user's: an open table, with the C-driver
+          # primitive the cc, lld and mold kinds are built from.
+          && lib.hasSuffix "cc-wild" (
+            discard
+              (presetSpec {
+                triple = native;
+                preset = presets.linux;
+                modules = [
+                  {
+                    linkerKinds.wild = {
+                      on = t: t.isLinux;
+                      what = "Linux";
+                      build =
+                        { packageSet, ... }:
+                        presets.ccDriverLinker {
+                          inherit packageSet;
+                          flag = "-fuse-ld=wild";
+                        };
+                    };
+                    linkerKind = "wild";
+                  }
+                ];
+              }).linker
+          )
+          # A name not in the table fails, listing the known ones.
+          &&
+            fails
+              (presetSpec {
+                triple = native;
+                preset = presets.linux;
+                modules = [ { linkerKind = "gold"; } ];
+              }).linker
           && lib.hasSuffix "cc-mold" (discard (mold native presets.linux).host.linker)
           # Another triple's kind stays on its own units.
           && lib.hasSuffix "cc-lld" (
