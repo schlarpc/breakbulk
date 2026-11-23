@@ -390,6 +390,16 @@ pub struct SearchPaths {
     pub literals: Vec<String>,
 }
 
+/// A dynamic-library path variable (`LD_LIBRARY_PATH`, `PATH`, …) and the
+/// separator of its entries: the Nix library's target traits
+/// (`dylibPathVar`, `dylibPathSep`) of the machine the process runs on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DylibPath {
+    pub var: String,
+    pub sep: String,
+}
+
 /// The crate a compile unit builds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -527,6 +537,10 @@ pub struct RenderedCompile {
     /// `out` go on the dynamic-library path, in order (dynamic-path splices).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<String>,
+    /// With `dylib_path_from`: the build machine's dynamic-library path
+    /// variable, which the unit's process reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dylib_path: Option<DylibPath>,
     pub cwd: String,
     /// Where each file the program writes goes ([`OutputRule`]), first
     /// matching rule first. Every derivation output a rule names is
@@ -754,6 +768,9 @@ pub struct RenderedRun {
     /// Dynamic-path splices, as for compiles.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dylib_path_from: Vec<String>,
+    /// As for compiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dylib_path: Option<DylibPath>,
     /// The package's `rust-version`, for Cargo's `cargo::` syntax check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rust_version: Option<String>,

@@ -512,9 +512,21 @@ let
     )
   );
 
+  # The build machine's dynamic-library path variable, `{ var; sep; }`
+  # from its target traits: Cargo ran every recorded process with it, and
+  # every unit's process reads it (the plan's `dylibPath`).
+  buildDylibPath =
+    let
+      d = testRuns.dylibPathOf {
+        traits = targetTraitsLib.resolve { triple = targetTraitsLib.nativeTriple pkgs; };
+      };
+    in
+    if d == null then throw "breakbulk: the build machine has no dynamic-library path variable" else d;
+
   plans = lib.mapAttrs (
     kind: c:
     mkPlan pkgs {
+      dylibPath = buildDylibPath;
       vendor = vendored;
       inherit
         mode

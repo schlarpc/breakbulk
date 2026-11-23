@@ -852,10 +852,7 @@ rec {
       jq,
       extra,
       # dylibPathOf's result for the target.
-      dylibPath ? {
-        var = "LD_LIBRARY_PATH";
-        sep = ":";
-      },
+      dylibPath,
       # Whether `$info` is a stable copy's (`runInfo` with `ca`, in mkTestRuns),
       # with the dynamic-library path in `$specDylibs/dylib/*` and the
       # `rustc-env` values in `$spec/rustc-env`.

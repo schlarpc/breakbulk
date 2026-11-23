@@ -102,6 +102,7 @@ let
             --cargo ${cargo}/bin/cargo --rustc ${rustc}/bin/rustc --rustdoc ${rustc}/bin/rustdoc \
             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim \
             --skeleton $sk --canonical-root /build/skeleton \
+            --dylib-path-var LD_LIBRARY_PATH --dylib-path-sep : \
             --kind $kind --cargo-arg $kind --target ${target} --profile dev \
             --scratch $NIX_BUILD_TOP/scratch-$kind \
             --capabilities ${

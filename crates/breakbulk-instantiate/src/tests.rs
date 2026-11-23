@@ -186,6 +186,9 @@ impl RealPaths<'_> {
 
 impl Resolve for RealPaths<'_> {
     type Error = String;
+    fn dylib_path(&self) -> Option<DylibPath> {
+        Some(self.0.plan.dylib_path.clone())
+    }
     fn build_script_hints(&self) -> Result<Option<String>, String> {
         Ok(Some(input_value(keys::BUILD_SCRIPT_HINTS)))
     }

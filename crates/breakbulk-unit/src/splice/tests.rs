@@ -358,18 +358,24 @@ fn dylib_paths_append_like_add_plugin_deps() {
     };
     let d = BTreeMap::from([("/a".to_owned(), a), ("/b".to_owned(), b)]);
     let runs = ["/a".to_owned(), "/b".to_owned()];
+    let ld = DylibPath {
+        var: "LD_LIBRARY_PATH".into(),
+        sep: ":".into(),
+    };
+    let ld = Some(&ld);
+    const DYLIB_PATH_VAR: &str = "LD_LIBRARY_PATH";
     let recorded = || BTreeMap::from([(DYLIB_PATH_VAR.to_owned(), "/sysroot/lib".to_owned())]);
 
     // Compiles and runs: after the recorded value, in run and printed
     // order, duplicates kept, upstream OUT_DIRs included.
     let mut env = recorded();
-    expand_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
+    expand_dylib_path(&mut env, ld, &runs, |p| d.get(p)).unwrap();
     assert_eq!(
         env[DYLIB_PATH_VAR],
         "/sysroot/lib:/out-a/lib:/out-up/lib:/out-a/lib:/out-b"
     );
     let mut env = BTreeMap::new();
-    expand_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
+    expand_dylib_path(&mut env, ld, &runs, |p| d.get(p)).unwrap();
     assert_eq!(
         env[DYLIB_PATH_VAR],
         "/out-a/lib:/out-up/lib:/out-a/lib:/out-b"
@@ -378,7 +384,7 @@ fn dylib_paths_append_like_add_plugin_deps() {
     // Doctests: sorted by the printed value (`/out-b` before `native=…`),
     // duplicate values once, before the recorded value.
     let mut env = recorded();
-    prepend_dylib_path(&mut env, &runs, |p| d.get(p)).unwrap();
+    prepend_dylib_path(&mut env, ld, &runs, |p| d.get(p)).unwrap();
     assert_eq!(
         env[DYLIB_PATH_VAR],
         "/out-b:/out-a/lib:/out-up/lib:/sysroot/lib"
@@ -386,7 +392,18 @@ fn dylib_paths_append_like_add_plugin_deps() {
 
     // No runs: untouched.
     let mut env = recorded();
-    expand_dylib_path(&mut env, &[], |p| d.get(p)).unwrap();
+    expand_dylib_path(&mut env, ld, &[], |p| d.get(p)).unwrap();
     assert_eq!(env, recorded());
-    assert!(expand_dylib_path(&mut env, &["/x".to_owned()], |p| d.get(p)).is_err());
+    assert!(expand_dylib_path(&mut env, ld, &["/x".to_owned()], |p| d.get(p)).is_err());
+    // Runs, and no variable to put them on.
+    assert!(expand_dylib_path(&mut env, None, &runs, |p| d.get(p)).is_err());
+
+    // Another platform's variable and separator.
+    let path = DylibPath {
+        var: "PATH".into(),
+        sep: ";".into(),
+    };
+    let mut env = BTreeMap::new();
+    expand_dylib_path(&mut env, Some(&path), &runs, |p| d.get(p)).unwrap();
+    assert_eq!(env["PATH"], "/out-a/lib;/out-up/lib;/out-a/lib;/out-b");
 }

@@ -120,7 +120,7 @@ pub(crate) fn test_spec(tokens: &Tokens, plan: &Plan, unit: &str) -> Result<Test
     for (k, v) in &c.env {
         let into = if is_runtime_var(k) {
             &mut env
-        } else if plan.config_env.contains(k) && k != breakbulk_format::HOST_DYLIB_PATH_VAR {
+        } else if plan.config_env.contains(k) && *k != plan.dylib_path.var {
             &mut config_env
         } else {
             continue;

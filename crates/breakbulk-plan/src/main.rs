@@ -111,7 +111,10 @@ fn main() -> ExitCode {
         trim_paths_default: false,
         std_vendor: None,
         capabilities: None,
+        dylib_path: None,
     };
+    let mut dylib_path_var = None;
+    let mut dylib_path_sep = None;
     let mut out = None;
     // Every `--profile`: `--cargo-env-only` exports trim-paths for each
     // (the build plan's and the test plan's); planning takes the last.
@@ -190,6 +193,8 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             },
+            "--dylib-path-var" => dylib_path_var = Some(val()),
+            "--dylib-path-sep" => dylib_path_sep = Some(val()),
             "--out" => out = Some(val()),
             "--cargo-env" => cargo_env_out = Some(val()),
             "--cargo-env-only" => cargo_env_only = true,
@@ -197,6 +202,11 @@ fn main() -> ExitCode {
             _ => usage(),
         }
     }
+    opts.dylib_path = match (dylib_path_var, dylib_path_sep) {
+        (Some(var), Some(sep)) => Some(breakbulk_format::DylibPath { var, sep }),
+        (None, None) => None,
+        _ => usage(),
+    };
     opts.crates_io = match (crates_io_source, crates_io_directory) {
         (Some(name), Some(dir)) => Some((name, dir)),
         (None, None) => None,

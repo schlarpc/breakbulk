@@ -25,10 +25,10 @@ use std::path::{Path, PathBuf};
 use breakbulk_format::{Plan, Reference, Resolve, Unit, UnitId, render_doctest, render_unit};
 use breakbulk_unit::directives::{BuildOutput, MetadataFile, ParseContext, parse};
 use breakbulk_unit::run::run_env;
-use breakbulk_unit::spec::{RenderedArg, RenderedUnit, SearchPaths, package_name_version};
-use breakbulk_unit::splice::{
-    DYLIB_PATH_VAR, expand_args, expand_dylib_path, expand_env, prepend_dylib_path,
+use breakbulk_unit::spec::{
+    DylibPath, RenderedArg, RenderedUnit, SearchPaths, package_name_version,
 };
+use breakbulk_unit::splice::{expand_args, expand_dylib_path, expand_env, prepend_dylib_path};
 
 use crate::graph::{CARGO_BUILD_DIR_REMAP, OVERRIDDEN_OUT_DIR};
 use crate::records::{Metadata, Package};
@@ -364,6 +364,7 @@ pub fn compare(plan: &Plan, log: &str, target: &Path, metadata: &Metadata) -> Re
 ///   toolchains), so only the file is compared.
 fn normal_env(
     env: &BTreeMap<String, String>,
+    dylib: &DylibPath,
     target: &Path,
     run_dirs: &[&str],
 ) -> BTreeMap<String, String> {
@@ -372,9 +373,9 @@ fn normal_env(
         if k == "NUM_JOBS" {
             continue;
         }
-        let v = if k == DYLIB_PATH_VAR {
+        let v = if *k == dylib.var {
             let kept: Vec<&str> = v
-                .split(':')
+                .split(dylib.sep.as_str())
                 .filter(|e| {
                     !e.is_empty()
                         && (!Path::new(e).starts_with(target)
@@ -384,7 +385,7 @@ fn normal_env(
             if kept.is_empty() {
                 continue;
             }
-            kept.join(":")
+            kept.join(&dylib.sep)
         } else if k == "OUT_DIR"
             && (v.starts_with(OVERRIDDEN_OUT_DIR)
                 || (Path::new(v).starts_with(target) && !Path::new(v).is_dir())
@@ -649,14 +650,19 @@ pub fn compare_with(
         }
         if opts.env {
             let env = expand_env(&rendered.env, &rendered.env_splices, lookup).and_then(|mut e| {
-                expand_dylib_path(&mut e, &rendered.dylib_path_from, lookup)?;
+                expand_dylib_path(
+                    &mut e,
+                    Some(&plan.dylib_path),
+                    &rendered.dylib_path_from,
+                    lookup,
+                )?;
                 Ok(e)
             });
             match env {
                 Ok(e) => {
                     let d = env_diff(
-                        &normal_env(&real[*id].env, target, &run_dirs),
-                        &normal_env(&e, target, &run_dirs),
+                        &normal_env(&real[*id].env, &plan.dylib_path, target, &run_dirs),
+                        &normal_env(&e, &plan.dylib_path, target, &run_dirs),
                     );
                     if !d.is_empty() {
                         report.problems.push(format!(
@@ -707,14 +713,18 @@ pub fn compare_with(
                 })
                 .collect();
             let mut got = run_env(&r, Path::new(out_dir), &md);
-            if let Err(e) = expand_dylib_path(&mut got, &r.dylib_path_from, |f| outputs.get(f)) {
+            if let Err(e) =
+                expand_dylib_path(&mut got, Some(&plan.dylib_path), &r.dylib_path_from, |f| {
+                    outputs.get(f)
+                })
+            {
                 report.problems.push(format!("{id}: {}", e.0));
                 continue;
             }
             report.compared += 1;
             let d = env_diff(
-                &normal_env(want, target, &run_dirs),
-                &normal_env(&got, target, &run_dirs),
+                &normal_env(want, &plan.dylib_path, target, &run_dirs),
+                &normal_env(&got, &plan.dylib_path, target, &run_dirs),
             );
             if !d.is_empty() {
                 report.problems.push(format!(
@@ -918,14 +928,14 @@ fn compare_doctests(
         }
         if opts.env {
             let env = expand_env(&d.env, &d.env_splices, lookup).and_then(|mut e| {
-                prepend_dylib_path(&mut e, &traced_dylib, lookup)?;
+                prepend_dylib_path(&mut e, Some(&plan.dylib_path), &traced_dylib, lookup)?;
                 Ok(e)
             });
             match env {
                 Ok(e) => {
                     let diff = env_diff(
-                        &normal_env(&r.env, target, run_dirs),
-                        &normal_env(&e, target, run_dirs),
+                        &normal_env(&r.env, &plan.dylib_path, target, run_dirs),
+                        &normal_env(&e, &plan.dylib_path, target, run_dirs),
                     );
                     if !diff.is_empty() {
                         report
@@ -958,6 +968,13 @@ mod tests {
         );
     }
 
+    fn ld() -> DylibPath {
+        DylibPath {
+            var: "LD_LIBRARY_PATH".into(),
+            sep: ":".into(),
+        }
+    }
+
     #[test]
     fn cargo_compared_as_a_file() {
         let dir = std::env::temp_dir().join(format!("bb-golden-cargo-{}", std::process::id()));
@@ -972,12 +989,12 @@ mod tests {
         let env = |v: &Path| BTreeMap::from([("CARGO".to_owned(), v.display().to_string())]);
         let t = Path::new("/nonexistent-target");
         assert_eq!(
-            normal_env(&env(&real), t, &[]),
-            normal_env(&env(&link), t, &[])
+            normal_env(&env(&real), &ld(), t, &[]),
+            normal_env(&env(&link), &ld(), t, &[])
         );
         assert_ne!(
-            normal_env(&env(&real), t, &[]),
-            normal_env(&env(&other), t, &[])
+            normal_env(&env(&real), &ld(), t, &[]),
+            normal_env(&env(&other), &ld(), t, &[])
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -986,15 +1003,19 @@ mod tests {
     fn bin_exe_compared_by_file_name() {
         let env = |v: &str| BTreeMap::from([("CARGO_BIN_EXE_app".to_owned(), v.to_owned())]);
         let t = Path::new("/t");
-        let real = normal_env(&env("/t/x86_64-unknown-linux-gnu/debug/app"), t, &[]);
-        assert_eq!(real, normal_env(&env("/t/x/debug/deps/app"), t, &[]));
-        assert_ne!(real, normal_env(&env("/t/x/debug/deps/app-0123"), t, &[]));
+        let real = normal_env(&env("/t/x86_64-unknown-linux-gnu/debug/app"), &ld(), t, &[]);
+        assert_eq!(real, normal_env(&env("/t/x/debug/deps/app"), &ld(), t, &[]));
+        assert_ne!(
+            real,
+            normal_env(&env("/t/x/debug/deps/app-0123"), &ld(), t, &[])
+        );
     }
 
     #[test]
     fn trim_paths_forms() {
         let mut plan: Plan = serde_json::from_value(serde_json::json!({
             "version": 7, "kind": "build", "cargo": "1.101.0", "rustc": "1.101.0",
+            "dylibPath": { "var": "LD_LIBRARY_PATH", "sep": ":" },
             "nightlyFeaturesAllowed": false, "host": "h",
             "target": {
                 "arg": "t", "shortName": "t",

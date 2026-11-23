@@ -572,7 +572,12 @@ pub fn run(r: &RenderedRun, outer: &Outer) -> Result<(), Error> {
         .map(|f| Ok((f.clone(), read_directives(Path::new(f))?)))
         .collect::<Result<BTreeMap<String, BuildOutput>, Error>>()?;
     let mut unit_env = run_env(r, &out_dir, &metadata);
-    expand_dylib_path(&mut unit_env, &r.dylib_path_from, |f| dylib_dirs.get(f))?;
+    expand_dylib_path(
+        &mut unit_env,
+        r.dylib_path.as_ref(),
+        &r.dylib_path_from,
+        |f| dylib_dirs.get(f),
+    )?;
     let env = layered(
         outer,
         capture.as_ref(),

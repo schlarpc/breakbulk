@@ -15,6 +15,7 @@ it depends on (`…` marks elided values):
   "nightlyFeaturesAllowed": false,
   "rustc": "1.96.1 (…)",
   "host": "x86_64-unknown-linux-gnu",
+  "dylibPath": { "var": "LD_LIBRARY_PATH", "sep": ":" },
   "target": {
     "arg": "wasm32-unknown-unknown",
     "shortName": "wasm32-unknown-unknown",
@@ -105,6 +106,7 @@ The fields every unit has: `package` (Cargo's package id), `platform`, `program`
 ## Header
 
 - **`kind`** is the plan kind: `build`, `test`, `bench` or `doc`, and **`variant.mode`** the variant's mode, `build` or `check`. Both are labels: the traced Cargo command comes from the Nix library's table of plan commands (`lib/cargo-commands.nix`), and they decide which units are roots (a check plan, like a doc plan, has none).
+- **`dylibPath`** is the planning machine's dynamic-library path variable and the separator of its entries, given to the planner by the Nix library (`--dylib-path-var`, `--dylib-path-sep`, from the build machine's target traits through `testRuns.dylibPathOf`): the variable the planner reads Cargo's dynamic-path entries from (`dylibPathFrom`), and the one units put them on, since every unit's process runs on that machine too. Required.
 - **`nightlyFeaturesAllowed`** is Cargo's `nightly_features_allowed` for the planning toolchain: whether a build script's `rustc-env=RUSTC_BOOTSTRAP=…` is an error or a warning.
 - **`target`** describes the planned target: `arg`, what Cargo was given as `--target` (a triple, or a `.json` spec's path); `shortName`, Cargo's short name (the triple, or the spec's file stem), which names the docs derivation; `exeSuffix` (omitted when empty), the spec's `exe-suffix`; and `debuginfo`, what the planning rustc's target spec says about the debuginfo side files the target's links write (`rustc --print target-spec-json`; see [Target facts from rustc](../explanation/internals/planner.md#target-facts-from-rustc)). `debuginfo.splitDefault` is the `-C split-debuginfo` rustc uses when a unit's arguments give none (`off`, `packed` or `unpacked`). `debuginfo.artifacts` lists the side files, each `{ "suffix", "when", "perObject"?, "directory"? }`: `when` is `always` (an MSVC-style link's `.pdb`), `split-packed` (`.dwp`, Apple's `.dSYM` directory) or `split-unpacked` (`.dwo`, one per object file, `perObject`). Instantiation decides from it which units get a `debug` output ([Instantiation](../explanation/internals/instantiation.md)). Required.
 - **`remap`** says how source paths are remapped: `trimPaths` and `trimPathsDefault` (omitted when false; see [trim-paths](../explanation/internals/planner.md#trim-paths)), and `rustSrc` (omitted without the `rust-src` component), the remap `[<sysroot>/lib/rustlib/src/rust, /rustc/<commit-hash>]` breakbulk adds to its own remaps so that standard-library paths name no toolchain store path.

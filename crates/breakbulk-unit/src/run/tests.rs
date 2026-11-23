@@ -19,6 +19,7 @@ fn unit(cwd: &Path) -> RenderedRun {
         cwd: cwd.display().to_string(),
         metadata_from: vec![],
         dylib_path_from: vec![],
+        dylib_path: None,
         rust_version: None,
         targets: vec![PackageTarget {
             name: "foo_sys".into(),

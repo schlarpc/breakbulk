@@ -5,6 +5,7 @@
   "nightlyFeaturesAllowed": false,
   "rustc": "1.99.0",
   "host": "x86_64-unknown-linux-gnu",
+  "dylibPath": { "var": "LD_LIBRARY_PATH", "sep": ":" },
   "target": {
     "arg": "x86_64-unknown-linux-gnu",
     "shortName": "x86_64-unknown-linux-gnu",

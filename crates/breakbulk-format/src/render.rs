@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use breakbulk_unit::env::{EnvAppend, EnvLayer, list_separator};
 use breakbulk_unit::spec::{
-    Hints, OutDirRemove, OutputInto, OutputRule, RenderedArg, RenderedCompile, RenderedRun,
-    RenderedUnit, RepositoryPath, SearchPaths, SourceView,
+    DylibPath, Hints, OutDirRemove, OutputInto, OutputRule, RenderedArg, RenderedCompile,
+    RenderedRun, RenderedUnit, RepositoryPath, SearchPaths, SourceView,
 };
 
 use crate::deps::Graph;
@@ -110,6 +110,12 @@ pub trait Resolve {
     fn source_view(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<SourceView>, Self::Error> {
         Ok(None)
     }
+    /// The build machine's dynamic-library path variable, which the
+    /// processes of every unit read (instantiation's `toolchains.json`),
+    /// or none.
+    fn dylib_path(&self) -> Option<DylibPath> {
+        None
+    }
     /// For a build-script run: the file holding the table of its failure
     /// hints (`Hints::build_script_hints`), or none.
     fn build_script_hints(&self) -> Result<Option<String>, Self::Error> {
@@ -123,6 +129,16 @@ pub trait Resolve {
         _unit: &Unit,
     ) -> Result<breakbulk_unit::spec::DoctestConfig, Self::Error> {
         Ok(Default::default())
+    }
+}
+
+/// The dynamic-library path variable of a unit with dynamic-path splices
+/// (`runs`), none for one without.
+pub(crate) fn dylib_path<R: Resolve>(runs: &[UnitId], r: &R) -> Option<DylibPath> {
+    if runs.is_empty() {
+        None
+    } else {
+        r.dylib_path()
     }
 }
 
@@ -511,6 +527,7 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|u| flags(u, r, weak))
                     .collect::<Result<_, _>>()?,
+                dylib_path: dylib_path(&c.dylib_path_from, r),
                 cwd: c.cwd.render(r)?,
                 outputs: output_rules(plan, c, r),
                 deps: sorted(deps.deps.iter().cloned().map(out))?,
@@ -582,6 +599,7 @@ pub fn render_unit_in<R: Resolve>(
                     .iter()
                     .map(|u| r.flags(u))
                     .collect::<Result<_, _>>()?,
+                dylib_path: dylib_path(&run.dylib_path_from, r),
                 rust_version: facts.and_then(|f| f.rust_version.clone()),
                 targets: facts.map(|f| f.run_targets()).unwrap_or_default(),
                 nightly_features_allowed: plan.nightly_features_allowed,

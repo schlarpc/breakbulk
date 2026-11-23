@@ -152,6 +152,10 @@ in
           jq = "${pkgs.jq}/bin/jq";
           extra = [ ];
           stable = true;
+          dylibPath = {
+            var = "LD_LIBRARY_PATH";
+            sep = ":";
+          };
         }}
         echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
         # Every entry is a copy (or the sysroot), holding beta's library file

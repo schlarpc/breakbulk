@@ -85,6 +85,9 @@ impl Tokens<'_> {
 
 impl Resolve for Tokens<'_> {
     type Error = String;
+    fn dylib_path(&self) -> Option<breakbulk_unit::spec::DylibPath> {
+        Some(self.plan.dylib_path.clone())
+    }
     fn reference(&self, r: &Reference) -> Result<String, String> {
         Ok(match r {
             Reference::Src(s) if s.rel.is_empty() => BB_SRC.to_owned(),

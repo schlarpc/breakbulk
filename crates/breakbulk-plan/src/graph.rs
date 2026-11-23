@@ -64,6 +64,8 @@ pub struct Context {
     /// `-Zbuild-std`: the merged crates.io directory and the toolchain's
     /// `library` ([`crate::build_std::StdVendor`]).
     pub std_vendor: Option<(String, String)>,
+    /// [`Plan::dylib_path`].
+    pub dylib_path: breakbulk_format::DylibPath,
 }
 
 /// What Cargo's `trim-paths` remaps its build directory to (cargo
@@ -124,10 +126,6 @@ const ALWAYS_KEPT_ENV: &[&str] = &["CARGO"];
 /// The remap pairs Cargo gives build scripts under trim-paths (cargo
 /// `src/compiler/custom_build.rs`), `:`-separated.
 const TRIM_PATHS_REMAP_VAR: &str = "CARGO_TRIM_PATHS_REMAP";
-
-/// The dynamic-library path variable on the planning host, where Cargo ran
-/// every recorded process (one definition, `breakbulk-unit`'s).
-const DYLIB_VAR: &str = breakbulk_format::HOST_DYLIB_PATH_VAR;
 
 /// What `CARGO_TARGET_TMPDIR` (compile-time env of integration tests and
 /// benches) becomes: a relative path, which resolves against the working
@@ -798,7 +796,10 @@ impl<'a> Builder<'a> {
     fn dylib_path(&self, value: &str) -> Result<(Vec<UnitId>, Option<String>), Error> {
         let mut runs = Vec::new();
         let mut kept = Vec::new();
-        let mut entries: Vec<&str> = value.split(':').filter(|e| !e.is_empty()).collect();
+        let mut entries: Vec<&str> = value
+            .split(self.ctx.dylib_path.sep.as_str())
+            .filter(|e| !e.is_empty())
+            .collect();
         // Cargo appends its own process's value to the paths it adds, or
         // uses that value alone when it already starts with them (cargo
         // 0.97.0, `core/compiler/compilation.rs`, `fill_env`:
@@ -810,8 +811,12 @@ impl<'a> Builder<'a> {
         // the last occurrence of it that only run paths follow.
         let inherited: Vec<&str> = self
             .baseline
-            .get(DYLIB_VAR)
-            .map(|v| v.split(':').filter(|e| !e.is_empty()).collect())
+            .get(&self.ctx.dylib_path.var)
+            .map(|v| {
+                v.split(self.ctx.dylib_path.sep.as_str())
+                    .filter(|e| !e.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
         if !inherited.is_empty() && entries.len() >= inherited.len() {
             let found = (0..=entries.len() - inherited.len()).rev().find(|&i| {
@@ -826,7 +831,7 @@ impl<'a> Builder<'a> {
         }
         for e in entries {
             if let Some((tag, dir)) = dylib_sentinel(e) {
-                let r = self.run_id(&tag, Some(DYLIB_VAR))?;
+                let r = self.run_id(&tag, Some(&self.ctx.dylib_path.var))?;
                 if dir != r.out_dir {
                     return Err(self.shape_error("dynamic-library path", e, &[]));
                 }
@@ -839,7 +844,10 @@ impl<'a> Builder<'a> {
                 kept.push(e);
             }
         }
-        Ok((runs, (!kept.is_empty()).then(|| kept.join(":"))))
+        Ok((
+            runs,
+            (!kept.is_empty()).then(|| kept.join(self.ctx.dylib_path.sep.as_str())),
+        ))
     }
 
     fn rewrite_env(
@@ -906,7 +914,7 @@ impl<'a> Builder<'a> {
             } else {
                 v
             };
-            let v = if k == DYLIB_VAR {
+            let v = if k == self.ctx.dylib_path.var {
                 let (runs, rest) = self.dylib_path(&v)?;
                 dylib = runs;
                 match rest {
@@ -1414,7 +1422,7 @@ impl<'a> Builder<'a> {
                 metadata_from.insert(up.id.clone());
                 continue;
             }
-            if contains_sentinel(k) || contains_sentinel(v) && k != DYLIB_VAR {
+            if contains_sentinel(k) || contains_sentinel(v) && *k != self.ctx.dylib_path.var {
                 return Err(self.shape_error("env", &format!("`{k}={v}`"), &[]));
             }
             env.insert(k.clone(), v.clone());
@@ -1887,6 +1895,7 @@ impl<'a> Builder<'a> {
             nightly_features_allowed: self.ctx.nightly,
             rustc: self.ctx.rustc_version.clone(),
             host: self.ctx.host.clone(),
+            dylib_path: self.ctx.dylib_path.clone(),
             target: PlanTarget {
                 arg: self.ctx.target.arg.clone(),
                 short_name: self.ctx.target.short_name.clone(),
@@ -2000,6 +2009,10 @@ mod error_tests {
             rust_src_remap: None,
             trim_paths_default: false,
             std_vendor: None,
+            dylib_path: breakbulk_format::DylibPath {
+                var: "LD_LIBRARY_PATH".into(),
+                sep: ":".into(),
+            },
         }
     }
 

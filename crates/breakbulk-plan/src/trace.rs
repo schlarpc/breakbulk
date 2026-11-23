@@ -105,6 +105,12 @@ pub struct Options {
     /// `toolchainFacts`). Planning needs it; the dev shell's
     /// `--cargo-env-only` does not.
     pub capabilities: Option<breakbulk_format::Capabilities>,
+    /// The planning host's dynamic-library path variable
+    /// (`--dylib-path-var`, `--dylib-path-sep`; [`Plan::dylib_path`]).
+    /// Planning needs it.
+    ///
+    /// [`Plan::dylib_path`]: breakbulk_format::Plan::dylib_path
+    pub dylib_path: Option<breakbulk_format::DylibPath>,
 }
 
 /// What one trace produced.
@@ -153,6 +159,9 @@ impl Trace {
                 .std_vendor
                 .as_ref()
                 .map(|v| (v.dir.clone(), v.library.clone())),
+            dylib_path: opts.dylib_path.clone().ok_or_else(|| {
+                Error("planning needs --dylib-path-var and --dylib-path-sep".into())
+            })?,
         })
     }
 }

@@ -75,6 +75,9 @@
       # Cargo's trim-paths: "auto" (on when the toolchain
       # has it, unless the project declares it), "on" or "off".
       trimPaths ? "auto",
+      # The planning machine's dynamic-library path variable, `{ var; sep; }`
+      # (testRuns.dylibPathOf of its target traits): the plan's `dylibPath`.
+      dylibPath,
     }:
     let
       caps =
@@ -107,6 +110,10 @@
         "${vendor.dir}"
         "--capabilities"
         (toolchainFacts.capabilitiesFile caps)
+        "--dylib-path-var"
+        dylibPath.var
+        "--dylib-path-sep"
+        dylibPath.sep
       ]
       ++ lib.optionals (vendor.cratesIo != null) [
         "--crates-io-source"

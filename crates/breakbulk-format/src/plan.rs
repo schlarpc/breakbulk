@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 pub use breakbulk_unit::spec::{
-    CrateInfo, LinkArgKind, PackageTarget, Platform, RunnerSlot, SearchIn, SpliceKind,
+    CrateInfo, DylibPath, LinkArgKind, PackageTarget, Platform, RunnerSlot, SearchIn, SpliceKind,
 };
 
 /// The only plan format version this crate reads and writes.
@@ -50,6 +50,14 @@ pub struct Plan {
     /// `rustc -vV` release line.
     pub rustc: String,
     pub host: String,
+    /// The dynamic-library path variable of the planning host, where Cargo
+    /// ran every recorded process and every unit's process runs (the Nix
+    /// library's target traits of the build machine; the planner's
+    /// `--dylib-path-var`, `--dylib-path-sep`). The planner reads Cargo's
+    /// value of it into `dylibPathFrom`, and units put their dynamic-path
+    /// splices on it. A test process's own comes from the target's traits
+    /// and runner (`dylibPathOf` in `lib/test-runs.nix`).
+    pub dylib_path: DylibPath,
     pub target: PlanTarget,
     pub variant: Variant,
     /// The canonical absolute skeleton path planning ran at.

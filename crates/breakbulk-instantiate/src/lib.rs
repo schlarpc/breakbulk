@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use breakbulk_format::rendered::{
-    DoctestConfig, OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
+    DoctestConfig, DylibPath, OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
 };
 use breakbulk_format::{
     CargoTarget, DEBUG_OUTPUT, EnvLayer, Graph, LayerValue, Plan, PlanKind, Platform, Reference,
@@ -605,6 +605,10 @@ impl Resolve for Tokens<'_> {
                 format!("{tree}/{dir}")
             },
         )))
+    }
+
+    fn dylib_path(&self) -> Option<DylibPath> {
+        Some(self.inputs.plan.dylib_path.clone())
     }
 
     fn build_script_hints(&self) -> Result<Option<String>, Error> {

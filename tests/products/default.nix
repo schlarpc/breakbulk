@@ -3351,7 +3351,7 @@ in
           mkdir -p "$(dirname ${dir})"
           cp -r --no-preserve=mode ${i.skeleton} ${dir}
           mkdir -p $out
-          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --cargo-arg build --target ${native} --profile dev             --config ${i.vendor.configFile}             --capabilities ${
+          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --dylib-path-var LD_LIBRARY_PATH --dylib-path-sep : --kind build --cargo-arg build --target ${native} --profile dev             --config ${i.vendor.configFile}             --capabilities ${
             breakbulk.toolchainFacts.capabilitiesFile
               (breakbulk.toolchainFacts.of {
                 inherit pkgs;

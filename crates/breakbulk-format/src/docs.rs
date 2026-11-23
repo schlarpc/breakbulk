@@ -85,6 +85,7 @@ pub(crate) fn rustdoc_command<R: Resolve>(
             .iter()
             .map(|u| flags(u, r, &strong))
             .collect::<Result<_, _>>()?,
+        dylib_path: crate::render::dylib_path(&d.dylib_path_from, r),
         cwd: d.cwd.render(r)?,
         outputs: Vec::new(),
         deps: deps

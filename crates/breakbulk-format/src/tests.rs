@@ -16,6 +16,7 @@ fn example_json() -> String {
   "kind": "build",
   "cargo": "1.96.1", "nightlyFeaturesAllowed": false,
   "rustc": "1.96.1 (abc 2026-01-01)", "host": "x86_64-unknown-linux-gnu",
+  "dylibPath": {{ "var": "LD_LIBRARY_PATH", "sep": ":" }},
   "target": {{
     "arg": "wasm32-unknown-unknown", "shortName": "wasm32-unknown-unknown", "exeSuffix": ".wasm",
     "debuginfo": {{ "splitDefault": "off", "artifacts": [] }}
@@ -169,7 +170,7 @@ fn canonical_json_is_sorted_compact_and_stable() {
     let p = example();
     let a = p.to_canonical_json();
     assert!(!a.contains('\n') && !a.contains(": "));
-    assert!(a.starts_with(r#"{"cargo":"1.96.1","host":"#), "{a}");
+    assert!(a.starts_with(r#"{"cargo":"1.96.1","dylibPath":"#), "{a}");
     // Concatenated literals are merged in normal form. (The doc's example
     // array concatenates `--extern` and `cfg_if=` into one argument.)
     assert!(a.contains(r#"["--externcfg_if=",{"file":"#), "{a}");

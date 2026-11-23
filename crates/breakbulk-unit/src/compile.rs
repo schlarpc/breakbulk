@@ -162,7 +162,12 @@ pub fn invocation(
     argv.extend(added_args(c, dirs));
     let (layer_env, env_append) = c.layered_env();
     let mut unit_env = expand_env(&layer_env, &c.env_splices, lookup)?;
-    expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
+    expand_dylib_path(
+        &mut unit_env,
+        c.dylib_path.as_ref(),
+        &c.dylib_path_from,
+        lookup,
+    )?;
     let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     let cflags = CFlags {
         random_seed: c.seed.clone(),

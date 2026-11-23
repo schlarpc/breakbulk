@@ -279,6 +279,7 @@ let
         --cargo ${pkgs.cargo}/bin/cargo --rustc ${pkgs.rustc}/bin/rustc \
         --rustdoc ${pkgs.rustc}/bin/rustdoc --shim ${tools.breakbulk-shim}/bin/breakbulk-shim \
         --skeleton $sk --canonical-root /build/skeleton \
+        --dylib-path-var LD_LIBRARY_PATH --dylib-path-sep : \
         --kind test --cargo-arg test --target ${target} --profile dev \
         --scratch $NIX_BUILD_TOP/scratch \
         --capabilities ${
@@ -459,6 +460,10 @@ let
           jq = "${pkgs.jq}/bin/jq";
           extra = [ ];
           stable = true;
+          dylibPath = {
+            var = "LD_LIBRARY_PATH";
+            sep = ":";
+          };
         }}
         case :$LD_LIBRARY_PATH: in
           *:$specDylibs/dylib/*) ;;

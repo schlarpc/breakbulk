@@ -73,7 +73,12 @@ pub fn invocation(
     ]);
     let (layer_env, env_append) = c.layered_env();
     let mut unit_env = expand_env(&layer_env, &c.env_splices, lookup)?;
-    expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
+    expand_dylib_path(
+        &mut unit_env,
+        c.dylib_path.as_ref(),
+        &c.dylib_path_from,
+        lookup,
+    )?;
     let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     Ok(Invocation {
         argv,
@@ -132,6 +137,7 @@ mod tests {
             env_layers: Vec::new(),
             env_splices: vec![Splice::new("/f/a".into(), SpliceKind::RustcEnv)],
             dylib_path_from: vec![],
+            dylib_path: None,
             cwd: "/src".into(),
             outputs: Vec::new(),
             deps: vec![],

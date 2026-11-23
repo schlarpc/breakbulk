@@ -24,6 +24,7 @@ fn unit(args: &[&str]) -> RenderedCompile {
         env_layers: Vec::new(),
         env_splices: vec![],
         dylib_path_from: vec![],
+        dylib_path: None,
         cwd: "/nix/store/x-src".into(),
         outputs: vec![OutputRule::file("app-1", "out")],
         deps: vec![],

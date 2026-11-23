@@ -35,7 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::directives::{BuildOutput, search_path_without_kind};
-use crate::spec::{RenderedArg, SearchIn, SearchPaths, Splice, SpliceKind};
+use crate::spec::{DylibPath, RenderedArg, SearchIn, SearchPaths, Splice, SpliceKind};
 
 /// The arguments one directive value becomes, or `None` for `rustc-env`,
 /// which becomes an env var. The planner checks sentinel placement against
@@ -215,16 +215,6 @@ pub fn search_paths<'a>(
         .collect()
 }
 
-/// The dynamic-library path variable of the platform `breakbulk-unit` runs
-/// on: Cargo's `dylib_path_envvar` (`cargo-util`, `paths.rs`).
-pub const DYLIB_PATH_VAR: &str = if cfg!(windows) {
-    "PATH"
-} else if cfg!(target_os = "macos") {
-    "DYLD_FALLBACK_LIBRARY_PATH"
-} else {
-    "LD_LIBRARY_PATH"
-};
-
 /// The search paths of `runs` that go on a dynamic-library path, without
 /// their `native=`-style kind, in run order and printed order, duplicates
 /// kept. Cargo keeps only paths inside its target directory
@@ -251,7 +241,19 @@ fn dylib_paths<'a>(
     Ok(paths)
 }
 
-const DYLIB_PATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
+/// The variable dynamic-path splices go on: an error when there are some
+/// and the unit names none.
+fn dylib_var<'d>(
+    dylib: Option<&'d DylibPath>,
+    runs: &[String],
+) -> Result<&'d DylibPath, SpliceError> {
+    dylib.ok_or_else(|| {
+        SpliceError(format!(
+            "the unit has dynamic-path splices ({}) but no dynamic-library path variable",
+            runs.join(", ")
+        ))
+    })
+}
 
 /// Expand the dynamic-path splices of a compile or a build-script run into
 /// `env`: the runs' paths ([`dylib_paths`]) go after the variable's
@@ -261,19 +263,21 @@ const DYLIB_PATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
 /// deduplicates them.
 pub fn expand_dylib_path<'a>(
     env: &mut BTreeMap<String, String>,
+    dylib: Option<&DylibPath>,
     runs: &[String],
     directives: impl Fn(&str) -> Option<&'a BuildOutput>,
 ) -> Result<(), SpliceError> {
     if runs.is_empty() {
         return Ok(());
     }
+    let DylibPath { var, sep } = dylib_var(dylib, runs)?;
     let mut paths = Vec::new();
-    if let Some(old) = env.get(DYLIB_PATH_VAR).filter(|v| !v.is_empty()) {
+    if let Some(old) = env.get(var).filter(|v| !v.is_empty()) {
         paths.push(old.clone());
     }
     paths.extend(dylib_paths(runs, directives)?);
     if !paths.is_empty() {
-        env.insert(DYLIB_PATH_VAR.into(), paths.join(DYLIB_PATH_SEP));
+        env.insert(var.clone(), paths.join(sep));
     }
     Ok(())
 }
@@ -287,12 +291,14 @@ pub fn expand_dylib_path<'a>(
 /// recorded value.
 pub fn prepend_dylib_path<'a>(
     env: &mut BTreeMap<String, String>,
+    dylib: Option<&DylibPath>,
     runs: &[String],
     directives: impl Fn(&str) -> Option<&'a BuildOutput>,
 ) -> Result<(), SpliceError> {
     if runs.is_empty() {
         return Ok(());
     }
+    let DylibPath { var, sep } = dylib_var(dylib, runs)?;
     let mut set: BTreeMap<std::path::PathBuf, &str> = BTreeMap::new();
     for r in runs {
         let d = directives(r).ok_or_else(|| {
@@ -308,11 +314,11 @@ pub fn prepend_dylib_path<'a>(
         .into_values()
         .map(|v| search_path_without_kind(v).to_owned())
         .collect();
-    if let Some(old) = env.get(DYLIB_PATH_VAR).filter(|v| !v.is_empty()) {
+    if let Some(old) = env.get(var).filter(|v| !v.is_empty()) {
         paths.push(old.clone());
     }
     if !paths.is_empty() {
-        env.insert(DYLIB_PATH_VAR.into(), paths.join(DYLIB_PATH_SEP));
+        env.insert(var.clone(), paths.join(sep));
     }
     Ok(())
 }
