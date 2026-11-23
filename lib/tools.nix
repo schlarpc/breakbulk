@@ -254,6 +254,7 @@ let
       crates = cratesOf pname;
       trimmed = trimmedLock crates;
       lockFile = trimmed.file;
+      usesAwsLc = lib.any (p: p.name == "aws-lc-sys") trimmed.kept;
     in
     pkgs.rustPlatform.buildRustPackage {
       inherit pname;
@@ -280,7 +281,14 @@ let
         "-p"
         pname
       ];
-      nativeBuildInputs = [ pkgs.buildPackages.python3 ];
+      nativeBuildInputs = [
+        pkgs.buildPackages.python3
+      ]
+      ++ lib.optional usesAwsLc pkgs.buildPackages.pkg-config;
+      # nixpkgs' cargo setup hook sets AWS_LC_SYS_USE_SYSTEM=1, so
+      # aws-lc-sys (breakbulk-drv, through harmonia) needs the system
+      # library rather than building its bundled copy.
+      buildInputs = lib.optional usesAwsLc pkgs.aws-lc;
       postBuild = ''
         python3 ${./lock-shrunk.py} ${lockFile} Cargo.lock
       '';

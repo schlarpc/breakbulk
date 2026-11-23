@@ -1684,7 +1684,8 @@ in
         }
 
         c=${metaDefaults}/lib/adder.wasm
-        wasm-tools print $c | head -n1 | grep -q '^(component'
+        # Whole-output reads: wasm-tools fails on a closed pipe (pipefail).
+        wasm-tools print $c | sed -n 1p | grep -q '^(component'
         wasm-tools metadata show $c
         # From the derivation, without its trailing newline.
         expect $c revision 'tree:abc;guest:def'
@@ -1705,7 +1706,7 @@ in
 
         # A core module.
         m=${metaCore}/lib/adder.wasm
-        wasm-tools print $m | head -n1 | grep -q '^(module'
+        wasm-tools print $m | sed -n 1p | grep -q '^(module'
         wasm-tools metadata show $m
         expect $m name adder-core
         expect $m revision 'tree:abc;guest:def'
@@ -1732,7 +1733,8 @@ in
       opt = H.wasmOpt (stageArgs module);
     in
     pkgs.runCommand "stages-wasm-opt-features" { nativeBuildInputs = [ pkgs.wasm-tools ]; } ''
-      wasm-tools print ${opt}/m.wasm | grep -q memory.copy
+      # grep without -q reads to the end: wasm-tools fails on a closed pipe.
+      wasm-tools print ${opt}/m.wasm | grep memory.copy > /dev/null
       touch $out
     '';
 

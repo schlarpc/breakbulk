@@ -694,6 +694,9 @@ in
     fetchArgs.gitHashes."git+https://github.com/dtolnay/itoa?tag=1.0.11#8f392032fadf15b5e6b9b7b6add21875575d67af" =
       "sha256-5mLf4B3zTZwv3wKgdixL/QJuTuouPlpm01rMFAZ8D6Y=";
     expectOutput = "ok 42";
+    # From an online `cargo build -v` of the fixture with nixpkgs' cargo
+    # and rustc; the hashes include rustc's version, so a nixpkgs bump
+    # that moves rustc needs the file again.
     expectedMetadata = fixtures + "/vendor-collision/expected-metadata.txt";
   };
 

@@ -272,22 +272,16 @@ let
       # `static` (default: isStatic) links its programs with `-static`,
       # which glibc cannot do; its library is static either way.
       libev = prev.libev.override { static = false; };
-      # libpsl compiles in two paths of the list, both store paths in
-      # nixpkgs (the `portableNoStorePaths` check finds them): the one
-      # `psl_latest()` reads (`--with-psl-distfile`, `-DPSL_DISTFILE`), and
-      # the one the built-in list was made from, which psl_latest() and
-      # psl_builtin_outdated() also read (`--with-psl-file`, written into
-      # suffixes_dafsa.h as `_psl_filename` by src/psl-make-dafsa; libpsl
-      # 0.21.5). On the target system both are where Debian and Fedora
-      # install the list; the built-in list is still made from nixpkgs'.
+      # libpsl compiles in the path `psl_latest()` reads (meson's
+      # `psl_distfile`, `-DPSL_DISTFILE`), a store path in nixpkgs that the
+      # `portableNoStorePaths` check finds; on the target system it is
+      # where Debian and Fedora install the list. (The list the built-in
+      # one was made from is written as its basename only, libpsl 0.23.3
+      # src/psl-make-dafsa.)
       libpsl = prev.libpsl.overrideAttrs (old: {
-        configureFlags = map (
-          f: if lib.hasPrefix "--with-psl-distfile=" f then "--with-psl-distfile=${pslSystemFile}" else f
-        ) old.configureFlags;
-        postPatch = (old.postPatch or "") + ''
-          substituteInPlace src/psl-make-dafsa \
-            --replace-fail "bytes(psl_input_file, **codecs)" "b'${pslSystemFile}'"
-        '';
+        mesonFlags = map (
+          f: if lib.hasPrefix "-Dpsl_distfile=" f then "-Dpsl_distfile=${pslSystemFile}" else f
+        ) old.mesonFlags;
       });
       # nixpkgs' static OpenSSL configures OPENSSLDIR as its `etc` output
       # (ENGINESDIR below it) and MODULESDIR as `$out/lib/ossl-modules`,
