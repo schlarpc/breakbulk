@@ -116,6 +116,7 @@ let
   inherit (builtins)
     toJSON
     ;
+  bt = import ./modules/types.nix { inherit lib; };
 
   # The key of a test binary within its package.
   binaryKey = r: if r.kind == "test" then r.target else "${r.kind}/${r.target}";
@@ -308,7 +309,9 @@ rec {
   resolveTestEnv =
     facts: packages:
     let
-      resolve = f: t: t // { env = lib.mapAttrs (_: v: if lib.isFunction v then v f else v) t.env; };
+      resolve =
+        f: t:
+        t // { env = lib.mapAttrs (_: bt.envMapValues (v: if lib.isFunction v then v f else v)) t.env; };
       one =
         pkg: p:
         if !(p ? runs) then
@@ -495,8 +498,42 @@ rec {
     let
       path = pathOf pkgs cfg;
     in
-    lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)
+    lib.concatStrings (
+      lib.mapAttrsToList (
+        k: v:
+        let
+          spec = bt.envSpec (cfg.envSeparators or { }) k v;
+        in
+        if isAppend spec then
+          "export ${k}=\"\${${k}:+\$${k}${spec.sep}}\"${lib.escapeShellArg spec.append}\n"
+        else
+          "export ${k}=${lib.escapeShellArg spec}\n"
+      ) cfg.env
+    )
     + lib.optionalString (path != [ ]) "export PATH=$PATH:${lib.makeBinPath path}\n";
+
+  # An env spec that appends (types.nix `envSpec`).
+  isAppend = v: builtins.isAttrs v && v ? append && !lib.isDerivation v;
+
+  # A run's env as one layer of breakbulk-unit's (`LayerValue`s).
+  envLayerOf =
+    cfg:
+    lib.mapAttrs (
+      k: v:
+      let
+        spec = bt.envSpec (cfg.envSeparators or { }) k v;
+      in
+      if isAppend spec then
+        {
+          value = spec.append;
+          inherit (spec) sep;
+        }
+      else
+        {
+          value = spec;
+          sep = "";
+        }
+    ) cfg.env;
 
   # A run's `preRun` entries, without the removed ones.
   preRunEntries = cfg: lib.filterAttrs (_: v: v != null) cfg.preRun;
@@ -704,7 +741,13 @@ rec {
       });
       BREAKBULK_TEST_ARGS = toJSON cfg.args;
       BREAKBULK_TEST_ENV = toJSON (
-        cfg.env // lib.optionalAttrs (path != [ ]) { PATH = lib.makeBinPath path; }
+        [ (envLayerOf cfg) ]
+        ++ lib.optional (path != [ ]) {
+          PATH = {
+            value = lib.makeBinPath path;
+            sep = ":";
+          };
+        }
       );
     };
 

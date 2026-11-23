@@ -71,12 +71,19 @@ pub fn invocation(
         "-L".to_owned(),
         format!("dependency={}", deps.display()),
     ]);
-    let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
+    let (layer_env, env_append) = c.layered_env();
+    let mut unit_env = expand_env(&layer_env, &c.env_splices, lookup)?;
     expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     Ok(Invocation {
         argv,
-        env: layered(outer, capture.as_ref(), &unit_env, &CFlags::default()),
+        env: layered(
+            outer,
+            capture.as_ref(),
+            &unit_env,
+            &env_append,
+            &CFlags::default(),
+        ),
         cwd: std::path::PathBuf::from(&c.cwd),
     })
 }
@@ -121,6 +128,8 @@ mod tests {
             program: vec!["/s/rustdoc".into()],
             args,
             env: BTreeMap::from([("CARGO_PKG_NAME".into(), "util".into())]),
+            env_append: Default::default(),
+            env_layers: Vec::new(),
             env_splices: vec![Splice::new("/f/a".into(), SpliceKind::RustcEnv)],
             dylib_path_from: vec![],
             cwd: "/src".into(),

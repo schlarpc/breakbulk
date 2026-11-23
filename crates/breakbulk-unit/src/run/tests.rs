@@ -31,6 +31,8 @@ fn unit(cwd: &Path) -> RenderedRun {
         remap: vec![],
         out_dir_remap: None,
         out_dir_remove: Vec::new(),
+        env_append: Default::default(),
+        env_layers: Vec::new(),
     }
 }
 

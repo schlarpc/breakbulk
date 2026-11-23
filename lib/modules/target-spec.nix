@@ -248,10 +248,20 @@ in
         [side](../../explanation/configuration.md#host-and-target-sides)),
         never through Cargo's `[env]`, so build-script compiles and proc
         macros (host units) do not see it.
-        List-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, …) are
-        appended to the env capture's value.
-
         ${bt.envNote}
+      '';
+    };
+    envSeparators = mkOption {
+      type = types.lazyAttrsOf bt.envSeparator;
+      default = { };
+      example = {
+        CMAKE_PREFIX_PATH = ":";
+      };
+      description = ''
+        The separator a variable's lists are joined with, by name, for
+        this target's `env`. Without an entry, the built-in
+        table's ([list variables](../unit-builder.md#list-variables)),
+        else `:`.
       '';
     };
     runner = mkOption {

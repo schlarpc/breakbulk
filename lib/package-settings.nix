@@ -152,7 +152,11 @@ let
         let
           t = e.config.test;
         in
-        t // { env = lib.mapAttrs (_: bt.testEnvString) t.env; };
+        t
+        // {
+          env = lib.mapAttrs (_: bt.testEnvString) t.env;
+          inherit (e.config) envSeparators;
+        };
     in
     {
       runEvals = evals;

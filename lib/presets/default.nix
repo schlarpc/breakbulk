@@ -493,16 +493,24 @@ let
         ]) incdirs;
         rustflags =
           map (d: "-Lnative=${d}") libdirs ++ (staticLinking { inherit traits crtStatic; }).rustflags;
-        env = defaultEnv {
-          LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
-          RC = "${tools}/llvm-rc";
-          RCFLAGS = lib.concatMapStringsSep " " (d: "/I ${d}") incdirs;
-          LIB = lib.concatStringsSep ";" libdirs;
-          INCLUDE = lib.concatStringsSep ";" incdirs;
+        env =
+          defaultEnv {
+            LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
+            RC = "${tools}/llvm-rc";
+            RCFLAGS = lib.concatMapStringsSep " " (d: "/I ${d}") incdirs;
+            LIB = lib.concatStringsSep ";" libdirs;
+            INCLUDE = lib.concatStringsSep ";" incdirs;
+          }
           # llvm-rc runs `clang` from PATH to preprocess (llvm-rc.cpp,
-          # findClang); PATH is appended to the capture's.
-          PATH = "${clang}/bin:${tools}:${llvm.lld}/bin";
-        };
+          # findClang): a list, appended to the capture's PATH, and not at
+          # `mkDefault`, which a user's own list would drop.
+          // {
+            PATH = [
+              "${clang}/bin"
+              tools
+              "${llvm.lld}/bin"
+            ];
+          };
         runner =
           mkDefault
             (chooseRunner {

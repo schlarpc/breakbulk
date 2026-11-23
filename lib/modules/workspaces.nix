@@ -1153,6 +1153,16 @@ let
                   ${bt.envNote}
                 '';
               };
+              envSeparators = mkOption {
+                type = types.lazyAttrsOf bt.envSeparator;
+                default = { };
+                description = ''
+                  The separator a variable's lists are joined with, by name,
+                  for `host.env`. Without an entry, the built-in table's
+                  ([list variables](../unit-builder.md#list-variables)), else
+                  `:`.
+                '';
+              };
               stdenv = mkOption {
                 type = types.nullOr types.raw;
                 default = null;

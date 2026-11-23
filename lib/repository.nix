@@ -499,7 +499,9 @@ let
     )
   ) cfg.workspaces;
 
-  envStrings = lib.mapAttrs (_: bt.envString);
+  # Env layers, lowest first, as instantiate takes them: each variable a
+  # value (replaces) or `{ append; sep; }` (appends; types.nix `envSpec`).
+  envSpecsOf = separators: layers: bt.envSpecs separators (bt.envLayers layers);
   # Two `inputs` (functions of a package set), concatenated.
   catFn =
     f: g: p:
@@ -869,7 +871,7 @@ let
     in
     {
       linker = "${h.linker}";
-      env = envStrings h.env;
+      env = envSpecsOf h.envSeparators [ h.env ];
       inherit (h) stdenv testSystem;
       runner = runnerOf wsName h.runner;
     };
@@ -909,7 +911,10 @@ let
       // lib.optionalAttrs (t != null) {
         targetPackageSet = captureSetOf wsName triple;
         targetStdenv = t.stdenv;
-        targetEnv = envStrings (t.cEnv // t.env);
+        targetEnv = envSpecsOf t.envSeparators [
+          t.cEnv
+          t.env
+        ];
       };
       # `runners.none` (a preset found nothing that runs the target's
       # programs) says so as an attribute, which the list above drops.
@@ -985,13 +990,19 @@ let
               };
           ov = {
             host = {
-              env = envStrings (o.env // o.forHost.env);
+              env = envSpecsOf o.envSeparators [
+                o.env
+                o.forHost.env
+              ];
               envCapture = capture "host" (catFn o.nativeInputs o.forHost.nativeInputs) (
                 catFn o.inputs o.forHost.inputs
               );
             };
             target = {
-              env = envStrings (o.env // o.forTarget.env);
+              env = envSpecsOf o.envSeparators [
+                o.env
+                o.forTarget.env
+              ];
               envCapture = capture "target" (catFn o.nativeInputs o.forTarget.nativeInputs) (
                 catFn o.inputs o.forTarget.inputs
               );
@@ -1523,7 +1534,10 @@ let
         );
         shellEnv = ws.devShell.env;
         targetEnv = lib.optionalAttrs (ws.devShell.target != null) (
-          envStrings (targetField wsName ws.devShell.target "env" { })
+          let
+            t = targetCfgOf wsName ws.devShell.target;
+          in
+          lib.optionalAttrs (t != null) (lib.mapAttrs (bt.envFlat t.envSeparators) t.env)
         );
         # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default

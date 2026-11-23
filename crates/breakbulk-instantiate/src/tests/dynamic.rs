@@ -45,7 +45,7 @@ fn values(inputs: &Inputs) -> Values {
                 .platform(p)
                 .env
                 .iter()
-                .map(|v| keys::env(p, v)),
+                .flat_map(|v| [keys::env(p, v), keys::env_sep(p, v)]),
         );
         for (k, o) in &inputs.overrides.packages {
             keys.push(keys::override_capture(k, p));
@@ -53,7 +53,7 @@ fn values(inputs: &Inputs) -> Values {
                 o.platform(p)
                     .env
                     .iter()
-                    .map(|v| keys::override_env(k, p, v)),
+                    .flat_map(|v| [keys::override_env(k, p, v), keys::override_env_sep(k, p, v)]),
             );
         }
     }
@@ -829,45 +829,4 @@ fn long_units_pass_as_file() {
     let n = &plan.nodes[0];
     let r = resolve(&n.drv, &vals, &BTreeMap::new(), 10).unwrap();
     assert_eq!(r.env["passAsFile"], "BREAKBULK_UNIT");
-}
-
-/// A list-like variable joined from several env layers resolves as the Nix
-/// side resolves it: empty layers left out.
-#[test]
-fn joined_env_layers_resolve_as_nix_does() {
-    let mut inputs = dyn_inputs();
-    inputs
-        .toolchains
-        .target
-        .env
-        .extend(["PATH".into(), "PKG_CONFIG_PATH".into()]);
-    inputs
-        .overrides
-        .packages
-        .get_mut("smokelib")
-        .unwrap()
-        .target
-        .env
-        .extend(["PATH".into(), "PKG_CONFIG_PATH".into()]);
-    let units = instantiate(&inputs).unwrap();
-    let (resolved, _) = write_all(&inputs);
-    let lib = &resolved.iter().find(|(k, _)| k == LIB).unwrap().1;
-    assert_eq!(
-        lib.env["BREAKBULK_UNIT"],
-        attr(&units.units[LIB], "BREAKBULK_UNIT")
-    );
-    let RenderedUnit::Compile(c) = serde_json::from_str(&lib.env["BREAKBULK_UNIT"]).unwrap() else {
-        panic!()
-    };
-    let ov = |v: &str| input_value(&keys::override_env("smokelib", Platform::Target, v));
-    // The spec's PATH is empty in these tests (`input_value`).
-    assert_eq!(c.env["PATH"], ov("PATH"));
-    assert_eq!(
-        c.env["PKG_CONFIG_PATH"],
-        format!(
-            "{}:{}",
-            input_value(&keys::env(Platform::Target, "PKG_CONFIG_PATH")),
-            ov("PKG_CONFIG_PATH")
-        )
-    );
 }

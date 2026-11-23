@@ -27,6 +27,7 @@
   extraModules ? [ ],
 }:
 let
+  unitEnv = import ../lib/unit-env.nix { inherit lib; };
   inherit (pkgs) lib;
   fixtures = ../fixtures;
   native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
@@ -1915,7 +1916,10 @@ in
     let
       units = unitsNamed (inst' overrideRepo "b") "build";
       envOf =
-        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n:
+        unitEnv (
+          builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)
+        );
       itoa = envOf "itoa-1.0.11-lib";
       libc = envOf "libc-0.2.191-lib";
       libcRun = envOf "libc-0.2.191-build-run";
@@ -1993,13 +1997,66 @@ in
         }
       ];
     in
-    assert lib.assertMsg (runOf repo "cm-sys" == rule)
-      "cmake-out-dir-remove: cm-sys ${builtins.toJSON (runOf repo "cm-sys")}";
+    assert lib.assertMsg (
+      runOf repo "cm-sys" == rule
+    ) "cmake-out-dir-remove: cm-sys ${builtins.toJSON (runOf repo "cm-sys")}";
     assert lib.assertMsg (
       runOf repo "bg-sys" == [ ] && runOf repo "plain" == [ ]
     ) "cmake-out-dir-remove: reached a package that does not depend on cmake";
     assert lib.assertMsg (runOf off "cm-sys" == [ ]) "cmake-out-dir-remove: mkForce kept the rule";
     evalCheck "cmake-out-dir-remove" "";
+
+  # Env settings: a list appends (lists of every layer concatenate, joined
+  # with the variable's separator), a string replaces, a list after a
+  # string extends it; `envSeparators` sets a separator.
+  env-lists =
+    let
+      repo = mkRepo (fixtures + "/walking-skeleton") [
+        (oneWs ".")
+        {
+          workspaces.main.memberDefaults.env = {
+            CPATH = [ "/a" ];
+            X = "s";
+          };
+          packages.walking-skeleton = {
+            env = {
+              CPATH = [ "/b" ];
+              PATH = "/only";
+              PKG_CONFIG_PATH = [ "/p" ];
+              X = [ "t" ];
+            };
+            envSeparators.CPATH = ";";
+          };
+        }
+      ];
+      run = builtins.fromJSON (
+        builtins.unsafeDiscardStringContext
+          (unitsNamed (inst repo) "build")."walking-skeleton-0.1.0-build-run".drvAttrs.BREAKBULK_UNIT
+      );
+      layer = lib.last run.envLayers;
+      want = {
+        CPATH = {
+          value = "/a;/b";
+          sep = ";";
+        };
+        PATH = {
+          value = "/only";
+          sep = "";
+        };
+        PKG_CONFIG_PATH = {
+          value = "/p";
+          sep = ":";
+        };
+        X = {
+          value = "s:t";
+          sep = "";
+        };
+      };
+    in
+    assert lib.assertMsg (lib.all (k: layer.${k} or null == want.${k}) (
+      lib.attrNames want
+    )) "env-lists: ${builtins.toJSON layer}";
+    evalCheck "env-lists" "";
 
   # Version requirements, against the semver crate's rules.
   version-req =
@@ -2489,7 +2546,8 @@ in
         binExe = lib.concatMap (u: lib.optional (u ? env.CARGO_BIN_EXE_tool) u.env.CARGO_BIN_EXE_tool) (
           lib.attrValues plan.units
         );
-        shellTarget = (w.devShell.CARGO_BUILD_TARGET or w.devShell.env.CARGO_BUILD_TARGET) == plan.target.arg;
+        shellTarget =
+          (w.devShell.CARGO_BUILD_TARGET or w.devShell.env.CARGO_BUILD_TARGET) == plan.target.arg;
       };
       want = {
         target = true;
@@ -2764,7 +2822,10 @@ in
       ];
       units = unitsNamed (repo.workspaces.main.internal.instances.${native}.default) "build";
       envOf =
-        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n:
+        unitEnv (
+          builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)
+        );
       itoa = envOf "itoa-1.0.11-lib";
       libc = envOf "libc-0.2.191-lib";
       off = mkRepo (fixtures + "/multi-ws") [
@@ -2821,7 +2882,10 @@ in
       hasC = view: (builtins.readDir view) ? c;
       units = unitsNamed i "build";
       envOf =
-        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n:
+        unitEnv (
+          builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)
+        );
     in
     assert lib.assertMsg (
       lib.hasInfix "export MD_ONLY=md" script && lib.hasInfix "export MD_BOTH=own" script
@@ -2933,7 +2997,10 @@ in
       t = repo.workspaces.main.target.${native};
       units = unitsNamed (repo.workspaces.main.internal.instances.${native}.default) "build";
       envOf =
-        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n:
+        unitEnv (
+          builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)
+        );
       bin = envOf "shared-0.1.0-lib";
       appB = envOf "app-b-0.1.0-bin";
       run = t.variants.default.testRuns.app-b."bin/app-b".drvAttrs.buildCommand;
@@ -2978,7 +3045,10 @@ in
       ];
       units = unitsNamed (repo.workspaces.main.internal.instances.${native}.default) "build";
       envOf =
-        n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
+        n:
+        unitEnv (
+          builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)
+        );
       lib' = envOf "libc-0.2.191-lib";
       run = envOf "libc-0.2.191-build-run";
       script = envOf "libc-0.2.191-build-script";

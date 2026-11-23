@@ -227,21 +227,6 @@ fn substitute(
                     }
                 }
             }
-            Part::Join { join, sep } => {
-                let mut items = Vec::new();
-                for item in join {
-                    let mut c = Ctx::default();
-                    let v = substitute(item, values, written, &mut c)?;
-                    if !v.is_empty() {
-                        items.push(v);
-                        ctx.srcs.extend(c.srcs);
-                        for (drv, outs) in c.drvs {
-                            ctx.drvs.entry(drv).or_default().extend(outs);
-                        }
-                    }
-                }
-                s.push_str(&items.join(sep));
-            }
         }
     }
     Ok(s)

@@ -650,7 +650,10 @@ let
       unit = lib.findFirst (u: u.name == "ui-0.1.0-lib") (throw "no ui lib unit") (
         lib.attrValues i.units.build
       );
-      data = builtins.fromJSON (builtins.unsafeDiscardStringContext unit.drvAttrs.BREAKBULK_UNIT);
+      rendered = builtins.fromJSON (builtins.unsafeDiscardStringContext unit.drvAttrs.BREAKBULK_UNIT);
+      data = rendered // {
+        env = import ../lib/unit-env.nix { inherit lib; } rendered;
+      };
     in
     assert lib.assertMsg (
       !(data.env ? SYS_UI)

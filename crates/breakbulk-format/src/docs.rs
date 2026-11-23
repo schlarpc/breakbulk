@@ -2,7 +2,7 @@
 //! docs derivation (`kind: docs`, see `breakbulk_unit::docs`), and
 //! the command part rustdoc units (docs and doctests) share.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use breakbulk_unit::spec::{Hints, RenderedArg, RenderedCompile, RenderedDocs, RenderedUnit};
 
@@ -48,8 +48,7 @@ pub(crate) fn rustdoc_command<R: Resolve>(
 ) -> Result<RenderedCompile, R::Error> {
     let overlay = r.env_overlay(id, d)?;
     let env_capture = r.env_capture(id, d)?;
-    let mut env: BTreeMap<String, String> = env(&d.env, r)?;
-    crate::render::merge_layer_with(r, &mut env, overlay)?;
+    let (env, env_append) = crate::render::recorded_env(env(&d.env, r)?);
     let strong = BTreeSet::new();
     Ok(RenderedCompile {
         package: d.package.clone(),
@@ -73,6 +72,8 @@ pub(crate) fn rustdoc_command<R: Resolve>(
             })
             .collect::<Result<_, _>>()?,
         env,
+        env_append,
+        env_layers: overlay,
         env_splices: d
             .env_splices
             .iter()

@@ -20,6 +20,8 @@ fn unit(args: &[&str]) -> RenderedCompile {
             .map(|a| RenderedArg::Literal(a.to_string()))
             .collect(),
         env: BTreeMap::new(),
+        env_append: Default::default(),
+        env_layers: Vec::new(),
         env_splices: vec![],
         dylib_path_from: vec![],
         cwd: "/nix/store/x-src".into(),

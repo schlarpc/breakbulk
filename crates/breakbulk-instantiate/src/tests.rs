@@ -113,6 +113,15 @@ fn input_value(key: &str) -> String {
                 k.replace(':', "-")
             )
         }
+        // Lists append (with `:`) for these variables in these tests; every
+        // other variable replaces.
+        k if k.contains("envsep:") => {
+            if k.ends_with(":PATH") || k.ends_with(":PKG_CONFIG_PATH") {
+                ":".into()
+            } else {
+                String::new()
+            }
+        }
         // Empty values, for list-like variables.
         k if k.ends_with(":EMPTY") || k.ends_with(":PATH") && k.starts_with("env:") => {
             String::new()
@@ -142,12 +151,6 @@ fn resolve(parts: &[Part]) -> String {
                     v
                 }
             }
-            Part::Join { join, sep } => join
-                .iter()
-                .map(|item| resolve(item))
-                .filter(|v| !v.is_empty())
-                .collect::<Vec<_>>()
-                .join(sep),
         })
         .collect()
 }
@@ -254,26 +257,37 @@ impl Resolve for RealPaths<'_> {
             .map(|k| input_value(&keys::override_capture(k, c.platform)))
             .collect())
     }
-    fn env_overlay(&self, _: &UnitId, u: &Unit) -> Result<BTreeMap<String, String>, String> {
+    fn env_overlay(&self, _: &UnitId, u: &Unit) -> Result<Vec<breakbulk_format::EnvLayer>, String> {
         let p = platform(u);
-        let mut env: BTreeMap<String, String> = self
-            .0
-            .toolchains
-            .platform(p)
-            .env
-            .iter()
-            .map(|v| (v.clone(), input_value(&keys::env(p, v))))
-            .collect();
-        if let Some((k, o)) = self.ov(u.package()) {
-            let layer = o
-                .platform(p)
-                .env
+        let layer = |spec: &PlatformSpec,
+                     value: &dyn Fn(&str) -> String,
+                     sep: &dyn Fn(&str) -> String|
+         -> breakbulk_format::EnvLayer {
+            spec.env
                 .iter()
-                .map(|v| (v.clone(), input_value(&keys::override_env(&k, p, v))))
-                .collect();
-            breakbulk_format::merge_layer_with(self, &mut env, layer)?;
+                .map(|v| {
+                    let l = breakbulk_format::LayerValue {
+                        value: input_value(&value(v)),
+                        sep: input_value(&sep(v)),
+                    };
+                    (v.clone(), l)
+                })
+                .collect()
+        };
+        let mut layers = vec![layer(
+            self.0.toolchains.platform(p),
+            &|v| keys::env(p, v),
+            &|v| keys::env_sep(p, v),
+        )];
+        if let Some((k, o)) = self.ov(u.package()) {
+            layers.push(layer(
+                o.platform(p),
+                &|v| keys::override_env(&k, p, v),
+                &|v| keys::override_env_sep(&k, p, v),
+            ));
         }
-        Ok(env)
+        layers.retain(|l| !l.is_empty());
+        Ok(layers)
     }
     // The smoke plan has no test units and no test views.
     fn source_view(
@@ -423,16 +437,17 @@ fn layers_and_overrides() {
         panic!()
     };
     // Toolchain env, then the package override (which wins for SHARED).
-    assert_eq!(lib.env["CFLAGS"], input_value("env:target:CFLAGS"));
+    let env = lib.layered_env().0;
+    assert_eq!(env["CFLAGS"], input_value("env:target:CFLAGS"));
     assert_eq!(
-        lib.env["SHARED"],
+        env["SHARED"],
         input_value("override:smokelib:env:target:SHARED")
     );
     assert_eq!(
-        lib.env["LIB_ONLY"],
+        env["LIB_ONLY"],
         input_value("override:smokelib:env:target:LIB_ONLY")
     );
-    assert!(!lib.env.contains_key("HOST_ONLY"));
+    assert!(!env.contains_key("HOST_ONLY"));
     assert_eq!(
         lib.env_capture.as_deref(),
         Some(input_value("override:smokelib:capture:target").as_str())
@@ -442,8 +457,9 @@ fn layers_and_overrides() {
     let RenderedUnit::Compile(script) = unit(SCRIPT) else {
         panic!()
     };
-    assert_eq!(script.env["HOST_ONLY"], input_value("env:host:HOST_ONLY"));
-    assert!(!script.env.contains_key("CFLAGS") && !script.env.contains_key("LIB_ONLY"));
+    let env = script.layered_env().0;
+    assert_eq!(env["HOST_ONLY"], input_value("env:host:HOST_ONLY"));
+    assert!(!env.contains_key("CFLAGS") && !env.contains_key("LIB_ONLY"));
     assert_eq!(
         script.env_capture.as_deref(),
         Some(input_value("capture:host").as_str())
@@ -473,19 +489,20 @@ fn layers_and_overrides() {
     assert_eq!(run.env["RUSTC"], format!("{RUSTC}/bin/rustc"));
 }
 
-/// Layer 5 (the package override) appends to layer 4 (the toolchain spec)
-/// for list-like variables, and both append to Cargo's recorded env (layer
-/// 3), as `breakbulk_unit::env::merge_layer` does with real values. Empty
-/// values leave no separator behind: an empty `PATH` entry would mean the
-/// working directory.
+/// Layers 4 (the toolchain spec) and 5 (the package override) reach the
+/// unit unmerged, each value with the separator it appends with (empty: it
+/// replaces), both filled in by the Nix side: a value can be a product of
+/// the plan, so whether it is a list is known only then. breakbulk-unit
+/// folds them over Cargo's recorded env (layer 3), whose list-like
+/// variables append to the env capture.
 #[test]
-fn list_like_variables_append_across_layers() {
+fn env_layers_reach_the_unit_unmerged() {
     let mut inputs = smoke_inputs();
-    inputs.toolchains.target.env.extend([
-        "PATH".into(),
-        "NIX_CFLAGS_COMPILE".into(),
-        "PKG_CONFIG_PATH".into(),
-    ]);
+    inputs
+        .toolchains
+        .target
+        .env
+        .extend(["PATH".into(), "PKG_CONFIG_PATH".into()]);
     inputs
         .overrides
         .packages
@@ -493,12 +510,7 @@ fn list_like_variables_append_across_layers() {
         .unwrap()
         .target
         .env
-        .extend([
-            "PATH".into(),
-            "NIX_CFLAGS_COMPILE".into(),
-            "PKG_CONFIG_PATH".into(),
-        ]);
-    // The recorded env of the library also has a PATH (layer 3).
+        .extend(["PATH".into(), "PKG_CONFIG_PATH".into()]);
     let lib = match inputs.plan.units.get_mut(LIB).unwrap() {
         Unit::Compile(c) => c,
         _ => panic!(),
@@ -508,84 +520,33 @@ fn list_like_variables_append_across_layers() {
         breakbulk_format::Text::Literal(format!("{RUSTC}/bin")),
     );
     let out = instantiate(&inputs).unwrap();
-    let RenderedUnit::Compile(c) =
-        serde_json::from_str(&attr(&out.units[LIB], "BREAKBULK_UNIT")).unwrap()
-    else {
-        panic!()
-    };
-    let spec = |v: &str| input_value(&keys::env(Platform::Target, v));
-    let ov = |v: &str| input_value(&keys::override_env("smokelib", Platform::Target, v));
-    assert_eq!(
-        c.env["NIX_CFLAGS_COMPILE"],
-        format!(
-            "{} {}",
-            spec("NIX_CFLAGS_COMPILE"),
-            ov("NIX_CFLAGS_COMPILE")
-        )
-    );
-    assert_eq!(
-        c.env["PKG_CONFIG_PATH"],
-        format!("{}:{}", spec("PKG_CONFIG_PATH"), ov("PKG_CONFIG_PATH"))
-    );
-    // The spec's PATH is empty: no empty entry between the recorded PATH
-    // and the override's.
-    assert_eq!(spec("PATH"), "");
-    assert_eq!(c.env["PATH"], format!("{RUSTC}/bin:{}", ov("PATH")));
-    // Not list-like: the override replaces the spec's value.
-    assert_eq!(c.env["SHARED"], ov("SHARED"));
-    // Identical to rendering with the real values.
-    let direct =
-        unit_env_value(&render_unit(&inputs.plan, &LIB.to_owned(), &RealPaths(&inputs)).unwrap())
-            .unwrap();
-    assert_eq!(attr(&out.units[LIB], "BREAKBULK_UNIT"), direct);
-    // units.json still names no store path: the recorded PATH's store path
-    // became a tool token inside the join.
-    assert!(!to_json(&out).contains("/nix/store"));
-    // A target unit without the override joins only the spec's values; the
-    // empty spec PATH leaves no PATH at all in a unit that records none.
-    let RenderedUnit::Compile(app) =
-        serde_json::from_str(&attr(&out.units[APP], "BREAKBULK_UNIT")).unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(app.env["PATH"], "");
-    assert_eq!(app.env["NIX_CFLAGS_COMPILE"], spec("NIX_CFLAGS_COMPILE"));
-}
-
-#[test]
-fn joined_recorded_values_are_json_escaped() {
-    // A recorded list-like value (from the project's `[env]`) that needs
-    // escaping, joined with a spec value: the join's literal must be escaped
-    // like the rest of BREAKBULK_UNIT.
-    let mut inputs = smoke_inputs();
-    inputs
-        .toolchains
-        .target
-        .env
-        .insert("BINDGEN_EXTRA_CLANG_ARGS".into());
-    let recorded = "-DNAME=\"x\" -IC:\\inc";
-    let lib = match inputs.plan.units.get_mut(LIB).unwrap() {
-        Unit::Compile(c) => c,
-        _ => panic!(),
-    };
-    lib.env.insert(
-        "BINDGEN_EXTRA_CLANG_ARGS".into(),
-        breakbulk_format::Text::Literal(recorded.into()),
-    );
-    let out = instantiate(&inputs).unwrap();
     let text = attr(&out.units[LIB], "BREAKBULK_UNIT");
     let RenderedUnit::Compile(c) = serde_json::from_str(&text).unwrap() else {
         panic!()
     };
-    let spec = input_value(&keys::env(Platform::Target, "BINDGEN_EXTRA_CLANG_ARGS"));
+    let spec = |v: &str| input_value(&keys::env(Platform::Target, v));
+    let ov = |v: &str| input_value(&keys::override_env("smokelib", Platform::Target, v));
+    assert_eq!(c.env_layers.len(), 2);
+    assert_eq!(c.env_layers[1]["SHARED"].value, ov("SHARED"));
+    assert_eq!(c.env_layers[1]["SHARED"].sep, "");
+    assert_eq!(c.env_append.get("PATH"), Some(&':'));
+    let (env, appends) = c.layered_env();
+    // The spec's PATH is empty: no empty entry between the recorded PATH
+    // and the override's.
+    assert_eq!(env["PATH"], format!("{RUSTC}/bin:{}", ov("PATH")));
     assert_eq!(
-        c.env["BINDGEN_EXTRA_CLANG_ARGS"],
-        format!("{recorded} {spec}")
+        env["PKG_CONFIG_PATH"],
+        format!("{}:{}", spec("PKG_CONFIG_PATH"), ov("PKG_CONFIG_PATH"))
     );
+    assert_eq!(env["SHARED"], ov("SHARED"));
+    assert_eq!(appends.get("PKG_CONFIG_PATH"), Some(&':'));
+    assert!(!appends.contains_key("SHARED"));
+    // Identical to rendering with the real values.
     let direct =
         unit_env_value(&render_unit(&inputs.plan, &LIB.to_owned(), &RealPaths(&inputs)).unwrap())
             .unwrap();
     assert_eq!(text, direct);
+    assert!(!to_json(&out).contains("/nix/store"));
 }
 
 #[test]

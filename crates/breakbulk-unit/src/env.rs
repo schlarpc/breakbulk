@@ -11,11 +11,12 @@
 //!    build's temporary directory instead ([`Outer::test_base`]).
 //! 2. The env capture (`env.json`) for the unit's package and platform.
 //! 3. to 5. The unit's rendered `env`: Cargo's recorded env, then the toolchain
-//!    spec's env, then the package override's env, merged at instantiation
-//!    with [`merge_layer`].
+//!    spec's env, then the package override's env, merged at instantiation.
 //!
-//! Later layers win, except for list-like variables ([`list_separator`]),
-//! where a later layer's value is appended to the earlier one.
+//! A value of layers 3 to 5 replaces the earlier layers' value, or appends
+//! to it with a separator when the rendered unit's `envAppend` names it
+//! ([`merge_rendered`]): a recorded list-like variable
+//! ([`list_separator`]), or a variable a user's env layer gave as a list.
 //!
 //! Then, as nixpkgs' stdenv does for every build, the unit's own
 //! `-frandom-seed` goes at the start of `NIX_CFLAGS_COMPILE`, and a
@@ -51,53 +52,118 @@ pub const FIXED_BASE: [(&str, &str); 4] = [
 /// and the linker wrapper skips its check.
 pub const PASSED_BASE: [&str; 4] = ["NIX_BUILD_CORES", "NIX_BUILD_TOP", "NIX_STORE", "TMPDIR"];
 
-/// Search-path variables: `:`-separated lists that setup hooks build with
-/// `addToSearchPath`. The names are those a broad capture of common hooks
-/// produced (spike C: pkg-config, cmake, perl, python3, gettext,
-/// gobject-introspection, autotools).
-const SEARCH_PATHS: [&str; 11] = [
-    "ACLOCAL_PATH",
-    "CMAKE_INCLUDE_PATH",
-    "CMAKE_LIBRARY_PATH",
-    "GETTEXTDATADIRS",
-    "GI_TYPELIB_PATH",
-    "NIXPKGS_CMAKE_PREFIX_PATH",
-    "PATH",
-    "PERL5LIB",
-    "PKG_CONFIG_PATH",
-    "PYTHONPATH",
-    "XDG_DATA_DIRS",
-];
+/// The built-in separators of list-like variables, by name
+/// (`env-separators.json`, which the Nix library reads too): `:` for the
+/// search paths setup hooks build with `addToSearchPath`, a space for the
+/// flag lists the compiler and linker wrappers (and bindgen) split into
+/// words. The names are those a broad capture of common hooks produced
+/// (pkg-config, cmake, perl, python3, gettext, gobject-introspection,
+/// autotools) and the wrappers' own inputs (`cc-wrapper/add-flags.sh`,
+/// `bintools-wrapper/add-flags.sh`, `rust-bindgen-hook.sh`).
+fn separators() -> &'static BTreeMap<String, char> {
+    static TABLE: std::sync::OnceLock<BTreeMap<String, char>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        serde_json::from_str(include_str!("env-separators.json"))
+            .expect("env-separators.json is a JSON object of one-character strings")
+    })
+}
 
-/// Flag variables: space-separated lists that the compiler and linker
-/// wrappers (and bindgen) split into words. The `NIX_*` names are the
-/// wrappers' inputs (`cc-wrapper/add-flags.sh`, `bintools-wrapper/add-flags.sh`);
-/// `BINDGEN_EXTRA_CLANG_ARGS` is filled by `rust-bindgen-hook.sh`.
-const FLAG_LISTS: [&str; 7] = [
-    "BINDGEN_EXTRA_CLANG_ARGS",
-    "NIX_CFLAGS_COMPILE",
-    "NIX_CFLAGS_COMPILE_BEFORE",
-    "NIX_CFLAGS_LINK",
-    "NIX_LDFLAGS",
-    "NIX_LDFLAGS_AFTER",
-    "NIX_LDFLAGS_BEFORE",
-];
-
-/// The separator of a list-like variable, or `None` when later layers
-/// replace it. The `_FOR_BUILD` and `_FOR_TARGET` forms that setup hooks
-/// write for other platform offsets are lists like their base names.
+/// The separator of a list-like variable from the built-in table, or
+/// `None` for any other. The `_FOR_BUILD` and `_FOR_TARGET` forms that
+/// setup hooks write for other platform offsets are lists like their base
+/// names.
+///
+/// It decides how Cargo's recorded env (layer 3) and the env captures of a
+/// link closure merge with layer 2. A user's env layers say it themselves
+/// ([`EnvAppend`]).
 pub fn list_separator(name: &str) -> Option<char> {
     let base = name
         .strip_suffix("_FOR_BUILD")
         .or_else(|| name.strip_suffix("_FOR_TARGET"))
         .unwrap_or(name);
-    if SEARCH_PATHS.contains(&base) {
-        Some(':')
-    } else if FLAG_LISTS.contains(&base) {
-        Some(' ')
-    } else {
-        None
+    separators().get(base).copied()
+}
+
+/// The variables of a rendered env whose value appends to the value of
+/// the earlier layers, with the separator to put between them; every other
+/// variable replaces it. An env layer's list (`env.X = [ … ]`) appends, a
+/// string replaces, the captured value included.
+pub type EnvAppend = BTreeMap<String, char>;
+
+/// One variable of a user's env layer (the toolchain spec's, the
+/// package's, a test run's): `value` replaces the earlier layers' value,
+/// or, with a `sep`, is appended to it with `sep` between them (the
+/// setting was a list). Both are strings so that instantiation can fill
+/// them in as tokens.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerValue {
+    pub value: String,
+    /// One character, or empty: `value` replaces. Always written, as
+    /// instantiation writes it before it knows the value.
+    #[serde(default)]
+    pub sep: String,
+}
+
+impl LayerValue {
+    pub fn set(value: impl Into<String>) -> LayerValue {
+        LayerValue {
+            value: value.into(),
+            sep: String::new(),
+        }
     }
+
+    pub fn append(value: impl Into<String>, sep: char) -> LayerValue {
+        LayerValue {
+            value: value.into(),
+            sep: sep.to_string(),
+        }
+    }
+
+    fn sep(&self) -> Option<char> {
+        self.sep.chars().next()
+    }
+}
+
+/// An env layer of [`LayerValue`]s, by variable.
+pub type EnvLayer = BTreeMap<String, LayerValue>;
+
+/// Fold the user's env layers (4 and 5, lowest first) over Cargo's
+/// recorded env (`values`, with `appends`): a replacing value replaces,
+/// and the variable no longer appends to the env capture; an appending one
+/// goes after the value there, or, with none, appends to the capture.
+pub fn fold_layers(
+    values: &BTreeMap<String, String>,
+    appends: &EnvAppend,
+    layers: &[EnvLayer],
+) -> (BTreeMap<String, String>, EnvAppend) {
+    let mut values = values.clone();
+    let mut appends = appends.clone();
+    for layer in layers {
+        for (k, v) in layer {
+            match (v.sep(), values.get(k)) {
+                (None, _) => {
+                    appends.remove(k);
+                    values.insert(k.clone(), v.value.clone());
+                }
+                (Some(sep), Some(earlier)) => {
+                    let merged = append(sep, earlier, &v.value);
+                    values.insert(k.clone(), merged);
+                }
+                (Some(sep), None) => {
+                    appends.insert(k.clone(), sep);
+                    values.insert(k.clone(), v.value.clone());
+                }
+            }
+        }
+    }
+    (values, appends)
+}
+
+/// Whether `value` looks like a search path of store paths: what a string
+/// replacing a captured value most likely meant to extend.
+fn looks_like_list(value: &str) -> bool {
+    value.contains(':') && value.contains("/nix/store")
 }
 
 /// `earlier` followed by `later`. An empty side is left out, so no empty
@@ -110,11 +176,10 @@ pub fn append(sep: char, earlier: &str, later: &str) -> String {
     }
 }
 
-/// Merge a later layer into `env`: its values replace earlier ones, except
-/// for list-like variables, which are appended.
-///
-/// Instantiation uses this to merge layers 3 to 5, and `breakbulk-unit` to
-/// put those over layers 1 and 2.
+/// Merge a later layer into `env` by the built-in table: its values
+/// replace earlier ones, except for list-like variables
+/// ([`list_separator`]), which are appended. For layers whose own rules
+/// come with them, [`merge_rendered`].
 pub fn merge_layer<K, V>(
     env: &mut BTreeMap<String, String>,
     layer: impl IntoIterator<Item = (K, V)>,
@@ -129,6 +194,31 @@ pub fn merge_layer<K, V>(
             _ => v,
         };
         env.insert(k, merged);
+    }
+}
+
+/// Merge a rendered env (`values`, with `appends` saying which of them
+/// append) over `env`: an appending value goes after the earlier one, any
+/// other replaces it. A replaced value that looks like a list of store
+/// paths gets a warning, since `env.X = "…"` is easily meant as an append.
+pub fn merge_rendered(
+    env: &mut BTreeMap<String, String>,
+    values: &BTreeMap<String, String>,
+    appends: &EnvAppend,
+) {
+    for (k, v) in values {
+        let merged = match (appends.get(k), env.get(k)) {
+            (Some(sep), Some(earlier)) => append(*sep, earlier, v),
+            (None, Some(earlier)) if earlier != v && looks_like_list(earlier) => {
+                eprintln!(
+                    "warning: `{k}` replaces the env capture's value, which looks like a list \
+                     (`{earlier}`); give the setting as a list (`env.{k} = [ … ]`) to append to it"
+                );
+                v.clone()
+            }
+            _ => v.clone(),
+        };
+        env.insert(k.clone(), merged);
     }
 }
 
@@ -343,9 +433,10 @@ pub fn layered(
     outer: &Outer,
     capture: Option<&BTreeMap<String, String>>,
     unit_env: &BTreeMap<String, String>,
+    env_append: &EnvAppend,
     cflags: &CFlags,
 ) -> BTreeMap<String, String> {
-    layered_on(outer.base(), outer, capture, unit_env, cflags)
+    layered_on(outer.base(), outer, capture, unit_env, env_append, cflags)
 }
 
 /// [`layered`] over another layer 1 (`base`), such as
@@ -355,16 +446,14 @@ pub fn layered_on(
     outer: &Outer,
     capture: Option<&BTreeMap<String, String>>,
     unit_env: &BTreeMap<String, String>,
+    env_append: &EnvAppend,
     cflags: &CFlags,
 ) -> BTreeMap<String, String> {
     let mut env = base;
     if let Some(c) = capture {
         merge_layer(&mut env, c.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     }
-    merge_layer(
-        &mut env,
-        unit_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-    );
+    merge_rendered(&mut env, unit_env, env_append);
     cflags.apply(&mut env);
     if env.contains_key("NUM_JOBS") {
         env.insert("NUM_JOBS".into(), outer.jobs().to_string());

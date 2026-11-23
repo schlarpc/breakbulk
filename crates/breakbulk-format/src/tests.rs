@@ -601,12 +601,19 @@ impl Resolve for Configured {
     fn env_capture(&self, id: &UnitId, _: &Unit) -> Result<Option<String>, String> {
         Ok(Some(format!("/nix/store/capture-{id}/env.json")))
     }
-    fn env_overlay(&self, _: &UnitId, unit: &Unit) -> Result<BTreeMap<String, String>, String> {
-        let mut m = BTreeMap::from([("SPEC".to_owned(), "1".to_owned())]);
+    fn env_overlay(&self, _: &UnitId, unit: &Unit) -> Result<Vec<crate::EnvLayer>, String> {
+        let set = crate::LayerValue::set;
+        let mut m = BTreeMap::from([
+            ("SPEC".to_owned(), set("1")),
+            (
+                "CPATH".to_owned(),
+                crate::LayerValue::append("/spec/include", ':'),
+            ),
+        ]);
         if let Unit::Compile(_) = unit {
-            m.insert("CARGO_PKG_NAME".into(), "overridden".into());
+            m.insert("CARGO_PKG_NAME".into(), set("overridden"));
         }
-        Ok(m)
+        Ok(vec![m])
     }
 }
 
@@ -625,8 +632,13 @@ fn render_configuration_hooks() {
     let RenderedUnit::Compile(c) = render_unit(&p, &"c-ring".into(), &Configured).unwrap() else {
         panic!()
     };
-    assert_eq!(c.env["CARGO_PKG_NAME"], "overridden");
-    assert_eq!(c.env["SPEC"], "1");
+    // Layers 4 and 5 go to breakbulk-unit as they are: whether a value
+    // replaces or appends is the setting's.
+    let (env, appends) = c.layered_env();
+    assert_eq!(env["CARGO_PKG_NAME"], "overridden");
+    assert_eq!(env["SPEC"], "1");
+    assert_eq!(env["CPATH"], "/spec/include");
+    assert_eq!(appends.get("CPATH"), Some(&':'));
     assert_eq!(
         c.env_capture.as_deref(),
         Some("/nix/store/capture-c-ring/env.json")
@@ -648,7 +660,7 @@ fn render_configuration_hooks() {
         panic!()
     };
     assert!(!r.env.contains_key("OUT_DIR"));
-    assert_eq!(r.env["SPEC"], "1");
+    assert_eq!(r.layered_env().0["SPEC"], "1");
 
     // With Cargo's trim-paths, breakbulk adds no remaps.
     p.remap.trim_paths = true;

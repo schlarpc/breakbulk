@@ -1,0 +1,20 @@
+{
+  "ACLOCAL_PATH": ":",
+  "BINDGEN_EXTRA_CLANG_ARGS": " ",
+  "CMAKE_INCLUDE_PATH": ":",
+  "CMAKE_LIBRARY_PATH": ":",
+  "GETTEXTDATADIRS": ":",
+  "GI_TYPELIB_PATH": ":",
+  "NIXPKGS_CMAKE_PREFIX_PATH": ":",
+  "NIX_CFLAGS_COMPILE": " ",
+  "NIX_CFLAGS_COMPILE_BEFORE": " ",
+  "NIX_CFLAGS_LINK": " ",
+  "NIX_LDFLAGS": " ",
+  "NIX_LDFLAGS_AFTER": " ",
+  "NIX_LDFLAGS_BEFORE": " ",
+  "PATH": ":",
+  "PERL5LIB": ":",
+  "PKG_CONFIG_PATH": ":",
+  "PYTHONPATH": ":",
+  "XDG_DATA_DIRS": ":"
+}

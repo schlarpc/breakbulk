@@ -21,9 +21,24 @@ Test runs are not units; they belong to [products](../explanation/products.md).
 
 ## Environment contract
 
-A unit's environment is built in layers. Later layers win, except for
-list-like variables (`PATH`, `NIX_CFLAGS_COMPILE`, `NIX_LDFLAGS`), where
-later layers append.
+A unit's environment is built in layers. A later layer's value replaces
+the earlier one, or is appended to it:
+
+- Cargo's recorded env (layer 3) appends for the list variables of the
+  table below, and replaces otherwise.
+- Layers 4 and 5 say it per variable: a setting given as a string
+  replaces, the env capture's value included; one given as a list is
+  appended, its values joined with the variable's separator. Lists from
+  every settings layer concatenate. The rendered unit carries these
+  layers as they are (`envLayers`, each value with its separator, empty
+  for a replacing one), and `breakbulk-unit` folds them over layer 3,
+  then the result over layer 2: whether a value is a list is known only
+  when instantiation's values are, since a value can be a product of the
+  plan.
+
+A string that replaces a captured value that looks like a list (it holds
+`:` and `/nix/store`) gets a warning: `env.PATH = "…"` drops the capture's
+tools, where `env.PATH = [ "…" ]` adds to them.
 
 | Layer | Contents |
 | --- | --- |
@@ -34,6 +49,36 @@ later layers append.
 | 5. Package override | The package's `env` for the unit's platform |
 
 Nothing from the planner's environment reaches a unit.
+
+### List variables
+
+The built-in separators (`crates/breakbulk-unit/src/env-separators.json`,
+which the Nix library reads too). The `_FOR_BUILD` and `_FOR_TARGET` forms
+setup hooks write for other platform offsets take their base name's. A
+variable not in the table joins its lists with `:`; `envSeparators.<name>`
+(of a package's settings, or of `targets.<triple>`) sets another, one
+character.
+
+| Variable | Separator |
+| --- | --- |
+| `ACLOCAL_PATH` | `:` |
+| `BINDGEN_EXTRA_CLANG_ARGS` | a space |
+| `CMAKE_INCLUDE_PATH` | `:` |
+| `CMAKE_LIBRARY_PATH` | `:` |
+| `GETTEXTDATADIRS` | `:` |
+| `GI_TYPELIB_PATH` | `:` |
+| `NIXPKGS_CMAKE_PREFIX_PATH` | `:` |
+| `NIX_CFLAGS_COMPILE` | a space |
+| `NIX_CFLAGS_COMPILE_BEFORE` | a space |
+| `NIX_CFLAGS_LINK` | a space |
+| `NIX_LDFLAGS` | a space |
+| `NIX_LDFLAGS_AFTER` | a space |
+| `NIX_LDFLAGS_BEFORE` | a space |
+| `PATH` | `:` |
+| `PERL5LIB` | `:` |
+| `PKG_CONFIG_PATH` | `:` |
+| `PYTHONPATH` | `:` |
+| `XDG_DATA_DIRS` | `:` |
 
 `HOME` does not exist in compiles and build-script runs, so a build that
 writes to its home fails. Doctests are tests, so they get a writable home

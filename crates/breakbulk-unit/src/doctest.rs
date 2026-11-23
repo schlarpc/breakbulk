@@ -24,9 +24,10 @@
 //!   the target, `--target T`.
 //! - [`TEST_ARGS_VAR`]: a JSON array of libtest arguments, each passed as
 //!   `--test-args A` right after the `-L` list, where Cargo puts them.
-//! - [`TEST_ENV_VAR`]: a JSON object of variables merged over the command's
-//!   environment, list-like variables (`PATH`) appended
-//!   ([`crate::env::merge_layer`]).
+//! - [`TEST_ENV_VAR`]: a JSON array of env layers merged over the command's
+//!   environment, lowest first ([`crate::env::LayerValue`]: `{ "value": V,
+//!   "sep": "" }` replaces, `{ "value": V, "sep": S }` appends): the
+//!   package's `test.env`, then its `test.path` on `PATH`.
 //!
 //! - [`POST_RUN_VAR`]: a program run after passing doctests (the
 //!   package's `test.postRun` snippets, `test.keepLog`'s copy), in
@@ -48,7 +49,9 @@ use std::process::Stdio;
 
 use crate::compile::{Invocation, check_args, fresh_dir, link_deps, load_directives};
 use crate::directives::BuildOutput;
-use crate::env::{CFlags, Outer, capture_layer, layered_on, merge_layer};
+use crate::env::{
+    CFlags, EnvAppend, EnvLayer, Outer, capture_layer, fold_layers, layered_on, merge_rendered,
+};
 use crate::process::{command, describe_status, shell_words};
 use crate::spec::{Platform, RenderedArg, RenderedCompile};
 use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
@@ -69,7 +72,8 @@ pub struct TestConfig {
     /// Each platform's runner; a platform without one runs directly.
     pub runners: BTreeMap<Platform, Vec<String>>,
     pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
+    /// Lowest first.
+    pub env: Vec<EnvLayer>,
     pub post_run: Option<String>,
 }
 
@@ -168,7 +172,9 @@ pub fn invocation(
         format!("dependency={}", deps_dir.display()),
     ]);
 
-    let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
+    let (layer_env, env_append) = c.layered_env();
+
+    let mut unit_env = expand_env(&layer_env, &c.env_splices, lookup)?;
     prepend_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     let mut env = layered_on(
@@ -176,10 +182,12 @@ pub fn invocation(
         outer,
         capture.as_ref(),
         &unit_env,
+        &env_append,
         &CFlags::default(),
     );
     env.insert("RUST_TEST_THREADS".into(), outer.jobs().to_string());
-    merge_layer(&mut env, config.env.clone());
+    let (values, appends) = fold_layers(&BTreeMap::new(), &EnvAppend::new(), &config.env);
+    merge_rendered(&mut env, &values, &appends);
     Ok(Invocation {
         argv,
         env,
@@ -311,6 +319,8 @@ mod tests {
                 program: vec!["/s/rustdoc".into()],
                 args,
                 env: BTreeMap::from([("CARGO_PKG_NAME".into(), "c".into())]),
+                env_append: Default::default(),
+                env_layers: Vec::new(),
                 env_splices: vec![Splice::new("/f/a".into(), SpliceKind::RustcEnv)],
                 dylib_path_from: vec![],
                 cwd: "/src".into(),
@@ -382,10 +392,13 @@ mod tests {
                 (Platform::Host, vec!["/host/runner".into()]),
             ]),
             args: vec!["--skip".into(), "net".into()],
-            env: BTreeMap::from([
-                ("PATH".into(), "/tools/bin".into()),
-                ("EXTRA".into(), "yes".into()),
-            ]),
+            env: vec![BTreeMap::from([
+                (
+                    "PATH".into(),
+                    crate::env::LayerValue::append("/tools/bin", ':'),
+                ),
+                ("EXTRA".into(), crate::env::LayerValue::set("yes")),
+            ])],
             post_run: None,
         };
         let outer = Outer {
@@ -508,7 +521,10 @@ mod tests {
         let inv = invocation(&d, &outer, &dirs, &TestConfig::default(), Path::new("/d")).unwrap();
         assert_eq!(inv.env["HOME"], "/build/home");
         let config = TestConfig {
-            env: BTreeMap::from([("HOME".into(), "/homeless-shelter".into())]),
+            env: vec![BTreeMap::from([(
+                "HOME".into(),
+                crate::env::LayerValue::set("/homeless-shelter"),
+            )])],
             ..TestConfig::default()
         };
         let inv = invocation(&d, &outer, &dirs, &config, Path::new("/d")).unwrap();

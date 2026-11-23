@@ -15,6 +15,13 @@ fn map(vars: &[(&str, &str)]) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// The appends of a recorded env (layer 3): its list-like variables.
+fn table(unit: &BTreeMap<String, String>) -> EnvAppend {
+    unit.keys()
+        .filter_map(|k| Some((k.clone(), list_separator(k)?)))
+        .collect()
+}
+
 fn none() -> CFlags {
     CFlags::default()
 }
@@ -33,7 +40,13 @@ fn nothing_leaks_from_the_builder() {
         ("SOURCE_DATE_EPOCH", "1"),
         ("NIX_CFLAGS_COMPILE", "-DOUTER"),
     ]);
-    let env = layered(&o, None, &BTreeMap::new(), &none());
+    let env = layered(
+        &o,
+        None,
+        &BTreeMap::new(),
+        &table(&BTreeMap::new()),
+        &none(),
+    );
     assert_eq!(
         env,
         map(&[
@@ -66,11 +79,18 @@ fn test_processes_get_a_home_in_tmpdir() {
         &o,
         None,
         &map(&[("HOME", "/elsewhere")]),
+        &EnvAppend::new(),
         &none(),
     );
     assert_eq!(env["HOME"], "/elsewhere");
     assert_eq!(
-        layered(&o, None, &BTreeMap::new(), &none())["HOME"],
+        layered(
+            &o,
+            None,
+            &BTreeMap::new(),
+            &table(&BTreeMap::new()),
+            &none()
+        )["HOME"],
         "/homeless-shelter"
     );
 }
@@ -84,7 +104,7 @@ fn later_layers_win() {
         ("CARGO_PKG_NAME", "x"),
         ("SOURCE_DATE_EPOCH", "1700000000"),
     ]);
-    let env = layered(&o, Some(&capture), &unit, &none());
+    let env = layered(&o, Some(&capture), &unit, &table(&unit), &none());
     assert_eq!(env["CC"], "clang");
     assert_eq!(env["TZ"], "Europe/Paris");
     assert_eq!(env["CARGO_PKG_NAME"], "x");
@@ -134,7 +154,7 @@ fn list_like_variables_append_across_layers() {
         ("NIX_LDFLAGS", "-L/spec/lib"),
         ("BINDGEN_EXTRA_CLANG_ARGS", "-I/spec/include"),
     ]);
-    let env = layered(&o, Some(&capture), &unit, &none());
+    let env = layered(&o, Some(&capture), &unit, &table(&unit), &none());
     assert_eq!(env["PATH"], "/cap/bin:/spec/bin");
     assert_eq!(env["NIX_CFLAGS_COMPILE"], " -isystem /cap/include -DSPEC");
     assert_eq!(env["NIX_LDFLAGS"], " -L/cap/lib -L/spec/lib");
@@ -175,7 +195,7 @@ fn c_flags_seed_first_prefix_maps_last() {
             ("/nix/store/o-out".into(), "/breakbulk/build/r-ring".into()),
         ],
     };
-    let env = layered(&o, Some(&capture), &unit, &cflags);
+    let env = layered(&o, Some(&capture), &unit, &table(&unit), &cflags);
     assert_eq!(
         env["NIX_CFLAGS_COMPILE"],
         " -frandom-seed=0123456789 -isystem /cap/include -DOVERRIDE \
@@ -189,6 +209,7 @@ fn c_flags_seed_first_prefix_maps_last() {
         &o,
         Some(&map(&[("NIX_CFLAGS_COMPILE", "")])),
         &BTreeMap::new(),
+        &EnvAppend::new(),
         &CFlags {
             random_seed: Some("s".into()),
             prefix_maps: vec![],
@@ -197,7 +218,13 @@ fn c_flags_seed_first_prefix_maps_last() {
     assert_eq!(env["NIX_CFLAGS_COMPILE"], " -frandom-seed=s");
 
     // Nothing to add: the variable is left alone (and not created).
-    let env = layered(&o, None, &BTreeMap::new(), &none());
+    let env = layered(
+        &o,
+        None,
+        &BTreeMap::new(),
+        &table(&BTreeMap::new()),
+        &none(),
+    );
     assert!(!env.contains_key("NIX_CFLAGS_COMPILE"));
 }
 
@@ -209,6 +236,7 @@ fn seed_is_its_own_word_before_a_value_without_leading_space() {
         &outer(&[]),
         Some(&map(&[("NIX_CFLAGS_COMPILE", "")])),
         &map(&[("NIX_CFLAGS_COMPILE", "-DSTAMP=1")]),
+        &table(&map(&[("NIX_CFLAGS_COMPILE", "")])),
         &CFlags {
             random_seed: Some("s".into()),
             prefix_maps: vec![],
@@ -233,13 +261,34 @@ fn prefix_maps_that_cannot_be_words_are_skipped() {
 #[test]
 fn num_jobs_follows_nix_build_cores() {
     let o = outer(&[("NIX_BUILD_CORES", "3")]);
-    let env = layered(&o, None, &map(&[("NUM_JOBS", "8")]), &none());
+    let env = layered(
+        &o,
+        None,
+        &map(&[("NUM_JOBS", "8")]),
+        &EnvAppend::new(),
+        &none(),
+    );
     assert_eq!(env["NUM_JOBS"], "3");
     // Only units that have NUM_JOBS (build-script runs) get it.
-    assert!(!layered(&o, None, &BTreeMap::new(), &none()).contains_key("NUM_JOBS"));
+    assert!(
+        !layered(
+            &o,
+            None,
+            &BTreeMap::new(),
+            &table(&BTreeMap::new()),
+            &none()
+        )
+        .contains_key("NUM_JOBS")
+    );
     // 0 means every CPU.
     let o = outer(&[("NIX_BUILD_CORES", "0")]);
-    let n: usize = layered(&o, None, &map(&[("NUM_JOBS", "8")]), &none())["NUM_JOBS"]
+    let n: usize = layered(
+        &o,
+        None,
+        &map(&[("NUM_JOBS", "8")]),
+        &EnvAppend::new(),
+        &none(),
+    )["NUM_JOBS"]
         .parse()
         .unwrap();
     assert!(n >= 1);
@@ -318,4 +367,55 @@ fn link_captures_add_only_library_search_flags() {
     let env = capture_layer(None, &links[..1]).unwrap().unwrap();
     assert_eq!(env, map(&[("NIX_LDFLAGS", " -L/magic/lib")]));
     assert_eq!(capture_layer(None, &[]).unwrap(), None);
+}
+
+#[test]
+fn rendered_values_replace_or_append_as_they_say() {
+    let capture = map(&[
+        ("PATH", "/nix/store/a-cap/bin:/nix/store/b-cap/bin"),
+        ("CPATH", "/cap/include"),
+        ("PKG_CONFIG_PATH", "/cap/pc"),
+    ]);
+    // A user's list: appends, whatever the name (CPATH is not in the
+    // table). A user's string: replaces, also a list-like variable.
+    let unit = map(&[
+        ("CPATH", "/u/include"),
+        ("PATH", "/u/bin"),
+        ("PKG_CONFIG_PATH", "/u/pc"),
+    ]);
+    let appends = EnvAppend::from([
+        ("CPATH".to_owned(), ':'),
+        ("PKG_CONFIG_PATH".to_owned(), ':'),
+    ]);
+    let env = layered(&outer(&[]), Some(&capture), &unit, &appends, &none());
+    assert_eq!(env["CPATH"], "/cap/include:/u/include");
+    assert_eq!(env["PKG_CONFIG_PATH"], "/cap/pc:/u/pc");
+    assert_eq!(env["PATH"], "/u/bin");
+    assert!(looks_like_list(&capture["PATH"]));
+    assert!(!looks_like_list("/cap/include"));
+}
+
+#[test]
+fn user_layers_fold_over_the_recorded_env() {
+    let layers: Vec<EnvLayer> = serde_json::from_str(
+        r#"[{"A": {"value": "x"}, "B": {"value": "/b", "sep": ":"}, "C": {"value": "-c", "sep": " "}},
+            {"B": {"value": "/b2", "sep": ":"}, "PATH": {"value": "/p"}}]"#,
+    )
+    .unwrap();
+    let recorded = map(&[("A", "rec"), ("C", "-rec"), ("PATH", "/rec/bin")]);
+    let appends = table(&recorded);
+    let (values, appends) = fold_layers(&recorded, &appends, &layers);
+    // A string replaces the recorded value; lists append to it, or, with
+    // none, to the capture; a string over a recorded list-like variable
+    // no longer appends to the capture.
+    assert_eq!(
+        values,
+        map(&[
+            ("A", "x"),
+            ("B", "/b:/b2"),
+            ("C", "-rec -c"),
+            ("PATH", "/p")
+        ])
+    );
+    assert_eq!(appends, EnvAppend::from([("B".to_owned(), ':')]));
 }

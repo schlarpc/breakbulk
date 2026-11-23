@@ -431,6 +431,16 @@ pub struct RenderedCompile {
     pub program: Vec<String>,
     pub args: Vec<RenderedArg>,
     pub env: BTreeMap<String, String>,
+    /// The variables of `env` (Cargo's recorded env, layer 3) that append
+    /// to the env capture's value (layer 2), with their separators: its
+    /// list-like variables. The others replace it
+    /// ([`crate::env::merge_rendered`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_append: crate::env::EnvAppend,
+    /// Layers 4 and 5: the toolchain spec's env, then the package's, each
+    /// value replacing or appending ([`crate::env::fold_layers`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_layers: Vec<crate::env::EnvLayer>,
     pub env_splices: Vec<Splice<String>>,
     /// The `flags` directories of the runs whose search paths inside their
     /// `out` go on the dynamic-library path, in order (dynamic-path splices).
@@ -638,9 +648,19 @@ pub struct RenderedRun {
     /// The build-script executable, or its compile unit's `bin` output
     /// directory holding exactly one file.
     pub script: String,
-    /// Layers 3 to 5 of the environment contract, merged. Has no `OUT_DIR`:
+    /// Layer 3 of the environment contract, Cargo's recorded env. Has no `OUT_DIR`:
     /// `breakbulk-unit` sets it inside the run's own `out` (`out_dir`).
     pub env: BTreeMap<String, String>,
+    /// The variables of `env` (Cargo's recorded env, layer 3) that append
+    /// to the env capture's value (layer 2), with their separators: its
+    /// list-like variables. The others replace it
+    /// ([`crate::env::merge_rendered`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_append: crate::env::EnvAppend,
+    /// Layers 4 and 5: the toolchain spec's env, then the package's, each
+    /// value replacing or appending ([`crate::env::fold_layers`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_layers: Vec<crate::env::EnvLayer>,
     /// Where `OUT_DIR` is inside the run's `out`, as Cargo laid out its
     /// target directory (`RunUnit::out_dir`, #23). Empty: the `out` itself.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -692,6 +712,21 @@ pub struct RenderedRun {
     /// it; `None` adds no seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+}
+
+impl RenderedCompile {
+    /// Layers 3 to 5 as one env, and which of its variables append to the
+    /// env capture.
+    pub fn layered_env(&self) -> (BTreeMap<String, String>, crate::env::EnvAppend) {
+        crate::env::fold_layers(&self.env, &self.env_append, &self.env_layers)
+    }
+}
+
+impl RenderedRun {
+    /// As for [`RenderedCompile::layered_env`].
+    pub fn layered_env(&self) -> (BTreeMap<String, String>, crate::env::EnvAppend) {
+        crate::env::fold_layers(&self.env, &self.env_append, &self.env_layers)
+    }
 }
 
 /// A removal rule for a build-script run's output

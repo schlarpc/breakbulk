@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use breakbulk_unit::env::{append, list_separator};
+use breakbulk_unit::env::{EnvAppend, EnvLayer, list_separator};
 use breakbulk_unit::spec::{
     Hints, OutDirRemove, OutputInto, OutputRule, RenderedArg, RenderedCompile, RenderedRun,
     RenderedUnit, RepositoryPath, SearchPaths, SourceView,
@@ -68,16 +68,13 @@ pub trait Resolve {
     ) -> Result<Vec<String>, Self::Error> {
         Ok(Vec::new())
     }
-    /// Layers 4 and 5 of the environment contract, merged with
-    /// [`merge_layer`] (list-like variables such as `PATH` append): the
+    /// Layers 4 and 5 of the environment contract, lowest first: the
     /// toolchain spec's env for the unit's platform, then the package
-    /// override's. Applied over Cargo's recorded env the same way.
-    fn env_overlay(
-        &self,
-        _id: &UnitId,
-        _unit: &Unit,
-    ) -> Result<BTreeMap<String, String>, Self::Error> {
-        Ok(BTreeMap::new())
+    /// override's. Each value replaces the earlier layers' or appends to
+    /// them ([`LayerValue`]); `breakbulk-unit` folds them over Cargo's
+    /// recorded env at build time, when instantiation's values are known.
+    fn env_overlay(&self, _id: &UnitId, _unit: &Unit) -> Result<Vec<EnvLayer>, Self::Error> {
+        Ok(Vec::new())
     }
     /// For a compile unit the variant's workspace wrapper runs on: the
     /// variable that names the directory the wrapper starts its config
@@ -113,31 +110,17 @@ pub trait Resolve {
     fn source_view(&self, _id: &UnitId, _unit: &Unit) -> Result<Option<SourceView>, Self::Error> {
         Ok(None)
     }
-    /// A list-like variable's `earlier` value followed by `later`, with
-    /// `sep` between them ([`breakbulk_unit::env::append`]): an empty side
-    /// is left out. A resolver whose values are placeholders, whose
-    /// emptiness is known only once they are substituted, overrides this.
-    fn append_list(&self, sep: char, earlier: &str, later: &str) -> Result<String, Self::Error> {
-        Ok(append(sep, earlier, later))
-    }
 }
 
-/// [`breakbulk_unit::env::merge_layer`] through [`Resolve::append_list`]:
-/// `layer`'s values replace those in `env`, except that list-like variables
-/// are appended.
-pub fn merge_layer_with<R: Resolve>(
-    r: &R,
-    env: &mut BTreeMap<String, String>,
-    layer: BTreeMap<String, String>,
-) -> Result<(), R::Error> {
-    for (k, v) in layer {
-        let merged = match (list_separator(&k), env.get(&k)) {
-            (Some(sep), Some(earlier)) => r.append_list(sep, earlier, &v)?,
-            _ => v,
-        };
-        env.insert(k, merged);
-    }
-    Ok(())
+/// Cargo's recorded env (layer 3), with its list-like variables
+/// ([`list_separator`]) appending to the env capture: their recorded
+/// values extend what a setup hook put there.
+pub fn recorded_env(values: BTreeMap<String, String>) -> (BTreeMap<String, String>, EnvAppend) {
+    let appends = values
+        .keys()
+        .filter_map(|k| Some((k.clone(), list_separator(k)?)))
+        .collect();
+    (values, appends)
 }
 
 pub(crate) fn text<R: Resolve>(t: &Text, r: &R) -> Result<String, R::Error> {
@@ -307,16 +290,17 @@ fn repository_args(args: &[(String, Option<Vec<String>>)]) -> Vec<RepositoryPath
 /// `relative = true`, or `CARGO_ENCODED_RUSTFLAGS`) and arguments
 /// (`build.rustflags`) name, for a unit without a source view, where they
 /// are `empty` references. Not a variable that `overlay` (layers 4 and 5)
+/// sets: whether it replaces or appends is known only at build time, and
 /// replaces: a package's `env` is the way to give the unit that path.
 fn repository_paths(
     env: &BTreeMap<String, Text>,
     args: &[Arg],
-    overlay: &BTreeMap<String, String>,
+    overlay: &[EnvLayer],
 ) -> Vec<RepositoryPath> {
     let mut out = Vec::new();
     for (k, v) in env {
         let Text::Concat(pieces) = v else { continue };
-        if overlay.contains_key(k) && list_separator(k).is_none() {
+        if overlay.iter().any(|l| l.contains_key(k)) {
             continue;
         }
         if k == "CARGO_ENCODED_RUSTFLAGS" {
@@ -437,11 +421,11 @@ pub fn render_unit_in<R: Resolve>(
                 })
             };
             let repository_paths = repository_paths(&c.env, &c.args, &overlay);
-            let mut env = env(&c.env, r)?;
+            let (mut env, mut env_append) = recorded_env(env(&c.env, r)?);
             if let Some((var, dir)) = r.wrapper_config_dir(id, c)? {
+                env_append.remove(&var);
                 env.insert(var, dir);
             }
-            merge_layer_with(r, &mut env, overlay)?;
             let link_captures = if is_linking(c) {
                 let packages = link_packages(plan, c, &graph.crate_deps(id));
                 r.link_captures(id, c, &packages)?
@@ -473,8 +457,7 @@ pub fn render_unit_in<R: Resolve>(
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 remap.extend(plan.remap.rust_src.clone());
-                remap.sort();
-                remap.dedup();
+                sort_remap(&mut remap);
                 (remap, r.remap_scope(id, c))
             };
             RenderedUnit::Compile(RenderedCompile {
@@ -501,6 +484,8 @@ pub fn render_unit_in<R: Resolve>(
                     })
                     .collect::<Result<_, _>>()?,
                 env,
+                env_append,
+                env_layers: overlay,
                 env_splices: c
                     .env_splices
                     .iter()
@@ -543,8 +528,7 @@ pub fn render_unit_in<R: Resolve>(
             let mut recorded = run.env.clone();
             recorded.remove("OUT_DIR");
             let repository_paths = repository_paths(&recorded, &[], &overlay);
-            let mut env = env(&recorded, r)?;
-            merge_layer_with(r, &mut env, overlay)?;
+            let (env, env_append) = recorded_env(env(&recorded, r)?);
             let (remap, out_dir_remap) = if r.keep_source_paths() {
                 (Vec::new(), None)
             } else if plan.remap.trim_paths {
@@ -568,6 +552,8 @@ pub fn render_unit_in<R: Resolve>(
                     None => panic!("{id}: a run's program is its script (validated)"),
                 },
                 env,
+                env_append,
+                env_layers: overlay,
                 out_dir: run.out_dir.clone(),
                 cwd: run.cwd.render(r)?,
                 metadata_from: run
@@ -678,9 +664,18 @@ fn run_remap<R: Resolve>(
             Ok((from, r.remap_name(b)?))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    remap.sort();
-    remap.dedup();
+    sort_remap(&mut remap);
     Ok(remap)
+}
+
+/// Sort remap pairs by the name each path becomes, unique per base, and
+/// drop repeats. Not by the path: a resolver's paths can be placeholders
+/// whose order is not that of the paths they stand for, and the unit would
+/// then differ by who rendered it. The bases never nest, so the order
+/// decides no match.
+fn sort_remap(remap: &mut Vec<(String, String)>) {
+    remap.sort_by(|a, b| (&a.1, &a.0).cmp(&(&b.1, &b.0)));
+    remap.dedup();
 }
 
 /// A run's C prefix maps and its own `OUT_DIR`'s name.
@@ -762,7 +757,10 @@ mod repository_path_tests {
             Arg::Concat(vec![Piece::Literal("native=".into()), empty("vendor/lib")]),
             Arg::Concat(vec![Piece::Literal("-Lnative=".into()), empty("other")]),
         ];
-        let overlay = BTreeMap::from([("REPLACED".to_owned(), "/nix/store/x".to_owned())]);
+        let overlay = [BTreeMap::from([(
+            "REPLACED".to_owned(),
+            breakbulk_unit::env::LayerValue::set("/nix/store/x"),
+        )])];
         let p = |path: &str, env: Option<&str>, whole: bool, arg: Option<&str>| RepositoryPath {
             path: path.into(),
             env: env.map(Into::into),

@@ -74,7 +74,8 @@
   cargoEnv ? { },
 }:
 let
-  envString = (import ./modules/types.nix { inherit lib; }).envString;
+  bt = import ./modules/types.nix { inherit lib; };
+  inherit (bt) envString;
 
   overrides = map (p: p.override) packages;
   # Everything the native build needs: host-side and target-side inputs
@@ -97,7 +98,16 @@ let
     ) overrides
   );
 
-  envOf = o: lib.mapAttrs (_: envString) (o.env // o.forHost.env // o.forTarget.env);
+  # A shell sets each variable once: lists are joined into the value.
+  envOf =
+    o:
+    lib.mapAttrs (bt.envFlat o.envSeparators) (
+      bt.envLayers [
+        o.env
+        o.forHost.env
+        o.forTarget.env
+      ]
+    );
   # Lowest first.
   sources =
     map (p: {

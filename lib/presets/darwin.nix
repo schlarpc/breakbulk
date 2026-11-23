@@ -188,16 +188,21 @@ guard (traits.isApple && traits.os == "macos")
             "-C"
             "split-debuginfo=packed"
           ];
-          env = lib.mapAttrs (_: mkDefault) (
-            {
-              SDKROOT = "${sdkPackage}";
-              LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
-              PATH = "${tools}/bin";
-            }
-            // lib.optionalAttrs (deploymentTarget != null) {
-              MACOSX_DEPLOYMENT_TARGET = deploymentTarget;
-            }
-          );
+          env =
+            lib.mapAttrs (_: mkDefault) (
+              {
+                SDKROOT = "${sdkPackage}";
+                LIBCLANG_PATH = "${lib.getLib llvm.libclang}/lib";
+              }
+              // lib.optionalAttrs (deploymentTarget != null) {
+                MACOSX_DEPLOYMENT_TARGET = deploymentTarget;
+              }
+            )
+            # A list, appended to the capture's PATH; not at `mkDefault`,
+            # which a user's own list would drop rather than add to.
+            // {
+              PATH = [ "${tools}/bin" ];
+            };
           stages.adhocSign = {
             after = mkDefault "install";
             run = mkDefault stageHelpers.adhocSign;

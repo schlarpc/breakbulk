@@ -99,7 +99,7 @@ list of string
 [` test.env `](\#packagesnametestenv) for the package’s bench runs\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean)) (replaces) or list of them (appends)
 
 *Default:*
 ` test.env `’s
@@ -424,18 +424,56 @@ including the products of other packages, in this workspace or
 another, on any target; they are passed by reference, and only
 this package’s units read them\.
 
+A string (or path, package, number, boolean) replaces the
+variable’s value from the layers below, the env capture’s included; a
+list of them is appended to it, joined with the variable’s separator
+(` envSeparators `; by default ` : ` for search paths and unknown names, a
+space for flag lists such as ` NIX_CFLAGS_COMPILE `; see
+[the table](\.\./unit-builder\.md\#list-variables))\. Lists from every
+layer concatenate; ` lib.mkForce ` keeps only its own definition\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean) (replaces) or list of them (appends)
 
 *Default:*
 
 ```nix
 { }
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.envSeparators`
+
+The separator a variable’s lists are joined with, by name, for
+this package’s ` env `, ` forHost.env `, ` forTarget.env ` and
+` test.env `: what goes between the earlier value and an appended
+list, and between the list’s values\. Without an entry, the
+built-in table’s ([list variables](\.\./unit-builder\.md\#list-variables)),
+else ` : `\.
+
+*Type:*
+lazy attribute set of string
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  CMAKE_PREFIX_PATH = ":";
+  RUSTDOCFLAGS = " ";
+}
 ```
 
 *Declared by:*
@@ -476,13 +514,21 @@ list of (absolute path or string)
 
 Environment for this package’s host units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+A string (or path, package, number, boolean) replaces the
+variable’s value from the layers below, the env capture’s included; a
+list of them is appended to it, joined with the variable’s separator
+(` envSeparators `; by default ` : ` for search paths and unknown names, a
+space for flag lists such as ` NIX_CFLAGS_COMPILE `; see
+[the table](\.\./unit-builder\.md\#list-variables))\. Lists from every
+layer concatenate; ` lib.mkForce ` keeps only its own definition\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean) (replaces) or list of them (appends)
 
 *Default:*
 
@@ -549,13 +595,21 @@ p: [ p.openssl ]
 
 Environment for this package’s target units only ([sides](\.\./\.\./explanation/configuration\.md\#host-and-target-sides))\.
 
+A string (or path, package, number, boolean) replaces the
+variable’s value from the layers below, the env capture’s included; a
+list of them is appended to it, joined with the variable’s separator
+(` envSeparators `; by default ` : ` for search paths and unknown names, a
+space for flag lists such as ` NIX_CFLAGS_COMPILE `; see
+[the table](\.\./unit-builder\.md\#list-variables))\. Lists from every
+layer concatenate; ` lib.mkForce ` keeps only its own definition\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean)
+lazy attribute set of (string or absolute path or package or signed integer or boolean) (replaces) or list of them (appends)
 
 *Default:*
 
@@ -1209,7 +1263,7 @@ list of string
 [` test.env `](\#packagesnametestenv) for this binary’s runs\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean)) (replaces) or list of them (appends)
 
 *Default:*
 ` test.env `’s
@@ -1389,7 +1443,7 @@ list of string
 [` test.env `](\#packagesnametestenv) for the package’s doctest run\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean)) (replaces) or list of them (appends)
 
 *Default:*
 ` test.env `’s
@@ -1428,13 +1482,21 @@ for a test app with ` checkout `)\. For example
 ` INSTA_WORKSPACE_ROOT = run: run.workspaceRoot; `\. More attributes may
 be added, so take them with ` { workspaceRoot, ... } `\.
 
+A string (or path, package, number, boolean) replaces the
+variable’s value from the layers below, the env capture’s included; a
+list of them is appended to it, joined with the variable’s separator
+(` envSeparators `; by default ` : ` for search paths and unknown names, a
+space for flag lists such as ` NIX_CFLAGS_COMPILE `; see
+[the table](\.\./unit-builder\.md\#list-variables))\. Lists from every
+layer concatenate; ` lib.mkForce ` keeps only its own definition\.
+
 The variables’ names are read before their values, so ` lib.mkIf `
 goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
 one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
 variable, and reading it is an error\.
 
 *Type:*
-lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean)) (replaces) or list of them (appends)
 
 *Default:*
 

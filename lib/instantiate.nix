@@ -131,8 +131,8 @@ rec {
       host ? { },
       target ? { },
       # overrides."<name>" or ."<name>@<version>" = {
-      #   host = { env = { }; envCapture = null; };
-      #   target = { env = { }; envCapture = null; };
+      #   host = { env = { }; envCapture = null; };   # env values: a value
+      #   target = { env = { }; envCapture = null; };  # or { append; sep; }
       #   outDirRemove = [ { beside; path; } ];  # buildScript.outDirRemove
       # }
       # with package-wide and per-triple settings already merged per platform.
@@ -199,6 +199,21 @@ rec {
       # --- the instantiate derivation's inputs: keys and tool paths only ---
 
       noCtx = v: util.devirtualizeAndDiscard (str v);
+      # An env attribute set's inputs: each variable's value under
+      # `<valueKey>:<name>`, and the separator it appends with (empty: it
+      # replaces) under `<sepKey>:<name>` (breakbulk_unit::env::LayerValue).
+      # A value is `{ append; sep; }` or a value (types.nix `envSpec`); which
+      # one is read only when the unit is substituted, after units.json,
+      # so that a value can be a product of this plan.
+      envInputs =
+        valueKey: sepKey: env:
+        let
+          isAppend = v: builtins.isAttrs v && v ? append && !lib.isDerivation v;
+        in
+        lib.mapAttrs' (
+          k: v: lib.nameValuePair "${valueKey}:${k}" (str (if isAppend v then v.append else v))
+        ) env
+        // lib.mapAttrs' (k: v: lib.nameValuePair "${sepKey}:${k}" (if isAppend v then v.sep else "")) env;
       platformJson = s: {
         env = lib.attrNames (spec s).env;
         envCapture = (spec s).envCapture != null;
@@ -312,7 +327,7 @@ rec {
         // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
         // lib.concatMapAttrs (
           p: s:
-          lib.mapAttrs' (k: v: lib.nameValuePair "env:${p}:${k}" (str v)) (spec s).env
+          envInputs "env:${p}" "envsep:${p}" (spec s).env
           // lib.optionalAttrs ((spec s).envCapture != null) { "capture:${p}" = str (spec s).envCapture; }
         ) platformSpec
         // lib.concatMapAttrs (
@@ -322,7 +337,7 @@ rec {
             let
               s = ovPlatform o p;
             in
-            lib.mapAttrs' (k: v: lib.nameValuePair "override:${pkg}:env:${p}:${k}" (str v)) s.env
+            envInputs "override:${pkg}:env:${p}" "override:${pkg}:envsep:${p}" s.env
             // lib.optionalAttrs (s.envCapture != null) { "override:${pkg}:capture:${p}" = str s.envCapture; }
           ) platformSpec
         ) overrides;
@@ -341,10 +356,6 @@ rec {
           # A weak reference names a path the unit reaches through its
           # dependencies' references (their manifests), not as an input.
           (if p.weak or false then unsafeDiscardStringContext else lib.id) drvs.${p.unit}.${p.output}.outPath
-        else if p ? join then
-          # A list-like variable set by several env layers: the non-empty
-          # layers, joined (breakbulk_unit::env::append).
-          lib.concatStringsSep p.sep (lib.filter (s: s != "") (map (lib.concatMapStrings part) p.join))
         else if p.json or false then
           input inputsJson p.input
         else
@@ -371,7 +382,7 @@ rec {
 
       units =
         assert lib.assertMsg (
-          json.version == 4
+          json.version == 5
         ) "breakbulk: units.json version ${toString json.version} is not supported";
         lib.mapAttrs (_: mkDrv) json.units;
       # What parts name: units, and the stubs, doctests and docs the

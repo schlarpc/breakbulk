@@ -58,6 +58,10 @@ rec {
     types.functionTo (lazyListOf types.package)
   );
 
+  # A separator of an env list: one character, as breakbulk-unit takes it.
+  # A checked `str`, so that `layer` ranks it as the single value it is.
+  envSeparator = types.addCheck types.str (s: lib.stringLength s == 1);
+
   # An environment value: a string, or anything that turns into one (a
   # path, a derivation such as another package's product, a number or a
   # boolean). Derivations reach instantiation by reference.
@@ -69,11 +73,120 @@ rec {
     types.bool
   ];
 
+  # One variable of an env layer: a value, which replaces the value of the
+  # layers below (the env capture's included), or a list of values, which
+  # are appended to it, joined with the variable's separator
+  # (`envSeparatorOf`). The definitions of all layers fold in layer order
+  # (`envOver`), so lists concatenate and a later string starts again;
+  # `lib.mkForce` keeps only its own definitions. The merged value is a
+  # value, a list, or `{ _type = "breakbulkEnv"; replace; append; }` (a
+  # value with lists after it). List elements are checked when they are
+  # read, so that a list's length is known before its elements are.
+  envEntryOf =
+    item:
+    lib.mkOptionType {
+      name = "envEntry";
+      description = "${
+        types.optionDescriptionPhrase (class: class == "noun" || class == "composite") item
+      } (replaces) or list of them (appends)";
+      descriptionClass = "composite";
+      check = v: builtins.isList v || item.check v;
+      merge = loc: defs: lib.foldl' (acc: d: envOver acc d.value) null defs;
+    };
+
+  # `v` (one layer's definition) over `acc` (the layers below, or null).
+  envOver =
+    acc: v:
+    if !(builtins.isList v) then
+      v
+    else if acc == null then
+      v
+    else if builtins.isList acc then
+      acc ++ v
+    else if acc._type or null == "breakbulkEnv" then
+      acc // { append = acc.append ++ v; }
+    else
+      {
+        _type = "breakbulkEnv";
+        replace = acc;
+        append = v;
+      };
+
+  # Env attribute sets, lowest layer first, as one (`env` then
+  # `forHost.env`): each variable's values fold as an option's definitions
+  # do. A variable only one layer sets is left unevaluated.
+  envLayers =
+    layers:
+    lib.zipAttrsWith (_: vs: if lib.length vs == 1 then lib.head vs else lib.foldl' envOver null vs) (
+      lib.filter (l: l != { }) layers
+    );
+
+  # `f` applied to every value of a merged env entry, whatever its form.
+  envMapValues =
+    f: v:
+    if builtins.isList v then
+      map f v
+    else if v._type or null == "breakbulkEnv" then
+      v
+      // {
+        replace = f v.replace;
+        append = map f v.append;
+      }
+    else
+      f v;
+
+  # The separator lists of `name` are joined with: `separators.<name>` (a
+  # setting's `envSeparators`), else the built-in table's
+  # (crates/breakbulk-unit/src/env-separators.json, which breakbulk-unit
+  # reads too: `:` for search paths, a space for flag lists; the
+  # `_FOR_BUILD` and `_FOR_TARGET` forms as their base names), else `:`.
+  builtinEnvSeparators = lib.importJSON ../../crates/breakbulk-unit/src/env-separators.json;
+  envSeparatorOf =
+    separators: name:
+    let
+      base = lib.removeSuffix "_FOR_TARGET" (lib.removeSuffix "_FOR_BUILD" name);
+    in
+    separators.${name} or builtinEnvSeparators.${base} or ":";
+
+  # The non-empty values of a list joined with `sep`, each as the string a
+  # unit sees.
+  envJoin =
+    sep: vs: lib.concatStringsSep sep (lib.filter (x: x != "") (map (x: "${envString x}") vs));
+
+  # A merged env entry as instantiate takes it: a value (replaces), or
+  # `{ append; sep; }` (appends). A value with lists after it is one value.
+  envSpec =
+    separators: name: v:
+    let
+      sep = envSeparatorOf separators name;
+    in
+    if builtins.isList v then
+      {
+        append = envJoin sep v;
+        inherit sep;
+      }
+    else if v._type or null == "breakbulkEnv" then
+      envJoin sep ([ v.replace ] ++ v.append)
+    else
+      envString v;
+
+  # An env attribute set as instantiate takes it.
+  envSpecs = separators: lib.mapAttrs (envSpec separators);
+
+  # A merged env entry as one string, for a consumer that cannot append
+  # (the dev shell): the lists joined.
+  envFlat =
+    separators: name: v:
+    let
+      s = envSpec separators name v;
+    in
+    if builtins.isAttrs s && !(lib.isDerivation s) then s.append else s;
+
   # Lazy, so that the variables' names are known without their values: a
   # value can be a product of the plan whose instantiation lists the
   # names. Not `types.attrsOf`, which evaluates every value to drop those
   # under `mkIf false`.
-  envAttrs = types.lazyAttrsOf envValue;
+  envAttrs = types.lazyAttrsOf (envEntryOf envValue);
 
   # An env value as the string a unit sees. Booleans as "1" and "" (as
   # derivation attributes are).
@@ -87,14 +200,17 @@ rec {
       v;
 
   # A test-run environment value: an env value, or a function of the
-  # run's facts (`{ workspaceRoot, ... }`) that returns one. The facts are
-  # known only per run (lib/test-runs.nix resolveTestEnv), so the function
-  # is kept until then.
+  # run's facts (`{ workspaceRoot, ... }`) that returns one; a variable
+  # takes one, or a list of them. The facts are known only per run
+  # (lib/test-runs.nix resolveTestEnv), so a function is kept until then.
   testEnvValue = types.either envValue (types.functionTo envValue);
-  testEnvAttrs = types.lazyAttrsOf testEnvValue;
+  testEnvAttrs = types.lazyAttrsOf (envEntryOf testEnvValue);
 
-  # An env value as the string a run sees, keeping a function a function.
-  testEnvString = v: if lib.isFunction v then facts: envString (v facts) else envString v;
+  # A merged test-run env entry with each value as the string a run sees,
+  # keeping a function a function.
+  testEnvString = envMapValues (
+    v: if lib.isFunction v then facts: envString (v facts) else envString v
+  );
 
   testEnvNote = ''
     A value can also be a function of the run, `run: …`, with
@@ -108,6 +224,14 @@ rec {
   # What `envAttrs` and `inputs` being lazy means for `lib.mkIf`, for the
   # texts of their options.
   envNote = ''
+    A string (or path, package, number, boolean) replaces the
+    variable's value from the layers below, the env capture's included; a
+    list of them is appended to it, joined with the variable's separator
+    (`envSeparators`; by default `:` for search paths and unknown names, a
+    space for flag lists such as `NIX_CFLAGS_COMPILE`; see
+    [the table](../unit-builder.md#list-variables)). Lists from every
+    layer concatenate; `lib.mkForce` keeps only its own definition.
+
     The variables' names are read before their values, so `lib.mkIf`
     goes around the whole set (`env = lib.mkIf cond { FOO = "x"; }`): on
     one value (`env.FOO = lib.mkIf false "x"`) it does not remove the

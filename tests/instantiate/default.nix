@@ -138,24 +138,36 @@ let
       env.SMOKE_MARKER = v;
     };
   };
-  # List-like variables: the package override (layer 5) appends to the
-  # toolchain spec (layer 4); empty layers leave no separator.
+  # Env layers given as lists (`{ append; sep; }`) and as values reach the
+  # unit as layers 4 and 5, each value with the separator it appends with
+  # (empty: it replaces); breakbulk-unit folds them.
   listEnv = breakbulk.instantiate (
     args
     // {
       target = {
         envCapture = smoke.capture;
         env = {
-          PATH = "${pkgs.hello}/bin";
-          NIX_CFLAGS_COMPILE = "";
-          PKG_CONFIG_PATH = "/spec";
+          PATH = {
+            append = "${pkgs.hello}/bin";
+            sep = ":";
+          };
+          PKG_CONFIG_PATH = {
+            append = "/spec";
+            sep = ":";
+          };
           SMOKE_MARKER = "spec";
         };
       };
       overrides.smokelib.target.env = {
-        PATH = "${pkgs.cowsay}/bin";
-        NIX_CFLAGS_COMPILE = "-DFROM_OVERRIDE";
-        PKG_CONFIG_PATH = "";
+        PATH = {
+          append = "${pkgs.cowsay}/bin";
+          sep = ":";
+        };
+        NIX_CFLAGS_COMPILE = {
+          append = "-DFROM_OVERRIDE";
+          sep = " ";
+        };
+        PKG_CONFIG_PATH = "/override";
         SMOKE_MARKER = "override";
       };
     }
@@ -237,13 +249,45 @@ let
           "c-a6654c0a89d81026"
           "r-smokelib-63aa584f9c6a6c6c"
         ]
-      && lib.hasInfix ''"SMOKE_MARKER":"b \"quoted\"\n"'' (unitText envB "c-a6654c0a89d81026");
-    list-like-env-appends =
-      listEnvLib.env.PATH == "${pkgs.hello}/bin:${pkgs.cowsay}/bin"
-      && listEnvLib.env.NIX_CFLAGS_COMPILE == "-DFROM_OVERRIDE"
-      && listEnvLib.env.PKG_CONFIG_PATH == "/spec"
-      && listEnvLib.env.SMOKE_MARKER == "override"
-      # The joined values keep their context: both PATH entries are inputs.
+      && lib.hasInfix ''"SMOKE_MARKER":{"sep":"","value":"b \"quoted\"\n"}'' (
+        unitText envB "c-a6654c0a89d81026"
+      );
+    env-layers =
+      listEnvLib.envLayers == [
+        {
+          PATH = {
+            value = "${pkgs.hello}/bin";
+            sep = ":";
+          };
+          PKG_CONFIG_PATH = {
+            value = "/spec";
+            sep = ":";
+          };
+          SMOKE_MARKER = {
+            value = "spec";
+            sep = "";
+          };
+        }
+        {
+          PATH = {
+            value = "${pkgs.cowsay}/bin";
+            sep = ":";
+          };
+          NIX_CFLAGS_COMPILE = {
+            value = "-DFROM_OVERRIDE";
+            sep = " ";
+          };
+          PKG_CONFIG_PATH = {
+            value = "/override";
+            sep = "";
+          };
+          SMOKE_MARKER = {
+            value = "override";
+            sep = "";
+          };
+        }
+      ]
+      # The values keep their context: both PATH entries are inputs.
       &&
         lib.all
           (

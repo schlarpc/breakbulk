@@ -160,7 +160,8 @@ pub fn invocation(
     let mut argv = c.program.clone();
     argv.extend(expand_args(&c.args, lookup)?);
     argv.extend(added_args(c, dirs));
-    let mut unit_env = expand_env(&c.env, &c.env_splices, lookup)?;
+    let (layer_env, env_append) = c.layered_env();
+    let mut unit_env = expand_env(&layer_env, &c.env_splices, lookup)?;
     expand_dylib_path(&mut unit_env, &c.dylib_path_from, lookup)?;
     let capture = capture_layer(c.env_capture.as_deref(), &c.link_captures)?;
     let cflags = CFlags {
@@ -169,7 +170,7 @@ pub fn invocation(
     };
     Ok(Invocation {
         argv,
-        env: layered(outer, capture.as_ref(), &unit_env, &cflags),
+        env: layered(outer, capture.as_ref(), &unit_env, &env_append, &cflags),
         cwd: PathBuf::from(&c.cwd),
     })
 }

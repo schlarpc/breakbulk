@@ -759,7 +759,12 @@ in
       # (`<package>-<version>-<kind>`).
       pkgOf =
         d: lib.findFirst (n: builtins.match "${n}-[0-9].*" d.name != null) null (lib.attrNames expect);
-      unitOf = d: builtins.fromJSON (builtins.unsafeDiscardStringContext d.drvAttrs.BREAKBULK_UNIT);
+      unitOf =
+        d:
+        let
+          u = builtins.fromJSON (builtins.unsafeDiscardStringContext d.drvAttrs.BREAKBULK_UNIT);
+        in
+        u // { env = import ../lib/unit-env.nix { inherit lib; } u; };
       wrong = lib.concatLists (
         lib.mapAttrsToList (
           kind: units:

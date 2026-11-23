@@ -23,7 +23,7 @@ pub use doctest::{closure_runs, render_doctest};
 pub use normalize::{normalize_arg, normalize_text, normalize_unit};
 pub use plan::*;
 pub use render::{
-    Resolve, is_linking, link_packages, merge_layer_with, remap_bases, render_unit, render_unit_in,
+    Resolve, is_linking, link_packages, recorded_env, remap_bases, render_unit, render_unit_in,
     unit_env_value,
 };
 pub use validate::{
@@ -31,8 +31,9 @@ pub use validate::{
     validate,
 };
 
-/// The environment contract's layer merging, shared with instantiation.
 pub use breakbulk_unit::env::append as append_env_list;
+/// The environment contract's layer merging, shared with instantiation.
+pub use breakbulk_unit::env::{EnvLayer, LayerValue};
 /// The per-unit `BREAKBULK_UNIT` types, defined by `breakbulk-unit`.
 pub use breakbulk_unit::spec as rendered;
 /// The dynamic-library path variable of the machine units run on (the

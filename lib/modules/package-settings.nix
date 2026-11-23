@@ -295,6 +295,22 @@ let
         another, on any target; they are passed by reference, and only
         this package's units read them.
       '';
+      envSeparators = mkOption {
+        type = types.lazyAttrsOf bt.envSeparator;
+        default = { };
+        example = {
+          CMAKE_PREFIX_PATH = ":";
+          RUSTDOCFLAGS = " ";
+        };
+        description = ''
+          The separator a variable's lists are joined with, by name, for
+          this package's `env`, `forHost.env`, `forTarget.env` and
+          `test.env`: what goes between the earlier value and an appended
+          list, and between the list's values. Without an entry, the
+          built-in table's ([list variables](../unit-builder.md#list-variables)),
+          else `:`.
+        '';
+      };
       nativeInputs = bt.mkInputs ''
         Tools that run on the build machine (`pkg-config`, `cmake`,
         `protoc`), for this package's units on both ${sides}. A function of

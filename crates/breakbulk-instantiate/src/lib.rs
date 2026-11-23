@@ -23,13 +23,15 @@ use breakbulk_format::rendered::{
     OutDirRemove, OutputRule, SourceView, Widen, package_name_version,
 };
 use breakbulk_format::{
-    CargoTarget, DEBUG_OUTPUT, Graph, Plan, PlanKind, Platform, Reference, Resolve, Root, RootKind,
-    SrcRef, TargetDebuginfo, Unit, UnitBody, UnitId, ValidationOptions, derivation_output,
-    merge_layer_with, render_docs, render_doctest, render_unit_in, to_canonical_json,
+    CargoTarget, DEBUG_OUTPUT, EnvLayer, Graph, LayerValue, Plan, PlanKind, Platform, Reference,
+    Resolve, Root, RootKind, SrcRef, TargetDebuginfo, Unit, UnitBody, UnitId, ValidationOptions,
+    derivation_output, render_docs, render_doctest, render_unit_in, to_canonical_json,
     unit_env_value, validate,
 };
 
-use inputs::{Overrides, PackageOverride, PredictedRoot, PredictedRoots, Sources, Toolchains};
+use inputs::{
+    Overrides, PackageOverride, PlatformSpec, PredictedRoot, PredictedRoots, Sources, Toolchains,
+};
 use output::{Drv, PASS_AS_FILE_ABOVE, Part, RootOut, RootWhat, UNITS_VERSION, UnitsJson, Value};
 
 /// The tool that is every unit's builder.
@@ -76,13 +78,6 @@ enum Ref {
     Input {
         key: String,
         json: bool,
-    },
-    /// A list-like variable's layers, joined with `sep` after the Nix side
-    /// has substituted them, leaving empty ones out (as
-    /// `breakbulk_unit::env::append` does). Each item is text with tokens.
-    Join {
-        sep: char,
-        items: Vec<String>,
     },
 }
 
@@ -142,6 +137,15 @@ pub mod keys {
     /// A package override's env value.
     pub fn override_env(pkg: &str, p: Platform, var: &str) -> String {
         format!("override:{pkg}:env:{}:{var}", platform(p))
+    }
+    /// The separator a toolchain spec's env variable appends with, empty
+    /// when it replaces (`breakbulk_unit::env::LayerValue`).
+    pub fn env_sep(p: Platform, var: &str) -> String {
+        format!("envsep:{}:{var}", platform(p))
+    }
+    /// As [`env_sep`], for a package override's env variable.
+    pub fn override_env_sep(pkg: &str, p: Platform, var: &str) -> String {
+        format!("override:{pkg}:envsep:{}:{var}", platform(p))
     }
 }
 
@@ -301,13 +305,6 @@ impl<'a> Tokens<'a> {
             parts.push(match r {
                 Some(Ref::Unit { unit, output, weak }) => Part::Unit { unit, output, weak },
                 Some(Ref::Input { key, json }) => Part::Input { input: key, json },
-                Some(Ref::Join { sep, items }) => Part::Join {
-                    join: items
-                        .iter()
-                        .map(|i| self.split(i))
-                        .collect::<Result<_, _>>()?,
-                    sep: sep.to_string(),
-                },
                 None => return err(format!("unknown token {n} in {text}")),
             });
             rest = &after[end + 1..];
@@ -529,26 +526,35 @@ impl Resolve for Tokens<'_> {
             .collect())
     }
 
-    fn env_overlay(&self, _id: &UnitId, unit: &Unit) -> Result<BTreeMap<String, String>, Error> {
+    fn env_overlay(&self, _id: &UnitId, unit: &Unit) -> Result<Vec<EnvLayer>, Error> {
         let p = platform(unit);
-        let mut env: BTreeMap<String, String> = self
-            .inputs
-            .toolchains
-            .platform(p)
-            .env
-            .iter()
-            .map(|v| (v.clone(), self.json_input(keys::env(p, v))))
-            .collect();
+        let layer =
+            |spec: &PlatformSpec, value: &dyn Fn(&str) -> String, sep: &dyn Fn(&str) -> String| {
+                spec.env
+                    .iter()
+                    .map(|v| {
+                        let l = LayerValue {
+                            value: self.json_input(value(v)),
+                            sep: self.json_input(sep(v)),
+                        };
+                        (v.clone(), l)
+                    })
+                    .collect::<EnvLayer>()
+            };
+        let mut layers = vec![layer(
+            self.inputs.toolchains.platform(p),
+            &|v| keys::env(p, v),
+            &|v| keys::env_sep(p, v),
+        )];
         if let Some((key, o)) = self.package_override(unit.package()) {
-            let layer = o
-                .platform(p)
-                .env
-                .iter()
-                .map(|v| (v.clone(), self.json_input(keys::override_env(&key, p, v))))
-                .collect();
-            merge_layer_with(self, &mut env, layer)?;
+            layers.push(layer(
+                o.platform(p),
+                &|v| keys::override_env(&key, p, v),
+                &|v| keys::override_env_sep(&key, p, v),
+            ));
         }
-        Ok(env)
+        layers.retain(|l| !l.is_empty());
+        Ok(layers)
     }
 
     fn out_dir_remove(&self, _id: &UnitId, unit: &Unit) -> Vec<OutDirRemove> {
@@ -617,30 +623,6 @@ impl Resolve for Tokens<'_> {
                 .predicted
                 .contains(&self.view_key(unit.package(), dir)),
         }))
-    }
-
-    /// Values from the Nix side are tokens whose emptiness is unknown here,
-    /// so a side with a token is joined by the Nix side ([`Ref::Join`]).
-    /// Literal store paths in a side are tokenized first: the join's items
-    /// never reach [`Tokens::tokenize_store_paths`] through the unit text.
-    /// For the same reason each item is escaped here as the inside of a JSON
-    /// string, as the unit text around the token is: a join only ever
-    /// stands in an env value of `BREAKBULK_UNIT`. Tokens and JSON-escaped
-    /// inputs pass through unchanged (their characters need no escaping),
-    /// and escaping keeps an item empty exactly when it was.
-    fn append_list(&self, sep: char, earlier: &str, later: &str) -> Result<String, Error> {
-        if !earlier.contains(self.prefix) && !later.contains(self.prefix) {
-            return Ok(breakbulk_format::append_env_list(sep, earlier, later));
-        }
-        let items = [earlier, later]
-            .into_iter()
-            .map(|t| {
-                let t = self.tokenize_store_paths("(env layer)", t)?;
-                let q = serde_json::to_string(&t).map_err(|e| Error(e.to_string()))?;
-                Ok(q[1..q.len() - 1].to_owned())
-            })
-            .collect::<Result<_, Error>>()?;
-        Ok(self.token(Ref::Join { sep, items }))
     }
 }
 
