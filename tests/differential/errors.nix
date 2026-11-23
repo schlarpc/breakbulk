@@ -10,7 +10,7 @@
 #
 #   1. real `cargo build -p <case>`;
 #   2. the case's run unit as breakbulk planned it, through
-#      `breakbulk-unit unit` (as its derivation would, but in this sandbox,
+#      `breakbulk-unit` (as its derivation would, but in this sandbox,
 #      so a failure can be compared);
 #
 # and requires the same outcome: success or failure, and the same lines
@@ -113,7 +113,7 @@ let
           unit=unit_''${case//-/_}
           rc=0
           BREAKBULK_UNIT="''${!unit}" out=$TMPDIR/o-$case flags=$TMPDIR/f-$case \
-            ${tools.breakbulk-unit}/bin/breakbulk-unit unit > $out/$case.breakbulk.log 2>&1 || rc=$?
+            ${tools.breakbulk-unit}/bin/breakbulk-unit > $out/$case.breakbulk.log 2>&1 || rc=$?
           outcome $rc $out/$case.breakbulk.log > $out/$case.breakbulk
 
           if diff -u $out/$case.cargo $out/$case.breakbulk > $out/$case.diff; then
