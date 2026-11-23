@@ -483,7 +483,28 @@ let
         }
       ];
     };
-    variants-coverage = products.coverageRepo;
+    # Its runs keep their logs beside the profiles: a plain `postRun` (not
+    # keepLogs' `mkDefault`, which the preset's plain one outranks)
+    # concatenates with the coverage preset's.
+    variants-coverage = breakbulk.mkRepository {
+      inherit pkgs tools;
+      root = fixtures + "/variants";
+      modules = [
+        { inherit mode; }
+        { workspaces.main.memberDefaults.test.postRun = ''cp "$log" "$out/log"''; }
+        {
+          workspaces.main = {
+            path = "ws";
+            imports = [
+              (breakbulk.variants.coverage {
+                name = "default";
+                variant.profile = "release";
+              })
+            ];
+          };
+        }
+      ];
+    };
     # A toy rustc driver as rustc wrapper and as workspace wrapper, with
     # the side files it writes kept beside each crate file.
     variants-driver = products.driver;
