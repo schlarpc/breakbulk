@@ -14,9 +14,15 @@ toolchain, so a preset uses each workspace’s rustc\. A triple whose
 preset needs no arguments gets it without an entry here, and with
 entries that set other fields: the native triple, when the ` pkgs `
 given to mkRepository is Linux, gets ` presets.linux ` (glibc) or
-` presets.linuxStatic ` (musl), and a UEFI triple ` presets.uefi `\.
-Any other triple with no entry here or in the workspace uses an
-empty spec (the toolchain as Cargo finds it)\.
+` presets.linuxStatic ` (musl); another Linux ` -gnu ` triple
+` presets.linux `, a ` -musl ` one ` presets.linuxStatic `, a Windows
+` -gnu ` or ` -gnullvm ` one ` presets.windows `, ` wasm32-wasip2 `
+` presets.wasmComponent `, and a UEFI triple ` presets.uefi `\. A triple
+whose preset needs arguments or a choice (` -msvc `, macOS,
+wasm32 without WASI) fails at evaluation, naming the preset, unless
+the target sets a ` preset `, a ` linker `, or ` preset = null `\. Any
+other triple, and one with ` preset = null `, uses an empty spec (the
+toolchain as Cargo finds it)\.
 
 *Type:*
 attribute set of module
@@ -377,8 +383,8 @@ fields set here override the preset’s (lists concatenate; use
 ` breakbulk.presets.<name> { inherit pkgs; triple = …; } ` gives
 the same fields, except that the preset then sees no workspace
 toolchain (pass ` rustc ` there)\. Set ` null ` to use no preset on
-a target that has a default one (rustc’s own linker choice and
-the C toolchain Cargo finds)\.
+a target that has a default one, or that would need one (rustc’s
+own linker choice and the C toolchain Cargo finds)\.
 
 *Type:*
 null or breakbulk preset (function)
@@ -387,8 +393,14 @@ null or breakbulk preset (function)
 unless the target is defined directly from a preset: for the
 native triple, ` breakbulk.presets.linux ` when the ` pkgs ` given to
 mkRepository is Linux with glibc, ` breakbulk.presets.linuxStatic `
-when it is Linux with musl (` pkgs.pkgsMusl `); for a UEFI triple,
-` breakbulk.presets.uefi `; ` null ` otherwise
+when it is Linux with musl (` pkgs.pkgsMusl `); for another Linux
+` -gnu ` triple ` breakbulk.presets.linux `, a Linux ` -musl ` triple
+` breakbulk.presets.linuxStatic `, a Windows ` -gnu ` or ` -gnullvm `
+triple ` breakbulk.presets.windows `, ` wasm32-wasip2 `
+` breakbulk.presets.wasmComponent `, a UEFI triple
+` breakbulk.presets.uefi `; ` null ` otherwise, which is an
+evaluation error for ` -msvc `, macOS and wasm32 without WASI unless
+` linker ` is set
 
 *Example:*
 

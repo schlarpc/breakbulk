@@ -3580,6 +3580,36 @@ in
       "nix-features: a Cargo config's build.target is not counted";
     evalCheck "nix-features" (builtins.toJSON (map (c: features c.settings) cases));
 
+  # A target with no preset gets the one its triple determines
+  # (`targetTraits.presetRule`): `presets.linux` on a cross Linux -gnu
+  # triple. A triple whose preset needs arguments or a choice (wasm32
+  # without WASI: wasmWeb or wasmComponent) fails at evaluation, unless
+  # the target sets a preset, a linker, or `preset = null`. Evaluation
+  # only.
+  default-presets =
+    let
+      specOf =
+        triple: target:
+        (mkRepo (fixtures + "/multi-ws") [
+          (oneWs "b")
+          { workspaces.main.targets.${triple} = target; }
+        ]).workspaces.main.target.${triple}.spec;
+      wasm = "wasm32-unknown-unknown";
+      fails = v: !(builtins.tryEval (builtins.seq v v)).success;
+      report = {
+        crossGnu =
+          (specOf "aarch64-unknown-linux-gnu" { }).packageSet.stdenv.hostPlatform.config
+          == "aarch64-unknown-linux-gnu";
+        wasmFails = fails (specOf wasm { });
+        wasmOptOut = (specOf wasm { preset = null; }).linker == null;
+        wasmLinker = (specOf wasm { linker = "/custom/wasm-ld"; }).linker == "/custom/wasm-ld";
+      };
+    in
+    assert lib.assertMsg (lib.all lib.id (
+      lib.attrValues report
+    )) "default-presets: ${builtins.toJSON report}";
+    evalCheck "default-presets" (builtins.toJSON report);
+
   # Every option has a description, so the docs generate.
   options-doc = (mkRepo (fixtures + "/multi-ws") [ ]).optionsDoc.optionsCommonMark;
 }

@@ -2437,7 +2437,11 @@ in
             path = "ws";
             targets = {
               ${native}.tests = [ "lib-a" ];
-              ${musl}.tests = false;
+              # The toolchain as Cargo finds it: nothing here builds it.
+              ${musl} = {
+                preset = null;
+                tests = false;
+              };
             };
             variants = {
               default = {
@@ -2591,7 +2595,11 @@ in
               };
               targets = {
                 ${native} = nativeTarget;
-                ${wasm}.tests = false;
+                # rust-overlay's rust-lld, as Cargo finds it.
+                ${wasm} = {
+                  preset = null;
+                  tests = false;
+                };
               };
             };
           }
@@ -2648,12 +2656,16 @@ in
                 targets = {
                   ${native} = { };
                   # `extra` is app's feature, not lib-a's.
-                  ${wasm}.variantDefaults = {
-                    features = [
-                      "lib-a/y"
-                      "extra"
-                    ];
-                    testProfile = "release";
+                  ${wasm} = {
+                    # rust-overlay's rust-lld, as Cargo finds it.
+                    preset = null;
+                    variantDefaults = {
+                      features = [
+                        "lib-a/y"
+                        "extra"
+                      ];
+                      testProfile = "release";
+                    };
                   };
                 };
               }

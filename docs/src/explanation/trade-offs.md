@@ -97,6 +97,15 @@ them as nixpkgs' `buildRustPackage` does. Edit-compile loops belong in the
 - **Slow first evaluation in IFD mode.** Planning needs every crate, so the
   first evaluation of a large workspace takes minutes
   ([#19](https://github.com/schlarpc/breakbulk/issues/19)).
+- **A cross Linux target may build its own cross gcc.** A cross `-gnu`
+  or `-musl` triple gets `presets.linux` or `presets.linuxStatic` by
+  default, which link through nixpkgs' cross toolchain for that triple.
+  nixpkgs' binary cache has that toolchain for only some triples; for
+  any other, the first build compiles a cross gcc and its C library.
+  For a `-gnu` triple, `presets.linuxPortable` is the cache-friendly
+  alternative: it links with `zig cc`, which needs no cross toolchain
+  (library inputs still build from source, below)
+  ([#161](https://github.com/schlarpc/breakbulk/issues/161)).
 - **`linuxPortable`'s libraries build from source.** The preset's
   package set is nixpkgs cross-built with `zig cc` against an old glibc,
   and no binary cache has it. The first build of a library input and

@@ -77,18 +77,31 @@ target. Choose one from [Presets](../reference/presets.md):
 
 | You want | Triple | Preset |
 | --- | --- | --- |
-| A static Linux binary | `x86_64-unknown-linux-musl` | `presets.linuxStatic` |
-| A Linux binary for another architecture | `aarch64-unknown-linux-gnu` | `presets.linux` |
+| A static Linux binary | `x86_64-unknown-linux-musl` | `presets.linuxStatic` (the default) |
+| A Linux binary for another architecture | `aarch64-unknown-linux-gnu` | `presets.linux` (the default) |
 | A Linux binary for old distributions | your own triple | `presets.linuxPortable { glibc = "2.17"; }` |
-| A Windows program | `x86_64-pc-windows-gnu` | `presets.windows` |
+| A Windows program | `x86_64-pc-windows-gnu` | `presets.windows` (the default) |
 | A Windows program (MSVC) | `x86_64-pc-windows-msvc` | `presets.windows { inherit sdk; }` (below) |
+| A WebAssembly component | `wasm32-wasip2` | `presets.wasmComponent` (the default) |
 | wasm for browsers | `wasm32-unknown-unknown` | `presets.wasmWeb` |
 | wasm for browsers, tests in headless Chromium | `wasm32-unknown-unknown` | `presets.wasmWeb { browser = "chromium"; }` |
 
-A UEFI target gets its preset, `presets.uefi`, without any setting:
-`workspaces.default.targets.x86_64-unknown-uefi = { };` is enough. So
-does a target whose linker rustc chooses itself (bare metal), which needs
-no preset.
+A triple whose preset needs no arguments gets it without any setting,
+marked "the default" above: `workspaces.default.targets.aarch64-unknown-linux-gnu = { };`
+is enough. So does a UEFI triple (`presets.uefi`), and so does a
+target whose linker rustc chooses itself (bare metal), which needs no
+preset.
+
+A triple whose preset needs arguments or a choice has no default: an
+`-msvc` triple (the SDK), macOS (the SDK, `presets.darwin`) and
+`wasm32-unknown-unknown` (`presets.wasmWeb` or
+`presets.wasmComponent`). Building one with no preset and no `linker`
+fails at evaluation, naming the preset to set. To build any target with
+the toolchain as Cargo finds it, set `preset = null`.
+
+A cross Linux triple's default preset uses nixpkgs' cross toolchain for
+it, which a binary cache may not have: see
+[Trade-offs](../explanation/trade-offs.md#costs).
 
 ## Another linker
 

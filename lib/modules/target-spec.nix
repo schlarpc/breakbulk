@@ -19,10 +19,11 @@ let
   inherit (lib) types mkOption;
 
   # A target whose preset needs no arguments gets it unless another preset
-  # is set (`targetTraits.defaultPreset`): on Linux the native target gets
+  # is set (`targetTraits.presetRule`): on Linux the native target gets
   # `presets.linux` (glibc `pkgs`) or `presets.linuxStatic` (musl `pkgs`),
   # so the native linker is nixpkgs' wrapped cc, as on every other target,
-  # instead of rustc's bundled rust-lld; a UEFI target gets `presets.uefi`.
+  # instead of rustc's bundled rust-lld; a cross Linux, MinGW, wasip2 or
+  # UEFI target gets the preset its triple determines.
   # A target defined directly from a preset (`targets.<t> =
   # breakbulk.presets.linuxPortable { … }`) counts as having one.
   targetTraits = import ../target-traits.nix { inherit lib; };
@@ -128,8 +129,14 @@ in
         unless the target is defined directly from a preset: for the
         native triple, `breakbulk.presets.linux` when the `pkgs` given to
         mkRepository is Linux with glibc, `breakbulk.presets.linuxStatic`
-        when it is Linux with musl (`pkgs.pkgsMusl`); for a UEFI triple,
-        `breakbulk.presets.uefi`; `null` otherwise
+        when it is Linux with musl (`pkgs.pkgsMusl`); for another Linux
+        `-gnu` triple `breakbulk.presets.linux`, a Linux `-musl` triple
+        `breakbulk.presets.linuxStatic`, a Windows `-gnu` or `-gnullvm`
+        triple `breakbulk.presets.windows`, `wasm32-wasip2`
+        `breakbulk.presets.wasmComponent`, a UEFI triple
+        `breakbulk.presets.uefi`; `null` otherwise, which is an
+        evaluation error for `-msvc`, macOS and wasm32 without WASI unless
+        `linker` is set
       '';
       example = lib.literalExpression "breakbulk.presets.linuxStatic";
       description = ''
@@ -145,8 +152,8 @@ in
         `breakbulk.presets.<name> { inherit pkgs; triple = …; }` gives
         the same fields, except that the preset then sees no workspace
         toolchain (pass `rustc` there). Set `null` to use no preset on
-        a target that has a default one (rustc's own linker choice and
-        the C toolchain Cargo finds).
+        a target that has a default one, or that would need one (rustc's
+        own linker choice and the C toolchain Cargo finds).
       '';
     };
     traits = mkOption {

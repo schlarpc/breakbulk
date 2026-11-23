@@ -835,8 +835,11 @@ let
   # (both modules, lib/modules/target-spec.nix), evaluated together with the
   # workspace's toolchain, so a preset picks tools for that workspace's
   # rustc. `present` is false when neither defines anything but `packages`
-  # and the triple has no default preset (`targetTraits.defaultPreset`):
-  # such a target has no spec (the toolchain as Cargo finds it).
+  # and the triple has no default preset (`targetTraits.presetRule`):
+  # such a target has no spec (the toolchain as Cargo finds it). A triple
+  # whose preset needs arguments or a choice fails here when the target
+  # sets no preset, no linker and not `preset = null`: the empty spec
+  # would fail only at its first link, with the build machine's linker.
   specArgs = {
     inherit pkgs;
     breakbulkPresets = presets;
@@ -876,13 +879,25 @@ let
         tests = e.config.tests or true;
         products = e.config.products or true;
       };
+      rule = targetTraits.presetRule {
+        inherit pkgs triple;
+        traits = targetTraits.resolve {
+          inherit triple;
+          inherit (e.config) traits;
+        };
+      };
+      # `preset` at its option default (null here), so not `preset = null`.
+      unchosen = rule ? choose && e.options.preset.highestPrio >= 1500 && e.config.linker == null;
     in
     {
       inherit (e) config;
       present =
-        repoDef != null
-        || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions)
-        || e.config.preset != null;
+        if unchosen then
+          throw "breakbulk: targets.\"${triple}\" (workspace ${wsName}) has no preset and no linker, and ${triple} has no default preset: set `targets.\"${triple}\".preset` to ${rule.choose}; or `preset = null` to build with the toolchain as Cargo finds it"
+        else
+          repoDef != null
+          || (wsDef != null && lib.any (o: o.highestPrio < 1500) specOptions)
+          || e.config.preset != null;
       selectionErrors = lib.concatLists (
         lib.mapAttrsToList (
           o: s:

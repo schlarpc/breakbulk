@@ -540,26 +540,52 @@ in
         "lld-link"
       ];
     };
-    # The preset a target gets when it sets none: only presets that need
-    # no arguments (msvc's needs an SDK).
+    # The preset a target gets when it sets none: one that needs no
+    # arguments for the triple; a choice to make (msvc and macOS need an
+    # SDK, wasm without WASI a browser or component preset); or none.
     testDefaultPresets = {
       expr =
         map
           (
             triple:
-            tt.defaultPreset {
-              inherit pkgs triple;
-            }
+            let
+              rule = tt.presetRule { inherit pkgs triple; };
+            in
+            if rule ? choose then
+              "choose"
+            else
+              assert (rule.name or null) == tt.defaultPreset { inherit pkgs triple; };
+              rule.name or null
           )
           [
             (tt.nativeTriple pkgs)
+            "aarch64-unknown-linux-gnu"
+            "armv7-unknown-linux-gnueabihf"
+            "aarch64-unknown-linux-musl"
+            "x86_64-pc-windows-gnu"
+            "aarch64-pc-windows-gnullvm"
+            "wasm32-wasip2"
             "x86_64-unknown-uefi"
             "x86_64-pc-windows-msvc"
+            "aarch64-apple-darwin"
+            "wasm32-unknown-unknown"
             "x86_64-unknown-none"
+            "wasm32-wasip1"
+            "aarch64-linux-android"
           ];
       expected = [
         (if pkgs.stdenv.hostPlatform.isMusl then "linuxStatic" else "linux")
+        "linux"
+        "linux"
+        "linuxStatic"
+        "windows"
+        "windows"
+        "wasmComponent"
         "uefi"
+        "choose"
+        "choose"
+        "choose"
+        null
         null
         null
       ];

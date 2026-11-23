@@ -30,12 +30,27 @@ The preset is named for what you want; the target triple picks how:
 ## Defaults
 
 - A target gets a preset without any setting when that preset needs no
-  arguments. Your own machine's triple gets `linux` (or `linuxStatic`
-  when `pkgs` is a musl package set), and a UEFI triple gets `uefi`.
+  arguments for its triple:
+
+  | Triple | Default preset |
+  | --- | --- |
+  | your own machine's | `linux` (`linuxStatic` when `pkgs` is a musl package set) |
+  | another `*-linux-gnu*` | `linux` |
+  | `*-linux-musl*` | `linuxStatic` |
+  | `*-pc-windows-gnu`, `*-gnullvm` | `windows` |
+  | `wasm32-wasip2` | `wasmComponent` |
+  | `*-unknown-uefi` | `uefi` |
+
   Options set on the target override the preset's, as with any preset;
-  `preset = null` turns it off. Windows MSVC has no default: its preset
-  needs the SDK.
-- A target whose linker rustc chooses itself needs no preset (below).
+  `preset = null` turns it off.
+- A triple whose preset needs arguments or a choice has no default:
+  `*-pc-windows-msvc` and macOS (their presets need the SDK), and
+  `wasm32-unknown-unknown` (`wasmWeb` or `wasmComponent`). Such a target
+  with no preset and no
+  [`linker`](options/targets.md#targetsnamelinker) fails at
+  evaluation, naming the preset to set.
+- `preset = null` builds any target with the toolchain as Cargo finds
+  it. A target whose linker rustc chooses itself needs no more (below).
 - Any other target needs a preset, or at least
   [`targets.<triple>.linker`](options/targets.md#targetsnamelinker).
   Without one, Cargo uses rustc's default linker for the triple, usually
@@ -48,7 +63,7 @@ These targets build with no preset. rustc's target spec names its own
 | --- | --- |
 | bare metal (`x86_64-unknown-none`, …) | an ELF program |
 | `wasm32-wasip1` | a core module, with the WASI libc that ships with rustc |
-| `wasm32-unknown-unknown` | a core module, without wasm-bindgen or `wasm-opt` |
+| `wasm32-unknown-unknown`, with `preset = null` | a core module, without wasm-bindgen or `wasm-opt` |
 
 ```nix
 targets.wasm32-wasip1 = { };

@@ -792,15 +792,20 @@ let
         storePath = "${copy}";
       };
 
-  # The name of the preset (`breakbulk.presets.<name>`) a target gets when
-  # it sets none, or null. Only a preset that needs no arguments can be a
-  # default: msvc needs SDK choices, so `-msvc` triples have none. The
-  # native triple's follows the `pkgs` given to mkRepository, not the
-  # machine evaluating: a glibc Linux package set gets "linux", a musl one
-  # (`pkgs.pkgsMusl`, or nixpkgs on a musl system) "linuxStatic".
+  # The preset (`breakbulk.presets.<name>`) a target gets when it sets
+  # none: `{ name; }`, a preset that needs no arguments for the triple;
+  # `{ choose; }`, a message naming the presets to choose from, for a
+  # triple whose preset needs arguments or a choice, which mkRepository
+  # turns into an evaluation error unless the target sets a preset, a
+  # linker, or `preset = null`; or null, for a triple no preset covers
+  # (the toolchain as Cargo finds it). The native triple's follows the
+  # `pkgs` given to mkRepository, not the machine evaluating: a glibc
+  # Linux package set gets "linux", a musl one (`pkgs.pkgsMusl`, or nixpkgs
+  # on a musl system) "linuxStatic", any other none.
   #
-  #   defaultPreset { pkgs; triple; traits ? <built-in>; } -> a name or null
-  defaultPreset =
+  #   presetRule { pkgs; triple; traits ? <built-in>; }
+  #     -> { name; } | { choose; } | null
+  presetRule =
     {
       pkgs,
       triple,
@@ -808,22 +813,44 @@ let
     }:
     let
       h = pkgs.stdenv.hostPlatform;
+      name = n: { name = n; };
+      choose = m: { choose = m; };
     in
     if triple == nativeTriple pkgs then
       (
         if !h.isLinux then
           null
         else if h.isMusl then
-          "linuxStatic"
+          name "linuxStatic"
         else if h.isGnu then
-          "linux"
+          name "linux"
         else
           null
       )
+    else if traits.isLinux && traits.env == "gnu" then
+      name "linux"
+    else if traits.isLinux && traits.env == "musl" then
+      name "linuxStatic"
+    else if traits.isMingw then
+      name "windows"
+    else if traits.linksComponents then
+      name "wasmComponent"
     else if traits.isUefi then
-      "uefi"
+      name "uefi"
+    else if traits.isMsvc then
+      choose "`breakbulk.presets.windows { sdk = breakbulk.xwinSdk { … }; }` (the MSVC CRT and Windows SDK)"
+    else if traits.isApple && traits.os == "macos" then
+      choose "`breakbulk.presets.darwin { sdk = …; }` (the macOS SDK)"
+    else if traits.isWasm && !traits.isWasi then
+      choose "`breakbulk.presets.wasmWeb` (wasm-bindgen, for browsers) or `breakbulk.presets.wasmComponent` (a WebAssembly component)"
     else
       null;
+
+  # The name of the preset a target gets when it sets none, or null
+  # (presetRule).
+  #
+  #   defaultPreset { pkgs; triple; traits ? <built-in>; } -> a name or null
+  defaultPreset = args: (presetRule args).name or null;
 
 in
 {
@@ -833,6 +860,7 @@ in
     resolve
     nativeTriple
     rustcTargetArg
+    presetRule
     defaultPreset
     fieldNames
     nixpkgsSystems

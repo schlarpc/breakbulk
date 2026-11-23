@@ -46,9 +46,15 @@ in
       preset needs no arguments gets it without an entry here, and with
       entries that set other fields: the native triple, when the `pkgs`
       given to mkRepository is Linux, gets `presets.linux` (glibc) or
-      `presets.linuxStatic` (musl), and a UEFI triple `presets.uefi`.
-      Any other triple with no entry here or in the workspace uses an
-      empty spec (the toolchain as Cargo finds it).
+      `presets.linuxStatic` (musl); another Linux `-gnu` triple
+      `presets.linux`, a `-musl` one `presets.linuxStatic`, a Windows
+      `-gnu` or `-gnullvm` one `presets.windows`, `wasm32-wasip2`
+      `presets.wasmComponent`, and a UEFI triple `presets.uefi`. A triple
+      whose preset needs arguments or a choice (`-msvc`, macOS,
+      wasm32 without WASI) fails at evaluation, naming the preset, unless
+      the target sets a `preset`, a `linker`, or `preset = null`. Any
+      other triple, and one with `preset = null`, uses an empty spec (the
+      toolchain as Cargo finds it).
     '';
   };
 }
