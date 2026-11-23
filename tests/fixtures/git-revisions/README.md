@@ -11,5 +11,5 @@ and `repo-r2/`, which differ only in `gitdep`'s source.
 
 tests/git-revisions makes the real repository (fixed dates, so the commit
 ids are stable), checks that real Cargo writes these lockfiles against it,
-and builds the workspaces with `gitTrees` pointing each locked source at
+and builds the workspaces with `git.<source>.tree` pointing each locked source at
 `repo-r1/` or `repo-r2/`.

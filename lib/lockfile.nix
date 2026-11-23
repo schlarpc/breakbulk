@@ -23,7 +23,7 @@ let
   cratesIoSparse = "sparse+https://index.crates.io/";
 in
 rec {
-  inherit cratesIoIndex;
+  inherit cratesIoIndex cratesIoSparse;
 
   # Parse a `source` string from Cargo.lock.
   #

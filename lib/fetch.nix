@@ -1,8 +1,12 @@
 # Fetch derivations for every remote package in one or more lockfiles.
 #
-# Registry crates: a fixed-output `fetchurl` keyed by the lockfile's SHA-256,
-# plus a small unpack derivation that adds the `.cargo-checksum.json` Cargo's
-# directory sources require. Both download and unpack at build time.
+# Each entry's source comes from the first of `crateSources` that returns
+# one, else from the built-in fetchers:
+#
+# Registry crates: a fixed-output fetch (`registries.<name>.fetch`, by
+# default `fetchurl`) keyed by the lockfile's SHA-256, plus a small unpack
+# derivation that adds the `.cargo-checksum.json` Cargo's directory sources
+# require. Both download and unpack at build time.
 #
 # Git sources: `builtins.fetchGit` during evaluation, because finding a crate
 # inside the repository needs its tree. Keyed by URL and locked revision.
@@ -15,33 +19,35 @@
   manifest,
 }:
 {
-  # registries.<name> = { index = "<index URL as in Cargo.lock>"; dl = "<template>"; }
+  # registries.<name> = { index = "<index URL as in Cargo.lock>"; dl = "<template>"; fetch = pkgs: pkgs.fetchurl; }
   # `index` may be given with or without the `registry+` prefix; sparse
-  # registries keep their `sparse+` prefix.
+  # registries keep their `sparse+` prefix. Merged field by field over
+  # lib/registries.nix.
   registries ? { },
-  # gitHashes."<Cargo.lock source string>" = "sha256-…": the NAR hash of the
-  # fetched tree. Passed to builtins.fetchGit as `narHash`, which lets Nix
-  # substitute the tree from a binary cache instead of cloning.
-  gitHashes ? { },
-  # gitSubdirs."<Cargo.lock source string or URL>"."<crate name>" = "path/in/repo":
-  # skips the walk that locates a crate inside the tree.
-  gitSubdirs ? { },
-  # gitSubmodules."<URL>" = false: Cargo checks out submodules of git
-  # dependencies (cargo src/sources/git/utils.rs, `GitCheckout::reset` calls
-  # `update_submodules`), so this defaults to true.
-  gitSubmodules ? { },
-  # gitTrees."<Cargo.lock source string or URL>" = <path>: use this tree
-  # instead of fetching (a local checkout, a test fixture, or a fetched
-  # tree such as a flake input).
-  gitTrees ? { },
+  # git."<Cargo.lock source string or URL>" = { hash; tree; subdirs; submodules; }:
+  # the entry under the source string, else the one under the URL.
+  #   hash        the NAR hash of the fetched tree, passed to builtins.fetchGit
+  #               as `narHash`, which lets Nix substitute the tree from a
+  #               binary cache instead of cloning
+  #   tree        a tree to use instead of fetching (a local checkout, a test
+  #               fixture, or a fetched tree such as a flake input)
+  #   subdirs.<crate> = "path/in/repo": skips the walk that locates a crate
+  #   submodules  Cargo checks out submodules of git dependencies (cargo
+  #               src/sources/git/utils.rs, `GitCheckout::reset` calls
+  #               `update_submodules`), so this defaults to true
+  git ? { },
+  # crateSources = [ (entry: null | { path; subdir ? ""; }) ]: consulted in
+  # order before the built-in fetchers; the first non-null result is the
+  # entry's source, the crate at `subdir` inside the tree `path`. `entry`
+  # is the lockfile entry plus `defaultSource`, what the built-in fetchers
+  # give in the same shape.
+  crateSources ? [ ],
 }:
 let
   inherit (builtins)
     attrNames
     concatStringsSep
-    elemAt
     filter
-    hasAttr
     head
     isAttrs
     isString
@@ -52,18 +58,34 @@ let
     replaceStrings
     stringLength
     substring
+    tail
     toJSON
     ;
 
-  cratesIoDl = "https://static.crates.io/crates/{crate}/{crate}-{version}.crate";
+  defaultRegistries = import ./registries.nix;
+  allRegistries = lib.mapAttrs (n: r: (defaultRegistries.${n} or { }) // r) (
+    defaultRegistries // registries
+  );
 
-  normIndex = i: if lib.hasPrefix "sparse+" i then i else lib.removePrefix "registry+" i;
+  # An index URL as Cargo.lock spells it, with crates.io's sparse index
+  # folded into its git one: both are crates.io (`SourceId::is_crates_io`),
+  # and one `registries.crates-io` entry serves both.
+  canonicalIndex =
+    i:
+    let
+      n = if lib.hasPrefix "sparse+" i then i else lib.removePrefix "registry+" i;
+    in
+    if n == lockfile.cratesIoSparse then lockfile.cratesIoIndex else n;
 
-  dlByIndex = lib.listToAttrs (
-    lib.mapAttrsToList (name: r: lib.nameValuePair (normIndex r.index) (r // { inherit name; })) (
-      lib.filterAttrs (_: r: r ? index) registries
+  byIndex = lib.listToAttrs (
+    lib.mapAttrsToList (name: r: lib.nameValuePair (canonicalIndex r.index) (r // { inherit name; })) (
+      lib.filterAttrs (_: r: r ? index) allRegistries
     )
   );
+
+  # The `registries` entry (with its `name`) that serves a registry
+  # entry's index, or null.
+  registryOf = e: byIndex.${canonicalIndex e.parsed.url} or null;
 
   # cargo-util src/registry.rs, `make_dep_path(name, true)`.
   prefixOf =
@@ -100,28 +122,34 @@ let
     else
       replaceStrings markers [ e.name e.version prefix (lib.toLower prefix) e.checksum ] dl;
 
-  registryDl =
+  registryFor =
     e:
-    if e.parsed.isCratesIo then
-      cratesIoDl
-    else
-      (dlByIndex.${e.parsed.url} or (throw ''
+    let
+      r = registryOf e;
+    in
+    if r == null || !(r ? dl) then
+      throw ''
         breakbulk: no download URL for registry ${e.parsed.url} (needed by ${e.name} ${e.version}).
         Set registries.<name> = { index = "${e.parsed.url}"; dl = "<dl template from the registry's config.json>"; };
-      '')
-      ).dl;
+      ''
+    else
+      r;
 
   # Store-path-safe name fragment.
   safeName = s: replaceStrings [ "+" ] [ "_" ] s;
 
   fetchRegistryTarball =
     e:
+    let
+      r = registryFor e;
+      fetch = r.fetch or (p: p.fetchurl);
+    in
     if e.checksum == null then
       throw "breakbulk: ${e.id} has no checksum in Cargo.lock"
     else
-      pkgs.fetchurl {
+      fetch pkgs {
         name = "${safeName e.name}-${e.version}.tar.gz";
-        url = crateUrl (registryDl e) e;
+        url = crateUrl r.dl e;
         sha256 = e.checksum;
       };
 
@@ -143,11 +171,23 @@ let
         cp "$checksumJsonPath" $out/.cargo-checksum.json
       '';
 
+  # The `git` entry of a git source: by source string, else by URL.
+  gitSettings =
+    parsed:
+    let
+      s = git.${parsed.source} or git.${parsed.url} or { };
+    in
+    {
+      hash = s.hash or null;
+      tree = s.tree or null;
+      subdirs = s.subdirs or { };
+      submodules = s.submodules or true;
+    };
+
   gitTree =
     parsed:
     let
-      hash = gitHashes.${parsed.source} or null;
-      submodules = gitSubmodules.${parsed.url} or true;
+      s = gitSettings parsed;
     in
     builtins.fetchGit (
       {
@@ -155,12 +195,12 @@ let
         rev = parsed.precise;
         allRefs = true;
         shallow = true;
-        inherit submodules;
+        inherit (s) submodules;
       }
       # Cargo checks out the tree as is; `git archive` export-ignore rules
       # do not apply (builtins.fetchGit turns them on by default).
       // lib.optionalAttrs featureGates.fetchGitExportIgnore { exportIgnore = false; }
-      // lib.optionalAttrs (hash != null) { narHash = hash; }
+      // lib.optionalAttrs (s.hash != null) { narHash = s.hash; }
     );
 
   # A fetched tree (a `fetchGit` or `fetchTree` result, or a flake input)
@@ -298,22 +338,74 @@ let
     else
       result.found;
 
+  # A crate inside a tree, as crateSource returns it. `path` is a string
+  # with context: the crate directory inside the tree.
+  inTree = tree: subdir: {
+    inherit tree subdir;
+    path = if subdir == "" then "${realTree tree}" else "${realTree tree}/${subdir}";
+  };
+
   gitCrate =
     e:
     let
-      tree = gitTrees.${e.parsed.source} or gitTrees.${e.parsed.url} or (gitTree e.parsed);
-      hint =
-        let
-          h = gitSubdirs.${e.parsed.source} or gitSubdirs.${e.parsed.url} or { };
-        in
-        h.${e.name} or null;
-      subdir = if hint != null then util.normalizeRel hint else locateInTree tree e.name e.version;
+      s = gitSettings e.parsed;
+      tree = if s.tree != null then s.tree else gitTree e.parsed;
+      hint = s.subdirs.${e.name} or null;
     in
-    {
-      inherit tree subdir;
-      # String with context: the crate directory inside the fetched tree.
-      path = if subdir == "" then "${realTree tree}" else "${realTree tree}/${subdir}";
-    };
+    inTree tree (if hint != null then util.normalizeRel hint else locateInTree tree e.name e.version);
+
+  # What the built-in fetchers give. `checksummed`: `path` is a Cargo
+  # directory-source entry as is, `.cargo-checksum.json` included.
+  builtinSource =
+    e:
+    if e.parsed.kind == "registry" then
+      let
+        path = unpackRegistryCrate e;
+      in
+      {
+        tree = path;
+        subdir = "";
+        inherit path;
+        checksummed = true;
+      }
+    else if e.parsed.kind == "git" then
+      gitCrate e // { checksummed = false; }
+    else
+      throw "breakbulk: ${e.id} is a path package and is not fetched";
+
+  # The first of `crateSources` that returns a source for `e`, or null.
+  # Not `lib.findFirst` over `map`: a later function is not called once an
+  # earlier one has answered.
+  suppliedSource =
+    e:
+    let
+      e' = e // {
+        defaultSource = {
+          inherit (builtinSource e) subdir;
+          path = (builtinSource e).tree;
+        };
+      };
+      check =
+        r:
+        if
+          r == null || (isAttrs r && r ? path && lib.all (k: k == "path" || k == "subdir") (attrNames r))
+        then
+          r
+        else
+          throw "breakbulk: a `crateSources` function returned something other than null or { path; subdir ? \"\"; } for ${e.id}";
+      go =
+        fs:
+        if fs == [ ] then
+          null
+        else
+          let
+            f = head fs;
+            r =
+              if lib.isFunction f then check (f e') else throw "breakbulk: `crateSources` holds a non-function";
+          in
+          if r != null then r else go (tail fs);
+    in
+    go crateSources;
 in
 rec {
   inherit
@@ -322,29 +414,29 @@ rec {
     realTree
     gitCrate
     locateInTree
+    registryOf
     unpackRegistryCrate
     fetchRegistryTarball
     ;
 
   # The source of one lockfile entry:
-  #   registry: { kind = "registry"; path = <unpacked crate drv>; }
-  #   git:      { kind = "git"; path = "<tree>/<subdir>"; tree; subdir; }
+  #   { kind = "registry" | "git"; entry; tree; subdir; path; checksummed; }
+  # `path` is the crate directory, `subdir` its place in `tree`.
   crateSource =
     e:
-    if e.parsed.kind == "registry" then
-      {
-        kind = "registry";
-        path = unpackRegistryCrate e;
-        entry = e;
-      }
-    else if e.parsed.kind == "git" then
-      (gitCrate e)
-      // {
-        kind = "git";
-        entry = e;
-      }
-    else
-      throw "breakbulk: ${e.id} is a path package and is not fetched";
+    let
+      r = suppliedSource e;
+    in
+    (
+      if r == null then
+        builtinSource e
+      else
+        inTree r.path (util.normalizeRel (r.subdir or "")) // { checksummed = false; }
+    )
+    // {
+      kind = e.parsed.kind;
+      entry = e;
+    };
 
   # Sources for a list of entries (or merged attrset), keyed by entry key.
   sourcesFor =

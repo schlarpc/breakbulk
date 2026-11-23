@@ -187,10 +187,8 @@ let
   fetchArgs = {
     inherit (cfg)
       registries
-      gitHashes
-      gitTrees
-      gitSubdirs
-      gitSubmodules
+      git
+      crateSources
       ;
   };
   fetch = mkFetch pkgs fetchArgs;

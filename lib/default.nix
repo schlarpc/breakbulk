@@ -5,7 +5,7 @@
 # Pure parts (no pkgs): util, lockfile, manifest, roots, sourceViews,
 # skeleton.describe. Parts that create derivations take pkgs:
 #   breakbulk.envCapture.forPackage { pkgs; platform; name; nativeInputs; inputs; }
-#   breakbulk.mkFetch pkgs { registries; gitHashes; ... }
+#   breakbulk.mkFetch pkgs { registries; git; crateSources; }
 #   breakbulk.mkVendor pkgs { fetch; entries; ... }
 #   breakbulk.mkSkeleton pkgs { root; wsDir; }
 #   breakbulk.xwinSdk { pkgs; crt; sdk; arches; hash; }   (unfree; FOD)

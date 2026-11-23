@@ -3,6 +3,8 @@
 #
 # Layout (crane's, lib/vendorCargoRegistries.nix and lib/vendorGitDeps.nix):
 #   <vendor>/<hash of registry source>/<name>-<version> -> unpacked crate
+#                                  (or, for one from `crateSources`, a
+#                                  directory as for git crates below)
 #   <vendor>/<hash of git source id>/<name>-<version>/  -> symlinks into the
 #                                                          fetched tree, plus
 #                                                          .cargo-checksum.json
@@ -60,7 +62,6 @@ in
     {
       fetch,
       entries,
-      registries ? { },
       name ? "breakbulk-vendor",
     }:
     let
@@ -240,6 +241,7 @@ in
               dir = "${h}/${crateDirName e}";
               sourceDir = h;
               path = toString src.path;
+              inherit (src) checksummed;
               kind = e.parsed.kind;
               rewritten = if g == null then null else g.rewritten pointer;
             }
@@ -271,16 +273,24 @@ in
         ) pointerStubs
         ++ map (
           c:
-          if c.kind == "registry" then
+          if c.checksummed then
             "ln -s ${c.path} $out/${lib.escapeShellArg c.dir}"
           else
+            # A crate from `crateSources` or a git tree: its files, and a
+            # `.cargo-checksum.json` that lists none, so that Cargo checks
+            # only the package checksum, the lockfile's (null for git).
             concatStringsSep "\n" (
               [
                 "d=$out/${lib.escapeShellArg c.dir}"
                 "mkdir -p \"$d\""
                 "for f in ${c.path}/* ${c.path}/.[!.]* ${c.path}/..?*; do [ -e \"$f\" ] || [ -L \"$f\" ] || continue; ln -s \"$f\" \"$d/\"; done"
                 "rm -f \"$d/.cargo-checksum.json\""
-                "echo '{\"files\":{},\"package\":null}' > \"$d/.cargo-checksum.json\""
+                "echo ${
+                  lib.escapeShellArg (toJSON {
+                    files = { };
+                    package = c.e.checksum;
+                  })
+                } > \"$d/.cargo-checksum.json\""
               ]
               ++ lib.optionals (c.rewritten != null) [
                 "rm \"$d/Cargo.toml\""
@@ -294,21 +304,13 @@ in
 
       # --- source replacement config ----------------------------------------
 
-      regNameByIndex = lib.listToAttrs (
-        lib.mapAttrsToList (
-          n: r:
-          lib.nameValuePair (
-            if lib.hasPrefix "sparse+" r.index then r.index else lib.removePrefix "registry+" r.index
-          ) n
-        ) (lib.filterAttrs (_: r: r ? index) registries)
-      );
-
       replacement = h: "breakbulk-${h}";
 
       sourceSection =
         h: es:
         let
           p = (head es).parsed;
+          reg = fetch.registryOf (head es);
           target = replacement h;
         in
         if p.kind == "registry" && p.isCratesIo then
@@ -318,7 +320,7 @@ in
           ''
         else if p.kind == "registry" then
           ''
-            [source.${q (regNameByIndex.${p.url} or "breakbulk-registry-${h}")}]
+            [source.${q (if reg == null then "breakbulk-registry-${h}" else reg.name)}]
             registry = ${q p.url}
             replace-with = ${q target}
           ''

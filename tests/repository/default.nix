@@ -410,15 +410,65 @@ let
   pkgidShort = mkRepo (fixtures + "/pkgid-short") [
     (oneWs "app")
     {
-      gitTrees."https://example.invalid/me/gitdep" = fixtures + "/pkgid-short/repo";
-      gitTrees."https://example.invalid/me/tools" = fixtures + "/pkgid-short/tools";
+      git."https://example.invalid/me/gitdep".tree = fixtures + "/pkgid-short/repo";
+      git."https://example.invalid/me/tools".tree = fixtures + "/pkgid-short/tools";
+    }
+  ];
+
+  # --- crate-sources -----------------------------------------------------------
+
+  # A crates.io mirror: a directory of `.crate` files, from the default
+  # download.
+  cratesMirror =
+    let
+      itoa = lib.findFirst (e: e.name == "itoa") null (
+        breakbulk.lockfile.read (fixtures + "/crate-sources/app/Cargo.lock")
+      );
+    in
+    pkgs.runCommand "crates-mirror" { } ''
+      mkdir -p $out/itoa
+      cp ${(breakbulk.mkFetch pkgs { }).fetchRegistryTarball itoa} $out/itoa/itoa-1.0.11.crate
+    '';
+  crateSourcesRepo = mkRepo (fixtures + "/crate-sources") [
+    (oneWs "app")
+    {
+      registries.crates-io = {
+        dl = "file://${cratesMirror}/{crate}/{crate}-{version}.crate";
+        # A name of its own: under the default name, the default
+        # download's output is in the store already and the mirror is
+        # never read.
+        fetch = p: args: p.fetchurl (args // { name = "mirrored-${args.name}"; });
+      };
+      crateSources = [
+        (
+          e:
+          let
+            dir = fixtures + "/crate-sources/vendored/${e.name}-${e.version}";
+          in
+          if builtins.pathExists dir then { path = dir; } else null
+        )
+        (
+          e:
+          if e.name == "itoa" then
+            {
+              path = pkgs.applyPatches {
+                name = "itoa-patched";
+                src = e.defaultSource.path;
+                postPatch = "echo 'pub const PATCHED: u32 = 42;' >> src/lib.rs";
+              };
+              inherit (e.defaultSource) subdir;
+            }
+          else
+            null
+        )
+      ];
     }
   ];
 
   # --- env-repository-path -----------------------------------------------------
 
   envRepoPathModule = {
-    gitTrees."https://example.invalid/me/envdep" = fixtures + "/env-repository-path/envdep";
+    git."https://example.invalid/me/envdep".tree = fixtures + "/env-repository-path/envdep";
   };
   envRepoPath = mkRepo (fixtures + "/env-repository-path") [
     (oneWs "app")
@@ -804,6 +854,7 @@ in
       resultNames
       resultNamesFixed
       pkgidShort
+      crateSourcesRepo
       envRepoPath
       envRepoPathFixed
       sources
@@ -2395,6 +2446,21 @@ in
     [ "$($app/bin/app)" = "gitdep 43" ]
     touch $out
   '';
+
+  # Registry crates through units from elsewhere than their registry: a
+  # pre-vendored crate and a patched one (`crateSources`), the latter
+  # downloaded from a crates.io mirror (`registries.crates-io`).
+  crate-sources =
+    pkgs.runCommand "crate-sources"
+      {
+        app = crateSourcesRepo.workspaces.main.packages.app;
+        itoa = crateSourcesRepo.sources.itoa;
+      }
+      ''
+        [ "$($app/bin/app)" = "42 7" ]
+        grep -q 'pub const PATCHED' "$itoa/src/lib.rs"
+        touch $out
+      '';
 
   # A git crate's build script reads a repository path from Cargo config
   # `[env]`: the run fails, and the hint names the package's `env` setting

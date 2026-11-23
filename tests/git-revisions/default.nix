@@ -19,7 +19,8 @@
 #
 # The repository sits at file:///build/gitdep, inside the sandbox's build
 # directory, where `repo` is copied before real Cargo fetches from it.
-# breakbulk never fetches it: `gitTrees` maps each locked source to its tree.
+# breakbulk never fetches it: `git.<source>.tree` maps each locked source to
+# its tree.
 #
 # `repos` exposes the repository for debugging.
 {
@@ -135,10 +136,10 @@ let
         });
         # The trees of the two commits, by locked source: breakbulk never
         # contacts the URL.
-        gitTrees = {
-          ${src1} = fixture + "/repo-r1";
-          ${src2} = fixture + "/repo-r2";
-          ${srcRev1} = fixture + "/repo-r1";
+        git = {
+          ${src1}.tree = fixture + "/repo-r1";
+          ${src2}.tree = fixture + "/repo-r2";
+          ${srcRev1}.tree = fixture + "/repo-r1";
         };
       }
     ]

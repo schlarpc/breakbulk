@@ -18,7 +18,7 @@
 #                 _DESCRIPTION of a crate from each workspace)
 #   fetched       the consumer with the repository fetched by
 #                 `builtins.fetchGit` (IFD: `repo` is built first), as a
-#                 gitTrees override and through the lockfile's own fetch;
+#                 `git.<url>.tree` and through the lockfile's own fetch;
 #                 under lazy trees both give virtual paths. Every path in
 #                 its noSourceReferences source list is in the store, and
 #                 two fetches of the same revision give the same path
@@ -35,7 +35,7 @@
 #
 # The repository sits at file:///build/gitdep, inside the sandbox's build
 # directory, where `repo` is copied before real Cargo fetches from it.
-# breakbulk never fetches it: `gitTrees` maps the URL to repo/.
+# breakbulk never fetches it: `git.<url>.tree` maps the URL to repo/.
 {
   pkgs ? import (
     let
@@ -104,7 +104,7 @@ let
       root = fixture + "/consumer";
       inherit tools toolchain;
       name = "git-multi-workspace";
-      fetchArgs.gitTrees.${url} = fixture + "/repo";
+      fetchArgs.git.${url}.tree = fixture + "/repo";
     };
   ws = mk toolchains.default;
 
@@ -130,7 +130,7 @@ let
     inherit tools;
     toolchain = toolchains.default;
     name = "git-multi-workspace-fetched";
-    fetchArgs.gitTrees.${url} = builtins.fetchGit {
+    fetchArgs.git.${url}.tree = builtins.fetchGit {
       url = repoUrl;
       inherit rev;
     };

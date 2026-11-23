@@ -83,7 +83,6 @@ let
   vendor = bb.mkVendor pkgs {
     inherit fetch;
     entries = lib.filter (e: e.parsed.kind == "registry") a;
-    registries.my.index = "sparse+https://my.registry/index/";
   };
 
   # Layered settings (lib/modules/types.nix `layer`): a base evaluation
@@ -306,6 +305,144 @@ runTests "lib-unit" {
       "https://my.registry/dl/pr/iv/priv/2.0.0/1111111111111111111111111111111111111111111111111111111111111111"
     ];
   };
+  # crates.io is the `registries.crates-io` entry: a mirror replaces its
+  # `dl`, a fetcher its `fetch`, and its sparse index is the same registry.
+  testCratesIoMirror = {
+    expr =
+      let
+        f = bb.mkFetch pkgs {
+          registries.crates-io = {
+            dl = "https://mirror.example/{crate}/{version}";
+            fetch = p: args: p.fetchurl (args // { name = "mirrored-${args.name}"; });
+          };
+        };
+        sparse = lockfile.mkEntry {
+          name = "itoa";
+          version = "1.0.11";
+          source = "sparse+https://index.crates.io/";
+          inherit (find a "itoa") checksum;
+        };
+        t = f.fetchRegistryTarball sparse;
+      in
+      {
+        inherit (t) name;
+        urls = t.urls or [ t.url ];
+        registry = (f.registryOf sparse).name;
+      };
+    expected = {
+      name = "mirrored-itoa-1.0.11.tar.gz";
+      urls = [ "https://mirror.example/itoa/1.0.11" ];
+      registry = "crates-io";
+    };
+  };
+  testUnknownRegistry = {
+    expr = (bb.mkFetch pkgs { }).registryOf (find a "priv");
+    expected = null;
+  };
+  testUnknownRegistryFetch = {
+    expr =
+      (builtins.tryEval ((bb.mkFetch pkgs { }).fetchRegistryTarball (find a "priv")).drvPath).success;
+    expected = false;
+  };
+
+  # --- git settings: by source string, else by URL ---------------------------
+  testGitKeyRule = {
+    expr =
+      let
+        e = find a "serde";
+        subdirWith = git: (bb.mkFetch pkgs { inherit git; }).crateSource e;
+      in
+      {
+        both =
+          (subdirWith {
+            ${e.source}.subdirs.serde = "by-source";
+            ${e.parsed.url}.subdirs.serde = "by-url";
+          }).subdir;
+        url = (subdirWith { ${e.parsed.url}.subdirs.serde = "./by-url/"; }).subdir;
+        # The two entries are not merged: the source string's has no
+        # subdir, so `a` is found in its tree.
+        notMerged =
+          let
+            entries = lockfile.read ../fixtures/vendor-git-inherit/consumer/Cargo.lock;
+            ea = find entries "a";
+          in
+          (
+            (bb.mkFetch pkgs {
+              git.${ea.source}.tree = ../fixtures/vendor-git-inherit/repo;
+              git.${ea.parsed.url} = {
+                tree = ../fixtures/vendor-git-inherit/repo;
+                subdirs.a = "elsewhere";
+              };
+            }).crateSource
+              ea
+          ).subdir;
+      };
+    expected = {
+      both = "by-source";
+      url = "by-url";
+      notMerged = "crates/a";
+    };
+  };
+
+  # --- crateSources -----------------------------------------------------------
+  testCrateSources = {
+    expr =
+      let
+        f = bb.mkFetch pkgs {
+          git."https://github.com/me/serde".subdirs.serde = "in/repo";
+          crateSources = [
+            (
+              e:
+              if e.name == "serde" then
+                {
+                  inherit (e.defaultSource) path;
+                  subdir = "${e.defaultSource.subdir}/patched";
+                }
+              else
+                null
+            )
+            (
+              e:
+              if e.name == "itoa" then
+                {
+                  path = ../fixtures/vendor-git-inherit/repo;
+                  subdir = "./crates/a/";
+                }
+              else
+                null
+            )
+            (e: if e.name == "itoa" then throw "a later function was called" else null)
+          ];
+        };
+        s = n: f.crateSource (find a n);
+      in
+      {
+        itoa = {
+          inherit (s "itoa") subdir checksummed kind;
+          path = lib.hasSuffix "-repo/crates/a" (s "itoa").path;
+        };
+        serde = (s "serde").subdir;
+        # No function answers: the built-in fetcher's unpacked crate.
+        priv = (s "priv").checksummed;
+      };
+    expected = {
+      itoa = {
+        subdir = "crates/a";
+        checksummed = false;
+        kind = "registry";
+        path = true;
+      };
+      serde = "in/repo/patched";
+      priv = true;
+    };
+  };
+  testCrateSourcesBadResult = {
+    expr =
+      (builtins.tryEval
+        ((bb.mkFetch pkgs { crateSources = [ (_: { dir = ./.; }) ]; }).crateSource (find a "itoa")).path
+      ).success;
+    expected = false;
+  };
 
   # --- vendor config --------------------------------------------------------
   testVendorConfig = {
@@ -334,7 +471,7 @@ runTests "lib-unit" {
         entries = lockfile.read ../fixtures/vendor-git-inherit/consumer/Cargo.lock;
         v = bb.mkVendor pkgs {
           fetch = bb.mkFetch pkgs {
-            gitTrees."https://example.invalid/repo" = ../fixtures/vendor-git-inherit/repo;
+            git."https://example.invalid/repo".tree = ../fixtures/vendor-git-inherit/repo;
           };
           inherit entries;
         };

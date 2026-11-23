@@ -9,8 +9,11 @@ let
   curated = import ../sys-defaults.nix { inherit lib; };
   curatedDependents = import ../sys-defaults-dependents.nix { inherit lib; };
   gates = import ../nix-features.nix { inherit lib; };
+  registryDefaults = import ../registries.nix;
 in
 {
+  config.registries = lib.mapAttrs (_: lib.mapAttrs (_: lib.mkDefault)) registryDefaults;
+
   config.sysDefaults = {
     packages = lib.mapAttrs (_: lib.mkDefault) curated;
     dependents = lib.mapAttrs (
@@ -80,7 +83,9 @@ in
               description = ''
                 The registry's index URL as it appears in `Cargo.lock`
                 (with or without the `registry+` prefix; sparse registries
-                keep `sparse+`).
+                keep `sparse+`). It says which lockfile entries the
+                registry serves; crates.io's sparse index
+                (`sparse+https://index.crates.io/`) counts as its git one.
               '';
             };
             dl = mkOption {
@@ -91,61 +96,172 @@ in
                 (`{crate}`, `{version}`, `{prefix}`, `{lowerprefix}`,
                 `{sha256-checksum}`). `Cargo.lock` records only the index,
                 and reading `config.json` would need a fetch during
-                evaluation.
+                evaluation. A mirror is a different `dl`.
+              '';
+            };
+            fetch = mkOption {
+              type = types.functionTo (types.functionTo types.package);
+              default = p: p.fetchurl;
+              defaultText = lib.literalExpression "pkgs: pkgs.fetchurl";
+              example = lib.literalExpression ''
+                pkgs: args: pkgs.fetchurl (args // {
+                  netrcImpureEnvVars = [ "MY_REGISTRY_TOKEN" ];
+                  netrcPhase = '''
+                    echo "machine my-registry.example password $MY_REGISTRY_TOKEN" > netrc
+                  ''';
+                })
+              '';
+              description = ''
+                How to download one crate: a function of the build
+                machine's package set that returns a fetcher with
+                `fetchurl`'s interface. The fetcher is called with `name`,
+                `url` (from `dl`) and `sha256` (the lockfile's checksum)
+                and returns the `.crate` file as a fixed-output
+                derivation. Change it to authenticate.
+
+                breakbulk does not handle secrets. A credential reaches
+                the fetch only through an environment variable that the
+                fetch names as impure, which Nix reads from the daemon's
+                environment or its `impure-env` setting, or through a
+                netrc file the daemon reads (see
+                [Fetch from a mirror or a private registry](../../how-to/registries.md)).
               '';
             };
           };
         }
       );
       default = { };
-      description = "Alternative registries, by name.";
-    };
-
-    gitHashes = mkOption {
-      type = types.attrsOf types.str;
-      default = { };
-      example = {
-        "git+https://github.com/me/serde?rev=abc#abc0123" = "sha256-…";
-      };
+      defaultText = lib.literalExpression ''
+        {
+          crates-io = {
+            index = "${registryDefaults.crates-io.index}";
+            dl = "${registryDefaults.crates-io.dl}";
+          };
+        }
+      '';
+      example = lib.literalExpression ''
+        {
+          crates-io.dl = "https://crates-mirror.example/{crate}/{crate}-{version}.crate";
+          my = {
+            index = "sparse+https://my-registry.example/index/";
+            dl = "https://my-registry.example/api/v1/crates/{crate}/{version}/download";
+          };
+        }
+      '';
       description = ''
-        NAR hashes of git sources, keyed by the full `Cargo.lock` source
-        string. Optional: with a hash, the fetch is fixed-output and a
-        binary cache can serve it; without one, every fresh machine clones
-        the source during evaluation. The hash is that of the fetched tree
-        (`builtins.fetchGit`'s `narHash`), not crane's `outputHashes`.
+        The registries crates are downloaded from, by name. A lockfile
+        entry from a registry not listed here is an error. `crates-io` is
+        defined field by field at `mkDefault` priority, so a definition of
+        one of its fields replaces just that field: a mirror of crates.io
+        sets `crates-io.dl`. The name labels the registry in the Cargo
+        configuration that replaces it with its vendor directory.
       '';
     };
 
-    gitTrees = mkOption {
-      type = types.attrsOf types.path;
+    git = mkOption {
+      type = types.attrsOf (
+        types.submodule {
+          options = {
+            hash = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "sha256-5mLf4B3zTZwv3wKgdixL/QJuTuouPlpm01rMFAZ8D6Y=";
+              description = ''
+                The NAR hash of the fetched tree (`builtins.fetchGit`'s
+                `narHash`, not crane's `outputHashes`). Optional: with a
+                hash, the fetch is fixed-output and a binary cache can
+                serve it; without one, every fresh machine clones the
+                source during evaluation.
+              '';
+            };
+            tree = mkOption {
+              type = types.nullOr types.path;
+              default = null;
+              example = lib.literalExpression "inputs.my-fork";
+              description = ''
+                A tree to use instead of fetching: a local checkout, a
+                fetched tree such as a flake input, or a test fixture.
+                Crates are found in it as in a fetched one.
+              '';
+            };
+            subdirs = mkOption {
+              type = types.attrsOf types.str;
+              default = { };
+              example = {
+                mycrate = "crates/mycrate";
+              };
+              description = ''
+                Where a crate lives inside the tree, by crate name. Skips
+                the walk over the tree's `Cargo.toml` files.
+              '';
+            };
+            submodules = mkOption {
+              type = types.bool;
+              default = true;
+              description = ''
+                Whether to fetch submodules. Cargo checks out the
+                submodules of git dependencies.
+              '';
+            };
+          };
+        }
+      );
       default = { };
+      example = lib.literalExpression ''
+        {
+          "https://github.com/me/repo".subdirs.mycrate = "crates/mycrate";
+          "git+https://github.com/me/serde?rev=abc#abc0123".hash = "sha256-…";
+        }
+      '';
       description = ''
-        Use a local tree instead of fetching a git source. Keyed by the
-        `Cargo.lock` source string or by URL.
+        Settings for git sources, keyed by the full `Cargo.lock` source
+        string (`git+<url>?<reference>#<revision>`) or by the URL alone.
+        A source uses the entry under its source string if there is one,
+        else the one under its URL; the two are not merged. A source
+        string names one locked revision, as a hash needs; a URL covers
+        every revision locked from it. See
+        [Use git dependencies](../../how-to/git-dependencies.md).
       '';
     };
 
-    gitSubdirs = mkOption {
-      type = types.attrsOf (types.attrsOf types.str);
-      default = { };
-      example = {
-        "https://github.com/me/repo" = {
-          mycrate = "crates/mycrate";
-        };
-      };
-      description = ''
-        Where a crate lives inside a git source, keyed by source string or
-        URL, then by crate name. Skips the walk over the tree's
-        `Cargo.toml` files.
+    crateSources = mkOption {
+      type = types.listOf (types.functionTo types.raw);
+      default = [ ];
+      example = lib.literalExpression ''
+        [
+          # A pre-vendored directory, as `cargo vendor` writes it.
+          (entry:
+            let dir = ./vendor + "/''${entry.name}-''${entry.version}"; in
+            if builtins.pathExists dir then { path = dir; } else null)
+          # A patched crate.
+          (entry:
+            if entry.name == "itoa" then {
+              path = pkgs.applyPatches {
+                name = "itoa-patched";
+                src = entry.defaultSource.path;
+                patches = [ ./itoa.patch ];
+              };
+              inherit (entry.defaultSource) subdir;
+            } else null)
+        ]
       '';
-    };
-
-    gitSubmodules = mkOption {
-      type = types.attrsOf types.bool;
-      default = { };
       description = ''
-        Per git URL: whether to fetch submodules. Cargo checks out
-        submodules of git dependencies, so the default is true.
+        Functions that supply the source of a registry or git dependency
+        instead of fetching it. Each is called with the lockfile entry and
+        returns `null` to pass, or `{ path; subdir ? ""; }`: the crate is
+        the directory `subdir` of the tree `path` (a path, a derivation or
+        a fetched tree). They are tried in order and the first non-null
+        answer wins; the built-in fetchers (`registries`, `git`) come
+        last.
+
+        The entry has `name`, `version`, `source` (the `Cargo.lock` source
+        string), `checksum` (null for git), `parsed.kind` (`"registry"` or
+        `"git"`), `parsed.url`, and `defaultSource`: the
+        `{ path; subdir; }` the built-in fetchers give, fetched only if
+        used. Cargo checks a registry crate against the lockfile's
+        checksum, which breakbulk gives a supplied crate whatever its
+        contents, so a patched crate needs no new lockfile. See
+        [Supply or patch a crate's source](../../how-to/crate-sources.md).
       '';
     };
 

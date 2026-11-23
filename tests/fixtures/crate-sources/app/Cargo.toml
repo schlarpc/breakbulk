@@ -1,0 +1,10 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Not on crates.io: tests/repository supplies it from ../vendored.
+breakbulk-test-prevendored = "=0.1.0"
+# Patched by tests/repository: src/lib.rs gains `PATCHED`.
+itoa = "=1.0.11"

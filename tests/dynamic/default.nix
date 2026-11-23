@@ -414,7 +414,7 @@ let
         { inherit mode; }
         keepLogs
         oneWs
-        { gitTrees."file:///build/gitdep" = fixtures + "/git-multi-workspace/repo"; }
+        { git."file:///build/gitdep".tree = fixtures + "/git-multi-workspace/repo"; }
       ];
     };
     git-revisions = (import ../git-revisions testArgs).repos.repository;

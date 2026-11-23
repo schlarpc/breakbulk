@@ -1,0 +1,4 @@
+[package]
+edition = "2021"
+name = "breakbulk-test-prevendored"
+version = "0.1.0"

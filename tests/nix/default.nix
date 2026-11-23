@@ -691,7 +691,7 @@ in
     name = "vendor-collision";
     src = fixtures + "/vendor-collision";
     # One git source pinned by NAR hash (substitutable), one without.
-    fetchArgs.gitHashes."git+https://github.com/dtolnay/itoa?tag=1.0.11#8f392032fadf15b5e6b9b7b6add21875575d67af" =
+    fetchArgs.git."git+https://github.com/dtolnay/itoa?tag=1.0.11#8f392032fadf15b5e6b9b7b6add21875575d67af".hash =
       "sha256-5mLf4B3zTZwv3wKgdixL/QJuTuouPlpm01rMFAZ8D6Y=";
     expectOutput = "ok 42";
     # From an online `cargo build -v` of the fixture with nixpkgs' cargo
@@ -703,7 +703,7 @@ in
   vendor-git-inherit = vendorBuild {
     name = "consumer";
     src = fixtures + "/vendor-git-inherit/consumer";
-    fetchArgs.gitTrees."https://example.invalid/repo" = fixtures + "/vendor-git-inherit/repo";
+    fetchArgs.git."https://example.invalid/repo".tree = fixtures + "/vendor-git-inherit/repo";
     # What Cargo reports for these crates in a real checkout (crates/a is
     # two levels below the workspace root).
     expectOutput = "../../README.md ../../LICENSE 42";

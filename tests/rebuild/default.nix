@@ -107,6 +107,7 @@ let
     clippy-conf = [ (plainAt "ws" "clippy-conf" [ ]) ];
     # With the setting that lets the host copy's clippy unit pass.
     clippy-host = [ products.repos.clippyHostFixed ];
+    crate-sources = [ repository.repos.crateSourcesRepo ];
     crate-types = [ (plain "crate-types" [ ]) ];
     cross-doctests = [ dynamic.repos.cross-doctests-aarch64 ];
     cross-lto = [
@@ -151,8 +152,8 @@ let
     pkgid-short = [
       (plainAt "app" "pkgid-short" [
         {
-          gitTrees."https://example.invalid/me/gitdep" = fixtures + "/pkgid-short/repo";
-          gitTrees."https://example.invalid/me/tools" = fixtures + "/pkgid-short/tools";
+          git."https://example.invalid/me/gitdep".tree = fixtures + "/pkgid-short/repo";
+          git."https://example.invalid/me/tools".tree = fixtures + "/pkgid-short/tools";
         }
       ])
     ];
