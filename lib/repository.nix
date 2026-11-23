@@ -920,7 +920,8 @@ let
       # (wine: WINEPATH), else the target's traits.
       testDylibPath = breakbulkLib.testRuns.dylibPathOf {
         traits = traitsOf wsName triple;
-        inherit runner;
+        # The runner as given: a list of strings loses its attributes.
+        runner = if t == null then null else runnerValue wsName t.runner;
       };
       testSystem = if t == null then null else t.testSystem;
     };
@@ -1307,7 +1308,7 @@ let
             inherit (h) runner testSystem;
             dylibPath = breakbulkLib.testRuns.dylibPathOf {
               traits = targetTraits.resolve { triple = nativeTriple; };
-              inherit (h) runner;
+              runner = runnerValue wsName cfg.workspaces.${wsName}.host.runner;
             };
             packageSet = pkgs;
           };
