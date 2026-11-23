@@ -1224,8 +1224,8 @@ let
   variantsFor =
     ws: triple: lib.filterAttrs (_: v: v.targets == null || lib.elem triple v.targets) ws.variants;
 
-  # Each planned variant's settings on each target: its own, then the
-  # target's `variantDefaults`, then its `target.<triple>` layer. Every
+  # Each planned variant's settings on each target: the target's
+  # `variantDefaults`, its own, then its `target.<triple>` layer. Every
   # per-variant decision below reads these.
   variantCells = lib.mapAttrs (
     wsName: ws:

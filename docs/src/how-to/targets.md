@@ -223,14 +223,17 @@ The layers apply in this order:
 
 | Order | Layer |
 | --- | --- |
-| 1 | `variants.<v>` |
-| 2 | `targets.<triple>.variantDefaults` |
+| 1 | `targets.<triple>.variantDefaults` |
+| 2 | `variants.<v>` |
 | 3 | `variants.<v>.target.<triple>` |
 
 Lists such as `features` concatenate, in this order. A single value,
 such as `profile` or `checks`, set in two layers takes the later layer's
-value. To replace the other layers' lists, use `lib.mkForce` on a list.
-See [Layers and priorities](#layers-and-priorities).
+value: a variant's own setting wins over the target's defaults, as a
+package's own settings win over `memberDefaults`. A fact about the
+target that every variant must keep takes `lib.mkForce` in
+`variantDefaults`. To replace the other layers' lists, use `lib.mkForce`
+on a list. See [Layers and priorities](#layers-and-priorities).
 
 A variant that selects packages
 ([`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)),
@@ -300,9 +303,9 @@ priorities still apply between layers:
 
 breakbulk does this by changing priorities, and the module system
 merges the layers. In `targets.<triple>.variantDefaults`, a single
-value's priority number is lowered by 0.25. In
+value's priority number is raised by 0.25. In
 `variants.<v>.target.<triple>`, it is lowered by 0.5. So a plain value
-is 100 in `variants.<v>`, 99.75 in `variantDefaults` and 99.5 in
+is 100.25 in `variantDefaults`, 100 in `variants.<v>` and 99.5 in
 `variants.<v>.target.<triple>`, and `lib.mkOverride 99` in any layer
 wins over all three. Package layers get fractions between 0 and 1 the
 same way, lowest layer least. Lists keep their priority, so that they

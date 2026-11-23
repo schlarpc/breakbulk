@@ -228,7 +228,8 @@ rec {
   };
 
   # A layer of settings over a module evaluation: `layer options rank value
-  # module`. `rank` (0 ≤ rank < 1) orders the layers of one evaluation.
+  # module`. `rank` (-1 < rank < 1) orders the layers of one evaluation;
+  # definitions outside any layer have rank 0.
   # The definitions `module` gives single-valued options (of `options`,
   # and inside their attribute sets and submodules: `env.FOO`,
   # `test.binaries.<key>.enable`) are moved up by `rank` in priority, so

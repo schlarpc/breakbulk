@@ -714,13 +714,14 @@ true
 
 Settings for every variant planned on this target: any option of
 ` variants.<v> `, for facts about the target (“msvc needs the
-` windows ` feature”, “wasm has no default features”)\. For each
-variant on this target they apply over the variant’s own settings,
-and its ` variants.<v>.target.<triple> ` over them: lists
-concatenate, and a single value set in two of these places takes
-the later one’s, without ` lib.mkForce `\. Priorities still count
-across them: ` lib.mkForce ` in the variant wins over a plain value
-here, ` lib.mkDefault ` here loses to a plain value in the variant
+` windows ` feature”, “wasm has no default features”)\. They are a
+layer under each variant’s own settings, and its
+` variants.<v>.target.<triple> ` is over both: lists concatenate,
+and a single value set in two of these places takes the higher
+one’s, without ` lib.mkForce `, so the variant’s own value wins over
+this one\. Priorities still count across them: ` lib.mkForce ` here
+wins over a plain value in the variant, for a fact the variants
+must not change
 ([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
 
 A variant that selects packages (` variants.<v>.packages `, such as
@@ -1432,12 +1433,12 @@ workspaces.<ws>.sourcePaths
 This variant’s settings on one of its targets: any option of
 the variant (` features `, ` noDefaultFeatures `, ` profile `,
 ` testProfile `, ` cargoConfig `, ` allTargets `, ` clippyArgs `, ` packages `, ` benches `, ` checks `, …)
-except ` targets `\. They apply over the variant’s own settings
-and the target’s ` variantDefaults `
-(` workspaces.<ws>.targets.<triple>.variantDefaults `): lists
-concatenate, and a single value set here wins over theirs
-without ` lib.mkForce `, unless one of theirs has a higher
-priority (` lib.mkForce `)
+except ` targets `\. They apply over the target’s
+` variantDefaults `
+(` workspaces.<ws>.targets.<triple>.variantDefaults `) and the
+variant’s own settings: lists concatenate, and a single value
+set here wins over theirs without ` lib.mkForce `, unless one of
+theirs has a higher priority (` lib.mkForce `)
 ([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
 Only targets the variant is planned for are allowed\.
 

@@ -2837,6 +2837,19 @@ in
             in
             lib.hasInfix " --profile release "
               r.workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+          # The variant's own plain value wins over a plain value in the
+          # target's `variantDefaults`; mkForce there wins over it.
+          defaultsLose =
+            let
+              p =
+                d:
+                (repoWith {
+                  variants.default.profile = "release";
+                  targets.${wasm}.variantDefaults.profile = d;
+                }).workspaces.main.instances.${wasm}.default.plans.build.drvAttrs.buildCommand;
+            in
+            lib.hasInfix " --profile release " (p "bench")
+            && lib.hasInfix " --profile bench " (p (lib.mkForce "bench"));
           # The example of the docs: test runs and products in repo.checks
           # on wasm only.
           checksOnOneTarget =
