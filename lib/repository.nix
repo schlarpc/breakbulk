@@ -1224,9 +1224,9 @@ let
   variantsFor =
     ws: triple: lib.filterAttrs (_: v: v.targets == null || lib.elem triple v.targets) ws.variants;
 
-  # Each planned variant's settings on each target: the target's
-  # `variantDefaults`, its own, then its `target.<triple>` layer. Every
-  # per-variant decision below reads these.
+  # Each planned variant's settings on each target: the workspace's and
+  # the target's `variantDefaults`, its own, then its `target.<triple>`
+  # layer. Every per-variant decision below reads these.
   variantCells = lib.mapAttrs (
     wsName: ws:
     lib.mapAttrs (
@@ -1312,7 +1312,7 @@ let
           if v.mode == "clippy" then "${ws.toolchain.clippy}/bin/clippy-driver" else v.rustcWorkspaceWrapper;
         clippyOption = "workspaces.${wsName}.toolchain.clippy";
         bench = v.benches;
-        docsNoDeps = ws.docs.noDeps;
+        docsNoDeps = v.docs.noDeps;
         inherit (s)
           runner
           testSystem

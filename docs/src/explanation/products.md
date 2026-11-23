@@ -199,7 +199,7 @@ of its own, and keeps the per-kind scopes above, unless the project sets
 root's `Cargo.toml`, the project's Cargo config or the variant's
 [`cargoConfig`](../reference/options/workspaces.md#workspacesnamevariantsnamecargoconfig)
 leaves the choice to the project. That is
-[`sourcePaths = "auto"`](../reference/options/workspaces.md#workspacesnamesourcepaths),
+[`sourcePaths = "auto"`](../reference/options/workspaces.md#workspacesnamevariantsnamesourcepaths),
 the default; the other values change it:
 
 - `"cargo"` turns Cargo's trim-paths on even over the project's own
@@ -519,7 +519,7 @@ default variant's. Open `<crate>/index.html` in it, as in Cargo's
 
 - By default only the planned packages are documented, as with
   `cargo doc --no-deps`. With
-  [`docs.noDeps = false`](../reference/options/workspaces.md#workspacesnamedocsnodeps)
+  [`docs.noDeps = false`](../reference/options/workspaces.md#workspacesnamevariantsnamedocsnodeps)
   their dependencies are documented too, and links to a dependency's
   items go to its pages in the same folder.
 - It is one derivation. rustdoc merges the cross-crate files (the search

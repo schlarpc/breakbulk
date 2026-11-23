@@ -23,14 +23,6 @@ let
     rootNameRegex
     ;
 
-  # `workspaces.<ws>.sourcePaths`, also each variant's.
-  sourcePathsType = types.enum [
-    "auto"
-    "cargo"
-    "remap"
-    "keep"
-  ];
-
   # The exclude form, in each selection option's description.
   excludeFormDoc = ''
     `{ exclude = [ … ]; }`: every member
@@ -275,6 +267,10 @@ let
       unplannedLayers = lib.filter (t: !(lib.elem t planned)) (lib.attrNames config.target);
     in
     {
+      # The workspace's `variantDefaults`, the lowest layer: in the
+      # variant's own evaluation, as they do not depend on the target.
+      imports = [ ({ options, ... }: bt.layer options (-0.5) (_: v: v) ws.variantDefaults) ];
+
       # Through extendModules, so the variant's own definitions keep their
       # priorities: a value merged first could not be replaced by a plain
       # definition in a later layer. The target's defaults rank below the
@@ -678,11 +674,58 @@ let
           '';
         };
         sourcePaths = mkOption {
-          type = sourcePathsType;
-          default = ws.sourcePaths;
-          defaultText = lib.literalExpression "workspaces.<ws>.sourcePaths";
-          description = "This variant's `workspaces.<ws>.sourcePaths`.";
+          type = types.enum [
+            "auto"
+            "cargo"
+            "remap"
+            "keep"
+          ];
+          default = "auto";
+          description = ''
+            How source paths are kept out of what this variant builds.
+            Every value but `keep` gives each product the
+            `noSourceReferences` check. A project that sets Cargo's
+            `trim-paths` itself gets Cargo's remaps whatever the value.
+            For every variant of the workspace, set it in
+            [`variantDefaults`](#workspacesnamevariantdefaults).
+
+            - `auto`: breakbulk turns Cargo's `trim-paths` on
+              (`--config profile.<p>.trim-paths="all"`) when the toolchain
+              has it (its `trimPaths` capability: Cargo 1.101 and later)
+              and the project declares no `trim-paths` in any profile of
+              the workspace root's `Cargo.toml` or of its
+              `.cargo/config.toml` files (any profile, package override or
+              value counts; the files are read, not merged as Cargo
+              would). Units without Cargo's trim-paths get breakbulk's own
+              remaps.
+            - `cargo`: breakbulk always turns Cargo's `trim-paths` on,
+              replacing the project's own setting. Planning fails when the
+              toolchain lacks the `trimPaths` capability.
+            - `remap`: breakbulk never turns Cargo's `trim-paths` on and
+              hides paths with its own remaps (Rust `--remap-path-prefix`,
+              C `-ffile-prefix-map`).
+            - `keep`: breakbulk neither turns Cargo's `trim-paths` on nor
+              adds remaps of its own, and products get no default
+              `noSourceReferences` check; binaries then reference their
+              sources' store paths.
+
+            Under Cargo's trim-paths, breakbulk's own C prefix maps use
+            Cargo's names, as cc-rs does.
+          '';
         };
+
+        docs.noDeps = mkOption {
+          type = types.bool;
+          default = true;
+          example = false;
+          description = ''
+            Document only the planned packages, as `cargo doc --no-deps`
+            does, in `target.<triple>.variants.<v>.docs`. `false`: their dependencies
+            too, as `cargo doc`; links to a dependency's items then go to
+            its pages in the same folder.
+          '';
+        };
+
         benches = mkOption {
           type = types.bool;
           default = false;
@@ -1041,41 +1084,6 @@ let
             };
           };
 
-        sourcePaths = mkOption {
-          type = sourcePathsType;
-          default = "auto";
-          description = ''
-            How source paths are kept out of what this workspace builds.
-            Every value but `keep` gives each product the
-            `noSourceReferences` check. A project that sets Cargo's
-            `trim-paths` itself gets Cargo's remaps whatever the value. A
-            variant's own setting wins.
-
-            - `auto`: breakbulk turns Cargo's `trim-paths` on
-              (`--config profile.<p>.trim-paths="all"`) when the toolchain
-              has it (its `trimPaths` capability: Cargo 1.101 and later)
-              and the project declares no `trim-paths` in any profile of
-              the workspace root's `Cargo.toml` or of its
-              `.cargo/config.toml` files (any profile, package override or
-              value counts; the files are read, not merged as Cargo
-              would). Units without Cargo's trim-paths get breakbulk's own
-              remaps.
-            - `cargo`: breakbulk always turns Cargo's `trim-paths` on,
-              replacing the project's own setting. Planning fails when the
-              toolchain lacks the `trimPaths` capability.
-            - `remap`: breakbulk never turns Cargo's `trim-paths` on and
-              hides paths with its own remaps (Rust `--remap-path-prefix`,
-              C `-ffile-prefix-map`).
-            - `keep`: breakbulk neither turns Cargo's `trim-paths` on nor
-              adds remaps of its own, and products get no default
-              `noSourceReferences` check; binaries then reference their
-              sources' store paths.
-
-            Under Cargo's trim-paths, breakbulk's own C prefix maps use
-            Cargo's names, as cc-rs does.
-          '';
-        };
-
         fmt.enable = mkOption {
           type = types.bool;
           default = false;
@@ -1200,6 +1208,31 @@ let
           '';
         };
 
+        variantDefaults = mkOption {
+          type = types.deferredModule;
+          default = { };
+          example = lib.literalExpression ''
+            {
+              sourcePaths = "remap";
+              docs.noDeps = false;
+            }
+          '';
+          description = ''
+            Settings for every variant of this workspace: a module with
+            the options of [`variants.<v>`](#workspacesnamevariants). They
+            are the lowest layer of each variant's settings, under the
+            target's
+            [`variantDefaults`](#workspacesnametargetsnamevariantdefaults),
+            the variant's own settings and its `target.<triple>`: lists
+            concatenate, and a single value set in a higher layer wins
+            without `lib.mkForce`
+            ([layers and priorities](../../how-to/targets.md#layers-and-priorities)).
+            A function module gets the variant's settings as `config`,
+            with every layer applied
+            (`{ config, lib, ... }: { features = lib.optional (config.mode == "check") "strict"; }`).
+          '';
+        };
+
         memberDefaults = mkOption {
           type = settingsModule;
           default = { };
@@ -1224,18 +1257,6 @@ let
             higher priority (`lib.mkForce`)
             ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)).
             Dependencies from a registry or git do not get them.
-          '';
-        };
-
-        docs.noDeps = mkOption {
-          type = types.bool;
-          default = true;
-          example = false;
-          description = ''
-            Document only the planned packages, as `cargo doc --no-deps`
-            does, in `target.<triple>.docs`. `false`: their dependencies
-            too, as `cargo doc`; links to a dependency's items then go to
-            its pages in the same folder.
           '';
         };
 

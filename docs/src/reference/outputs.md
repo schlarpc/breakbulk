@@ -118,7 +118,7 @@ libraries, passed through the target's post-link stages and installed
 `docs` is the folder `cargo doc` writes, for the variant's packages on
 the target: a directory per documented crate (`<crate>/index.html`),
 `crates.js`, `search.index/`, `src/`, `static.files/`, `trait.impl/`.
-[`docs.noDeps`](options/workspaces.md#workspacesnamedocsnodeps) (`true`
+[`docs.noDeps`](options/workspaces.md#workspacesnamevariantsnamedocsnodeps) (`true`
 by default) documents the planned packages only (`cargo doc --no-deps`);
 `false` documents their dependencies too. Proc macros are in the same
 folder. The doc plan (`plans.<triple>.<v>.doc`) is traced only when

@@ -2344,9 +2344,9 @@ in
         broken = shellVar broken;
         brokenWarned = lib.any (lib.hasInfix "is not valid TOML") (cargoEnvOf broken).warnings;
         declares = shellVar (ws declares { });
-        forced = shellVar (ws declares { sourcePaths = "cargo"; });
-        off = shellVar (ws (fixtures + "/stamps") { sourcePaths = "remap"; });
-        keep = shellVar (ws (fixtures + "/stamps") { sourcePaths = "keep"; });
+        forced = shellVar (ws declares { variantDefaults.sourcePaths = "cargo"; });
+        off = shellVar (ws (fixtures + "/stamps") { variantDefaults.sourcePaths = "remap"; });
+        keep = shellVar (ws (fixtures + "/stamps") { variantDefaults.sourcePaths = "keep"; });
       };
       want = {
         broken = "all";

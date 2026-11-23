@@ -223,9 +223,13 @@ The layers apply in this order:
 
 | Order | Layer |
 | --- | --- |
-| 1 | `targets.<triple>.variantDefaults` |
-| 2 | `variants.<v>` |
-| 3 | `variants.<v>.target.<triple>` |
+| 1 | `workspaces.<ws>.variantDefaults` |
+| 2 | `targets.<triple>.variantDefaults` |
+| 3 | `variants.<v>` |
+| 4 | `variants.<v>.target.<triple>` |
+
+[`workspaces.<ws>.variantDefaults`](../reference/options/workspaces.md#workspacesnamevariantdefaults)
+holds settings for every variant of the workspace, on every target.
 
 Lists such as `features` concatenate, in this order. A single value,
 such as `profile` or `checks`, set in two layers takes the later layer's
@@ -302,12 +306,13 @@ priorities still apply between layers:
 - Between values of the same priority, the later layer wins.
 
 breakbulk does this by changing priorities, and the module system
-merges the layers. In `targets.<triple>.variantDefaults`, a single
-value's priority number is raised by 0.25. In
-`variants.<v>.target.<triple>`, it is lowered by 0.5. So a plain value
-is 100.25 in `variantDefaults`, 100 in `variants.<v>` and 99.5 in
-`variants.<v>.target.<triple>`, and `lib.mkOverride 99` in any layer
-wins over all three. Package layers get fractions between 0 and 1 the
+merges the layers. In `workspaces.<ws>.variantDefaults`, a single
+value's priority number is raised by 0.5, in
+`targets.<triple>.variantDefaults` by 0.25, and in
+`variants.<v>.target.<triple>` it is lowered by 0.5. So a plain value is
+100.5 and 100.25 in the two `variantDefaults`, 100 in `variants.<v>`
+and 99.5 in `variants.<v>.target.<triple>`, and `lib.mkOverride 99` in
+any layer wins over all four. Package layers get fractions between 0 and 1 the
 same way, lowest layer least. Lists keep their priority, so that they
 still concatenate, and are ordered by layer.
 

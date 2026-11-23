@@ -185,7 +185,7 @@ pkgs:
   clippyArgs ? [ ],
   sideFiles ? [ ],
   bench ? false,
-  # The doc plan's `cargo doc --no-deps` (`workspaces.<ws>.docs.noDeps`).
+  # The doc plan's `cargo doc --no-deps` (`variants.<v>.docs.noDeps`).
   docsNoDeps ? true,
   # The target's toolchain spec (from lib/repository.nix):
   #   spec = { rustflags; linker; hostLinker; }  for the planner (mkPlan)

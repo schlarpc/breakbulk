@@ -159,31 +159,6 @@ defaultTarget
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
-## `workspaces.<name>.docs.noDeps`
-
-Document only the planned packages, as ` cargo doc --no-deps `
-does, in ` target.<triple>.docs `\. ` false `: their dependencies
-too, as ` cargo doc `; links to a dependency’s items then go to
-its pages in the same folder\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-true
-```
-
-*Example:*
-
-```nix
-false
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
 ## `workspaces.<name>.fmt.enable`
 
 Add a check, ` repo.checks."<ws>/fmt" `, that runs ` cargo fmt --check ` with ` toolchain.rustfmt ` on every member of the
@@ -530,49 +505,6 @@ null
   { name = "pm/lib-test/pm"; platform = "host"; }
 ]
 
-```
-
-*Declared by:*
- - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
-
-## `workspaces.<name>.sourcePaths`
-
-How source paths are kept out of what this workspace builds\.
-Every value but ` keep ` gives each product the
-` noSourceReferences ` check\. A project that sets Cargo’s
-` trim-paths ` itself gets Cargo’s remaps whatever the value\. A
-variant’s own setting wins\.
-
- - ` auto `: breakbulk turns Cargo’s ` trim-paths ` on
-   (` --config profile.<p>.trim-paths="all" `) when the toolchain
-   has it (its ` trimPaths ` capability: Cargo 1\.101 and later)
-   and the project declares no ` trim-paths ` in any profile of
-   the workspace root’s ` Cargo.toml ` or of its
-   ` .cargo/config.toml ` files (any profile, package override or
-   value counts; the files are read, not merged as Cargo
-   would)\. Units without Cargo’s trim-paths get breakbulk’s own
-   remaps\.
- - ` cargo `: breakbulk always turns Cargo’s ` trim-paths ` on,
-   replacing the project’s own setting\. Planning fails when the
-   toolchain lacks the ` trimPaths ` capability\.
- - ` remap `: breakbulk never turns Cargo’s ` trim-paths ` on and
-   hides paths with its own remaps (Rust ` --remap-path-prefix `,
-   C ` -ffile-prefix-map `)\.
- - ` keep `: breakbulk neither turns Cargo’s ` trim-paths ` on nor
-   adds remaps of its own, and products get no default
-   ` noSourceReferences ` check; binaries then reference their
-   sources’ store paths\.
-
-Under Cargo’s trim-paths, breakbulk’s own C prefix maps use
-Cargo’s names, as cc-rs does\.
-
-*Type:*
-one of “auto”, “cargo”, “remap”, “keep”
-
-*Default:*
-
-```nix
-"auto"
 ```
 
 *Declared by:*
@@ -925,6 +857,43 @@ if rustc == pkgs.rustc then pkgs.rustfmt else rustc
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.variantDefaults`
+
+Settings for every variant of this workspace: a module with
+the options of [` variants.<v> `](\#workspacesnamevariants)\. They
+are the lowest layer of each variant’s settings, under the
+target’s
+[` variantDefaults `](\#workspacesnametargetsnamevariantdefaults),
+the variant’s own settings and its ` target.<triple> `: lists
+concatenate, and a single value set in a higher layer wins
+without ` lib.mkForce `
+([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
+A function module gets the variant’s settings as ` config `,
+with every layer applied
+(` { config, lib, ... }: { features = lib.optional (config.mode == "check") "strict"; } `)\.
+
+*Type:*
+module
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  sourcePaths = "remap";
+  docs.noDeps = false;
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.variants`
 
 Plan parameters\. Each variant is a separate pair of plans (build
@@ -1178,6 +1147,31 @@ true
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.variants.<name>.docs.noDeps`
+
+Document only the planned packages, as ` cargo doc --no-deps `
+does, in ` target.<triple>.variants.<v>.docs `\. ` false `: their dependencies
+too, as ` cargo doc `; links to a dependency’s items then go to
+its pages in the same folder\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Example:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.variants.<name>.features`
 
 Features to enable (` --features `), as Cargo spells them (` pkg/feat ` is allowed)\.
@@ -1414,7 +1408,35 @@ string
 
 ## `workspaces.<name>.variants.<name>.sourcePaths`
 
-This variant’s ` workspaces.<ws>.sourcePaths `\.
+How source paths are kept out of what this variant builds\.
+Every value but ` keep ` gives each product the
+` noSourceReferences ` check\. A project that sets Cargo’s
+` trim-paths ` itself gets Cargo’s remaps whatever the value\.
+For every variant of the workspace, set it in
+[` variantDefaults `](\#workspacesnamevariantdefaults)\.
+
+ - ` auto `: breakbulk turns Cargo’s ` trim-paths ` on
+   (` --config profile.<p>.trim-paths="all" `) when the toolchain
+   has it (its ` trimPaths ` capability: Cargo 1\.101 and later)
+   and the project declares no ` trim-paths ` in any profile of
+   the workspace root’s ` Cargo.toml ` or of its
+   ` .cargo/config.toml ` files (any profile, package override or
+   value counts; the files are read, not merged as Cargo
+   would)\. Units without Cargo’s trim-paths get breakbulk’s own
+   remaps\.
+ - ` cargo `: breakbulk always turns Cargo’s ` trim-paths ` on,
+   replacing the project’s own setting\. Planning fails when the
+   toolchain lacks the ` trimPaths ` capability\.
+ - ` remap `: breakbulk never turns Cargo’s ` trim-paths ` on and
+   hides paths with its own remaps (Rust ` --remap-path-prefix `,
+   C ` -ffile-prefix-map `)\.
+ - ` keep `: breakbulk neither turns Cargo’s ` trim-paths ` on nor
+   adds remaps of its own, and products get no default
+   ` noSourceReferences ` check; binaries then reference their
+   sources’ store paths\.
+
+Under Cargo’s trim-paths, breakbulk’s own C prefix maps use
+Cargo’s names, as cc-rs does\.
 
 *Type:*
 one of “auto”, “cargo”, “remap”, “keep”
@@ -1422,7 +1444,7 @@ one of “auto”, “cargo”, “remap”, “keep”
 *Default:*
 
 ```nix
-workspaces.<ws>.sourcePaths
+"auto"
 ```
 
 *Declared by:*

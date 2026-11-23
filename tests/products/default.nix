@@ -1221,7 +1221,7 @@ let
       {
         workspaces.main = {
           path = ".";
-          docs = { inherit noDeps; };
+          variantDefaults.docs.noDeps = noDeps;
           targets.${native}.variantDefaults.docs.check = true;
           variants.default = { inherit profile; };
           variants.check = {
@@ -2850,6 +2850,33 @@ in
             in
             lib.hasInfix " --profile release " (p "bench")
             && lib.hasInfix " --profile bench " (p (lib.mkForce "bench"));
+          # The workspace's `variantDefaults`, under the target's and the
+          # variant's own; a function module reads the variant's settings
+          # with every layer applied (the target layer's `mode` here).
+          workspaceDefaults =
+            let
+              r = repoWith {
+                variantDefaults =
+                  { config, ... }:
+                  {
+                    profile = "dev";
+                    features = lib.optional (config.mode == "check") "lib-a/x";
+                  };
+                targets.${wasm}.variantDefaults.profile = lib.mkForce "bench";
+                variants.default = { };
+                variants.own = {
+                  profile = "release";
+                  target.${wasm}.mode = "check";
+                };
+              };
+              p = t: v: r.workspaces.main.instances.${t}.${v}.plans.build.drvAttrs.buildCommand;
+            in
+            lib.hasInfix " --profile dev " (p native "default")
+            && lib.hasInfix " --profile bench " (p wasm "default")
+            && lib.hasInfix " --profile release " (p native "own")
+            && !(lib.hasInfix "lib-a/x" (p native "own"))
+            && lib.hasInfix " --features lib-a/x " (p wasm "own")
+            && !(lib.hasInfix "lib-a/x" (p wasm "default"));
           # The example of the docs: test runs and products in repo.checks
           # on wasm only.
           checksOnOneTarget =
@@ -3324,8 +3351,8 @@ in
   trim-paths-cc =
     let
       repo = trimCcRepo { };
-      off = trimCcRepo { sourcePaths = "remap"; };
-      keep = trimCcRepo { sourcePaths = "keep"; };
+      off = trimCcRepo { variantDefaults.sourcePaths = "remap"; };
+      keep = trimCcRepo { variantDefaults.sourcePaths = "keep"; };
       planOf =
         r:
         builtins.fromJSON (

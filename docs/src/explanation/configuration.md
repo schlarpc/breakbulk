@@ -247,8 +247,10 @@ which each higher layer's single values have a slightly higher priority:
   replaces every lower-priority definition of `env`, the curated ones
   included, while `env.X = lib.mkForce "a"` forces one variable.
 
-Variant layers (`variantDefaults`, `variants.<v>.target.<triple>`)
-follow the same rules ([layers and
+Variant settings layer the same way, with the same rule that the
+owner's own setting wins over a defaults layer: lowest first,
+`workspaces.<ws>.variantDefaults`, `workspaces.<ws>.targets.<triple>.variantDefaults`,
+`variants.<v>`, `variants.<v>.target.<triple>` ([layers and
 priorities](../how-to/targets.md#layers-and-priorities)).
 
 breakbulk ships settings for common `-sys` crates, from nixpkgs'
@@ -608,10 +610,12 @@ For feature matrices, the workspace module
 cargo-hack does or for one feature list
 ([Check feature combinations](../how-to/feature-matrix.md)).
 
-A variant's settings can differ per target: a target's `variantDefaults`
-applies to every variant on it, and `variants.<v>.target.<triple>` to one
-variant. See [Different features per
-target](../how-to/targets.md#different-features-per-target).
+Settings for every variant of a workspace go in
+[`workspaces.<ws>.variantDefaults`](../reference/options/workspaces.md#workspacesnamevariantdefaults),
+such as `sourcePaths` or `docs.noDeps`. A variant's settings can differ
+per target: a target's `variantDefaults` applies to every variant on it,
+and `variants.<v>.target.<triple>` to one variant. See [Different
+features per target](../how-to/targets.md#different-features-per-target).
 
 ### Cargo configuration per variant
 
