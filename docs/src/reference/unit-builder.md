@@ -73,7 +73,7 @@ set up the same home with the `home` entry of
    plan's `uplifted` gives it). Other files go where the unit's side-file
    rules send them, the first rule whose suffix the name ends in winning:
    breakbulk's own rules send the target's debuginfo side files (the
-   suffixes of the plan's `targetDebuginfo`: `.pdb`, `.dwp`, `.dwo`,
+   suffixes of the plan's `target.debuginfo`: `.pdb`, `.dwp`, `.dwo`,
    `.dSYM`) to `$debug` when the unit has it, and a variant's
    [`sideFiles`](options/workspaces.md#workspacesnamevariantsnamesidefiles)
    rules, on units a wrapper runs on, send a file into a named output or
@@ -155,7 +155,7 @@ are not in the plan's output list, because `--print=file-names` does not
 name them.
 
 - They are collected by scanning `$TMPDIR/out` for the suffixes of the
-  plan's `targetDebuginfo` artifacts (`.dwp` and `.dwo` on Linux, `.pdb`
+  plan's `target.debuginfo` artifacts (`.dwp` and `.dwo` on Linux, `.pdb`
   on msvc and UEFI, `.dSYM` directories on Apple), and moved, under
   rustc's names, to the unit's `debug` output.
 - Units without a `debug` output discard them with a warning: host units,

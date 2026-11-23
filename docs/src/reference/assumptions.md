@@ -596,7 +596,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 ### P7. rustc maps standard-library paths to rust-src
 
 - **Assumption.** When the toolchain ships `rust-src`, rustc names the standard library's files by the local copy's path (`<sysroot>/lib/rustlib/src/rust/…`) instead of `/rustc/<commit-hash>/…`, and `rustc -vV` names the commit (`commit-hash:`), so remapping that copy back to `/rustc/<hash>` restores Cargo's paths.
-- **Where.** `crates/breakbulk-plan/src/trace.rs`: `rust_src_remap`; plan header `rustSrcRemap`.
+- **Where.** `crates/breakbulk-plan/src/trace.rs`: `rust_src_remap`; plan header `remap.rustSrc`.
 - **Upstream.** cargo `0.97.0` `core/compiler/mod.rs`, `sysroot_remap`; in a 0.102 tree, `src/compiler/trim_paths.rs` (trim-paths adds the same remap, and `/rustc/<version>` when rustc names no commit, where breakbulk adds none; checked for this page).
 - **Holds for.** 1.99.
 - **Pinned by.** `products-rust-src` (the product references no toolchain path).
