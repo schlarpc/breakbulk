@@ -1,6 +1,6 @@
 //! `breakbulk-instantiate`: turns `plan.json` into unit derivations.
 //!
-//! IFD mode (`--emit json`) writes `units.json` (see [`output`]): each unit's
+//! IFD mode writes `units.json` (see [`output`]): each unit's
 //! complete derivation attributes, with every reference to another unit or
 //! to an evaluation-time input left as a named reference for the Nix side
 //! (`lib/instantiate.nix`) to substitute. Rendering itself is
@@ -485,19 +485,18 @@ impl Resolve for Tokens<'_> {
     }
 
     fn remap_scope(&self, _id: &UnitId, unit: &Unit) -> Option<String> {
-        // Test units remap every scope; so does everything with a rustc
-        // that has no `--remap-path-scope` (toolchains.json's
-        // `capabilities`).
-        if !self.inputs.toolchains.capabilities.remap_path_scope || unit.test {
+        let t = &self.inputs.toolchains;
+        if !t.capabilities.remap_path_scope {
             return None;
         }
-        match unit.platform {
-            Platform::Target => self.inputs.toolchains.shipped_remap_scope.clone(),
-            // Not the shipped scope: that follows the target's `debugInfo`,
-            // which only matters for what ships, and host units never ship.
-            // One fixed scope keeps a single build of each host unit for
-            // every target.
-            Platform::Host => Some(HOST_REMAP_SCOPE.to_owned()),
+        let s = &t.remap_scope;
+        if unit.test {
+            s.test.clone()
+        } else {
+            match unit.platform {
+                Platform::Target => s.target.clone(),
+                Platform::Host => s.host.clone(),
+            }
         }
     }
 
@@ -719,12 +718,6 @@ fn store_name(s: &str) -> String {
     n
 }
 
-/// The `--remap-path-scope` of host units (build scripts, proc macros) when
-/// rustc takes one: debug info and the like keep real store paths, as in a
-/// target whose debug info is split off. No `coverage`: host units are not
-/// instrumented.
-const HOST_REMAP_SCOPE: &str = "macro,diagnostics";
-
 /// `<package>-<version>-<kind>`: `ring-0.17.14-lib`, `ring-0.17.14-build-script`,
 /// `ring-0.17.14-build-run`, `app-0.1.0-bin`, `app-0.1.0-test` (any test
 /// unit: harnesses, unharnessed tests and benches, examples); a bin or test
@@ -830,11 +823,36 @@ fn unit_drv(
     outputs: Value,
     text: &str,
 ) -> Result<Drv, Error> {
+    drv(
+        inputs,
+        tokens,
+        tool,
+        name,
+        outputs,
+        [(
+            "BREAKBULK_UNIT".into(),
+            Value::Parts {
+                parts: tokens.split(text)?,
+            },
+        )],
+    )
+}
+
+/// Every derivation's attributes: `name`, `builder` (the tool `tool`),
+/// `system` (the planner's), `outputs`, and `attrs`.
+pub(crate) fn drv(
+    inputs: &Inputs,
+    tokens: &Tokens,
+    tool: &str,
+    name: Value,
+    outputs: Value,
+    attrs: impl IntoIterator<Item = (String, Value)>,
+) -> Result<Drv, Error> {
     if !inputs.toolchains.tools.contains_key(tool) {
         return err(format!("toolchains.json: the tool `{tool}` is missing"));
     }
     let builder = tokens.input(keys::tool(tool));
-    let attrs = BTreeMap::from([
+    let mut all = BTreeMap::from([
         ("name".into(), name),
         (
             "builder".into(),
@@ -847,14 +865,32 @@ fn unit_drv(
             Value::String(inputs.toolchains.system.clone()),
         ),
         ("outputs".into(), outputs),
-        (
-            "BREAKBULK_UNIT".into(),
-            Value::Parts {
-                parts: tokens.split(text)?,
-            },
-        ),
     ]);
-    Ok(Drv { attrs })
+    all.extend(attrs);
+    Ok(Drv { attrs: all })
+}
+
+/// A derivation that runs `script` with bash (the `shell` tool), with
+/// `attrs`.
+pub(crate) fn shell_drv(
+    inputs: &Inputs,
+    tokens: &Tokens,
+    name: String,
+    script: &str,
+    attrs: impl IntoIterator<Item = (String, Value)>,
+) -> Result<Drv, Error> {
+    drv(
+        inputs,
+        tokens,
+        TOOL_SHELL,
+        Value::String(name),
+        Value::Strings(vec!["out".into()]),
+        std::iter::once((
+            "args".into(),
+            Value::Strings(vec!["-c".into(), script.into()]),
+        ))
+        .chain(attrs),
+    )
 }
 
 /// A doctest's derivation: `breakbulk-doctest` over the rendered
@@ -963,44 +999,26 @@ fn stub(inputs: &Inputs, prefix: &str, p: &PredictedRoot, variant: &str) -> Resu
         r#"printf 'error: %s\n' "$message" >&2; exit 1"#
     };
     let tokens = Tokens::new(inputs, prefix);
-    let builder = tokens.input(keys::tool(TOOL_SHELL));
-    let mut attrs = BTreeMap::new();
-    attrs.insert(
-        "name".into(),
-        Value::String(store_name(&format!(
+    let stub = shell_drv(
+        inputs,
+        &tokens,
+        store_name(&format!(
             "{}-{}-{}-{}",
             p.package,
             kind_str(p.kind),
             p.target,
             if p.test { "skipped" } else { "not-built" }
-        ))),
-    );
-    attrs.insert(
-        "builder".into(),
-        Value::Parts {
-            parts: tokens.split(&builder)?,
-        },
-    );
-    attrs.insert(
-        "args".into(),
-        Value::Strings(vec!["-c".into(), script.into()]),
-    );
-    attrs.insert(
-        "system".into(),
-        Value::String(inputs.toolchains.system.clone()),
-    );
-    attrs.insert("outputs".into(), Value::Strings(vec!["out".into()]));
-    attrs.insert("message".into(), Value::String(reason.clone()));
+        )),
+        script,
+        [("message".into(), Value::String(reason.clone()))],
+    )?;
     Ok(RootOut {
         package: p.package.clone(),
         target: p.target.clone(),
         kind: p.kind,
         test: p.test,
         platform: p.platform,
-        what: RootWhat::Stub {
-            reason,
-            stub: Drv { attrs },
-        },
+        what: RootWhat::Stub { reason, stub },
         build_script_runs: Vec::new(),
         debug_units: Vec::new(),
     })

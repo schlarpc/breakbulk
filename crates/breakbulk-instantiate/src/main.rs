@@ -1,4 +1,4 @@
-//! `breakbulk-instantiate --emit json --plan <plan.json> --sources <file>
+//! `breakbulk-instantiate --plan <plan.json> --sources <file>
 //! --toolchains <file> --overrides <file> [--roots <file>] [--outer <file>]
 //! [--out <file>]`
 //!
@@ -13,7 +13,7 @@ use breakbulk_format::Plan;
 use breakbulk_instantiate::shape::{Outer, shape};
 use breakbulk_instantiate::{Inputs, instantiate, to_json};
 
-const USAGE: &str = "usage: breakbulk-instantiate --emit json --plan <plan.json> \
+const USAGE: &str = "usage: breakbulk-instantiate --plan <plan.json> \
     --sources <sources.json> --toolchains <toolchains.json> --overrides <overrides.json> \
     [--roots <roots.json>] [--outer <outer.json>] [--out <units.json>]";
 
@@ -34,14 +34,7 @@ fn run() -> Result<(), String> {
             .filter(|n| {
                 matches!(
                     *n,
-                    "emit"
-                        | "plan"
-                        | "sources"
-                        | "toolchains"
-                        | "overrides"
-                        | "roots"
-                        | "outer"
-                        | "out"
+                    "plan" | "sources" | "toolchains" | "overrides" | "roots" | "outer" | "out"
                 )
             })
             .ok_or_else(|| format!("unknown argument `{flag}`\n{USAGE}"))?;
@@ -57,10 +50,6 @@ fn run() -> Result<(), String> {
             .cloned()
             .ok_or_else(|| format!("missing --{n}\n{USAGE}"))
     };
-    match need("emit")?.as_str() {
-        "json" => {}
-        e => return Err(format!("--emit {e}: only `json` (IFD mode) is implemented")),
-    }
     let plan_path = need("plan")?;
     let plan = Plan::from_json(&read(&plan_path)?).map_err(|e| format!("{plan_path}: {e}"))?;
     let inputs = Inputs {

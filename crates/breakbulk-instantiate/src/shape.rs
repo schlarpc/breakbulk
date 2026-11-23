@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::output::{Drv, RootOut, RootWhat, UnitsJson, Value};
 use crate::test_spec::{TestSpec, test_spec, test_tokens};
-use crate::{Error, Inputs, TOOL_SHELL, Tokens, err, keys, token_prefix, unit_outputs};
+use crate::{Error, Inputs, Tokens, err, token_prefix, unit_outputs};
 
 /// The key of the coreutils store path the wrappers use.
 pub const COREUTILS_KEY: &str = "wrapper:coreutils";
@@ -246,33 +246,25 @@ fn small_drv<const N: usize>(
         ))
     })?;
     let path = format!("{}/bin", tokens.input(COREUTILS_KEY.into()));
-    let builder = tokens.input(keys::tool(TOOL_SHELL));
-    let mut out = BTreeMap::new();
-    out.insert(
-        "name".into(),
-        Value::String(format!("{}-{base}", outer.name)),
-    );
-    out.insert(
-        "args".into(),
-        Value::Strings(vec!["-c".into(), script.into()]),
-    );
-    out.insert(
-        "system".into(),
-        Value::String(inputs.toolchains.system.clone()),
-    );
-    out.insert("outputs".into(), Value::Strings(vec!["out".into()]));
-    for (k, v) in [("builder", builder), ("PATH", path)]
+    let attrs = [("PATH", path)]
         .into_iter()
         .chain(attrs)
-    {
-        out.insert(
-            k.into(),
-            Value::Parts {
-                parts: tokens.split(&v)?,
-            },
-        );
-    }
-    Ok(Drv { attrs: out })
+        .map(|(k, v)| {
+            Ok((
+                k.to_owned(),
+                Value::Parts {
+                    parts: tokens.split(&v)?,
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::shell_drv(
+        inputs,
+        tokens,
+        format!("{}-{base}", outer.name),
+        script,
+        attrs,
+    )
 }
 
 /// The derivation that depends on every output of every unit of the plan;

@@ -1149,10 +1149,11 @@ in
             host = "x86_64-unknown-linux-gnu";
           };
         };
-        scope = bb.products.shippedRemapScope {
-          triple = "my-board";
-          traits = board;
-        };
+        scope =
+          (bb.products.remapScope {
+            triple = "my-board";
+            traits = board;
+          }).target;
         nativeVar = native.dylibPathVar;
         nativeOs = native.os;
       };

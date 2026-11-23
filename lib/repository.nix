@@ -1188,7 +1188,7 @@ let
         packageOverrides = instOverrides wsName entries triple vName;
         name = "${wsName}-${triple}-${vName}";
         inherit delivery;
-        shippedRemapScope = products.shippedRemapScope (stageSetArgs wsName triple);
+        remapScope = products.remapScope (stageSetArgs wsName triple);
         inherit buildScriptHints;
         inherit (v) sourcePaths;
         traits = traitsOf wsName triple;

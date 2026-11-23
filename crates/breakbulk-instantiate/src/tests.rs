@@ -65,7 +65,11 @@ fn smoke_inputs() -> Inputs {
                 env: ["CFLAGS".into(), "SHARED".into()].into(),
                 env_capture: true,
             },
-            shipped_remap_scope: None,
+            remap_scope: RemapScope {
+                host: Some("macro,diagnostics".into()),
+                target: None,
+                test: None,
+            },
             keep_source_paths: false,
             side_files: Vec::new(),
             wrapper_config_var: None,
@@ -232,12 +236,16 @@ impl Resolve for RealPaths<'_> {
         self.0.toolchains.keep_source_paths
     }
     fn remap_scope(&self, _: &UnitId, c: &Unit) -> Option<String> {
-        if c.test || !self.0.toolchains.capabilities.remap_path_scope {
-            return None;
-        }
-        match c.platform {
-            breakbulk_format::Platform::Target => self.0.toolchains.shipped_remap_scope.clone(),
-            breakbulk_format::Platform::Host => Some("macro,diagnostics".into()),
+        let s = &self.0.toolchains.remap_scope;
+        if !self.0.toolchains.capabilities.remap_path_scope {
+            None
+        } else if c.test {
+            s.test.clone()
+        } else {
+            match c.platform {
+                breakbulk_format::Platform::Target => s.target.clone(),
+                breakbulk_format::Platform::Host => s.host.clone(),
+            }
         }
     }
     fn env_capture(&self, _: &UnitId, u: &Unit) -> Result<Option<String>, String> {
@@ -375,7 +383,7 @@ fn shipped_remap_scope() {
     }
     assert_eq!(scopes[SCRIPT].as_deref(), Some("macro,diagnostics"));
     let keep_script = instantiate(&inputs).unwrap().units[SCRIPT].clone();
-    inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics".into());
+    inputs.toolchains.remap_scope.target = Some("macro,diagnostics".into());
     assert_eq!(instantiate(&inputs).unwrap().units[SCRIPT], keep_script);
     let scopes = scope_of(&inputs);
     for id in [APP, LIB, SCRIPT] {
@@ -383,7 +391,7 @@ fn shipped_remap_scope() {
     }
     assert_eq!(scopes[RUN], None);
     // Coverage: host units (the build script) leave the coverage scope out.
-    inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics,coverage".into());
+    inputs.toolchains.remap_scope.target = Some("macro,diagnostics,coverage".into());
     let scopes = scope_of(&inputs);
     for id in [APP, LIB] {
         assert_eq!(
@@ -426,7 +434,7 @@ fn keep_source_paths() {
             .collect()
     };
     let mut inputs = smoke_inputs();
-    inputs.toolchains.shipped_remap_scope = Some("macro,diagnostics".into());
+    inputs.toolchains.remap_scope.target = Some("macro,diagnostics".into());
     assert!(fields(&inputs).iter().any(|(_, any)| *any));
     inputs.toolchains.keep_source_paths = true;
     let kept = fields(&inputs);

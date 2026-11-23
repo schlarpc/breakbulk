@@ -82,7 +82,14 @@ let
     in
     builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
   sourceRun =
-    root: (mkWith root { shippedRemapScope = "macro,diagnostics"; }).testRuns.alpha."lib/alpha";
+    root:
+    (mkWith root {
+      remapScope = {
+        host = "macro,diagnostics";
+        target = "macro,diagnostics";
+        test = null;
+      };
+    }).testRuns.alpha."lib/alpha";
   runsOf = ws: {
     alpha = ws.testRuns.alpha."lib/alpha";
     beta = ws.testRuns.beta."lib/beta";

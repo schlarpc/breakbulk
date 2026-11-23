@@ -175,7 +175,7 @@ Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 ### T7. rustc option arity and output names
 
 - **Assumption.** The rustc options Cargo passes that take a separate value are those in the shim's list; outputs go to `--out-dir` (or `-o`'s directory) as `lib<crate><extra-filename>.rmeta` and `<crate><extra-filename>.d`.
-- **Where.** `crates/breakbulk-shim/src/args.rs`: `TAKES_VALUE`, `RustcArgs::parse`, `stem`; `compile.rs`: `outputs`; `crates/breakbulk-plan/src/graph.rs`: `input_file`.
+- **Where.** `crates/breakbulk-trace/src/rustc_args.rs`: `TAKES_VALUE`, `options`, `RustcArgs::parse`, `stem` (the shim and the planner read argv with it); `crates/breakbulk-shim/src/compile.rs`: `outputs`.
 - **Upstream.** `rustc --help`, `rustc -C help`; spike A.
 - **Holds for.** The window.
 - **Pinned by.** Every plan check; `plan-crate-types`. Rust: `args::tests::*`, `compile::tests::lib_pipelined_outputs` (shim).

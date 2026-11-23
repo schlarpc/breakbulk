@@ -415,13 +415,28 @@ let
   # when NIX_SET_BUILD_ID is set, as stdenv's separateDebugInfo does.
   targetUnitEnv = args: lib.optionalAttrs (targetSplitsDebug args) { NIX_SET_BUILD_ID = "1"; };
 
-  # The scope of non-test units for a target (targetLayers' arguments):
-  # when debug info is split off, every scope but `debuginfo`, which keeps
-  # the real source paths the debug output is read against. `coverage`
-  # too where nothing is instrumented: one scope for every variant, so
-  # instrumenting (`-C instrument-coverage` in a variant's `rustflags`)
-  # needs no scope of its own.
-  shippedRemapScope = args: if targetSplitsDebug args then "macro,diagnostics,coverage" else null;
+  # The `--remap-path-scope` of each kind of unit of a target
+  # (targetLayers' arguments; instantiate's `remapScope`), null for every
+  # scope:
+  #
+  # - target units: when the target's debug info is split off, every
+  #   scope but `debuginfo`, which keeps the real source paths the debug
+  #   output is read against. `coverage` too where nothing is
+  #   instrumented: one scope for every variant, so instrumenting (`-C
+  #   instrument-coverage` in a variant's `rustflags`) needs no scope of
+  #   its own.
+  # - host units (build scripts, proc macros): debug info and the like keep
+  #   real store paths, as in a target whose debug info is split off. Not
+  #   the target's scope: that follows its `debugInfo`, which only matters
+  #   for what ships, and host units never ship; one scope keeps a single
+  #   build of each host unit for every target. No `coverage`: host units
+  #   are not instrumented.
+  # - test units: every scope, so a failing test names real paths.
+  remapScope = args: {
+    host = "macro,diagnostics";
+    target = if targetSplitsDebug args then "macro,diagnostics,coverage" else null;
+    test = null;
+  };
 
   mkProducts =
     {
@@ -562,6 +577,6 @@ in
     targetStageSet
     debugInfoOf
     targetUnitEnv
-    shippedRemapScope
+    remapScope
     ;
 }

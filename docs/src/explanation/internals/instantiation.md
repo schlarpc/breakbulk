@@ -50,7 +50,7 @@ The cost is one small derivation per root more than linking the unit's output di
 
 ## IFD mode
 
-The instantiate derivation runs `breakbulk-instantiate --emit json` and writes `units.json`, mapping each unit to its complete derivation attributes, and with `--outer` the root shape: the wrappers by output name, and the stubs, doctests and docs they link (`nodes`, which a reference names as it names a unit). The Nix side imports it and applies `derivation` to each entry. Nix computes output paths. A unit's attribute names do not depend on its substituted values: `passAsFile` is always there, naming `BREAKBULK_UNIT` when that is long and empty otherwise. So selecting one unit's output does not evaluate the values of any unit, and a package's `env` can name a product of the same plan.
+The instantiate derivation runs `breakbulk-instantiate` and writes `units.json`, mapping each unit to its complete derivation attributes, and with `--outer` the root shape: the wrappers by output name, and the stubs, doctests and docs they link (`nodes`, which a reference names as it names a unit). The Nix side imports it and applies `derivation` to each entry. Nix computes output paths. A unit's attribute names do not depend on its substituted values: `passAsFile` is always there, naming `BREAKBULK_UNIT` when that is long and empty otherwise. So selecting one unit's output does not evaluate the values of any unit, and a package's `env` can name a product of the same plan.
 
 ## Dynamic-derivation mode
 

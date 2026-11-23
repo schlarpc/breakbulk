@@ -1,4 +1,4 @@
-# Instantiation in IFD mode: run `breakbulk-instantiate --emit json` over a
+# Instantiation in IFD mode: run `breakbulk-instantiate` over a
 # plan in a derivation, import its `units.json`, and turn each entry into a
 # unit derivation, and each root's wrapper into a derivation: the same
 # root shape as dynamic-derivation mode's (`rootShape`).
@@ -141,10 +141,10 @@ rec {
       # platform; requiredFeatures; } ]; } (see predictedRoots), or null to take the
       # plan's roots as they are.
       roots ? null,
-      # The `--remap-path-scope` of non-test target compile units, for targets
-      # whose products split debug info off (`"macro,diagnostics,coverage"`), or
-      # null for every scope. See inputs.rs `shipped_remap_scope`.
-      shippedRemapScope ? null,
+      # The `--remap-path-scope` of each kind of unit, `{ host; target; test; }`
+      # (products.remapScope), each null for every scope. See inputs.rs
+      # `RemapScope`.
+      remapScope ? { },
       # `sourcePaths = "keep"`: no remaps of breakbulk's own.
       keepSourcePaths ? false,
       # The extensions of the side files that compile units run through a
@@ -252,7 +252,9 @@ rec {
             host = platformJson host;
             target = platformJson target;
           }
-          // lib.optionalAttrs (shippedRemapScope != null) { inherit shippedRemapScope; }
+          // {
+            remapScope = lib.filterAttrs (_: v: v != null) remapScope;
+          }
           // lib.optionalAttrs keepSourcePaths { inherit keepSourcePaths; }
           // lib.optionalAttrs (sideFiles != [ ]) { inherit sideFiles; }
           // lib.optionalAttrs (wrapperConfigVar != null) { inherit wrapperConfigVar; }
@@ -281,8 +283,6 @@ rec {
         inherit system;
         builder = "${breakbulkInstantiate}/bin/breakbulk-instantiate";
         args = [
-          "--emit"
-          "json"
           "--plan"
           plan
           "--sources"

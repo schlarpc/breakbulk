@@ -509,6 +509,10 @@ capability):
 | Host units (build scripts, proc macros), on every target | `macro,diagnostics`. They never ship, so `debugInfo` doesn't apply, and one build serves every target |
 | Any unit, with a rustc without `--remap-path-scope` (older than 1.95, or `remapPathScope = false`) | All scopes (no scope flag) |
 
+The scopes are data: `products.remapScope` in `lib/products.nix` gives
+each target's `{ host; target; test; }`, which instantiation reads from
+`toolchains.json`'s `remapScope`.
+
 ### `debugInfo`
 
 What happens to debug info is one property of the target:

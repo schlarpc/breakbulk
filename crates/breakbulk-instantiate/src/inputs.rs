@@ -91,17 +91,12 @@ pub struct Toolchains {
     pub host: PlatformSpec,
     #[serde(default)]
     pub target: PlatformSpec,
-    /// The `--remap-path-scope` of target compile units that end up in
-    /// shipped products whose debug information is split off
-    /// (`splitDebug`), e.g. `macro,diagnostics,coverage`: debug info keeps
-    /// real store paths. `None`: every scope is remapped. Host units do
-    /// not read it: they always get
-    /// `macro,diagnostics`. Test harnesses (`--test`) always remap every
-    /// scope, and so does every unit when rustc has no `--remap-path-scope`
-    /// (`capabilities`; "Source paths at run time" in
-    /// `docs/src/reference/unit-builder.md`).
+    /// The `--remap-path-scope` of each kind of unit (the Nix library's
+    /// `products.remapScope`). Every unit remaps every scope when rustc
+    /// has no `--remap-path-scope` (`capabilities`; "Source paths at run
+    /// time" in `docs/src/reference/unit-builder.md`).
     #[serde(default)]
-    pub shipped_remap_scope: Option<String>,
+    pub remap_scope: RemapScope,
     /// `sourcePaths = "keep"`: add no remaps of breakbulk's
     /// own, Rust or C ([`breakbulk_format::Resolve::keep_source_paths`]).
     #[serde(default)]
@@ -138,6 +133,22 @@ impl Toolchains {
             Platform::Target => &self.target,
         }
     }
+}
+
+/// `toolchains.json`'s `remapScope`: a `--remap-path-scope` value per kind
+/// of unit; `None` remaps every scope.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemapScope {
+    /// Host units (build scripts, proc macros).
+    #[serde(default)]
+    pub host: Option<String>,
+    /// Target units other than test units.
+    #[serde(default)]
+    pub target: Option<String>,
+    /// Test units (the plan's `test`), of either platform.
+    #[serde(default)]
+    pub test: Option<String>,
 }
 
 /// Env and env capture for one platform, of a toolchain spec or a package
