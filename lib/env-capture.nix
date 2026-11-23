@@ -206,7 +206,14 @@ let
       inherit dropNamesFile;
       preferLocalBuild = true;
       allowSubstitutes = false;
-      passthru = { inherit platform; };
+      passthru = {
+        inherit platform;
+        # What the capture is made from, for instantiation's check that no
+        # setting names a derivation of the plan taking it (instantiate.nix
+        # `samePlanCheck`): the capture's own string context names only
+        # the capture.
+        breakbulkMadeFrom = pick s.build nativeInputs ++ pick s.host inputs;
+      };
     };
 
   # The capture every package without inputs gets on a platform.

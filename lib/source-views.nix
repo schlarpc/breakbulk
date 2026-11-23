@@ -410,17 +410,24 @@ rec {
     else if nested != [ ] then
       throw "breakbulk: packages.${name}.sourceOverlay: \"${(lib.head nested).rel}\" is inside another entry's path"
     else
-      runCommand "source" { } (
-        ''
-          cp -r ${view} $out
-          chmod -R u+w $out
-        ''
-        + lib.concatMapStrings (e: ''
-          rm -rf $out/${lib.escapeShellArg e.p}
-          mkdir -p "$(dirname $out/${lib.escapeShellArg e.p})"
-          ln -s ${lib.escapeShellArg "${e.value}"} $out/${lib.escapeShellArg e.p}
-        '') places
-      );
+      runCommand "source"
+        {
+          # The entries' values, for instantiation's check that no setting
+          # names a derivation of the plan taking the view (instantiate.nix
+          # `samePlanCheck`).
+          passthru.breakbulkMadeFrom = map (e: e.value) places;
+        }
+        (
+          ''
+            cp -r ${view} $out
+            chmod -R u+w $out
+          ''
+          + lib.concatMapStrings (e: ''
+            rm -rf $out/${lib.escapeShellArg e.p}
+            mkdir -p "$(dirname $out/${lib.escapeShellArg e.p})"
+            ln -s ${lib.escapeShellArg "${e.value}"} $out/${lib.escapeShellArg e.p}
+          '') places
+        );
 
   # A package's views, rooted at the repository root (`<view>/<pkgDir>`
   # is the package directory): `src` for its "build" units; for a package

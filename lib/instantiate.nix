@@ -173,6 +173,10 @@ rec {
       doctests ? { },
       # Doc plans: the plan has a docs derivation.
       docs ? false,
+      # The derivations made from this plan's roots, as a function of the
+      # roots (`roots` of the result): `[ product ] ++ its stages`, for
+      # the check that no input names one (`samePlanCheck`).
+      planProducts ? _: [ ],
       storeDir ? builtins.storeDir,
       # The record importing units.json is checked against
       # (lib/nix-features.nix; repo.nixFeatures, from mkRepository).
@@ -214,9 +218,7 @@ rec {
         let
           isAppend = v: builtins.isAttrs v && v ? append && !lib.isDerivation v;
         in
-        lib.mapAttrs' (
-          k: v: lib.nameValuePair "${valueKey}:${k}" (str (if isAppend v then v.append else v))
-        ) env
+        lib.mapAttrs' (k: v: lib.nameValuePair "${valueKey}:${k}" (if isAppend v then v.append else v)) env
         // lib.mapAttrs' (k: v: lib.nameValuePair "${sepKey}:${k}" (if isAppend v then v.sep else "")) env;
       platformJson = s: {
         env = lib.attrNames (spec s).env;
@@ -308,35 +310,36 @@ rec {
 
       # --- substitution -----------------------------------------------------
 
-      # Every key units.json may name, with its value (and context).
-      inputs =
-        lib.mapAttrs' (d: v: lib.nameValuePair "src:${d}" (str v)) workspace
-        // lib.mapAttrs' (d: v: lib.nameValuePair "test-src:${d}" (str v)) workspaceTest
+      # Every key units.json may name, with its value as given: a string,
+      # path or derivation (`str` gives the value units take).
+      givenInputs =
+        lib.mapAttrs' (d: v: lib.nameValuePair "src:${d}" v) workspace
+        // lib.mapAttrs' (d: v: lib.nameValuePair "test-src:${d}" v) workspaceTest
         // lib.concatMapAttrs (
-          d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "src:${d}#${t}" (str v)) ts
+          d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "src:${d}#${t}" v) ts
         ) workspaceTargets
         // lib.concatMapAttrs (
-          d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "test-src:${d}#${t}" (str v)) ts
+          d: ts: lib.mapAttrs' (t: v: lib.nameValuePair "test-src:${d}#${t}" v) ts
         ) workspaceTestTargets
-        // lib.mapAttrs (_: p: str p.value) predicted
-        // lib.mapAttrs' (d: v: lib.nameValuePair "wrapper-config:${d}" (str v)) wrapperConfig
-        // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" (str v)) crates
+        // lib.mapAttrs (_: p: p.value) predicted
+        // lib.mapAttrs' (d: v: lib.nameValuePair "wrapper-config:${d}" v) wrapperConfig
+        // lib.mapAttrs' (id: v: lib.nameValuePair "crate:${id}" v) crates
         // {
-          "empty-dir" = str emptyDir;
-          "wrapper:coreutils" = str coreutils;
+          "empty-dir" = emptyDir;
+          "wrapper:coreutils" = coreutils;
         }
         // lib.optionalAttrs (buildScriptHints != null) {
-          "build-script-hints" = str buildScriptHints;
+          "build-script-hints" = buildScriptHints;
         }
         # Each doctest's test configuration (lib.rs `keys::doctest`).
         // lib.concatMapAttrs (
-          pkg: attrs: lib.mapAttrs' (k: v: lib.nameValuePair "doctest:${pkg}:${k}" (str v)) attrs
+          pkg: attrs: lib.mapAttrs' (k: v: lib.nameValuePair "doctest:${pkg}:${k}" v) attrs
         ) doctests
-        // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" (str v)) tools
+        // lib.mapAttrs' (n: v: lib.nameValuePair "tool:${n}" v) tools
         // lib.concatMapAttrs (
           p: s:
           envInputs "env:${p}" "envsep:${p}" (spec s).env
-          // lib.optionalAttrs ((spec s).envCapture != null) { "capture:${p}" = str (spec s).envCapture; }
+          // lib.optionalAttrs ((spec s).envCapture != null) { "capture:${p}" = (spec s).envCapture; }
         ) platformSpec
         // lib.concatMapAttrs (
           pkg: o:
@@ -346,73 +349,124 @@ rec {
               s = ovPlatform o p;
             in
             envInputs "override:${pkg}:env:${p}" "override:${pkg}:envsep:${p}" s.env
-            // lib.optionalAttrs (s.envCapture != null) { "override:${pkg}:capture:${p}" = str s.envCapture; }
+            // lib.optionalAttrs (s.envCapture != null) { "override:${pkg}:capture:${p}" = s.envCapture; }
           ) platformSpec
         ) overrides;
+      # Every key units.json may name, with its value (and context).
+      inputs = lib.mapAttrs (_: str) givenInputs;
       # Checked once per key, when a unit first takes it.
-      checkedInputs = lib.mapAttrs checkInput inputs;
-      inputsJson = lib.mapAttrs (_: jsonInside) checkedInputs;
+      checkedInputs = lib.mapAttrs (k: v: samePlanCheck k (checkInput k v)) inputs;
 
       input =
         set: k:
         set.${k}
           or (throw "breakbulk: units.json names the input `${k}`, which was not given to instantiate");
 
-      part =
-        p:
-        if isString p then
-          p
-        else if p ? unit then
-          # A weak reference names a path the unit reaches through its
-          # dependencies' references (their manifests), not as an input.
-          (if p.weak or false then unsafeDiscardStringContext else lib.id) drvs.${p.unit}.${p.output}.outPath
-        else if p.json or false then
-          input inputsJson p.input
-        else
-          input checkedInputs p.input;
-
-      value = v: if isAttrs v then lib.concatMapStrings part v.parts else v;
-
-      # A unit always has `passAsFile`, empty when its text is short: were
-      # the attribute present only for long texts, the names of a unit's
-      # attributes, and so selecting any of its outputs, would need its
-      # substituted text, which can name a product of this same plan.
-      drvAttrs =
-        d:
+      # The units, nodes, wrappers and root shape, substituting `values`.
+      # Made twice: with the checked inputs (what the result gives), and
+      # with the unchecked ones (`raw`), the same derivations, which
+      # `samePlanCheck` compares a value with while a unit taking it is
+      # being made. The checked ones cannot serve: making the plan's
+      # derivations forces every key's check, this one among them.
+      substitute =
+        values:
         let
-          attrs = lib.mapAttrs (_: value) d.attrs;
-        in
-        attrs
-        // lib.optionalAttrs (d.attrs ? BREAKBULK_UNIT) {
-          passAsFile = lib.optional (
-            stringLength attrs.BREAKBULK_UNIT > json.passAsFileAbove
-          ) "BREAKBULK_UNIT";
-        };
-      mkDrv = d: derivation (drvAttrs d);
+          valuesJson = lib.mapAttrs (_: jsonInside) values;
+          part =
+            p:
+            if isString p then
+              p
+            else if p ? unit then
+              # A weak reference names a path the unit reaches through its
+              # dependencies' references (their manifests), not as an input.
+              (if p.weak or false then unsafeDiscardStringContext else lib.id) drvs.${p.unit}.${p.output}.outPath
+            else if p.json or false then
+              input valuesJson p.input
+            else
+              input values p.input;
 
-      units =
-        assert lib.assertMsg (
-          json.version == 5
-        ) "breakbulk: units.json version ${toString json.version} is not supported";
-        lib.mapAttrs (_: mkDrv) json.units;
-      # What parts name: units, and the stubs, doctests and docs the
-      # wrappers link (`nodes`, whose keys are no unit ids).
-      drvs = units // lib.mapAttrs (_: mkDrv) (json.nodes or { });
-      wrappers = lib.mapAttrs (_: mkDrv) (json.wrappers or { });
-      shape = rootShape {
-        inherit
-          system
-          coreutils
-          outerName
-          docs
-          ;
-        roots = rootList;
-        shell = tools.shell;
-        doctests = lib.attrNames doctests;
-        wrapperOf =
-          _: what: output:
-          (wrappers.${output} or (throw "breakbulk: units.json has no wrapper for the ${what}")).outPath;
-      };
+          value = v: if isAttrs v then lib.concatMapStrings part v.parts else v;
+
+          # A unit always has `passAsFile`, empty when its text is short:
+          # were the attribute present only for long texts, the names of a
+          # unit's attributes, and so selecting any of its outputs, would
+          # need its substituted text, which can name a product of another
+          # plan.
+          drvAttrs =
+            d:
+            let
+              attrs = lib.mapAttrs (_: value) d.attrs;
+            in
+            attrs
+            // lib.optionalAttrs (d.attrs ? BREAKBULK_UNIT) {
+              passAsFile = lib.optional (
+                stringLength attrs.BREAKBULK_UNIT > json.passAsFileAbove
+              ) "BREAKBULK_UNIT";
+            };
+          mkDrv = d: derivation (drvAttrs d);
+
+          units =
+            assert lib.assertMsg (
+              json.version == 5
+            ) "breakbulk: units.json version ${toString json.version} is not supported";
+            lib.mapAttrs (_: mkDrv) json.units;
+          # What parts name: units, and the stubs, doctests and docs the
+          # wrappers link (`nodes`, whose keys are no unit ids).
+          drvs = units // lib.mapAttrs (_: mkDrv) (json.nodes or { });
+          wrappers = lib.mapAttrs (_: mkDrv) (json.wrappers or { });
+          shape = rootShape {
+            inherit
+              system
+              coreutils
+              outerName
+              docs
+              ;
+            roots = rootList;
+            shell = tools.shell;
+            doctests = lib.attrNames doctests;
+            wrapperOf =
+              _: what: output:
+              (wrappers.${output} or (throw "breakbulk: units.json has no wrapper for the ${what}")).outPath;
+          };
+        in
+        {
+          inherit units drvs shape;
+        };
+      inherit (substitute checkedInputs) units drvs shape;
+      raw = substitute inputs;
+
+      # The derivations no input may name, by name: the plan's roots and
+      # what is made from them (`planProducts`). Names are known without
+      # making a derivation, so a plan derivation is made (from `raw`)
+      # only when a value names a derivation of the same name.
+      planDrvsByName = lib.groupBy (d: d.name) (
+        lib.attrValues raw.shape.roots ++ planProducts raw.shape.roots
+      );
+      # A key's value, or an error when its string context names an output
+      # of one of the plan's derivations: dynamic-derivation mode's outer
+      # derivation takes every input of the plan, so the plan would
+      # depend on itself there. The values settings put in an env capture
+      # or a view (their `breakbulkMadeFrom`) are checked with it, since
+      # the capture's or view's own context names only itself. A plan
+      # derivation that a unit taking the key is part of never gets here:
+      # making the value is an infinite recursion already. So of the plain
+      # values only a package's env is read: every root's own units take
+      # the toolchain's and the target's, and reading the plan's names
+      # costs an evaluation of its products.
+      packageEnvKey = key: builtins.match "override:[^:]*:env:.*" key != null;
+      samePlanCheck =
+        key: v:
+        let
+          given = givenInputs.${key};
+          madeFrom = if isAttrs given then given.breakbulkMadeFrom or [ ] else [ ];
+          outputsNamed = x: lib.attrNames (lib.filterAttrs (_: c: c ? outputs) (builtins.getContext (str x)));
+          # `<store dir>/<32-character hash>-<name>.drv`
+          drvName = d: lib.removeSuffix ".drv" (substring 33 (-1) (baseNameOf d));
+          ofPlan = lib.filter (
+            d: lib.any (c: unsafeDiscardStringContext c.drvPath == d) (planDrvsByName.${drvName d} or [ ])
+          ) (lib.concatMap outputsNamed (lib.optional (packageEnvKey key) v ++ madeFrom));
+        in
+        if ofPlan == [ ] then v else throw (samePlanMessage key outerName (drvName (lib.head ofPlan)));
 
     in
     {
@@ -470,6 +524,30 @@ rec {
       v
     else
       throw "breakbulk: the input `${key}` depends on all outputs of ${lib.head all} (a `drvPath` string); a unit cannot take that: name an output's path instead (the derivation itself, or `.out`)";
+
+  # samePlanCheck's error: input `key` of the plan `plan` names `drv` (a
+  # derivation name), a root of the plan or made from one.
+  samePlanMessage =
+    key: plan: drv:
+    let
+      parts = lib.splitString ":" key;
+      at = lib.elemAt parts;
+      n = lib.length parts;
+      pkg = lib.head (lib.splitString "@" (at 1));
+      layers = "`packages.${pkg}`, its `${
+        if at 3 == "host" then "forHost" else "forTarget"
+      }` or a `target.<triple>` layer";
+      setting =
+        if at 0 == "override" && n == 5 && at 2 == "env" then
+          "the env variable `${at 4}` of ${at 1}'s ${at 3} units (`env` of ${layers})"
+        else if at 0 == "override" && n == 4 && at 2 == "capture" then
+          "a value in the `inputs` or `nativeInputs` of ${at 1}'s ${at 3} units (${layers})"
+        else if lib.hasPrefix "src:" key || lib.hasPrefix "test-src:" key then
+          "a `sourceOverlay` value of the package in `${lib.head (lib.splitString "#" (lib.removePrefix "src:" (lib.removePrefix "test-" key)))}`"
+        else
+          "the input `${key}`";
+    in
+    "breakbulk: ${setting} names `${drv}`, which the plan `${plan}` builds. That plan's units take this setting, so the plan would depend on itself (an infinite recursion in dynamic-derivation mode). Take the product from another plan: for a package of the same workspace, import `breakbulk.variants.tools { packages = [ … ]; }` in the workspace's `imports` and use `repo.workspaces.<ws>.tools.<pkg>`.";
 
   # The output name of a root's or doctest's wrapper (`n` a root name, or
   # `<package>/doctest`): `<package>.<kind>.<target>.drv`. A dynamic

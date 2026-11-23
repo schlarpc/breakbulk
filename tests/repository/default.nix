@@ -3707,6 +3707,94 @@ in
     ) "ifd-all-outputs: ${builtins.toJSON got}";
     evalCheck "ifd-all-outputs" "ok";
 
+  # IFD mode rejects a package setting that names a derivation of the plan
+  # that builds the package (a root, a product or a stage), as
+  # dynamic-derivation mode cannot build it: `app`'s product fails to
+  # evaluate, `tool`'s does not. The same product from the tools variant
+  # evaluates. The message is checked from `samePlanMessage`, since
+  # `tryEval` does not give it.
+  ifd-same-plan-product =
+    let
+      fixture = fixtures + "/same-workspace-products";
+      repoWith =
+        imports: settings:
+        mkRepo fixture [
+          (oneWs ".")
+          {
+            mode = "ifd";
+            workspaces.main = { inherit imports; };
+          }
+          (
+            { repo, ... }:
+            {
+              packages.app = settings repo.workspaces.main;
+            }
+          )
+        ];
+      ok = d: (builtins.tryEval (builtins.unsafeDiscardStringContext d.drvPath)).success;
+      evalsWith =
+        imports: settings:
+        let
+          p = (repoWith imports settings).workspaces.main.packages;
+        in
+        {
+          app = ok p.app;
+          tool = ok p.tool;
+        };
+      evals = evalsWith [ ];
+      rejected = {
+        app = false;
+        tool = true;
+      };
+      cases = {
+        env = evals (ws: {
+          env.TOOL = "${ws.packages.tool}/bin/tool";
+        });
+        forTarget = evals (ws: {
+          forTarget.env.TOOL = "${ws.packages.tool}/bin/tool";
+        });
+        stage = evals (ws: {
+          env.TOOL = "${ws.packages.tool.stages.linked}/tool";
+        });
+        root = evals (ws: {
+          env.TOOL = "${ws.packages.tool.roots."bin/tool"}";
+        });
+        nativeInputs = evals (ws: {
+          nativeInputs = _: [ ws.packages.tool ];
+        });
+        sourceOverlay = evals (ws: {
+          sourceOverlay."tool" = ws.packages.tool;
+        });
+      };
+      bad = lib.filterAttrs (_: got: got != rejected) cases;
+      # Products named like the default variant's, so the check compares
+      # paths.
+      fromTools = evalsWith [ (breakbulk.variants.tools { packages = [ "tool" ]; }) ] (ws: {
+        env.TOOL = "${ws.tools.tool}/bin/tool";
+        nativeInputs = _: [ ws.tools.tool ];
+      });
+      instantiateLib = import ../../lib/instantiate.nix {
+        inherit lib;
+        featureGates = null;
+        util = null;
+      };
+      message =
+        instantiateLib.samePlanMessage "override:app@0.1.0:env:target:TOOL" "main-${native}-default"
+          "tool";
+    in
+    assert lib.assertMsg (bad == { }) "ifd-same-plan-product: not rejected: ${builtins.toJSON bad}";
+    assert lib.assertMsg (
+      fromTools == {
+        app = true;
+        tool = true;
+      }
+    ) "ifd-same-plan-product: the tools variant's product: ${builtins.toJSON fromTools}";
+    assert lib.assertMsg (
+      lib.hasPrefix "breakbulk: the env variable `TOOL` of app@0.1.0's target units (`env` of `packages.app`, its `forTarget` or a `target.<triple>` layer) names `tool`, which the plan `main-${native}-default` builds." message
+      && lib.hasInfix "import `breakbulk.variants.tools { packages = [ … ]; }`" message
+    ) "ifd-same-plan-product: message: ${message}";
+    evalCheck "ifd-same-plan-product" message;
+
   # Instantiating a plan needs only the names of package settings; their
   # values reach a unit's derivation when it is substituted. Here every
   # value-carrying setting of `app` (package level and `target.<triple>`,

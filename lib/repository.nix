@@ -1182,10 +1182,24 @@ let
       s = specFor wsName triple;
       # Target units only: host units' products are not shipped.
       debugEnv = products.targetUnitEnv (stageSetArgs wsName triple);
+      psel = productSelOf wsName v;
     in
     mkWorkspace pkgs (
       {
         inherit root tools fetchArgs;
+        # The products made from the given roots, as workspaceOut makes
+        # them from this instance's roots, and their stages.
+        planProducts =
+          roots:
+          lib.optionals (psel != false) (
+            lib.concatMap (p: [ p ] ++ lib.attrValues p.stages) (
+              lib.attrValues (
+                productsOf wsName ws triple vName v (
+                  workspaces.${wsName}.internal.instances.${triple}.${vName} // { inherit roots; }
+                ) psel
+              )
+            )
+          );
         vendor = vendors.${wsName};
         path = ws.path;
         toolchain = {

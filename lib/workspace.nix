@@ -151,6 +151,10 @@ pkgs:
   # The table of build-script failure hints, a JSON file
   # (`sysDefaults.buildScriptHints`; lib/instantiate.nix).
   buildScriptHints ? ./build-script-hints.json,
+  # The derivations made from the build plan's roots, a function of them
+  # (instantiate's `planProducts`): mkRepository passes the products
+  # and their stages.
+  planProducts ? _: [ ],
   # How source paths are hidden (`workspaces.<ws>.sourcePaths`): "auto",
   # "cargo", "remap" or "keep".
   sourcePaths ? "auto",
@@ -722,6 +726,8 @@ let
         );
         docs = kind == "doc";
         inherit nixFeatures;
+        # Products are made from the build plan only.
+        planProducts = if kind == "build" then planProducts else _: [ ];
       };
     in
     if isDynamic then dynamic.instantiate (all // { inherit breakbulkDrv; }) else instantiate all;
