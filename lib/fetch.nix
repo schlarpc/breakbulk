@@ -58,7 +58,6 @@ let
     replaceStrings
     stringLength
     substring
-    tail
     toJSON
     ;
 
@@ -374,15 +373,16 @@ let
       throw "breakbulk: ${e.id} is a path package and is not fetched";
 
   # The first of `crateSources` that returns a source for `e`, or null.
-  # Not `lib.findFirst` over `map`: a later function is not called once an
-  # earlier one has answered.
+  # Later functions are not called (`lib.findFirst` stops at the first
+  # match, and `map` is lazy).
   suppliedSource =
     e:
     let
+      builtin = builtinSource e;
       e' = e // {
         defaultSource = {
-          inherit (builtinSource e) subdir;
-          path = (builtinSource e).tree;
+          inherit (builtin) subdir;
+          path = builtin.tree;
         };
       };
       check =
@@ -393,19 +393,8 @@ let
           r
         else
           throw "breakbulk: a `crateSources` function returned something other than null or { path; subdir ? \"\"; } for ${e.id}";
-      go =
-        fs:
-        if fs == [ ] then
-          null
-        else
-          let
-            f = head fs;
-            r =
-              if lib.isFunction f then check (f e') else throw "breakbulk: `crateSources` holds a non-function";
-          in
-          if r != null then r else go (tail fs);
     in
-    go crateSources;
+    lib.findFirst (r: r != null) null (map (f: check (f e')) crateSources);
 in
 rec {
   inherit
