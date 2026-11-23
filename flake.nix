@@ -242,6 +242,20 @@
           };
         }
         // nixpkgs.lib.optionalAttrs (pkgs.stdenv.buildPlatform.system == "x86_64-linux") {
+          # The Android fixture's tests on the Android emulator, with KVM
+          # (tests/presets/android-emulator.nix): downloads the NDK, the
+          # emulator and a system image (unfree), so it is not a flake
+          # check. Arguments go to nix-store.
+          #   nix run .#test-android-emulator [-- --max-jobs 2]
+          test-android-emulator = {
+            type = "app";
+            program = toString (
+              import ./tests/presets/android-emulator.nix {
+                inherit pkgs;
+                breakbulk = self.lib;
+              }
+            );
+          };
           # linuxPortable (zig) binaries in a real glibc 2.17 userland: pulls
           # CentOS 7.9 from Docker Hub (~75 MB) and builds OpenSSL with zig
           # cc, so it is not a flake check. Arguments go to nix-store.

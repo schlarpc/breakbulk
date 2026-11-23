@@ -77,6 +77,7 @@ One small workspace per pattern in [Patterns and prior art](../prior-art.md), un
 - `nix develop -c cargo test` runs the Rust tests.
 - `nix flake check` runs every flake check, the fixtures included. Some download the Windows SDK, build cross toolchains and run wine.
 - `nix run .#test-dynamic`, `.#test-cutoff`, `.#test-options` and `.#test-linux-portable-container` run tests that need a Nix master build or extra downloads, so they are not flake checks.
+- `nix run .#test-android-emulator` (`tests/presets/android-emulator.nix`) runs the Android fixture's test apps on the Android emulator, headless, through adb. It needs `/dev/kvm`, which sandboxed builds do not get, and downloads the emulator and an x86\_64 Google APIs system image, whose ARM translation runs the `aarch64-linux-android` test binaries.
 - `nix run .#test-rebuild` runs the rebuild check. It builds every fixture twice, so it is not a flake check.
 
 ### Rebuild check
