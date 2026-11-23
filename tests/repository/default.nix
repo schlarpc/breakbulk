@@ -3320,7 +3320,7 @@ in
         variantTargets = {
           m.variants.default.targets = [ "riscv64gc-unknown-linux-gnu" ];
           want = [
-            "${ws}.variants.default.targets ${at}: riscv64gc-unknown-linux-gnu not among the workspace's targets (${native})"
+            "${ws}.variants.default.targets ${at}: riscv64gc-unknown-linux-gnu not among the workspace's targets (${native}) or its host triple (${native})"
           ];
         };
       };
