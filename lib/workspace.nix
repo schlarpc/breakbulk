@@ -363,8 +363,16 @@ let
       (placeholder "out")
     ];
   };
+  # In dynamic-derivation mode only `repo.explainSharing` reaches this
+  # read (through IFD mode's units), and it imports by design, outside the
+  # record; the outputs never read `value` there.
   predictResult = builtins.fromJSON (
-    featureGates.readOutput nixFeatures "the predicted views of `${name}`" "${predictOut}/result.json"
+    featureGates.readOutput (
+      if nixFeatures.dynamicDerivations or false then
+        nixFeatures // { importFromDerivation = true; }
+      else
+        nixFeatures
+    ) "the predicted views of `${name}`" "${predictOut}/result.json"
   );
   predictedFor =
     kind:
