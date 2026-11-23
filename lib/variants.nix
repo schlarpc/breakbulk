@@ -68,9 +68,8 @@
 # and no optional dependencies gets one plain run. Optional dependencies
 # are not features in the sets (cargo-hack's default without
 # --optional-deps). Names: `<prefix>-<pkg>`, `<prefix>-<pkg>.all-features`,
-# `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. A
-# target's `variantDefaults` apply as to any variant; of their features, a
-# run keeps the ones its package accepts (`variants.<v>.packages`).
+# `<prefix>-<pkg>.no-default-features`, `<prefix>-<pkg>.<f1>+<f2>`. The
+# `variantDefaults` apply as to any variant.
 #
 #   breakbulk.variants.unitsCheck { pkgs; name; units = [ … ]; }
 #

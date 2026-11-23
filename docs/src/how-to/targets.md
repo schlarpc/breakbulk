@@ -239,20 +239,54 @@ target that every variant must keep takes `lib.mkForce` in
 `variantDefaults`. To replace the other layers' lists, use `lib.mkForce`
 on a list. See [Layers and priorities](#layers-and-priorities).
 
-A variant that selects packages
+### Features and package selections
+
+`variantDefaults.features` reach every variant on the target as
+written. A variant that selects packages
 ([`packages`](../reference/options/workspaces.md#workspacesnamevariantsnamepackages)),
 such as each package-scope run of
-[`breakbulk.variants.featurePowerset`](feature-matrix.md), gets only
-the `variantDefaults` features that one of its packages accepts. Cargo
-runs it with `-p <pkg>`, and then accepts only the package's own
-features and optional dependencies, `<pkg>/<feature>` and
-`<dependency>/<feature>`. For example, with `variantDefaults.features =
-[ "windows" "app/gui" ]`, a run of `core` gets `windows` if `core` has
-that feature, and never `app/gui` unless `app` is a dependency of
-`core`. The variant's own features are not filtered: Cargo reports a
-wrong one. `variantDefaults.noDefaultFeatures = true` applies to every
-run, so a run with default features becomes the same as its
-`no-default-features` run on that target.
+[`breakbulk.variants.featurePowerset`](feature-matrix.md), is planned
+with `-p <pkg> --features …`. Cargo then accepts only a selected
+package's own features and optional dependencies, `<pkg>/<feature>` and
+`<dependency>/<feature>`, and planning fails on any other.
+
+To give such variants only the features they accept, make
+`variantDefaults` a function of the variant's settings, and test each
+feature with
+`breakbulk.lib.acceptsFeature member feature`, Cargo's rule for one
+member of
+[`workspaces.<ws>.members`](../reference/options/workspaces.md#workspacesnamemembers):
+
+```nix
+{ config, lib, breakbulk, ... }:
+let
+  members = config.workspaces.default.members;
+  # Every feature for a variant of the whole workspace; for one that
+  # selects packages, those one of its packages accepts.
+  accepted =
+    variant: features:
+    if builtins.isList variant.packages then
+      lib.filter (
+        f: lib.any (p: breakbulk.lib.acceptsFeature members.${p} f) variant.packages
+      ) features
+    else
+      features;
+in
+{
+  workspaces.default.targets.x86_64-pc-windows-msvc.variantDefaults =
+    { config, ... }:
+    {
+      features = accepted config [ "windows" "app/gui" ];
+    };
+}
+```
+
+With it, a run of `core` gets `windows` if `core` has that feature, and
+never `app/gui` unless `app` is a dependency of `core`. The function
+reads the variant's settings with every layer applied.
+`variantDefaults.noDefaultFeatures = true` applies to every run, so a
+run with default features becomes the same as its `no-default-features`
+run on that target.
 
 ## Package settings per target or variant
 

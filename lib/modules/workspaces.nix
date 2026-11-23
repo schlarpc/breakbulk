@@ -121,13 +121,14 @@ let
         must not change
         ([layers and priorities](../../how-to/targets.md#layers-and-priorities)).
 
-        A variant that selects packages (`variants.<v>.packages`, such as
-        the package-scope runs of `breakbulk.variants.featurePowerset`) takes
-        only the `features` here that one of those packages accepts, by
-        Cargo's rule for `-p <pkg> --features`: one of its own features
-        or optional dependencies, `<pkg>/<feature>`, or
-        `<dependency>/<feature>`. Cargo rejects any other, and these
-        apply to every variant on the target.
+        Its `features` reach every variant as written. A variant that
+        selects packages (`variants.<v>.packages`, such as the
+        package-scope runs of `breakbulk.variants.featurePowerset`) is
+        planned with `-p <pkg> --features …`, which Cargo rejects when no
+        selected package accepts a feature. A function module that reads
+        the variant's `config.packages` can give such variants only what
+        they accept, with `breakbulk.lib.acceptsFeature`
+        ([features and package selections](../../how-to/targets.md#features-and-package-selections)).
       '';
     };
   };
@@ -279,40 +280,13 @@ let
         defaults: triple:
         let
           layer = bt.layer options;
-          cell =
-            (extendModules {
-              modules = [
-                (layer (-0.25) (n: v: if n == "features" then defaultFeatures v else v) defaults)
-              ]
-              ++ lib.optional (config.target ? ${triple}) (layer 0.5 (_: v: v) config.target.${triple});
-            }).config;
-          # `variantDefaults` name features for any variant on the target;
-          # a variant that selects packages runs `-p <pkg>…`, and Cargo
-          # rejects a feature none of those packages accept. Only these
-          # are left out: a variant's own wrong feature still fails in
-          # Cargo.
-          selected =
-            if builtins.isList cell.packages then
-              cell.packages
-            else
-              (manifest.excludeMembers (lib.attrNames ws.members) cell.packages.exclude).selected;
-          manifests = map (p: manifest.readManifest root ws.members.${p}.path) (
-            lib.filter (p: ws.members ? ${p}) selected
-          );
-          accepted = f: lib.any (m: manifest.acceptsCliFeature m f) manifests;
-          # Split as Cargo splits `--features` values.
-          defaultFeatures =
-            v:
-            if cell.packages == null then
-              v
-            else
-              lib.filter accepted (
-                lib.concatMap (s: lib.filter (f: f != "") (lib.splitString "," s)) (
-                  lib.concatMap (s: lib.filter builtins.isString (builtins.split "[[:space:]]+" s)) v
-                )
-              );
         in
-        cell;
+        (extendModules {
+          modules = [
+            (layer (-0.25) (_: v: v) defaults)
+          ]
+          ++ lib.optional (config.target ? ${triple}) (layer 0.5 (_: v: v) config.target.${triple});
+        }).config;
 
       config.assertions = [
         {
@@ -793,42 +767,40 @@ let
                     table, `[target.<cfg>]` ones included.
                   '';
                 };
+                dependencies = mkOption {
+                  type = types.listOf types.str;
+                  description = ''
+                    The names (renamed names where renamed) of all the
+                    package's dependencies, of every kind, in any
+                    dependency table, `[target.<cfg>]` ones included.
+                  '';
+                };
               };
             }
           );
           readOnly = true;
-          default =
-            lib.mapAttrs
-              (
-                _: m:
-                let
-                  toml = manifest.readManifest root m.path;
-                in
-                m
-                // {
-                  features = toml.features or { };
-                  optionalDependencies = lib.unique (
-                    lib.concatMap (
-                      t: lib.attrNames (lib.filterAttrs (_: d: builtins.isAttrs d && d.optional or false) t)
-                    ) (manifest.dependencyTables toml)
-                  );
-                }
-              )
-              (
-                manifest.memberPackages {
-                  inherit root;
-                  wsDir = util.normalizeRel config.path;
-                }
-              );
+          default = lib.mapAttrs (_: m: m // manifest.featureFacts (manifest.readManifest root m.path)) (
+            manifest.memberPackages {
+              inherit root;
+              wsDir = util.normalizeRel config.path;
+            }
+          );
           defaultText = lib.literalMD "the workspace's members, by name";
           example = lib.literalExpression ''
             {
-              app = { name = "app"; path = "."; features = { }; optionalDependencies = [ ]; };
+              app = {
+                name = "app";
+                path = ".";
+                features = { };
+                optionalDependencies = [ ];
+                dependencies = [ "core" ];
+              };
               core = {
                 name = "core";
                 path = "crates/core";
                 features = { default = [ "std" ]; std = [ ]; serde = [ "dep:serde" ]; };
                 optionalDependencies = [ "serde" ];
+                dependencies = [ "serde" ];
               };
             }
           '';

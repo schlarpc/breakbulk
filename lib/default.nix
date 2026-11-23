@@ -35,6 +35,8 @@
 #                               dependents, by the crate's name
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
 #   breakbulk.whenVersion req m package settings `m` for matching versions only
+#   breakbulk.acceptsFeature member f  whether `cargo -p <member> --features f`
+#                               takes `f` (`member`: workspaces.<ws>.members.<name>)
 #   breakbulk.packageSettings   the evaluation of package settings layers
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
 # Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
@@ -299,6 +301,8 @@ let
         throw "breakbulk.whenVersion: `${req}` is not a Cargo version requirement"
       else
         { package, ... }: { imports = lib.optional (versionReq.matches req package.version) module; };
+
+    inherit (manifest) acceptsFeature;
 
     xwinSdk = import ./xwin-sdk.nix { inherit lib; };
     inherit appleSdk;

@@ -257,15 +257,40 @@ the workspace’s members, by name
 
 ```nix
 {
-  app = { name = "app"; path = "."; features = { }; optionalDependencies = [ ]; };
+  app = {
+    name = "app";
+    path = ".";
+    features = { };
+    optionalDependencies = [ ];
+    dependencies = [ "core" ];
+  };
   core = {
     name = "core";
     path = "crates/core";
     features = { default = [ "std" ]; std = [ ]; serde = [ "dep:serde" ]; };
     optionalDependencies = [ "serde" ];
+    dependencies = [ "serde" ];
   };
 }
 
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.members.<name>.dependencies`
+
+The names (renamed names where renamed) of all the
+package’s dependencies, of every kind, in any
+dependency table, ` [target.<cfg>] ` ones included\.
+
+*Type:*
+list of string
+
+*Default:*
+
+```nix
+[ ]
 ```
 
 *Declared by:*
@@ -656,13 +681,14 @@ wins over a plain value in the variant, for a fact the variants
 must not change
 ([layers and priorities](\.\./\.\./how-to/targets\.md\#layers-and-priorities))\.
 
-A variant that selects packages (` variants.<v>.packages `, such as
-the package-scope runs of ` breakbulk.variants.featurePowerset `) takes
-only the ` features ` here that one of those packages accepts, by
-Cargo’s rule for ` -p <pkg> --features `: one of its own features
-or optional dependencies, ` <pkg>/<feature> `, or
-` <dependency>/<feature> `\. Cargo rejects any other, and these
-apply to every variant on the target\.
+Its ` features ` reach every variant as written\. A variant that
+selects packages (` variants.<v>.packages `, such as the
+package-scope runs of ` breakbulk.variants.featurePowerset `) is
+planned with ` -p <pkg> --features … `, which Cargo rejects when no
+selected package accepts a feature\. A function module that reads
+the variant’s ` config.packages ` can give such variants only what
+they accept, with ` breakbulk.lib.acceptsFeature `
+([features and package selections](\.\./\.\./how-to/targets\.md\#features-and-package-selections))\.
 
 *Type:*
 module

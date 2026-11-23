@@ -89,9 +89,11 @@ variant:
   runs that keep them, such as the `all-features` run.
 - A setting that contradicts a run, such as `noDefaultFeatures = false`
   on a `--no-default-features` run, is an evaluation error.
-- A target's `variantDefaults` apply too. A package-scope run keeps only
-  the `variantDefaults` features its package accepts
-  ([Different features per target](targets.md#different-features-per-target)).
+- The `variantDefaults` apply too, their `features` included, which
+  Cargo rejects on a package-scope run of a package that does not accept
+  them. A function module can give each run only the features its
+  package accepts
+  ([Features and package selections](targets.md#features-and-package-selections)).
 
 ## Put the runs in `repo.checks`
 

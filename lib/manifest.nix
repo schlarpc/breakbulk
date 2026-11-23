@@ -252,23 +252,37 @@ rec {
       ) ms;
     };
 
-  # Whether a `cargo … -p <pkg> --features <feature>` run accepts
-  # `feature` (one feature, as `--features` splits them) for the member
-  # whose manifest is `m` (cargo src/workspace/workspace.rs,
-  # `Workspace::collect_matching_features`): one of the package's
-  # `[features]` or optional dependencies, `<pkg>/<that>`, or
-  # `<dep>/<anything>` for any dependency (`<dep>?/…` too), named as the
-  # manifest's dependency tables key it. `dep:<name>` counts as accepted:
-  # Cargo rejects it on the command line with its own message.
-  acceptsCliFeature =
-    m: feature:
+  # What `acceptsFeature` reads of a member's manifest `m`, as
+  # `workspaces.<ws>.members.<name>` holds it: `[features]` as written,
+  # the names of its optional dependencies and of every dependency, as
+  # its dependency tables (any kind, `[target.<cfg>]` ones included) key
+  # them.
+  featureFacts =
+    m:
     let
       tables = dependencyTables m;
-      deps = concatLists (map attrNames tables);
-      optional = concatLists (
-        map (t: attrNames (lib.filterAttrs (_: d: isAttrs d && d.optional or false) t)) tables
+    in
+    {
+      features = m.features or { };
+      optionalDependencies = lib.unique (
+        concatLists (map (t: attrNames (lib.filterAttrs (_: d: isAttrs d && d.optional or false) t)) tables)
       );
-      own = f: (m.features or { }) ? ${f} || lib.elem f optional;
+      dependencies = lib.unique (concatLists (map attrNames tables));
+    };
+
+  # Whether a `cargo … -p <pkg> --features <feature>` run accepts
+  # `feature` (one feature, as `--features` splits them) for `member`
+  # (`{ name; features; optionalDependencies; dependencies; }`, as
+  # `workspaces.<ws>.members.<name>`) (cargo src/workspace/workspace.rs,
+  # `Workspace::collect_matching_features`): one of the package's
+  # `[features]` or optional dependencies, `<pkg>/<that>`, or
+  # `<dep>/<anything>` for any dependency (`<dep>?/…` too). `dep:<name>`
+  # counts as accepted: Cargo rejects it on the command line with its own
+  # message.
+  acceptsFeature =
+    member: feature:
+    let
+      own = f: member.features ? ${f} || lib.elem f member.optionalDependencies;
       parts = lib.splitString "/" feature;
       depName = lib.removeSuffix "?" (lib.head parts);
       depFeature = lib.concatStringsSep "/" (lib.tail parts);
@@ -278,7 +292,7 @@ rec {
     else if lib.length parts == 1 then
       own feature
     else
-      lib.elem depName deps || (depName == (m.package.name or null) && own depFeature);
+      lib.elem depName member.dependencies || (depName == member.name && own depFeature);
 
   # Package-level fields with workspace inheritance applied for the fields
   # that discovery needs (name, version, edition).

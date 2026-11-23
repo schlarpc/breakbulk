@@ -1720,7 +1720,7 @@ runTests "lib-unit" {
     };
 
   # Cargo's `Workspace::collect_matching_features` for one member.
-  testAcceptsCliFeature =
+  testAcceptsFeature =
     let
       m = {
         package.name = "core";
@@ -1736,7 +1736,7 @@ runTests "lib-unit" {
       };
     in
     {
-      expr = lib.filter (bb.manifest.acceptsCliFeature m) [
+      expr = lib.filter (bb.acceptsFeature ({ name = "core"; } // bb.manifest.featureFacts m)) [
         "fast"
         "json"
         "core/fast"

@@ -2660,33 +2660,50 @@ in
       repoWith =
         extra:
         mkRepo (fixtures + "/variants") [
-          {
-            workspaces.main = lib.mkMerge [
-              {
-                path = "ws";
-                toolchain = {
-                  rustc = wasmRust;
-                  cargo = wasmRust;
-                };
-                targets = {
-                  ${native} = { };
-                  # `extra` is app's feature, not lib-a's.
-                  ${wasm} = {
-                    # rust-overlay's rust-lld, as Cargo finds it.
-                    preset = null;
-                    variantDefaults = {
-                      features = [
-                        "lib-a/y"
-                        "extra"
-                      ];
-                      testProfile = "release";
+          (
+            top:
+            let
+              inherit (top.config.workspaces.main) members;
+            in
+            {
+              workspaces.main = lib.mkMerge [
+                {
+                  path = "ws";
+                  toolchain = {
+                    rustc = wasmRust;
+                    cargo = wasmRust;
+                  };
+                  targets = {
+                    ${native} = { };
+                    # `extra` is app's feature, not lib-a's: a variant
+                    # that selects packages gets only what one of them
+                    # accepts.
+                    ${wasm} = {
+                      # rust-overlay's rust-lld, as Cargo finds it.
+                      preset = null;
+                      variantDefaults =
+                        { config, ... }:
+                        {
+                          features =
+                            lib.filter
+                              (
+                                f:
+                                !(builtins.isList config.packages)
+                                || lib.any (p: breakbulk.acceptsFeature members.${p} f) config.packages
+                              )
+                              [
+                                "lib-a/y"
+                                "extra"
+                              ];
+                          testProfile = "release";
+                        };
                     };
                   };
-                };
-              }
-              extra
-            ];
-          }
+                }
+                extra
+              ];
+            }
+          )
         ];
       repo = repoWith {
         variants = lib.mkMerge [
