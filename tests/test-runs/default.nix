@@ -355,7 +355,8 @@ let
   ctlTest = {
     postRun = keepLogRun;
     env.CTL_EXPECT_NIX = "1";
-    path = [ pkgs.hello ];
+    # A function of the test machine's package set.
+    path = p: [ p.hello ];
     binaries.net.args = [
       "--skip"
       "needs_network"
