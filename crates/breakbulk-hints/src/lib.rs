@@ -14,6 +14,10 @@
 //! - under the root of another Cargo target of the package (a bin's,
 //!   example's, test's or bench's), in the view of one target's units:
 //!   `sources.targetRoots`;
+//! - inside the package directory, repeating its end (`crates/x/crates/x/…`):
+//!   a library that takes the topmost directory with a `Cargo.toml` as the
+//!   workspace root found the package's own, so the hint names a
+//!   `sources` entry that adds the workspace's root `Cargo.toml`;
 //! - under what every view of the package leaves out as junk (`target/`,
 //!   `.git`, Nix's `result` symlinks): the cause, and the view's [`Widen`]
 //!   option;
@@ -215,6 +219,9 @@ pub enum Found {
         rel: String,
         entry: String,
     },
+    /// In the package directory, repeating its end: resolved against the
+    /// package directory where the workspace root was meant.
+    WorkspaceRoot { path: PathBuf, rel: String },
     /// Inside the unit's view, outside the package directory (or anywhere,
     /// in a `test.runFiles` view), and not there.
     Missing { path: PathBuf, rel: String },
@@ -226,6 +233,7 @@ impl Found {
             Found::TestOnly { path, .. }
             | Found::TargetRoot { path, .. }
             | Found::Junk { path, .. }
+            | Found::WorkspaceRoot { path, .. }
             | Found::Missing { path, .. } => path,
         }
     }
@@ -311,6 +319,12 @@ fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Opti
             entry: e.display().to_string(),
         });
     }
+    if !exists(p) && repeats_package_dir(rel, &view.package_dir) {
+        return Some(Found::WorkspaceRoot {
+            path: p.to_owned(),
+            rel: rel.display().to_string(),
+        });
+    }
     let whole_package = !view.custom && !view.predicted && view.widen != Widen::TestRunFiles;
     if whole_package && rel.starts_with(&view.package_dir) || exists(p) {
         return None;
@@ -319,6 +333,24 @@ fn classify(p: &Path, view: &SourceView, exists: &dyn Fn(&Path) -> bool) -> Opti
         path: p.to_owned(),
         rel: rel.display().to_string(),
     })
+}
+
+/// Whether `rel` (relative to the repository root) is in the package
+/// directory `dir` and goes on with the end of `dir` again: the whole of
+/// it, or its last two components or more. A file's path relative to the
+/// workspace root (`file!()`) joined to the package directory gives that.
+fn repeats_package_dir(rel: &Path, dir: &str) -> bool {
+    let d: Vec<&str> = dir.split('/').filter(|c| !c.is_empty()).collect();
+    let r: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    if d.is_empty() || r.len() <= d.len() || r[..d.len()] != d[..] {
+        return false;
+    }
+    let rest = &r[d.len()..];
+    (1..=d.len())
+        .any(|k| (k >= 2 || k == d.len()) && rest.len() > k && rest[..k] == d[d.len() - k..])
 }
 
 /// The paths `text` names that the unit's `view` lacks, in the order
@@ -423,6 +455,12 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
                 "`{rel}` is under `{entry}`, which source views leave out as junk ({JUNK}); if \
                  the unit reads it, {}",
                 adds(&opt, view, rel)
+            ),
+            Found::WorkspaceRoot { rel, .. } => format!(
+                "`{rel}` repeats the package directory: a library that takes the topmost \
+                 directory with a `Cargo.toml` as the workspace root found the package's own; if \
+                 so, add the workspace's root `Cargo.toml` to the package's test views with an \
+                 entry of `{opt}.sources`, as `sysDefaults.dependents.snapbox` does"
             ),
             Found::Missing { rel, .. } if view.widen == Widen::TestRunFiles => format!(
                 "`{rel}` is not in this test run's `{opt}.test.runFiles`; if it is in the \
@@ -843,6 +881,29 @@ mod tests {
         let text = format!("reading {TEST_VIEW}/crates/x/tests/fixtures/gone.txt");
         let (f, _) = run(&text, &v, &[], TEST_VIEW, &[&present]);
         assert!(f.is_empty(), "{f:?}");
+    }
+
+    // A snapshot library that found the package's `Cargo.toml` as the
+    // workspace root joins `file!()` to the package directory.
+    #[test]
+    fn workspace_root_missing() {
+        let v = view(TEST_VIEW, "ws/crates/x", Widen::TestSourceScope);
+        let text = format!(
+            "Failed to read {TEST_VIEW}/ws/crates/x/crates/x/tests/snapshots/a.txt: No such file"
+        );
+        let (_, h) = run(&text, &v, &[], TEST_VIEW, &[]);
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(
+            h[0].starts_with("`ws/crates/x/crates/x/tests/snapshots/a.txt` repeats the package"),
+            "{h:?}"
+        );
+        assert!(h[0].contains("`packages.x.sources`"), "{h:?}");
+        // One component again is not enough: `crates/x/x/` is a layout.
+        assert!(!repeats_package_dir(
+            Path::new("ws/crates/x/x/a.rs"),
+            "ws/crates/x"
+        ));
+        assert!(repeats_package_dir(Path::new("x/x/a.rs"), "x"));
     }
 
     #[test]

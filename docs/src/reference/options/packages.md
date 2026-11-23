@@ -958,8 +958,6 @@ The built-in entries, in order, each made by a constructor of
    a library that ` include_str! `s an example)\.
  - ` runFiles `: [` test.runFiles `](\#packagesnametestrunfiles), for
    test runs\.
- - ` workspaceManifest `: the workspace’s root ` Cargo.toml `, for
-   test units ([` test.workspaceManifest `](\#packagesnametestworkspacemanifest))\.
 
 An entry runs after the entries its ` after ` names and before
 those its ` before ` names; one with neither runs after every
@@ -1834,31 +1832,6 @@ true
 
 *Type:*
 raw value
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.test.workspaceManifest`
-
-Whether this package’s test units and test runs see the
-workspace’s root ` Cargo.toml ` (not ` Cargo.lock `)\. Snapshot-test
-libraries (snapbox, expect-test) look for the topmost
-directory above the package with a ` Cargo.toml ` and resolve
-their snapshot paths there\. Its cost: an edit to the root
-manifest rebuilds this package’s test units and re-runs its
-tests\. Other units never see it\. Set ` false ` (in
-` memberDefaults ` for every member) when no test needs it\. See
-[Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md)\. A
-built-in step of [` sources `](\#packagesnamesources), after ` runFiles `\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-true
-```
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)

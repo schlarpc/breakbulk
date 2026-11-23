@@ -717,7 +717,7 @@ over ` sysDefaults.packages ` and under ` memberDefaults `
 The curated entries are defined at ` mkDefault ` priority, so a
 plain definition replaces one: ` null ` turns it off, a function
 replaces it, and ` sysDefaults.dependents = lib.mkForce { } ` drops
-them all\. They are: ` autocfg `, ` bevy_macro_utils `, ` bindgen `, ` cmake `, ` cxx-build `, ` find-crate `, ` glib-build-tools `, ` insta `, ` lalrpop `, ` proc-macro-crate `, ` slint-build `, ` tauri-build `, ` vergen `, ` vergen-lib `\.
+them all\. They are: ` autocfg `, ` bevy_macro_utils `, ` bindgen `, ` cmake `, ` cxx-build `, ` expect-test `, ` find-crate `, ` glib-build-tools `, ` insta `, ` lalrpop `, ` proc-macro-crate `, ` slint-build `, ` snapbox `, ` tauri-build `, ` vergen `, ` vergen-lib `\.
 ` insta ` sets ` INSTA_WORKSPACE_ROOT ` to the workspace root of the
 run’s files and ` INSTA_UPDATE = "no" `, in test runs and doctests
 (see [Run snapshot tests](\.\./\.\./how-to/snapshot-tests\.md))\.

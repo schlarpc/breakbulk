@@ -10,10 +10,10 @@ configuration rebuilds it and everything that depends on it. The members
 do not see those files.
 
 Members in subdirectories (`crates/foo`) need nothing on this page,
-unless they hold files their build does not read. Their tests also see
-the workspace's root `Cargo.toml`, for snapshot-test libraries
+unless they hold files their build does not read. The tests of a member
+that depends on snapbox also see the workspace's root `Cargo.toml`
 ([Run snapshot tests](snapshot-tests.md)), so an edit to it re-runs
-every member's tests.
+them.
 
 The views and the steps that make them are explained in
 [Fetching and source views](../explanation/internals/sources.md#source-views).
@@ -128,8 +128,8 @@ modules = [
   `...` fails on its first use.
 
 The built-in steps come first: `package` (the package directory),
-`extraSources`, `sourceScope`, `testsDir`, `targetRoots`, `runFiles` and
-`workspaceManifest`, which the reference describes. A step of yours runs
+`extraSources`, `sourceScope`, `testsDir`, `targetRoots` and `runFiles`,
+which the reference describes. A step of yours runs
 after them; `after` and `before` place it elsewhere, and `null` removes
 any step:
 

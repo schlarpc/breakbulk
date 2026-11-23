@@ -45,7 +45,6 @@ let
     "testsDir"
     "targetRoots"
     "runFiles"
-    "workspaceManifest"
   ];
 in
 rec {
@@ -346,20 +345,6 @@ rec {
         default
       else
         fs.unions (map (p: manifest.at root (util.joinRel packageDir p)) paths);
-
-    # The workspace's root `Cargo.toml` in the test units' views. After
-    # `runFiles`, because expect-test searches upwards from the run's
-    # CARGO_MANIFEST_DIR. Not the lockfile: no snapshot library reads it,
-    # and an edit to it would re-run every member's tests.
-    workspaceManifest =
-      {
-        default,
-        test,
-        root,
-        workspaceDir,
-        ...
-      }:
-      if test then fs.union default (manifest.at root (util.joinRel workspaceDir "Cargo.toml")) else default;
   };
 
   # The built-in entries of one package's `sources`, from its settings
@@ -378,8 +363,6 @@ rec {
         sourceScope = steps.testScope (test.sourceScope or [ ]);
         inherit (steps) testsDir targetRoots;
         runFiles = steps.runFiles (test.runFiles or null);
-        workspaceManifest =
-          if test.workspaceManifest or null != false then steps.workspaceManifest else ({ default, ... }: default);
       };
     in
     lib.listToAttrs (

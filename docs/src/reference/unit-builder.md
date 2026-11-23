@@ -329,6 +329,13 @@ the repository root, for each path that does not exist and is
 - under the root of another Cargo target of the package, or under
   `examples/` or `benches/`, in the view of one target's units:
   [`sources.targetRoots = null`](options/packages.md#packagesnamesources);
+- inside the package directory, going on with the end of the package
+  directory again (`crates/x/crates/x/tests/…`): a library that takes the
+  topmost directory with a `Cargo.toml` as the workspace root found the
+  package's own, so the hint names a
+  [`sources`](options/packages.md#packagesnamesources) entry adding the
+  workspace's root `Cargo.toml`, as the curated snapbox entry does
+  ([Run snapshot tests](../how-to/snapshot-tests.md#snapbox-and-expect-test));
 - under what every view of the package leaves out at its top level
   (`target/`, `.git`, and the `result` and `result-*` symlinks of `nix
   build`): that cause, and the option for the unit's kind (below);

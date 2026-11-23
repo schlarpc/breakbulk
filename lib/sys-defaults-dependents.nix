@@ -50,6 +50,49 @@ in
         default;
   };
 
+  # expect-test resolves a relative `expect_file!` path, and the file an
+  # `expect!` is in, against `CARGO_WORKSPACE_DIR` when the test runs, and
+  # only without it against the topmost directory with a `Cargo.toml`
+  # above `CARGO_MANIFEST_DIR` (1.5.1, `to_abs_ws_path`). Not the
+  # workspace's `Cargo.toml` in the views: an edit to it would re-run
+  # every dependent's tests.
+  expect-test = {
+    test.env.CARGO_WORKSPACE_DIR = run: run.workspaceRoot;
+  };
+
+  # snapbox's `file!` and `current_dir!` resolve against the topmost
+  # directory with a `Cargo.toml` above the test compile's
+  # `CARGO_MANIFEST_DIR`, which `env!` fixes when the test compiles and
+  # the run checks for (1.2.2, `cargo_rustc_current_dir!`), so the
+  # workspace's `Cargo.toml` is in its direct dependents' test views:
+  # their compiles' (the path the run checks) and their runs' (a test
+  # that runs `cargo`). Not `CARGO_RUSTC_CURRENT_DIR`, which snapbox
+  # prefers: it is read with `option_env!` when the test compiles, and no
+  # setting gives a compile its own view's path. Only direct dependents:
+  # the macros expand in the crate that calls them, and trycmd (1.2.1),
+  # which depends on snapbox, calls none of them; its cases are relative
+  # to the run's working directory.
+  snapbox =
+    { direct, ... }:
+    {
+      config = lib.mkIf direct {
+        sources.workspaceManifest =
+          {
+            default,
+            test,
+            root,
+            workspaceDir,
+            ...
+          }:
+          if test then
+            lib.fileset.union default (
+              root + "/${if workspaceDir == "" then "" else workspaceDir + "/"}Cargo.toml"
+            )
+          else
+            default;
+      };
+    };
+
   # They read the dependent's `Cargo.toml` from `CARGO_MANIFEST_DIR`
   # (proc-macro-crate also its workspace's, found with `cargo
   # locate-project --workspace` when `CARGO` is set); checked in each

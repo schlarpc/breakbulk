@@ -1879,18 +1879,19 @@ in
       '';
 
   # Snapshot tests (`snapshotsModule`), in a workspace at `ws/`: snapbox
-  # and expect-test find their files through the workspace's root
-  # Cargo.toml in the test view, insta through INSTA_WORKSPACE_ROOT; all
-  # three pass. The curated insta default sets INSTA_WORKSPACE_ROOT (a
+  # finds its files through the workspace's root Cargo.toml, which its
+  # curated default puts in its dependents' test views, expect-test
+  # through CARGO_WORKSPACE_DIR and insta through INSTA_WORKSPACE_ROOT,
+  # both set by their curated defaults; all three pass. The curated insta default sets INSTA_WORKSPACE_ROOT (a
   # function of the run) to the workspace directory of the files each
   # run reads: the "run" view for a test run (narrower with `runFiles`),
   # the test view for the doctest (a test app with `checkout`:
   # tests/test-runs).
   # `other` does not depend on insta and gets nothing; `null` turns the
   # default off. A function in `memberDefaults` gets each member's own
-  # root. The root manifest is in no "build" view: an edit to it
-  # changes only the members' test units, and none with
-  # `test.workspaceManifest = false`. The curated default also leaves the
+  # root. The root manifest is in no "build" view and in no view of
+  # `other`, which depends on none of them: an edit to it changes only
+  # snaps' test units, and none with snapbox's default off. The curated default also leaves the
   # snapshots out of every view but the runs', so an edit to the snapshot
   # under src/ changes no unit, only snaps' test runs, which read the
   # "run" view with them (INSTA_WORKSPACE_ROOT there).
@@ -1900,7 +1901,7 @@ in
       rootEdit = "echo '# A comment.' >> ws/Cargo.toml";
       got = {
         root = changedBy rootEdit [ ];
-        rootOff = changedBy rootEdit [ { workspaces.main.memberDefaults.test.workspaceManifest = false; } ];
+        rootOff = changedBy rootEdit [ { sysDefaults.dependents.snapbox = null; } ];
         snapshot = changedBy "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [ ];
         snapshotOff = changedBy "echo >> ws/crates/snaps/src/snapshots/snaps__tests__render.snap" [
           { sysDefaults.dependents.insta = null; }
@@ -1908,7 +1909,6 @@ in
       };
       want = rec {
         root = [
-          "other-0.1.0-test"
           "snaps-0.1.0-test"
           "snaps-0.1.0-test-expect"
           "snaps-0.1.0-test-snapbox"
@@ -1966,6 +1966,10 @@ in
     assert lib.assertMsg (
       exported runs."lib/snaps" "INSTA_UPDATE" == [ "no" ]
     ) "snapshots: INSTA_UPDATE";
+    assert lib.assertMsg (
+      exported runs.expect "CARGO_WORKSPACE_DIR" == exported runs.expect "INSTA_WORKSPACE_ROOT"
+      && exported i.testRuns.other."lib/other" "CARGO_WORKSPACE_DIR" == null
+    ) "snapshots: expect-test's CARGO_WORKSPACE_DIR";
     assert lib.assertMsg (
       (doctestEnv i "snaps").INSTA_WORKSPACE_ROOT or null == wsIn (testView i "snaps")
     ) "snapshots: the doctest's env ${builtins.toJSON (doctestEnv i "snaps")}";

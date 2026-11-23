@@ -394,7 +394,6 @@ let
         packages.bin-dirs.extraSources = [ "../../shared/bin" ];
         # A "run" view with no file of the package.
         packages.virtual-sub.test.runFiles = [ ];
-        packages.normalized.test.workspaceManifest = false;
       };
     in
     assert lib.assertMsg (
@@ -406,7 +405,7 @@ let
     pkgs.runCommand "source-views" { } ''
       r=${views.virtual-sub.runSrc}/virtual-sub
       test -d $r && test -z "$(ls -A $r)"         # the package directory, empty
-      test -f $r/../Cargo.toml                    # the workspace manifest, still
+      test ! -e $r/../Cargo.toml                  # nor the workspace manifest
       t=${views.bin-dirs.testSrc}
       test -f $t/Cargo.toml && test ! -e $t/Cargo.lock
       v=${views.virtual-sub.src}

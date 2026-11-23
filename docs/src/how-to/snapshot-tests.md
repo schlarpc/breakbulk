@@ -11,27 +11,52 @@ says what each library needs there.
 
 | Library | How it finds its files | In breakbulk |
 | --- | --- | --- |
-| snapbox (`file![…]`, `str![…]`) | `CARGO_RUSTC_CURRENT_DIR` at compile time, when the project sets it in `[env]`; otherwise the topmost directory above the compile's `CARGO_MANIFEST_DIR` that has a `Cargo.toml` | works |
+| snapbox (`file![…]`, `str![…]`) | `CARGO_RUSTC_CURRENT_DIR` at compile time, when the project sets it in `[env]`; otherwise the topmost directory above the compile's `CARGO_MANIFEST_DIR` that has a `Cargo.toml` (checked when the test runs) | works, with a curated default, [below](#snapbox-and-expect-test) |
 | trycmd | case files relative to the working directory | works |
-| expect-test (`expect_file![…]`) | `CARGO_WORKSPACE_DIR` at run time; otherwise the topmost directory above the run's `CARGO_MANIFEST_DIR` that has a `Cargo.toml` | works |
+| expect-test (`expect_file![…]`) | `CARGO_WORKSPACE_DIR` at run time; otherwise the topmost directory above the run's `CARGO_MANIFEST_DIR` that has a `Cargo.toml` | works, with a curated default, [below](#snapbox-and-expect-test) |
 | insta | `INSTA_WORKSPACE_ROOT` at run time, then at compile time; otherwise `cargo metadata --no-deps` in the package directory | works, with a curated default, [below](#insta) |
 
-snapbox and expect-test work because every member's test units and test
-runs see the workspace's root `Cargo.toml`
-([`test.workspaceManifest`](../reference/options/packages.md#packagesnametestworkspacemanifest)).
-They do not see `Cargo.lock`. Test runs run in the package directory of
-the view, as Cargo runs them, so trycmd's paths work as they are.
+Test runs run in the package directory of the view, as Cargo runs them,
+so trycmd's paths work as they are. No view holds the workspace's root
+`Cargo.toml` or `Cargo.lock` unless something puts it there, so an edit
+to the root manifest re-runs no test of a package that does not need it.
 
-The root manifest has a cost: an edit to it rebuilds every member's test
-binaries and re-runs every test, also when the plan does not change. The
-library, bins and products never see the file, so they do not rebuild.
-If no test needs the file, turn it off for every member:
+## snapbox and expect-test
+
+Two curated
+[`sysDefaults.dependents`](../reference/options/repository.md#sysdefaultsdependents)
+entries cover them:
+
+- **snapbox**: every package that depends on snapbox directly gets a
+  [`sources`](../reference/options/packages.md#packagesnamesources) entry,
+  `workspaceManifest`, that puts the workspace's root `Cargo.toml` in its
+  test views: its test compiles' and its test runs'. snapbox fixes the
+  compile's `CARGO_MANIFEST_DIR` when the test compiles and looks for the
+  topmost `Cargo.toml` above it when the test runs, so both need the
+  file. An edit to the root manifest then rebuilds that package's test
+  binaries and re-runs its tests; its library, bins and products never
+  see the file. trycmd, which depends on snapbox, needs nothing: it calls
+  none of these macros.
+- **expect-test**: every package that depends on it gets
+  `CARGO_WORKSPACE_DIR` in its test runs' environment, the workspace root
+  in the files the run reads (as `INSTA_WORKSPACE_ROOT`
+  [below](#insta)). No file is added, so an edit to the root manifest
+  re-runs none of its tests.
+
+`sysDefaults.dependents.snapbox = null` turns the first off. Another
+library that looks for the topmost `Cargo.toml` finds the package's
+instead; its failure names a path that repeats the package directory
+(`crates/x/crates/x/tests/…`), and the hint names a `sources` entry. Add
+the root manifest as snapbox's entry does:
 
 ```nix
-workspaces.main.memberDefaults.test.workspaceManifest = false;
+packages.my-crate.sources.workspaceManifest = { default, test, root, workspaceDir, ... }:
+  if test
+  then lib.fileset.union default (root + "/${workspaceDir}/Cargo.toml")
+  else default;
 ```
 
-or for one package with `packages.<name>.test.workspaceManifest = false`.
+(for a workspace at the repository root, `root + "/Cargo.toml"`).
 
 ## insta
 
