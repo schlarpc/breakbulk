@@ -59,6 +59,36 @@ attribute set of list of (string or package)
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
 
+## `checks`
+
+Your own checks, each a named leaf of ` repo.checks ` (and the
+flake’s ` checks `), beside breakbulk’s: a name may hold ` / `, and
+then makes groups as breakbulk’s names do (` lint/deny ` is in the
+group ` lint `, [check groups](\.\./outputs\.md\#checks)), and
+` checkGroups ` patterns match it\. A name that is already one of
+breakbulk’s checks is an error\.
+
+*Type:*
+attribute set of package
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  "lint/deny" = pkgs.runCommand "deny" { } "cargo-deny … && touch $out";
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
 ## `crateSources`
 
 Functions that supply the source of a registry or git dependency

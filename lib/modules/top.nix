@@ -343,6 +343,24 @@ in
       '';
     };
 
+    checks = mkOption {
+      type = types.attrsOf types.package;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          "lint/deny" = pkgs.runCommand "deny" { } "cargo-deny … && touch $out";
+        }
+      '';
+      description = ''
+        Your own checks, each a named leaf of `repo.checks` (and the
+        flake's `checks`), beside breakbulk's: a name may hold `/`, and
+        then makes groups as breakbulk's names do (`lint/deny` is in the
+        group `lint`, [check groups](../outputs.md#checks)), and
+        `checkGroups` patterns match it. A name that is already one of
+        breakbulk's checks is an error.
+      '';
+    };
+
     checkGroups = mkOption {
       type = types.attrsOf (types.listOf (types.either types.str types.package));
       default = { };

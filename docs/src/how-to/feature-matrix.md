@@ -97,7 +97,8 @@ variant:
 
 ## Put the runs in `repo.checks`
 
-A generated variant has `checks = false` at `lib.mkDefault` priority, so
-the test runs and products of a large matrix stay out of `repo.checks`.
-A check or clippy variant's `check` derivation is in `repo.checks`
-anyway. To add the test runs too, set `variant.checks = true`.
+A generated variant has `checks.products`, `checks.tests` and
+`checks.benches` set to `false` at `lib.mkDefault` priority, so the
+runs and products of a large matrix stay out of `repo.checks`. A check or clippy variant's
+`check` derivation is in `repo.checks` anyway (`checks.check`). To add
+the test runs too, set `variant.checks.tests = true`.

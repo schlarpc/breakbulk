@@ -915,9 +915,29 @@ in
               marker
             ];
           };
+          # A user's own leaf, in the groups of its name.
+          checks."lint/deny" = marker;
         }
       ];
       c = repo.checks;
+      # The variant's `checks` record: a clippy variant's `check` left out
+      # and its docs put in.
+      record =
+        (groupsRepo [
+          {
+            workspaces.a = {
+              variants.clippy = {
+                mode = "clippy";
+                profile = "dev";
+                checks = {
+                  check = false;
+                  docs = true;
+                };
+              };
+            };
+          }
+        ]).checks;
+      recordLeaves = lib.filter (n: !(record.${n}.breakbulkCheckGroup or false)) (lib.attrNames record);
       isGroup = n: c.${n}.breakbulkCheckGroup or false;
       leaves = lib.filter (n: !(isGroup n)) (lib.attrNames c);
       entriesOf = n: lib.sort lib.lessThan (lib.attrNames c.${n}.passthru.entries);
@@ -927,6 +947,22 @@ in
     assert lib.assertMsg (
       c ? a && c ? b && c ? "a/${native}" && c ? all
     ) "check-groups: groups ${toString (lib.filter isGroup (lib.attrNames c))}";
+    assert lib.assertMsg (
+      c ? "lint/deny"
+      && isGroup "lint"
+      && entriesOf "lint" == [ "lint/deny" ]
+      && lib.elem "lint/deny" (entriesOf "all")
+    ) "check-groups: the user's own check lint/deny";
+    assert lib.assertMsg (failsOn [
+      { checks."a/${native}/buildScriptPaths/build" = marker; }
+    ]) "check-groups: a user's check named as breakbulk's";
+    assert lib.assertMsg (
+      !(lib.any (lib.hasPrefix "a/${native}/variant-clippy/") (
+        lib.remove "a/${native}/variant-clippy/docs" recordLeaves
+      ))
+      && lib.elem "a/${native}/variant-clippy/docs" recordLeaves
+      && lib.elem "a/${native}/app-a/build" recordLeaves
+    ) "check-groups: checks record ${toString recordLeaves}";
     assert lib.assertMsg (
       entriesOf "a" == under "a"
     ) "check-groups: a holds ${toString (entriesOf "a")}";

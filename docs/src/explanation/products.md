@@ -499,7 +499,8 @@ by its name (`--skip "src/lib.rs - net::connect"`); per-binary
 **Benches** come only from a bench variant (`cargo bench --no-run`, bench
 profile), which gives optimized bench binaries to run outside Nix.
 `cargo test --no-run` builds no benches. Each bench binary also runs
-once in test mode, as a check of that variant (`<pkg>/bench-<name>`),
+once in test mode, as a check of that variant (`<pkg>/bench-<name>`,
+[`checks.benches`](../reference/options/workspaces.md#workspacesnamevariantsnamechecksbenches)),
 so that a bench that no longer runs fails CI; timed runs never happen
 inside Nix. Bench runs are runs like the others, with their own layer of
 run settings,
@@ -528,7 +529,7 @@ default variant's. Open `<crate>/index.html` in it, as in Cargo's
   merge them later. So any change to any documented crate runs every
   rustdoc again. That is why a variant's docs are in `repo.checks` only
   with
-  [`docs.check = true`](../reference/options/workspaces.md#workspacesnamevariantsnamedocscheck).
+  [`checks.docs = true`](../reference/options/workspaces.md#workspacesnamevariantsnamechecksdocs).
   The flake-parts module puts each workspace's docs (the default target
   and variant's) in the flake's `packages` as `<ws>-docs`.
 - The crates rustdoc reads are check-mode units: metadata only, no code.

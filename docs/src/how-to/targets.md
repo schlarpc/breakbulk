@@ -235,8 +235,8 @@ workspaces.default.variants.minimal = {
 };
 workspaces.default.variants.default = {
   # Test runs in repo.checks on wasm only.
-  checks = false;
-  target.wasm32-unknown-unknown.checks = true;
+  checks.tests = false;
+  target.wasm32-unknown-unknown.checks.tests = true;
 };
 ```
 
@@ -253,7 +253,7 @@ The layers apply in this order:
 holds settings for every variant of the workspace, on every target.
 
 Lists such as `features` concatenate, in this order. A single value,
-such as `profile` or `checks`, set in two layers takes the later layer's
+such as `profile` or `checks.tests`, set in two layers takes the later layer's
 value: a variant's own setting wins over the target's defaults, as a
 package's own settings win over `memberDefaults`. A fact about the
 target that every variant must keep takes `lib.mkForce` in

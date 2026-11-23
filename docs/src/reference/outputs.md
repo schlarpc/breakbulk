@@ -123,7 +123,7 @@ by default) documents the planned packages only (`cargo doc --no-deps`);
 `false` documents their dependencies too. Proc macros are in the same
 folder. The doc plan (`plans.<triple>.<v>.doc`) is traced only when
 `docs` is used. A variant's docs are in `checks` only with
-[`docs.check`](options/workspaces.md#workspacesnamevariantsnamedocscheck)
+[`checks.docs`](options/workspaces.md#workspacesnamevariantsnamechecksdocs)
 (`false` by default), as `<ws>/<triple>/docs` for the default variant.
 See
 [Documentation](../explanation/products.md#documentation).
@@ -138,26 +138,35 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 | product check | `…/<pkg>/<check>` | `…/variant-<v>/<pkg>/<check>` |
 | test run | `…/<pkg>/test-<name>` | `…/variant-<v>/<pkg>/test-<name>` |
 | doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
-| bench run, with `benches` | `…/<pkg>/bench-<name>` | `…/variant-<v>/<pkg>/bench-<name>` |
+| bench run | `…/<pkg>/bench-<name>` | `…/variant-<v>/<pkg>/bench-<name>` |
 | plan check | `…/buildScriptPaths/<plan>` | `…/variant-<v>/buildScriptPaths/<plan>` |
 | check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
-| docs, with `docs.check` | `<ws>/<triple>/docs` | `<ws>/<triple>/variant-<v>/docs` |
+| docs | `<ws>/<triple>/docs` | `<ws>/<triple>/variant-<v>/docs` |
+| your own | `<name>` of [`checks`](options/repository.md#checks) | |
 
-The first six rows come from every build or coverage variant with
-[`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)
-(the default for hand-written variants, not for the feature-matrix
-helpers'). A product whose roots Cargo all skipped is left out, and so
-is a run turned off with its `enable`
+Each variant's
+[`checks`](options/workspaces.md#workspacesnamevariantsnamechecksproducts)
+record says which of its outputs are in: `products` (products and
+product checks), `tests` (test runs and doctests), `benches` (bench runs,
+of a variant with `benches`), `check` and `docs`. All but `docs` are
+on by default for hand-written variants; the feature-matrix helpers'
+variants have `products`, `tests` and `benches` off. Like any variant
+setting, the record can be set for every variant in
+`workspaces.<ws>.variantDefaults` and for one target in its
+`variantDefaults`. A product whose roots Cargo all skipped is left out,
+and so is a run turned off with its `enable`
 ([run settings](../explanation/configuration.md#run-settings):
 [`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable),
 [`test.doctest.enable`](options/packages.md#packagesnametestdoctestenable),
 [`bench.enable`](options/packages.md#packagesnamebenchenable)).
 A plan check is
 [`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths)
-of each plan the variant traces: the build plan (`<plan>` is `build`)
-unless it has `products = false`, and the test plan (`test`) unless it
-has `tests = false`. A check or clippy variant's `check` builds the
-same plans.
+of a plan the variant traces (the build plan, `<plan>` is `build`,
+unless it has `products = false`; the test plan, `test`, unless it has
+`tests = false`) whose outputs are in: the build plan's with
+`checks.products`, the test plan's with `checks.tests`, on any target;
+a check or clippy variant's with `checks.check`, for the plans its
+`check` builds.
 
 Groups are checks too, each an aggregate (a `linkFarm` of the checks it
 holds) that builds them as one installable
@@ -191,7 +200,7 @@ the shape of a flake's `apps` output (`{ type = "app"; program; meta; }`),
 for `apps.<system> = repo.apps;`. Each is named as its test run's check
 in the table above (`…/<pkg>/test-<name>`,
 `…/variant-<v>/<pkg>/test-<name>`), also when the variant has
-`checks = false` or the run is disabled. A target with
+`checks.tests = false` or the run is disabled. A target with
 `canRunTests = false` has none.
 
 ```

@@ -376,7 +376,7 @@ let
             (`cargo build`, `cargo test`). `check`: `cargo check`
             and `cargo check --all-targets`, metadata only, no products or
             test runs; `target.<triple>.variants.<v>.check` builds every
-            unit and is in `repo.checks`. `clippy`: as `check`, with
+            unit and is in `repo.checks` (`checks.check`). `clippy`: as `check`, with
             clippy-driver as `RUSTC_WORKSPACE_WRAPPER` (workspace members
             only, so dependencies are shared with `check`), and the
             `clippy.toml` files of each member's directory and its parents
@@ -528,7 +528,7 @@ let
           description = ''
             This variant's settings on one of its targets: any option of
             the variant (`features`, `noDefaultFeatures`, `profile`,
-            `testProfile`, `cargoConfig`, `clippyArgs`, `packages`, `tests`, `benches`, `checks`, …)
+            `testProfile`, `cargoConfig`, `clippyArgs`, `packages`, `tests`, `benches`, `checks.tests`, …)
             except `targets`. They apply over the target's
             `variantDefaults`
             (`workspaces.<ws>.targets.<triple>.variantDefaults`) and the
@@ -599,37 +599,67 @@ let
             ${excludeFormDoc}
           '';
         };
-        checks = mkOption {
-          type = types.bool;
-          default = true;
-          description = ''
-            Put this build or coverage variant's outputs in `repo.checks`:
-            its products (`<pkg>/build`), their checks (`<pkg>/<check>`),
-            its enabled test runs (`<pkg>/test-<name>`), doctests
-            (`<pkg>/doctest`) and bench runs (`<pkg>/bench-<name>`, with
-            `benches`). The default variant's are under
-            `<ws>/<triple>/`, any other variant's under
-            `<ws>/<triple>/variant-<v>/`. A product whose roots Cargo all
-            skipped (required features) is left out. Check and clippy
-            variants have no products or test runs; their `check` is in
-            `repo.checks` regardless.
-            Variants made by `breakbulk.variants.featurePowerset` set
-            this to `false` with `lib.mkDefault`, so any plain
-            definition, such as one in its `variant`, overrides it.
-          '';
-        };
-        docs.check = mkOption {
-          type = types.bool;
-          default = false;
-          example = true;
-          description = ''
-            Put this variant's documentation (`target.<triple>.variants.<v>.docs`)
-            in `repo.checks`, as `<ws>/<triple>/docs` for the default
-            variant and `<ws>/<triple>/variant-<v>/docs` for the others,
-            in any mode and whatever `checks` says. Off by default: any
-            change to a documented crate runs every rustdoc of the
-            variant again.
-          '';
+        checks = {
+          products = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Put this build or coverage variant's products in
+              `repo.checks`, as `<pkg>/build`, and their checks, as
+              `<pkg>/<check>`, under the variant's prefix:
+              `<ws>/<triple>/` for the default variant,
+              `<ws>/<triple>/variant-<v>/` for the others. A product
+              whose roots Cargo all skipped (required features) is left
+              out. Variants made by `breakbulk.variants.featurePowerset`
+              set this, `tests` and `benches` to `false` with
+              `lib.mkDefault`, so any plain definition, such as one in its
+              `variant`, overrides it.
+            '';
+          };
+          tests = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Put this build or coverage variant's enabled test runs
+              (`<pkg>/test-<name>`, `test.binaries.<key>.enable`) and
+              doctests (`<pkg>/doctest`, `test.doctest.enable`) in
+              `repo.checks`, on a target that can run tests
+              (`canRunTests`).
+            '';
+          };
+          benches = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Put this build or coverage variant's enabled bench runs
+              (`<pkg>/bench-<name>`, each bench binary of
+              [`benches`](#workspacesnamevariantsnamebenches) once in test
+              mode, `bench.enable`) in `repo.checks`, on a target that can
+              run tests. Timed runs never happen inside Nix.
+            '';
+          };
+          docs = mkOption {
+            type = types.bool;
+            default = false;
+            example = true;
+            description = ''
+              Put this variant's documentation
+              (`target.<triple>.variants.<v>.docs`) in `repo.checks`, as
+              `<ws>/<triple>/docs` for the default variant and
+              `<ws>/<triple>/variant-<v>/docs` for the others, in any
+              mode. Off by default: any change to a documented crate runs
+              every rustdoc of the variant again.
+            '';
+          };
+          check = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Put this check or clippy variant's `check` (every unit of
+              its plans) in `repo.checks`, as
+              `<ws>/<triple>/variant-<v>/check`.
+            '';
+          };
         };
         sourcePaths = mkOption {
           type = types.enum [

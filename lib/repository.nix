@@ -52,16 +52,15 @@
 # was built, the product is the first stub, which fails with the reason.
 # Every root is also under `.roots."<kind>/<target>"`.
 #
-# repo.checks: for each build or coverage variant with `checks = true`,
+# repo.checks: for each variant, the outputs its `checks` record names,
 # `<pkg>/build` (the product), `<pkg>/<check>` (its checks),
 # `<pkg>/test-<name>` and `<pkg>/doctest` (enabled test runs and
-# doctests), `buildScriptPaths/{build,test}` (the plans' checks), under
+# doctests), `<pkg>/bench-<name>` (bench runs),
+# `buildScriptPaths/{build,test}` (the plans' checks), `docs`, under
 # `<ws>/<triple>/` for the default variant and `<ws>/<triple>/variant-<v>/`
 # for the others; check and clippy variants as
-# `<ws>/<triple>/variant-<v>/check` and `…/buildScriptPaths/<plan>`.
-# A variant with `docs.check` (any mode) adds its docs as `docs` under its
-# prefix.
-# Every proper prefix of those names,
+# `<ws>/<triple>/variant-<v>/check` and `…/buildScriptPaths/<plan>`;
+# then the user's own `checks.<name>`. Every proper prefix of those names,
 # `all` and each of `checkGroups` is also a check: an aggregate of the
 # checks it selects (lib/check-groups.nix).
 #
@@ -1687,15 +1686,16 @@ let
 
   workspaces = lib.mapAttrs workspaceOut cfg.workspaces;
 
-  # repo.checks, for every workspace and target, from each build or
-  # coverage variant with `checks = true` (the default variant's under the
-  # target, the others' under `variant-<v>/`): its products that built
-  # something (`<pkg>/build`) and their checks, every enabled test run
-  # (`<pkg>/test-<name>`, named as in `tests`) and doctest, and the
-  # plans' `buildScriptPaths/<plan>`; check and clippy variants' `check`
-  # and `buildScriptPaths/<plan>`; and the docs of every variant with
-  # `docs.check`.
-  checks =
+  # repo.checks, for every workspace and target, from each variant, as
+  # its `checks` record says (the default variant's under the target, the
+  # others' under `variant-<v>/`): a build or coverage variant's products
+  # that built something (`<pkg>/build`) and their checks (`products`),
+  # every enabled test run (`<pkg>/test-<name>`, named as in `tests`) and
+  # doctest (`tests`), and bench run (`benches`); a check or clippy
+  # variant's `check` (`check`); the `buildScriptPaths/<plan>` of the
+  # plans whose outputs are in; and the docs
+  # (`docs`). Then the user's own (`checks.<name>`).
+  generatedChecks =
     lib.concatMapAttrs (
       wsName: w:
       lib.concatMapAttrs (
@@ -1704,7 +1704,19 @@ let
           vName: v:
           let
             vc = variantCells.${wsName}.${triple}.${vName};
+            c = vc.checks;
+            building = vc.mode == "build" || vc.mode == "coverage";
             prefix = variantPrefix wsName triple vName;
+            # The plans whose outputs are in repo.checks.
+            plansIn =
+              if building then
+                lib.optional c.products "build" ++ lib.optional c.tests "test"
+              else
+                lib.optionals c.check [
+                  "build"
+                  "test"
+                ];
+            planChecks = lib.filterAttrs (kind: _: lib.elem kind plansIn) v.buildScriptPaths;
             # IFD mode checks the variant's `productInputs` here.
             verified =
               d:
@@ -1714,7 +1726,7 @@ let
                 throw (lib.concatStringsSep "\n" v.productInputErrors);
           in
           lib.mapAttrs (_: verified) (
-            lib.optionalAttrs (vc.checks && (vc.mode == "build" || vc.mode == "coverage")) (
+            lib.optionalAttrs (building && c.products) (
               lib.concatMapAttrs (
                 pkg: p:
                 # IFD mode leaves out a product whose roots Cargo all skipped
@@ -1729,43 +1741,45 @@ let
                   // lib.mapAttrs' (n: c: lib.nameValuePair "${prefix}/${pkg}/${n}" c) (p.checks or { })
                 )
               ) v.packages
-              // lib.mapAttrs' (
-                kind: c: lib.nameValuePair "${prefix}/buildScriptPaths/${kind}" c
-              ) v.buildScriptPaths
-              // lib.optionalAttrs t.canRunTests (
-                lib.concatMapAttrs (
-                  pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
-                ) v.namedTestRuns
-                // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
-                // lib.concatMapAttrs (
-                  pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/bench-${n}" d) rs.enabled
-                ) v.namedBenchRuns
-              )
+            )
+            // lib.optionalAttrs (building && c.tests && t.canRunTests) (
+              lib.concatMapAttrs (
+                pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
+              ) v.namedTestRuns
+              // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
+            )
+            // lib.optionalAttrs (building && c.benches && t.canRunTests) (
+              lib.concatMapAttrs (
+                pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/bench-${n}" d) rs.enabled
+              ) v.namedBenchRuns
+            )
+            // lib.optionalAttrs building (
+              lib.mapAttrs' (kind: d: lib.nameValuePair "${prefix}/buildScriptPaths/${kind}" d) planChecks
             )
           )
-        ) t.variants
-        // lib.concatMapAttrs (
-          vName: v:
-          lib.optionalAttrs (variantCells.${wsName}.${triple}.${vName}.docs.check) {
-            "${variantPrefix wsName triple vName}/docs" = v.docs;
-          }
-        ) t.variants
-        // lib.concatMapAttrs (
-          vName: v:
-          lib.optionalAttrs (v ? check) (
+          // lib.optionalAttrs (v ? check && c.check) (
             {
               "${wsName}/${triple}/variant-${vName}/check" = v.check;
             }
             // lib.mapAttrs' (
-              kind: c: lib.nameValuePair "${wsName}/${triple}/variant-${vName}/buildScriptPaths/${kind}" c
-            ) v.buildScriptPaths
+              kind: d: lib.nameValuePair "${wsName}/${triple}/variant-${vName}/buildScriptPaths/${kind}" d
+            ) planChecks
           )
+          // lib.optionalAttrs c.docs { "${prefix}/docs" = v.docs; }
         ) t.variants
       ) w.target
     ) workspaces
     // lib.concatMapAttrs (
       wsName: ws: lib.optionalAttrs ws.fmt.enable { "${wsName}/fmt" = fmtCheck wsName ws; }
     ) cfg.workspaces;
+  checks =
+    let
+      taken = lib.attrNames (builtins.intersectAttrs cfg.checks generatedChecks);
+    in
+    if taken != [ ] then
+      throw "breakbulk: checks.\"${lib.head taken}\"${bt.setIn eval.options.checks}: the name is one of breakbulk's own checks; choose another"
+    else
+      generatedChecks // cfg.checks;
 
   # Where a variant's checks are named: `<ws>/<triple>` for the default
   # variant, `<ws>/<triple>/variant-<v>` for the others.
@@ -1779,7 +1793,7 @@ let
   # repo.apps: every test app of every build or coverage variant, in a
   # flake's `apps` shape, named as its test run's check
   # (`<prefix>/<pkg>/test-<name>`). Unlike repo.checks, it does not ask
-  # for `checks = true` or an enabled run: the sandbox's skip lists and
+  # for `checks.tests` or an enabled run: the sandbox's skip lists and
   # disabled runs are what a test app is for. A target that cannot run
   # tests here (`canRunTests`) has none, as its apps would only fail.
   apps = lib.concatMapAttrs (

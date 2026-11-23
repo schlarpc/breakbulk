@@ -258,7 +258,7 @@ rec {
     options:
     let
       optionAt = path: lib.attrByPath path null options;
-      # A group of options (`docs` of `docs.check`), not an option.
+      # A group of options (`checks` of `checks.docs`), not an option.
       isGroup =
         path:
         let

@@ -102,7 +102,7 @@
 #   variants-narrowing   `variants.<v>.targets`, `variants.<v>.packages`
 #                    and `variants.<v>.tests` narrow plans and outputs per
 #                    target; other variants' test runs are in repo.checks
-#                    under `variant-<v>/` unless `checks = false`; a
+#                    under `variant-<v>/` unless `checks.tests = false`; a
 #                    test-only variant; `packages = false`
 #   tests-only       `tests = false` on wasm32 and `products = false` on
 #                    the native target, through the targets'
@@ -756,7 +756,10 @@ let
           release-tests = {
             profile = "release";
             testProfile = "release";
-            checks = false;
+            checks = {
+              products = false;
+              tests = false;
+            };
           };
           check = {
             mode = "check";
@@ -1214,7 +1217,7 @@ let
   # "document output filename collision" on this workspace (the proc macro
   # `derive` is a member and a dependency of `util`), as it does outside
   # breakbulk (rust-lang/cargo#10368); `--no-deps` and `dev` do not.
-  # `docs.check` from the target's `variantDefaults`, replaced in the check
+  # `checks.docs` from the target's `variantDefaults`, replaced in the check
   # variant's own target settings: only the default variant's docs are in
   # repo.checks.
   docsRepo =
@@ -1224,12 +1227,12 @@ let
         workspaces.main = {
           path = ".";
           variantDefaults.docs.noDeps = noDeps;
-          targets.${native}.variantDefaults.docs.check = true;
+          targets.${native}.variantDefaults.checks.docs = true;
           variants.default = { inherit profile; };
           variants.check = {
             mode = "check";
             inherit profile;
-            target.${native}.docs.check = false;
+            target.${native}.checks.docs = false;
           };
         };
       }
@@ -1702,6 +1705,25 @@ in
         (builtins.fromJSON (builtins.unsafeDiscardStringContext critUnit.drvAttrs.BREAKBULK_UNIT)).args
       );
       smoke = lib.filterAttrs (n: _: lib.hasInfix "/bench-" n) benchesRepo.checks;
+      # `checks.benches = false` leaves the bench runs out of repo.checks,
+      # not out of `benchRuns`; the bench plan selected by a list.
+      viaRecord = mkRepo (fixtures + "/benches") [
+        {
+          workspaces.main = {
+            path = ".";
+            memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
+            variants = {
+              default.profile = "dev";
+              bench = {
+                profile = "bench";
+                benches = [ "bencher" ];
+                checks.benches = false;
+              };
+            };
+          };
+        }
+      ];
+      recordRuns = lib.filterAttrs (n: _: lib.hasInfix "/bench-" n) viaRecord.checks;
     in
     assert lib.assertMsg (
       lib.attrNames t.benches.bencher == [
@@ -1741,6 +1763,9 @@ in
         lib.attrValues (lib.filterAttrs (n: _: lib.hasPrefix "test/" n) w.instances.${native}.bench.checks)
       )
     ) "benches: `bench` env reaches bench runs only";
+    assert lib.assertMsg (
+      recordRuns == { } && viaRecord.workspaces.main.target.${native}.benchRuns ? bencher
+    ) "benches: checks.benches = false kept ${builtins.toJSON (lib.attrNames recordRuns)}";
     pkgs.runCommand "benches"
       (
         {
@@ -2492,7 +2517,10 @@ in
                   "app"
                 ];
                 features = [ "lib-a/y" ];
-                checks = false;
+                checks = {
+                  products = false;
+                  tests = false;
+                };
               };
               musl-check = {
                 mode = "check";
@@ -2952,8 +2980,14 @@ in
                   (repoWith {
                     variants.default = {
                       profile = "release";
-                      checks = false;
-                      target.${wasm}.checks = true;
+                      checks = {
+                        products = false;
+                        tests = false;
+                      };
+                      target.${wasm}.checks = {
+                        products = true;
+                        tests = true;
+                      };
                     };
                   }).checks;
             in

@@ -120,7 +120,7 @@ let
                   type = lib.types.listOf lib.types.str;
                   default = [ ];
                 };
-                # A group of options, as a variant's `docs.check`.
+                # A group of options, as a variant's `checks` is.
                 docs.check = lib.mkOption {
                   type = lib.types.bool;
                   default = false;
@@ -1079,7 +1079,8 @@ runTests "lib-unit" {
   # to in.
   testGeneratedVariantChecks =
     let
-      checksOf = vs: lib.unique (lib.mapAttrsToList (_: v: v.checks) vs);
+      # Products and test runs together, as the generator sets both.
+      checksOf = vs: lib.unique (lib.mapAttrsToList (_: v: v.checks.products && v.checks.tests) vs);
     in
     {
       expr = {
@@ -1087,7 +1088,10 @@ runTests "lib-unit" {
         packageOptIn = checksOf (
           powersetVariants {
             scope = "package";
-            variant.checks = true;
+            variant.checks = {
+              products = true;
+              tests = true;
+            };
           } { }
         );
         workspace = checksOf (
@@ -1100,12 +1104,23 @@ runTests "lib-unit" {
           } { }
         );
         workspaceOptIn = checksOf (
-          powersetVariants {
-            scope = "workspace";
-            features = [ "lib-a/x" ];
-          } { variants.features-none.checks = true; }
+          powersetVariants
+            {
+              scope = "workspace";
+              features = [ "lib-a/x" ];
+            }
+            {
+              variants.features-none.checks = {
+                products = true;
+                tests = true;
+              };
+            }
         );
-        handWritten = (powersetVariants { scope = "package"; } { variants.mine = { }; }).mine.checks;
+        handWritten =
+          let
+            c = (powersetVariants { scope = "package"; } { variants.mine = { }; }).mine.checks;
+          in
+          c.products && c.tests;
       };
       expected = {
         package = [ false ];

@@ -37,6 +37,20 @@ target. Test binaries, test runs and doctests are unchanged, so a helper
 crate with tests is still built for them. `products = false` leaves out
 every product.
 
+## Your own checks
+
+A check of your own, such as a license audit, becomes a leaf of
+`repo.checks` with
+[`checks`](../reference/options/repository.md#checks), in the same
+groups as breakbulk's:
+
+```nix
+checks."lint/deny" = pkgs.runCommand "deny" { } "…; touch $out";
+```
+
+`nix build .#checks.x86_64-linux.lint` then builds every check under
+`lint/`, and `all` holds it too.
+
 ## Why one installable
 
 With the evaluation cache off (`--no-eval-cache`, or a CI runner without

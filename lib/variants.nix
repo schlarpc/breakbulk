@@ -41,8 +41,9 @@
 #                             `variants.<v>` setting (`mode`, `profile`,
 #                             `targets`, `checks`, more `features`, …).
 #
-# Generated variants have `checks = lib.mkDefault false`: their test runs
-# stay out of repo.checks unless `variant` or another definition says
+# Generated variants have `checks.products`, `checks.tests` and
+# `checks.benches` at `lib.mkDefault false`: their products and runs stay
+# out of repo.checks unless `variant` or another definition says
 # otherwise. The generator defines only what a run needs, as plain
 # definitions (`noDefaultFeatures = true`, `allFeatures = true`, its
 # `features` and `packages`), so every other definition of a generated
@@ -308,9 +309,13 @@ let
           lib.nameValuePair r.name (_: {
             imports = [ variant ];
             config = r.settings // {
-              # Generated variants' test runs stay out of repo.checks
-              # unless asked for.
-              checks = lib.mkDefault false;
+              # Generated variants' products and runs stay out of
+              # repo.checks unless asked for.
+              checks = {
+                products = lib.mkDefault false;
+                tests = lib.mkDefault false;
+                benches = lib.mkDefault false;
+              };
             };
           })
         ) runs

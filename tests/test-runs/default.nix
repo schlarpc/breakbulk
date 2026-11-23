@@ -629,7 +629,7 @@ let
 
   # repo.apps over the same fixture through mkRepository: every test app
   # of every build variant, named as its test run's check, a disabled run's
-  # and a `checks = false` variant's included; each in the flake app shape,
+  # and a `checks.tests = false` variant's included; each in the flake app shape,
   # its program the one `nix run` runs for the variant's test app.
   ctlRepo = breakbulk.mkRepository {
     inherit pkgs tools;
@@ -641,7 +641,10 @@ let
           variants.default.profile = "dev";
           variants.unchecked = {
             profile = "dev";
-            checks = false;
+            checks = {
+              products = false;
+              tests = false;
+            };
           };
         };
         packages.ctl.test = ctlTest // {
