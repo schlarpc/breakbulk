@@ -438,9 +438,13 @@ More arguments for `wasm-bindgen`, before the input file.
 The wasm-bindgen CLI. It must be the version of the
 `wasm-bindgen` crate the module was built with.
 
-`null` finds it from the product's Cargo.lock
-(`product.lockfile`, or `product.lockEntries` for a
-product made with `mkProduct` that passes parsed entries):
+`null`: the product's `wasmBindgen`, which mkRepository's
+products have (the workspace's
+[`tools.wasmBindgen`](options/workspaces.md#workspacesnametoolswasmbindgen),
+also the wasmWeb preset's test runner). A product made with
+`mkProduct` without it gets the CLI matched from its
+Cargo.lock (`product.lockfile`, or `product.lockEntries`
+for parsed entries):
 
 1. The version, X.Y.Z, is the lockfile's `wasm-bindgen`
    package from a registry. Evaluation fails when the

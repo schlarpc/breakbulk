@@ -83,11 +83,11 @@ repo = {
         check;                       # check variants only
       };
       packages.<pkg>;        # the default variant's products
-      runner;                # the target runner (a list), or null
+      runner;                # the target runner (a list: program and arguments), or null
       testSystem;            # the system test runs build on, or null
       spec;                  # the resolved target spec
       traits;                # the target's traits
-      canRunTests;           # false: no target runner; its runs not in checks, its apps not in apps
+      canRunTests;           # targets.<triple>.canRunTests: when false, its runs are not in checks, its apps not in apps
     };
 
     internal;                # what the outputs are made of; not an interface

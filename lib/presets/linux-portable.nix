@@ -36,7 +36,7 @@
   targetTraits,
   stageHelpers,
   chooseLinker,
-  chooseRunner,
+  runners,
   nativeTriple,
 }:
 {
@@ -364,15 +364,9 @@ else
     # zig links the FHS loader path (/lib64/ld-linux-x86-64.so.2), as a
     # program for other distributions should; the Nix sandbox has none, so
     # tests run through the build machine's glibc loader, which also finds
-    # its own libc.so.6 (newer than `glibc`, as on a real target system):
-    # ./runner.nix, kind ld-so, when the build machine runs the target.
-    runner =
-      mkDefault
-        (chooseRunner {
-          inherit pkgs;
-          traits = null;
-          flavor = "zig";
-          inherit canExecute;
-        }).runner;
+    # its own libc.so.6 (newer than `glibc`, as on a real target system),
+    # when the build machine runs the target. Not qemu-user for another
+    # CPU: its loader is not at the FHS path either.
+    runner = mkDefault (if canExecute then runners.ldSo { pkgs = bp; } else false);
     testSystem = mkDefault null;
   }

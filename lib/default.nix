@@ -146,7 +146,6 @@ let
       toolchainFacts
       llvmVersions
       runners
-      wasmBindgen
       wasiSdk
       appleSdk
       ;
@@ -169,12 +168,15 @@ let
       toolchain ? { },
       modules ? [ ],
       specialArgs ? { },
+      # The workspace the spec is for, `{ name; tools; }` (mkRepository
+      # passes it), or null: presets read its tools (wasmWeb's runner).
+      workspace ? null,
     }:
     let
       first = lib.evalModules {
         modules = [ ./modules/target-spec.nix ] ++ modules;
         specialArgs = {
-          inherit pkgs;
+          inherit pkgs workspace;
           toolchain = toolchainFacts.resolve { inherit pkgs toolchain; };
           name = triple;
           breakbulk = self;

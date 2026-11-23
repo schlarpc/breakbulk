@@ -770,6 +770,81 @@ rec {
     description = "Warnings from this part of the configuration.";
   };
 
+  # A target runner (`targets.<t>.runner`, `workspaces.<ws>.host.runner`):
+  # null, false, a program, a list of a program and its first arguments, or
+  # a record (`runnerNote`). The program types are tried in this order: a
+  # store-path string stays a string (`types.package` would make it a
+  # derivation).
+  runnerProgram = types.oneOf [
+    types.str
+    types.path
+    types.package
+  ];
+  runner = types.nullOr (
+    types.oneOf [
+      (types.enum [ false ])
+      runnerProgram
+      (types.nonEmptyListOf runnerProgram)
+      (types.submodule {
+        options = {
+          program = mkOption {
+            type = runnerProgram;
+            description = "The runner program.";
+          };
+          args = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            description = "Arguments before the test binary.";
+          };
+          dylibPath = mkOption {
+            type = types.nullOr (
+              types.submodule {
+                options = {
+                  var = mkOption {
+                    type = types.str;
+                    description = "The variable.";
+                  };
+                  sep = mkOption {
+                    type = types.str;
+                    description = "The separator of its entries.";
+                  };
+                };
+              }
+            );
+            default = null;
+            description = ''
+              The variable the test process reads shared-library
+              directories from under this runner, and its separator.
+              `null`: the target's (its traits' `dylibPathVar` and
+              `dylibPathSep`).
+            '';
+          };
+        };
+      })
+    ]
+  );
+  runnerNote = ''
+    The value is one of:
+
+    - `null`: the binary runs directly.
+    - a program: invoked as `<runner> <binary> <args…>`, as Cargo invokes
+      `target.<triple>.runner`, with the run's working directory,
+      environment and `$TMPDIR`. It keeps any state it needs (a wine
+      prefix, a browser profile) under `$TMPDIR`.
+    - a list of the program and its first arguments (Cargo's array form).
+    - `{ program; args ? [ ]; dylibPath ? null; }`: the program, its first
+      arguments, and `{ var; sep; }`, the variable the test process reads
+      shared-library directories from under this runner, when it is not
+      the target's: wine reads `WINEPATH` (`;`-separated), not the
+      Unix `PATH` (`breakbulk.runners.wine` gives this).
+    - `false`: nothing here runs the target's programs (a preset's value
+      when it finds no runner). A test run fails, naming the options that
+      give one, and `canRunTests` defaults to false.
+
+    `breakbulk.runners` has runners for wine, qemu-user, wasmtime,
+    wasm-bindgen-test-runner and the build machine's ELF loader.
+  '';
+
   # An internal option collecting cross-option checks from a submodule, as
   # NixOS's `assertions`: mkRepository fails with every false one's message
   # before it returns anything.

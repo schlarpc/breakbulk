@@ -754,3 +754,52 @@ attribute set of (null or (function that evaluates to a(n) module))
 
 *Declared by:*
  - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `wasmBindgen.hashes`
+
+wasm-bindgen-cli versions to build from crates\.io, by version,
+merged over breakbulk’s table (` lib/wasm-bindgen-hashes.nix `),
+for a workspace whose locked ` wasm-bindgen ` is in neither that
+table nor nixpkgs
+([` workspaces.<ws>.tools.wasmBindgen `](workspaces\.md\#workspacesnametoolswasmbindgen))\.
+
+*Type:*
+attribute set of (submodule)
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  "0.2.123" = { hash = "sha256-…"; cargoHash = "sha256-…"; };
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `wasmBindgen.hashes.<name>.cargoHash`
+
+The hash of its vendored dependencies (` buildRustPackage `’s ` cargoHash `)\.
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)
+
+## `wasmBindgen.hashes.<name>.hash`
+
+The hash of ` fetchCrate { pname = "wasm-bindgen-cli"; version; } `\.
+
+*Type:*
+string
+
+*Declared by:*
+ - [lib/modules/top\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/top.nix)

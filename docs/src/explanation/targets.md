@@ -28,12 +28,17 @@ This page explains what each kind of target gets, and why.
 | `{x86_64,aarch64}-unknown-uefi` | yours, with the target | lld-link | none |
 | `x86_64-unknown-none` (build-std) | a nightly with `rust-src` | the toolchain's `rust-lld`, or nixpkgs' `ld.lld` | none: no `test` crate, so test binaries do not compile |
 
-For a preset's target, "none" means nothing on the build machine runs the target's programs.
+For a preset's target, "none" means nothing on the build machine runs the
+target's programs: the preset sets `targets.<triple>.runner = false`.
 The test binaries and doctests still build, but their runs fail with a
 message naming `targets.<triple>.runner` and `testSystem`, and they are
 not in `repo.checks`, so `nix flake check` checks what can be checked.
-Setting either option gives the target a target runner and puts its runs back
-(`target.<triple>.canRunTests` says which applies).
+Setting a runner, or `testSystem` with `runner = null`, puts its runs back:
+[`targets.<triple>.canRunTests`](../reference/options/targets.md#targetsnamecanruntests)
+defaults to whether the runner is `false`, and can be set either way.
+A runner may also say which variable the test process reads shared
+libraries from, when it is not the target's (wine reads `WINEPATH`):
+see [`targets.<triple>.runner`](../reference/options/targets.md#targetsnamerunner).
 
 "Yours" means the toolchain you give the workspace (see below). macOS
 targets build on Linux machines; building them on a Mac does not work

@@ -125,8 +125,8 @@ let
 
   # How a test process of a target finds shared libraries: `{ var; sep; }`,
   # or null when it has no such variable (wasm, bare metal). The runner's
-  # own, when it declares one (`breakbulkDylibPath`: wine reads WINEPATH,
-  # not the Windows PATH), else the target's traits (`dylibPathVar`,
+  # own, when its record has one (`dylibPath`: wine reads WINEPATH, not the
+  # Windows PATH), else the target's traits (`dylibPathVar`,
   # `dylibPathSep`). Cargo itself sets its host's variable for the runner
   # (`dylib_path_envvar`), which wine does not read.
   dylibPathOf =
@@ -135,10 +135,10 @@ let
       runner ? null,
     }:
     let
-      r = lib.findFirst (x: builtins.isAttrs x && x ? breakbulkDylibPath) null (lib.toList runner);
+      r = runners.toRecord runner;
     in
-    if r != null then
-      r.breakbulkDylibPath
+    if r != null && r != false && r.dylibPath != null then
+      { inherit (r.dylibPath) var sep; }
     else if traits.dylibPathVar == null then
       null
     else

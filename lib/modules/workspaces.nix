@@ -933,6 +933,34 @@ let
           '';
         };
 
+        tools.wasmBindgen = mkOption {
+          type = types.nullOr types.package;
+          default = null;
+          example = lib.literalExpression "pkgs.wasm-bindgen-cli_0_2_100";
+          description = ''
+            The wasm-bindgen CLI of this workspace, which the `wasmBindgen`
+            stage and `presets.wasmWeb`'s test runner
+            (wasm-bindgen-test-runner) run. It must be the version of the
+            `wasm-bindgen` crate in the workspace's `Cargo.lock`, since
+            the crate embeds a schema version the CLI checks. `null`:
+            matched from the lockfile:
+
+            1. The version, X.Y.Z, is the lockfile's `wasm-bindgen`
+               package from a registry. Evaluation fails when the
+               lockfile has none, several versions, or one from git or a
+               path.
+            2. nixpkgs' `wasm-bindgen-cli_X_Y_Z`, when `pkgs` has it.
+            3. Otherwise wasm-bindgen-cli X.Y.Z from crates.io, built with
+               `pkgs.rustPlatform`, with its hashes from
+               [`wasmBindgen.hashes`](repository.md#wasmbindgenhashes) over
+               breakbulk's table (`lib/wasm-bindgen-hashes.nix`).
+            4. Otherwise evaluation fails, naming the version.
+
+            Only read when something runs it, so a workspace without
+            wasm-bindgen needs nothing here.
+          '';
+        };
+
         toolchain = mkOption {
           type = types.submodule (tc: {
             options = {
@@ -1179,14 +1207,14 @@ let
                 '';
               };
               runner = mkOption {
-                type = types.nullOr types.raw;
+                type = bt.runner;
                 default = null;
                 description = ''
                   The runner of the host units' tests (a proc macro's
                   unit tests and doctests, which Cargo builds for the
-                  build machine), as
-                  [`targets.<triple>.runner`](targets.md#targetsnamerunner)
-                  is a target's. `null`: run directly.
+                  build machine), with the values of
+                  [`targets.<triple>.runner`](targets.md#targetsnamerunner).
+                  `null`: run directly.
                 '';
               };
               testSystem = mkOption {

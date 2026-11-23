@@ -265,19 +265,34 @@ in
       '';
     };
     runner = mkOption {
-      type = types.nullOr types.raw;
+      type = bt.runner;
       default = null;
+      example = lib.literalExpression ''
+        {
+          program = breakbulk.runners.qemuUser { pkgs = pkgs.buildPackages; arch = "arm"; };
+          args = [ "-L" "''${sysroot}" ];
+        }
+      '';
       description = ''
         The target runner: the program that runs this target's test
-        binaries (wine, wasmtime, qemu-user, …), invoked as `<runner>
-        <binary> <args…>` like Cargo's `target.<triple>.runner`: a
-        program, or a list of the program and its first arguments.
-        `null`: run directly. Not the test runner
+        binaries (wine, wasmtime, qemu-user, …), as Cargo's
+        `target.<triple>.runner`. The preset sets it. Not the test runner
         ([`packages.<name>.test.runner`](packages.md#packagesnametestrunner)),
         which starts a binary in its run, under this one.
-        May be a function `{ lockfile, workspace }: <runner>` for runners
-        that depend on the workspace (wasm-bindgen-test-runner must
-        match the locked wasm-bindgen).
+
+        ${bt.runnerNote}
+      '';
+    };
+    canRunTests = mkOption {
+      type = types.bool;
+      default = config.runner != false;
+      defaultText = lib.literalExpression "config.runner != false";
+      description = ''
+        Whether this target's test binaries can run here, through
+        `runner` or on `testSystem`'s builders. When false, its test runs
+        and doctests are not in `checks` and its test apps are not in
+        `apps`; a test run built anyway fails, naming the options that
+        would give it a runner.
       '';
     };
     testSystem = mkOption {

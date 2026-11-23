@@ -458,6 +458,9 @@ let
       # Package name -> its `[package]` table, workspace fields resolved
       # (manifest.packageInfo's `package`), for `product.package`.
       cargoPackages ? { },
+      # The workspace's tools (`workspaces.<ws>.tools`), each a product
+      # attribute: `wasmBindgen`, which the wasmBindgen stage runs.
+      workspaceTools ? { },
       keepSourcePaths ? false,
       sourcePaths ?
         attrValues inst.sources.workspace
@@ -557,6 +560,7 @@ let
             # lists each (checked by products-product-attributes).
             info =
               lib.optionalAttrs (lockfile != null) { inherit lockfile; }
+              // lib.optionalAttrs (workspaceTools ? wasmBindgen) { inherit (workspaceTools) wasmBindgen; }
               // lib.optionalAttrs (cargoPackages ? ${pkg}) { package = cargoPackages.${pkg}; }
               // {
                 inherit buildScriptFlags;

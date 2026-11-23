@@ -21,7 +21,7 @@
   lib,
   wasmCommon,
   wasiSdkLib,
-  chooseRunner,
+  runners,
   guard,
 }:
 {
@@ -48,14 +48,12 @@ guard traits.linksComponents
   (
     common
     // {
-      runner =
-        mkDefault
-          (chooseRunner {
-            inherit pkgs wasmtime;
-            inherit traits;
-            canExecute = false;
-            flavor = "wasmtime";
-          }).runner;
+      runner = mkDefault (
+        runners.wasmtime {
+          pkgs = bp;
+          inherit wasmtime;
+        }
+      );
     }
     // lib.optionalAttrs withC {
       cflags = [ inc ];

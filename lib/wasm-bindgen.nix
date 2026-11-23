@@ -102,7 +102,7 @@ let
         else if table ? ${version} then
           fromCratesIo pkgs version table.${version}
         else
-          throw "breakbulk.wasmBindgen: no wasm-bindgen-cli ${version}: nixpkgs has no `${name}` and breakbulk's hash table (lib/wasm-bindgen-hashes.nix) has no entry for it; build it with `breakbulk.wasmBindgen.forVersion { inherit pkgs; version = \"${version}\"; hashes.\"${version}\" = { hash = …; cargoHash = …; }; }` and pass it in place of the matched one (for the wasmBindgen stage: `breakbulk.stageHelpers.wasmBindgen { package = …; }`)";
+          throw "breakbulk.wasmBindgen: no wasm-bindgen-cli ${version}: nixpkgs has no `${name}` and breakbulk's hash table (lib/wasm-bindgen-hashes.nix) has no entry for it; in mkRepository add its hashes, `wasmBindgen.hashes.\"${version}\" = { hash = …; cargoHash = …; };`, or set the CLI, `workspaces.<ws>.tools.wasmBindgen` (the wasmBindgen stage and the wasmWeb test runner read either); elsewhere `breakbulk.wasmBindgen.forVersion { inherit pkgs; version = \"${version}\"; hashes.\"${version}\" = { … }; }`";
     in
     drv.overrideAttrs (old: {
       passthru = (old.passthru or { }) // {

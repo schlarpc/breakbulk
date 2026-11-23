@@ -753,6 +753,7 @@ let
       e = breakbulkLib.evalTargetSpec {
         inherit pkgs triple specialArgs;
         inherit (ws) toolchain;
+        workspace = workspaceArgOf wsName;
         modules = lib.optional (repoDef != null) repoDef ++ lib.optional (wsDef != null) wsDef;
       };
       # The definitions before the preset's.
@@ -863,23 +864,42 @@ let
   inherit (util) storePathsIn;
   # A runner option's value (`targets.<t>.runner`, `workspaces.<ws>.host.runner`),
   # a function called with the workspace's lockfile.
-  runnerValue =
-    wsName: r:
-    if builtins.isFunction r then
-      r {
-        lockfile = root + "/${util.joinRel (wsDirOf cfg.workspaces.${wsName}) "Cargo.lock"}";
-        workspace = wsName;
-      }
-    else
-      r;
-  # It as test runs take it: a list, program and arguments (as Cargo's
-  # `target.<triple>.runner` takes a string or an array), or null.
+  # A runner (lib/modules/types.nix `runner`) as test runs take it: a
+  # list, program and arguments (as Cargo's `target.<triple>.runner`
+  # takes a string or an array), or null. `false` runs `runners.none`,
+  # which fails naming the options.
   runnerOf =
-    wsName: r:
+    triple: r:
     let
-      v = runnerValue wsName r;
+      v = breakbulkLib.runners.toRecord r;
     in
-    if v == null then null else map (x: "${x}") (lib.toList v);
+    if v == null then
+      null
+    else if v == false then
+      [ "${breakbulkLib.runners.none { inherit pkgs triple; }}" ]
+    else
+      map (x: "${x}") ([ v.program ] ++ v.args);
+  # The workspace's wasm-bindgen CLI: `tools.wasmBindgen`, else the one
+  # its Cargo.lock locks (lib/wasm-bindgen.nix), with the repository's
+  # hashes over the shipped table. Read only by what runs it.
+  wasmBindgenOf =
+    wsName:
+    let
+      ws = cfg.workspaces.${wsName};
+    in
+    if ws.tools.wasmBindgen != null then
+      ws.tools.wasmBindgen
+    else
+      breakbulkLib.wasmBindgen.forLockfile {
+        inherit pkgs;
+        lockfile = root + "/${util.joinRel (wsDirOf ws) "Cargo.lock"}";
+        hashes = lib.mapAttrs (_: h: { inherit (h) hash cargoHash; }) cfg.wasmBindgen.hashes;
+      };
+  # What a target spec's presets read of its workspace.
+  workspaceArgOf = wsName: {
+    name = wsName;
+    tools.wasmBindgen = wasmBindgenOf wsName;
+  };
   # The workspace's host spec (`workspaces.<ws>.host`).
   hostOf =
     wsName:
@@ -890,7 +910,7 @@ let
       linker = "${h.linker}";
       env = envSpecsOf h.envSeparators [ h.env ];
       inherit (h) stdenv testSystem;
-      runner = runnerOf wsName h.runner;
+      runner = runnerOf nativeTriple h.runner;
     };
   specFor =
     wsName: triple:
@@ -902,7 +922,7 @@ let
       rustflags = if t == null then [ ] else t.rustflags;
       named =
         prefix: l: lib.listToAttrs (lib.imap0 (i: p: lib.nameValuePair "${prefix}-${toString i}" p) l);
-      runner = if t == null then null else runnerOf wsName t.runner;
+      runner = if t == null then null else runnerOf triple t.runner;
       # The package set the stages of its test binaries get (`strip`
       # takes its C toolchain's binutils from it).
       testPackageSet = packageSetOf wsName triple;
@@ -933,17 +953,13 @@ let
           t.env
         ];
       };
-      # `runners.none` (a preset found nothing that runs the target's
-      # programs) says so as an attribute, which the list above drops.
-      canRunTests =
-        t == null
-        || !(lib.any (x: x.breakbulkNoRunner or false) (lib.toList (runnerValue wsName t.runner)));
+      canRunTests = t == null || t.canRunTests;
       # How its test processes find shared libraries: the runner's way
       # (wine: WINEPATH), else the target's traits.
       testDylibPath = breakbulkLib.testRuns.dylibPathOf {
         traits = traitsOf wsName triple;
-        # The runner as given: a list of strings loses its attributes.
-        runner = if t == null then null else runnerValue wsName t.runner;
+        # The runner as given: the list form drops its `dylibPath`.
+        runner = if t == null then null else t.runner;
       };
       testSystem = if t == null then null else t.testSystem;
     };
@@ -1223,7 +1239,7 @@ let
             inherit (h) runner testSystem;
             dylibPath = breakbulkLib.testRuns.dylibPathOf {
               traits = targetTraits.resolve { triple = nativeTriple; };
-              runner = runnerValue wsName cfg.workspaces.${wsName}.host.runner;
+              runner = cfg.workspaces.${wsName}.host.runner;
             };
             packageSet = pkgs;
           };
@@ -1263,6 +1279,7 @@ let
       // {
         inherit pkgs inst;
         packageSet = packageSetOf wsName triple;
+        workspaceTools = (workspaceArgOf wsName).tools;
         # `sourcePaths = "keep"`: no default noSourceReferences check.
         keepSourcePaths = v.sourcePaths == "keep";
         select = sel;
@@ -1373,9 +1390,9 @@ let
           # The target spec's target runner (a list: program and
           # arguments, or null) and test system, as test runs use them.
           inherit (s) runner testSystem;
-          # false when the target's runner is `runners.none` (a preset
-          # found nothing that runs its programs): its test runs and
-          # doctests fail naming the options, and are not in repo.checks.
+          # `targets.<triple>.canRunTests`: when false (by default when
+          # its runner is `false`: a preset found nothing that runs its
+          # programs), its test runs and doctests are not in repo.checks.
           inherit (s) canRunTests;
           # The resolved target spec of this workspace (the evaluated
           # `targets.<triple>` options), or null when it has none.

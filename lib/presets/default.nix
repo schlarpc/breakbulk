@@ -41,7 +41,6 @@
   toolchainFacts,
   llvmVersions,
   runners,
-  wasmBindgen,
   wasiSdk,
   appleSdk,
   stageHelpers,
@@ -70,6 +69,7 @@ let
               opts
               // {
                 inherit (args) pkgs config toolchain;
+                workspace = args.workspace or null;
                 inherit (args.toolchain) facts;
                 kinds = args.config.linkerKinds;
                 triple = args.name;
@@ -102,6 +102,7 @@ let
     llvmPackages = "set `workspaces.<ws>.toolchain.facts.llvmPackages`";
     wasiSdkVersion = "set `workspaces.<ws>.toolchain.facts.wasiSdkVersion`";
     packageSet = "set `targets.<triple>.packageSet`";
+    workspace = "the preset gets the workspace's tools from mkRepository";
   };
 
   # Definitions `attrs` with every value failing with `msg` unless
@@ -183,7 +184,7 @@ let
   inherit (linkers) chooseLinker;
 
   # The test runner choice (./runner.nix): one function for every preset.
-  runnerChoice = import ./runner.nix { inherit lib runners wasmBindgen; };
+  runnerChoice = import ./runner.nix { inherit lib runners; };
   inherit (runnerChoice) chooseRunner;
 
   defaultEnv = lib.mapAttrs (_: mkDefault);
@@ -594,14 +595,14 @@ let
     # with the version-matched `wasm-ld` instead of rustup's rust-lld; C code
     # with unwrapped clang targeting wasm32; tests under
     # wasm-bindgen-test-runner in Node.js (browser = "chromium" or
-    # "firefox" for that headless browser). The runner is a function of the
-    # workspace's lockfile, since the runner must be the exact wasm-bindgen
-    # version.
+    # "firefox" for that headless browser). The runner is the workspace's
+    # wasm-bindgen CLI (`workspaces.<ws>.tools.wasmBindgen`), the exact
+    # version of the locked crate, as the wasmBindgen stage's is.
     wasmWeb =
       {
         pkgs,
-        traits,
         browser ? "node",
+        workspace,
         ...
       }@args:
       wasmCommon args
@@ -610,13 +611,17 @@ let
           "wasmBindgen"
           "wasmOpt"
         ];
-        runner =
-          mkDefault
-            (chooseRunner {
-              inherit pkgs browser traits;
-              canExecute = false;
-              flavor = "wasm-bindgen";
-            }).runner;
+        runner = mkDefault (
+          runners.wasmBindgenTest {
+            pkgs = pkgs.buildPackages;
+            inherit browser;
+            wasmBindgen =
+              if workspace == null then
+                throw "breakbulk.presets.wasmWeb: its test runner is the workspace's wasm-bindgen CLI (`workspaces.<ws>.tools.wasmBindgen`), and this target spec was evaluated for no workspace: evaluate it through mkRepository, or set `runner`"
+              else
+                workspace.tools.wasmBindgen;
+          }
+        );
       };
 
     # Further targets, one file each.
@@ -624,7 +629,7 @@ let
       inherit
         lib
         wasmCommon
-        chooseRunner
+        runners
         guard
         ;
       wasiSdkLib = wasiSdk;
@@ -635,7 +640,7 @@ let
         targetTraits
         stageHelpers
         chooseLinker
-        chooseRunner
+        runners
         nativeTriple
         ;
     };
@@ -700,13 +705,9 @@ let
           "wasmComponentize"
           "wasmMetadata"
         ];
-        runner =
-          mkDefault
-            (chooseRunner {
-              inherit pkgs traits;
-              canExecute = false;
-              flavor = "wasmtime";
-            }).runner;
+        # Componentized by the stages, so wasmtime runs them although
+        # the triple has no WASI.
+        runner = mkDefault (runners.wasmtime { pkgs = pkgs.buildPackages; });
       };
   };
 in

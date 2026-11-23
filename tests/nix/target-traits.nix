@@ -651,16 +651,6 @@ in
           canExecute = false;
         }
         {
-          t = "wasm32-unknown-unknown";
-          canExecute = false;
-          flavor = "wasm-bindgen";
-        }
-        {
-          t = "x86_64-unknown-linux-gnu";
-          canExecute = true;
-          flavor = "zig";
-        }
-        {
           t = "x86_64-unknown-none";
           canExecute = false;
         }
@@ -674,8 +664,6 @@ in
         "wine"
         "wasmtime"
         "none"
-        "wasm-bindgen"
-        "ld-so"
         "none"
       ];
     };

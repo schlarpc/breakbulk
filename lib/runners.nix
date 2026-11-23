@@ -1,24 +1,30 @@
-# Test runners for cross targets ("runner" in the target spec;
-# "Tests as products" in docs/src/explanation/products.md).
+# Test runners for cross targets (`targets.<triple>.runner`; "Tests as
+# products" in docs/src/explanation/products.md).
 #
-# A runner is an executable invoked as Cargo invokes `target.<triple>.runner`:
+# A runner program is invoked as Cargo invokes `target.<triple>.runner`:
 #
-#   <runner> <program> [args...]
+#   <runner> [args...] <program> [program args...]
 #
 # with the working directory, environment and TMPDIR of the test-run
 # derivation that calls it. Each runner keeps any state it needs (a wine
 # prefix, a browser profile) under $TMPDIR, so it works inside the Nix
-# sandbox with no display, network or writable home.
+# sandbox with no display, network or writable home. The values the
+# option takes (null, false, a program, a list, a record with `args` and
+# `dylibPath`) are in lib/modules/types.nix (`runner`, `runnerNote`);
+# `toRecord` reads any of them.
 #
 #   runners = breakbulk.runners;
 #   runners.wine { inherit pkgs; }                       x86_64 (and i686) Windows .exe
+#                                                        (a record: its dylibPath is WINEPATH)
 #   runners.qemuUser { inherit pkgs; arch = "aarch64"; } Linux ELF for another CPU
+#   runners.ldSo { inherit pkgs; }                       ELF for the build machine that names
+#                                                        the FHS loader (linuxPortable)
 #   runners.wasmtime { inherit pkgs; }                    WASI modules and components
 #   runners.wasmBindgenTest { inherit pkgs; wasmBindgen; browser = "node"; }
 #                                                        wasm-bindgen-test binaries
 #                                                        (or "chromium", "firefox")
-#   runners.none { inherit pkgs; triple; }               no way to run: fails naming
-#                                                        the options that give one
+#   runners.none { inherit pkgs; triple; }               what a run under `runner = false`
+#                                                        runs: fails naming the options
 { lib }:
 let
   script =
@@ -29,6 +35,31 @@ let
     '';
 in
 {
+  # A runner value as `{ program; args; dylibPath; }`, or null (run
+  # directly) or false (nothing runs the target's programs) unchanged.
+  toRecord =
+    v:
+    if v == null || v == false then
+      v
+    else if builtins.isList v then
+      {
+        program = lib.head v;
+        args = lib.tail v;
+        dylibPath = null;
+      }
+    else if builtins.isAttrs v && v ? program && !(lib.isDerivation v) then
+      {
+        args = [ ];
+        dylibPath = null;
+      }
+      // v
+    else
+      {
+        program = v;
+        args = [ ];
+        dylibPath = null;
+      };
+
   # The package set test runs build with: `pkgs` itself, or, for a target
   # whose tests run on another system (`testSystem`, a native builder),
   # nixpkgs for that system with the user's overlays and config (allowUnfree,
@@ -53,44 +84,50 @@ in
   # wine is not the Unix one: wine prepends WINEPATH, `;`-separated, whose
   # entries may be Unix paths (checked with wine 11.0: a DLL in a
   # directory named by WINEPATH loads; on the Unix PATH or
-  # LD_LIBRARY_PATH it does not, exit status 53). So test runs give the
-  # dynamic-library path to Windows test binaries as WINEPATH
-  # (`breakbulkDylibPath`, read by testRuns.dylibPathOf).
+  # LD_LIBRARY_PATH it does not, exit status 53). So the runner is a
+  # record whose `dylibPath` is WINEPATH, which test runs give the
+  # dynamic-library path to Windows test binaries in.
   wine =
     {
       pkgs,
       wine ? pkgs.wineWow64Packages.minimal,
     }:
-    (script pkgs "breakbulk-runner-wine" ''
-      tmp="''${TMPDIR:-/tmp}"
-      export HOME="$tmp/wine-home" WINEPREFIX="$tmp/wine-prefix"
-      export WINEDEBUG="''${WINEDEBUG:--all}" WINEDLLOVERRIDES="''${WINEDLLOVERRIDES:-mscoree,mshtml=}"
-      mkdir -p "$HOME"
-      if [ ! -e "$WINEPREFIX/system.reg" ]; then
-        ${wine}/bin/wineboot --init >/dev/null 2>&1 || true
-      fi
-      exec ${wine}/bin/wine "$@"
-    '')
-    // {
-      breakbulkDylibPath = {
+    {
+      program = script pkgs "breakbulk-runner-wine" ''
+        tmp="''${TMPDIR:-/tmp}"
+        export HOME="$tmp/wine-home" WINEPREFIX="$tmp/wine-prefix"
+        export WINEDEBUG="''${WINEDEBUG:--all}" WINEDLLOVERRIDES="''${WINEDLLOVERRIDES:-mscoree,mshtml=}"
+        mkdir -p "$HOME"
+        if [ ! -e "$WINEPREFIX/system.reg" ]; then
+          ${wine}/bin/wineboot --init >/dev/null 2>&1 || true
+        fi
+        exec ${wine}/bin/wine "$@"
+      '';
+      args = [ ];
+      dylibPath = {
         var = "WINEPATH";
         sep = ";";
       };
     };
 
-  # For a target whose programs nothing here can run. A test run under it
-  # fails with what to set; `breakbulkNoRunner` keeps such runs and
-  # doctests out of repo.checks (`canRunTests` on the target's outputs).
-  # Setting the target's `runner` or `testSystem` replaces it.
+  # What a test run of a target whose runner is `false` runs: it fails
+  # with what to set.
   none =
     { pkgs, triple }:
-    (script pkgs "breakbulk-runner-none-${triple}" ''
-      echo 'breakbulk: nothing runs ${triple} programs on this machine, so its tests cannot run. Set targets."${triple}".runner (a program, as Cargo'"'"'s target.<triple>.runner) or targets."${triple}".testSystem (a Nix system whose builders run them).' >&2
+    script pkgs "breakbulk-runner-none-${triple}" ''
+      echo 'breakbulk: nothing runs ${triple} programs on this machine, so its tests cannot run. Set targets."${triple}".runner (a program, as Cargo'"'"'s target.<triple>.runner), or targets."${triple}".testSystem (a Nix system whose builders run them) with runner = null.' >&2
       exit 1
-    '')
-    // {
-      breakbulkNoRunner = true;
-    };
+    '';
+
+  # The build machine's ELF loader, for programs that name the FHS
+  # loader path (/lib64/ld-linux-x86-64.so.2), as a program for other
+  # distributions should (linuxPortable's zig links them so); the Nix
+  # sandbox has none. The loader also finds its own libc.so.6.
+  ldSo =
+    { pkgs }:
+    pkgs.writeShellScript "breakbulk-runner-ld-so" ''
+      exec ${pkgs.stdenv.cc.bintools.dynamicLinker} "$@"
+    '';
 
   # qemu user-mode emulation. Programs built against a nixpkgs cross libc
   # name their dynamic loader by store path, so no -L sysroot is needed.

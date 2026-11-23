@@ -455,6 +455,36 @@ in
       '';
     };
 
+    wasmBindgen.hashes = mkOption {
+      type = types.attrsOf (
+        types.submodule {
+          options = {
+            hash = mkOption {
+              type = types.str;
+              description = "The hash of `fetchCrate { pname = \"wasm-bindgen-cli\"; version; }`.";
+            };
+            cargoHash = mkOption {
+              type = types.str;
+              description = "The hash of its vendored dependencies (`buildRustPackage`'s `cargoHash`).";
+            };
+          };
+        }
+      );
+      default = { };
+      example = lib.literalExpression ''
+        {
+          "0.2.123" = { hash = "sha256-…"; cargoHash = "sha256-…"; };
+        }
+      '';
+      description = ''
+        wasm-bindgen-cli versions to build from crates.io, by version,
+        merged over breakbulk's table (`lib/wasm-bindgen-hashes.nix`),
+        for a workspace whose locked `wasm-bindgen` is in neither that
+        table nor nixpkgs
+        ([`workspaces.<ws>.tools.wasmBindgen`](workspaces.md#workspacesnametoolswasmbindgen)).
+      '';
+    };
+
     checks = mkOption {
       type = types.attrsOf types.package;
       default = { };

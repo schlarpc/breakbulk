@@ -52,6 +52,10 @@
 #                checks alike.
 #   runner-list  `targets.<triple>.runner` as a list (program and arguments):
 #                the test run runs `env BB_RUNNER=1 <binary>`.
+#   runner-record  `targets.<triple>.runner` as a record: its `dylibPath`
+#                variable is exported to the run; `runner = false` gives
+#                `canRunTests = false` and runs.none; an explicit
+#                `canRunTests` wins.
 #   test-libs    a test run depends on the sysroot's target shared
 #                libraries (a small copy), not the whole toolchain.
 {
@@ -782,6 +786,71 @@ let
     ) "runner-list: the runner is ${builtins.toJSON t.runner}";
     t.variants.default.testRuns.a.runs_tool;
 
+  # `targets.<triple>.runner` as a record: program, arguments and the
+  # variable the test process reads shared-library directories from.
+  # The runner checks the test run exported that variable, then runs
+  # `env BB_RUNNER=1 <binary> <args…>`. `runner = false` makes
+  # `canRunTests` false and runs `runners.none`; `canRunTests` set
+  # explicitly wins over either.
+  runnerRecord =
+    let
+      mk =
+        target:
+        breakbulk.mkRepository {
+          inherit pkgs tools;
+          root = fixtures + "/names";
+          modules = [
+            {
+              workspaces.main.variants.default.profile = "dev";
+              targets.${native} = target;
+            }
+          ];
+        };
+      checkLibs = pkgs.writeShellScript "check-bb-libs" ''
+        if [ "''${BB_LIBS+set}" != set ]; then
+          echo "the runner's dylibPath variable BB_LIBS is not set" >&2
+          exit 1
+        fi
+        exec ${pkgs.coreutils}/bin/env "$@"
+      '';
+      repo = mk {
+        runner = {
+          program = checkLibs;
+          args = [ "BB_RUNNER=1" ];
+          dylibPath = {
+            var = "BB_LIBS";
+            sep = ":";
+          };
+        };
+      };
+      t = repo.workspaces.main.target.${native};
+      none = (mk { runner = false; }).workspaces.main.target.${native};
+      forced =
+        (mk {
+          runner = false;
+          canRunTests = true;
+        }).workspaces.main.target.${native};
+      off = (mk { canRunTests = false; }).workspaces.main.target.${native};
+    in
+    assert lib.assertMsg (
+      t.runner == [
+        "${checkLibs}"
+        "BB_RUNNER=1"
+      ]
+      && t.canRunTests
+    ) "runner-record: the runner is ${builtins.toJSON t.runner}";
+    assert lib.assertMsg
+      (
+        !none.canRunTests
+        && lib.length none.runner == 1
+        && lib.hasInfix "breakbulk-runner-none-${native}" (lib.head none.runner)
+      )
+      "runner-record: runner = false gave ${builtins.toJSON none.runner}, canRunTests ${lib.boolToString none.canRunTests}";
+    assert lib.assertMsg (
+      forced.canRunTests && !off.canRunTests && off.runner == null
+    ) "runner-record: canRunTests set explicitly did not win";
+    t.variants.default.testRuns.a.runs_tool;
+
   # --- test-libs --------------------------------------------------------------
 
   # A test run depends on a small copy of the sysroot's standard library
@@ -835,6 +904,7 @@ in
   cfg-rustflags = cfgRustflags;
   inherit names;
   runner-list = runnerList;
+  runner-record = runnerRecord;
   test-libs = testLibs;
   workspaces = {
     config-env = configEnvWs;

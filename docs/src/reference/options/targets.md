@@ -91,6 +91,26 @@ list of string
 *Declared by:*
  - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
 
+## `targets.<name>.canRunTests`
+
+Whether this target’s test binaries can run here, through
+` runner ` or on ` testSystem `’s builders\. When false, its test runs
+and doctests are not in ` checks ` and its test apps are not in
+` apps `; a test run built anyway fails, naming the options that
+would give it a runner\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+config.runner != false
+```
+
+*Declared by:*
+ - [lib/modules/target-spec\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/target-spec.nix)
+
 ## `targets.<name>.cc`
 
 The C compiler build scripts use for this target (` CC_<triple> `)\.
@@ -586,22 +606,48 @@ breakbulk.presets.windows { inherit sdk; }
 ## `targets.<name>.runner`
 
 The target runner: the program that runs this target’s test
-binaries (wine, wasmtime, qemu-user, …), invoked as ` <runner> <binary> <args…> ` like Cargo’s ` target.<triple>.runner `: a
-program, or a list of the program and its first arguments\.
-` null `: run directly\. Not the test runner
+binaries (wine, wasmtime, qemu-user, …), as Cargo’s
+` target.<triple>.runner `\. The preset sets it\. Not the test runner
 ([` packages.<name>.test.runner `](packages\.md\#packagesnametestrunner)),
 which starts a binary in its run, under this one\.
-May be a function ` { lockfile, workspace }: <runner> ` for runners
-that depend on the workspace (wasm-bindgen-test-runner must
-match the locked wasm-bindgen)\.
+
+The value is one of:
+
+ - ` null `: the binary runs directly\.
+ - a program: invoked as ` <runner> <binary> <args…> `, as Cargo invokes
+   ` target.<triple>.runner `, with the run’s working directory,
+   environment and ` $TMPDIR `\. It keeps any state it needs (a wine
+   prefix, a browser profile) under ` $TMPDIR `\.
+ - a list of the program and its first arguments (Cargo’s array form)\.
+ - ` { program; args ? [ ]; dylibPath ? null; } `: the program, its first
+   arguments, and ` { var; sep; } `, the variable the test process reads
+   shared-library directories from under this runner, when it is not
+   the target’s: wine reads ` WINEPATH ` (` ; `-separated), not the
+   Unix ` PATH ` (` breakbulk.runners.wine ` gives this)\.
+ - ` false `: nothing here runs the target’s programs (a preset’s value
+   when it finds no runner)\. A test run fails, naming the options that
+   give one, and ` canRunTests ` defaults to false\.
+
+` breakbulk.runners ` has runners for wine, qemu-user, wasmtime,
+wasm-bindgen-test-runner and the build machine’s ELF loader\.
 
 *Type:*
-null or raw value
+null or value false (singular enum) or string or absolute path or package or non-empty (list of (string or absolute path or package)) or (submodule)
 
 *Default:*
 
 ```nix
 null
+```
+
+*Example:*
+
+```nix
+{
+  program = breakbulk.runners.qemuUser { pkgs = pkgs.buildPackages; arch = "arm"; };
+  args = [ "-L" "${sysroot}" ];
+}
+
 ```
 
 *Declared by:*

@@ -1105,6 +1105,39 @@ let
     assert lib.assertMsg (differing == { })
       "wasm-web-runner-sharing: units differ from the node runner's in ${toString (lib.attrNames differing)}";
     evalCheck "wasm-web-runner-sharing" "${toString (lib.length units.node)} units identical across ${toString (lib.attrNames configs)}";
+  # One wasm-bindgen CLI per workspace (`tools.wasmBindgen`): the
+  # wasmBindgen stage and the wasmWeb test runner both run the
+  # lockfile-matched one by default, and both a CLI set there.
+  wasmTools =
+    let
+      cliOf =
+        repo:
+        let
+          t = repo.workspaces.main.target.${wasm};
+          stage = t.packages.ui.stages.wasmBindgen;
+        in
+        {
+          stage = map discard (map toString stage.nativeBuildInputs);
+          runnerText = t.spec.runner.text;
+        };
+      matched = cliOf wasmBrowser;
+      cli = pkgs.writeShellScriptBin "wasm-bindgen" "exit 1";
+      given = cliOf (wasmBrowserWith {
+        targets.${wasm}.preset = presets.wasmWeb;
+        workspaces.main.tools.wasmBindgen = cli;
+      });
+      matchedCli = lib.head matched.stage;
+      report = {
+        matchedInRunner = lib.hasInfix matchedCli matched.runnerText;
+        matchedVersion = lib.hasInfix "wasm-bindgen-cli-0.2.130" matchedCli;
+        givenInStage = given.stage == [ (discard (toString cli)) ];
+        givenInRunner = lib.hasInfix (discard (toString cli)) given.runnerText;
+      };
+    in
+    assert lib.assertMsg (lib.all lib.id (
+      lib.attrValues report
+    )) "wasm-web-tools: ${builtins.toJSON report}";
+    evalCheck "wasm-web-tools" (builtins.toJSON report);
   wasmBrowserChecks =
     let
       t = wasmBrowser.workspaces.main.target.${wasm};
@@ -1125,6 +1158,7 @@ let
       wasm-web-test-chromium = wasmBrowserIn "chromium";
       wasm-web-test-firefox = wasmBrowserIn "firefox";
       wasm-web-runner-sharing = wasmRunnerSharing;
+      wasm-web-tools = wasmTools;
       # The wasmBindgen stage with the lockfile-matched CLI (0.2.130), then
       # wasm-opt; the JS glue loads in Node and computes the digest.
       wasm-web-bindgen =
