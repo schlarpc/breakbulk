@@ -257,10 +257,13 @@ let
   devShell = shellRepo.workspaces.main.devShell;
 
   # Local `cargo build -v --release` in the dev shell's environment (the
-  # shell derivation, made buildable), staged outside any home directory,
-  # with the planner's source replacement so it builds offline. The set of
-  # `-C metadata` values equals the plan's compile unit keys, and every
-  # target unit gets the spec's linker and rustflags.
+  # shell derivation, made buildable, with its hook run as the shell
+  # starts), staged outside any home directory, with the planner's source
+  # replacement so it builds offline. The set of `-C metadata` values
+  # equals the plan's compile unit keys, and every target unit gets the
+  # spec's linker and rustflags, which the hook exports from
+  # cargo-env.json. The shell's derivation names no cargo-env.json value:
+  # evaluating it reads nothing built.
   devshell =
     let
       envVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}";
@@ -270,9 +273,8 @@ let
       shellEnv.CARGO_BUILD_TARGET or null == native
     ) "devshell: CARGO_BUILD_TARGET is not set";
     assert lib.assertMsg (
-      (shellEnv."${envVar}_RUSTFLAGS" or null) == "--cfg bb_devshell"
-    ) "devshell: ${envVar}_RUSTFLAGS is ${builtins.toJSON (shellEnv."${envVar}_RUSTFLAGS" or null)}";
-    assert lib.assertMsg (shellEnv ? "${envVar}_LINKER") "devshell: ${envVar}_LINKER is not set";
+      !(shellEnv ? "${envVar}_LINKER")
+    ) "devshell: ${envVar}_LINKER is set at evaluation";
     devShell.overrideAttrs (_: {
       name = "loose-ends-devshell";
       phases = [ "buildPhase" ];
@@ -282,6 +284,11 @@ let
       jq = "${pkgs.jq}/bin/jq";
       buildPhase = ''
         export CARGO_HOME=$TMPDIR/cargo-home
+        eval "$shellHook"
+        [ "''$${envVar}_RUSTFLAGS" = "--cfg bb_devshell" ]
+        [ -x "''$${envVar}_LINKER" ]
+        # Cargo 1.99: the planner leaves trim-paths off.
+        [ -z "''${CARGO_PROFILE_RELEASE_TRIM_PATHS+set}" ]
         cp -r --no-preserve=mode $fixture $TMPDIR/ws
         cd $TMPDIR/ws
         echo "$CARGO_BUILD_TARGET ''$${envVar}_LINKER ''$${envVar}_RUSTFLAGS"
@@ -430,15 +437,6 @@ let
       drvClosure =
         s: pkgs.closureInfo { rootPaths = [ (builtins.unsafeDiscardOutputDependency s.drvPath) ]; };
     in
-    assert lib.assertMsg (
-      plain.warnings == map conflict [
-        "BB_C"
-        "BB_Y"
-      ]
-    ) "devshell-env: the shell without devShell.env warns ${builtins.toJSON plain.warnings}";
-    assert lib.assertMsg (
-      over.warnings == [ (conflict "BB_C") ]
-    ) "devshell-env: the shell with devShell.env warns ${builtins.toJSON over.warnings}";
     assert lib.assertMsg (lib.elem marker.drvPath (
       inputsOf plain
     )) "devshell-env: the shell without devShell.env does not depend on the marker";
@@ -451,7 +449,19 @@ let
       markerDrv = builtins.unsafeDiscardStringContext marker.drvPath;
       plainClosure = drvClosure plain;
       overClosure = drvClosure over;
+      plainHook = plain.shellHook;
+      # The warnings each shell's hook prints, as it starts.
+      plainWant = lib.concatMapStrings (v: conflict v + "\n") [
+        "BB_C"
+        "BB_Y"
+      ];
+      overWant = conflict "BB_C" + "\n";
       buildPhase = ''
+        export HOME=$TMPDIR
+        ( eval "$plainHook" ) 2> plain-warnings
+        printf '%s' "$plainWant" | diff -u - plain-warnings
+        eval "$shellHook" 2> over-warnings
+        printf '%s' "$overWant" | diff -u - over-warnings
         grep -qxF "$markerDrv" $plainClosure/store-paths
         if grep -qxF "$markerDrv" $overClosure/store-paths; then
           echo "the shell's closure has $markerDrv" >&2; exit 1
@@ -493,12 +503,6 @@ let
     in
     assert lib.assertMsg (plan.remap.trimPathsDefault or false
     ) "devshell-trim-paths: the plan has no remap.trimPathsDefault";
-    assert lib.assertMsg (
-      shell.drvAttrs.CARGO_PROFILE_RELEASE_TRIM_PATHS or null == "all"
-    ) "devshell-trim-paths: CARGO_PROFILE_RELEASE_TRIM_PATHS is not set";
-    assert lib.assertMsg (
-      !(devShell.drvAttrs ? CARGO_PROFILE_RELEASE_TRIM_PATHS)
-    ) "devshell-trim-paths: the Cargo 1.99 shell sets CARGO_PROFILE_RELEASE_TRIM_PATHS";
     shell.overrideAttrs (_: {
       name = "loose-ends-devshell-trim-paths";
       phases = [ "buildPhase" ];
@@ -508,6 +512,8 @@ let
       jq = "${pkgs.jq}/bin/jq";
       buildPhase = ''
         export CARGO_HOME=$TMPDIR/cargo-home
+        eval "$shellHook"
+        [ "$CARGO_PROFILE_RELEASE_TRIM_PATHS" = all ]
         cp -r --no-preserve=mode $fixture $TMPDIR/ws
         cd $TMPDIR/ws
         cargo -V

@@ -331,9 +331,9 @@ On a Nix without dynamic derivations, with both at their defaults, it is:
   for its version or LLVM (a `rustc` or `cargo` whose `version` is not a
   Rust release, or a Rust release newer than breakbulk's LLVM table), a
   workspace's `defaultTarget` default may read the project's
-  `build.target` (several targets, none native, and a Cargo config file),
-  or a workspace has a dev shell (its Cargo env is read at evaluation
-  time; `devShell.target = null` turns it off).
+  `build.target` (several targets, none native, and a Cargo config file).
+  A dev shell reads its Cargo env when it starts, so evaluating it
+  imports nothing.
 
 breakbulk uses each feature in one place (`lib/nix-features.nix`), which
 fails with an error naming what needed it when the record says the

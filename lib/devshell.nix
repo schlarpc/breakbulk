@@ -15,7 +15,13 @@
 #    while a manifest is broken): CARGO_TARGET_<TRIPLE>_LINKER, and the spec's
 #    rustflags as CARGO_TARGET_<TRIPLE>_RUSTFLAGS or CARGO_BUILD_RUSTFLAGS,
 #    whichever key the planner's `--config` used. Cargo appends these lists
-#    to the project's own, as it appends `--config` lists.
+#    to the project's own, as it appends `--config` lists. The shell
+#    depends on that derivation and its hook exports the variables when
+#    the shell starts (`nix develop`, `nix print-dev-env`), so evaluating
+#    the shell imports nothing from a derivation: in dynamic-derivation
+#    mode `nix flake check` evaluates it without building the planner.
+#    The spec's tool paths are inputs of the shell, since the file names
+#    them without their context.
 #  - CARGO_PROFILE_<P>_TRIM_PATHS=all when the planner turns Cargo's
 #    trim-paths on, for each profile P of the default variant's build and
 #    test plans (Cargo 1.101 and
@@ -36,6 +42,9 @@
 #    removes (and with it the shell's dependency on the value's
 #    derivation). There is no ranking between packages, as a conflict
 #    between them concerns only the shell, and `devShell.env` settles it.
+#    The conflict warnings and cargo-env.json's own warnings are printed
+#    when the shell starts: a variable the planner's env sets is not a
+#    conflict, and that env is known only then.
 #  - A warning, when the shell starts, for each variable in the user's
 #    environment that changes what Cargo builds but that the planner never
 #    sees: CARGO_* (except those that only affect output location, the
@@ -68,10 +77,14 @@
   targetEnv ? { },
   # devShell.env: env values, or null to remove.
   shellEnv ? { },
-  # The planner's `cargo-env.json` for `target`: { env; warnings; }
+  # The planner's `cargo-env.json` for `target`, a path with its
+  # derivation's context: { env; warnings; }
   # (crates/breakbulk-plan/src/spec.rs `CargoEnv`), the trim-paths
-  # variable included.
-  cargoEnv ? { },
+  # variable included. Null: none.
+  cargoEnvFile ? null,
+  # The store paths (strings with context) that cargo-env.json's values
+  # name: the spec's linkers and rustflags.
+  cargoEnvInputs ? [ ],
 }:
 let
   bt = import ./modules/types.nix { inherit lib; };
@@ -122,16 +135,15 @@ let
     ];
   packageEnv = lib.foldl' (a: s: a // s.env) { } sources;
 
-  # How the planner runs Cargo for `target`.
-  planEnv =
-    (cargoEnv.env or { })
-    // lib.optionalAttrs (target != null) {
-      CARGO_BUILD_TARGET = rustcTarget;
-    };
+  # How the planner runs Cargo for `target`, as far as evaluation knows
+  # it; cargo-env.json's variables come when the shell starts.
+  planEnv = lib.optionalAttrs (target != null) {
+    CARGO_BUILD_TARGET = rustcTarget;
+  };
 
   # { <var> = [ { label; value; } … ]; } for the variables that sources
   # set to different values and that neither `planEnv` nor `devShell.env`
-  # replaces.
+  # replaces. The hook drops those cargo-env.json sets.
   conflicts =
     lib.filterAttrs
       (
@@ -193,11 +205,23 @@ let
     toolchain.cargo
     toolchain.rustc
   ];
-  warnings = map (w: "breakbulk: the dev shell of workspace `${name}`: ${w}") (
-    (cargoEnv.warnings or [ ]) ++ lib.mapAttrsToList conflictWarning conflicts
-  );
+  prefix = "breakbulk: the dev shell of workspace `${name}`: ";
+
+  # cargo-env.json as shell lines, made when the shell's inputs are built:
+  # `__bb_set <var> <value>` per variable, `__bb_note <warning>` per
+  # warning. Not jq in the hook: the hook runs in the user's shell, and
+  # the conversion is the same every time.
+  cargoEnvScript =
+    pkgs.buildPackages.runCommand "breakbulk-${name}-cargo-env.sh"
+      {
+        nativeBuildInputs = [ pkgs.buildPackages.jq ];
+      }
+      ''
+        jq -r '(.env // {} | to_entries[] | "__bb_set \(.key | @sh) \(.value | @sh)"),
+          (.warnings // [] | .[] | "__bb_note \(. | @sh)")' ${cargoEnvFile} > $out
+      '';
 in
-lib.foldr lib.warn (pkgs.mkShell {
+pkgs.mkShell {
   name = "breakbulk-${name}";
   packages = pkgsList;
   nativeBuildInputs = nativeInputs;
@@ -205,13 +229,36 @@ lib.foldr lib.warn (pkgs.mkShell {
   strictDeps = true;
   env = ownEnv;
   breakbulkOwnEnv = lib.concatStringsSep " " (lib.attrNames ownEnv);
+  # The tool paths cargo-env.json names, built with the shell.
+  breakbulkCargoEnvInputs = cargoEnvInputs;
   shellHook = ''
     __breakbulk_warn() { echo "breakbulk: $*" >&2; }
+    __bb_own=" $breakbulkOwnEnv "
+    __bb_planned=" "
+    ${lib.optionalString (cargoEnvFile != null) ''
+      # The planner's env (cargo-env.json), under devShell.env.
+      __bb_set() {
+        case " ${lib.concatStringsSep " " (lib.attrNames shellEnv)} " in *" $1 "*) return 0 ;; esac
+        export "$1=$2"
+        __bb_own+="$1 "
+        __bb_planned+="$1 "
+      }
+      __bb_note() { echo ${lib.escapeShellArg prefix}"$1" >&2; }
+      . ${cargoEnvScript}
+      unset -f __bb_set __bb_note
+    ''}
+    ${lib.concatStrings (
+      lib.mapAttrsToList (var: setters: ''
+        case "$__bb_planned" in *" ${var} "*) ;; *) echo ${
+          lib.escapeShellArg (prefix + conflictWarning var setters)
+        } >&2 ;; esac
+      '') conflicts
+    )}
     for __bb_v in "''${!CARGO_@}" ${lib.concatStringsSep " " watched}; do
       # Exported variables only (the planner's Cargo would inherit
       # nothing else either).
       case "$(declare -p "$__bb_v" 2>/dev/null)" in "declare -x"*) ;; *) continue ;; esac
-      case " $breakbulkOwnEnv " in *" $__bb_v "*) continue ;; esac
+      case "$__bb_own" in *" $__bb_v "*) continue ;; esac
       case "$__bb_v" in
         ${lib.concatStringsSep " | " harmless}) ;;
         CARGO_* | ${lib.concatStringsSep " | " watched})
@@ -223,10 +270,7 @@ lib.foldr lib.warn (pkgs.mkShell {
         __breakbulk_warn "$__bb_f exists. breakbulk's planner reads only the project's own Cargo config; settings there that change the build do not reach Nix builds."
       fi
     done
-    unset __bb_v __bb_f
+    unset __bb_v __bb_f __bb_own __bb_planned
     unset -f __breakbulk_warn
   '';
-  # The messages that evaluating the shell prints, for reading them
-  # without parsing the evaluator's stderr.
-  passthru = { inherit warnings; };
-}) warnings
+}

@@ -449,9 +449,9 @@ done
 # repo.nixFeatures is all Nix must allow: each of these fixtures, in each
 # mode with `ca` off and on, builds with `experimental-features` set to
 # exactly the features its record lists and `allow-import-from-derivation`
-# to its `importFromDerivation`. walking-skeleton (no dev shell) imports
-# nothing in dynamic mode; doctests has doctests (`outputOf`) and a dev
-# shell (import from derivation in both modes).
+# to its `importFromDerivation`, and its dev shell instantiates with the
+# same settings. walking-skeleton imports nothing in dynamic mode, its
+# dev shell included; doctests has doctests (`outputOf`).
 nixFeaturesFixtures=(walking-skeleton doctests)
 for f in "${nixFeaturesFixtures[@]}"; do
   case " ${fixtures[*]} " in *" $f "*) ;; *) continue ;; esac
@@ -472,6 +472,15 @@ print("true" if r["importFromDerivation"] else "false", " ".join(n for k, n in n
       else
         tail -30 "$WORK/features.log" >&2
         echo "FAIL: $f (mode = $mode, ca = $ca) needs more than $record" >&2
+        status=1
+      fi
+      if "$NIX_MASTER/bin/nix-instantiate" --store "$STORE" "$REPO/tests/dynamic" \
+        --option experimental-features "$features" --option allow-import-from-derivation "$ifdAllowed" \
+        --arg mode "\"$mode\"" --arg ca "$ca" -A "devShell.$f" >"$WORK/features.log" 2>&1; then
+        echo "$f: its dev shell instantiates with exactly $record" >&2
+      else
+        tail -30 "$WORK/features.log" >&2
+        echo "FAIL: $f's dev shell (mode = $mode, ca = $ca) needs more than $record" >&2
         status=1
       fi
     done

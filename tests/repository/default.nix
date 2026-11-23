@@ -2305,18 +2305,19 @@ in
       broken = mkRepo (edited "stamps" "echo 'this is [not toml' >> tool/Cargo.toml") [ (oneWs ".") ];
       shell = broken.workspaces.main.devShell;
       linkerVar = "CARGO_TARGET_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] native)}_LINKER";
-      linker = shell.${linkerVar} or shell.env.${linkerVar} or "";
     in
-    assert lib.assertMsg (lib.hasSuffix "cc-default" linker)
-      "devshell-broken-manifest: no linker in the shell (${linker})";
     pkgs.runCommand "devshell-broken-manifest"
       {
         inherit (shell) shellHook;
-        inherit linker;
+        # The derivation that builds the linker, which the shell has as
+        # an input.
+        inherit (shell) breakbulkCargoEnvInputs;
       }
       ''
         export HOME=$TMPDIR
         eval "$shellHook"
+        linker=''$${linkerVar}
+        case "$linker" in *cc-default) ;; *) echo "no linker in the shell ($linker)" >&2; exit 1 ;; esac
         [ -x "$linker" ]
         echo "$linker" > $out
       '';
@@ -2533,7 +2534,8 @@ in
       brokenRoot = edited "stamps" "echo 'this is [not toml' >> Cargo.toml";
       declares = edited "stamps" ''printf '\n[profile.bench.package.tool]\ntrim-paths = "none"\n' >> Cargo.toml'';
       var = "CARGO_PROFILE_DEV_TRIM_PATHS";
-      shellVar = w: w.devShell.${var} or w.devShell.env.${var} or null;
+      # What the shell exports when it starts, from cargo-env.json.
+      shellVar = w: (cargoEnvOf w).env.${var} or null;
       cargoEnvOf =
         w:
         builtins.fromJSON (
@@ -3793,10 +3795,6 @@ in
         dynamicDerivations = dyn;
         importFromDerivation = ifd;
       };
-      # No dev shell (its Cargo env is read by IFD in either mode).
-      noShell = {
-        workspaces.a.devShell.target = null;
-      };
       g = breakbulk.nixFeatures;
       cases = [
         {
@@ -3814,33 +3812,29 @@ in
           want = record true false true;
         }
         {
-          settings = [
-            noShell
-            {
-              mode = "dynamic";
-              ca = false;
-            }
-          ];
+          settings = {
+            mode = "dynamic";
+            ca = false;
+          };
           want = record true true false;
         }
         {
-          settings = [
-            noShell
-            { mode = "dynamic"; }
-          ];
+          settings = {
+            workspaces.a.devShell.target = null;
+            mode = "dynamic";
+          };
           want = record true true false;
         }
-        # The dev shell's Cargo env.
+        # With a dev shell, which reads its Cargo env when it starts.
         {
           settings = {
             mode = "dynamic";
           };
-          want = record true true true;
+          want = record true true false;
         }
         # A rustc whose `version` is not a Rust release is probed.
         {
           settings = [
-            noShell
             {
               mode = "dynamic";
               workspaces.a.toolchain.rustc = pkgs.rustc // {
@@ -3854,7 +3848,6 @@ in
         # project's `build.target`, but this fixture has no Cargo config.
         {
           settings = [
-            noShell
             {
               mode = "dynamic";
               workspaces.a.targets = {
@@ -3866,7 +3859,7 @@ in
           want = record true true false;
         }
         {
-          settings = [ noShell ];
+          settings = [ ];
           want = record g.defaultCa g.available (!g.available);
         }
       ];
@@ -3881,7 +3874,6 @@ in
               mode = "dynamic";
               workspaces.main = {
                 path = ".";
-                devShell.target = null;
                 targets = {
                   wasm32-unknown-unknown = { };
                   aarch64-unknown-linux-gnu = { };

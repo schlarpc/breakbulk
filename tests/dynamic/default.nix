@@ -171,13 +171,11 @@ let
   ];
 
   repos = {
-    # Without a dev shell (whose Cargo env is read at evaluation time), so
-    # that its dynamic mode imports nothing: run.sh builds it with
-    # import from derivation off (`nixFeaturesFixtures`).
-    walking-skeleton = mkRepo "walking-skeleton" [
-      oneWs
-      { workspaces.main.devShell.target = null; }
-    ];
+    # Its dynamic mode imports nothing, its dev shell included (which
+    # reads its Cargo env when it starts): run.sh builds it and
+    # instantiates the shell with import from derivation off
+    # (`nixFeaturesFixtures`).
+    walking-skeleton = mkRepo "walking-skeleton" [ oneWs ];
     # #23: a build script writes next to the binaries. The product takes
     # the file with the `buildScriptFiles` stage (read in dynamic mode from
     # the root's `breakbulk-root.json`), its check passes,
@@ -1101,6 +1099,7 @@ in
     ;
   build = lib.mapAttrs build repos;
   nixFeatures = lib.mapAttrs (_: r: r.nixFeatures) repos;
+  devShell = lib.mapAttrs (_: r: r.workspaces.main.devShell) repos;
   unitDrvs = lib.mapAttrs unitDrvs repos;
   outer = lib.mapAttrs (
     name: repo:

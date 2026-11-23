@@ -1429,43 +1429,45 @@ let
           null
         else
           perTarget.${ws.defaultTarget}.variants.${ws.defaultVariant}.docs or null;
-      devShell = mkDevShell {
-        inherit pkgs nativeTriple;
-        name = wsName;
-        inherit (ws) toolchain;
-        target = ws.devShell.target;
-        rustcTarget =
-          if ws.devShell.target == null then
-            null
-          else
-            (targetTraits.rustcTargetArg {
-              inherit pkgs;
-              name = ws.devShell.target;
-              inherit (targetSpecs.${wsName}.${ws.devShell.target}.config) rustcTarget;
-            }).arg;
-        packages = lib.filter (p: p.override != null) (
-          map (e: {
-            id = "${e.name}@${e.version}";
-            override = settingsOf wsName (
-              if ws.devShell.target == null then nativeTriple else ws.devShell.target
-            ) ws.defaultVariant e;
-          }) locks.${wsName}
-        );
-        shellEnv = ws.devShell.env;
-        targetEnv = lib.optionalAttrs (ws.devShell.target != null) (
-          let
-            t = targetCfgOf wsName ws.devShell.target;
-          in
-          lib.optionalAttrs (t != null) (lib.mapAttrs (bt.envFlat t.envSeparators) t.env)
-        );
+      devShell = mkDevShell (
+        {
+          inherit pkgs nativeTriple;
+          name = wsName;
+          inherit (ws) toolchain;
+          target = ws.devShell.target;
+          rustcTarget =
+            if ws.devShell.target == null then
+              null
+            else
+              (targetTraits.rustcTargetArg {
+                inherit pkgs;
+                name = ws.devShell.target;
+                inherit (targetSpecs.${wsName}.${ws.devShell.target}.config) rustcTarget;
+              }).arg;
+          packages = lib.filter (p: p.override != null) (
+            map (e: {
+              id = "${e.name}@${e.version}";
+              override = settingsOf wsName (
+                if ws.devShell.target == null then nativeTriple else ws.devShell.target
+              ) ws.defaultVariant e;
+            }) locks.${wsName}
+          );
+          shellEnv = ws.devShell.env;
+          targetEnv = lib.optionalAttrs (ws.devShell.target != null) (
+            let
+              t = targetCfgOf wsName ws.devShell.target;
+            in
+            lib.optionalAttrs (t != null) (lib.mapAttrs (bt.envFlat t.envSeparators) t.env)
+          );
+        }
         # How the planner passes the shell target's spec to Cargo, and the
         # trim-paths variable when the planner turns it on for the default
-        # variant's profile (IFD: a small derivation that reads the
-        # project's Cargo config and root manifest as files and asks rustc,
-        # apart from planning, so a broken manifest does not break the
-        # shell). The file names tool paths without
-        # their context; the spec's own values carry it.
-        cargoEnv =
+        # variant's profile: a small derivation that reads the project's
+        # Cargo config and root manifest as files and asks rustc, apart from
+        # planning, so a broken manifest does not break the shell. The shell
+        # reads it when it starts, not at evaluation. The file names tool
+        # paths without their context; the spec's own values carry it.
+        // (
           let
             inst =
               if ws.devShell.target == null then
@@ -1477,28 +1479,23 @@ let
                 null
               else
                 (specFor wsName ws.devShell.target).mkWorkspace.spec or null;
-            values = lib.filter builtins.isString (
-              if spec == null then
-                [ ]
-              else
-                [
-                  spec.linker
-                  spec.hostLinker
-                ]
-                ++ spec.rustflags
-            );
-            withContext = builtins.replaceStrings (map util.devirtualizeAndDiscard values) (
-              map util.devirtualize values
-            );
-            j = builtins.fromJSON (
-              builtins.unsafeDiscardStringContext (
-                featureGates.readOutput nixFeatures "the dev shell of workspace `${wsName}` (cargo-env.json)"
-                  "${inst.cargoEnv}/cargo-env.json"
+          in
+          lib.optionalAttrs (inst != null) {
+            cargoEnvFile = "${inst.cargoEnv}/cargo-env.json";
+            cargoEnvInputs = map util.devirtualize (
+              lib.filter builtins.isString (
+                lib.optionals (spec != null) (
+                  [
+                    spec.linker
+                    spec.hostLinker
+                  ]
+                  ++ spec.rustflags
+                )
               )
             );
-          in
-          if inst == null then { } else j // { env = lib.mapAttrs (_: withContext) j.env; };
-      };
+          }
+        )
+      );
     };
 
   workspaces = lib.mapAttrs workspaceOut cfg.workspaces;
@@ -1716,11 +1713,9 @@ let
   # throws means the record is wrong. Dynamic-derivation mode imports from
   # derivations only where a workspace's toolchain needs probing, a
   # workspace's `defaultTarget` default may read the project's
-  # `build.target`, or a dev shell reads its Cargo env. A preset given a
-  # rustc other than its workspace's is not counted: it checks its probes
-  # against no record. The order matters: `devShell.target` defaults to
-  # `defaultTarget`, which reads `build.target` through the record, and is
-  # reached only when the `defaultTarget` site is not.
+  # `build.target`. A dev shell reads its Cargo env when it starts, not at
+  # evaluation. A preset given a rustc other than its workspace's is not
+  # counted: it checks its probes against no record.
   importsInDynamicMode =
     ws:
     toolchainFacts.mayProbe { inherit (ws.toolchain) rustc cargo; }
@@ -1731,8 +1726,7 @@ let
           inherit root;
           wsDir = wsDirOf ws;
         } != [ ]
-    )
-    || ws.devShell.target != null;
+    );
   nixFeatures = {
     dynamicDerivations = cfg.mode == "dynamic";
     caDerivations = cfg.ca || cfg.mode == "dynamic";
