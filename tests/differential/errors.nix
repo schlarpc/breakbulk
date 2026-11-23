@@ -42,7 +42,7 @@ let
             path = ".";
             toolchain = {
               inherit (toolchain) rustc cargo;
-              capabilities = toolchain.capabilities or { };
+              facts.capabilities = toolchain.capabilities or { };
             };
             variants.default.profile = "dev";
           };

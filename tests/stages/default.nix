@@ -906,6 +906,7 @@ let
     name = "hello-unsplit";
     linked = helloLinked;
     stages = { };
+    checks.noSourceReferences.run = H.noSourceReferences;
     checks.sourcesOnly.run = H.noSourceReferences { toolchain = [ ]; };
     sourcePaths = [ helloSrc ];
     inherit pkgs;
