@@ -26,8 +26,8 @@
                   path = "ws";
                   variants.default.profile = "dev";
                 };
-                packages.reader.extraSources = [ "schema" ];
-                packages.app.extraSources = [ "assets" ];
+                packages.reader.extraSources = [ "../../schema" ];
+                packages.app.extraSources = [ "../../assets" ];
               }
             ];
           };

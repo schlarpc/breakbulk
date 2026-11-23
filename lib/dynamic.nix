@@ -147,6 +147,7 @@ let
         // {
           inherit key;
           view = unsafeDiscardStringContext (util.devirtualize spec.view);
+          fallback = unsafeDiscardStringContext (util.devirtualize spec.fallback);
         }
       ) base.predictedSpecs;
       # Every store path any value depends on, as a plain path: a
@@ -154,7 +155,11 @@ let
       # built).
       contextPaths = lib.unique (
         lib.concatMap (v: lib.attrNames (getContext v)) (
-          lib.attrValues values ++ map (p: util.devirtualize p.view) (lib.attrValues base.predictedSpecs)
+          lib.attrValues values
+          ++ lib.concatMap (p: [
+            (util.devirtualize p.view)
+            (util.devirtualize p.fallback)
+          ]) (lib.attrValues base.predictedSpecs)
         )
       );
       context = builtins.appendContext "" (

@@ -2,14 +2,19 @@
 # repository root, so relative paths that leave the crate directory
 # (`../../wit`, `../shared/assets`) resolve unchanged.
 #
-# Which files a view holds is a pipeline of steps per package and kind of
-# unit: "build" (non-test compiles, build scripts and their runs), "test"
-# (test compiles and doctests), "run" (test runs), and per Cargo target
-# (`cargoTarget`, null for the package's view). Each step is a function
-# from `{ default, kind, cargoTarget, root, packageDir, ... }` to a file
-# set, and gets the previous step's result as `default`. The built-in
-# steps (`defaultSteps`) come first, then the package's `sources`
-# functions.
+# Which files a view holds is a pipeline of named steps per package (its
+# `sources` entries, built-in ones first: `steps` has their
+# constructors), run once per unit descriptor:
+#
+#   { unit = "compile" | "build-script-run" | "doctest" | "test-run";
+#     test; cargoTarget; root; packageDir; workspaceDir; targets;
+#     memberDirs; }
+#
+# Each step gets the descriptor and `default`, the previous step's result,
+# and returns a file set. A unit's view is then
+# overlay(predict(pipeline(unit))): source prediction narrows a compile or
+# build-script run to the files it reads, out of the package's widest
+# view, and the `sourceOverlay` entries go on top.
 {
   lib,
   util,
@@ -19,6 +24,7 @@ let
   inherit (builtins)
     attrNames
     filter
+    isFunction
     isPath
     isString
     readDir
@@ -29,20 +35,41 @@ let
   # An argument every step gets, so that a function without `...` fails on
   # its first call, not when breakbulk adds an argument. Nix's error names
   # the unexpected argument, so its name is the message.
-  sentinel = "breakbulk: add ... to this sources function's arguments, as in { default, kind, ... }";
+  sentinel = "breakbulk: add ... to this function's arguments, as in { default, unit, ... }";
+
+  # The built-in entries, in their order.
+  builtinNames = [
+    "package"
+    "extraSources"
+    "sourceScope"
+    "testsDir"
+    "targetRoots"
+    "runFiles"
+    "workspaceManifest"
+  ];
 in
 rec {
-  inherit sentinel;
+  inherit sentinel builtinNames;
 
-  # A repository path from a path value or a string relative to the root.
+  # A repository path from a path value or a string relative to the
+  # package directory `pkgDir` (relative to the root).
   pathOf =
-    root: what: x:
+    root: pkgDir: what: x:
     if isPath x then
       x
     else if isString x then
-      manifest.at root (util.normalizeRel x)
+      manifest.at root (util.joinRel pkgDir x)
     else
-      throw "breakbulk: ${what} entries must be paths or strings relative to the repository root";
+      throw "breakbulk: ${what} entries must be paths or strings relative to the package directory";
+
+  # `x` (a path or a string relative to `pkgDir`) relative to the root,
+  # or null for a path outside it.
+  relOf =
+    root: pkgDir: x:
+    if isPath x then
+      (if lib.path.hasPrefix root x then util.normalizeRel (lib.path.removePrefix root x) else null)
+    else
+      util.joinRel pkgDir x;
 
   # The entries at the top level of `dir` (relative to the root) that no
   # view holds, relative to the root: `target/`, `.git`, and the symlinks
@@ -81,52 +108,25 @@ rec {
     in
     fs.difference (at pkgDir) (fs.unions (map at (junk ++ nested)));
 
-  # The `test.sourceScope` entries inside the package, relative to the
-  # root: the ones its non-test units do not see. Entries outside the
-  # package only widen its test view.
+  # The `sourceScope` entries inside the package, relative to the root:
+  # the ones its non-test units do not see. Entries outside the package
+  # only widen its test views.
   scopeInside =
     {
       root,
       pkgDir,
       sourceScope ? [ ],
     }:
-    let
-      rel =
-        x:
-        if isPath x then
-          (if lib.path.hasPrefix root x then util.normalizeRel (lib.path.removePrefix root x) else null)
-        else
-          util.normalizeRel x;
-    in
-    filter (r: r != null && util.isUnder pkgDir r) (map rel sourceScope);
+    filter (r: r != null && util.isUnder pkgDir r) (map (relOf root pkgDir) sourceScope);
 
-  # The package's `tests/` directory relative to the root, when it exists
-  # and `scopeTestsDir` is not false, else null. Cargo builds it only as
-  # integration tests.
+  # The package's `tests/` directory relative to the root, when it
+  # exists, else null. Cargo builds it only as integration tests.
   testsDirOf =
-    {
-      root,
-      pkgDir,
-      scopeTestsDir ? null,
-    }:
-    if scopeTestsDir != false && (readDir (manifest.at root pkgDir)).tests or null == "directory" then
+    { root, pkgDir }:
+    if (readDir (manifest.at root pkgDir)).tests or null == "directory" then
       util.joinRel pkgDir "tests"
     else
       null;
-
-  # The paths the built-in steps leave out of a package's "build" view
-  # (relative to the root), for the hint when a non-test unit misses one.
-  testOnlyPaths =
-    {
-      root,
-      pkgDir,
-      sourceScope ? [ ],
-      scopeTestsDir ? null,
-    }:
-    let
-      tests = testsDirOf { inherit root pkgDir scopeTestsDir; };
-    in
-    lib.unique (lib.optional (tests != null) tests ++ scopeInside { inherit root pkgDir sourceScope; });
 
   # A target's own root, relative to the package directory: its crate
   # root file, or the directory of a `<dir>/main.rs` root outside the
@@ -153,11 +153,11 @@ rec {
       t.path;
 
   # The paths of the package (relative to the package directory) that the
-  # view of `cargoTarget`'s units leaves out: the roots of the package's
-  # other bins, examples, tests and benches, and for a library, bin or
-  # build script the whole `examples/` and `benches/` directories. Never a
-  # path that holds the target's own root, the library's or a build
-  # script's, and never one inside the target's own root directory.
+  # view of `cargoTarget`'s compiles leaves out: the roots of the
+  # package's other bins, examples, tests and benches, and for a library,
+  # bin or build script the whole `examples/` and `benches/` directories.
+  # Never a path that holds the target's own root, the library's or a
+  # build script's, and never one inside the target's own root directory.
   targetExcluded =
     {
       root,
@@ -207,8 +207,8 @@ rec {
     in
     lib.unique (filter keep (map util.normalizeRel (roots ++ dirs)));
 
-  # Every path some target's view leaves out (relative to the root), for
-  # the hint when a unit misses one.
+  # Every path some target's compiles leave out (relative to the root),
+  # for the hint when a unit misses one.
   targetRootPaths =
     {
       root,
@@ -225,126 +225,321 @@ rec {
       ) targets
     );
 
-  # The built-in steps of one package, in order, from its settings
-  # (`extraSources` and `test`, as `packages.<name>` has them). `wsDir`:
-  # the directory of the package's workspace, relative to the root.
-  defaultSteps =
+  # The constructors of the built-in steps (`breakbulk.lib.sourceSteps`).
+  # Each returns a step: a function of a descriptor and `default` to a
+  # file set.
+  steps = {
+    # The package directory, minus junk and nested members, plus
+    # `extraFiles` (relative to the root).
+    package =
+      {
+        extraFiles ? [ ],
+      }:
+      {
+        default,
+        root,
+        packageDir,
+        memberDirs,
+        ...
+      }:
+      fs.unions (
+        [
+          default
+          (packageFileset {
+            inherit root memberDirs;
+            pkgDir = packageDir;
+          })
+        ]
+        ++ map (manifest.at root) extraFiles
+      );
+
+    # `paths` (paths, or strings relative to the package directory), for
+    # every unit.
+    add =
+      paths:
+      {
+        default,
+        root,
+        packageDir,
+        ...
+      }:
+      fs.unions ([ default ] ++ map (pathOf root packageDir "extraSources") paths);
+
+    # `paths` for test units only: added to their views, and the ones
+    # inside the package taken out of every other view.
+    testScope =
+      paths:
+      {
+        default,
+        test,
+        root,
+        packageDir,
+        ...
+      }:
+      if test then
+        fs.unions ([ default ] ++ map (pathOf root packageDir "test.sourceScope") paths)
+      else
+        fs.difference default (
+          fs.unions (
+            map (manifest.at root) (scopeInside {
+              inherit root;
+              pkgDir = packageDir;
+              sourceScope = paths;
+            })
+          )
+        );
+
+    # The package's `tests/` directory out of the views of its non-test
+    # units.
+    testsDir =
+      {
+        default,
+        test,
+        root,
+        packageDir,
+        ...
+      }:
+      let
+        tests = testsDirOf {
+          inherit root;
+          pkgDir = packageDir;
+        };
+      in
+      if !test && tests != null then fs.difference default (manifest.at root tests) else default;
+
+    # The roots of the package's other targets out of one target's
+    # compiles (`targetExcluded`).
+    targetRoots =
+      {
+        default,
+        unit,
+        cargoTarget,
+        targets,
+        root,
+        packageDir,
+        ...
+      }:
+      if unit != "compile" || cargoTarget == null then
+        default
+      else
+        fs.difference default (
+          fs.unions (
+            map (e: fs.maybeMissing (manifest.at root (util.joinRel packageDir e))) (targetExcluded {
+              inherit root targets cargoTarget;
+              pkgDir = packageDir;
+            })
+          )
+        );
+
+    # Test runs see only `paths` (relative to the package directory);
+    # null: every step's files.
+    runFiles =
+      paths:
+      {
+        default,
+        unit,
+        root,
+        packageDir,
+        ...
+      }:
+      if unit != "test-run" || paths == null then
+        default
+      else
+        fs.unions (map (p: manifest.at root (util.joinRel packageDir p)) paths);
+
+    # The workspace's root `Cargo.toml` in the test units' views. After
+    # `runFiles`, because expect-test searches upwards from the run's
+    # CARGO_MANIFEST_DIR. Not the lockfile: no snapshot library reads it,
+    # and an edit to it would re-run every member's tests.
+    workspaceManifest =
+      {
+        default,
+        test,
+        root,
+        workspaceDir,
+        ...
+      }:
+      if test then fs.union default (manifest.at root (util.joinRel workspaceDir "Cargo.toml")) else default;
+  };
+
+  # The built-in entries of one package's `sources`, from its settings
+  # (`extraSources` and `test`, as `packages.<name>` has them), each after
+  # every built-in before it.
+  defaultEntries =
     {
-      root,
-      pkgDir,
-      wsDir ? "",
-      memberDirs ? [ ],
       settings ? { },
-      targets ? [ ],
       extraFiles ? [ ],
     }:
     let
-      at = manifest.at root;
-      scopeTargets = settings.scopeTargetRoots or null != false;
-      wsManifest = test.workspaceManifest or null != false;
-      extra = map (pathOf root "extraSources") (settings.extraSources or [ ]) ++ map at extraFiles;
       test = settings.test or { };
-      scope = test.sourceScope or [ ];
-      inside = scopeInside {
-        inherit root pkgDir;
-        sourceScope = scope;
+      steps' = {
+        package = steps.package { inherit extraFiles; };
+        extraSources = steps.add (settings.extraSources or [ ]);
+        sourceScope = steps.testScope (test.sourceScope or [ ]);
+        inherit (steps) testsDir targetRoots;
+        runFiles = steps.runFiles (test.runFiles or null);
+        workspaceManifest =
+          if test.workspaceManifest or null != false then steps.workspaceManifest else ({ default, ... }: default);
       };
-      tests = testsDirOf {
-        inherit root pkgDir;
-        scopeTestsDir = test.scopeTestsDir or null;
-      };
-      runFiles = test.runFiles or null;
     in
-    [
-      (
-        { default, ... }:
-        fs.union default (packageFileset {
-          inherit root pkgDir memberDirs;
-        })
-      )
-      # extraSources
-      ({ default, ... }: fs.unions ([ default ] ++ extra))
-      # test.sourceScope
-      (
-        { default, kind, ... }:
-        if kind == "build" then
-          fs.difference default (fs.unions (map at inside))
-        else
-          fs.unions ([ default ] ++ map (pathOf root "test.sourceScope") scope)
-      )
-      # test.scopeTestsDir
-      (
-        { default, kind, ... }:
-        if kind == "build" && tests != null then fs.difference default (at tests) else default
-      )
-      # scopeTargetRoots. After test.sourceScope, which can add back a
-      # whole directory of roots for the test kinds.
-      (
-        { default, cargoTarget, ... }:
-        if cargoTarget == null || !scopeTargets then
-          default
-        else
-          fs.difference default (
-            fs.unions (
-              map (e: fs.maybeMissing (at (util.joinRel pkgDir e))) (targetExcluded {
-                inherit
-                  root
-                  pkgDir
-                  targets
-                  cargoTarget
-                  ;
-              })
-            )
-          )
-      )
-      # test.runFiles: only the listed paths, relative to the package.
-      (
-        { default, kind, ... }:
-        if kind != "run" || runFiles == null then
-          default
-        else
-          fs.unions (map (p: at (util.joinRel pkgDir p)) runFiles)
-      )
-      # test.workspaceManifest. After runFiles, because expect-test
-      # searches upwards from the run's CARGO_MANIFEST_DIR. Not the
-      # lockfile: no snapshot library reads it, and an edit to it would
-      # re-run every member's tests.
-      (
-        { default, kind, ... }:
-        if (kind == "test" || kind == "run") && wsManifest then
-          fs.union default (at (util.joinRel wsDir "Cargo.toml"))
-        else
-          default
-      )
-    ];
+    lib.listToAttrs (
+      lib.imap0 (
+        i: n:
+        lib.nameValuePair n {
+          step = steps'.${n};
+          after = lib.take i builtinNames;
+        }
+      ) builtinNames
+    );
 
-  # The files of one package's units of `kind` (of `cargoTarget`'s units,
-  # or every unit's when null): every step in turn, from the empty set.
-  # `name`: the package's, for errors.
-  viewFileset =
+  # One package's `sources` entries over the built-in ones: a value of
+  # `settings.sources.<name>` is null (removes it), a step function, or
+  # `{ step; after; before; enable; }` (the module's), whose non-null
+  # fields replace the built-in entry's. Returns the live entries by name
+  # and the names of the removed ones.
+  entriesOf =
     {
-      root,
       name,
-      pkgDir,
-      steps,
-      kind,
-      cargoTarget ? null,
+      settings ? { },
+      extraFiles ? [ ],
+    }:
+    let
+      builtin = defaultEntries { inherit settings extraFiles; };
+      user = settings.sources or { };
+      norm =
+        n: v:
+        if v == null then
+          { enable = false; }
+        else if isFunction v then
+          { step = v; }
+        else if builtins.isAttrs v then
+          lib.filterAttrs (_: x: x != null) v
+        else
+          throw "breakbulk: packages.${name}.sources.${n} must be null, a function or an attribute set, not a ${typeOf v}";
+      merged =
+        builtin // lib.mapAttrs (n: v: removeAttrs (builtin.${n} or { }) [ "enable" ] // norm n v) user;
+      isLive = e: e.enable or true;
+      live = lib.filterAttrs (_: isLive) merged;
+    in
+    if !builtins.isAttrs user then
+      throw "breakbulk: packages.${name}.sources must be an attribute set of named entries, not a ${typeOf user}"
+    else
+      {
+        entries = lib.mapAttrs (
+          n: e:
+          if e ? step && isFunction e.step then
+            e
+          else
+            throw "breakbulk: packages.${name}.sources.${n} has no `step` function"
+        ) live;
+        removed = attrNames (lib.filterAttrs (_: e: !(isLive e)) merged);
+      };
+
+  # The live entries of `entriesOf` in order: each after the entries its
+  # `after` names and before those its `before` names; an entry with
+  # neither after every built-in one. Entries the constraints leave
+  # unordered run built-in ones first, in their order, then by name.
+  orderEntries =
+    {
+      name,
+      entries,
+      removed ? [ ],
+    }:
+    let
+      names = attrNames entries;
+      refs =
+        n: what: v:
+        let
+          l = if v == null then [ ] else lib.toList v;
+          bad = filter (x: !(entries ? ${x}) && !(lib.elem x removed)) l;
+        in
+        if !(builtins.isList l && lib.all isString l) then
+          throw "breakbulk: packages.${name}.sources.${n}.${what} must be an entry name or a list of them"
+        else if bad != [ ] then
+          throw "breakbulk: packages.${name}.sources.${n}.${what} names `${lib.head bad}`, which is not an entry"
+        else
+          filter (x: entries ? ${x}) l;
+      cons = lib.mapAttrs (
+        n: e:
+        let
+          a = refs n "after" (e.after or null);
+          b = refs n "before" (e.before or null);
+          free = (e.after or null) == null && (e.before or null) == null && !(lib.elem n builtinNames);
+        in
+        {
+          after = a ++ lib.optionals free (filter (x: entries ? ${x}) builtinNames);
+          before = b;
+        }
+      ) entries;
+      edge = x: y: x != y && (lib.elem x cons.${y}.after || lib.elem y cons.${x}.before);
+      rank =
+        n:
+        let
+          i = lib.lists.findFirstIndex (x: x == n) null builtinNames;
+        in
+        if i == null then
+          {
+            b = 1;
+            inherit n;
+          }
+        else
+          {
+            b = 0;
+            n = lib.fixedWidthNumber 3 i;
+          };
+      less = x: y: (rank x).b < (rank y).b || (rank x).b == (rank y).b && (rank x).n < (rank y).n;
+      go =
+        done: left:
+        if left == [ ] then
+          done
+        else
+          let
+            ready = filter (y: !(lib.any (x: x != y && edge x y) left)) left;
+          in
+          if ready == [ ] then
+            throw "breakbulk: the `after` and `before` of packages.${name}.sources form a cycle among ${
+              lib.concatMapStringsSep ", " (n: "`${n}`") left
+            }"
+          else
+            let
+              next = lib.head (lib.sort less ready);
+            in
+            go (done ++ [ next ]) (filter (x: x != next) left);
+    in
+    map (n: {
+      inherit n;
+      inherit (entries.${n}) step;
+    }) (go [ ] names);
+
+  # The files of one unit's view (`descriptor`): every step in turn, from
+  # the empty set. `name`: the package's, for errors.
+  pipeline =
+    {
+      name,
+      ordered,
+      descriptor,
     }:
     lib.foldl' (
-      acc: step:
+      acc: e:
       let
-        r = step {
-          inherit root kind cargoTarget;
-          packageDir = pkgDir;
-          default = acc;
-          ${sentinel} = null;
-        };
+        r = e.step (
+          descriptor
+          // {
+            default = acc;
+            ${sentinel} = null;
+          }
+        );
       in
       if fs.isFileset r then
         r
       else
-        throw "breakbulk: a function in packages.${name}.sources returned a ${typeOf r}, not a file set (lib.fileset)"
-    ) fs.empty steps;
+        throw "breakbulk: packages.${name}.sources.${e.n} returned a ${typeOf r}, not a file set (lib.fileset)"
+    ) fs.empty ordered;
+
+  # Whether two file sets hold the same files. Not by `fs.toList` of
+  # each: the differences are empty without reading a directory both hold
+  # whole.
+  sameFiles = a: b: fs.toList (fs.difference a b) == [ ] && fs.toList (fs.difference b a) == [ ];
 
   # The store path of a view of the repository root: the files of
   # `fileset` at their places, and the package directory even when none of
@@ -429,19 +624,6 @@ rec {
           '') places
         );
 
-  # A package's views, rooted at the repository root (`<view>/<pkgDir>`
-  # is the package directory): `src` for its "build" units; for a package
-  # that is `tested`, `testSrc` for its "test" units and `runDir`, the
-  # package directory of its "run" view, or null when that view is
-  # `testSrc`. `targetSrc` and `targetTestSrc`: the views of single Cargo
-  # targets' units, by `<kind>/<name>`, for the targets whose view can
-  # differ from the package's: ones the built-in steps narrow, or every
-  # target when `sources` functions choose files. `settings`:
-  # `extraSources`, `scopeTargetRoots`, `test`, `sources` and
-  # `sourceOverlay`, as `packages.<name>` has them. `targets`: the
-  # package's Cargo targets (`{ kind; name; path; }`, `path` relative to
-  # the package directory; lib/roots.nix `packageTargets`). `runCommand`:
-  # for a package with a `sourceOverlay`.
   # The crate names in a package's `[build-dependencies]` (and
   # `target.<cfg>.build-dependencies`), by the package they name.
   buildDependencies =
@@ -463,76 +645,57 @@ rec {
       ) tables
     );
 
-  # A package's `predictSources` settings, resolved: `enable` (false for a
-  # package with a `sourceOverlay`, with a warning), `runs` (whether its
-  # build-script runs are predicted), and `spec`, the predicted view spec
-  # of one target's units (`breakbulk-predict`'s ViewSpec, `view` with its
-  # context).
-  predictSettings =
+  # The paths `predictSources.keep` gives for one descriptor, relative to
+  # the root: strings relative to the package directory, paths, and the
+  # files of the file sets its functions return.
+  keepPaths =
     {
       root,
       name,
       pkgDir,
-      wsDir,
-      settings,
-      extraKeep,
+      keep,
+      descriptor,
     }:
     let
-      ps = settings.predictSources or { };
-      wanted = ps.enable or null == true;
-      overlaid = settings.sourceOverlay or { } != { };
-      enable =
-        if wanted && overlaid then
-          lib.warn "breakbulk: packages.${name}.predictSources: the package has a sourceOverlay, so its views are not predicted" false
-        else
-          wanted;
-      rel =
-        p: if lib.path.hasPrefix root p then util.normalizeRel (lib.path.removePrefix root p) else null;
-      keepOf =
-        args:
-        lib.concatMap (
-          k:
-          if builtins.isString k then
-            [ (util.joinRel pkgDir k) ]
-          else if builtins.isPath k then
-            lib.toList (rel k)
-          else
-            let
-              r = k (args // { ${sentinel} = null; });
-            in
-            if fs.isFileset r then
-              lib.filter (x: x != null) (map rel (fs.toList r))
-            else
-              throw "breakbulk: a function in packages.${name}.predictSources.keep returned a ${typeOf r}, not a file set (lib.fileset)"
-        ) (ps.keep or [ ]);
+      rel = relOf root pkgDir;
     in
-    {
-      inherit enable;
-      runs = ps.buildScriptRuns or null != false;
-      spec =
-        {
-          kind,
-          cargoTarget,
-          run,
-          view,
-        }:
-        {
-          view = "${view}";
-          packageDir = pkgDir;
-          kind = if run then "run" else "crate";
-          root = util.joinRel pkgDir cargoTarget.path;
-          keep = lib.unique (
-            extraKeep
-            ++ keepOf {
-              inherit root kind cargoTarget;
-              buildScriptRun = run;
-              packageDir = pkgDir;
-              workspaceDir = wsDir;
-            }
-          );
-        };
-    };
+    lib.concatMap (
+      k:
+      if isString k || isPath k then
+        lib.toList (rel k)
+      else
+        let
+          r = k (descriptor // { ${sentinel} = null; });
+        in
+        if fs.isFileset r then
+          filter (x: x != null) (map rel (fs.toList r))
+        else
+          throw "breakbulk: a function in packages.${name}.predictSources.keep returned a ${typeOf r}, not a file set (lib.fileset)"
+    ) keep;
 
+  # A package's views, rooted at the repository root (`<view>/<pkgDir>`
+  # is the package directory):
+  #
+  # - `src`: its non-test units' view (a compile with `test = false` and no
+  #   Cargo target: what a unit the planner matched to no target reads);
+  #   for a package that is `tested`, `testSrc`, its test compiles' (and
+  #   test runs' working directory unless `runDirs` says otherwise).
+  # - `targetSrc` and `targetTestSrc`: the views of single units by
+  #   identity (`<kind>/<name>` for a Cargo target's compiles,
+  #   `run/custom-build/<name>` for a build-script run, `doctest`), for
+  #   the units whose view differs from the package's, and the predicted
+  #   ones (`predicted`'s specs say how; the value here is the view they
+  #   narrow).
+  # - `runDirs."<kind>/<name>"`: the package directory of a test binary's
+  #   run view, or null when it is `testSrc`'s; `runSrc`, the view of a
+  #   run of no known binary.
+  #
+  # `settings`: `extraSources`, `test`, `sources`, `predictSources` and
+  # `sourceOverlay`, as `packages.<name>` has them. `targets`: the
+  # package's Cargo targets (`{ kind; name; path; }`, `path` relative to
+  # the package directory; lib/roots.nix `packageTargets`). `runCommand`:
+  # for a package with a `sourceOverlay`; `predictOne`: a spec to its
+  # predicted view as a derivation, for such a package's predicted units.
   packageViews =
     {
       root,
@@ -544,165 +707,228 @@ rec {
       targets ? [ ],
       tested ? true,
       runCommand ? null,
+      predictOne ? null,
       # Paths every predicted view of the package keeps, relative to the
       # root, besides `predictSources.keep` (the files the variant's
       # workspace wrapper reads: `wrapperConfig.workingDirFiles`).
       extraKeep ? [ ],
-      # Paths every view of the package holds, relative to the root,
-      # besides `extraSources` (the variant's `wrapperConfig.workingDirFiles`).
+      # Paths every view of the package holds, relative to the root (the
+      # variant's `wrapperConfig.workingDirFiles`).
       extraFiles ? [ ],
     }:
     let
       cargoTargets = map (t: { inherit (t) kind name path; }) targets;
-      steps =
-        defaultSteps {
-          inherit
-            root
-            pkgDir
-            wsDir
-            memberDirs
-            settings
-            extraFiles
-            ;
-          targets = cargoTargets;
-        }
-        ++ settings.sources or [ ];
-      custom = settings.sources or [ ] != [ ];
-      view =
-        kind: cargoTarget:
+      es = entriesOf { inherit name settings extraFiles; };
+      ordered = orderEntries {
+        inherit name;
+        inherit (es) entries removed;
+      };
+      descriptor = unit: test: cargoTarget: {
+        inherit
+          unit
+          test
+          cargoTarget
+          root
+          memberDirs
+          ;
+        packageDir = pkgDir;
+        workspaceDir = wsDir;
+        targets = cargoTargets;
+      };
+      filesOf =
+        d:
+        pipeline {
+          inherit name ordered;
+          descriptor = d;
+        };
+      realizeFiles =
+        fileset:
+        realize {
+          inherit root pkgDir fileset;
+        };
+      overlayEntries = settings.sourceOverlay or { };
+      overlaid = overlayEntries != { };
+      withOverlay =
+        view:
         overlay {
           inherit runCommand name pkgDir;
-          entries = settings.sourceOverlay or { };
-          view = realize {
-            inherit root pkgDir;
-            fileset = viewFileset {
-              inherit
-                root
-                name
-                pkgDir
-                steps
-                kind
-                cargoTarget
-                ;
-            };
-          };
+          entries = overlayEntries;
+          view = view;
         };
-      realized = lib.genAttrs [ "build" "test" "run" ] (kind: view kind null);
-      src = realized.build;
-      testSrc = realized.test;
-      run = realized.run;
-      # Not every target: a view the steps cannot narrow is the package's
-      # view again, and each costs a copy of the package at evaluation.
-      narrowed =
-        t:
-        custom
-        ||
-          settings.scopeTargetRoots or null != false
-          &&
-            targetExcluded {
-              inherit root pkgDir;
-              targets = cargoTargets;
-              cargoTarget = t;
-            } != [ ];
-      targetViews =
-        kind: ts:
-        lib.listToAttrs (
-          map (t: lib.nameValuePair "${t.kind}/${t.name}" (view kind t)) (filter narrowed ts)
-        );
-      buildTargets = filter (
-        t:
-        lib.elem t.kind [
-          "lib"
-          "bin"
-          "custom-build"
-        ]
-      ) cargoTargets;
-      testTargets = filter (t: t.kind != "custom-build") cargoTargets;
-      predict = predictSettings {
-        inherit
-          root
-          name
-          pkgDir
-          wsDir
-          settings
-          extraKeep
-          ;
+
+      # The package's views: non-test compiles', test compiles', test
+      # runs'. Their files, the files realized, and that with the overlay.
+      pkgFiles = {
+        build = filesOf (descriptor "compile" false null);
+        test = filesOf (descriptor "compile" true null);
+        run = filesOf (descriptor "test-run" true null);
       };
-      # The view a target's predicted view narrows: its own when the steps
-      # narrow it, else the package's.
-      allowed = kind: t: if narrowed t then view kind t else realized.${kind};
-      specsOf =
-        kind: ts:
-        lib.listToAttrs (
-          lib.concatMap (
-            t:
-            [
-              (lib.nameValuePair "${t.kind}/${t.name}" (
-                predict.spec {
-                  inherit kind;
-                  cargoTarget = t;
-                  run = false;
-                  view = allowed kind t;
-                }
-              ))
-            ]
-            ++ lib.optional (t.kind == "custom-build" && predict.runs) (
-              # Narrows the package's view, not the script's, as the run
-              # reads it without prediction (instantiation's view_key).
-              lib.nameValuePair "run/${t.kind}/${t.name}" (
-                predict.spec {
-                  inherit kind;
-                  cargoTarget = t;
-                  run = true;
-                  view = realized.${kind};
-                }
-              )
-            )
-          ) ts
+      pkgBase = lib.mapAttrs (_: realizeFiles) pkgFiles;
+      pkgView = lib.mapAttrs (_: withOverlay) pkgBase;
+
+      ofKind = ks: filter (t: lib.elem t.kind ks) cargoTargets;
+      buildTargets = ofKind [
+        "lib"
+        "bin"
+        "custom-build"
+      ];
+      testTargets = filter (t: t.kind != "custom-build") cargoTargets;
+      libTarget = lib.findFirst (t: t.kind == "lib") null cargoTargets;
+
+      # Every unit with a view of its own: `ident`, its descriptor, and
+      # the package view (`pkg`: "build" or "test") it stands in for.
+      units =
+        map (t: {
+          ident = "${t.kind}/${t.name}";
+          d = descriptor "compile" false t;
+          pkg = "build";
+        }) buildTargets
+        ++ map (t: {
+          ident = "run/${t.kind}/${t.name}";
+          d = descriptor "build-script-run" false t;
+          pkg = "build";
+        }) (ofKind [ "custom-build" ])
+        ++ lib.optionals tested (
+          map (t: {
+            ident = "${t.kind}/${t.name}";
+            d = descriptor "compile" true t;
+            pkg = "test";
+          }) testTargets
+          ++ lib.optional (libTarget != null) {
+            ident = "doctest";
+            d = descriptor "doctest" true libTarget;
+            pkg = "test";
+          }
         );
+
+      ps = settings.predictSources or { };
+      predictOn = ps.enable or null == true;
+      predictRuns = ps.buildScriptRuns or null != false;
+      isPredicted =
+        u:
+        predictOn
+        && (u.d.unit == "compile" || u.d.unit == "build-script-run" && predictRuns)
+        && u.d.cargoTarget != null;
+
+      unitOf =
+        u:
+        let
+          files = filesOf u.d;
+          same = sameFiles files pkgFiles.${u.pkg};
+          base = if same then pkgBase.${u.pkg} else realizeFiles files;
+          # What prediction reads: the package's test compiles' view, the
+          # widest of its own, with any file of the unit's own view it
+          # lacks. So a predicted read wins over a step that left the file
+          # out of this unit's view.
+          wider = fs.union pkgFiles.test files;
+          spec = {
+            view = "${if sameFiles wider pkgFiles.test then pkgBase.test else realizeFiles wider}";
+            fallback = "${base}";
+            packageDir = pkgDir;
+            kind = if u.d.unit == "build-script-run" then "run" else "crate";
+            root = util.joinRel pkgDir u.d.cargoTarget.path;
+            keep = lib.unique (
+              extraKeep
+              ++ keepPaths {
+                inherit root name pkgDir;
+                keep = ps.keep or [ ];
+                descriptor = u.d;
+              }
+            );
+          };
+          predicted = isPredicted u;
+        in
+        u
+        // {
+          inherit spec predicted;
+          # The view instantiation names for it, or null for the
+          # package's.
+          view =
+            if predicted then
+              (if overlaid then withOverlay (predictOne spec) else base)
+            else if same then
+              null
+            else
+              withOverlay base;
+        };
+      resolved = map unitOf units;
+      viewsOf =
+        pkg:
+        lib.listToAttrs (
+          map (u: lib.nameValuePair u.ident u.view) (filter (u: u.pkg == pkg && u.view != null) resolved)
+        );
+      specsOf =
+        pkg:
+        lib.listToAttrs (
+          map (u: lib.nameValuePair u.ident u.spec) (
+            filter (u: u.pkg == pkg && u.predicted && !overlaid) resolved
+          )
+        );
+      derivedOf = pkg: map (u: u.ident) (filter (u: u.pkg == pkg && u.predicted && overlaid) resolved);
+
+      # Test runs: one binary's run view, or null for the test compiles'.
+      runShared = if sameFiles pkgFiles.run pkgFiles.test then null else pkgView.run;
+      runViewOf =
+        t:
+        let
+          files = filesOf (descriptor "test-run" true t);
+        in
+        if sameFiles files pkgFiles.test then
+          null
+        else if sameFiles files pkgFiles.run then
+          runShared
+        else
+          withOverlay (realizeFiles files);
+      dirIn = view: if view == null then null else if pkgDir == "" then "${view}" else "${view}/${pkgDir}";
+
+      live = n: es.entries ? ${n};
+      tests = testsDirOf { inherit root pkgDir; };
     in
     {
-      inherit src custom;
-      # The predicted views' specs (lib/instantiate.nix `sources.predicted`),
-      # by `<kind>/<name>` (`run/custom-build/<name>` for a build-script
-      # run), for "build" and "test" units.
-      predicted = lib.optionalAttrs predict.enable (
+      src = pkgView.build;
+      # Whether entries other than the built-in ones choose the files.
+      custom = lib.any (n: !(lib.elem n builtinNames)) (attrNames es.entries);
+      # The predicted views' specs (lib/instantiate.nix
+      # `sources.predicted`), by identity, for "build" and "test" units;
+      # not a package with a `sourceOverlay`, whose predicted views are
+      # derivations (`predictOne`) in `targetSrc`.
+      predicted = lib.optionalAttrs predictOn (
         {
-          build = specsOf "build" buildTargets;
+          build = specsOf "build";
         }
-        // lib.optionalAttrs tested { test = specsOf "test" testTargets; }
+        // lib.optionalAttrs tested { test = specsOf "test"; }
       );
-      targetSrc = targetViews "build" buildTargets;
-      targetRoots = lib.optionals (settings.scopeTargetRoots or null != false) (targetRootPaths {
+      # The identities of the predicted views that are derivations
+      # (`predictOne`), by package view, for hints.
+      predictedDerived = {
+        build = derivedOf "build";
+        test = lib.optionals tested (derivedOf "test");
+      };
+      targetSrc = viewsOf "build";
+      targetRoots = lib.optionals (live "targetRoots") (targetRootPaths {
         inherit root pkgDir;
         targets = cargoTargets;
       });
-      testOnly = testOnlyPaths {
-        inherit root pkgDir;
-        sourceScope = settings.test.sourceScope or [ ];
-        scopeTestsDir = settings.test.scopeTestsDir or null;
-      };
+      testOnly = lib.unique (
+        lib.optional (live "testsDir" && tests != null) tests
+        ++ lib.optionals (live "sourceScope") (scopeInside {
+          inherit root pkgDir;
+          sourceScope = settings.test.sourceScope or [ ];
+        })
+      );
       # What every view of the package leaves out as junk, for a hint.
-      junk = junkPaths {
+      junk = lib.optionals (live "package") (junkPaths {
         inherit root;
         dir = pkgDir;
-      };
+      });
     }
     // lib.optionalAttrs tested {
-      inherit testSrc;
-      targetTestSrc = targetViews "test" testTargets;
-      # The view the test runs read: the "run" view when a step chose
-      # other files for runs, else the test view.
-      runSrc = if "${run}" == "${testSrc}" then testSrc else run;
-      # Compared by store path, so that a run reads its test binary's own
-      # view unless a step chose other files for runs.
-      runDir =
-        if "${run}" == "${testSrc}" then
-          null
-        else if pkgDir == "" then
-          "${run}"
-        else
-          "${run}/${pkgDir}";
+      testSrc = pkgView.test;
+      targetTestSrc = viewsOf "test";
+      runSrc = if runShared == null then pkgView.test else runShared;
+      runDirs = lib.listToAttrs (
+        map (t: lib.nameValuePair "${t.kind}/${t.name}" (dirIn (runViewOf t))) testTargets
+      );
     };
 
   # A member's tree of a workspace wrapper's config files, rooted at the
@@ -734,7 +960,7 @@ rec {
 
   # Views for every member of a workspace, keyed by package name
   # (`packageViews`, plus `dir`). `packages.<package name>`: its settings.
-  # `runCommand`: as packageViews takes it.
+  # `runCommand`, `predictOne`: as packageViews takes them.
   workspaceViews =
     {
       root,
@@ -744,6 +970,7 @@ rec {
       # `targets`).
       targetsOf ? (_: [ ]),
       runCommand ? null,
+      predictOne ? null,
       # packageViews' `extraKeep` and `extraFiles`, for every member.
       extraKeep ? [ ],
       extraFiles ? [ ],
@@ -769,6 +996,7 @@ rec {
               root
               wsDir
               runCommand
+              predictOne
               extraKeep
               extraFiles
               ;

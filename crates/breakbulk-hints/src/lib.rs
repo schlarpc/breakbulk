@@ -10,10 +10,10 @@
 //!
 //! - under one of the package's test-only paths, in a view that leaves it
 //!   out (the view of the package's non-test units, wherever the path came
-//!   from): `test.scopeTestsDir` or `extraSources`;
+//!   from): `sources.testsDir` or `extraSources`;
 //! - under the root of another Cargo target of the package (a bin's,
 //!   example's, test's or bench's), in the view of one target's units:
-//!   `scopeTargetRoots`;
+//!   `sources.targetRoots`;
 //! - under what every view of the package leaves out as junk (`target/`,
 //!   `.git`, Nix's `result` symlinks): the cause, and the view's [`Widen`]
 //!   option;
@@ -62,7 +62,7 @@ pub struct SourceView {
     pub test_only: Vec<String>,
     /// The roots of the package's other Cargo targets (bins, examples,
     /// tests, benches), relative to the repository root, which this view
-    /// of one target's units leaves out (`scopeTargetRoots`).
+    /// of one target's units leaves out (`sources.targetRoots`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_roots: Vec<String>,
     /// What every view of the package leaves out as junk at its top level
@@ -399,7 +399,7 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
             {
                 format!(
                     "`{rel}` is in the package's `tests/` directory, which only its test units \
-                     see; if non-test code reads it, set `{opt}.test.scopeTestsDir = false`"
+                     see; if non-test code reads it, set `{opt}.sources.testsDir = null`"
                 )
             }
             Found::TestOnly { rel, .. } => format!(
@@ -409,11 +409,11 @@ pub fn hint_lines(package: &str, view: &SourceView, found: &[Found]) -> Vec<Stri
             Found::TargetRoot { rel, entry, .. } if rel == entry => format!(
                 "`{rel}` is the root of another Cargo target of the package, which only that \
                  target's units see; if this target reads it, set \
-                 `{opt}.scopeTargetRoots = false`"
+                 `{opt}.sources.targetRoots = null`"
             ),
             Found::TargetRoot { rel, entry, .. } => format!(
                 "`{rel}` is under `{entry}`, which only other Cargo targets of the package see; \
-                 if this target reads it, set `{opt}.scopeTargetRoots = false`"
+                 if this target reads it, set `{opt}.sources.targetRoots = null`"
             ),
             Found::Junk { rel, entry, .. } if rel == entry => format!(
                 "`{rel}` is left out of source views as junk ({JUNK}); if the unit reads it, {}",
@@ -703,7 +703,7 @@ mod tests {
             [
                 "`crates/x/src/bin/tool/cli.rs` is under `crates/x/src/bin/tool`, which only other \
                  Cargo targets of the package see; if this target reads it, set \
-                 `packages.x.scopeTargetRoots = false`"
+                 `packages.x.sources.targetRoots = null`"
             ]
         );
         // So does a view a `sources` function chose, with the kind's option.
@@ -797,7 +797,7 @@ mod tests {
             h,
             [
                 "`crates/x/tests/data.txt` is in the package's `tests/` directory, which only its \
-              test units see; if non-test code reads it, set `packages.x.test.scopeTestsDir = false`"
+              test units see; if non-test code reads it, set `packages.x.sources.testsDir = null`"
             ]
         );
         // Remapped, and relative to the working directory, as a build
@@ -835,7 +835,7 @@ mod tests {
         );
         assert_eq!(h.len(), 1, "{h:?}");
         assert!(
-            h[0].contains("set `packages.x.test.scopeTestsDir = false`"),
+            h[0].contains("set `packages.x.sources.testsDir = null`"),
             "{h:?}"
         );
         // In the test view itself, `tests/` is there: a missing fixture is

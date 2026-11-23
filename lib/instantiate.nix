@@ -109,6 +109,10 @@ rec {
       #   prediction narrows (`predictSources`): `spec`, breakbulk-predict's
       #   ViewSpec (dynamic-derivation mode makes the view from it), and
       #   `value`, the view (IFD mode; never read in dynamic mode)
+      # sources.predictedDerived = [ "<key>" ... ]: keys listed in
+      #   workspaceTargets or workspaceTestTargets whose predicted views
+      #   are derivations there (a package with a `sourceOverlay`), for
+      #   hints
       # sources.wrapperConfig."<dir>" = a member's tree of the workspace
       #   wrapper's config files (sourceViews.wrapperConfigTree), for `wrapperConfigVar`
       # sources.testOnly."<dir>" = [ "<path relative to the root>" ... ]
@@ -193,6 +197,7 @@ rec {
       junk = sources.junk or { };
       custom = sources.custom or [ ];
       predicted = sources.predicted or { };
+      predictedDerived = sources.predictedDerived or [ ];
       crates = sources.crates or { };
       spec =
         p:
@@ -242,7 +247,9 @@ rec {
           // lib.optionalAttrs (testOnly != { }) { inherit testOnly; }
           // lib.optionalAttrs (junk != { }) { inherit junk; }
           // lib.optionalAttrs (custom != [ ]) { inherit custom; }
-          // lib.optionalAttrs (predicted != { }) { predicted = lib.attrNames predicted; }
+          // lib.optionalAttrs (predicted != { } || predictedDerived != [ ]) {
+            predicted = lib.attrNames predicted ++ predictedDerived;
+          }
         )
       );
       toolchainsFile = toFile "toolchains.json" (

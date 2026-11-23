@@ -95,7 +95,7 @@ let
             "oldsyn"
           ]
           (_: [
-            "common"
+            "../common"
           ]);
     };
   };

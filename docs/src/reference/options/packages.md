@@ -487,10 +487,12 @@ lazy attribute set of string
 Files and directories outside the package directory that its
 units read (` include_str!("../../wit/x.wit") `, a sibling assets
 directory, patches), at their original relative paths\. Strings
-are relative to the repository root\. A built-in step of
-[` sources `](\#packagesnamesources): added for every kind of unit\. A library, bin or
-build script that fails naming a path outside its source view
-ends with a hint naming the path and this option\.
+are relative to the package directory, as every path of a
+package’s settings is\. The built-in entry
+` sources.extraSources ` of [` sources `](\#packagesnamesources) adds them for every unit\.
+A library, bin or build script that fails naming a path outside
+its source view ends with a hint naming the path and this
+option\.
 
 *Type:*
 list of (absolute path or string)
@@ -752,11 +754,15 @@ target’s crate root, followed as rustc does (` mod ` items,
 ` #[path] ` and ` cfg_attr(…, path = …) `), and the files of every
 ` include! `, ` include_str! ` and ` include_bytes! ` with a literal
 path (also ` concat!(env!("CARGO_MANIFEST_DIR"), "…") `) and of
-` #[debugger_visualizer] `, out of the view the steps of
-[` sources `](\#packagesnamesources) chose\. A build-script run’s is the paths its
+` #[debugger_visualizer] `\. A build-script run’s is the paths its
 script declares with literal ` rerun-if-changed ` directives,
-which is what Cargo reruns it for\. Test runs and doctests keep
-the package’s views\.
+which is what Cargo reruns it for\. Prediction reads the
+package’s widest view (its test compiles’ view, with the
+unit’s own), so a predicted read wins over an entry of
+[` sources `](\#packagesnamesources) that left the file out of the unit’s view (the
+` tests/ ` directory, another target’s root)\. Test runs and
+doctests keep their views\. ` sourceOverlay ` entries go on top
+of the predicted view\.
 
 Files read in a way the prediction does not see are misses: a
 proc macro reading a file (` askama ` templates, ` sqlx `’s
@@ -766,8 +772,10 @@ with a hint naming ` predictSources.keep `\. A unit whose files
 cannot be predicted (a ` mod ` or include in a ` macro_rules! `
 body, an include with a computed path, a file syn cannot parse,
 a build script whose directives are computed or that prints
-none) sees its whole view\. A package with a ` sourceOverlay ` is
-not predicted (an evaluation warning says so)\.
+none) sees its own view, as without prediction\. A package with
+a ` sourceOverlay ` has a derivation for each predicted view;
+without [` ca `](repository\.md\#ca), every edit to the package
+rebuilds its units\.
 
 *Type:*
 boolean
@@ -804,23 +812,22 @@ true
 
 ## `packages.<name>.predictSources.keep`
 
-Paths every predicted view of this package keeps, when
-[` sources `](\#packagesnamesources) chose them: files a proc macro or build script reads
-that source prediction does not see\. A string is relative to the
-package directory (a directory keeps everything under it); a
-path is absolute\. A function gets ` { kind, cargoTarget, buildScriptRun, root, packageDir, workspaceDir, ... } ` (` kind `
-and ` cargoTarget ` as ` sources ` functions get them, never null
-here; ` buildScriptRun `: whether the view is a build-script
-run’s; ` workspaceDir `: the workspace’s directory, relative to
-` root `) and returns a ` lib.fileset ` value\. Lists concatenate in
-layer order\. The curated defaults keep ` Cargo.toml ` for the
+Paths every predicted view of this package keeps, when the
+package’s widest view has them: files a proc macro or build
+script reads that source prediction does not see\. A string is
+relative to the package directory (a directory keeps
+everything under it); a path is absolute\. A function gets the
+unit’s descriptor, as a ` sources ` step does without ` default `
+(` unit ` is ` "compile" ` or ` "build-script-run" ` here, and
+` cargoTarget ` is never null), and returns a ` lib.fileset `
+value\. Lists concatenate in layer order\. The curated defaults keep ` Cargo.toml ` for the
 dependents of ` proc-macro-crate ` (also the workspace’s),
 ` find-crate ` and ` bevy_macro_utils `, which read it from
 ` CARGO_MANIFEST_DIR `, and a variant’s ` wrapperConfig.workingDirFiles `
 are kept (clippy’s: the working directory’s ` Cargo.toml `)\.
 
 *Type:*
-list of (string or absolute path or function from { kind, cargoTarget, buildScriptRun, root, packageDir, workspaceDir, \.\.\. } to a file set)
+list of (string or absolute path or function from { unit, test, cargoTarget, root, packageDir, workspaceDir, targets, memberDirs, \.\.\. } to a file set)
 
 *Default:*
 
@@ -833,44 +840,10 @@ list of (string or absolute path or function from { kind, cargoTarget, buildScri
 ```nix
 [
   "templates"
-  ({ cargoTarget, root, packageDir, ... }:
+  ({ root, packageDir, ... }:
     lib.fileset.fileFilter (f: f.hasExt "sql") (root + "/${packageDir}/migrations"))
 ]
 
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.scopeTargetRoots`
-
-Whether each Cargo target’s units see only their own root among
-the package’s targets\. The view of one target’s compiles leaves
-out the crate roots of the package’s other bins, examples, tests
-and benches (a root ` <dir>/main.rs ` outside ` src/ `, ` src/bin/ `,
-` tests/ `, ` benches/ ` and ` examples/ ` counts as its whole
-directory), and the view of the library, a bin or the build
-script also leaves out the ` examples/ ` and ` benches/ `
-directories\. So an edit to ` tests/foo.rs ` rebuilds only that
-test\. Shared files, such as ` tests/common/mod.rs `, stay in
-every view\. Test runs, doctests and build-script runs read the
-package’s own views, with every root: Cargo re-runs a build
-script on any edit to its package\. So an edit to an example or
-a bin re-runs the package’s build script, unless
-[` predictSources `](\#packagesnamepredictsourcesenable) narrows
-the run to its ` rerun-if-changed ` paths; then it rebuilds no
-library, other bin or product\. Set it to ` false ` when a target reads another
-target’s root (` #[path = "../other.rs"] `, a library that
-` include_str! `s an example); such a unit fails with a hint
-naming this option\. A built-in step of [` sources `](\#packagesnamesources)\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-true
 ```
 
 *Declared by:*
@@ -891,7 +864,9 @@ the value, which replaces whatever the repository has at that
 path\. The value is passed by reference: only this package’s
 units depend on it, and planning and instantiation do not\.
 Workspace packages only: registry and git crates have no view,
-and setting it for one is an evaluation warning\.
+and setting it for one is an evaluation warning\. A predicted
+view gets the entries too, on top of the files prediction
+chose\.
 See [Fetching and source
 views](\.\./\.\./explanation/internals/sources\.md\#products-in-a-view)\.
 
@@ -918,64 +893,113 @@ lazy attribute set of (package or absolute path or string)
 
 ## `packages.<name>.sources`
 
-Functions that choose the files of this package’s source views\.
-Each gets an attribute set and returns a ` lib.fileset ` value
-inside the repository root:
+The named steps that choose the files of this package’s source
+views\. A unit’s view is every entry’s step in order, each on the
+result of the one before, from the empty set; source prediction
+([` predictSources `](\#packagesnamepredictsourcesenable)) and then
+[` sourceOverlay `](\#packagesnamesourceoverlay) act on the result\.
+An entry is a function, or ` { step; after; before; } `; ` null `
+removes it\. A step gets an attribute set and returns a
+` lib.fileset ` value inside the repository root: ` default `, the
+files chosen so far, and the unit’s descriptor:
 
- - ` default `: the files chosen so far\.
- - ` kind `: ` "build" ` (non-test compiles, build scripts and their
-   runs), ` "test" ` (test compiles and doctests) or ` "run" ` (test
-   runs)\. More kinds may be added: return ` default ` for a kind
-   you do not know\.
+ - ` unit `: ` "compile" `, ` "build-script-run" `, ` "doctest" ` or
+   ` "test-run" `\. More may be added: return ` default ` for one you do
+   not know\.
+ - ` test `: whether the unit is one of the package’s test units: a
+   compile Cargo builds with its dev-dependencies (test harnesses,
+   integration tests, benches, examples), a doctest or a test run\.
+ - ` cargoTarget `: the Cargo target the unit is of, ` { kind, name, path } ` (` kind `: ` "lib" `, ` "bin" `, ` "example" `, ` "test" `,
+   ` "bench" ` or ` "custom-build" `; ` path `: its crate root, relative to
+   the package directory): the compiled target, the build script of a
+   run, the library of a doctest, the test binary of a run\. null for
+   the package’s own view, which a unit the planner matched to no
+   target reads\.
  - ` root `: the repository root, a path\.
- - ` packageDir `: the package directory, relative to ` root ` (` "" `
-   for a package at the root)\.
- - ` cargoTarget `: the Cargo target whose units the view is for,
-   ` { kind, name, path } ` (` kind `: ` "lib" `, ` "bin" `,
-   ` "example" `, ` "test" `, ` "bench" ` or ` "custom-build" `; ` path `:
-   its crate root, relative to the package directory), or null
-   for the package’s view, which test runs, doctests and any
-   unit the planner matched to no target read\.
+ - ` packageDir `: the package directory, relative to ` root ` (` "" ` for
+   a package at the root)\.
+ - ` workspaceDir `: the Cargo workspace’s directory, relative to ` root `\.
+ - ` targets `: every Cargo target of the package, as ` cargoTarget `\.
+ - ` memberDirs `: the directories of the workspace’s members, relative
+   to ` root `\.
 
-A function must take ` ... `\. breakbulk passes one more argument,
-so that a function without ` ... ` fails on its first use, not
-when breakbulk adds an argument\. The error names an argument the
-function does not take; the extra one’s name says to add ` ... `\.
+A step must take ` ... `\. breakbulk passes one more argument, so
+that a step without ` ... ` fails on its first use, not when
+breakbulk adds an argument\. The error names an argument the step
+does not take; the extra one’s name says to add ` ... `\.
 
-The functions run after the built-in steps (the package
-directory, then ` extraSources `, ` test.sourceScope `,
-` test.scopeTestsDir `, ` scopeTargetRoots `, ` test.runFiles ` and
-` test.workspaceManifest `), each on the result
-of the one before\. Lists concatenate in [layer
-order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order):
-a ` memberDefaults ` function runs before a ` packages.<name> `
-one, and a ` variant.<v> ` function after the level it refines\.
-Within one layer, ` lib.mkBefore ` and ` lib.mkAfter ` order them\.
-See [Fetching and source
+The built-in entries, in order, each made by a constructor of
+` breakbulk.lib.sourceSteps `:
+
+ - ` package `: the package directory, without its top-level
+   ` target/ `, ` .git ` and ` result ` symlinks of ` nix build `, and
+   without nested workspace members\.
+ - ` extraSources `: [` extraSources `](\#packagesnameextrasources),
+   for every unit\.
+ - ` sourceScope `: [` test.sourceScope `](\#packagesnametestsourcescope),
+   added for the test units and its paths inside the package
+   taken out for the others\.
+ - ` testsDir `: the package’s ` tests/ ` directory taken out for
+   its non-test units (the library, bins, the build script and
+   its run), so a fixture edit there rebuilds no library, bin or
+   product\. Set it to ` null ` when one of them reads from ` tests/ `
+   (` include_str!("../tests/…") `, a build script that generates
+   tests from fixtures, a library that builds a path into
+   ` tests/ ` from ` CARGO_MANIFEST_DIR ` that the tests read)\.
+ - ` targetRoots `: for one Cargo target’s compiles, the crate
+   roots of the package’s other bins, examples, tests and
+   benches taken out (a root ` <dir>/main.rs ` outside ` src/ `,
+   ` src/bin/ `, ` tests/ `, ` benches/ ` and ` examples/ ` counts as its
+   whole directory), and for the library, a bin or the build
+   script, the ` examples/ ` and ` benches/ ` directories\. So an
+   edit to ` tests/foo.rs ` rebuilds only that test\. Shared files,
+   such as ` tests/common/mod.rs `, stay\. Set it to ` null ` when a
+   target reads another target’s root (` #[path = "../other.rs"] `,
+   a library that ` include_str! `s an example)\.
+ - ` runFiles `: [` test.runFiles `](\#packagesnametestrunfiles), for
+   test runs\.
+ - ` workspaceManifest `: the workspace’s root ` Cargo.toml `, for
+   test units ([` test.workspaceManifest `](\#packagesnametestworkspacemanifest))\.
+
+An entry runs after the entries its ` after ` names and before
+those its ` before ` names; one with neither runs after every
+built-in entry\. Entries left unordered run built-in ones first,
+in their order, then by name\. A reference to a removed entry is
+dropped\. A unit that fails naming a path its view lacks ends with a
+hint naming the entry that left it out, where one did\. Each
+entry is one value: of two
+[layers](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)
+that set it, the higher one’s wins\. An attribute set given for
+a built-in entry takes the fields it leaves out from the
+built-in one, so ` sources.testsDir.after = "mine" ` moves it and
+` sources.testsDir.enable = true ` brings it back over a lower
+layer’s ` null `\. See [Fetching and source
 views](\.\./\.\./explanation/internals/sources\.md\#source-views) and
 [Rebuild less when unrelated files
 change](\.\./\.\./how-to/filter-source\.md)\.
 
 *Type:*
-list of function from { default, kind, cargoTarget, root, packageDir, \.\.\. } to a file set
+attribute set of (null, step function or { step, after, before, enable })
 
 *Default:*
 
 ```nix
-[ ]
+{ }
 ```
 
 *Example:*
 
-```nix
-[
-  ({ default, kind, root, ... }:
-    if kind == "run"
+````nix
+{
+  fixtures = { default, unit, root, ... }:
+    if unit == "test-run"
     then lib.fileset.union default (root + "/crates/linter/resources/fixtures")
-    else default)
-]
+    else default;
+  # Library code reads `tests/data` at compile time.
+  testsDir = null;
+}
 
-```
+````
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
@@ -1599,7 +1623,8 @@ test binary is not re-run\. A test that reads a file not listed
 fails\. ` null `: the view of the package’s test compiles, as
 ` cargo test ` sees it\. Test apps keep that view\. A built-in
 step of [` sources `](\#packagesnamesources), for kind ` "run" `: a later function can
-still add files, such as another package’s fixtures\.
+still add files, such as another package’s fixtures\. Strings
+are relative to the package directory\.
 ` repo.config.ca ` says whether [` ca `](repository\.md\#ca) is on\.
 
 *Type:*
@@ -1661,37 +1686,10 @@ breakbulk.lib.testRunners.nextest { profile = "ci"; }
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
-## `packages.<name>.test.scopeTestsDir`
-
-Whether the package’s ` tests/ ` directory is test-only, as if
-listed in ` sourceScope `: only the package’s test units see it
-(integration tests, with or without the libtest harness,
-benches, examples, test harnesses, doctests and test runs), so
-a fixture edit there rebuilds no library, bin or product\. Set
-it to ` false ` when the library, a bin or the build script
-reads from ` tests/ ` at compile time
-(` include_str!("../tests/…") `, a build script that generates
-tests from fixtures), or when the library builds a path into
-` tests/ ` from ` CARGO_MANIFEST_DIR ` that the tests read; such a
-unit or test run fails with a hint naming this option\. A
-built-in step of [` sources `](\#packagesnamesources)\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-true
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
 ## `packages.<name>.test.sourceScope`
 
-Repository paths (paths, or strings relative to the
-repository root) that only this package’s test units see: the
+Paths (paths, or strings relative to the package directory)
+that only this package’s test units see: the
 units Cargo builds with its dev-dependencies (test harnesses,
 integration tests and benches with or without the libtest
 harness, examples), its doctests and its test runs, whose
@@ -1701,9 +1699,10 @@ inside the package is also removed from the view of its other
 units (the library, bins, build script)\. Either way, editing
 it rebuilds only this package’s test units and re-runs its
 tests\. The package’s ` tests/ ` directory is in this scope too
-(` scopeTestsDir `)\. A built-in step of [` sources `](\#packagesnamesources)\. A test
-unit or test run that fails naming a path outside its source
-view ends with a hint naming the path and this option\.
+(the built-in entry ` sources.testsDir `)\. The built-in entry
+` sources.sourceScope ` of [` sources `](\#packagesnamesources) applies it\. A test unit or
+test run that fails naming a path outside its source view ends
+with a hint naming the path and this option\.
 
 *Type:*
 list of (absolute path or string)

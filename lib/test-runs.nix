@@ -913,8 +913,9 @@ rec {
           ;
       },
       packages ? { },
-      # runDirs.<package> = the package directory of its "run" view, or
-      # null for the test binary's own view (lib/workspace.nix).
+      # runDirs.<package>."<kind>/<name>" = the package directory of that
+      # test binary's run view, or null for its package's test view
+      # (lib/workspace.nix).
       runDirs ? { },
       # Whose run settings the runs take (`runConfig`): "test", or "bench"
       # for a bench plan's binaries.
@@ -996,7 +997,7 @@ rec {
           '';
         };
 
-      runDir = pkg: runDirs.${pkg} or null;
+      runDir = b: (runDirs.${b.package} or { })."${b.kind}/${b.target}" or null;
 
       runInfoOf =
         r: cfg:
@@ -1006,7 +1007,7 @@ rec {
           name = "${name}-test-spec";
           stable = useCa;
           dylibPath = (platformOf r).dylibPath;
-          narrowDir = runDir r.breakbulkRoot.package;
+          narrowDir = runDir r.breakbulkRoot;
           linkRoot = !copiesBinary cfg;
         };
 
@@ -1149,7 +1150,7 @@ rec {
                 binary = key;
                 inherit (cfg) args;
                 # The package directory of its "run" view, or null.
-                runDir = runDir b.package;
+                runDir = runDir b;
               };
               binary = bin;
               # The test root, whose wrapper (`breakbulkRoot.wrapper`)

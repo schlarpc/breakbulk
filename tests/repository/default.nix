@@ -197,8 +197,8 @@ let
   outsideModules = [
     (oneWs "ws")
     {
-      packages.reader.extraSources = [ "schema" ];
-      packages.app.extraSources = [ "assets" ];
+      packages.reader.extraSources = [ "../../schema" ];
+      packages.app.extraSources = [ "../../assets" ];
     }
   ];
   outside = mkRepo (fixtures + "/outside-reads") outsideModules;
@@ -219,8 +219,8 @@ let
         variants.default.profile = "dev";
       };
       packages.app.extraSources = [ "crates/lib1/data" ];
-      packages.lib1.extraSources = [ "assets" ];
-      packages.vmember.extraSources = [ "assets" ];
+      packages.lib1.extraSources = [ "../../assets" ];
+      packages.vmember.extraSources = [ "../../assets" ];
     }
   ];
   ownView = mkRepo (fixtures + "/own-view") ownViewModules;
@@ -305,7 +305,7 @@ let
     {
       packages.mylib-sys = {
         env.MYLIB_DIR = mylib;
-        extraSources = [ "vendor" ];
+        extraSources = [ "../vendor" ];
       };
     }
   ];
@@ -329,7 +329,7 @@ let
   # glob, tool's by `*`, devdep's by its path.
   declaredProvided = declaredPaths [
     {
-      packages.app.extraSources = [ "shared" ];
+      packages.app.extraSources = [ "../shared" ];
       packages.dep.buildScriptPaths.allow = [ "/nonexistent/*" ];
       packages.tool.buildScriptPaths.allow = [ "*" ];
       packages.devdep.buildScriptPaths.allow = [ "/nonexistent/breakbulk-dev-dep.h" ];
@@ -564,7 +564,7 @@ let
           target.${native}.sourceOverlay."ui/dist" = "/nowhere";
         };
         # A variant layer's sources reach the package's source view.
-        app-b.variant.default.extraSources = [ "c" ];
+        app-b.variant.default.extraSources = [ "../c" ];
         not-in-any-lockfile.env.X = "1";
         shared.nativeInputs = p: [ p.pkg-config ];
       };
@@ -583,10 +583,10 @@ let
   # --- test-only ---------------------------------------------------------------
 
   testOnlyScope = {
-    packages.proto.test.sourceScope = [ "proto/testdata" ];
+    packages.proto.test.sourceScope = [ "testdata" ];
   };
   testOnlyOptOut = {
-    packages.proto.test.scopeTestsDir = false;
+    packages.proto.sources.testsDir = null;
   };
   testOnlyRepo =
     edit: modules:
@@ -663,45 +663,52 @@ let
     { lib, ... }:
     let
       fs = lib.fileset;
-      onRun = f: { default, kind, ... }@a: if kind == "run" then f a else default;
+      onRun =
+        f:
+        { default, unit, ... }@a:
+        if unit == "test-run" then f a else default;
     in
     {
-      packages.cli.sources = [
-        (
-          { default, root, ... }:
-          fs.intersection default (
-            fs.unions [
-              (root + "/Cargo.toml")
-              (root + "/src")
-              (root + "/tests")
-            ]
-          )
-        )
-        (onRun ({ default, root, ... }: fs.union default (root + "/data")))
-      ];
-      packages.lint.sources = [
-        (
+      packages.cli.sources = {
+        cliOnly = {
+          after = "runData";
+          step =
+            { default, root, ... }:
+            fs.intersection default (
+              fs.unions [
+                (root + "/Cargo.toml")
+                (root + "/src")
+                (root + "/tests")
+              ]
+            );
+        };
+        cliData = {
+          after = "cliOnly";
+          step = onRun ({ default, root, ... }: fs.union default (root + "/data"));
+        };
+      };
+      packages.lint.sources = {
+        lintSnapshots =
           {
             default,
-            kind,
+            test,
             root,
             packageDir,
             ...
           }:
-          if kind == "build" then
+          if !test then
             fs.difference default (fs.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}/src"))
           else
-            default
-        )
-        (
+            default;
+        lintMeta =
           {
             default,
-            kind,
+            test,
             root,
             packageDir,
             ...
           }:
-          if kind == "build" then
+          if !test then
             fs.difference default (
               fs.unions [
                 (root + "/${packageDir}/README.md")
@@ -709,24 +716,27 @@ let
               ]
             )
           else
-            default
-        )
-        (onRun (
-          { default, root, ... }:
-          fs.difference default (
-            fs.unions [
-              (root + "/data/unused.txt")
-              (root + "/data/other.txt")
-            ]
-          )
-        ))
-      ];
-      packages.lint.variant.default.sources = [
-        (onRun ({ default, root, ... }: fs.union default (root + "/data/other.txt")))
-      ];
-      workspaces.main.memberDefaults.sources = [
-        (onRun ({ default, root, ... }: fs.union default (root + "/data")))
-      ];
+            default;
+        lintTrim = {
+          after = "runData";
+          step = onRun (
+            { default, root, ... }:
+            fs.difference default (
+              fs.unions [
+                (root + "/data/unused.txt")
+                (root + "/data/other.txt")
+              ]
+            )
+          );
+        };
+      };
+      packages.lint.variant.default.sources.lintOther = {
+        after = "lintTrim";
+        step = onRun ({ default, root, ... }: fs.union default (root + "/data/other.txt"));
+      };
+      workspaces.main.memberDefaults.sources.runData = onRun (
+        { default, root, ... }: fs.union default (root + "/data")
+      );
       # The checks read the runs' output.
       workspaces.main.memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
     };
@@ -765,21 +775,15 @@ let
   viewHints = mkRepo (fixtures + "/view-hints") [
     (oneWs ".")
     {
-      packages.chosen-reads.sources = [
-        (
-          {
-            default,
-            kind,
-            root,
-            packageDir,
-            ...
-          }:
-          if kind == "build" then
-            lib.fileset.difference default (root + "/${packageDir}/data.txt")
-          else
-            default
-        )
-      ];
+      packages.chosen-reads.sources.noData =
+        {
+          default,
+          test,
+          root,
+          packageDir,
+          ...
+        }:
+        if !test then lib.fileset.difference default (root + "/${packageDir}/data.txt") else default;
     }
   ];
   # With the options the hints name.
@@ -787,12 +791,12 @@ let
     (oneWs ".")
     {
       packages = {
-        lib-reads.extraSources = [ "shared" ];
-        script-reads.extraSources = [ "shared" ];
-        test-reads.test.sourceScope = [ "shared" ];
-        run-reads.test.sourceScope = [ "shared" ];
-        doc-reads.test.sourceScope = [ "shared" ];
-        lib-to-tests.test.scopeTestsDir = false;
+        lib-reads.extraSources = [ "../../shared" ];
+        script-reads.extraSources = [ "../../shared" ];
+        test-reads.test.sourceScope = [ "../../shared" ];
+        run-reads.test.sourceScope = [ "../../shared" ];
+        doc-reads.test.sourceScope = [ "../../shared" ];
+        lib-to-tests.sources.testsDir = null;
       };
     }
   ];
@@ -803,7 +807,7 @@ let
   # With the option the hint names.
   resultNamesFixed = mkRepo (fixtures + "/result-names") [
     (oneWs ".")
-    { packages.via-link.extraSources = [ "crates/via-link/result" ]; }
+    { packages.via-link.extraSources = [ "result" ]; }
   ];
 
   # --- host units across debugInfo ---------------------------------------------
@@ -1323,9 +1327,10 @@ in
 
   # `tests/` and in-package `test.sourceScope` paths are test-only: editing
   # them changes only proto's test units (and its test runs), not its
-  # library or app; `scopeTestsDir = false` keeps `tests/` in every view,
-  # set on the package, in `memberDefaults` or per triple (`target.<t>`),
-  # and a package's `true` overrides `memberDefaults`' `false`. The
+  # library or app; `sources.testsDir = null` keeps `tests/` in every
+  # view, set on the package, in `memberDefaults` or per triple
+  # (`target.<t>`), and a package's `enable = true` overrides
+  # `memberDefaults`' `null`. The
   # integration tests, with and without the libtest harness, read both at
   # their paths; the example reads `tests/`.
   test-only =
@@ -1342,13 +1347,13 @@ in
       changedWith = m: changedUnits (testOnlyRepo null [ m ]) (testOnlyRepo addFixture [ m ]);
       optOuts = {
         package = testOnlyOptOut;
-        memberDefaults.workspaces.main.memberDefaults.test.scopeTestsDir = false;
-        target.packages.proto.target.${native}.test.scopeTestsDir = false;
+        memberDefaults.workspaces.main.memberDefaults.sources.testsDir = null;
+        target.packages.proto.target.${native}.sources.testsDir = null;
       };
       optOutChanged = lib.mapAttrs (_: changedWith) optOuts;
       backOn = changedWith {
-        workspaces.main.memberDefaults.test.scopeTestsDir = false;
-        packages.proto.test.scopeTestsDir = true;
+        workspaces.main.memberDefaults.sources.testsDir = null;
+        packages.proto.sources.testsDir.enable = true;
       };
     in
     assert lib.assertMsg (
@@ -1364,9 +1369,9 @@ in
       (lib.all (c: lib.elem "proto-0.1.0-lib" c && lib.elem "app-0.1.0-bin" c) (
         lib.attrValues optOutChanged
       ))
-      "test-only: with scopeTestsDir = false, a fixture edit changed only ${builtins.toJSON optOutChanged}";
+      "test-only: with sources.testsDir = null, a fixture edit changed only ${builtins.toJSON optOutChanged}";
     assert lib.assertMsg (backOn == testUnits)
-      "test-only: the package's scopeTestsDir = true did not override memberDefaults: ${builtins.toJSON backOn}";
+      "test-only: the package's sources.testsDir.enable = true did not override memberDefaults: ${builtins.toJSON backOn}";
     pkgs.runCommand "test-only"
       {
         read = (inst testOnly).testRuns.proto.read;
@@ -1382,7 +1387,7 @@ in
         touch $out
       '';
 
-  # Per-target views (`scopeTargetRoots`): an edit to one integration
+  # Per-target views (`sources.targetRoots`): an edit to one integration
   # test's root changes only that test's compile; a shared module under
   # `tests/` changes the test compiles, and no library, bin or build
   # script. tv's build-script run reads the package's whole view, as
@@ -1390,9 +1395,9 @@ in
   # bin edit re-runs it and rebuilds the package; with `predictSources`,
   # which narrows the run to its `rerun-if-changed` paths, the edit
   # changes only that target's units (and the tests that link the bin).
-  # With `scopeTargetRoots = false` every target
+  # With `sources.targetRoots = null` every target
   # sees every root again. A test that reads another test's root fails
-  # with a hint naming the option. Test runs read the package's views:
+  # with a hint naming the entry. Test runs read the package's views:
   # an edit to one test re-runs the other.
   target-views =
     let
@@ -1409,7 +1414,7 @@ in
         common = changedBy "echo '// edited' >> tv/tests/common/mod.rs" [ ];
       };
       exampleRun = changedBy exampleEdit [ ];
-      off = changedBy fooEdit [ { packages.tv.scopeTargetRoots = false; } ];
+      off = changedBy fooEdit [ { packages.tv.sources.targetRoots = null; } ];
       want = {
         foo = [ "tv-0.1.0-test-foo" ];
         example = [ "tv-0.1.0-test-x" ];
@@ -1440,7 +1445,7 @@ in
       (lib.elem "tv-0.1.0-build-run" exampleRun && lib.elem "tv-0.1.0-lib" exampleRun)
       "target-views: without predictSources, an example edit changed only ${builtins.toJSON exampleRun}";
     assert lib.assertMsg (lib.elem "tv-0.1.0-test-bar" off && lib.elem "tv-0.1.0-test" off)
-      "target-views: with scopeTargetRoots = false, an edit to tests/foo.rs changed only ${builtins.toJSON off}";
+      "target-views: with sources.targetRoots = null, an edit to tests/foo.rs changed only ${builtins.toJSON off}";
     assert lib.assertMsg (
       runOf (targetViewsRepo fooEdit [ ]) "bar" != runOf targetViews "bar"
     ) "target-views: an edit to tests/foo.rs left bar's test run unchanged";
@@ -1451,7 +1456,7 @@ in
         tool = targetViews.workspaces.main.packages.tv;
         hint = expectFailure "target-views-hint" readerUnit [
           "tests/bar.rs"
-          "packages.tv.scopeTargetRoots = false"
+          "packages.tv.sources.targetRoots = null"
         ];
       }
       ''
@@ -1514,9 +1519,10 @@ in
       noRuns = specsOf (predictSourcesRepo null [
         { packages.ps.predictSources.buildScriptRuns = false; }
       ]) "default";
-      overlaid = specsOf (predictSourcesRepo null [
-        { packages.ps.sourceOverlay."assets" = ./.; }
-      ]) "default";
+      overlaidRepo = predictSourcesRepo null [
+        { packages.ps.sourceOverlay."assets" = pkgs.writeTextDir "a.txt" "a"; }
+      ];
+      overlaid = specsOf overlaidRepo "default";
       missingLib = (unitsNamed (inst missing) "build")."ps-0.1.0-lib";
       # bg-sys build-depends on bindgen, whose library prints
       # `rerun-if-changed`; app reaches bindgen and cc only through
@@ -1545,9 +1551,10 @@ in
     assert lib.assertMsg (
       !(noRuns ? ${runKey}) && noRuns ? "src:ps#lib/ps"
     ) "predict-sources: with buildScriptRuns = false the run is still predicted";
+    # Its predicted views are derivations of their own, not specs.
     assert lib.assertMsg (
       overlaid == { }
-    ) "predict-sources: a package with a sourceOverlay is predicted";
+    ) "predict-sources: a package with a sourceOverlay has predicted specs";
     assert lib.assertMsg (
       !(sysNative ? "src:bg-sys#run/custom-build/build-script-build")
       && sysNative ? "src:cm-sys#run/custom-build/build-script-build"
@@ -1558,6 +1565,9 @@ in
       {
         ps = predictSources.workspaces.main.packages.ps;
         t = (inst predictSources).testRuns.ps.t;
+        # A package with a sourceOverlay is predicted, the overlay on top.
+        overlaidLib = (inst' overlaidRepo "main").sources.workspaceTargets.ps."lib/ps";
+        overlaidPs = overlaidRepo.workspaces.main.packages.ps;
         hint = expectFailure "predict-sources-hint" missingLib [
           "ps/templates/page.txt"
           "packages.ps.predictSources.keep"
@@ -1565,6 +1575,9 @@ in
       }
       ''
         [ "$($ps/bin/ps)" = "42 data page proto" ]
+        [ "$($overlaidPs/bin/ps)" = "42 data page proto" ]
+        test -f $overlaidLib/ps/src/lib.rs && test ! -e $overlaidLib/ps/README.md
+        test -f $overlaidLib/ps/assets/a.txt
         touch $out
       '';
 
@@ -1694,7 +1707,8 @@ in
       '';
 
   # A library that reads a test-only path at compile time fails with a hint
-  # naming the option that keeps it; with `scopeTestsDir = false` it builds.
+  # naming the option that keeps it; with `sources.testsDir = null` it
+  # builds, and so it does with source prediction.
   test-only-hint =
     pkgs.runCommand "test-only-hint"
       {
@@ -1703,7 +1717,7 @@ in
             (protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ ]))
             [
               "proto/tests/fixtures/input.txt"
-              "packages.proto.test.scopeTestsDir = false"
+              "packages.proto.sources.testsDir = null"
             ];
         scope =
           expectFailure "test-only-scope" (protoLib (testOnlyRepo (includeFrom "testdata/more.txt") [ ]))
@@ -1713,6 +1727,13 @@ in
               "packages.proto.extraSources"
             ];
         optOut = protoLib (testOnlyRepo (includeFrom "tests/fixtures/input.txt") [ testOnlyOptOut ]);
+        # Source prediction reads the package's widest view: the read wins
+        # over the `testsDir` step.
+        predicted = protoLib (
+          testOnlyRepo (includeFrom "tests/fixtures/input.txt") [
+            { packages.proto.predictSources.enable = true; }
+          ]
+        );
       }
       ''
         cat $tests/log $scope/log
@@ -1821,7 +1842,7 @@ in
         ];
         libToTests = expectFailure "view-hints-lib-to-tests" i.testRuns.lib-to-tests.fixture [
           "`crates/lib-to-tests/tests/fixtures/input.txt` is in the package's `tests/` directory"
-          "`packages.lib-to-tests.test.scopeTestsDir = false`"
+          "`packages.lib-to-tests.sources.testsDir = null`"
         ];
         fixedLib = (unitsNamed fixed "build")."lib-reads-0.1.0-lib";
         fixedRun = (unitsNamed fixed "build")."script-reads-0.1.0-build-run";
@@ -2936,7 +2957,8 @@ in
             MD_BOTH = "md";
           };
           test.runner = breakbulk.testRunners.nextest { };
-          extraSources = [ "c" ];
+          # A path: a string would be each member's own `c`.
+          extraSources = [ (fixtures + "/multi-ws/c") ];
         };
         packages.app-b.test = {
           env.MD_BOTH = "own";

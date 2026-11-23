@@ -78,22 +78,21 @@ it.
 - With insta, the curated default above keeps every `.snap` file of the
   package out of the library's, bins' and test compiles' views.
 - Snapshots under `tests/` are test-only already: the `tests/` directory
-  is in the test views only
-  ([`test.scopeTestsDir`](../reference/options/packages.md#packagesnametestscopetestsdir)).
+  is in the test views only (the built-in
+  [`sources`](../reference/options/packages.md#packagesnamesources) entry
+  `testsDir`).
 - Other snapshot files under `src/` (snapbox's or expect-test's, or
-  insta's with the default off) are in the `"build"` view. Leave them
-  out of it with a
+  insta's with the default off) are in the non-test units' views. Leave
+  them out of those with a
   [`sources`](../reference/options/packages.md#packagesnamesources)
-  function:
+  entry:
 
 ```nix
 modules = [
   ({ lib, ... }: {
-    packages.my-crate.sources = [
-      ({ default, kind, root, packageDir, ... }:
-        let snaps = lib.fileset.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}/src");
-        in if kind == "build" then lib.fileset.difference default snaps else default)
-    ];
+    packages.my-crate.sources.snapshots = { default, test, root, packageDir, ... }:
+      let snaps = lib.fileset.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}/src");
+      in if !test then lib.fileset.difference default snaps else default;
   })
 ];
 ```
@@ -101,7 +100,7 @@ modules = [
 An edit to a snapshot then rebuilds no library, bin or product. For whole
 directories,
 [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
-does the same without a function. More recipes are in [Rebuild less when
+does the same without a step. More recipes are in [Rebuild less when
 unrelated files change](filter-source.md).
 
 ## Update snapshots

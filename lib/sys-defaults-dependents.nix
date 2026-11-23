@@ -34,23 +34,20 @@ in
       INSTA_WORKSPACE_ROOT = run: run.workspaceRoot;
       INSTA_UPDATE = "no";
     };
-    sources = [
-      (
-        {
-          default,
-          kind,
-          root,
-          packageDir,
-          ...
-        }:
-        if kind != "run" then
-          lib.fileset.difference default (
-            lib.fileset.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}")
-          )
-        else
-          default
-      )
-    ];
+    sources.instaSnapshots =
+      {
+        default,
+        unit,
+        root,
+        packageDir,
+        ...
+      }:
+      if unit != "test-run" then
+        lib.fileset.difference default (
+          lib.fileset.fileFilter (f: f.hasExt "snap") (root + "/${packageDir}")
+        )
+      else
+        default;
   };
 
   # They read the dependent's `Cargo.toml` from `CARGO_MANIFEST_DIR`

@@ -240,6 +240,11 @@ which each higher layer's single values have a slightly higher priority:
   `packages.<name>.extraSources = lib.mkForce [ ]` drops what
   `memberDefaults` adds, for that package only.
 - A single value (`test.runner`) is the highest layer's that sets one.
+- A [`sources`](../reference/options/packages.md#packagesnamesources)
+  entry is a single value too. One given for a built-in entry as an
+  attribute set takes the fields it leaves out from the built-in one,
+  so a layer can move it (`after`, `before`), remove it (`null`) or
+  bring it back over a lower layer's `null` (`enable = true`).
 - `env` (with `forHost.env`, `forTarget.env` and `test.env`), `stages`,
   `checks` and `test.preRun` merge, and each variable, stage, check or
   snippet in them is a single value of its own.
@@ -401,8 +406,9 @@ local Cargo builds with other flags than Nix does.
 
 ## Source views
 
-A package's source is the package's directory plus its `extraSources`,
-at their original places in the repository. So relative paths like
+A package's source is the package's directory plus its `extraSources`
+(relative to the package directory, as every path in a package's
+settings is), at their original places in the repository. So relative paths like
 `../../wit` or `../shared/assets` work unchanged, and editing a file
 outside them changes nothing for the package.
 
@@ -412,8 +418,8 @@ For tests:
   (integration tests and benches with or without the libtest harness, test
   harnesses, examples, doctests and test runs) see it, so a fixture edit
   there re-runs the package's tests and rebuilds nothing else.
-  [`test.scopeTestsDir = false`](../reference/options/packages.md#packagesnametestscopetestsdir)
-  turns that off for code that reads `tests/` at compile time;
+  `sources.testsDir = null` turns that off for code that reads `tests/`
+  at compile time;
 - [`test.sourceScope`](../reference/options/packages.md#packagesnametestsourcescope)
   makes more paths test-only: a path outside the package is added to its
   tests' source, and a path inside it is removed from the source of its
@@ -425,13 +431,16 @@ For tests:
   package's bins, examples, tests and benches, so an edit to
   `tests/foo.rs` rebuilds only that test, and an example edit rebuilds
   no library unless it re-runs the package's build script
-  ([`scopeTargetRoots`](../reference/options/packages.md#packagesnamescopetargetroots)).
+  (`sources.targetRoots`);
+- [`sources`](../reference/options/packages.md#packagesnamesources)
+  holds these as named steps, which a package can reorder, remove or add
+  to.
 
 When a unit fails and its output names a repository path that its source
 view lacks, the message names the path and the option that adds it:
 `extraSources` for a library, bin or build script, `test.sourceScope`
-for a test, a doctest or a test run, `test.scopeTestsDir` for a
-test-only path that non-test code reads, and `scopeTargetRoots` for
+for a test, a doctest or a test run, `sources.testsDir` for a
+test-only path that non-test code reads, and `sources.targetRoots` for
 another target's root
 ([Missing paths](../reference/unit-builder.md#missing-paths)). So does a
 build script that fails while it names a `rerun-if-changed` path that is

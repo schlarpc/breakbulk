@@ -270,7 +270,33 @@ let
     # its working directory is its own directory, which its view holds.
     extraFiles = workingDirFiles wsDir;
     runCommand = pkgs.runCommandLocal;
+    inherit predictOne;
   };
+  # A package with a `sourceOverlay` has its predicted views made by a
+  # derivation each, with the overlay on top. Not with the others' (one
+  # derivation over every predicted view, imported at evaluation, or the
+  # outer derivation's in dynamic-derivation mode): the overlay is a
+  # derivation over the predicted view, which those make too late for
+  # instantiation to name. With `ca`, a view whose files stay the same
+  # leaves its units unchanged.
+  predictOne =
+    spec:
+    derivation (
+      {
+        name = "source";
+        inherit system;
+        builder = "${tools.breakbulk-predict}/bin/breakbulk-predict";
+        args = [
+          "--one"
+          (builtins.toFile "predict.json" (builtins.toJSON (spec // { key = "source"; })))
+          "--out"
+          (placeholder "out")
+        ];
+      }
+      // lib.optionalAttrs ca (
+        featureGates.caAttrs nixFeatures "the predicted views of `${name}`'s overlaid packages (`ca`)"
+      )
+    );
   # The files the workspace wrapper reads from the compiles' working
   # directory (`cwd`: the workspace root for a member, the package
   # directory for a package outside it), in every view, predicted or not:
@@ -310,6 +336,7 @@ let
         if outsideRoots ? ${pkgName} && r.success then r.value else [ ];
       tested = false;
       runCommand = pkgs.runCommandLocal;
+      inherit predictOne;
       extraKeep = workingDirFiles dir;
     }
     // {
@@ -332,12 +359,17 @@ let
       workspaceTest = lib.mapAttrs (_: v: v.testSrc) (lib.filterAttrs (_: v: v ? testSrc) keep);
       # A predicted view's key is listed with the view it narrows as its
       # value; instantiate's `sources.predicted` gives the predicted one.
-      workspaceTargets = lib.filterAttrs (_: ts: ts != { }) (
-        lib.mapAttrs (_: v: v.targetSrc // lib.mapAttrs (_: s: s.view) (v.predicted.build or { })) keep
-      );
+      workspaceTargets = lib.filterAttrs (_: ts: ts != { }) (lib.mapAttrs (_: v: v.targetSrc) keep);
       workspaceTestTargets = lib.filterAttrs (_: ts: ts != { }) (
-        lib.mapAttrs (
-          _: v: v.targetTestSrc or { } // lib.mapAttrs (_: s: s.view) (v.predicted.test or { })
+        lib.mapAttrs (_: v: v.targetTestSrc or { }) keep
+      );
+      # The keys of predicted views that are derivations (`predictOne`),
+      # listed with their values above, for hints.
+      predictedDerived = lib.concatLists (
+        lib.mapAttrsToList (
+          dir: v:
+          map (i: "src:${dir}#${i}") v.predictedDerived.build
+          ++ map (i: "test-src:${dir}#${i}") v.predictedDerived.test
         ) keep
       );
     };
@@ -360,8 +392,12 @@ let
     builder = "${tools.breakbulk-predict}/bin/breakbulk-predict";
     args = [
       "--spec"
+      # Without each view's fallback, which this derivation does not read:
+      # a view prediction narrows need not be made unless it falls back.
       (builtins.toFile "predict.json" (
-        builtins.toJSON (lib.mapAttrsToList (key: spec: spec // { inherit key; }) predictedAll)
+        builtins.toJSON (
+          lib.mapAttrsToList (key: spec: removeAttrs spec [ "fallback" ] // { inherit key; }) predictedAll
+        )
       ))
       "--out"
       (placeholder "out")
@@ -396,7 +432,7 @@ let
               name = "source";
             }
           else
-            spec.view;
+            spec.fallback;
       })
       (
         lib.filterAttrs (
@@ -438,10 +474,11 @@ let
         )
       );
 
-  # The package directory of each member's "run" view, by package name, or
-  # null when its test runs read their test binary's own view. Test runs
-  # use it as their working directory and runtime CARGO_MANIFEST_DIR.
-  runDirs = lib.mapAttrs (_: v: v.runDir) views;
+  # The package directory of each test binary's run view, by package name
+  # and `<kind>/<name>`, or null when the run reads its package's test
+  # view. Test runs use it as their working directory and runtime
+  # CARGO_MANIFEST_DIR.
+  runDirs = lib.mapAttrs (_: v: v.runDirs) views;
 
   # `packages` with the function values of their test env applied
   # (testRuns.resolveTestEnv) for one kind of run. `filesOf` gives the
@@ -748,6 +785,7 @@ let
           junk
           ;
         predicted = predictedFor kind;
+        inherit (viewsFor kind) predictedDerived;
         wrapperConfig = wrapperConfigTrees;
       }
       # The build and doc plans have no test units; the bench plan's

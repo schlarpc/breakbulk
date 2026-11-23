@@ -251,7 +251,7 @@ Status of the 94 entries: 94 pinned; [Gaps](#gaps) lists none. A check (`docs-as
 - **Upstream.** cargo `0.100.0` `src/compiler/unit_dependencies.rs`: `State::deps` (non-transitive dependencies only for test and example targets or a test mode); `src/compiler/mod.rs`: `build_base_args` (`--crate-type` only outside a test mode, `--test` only with `unit.target.harness()`). Checked for this page.
 - **Holds for.** 1.99.
 - **Pinned by.** `repository-test-only` (an integration test without the harness and an example read `tests/`); `repository-test-only-variants` (the same in a clippy variant, which checks no bench, and a bench without the harness reads a `test.sourceScope` path in the bench variant).
-- **If it changes.** A test unit gets the normal view and fails to find its crate root or a fixture, with the hint at `test.scopeTestsDir`; these checks fail.
+- **If it changes.** A test unit gets the normal view and fails to find its crate root or a fixture, with the hint at `sources.testsDir`; these checks fail.
 
 ### T16. Rustc wrappers and the files beside a crate
 

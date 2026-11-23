@@ -31,14 +31,15 @@ needs:
 - **A home.** `HOME` is `/homeless-shelter`, which does not exist. Setting
   `CARGO_HOME` covers this too.
 
-For a workspace whose `outer` package has a build script that runs
-`$CARGO build -p inner --target-dir $OUT_DIR/nested`:
+For a workspace whose `outer` package (in `outer/`) has a build script
+that runs `$CARGO build -p inner --target-dir $OUT_DIR/nested`, with
+`extraSources` relative to `outer/`:
 
 ```nix
 { repo, ... }:
 {
   packages.outer = {
-    extraSources = [ "Cargo.toml" "Cargo.lock" "inner" ];
+    extraSources = [ "../Cargo.toml" "../Cargo.lock" "../inner" ];
     forTarget.env.CARGO_HOME = repo.workspaces.default.vendor.cargoHome;
   };
 }
@@ -186,7 +187,8 @@ let
 in
 {
   packages.app.test = {
-    sourceScope = [ "Cargo.toml" "Cargo.lock" "crates/inner" ];
+    # Relative to `crates/app`.
+    sourceScope = [ "../../Cargo.toml" "../../Cargo.lock" "../inner" ];
     env = {
       CARGO_HOME = ws.vendor.cargoHome;
       CARGO_TARGET_DIR = "/tmp/nested-target";

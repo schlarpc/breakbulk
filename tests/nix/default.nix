@@ -391,20 +391,20 @@ let
     let
       views = bb.sourceViews.workspaceViews {
         root = rootsLayouts;
-        packages.bin-dirs.extraSources = [ "shared/bin" ];
+        packages.bin-dirs.extraSources = [ "../../shared/bin" ];
         # A "run" view with no file of the package.
         packages.virtual-sub.test.runFiles = [ ];
         packages.normalized.test.workspaceManifest = false;
       };
     in
     assert lib.assertMsg (
-      views.bin-dirs.runDir == null
+      "${views.bin-dirs.runSrc}" == "${views.bin-dirs.testSrc}"
     ) "source-views: bin-dirs' runs have a view of their own";
     assert lib.assertMsg (
       "${views.normalized.src}" == "${views.normalized.testSrc}"
     ) "source-views: normalized's test view differs from its build view";
     pkgs.runCommand "source-views" { } ''
-      r=${views.virtual-sub.runDir}
+      r=${views.virtual-sub.runSrc}/virtual-sub
       test -d $r && test -z "$(ls -A $r)"         # the package directory, empty
       test -f $r/../Cargo.toml                    # the workspace manifest, still
       t=${views.bin-dirs.testSrc}
@@ -436,21 +436,28 @@ let
           manifest = import ${../../lib/manifest.nix} { inherit lib util; };
           sourceViews = import ${../../lib/source-views.nix} { inherit lib util manifest; };
         in
-        builtins.seq (sourceViews.viewFileset {
-          root = /. + builtins.getEnv "ROOT";
+        builtins.seq (sourceViews.pipeline {
           name = "p";
-          pkgDir = "p";
-          kind = "build";
-          steps = [ (${fn}) ];
+          ordered = [ { n = "s"; step = ${fn}; } ];
+          descriptor = {
+            unit = "compile";
+            test = false;
+            cargoTarget = null;
+            root = /. + builtins.getEnv "ROOT";
+            packageDir = "p";
+            workspaceDir = "";
+            targets = [ ];
+            memberDirs = [ ];
+          };
         }) "evaluated"
       '';
     in
     pkgs.runCommand "sources-sentinel"
       {
         nativeBuildInputs = [ pkgs.nix ];
-        without = expr "{ default, kind, cargoTarget, root, packageDir }: default";
-        fewer = expr "{ default, kind }: default";
-        withDots = expr "{ default, kind, ... }: default";
+        without = expr "{ default, unit, test, cargoTarget, root, packageDir, workspaceDir, targets, memberDirs }: default";
+        fewer = expr "{ default, unit }: default";
+        withDots = expr "{ default, unit, ... }: default";
         passAsFile = [
           "without"
           "fewer"

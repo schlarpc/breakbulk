@@ -38,6 +38,7 @@
 #   breakbulk.acceptsFeature member f  whether `cargo -p <member> --features f`
 #                               takes `f` (`member`: workspaces.<ws>.members.<name>)
 #   breakbulk.packageSettings   the evaluation of package settings layers
+#   breakbulk.sourceSteps       the constructors of the built-in `sources` entries
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
 # Toolchains: breakbulk.presets.<name> (lib/presets: target-spec modules),
 #   breakbulk.evalTargetSpec { pkgs; triple; toolchain; modules; },
@@ -321,6 +322,8 @@ let
       cargoCommands
       ;
     nixFeatures = featureGates;
+    # The constructors of the built-in `sources` entries.
+    sourceSteps = sourceViews.steps;
 
     mkSkeleton = skeleton.mkSkeleton;
 

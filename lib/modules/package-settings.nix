@@ -27,21 +27,66 @@ let
   # options are steps of.
   pipeline = "[`sources`](#packagesnamesources)";
 
-  keepFunction = lib.mkOptionType {
-    name = "keepFunction";
-    description = "function from { kind, cargoTarget, buildScriptRun, root, packageDir, workspaceDir, ... } to a file set";
+  # A function of a unit descriptor (lib/source-views.nix): a `sources`
+  # entry's step, which also gets `default`, or a `predictSources.keep`
+  # function.
+  viewFunction = lib.mkOptionType {
+    name = "viewFunction";
+    description = "function from { unit, test, cargoTarget, root, packageDir, workspaceDir, targets, memberDirs, ... } to a file set";
     descriptionClass = "noun";
     check = builtins.isFunction;
     merge = lib.options.mergeOneOption;
   };
 
-  sourcesFunction = lib.mkOptionType {
-    name = "sourcesFunction";
-    description = "function from { default, kind, cargoTarget, root, packageDir, ... } to a file set";
-    descriptionClass = "noun";
-    check = builtins.isFunction;
-    merge = lib.options.mergeOneOption;
-  };
+  # A `sources` entry: null (removes it), a step, or `{ step; after;
+  # before; enable; }`. One value, which a higher layer replaces
+  # (`singleValued`); lib/source-views.nix fills a built-in entry's
+  # missing fields from the built-in. Not a submodule: its definitions
+  # would be modules, and a step is a function too.
+  sourceEntry =
+    let
+      fields = [
+        "step"
+        "after"
+        "before"
+        "enable"
+      ];
+    in
+    lib.mkOptionType {
+      name = "sourceEntry";
+      description = "null, step function or { step, after, before, enable }";
+      descriptionClass = "conjunction";
+      check =
+        x:
+        x == null
+        || builtins.isFunction x
+        || builtins.isAttrs x && lib.all (n: lib.elem n fields) (builtins.attrNames x);
+      merge = lib.options.mergeOneOption;
+    };
+
+  # What a step and a keep function get, for the option texts.
+  descriptor = ''
+    - `unit`: `"compile"`, `"build-script-run"`, `"doctest"` or
+      `"test-run"`. More may be added: return `default` for one you do
+      not know.
+    - `test`: whether the unit is one of the package's test units: a
+      compile Cargo builds with its dev-dependencies (test harnesses,
+      integration tests, benches, examples), a doctest or a test run.
+    - `cargoTarget`: the Cargo target the unit is of, `{ kind, name,
+      path }` (`kind`: `"lib"`, `"bin"`, `"example"`, `"test"`,
+      `"bench"` or `"custom-build"`; `path`: its crate root, relative to
+      the package directory): the compiled target, the build script of a
+      run, the library of a doctest, the test binary of a run. null for
+      the package's own view, which a unit the planner matched to no
+      target reads.
+    - `root`: the repository root, a path.
+    - `packageDir`: the package directory, relative to `root` (`""` for
+      a package at the root).
+    - `workspaceDir`: the Cargo workspace's directory, relative to `root`.
+    - `targets`: every Cargo target of the package, as `cargoTarget`.
+    - `memberDirs`: the directories of the workspace's members, relative
+      to `root`.
+  '';
 
   side = name: {
     env = bt.mkEnv "Environment for this package's ${name} units only (${sides}).";
@@ -343,35 +388,12 @@ let
           Files and directories outside the package directory that its
           units read (`include_str!("../../wit/x.wit")`, a sibling assets
           directory, patches), at their original relative paths. Strings
-          are relative to the repository root. A built-in step of
-          ${pipeline}: added for every kind of unit. A library, bin or
-          build script that fails naming a path outside its source view
-          ends with a hint naming the path and this option.
-        '';
-      };
-      scopeTargetRoots = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Whether each Cargo target's units see only their own root among
-          the package's targets. The view of one target's compiles leaves
-          out the crate roots of the package's other bins, examples, tests
-          and benches (a root `<dir>/main.rs` outside `src/`, `src/bin/`,
-          `tests/`, `benches/` and `examples/` counts as its whole
-          directory), and the view of the library, a bin or the build
-          script also leaves out the `examples/` and `benches/`
-          directories. So an edit to `tests/foo.rs` rebuilds only that
-          test. Shared files, such as `tests/common/mod.rs`, stay in
-          every view. Test runs, doctests and build-script runs read the
-          package's own views, with every root: Cargo re-runs a build
-          script on any edit to its package. So an edit to an example or
-          a bin re-runs the package's build script, unless
-          [`predictSources`](#packagesnamepredictsourcesenable) narrows
-          the run to its `rerun-if-changed` paths; then it rebuilds no
-          library, other bin or product. Set it to `false` when a target reads another
-          target's root (`#[path = "../other.rs"]`, a library that
-          `include_str!`s an example); such a unit fails with a hint
-          naming this option. A built-in step of ${pipeline}.
+          are relative to the package directory, as every path of a
+          package's settings is. The built-in entry
+          `sources.extraSources` of ${pipeline} adds them for every unit.
+          A library, bin or build script that fails naming a path outside
+          its source view ends with a hint naming the path and this
+          option.
         '';
       };
       predictSources = {
@@ -390,11 +412,15 @@ let
             `#[path]` and `cfg_attr(…, path = …)`), and the files of every
             `include!`, `include_str!` and `include_bytes!` with a literal
             path (also `concat!(env!("CARGO_MANIFEST_DIR"), "…")`) and of
-            `#[debugger_visualizer]`, out of the view the steps of
-            ${pipeline} chose. A build-script run's is the paths its
+            `#[debugger_visualizer]`. A build-script run's is the paths its
             script declares with literal `rerun-if-changed` directives,
-            which is what Cargo reruns it for. Test runs and doctests keep
-            the package's views.
+            which is what Cargo reruns it for. Prediction reads the
+            package's widest view (its test compiles' view, with the
+            unit's own), so a predicted read wins over an entry of
+            ${pipeline} that left the file out of the unit's view (the
+            `tests/` directory, another target's root). Test runs and
+            doctests keep their views. `sourceOverlay` entries go on top
+            of the predicted view.
 
             Files read in a way the prediction does not see are misses: a
             proc macro reading a file (`askama` templates, `sqlx`'s
@@ -404,8 +430,10 @@ let
             cannot be predicted (a `mod` or include in a `macro_rules!`
             body, an include with a computed path, a file syn cannot parse,
             a build script whose directives are computed or that prints
-            none) sees its whole view. A package with a `sourceOverlay` is
-            not predicted (an evaluation warning says so).
+            none) sees its own view, as without prediction. A package with
+            a `sourceOverlay` has a derivation for each predicted view;
+            without [`ca`](repository.md#ca), every edit to the package
+            rebuilds its units.
           '';
         };
         keep = mkOption {
@@ -413,29 +441,27 @@ let
             types.oneOf [
               types.str
               types.path
-              keepFunction
+              viewFunction
             ]
           );
           default = [ ];
           example = lib.literalExpression ''
             [
               "templates"
-              ({ cargoTarget, root, packageDir, ... }:
+              ({ root, packageDir, ... }:
                 lib.fileset.fileFilter (f: f.hasExt "sql") (root + "/''${packageDir}/migrations"))
             ]
           '';
           description = ''
-            Paths every predicted view of this package keeps, when
-            ${pipeline} chose them: files a proc macro or build script reads
-            that source prediction does not see. A string is relative to the
-            package directory (a directory keeps everything under it); a
-            path is absolute. A function gets `{ kind, cargoTarget,
-            buildScriptRun, root, packageDir, workspaceDir, ... }` (`kind`
-            and `cargoTarget` as `sources` functions get them, never null
-            here; `buildScriptRun`: whether the view is a build-script
-            run's; `workspaceDir`: the workspace's directory, relative to
-            `root`) and returns a `lib.fileset` value. Lists concatenate in
-            layer order. The curated defaults keep `Cargo.toml` for the
+            Paths every predicted view of this package keeps, when the
+            package's widest view has them: files a proc macro or build
+            script reads that source prediction does not see. A string is
+            relative to the package directory (a directory keeps
+            everything under it); a path is absolute. A function gets the
+            unit's descriptor, as a `sources` step does without `default`
+            (`unit` is `"compile"` or `"build-script-run"` here, and
+            `cargoTarget` is never null), and returns a `lib.fileset`
+            value. Lists concatenate in layer order. The curated defaults keep `Cargo.toml` for the
             dependents of `proc-macro-crate` (also the workspace's),
             `find-crate` and `bevy_macro_utils`, which read it from
             `CARGO_MANIFEST_DIR`, and a variant's `wrapperConfig.workingDirFiles`
@@ -544,57 +570,89 @@ let
           path. The value is passed by reference: only this package's
           units depend on it, and planning and instantiation do not.
           Workspace packages only: registry and git crates have no view,
-          and setting it for one is an evaluation warning.
+          and setting it for one is an evaluation warning. A predicted
+          view gets the entries too, on top of the files prediction
+          chose.
           See [Fetching and source
           views](../../explanation/internals/sources.md#products-in-a-view).
         '';
       };
       sources = mkOption {
-        type = types.listOf sourcesFunction;
-        default = [ ];
+        type = types.attrsOf sourceEntry;
+        default = { };
         example = lib.literalExpression ''
-          [
-            ({ default, kind, root, ... }:
-              if kind == "run"
+          {
+            fixtures = { default, unit, root, ... }:
+              if unit == "test-run"
               then lib.fileset.union default (root + "/crates/linter/resources/fixtures")
-              else default)
-          ]
+              else default;
+            # Library code reads `tests/data` at compile time.
+            testsDir = null;
+          }
         '';
         description = ''
-          Functions that choose the files of this package's source views.
-          Each gets an attribute set and returns a `lib.fileset` value
-          inside the repository root:
+          The named steps that choose the files of this package's source
+          views. A unit's view is every entry's step in order, each on the
+          result of the one before, from the empty set; source prediction
+          ([`predictSources`](#packagesnamepredictsourcesenable)) and then
+          [`sourceOverlay`](#packagesnamesourceoverlay) act on the result.
+          An entry is a function, or `{ step; after; before; }`; `null`
+          removes it. A step gets an attribute set and returns a
+          `lib.fileset` value inside the repository root: `default`, the
+          files chosen so far, and the unit's descriptor:
 
-          - `default`: the files chosen so far.
-          - `kind`: `"build"` (non-test compiles, build scripts and their
-            runs), `"test"` (test compiles and doctests) or `"run"` (test
-            runs). More kinds may be added: return `default` for a kind
-            you do not know.
-          - `root`: the repository root, a path.
-          - `packageDir`: the package directory, relative to `root` (`""`
-            for a package at the root).
-          - `cargoTarget`: the Cargo target whose units the view is for,
-            `{ kind, name, path }` (`kind`: `"lib"`, `"bin"`,
-            `"example"`, `"test"`, `"bench"` or `"custom-build"`; `path`:
-            its crate root, relative to the package directory), or null
-            for the package's view, which test runs, doctests and any
-            unit the planner matched to no target read.
+          ${descriptor}
+          A step must take `...`. breakbulk passes one more argument, so
+          that a step without `...` fails on its first use, not when
+          breakbulk adds an argument. The error names an argument the step
+          does not take; the extra one's name says to add `...`.
 
-          A function must take `...`. breakbulk passes one more argument,
-          so that a function without `...` fails on its first use, not
-          when breakbulk adds an argument. The error names an argument the
-          function does not take; the extra one's name says to add `...`.
+          The built-in entries, in order, each made by a constructor of
+          `breakbulk.lib.sourceSteps`:
 
-          The functions run after the built-in steps (the package
-          directory, then `extraSources`, `test.sourceScope`,
-          `test.scopeTestsDir`, `scopeTargetRoots`, `test.runFiles` and
-          `test.workspaceManifest`), each on the result
-          of the one before. Lists concatenate in [layer
-          order](../../explanation/configuration.md#shared-settings-and-layer-order):
-          a `memberDefaults` function runs before a `packages.<name>`
-          one, and a `variant.<v>` function after the level it refines.
-          Within one layer, `lib.mkBefore` and `lib.mkAfter` order them.
-          See [Fetching and source
+          - `package`: the package directory, without its top-level
+            `target/`, `.git` and `result` symlinks of `nix build`, and
+            without nested workspace members.
+          - `extraSources`: [`extraSources`](#packagesnameextrasources),
+            for every unit.
+          - `sourceScope`: [`test.sourceScope`](#packagesnametestsourcescope),
+            added for the test units and its paths inside the package
+            taken out for the others.
+          - `testsDir`: the package's `tests/` directory taken out for
+            its non-test units (the library, bins, the build script and
+            its run), so a fixture edit there rebuilds no library, bin or
+            product. Set it to `null` when one of them reads from `tests/`
+            (`include_str!("../tests/…")`, a build script that generates
+            tests from fixtures, a library that builds a path into
+            `tests/` from `CARGO_MANIFEST_DIR` that the tests read).
+          - `targetRoots`: for one Cargo target's compiles, the crate
+            roots of the package's other bins, examples, tests and
+            benches taken out (a root `<dir>/main.rs` outside `src/`,
+            `src/bin/`, `tests/`, `benches/` and `examples/` counts as its
+            whole directory), and for the library, a bin or the build
+            script, the `examples/` and `benches/` directories. So an
+            edit to `tests/foo.rs` rebuilds only that test. Shared files,
+            such as `tests/common/mod.rs`, stay. Set it to `null` when a
+            target reads another target's root (`#[path = "../other.rs"]`,
+            a library that `include_str!`s an example).
+          - `runFiles`: [`test.runFiles`](#packagesnametestrunfiles), for
+            test runs.
+          - `workspaceManifest`: the workspace's root `Cargo.toml`, for
+            test units ([`test.workspaceManifest`](#packagesnametestworkspacemanifest)).
+
+          An entry runs after the entries its `after` names and before
+          those its `before` names; one with neither runs after every
+          built-in entry. Entries left unordered run built-in ones first,
+          in their order, then by name. A reference to a removed entry is
+          dropped. A unit that fails naming a path its view lacks ends with a
+          hint naming the entry that left it out, where one did. Each
+          entry is one value: of two
+          [layers](../../explanation/configuration.md#shared-settings-and-layer-order)
+          that set it, the higher one's wins. An attribute set given for
+          a built-in entry takes the fields it leaves out from the
+          built-in one, so `sources.testsDir.after = "mine"` moves it and
+          `sources.testsDir.enable = true` brings it back over a lower
+          layer's `null`. See [Fetching and source
           views](../../explanation/internals/sources.md#source-views) and
           [Rebuild less when unrelated files
           change](../../how-to/filter-source.md).
@@ -627,8 +685,8 @@ let
           default = [ ];
           example = [ "testdata" ];
           description = ''
-            Repository paths (paths, or strings relative to the
-            repository root) that only this package's test units see: the
+            Paths (paths, or strings relative to the package directory)
+            that only this package's test units see: the
             units Cargo builds with its dev-dependencies (test harnesses,
             integration tests and benches with or without the libtest
             harness, examples), its doctests and its test runs, whose
@@ -638,27 +696,10 @@ let
             units (the library, bins, build script). Either way, editing
             it rebuilds only this package's test units and re-runs its
             tests. The package's `tests/` directory is in this scope too
-            (`scopeTestsDir`). A built-in step of ${pipeline}. A test
-            unit or test run that fails naming a path outside its source
-            view ends with a hint naming the path and this option.
-          '';
-        };
-        scopeTestsDir = mkOption {
-          type = types.bool;
-          default = true;
-          description = ''
-            Whether the package's `tests/` directory is test-only, as if
-            listed in `sourceScope`: only the package's test units see it
-            (integration tests, with or without the libtest harness,
-            benches, examples, test harnesses, doctests and test runs), so
-            a fixture edit there rebuilds no library, bin or product. Set
-            it to `false` when the library, a bin or the build script
-            reads from `tests/` at compile time
-            (`include_str!("../tests/…")`, a build script that generates
-            tests from fixtures), or when the library builds a path into
-            `tests/` from `CARGO_MANIFEST_DIR` that the tests read; such a
-            unit or test run fails with a hint naming this option. A
-            built-in step of ${pipeline}.
+            (the built-in entry `sources.testsDir`). The built-in entry
+            `sources.sourceScope` of ${pipeline} applies it. A test unit or
+            test run that fails naming a path outside its source view ends
+            with a hint naming the path and this option.
           '';
         };
         runFiles = mkOption {
@@ -676,7 +717,8 @@ let
             fails. `null`: the view of the package's test compiles, as
             `cargo test` sees it. Test apps keep that view. A built-in
             step of ${pipeline}, for kind `"run"`: a later function can
-            still add files, such as another package's fixtures.
+            still add files, such as another package's fixtures. Strings
+            are relative to the package directory.
             `repo.config.ca` says whether [`ca`](repository.md#ca) is on.
           '';
         };

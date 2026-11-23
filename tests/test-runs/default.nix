@@ -1150,7 +1150,7 @@ let
           postRun = keepLogRun;
           wrapper = layout;
         };
-        packages.locate.test.sourceScope = [ "repo-marker.txt" ];
+        packages.locate.test.sourceScope = [ "../../repo-marker.txt" ];
       }
     ]
     ++ extraModules;
@@ -1165,7 +1165,7 @@ let
     mk "test-wrapper" {
       packages.locate.test = {
         postRun = keepLogRun;
-        sourceScope = [ "repo-marker.txt" ];
+        sourceScope = [ "../../repo-marker.txt" ];
       }
       // test;
     };
@@ -1176,7 +1176,7 @@ let
       withRunner = mk "test-wrapper" {
         packages.locate.test = {
           postRun = keepLogRun;
-          sourceScope = [ "repo-marker.txt" ];
+          sourceScope = [ "../../repo-marker.txt" ];
           wrapper = layout;
         };
         runner = [ pathRunner ];

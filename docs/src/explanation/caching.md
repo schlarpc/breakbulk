@@ -107,8 +107,9 @@ script on any edit to its package. With
 [`predictSources`](../reference/options/packages.md#packagesnamepredictsourcesenable),
 a run sees only its declared `rerun-if-changed` paths. Each target with such a view costs one more copy of the
 package in the store. A target that reads another target's root fails
-with a hint; `scopeTargetRoots = false` gives every target the package's
-view again.
+with a hint; `sources.targetRoots = null` gives every target the
+package's view again. With `predictSources`, the read is predicted and
+the target builds as it is.
 
 ## What has to be deterministic
 

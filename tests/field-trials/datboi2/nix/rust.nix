@@ -196,10 +196,10 @@ in
     {
       # The wit-bindgen macro reads ../../wit/<lane>/v1 (and the deps/
       # symlinks inside it) at compile time.
-      datboi-guest-transform.extraSources = [ "wit" ];
-      datboi-guest-extractor.extraSources = [ "wit" ];
+      datboi-guest-transform.extraSources = [ "../../wit" ];
+      datboi-guest-extractor.extraSources = [ "../../wit" ];
       # The host side of the same worlds (wasmtime's bindgen!).
-      datboi-runtime.extraSources = [ "wit" ];
+      datboi-runtime.extraSources = [ "../../wit" ];
       # Tests that include_bytes! fixtures of sibling crates.
       # These pin the blake3 of the crane-built components, whose bytes
       # carry crane's build paths in panic locations (/build/nest/…, the
@@ -211,10 +211,10 @@ in
         "component_bytes_are_pinned"
       ];
       datboi-runtime.test.sourceScope = [
-        "crates/datboi-ingest/tests/fixtures"
-        "crates/datboi-xf-xgd1-prng/data"
+        "../datboi-ingest/tests/fixtures"
+        "../datboi-xf-xgd1-prng/data"
       ];
-      datboi-exec.test.sourceScope = [ "crates/datboi-runtime/tests/fixtures" ];
+      datboi-exec.test.sourceScope = [ "../datboi-runtime/tests/fixtures" ];
 
       # The `magic` crate links libmagic. magic-sys's build script prints
       # only `rustc-link-lib=dylib=magic` unless MAGIC_DIR is set, and the

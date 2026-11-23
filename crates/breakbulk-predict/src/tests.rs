@@ -436,6 +436,7 @@ fn predicted_view_keeps_predicted_and_kept_paths() {
     let spec = ViewSpec {
         key: "src:c#lib/c".into(),
         view: v.path().display().to_string(),
+        fallback: None,
         package_dir: "c".into(),
         kind: Kind::Crate,
         root: "c/src/lib.rs".into(),
@@ -474,6 +475,7 @@ fn predicted_view_falls_back() {
     let spec = ViewSpec {
         key: "src:c#run/custom-build/build-script-build".into(),
         view: v.path().display().to_string(),
+        fallback: None,
         package_dir: "c".into(),
         kind: Kind::Run,
         root: "c/build.rs".into(),

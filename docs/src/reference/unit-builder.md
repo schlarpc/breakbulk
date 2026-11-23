@@ -320,7 +320,7 @@ names a file that was read. A hint is added, naming the path relative to
 the repository root, for each path that does not exist and is
 
 - under one of the package's test-only paths, in a view that leaves it
-  out: [`test.scopeTestsDir = false`](options/packages.md#packagesnametestscopetestsdir)
+  out: [`sources.testsDir = null`](options/packages.md#packagesnamesources)
   for `tests/`, or a move from
   [`test.sourceScope`](options/packages.md#packagesnametestsourcescope)
   to [`extraSources`](options/packages.md#packagesnameextrasources). The
@@ -328,7 +328,7 @@ the repository root, for each path that does not exist and is
   `tests/` from `CARGO_MANIFEST_DIR`, and its test run reads it;
 - under the root of another Cargo target of the package, or under
   `examples/` or `benches/`, in the view of one target's units:
-  [`scopeTargetRoots = false`](options/packages.md#packagesnamescopetargetroots);
+  [`sources.targetRoots = null`](options/packages.md#packagesnamesources);
 - under what every view of the package leaves out at its top level
   (`target/`, `.git`, and the `result` and `result-*` symlinks of `nix
   build`): that cause, and the option for the unit's kind (below);
@@ -345,16 +345,16 @@ the repository root, for each path that does not exist and is
   [`test.runFiles`](options/packages.md#packagesnametestrunfiles) names
   that option, with the path relative to the package directory. Paths in
   the package directory count only for such a run and for a package with
-  [`sources`](options/packages.md#packagesnamesources) functions: the
-  built-in steps keep the whole directory otherwise, so a file missing
-  there is missing from the repository too. With `sources` functions,
-  breakbulk cannot tell whether a function left the path out, so the
-  hint names the functions and the option for the unit's kind, which
-  helps only if the functions keep what it adds.
+  [`sources`](options/packages.md#packagesnamesources) entries of its
+  own: the built-in steps keep the whole directory otherwise, so a file
+  missing there is missing from the repository too. With entries of its
+  own, breakbulk cannot tell whether one left the path out, so the hint
+  names `sources` and the option for the unit, which helps only if the
+  entries keep what it adds.
 
 A build-script run that succeeds without a `rerun-if-changed` path it
 declared names the option the same way: `extraSources`, or, with
-`sources` functions, those too; in a predicted view,
+`sources` entries of its own, those too; in a predicted view,
 `predictSources.keep` or
 [`predictSources.buildScriptRuns = false`](options/packages.md#packagesnamepredictsourcesbuildscriptruns).
 

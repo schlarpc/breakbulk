@@ -268,7 +268,7 @@ let
   ];
   directives = mk "directives" {
     # Every build script includes ../common/build_common.rs.
-    extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+    extraSources = lib.genAttrs directivesPackages (_: [ "../common" ]);
   };
   walking-skeleton-cargo = cargoBuild {
     fixture = "walking-skeleton";
@@ -1046,7 +1046,7 @@ in
       # inherited value.
       dir = mk "directives" {
         inherit toolchain;
-        extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+        extraSources = lib.genAttrs directivesPackages (_: [ "../common" ]);
       };
       units = lib.concatMap (p: lib.attrValues p.units) [
         (readPlan ws "build")
@@ -1148,7 +1148,7 @@ in
       '';
 }
 // goldenOn "walking-skeleton" { } { }
-// goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); } { }
+// goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "../common" ]); } { }
 // goldenOn "build-dep-leak" { } { }
 // goldenOn "crate-types" { } { }
 // goldenOn "dev-dep-features" { } { }
@@ -1167,7 +1167,7 @@ in
     ws = mk "walking-skeleton" { inherit toolchain; };
     dir = mk "directives" {
       inherit toolchain;
-      extraSources = lib.genAttrs directivesPackages (_: [ "common" ]);
+      extraSources = lib.genAttrs directivesPackages (_: [ "../common" ]);
     };
     goldens =
       fixture: w:

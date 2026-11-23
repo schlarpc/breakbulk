@@ -250,7 +250,9 @@ async fn run() -> Res<()> {
                     spec.key,
                     reasons.join("; ")
                 );
-                spec.view.clone()
+                spec.fallback
+                    .clone()
+                    .ok_or_else(|| format!("{}: no fallback view", spec.key))?
             }
         };
         println!("breakbulk-drv: predicted {} {path}", spec.key);

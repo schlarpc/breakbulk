@@ -31,8 +31,15 @@ pub enum Kind {
 pub struct ViewSpec {
     /// The instantiation key it stands for (`src:<dir>#<kind>/<name>`).
     pub key: String,
-    /// The view to narrow: its store path, rooted at the repository root.
+    /// The view prediction reads and takes the files from: its store
+    /// path, rooted at the repository root. The package's widest view, so
+    /// that a predicted read wins over a step that left the file out of
+    /// the unit's own view.
     pub view: String,
+    /// The unit's own view, which it sees when prediction falls back.
+    /// Absent where the caller makes that view itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
     /// The package directory, relative to the repository root.
     pub package_dir: String,
     pub kind: Kind,
@@ -50,7 +57,7 @@ pub struct ViewSpec {
 pub enum Outcome {
     /// The files (or directories) of the view to keep.
     Files(BTreeSet<String>),
-    /// The prediction cannot be trusted: the unit sees `view` itself.
+    /// The prediction cannot be trusted: the unit sees `fallback`.
     Fallback(Vec<String>),
 }
 
@@ -114,6 +121,13 @@ fn under_symlink(view: &Path, rel: &str) -> bool {
         }
     }
     false
+}
+
+/// Write a whole view at `dest`, as [`materialize`] writes a predicted
+/// one: for a unit whose prediction falls back where its view is made
+/// from the spec alone.
+pub fn copy_view(view: &Path, dest: &Path) -> io::Result<()> {
+    copy(view, dest)
 }
 
 fn copy(src: &Path, to: &Path) -> io::Result<()> {

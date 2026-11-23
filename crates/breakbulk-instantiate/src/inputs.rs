@@ -27,10 +27,11 @@ pub struct Sources {
     /// get a wider source view (`test.sourceScope`), by directory.
     #[serde(default)]
     pub workspace_test: BTreeSet<String>,
-    /// The Cargo targets (`<kind>/<name>`) whose units get a view of their
-    /// own in place of their package's normal view, by directory. A unit
-    /// whose target is not listed (or that the plan matched to none) gets
-    /// the package's view.
+    /// The units with a view of their own in place of their package's
+    /// normal view, by directory: a Cargo target's compiles
+    /// (`<kind>/<name>`), a build-script run (`run/custom-build/<name>`),
+    /// the doctest (`doctest`). A unit not listed (or that the plan
+    /// matched to no target) gets the package's view.
     #[serde(default)]
     pub workspace_targets: BTreeMap<String, BTreeSet<String>>,
     /// The same for the test view.

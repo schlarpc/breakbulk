@@ -197,7 +197,7 @@ let
       oneWs
       {
         packages = lib.genAttrs directivesPackages (_: {
-          extraSources = [ "common" ];
+          extraSources = [ "../common" ];
         });
       }
     ];
@@ -234,9 +234,9 @@ let
         # As tests/loose-ends: the tests compare a source path the library
         # embedded at compile time with the test run's, one view for both.
         {
-          packages.config-env = {
-            scopeTargetRoots = false;
-            test.scopeTestsDir = false;
+          packages.config-env.sources = {
+            targetRoots = null;
+            testsDir = null;
           };
         }
       ];

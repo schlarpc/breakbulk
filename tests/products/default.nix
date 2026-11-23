@@ -1068,18 +1068,18 @@ let
       {
         packages.outer = {
           extraSources = [
-            "Cargo.toml"
-            "Cargo.lock"
-            "inner"
+            "../Cargo.toml"
+            "../Cargo.lock"
+            "../inner"
           ];
           forTarget.env.CARGO_HOME = repo.workspaces.main.vendor.cargoHome;
         };
         # inner's test runs `cargo run -p inner`.
         packages.inner.test = {
           sourceScope = [
-            "Cargo.toml"
-            "Cargo.lock"
-            "outer"
+            "../Cargo.toml"
+            "../Cargo.lock"
+            "../outer"
           ];
           env = {
             CARGO_HOME = repo.workspaces.main.vendor.cargoHome;

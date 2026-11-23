@@ -522,6 +522,7 @@ rec {
         "raw"
         "testRunner"
         "stageRefs"
+        "sourceEntry"
       ];
 
   # The modules of a layer's sub-layers (the `target.<triple>` and

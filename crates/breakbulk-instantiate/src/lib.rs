@@ -113,6 +113,9 @@ pub mod keys {
     pub fn run_target(target: &str) -> String {
         format!("run/{target}")
     }
+    /// The identity of a package's doctest view, in place of a Cargo
+    /// target's in [`of_target`].
+    pub const DOCTEST_TARGET: &str = "doctest";
     /// A workspace member's tree of wrapper config files, by directory.
     pub fn wrapper_config(dir: &str) -> String {
         format!("wrapper-config:{dir}")
@@ -169,8 +172,9 @@ struct Tokens<'a> {
     /// For a test unit (a `--test` compile or a doctest): its package,
     /// whose source view is the test view when there is one.
     test_package: Option<String>,
-    /// The unit's package and Cargo target (`<kind>/<name>`), whose own
-    /// view, when there is one, stands in for the package's.
+    /// The unit's package and Cargo target (`<kind>/<name>`, or
+    /// [`keys::DOCTEST_TARGET`] for a doctest), whose own view, when there
+    /// is one, stands in for the package's.
     target: Option<(String, String)>,
     /// Whether the unit is a build-script run.
     run: bool,
@@ -900,6 +904,7 @@ fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, E
     let d = &inputs.plan.units[id];
     let mut tokens = Tokens::new(inputs, prefix);
     tokens.test_package = Some(d.package.clone());
+    tokens.target = Some((d.package.clone(), keys::DOCTEST_TARGET.into()));
     let rendered = render_doctest(&inputs.plan, id, &tokens)
         .map_err(|e| Error(format!("doctest {id}: {e}")))?;
     let text = to_canonical_json(&rendered).map_err(|e| Error(format!("doctest {id}: {e}")))?;

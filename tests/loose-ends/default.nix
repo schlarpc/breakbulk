@@ -113,11 +113,11 @@ let
           # time with the one the test run gets, which needs one view for
           # both: no test-only `tests/`, and no per-target views.
           packages.config-env = {
-            scopeTargetRoots = false;
-            test = {
-              scopeTestsDir = false;
-              postRun = ''cp "$log" "$out/log"'';
+            sources = {
+              targetRoots = null;
+              testsDir = null;
             };
+            test.postRun = ''cp "$log" "$out/log"'';
           };
         }
       ];
@@ -179,7 +179,7 @@ let
   noScope = mkRepo [ scopeBase ];
   withScope = mkRepo [
     scopeBase
-    { packages.a.test.sourceScope = [ "testdata" ]; }
+    { packages.a.test.sourceScope = [ "../testdata" ]; }
   ];
   instOf = repo: repo.workspaces.main.internal.instances.${native}.default;
 
