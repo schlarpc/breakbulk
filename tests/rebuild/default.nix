@@ -108,6 +108,7 @@ let
     # With the setting that lets the host copy's clippy unit pass.
     clippy-host = [ products.repos.clippyHostFixed ];
     crate-sources = [ repository.repos.crateSourcesRepo ];
+    curated-keeps = [ repository.repos.curatedKeeps ];
     crate-types = [ (plain "crate-types" [ ]) ];
     cross-doctests = [ dynamic.repos.cross-doctests-aarch64 ];
     cross-lto = [
@@ -235,6 +236,7 @@ let
     directive-errors = "build scripts print outputs Cargo rejects, by design";
     forced-target = "planning fails by design";
     predict-rustc = "rustc runs on its crate root alone (predict-rustc-reads); Cargo never builds it";
+    accepts-feature = "plain `cargo check` runs over it (accepts-feature-cargo); breakbulk builds nothing";
     roots-layouts = "root prediction only; nothing is built";
     vendor-collision = "a Cargo build over the vendor directory; fetches GitHub repositories at evaluation";
     vendor-git-inherit = "a Cargo build over the vendor directory";

@@ -1,0 +1,14 @@
+[package]
+name = "core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+fast = []
+
+[dependencies]
+serde = { path = "../stubs/serde" }
+json = { package = "serde_json", path = "../stubs/serde_json", optional = true }
+
+[target."cfg(windows)".dev-dependencies]
+winapi = { path = "../stubs/winapi" }

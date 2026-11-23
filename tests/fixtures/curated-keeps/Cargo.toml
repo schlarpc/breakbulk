@@ -1,0 +1,13 @@
+# The curated `predictSources.keep` of proc-macro-crate, find-crate and
+# bevy_macro_utils (lib/sys-defaults-dependents.nix): each `mac-*` proc
+# macro asks one of them for its own name in the caller's Cargo.toml,
+# which the crate reads from CARGO_MANIFEST_DIR, and each `use-*` binary
+# calls one macro. One crate per pair, so each keep is the only one that
+# reaches its `use-*` package.
+[workspace]
+resolver = "2"
+members = ["mac-pmc", "mac-fc", "mac-bevy", "use-pmc", "use-fc", "use-bevy"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

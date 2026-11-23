@@ -1,0 +1,11 @@
+[package]
+name = "mac-bevy"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+bevy_macro_utils = "=0.20.1"
+quote = "1"

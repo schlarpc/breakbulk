@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
+Status of the 94 entries: 94 pinned; [Gaps](#gaps) lists none. A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
 
 ## Summary
 
@@ -107,9 +107,9 @@ Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 | [F5](#f5-the-skeleton-is-enough-for-cargo) | The skeleton is enough for Cargo | yes |
 | [F6](#f6-root-prediction) | Root prediction | yes |
 | [F7](#f7-build-std) | build-std | yes |
-| [F8](#f8-source-prediction) | Source prediction | rustc's rules and clippy's read; the crates' keeps are in Gaps |
+| [F8](#f8-source-prediction) | Source prediction | yes |
 | [F9](#f9-workspace-membership) | Workspace membership | yes |
-| [F10](#f10-which---features-a-selected-package-accepts) | Which `--features` a selected package accepts | no |
+| [F10](#f10-which---features-a-selected-package-accepts) | Which `--features` a selected package accepts | yes |
 | [F11](#f11-a--p-plan-unifies-features-over-the-selected-packages) | A `-p` plan unifies features over the selected packages | yes |
 | [E1](#e1-pkg-config-rs-and-pkg_config_all_static) | pkg-config-rs and `PKG_CONFIG_ALL_STATIC` | yes |
 | [E2](#e2-cc-rs-passes---targetrust-triple) | cc-rs passes `--target=<Rust triple>` | yes |
@@ -913,8 +913,8 @@ Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 - **Assumption.** rustc reads, for a crate, the files of its module tree by the rules of `rustc_expand/src/module.rs` and the files `include!`, `include_str!` and `include_bytes!` name, relative to the including file, and fails on any module or include it cannot read. Clippy's `lint_groups_priority` reads `Cargo.toml` from the compile's working directory, which Cargo makes the workspace root for a member and the package directory for a path package outside it: the `[lints]` and `[workspace.lints]` of that one file, never a non-root member's own `[lints]`; it skips the lint without a word when the file is missing. proc-macro-crate, find-crate and bevy_macro_utils read the dependent's `Cargo.toml` from `CARGO_MANIFEST_DIR`; proc-macro-crate also reads its workspace's, which it finds with `cargo locate-project --workspace` when `CARGO` is set.
 - **Where.** `crates/breakbulk-predict/src/lib.rs`: `predict_crate`; `view.rs`: `outcome`, `materialize`; `lib/workspace.nix`: `clippyKeep` (a clippy variant's views, and its predicted views' keep); `lib/source-views.nix`: `defaultSteps` (`extraFiles`); `lib/sys-defaults-dependents.nix` (the `predictSources.keep` of the three crates).
 - **Upstream.** rustc 1.99.0 (`b940084`): `compiler/rustc_expand/src/module.rs` (`mod_dir_path`, `mod_file_path`, `mod_file_path_from_attr`, `default_submod_path`), `compiler/rustc_builtin_macros/src/source_util.rs` (`expand_include`, `expand_include_str`, `expand_include_bytes`); clippy in the same tree, `clippy_lints/src/cargo/lint_groups_priority.rs` (`check`: `load_file(Path::new("Cargo.toml"))`, a path relative to the process's working directory, then the file's `lints` and `workspace.lints`); cargo `0.100.0` `src/util/workspace.rs` (`path_args`: the working directory is the workspace root for a path package under it, else the package root). proc-macro-crate 3.5.0 `src/lib.rs` (`crate_name`, `workspace_manifest_path`); find-crate 0.7.1 `src/lib.rs`; bevy_macro_utils 0.20.1 `src/bevy_manifest.rs` (panics without the file). Checked for this page.
-- **Holds for.** 1.99 and nightly 1.101 for rustc's rules, by check; clippy's read for nixpkgs' 1.99, by check; the crates at the versions named, by source.
-- **Pinned by.** `predict-rustc-reads` (the `predict-rustc` fixture, one file per module rule and include form: every file in rustc's dep-info is in the predicted view, and rustc compiles the crate in that view alone, with nixpkgs' rustc and rust-overlay's nightly); `repository-predict-sources` (a crate with modules, `include_str!`, a build script and a proc macro that reads a file builds from its predicted views; a missed read fails naming `predictSources.keep`). `products-variants-clippy-lint-groups` (a member taking a `[workspace.lints]` with a group at a lint's priority fails its clippy units naming the group, with predicted views and without, and a member with the same conflict in its own `[lints]` passes, as plain `cargo clippy` does on both, in the same check). Rust: `tests::*` in `crates/breakbulk-predict/src/tests.rs` check hand-written trees. Not pinned: the three crates' reads ([Gaps](#gaps)).
+- **Holds for.** 1.99 and nightly 1.101 for rustc's rules, by check; clippy's read for nixpkgs' 1.99, by check; the crates at the versions named, by check.
+- **Pinned by.** `predict-rustc-reads` (the `predict-rustc` fixture, one file per module rule and include form: every file in rustc's dep-info is in the predicted view, and rustc compiles the crate in that view alone, with nixpkgs' rustc and rust-overlay's nightly); `repository-predict-sources` (a crate with modules, `include_str!`, a build script and a proc macro that reads a file builds from its predicted views; a missed read fails naming `predictSources.keep`). `products-variants-clippy-lint-groups` (a member taking a `[workspace.lints]` with a group at a lint's priority fails its clippy units naming the group, with predicted views and without, and a member with the same conflict in its own `[lints]` passes, as plain `cargo clippy` does on both, in the same check). `repository-curated-keeps` (the `curated-keeps` fixture, a proc macro per crate asking it for its own name in the caller's `Cargo.toml`: with source prediction each caller builds and prints the name, and without that crate's keep its compile fails, with proc-macro-crate's and find-crate's errors and bevy_macro_utils' panic). Rust: `tests::*` in `crates/breakbulk-predict/src/tests.rs` check hand-written trees.
 - **If it changes.** A file rustc reads that the prediction misses fails the compile, naming the file, with a hint at `predictSources.keep`; `predict-rustc-reads` fails. A crate that only tests whether a file exists changes behavior without an error; for clippy's `Cargo.toml`, `products-variants-clippy-lint-groups` fails.
 
 ### F9. Workspace membership
@@ -931,8 +931,8 @@ Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 - **Assumption.** `cargo … -p <pkg> --features <f>` accepts `f` for a selected member when it is one of the member's `[features]` or optional dependencies, `<member>/<one of those>`, or `<dep>/<anything>` (also `<dep>?/…`) for a dependency named as the manifest's dependency tables key it; a feature that no selected member accepts fails the run.
 - **Where.** `lib/manifest.nix`: `acceptsFeature` (public as `breakbulk.lib.acceptsFeature`, for a `variantDefaults` function module that gives a package-selecting variant only the features it accepts), `featureFacts` (the facts of `workspaces.<ws>.members`). breakbulk itself filters no features: Cargo rejects what a `-p` run does not accept.
 - **Upstream.** cargo `0.100.0` `src/workspace/workspace.rs`: `Workspace::collect_matching_features`, `members_with_features_new` and `missing_feature_spelling_suggestions` ("none of the selected packages contains these features"). Checked for this page.
-- **Holds for.** 1.99, by source.
-- **Pinned by.** No flake check ([Gaps](#gaps)). Nix: `testAcceptsFeature` (`lib-unit`) checks the copy against hand-written cases; `products-variants-per-target` plans package-scope runs whose `variantDefaults` features a function module chooses with it, so Cargo would reject one it accepts wrongly there.
+- **Holds for.** nixpkgs' Cargo 1.99, by check.
+- **Pinned by.** `accepts-feature-cargo` (`cargo check -p core --features <f>` over the `accepts-feature` fixture, for each case of `testAcceptsFeature`: the values Cargo lets past its rule, by its "does not contain this feature" error, are the ones `acceptsFeature` accepts). Nix: `testAcceptsFeature` (`lib-unit`) checks the copy against the same cases by hand; `products-variants-per-target` plans package-scope runs whose `variantDefaults` features a function module chooses with it.
 - **If it changes.** A user's function drops a feature Cargo would accept, so the variant builds without it; or it keeps one Cargo rejects, and planning fails loudly.
 
 ### F11. A `-p` plan unifies features over the selected packages
@@ -988,8 +988,7 @@ Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 
 Assumptions that no flake check pins, or pins for some cases only. Each has an issue with the exit criterion "a test that fails if this assumption changes".
 
-- [F8](#f8-source-prediction): the `Cargo.toml` reads of proc-macro-crate, find-crate and bevy_macro_utils that the curated keeps serve (#181).
-- [F10](#f10-which---features-a-selected-package-accepts): the copy of Cargo's rule for which `--features` a selected package accepts (#181).
+None at present.
 
 Smaller unpinned details that are harmless if they change are noted in their entries: rustflags in `-C metadata` (U4), the incremental setting in `-C metadata` (U5), the `config`-over-`config.toml` rule (T6, guarded at plan time), and the non-Linux rows of G3.
 

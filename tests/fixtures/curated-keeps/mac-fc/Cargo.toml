@@ -1,0 +1,10 @@
+[package]
+name = "mac-fc"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+find-crate = "=0.7.1"

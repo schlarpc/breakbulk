@@ -1,0 +1,7 @@
+[package]
+name = "use-pmc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mac-pmc = { path = "../mac-pmc" }

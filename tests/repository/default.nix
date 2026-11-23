@@ -638,6 +638,19 @@ let
     );
   predictSources = predictSourcesRepo null [ ];
 
+  # --- curated-keeps -------------------------------------------------------------
+
+  curatedKeepsRepo =
+    modules:
+    mkRepo (fixtures + "/curated-keeps") (
+      [
+        (oneWs ".")
+        { workspaces.main.memberDefaults.predictSources.enable = true; }
+      ]
+      ++ modules
+    );
+  curatedKeeps = curatedKeepsRepo [ ];
+
   # --- sources -------------------------------------------------------------------
 
   # The fixture's source-view functions. `cli`, the root package, keeps
@@ -854,6 +867,7 @@ in
       testOnly
       targetViews
       predictSources
+      curatedKeeps
       viewHints
       viewHintsFixed
       resultNames
@@ -1552,6 +1566,59 @@ in
       ''
         [ "$($ps/bin/ps)" = "42 data page proto" ]
         touch $out
+      '';
+
+  # The curated keeps of the crates that read their dependent's
+  # Cargo.toml (lib/sys-defaults-dependents.nix), with source prediction
+  # on: each `use-*` binary of the curated-keeps fixture builds and
+  # prints the name its proc macro found in its Cargo.toml; without the
+  # one crate's keep (its `sysDefaults.dependents` entry null), its
+  # `use-*` binary fails to compile: proc-macro-crate and find-crate
+  # return an error the macro turns into `compile_error!`, and
+  # bevy_macro_utils panics.
+  curated-keeps =
+    let
+      kept = curatedKeeps;
+      without =
+        crate: user: patterns:
+        expectFailure "curated-keeps-${user}"
+          (unitsNamed (inst (curatedKeepsRepo [
+            { sysDefaults.dependents.${crate} = null; }
+          ])) "build")."${user}-0.1.0-bin"
+          patterns;
+      # The control: the keep is what puts Cargo.toml in the view.
+      keepOf = p: (inst kept).sources.predictedSpecs."src:${p}".keep;
+    in
+    assert lib.assertMsg (lib.all (p: lib.elem "${p}/Cargo.toml" (keepOf "${p}#bin/${p}")) [
+      "use-pmc"
+      "use-fc"
+      "use-bevy"
+    ]) "curated-keeps: a use-* view does not keep its Cargo.toml";
+    pkgs.runCommand "curated-keeps"
+      {
+        pmc = kept.workspaces.main.packages.use-pmc;
+        fc = kept.workspaces.main.packages.use-fc;
+        bevy = kept.workspaces.main.packages.use-bevy;
+        pmcMissing = without "proc-macro-crate" "use-pmc" [
+          "proc-macro-crate: Could not find `Cargo.toml` in manifest dir"
+        ];
+        fcMissing = without "find-crate" "use-fc" [
+          "find-crate: "
+          "No such file or directory"
+        ];
+        bevyMissing = without "bevy_macro_utils" "use-bevy" [
+          "proc macro panicked"
+          "Cargo manifest does not exist at path"
+        ];
+      }
+      ''
+        [ "$($pmc/bin/use-pmc)" = mac_pmc ]
+        [ "$($fc/bin/use-fc)" = mac_fc ]
+        [ "$($bevy/bin/use-bevy)" = mac_bevy ]
+        mkdir -p $out
+        cp $pmcMissing/log $out/pmc.log
+        cp $fcMissing/log $out/fc.log
+        cp $bevyMissing/log $out/bevy.log
       '';
 
   # A nextest run's synthesized cargo metadata names other packages only

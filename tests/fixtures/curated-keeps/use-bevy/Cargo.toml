@@ -1,0 +1,7 @@
+[package]
+name = "use-bevy"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mac-bevy = { path = "../mac-bevy" }

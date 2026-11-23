@@ -1,0 +1,7 @@
+[package]
+name = "use-fc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mac-fc = { path = "../mac-fc" }

@@ -1724,37 +1724,17 @@ runTests "lib-unit" {
       ];
     };
 
-  # Cargo's `Workspace::collect_matching_features` for one member.
+  # Cargo's `Workspace::collect_matching_features` for one member, the
+  # accepts-feature fixture's `core` (accepts-feature-cargo compares the
+  # same cases with Cargo's answers).
   testAcceptsFeature =
     let
-      m = {
-        package.name = "core";
-        features.fast = [ ];
-        dependencies = {
-          serde = "1";
-          json = {
-            package = "serde_json";
-            optional = true;
-          };
-        };
-        target."cfg(windows)".dev-dependencies.winapi = "0.3";
-      };
+      m = bb.manifest.readManifest ../fixtures/accepts-feature "core";
     in
     {
-      expr = lib.filter (bb.acceptsFeature ({ name = "core"; } // bb.manifest.featureFacts m)) [
-        "fast"
-        "json"
-        "core/fast"
-        "core?/json"
-        "serde/derive"
-        "json?/std"
-        "winapi/everything"
-        "dep:json"
-        "slow"
-        "core/slow"
-        "app/fast"
-        "serde_json/std"
-      ];
+      expr = lib.filter (bb.acceptsFeature ({ name = "core"; } // bb.manifest.featureFacts m)) (
+        import ./accepts-feature-cases.nix
+      );
       expected = [
         "fast"
         "json"

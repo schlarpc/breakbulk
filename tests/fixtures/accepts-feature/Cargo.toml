@@ -1,0 +1,14 @@
+# Which `--features` values `cargo … -p core` accepts
+# (`breakbulk.lib.acceptsFeature`, assumption F10): `core` has a feature,
+# an optional dependency under another name, a plain dependency and a
+# target-specific dev-dependency, as `testAcceptsFeature` (lib-unit) has.
+# The dependencies are path stubs with the features the cases name, so
+# that Cargo resolves offline and fails only on a feature it does not
+# accept.
+[workspace]
+resolver = "2"
+members = ["core", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

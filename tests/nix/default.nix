@@ -27,6 +27,8 @@
 #   vendor-collision         crates.io + git crates (network at evaluation
 #                            for git), offline `cargo build` against the
 #                            vendor directory with unchanged `-C metadata`
+#   accepts-feature-cargo    breakbulk.lib.acceptsFeature against `cargo
+#                            check -p core --features <f>` (assumption F10)
 #   vendor-git-inherit       git crates using workspace inheritance, offline
 {
   pkgs,
@@ -615,6 +617,52 @@ in
   ];
 
   roots-metadata-crates-io = compareMetadata "roots-metadata-crates-io" corpusCases;
+
+  # Assumption F10: breakbulk.lib.acceptsFeature, the copy of Cargo's
+  # rule for which `--features` values a `-p <pkg>` run accepts, against
+  # Cargo: `cargo check -p core --features <f>` over the accepts-feature
+  # fixture for each case of `testAcceptsFeature`. Cargo rejects a value
+  # past that rule only with "does not contain this feature" (one
+  # selected package) or "none of the selected packages contains these
+  # features"; any other outcome, success or another error (`dep:json`),
+  # means the rule let it through.
+  accepts-feature-cargo =
+    let
+      root = fixtures + "/accepts-feature";
+      cases = import ./accepts-feature-cases.nix;
+      member = {
+        name = "core";
+      }
+      // bb.manifest.featureFacts (bb.manifest.readManifest root "core");
+      accepted = lib.filter (bb.acceptsFeature member) cases;
+    in
+    pkgs.runCommand "accepts-feature-cargo"
+      {
+        nativeBuildInputs = [
+          cargo
+          rustc
+        ];
+      }
+      ''
+        cp -r ${root} ws
+        chmod -R u+w ws
+        cd ws
+        export CARGO_HOME=$TMPDIR/cargo-home
+        mkdir -p $out
+        : > $out/cargo
+        for f in ${lib.escapeShellArgs cases}; do
+          if cargo check --offline --frozen -q -p core --features "$f" 2> err; then
+            echo "$f" >> $out/cargo
+          elif grep -qE "does not contain this feature|none of the selected packages contain" err; then
+            echo "$f: rejected: $(head -n1 err)"
+          else
+            echo "$f: past the rule: $(head -n1 err)"
+            echo "$f" >> $out/cargo
+          fi
+        done
+        printf '%s\n' ${lib.escapeShellArgs accepted} > $out/nix
+        diff -u $out/nix $out/cargo
+      '';
 
   # Assumption F8: breakbulk-predict follows rustc's module and include
   # rules. Over the predict-rustc fixture (one file per rule), every file
