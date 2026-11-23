@@ -1459,7 +1459,9 @@ let
             single triple counts: a list, `host-tuple` or a `.json` path
             gives `null`. Reading it is an import-from-derivation, made only
             when the earlier rules do not decide and the workspace has a
-            Cargo config file; setting this option skips it.
+            Cargo config file; setting this option skips it. Dynamic-derivation
+            mode makes no such import: there, evaluation fails asking for
+            this option instead.
 
             Not Cargo's own `package.default-target` (nightly, per package),
             which breakbulk does not read.

@@ -3864,24 +3864,31 @@ in
         }
       ];
       bad = lib.filter (c: features c.settings != c.want) cases;
-      # With a Cargo config file, `build.target` may be read.
-      configured =
-        (breakbulk.mkRepository {
+      # With a Cargo config file, `build.target` would decide the default
+      # target: dynamic mode does not read it (no import from a derivation)
+      # and fails asking for `defaultTarget`; IFD mode reads it.
+      configuredRepo =
+        mode: settings:
+        breakbulk.mkRepository {
           inherit pkgs tools;
           root = fixtures + "/feature-unification";
           modules = [
             {
-              mode = "dynamic";
+              inherit mode;
               workspaces.main = {
                 path = ".";
                 targets = {
-                  wasm32-unknown-unknown = { };
+                  x86_64-pc-windows-gnu = { };
                   aarch64-unknown-linux-gnu = { };
                 };
               };
             }
+            settings
           ];
-        }).nixFeatures;
+        };
+      configured = configuredRepo "dynamic" { };
+      defaultTargetOf =
+        r: builtins.tryEval (builtins.deepSeq r.config.workspaces.main.defaultTarget true);
       chosen = repoWith { };
     in
     assert lib.assertMsg (bad == [ ])
@@ -3893,8 +3900,18 @@ in
       && (repoWith { mode = "dynamic"; }).config.ca
       && !(repoWith { ca = false; }).config.ca
     ) "nix-features: repo.config.mode and repo.config.ca are not what was chosen";
-    assert lib.assertMsg configured.importFromDerivation
-      "nix-features: a Cargo config's build.target is not counted";
+    assert lib.assertMsg
+      (
+        !configured.nixFeatures.importFromDerivation
+        && !(defaultTargetOf configured).success
+        && (defaultTargetOf (
+          configuredRepo "dynamic" {
+            workspaces.main.defaultTarget = "aarch64-unknown-linux-gnu";
+          }
+        )).success
+        && (configuredRepo "ifd" { }).nixFeatures.importFromDerivation
+      )
+      "nix-features: dynamic mode reads a Cargo config's build.target, or does not fail without defaultTarget";
     evalCheck "nix-features" (builtins.toJSON (map (c: features c.settings) cases));
 
   # A target with no preset gets the one its triple determines

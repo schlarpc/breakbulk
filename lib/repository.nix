@@ -179,6 +179,13 @@ let
     in
     if breakbulkLib.skeleton.configFiles { inherit root wsDir; } == [ ] then
       null
+    # Reading it would be an import from a derivation, and dynamic mode
+    # imports none: the value is needed at evaluation, and a Nix copy of
+    # Cargo's config reader would be a second rule to keep in step.
+    else if cfg.mode == "dynamic" then
+      throw "breakbulk: the workspace at `${
+        if wsDir == "" then "." else wsDir
+      }` has several targets, none of them this machine's, and a Cargo config file whose `build.target` would decide its default target; dynamic-derivation mode does not read it (that is an import from a derivation): set `workspaces.<ws>.defaultTarget` for this workspace"
     else
       (builtins.fromJSON (
         featureGates.readOutput nixFeatures
@@ -1716,17 +1723,7 @@ let
   # `build.target`. A dev shell reads its Cargo env when it starts, not at
   # evaluation. A preset given a rustc other than its workspace's is not
   # counted: it checks its probes against no record.
-  importsInDynamicMode =
-    ws:
-    toolchainFacts.mayProbe { inherit (ws.toolchain) rustc cargo; }
-    || (
-      targetsDefaultTarget (lib.attrNames ws.targets) == null
-      &&
-        breakbulkLib.skeleton.configFiles {
-          inherit root;
-          wsDir = wsDirOf ws;
-        } != [ ]
-    );
+  importsInDynamicMode = ws: toolchainFacts.mayProbe { inherit (ws.toolchain) rustc cargo; };
   nixFeatures = {
     dynamicDerivations = cfg.mode == "dynamic";
     caDerivations = cfg.ca || cfg.mode == "dynamic";

@@ -19,7 +19,7 @@ The planner always passes `--target`, and local Cargo without it behaves differe
 
   `defaultTarget` also picks what the `packages`, `tests` and `testRuns` shortcuts (and the flake-parts module's `packages`) name; every target is built either way.
 
-  `build.target` comes from the planner's own config reader (`ProjectConfig::read`: the project's `.cargo/config.toml` files from the workspace directory up, with `include`s and Cargo's merging, never `$CARGO_HOME` or the environment, as for every Cargo setting breakbulk reads), through `breakbulk-plan --build-target-only` (`mkBuildTarget`, an import-from-derivation made only when the earlier rules do not decide and the workspace has a config file; setting `defaultTarget` skips it).
+  `build.target` comes from the planner's own config reader (`ProjectConfig::read`: the project's `.cargo/config.toml` files from the workspace directory up, with `include`s and Cargo's merging, never `$CARGO_HOME` or the environment, as for every Cargo setting breakbulk reads), through `breakbulk-plan --build-target-only` (`mkBuildTarget`, an import-from-derivation made only when the earlier rules do not decide and the workspace has a config file; setting `defaultTarget` skips it). Dynamic-derivation mode makes no such import: it fails asking for `defaultTarget` instead.
 
   A triple that is not one of the workspace's targets is an evaluation error. With none, the shell exports no target and no spec, so the project's own `build.target` (or Cargo's host default) applies locally;
 - exports `CARGO_BUILD_TARGET=<target>`;
