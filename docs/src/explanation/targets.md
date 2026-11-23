@@ -190,15 +190,21 @@ not build for a Linux host), so the pieces come from elsewhere:
 - **C code.** Unwrapped clang from rustc's LLVM release, with
   `--target=<triple> -isysroot <SDK>`. cc-rs adds the deployment
   target.
-- **Deployment target.** rustc's default (macOS 11.0 on arm64, 10.12 on
-  x86\_64), which cc-rs follows. `deploymentTarget` sets
-  `MACOSX_DEPLOYMENT_TARGET` for rustc and C compilers alike.
+- **Deployment target.** `MACOSX_DEPLOYMENT_TARGET`, the oldest macOS a
+  program runs on, for rustc and every C build system (cc-rs, CMake,
+  autotools) alike. By default it is rustc's own value (macOS 11.0 on
+  arm64, 10.12 on x86\_64), which every target unit's environment reads
+  from `rustc --print deployment-target` when it builds, so it follows
+  rustc releases. `deploymentTarget` sets another value.
 - **Debug information.** In a macOS program, the debug information stays
   in the object files, and the binary keeps only a map of them, unless
   dsymutil gathers it into a `.dSYM` bundle. Cargo's default on Apple
   targets is `split-debuginfo = "unpacked"`, which skips dsymutil. The
   preset passes `-C split-debuginfo=packed` instead, so rustc runs LLVM's
-  `dsymutil` at the link, and the unit keeps the `.dSYM`. `debugInfo` is
+  `dsymutil` at the link, and the unit keeps the `.dSYM`. It also
+  replaces a profile's own `split-debuginfo = "unpacked"`: that leaves
+  the debug information in the unit's object files, which the sandboxed
+  build throws away, so nothing could ship it. `debugInfo` is
   `"split"` by default, as on Linux: the `splitDebug` stage moves the
   `.dSYM` to the `debug` output and removes the map, which names build
   paths.

@@ -20,8 +20,9 @@
 #   targets is `unpacked` whenever debuginfo is on (cargo
 #   core/profiles.rs), which leaves the DWARF in the object files of the
 #   build directory, and in the binary only a debug map naming them.
-# - `deploymentTarget`, as MACOSX_DEPLOYMENT_TARGET for rustc and C
-#   compilers alike; null keeps rustc's default, which cc-rs follows.
+# - MACOSX_DEPLOYMENT_TARGET for rustc and C compilers alike (cc-rs,
+#   CMake, autotools): `deploymentTarget`, else rustc's own default for
+#   the triple, which the target's env capture reads at build time.
 # - the `darwin` stage preset: `adhocSign` after `install`, last.
 # - tests: no runner unless `nativeBuilder`, which sends them to a Mac
 #   (`testSystem`).
@@ -32,7 +33,7 @@
 #                     breakbulk.appleSdk with this preset's `pkgs`.
 #                     Required on a build machine that is not a Mac.
 #   sdkVersion        the SDK's version, for a package without `version`
-#   deploymentTarget  e.g. "11.0"; null: rustc's default
+#   deploymentTarget  e.g. "11.0"; null: rustc's default (needs `rustc`)
 #   nativeBuilder     tests run on a Mac builder (testSystem)
 #   linkerKind, rustc, llvmMajor, llvmPackages   as for the other presets
 {
@@ -152,6 +153,20 @@ let
     "${sdkPackage}"
   ];
 
+  # rustc's default deployment target, exported in the target's env
+  # capture (layer 2 of every target unit's environment): rustc prints
+  # `MACOSX_DEPLOYMENT_TARGET=<version>`, from that variable when it is
+  # set, else from its own table (rustc 1.99). Read at build time rather
+  # than copied into breakbulk, where the table would drift from rustc's.
+  # Without the workspace's rustc the variable stays unset, which rustc
+  # and cc-rs treat the same way.
+  captureStdenv = pkgs.stdenvAdapters.addAttrsToDerivation {
+    preHook = ''
+      MACOSX_DEPLOYMENT_TARGET=$(${rustc}/bin/rustc --print deployment-target --target ${triple})
+      export MACOSX_DEPLOYMENT_TARGET=''${MACOSX_DEPLOYMENT_TARGET#MACOSX_DEPLOYMENT_TARGET=}
+    '';
+  } pkgs.stdenv;
+
   r = chooseRunner {
     inherit pkgs traits nativeBuilder;
     canExecute = false;
@@ -202,4 +217,9 @@ assert checked;
       linkerKind
       ;
   };
+}
+# The capture's stdenv is the build machine's: the target has no package
+# set.
+// lib.optionalAttrs (deploymentTarget == null && rustc != null) {
+  stdenv = mkDefault captureStdenv;
 }

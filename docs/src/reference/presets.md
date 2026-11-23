@@ -70,7 +70,7 @@ for `wasm32-wasip1`).
 | `linuxPortable` | `glibc` (default `"2.17"`), `systemLibraries`: sonames a product may load besides glibc's (`[ "libGL.so.1" ]`), `overlays`: nixpkgs overlays for the package set that builds library inputs against that glibc |
 | `windows` (MSVC) | `sdk`: the CRT and Windows SDK from `breakbulk.lib.xwinSdk` (required), `crtStatic` (default `false`), `extraSdks` |
 | `windows` (MinGW) | `crtStatic` (default `true`) |
-| `darwin` | `sdk`: the macOS SDK, a package or a version for `breakbulk.lib.appleSdk` (required on Linux), `sdkVersion`: its version when the package has no `version`, `deploymentTarget`: the oldest macOS to run on (default: rustc's, `11.0` on arm64, `10.12` on x86\_64), `nativeBuilder`: run tests on a Mac builder |
+| `darwin` | `sdk`: the macOS SDK, a package or a version for `breakbulk.lib.appleSdk` (required on Linux), `sdkVersion`: its version when the package has no `version`, `deploymentTarget`: the oldest macOS to run on, as `MACOSX_DEPLOYMENT_TARGET` for rustc and C build systems (default: rustc's, read at build time: `11.0` on arm64, `10.12` on x86\_64), `nativeBuilder`: run tests on a Mac builder |
 | `wasmWeb` | `browser`: where tests run, `"node"` (default), `"chromium"` or `"firefox"` (headless) |
 | `wasmComponent` | `withC`: compile C code for the component |
 

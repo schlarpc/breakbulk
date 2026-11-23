@@ -30,6 +30,11 @@
 #                         LLD 23.1.1, fails naming the ways out; nixpkgs'
 #                         lld passes), the missing-SDK error naming Apple's
 #                         agreement, `deploymentTarget`
+#   darwin-deployment-target  the target units' env capture exports rustc's
+#                         own deployment target (11.0 on aarch64, 10.12
+#                         on x86_64), read at build time, for C build
+#                         systems; with `deploymentTarget` the preset adds
+#                         no such capture
 {
   pkgs,
   breakbulk,
@@ -156,6 +161,25 @@ let
     cp file.txt $out/
   '';
 
+  # rustc's default, exported by the target capture every target unit
+  # replays (layer 2).
+  deploymentTarget =
+    let
+      captureOf = t: repo.workspaces.main.instances.${t}.default.captures.target;
+    in
+    pkgs.runCommand "darwin-deployment-target"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        a64 = captureOf a64;
+        x64 = captureOf x64;
+      }
+      ''
+        set -euo pipefail
+        [ "$(jq -r .MACOSX_DEPLOYMENT_TARGET $a64/env.json)" = 11.0 ]
+        [ "$(jq -r .MACOSX_DEPLOYMENT_TARGET $x64/env.json)" = 10.12 ]
+        touch $out
+      '';
+
   noRunner =
     let
       checkNames = lib.attrNames repo.checks;
@@ -224,10 +248,19 @@ let
       }).linker.content == "${pkgs.llvmPackages_21.lld}/bin/lld";
     noSdkFails = errorOf (direct { }).linker == true;
     deploymentTarget =
-      (direct {
-        sdk = fakeSdk "14.4";
-        deploymentTarget = "12.0";
-      }).env.MACOSX_DEPLOYMENT_TARGET.content == "12.0";
+      let
+        p = direct {
+          sdk = fakeSdk "14.4";
+          deploymentTarget = "12.0";
+        };
+      in
+      p.env.MACOSX_DEPLOYMENT_TARGET.content == "12.0" && !(p ? stdenv);
+    # Without it, the capture reads rustc's.
+    deploymentTargetDefault =
+      let
+        p = direct { sdk = fakeSdk "14.4"; };
+      in
+      !(p.env ? MACOSX_DEPLOYMENT_TARGET) && p ? stdenv;
     packed =
       (direct { sdk = fakeSdk "14.4"; }).rustflags == [
         "-C"
@@ -256,6 +289,7 @@ in
     darwin-aarch64 = aarch64;
     darwin-x86_64 = x86_64;
     darwin-no-runner = noRunner;
+    darwin-deployment-target = deploymentTarget;
     darwin-eval =
       if failedEval == { } then
         pkgs.runCommand "darwin-eval" { } "touch $out"

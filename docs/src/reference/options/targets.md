@@ -540,6 +540,9 @@ capture records (its C compiler, wrapper flags, hardening), for
 the base capture and every package’s own\. ` null `: the package
 set’s stdenv (` packageSet.stdenv `, or the build machine’s for a
 target without a package set)\. It must build for this target\.
+` presets.darwin ` sets it, unless given ` deploymentTarget `, to
+the build machine’s with a hook that exports rustc’s
+` MACOSX_DEPLOYMENT_TARGET `; a stdenv set here replaces that\.
 
 *Type:*
 null or raw value
