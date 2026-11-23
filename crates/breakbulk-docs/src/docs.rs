@@ -18,13 +18,13 @@
 
 use std::path::Path;
 
-use crate::compile::{
+use breakbulk_unit::compile::{
     Invocation, check_args, fresh_dir, link_deps, load_directives, run_diagnosed,
 };
-use crate::env::{CFlags, Outer, capture_layer, layered};
-use crate::spec::{RenderedArg, RenderedCompile, RenderedDocs};
-use crate::splice::{expand_args, expand_dylib_path, expand_env};
-use crate::{Error, io_err};
+use breakbulk_unit::env::{CFlags, Outer, capture_layer, layered};
+use breakbulk_unit::spec::{RenderedArg, RenderedCompile, RenderedDocs};
+use breakbulk_unit::splice::{expand_args, expand_dylib_path, expand_env};
+use breakbulk_unit::{Error, io_err};
 
 /// rustdoc's lock file in its output directory.
 const LOCK_FILE: &str = ".lock";
@@ -50,7 +50,7 @@ fn check_no_output(c: &RenderedCompile) -> Result<(), Error> {
 pub fn invocation(
     c: &RenderedCompile,
     outer: &Outer,
-    directives: &std::collections::BTreeMap<String, crate::directives::BuildOutput>,
+    directives: &std::collections::BTreeMap<String, breakbulk_unit::directives::BuildOutput>,
     deps: &Path,
     out: &Path,
 ) -> Result<Invocation, Error> {
@@ -113,7 +113,7 @@ pub fn docs(d: &RenderedDocs, outer: &Outer) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{CrateInfo, Platform, Splice, SpliceKind};
+    use breakbulk_unit::spec::{CrateInfo, Platform, Splice, SpliceKind};
     use std::collections::BTreeMap;
 
     fn command(args: Vec<RenderedArg>) -> RenderedCompile {
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn invocation_adds_output_and_dependencies() {
-        let a = crate::directives::BuildOutput {
+        let a = breakbulk_unit::directives::BuildOutput {
             env: vec![("UTIL_NOTE".into(), "x".into())],
             cfgs: vec!["util_generated".into()],
             ..Default::default()
@@ -215,13 +215,13 @@ mod tests {
 
     #[test]
     fn parses_with_kind() {
-        let d = crate::spec::RenderedUnit::Docs(RenderedDocs {
+        let d = breakbulk_unit::spec::RenderedUnit::Docs(RenderedDocs {
             commands: vec![command(vec![lit("src/lib.rs")])],
         });
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.starts_with("{\"kind\":\"docs\""), "{json}");
         assert_eq!(
-            serde_json::from_str::<crate::spec::RenderedUnit>(&json).unwrap(),
+            serde_json::from_str::<breakbulk_unit::spec::RenderedUnit>(&json).unwrap(),
             d
         );
     }

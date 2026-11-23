@@ -89,6 +89,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "breakbulk-docs"
+version = "0.1.0"
+dependencies = [
+ "breakbulk-unit",
+ "serde_json",
+]
+
+[[package]]
+name = "breakbulk-doctest"
+version = "0.1.0"
+dependencies = [
+ "breakbulk-unit",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "breakbulk-drv"
 version = "0.1.0"
 dependencies = [

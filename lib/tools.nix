@@ -7,14 +7,17 @@
 # glob finds only the ones that are there.
 #
 # So an edit to the planner, the instantiator or breakbulk-format never
-# changes breakbulk-unit's store path, which every unit depends on (decision
-# 50), and neither does an edit to a member's integration tests (`tests/`),
+# changes breakbulk-unit's store path, which every compile and run unit
+# depends on, nor does an edit to the doctest or docs builders
+# (breakbulk-doctest, breakbulk-docs, which only those derivations name),
+# or to a member's integration tests (`tests/`),
 # its dev-dependencies, or a Cargo.lock entry outside its closure. Edits to
 # the workspace Cargo.toml still do.
 #
 #   tools = breakbulk.mkTools pkgs;
 #   tools.breakbulk-plan  tools.breakbulk-shim  tools.breakbulk-unit
-#   tools.breakbulk-hints  tools.breakbulk-instantiate  tools.breakbulk-predict
+#   tools.breakbulk-doctest  tools.breakbulk-docs  tools.breakbulk-hints
+#   tools.breakbulk-instantiate  tools.breakbulk-predict
 #   tools.breakbulk-drv      dynamic-derivation mode's outer-derivation builder
 #   tools.<name>.passthru.crates    the member crates in its source
 #   tools.<name>.passthru.lockFile   its trimmed Cargo.lock
@@ -300,6 +303,8 @@ lib.genAttrs [
   "breakbulk-shim"
   "breakbulk-plan"
   "breakbulk-unit"
+  "breakbulk-doctest"
+  "breakbulk-docs"
   "breakbulk-hints"
   "breakbulk-instantiate"
   "breakbulk-predict"

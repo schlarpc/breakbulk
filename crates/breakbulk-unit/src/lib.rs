@@ -1,14 +1,15 @@
-//! Library half of `breakbulk-unit`, the builder of every unit.
+//! Library half of `breakbulk-unit`, the builder of every compile and
+//! run unit, shared with the doctest and docs builders
+//! (`breakbulk-doctest`, `breakbulk-docs`).
 //!
 //! Kept small and nearly dependency-free (only `serde`, `serde_json` and
 //! breakbulk's own `breakbulk-hints`): any change here changes every unit
-//! derivation.
+//! derivation. What only doctests or docs run lives in their own crates,
+//! so a change there leaves the compile and run units alone.
 
 pub mod compile;
 pub mod diag;
 pub mod directives;
-pub mod docs;
-pub mod doctest;
 pub mod env;
 pub mod manifest;
 pub mod process;
@@ -70,7 +71,7 @@ impl From<directives::DirectiveError> for Error {
 }
 
 /// Attach the path concerned to an I/O error.
-pub(crate) fn io_err(what: &str, path: &std::path::Path, e: std::io::Error) -> Error {
+pub fn io_err(what: &str, path: &std::path::Path, e: std::io::Error) -> Error {
     Error(format!("{what} {}: {e}", path.display()))
 }
 
@@ -96,4 +97,58 @@ pub(crate) fn write_json<T: serde::Serialize>(
     let mut text = serde_json::to_string(value).map_err(|e| Error(e.to_string()))?;
     text.push('\n');
     std::fs::write(path, text).map_err(|e| io_err("writing", path, e))
+}
+
+/// The main function of a unit builder (`breakbulk-unit`,
+/// `breakbulk-doctest`, `breakbulk-docs`): reads the unit ([`read_unit`]),
+/// hands it to `build`, and prints an error. A builder takes no
+/// arguments; `usage` says what it does.
+pub fn builder_main(
+    usage: &str,
+    build: impl FnOnce(spec::RenderedUnit, &env::Outer) -> Result<(), Error>,
+) -> std::process::ExitCode {
+    use std::process::ExitCode;
+    if std::env::args().len() > 1 {
+        eprintln!("{usage}");
+        return ExitCode::from(2);
+    }
+    let outer = env::Outer::from_process();
+    match read_unit(&outer).and_then(|unit| build(unit, &outer)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The unit a builder builds: `BREAKBULK_UNIT`, or, when the derivation
+/// passes it with `passAsFile`, the file `BREAKBULK_UNITPath` names.
+pub fn read_unit(outer: &env::Outer) -> Result<spec::RenderedUnit, Error> {
+    let (text, whence) = if let Some(path) = outer.get("BREAKBULK_UNITPath") {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| Error(format!("reading BREAKBULK_UNITPath {path}: {e}")))?;
+        (text, format!("the file {path}"))
+    } else if let Some(text) = outer.get("BREAKBULK_UNIT") {
+        (text.to_owned(), "BREAKBULK_UNIT".to_owned())
+    } else {
+        return Err(Error::new(
+            "neither BREAKBULK_UNIT nor BREAKBULK_UNITPath is set",
+        ));
+    };
+    serde_json::from_str(&text).map_err(|e| Error(format!("invalid unit in {whence}: {e}")))
+}
+
+/// The builder of each kind of unit (`builder`, a derivation's), and the
+/// error for a unit of a kind `builder` does not build.
+pub fn wrong_builder(unit: &spec::RenderedUnit, builder: &str) -> Error {
+    let (kind, right) = match unit {
+        spec::RenderedUnit::Compile(_) => ("compile", "breakbulk-unit"),
+        spec::RenderedUnit::Run(_) => ("run", "breakbulk-unit"),
+        spec::RenderedUnit::Doctest(_) => ("doctest", "breakbulk-doctest"),
+        spec::RenderedUnit::Docs(_) => ("docs", "breakbulk-docs"),
+    };
+    Error(format!(
+        "{builder} was given a `{kind}` unit, which {right} builds"
+    ))
 }

@@ -754,7 +754,7 @@ let
         grep -q 'test quick ... ok' $quick/log
         result=$out
         if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_RUNNERS="$testRunner" out=$TMPDIR/o \
-            ${tools.breakbulk-unit}/bin/breakbulk-unit 2> err; then
+            ${tools.breakbulk-doctest}/bin/breakbulk-doctest 2> err; then
           cat err
           echo "the doctest succeeded under a failing runner" >&2
           exit 1
@@ -1323,7 +1323,7 @@ let
         grep -q 'cannot create /homeless-shelter/.config/th' $strictRun/testBuildFailure.log
         result=$out
         if BREAKBULK_UNIT="$unit" BREAKBULK_TEST_ENV="$testEnv" out=$TMPDIR/o \
-            ${tools.breakbulk-unit}/bin/breakbulk-unit 2> err; then
+            ${tools.breakbulk-doctest}/bin/breakbulk-doctest 2> err; then
           cat err
           echo "the doctest succeeded with HOME=/homeless-shelter" >&2
           exit 1

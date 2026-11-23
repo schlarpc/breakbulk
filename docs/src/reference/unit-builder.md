@@ -1,17 +1,22 @@
 # The unit builder
 
-`breakbulk-unit` is the builder of every unit. It is a small Rust binary
-with few dependencies. It takes no arguments: it reads one rendered value
-from `BREAKBULK_UNIT` (or the file `BREAKBULK_UNITPath`, when the
-derivation passes it with `passAsFile`) and does what its `kind` says:
+`breakbulk-unit` is the builder of every compile and build-script-run
+unit. It is a small Rust binary with few dependencies. It takes no
+arguments: it reads one rendered value from `BREAKBULK_UNIT` (or the file
+`BREAKBULK_UNITPath`, when the derivation passes it with `passAsFile`) and
+does what its `kind` says. Two more builders over the same library read
+their value the same way, so that a change to them does not rebuild every
+unit:
 
-- `compile`: one rustc call;
-- `run`: one build-script run;
-- `doctest`: a library's doctests, one `rustdoc --test`;
+- `compile`: one rustc call (`breakbulk-unit`);
+- `run`: one build-script run (`breakbulk-unit`);
+- `doctest`: a library's doctests, one `rustdoc --test`
+  (`breakbulk-doctest`);
 - `docs`: a doc plan's documentation, every traced `rustdoc` command in
   turn, each as a compile with no outputs, with `-o $out` and its own
   dependency directory
-  ([Documentation](../explanation/internals/products.md#documentation)).
+  ([Documentation](../explanation/internals/products.md#documentation))
+  (`breakbulk-docs`).
 
 Everything a value carries only to explain a failure (the unit's source
 view, the repository paths of a registry or git crate) is under its

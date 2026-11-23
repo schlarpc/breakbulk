@@ -659,6 +659,8 @@ in
         ''
           echo '// edited' >> $out/crates/breakbulk-plan/src/main.rs
           echo '// edited' >> $out/crates/breakbulk-format/src/lib.rs
+          echo '// edited' >> $out/crates/breakbulk-doctest/src/doctest.rs
+          echo '// edited' >> $out/crates/breakbulk-docs/src/docs.rs
           echo '// edited' >> $out/crates/breakbulk-unit/tests/smoke.rs
           echo 'tempfile = "3"' >> $out/crates/breakbulk-unit/Cargo.toml
           sed -i '/^\[dependencies\]$/a plan-only = "1"' $out/crates/breakbulk-plan/Cargo.toml
@@ -679,6 +681,8 @@ in
       checks = {
         "breakbulk-unit unchanged" = same real other "breakbulk-unit";
         "breakbulk-hints unchanged" = same real other "breakbulk-hints";
+        "breakbulk-doctest changed" = !same real other "breakbulk-doctest";
+        "breakbulk-docs changed" = !same real other "breakbulk-docs";
         "breakbulk-shim unchanged" = same real other "breakbulk-shim";
         "breakbulk-plan changed" = !same real other "breakbulk-plan";
         "breakbulk-instantiate changed" = !same real other "breakbulk-instantiate";
@@ -693,6 +697,12 @@ in
             "breakbulk-unit"
           ];
         "breakbulk-hints's source has only itself" = real.breakbulk-hints.crates == [ "breakbulk-hints" ];
+        "breakbulk-doctest's source has breakbulk-unit's and itself" =
+          real.breakbulk-doctest.crates == [
+            "breakbulk-doctest"
+            "breakbulk-hints"
+            "breakbulk-unit"
+          ];
       };
       failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
     in

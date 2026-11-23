@@ -1,0 +1,16 @@
+[package]
+name = "breakbulk-docs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "breakbulk-docs"
+path = "src/main.rs"
+
+[dependencies]
+breakbulk-unit = { path = "../breakbulk-unit" }
+
+[dev-dependencies]
+serde_json = "1"

@@ -34,8 +34,12 @@ use inputs::{
 };
 use output::{Drv, PASS_AS_FILE_ABOVE, Part, RootOut, RootWhat, UNITS_VERSION, UnitsJson, Value};
 
-/// The tool that is every unit's builder.
+/// The tool that is every compile and run unit's builder.
 pub const TOOL_UNIT: &str = "breakbulk-unit";
+/// The builder of doctest derivations.
+pub const TOOL_DOCTEST: &str = "breakbulk-doctest";
+/// The builder of a doc plan's docs derivation.
+pub const TOOL_DOCS: &str = "breakbulk-docs";
 /// The tool that is every root stub's builder: a bash executable.
 pub const TOOL_SHELL: &str = "shell";
 
@@ -779,22 +783,27 @@ fn instantiate_unit(
     unit_drv(
         inputs,
         &tokens,
+        TOOL_UNIT,
         Value::String(unit_name(id, unit)),
         Value::Strings(unit_outputs(unit, &inputs.plan.target.debuginfo)),
         &text,
     )
 }
 
-/// A derivation that `breakbulk-unit` builds from `text`, its rendered
-/// `BREAKBULK_UNIT`, which says what to do by its `kind`.
+/// A derivation that `tool` (one of the unit builders) builds from
+/// `text`, its rendered `BREAKBULK_UNIT`.
 fn unit_drv(
     inputs: &Inputs,
     tokens: &Tokens,
+    tool: &str,
     name: Value,
     outputs: Value,
     text: &str,
 ) -> Result<Drv, Error> {
-    let builder = tokens.input(keys::tool(TOOL_UNIT));
+    if !inputs.toolchains.tools.contains_key(tool) {
+        return err(format!("toolchains.json: the tool `{tool}` is missing"));
+    }
+    let builder = tokens.input(keys::tool(tool));
     let attrs = BTreeMap::from([
         ("name".into(), name),
         (
@@ -818,7 +827,7 @@ fn unit_drv(
     Ok(Drv { attrs })
 }
 
-/// A doctest's derivation: `breakbulk-unit` over the rendered
+/// A doctest's derivation: `breakbulk-doctest` over the rendered
 /// doctest, named `<package>-<version>-doctest`, with the one output `out`
 /// (the log).
 fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, Error> {
@@ -833,13 +842,14 @@ fn instantiate_doctest(inputs: &Inputs, prefix: &str, id: &str) -> Result<Drv, E
     unit_drv(
         inputs,
         &tokens,
+        TOOL_DOCTEST,
         Value::String(store_name(&format!("{pkg}-{version}-doctest"))),
         Value::Strings(vec!["out".into()]),
         &text,
     )
 }
 
-/// A doc plan's docs derivation: `breakbulk-unit` over its rendered
+/// A doc plan's docs derivation: `breakbulk-docs` over its rendered
 /// rustdoc commands, named `<target>-doc` after Cargo's `target/<triple>/doc`
 /// (a target spec file by its stem), with the one output `out`.
 fn instantiate_docs(inputs: &Inputs, prefix: &str) -> Result<Drv, Error> {
@@ -851,6 +861,7 @@ fn instantiate_docs(inputs: &Inputs, prefix: &str) -> Result<Drv, Error> {
     unit_drv(
         inputs,
         &tokens,
+        TOOL_DOCS,
         Value::String(store_name(&format!("{stem}-doc"))),
         Value::Strings(vec!["out".into()]),
         &text,

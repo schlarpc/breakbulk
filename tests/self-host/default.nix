@@ -55,6 +55,8 @@ let
     "breakbulk-shim"
     "breakbulk-plan"
     "breakbulk-unit"
+    "breakbulk-doctest"
+    "breakbulk-docs"
     "breakbulk-hints"
     "breakbulk-instantiate"
   ] (p: packages.${p});

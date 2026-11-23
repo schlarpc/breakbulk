@@ -11,7 +11,7 @@
 //! no remapping). Its `-L` list of every build-script run's search paths,
 //! which Cargo computes from values rather than positions (`run_doc_tests`
 //! in Cargo's `src/cargo/ops/cargo_test.rs`), is a `searchPathsOf` splice
-//! ([`crate::splice::search_paths`]) at the position the trace showed.
+//! ([`breakbulk_unit::splice::search_paths`]) at the position the trace showed.
 //!
 //! Configuration from the derivation's environment, all optional:
 //!
@@ -25,7 +25,7 @@
 //! - [`TEST_ARGS_VAR`]: a JSON array of libtest arguments, each passed as
 //!   `--test-args A` right after the `-L` list, where Cargo puts them.
 //! - [`TEST_ENV_VAR`]: a JSON array of env layers merged over the command's
-//!   environment, lowest first ([`crate::env::LayerValue`]: `{ "value": V,
+//!   environment, lowest first ([`breakbulk_unit::env::LayerValue`]: `{ "value": V,
 //!   "sep": "" }` replaces, `{ "value": V, "sep": S }` appends): the
 //!   package's `test.env`, then its `test.path` on `PATH`.
 //!
@@ -40,22 +40,22 @@
 //! lines in a varying order, and `nix build --rebuild` compares `$out`,
 //! which stays empty unless the post-run program fills it. The derivation
 //! fails when rustdoc exits non-zero, with a hint for each path the log
-//! names that the source view lacks ([`crate::view_hints`]).
+//! names that the source view lacks ([`breakbulk_unit::view_hints`]).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use crate::compile::{Invocation, check_args, fresh_dir, link_deps, load_directives};
-use crate::directives::BuildOutput;
-use crate::env::{
+use breakbulk_unit::compile::{Invocation, check_args, fresh_dir, link_deps, load_directives};
+use breakbulk_unit::directives::BuildOutput;
+use breakbulk_unit::env::{
     CFlags, EnvAppend, EnvLayer, Outer, capture_layer, fold_layers, layered_on, merge_rendered,
 };
-use crate::process::{command, describe_status, shell_words};
-use crate::spec::{Platform, RenderedArg, RenderedCompile};
-use crate::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
-use crate::{Error, io_err, view_hints};
+use breakbulk_unit::process::{command, describe_status, shell_words};
+use breakbulk_unit::spec::{Platform, RenderedArg, RenderedCompile};
+use breakbulk_unit::splice::{check_arg_splices, expand_args, expand_env, prepend_dylib_path};
+use breakbulk_unit::{Error, io_err, view_hints};
 
 pub const RUNNERS_VAR: &str = "BREAKBULK_TEST_RUNNERS";
 pub const TEST_ARGS_VAR: &str = "BREAKBULK_TEST_ARGS";
@@ -280,9 +280,9 @@ fn post_run(program: &str, outer: &Outer, log: &Path, out: &Path) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directives::LibraryPath;
-    use crate::spec::{CrateInfo, RenderedUnit, SearchPaths, Splice, SpliceKind};
-    use crate::splice::search_paths;
+    use breakbulk_unit::directives::LibraryPath;
+    use breakbulk_unit::spec::{CrateInfo, RenderedUnit, SearchPaths, Splice, SpliceKind};
+    use breakbulk_unit::splice::search_paths;
 
     fn out(paths: &[&str]) -> BuildOutput {
         BuildOutput {
@@ -395,9 +395,9 @@ mod tests {
             env: vec![BTreeMap::from([
                 (
                     "PATH".into(),
-                    crate::env::LayerValue::append("/tools/bin", ':'),
+                    breakbulk_unit::env::LayerValue::append("/tools/bin", ':'),
                 ),
-                ("EXTRA".into(), crate::env::LayerValue::set("yes")),
+                ("EXTRA".into(), breakbulk_unit::env::LayerValue::set("yes")),
             ])],
             post_run: None,
         };
@@ -523,7 +523,7 @@ mod tests {
         let config = TestConfig {
             env: vec![BTreeMap::from([(
                 "HOME".into(),
-                crate::env::LayerValue::set("/homeless-shelter"),
+                breakbulk_unit::env::LayerValue::set("/homeless-shelter"),
             )])],
             ..TestConfig::default()
         };

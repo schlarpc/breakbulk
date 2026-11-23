@@ -578,6 +578,8 @@ let
     rustc-sysroot = toolchain.rustc.unwrapped or toolchain.rustc;
     cargo = toolchain.cargo;
     breakbulk-unit = "${tools.breakbulk-unit}/bin/breakbulk-unit";
+    breakbulk-doctest = "${tools.breakbulk-doctest}/bin/breakbulk-doctest";
+    breakbulk-docs = "${tools.breakbulk-docs}/bin/breakbulk-docs";
     shell = "${pkgs.bash}/bin/bash";
   }
   # rust-overlay toolchains are symlinkJoins of components; Cargo records

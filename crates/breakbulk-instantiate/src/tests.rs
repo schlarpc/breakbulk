@@ -13,6 +13,9 @@ use super::*;
 const RUSTC: &str = "/nix/store/00000000000000000000000000000000-rustc-1.99.0";
 const UNIT: &str = "/nix/store/11111111111111111111111111111111-breakbulk-unit/bin/breakbulk-unit";
 const SHELL: &str = "/nix/store/22222222222222222222222222222222-bash/bin/bash";
+const DOCTEST: &str =
+    "/nix/store/33333333333333333333333333333333-breakbulk-doctest/bin/breakbulk-doctest";
+const DOCS: &str = "/nix/store/44444444444444444444444444444444-breakbulk-docs/bin/breakbulk-docs";
 const APP: &str = "c-a6654c0a89d81026";
 const LIB: &str = "c-a0e9aa7440d71279";
 const SCRIPT: &str = "c-138fecd4c9176bd0";
@@ -50,6 +53,8 @@ fn smoke_inputs() -> Inputs {
             tools: BTreeMap::from([
                 ("rustc".into(), RUSTC.into()),
                 (TOOL_UNIT.into(), UNIT.into()),
+                (TOOL_DOCTEST.into(), DOCTEST.into()),
+                (TOOL_DOCS.into(), DOCS.into()),
                 (TOOL_SHELL.into(), SHELL.into()),
             ]),
             host: PlatformSpec {

@@ -252,7 +252,7 @@ fn symlink(target: &Path, link: &Path) -> Result<(), Error> {
         .map_err(|e| io_err("copying to", link, e))
 }
 
-pub(crate) fn fresh_dir(dir: &Path) -> Result<(), Error> {
+pub fn fresh_dir(dir: &Path) -> Result<(), Error> {
     if dir.symlink_metadata().is_ok() {
         std::fs::remove_dir_all(dir).map_err(|e| io_err("removing", dir, e))?;
     }
