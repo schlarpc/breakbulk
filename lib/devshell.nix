@@ -60,8 +60,8 @@
   # rustcTargetArg).
   rustcTarget ? target,
   # The workspace's packages that have settings, in Cargo.lock order:
-  # [ { id = "<name>@<version>"; override; } ], `override` being
-  # repository.nix's `overrideFor`, already merged for `target` (or the
+  # [ { id = "<name>@<version>"; override; } ], `override` being the
+  # package's settings (repository.nix `settingsOf`) for `target` (or the
   # native triple).
   packages ? [ ],
   # targets.<target>.env, already strings.
