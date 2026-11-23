@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Deserialize;
 
 use crate::output::{Drv, Part, UnitsJson, Value};
-use crate::shape::{Outer, left_units, shape};
+use crate::shape::{Outer, shape};
 use crate::{Error, Inputs, err};
 
 /// `values.json`: every input key's value, without string context, and the
@@ -81,22 +81,7 @@ pub fn dynamic_plan(
     units: &UnitsJson,
     outer: &Outer,
 ) -> Result<DynamicPlan, Error> {
-    let left = left_units(inputs, outer);
-    let mut drvs: BTreeMap<String, Drv> = units
-        .units
-        .iter()
-        .filter(|(id, _)| !left.contains(*id))
-        .map(|(id, d)| (id.clone(), d.clone()))
-        .collect();
-    for (id, d) in &drvs {
-        if let Some(dep) = refs(d).find(|r| left.contains(*r)) {
-            return err(format!(
-                "the unit {id} depends on {dep}, whose package outer.json leaves to another \
-                 outer derivation; every package that depends on a package left must be left \
-                 too"
-            ));
-        }
-    }
+    let mut drvs: BTreeMap<String, Drv> = units.units.clone();
     let s = shape(inputs, units, outer)?;
     drvs.extend(s.nodes);
     let mut order = Vec::new();

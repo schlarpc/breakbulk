@@ -526,8 +526,8 @@ let
     docs-deps = products.docsDeps;
     # Another repository's wasm product at a path in `assets`' views.
     source-overlay = products.sourceOverlayRepo;
-    # Products of the same plan in a package's env and inputs, declared in
-    # `productInputs`: the build plan has two outer derivations.
+    # Products of the same workspace in a package's env and inputs, from
+    # its tools variant.
     same-workspace-products = products.sameWsRepo;
     # A build script that runs Cargo, with the workspace's vendor directory
     # as CARGO_HOME; without noSourceReferences, which fails on its product

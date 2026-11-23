@@ -63,6 +63,7 @@ repo = {
     # The default target's (defaultTarget) default variant's:
     packages.<pkg>;          # a product: the build after the default stages
     docs;                    # `cargo doc`'s folder, or null
+    tools.<pkg>;             # the tools variant's products (breakbulk.variants.tools)
     devShell;                # a shell matching the planner's Cargo invocation
     toolchain = { rustc; cargo; clippy; rustfmt; };   # resolved
     vendor = { dir; configFile; cargoHome; };  # Cargo.lock's dependencies, for Cargo offline
@@ -256,6 +257,15 @@ It depends only on `Cargo.lock` and the fetch settings
 on any plan or package setting. So a package setting can name the
 vendor directory of its own workspace without an infinite recursion, in
 both delivery modes.
+
+### `tools`
+
+`repo.workspaces.<ws>.tools.<pkg>` is a product of the workspace's tools
+variant
+([`toolsVariant`](options/workspaces.md#workspacesnametoolsvariant)) on
+the build machine's triple: a binary or library for another package's
+settings to use. It is an error without a tools variant
+([Use a workspace binary in another package's build](../how-to/workspace-tools.md)).
 
 ### `explainSharing`
 

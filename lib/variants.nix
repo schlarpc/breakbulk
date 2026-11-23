@@ -83,6 +83,13 @@
 # (default "clippy", "coverage") and `variant`, a module for the variant
 # (`profile`, `targets`, …).
 #
+#   workspaces.main.imports = [ (breakbulk.variants.tools { packages = [ "tool" ]; }) ];
+#
+# is a workspace module for the variant of workspace binaries that other
+# packages' builds use, on the build machine's triple: its products are
+# `repo.workspaces.main.tools.<pkg>`. It takes `name` (default "tools")
+# and `variant`, as above.
+#
 #   breakbulk.variants.unitsCheck { pkgs; name; units = [ … ]; }
 #
 # is a derivation that depends on every unit derivation given (all outputs),
@@ -419,6 +426,43 @@ let
       };
     };
 
+  # Workspace binaries for other packages' builds as a variant: `-p` each
+  # of `packages`, planned on the build machine's triple only (also when
+  # it is not one of the workspace's targets), and named the workspace's
+  # `toolsVariant`, whose products are `repo.workspaces.<ws>.tools.<pkg>`.
+  # Not the default variant: a package's settings that name a product of
+  # the plan that builds that package make the plan depend on itself. Its
+  # products, test runs and benches stay out of repo.checks, and it traces
+  # no test plan, unless `variant` or another definition says otherwise:
+  # the default variant builds and tests the same packages.
+  tools =
+    {
+      packages,
+      name ? "tools",
+      variant ? { },
+    }:
+    { config, ... }:
+    {
+      _file = "breakbulk.variants.tools";
+      config = {
+        toolsVariant = name;
+        variants.${name} = _: {
+          imports = [ variant ];
+          config = {
+            inherit packages;
+            targets = [ config.host.triple ];
+            tests = lib.mkDefault false;
+            checks = {
+              products = lib.mkDefault false;
+              tests = lib.mkDefault false;
+              benches = lib.mkDefault false;
+              buildScriptPaths = lib.mkDefault false;
+            };
+          };
+        };
+      };
+    };
+
   unitsCheck =
     {
       pkgs,
@@ -444,6 +488,7 @@ in
     featurePowerset
     clippy
     coverage
+    tools
     packageRuns
     unitsCheck
     subsets

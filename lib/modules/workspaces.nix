@@ -216,7 +216,7 @@ let
     let
       at = "workspaces.${wsName}.variants.${name}";
       checkMode = config.mode == "check";
-      unknownTargets = lib.filter (t: !(ws.targets ? ${t})) (
+      unknownTargets = lib.filter (t: !(ws.targets ? ${t}) && t != ws.host.triple) (
         if config.targets == null then [ ] else config.targets
       );
       planned = if config.targets == null then lib.attrNames ws.targets else config.targets;
@@ -270,7 +270,7 @@ let
         }
         {
           assertion = unknownTargets == [ ];
-          message = "breakbulk: ${at}.targets${bt.setIn options.targets}: ${lib.concatStringsSep ", " unknownTargets} not among the workspace's targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)})";
+          message = "breakbulk: ${at}.targets${bt.setIn options.targets}: ${lib.concatStringsSep ", " unknownTargets} not among the workspace's targets (${lib.concatStringsSep ", " (lib.attrNames ws.targets)}) or its host triple (${ws.host.triple})";
         }
         {
           assertion = unplannedLayers == [ ];
@@ -576,7 +576,12 @@ let
             variant in `repo.checks`; when the default variant is left
             out, the target's `packages`, `tests` and test runs are empty.
             Use it for gates that apply to one target only (clippy
-            natively, a `cargo check` gate for wasm).
+            natively, a `cargo check` gate for wasm). It may also name
+            the build machine's triple
+            ([`host.triple`](#workspacesnamehosttriple)) when that is not
+            one of the workspace's targets: the triple is then planned
+            for the variants that name it, and no others
+            (`breakbulk.variants.tools` does this).
           '';
         };
         target = mkOption {
@@ -1189,6 +1194,20 @@ let
                 default = null;
                 description = "The Nix system that runs the host units' test runs. `null`: the build machine's.";
               };
+              triple = mkOption {
+                type = types.str;
+                default = nativeTriple;
+                defaultText = lib.literalExpression "pkgs.stdenv.hostPlatform.rust.rustcTarget";
+                readOnly = true;
+                description = ''
+                  The build machine's triple, which host units are built
+                  for. A variant's [`targets`](#workspacesnamevariantsnametargets)
+                  may name it when it is not one of the workspace's
+                  targets: the variant is then planned for it, alone
+                  ([use a workspace binary in another package's
+                  build](../../how-to/workspace-tools.md)).
+                '';
+              };
             };
             config.linkerKinds = lib.mapAttrs (
               _: lib.mapAttrs (_: lib.mkDefault)
@@ -1246,6 +1265,20 @@ let
             `breakbulk.variants.featurePowerset { … }` in
             `workspaces.<ws>.imports`
             ([feature matrices](../../how-to/feature-matrix.md)).
+          '';
+        };
+
+        toolsVariant = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "tools";
+          description = ''
+            The variant whose products on the build machine's triple
+            ([`host.triple`](#workspacesnamehosttriple)) are the
+            workspace's `tools.<pkg>`: binaries for other packages'
+            builds to run or embed. `breakbulk.variants.tools { … }` sets
+            it ([use a workspace binary in another package's
+            build](../../how-to/workspace-tools.md)).
           '';
         };
 
@@ -1544,6 +1577,23 @@ let
             })";
           }
           (targetOption [ "defaultTarget" ])
+          {
+            assertion =
+              config.toolsVariant == null
+              || (
+                let
+                  v = config.variants.${config.toolsVariant} or null;
+                in
+                v != null
+                && (
+                  if v.targets == null then
+                    config.targets ? ${config.host.triple}
+                  else
+                    lib.elem config.host.triple v.targets
+                )
+              );
+            message = "breakbulk: workspaces.${name}.toolsVariant `${toString config.toolsVariant}`${bt.setIn options.toolsVariant} is not a variant planned for the host triple ${config.host.triple}";
+          }
         ]
         # `devShell.target` defaults to `defaultTarget`: one message for an
         # invalid `defaultTarget`, naming it.

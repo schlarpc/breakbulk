@@ -1061,135 +1061,6 @@ let
       ) locks.${wsName};
     };
 
-  # productInputs by package name, from the settings of every entry of
-  # the name.
-  productInputsOf =
-    wsName: triple: vName: entries:
-    lib.foldl' (
-      acc: e:
-      let
-        o = settingsOf wsName triple vName e;
-        names = if o == null then [ ] else o.productInputs;
-      in
-      if names == [ ] then acc else acc // { ${e.name} = lib.unique ((acc.${e.name} or [ ]) ++ names); }
-    ) { } entries;
-
-  # IFD mode's check of `productInputs`: for the settings of each package
-  # the build plan can contain, the products of that plan (a product, its
-  # stages and its roots) in the string context of a value that the
-  # package does not declare. The settings as written, every layer: the
-  # instantiation's inputs would hide `inputs`, `nativeInputs` and
-  # `sourceOverlay` inside env captures and views. One message per
-  # package, naming the settings and the line to add. Dynamic-derivation
-  # mode cannot evaluate this: a missing declaration is an infinite
-  # recursion there (null).
-  #
-  # Evaluated by repo.checks only, never by a product: the check reads
-  # every product of the plan, and a product the settings use would then
-  # depend on it.
-  undeclaredProductInputs =
-    wsName: triple: vName: inst: products:
-    let
-      label = "workspace ${wsName}, target ${triple}, variant ${vName}";
-      discard = builtins.unsafeDiscardStringContext;
-      byDrv = lib.listToAttrs (
-        lib.concatLists (
-          lib.mapAttrsToList (
-            pkg: p:
-            map (d: lib.nameValuePair (discard d.drvPath) pkg) (
-              [ p ] ++ lib.attrValues (p.stages or { }) ++ lib.attrValues (p.roots or { })
-            )
-          ) products
-        )
-      );
-      # A value's string context, as instantiation would take it.
-      context =
-        v:
-        if builtins.isString v then
-          builtins.getContext v
-        else if builtins.isList v then
-          lib.foldl' (a: x: a // context x) { } v
-        else if lib.isDerivation v || (builtins.isAttrs v && v ? outPath) then
-          builtins.getContext "${v}"
-        else
-          { };
-      called = f: if lib.isFunction f then f pkgs else f;
-      # Every value-carrying setting of one layer the build plan takes:
-      # { what; value; }.
-      layerValues =
-        l:
-        let
-          side =
-            prefix: s:
-            lib.mapAttrsToList (k: v: {
-              what = "`${prefix}env.${k}`";
-              value = v;
-            }) (s.env or { })
-            ++ map (v: {
-              what = "`${prefix}nativeInputs`";
-              value = v;
-            }) (called (s.nativeInputs or [ ]))
-            ++ map (v: {
-              what = "`${prefix}inputs`";
-              value = v;
-            }) (called (s.inputs or [ ]));
-        in
-        side "" l
-        ++ side "forHost." (l.forHost or { })
-        ++ side "forTarget." (l.forTarget or { })
-        ++ lib.mapAttrsToList (k: v: {
-          what = "`sourceOverlay.\"${k}\"`";
-          value = v;
-        }) (l.sourceOverlay or { });
-      found = lib.concatMap (
-        e:
-        let
-          owner = e.name;
-          declared = inst.productInputs.${owner} or [ ];
-        in
-        lib.optionals (inst.canContain "build" owner) (
-          lib.concatMap
-            (
-              s:
-              lib.concatMap (
-                d:
-                let
-                  q = byDrv.${d} or null;
-                in
-                lib.optional (q != null && q != owner && !(lib.elem q declared)) {
-                  inherit owner q;
-                  inherit (s) what;
-                }
-              ) (lib.attrNames (context s.value))
-            )
-            (
-              let
-                o = settingsOf wsName triple vName e;
-              in
-              lib.optionals (o != null) (layerValues o)
-            )
-        )
-      ) locks.${wsName};
-      message =
-        owner: xs:
-        let
-          uses = lib.mapAttrsToList (
-            what: ys:
-            "${what} uses ${
-              lib.concatMapStringsSep ", " (q: "`${q}`") (lib.sort (a: b: a < b) (lib.unique (map (y: y.q) ys)))
-            }"
-          ) (lib.groupBy (y: y.what) xs);
-          all = lib.sort (a: b: a < b) (lib.unique ((inst.productInputs.${owner} or [ ]) ++ map (x: x.q) xs));
-        in
-        "breakbulk: the settings of `${owner}` use products of the plan that builds it (${label}) that `packages.${owner}.productInputs` does not name: ${lib.concatStringsSep "; " uses}. Dynamic-derivation mode needs them named (it cannot find them: there, this is an infinite recursion). Add: packages.${owner}.productInputs = [ ${
-          lib.concatMapStringsSep " " (q: "\"${q}\"") all
-        } ];";
-    in
-    if inst.delivery != "ifd" then
-      null
-    else
-      lib.mapAttrsToList message (lib.groupBy (x: x.owner) found);
-
   # --- workspaces --------------------------------------------------------------
 
   # The packages a variant plans on a target (its settings there, `v`):
@@ -1214,9 +1085,25 @@ let
   productSelOf = planSelOf "products";
   benchSelOf = planSelOf "benches";
 
-  # The variants planned for a target (`variants.<v>.targets`).
+  # The variants planned for a triple (`variants.<v>.targets`): on one of
+  # the workspace's targets, those that name it or every target; on the
+  # host triple when it is not one of them, only those that name it.
   variantsFor =
-    ws: triple: lib.filterAttrs (_: v: v.targets == null || lib.elem triple v.targets) ws.variants;
+    ws: triple:
+    lib.filterAttrs (
+      _: v: if v.targets == null then ws.targets ? ${triple} else lib.elem triple v.targets
+    ) ws.variants;
+
+  # The triples a workspace plans: its targets, and the host triple when a
+  # variant names it (`breakbulk.variants.tools`).
+  plannedTriples =
+    ws:
+    lib.unique (
+      lib.attrNames ws.targets
+      ++ lib.optional (lib.any (v: v.targets != null && lib.elem ws.host.triple v.targets) (
+        lib.attrValues ws.variants
+      )) ws.host.triple
+    );
 
   # Each planned variant's settings on each target: the workspace's and
   # the target's `variantDefaults`, its own, then its `target.<triple>`
@@ -1228,7 +1115,7 @@ let
       lib.mapAttrs (
         _: v: v.onTarget (targetSpecs.${wsName}.${triple}.config.variantDefaults or { }) triple
       ) (variantsFor ws triple)
-    ) ws.targets
+    ) (lib.genAttrs (plannedTriples ws) (_: null))
   ) cfg.workspaces;
 
   # The target's stage set's inputs (lib/products.nix targetStageSet): one
@@ -1281,7 +1168,6 @@ let
         testSelect = listOr tsel;
         benchSelect = listOr bsel;
         extraSources = extraSourcesOf wsName triple vName entries;
-        productInputs = productInputsOf wsName triple vName entries;
         packageOverrides = instOverrides wsName entries triple vName;
         name = "${wsName}-${triple}-${vName}";
         inherit delivery;
@@ -1401,9 +1287,9 @@ let
   workspaceOut =
     wsName: ws:
     let
-      instances = lib.mapAttrs (
-        triple: _: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor ws triple)
-      ) ws.targets;
+      instances = lib.genAttrs (plannedTriples ws) (
+        triple: lib.mapAttrs (vName: _: instance wsName ws triple vName) (variantsFor ws triple)
+      );
       perTarget = lib.mapAttrs (
         triple: vs:
         let
@@ -1483,19 +1369,9 @@ let
     in
     {
       # What the outputs are made of: the mkWorkspace result of each
-      # target and variant (lib/workspace.nix), and IFD mode's undeclared
-      # products as inputs (undeclaredProductInputs: a message per
-      # package, which repo.checks fails with; null in
-      # dynamic-derivation mode), by target and variant.
+      # target and variant (lib/workspace.nix), by target and variant.
       internal = {
         inherit instances;
-        productInputErrors = lib.mapAttrs (
-          triple:
-          lib.mapAttrs (
-            vName: inst:
-            undeclaredProductInputs wsName triple vName inst perTarget.${triple}.variants.${vName}.packages
-          )
-        ) instances;
       };
       vendor = vendors.${wsName};
       # The resolved toolchain (rustc, cargo, clippy, rustfmt), for wiring
@@ -1505,6 +1381,13 @@ let
       # The default target's (`defaultTarget`) default variant's
       # products and docs.
       packages = if ws.defaultTarget == null then { } else perTarget.${ws.defaultTarget}.packages;
+      # The tools variant's products on the host triple
+      # (`toolsVariant`, `breakbulk.variants.tools`).
+      tools =
+        if ws.toolsVariant == null then
+          throw "breakbulk: repo.workspaces.${wsName}.tools: the workspace has no tools variant; import `breakbulk.variants.tools { packages = [ … ]; }` in `workspaces.${wsName}.imports`"
+        else
+          perTarget.${ws.host.triple}.variants.${ws.toolsVariant}.packages;
       docs =
         if ws.defaultTarget == null then
           null
@@ -1617,13 +1500,9 @@ let
             planChecks = lib.optionalAttrs c.buildScriptPaths (
               lib.filterAttrs (kind: _: lib.elem kind plansIn) v.buildScriptPaths
             );
-            # IFD mode checks the variant's `productInputs` here.
-            errors = w.internal.productInputErrors.${triple}.${vName};
-            verified =
-              d: if errors == null || errors == [ ] then d else throw (lib.concatStringsSep "\n" errors);
             enabled = lib.filterAttrs (_: d: d.enabled);
           in
-          lib.mapAttrs (_: verified) (
+          (
             lib.optionalAttrs (building && c.products) (
               lib.concatMapAttrs (
                 pkg: p:

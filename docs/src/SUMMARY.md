@@ -14,6 +14,7 @@
 - [Use git dependencies](how-to/git-dependencies.md)
 - [Supply or patch a crate's source](how-to/crate-sources.md)
 - [A build script runs Cargo](how-to/nested-cargo.md)
+- [Use a workspace binary in another package's build](how-to/workspace-tools.md)
 - [Build for another target](how-to/targets.md)
 - [Write a preset](how-to/write-a-preset.md)
 - [Wrap or package a binary](how-to/wrap-package.md)

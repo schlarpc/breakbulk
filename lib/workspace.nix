@@ -105,10 +105,6 @@ pkgs:
   cargoConfig ? { },
   # extraSources.<package name> = [ "<path from the repository root>" ]
   extraSources ? { },
-  # productInputs.<package name> = [ "<package name>" ]: the packages whose
-  # products of this plan the package's settings use (mkRepository's
-  # `packages.<name>.productInputs`).
-  productInputs ? { },
   # packages.<name>: a member's settings, as mkRepository evaluates them
   # (lib/package-settings.nix), every option set, and `runs`, its runs'
   # settings (`runsOf` there); `sources` is the package's list of
@@ -676,134 +672,6 @@ let
   overridesFor =
     kind: lib.filterAttrs (k: _: canContain kind (lib.head (lib.splitString "@" k))) (packageOverrides);
 
-  # The package whose settings an instantiation input holds (its key, as
-  # lib/instantiate.nix names it), or null for the toolchain's, the
-  # tools' and fetched crates' inputs.
-  valueOwner =
-    key:
-    let
-      setting = builtins.match "(override|doctest):([^:@]+)[^:]*:.*" key;
-      view = builtins.match "(src|test-src|wrapper-config):([^#]*)(#.*)?" key;
-    in
-    if setting != null then
-      lib.elemAt setting 1
-    else if view != null then
-      allViews.${lib.elemAt view 1}.name or null
-    else
-      null;
-
-  # Products as inputs (`productInputs`): the packages that declare
-  # products of their own plan, and every package that depends on one of
-  # them in Cargo.lock. In dynamic-derivation mode the build plan's second
-  # outer derivation writes these, with their settings; the first writes
-  # the rest, the products those settings use among them, and never takes
-  # these settings. A declaration of a package Cargo.lock lacks plans
-  # nothing here.
-  declaring = lib.filterAttrs (n: l: l != [ ] && lockDeps ? ${n}) productInputs;
-  lockDependents = lib.mapAttrs (_: map (x: x.from)) (
-    lib.groupBy (x: x.to) (
-      lib.concatLists (
-        lib.mapAttrsToList (
-          n: ds:
-          map (d: {
-            from = n;
-            to = d;
-          }) (lib.unique ds)
-        ) lockDeps
-      )
-    )
-  );
-  dependentsOf =
-    names:
-    lib.listToAttrs (
-      map (x: lib.nameValuePair x.key true) (
-        builtins.genericClosure {
-          startSet = map (n: { key = n; }) names;
-          operator = x: map (n: { key = n; }) (lockDependents.${x.key} or [ ]);
-        }
-      )
-    );
-  productUsers = dependentsOf (lib.attrNames declaring);
-  # The shortest chain of Cargo.lock dependencies from `a` to `b`
-  # (genericClosure works breadth-first), as `a -> … -> b`.
-  lockChain =
-    a: b:
-    lib.concatStringsSep " -> " (
-      (lib.findFirst (x: x.key == b)
-        {
-          path = [
-            a
-            b
-          ];
-        }
-        (
-          builtins.genericClosure {
-            startSet = [
-              {
-                key = a;
-                path = [ a ];
-              }
-            ];
-            operator =
-              x:
-              map (n: {
-                key = n;
-                path = x.path ++ [ n ];
-              }) (lockDeps.${x.key} or [ ]);
-          }
-        )
-      ).path
-    );
-  # Declarations that cannot work, found from the names alone: a product
-  # whose package depends on the declaring one (the product would need
-  # itself), or that the second outer derivation writes for another
-  # declaration (dynamic-derivation mode has two, not one per level).
-  productInputConflicts = lib.concatLists (
-    lib.mapAttrsToList (
-      d: qs:
-      lib.concatMap (
-        q:
-        let
-          via = lib.findFirst (v: (dependentsOf [ v ]) ? ${q}) d ([ d ] ++ lib.attrNames declaring);
-          opt = "`packages.${d}.productInputs`";
-        in
-        if !(productUsers ? ${q}) then
-          [ ]
-        else if q == d then
-          [
-            "breakbulk: ${opt} names `${d}` itself: the settings of `${d}` cannot use its own product, which is built with them."
-          ]
-        else if via == d then
-          [
-            "breakbulk: `${q}` depends on `${d}` in Cargo.lock (${lockChain q d}), and ${opt} says the settings of `${d}` use the product of `${q}`: that product would need itself."
-          ]
-        else
-          [
-            "breakbulk: ${opt} names `${q}`, but `${q}` ${
-              if q == via then
-                "declares products of its plan itself"
-              else
-                "depends on `${via}` in Cargo.lock (${lockChain q via}), which declares products of its plan"
-            } (`packages.${via}.productInputs`). Dynamic-derivation mode builds a plan's units in two steps, the products that settings use and then the packages whose settings use them (with everything that depends on those), so `${q}` is in the second step and its product cannot be an input of `${d}`."
-          ]
-      ) qs
-    ) declaring
-  );
-  # The second outer derivation of a plan: the build plan's, which makes
-  # the products, when it can contain a package that uses them.
-  splitOf =
-    kind:
-    let
-      ps = lib.filter (canContain kind) (lib.attrNames productUsers);
-    in
-    if kind != "build" || ps == [ ] then
-      null
-    else
-      {
-        packages = ps;
-        owner = valueOwner;
-      };
-
   # The root wrappers are named after `<ws>-<triple>-<variant>` for the
   # build plan, with `-<kind>` for the others (in dynamic-derivation mode
   # the name of each plan's outer derivation).
@@ -827,18 +695,7 @@ let
         inherit nixFeatures;
       };
     in
-    if productInputConflicts != [ ] then
-      throw (lib.concatStringsSep "\n" productInputConflicts)
-    else if isDynamic then
-      dynamic.instantiate (
-        all
-        // {
-          inherit breakbulkDrv;
-          split = splitOf kind;
-        }
-      )
-    else
-      instantiate all;
+    if isDynamic then dynamic.instantiate (all // { inherit breakbulkDrv; }) else instantiate all;
 
   inst =
     kind:
@@ -1041,14 +898,7 @@ in
     test = tested.buildScriptRuns;
   };
   inherit delivery capabilities;
-  # Products as inputs: the declarations and whether a plan kind can
-  # contain a package, for mkRepository's check of the declarations in IFD
-  # mode; the declarations that cannot work (messages; instantiating any
-  # plan fails with them).
-  inherit productInputs canContain productInputConflicts;
-  # Dynamic-derivation mode: the outer derivations, by plan kind; each the
-  # one that writes every unit of its plan (with `productInputs`, the
-  # build plan's second).
+  # Dynamic-derivation mode: the outer derivations, by plan kind.
   outer = lib.optionalAttrs isDynamic (ofEach "outer");
   # The unit derivations through IFD mode, for explainSharing (in
   # dynamic-derivation mode they import units.json: lib/dynamic.nix

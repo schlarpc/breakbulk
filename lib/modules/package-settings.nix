@@ -291,9 +291,12 @@ let
       env = bt.mkEnv ''
         Environment for every unit of this package, on both ${sides}
         (compiles and build-script runs). Values may be derivations,
-        including the products of other packages, in this workspace or
-        another, on any target; they are passed by reference, and only
-        this package's units read them.
+        including the products of other plans: another workspace,
+        target or variant (a binary of this workspace for this build:
+        [`breakbulk.variants.tools`](../../how-to/workspace-tools.md));
+        not of the plan that builds this package, which would depend on
+        itself. They are passed by reference, and only this package's
+        units read them.
       '';
       envSeparators = mkOption {
         type = types.lazyAttrsOf bt.envSeparator;
@@ -329,24 +332,6 @@ let
         the same platform, so a `-sys` crate may print `rustc-link-lib`
         without a search path; binaries get an rpath to the library.
       '';
-      productInputs = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        example = [ "tool" ];
-        description = ''
-          The packages whose products, built by the same plan as this
-          package, this package's settings use (in `env`, `inputs`,
-          `nativeInputs` or `sourceOverlay`): `[ "tool" ]` for
-          `env.TOOL = "''${repo.workspaces.main.packages.tool}/bin/tool"`.
-          Products of another target, variant or workspace need no entry.
-          Dynamic-derivation mode needs every such package named: it
-          writes this package and every package that depends on it after
-          those products. Without an entry, it is an infinite recursion
-          there; IFD mode checks the entries in `repo.checks`. Lists
-          concatenate across layers. See [Products as
-          inputs](../../explanation/configuration.md#products-as-inputs).
-        '';
-      };
       extraSources = mkOption {
         type = types.listOf (types.either types.path types.str);
         default = [ ];

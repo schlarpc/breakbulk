@@ -483,8 +483,8 @@ Details: [Fetching and source views](internals/sources.md).
 ## Products as inputs
 
 A package's `env`, `inputs` or `nativeInputs` can name the product of
-another package: in another workspace, for another target, or in the
-same plan. `UI_DIST` in the example above is a wasm build of a member of
+another package: in another workspace, for another target, or in
+another variant. `UI_DIST` in the example above is a wasm build of a member of
 the same workspace. Products are passed by reference, so only the unit
 that embeds the product, and its dependents, wait for it. The rest of
 the build starts at once.
@@ -510,41 +510,16 @@ packages and what they depend on in `Cargo.lock`. Another package's
 settings do not reach it, so a product of the wasm target in the example
 does not depend on `app`'s `env`.
 
-A product of the same plan, as in the third form, must be named in the
-package's
-[`productInputs`](../reference/options/packages.md#packagesnameproductinputs):
-
-```nix
-packages.app = {
-  env.TOOL_BIN = "${repo.workspaces.default.packages.tool}/bin/tool";
-  productInputs = [ "tool" ];
-};
-```
-
-Products of another target, another variant or another workspace need no
-entry. The reason is dynamic-derivation mode. There, one derivation makes
-the derivations of all units of a plan, and it takes every setting it is
-given as an input. When `app`'s settings use `tool`'s product, that
-derivation would need its own output. With the entry, the build plan
-gets a second such derivation. It makes the units of `app` and of every
-package that depends on `app` in `Cargo.lock`, and it takes their
-settings. The first one makes all other units, `tool`'s among them, and
-takes none of those settings, so it does not depend on the second.
-
-Dynamic-derivation mode cannot find a missing entry: evaluating the
-setting to find the product in it is the infinite recursion itself. IFD
-mode checks the entries. When `repo.checks` is evaluated, each package's
-settings are compared with the products of its plan, and a product that
-is not named fails the checks with a message that names the setting and
-the line to add. Run the checks in IFD mode (`mode = "ifd"`) after you
-add such a setting.
-
-Some entries cannot work, and breakbulk names them in both modes, from
-the entries and `Cargo.lock` alone. When `tool` depends on `app` in
-`Cargo.lock`, `app`'s settings cannot use `tool`'s product, because that
-product is built with them. A product made by the second derivation (of
-a package that declares entries itself, or that depends on one that
-does) cannot be an entry of another package either.
+A product of the plan that builds the package cannot be used: that
+plan's units depend on the package's settings, so the plan would depend
+on itself: an infinite recursion in dynamic-derivation mode, which IFD
+mode does not detect. A product of the same workspace and target comes from
+another variant instead, and `breakbulk.variants.tools` makes one that
+plans only the packages other builds use, on the build machine's triple
+([Use a workspace binary in another package's build](../how-to/workspace-tools.md)).
+That plan selects the tools with `-p`, so Cargo can turn on fewer
+features of their dependencies than in the workspace's plan
+([F11](../reference/assumptions.md#f11-a--p-plan-unifies-features-over-the-selected-packages)).
 
 A product that needs itself, directly or through other products, is an
 infinite recursion. Determinate Nix evaluates in parallel, and there such

@@ -27,9 +27,8 @@
 //! more name every unit's outputs (`units.drv`) and every build-script
 //! run's `flags` (`runs.drv`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use breakbulk_format::rendered::package_name_version;
 use breakbulk_format::{Unit, to_canonical_json};
 use serde::{Deserialize, Serialize};
 
@@ -72,26 +71,6 @@ pub struct Outer {
     /// (`docs.drv`), whose `root` links the docs derivation's output.
     #[serde(default)]
     pub docs: Option<String>,
-    /// Packages (by name) whose units this outer derivation does not write,
-    /// nor their roots and doctests, nor the docs: another outer derivation
-    /// of the same plan writes them, with settings this one must not take
-    /// (settings that use this one's products). A unit of another package
-    /// that depends on one of them is an error.
-    #[serde(default)]
-    pub leave: BTreeSet<String>,
-    /// The packages whose roots and doctests this outer derivation
-    /// submits; None: every package's. It still writes every unit they
-    /// depend on: it cannot read another outer derivation's.
-    #[serde(default)]
-    pub submit: Option<BTreeSet<String>>,
-}
-
-impl Outer {
-    /// Whether this outer derivation submits the roots and doctest of
-    /// package `name`.
-    fn submits(&self, name: &str) -> bool {
-        !self.leave.contains(name) && self.submit.as_ref().is_none_or(|s| s.contains(name))
-    }
 }
 
 /// The attributes a doctest derivation gets from the package's test
@@ -329,12 +308,11 @@ fn all_units(
     prefix: &str,
     outer: &Outer,
     output_name: &str,
-    left: &BTreeSet<String>,
 ) -> Result<Drv, Error> {
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
-        if left.contains(id) || !(unit.is_compile() || unit.is_run()) {
+        if !(unit.is_compile() || unit.is_run()) {
             continue;
         }
         for o in unit_outputs(unit, &inputs.plan.target.debuginfo) {
@@ -355,19 +333,11 @@ fn all_units(
 /// The derivation that depends on the `flags` output of every build-script
 /// run of the plan; `$out/runs` lists them. Not `$out/units`: that one
 /// builds every compile of the plan too.
-fn all_runs(
-    inputs: &Inputs,
-    prefix: &str,
-    outer: &Outer,
-    output_name: &str,
-    left: &BTreeSet<String>,
-) -> Result<Drv, Error> {
+fn all_runs(inputs: &Inputs, prefix: &str, outer: &Outer, output_name: &str) -> Result<Drv, Error> {
     let tokens = Tokens::new(inputs, prefix);
     let mut list = String::new();
     for (id, unit) in &inputs.plan.units {
-        if let Unit::Run(_) = unit
-            && !left.contains(id)
-        {
+        if let Unit::Run(_) = unit {
             list.push_str(&tokens.unit(id, "flags"));
             list.push('\n');
         }
@@ -380,25 +350,6 @@ fn all_runs(
         r#"mkdir "$out" && printf '%s' "$runs" > "$out/runs""#,
         [("runs", list)],
     )
-}
-
-/// The ids of the compile and run units of the packages outer.json leaves
-/// to another outer derivation. Not their doctests or docs: no build plan,
-/// the only one split, has those.
-pub(crate) fn left_units(inputs: &Inputs, outer: &Outer) -> BTreeSet<String> {
-    if outer.leave.is_empty() {
-        return BTreeSet::new();
-    }
-    inputs
-        .plan
-        .units
-        .iter()
-        .filter(|(_, u)| {
-            (u.is_compile() || u.is_run())
-                && package_name_version(u.package()).is_some_and(|(n, _)| outer.leave.contains(n))
-        })
-        .map(|(id, _)| id.clone())
-        .collect()
 }
 
 /// What a root's shape adds to the units of one outer derivation: the
@@ -416,14 +367,9 @@ pub struct Shape {
 /// `units.drv` and `runs.drv` wrappers.
 pub fn shape(inputs: &Inputs, units: &UnitsJson, outer: &Outer) -> Result<Shape, Error> {
     let prefix = token_prefix(inputs);
-    let left = left_units(inputs, outer);
     let mut nodes: BTreeMap<String, Drv> = BTreeMap::new();
     let mut wrappers = Vec::new();
-    let roots: BTreeMap<&String, &RootOut> = units
-        .roots
-        .iter()
-        .filter(|(_, r)| outer.submits(&r.package))
-        .collect();
+    let roots: BTreeMap<&String, &RootOut> = units.roots.iter().collect();
     let missing: Vec<&String> = roots
         .keys()
         .filter(|r| !outer.outputs.contains_key(**r))
@@ -455,7 +401,7 @@ pub fn shape(inputs: &Inputs, units: &UnitsJson, outer: &Outer) -> Result<Shape,
         .doctests
         .keys()
         .filter_map(|id| id.strip_prefix("d-"))
-        .filter(|p| outer.submits(p) && !outer.doctests.contains_key(*p))
+        .filter(|p| !outer.doctests.contains_key(*p))
         .collect();
     if !unpredicted.is_empty() {
         return err(format!(
@@ -478,14 +424,7 @@ pub fn shape(inputs: &Inputs, units: &UnitsJson, outer: &Outer) -> Result<Shape,
         }
         wrappers.push((format!("wrapper:{package}.doctest"), w, output.clone()));
     }
-    // The docs read every package's rustdoc output: with packages left,
-    // the other outer derivation writes them.
-    let docs = if outer.leave.is_empty() {
-        &units.docs
-    } else {
-        &None
-    };
-    match (docs, &outer.docs) {
+    match (&units.docs, &outer.docs) {
         (None, None) => {}
         (Some(d), Some(output)) => {
             if let Some(other) = taken.insert(output.clone(), "the docs".into()) {
@@ -526,7 +465,7 @@ pub fn shape(inputs: &Inputs, units: &UnitsJson, outer: &Outer) -> Result<Shape,
         }
         wrappers.push((
             "wrapper:*units".into(),
-            all_units(inputs, &prefix, outer, output, &left)?,
+            all_units(inputs, &prefix, outer, output)?,
             output.clone(),
         ));
     }
@@ -538,7 +477,7 @@ pub fn shape(inputs: &Inputs, units: &UnitsJson, outer: &Outer) -> Result<Shape,
         }
         wrappers.push((
             "wrapper:*runs".into(),
-            all_runs(inputs, &prefix, outer, output, &left)?,
+            all_runs(inputs, &prefix, outer, output)?,
             output.clone(),
         ));
     }

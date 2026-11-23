@@ -498,6 +498,27 @@ null
 *Declared by:*
  - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
 
+## `workspaces.<name>.host.triple`
+
+The build machine’s triple, which host units are built
+for\. A variant’s [` targets `](\#workspacesnamevariantsnametargets)
+may name it when it is not one of the workspace’s
+targets: the variant is then planned for it, alone
+([use a workspace binary in another package’s
+build](\.\./\.\./how-to/workspace-tools\.md))\.
+
+*Type:*
+string *(read only)*
+
+*Default:*
+
+```nix
+pkgs.stdenv.hostPlatform.rust.rustcTarget
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
 ## `workspaces.<name>.memberDefaults`
 
 Settings for every member of this workspace (the path packages
@@ -1223,6 +1244,33 @@ package
 
 ```nix
 if rustc == pkgs.rustc then pkgs.rustfmt else rustc
+```
+
+*Declared by:*
+ - [lib/modules/workspaces\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/workspaces.nix)
+
+## `workspaces.<name>.toolsVariant`
+
+The variant whose products on the build machine’s triple
+([` host.triple `](\#workspacesnamehosttriple)) are the
+workspace’s ` tools.<pkg> `: binaries for other packages’
+builds to run or embed\. ` breakbulk.variants.tools { … } ` sets
+it ([use a workspace binary in another package’s
+build](\.\./\.\./how-to/workspace-tools\.md))\.
+
+*Type:*
+null or string
+
+*Default:*
+
+```nix
+null
+```
+
+*Example:*
+
+```nix
+"tools"
 ```
 
 *Declared by:*
@@ -1971,7 +2019,12 @@ out has no ` target.<triple>.variants.<v> `, and nothing of the
 variant in ` repo.checks `; when the default variant is left
 out, the target’s ` packages `, ` tests ` and test runs are empty\.
 Use it for gates that apply to one target only (clippy
-natively, a ` cargo check ` gate for wasm)\.
+natively, a ` cargo check ` gate for wasm)\. It may also name
+the build machine’s triple
+([` host.triple `](\#workspacesnamehosttriple)) when that is not
+one of the workspace’s targets: the triple is then planned
+for the variants that name it, and no others
+(` breakbulk.variants.tools ` does this)\.
 
 *Type:*
 null or (list of string)

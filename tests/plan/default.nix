@@ -1057,6 +1057,69 @@ in
         mkdir -p $out
         cp log $out/
       '';
+
+  # Assumption F11: Cargo unifies features over the selected packages
+  # only. `--workspace` builds `shared` once with fa+fb (a and b both
+  # select it); `-p a` with fa alone, and a's product sees only fa. The
+  # fixture without its `resolver.feature-unification` config.
+  select-feature-unification =
+    let
+      sharedFeatures =
+        ws:
+        map
+          (
+            u:
+            lib.concatStringsSep "+" (
+              lib.sort lib.lessThan (
+                map (a: lib.removeSuffix "\"" (lib.removePrefix "feature=\"" a)) (
+                  lib.filter (a: builtins.isString a && lib.hasPrefix "feature=\"" a) u.args
+                )
+              )
+            )
+          )
+          (
+            lib.filter (u: u.kind == "compile" && u.crate.name == "shared" && u.platform == "target") (
+              lib.attrValues (readPlan ws "build").units
+            )
+          );
+      root =
+        /.
+        + builtins.unsafeDiscardStringContext (
+          builtins.path {
+            name = "feature-unification";
+            path = fixtures + "/feature-unification";
+            filter = p: _: baseNameOf p != ".cargo";
+          }
+        );
+      whole = mk "feature-unification" { inherit root; };
+      selected = mk "feature-unification" {
+        inherit root;
+        select = [ "a" ];
+      };
+      got = {
+        workspace = sharedFeatures whole;
+        a = sharedFeatures selected;
+      };
+    in
+    assert lib.assertMsg (
+      got == {
+        workspace = [ "fa+fb" ];
+        a = [ "fa" ];
+      }
+    ) "select-feature-unification: ${builtins.toJSON got}";
+    pkgs.runCommand "select-feature-unification-check"
+      {
+        whole = whole.packages.a;
+        selected = selected.packages.a;
+      }
+      ''
+        $whole/bin/a | tee whole
+        $selected/bin/a | tee selected
+        grep -qx 'a fa+fb 5' whole
+        grep -qx 'a fa 2' selected
+        mkdir -p $out
+        cp whole selected $out/
+      '';
 }
 // goldenOn "walking-skeleton" { } { }
 // goldenOn "directives" { extraSources = lib.genAttrs directivesPackages (_: [ "common" ]); } { }

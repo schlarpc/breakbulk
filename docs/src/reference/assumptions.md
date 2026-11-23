@@ -15,7 +15,7 @@ Use it when a new Cargo or rustc release lands, when a check fails after a toolc
 - **Pinned by**: tests that fail if the assumption changes. Flake checks (`nix flake check`, names as in `checks.<system>`) run real Cargo or rustc. Rust tests (`nix develop -c cargo test`, names as `module::tests::name`) check breakbulk's own copy of a rule against hand-written input; they do not run Cargo, so they pin the copy, not the assumption. An entry counts as pinned only when a flake check would fail.
 - **If it changes**: what goes wrong, and whether anything fails loudly.
 
-Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
+Status of the 94 entries: 92 pinned; F8 in part and F10 are in [Gaps](#gaps). A check (`docs-assumptions-summary`) holds the summary table and these counts to the entries.
 
 ## Summary
 
@@ -110,6 +110,7 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 | [F8](#f8-source-prediction) | Source prediction | rustc's rules and clippy's read; the crates' keeps are in Gaps |
 | [F9](#f9-workspace-membership) | Workspace membership | yes |
 | [F10](#f10-which---features-a-selected-package-accepts) | Which `--features` a selected package accepts | no |
+| [F11](#f11-a--p-plan-unifies-features-over-the-selected-packages) | A `-p` plan unifies features over the selected packages | yes |
 | [E1](#e1-pkg-config-rs-and-pkg_config_all_static) | pkg-config-rs and `PKG_CONFIG_ALL_STATIC` | yes |
 | [E2](#e2-cc-rs-passes---targetrust-triple) | cc-rs passes `--target=<Rust triple>` | yes |
 | [E3](#e3-cmake-rs-reads-nothing-from-cmakefiles-after-the-run) | cmake-rs reads nothing from `CMakeFiles` after the run | yes |
@@ -933,6 +934,15 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 - **Holds for.** 1.99, by source.
 - **Pinned by.** No flake check ([Gaps](#gaps)). Nix: `testAcceptsFeature` (`lib-unit`) checks the copy against hand-written cases; `products-variants-per-target` plans package-scope runs whose `variantDefaults` features a function module chooses with it, so Cargo would reject one it accepts wrongly there.
 - **If it changes.** A user's function drops a feature Cargo would accept, so the variant builds without it; or it keeps one Cargo rejects, and planning fails loudly.
+
+### F11. A `-p` plan unifies features over the selected packages
+
+- **Assumption.** Cargo activates features for the packages a command selects (`-p`, or every member with `--workspace`) and what they depend on, and for nothing else: a dependency that two members use with different features is built once with both under `--workspace`, and with one member's alone under `-p <member>`. So a variant that selects some packages can build them differently from the workspace's plan: `breakbulk.variants.tools`' `-p tool` product, which another package's settings use, is not always byte-identical to the default variant's `tool`, as with `cargo run -p tool` or an artifact dependency. Project config can change the rule (`resolver.feature-unification`, unstable).
+- **Where.** `lib/variants.nix`: `tools`; `lib/cargo-commands.nix` (a variant's `packages` as `-p` per package).
+- **Upstream.** cargo `0.100.0` `src/ops/resolve.rs`: `resolve_ws_with_opts` (`FeatureUnification::Selected` resolves the selected specs together), `FeatureResolver::resolve` with those specs; `src/resolver/features.rs`: `do_resolve` (`members_with_features(specs, …)`, activating from each selected member only); `src/workspace/workspace.rs`: `resolve_feature_unification` (`Selected` unless `-Zfeature-unification` and the config say otherwise). Checked for this page.
+- **Holds for.** 1.99, by check.
+- **Pinned by.** `plan-select-feature-unification` (`feature-unification` without its config: `shared` has fa+fb under `--workspace` and fa under `-p a`, and the two products print their sets).
+- **If it changes.** Tools products and the default variant's agree, or differ in other ways; nothing breaks, and the check fails.
 
 ## Build-script crates
 

@@ -3554,51 +3554,60 @@ in
         touch $out
       '';
 
-  # `productInputs` that cannot work, named from the declarations and
-  # Cargo.lock without planning (feature-unification: a and b depend on
-  # shared): a product whose package depends on the declaring one, a
-  # package's own product, and a product the second outer derivation
-  # makes for another declaration.
-  product-inputs-conflicts =
+  # `breakbulk.variants.tools` plans its variant on the build machine's
+  # triple only, also when the workspace does not target it, and nothing
+  # else there; its outputs stay out of repo.checks.
+  tools-variant =
     let
-      conflicts =
-        decls:
-        (mkRepo (fixtures + "/feature-unification") [
-          (oneWs ".")
-          { packages = lib.mapAttrs (_: l: { productInputs = l; }) decls; }
-        ]).workspaces.main.internal.instances.${native}.default.productInputConflicts;
+      repoWith =
+        targets:
+        mkRepo (fixtures + "/same-workspace-products") [
+          {
+            workspaces.main = {
+              path = ".";
+              inherit targets;
+              imports = [ (breakbulk.variants.tools { packages = [ "tool" ]; }) ];
+            };
+          }
+        ];
+      wasmOnly = repoWith { wasm32-unknown-unknown.preset = null; };
+      native' = repoWith { ${native} = { }; };
+      planned = r: lib.mapAttrs (_: lib.attrNames) r.workspaces.main.internal.instances;
       cases = [
         {
-          decls.shared = [ "a" ];
-          want = [
-            "breakbulk: `a` depends on `shared` in Cargo.lock (a -> shared), and `packages.shared.productInputs` says the settings of `shared` use the product of `a`: that product would need itself."
-          ];
-        }
-        {
-          decls.a = [ "a" ];
-          want = [
-            "breakbulk: `packages.a.productInputs` names `a` itself: the settings of `a` cannot use its own product, which is built with them."
-          ];
-        }
-        {
-          decls = {
-            shared = [ "itoa" ];
-            b = [ "a" ];
+          got = planned wasmOnly;
+          want = {
+            wasm32-unknown-unknown = [ "default" ];
+            ${native} = [ "tools" ];
           };
-          want = [
-            "breakbulk: `packages.b.productInputs` names `a`, but `a` depends on `shared` in Cargo.lock (a -> shared), which declares products of its plan (`packages.shared.productInputs`). Dynamic-derivation mode builds a plan's units in two steps, the products that settings use and then the packages whose settings use them (with everything that depends on those), so `a` is in the second step and its product cannot be an input of `b`."
+        }
+        {
+          got = planned native';
+          want.${native} = [
+            "default"
+            "tools"
           ];
         }
         {
-          decls.a = [ "b" ];
+          got = lib.filter (lib.hasInfix "variant-tools") (lib.attrNames native'.checks);
           want = [ ];
         }
+        {
+          got = lib.attrNames native'.workspaces.main.tools;
+          want = [ "tool" ];
+        }
+        {
+          got =
+            (builtins.tryEval (
+              (mkRepo (fixtures + "/same-workspace-products") [ (oneWs ".") ]).workspaces.main.tools
+            )).success;
+          want = false;
+        }
       ];
-      bad = lib.filter (c: conflicts c.decls != c.want) cases;
+      bad = lib.filter (c: c.got != c.want) cases;
     in
-    assert lib.assertMsg (bad == [ ])
-      "product-inputs-conflicts: ${builtins.toJSON (map (c: c // { got = conflicts c.decls; }) bad)}";
-    evalCheck "product-inputs-conflicts" "ok";
+    assert lib.assertMsg (bad == [ ]) "tools-variant: ${builtins.toJSON bad}";
+    evalCheck "tools-variant" "ok";
 
   # Instantiating a plan needs only the names of package settings; their
   # values reach a unit's derivation when it is substituted. Here every
