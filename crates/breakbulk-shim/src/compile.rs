@@ -2,9 +2,10 @@
 //!
 //! See "Faking a compile" in docs/src/explanation/internals/planner.md.
 
-use crate::args::RustcArgs;
+use crate::Error;
 use crate::stub;
-use crate::{Error, record};
+use breakbulk_trace::record::{Mode, Record, RecordOutput};
+use breakbulk_trace::rustc_args::RustcArgs;
 use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -157,19 +158,15 @@ pub fn run(
     let outs = outputs(a, &link_names);
     let build_script = is_build_script(a);
 
-    let mut rec = record::base("compile", program, args);
-    rec.insert("crateName".into(), json!(a.crate_name));
-    rec.insert("extraFilename".into(), json!(a.extra_filename));
-    rec.insert(
-        "outputs".into(),
-        json!(
-            outs.iter()
-                .map(|o| json!({"emit": o.emit, "path": o.path.to_string_lossy()}))
-                .collect::<Vec<_>>()
-        ),
-    );
-    rec.insert("buildScript".into(), json!(build_script));
-    record::write(record_dir, "compile", &a.stem(), rec)
+    let mut rec = Record::of_process(Mode::Compile, program, args);
+    rec.outputs = outs
+        .iter()
+        .map(|o| RecordOutput {
+            emit: o.emit.clone(),
+            path: o.path.to_string_lossy().into_owned(),
+        })
+        .collect();
+    rec.write(record_dir, &a.stem())
         .map_err(|e| Error::new(format!("writing record: {e}")))?;
 
     let input = a.input.clone().unwrap_or_default();
@@ -182,7 +179,7 @@ pub fn run(
         if o.emit == "dep-info" {
             std::fs::write(&o.path, dep_info(&outs, &input)).map_err(|e| Error::io(&o.path, e))?;
         } else if o.emit == "link" && build_script {
-            stub::install(&o.path, rustc, a)?;
+            stub::install(&o.path, rustc)?;
         } else {
             std::fs::write(&o.path, b"").map_err(|e| Error::io(&o.path, e))?;
         }

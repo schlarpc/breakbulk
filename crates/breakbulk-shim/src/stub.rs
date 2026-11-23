@@ -3,24 +3,17 @@
 //!
 //! See docs/src/reference/sentinels.md.
 
-use crate::args::RustcArgs;
-use crate::{Error, record};
-use serde_json::{Value, json};
+use crate::Error;
+use breakbulk_trace::names::{METADATA_ENV, METADATA_FILE, STUB_MARKER as MARKER};
+use breakbulk_trace::record::{Mode, RECORD_VERSION, Record, StubCompile, StubMarker};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
-
-/// Marker file written next to the stub binary. Its presence beside the
-/// running executable is how the shim knows it was started as a stub.
-pub const MARKER: &str = "breakbulk-stub.json";
-
-/// Env var naming the `cargo metadata --format-version 1` JSON the stub reads
-/// to learn the package's targets. Default: `$BREAKBULK_RECORD/metadata.json`.
-pub const METADATA_ENV: &str = "BREAKBULK_METADATA";
 
 /// Copies the shim to the build script's output path and writes the marker.
 /// The marker names no record directory: a Cargo invocation other than the
 /// one that compiled the stub may run it, and the run's record belongs to
 /// that invocation ([`run`] takes it from `BREAKBULK_RECORD`).
-pub fn install(path: &Path, rustc: &str, a: &RustcArgs) -> Result<(), Error> {
+pub fn install(path: &Path, rustc: &str) -> Result<(), Error> {
     let me = std::env::current_exe().map_err(|e| Error::new(format!("current_exe: {e}")))?;
     std::fs::copy(&me, path).map_err(|e| Error::io(path, e))?;
     #[cfg(unix)]
@@ -29,18 +22,13 @@ pub fn install(path: &Path, rustc: &str, a: &RustcArgs) -> Result<(), Error> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| Error::io(path, e))?;
     }
-    let marker = json!({
-        "version": record::RECORD_VERSION,
-        "rustc": rustc,
-        "compile": {
-            "crateName": a.crate_name,
-            "extraFilename": a.extra_filename,
-            "binary": path.file_name().map(|f| f.to_string_lossy().into_owned()),
-            "manifestDir": std::env::var("CARGO_MANIFEST_DIR").ok(),
-            "pkgName": std::env::var("CARGO_PKG_NAME").ok(),
-            "pkgVersion": std::env::var("CARGO_PKG_VERSION").ok(),
+    let marker = StubMarker {
+        version: RECORD_VERSION,
+        rustc: rustc.to_owned(),
+        compile: StubCompile {
+            binary: path.file_name().map(|f| f.to_string_lossy().into_owned()),
         },
-    });
+    };
     let dir = path.parent().unwrap_or(Path::new("."));
     let mpath = dir.join(MARKER);
     std::fs::write(&mpath, serde_json::to_vec_pretty(&marker).unwrap())
@@ -48,7 +36,7 @@ pub fn install(path: &Path, rustc: &str, a: &RustcArgs) -> Result<(), Error> {
 }
 
 /// Returns the marker if the running executable is an installed stub.
-pub fn detect() -> Option<Value> {
+pub fn detect() -> Option<StubMarker> {
     let mut candidates = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         candidates.push(exe);
@@ -210,7 +198,7 @@ pub fn line(key: &str, value: &str, old_syntax: bool) -> String {
 
 /// Runs stub mode: records the run in `record_dir` (`$BREAKBULK_RECORD` of
 /// the Cargo running the stub).
-pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
+pub fn run(record_dir: &Path, marker: &StubMarker) -> Result<(), Error> {
     let out_dir = PathBuf::from(
         std::env::var_os("OUT_DIR")
             .ok_or_else(|| Error::new("build-script stub: OUT_DIR not set"))?,
@@ -224,7 +212,7 @@ pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default());
     let meta_path = std::env::var_os(METADATA_ENV)
         .map(PathBuf::from)
-        .unwrap_or_else(|| record_dir.join("metadata.json"));
+        .unwrap_or_else(|| record_dir.join(METADATA_FILE));
     let meta: Value = std::fs::read(&meta_path)
         .map_err(|e| Error::io(&meta_path, e))
         .and_then(|b| {
@@ -247,11 +235,10 @@ pub fn run(record_dir: &Path, marker: &Value) -> Result<(), Error> {
         .collect();
 
     let argv: Vec<String> = std::env::args().collect();
-    let mut rec = record::base("run", &argv[..1], &argv[1..]);
-    rec.insert("tag".into(), json!(tag));
-    rec.insert("stub".into(), marker.clone());
-    rec.insert("printed".into(), json!(lines));
-    record::write(record_dir, "run", tag, rec)
+    let mut rec = Record::of_process(Mode::Run, &argv[..1], &argv[1..]);
+    rec.tag = Some(tag.to_owned());
+    rec.stub = Some(marker.clone());
+    rec.write(record_dir, tag)
         .map_err(|e| Error::new(format!("writing record: {e}")))?;
 
     for l in &lines {

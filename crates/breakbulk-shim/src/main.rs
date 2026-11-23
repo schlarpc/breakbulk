@@ -27,22 +27,15 @@
 //! - `BREAKBULK_RUSTDOC`: the real rustdoc (rustdoc mode).
 //! - `BREAKBULK_METADATA`: `cargo metadata` JSON for stubs (default `$BREAKBULK_RECORD/metadata.json`).
 
-mod args;
 mod compile;
-mod record;
 mod stub;
 
-use args::RustcArgs;
+use breakbulk_trace::names::{RECORD_ENV, RUSTC_WRAPPER_ENV, RUSTDOC_ENV, TEST_RUNNER};
+use breakbulk_trace::record::{Mode, Record};
+use breakbulk_trace::rustc_args::RustcArgs;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-
-pub const RECORD_ENV: &str = "BREAKBULK_RECORD";
-pub const RUSTDOC_ENV: &str = "BREAKBULK_RUSTDOC";
-/// The variant's rustc wrapper, which every rustc invocation goes through.
-pub const RUSTC_WRAPPER_ENV: &str = "BREAKBULK_RUSTC_WRAPPER";
-/// The file name the planner starts the shim by as the test runner.
-pub const TEST_RUNNER: &str = "breakbulk-test-runner";
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -111,15 +104,10 @@ fn rustdoc_mode(args: Vec<String>) -> Result<ExitCode, Error> {
         return exec(&[real], &args);
     }
     let dir = record_dir()?;
-    let mut rec = record::base("rustdoc", &[real], &args);
     let a = RustcArgs::parse(&args);
-    rec.insert("crateName".into(), serde_json::json!(a.crate_name));
-    rec.insert(
-        "test".into(),
-        serde_json::json!(args.iter().any(|a| a == "--test")),
-    );
     let label = a.crate_name.clone().unwrap_or_else(|| "rustdoc".into());
-    record::write(&dir, "rustdoc", &label, rec)
+    Record::of_process(Mode::Rustdoc, &[real], &args)
+        .write(&dir, &label)
         .map_err(|e| Error::new(format!("writing record: {e}")))?;
     Ok(ExitCode::SUCCESS)
 }
@@ -141,8 +129,8 @@ fn wrapper_mode(argv: Vec<String>) -> Result<ExitCode, Error> {
         // subtracts. It includes variables Cargo sets on itself at startup,
         // such as SSL_CERT_FILE from openssl-probe.
         if let Ok(dir) = record_dir() {
-            let rec = record::base("query", &program, &args);
-            record::write(&dir, "query", "rustc", rec)
+            Record::of_process(Mode::Query, &program, &args)
+                .write(&dir, "rustc")
                 .map_err(|e| Error::new(format!("writing record: {e}")))?;
         }
         return exec(&program, &args);

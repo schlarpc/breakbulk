@@ -1,17 +1,19 @@
-//! Just enough rustc command-line parsing to fake a compile.
+//! rustc's (and rustdoc's) command-line grammar, as far as breakbulk reads
+//! it: which options take a value, in which forms ([`options`]), and what
+//! the shim needs to fake a compile ([`RustcArgs`]). The planner reads
+//! values with [`values`], [`codegen`] and [`input`], so both read an
+//! argument list the same way.
 //!
 //! The shim never interprets flags beyond what it needs to name outputs. The
-//! output names themselves come from rustc (`--print=file-names`); this module
-//! finds the crate name, the requested emit kinds, the output directory and the
-//! input file.
+//! output names themselves come from rustc (`--print=file-names`).
 
 use std::path::{Path, PathBuf};
 
-/// rustc options that take their value as the next argument when written
-/// without `=`. Anything not listed is treated as a flag without a value.
-/// Taken from `rustc --help` and `rustc -C help`/`-Z help` (all `-C`/`-Z`
-/// options take a value).
-const TAKES_VALUE: &[&str] = &[
+/// rustc and rustdoc options that take their value as the next argument
+/// when written without `=`. Anything not listed is treated as a flag
+/// without a value. Taken from `rustc --help`, `rustc -C help`/`-Z help`
+/// (all `-C`/`-Z` options take a value) and `rustdoc --help`.
+pub const TAKES_VALUE: &[&str] = &[
     "-o",
     "-L",
     "-l",
@@ -47,7 +49,77 @@ const TAKES_VALUE: &[&str] = &[
     "--deny",
     "--forbid",
     "--codegen",
+    // rustdoc's own.
+    "--test-args",
+    "--test-run-directory",
+    "--test-runtool",
+    "--test-runtool-arg",
+    "--extern-html-root-url",
+    "--crate-version",
+    "--default-theme",
+    "--resource-suffix",
+    "--index-page",
+    "--html-in-header",
+    "--html-before-content",
+    "--html-after-content",
+    "--markdown-css",
+    "--persist-doctests",
 ];
+
+/// One argument, as rustc reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arg<'a> {
+    /// An option, with its value if it takes one (`--opt=value`,
+    /// `-Cvalue`, `--opt value`, `-C value`).
+    Opt {
+        name: &'a str,
+        value: Option<&'a str>,
+    },
+    /// A positional argument: the input file, or `-` for standard input.
+    Positional(&'a str),
+}
+
+/// The arguments of `args`, as rustc reads them.
+pub fn options(args: &[String]) -> impl Iterator<Item = Arg<'_>> {
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        let a = args.get(i)?.as_str();
+        if a == "-" || !a.starts_with('-') {
+            i += 1;
+            return Some(Arg::Positional(a));
+        }
+        let (name, value, used) = split_opt(args, i);
+        i += used;
+        Some(Arg::Opt { name, value })
+    })
+}
+
+/// The values of every `flag` option, in order.
+pub fn values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+    options(args)
+        .filter_map(|a| match a {
+            Arg::Opt { name, value } if name == flag => value,
+            _ => None,
+        })
+        .collect()
+}
+
+/// The value of the first codegen option `name` (`-C name=value`,
+/// `-Cname=value`, `--codegen name=value`).
+pub fn codegen<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    values(args, "-C")
+        .into_iter()
+        .chain(values(args, "--codegen"))
+        .find_map(|v| v.strip_prefix(name)?.strip_prefix('='))
+}
+
+/// The input file: the first positional argument.
+pub fn input(args: &[String]) -> Option<&str> {
+    options(args).find_map(|a| match a {
+        Arg::Positional(p) => Some(p),
+        Arg::Opt { .. } => None,
+    })
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RustcArgs {
@@ -97,23 +169,21 @@ fn split_opt(args: &[String], i: usize) -> (&str, Option<&str>, usize) {
 impl RustcArgs {
     pub fn parse(args: &[String]) -> RustcArgs {
         let mut r = RustcArgs::default();
-        let mut i = 0;
-        while i < args.len() {
-            let a = &args[i];
-            if a == "-" {
-                r.is_query = true;
-                i += 1;
-                continue;
-            }
-            if !a.starts_with('-') {
-                // A positional argument is the input file. rustc accepts only one.
-                if r.input.is_none() {
-                    r.input = Some(a.clone());
+        for a in options(args) {
+            let (name, value) = match a {
+                Arg::Positional("-") => {
+                    r.is_query = true;
+                    continue;
                 }
-                i += 1;
-                continue;
-            }
-            let (name, value, used) = split_opt(args, i);
+                Arg::Positional(p) => {
+                    // The input file. rustc accepts only one.
+                    if r.input.is_none() {
+                        r.input = Some(p.to_owned());
+                    }
+                    continue;
+                }
+                Arg::Opt { name, value } => (name, value),
+            };
             match (name, value) {
                 ("-vV" | "-Vv" | "-V" | "--version", _) => r.is_query = true,
                 ("--print", _) => r.is_query = true,
@@ -142,7 +212,6 @@ impl RustcArgs {
                 }
                 _ => {}
             }
-            i += used;
         }
         r
     }
@@ -247,6 +316,34 @@ mod tests {
             ]
         );
         assert_eq!(a.input.as_deref(), Some("main.rs"));
+    }
+
+    #[test]
+    fn values_codegen_and_input() {
+        let a = v(&[
+            "--crate-name",
+            "x",
+            "--cfg",
+            "--crate-name",
+            "-Cmetadata=0a",
+            "--codegen",
+            "extra-filename=-0a",
+            "-o",
+            "/o/x",
+            "--target=t",
+            "src/main.rs",
+        ]);
+        // `--cfg`'s value is not an option.
+        assert_eq!(values(&a, "--crate-name"), ["x"]);
+        assert_eq!(values(&a, "--target"), ["t"]);
+        assert_eq!(values(&a, "-o"), ["/o/x"]);
+        assert_eq!(codegen(&a, "metadata"), Some("0a"));
+        assert_eq!(codegen(&a, "extra-filename"), Some("-0a"));
+        assert_eq!(codegen(&a, "opt-level"), None);
+        assert_eq!(input(&a), Some("src/main.rs"));
+        // rustdoc's options with values are not the input.
+        let d = v(&["--test-run-directory", "/w", "--test", "src/lib.rs"]);
+        assert_eq!(input(&d), Some("src/lib.rs"));
     }
 
     #[test]

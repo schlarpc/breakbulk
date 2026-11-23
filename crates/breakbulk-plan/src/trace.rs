@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use breakbulk_format::{PlanKind, Variant, VariantMode};
+use breakbulk_trace::names::{
+    METADATA_ENV, METADATA_FILE, RECORD_ENV, RUSTC_WRAPPER_ENV, RUSTDOC_ENV, TEST_RUNNER,
+};
 
 use crate::graph::Context;
 use crate::records::{Metadata, Record, read_records};
@@ -176,9 +179,9 @@ fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
             "HOME",
             "CARGO_HOME",
             "CARGO_CACHE_RUSTC_INFO",
-            "BREAKBULK_RUSTDOC",
-            "BREAKBULK_METADATA",
-            "BREAKBULK_RECORD",
+            RUSTDOC_ENV,
+            METADATA_ENV,
+            RECORD_ENV,
         ])
         .map(|k| (*k).to_owned())
         .collect();
@@ -191,10 +194,6 @@ fn cargo_env_names(opts: &Options) -> BTreeSet<String> {
     names.extend(opts.wrapper_env.iter().map(|(k, _)| k.clone()));
     names
 }
-
-/// How the planner hands the shim the variant's rustc wrapper
-/// (`breakbulk-shim`'s `RUSTC_WRAPPER_ENV`).
-pub const RUSTC_WRAPPER_ENV: &str = "BREAKBULK_RUSTC_WRAPPER";
 
 /// Variables passed through from the planner's own environment.
 const BASE_ENV: [&str; 2] = ["PATH", "TMPDIR"];
@@ -351,8 +350,8 @@ fn command(opts: &Options, program: &str) -> Command {
         // `Rustc::new` (`load_global_rustc`). It reaches every process
         // Cargo starts, so the baseline subtraction drops it from units.
         .env("CARGO_CACHE_RUSTC_INFO", "0")
-        .env("BREAKBULK_RUSTDOC", &opts.rustdoc)
-        .env("BREAKBULK_METADATA", scratch.join("metadata.json"))
+        .env(RUSTDOC_ENV, &opts.rustdoc)
+        .env(METADATA_ENV, scratch.join(METADATA_FILE))
         .current_dir(workspace_dir(opts));
     cmd
 }
@@ -585,7 +584,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     cmd.args(sub)
         .args(common_args(opts, &config))
         .args(selection_args(opts))
-        .env("BREAKBULK_RECORD", &record);
+        .env(RECORD_ENV, &record);
     if let Some(w) = &opts.rustc_wrapper {
         cmd.env(RUSTC_WRAPPER_ENV, w);
     }
@@ -600,7 +599,7 @@ pub fn run(opts: &Options) -> Result<Trace, Error> {
     // `docs/src/reference/assumptions.md`).
     if !records
         .iter()
-        .any(|r| r.mode == "query" && r.args == ["-vV"])
+        .any(|r| r.mode == breakbulk_trace::record::Mode::Query && r.args == ["-vV"])
     {
         bail!(
             "`cargo {}` sent no `rustc -vV` through the shim although its \
@@ -681,10 +680,6 @@ pub fn with_trim_paths(opts: &Options) -> Options {
     o.trim_paths_default = true;
     o
 }
-
-/// The file name of the shim as the test runner of a traced `cargo test`
-/// (the shim's `TEST_RUNNER`).
-const TEST_RUNNER: &str = "breakbulk-test-runner";
 
 /// The planned target as Cargo names it (cargo `CompileTarget`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

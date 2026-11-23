@@ -1,0 +1,11 @@
+[package]
+name = "breakbulk-trace"
+description = "What breakbulk-shim and breakbulk-plan share about a trace: the records, the names they agree on, and rustc's command-line grammar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

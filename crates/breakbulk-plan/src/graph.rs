@@ -13,10 +13,11 @@ use breakbulk_format::{
 };
 
 use crate::describe;
-use crate::records::{Metadata, Package, Record, Target};
+use crate::records::{Metadata, Mode, Package, Record, Target};
 use crate::rewrite::Rewriter;
 use crate::sentinel::{ArgSentinel, dep_sentinel, dylib_sentinel, env_sentinel, parse_pair};
 use crate::{Error, bail};
+use breakbulk_trace::rustc_args::{codegen, input, values};
 
 /// Facts about the trace that do not come from the records.
 #[derive(Clone, Debug)]
@@ -86,7 +87,7 @@ pub fn has_cargo_trim_paths(args: &[String]) -> bool {
 pub fn trace_trims_paths(records: &[Record]) -> bool {
     records
         .iter()
-        .any(|r| r.mode == "compile" && has_cargo_trim_paths(&r.args))
+        .any(|r| r.mode == Mode::Compile && has_cargo_trim_paths(&r.args))
 }
 
 /// Whether `value` names `dir` or a path below it, as a whole path.
@@ -107,16 +108,10 @@ fn names_path(value: &str, dir: &str) -> bool {
     false
 }
 
-/// Variables never kept in a unit's env: the planner's own, and the ones the
+/// Variables never kept in a unit's env, besides the planner's own with
+/// the shim ([`breakbulk_trace::names::PROTOCOL_ENV`]): the ones the
 /// design drops ("Env filtering").
-const DROPPED_ENV: &[&str] = &[
-    "RUSTC_WRAPPER",
-    crate::trace::RUSTC_WRAPPER_ENV,
-    "CARGO_MAKEFLAGS",
-    "BREAKBULK_RECORD",
-    "BREAKBULK_RUSTDOC",
-    "BREAKBULK_METADATA",
-];
+const DROPPED_ENV: &[&str] = &["RUSTC_WRAPPER", "CARGO_MAKEFLAGS"];
 
 /// Variables Cargo sets on every process it starts, kept even when equal to
 /// Cargo's own environment (from 1.97 Cargo also sets `CARGO` on itself, so
@@ -147,52 +142,6 @@ pub const NOT_BUILT_BIN_DIR: &str = "/breakbulk/not-built";
 /// Cargo's path after `build/`), which never exists, as Cargo's does not.
 pub const OVERRIDDEN_OUT_DIR: &str = "/breakbulk/overridden";
 
-fn arg_value<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        let a = &args[i];
-        if a == flag {
-            if let Some(v) = args.get(i + 1) {
-                out.push(v.as_str());
-            }
-            i += 2;
-            continue;
-        }
-        if let Some(v) = a.strip_prefix(flag).and_then(|r| r.strip_prefix('=')) {
-            out.push(v);
-        }
-        i += 1;
-    }
-    out
-}
-
-/// `-C <name>=<value>` (or `-C<name>=…`, `--codegen …`) values for `name`.
-fn codegen_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    let mut i = 0;
-    while i < args.len() {
-        let a = args[i].as_str();
-        let v = match a {
-            "-C" | "--codegen" => {
-                i += 1;
-                args.get(i).map(String::as_str)
-            }
-            _ => a
-                .strip_prefix("-C")
-                .or_else(|| a.strip_prefix("--codegen=")),
-        };
-        if let Some(v) = v
-            .and_then(|v| v.strip_prefix(name))
-            .and_then(|v| v.strip_prefix('='))
-        {
-            return Some(v);
-        }
-        i += 1;
-    }
-    None
-}
-
-/// The input file: the one positional argument.
 /// A `cargo metadata` target as source views name it: a library by `lib`
 /// whatever its crate types.
 fn cargo_target(t: &Target) -> CargoTarget {
@@ -204,54 +153,6 @@ fn cargo_target(t: &Target) -> CargoTarget {
         kind: kind.to_owned(),
         name: t.name.clone(),
     }
-}
-
-fn input_file(args: &[String]) -> Option<&str> {
-    const TAKES_VALUE: &[&str] = &[
-        "-o",
-        "-L",
-        "-l",
-        "-C",
-        "-Z",
-        "-W",
-        "-A",
-        "-D",
-        "-F",
-        "--cfg",
-        "--check-cfg",
-        "--crate-type",
-        "--crate-name",
-        "--edition",
-        "--emit",
-        "--print",
-        "--out-dir",
-        "--target",
-        "--cap-lints",
-        "--extern",
-        "--sysroot",
-        "--error-format",
-        "--json",
-        "--color",
-        "--remap-path-prefix",
-        "--remap-path-scope",
-        "--env-set",
-        "--codegen",
-        "--warn",
-        "--allow",
-        "--deny",
-        "--forbid",
-        "--force-warn",
-        "--diagnostic-width",
-    ];
-    let mut i = 0;
-    while i < args.len() {
-        let a = args[i].as_str();
-        if !a.starts_with('-') {
-            return Some(a);
-        }
-        i += if TAKES_VALUE.contains(&a) { 2 } else { 1 };
-    }
-    None
 }
 
 fn under<'a>(path: &'a str, dir: &str) -> Option<&'a str> {
@@ -313,7 +214,7 @@ fn doctest_native_block(args: &[String]) -> Option<(usize, usize)> {
 
 /// The `--crate-name` of recorded arguments, or empty.
 fn crate_name(args: &[String]) -> String {
-    arg_value(args, "--crate-name")
+    values(args, "--crate-name")
         .first()
         .map(|s| s.to_string())
         .unwrap_or_default()
@@ -375,7 +276,7 @@ fn describe_compile(c: &CompileRec<'_>) -> String {
         &c.id,
         &c.package.name,
         &c.package.version,
-        arg_value(&c.rec.args, "--crate-name")
+        values(&c.rec.args, "--crate-name")
             .first()
             .copied()
             .unwrap_or_default(),
@@ -410,7 +311,7 @@ impl<'a> Builder<'a> {
     ) -> Result<Builder<'a>, Error> {
         let baseline = records
             .iter()
-            .find(|r| r.mode == "query" && r.args == ["-vV"])
+            .find(|r| r.mode == Mode::Query && r.args == ["-vV"])
             .map(|r| r.env.clone())
             .ok_or_else(|| {
                 Error("the trace has no `rustc -vV` query record to take Cargo's env from".into())
@@ -427,8 +328,8 @@ impl<'a> Builder<'a> {
         };
         let mut seen = BTreeSet::new();
         for rec in records {
-            match rec.mode.as_str() {
-                "compile" => {
+            match rec.mode {
+                Mode::Compile => {
                     let c = b.compile_rec(rec)?;
                     if !seen.insert(c.id.clone()) {
                         let other = b.compiles.iter().find(|o| o.id == c.id);
@@ -441,7 +342,7 @@ impl<'a> Builder<'a> {
                     }
                     b.compiles.push(c);
                 }
-                "run" => {
+                Mode::Run => {
                     let r = b.run_rec(rec)?;
                     if !seen.insert(r.id.clone()) {
                         bail!("{} was traced twice", describe_run(&r));
@@ -458,9 +359,8 @@ impl<'a> Builder<'a> {
                     b.run_by_tag.insert(tag, b.runs.len());
                     b.runs.push(r);
                 }
-                "rustdoc" => b.rustdocs.push(rec),
-                "query" => {}
-                m => bail!("{}: unknown record mode `{m}`", rec.file),
+                Mode::Rustdoc => b.rustdocs.push(rec),
+                Mode::Query => {}
             }
         }
         // Register outputs and run directories for path rewriting.
@@ -498,7 +398,7 @@ impl<'a> Builder<'a> {
     /// `--target` (#39). A `.json` target counts by its short name: Cargo
     /// passes rustc the canonical path, not the planner's argument.
     fn check_target(&self, rec: &Record) -> Result<(), Error> {
-        let Some(t) = arg_value(&rec.args, "--target").first().copied() else {
+        let Some(t) = values(&rec.args, "--target").first().copied() else {
             return Ok(());
         };
         let short = crate::trace::Target::new(t, std::path::Path::new(&rec.cwd)).short_name;
@@ -537,19 +437,19 @@ impl<'a> Builder<'a> {
 
     fn compile_rec(&self, rec: &'a Record) -> Result<CompileRec<'a>, Error> {
         self.check_target(rec)?;
-        let Some(hash) = codegen_value(&rec.args, "metadata") else {
+        let Some(hash) = codegen(&rec.args, "metadata") else {
             bail!(
                 "{}: the compile of `{}` has no `-C metadata`",
                 rec.file,
-                arg_value(&rec.args, "--crate-name").join(",")
+                values(&rec.args, "--crate-name").join(",")
             );
         };
-        let out_dir = arg_value(&rec.args, "--out-dir")
+        let out_dir = values(&rec.args, "--out-dir")
             .first()
             .map(|s| s.to_string())
             .or_else(|| rec.outputs.first().map(|o| parent(&o.path).to_owned()))
             .unwrap_or_default();
-        let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
+        let mut types: Vec<String> = values(&rec.args, "--crate-type")
             .into_iter()
             .map(str::to_owned)
             .collect();
@@ -603,11 +503,11 @@ impl<'a> Builder<'a> {
             return Ok(None);
         };
         let rustc = file_name(&o.path);
-        let crate_name = arg_value(&c.rec.args, "--crate-name")
+        let crate_name = values(&c.rec.args, "--crate-name")
             .first()
             .copied()
             .unwrap_or_default();
-        let extra = codegen_value(&c.rec.args, "extra-filename").unwrap_or_default();
+        let extra = codegen(&c.rec.args, "extra-filename").unwrap_or_default();
         let suffix = &self.ctx.executable_suffix;
         let expected = format!("{crate_name}{extra}{suffix}");
         if rustc != expected {
@@ -706,13 +606,13 @@ impl<'a> Builder<'a> {
     /// The `cargo metadata` target a compile builds: matched by source path
     /// and crate name.
     fn target_of(&self, c: &CompileRec<'a>) -> Option<&'a Target> {
-        let input = input_file(&c.rec.args)?;
+        let input = input(&c.rec.args)?;
         let abs = if input.starts_with('/') {
             input.to_owned()
         } else {
             format!("{}/{input}", c.rec.cwd.trim_end_matches('/'))
         };
-        let crate_name = arg_value(&c.rec.args, "--crate-name").first().copied()?;
+        let crate_name = values(&c.rec.args, "--crate-name").first().copied()?;
         let canon = |p: &str| std::fs::canonicalize(p).ok();
         c.package.targets.iter().find(|t| {
             t.name.replace('-', "_") == crate_name
@@ -758,7 +658,9 @@ impl<'a> Builder<'a> {
                 out.insert(k.clone(), w.clone());
                 continue;
             }
-            if DROPPED_ENV.contains(&k.as_str()) {
+            if DROPPED_ENV.contains(&k.as_str())
+                || breakbulk_trace::names::PROTOCOL_ENV.contains(&k.as_str())
+            {
                 continue;
             }
             if k == "RUSTC_WORKSPACE_WRAPPER" && self.ctx.workspace_wrapper.is_none() {
@@ -1362,10 +1264,10 @@ impl<'a> Builder<'a> {
         let cwd = self
             .cwd(&c.rec.cwd, Some(&c.package.id))
             .map_err(|e| Error(format!("cwd: {}", e.0)))?;
-        let edition = arg_value(args, "--edition")
+        let edition = values(args, "--edition")
             .first()
             .map_or("2015".to_owned(), |e| e.to_string());
-        let name = arg_value(args, "--crate-name")
+        let name = values(args, "--crate-name")
             .first()
             .map(|s| s.to_string())
             .unwrap_or_default();
@@ -1469,16 +1371,24 @@ impl<'a> Builder<'a> {
     /// (with or without the libtest harness) and the lib and bin harnesses
     /// in bench mode. Check variants link nothing and have no roots, and
     /// neither have doc plans.
-    fn roots(&self) -> BTreeSet<Root> {
+    fn roots(&self) -> Result<BTreeSet<Root>, Error> {
         let mut roots = BTreeSet::new();
         if self.ctx.variant.mode == VariantMode::Check || self.ctx.kind == PlanKind::Doc {
-            return roots;
+            return Ok(roots);
         }
         for c in &self.compiles {
             if c.rec.env.get("CARGO_PRIMARY_PACKAGE").map(String::as_str) != Some("1") {
                 continue;
             }
-            let Some(t) = self.target_of(c) else { continue };
+            // A selected package's compile matches one of its targets by
+            // crate name and source path; none means the match is wrong
+            // and a root would be lost silently.
+            let Some(t) = self.target_of(c) else {
+                bail!(
+                    "{} matches none of its package's targets (by crate name and source path)",
+                    describe_compile(c)
+                );
+            };
             if t.has_kind("custom-build") {
                 continue;
             }
@@ -1544,7 +1454,7 @@ impl<'a> Builder<'a> {
             };
             roots.extend(kinds.into_iter().map(root));
         }
-        roots
+        Ok(roots)
     }
 
     /// [`Plan::packages`]: what `cargo metadata` says about every package
@@ -1669,7 +1579,7 @@ impl<'a> Builder<'a> {
             // (`platform_of`). Cargo passes `--target` exactly for
             // target-kind units (`CompileKind::add_target_arg`), and the
             // planner always plans with one.
-            let platform = if arg_value(&rec.args, "--target").is_empty() {
+            let platform = if values(&rec.args, "--target").is_empty() {
                 Platform::Host
             } else {
                 Platform::Target
@@ -1721,7 +1631,7 @@ impl<'a> Builder<'a> {
         let cwd = self
             .cwd(&rec.cwd, Some(&package.id))
             .map_err(|e| Error(format!("cwd: {}", e.0)))?;
-        let mut types: Vec<String> = arg_value(&rec.args, "--crate-type")
+        let mut types: Vec<String> = values(&rec.args, "--crate-type")
             .into_iter()
             .map(str::to_owned)
             .collect();
@@ -1734,7 +1644,7 @@ impl<'a> Builder<'a> {
                 krate: Some(CrateInfo {
                     name: crate_name(&rec.args),
                     types,
-                    edition: arg_value(&rec.args, "--edition")
+                    edition: values(&rec.args, "--edition")
                         .first()
                         .map_or("2015".to_owned(), |e| e.to_string()),
                 }),
@@ -1813,7 +1723,7 @@ impl<'a> Builder<'a> {
         rec: &Record,
         package: &Package,
     ) -> Result<(Unit, BTreeSet<(String, String)>), Error> {
-        let Some(out_dir) = arg_value(&rec.args, "-o").first().copied() else {
+        let Some(out_dir) = values(&rec.args, "-o").first().copied() else {
             bail!("the rustdoc command names no output directory (`-o`)");
         };
         let platform = self.platform_of(out_dir);
@@ -1912,7 +1822,7 @@ impl<'a> Builder<'a> {
             config_env: self.ctx.config_env.clone(),
             packages: self.packages(&units)?,
             units,
-            roots: self.roots(),
+            roots: self.roots()?,
         };
         if let Err(e) = breakbulk_format::doc_order(&plan) {
             bail!("{e}");
