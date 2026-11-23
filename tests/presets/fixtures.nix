@@ -529,7 +529,7 @@ let
       inst = crossDoctests.workspaces.main.internal.instances.${a64}.default;
       plan = planOf inst "test";
       unitOf = d: builtins.fromJSON (unitText d);
-      hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).args);
+      hasTarget = d: lib.elem "--target" (lib.filter builtins.isString (unitOf d).command.args);
       platformOf = name: inst.tests.${name}.breakbulkRoot.platform;
       checks = {
         "a runner" = t.runner != null;
