@@ -9,78 +9,43 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
-  versionReq = import ./version-req.nix { inherit lib; };
-  settings = (import ./package-settings.nix { inherit lib; }).settings;
-
-  package = {
-    imports = [ settings ];
-    options = {
-      version = mkOption {
-        type = types.nullOr bt.versionReq;
-        default = null;
-        example = ">=0.42, <0.50";
-        description = ''
-          A version requirement in Cargo's syntax (`1.2`, `^1.2`, `~1.2`,
-          `=1.2.3`, `>=1, <2`, `*`). The override applies to the
-          package's locked versions that match. `null` matches every
-          version. The attribute name may also carry the requirement:
-          `packages."aws-lc-sys@>=0.42"`.
-        '';
-      };
-
-      warnings = bt.warningsOption;
-    };
-  };
+  inherit (import ./package-settings.nix { inherit lib; }) settingsModule;
 in
 {
   options.packages = mkOption {
-    type = types.attrsOf (types.submodule package);
+    type = types.attrsOf settingsModule;
     default = { };
     example = lib.literalExpression ''
       {
         openssl-sys = { nativeInputs = p: [ p.pkg-config ]; inputs = p: [ p.openssl ]; };
         app.env.GIT_REV = self.rev or "dirty";
         "libsqlite3-sys".env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";  # opt in to the system SQLite
+        aws-lc-sys = breakbulk.whenVersion ">=0.42" { env.AWS_LC_SYS_PREBUILT_NASM = "1"; };
       }
     '';
     description = ''
-      Per-package overrides, by package name (or `name@<version
-      requirement>`). They apply in every workspace whose lockfile has a
-      matching package, and only to that package's units. An override that
-      matches nothing in any lockfile is an evaluation warning.
+      Per-package overrides, by crate name. They apply in every workspace
+      whose lockfile has a package of that name, and only to that
+      package's units. Each is a module of the options below, evaluated
+      for each locked package of the name, with that package's lockfile
+      entry (`{ name, version, source ? null, ... }`) as its `package`
+      argument: `{ package, ... }: lib.mkIf (breakbulk.versionReq.matches
+      ">=0.42" package.version) { … }` applies to the matching versions
+      only, as does `breakbulk.whenVersion ">=0.42" { … }`. A name that no
+      lockfile has is an evaluation warning.
     '';
   };
 
-  config.warnings =
-    let
-      variants = lib.unique (
-        lib.concatMap (ws: lib.attrNames ws.variants) (lib.attrValues config.workspaces)
-      );
-      esc = lib.strings.escapeNixIdentifier;
-    in
-    lib.concatMap (p: p.warnings) (lib.attrValues config.packages)
-    ++ lib.concatLists (
-      lib.mapAttrsToList (
-        k: p:
-        map (
-          v:
-          "breakbulk: `packages.${esc k}.variant.${esc v}` names no variant of any workspace; it has no effect."
-        ) (lib.filter (v: !(lib.elem v variants)) (lib.attrNames p.variant))
-      ) config.packages
-    );
-
-  # The requirement in a `name@<requirement>` key, which no option type sees.
-  config.assertions = lib.concatMap (
+  # Crate names have no `@`: a key with one is a version condition, which
+  # goes in the module instead.
+  config.assertions = map (
     k:
     let
-      m = builtins.match "([^@]+)@(.+)" k;
-      req = builtins.elemAt m 1;
-      # The files that define this key.
       files = map (d: d.file) (lib.filter (d: d.value ? ${k}) options.packages.definitionsWithLocations);
     in
-    lib.optional (m != null) {
-      assertion = versionReq.isReq req;
-      message = "breakbulk: packages.${lib.strings.escapeNixIdentifier k}${bt.setIn { inherit files; }}: `${req}` is not a Cargo version requirement";
+    {
+      assertion = false;
+      message = "breakbulk: packages.${lib.strings.escapeNixIdentifier k}${bt.setIn { inherit files; }}: a key is a crate name; for some versions only, use `packages.${lib.strings.escapeNixIdentifier (lib.head (lib.splitString "@" k))} = breakbulk.whenVersion \"${lib.last (lib.splitString "@" k)}\" { … }`";
     }
-  ) (lib.attrNames config.packages);
+  ) (lib.filter (lib.hasInfix "@") (lib.attrNames config.packages));
 }

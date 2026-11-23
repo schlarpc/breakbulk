@@ -14,9 +14,8 @@
 #                           # traits' default
 #     targetStages = { };   # targets.<triple>.stages
 #     targetChecks = { };   # targets.<triple>.checks
-#     packageConfig = pkg: [ { stages; checks; } … ];  # matching package
-#                           # overrides, least specific first, each with
-#                           # its target.<triple> settings applied after it
+#     packageConfig = pkg: { stages; checks; };  # the package's settings
+#                           # (packages.<name>.stages, .checks)
 #     ca = breakbulk.nixFeatures.defaultCa;
 #     nixFeatures = <standalone>;  # as stages.mkProduct's
 #     lockfile = null;      # the workspace's Cargo.lock (wasmBindgen stage)
@@ -37,9 +36,9 @@
 # The stage set of a product is, merged in this order (later wins per
 # attribute; `null` removes a stage): the target's stage set
 # (`targetStageSet`: the stages `debugInfo` inserts, the preset's default
-# stages, then the target's `stages`), and for each matching
-# `packages.<name>` (unversioned keys first) its `stages` then its
-# `target.<triple>.stages`. Checks merge the same way over the default
+# stages, then the target's `stages`), then the package's `stages`, its
+# settings layers already merged (lib/package-settings.nix). Checks
+# merge the same way over the default
 # `noSourceReferences`. What happens to debug info is the target's
 # decision (`debugInfo`): a stage set that removes the `splitDebug` or
 # `strip` it inserts, or adds `splitDebug` where it inserts none, is an
@@ -369,7 +368,7 @@ let
       debugInfo ? null,
       targetStages ? { },
       targetChecks ? { },
-      packageConfig ? _: [ ],
+      packageConfig ? _: { },
       ca ? featureGates.defaultCa,
       nixFeatures ? featureGates.standalone { inherit ca; },
       lockfile ? null,
@@ -448,30 +447,25 @@ let
             ) built
           );
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
-          confs = packageConfig pkg;
-          stageSet = stages.merge (
-            [ targetSet ]
-            ++ map (
-              c:
-              checkDebugStages {
-                inherit triple;
-                debugInfo = effectiveDebugInfo;
-                where = "packages.${pkg}.stages";
-              } (c.stages or { })
-            ) confs
-          );
-          checkSet = stages.merge (
-            [
-              # On every product (passing when no build script placed
-              # files): in dynamic mode whether there are runs is known
-              # only at build time, and both modes have the same checks.
-              {
-                buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
-              }
-              targetChecks
-            ]
-            ++ map (c: c.checks or { }) confs
-          );
+          conf = packageConfig pkg;
+          stageSet = stages.merge [
+            targetSet
+            (checkDebugStages {
+              inherit triple;
+              debugInfo = effectiveDebugInfo;
+              where = "packages.${pkg}.stages";
+            } (conf.stages or { }))
+          ];
+          checkSet = stages.merge ([
+            # On every product (passing when no build script placed
+            # files): in dynamic mode whether there are runs is known
+            # only at build time, and both modes have the same checks.
+            {
+              buildScriptFiles.run = stages.helpers.buildScriptFilesIncluded;
+            }
+            targetChecks
+            (conf.checks or { })
+          ]);
           p = stages.mkProduct {
             name = pkg;
             linked = mkLinked pkgs traits pkg built;

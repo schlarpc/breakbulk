@@ -80,6 +80,7 @@
   toolchainFacts,
   featureGates,
   targetTraitsLib,
+  packageSettings,
 }:
 pkgs:
 {
@@ -105,10 +106,11 @@ pkgs:
   # products of this plan the package's settings use (mkRepository's
   # `packages.<name>.productInputs`).
   productInputs ? { },
-  # packages.<name> = { test; sources; … }: a member's settings, as
-  # mkRepository merges them; `sources` is the package's list of
-  # source-view functions (lib/source-views.nix). Its env captures and env
-  # come in `packageOverrides`.
+  # packages.<name>: a member's settings, as mkRepository evaluates them
+  # (lib/package-settings.nix), every option set; `sources` is the
+  # package's list of source-view functions (lib/source-views.nix). A
+  # path package without an entry has the options' defaults. Its env
+  # captures and env come in `packageOverrides`.
   packages ? { },
   tools ? defaultTools pkgs,
   name ? "breakbulk",
@@ -203,6 +205,15 @@ pkgs:
 }:
 let
   wsDir = util.normalizeRel path;
+  # The settings of a package that `packages` does not list.
+  defaultSettings =
+    (packageSettings.evaluate {
+      layers = [ ];
+      defaults = packageSettings.contextDefaults {
+        inherit ca;
+        nextestConfig = testRuns.nextestDefaultConfig { inherit root wsDir; };
+      };
+    }).config;
   system = pkgs.stdenv.buildPlatform.system;
 
   fetch = mkFetch pkgs fetchArgs;
@@ -419,7 +430,11 @@ let
       lib.nameValuePair v.name {
         workspaceRoot = if rel == "" then filesOf v else "${filesOf v}/${rel}";
       }
-    ) allViews) packages;
+    ) allViews) settingsByName;
+  # Every path package's settings, by name.
+  settingsByName = lib.mapAttrs' (
+    _: v: lib.nameValuePair v.name (packages.${v.name} or defaultSettings)
+  ) allViews;
   runPackages = testEnvIn (v: "${v.runSrc or v.src}");
   viewPackages = testEnvIn (v: "${v.testSrc or v.src}");
   appPackages =
@@ -1042,7 +1057,7 @@ in
         packages =
           lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots)))
             (pkg: {
-              test = (runPackages.${pkg}.test or { }) // {
+              test = (runPackages.${pkg} or defaultSettings).test // {
                 args = [ "--test" ];
                 binaries = { };
               };

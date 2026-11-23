@@ -4,8 +4,8 @@
 # the flake's pinned nixos-unstable). Only what breakbulk can express is
 # copied: `nativeBuildInputs` -> nativeInputs, `buildInputs` -> inputs,
 # derivation env -> env. By crate name; each value is the
-# `sysDefaults.packages.<name>` settings, or a function of the lockfile
-# entry (`{ version, ... }`) that returns them. lib/modules/top.nix defines
+# `sysDefaults.packages.<name>` module, whose `package` argument is the
+# lockfile entry (`{ name, version, ... }`). lib/modules/top.nix defines
 # them at `mkDefault` priority.
 #
 # Left out, because they are not per-package inputs or env in breakbulk:
@@ -54,8 +54,8 @@ in
     inputs = p: [ p.alsa-lib ];
   };
   aws-lc-sys =
-    { version, ... }:
-    if lib.versionAtLeast version "0.42.0" then
+    { package, ... }:
+    if lib.versionAtLeast package.version "0.42.0" then
       {
         nativeInputs = pc;
         inputs = p: [ p.aws-lc ];

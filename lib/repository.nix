@@ -91,7 +91,6 @@
   breakbulkLib,
 }:
 let
-  versionReq = import ./modules/version-req.nix { inherit lib; };
   bt = import ./modules/types.nix { inherit lib; };
   bbModules = import ./modules;
   mkDevShell = import ./devshell.nix { inherit lib util; };
@@ -118,24 +117,25 @@ let
 
   eval = lib.evalModules {
     modules = bbModules ++ userModules ++ [ projectAssertions ];
-    # Module arguments: `pkgs`; `root` (the repository root, a path), for
-    # reading project files; `repo` (the result, below), for products used
-    # as inputs; `breakbulk` (the library: presets, stage helpers, xwinSdk);
-    # `projectBuildTarget` and `targetsDefaultTarget` (below). The
-    # caller's specialArgs win.
-    specialArgs = {
-      inherit
-        pkgs
-        root
-        projectBuildTarget
-        targetsDefaultTarget
-        ;
-      repo = result;
-      breakbulk = breakbulkLib;
-      breakbulkPresets = presets;
-    }
-    // specialArgs;
+    specialArgs = moduleArgs;
   };
+  # Module arguments, of these modules and of package settings: `pkgs`;
+  # `root` (the repository root, a path), for reading project files;
+  # `repo` (the result, below), for products used as inputs; `breakbulk`
+  # (the library: presets, stage helpers, xwinSdk); `projectBuildTarget`
+  # and `targetsDefaultTarget` (below). The caller's specialArgs win.
+  moduleArgs = {
+    inherit
+      pkgs
+      root
+      projectBuildTarget
+      targetsDefaultTarget
+      ;
+    repo = result;
+    breakbulk = breakbulkLib;
+    breakbulkPresets = presets;
+  }
+  // specialArgs;
   cfg = eval.config;
 
   # Checks of the options against the project's files (lockfiles,
@@ -217,214 +217,40 @@ let
   ) cfg.workspaces;
   allEntries = lib.concatLists (lib.attrValues locks);
 
-  # --- per-package overrides -------------------------------------------------
+  # --- package settings ------------------------------------------------------
 
-  # "name" or "name@<requirement>".
-  parseKey =
-    k:
-    let
-      m = builtins.match "([^@]+)@(.+)" k;
-    in
-    if m == null then
-      {
-        name = k;
-        req = null;
-      }
-    else
-      {
-        name = builtins.elemAt m 0;
-        req = builtins.elemAt m 1;
-      };
+  esc = lib.strings.escapeNixIdentifier;
 
-  overrideMatches =
-    k: e:
-    let
-      p = parseKey k;
-      o = cfg.packages.${k};
-    in
-    p.name == e.name
-    && (p.req == null || versionReq.matches p.req e.version)
-    && (o.version == null || versionReq.matches o.version e.version);
+  isPathEntry = e: e.source or null == null;
+  # A lockfile entry's key in the tables below: a Cargo.lock can hold one
+  # name and version from two sources.
+  entryKey = e: "${e.name} ${e.version}${lib.optionalString (!isPathEntry e) " ${e.source}"}";
 
-  unmatchedWarnings = map (
-    k:
-    "breakbulk: `packages.${lib.strings.escapeNixIdentifier k}` matches no package in any workspace's Cargo.lock${
-      lib.optionalString (
-        cfg.packages.${k}.version != null
-      ) " (version requirement `${cfg.packages.${k}.version}`)"
-    }; it has no effect."
-  ) (lib.filter (k: !(lib.any (overrideMatches k) allEntries)) (lib.attrNames cfg.packages));
-
-  # `sourceOverlay` in any layer of a key that matches a registry or git
-  # crate: such crates have no source view to place it in.
-  overlayWarnings = lib.concatMap (
-    k:
-    let
-      o = cfg.packages.${k};
-      layers = [
-        o
-      ]
-      ++ lib.attrValues o.target
-      ++ lib.concatMap (v: [ v ] ++ lib.attrValues v.target) (lib.attrValues o.variant);
-      fetched = lib.unique (
-        map (e: "${e.name} ${e.version}") (
-          lib.filter (e: e.source or null != null && overrideMatches k e) allEntries
-        )
-      );
-    in
-    lib.optional (lib.any (l: l.sourceOverlay != { }) layers && fetched != [ ])
-      "breakbulk: `packages.${lib.strings.escapeNixIdentifier k}.sourceOverlay` has no effect on ${lib.concatStringsSep ", " fetched}: registry and git crates have no source view; it applies to workspace packages only."
-  ) (lib.attrNames cfg.packages);
-
-  # Unversioned keys first, so a versioned override wins over a plain one.
-  orderedKeys = lib.sort (
-    a: b:
-    let
-      pa = parseKey a;
-      pb = parseKey b;
-      va = pa.req != null || cfg.packages.${a}.version != null;
-      vb = pb.req != null || cfg.packages.${b}.version != null;
-    in
-    if va != vb then vb else a < b
-  ) (lib.attrNames cfg.packages);
-
-  emptySide = {
-    env = { };
-    nativeInputs = _: [ ];
-    inputs = _: [ ];
-  };
-  emptyOverride = emptySide // {
-    extraSources = [ ];
-    buildScriptPaths.allow = [ ];
-    forHost = emptySide;
-    forTarget = emptySide;
-  };
-  catFn =
-    f: g: p:
-    f p ++ g p;
-  mergeSide = a: b: {
-    env = a.env // b.env;
-    nativeInputs = catFn a.nativeInputs b.nativeInputs;
-    inputs = catFn a.inputs b.inputs;
-  };
-  mergeOverride =
-    a: b:
-    mergeSide a b
-    // {
-      extraSources = a.extraSources ++ b.extraSources;
-      buildScriptPaths.allow = a.buildScriptPaths.allow ++ b.buildScriptPaths.allow;
-      forHost = mergeSide a.forHost b.forHost;
-      forTarget = mergeSide a.forTarget b.forTarget;
-    };
-
-  # A single-valued setting at `path` across settings blocks, lowest layer
-  # first: the definition of the highest priority (`priorityOf`), and of
-  # those the last, most specific layer's; `default` without blocks. As if
-  # the blocks were one module with each layer's priorities moved up a
-  # little, as variant layers are (`layer` in lib/modules/types.nix).
-  pickSingle =
-    default: path: blocks:
-    (lib.foldl'
-      (
-        acc: b:
-        let
-          p = b.priorityOf path;
-        in
-        if p <= acc.prio then
-          {
-            prio = p;
-            value = lib.getAttrFromPath path b;
-          }
-        else
-          acc
-      )
-      {
-        prio = 9999;
-        value = default;
-      }
-      blocks
-    ).value;
-
-  # The attribute set at `path` (`[ "env" ]`) across settings blocks, each
-  # attribute picked by `pickSingle` from the blocks that set it. Its
-  # names are known without any priority or value: an env value can be a
-  # product of the plan whose instantiation lists the names.
-  pickAttrs =
-    path: blocks:
-    lib.mapAttrs (
-      n: _: pickSingle null (path ++ [ n ]) (lib.filter (b: lib.getAttrFromPath path b ? ${n}) blocks)
-    ) (lib.foldl' (acc: b: acc // lib.getAttrFromPath path b) { } blocks);
-
-  # The attribute set at `path` (`[ "stages" ]`) of each settings block,
-  # keeping only the attributes no other block sets at a higher priority.
-  # Those left merge in layer order as before, so a stage's fields still
-  # combine across layers of equal priority.
-  keepHighestPrio =
-    path: blocks:
-    let
-      setsOf = b: lib.getAttrFromPath path b;
-      best = lib.zipAttrsWith (_: lib.foldl' lib.min 9999) (
-        map (b: lib.mapAttrs (n: _: b.priorityOf (path ++ [ n ])) (setsOf b)) blocks
-      );
-    in
-    map (b: lib.filterAttrs (n: _: b.priorityOf (path ++ [ n ]) <= best.${n}) (setsOf b)) blocks;
-
-  # The package settings of one lockfile entry of workspace `wsName` in
-  # the plans of variant `vName` on `triple`, as a list of
-  # `packages.<name>`-shaped layers, lowest first: the curated defaults
-  # (`sysDefaults.packages`), for a path package those of the crates it
-  # depends on for their dependents (`sysDefaults.dependents`), the
-  # workspace's `memberDefaults` for its path packages, then each matching
-  # `packages` key; each followed by its own
-  # `target.<triple>`, `variant.<v>` and `variant.<v>.target.<triple>`.
+  # The settings layers of one lockfile entry of workspace `wsName`,
+  # lowest first: the curated defaults (`sysDefaults.packages`), for a
+  # path package those of the crates it depends on for their dependents
+  # (`sysDefaults.dependents`) and the workspace's `memberDefaults`, then
+  # `packages.<name>`. lib/package-settings.nix adds each one's `target`
+  # and `variant` layers. `hostOnly`: the plan's target has no package
+  # set, so the curated layers reach host units only. For warnings:
+  # `label` names the layer, `known` the variants its `variant.<v>` may
+  # name, `where` says where they are.
   layersFor =
-    wsName: triple: vName: e:
+    wsName: hostOnly: e:
     let
       sys = cfg.sysDefaults.packages.${e.name} or null;
-      onTriple = l: [ l ] ++ lib.optional (l.target ? ${triple}) l.target.${triple};
-      withTriple = l: onTriple l ++ lib.optionals (l.variant ? ${vName}) (onTriple l.variant.${vName});
-      # The curated defaults name nixpkgs libraries: on a target without
-      # a package set, only its host units (the build machine's set) get
-      # them.
-      hostOnly =
-        l:
-        l
-        // emptySide
-        // {
-          forHost = mergeSide l l.forHost;
-          forTarget = emptySide;
-          # A `forHost.env` variable that came from `env` has its priority.
-          priorityOf =
-            path:
-            if
-              lib.take 2 path == [
-                "forHost"
-                "env"
-              ]
-              && lib.length path == 3
-              && !(l.forHost.env ? ${lib.last path})
-            then
-              l.priorityOf [
-                "env"
-                (lib.last path)
-              ]
-            else
-              l.priorityOf path;
-        };
+      md = cfg.workspaces.${wsName}.memberDefaults;
+      curated = label: module: {
+        inherit label module hostOnly;
+        known = allVariants;
+        where = "any workspace";
+      };
     in
-    let
-      curatedLayers =
-        l:
-        let
-          ls = withTriple l;
-        in
-        if packageSetOf wsName triple != null then ls else map hostOnly ls;
-    in
-    lib.optionals (sys != null) (curatedLayers (sys e))
-    ++ lib.optionals (e.source or null == null) (
-      lib.concatMap (
+    lib.optional (sys != null) (curated "sysDefaults.packages.${esc e.name}" sys)
+    ++ lib.optionals (isPathEntry e) (
+      map (
         d:
-        curatedLayers (
+        curated "sysDefaults.dependents.${esc d.name}" (
           cfg.sysDefaults.dependents.${d.name} (
             d
             // {
@@ -434,9 +260,186 @@ let
         )
       ) (curatedDeps wsName e.name)
     )
-    ++ lib.optionals (e.source or null == null) (withTriple cfg.workspaces.${wsName}.memberDefaults)
-    ++ lib.concatMap (k: withTriple cfg.packages.${k}) (
-      lib.filter (k: overrideMatches k e) orderedKeys
+    ++ lib.optional (isPathEntry e && md.imports != [ ]) {
+      label = "workspaces.${wsName}.memberDefaults";
+      module = md;
+      known = lib.attrNames cfg.workspaces.${wsName}.variants;
+      where = "workspaces.${wsName} (${
+        lib.concatStringsSep ", " (lib.attrNames cfg.workspaces.${wsName}.variants)
+      })";
+    }
+    ++ lib.optional (cfg.packages ? ${e.name}) {
+      label = "packages.${esc e.name}";
+      module = cfg.packages.${e.name};
+      known = allVariants;
+      where = "any workspace";
+    };
+
+  allVariants = lib.unique (
+    lib.concatMap (ws: lib.attrNames ws.variants) (lib.attrValues cfg.workspaces)
+  );
+
+  # Each lockfile entry's settings before any `target` or `variant`
+  # layer (lib/package-settings.nix `evaluate`), by workspace, by whether
+  # the curated layers are host-only (`host`) or not (`both`), and by
+  # entryKey; null for an entry without layers. `defaults`: the settings
+  # of a member without layers.
+  settingsBases = lib.mapAttrs (
+    wsName: ws:
+    let
+      defaults = breakbulkLib.packageSettings.contextDefaults {
+        inherit (cfg) ca;
+        nextestConfig = breakbulkLib.testRuns.nextestDefaultConfig {
+          inherit root;
+          wsDir = wsDirOf ws;
+        };
+      };
+      bases =
+        hostOnly:
+        lib.listToAttrs (
+          map (
+            e:
+            let
+              layers = layersFor wsName hostOnly e;
+            in
+            lib.nameValuePair (entryKey e) (
+              if layers == [ ] then
+                null
+              else
+                breakbulkLib.packageSettings.evaluate {
+                  inherit layers defaults;
+                  specialArgs = moduleArgs // {
+                    package = e;
+                  };
+                }
+            )
+          ) locks.${wsName}
+        );
+    in
+    {
+      host = bases true;
+      both = bases false;
+      defaults =
+        (breakbulkLib.packageSettings.evaluate {
+          layers = [ ];
+          inherit defaults;
+        }).config;
+    }
+  ) cfg.workspaces;
+
+  # The evaluated settings of lockfile entry `e` of workspace `wsName`
+  # in the plans of variant `vName` on `triple` (`.config`, `.options`),
+  # or null when it has no layers.
+  settingsFor =
+    wsName: triple: vName: e:
+    let
+      b =
+        settingsBases.${wsName}.${
+          if packageSetOf wsName triple == null then "host" else "both"
+        }.${entryKey e};
+    in
+    if b == null then
+      null
+    else
+      b.on {
+        inherit triple;
+        variant = vName;
+      };
+  # Each one evaluated once, for the workspace's targets and variants.
+  settingsTable = lib.mapAttrs (
+    wsName: ws:
+    lib.genAttrs (lib.attrNames ws.targets) (
+      triple:
+      lib.genAttrs (lib.attrNames ws.variants) (
+        vName:
+        lib.listToAttrs (
+          map (e: lib.nameValuePair (entryKey e) (settingsFor wsName triple vName e)) locks.${wsName}
+        )
+      )
+    )
+  ) cfg.workspaces;
+  # The settings themselves, or null.
+  settingsOf =
+    wsName: triple: vName: e:
+    let
+      ev =
+        settingsTable.${wsName}.${triple}.${vName}.${entryKey e} or (settingsFor wsName triple vName e);
+    in
+    if ev == null then null else ev.config;
+
+  # The path packages of each workspace's Cargo.lock, by name.
+  memberEntries = lib.mapAttrs (
+    _: entries: lib.listToAttrs (map (e: lib.nameValuePair e.name e) (lib.filter isPathEntry entries))
+  ) locks;
+
+  # A member's settings: its own, or the defaults.
+  memberSettings =
+    wsName: triple: vName: pkg:
+    let
+      e = memberEntries.${wsName}.${pkg} or null;
+      s = if e == null then null else settingsOf wsName triple vName e;
+    in
+    if s == null then settingsBases.${wsName}.defaults else s;
+
+  entryNames = lib.genAttrs (map (e: e.name) allEntries) (_: null);
+  unmatchedWarnings = map (
+    k:
+    "breakbulk: `packages.${esc k}` matches no package in any workspace's Cargo.lock; it has no effect."
+  ) (lib.filter (k: !(entryNames ? ${k})) (lib.attrNames cfg.packages));
+
+  # `sourceOverlay` in the settings of a registry or git crate that a
+  # `packages` key names: such crates have no source view to place it in.
+  overlayWarnings = lib.concatMap (
+    k:
+    let
+      fetched = lib.concatLists (
+        lib.mapAttrsToList (
+          wsName: ws:
+          map (e: { inherit wsName ws e; }) (lib.filter (e: e.name == k && !(isPathEntry e)) locks.${wsName})
+        ) cfg.workspaces
+      );
+      overlaid =
+        x:
+        lib.any (
+          triple:
+          lib.any (vName: (settingsOf x.wsName triple vName x.e).sourceOverlay != { }) (
+            lib.attrNames x.ws.variants
+          )
+        ) (lib.attrNames x.ws.targets);
+      hits = lib.unique (map (x: "${x.e.name} ${x.e.version}") (lib.filter overlaid fetched));
+    in
+    lib.optional (hits != [ ])
+      "breakbulk: `packages.${esc k}.sourceOverlay` has no effect on ${lib.concatStringsSep ", " hits}: registry and git crates have no source view; it applies to workspace packages only."
+  ) (lib.attrNames cfg.packages);
+
+  # A layer's `variant.<v>` that names a variant it cannot reach.
+  variantWarnings =
+    let
+      given = lib.concatLists (
+        lib.mapAttrsToList (
+          wsName: _:
+          lib.concatMap (
+            e:
+            let
+              b = settingsBases.${wsName}.both.${entryKey e};
+            in
+            lib.optionals (b != null) (
+              lib.zipListsWith (l: names: l // { inherit names; }) (layersFor wsName false e) b.layerVariants
+            )
+          ) locks.${wsName}
+        ) cfg.workspaces
+      );
+    in
+    lib.concatLists (
+      lib.mapAttrsToList (
+        label: ls:
+        let
+          l = lib.head ls;
+        in
+        map (
+          v: "breakbulk: `${label}.variant.${esc v}` names no variant of ${l.where}; it has no effect."
+        ) (lib.filter (v: !(lib.elem v l.known)) (lib.unique (lib.concatMap (x: x.names) ls)))
+      ) (lib.groupBy (l: l.label) given)
     );
 
   # The lockfile entries of workspace `wsName` that `pkg` depends on, by
@@ -498,190 +501,41 @@ let
     )
   ) cfg.workspaces;
 
-  # The merged override for one lockfile entry, or null. Each env
-  # variable is `pickAttrs`'s.
-  overrideFor =
-    wsName: triple: vName: e:
-    let
-      ls = layersFor wsName triple vName e;
-      m = lib.foldl' mergeOverride emptyOverride ls;
-      envAt = side: m.${side} // { env = pickAttrs [ side "env" ] ls; };
-    in
-    if ls == [ ] then
-      null
-    else
-      m
-      // {
-        env = pickAttrs [ "env" ] ls;
-        forHost = envAt "forHost";
-        forTarget = envAt "forTarget";
-      };
-
   envStrings = lib.mapAttrs (_: bt.envString);
+  # Two `inputs` (functions of a package set), concatenated.
+  catFn =
+    f: g: p:
+    f p ++ g p;
   # Test-run env: a function of the run stays one (lib/test-runs.nix
   # resolveTestEnv applies it).
   testEnvStrings = lib.mapAttrs (_: bt.testEnvString);
 
-  # The layers of a workspace's path package `pkg`.
-  memberLayers =
-    wsName: triple: vName: pkg:
-    let
-      e = lib.findFirst (e: e.name == pkg && e.source or null == null) null locks.${wsName};
-    in
-    if e == null then [ ] else layersFor wsName triple vName e;
+  # Product settings for mkProducts.
+  productConfig = wsName: triple: vName: pkg: {
+    inherit (memberSettings wsName triple vName pkg) stages checks;
+  };
 
-  # Product settings for mkProducts: each layer's stages and checks, but
-  # those another layer sets at a higher priority.
-  productConfig =
-    wsName: triple: vName: pkg:
-    let
-      ls = memberLayers wsName triple vName pkg;
-    in
-    lib.zipListsWith (stages: checks: { inherit stages checks; }) (keepHighestPrio [ "stages" ] ls) (
-      keepHighestPrio [ "checks" ] ls
-    );
-
-  # The layers' `test`, `scopeTargetRoots`, `predictSources`, `sources` and `sourceOverlay` settings merged, for
-  # mkWorkspace's `packages`: `{ <pkg> = { test = …; sources = …; }; }` for the
-  # workspace's path packages. Lists and snippets combine, in layer order;
-  # single values are `pickSingle`'s, env variables `pickAttrs`'.
+  # mkWorkspace's `packages`: each member's settings, test env values as
+  # strings.
   memberConfigs =
     wsName: triple: vName:
-    let
-      members = lib.unique (map (e: e.name) (lib.filter (e: e.source or null == null) locks.${wsName}));
-      joinLines =
-        a: b:
-        if a == "" then
-          b
-        else if b == "" then
-          a
-        else
-          a + "\n" + b;
-      mergeTest = a: b: {
-        path = a.path ++ b.path;
-        args = a.args ++ b.args;
-        sourceScope = lib.unique (a.sourceScope ++ b.sourceScope);
-        postRun = joinLines a.postRun b.postRun;
-        # Several matching keys: the union of their lists.
-        runFiles =
-          if b.runFiles == null then
-            a.runFiles
-          else if a.runFiles == null then
-            b.runFiles
-          else
-            lib.unique (a.runFiles ++ b.runFiles);
-        binaries =
-          lib.zipAttrsWith
-            (
-              _:
-              lib.foldl'
-                (x: y: {
-                  args = x.args ++ y.args;
-                  postRun = joinLines x.postRun y.postRun;
-                })
-                {
-                  args = [ ];
-                  postRun = "";
-                }
-            )
-            [
-              a.binaries
-              b.binaries
-            ];
-        doctest = {
-          args = a.doctest.args ++ b.doctest.args;
-          postRun = joinLines a.doctest.postRun b.doctest.postRun;
-        };
-      };
-      empty = {
-        path = [ ];
-        args = [ ];
-        sourceScope = [ ];
-        binaries = { };
-        doctest = {
-          args = [ ];
-          postRun = "";
-        };
-        runFiles = null;
-        postRun = "";
-      };
-      merged =
-        ls:
-        let
-          t = lib.foldl' (acc: l: mergeTest acc l.test) empty ls;
-          single = default: path: pickSingle default ([ "test" ] ++ path) ls;
-        in
-        t
-        // {
-          scopeTestsDir = single null [ "scopeTestsDir" ];
-          workspaceManifest = single null [ "workspaceManifest" ];
-          runner = single null [ "runner" ];
-          stripForRun = single null [ "stripForRun" ];
-          wrapper = single null [ "wrapper" ];
-          nextest = lib.genAttrs [ "profile" "configFile" "package" ] (
-            n:
-            single null [
-              "nextest"
-              n
-            ]
-          );
-          env = testEnvStrings (pickAttrs [ "test" "env" ] ls);
-          doctest =
-            let
-              ds = map (l: l.test.doctest) ls;
-            in
-            t.doctest
-            // {
-              env = testEnvStrings (pickAttrs [ "env" ] ds);
-              enable = pickSingle true [ "enable" ] ds;
-            };
-          binaries = lib.mapAttrs (
-            k: b:
-            let
-              bs = map (l: l.test.binaries.${k}) (lib.filter (l: l.test.binaries ? ${k}) ls);
-            in
-            b
-            // {
-              env = testEnvStrings (pickAttrs [ "env" ] bs);
-              enable = pickSingle true [ "enable" ] bs;
-              wrapper = pickSingle null [ "wrapper" ] bs;
-            }
-          ) t.binaries;
-        };
-      withDefaults =
-        t:
-        t
-        // {
-          nextest = t.nextest // {
-            configFile =
-              if t.nextest.configFile == null then
-                breakbulkLib.testRuns.nextestDefaultConfig {
-                  inherit root;
-                  wsDir = wsDirOf cfg.workspaces.${wsName};
-                }
-              else
-                t.nextest.configFile;
-          };
-        };
-    in
-    lib.genAttrs members (
-      pkg:
+    lib.mapAttrs (
+      pkg: _:
       let
-        ls = memberLayers wsName triple vName pkg;
+        s = memberSettings wsName triple vName pkg;
+        t = s.test;
       in
-      {
-        test = withDefaults (merged ls);
-        scopeTargetRoots = pickSingle null [ "scopeTargetRoots" ] ls;
-        predictSources = {
-          enable = pickSingle null [ "predictSources" "enable" ] ls;
-          buildScriptRuns = pickSingle null [ "predictSources" "buildScriptRuns" ] ls;
-          keep = lib.concatMap (l: l.predictSources.keep) ls;
+      s
+      // {
+        test = t // {
+          env = testEnvStrings t.env;
+          doctest = t.doctest // {
+            env = testEnvStrings t.doctest.env;
+          };
+          binaries = lib.mapAttrs (_: b: b // { env = testEnvStrings b.env; }) t.binaries;
         };
-        sources = lib.concatMap (l: l.sources) ls;
-        # Later layers win per path, as for env.
-        sourceOverlay = lib.foldl' (acc: l: acc // l.sourceOverlay) { } ls;
       }
-    );
+    ) memberEntries.${wsName};
 
   # --- test binary keys --------------------------------------------------------
   #
@@ -718,116 +572,109 @@ let
 
   # A `test.binaries` key that names no test binary is an error: the
   # settings are looked up by key, so a misspelt one would leave enabled
-  # what the user turned off. `option` is the module option holding the
-  # setting (for the files that set a key), `path` the setting's path
-  # within it, `name` its name in messages, `owner` what `known` are the
-  # test binaries of.
-  unknownBinaryKeys =
-    {
-      option,
-      path,
-      name,
-      keys,
-      known,
-      owner,
-    }:
+  # what the user turned off. A key of `memberDefaults` must name a test
+  # binary of some member, any other a test binary of the package. Each
+  # definition says where it comes from (`<file>, via option
+  # packages.app, via option target.<triple>`, as the module system
+  # locates a module given in an option); a definition from a module file
+  # given as a path says only its file, and is held to the
+  # `memberDefaults` rule.
+  binaryKeyAssertions =
     let
-      unknown = lib.filter (k: !(lib.elem k known)) keys;
-      files = lib.unique (
-        lib.concatMap (
-          k:
-          map (d: d.file) (
-            lib.filter (
-              d:
-              lib.hasAttrByPath (
-                path
-                ++ [
-                  "test"
-                  "binaries"
-                  k
-                ]
-              ) d.value
-            ) option.definitionsWithLocations
-          )
-        ) unknown
-      );
+      keysOf =
+        v:
+        let
+          t = v._type or null;
+        in
+        if t == "if" || t == "override" || t == "order" then
+          keysOf v.content
+        else if t == "merge" then
+          lib.concatMap keysOf v.contents
+        else
+          lib.attrNames v;
       quoted = ks: lib.concatMapStringsSep ", " (k: "`${k}`") ks;
     in
-    lib.optional (unknown != [ ]) {
-      assertion = false;
-      message = "breakbulk: ${name}.test.binaries${bt.setIn { inherit files; }}: ${quoted unknown} ${
-        if lib.length unknown == 1 then "names" else "name"
-      } no test binary of ${owner}; ${
-        if known == [ ] then "it has none" else "the test binaries are ${quoted known}"
-      }";
-    };
-
-  # A setting and its `target.<triple>`, `variant.<v>` and
-  # `variant.<v>.target.<triple>` layers, each with its path.
-  withLayers =
-    path: v:
-    let
-      sub =
-        name: l:
-        lib.mapAttrsToList (n: v: {
-          path = l.path ++ [
-            name
-            n
-          ];
-          inherit v;
-        }) l.v.${name};
-      withTriples = l: [ l ] ++ sub "target" l;
-    in
-    withTriples { inherit path v; } ++ lib.concatMap withTriples (sub "variant" { inherit path v; });
-  layerName = lib.concatMapStringsSep "." lib.strings.escapeNixIdentifier;
-
-  binaryKeyAssertions = lib.concatLists (
-    lib.mapAttrsToList (
-      wsName: ws:
-      let
-        known = testBinaryKeys.${wsName};
-        pathPackages = lib.filter (e: e.source or null == null) locks.${wsName};
-      in
-      # `packages.<name>`: the keys of each package it applies to.
-      lib.concatMap (
-        k:
-        lib.concatMap (
-          l:
-          let
-            keys = lib.attrNames l.v.test.binaries;
-          in
-          lib.optionals (keys != [ ]) (
-            lib.concatMap (
-              e:
-              unknownBinaryKeys {
-                option = eval.options.packages;
-                inherit (l) path;
-                name = "packages.${layerName l.path}";
-                inherit keys;
-                known = known.${e.name} or [ ];
-                owner = "`${e.name}` in workspaces.${wsName}";
-              }
-            ) (lib.filter (overrideMatches k) pathPackages)
-          )
-        ) (withLayers [ k ] cfg.packages.${k})
-      ) (lib.attrNames cfg.packages)
-      # `memberDefaults`: the keys of any of the path packages.
-      ++ lib.concatMap (
-        l:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        wsName: ws:
         let
-          keys = lib.attrNames l.v.test.binaries;
+          known = testBinaryKeys.${wsName};
+          anyMember = lib.sort lib.lessThan (
+            lib.unique (lib.concatMap (n: known.${n} or [ ]) (lib.attrNames memberEntries.${wsName}))
+          );
+          memberDefaults = lib.showOption [
+            "workspaces"
+            wsName
+            "memberDefaults"
+          ];
+          # The keys no test binary has, of each definition of
+          # `test.binaries` in a member's settings on each of the
+          # workspace's targets and variants: { name; owner; known; file;
+          # keys; }.
+          problems =
+            e:
+            lib.concatMap (
+              triple:
+              lib.concatMap (
+                vName:
+                let
+                  ev = settingsTable.${wsName}.${triple}.${vName}.${entryKey e};
+                in
+                lib.optionals (ev != null) (
+                  map (
+                    d:
+                    let
+                      parts = lib.splitString ", via option " d.file;
+                      layer = lib.tail parts;
+                      own = layer != [ ] && lib.head layer != memberDefaults;
+                      k =
+                        if own then
+                          {
+                            known = known.${e.name} or [ ];
+                            owner = "`${e.name}` in workspaces.${wsName}";
+                          }
+                        else
+                          {
+                            known = anyMember;
+                            owner = "any member of workspaces.${wsName}";
+                          };
+                    in
+                    k
+                    // {
+                      name = if layer == [ ] then "test.binaries" else "${lib.concatStringsSep "." layer}.test.binaries";
+                      file = lib.head parts;
+                      keys = lib.filter (key: !(lib.elem key (known.${e.name} or [ ])) && !(lib.elem key k.known)) (
+                        keysOf d.value
+                      );
+                    }
+                  ) ev.options.test.binaries.definitionsWithLocations
+                )
+              ) (lib.attrNames ws.variants)
+            ) (lib.attrNames ws.targets);
+          found = lib.filter (p: p.keys != [ ]) (
+            lib.concatMap problems (lib.attrValues memberEntries.${wsName})
+          );
         in
-        lib.optionals (keys != [ ]) (unknownBinaryKeys {
-          option = eval.options.workspaces;
-          inherit (l) path;
-          name = "workspaces.${layerName l.path}";
-          inherit keys;
-          known = lib.sort lib.lessThan (lib.unique (lib.concatMap (e: known.${e.name} or [ ]) pathPackages));
-          owner = "any member of workspaces.${wsName}";
-        })
-      ) (withLayers [ wsName "memberDefaults" ] ws.memberDefaults)
-    ) cfg.workspaces
-  );
+        lib.mapAttrsToList (
+          _: ps:
+          let
+            p = lib.head ps;
+            keys = lib.sort lib.lessThan (lib.unique (lib.concatMap (p: p.keys) ps));
+          in
+          {
+            assertion = false;
+            message = "breakbulk: ${p.name}${
+              bt.setIn { files = lib.unique (map (p: p.file) ps); }
+            }: ${quoted keys} ${
+              if lib.length keys == 1 then "names" else "name"
+            } no test binary of ${p.owner}; ${
+              if p.known == [ ] then "it has none" else "the test binaries are ${quoted p.known}"
+            }";
+          }
+        ) (lib.groupBy (p: "${p.name} ${p.owner}") found)
+      ) cfg.workspaces
+    );
+
   # --- target specs, per workspace -------------------------------------------
   #
   # The spec of one workspace on one triple: the repository-wide
@@ -1058,7 +905,7 @@ let
       lib.concatMap (
         e:
         let
-          o = overrideFor wsName triple vName e;
+          o = settingsOf wsName triple vName e;
           capture =
             platform: nativeInputs: inputs:
             let
@@ -1120,8 +967,8 @@ let
               );
             };
           };
-          # Members always have a layer (`memberDefaults`); one that sets
-          # nothing is left out, so instantiation's inputs do not change.
+          # Settings that give units nothing (test settings only) are left
+          # out, so instantiation's inputs do not change.
           empty = s: s.env == { } && s.envCapture == null;
         in
         lib.optional (o != null && !(empty ov.host && empty ov.target)) (
@@ -1130,13 +977,14 @@ let
       ) entries
     );
 
-  # extraSources by package name, from every matching override.
+  # extraSources by package name, from the settings of every entry of
+  # the name.
   extraSourcesOf =
     wsName: triple: vName: entries:
     lib.foldl' (
       acc: e:
       let
-        o = overrideFor wsName triple vName e;
+        o = settingsOf wsName triple vName e;
       in
       if o == null || o.extraSources == [ ] then
         acc
@@ -1157,7 +1005,7 @@ let
       allow = lib.concatMap (
         e:
         let
-          o = overrideFor wsName triple vName e;
+          o = settingsOf wsName triple vName e;
         in
         lib.optionals (o != null) (
           map (path: {
@@ -1169,14 +1017,15 @@ let
       ) locks.${wsName};
     };
 
-  # productInputs by package name, from every layer of every matching
-  # entry (the curated defaults' layers may lack the option).
+  # productInputs by package name, from the settings of every entry of
+  # the name.
   productInputsOf =
     wsName: triple: vName: entries:
     lib.foldl' (
       acc: e:
       let
-        names = lib.concatMap (l: l.productInputs or [ ]) (layersFor wsName triple vName e);
+        o = settingsOf wsName triple vName e;
+        names = if o == null then [ ] else o.productInputs;
       in
       if names == [ ] then acc else acc // { ${e.name} = lib.unique ((acc.${e.name} or [ ]) ++ names); }
     ) { } entries;
@@ -1255,19 +1104,26 @@ let
           declared = inst.productInputs.${owner} or [ ];
         in
         lib.optionals (inst.canContain "build" owner) (
-          lib.concatMap (
-            s:
-            lib.concatMap (
-              d:
+          lib.concatMap
+            (
+              s:
+              lib.concatMap (
+                d:
+                let
+                  q = byDrv.${d} or null;
+                in
+                lib.optional (q != null && q != owner && !(lib.elem q declared)) {
+                  inherit owner q;
+                  inherit (s) what;
+                }
+              ) (lib.attrNames (context s.value))
+            )
+            (
               let
-                q = byDrv.${d} or null;
+                o = settingsOf wsName triple vName e;
               in
-              lib.optional (q != null && q != owner && !(lib.elem q declared)) {
-                inherit owner q;
-                inherit (s) what;
-              }
-            ) (lib.attrNames (context s.value))
-          ) (lib.concatMap layerValues (layersFor wsName triple vName e))
+              lib.optionals (o != null) (layerValues o)
+            )
         )
       ) locks.${wsName};
       message =
@@ -1773,7 +1629,7 @@ let
         packages = lib.filter (p: p.override != null) (
           map (e: {
             id = "${e.name}@${e.version}";
-            override = overrideFor wsName (
+            override = settingsOf wsName (
               if ws.devShell.target == null then nativeTriple else ws.devShell.target
             ) ws.defaultVariant e;
           }) locks.${wsName}
@@ -2022,7 +1878,7 @@ let
 
   # --- warnings and mode -----------------------------------------------------
 
-  warnings = cfg.warnings ++ unmatchedWarnings ++ overlayWarnings;
+  warnings = cfg.warnings ++ unmatchedWarnings ++ overlayWarnings ++ variantWarnings;
   warned = x: lib.foldr (w: acc: lib.warn w acc) x warnings;
   # The modules' `assertions` (lib/modules/types.nix): any false one fails
   # whatever the repository is read for, with every such message.

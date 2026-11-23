@@ -87,7 +87,8 @@ let
   };
 
   # Layered settings (lib/modules/types.nix `layer`): a base evaluation
-  # extended with layers 1 and 2, as a variant's settings on a target.
+  # extended with layers of ranks 0.25 and 0.5, as a variant's settings
+  # on a target.
   bt = import ../../lib/modules/types.nix { inherit lib; };
   layered = layeredWith (_: v: v);
   # `value`: each layer's rewrite of its values (`layer`'s third argument).
@@ -132,7 +133,7 @@ let
         ];
       };
     in
-    (e.extendModules { modules = lib.imap1 (r: bt.layer r e.options value) layers; }).config;
+    (e.extendModules { modules = lib.imap1 (r: bt.layer e.options (r / 4.0) value) layers; }).config;
   layerFile = builtins.toFile "layer.nix" ''
     { lib, ... }: { profile = lib.mkForce "file"; features = [ "f" ]; }
   '';
@@ -157,6 +158,27 @@ let
       }).config.workspaces.main.variants
       [ "default" ];
   fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
+  # Package settings layers (lib/package-settings.nix), lowest first, as
+  # mkRepository gives them for one lockfile entry: a stand-in for
+  # `memberDefaults`, then one for `packages.<name>`, on triple `t` in
+  # variant `v`.
+  packageSettings =
+    layers:
+    (bb.packageSettings.evaluate {
+      layers = map (module: { inherit module; }) layers;
+      defaults = bb.packageSettings.contextDefaults {
+        ca = false;
+        nextestConfig = null;
+      };
+      specialArgs.package = {
+        name = "app";
+        version = "0.43.1";
+      };
+    }).on
+      {
+        triple = "t";
+        variant = "v";
+      };
 in
 runTests "lib-unit" {
   # --- lockfile ----------------------------------------------------------
@@ -1094,7 +1116,8 @@ runTests "lib-unit" {
       true
     ];
   };
-  # A later layer's single value wins without mkForce; lists concatenate.
+  # A later layer's single value wins without mkForce; lists concatenate,
+  # in layer order.
   testLayerPlain = {
     expr =
       layered
@@ -1116,8 +1139,8 @@ runTests "lib-unit" {
       profile = "two";
       flag = true;
       features = [
-        "1"
         "b"
+        "1"
       ];
     };
   };
@@ -1154,6 +1177,184 @@ runTests "lib-unit" {
   testLayerDefaultLoses = {
     expr = (layered { flag = false; } [ { flag = lib.mkDefault true; } ]).flag;
     expected = false;
+  };
+
+  # Lists concatenate across layers in layer order, sub-layers after the
+  # layer they refine; `lib.mkForce [ ]` in a higher layer clears the
+  # lower layers' entries, and `lib.mkForce` in a lower one keeps them
+  # over a higher layer's plain list.
+  testPackageSettingsLists = {
+    expr =
+      map
+        (
+          layers:
+          let
+            c = (packageSettings layers).config;
+          in
+          {
+            inherit (c) extraSources;
+            inherit (c.test) args;
+          }
+        )
+        [
+          [
+            {
+              extraSources = [ "md" ];
+              target.t.extraSources = [ "md-t" ];
+              test.args = [ "--md" ];
+            }
+            {
+              extraSources = [ "pkg" ];
+              variant.v.extraSources = [ "pkg-v" ];
+              variant.v.target.t.extraSources = [ "pkg-v-t" ];
+              test.args = lib.mkBefore [ "--pkg" ];
+            }
+          ]
+          [
+            {
+              extraSources = [ "md" ];
+              test.args = lib.mkForce [ "--md" ];
+            }
+            {
+              extraSources = lib.mkForce [ ];
+              test.args = [ "--pkg" ];
+            }
+          ]
+        ];
+    expected = [
+      {
+        extraSources = [
+          "md"
+          "md-t"
+          "pkg"
+          "pkg-v"
+          "pkg-v-t"
+        ];
+        args = [
+          "--md"
+          "--pkg"
+        ];
+      }
+      {
+        extraSources = [ ];
+        args = [ "--md" ];
+      }
+    ];
+  };
+  # Around a whole set, a priority is the module system's: `lib.mkForce`
+  # on `env` replaces every lower-priority definition of `env`; on one
+  # variable it forces that variable only. Single values inside sets and
+  # submodules (`env.X`, `stages.<name>`, `test.binaries.<key>.enable`,
+  # `test.doctest.enable`) take the higher layer's at equal priority.
+  testPackageSettingsSets = {
+    expr =
+      let
+        c =
+          (packageSettings [
+            {
+              env = {
+                A = "md";
+                B = "md";
+              };
+              forHost.env = {
+                H = "md";
+                F = lib.mkForce "md";
+              };
+              stages.sign.run = "md";
+              checks.lowOnly.run = "md";
+              test.binaries.lib.enable = false;
+              test.doctest.enable = false;
+            }
+            {
+              env = lib.mkForce { C = "pkg"; };
+              forHost.env = {
+                H = "pkg";
+                F = "pkg";
+              };
+              stages.sign = null;
+              test.binaries.lib.enable = true;
+              test.doctest.enable = true;
+            }
+          ]).config;
+      in
+      {
+        inherit (c) env stages;
+        forHost = c.forHost.env;
+        checks = lib.attrNames c.checks;
+        binary = c.test.binaries.lib.enable;
+        doctest = c.test.doctest.enable;
+      };
+    expected = {
+      env.C = "pkg";
+      forHost = {
+        H = "pkg";
+        F = "md";
+      };
+      stages.sign = null;
+      checks = [ "lowOnly" ];
+      binary = true;
+      doctest = true;
+    };
+  };
+  # A layer can be a module of the lockfile entry: a version condition,
+  # by hand or with `whenVersion`, which takes any module.
+  testPackageSettingsVersion = {
+    expr =
+      (packageSettings [
+        (
+          { package, ... }:
+          lib.mkIf (bb.versionReq.matches ">=0.42" package.version) { env.NEW = "1"; }
+        )
+        (bb.whenVersion "<0.42" { env.OLD = "1"; })
+        (bb.whenVersion "^0.43" ({ package, ... }: { env.VERSION = package.version; }))
+      ]).config.env;
+    expected = {
+      NEW = "1";
+      VERSION = "0.43.1";
+    };
+  };
+  # The names of `env` are known without its values, which can be
+  # products of the plan that reads the names; so are those of a curated
+  # layer's `env` on a target without a package set (moved to the host
+  # side).
+  testPackageSettingsLazyEnv = {
+    expr =
+      let
+        s = bb.packageSettings.evaluate {
+          layers = [
+            {
+              hostOnly = true;
+              module.env.CURATED = throw "a curated value was read";
+            }
+            {
+              module = {
+                env.PRODUCT = throw "a value was read";
+                forHost.env.HOST = throw "a host value was read";
+                target.t.env.TRIPLE = throw "a triple value was read";
+              };
+            }
+          ];
+        };
+        c =
+          (s.on {
+            triple = "t";
+            variant = "v";
+          }).config;
+      in
+      {
+        env = lib.attrNames c.env;
+        forHost = lib.attrNames c.forHost.env;
+      };
+    expected = {
+      env = [
+        "PRODUCT"
+        "TRIPLE"
+      ];
+      forHost = [
+        "CURATED"
+        "HOST"
+      ];
+    };
   };
   # Function modules (reading config), mkIf, mkMerge, an mkOverride
   # around several options, `config` and `imports`, and files.
@@ -1205,7 +1406,8 @@ runTests "lib-unit" {
   };
 
   # A layer's rewrite reaches its values under mkIf, mkMerge, mkOverride
-  # and mkOrder, and not the base's.
+  # and mkOrder, and not the base's; `lib.mkBefore` orders within the
+  # layer only.
   testLayerValues =
     let
       value = n: v: if n == "features" then lib.filter (f: f != "drop") v else v + "!";
@@ -1237,17 +1439,17 @@ runTests "lib-unit" {
           profile = "one!";
           flag = null;
           features = [
-            "keep"
             "drop"
+            "keep"
           ];
         }
         {
           profile = "forced!";
           flag = null;
           features = [
+            "drop"
             "before"
             "if"
-            "drop"
           ];
         }
         {

@@ -1079,8 +1079,8 @@ let
           '';
         };
       }
-      # A second matching key: a later layer.
-      { packages."ctl@0.1.0".test.postRun = keepLogRun; }
+      # A second definition, conditional on the version: after the first.
+      { packages.ctl = breakbulk.whenVersion "0.1.0" { test.postRun = keepLogRun; }; }
     ];
   };
   postRun =
@@ -1410,8 +1410,8 @@ let
         }
       ];
       want = [
-        "breakbulk: packages.ctl.test.binaries (set in `/checks/keys.nix'): `ctl`, `lib` name no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
         "breakbulk: packages.ctl.target.${native}.test.binaries (set in `/checks/keys.nix'): `needs-feat` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
+        "breakbulk: packages.ctl.test.binaries (set in `/checks/keys.nix'): `ctl`, `lib` name no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
         "breakbulk: packages.ctl.variant.extra.target.${native}.test.binaries (set in `/checks/keys.nix'): `net-x` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
         "breakbulk: workspaces.main.memberDefaults.test.binaries (set in `/checks/keys.nix'): `bin` names no test binary of any member of workspaces.main; the test binaries are ${ctlKeys}"
       ];

@@ -185,10 +185,11 @@ rec {
 
   # Whether an option type keeps one definition's value, where several
   # definitions at one priority conflict, rather than combining them
-  # (lists concatenate, attribute sets and modules merge).
+  # (lists concatenate, attribute sets and modules merge). A function's
+  # definitions merge as its results do.
   singleValued =
     t:
-    if t.name == "nullOr" then
+    if t.name == "nullOr" || t.name == "functionTo" then
       singleValued t.nestedTypes.elemType
     else if t.name == "either" then
       singleValued t.nestedTypes.left && singleValued t.nestedTypes.right
@@ -206,22 +207,47 @@ rec {
         "raw"
       ];
 
-  # Layer `rank` (1, 2, …) of settings that refine a module evaluation
-  # (`extendModules`): `module` with the definitions of the single-valued
-  # options it sets (of `options`, nested ones too) moved up by `rank / 4` in
-  # priority, so that among definitions of equal priority the
-  # higher-ranked layer's wins instead of conflicting. A fraction keeps
-  # the order of any two integer priorities: `mkForce` and `mkDefault`
-  # still win and lose as written. Not `mkOverride` around the whole
-  # module: a list at a lower priority would then be dropped, not
-  # concatenated. `value name v` rewrites each value the layer gives
-  # option `name` (`a.b` when nested), under its mkIf, mkMerge, mkOverride
-  # and mkOrder.
+  # The modules of a layer's sub-layers (the `target.<triple>` and
+  # `variant.<v>` of package settings): one `{ rank; module; }` per
+  # definition, `rank` being that of the `layer` that gave it, so that an
+  # evaluation can add each module as a layer of its own, ranked between
+  # that layer and the next (lib/package-settings.nix).
+  subLayers = lib.mkOptionType {
+    name = "subLayers";
+    description = "module";
+    descriptionClass = "noun";
+    check = m: builtins.isAttrs m || builtins.isFunction m || builtins.isPath m || builtins.isString m;
+    merge =
+      loc:
+      map (d: {
+        rank = if d.value ? _breakbulkLayer then d.value._breakbulkLayer else 0;
+        module = lib.setDefaultModuleLocation "${d.file}, via option ${lib.showOption loc}" (
+          if d.value ? _breakbulkLayer then d.value.module else d.value
+        );
+      });
+  };
+
+  # A layer of settings over a module evaluation: `layer options rank value
+  # module`. `rank` (0 ≤ rank < 1) orders the layers of one evaluation.
+  # The definitions `module` gives single-valued options (of `options`,
+  # and inside their attribute sets and submodules: `env.FOO`,
+  # `test.binaries.<key>.enable`) are moved up by `rank` in priority, so
+  # that of two definitions at one priority the higher layer's wins
+  # instead of conflicting. A fraction keeps the order of any two integer
+  # priorities: `mkForce` and `mkDefault` still win and lose as written.
+  # Not `mkOverride` around the whole module: a list at a lower priority
+  # would then be dropped, not concatenated. The definitions of the other
+  # options are ordered by `rank` (`mkOrder`), so lists concatenate in
+  # layer order whatever order the modules come in; within one layer,
+  # `lib.mkBefore` and `lib.mkAfter` order them. A `subLayers` option
+  # keeps each module with `rank`. `value name v` rewrites each value the
+  # layer gives option `name` (`a.b` when nested), under its mkIf,
+  # mkMerge, mkOverride and mkOrder. A module's key gets the rank, so a
+  # file imported by two layers counts in both.
   layer =
-    rank: options: value:
+    options:
     let
       optionAt = path: lib.attrByPath path null options;
-      isSingle = path: lib.isOption (optionAt path) && singleValued (optionAt path).type;
       # A group of options (`docs` of `docs.check`), not an option.
       isGroup =
         path:
@@ -229,19 +255,24 @@ rec {
           o = optionAt path;
         in
         builtins.isAttrs o && !lib.isOption o;
-      shift = rank / 4.0;
-      # `f` on each value under a definition's properties.
-      under =
-        f: v:
-        let
-          t = v._type or null;
-        in
-        if t == "if" || t == "override" || t == "order" then
-          v // { content = under f v.content; }
-        else if t == "merge" then
-          v // { contents = map (under f) v.contents; }
+      isAttrsType = t: t.name == "attrsOf" || t.name == "lazyAttrsOf";
+      # The layer function of the submodule an option's values are, or are
+      # attribute sets of; each computed once for every layer of `options`.
+      nestedOf =
+        t:
+        if t.name == "submodule" then
+          layer (t.getSubOptions [ ])
+        else if isAttrsType t then
+          nestedOf t.nestedTypes.elemType
         else
-          f v;
+          null;
+      nested = lib.mapAttrsRecursiveCond (o: !lib.isOption o) (_: o: nestedOf o.type) options;
+      default = lib.modules.defaultOverridePriority;
+    in
+    rank: value:
+    let
+      under = underProperties;
+      wrap = prio: v: if prio == default then v else lib.mkOverride prio v;
       leaf =
         prio: f: v:
         let
@@ -254,11 +285,60 @@ rec {
         else if t == "override" then
           v
           // {
-            priority = v.priority - shift;
+            priority = v.priority - rank;
             content = under f v.content;
           }
         else
-          lib.mkOverride (prio - shift) (under f v);
+          lib.mkOverride (prio - rank) (under f v);
+      # Far above any order a module writes, so the rank decides first.
+      orderOf = p: rank * 1.0e9 + p;
+      ordered =
+        f: v:
+        let
+          t = v._type or null;
+        in
+        if t == "if" || t == "override" then
+          v // { content = ordered f v.content; }
+        else if t == "merge" then
+          v // { contents = map (ordered f) v.contents; }
+        else if t == "order" then
+          v
+          // {
+            priority = orderOf v.priority;
+            content = under f v.content;
+          }
+        else
+          lib.mkOrder (orderOf lib.modules.defaultOrderPriority) (f v);
+      # A definition `v` of an option of type `t` at priority `prio` (an
+      # `mkOverride` around a set of options, pushed down to each).
+      # `sub`: nestedOf t.
+      def =
+        t: sub: prio: f: v:
+        if singleValued t then
+          leaf prio f v
+        else if t.name == "subLayers" then
+          wrap prio (
+            under (m: {
+              _breakbulkLayer = rank;
+              module = f m;
+            }) v
+          )
+        else if t.name == "submodule" then
+          # Not ordered: a submodule's merge takes definitions without
+          # an order, and its own options order theirs.
+          wrap prio (under (x: inner t sub (f x)) v)
+        else
+          wrap prio (ordered (x: inner t sub (f x)) v);
+      inner =
+        t: sub: x:
+        if t.name == "submodule" then
+          # A function, which a submodule whose attribute-set definitions
+          # are its config only (`types.submodule`) still takes as a module.
+          { ... }: sub rank (_: y: y) x
+        else if isAttrsType t && builtins.isAttrs x then
+          lib.mapAttrs (_: def t.nestedTypes.elemType sub default (y: y)) x
+        else
+          x;
       # A module's `config`. An `mkOverride` around several options goes
       # down to each, as the module system pushes it down.
       config =
@@ -277,17 +357,44 @@ rec {
             n: v:
             let
               p = path ++ [ n ];
-              name = lib.concatStringsSep "." p;
+              o = optionAt p;
             in
             if isGroup p then
               config prio p v
-            else if isSingle p then
-              leaf prio (value name) v
-            else if prio == lib.modules.defaultOverridePriority then
-              under (value name) v
+            else if lib.isOption o then
+              def o.type (lib.getAttrFromPath p nested) prio (value (lib.concatStringsSep "." p)) v
             else
-              lib.mkOverride prio (under (value name) v)
+              wrap prio v
           ) c;
+    in
+    mapModule {
+      config = config default [ ];
+      key = k: "${toString k}#layer-${toString rank}";
+    };
+
+  # `f` on each value under a definition's properties (mkIf, mkMerge,
+  # mkOverride, mkOrder).
+  underProperties =
+    f: v:
+    let
+      t = v._type or null;
+    in
+    if t == "if" || t == "override" || t == "order" then
+      v // { content = underProperties f v.content; }
+    else if t == "merge" then
+      v // { contents = map (underProperties f) v.contents; }
+    else
+      f v;
+
+  # A module with `config` applied to its `config` (the whole of it, under
+  # any properties) and to that of every module it imports, and `key` to
+  # its key and theirs: what a file is keyed by too.
+  mapModule =
+    {
+      config,
+      key ? k: k,
+    }:
+    let
       reserved = [
         "_class"
         "_file"
@@ -298,15 +405,17 @@ rec {
       module =
         m:
         if builtins.isPath m || builtins.isString m then
-          # Keyed as the module system keys a file, so that a file also
-          # imported elsewhere is still imported once.
+          # Keyed as the module system keys a file, so that a file imported
+          # twice is still imported once.
           {
-            key = toString m;
+            key = key (toString m);
             _file = m;
             imports = [ (module (import m)) ];
           }
         else if lib.isFunction m then
           lib.setFunctionArgs (args: module (m args)) (lib.functionArgs m)
+        else if (m._type or null) == "if" || (m._type or null) == "override" then
+          module { config = m; }
         else
           let
             explicit = m ? config || m ? options;
@@ -318,9 +427,10 @@ rec {
               "meta"
             ]
           ) (_: null)) m
+          // lib.optionalAttrs (m ? key) { key = key m.key; }
           // {
             imports = map module (m.require or [ ] ++ m.imports or [ ]);
-            config = config lib.modules.defaultOverridePriority [ ] (
+            config = config (
               if explicit then
                 m.config or { }
               else

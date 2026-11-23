@@ -111,6 +111,7 @@
   featureGates,
 }:
 let
+  packageSettings = import ./package-settings.nix { inherit lib; };
   inherit (builtins)
     replaceStrings
     toJSON
@@ -403,11 +404,6 @@ rec {
       envFlags = lib.optional (spec.envFlags != [ ]) env;
     };
 
-  # Whether a run executes a debug-stripped copy of its binary:
-  # `test.stripForRun`, which defaults to `ca`. Not on without `ca`: the
-  # copy is then input-addressed, so stripping it saves no run.
-  stripsForRun = ca: cfg: if cfg.stripForRun == null then ca else cfg.stripForRun;
-
   # `test.stripForRun`: shell lines defining `stripForRun`,
   # which strips debug info from the copy of a test binary its run
   # consumes, so the source paths that the debug info of workspace
@@ -509,39 +505,9 @@ rec {
     in
     lib.mapAttrs one packages;
 
-  # The package's test configuration, with defaults.
-  testConfig =
-    packages: pkg:
-    let
-      # Options left `null` take the defaults.
-      t = lib.filterAttrs (_: v: v != null) (packages.${pkg}.test or { });
-    in
-    {
-      env = { };
-      path = [ ];
-      args = [ ];
-      binaries = { };
-      runner = "libtest";
-      stripForRun = null;
-      wrapper = null;
-      postRun = "";
-    }
-    // t
-    // {
-      doctest = {
-        args = [ ];
-        env = { };
-        postRun = "";
-        enable = true;
-      }
-      // lib.filterAttrs (_: v: v != null) (t.doctest or { });
-      nextest = {
-        profile = "default";
-        configFile = null;
-        package = null;
-      }
-      // lib.filterAttrs (_: v: v != null) (t.nextest or { });
-    };
+  # The package's test settings (`packages.<name>.test`, as
+  # lib/package-settings.nix evaluates them).
+  testConfig = packages: pkg: packages.${pkg}.test;
 
   # The configuration file nextest reads by default for a workspace
   # (`wsDir`, relative to `root`): `.config/nextest.toml` under the Cargo
@@ -614,17 +580,7 @@ rec {
         reason = "breakbulk";
       };
 
-  binaryConfig =
-    cfg: binary:
-    {
-      args = [ ];
-      env = { };
-      postRun = "";
-      enable = true;
-      wrapper = null;
-    }
-    # Options left `null` take the defaults.
-    // lib.filterAttrs (_: v: v != null) (cfg.binaries.${binary} or { });
+  binaryConfig = cfg: binary: cfg.binaries.${binary} or packageSettings.binaryDefaults;
 
   # The test wrapper of one binary (`test.binaries.<binary>.wrapper`, else
   # `test.wrapper`) as a program on `pkgs`' system, or null. A function is
@@ -1150,14 +1106,14 @@ rec {
       # debug-stripped one with `test.stripForRun`, else the unit's output.
       binaryOf =
         r: s: cfg:
-        if !useCa && !stripsForRun useCa cfg then
+        if !useCa && !cfg.stripForRun then
           s.unitOut
         else
           binaryCopy {
             inherit pkgs caAttrs;
             inherit (s) name;
             inherit (platformOf r) objcopy;
-            strip = stripsForRun useCa cfg;
+            strip = cfg.stripForRun;
             src = "${s.unitOut}/*";
           };
 

@@ -11,7 +11,7 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
-  settings = (import ./package-settings.nix { inherit lib; }).settings;
+  inherit (import ./package-settings.nix { inherit lib; }) settingsModule;
   nativeTriple = (import ../target-traits.nix { inherit lib; }).nativeTriple pkgs;
   util = import ../util.nix { inherit lib; };
   manifest = import ../manifest.nix { inherit lib util; };
@@ -280,13 +280,13 @@ let
       config.onTarget =
         defaults: triple:
         let
-          layer = rank: bt.layer rank options;
+          layer = bt.layer options;
           cell =
             (extendModules {
               modules = [
-                (layer 1 (n: v: if n == "features" then defaultFeatures v else v) defaults)
+                (layer 0.25 (n: v: if n == "features" then defaultFeatures v else v) defaults)
               ]
-              ++ lib.optional (config.target ? ${triple}) (layer 2 (_: v: v) config.target.${triple});
+              ++ lib.optional (config.target ? ${triple}) (layer 0.5 (_: v: v) config.target.${triple});
             }).config;
           # `variantDefaults` name features for any variant on the target;
           # a variant that selects packages runs `-p <pkg>…`, and Cargo
@@ -1195,7 +1195,7 @@ let
         };
 
         memberDefaults = mkOption {
-          type = types.submodule settings;
+          type = settingsModule;
           default = { };
           # The options of `packages.<name>`, documented there.
           visible = "shallow";
@@ -1208,12 +1208,14 @@ let
           '';
           description = ''
             Settings for every member of this workspace (the path packages
-            of its `Cargo.lock`), with the options of
-            [`packages.<name>`](packages.md). They are a layer under the
-            package's own `packages.<name>` settings: lists concatenate,
-            `env` attributes merge, and the package's own value wins for
-            single values (`test.runner`) unless this one has a higher
-            priority (`lib.mkForce`)
+            of its `Cargo.lock`): a module with the options of
+            [`packages.<name>`](packages.md), evaluated for each member,
+            whose lockfile entry is its `package` argument. They are a
+            layer under the package's own `packages.<name>` settings:
+            lists concatenate (`lib.mkForce` in `packages.<name>` replaces
+            them), `env` attributes merge, and the package's own value
+            wins for single values (`test.runner`) unless this one has a
+            higher priority (`lib.mkForce`)
             ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)).
             Dependencies from a registry or git do not get them.
           '';
@@ -1283,11 +1285,6 @@ let
       # A definition, not the option's default, so that a user's variants
       # merge with it instead of replacing it.
       config.variants = lib.mkIf (config.defaultVariant == "default") { default = { }; };
-
-      config.warnings = map (
-        v:
-        "breakbulk: `workspaces.${name}.memberDefaults.variant.${lib.strings.escapeNixIdentifier v}` names no variant of workspaces.${name} (${lib.concatStringsSep ", " (lib.attrNames config.variants)}); it has no effect."
-      ) (lib.filter (v: !(config.variants ? ${v})) (lib.attrNames config.memberDefaults.variant));
     };
 in
 {

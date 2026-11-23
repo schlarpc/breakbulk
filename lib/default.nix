@@ -34,6 +34,8 @@
 #   breakbulk.sysDefaultsDependents  the curated settings for a crate's
 #                               dependents, by the crate's name
 #   breakbulk.versionReq        Cargo version requirements (matches req ver)
+#   breakbulk.whenVersion req m package settings `m` for matching versions only
+#   breakbulk.packageSettings   the evaluation of package settings layers
 #   breakbulk.flakeModule       a flake-parts module wrapping mkRepository
 # Toolchains: breakbulk.presets.<name> { pkgs; triple; … } (lib/presets),
 #   breakbulk.presetHelpers (the functions presets are built from),
@@ -99,6 +101,8 @@ let
       ;
   };
   buildScriptPaths = import ./build-script-paths.nix { inherit lib; };
+  packageSettings = import ./package-settings.nix { inherit lib; };
+  versionReq = import ./modules/version-req.nix { inherit lib; };
   variants = import ./variants.nix { inherit lib manifest; };
   testApps = import ./test-apps.nix {
     inherit lib;
@@ -222,6 +226,7 @@ let
       dynamic
       toolchainFacts
       featureGates
+      packageSettings
       ;
     targetTraitsLib = targetTraits;
   };
@@ -280,7 +285,17 @@ let
     flakeModule = import ./modules/flake-parts.nix { inherit mkRepository; };
     sysDefaults = import ./sys-defaults.nix { inherit lib; };
     sysDefaultsDependents = import ./sys-defaults-dependents.nix { inherit lib; };
-    versionReq = import ./modules/version-req.nix { inherit lib; };
+    inherit versionReq packageSettings;
+
+    # `packages.<name> = breakbulk.whenVersion ">=0.42" { … }`: package
+    # settings for the locked versions that match a Cargo version
+    # requirement only. Any module: the condition is on its import.
+    whenVersion =
+      req: module:
+      if !versionReq.isReq req then
+        throw "breakbulk.whenVersion: `${req}` is not a Cargo version requirement"
+      else
+        { package, ... }: { imports = lib.optional (versionReq.matches req package.version) module; };
 
     xwinSdk = import ./xwin-sdk.nix { inherit lib; };
     inherit appleSdk;

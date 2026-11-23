@@ -1,10 +1,10 @@
 # Curated settings for the workspace members that depend on a crate, by
 # the crate's name: what a library needs from its dependents' test runs
 # rather than from its own units (lib/sys-defaults.nix). Each value is the
-# `sysDefaults.dependents.<name>` settings, or a function of the crate's
-# lockfile entry and `buildDependency` (`{ version, buildDependency, ... }`)
-# that returns them. lib/modules/top.nix defines them at `mkDefault`
-# priority.
+# `sysDefaults.dependents.<name>` settings module, or a function of the
+# crate's lockfile entry and `buildDependency` (`{ version,
+# buildDependency, ... }`) that returns one. lib/modules/top.nix defines
+# them at `mkDefault` priority.
 { lib }:
 let
   # Build-dependencies whose library code prints `rerun-if-changed`
@@ -17,7 +17,9 @@ let
   # napi-build (only `rerun-if-env-changed`).
   directivePrinter =
     { buildDependency, ... }:
-    lib.optionalAttrs buildDependency { predictSources.buildScriptRuns = false; };
+    {
+      config = lib.mkIf buildDependency { predictSources.buildScriptRuns = false; };
+    };
 in
 {
   # insta finds snapshots under `INSTA_WORKSPACE_ROOT`, else through

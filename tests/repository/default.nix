@@ -490,13 +490,19 @@ let
         memberDefaults.variant.not-a-variant-of-b.env.X = "1";
       };
       packages = {
-        "itoa@^1".env.ITOA_CARET = "1";
-        itoa = {
-          version = ">=2";
-          env.ITOA_TWO = "1";
-        };
+        # Version conditions: the helper, and the module form it stands
+        # for.
+        itoa = lib.mkMerge [
+          (breakbulk.whenVersion "^1" { env.ITOA_CARET = "1"; })
+          (
+            { package, ... }:
+            lib.mkIf (breakbulk.versionReq.matches ">=2" package.version) { env.ITOA_TWO = "1"; }
+          )
+        ];
         libc = {
-          env.LIBC = "plain";
+          # Precedence is the module system's: the plain value is a
+          # default the version-conditional one replaces.
+          env.LIBC = lib.mkDefault "plain";
           # The variant layer, and its own target layer.
           variant.default = {
             forTarget.env.LIBC_VARIANT = "1";
@@ -508,10 +514,12 @@ let
         };
         # A variant layer's sources reach the package's source view.
         app-b.variant.default.extraSources = [ "c" ];
-        "libc@=0.2.191".env.LIBC = "exact";
         not-in-any-lockfile.env.X = "1";
         shared.nativeInputs = p: [ p.pkg-config ];
       };
+    }
+    { packages.libc = breakbulk.whenVersion "=0.2.191" { env.LIBC = "exact"; }; }
+    {
       targets.${native} = {
         rustflags = [
           "--cfg"
@@ -1810,9 +1818,9 @@ in
         touch $out
       '';
 
-  # Override keys: name, name@requirement, the version option; merging
-  # order (versioned last); warnings for unmatched and unimplemented
-  # options.
+  # Package settings by crate name, with version conditions as modules
+  # of the lockfile entry; warnings for unmatched names and options
+  # without effect.
   overrides =
     let
       units = unitsNamed (inst' overrideRepo "b") "build";
@@ -1849,8 +1857,6 @@ in
     ) "overrides: target env placement";
     assert lib.assertMsg (has "`packages.not-in-any-lockfile` matches no package")
       "overrides: no unmatched warning: ${builtins.toJSON ws}";
-    assert lib.assertMsg (has "`packages.itoa` matches no package")
-      "overrides: itoa >=2 should match nothing";
     assert lib.assertMsg (has "`packages.libc.sourceOverlay` has no effect on libc 0.2.191")
       "overrides: no sourceOverlay warning: ${builtins.toJSON ws}";
     # targets.<triple>.rustflags reach target units only.
@@ -2553,45 +2559,36 @@ in
     let
       repo = mkRepo (fixtures + "/multi-ws") [ (oneWs "a") ];
       sysCfg = repo.config.sysDefaults.packages;
+      # An entry's settings for a package of that name and version.
+      settingsOf =
+        n: version:
+        (breakbulk.packageSettings.evaluate {
+          layers = [ { module = sysCfg.${n}; } ];
+          specialArgs.package = {
+            inherit version;
+            name = n;
+          };
+        }).config;
       # Every entry at an old and a new version (aws-lc-sys differs).
       settings = lib.concatMap (
         n:
-        map
-          (
-            version:
-            sysCfg.${n} {
-              inherit version;
-              name = n;
-            }
-          )
-          [
-            "0.41.0"
-            "0.42.0"
-          ]
+        map (settingsOf n) [
+          "0.41.0"
+          "0.42.0"
+        ]
       ) (lib.attrNames sysCfg);
       envNames = lib.concatMap (p: lib.attrNames p.env) settings;
       switches = lib.filter (
         n: builtins.match ".*_(USE_PKG_CONFIG|USE_SYSTEM|NO_VENDOR|SYSTEM)" n != null
       ) envNames;
-      inputsOf =
-        n: version:
-        map lib.getName (
-          (sysCfg.${n} {
-            inherit version;
-            name = n;
-          }).inputs
-            pkgs
-        );
-      awsOld = sysCfg.aws-lc-sys {
-        name = "aws-lc-sys";
-        version = "0.41.0";
-      };
+      inputsOf = n: version: map lib.getName ((settingsOf n version).inputs pkgs);
+      awsOld = settingsOf "aws-lc-sys" "0.41.0";
     in
     assert lib.assertMsg (switches == [ ]) "sys-defaults: system-library switches ${toString switches}";
     assert lib.assertMsg (
       inputsOf "libsqlite3-sys" "0.30.0" == [ "sqlite" ]
     ) "sys-defaults: libsqlite3-sys inputs";
-    # aws-lc-sys by version: a function of the lockfile entry.
+    # aws-lc-sys by version: a module of the lockfile entry.
     assert lib.assertMsg (
       inputsOf "aws-lc-sys" "0.42.0" == [ "aws-lc" ]
     ) "sys-defaults: aws-lc-sys 0.42 inputs";
@@ -2620,11 +2617,11 @@ in
         {
           # Stand-ins for curated entries, at the curated priority.
           sysDefaults.packages = lib.mapAttrs (_: lib.mkDefault) {
-            itoa = _: {
+            itoa = {
               env.SYS_ITOA = "curated";
               env.SYS_BOTH = "curated";
             };
-            libc = _: { env.SYS_LIBC = "curated"; };
+            libc.env.SYS_LIBC = "curated";
           };
         }
         {
@@ -2822,7 +2819,7 @@ in
             target.${other}.forHost.env.FH_OTHER = "1";
           };
           workspaces.main.memberDefaults.target.${native}.forTarget.env.MDT = "1";
-          sysDefaults.packages.itoa = _: { target.${native}.forTarget.env.SYST = "1"; };
+          sysDefaults.packages.itoa.target.${native}.forTarget.env.SYST = "1";
         }
       ];
       units = unitsNamed (repo.workspaces.main.instances.${native}.default) "build";
@@ -2866,22 +2863,26 @@ in
             LIB_HAS_PRESETS = lib.boolToString (breakbulk.presets ? linux);
           };
         };
-      env = (mkRepo (fixtures + "/multi-ws") [ probe ]).config.packages.app-a.env;
+      # A package's settings, as a module of their own.
+      settingsOf = m: (breakbulk.packageSettings.evaluate { layers = [ { module = m; } ]; }).config;
+      env = (settingsOf (mkRepo (fixtures + "/multi-ws") [ probe ]).config.packages.app-a).env;
       overridden =
-        (breakbulk.mkRepository {
-          inherit pkgs tools;
-          root = fixtures + "/multi-ws";
-          modules = [
-            (
-              { marker, ... }:
-              {
-                workspaces.a.path = "a";
-                packages.app-a.env.MARKER = marker;
-              }
-            )
-          ];
-          specialArgs.marker = "mine";
-        }).config.packages.app-a.env.MARKER;
+        (settingsOf
+          (breakbulk.mkRepository {
+            inherit pkgs tools;
+            root = fixtures + "/multi-ws";
+            modules = [
+              (
+                { marker, ... }:
+                {
+                  workspaces.a.path = "a";
+                  packages.app-a.env.MARKER = marker;
+                }
+              )
+            ];
+            specialArgs.marker = "mine";
+          }).config.packages.app-a
+        ).env.MARKER;
       want = lib.genAttrs [ "ROOT_IS_PATH" "ROOT_READS" "REPO_HAS_WS" "LIB_HAS_PRESETS" ] (_: "true");
     in
     assert lib.assertMsg (env == want) "module-args: ${builtins.toJSON env}";
@@ -3104,26 +3105,23 @@ in
       badKey = mkRepo (fixtures + "/walking-skeleton") [
         {
           _file = "/checks/key.nix";
-          packages."foo@>=nope" = { };
+          packages."foo@>=0.2" = { };
         }
       ];
-      badVersion = mkRepo (fixtures + "/walking-skeleton") [ { packages.foo.version = "not a req"; } ];
       fails = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
     in
     assert lib.assertMsg (bad == [ ]) "option-assertions: ${builtins.toJSON (lib.getAttrs bad got)}";
     assert lib.assertMsg (
       failed badKey == [
-        "breakbulk: packages.\"foo@>=nope\" (set in `/checks/key.nix'): `>=nope` is not a Cargo version requirement"
+        "breakbulk: packages.\"foo@>=0.2\" (set in `/checks/key.nix'): a key is a crate name; for some versions only, use `packages.foo = breakbulk.whenVersion \">=0.2\" { … }`"
       ]
     ) "option-assertions: key: ${builtins.toJSON (failed badKey)}";
     assert lib.assertMsg (fails
       (repoOf { defaultVariant = "x"; }).workspaces
     ) "option-assertions: workspaces read despite a failed assertion";
-    assert lib.assertMsg (fails badVersion.config.packages.foo.version)
-      "option-assertions: a bad version requirement was accepted";
-    assert lib.assertMsg (
-      !(fails badVersion.config.packages.foo.env)
-    ) "option-assertions: the version's type error reached another option";
+    assert lib.assertMsg (fails (
+      breakbulk.whenVersion "not a req" { }
+    )) "option-assertions: a bad version requirement was accepted";
     evalCheck "option-assertions" (builtins.toJSON got);
 
   # `workspaces.<ws>.members` is what `cargo metadata` lists (glob

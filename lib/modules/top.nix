@@ -5,20 +5,18 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
-  settings = (import ./package-settings.nix { inherit lib; }).settings;
+  inherit (import ./package-settings.nix { inherit lib; }) settingsModule;
   curated = import ../sys-defaults.nix { inherit lib; };
   curatedDependents = import ../sys-defaults-dependents.nix { inherit lib; };
   gates = import ../nix-features.nix { inherit lib; };
 in
 {
-  config.sysDefaults =
-    let
-      define = lib.mapAttrs (_: v: lib.mkDefault (if builtins.isFunction v then v else _: v));
-    in
-    {
-      packages = define curated;
-      dependents = define curatedDependents;
-    };
+  config.sysDefaults = {
+    packages = lib.mapAttrs (_: lib.mkDefault) curated;
+    dependents = lib.mapAttrs (
+      _: v: lib.mkDefault (if builtins.isFunction v then v else _: v)
+    ) curatedDependents;
+  };
 
   options = {
     mode = mkOption {
@@ -152,22 +150,24 @@ in
     };
 
     sysDefaults.packages = mkOption {
-      type = types.attrsOf (types.nullOr (types.functionTo (types.submodule settings)));
+      type = types.attrsOf (types.nullOr settingsModule);
       default = { };
-      # The result has the options of `packages.<name>`, documented there.
+      # The options of `packages.<name>`, documented there.
       visible = "shallow";
       example = lib.literalExpression ''
         {
           libsqlite3-sys = null;  # no curated inputs
-          aws-lc-sys = { version, ... }: { inputs = p: [ p.aws-lc ]; };
+          aws-lc-sys = breakbulk.whenVersion ">=0.42" { inputs = p: [ p.aws-lc ]; };
         }
       '';
       description = ''
-        Default settings for a package, by crate name: a function of the
-        package's lockfile entry (`{ name, version, ... }`) that returns
-        settings with the options of `packages.<name>`. They are the
-        lowest layer; `packages.<name>` settings add to them (lists
-        concatenate, env attributes merge).
+        Default settings for a package, by crate name: a module with the
+        options of `packages.<name>`, whose `package` argument is the
+        package's lockfile entry (`{ name, version, ... }`). They are the
+        lowest layer
+        ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
+        lists concatenate with those of `packages.<name>`, env attributes
+        merge, and a single value there wins over one here.
 
         They name nixpkgs libraries, so they apply only where a package
         set exists: host units always (the build machine's), target units
@@ -176,14 +176,14 @@ in
         those crates build their bundled copies.
 
         The curated entries are defined at `mkDefault` priority, so a
-        plain definition replaces one: `null` turns it off, a function
+        plain definition replaces one: `null` turns it off, a module
         replaces it, and `sysDefaults.packages = lib.mkForce { }` drops
         them all. They are: ${lib.concatMapStringsSep ", " (n: "`${n}`") (lib.attrNames curated)}.
       '';
     };
 
     sysDefaults.dependents = mkOption {
-      type = types.attrsOf (types.nullOr (types.functionTo (types.submodule settings)));
+      type = types.attrsOf (types.nullOr (types.functionTo settingsModule));
       default = { };
       # The result has the options of `packages.<name>`, documented there.
       visible = "shallow";
@@ -196,8 +196,9 @@ in
       description = ''
         Default settings for the workspace members that depend on a
         crate, by the crate's name: a function of the crate's lockfile
-        entry (`{ name, version, buildDependency, ... }`) that returns
-        settings with the options of `packages.<name>`. They apply to
+        entry (`{ name, version, buildDependency, ... }`) that returns a
+        module with the options of `packages.<name>` (whose `package`
+        argument is the member's lockfile entry). They apply to
         every path package of a workspace whose `Cargo.lock` has the
         crate among its dependencies of any kind (dev-dependencies too),
         directly or through other crates. `buildDependency` narrows that:

@@ -1,7 +1,8 @@
-# The settings of one package's units: the options of `packages.<name>`
-# other than its matching (`version`). Also the shape of
-# `workspaces.<ws>.memberDefaults` and of `sysDefaults.packages.<name>`'s
-# result.
+# The settings of one package's units: the options of `packages.<name>`,
+# `workspaces.<ws>.memberDefaults`, `sysDefaults.packages.<name>` and
+# `sysDefaults.dependents.<name>`'s result. Each of those is a module of
+# these options, a layer that lib/package-settings.nix evaluates with the
+# others for one lockfile entry.
 { lib }:
 let
   inherit (lib) types mkOption;
@@ -35,55 +36,6 @@ let
     nativeInputs = bt.mkInputs "Build-machine tools for this package's ${name} units only (${sides}).";
     inputs = bt.mkInputs "Libraries for this package's ${name} units only (${sides}).";
   };
-
-  # `priorityOf [ "test" "runner" ]`: the priority of an option's
-  # definitions in this settings block (`highestPrio`: 1500 for the
-  # default alone). A path one name past an attribute-set option
-  # (`[ "env" "FOO" ]`, `[ "stages" "sign" ]`) gives that attribute's, or
-  # null when the block does not set it. Each layer is a block of its own,
-  # and module priorities hold only within one; lib/repository.nix
-  # compares the layers' values by these.
-  priorityOf =
-    { options, ... }:
-    let
-      # An `mkOverride` around the whole set counts for each attribute it
-      # holds that has no priority of its own, as if pushed down to it.
-      # Not the module system's reading, which drops the set's other
-      # definitions in the block: across layers, sets merge.
-      attrPrio =
-        opt: name:
-        let
-          byName = lib.modules.mergeAttrDefinitionsWithPrio opt;
-          p = byName.${name}.highestPrio;
-        in
-        if !(byName ? ${name}) then
-          null
-        else if p == lib.modules.defaultOverridePriority then
-          opt.highestPrio
-        else
-          p;
-      go =
-        o: path:
-        if lib.isOption o then
-          if path == [ ] then
-            o.highestPrio
-          else if lib.length path == 1 then
-            attrPrio o (lib.head path)
-          else
-            throw "breakbulk: priorityOf: `${lib.concatStringsSep "." path}` goes past the attributes of `${lib.showOption o.loc}`"
-        else
-          go o.${lib.head path} (lib.tail path);
-    in
-    {
-      options.priorityOf = mkOption {
-        type = types.raw;
-        internal = true;
-        visible = false;
-        readOnly = true;
-        description = "The priority of an option's definitions in this block, by its path.";
-      };
-      config.priorityOf = go options;
-    };
 
   # The settings of one run over the package's: a test binary's or the
   # doctest run's.
@@ -126,7 +78,6 @@ let
     };
 
   testBinary = {
-    imports = [ priorityOf ];
     options = runSettings "this test binary's run" // {
       wrapper = wrapperOption "this test binary" "Over `test.wrapper`. ";
       enable = mkOption {
@@ -145,7 +96,6 @@ let
   };
 
   doctest = {
-    imports = [ priorityOf ];
     options = runSettings "the package's doctest run" // {
       enable = mkOption {
         type = types.bool;
@@ -171,7 +121,6 @@ let
   common = {
     key = "breakbulk/modules/package-settings.nix#common";
     _file = ./package-settings.nix;
-    imports = [ priorityOf ];
     options = {
       env = bt.mkEnv ''
         Environment for every unit of this package, on both ${sides}
@@ -234,8 +183,8 @@ let
         '';
       };
       scopeTargetRoots = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
+        type = types.bool;
+        default = true;
         description = ''
           Whether each Cargo target's units see only their own root among
           the package's targets. The view of one target's compiles leaves
@@ -255,20 +204,19 @@ let
           library, other bin or product. Set it to `false` when a target reads another
           target's root (`#[path = "../other.rs"]`, a library that
           `include_str!`s an example); such a unit fails with a hint
-          naming this option. `null`: `true`. A built-in step of
-          ${pipeline}.
+          naming this option. A built-in step of ${pipeline}.
         '';
       };
       predictSources = {
         enable = mkOption {
-          type = types.nullOr types.bool;
-          default = null;
+          type = types.bool;
+          default = false;
           description = ''
             Whether this package's compiles and build-script runs see
             only the files source prediction finds they read, so that an
             edit to any other file of the package (its `README.md`, a
             comment in its `Cargo.toml`, a file only a test reads) rebuilds
-            none of them. `null`: `false`.
+            none of them.
 
             A compile's predicted view is the module tree of its Cargo
             target's crate root, followed as rustc does (`mod` items,
@@ -328,12 +276,11 @@ let
           '';
         };
         buildScriptRuns = mkOption {
-          type = types.nullOr types.bool;
-          default = null;
+          type = types.bool;
+          default = true;
           description = ''
             Whether `predictSources` narrows this package's build-script
-            runs to their declared `rerun-if-changed` paths. `null`: `true`.
-            The curated
+            runs to their declared `rerun-if-changed` paths. The curated
             [`sysDefaults.dependents`](repository.md#sysdefaultsdependents)
             entries set it to `false` for a package whose
             `[build-dependencies]` name a crate whose library code prints
@@ -499,8 +446,8 @@ let
           '';
         };
         scopeTestsDir = mkOption {
-          type = types.nullOr types.bool;
-          default = null;
+          type = types.bool;
+          default = true;
           description = ''
             Whether the package's `tests/` directory is test-only, as if
             listed in `sourceScope`: only the package's test units see it
@@ -512,8 +459,8 @@ let
             (`include_str!("../tests/…")`, a build script that generates
             tests from fixtures), or when the library builds a path into
             `tests/` from `CARGO_MANIFEST_DIR` that the tests read; such a
-            unit or test run fails with a hint naming this option. `null`:
-            `true`. A built-in step of ${pipeline}.
+            unit or test run fails with a hint naming this option. A
+            built-in step of ${pipeline}.
           '';
         };
         runFiles = mkOption {
@@ -536,8 +483,8 @@ let
           '';
         };
         workspaceManifest = mkOption {
-          type = types.nullOr types.bool;
-          default = null;
+          type = types.bool;
+          default = true;
           description = ''
             Whether this package's test units and test runs see the
             workspace's root `Cargo.toml` (not `Cargo.lock`). Snapshot-test
@@ -547,14 +494,17 @@ let
             manifest rebuilds this package's test units and re-runs its
             tests. Other units never see it. Set `false` (in
             `memberDefaults` for every member) when no test needs it. See
-            [Run snapshot tests](../../how-to/snapshot-tests.md). `null`:
-            `true`. A built-in step of ${pipeline}, after `runFiles`.
+            [Run snapshot tests](../../how-to/snapshot-tests.md). A
+            built-in step of ${pipeline}, after `runFiles`.
           '';
         };
         wrapper = wrapperOption "each test binary of this package" "";
         stripForRun = mkOption {
-          type = types.nullOr types.bool;
-          default = null;
+          type = types.bool;
+          # The evaluation that reads it sets the default
+          # (lib/package-settings.nix), from `ca`, which is not an option
+          # of these modules.
+          defaultText = lib.literalMD "[`ca`](repository.md#ca)";
           description = ''
             Run a copy of each test binary with its debug info (and build
             ID) stripped, content-addressed when `ca` is on. Workspace
@@ -565,9 +515,9 @@ let
             test is not re-run. Panic messages keep their file and line;
             backtraces still name functions, but not files, lines or inlined
             frames. The unstripped binary stays in `tests.<pkg>.<binary>`
-            for debugging. `null`: on when [`ca`](repository.md#ca) is on
-            (`repo.config.ca`), off otherwise: without `ca` the stripped copy
-            is input-addressed and saves no run.
+            for debugging. Off by default without
+            [`ca`](repository.md#ca) (`repo.config.ca`): the stripped copy
+            would then be input-addressed and save no run.
           '';
         };
         args = mkOption {
@@ -654,37 +604,35 @@ let
           '';
         };
         runner = mkOption {
-          type = types.nullOr (
-            types.enum [
-              "libtest"
-              "nextest"
-            ]
-          );
-          default = null;
+          type = types.enum [
+            "libtest"
+            "nextest"
+          ];
+          default = "libtest";
           example = "nextest";
           description = ''
             How this package's test binaries run: `libtest` (the binary
             itself, as `cargo test` runs it) or `nextest` (cargo-nextest's
             reuse-build mode over the one binary, with the project's
             nextest configuration: retries, timeouts, default filter, test
-            groups). Each binary is still its own test run. `null`:
-            `libtest`.
+            groups). Each binary is still its own test run.
           '';
         };
         nextest = {
           profile = mkOption {
-            type = types.nullOr types.str;
-            default = null;
+            type = types.str;
+            default = "default";
             example = "ci";
-            description = "nextest profile for this package's test runs (`null`: `default`).";
+            description = "nextest profile for this package's test runs.";
           };
           configFile = mkOption {
             type = types.nullOr types.path;
-            default = null;
+            # Set by the evaluation that reads it (lib/package-settings.nix),
+            # from the workspace's directory.
+            defaultText = lib.literalMD "the workspace's `.config/nextest.toml` when it exists, else `null`";
             example = lib.literalExpression "./.config/nextest.toml";
             description = ''
-              nextest configuration file. `null`: the repository's
-              `.config/nextest.toml` when it exists, else nextest's
+              nextest configuration file. `null`: none, nextest's
               defaults.
             '';
           };
@@ -698,7 +646,7 @@ let
     };
   };
   target = mkOption {
-    type = types.attrsOf (types.submodule common);
+    type = types.attrsOf bt.subLayers;
     default = { };
     # The same options as the package level, documented there.
     visible = "shallow";
@@ -709,58 +657,69 @@ let
       }
     '';
     description = ''
-      Settings for this package on one target triple, with every option
-      of the package level (`env`, `forHost`, `forTarget`, `stages`,
-      `test`, …). They apply to the plans for that triple, on top of the
-      package-level settings of the same definition: `env` still means
-      both ${sides} (the build-script compile of a plan for this triple
-      included), `forTarget.env` the target side only.
+      Settings for this package on one target triple: a module with every
+      option of the package level (`env`, `forHost`, `forTarget`,
+      `stages`, `test`, …). They apply to the plans for that triple, as a
+      layer over the settings of the same definition
+      ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
+      `env` still means both ${sides} (the build-script compile of a plan
+      for this triple included), `forTarget.env` the target side only.
     '';
   };
 
-  # A variant's layer: every setting, and its own per-triple layer.
-  variantLayer = {
-    key = "breakbulk/modules/package-settings.nix#variant";
-    _file = ./package-settings.nix;
-    imports = [ common ];
-    options = { inherit target; };
+  variant = mkOption {
+    type = types.attrsOf bt.subLayers;
+    default = { };
+    # The same options as the package level, documented there.
+    visible = "shallow";
+    example = lib.literalExpression ''
+      {
+        coverage.test.env.RUST_LOG = "debug";
+        full.inputs = p: [ p.openssl ];
+        full.target.x86_64-pc-windows-msvc.forTarget.env.OPENSSL_DIR = opensslWin;
+      }
+    '';
+    description = ''
+      Settings for this package in the plans of one variant
+      (`workspaces.<ws>.variants.<v>`): a module with every option of the
+      package level, `target.<triple>` included. They are a layer over
+      the settings of the same definition and their `target.<triple>`
+      layer
+      ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)),
+      and leave the units of other variants unchanged: a lint setting for
+      a `clippy` variant does not rebuild the release variant. A variant
+      layer's `target.<triple>` applies to that variant on that triple
+      only. The layer applies in every workspace that has a variant of
+      that name; a name that no workspace has is an evaluation warning.
+    '';
   };
-in
-{
-  inherit common;
-
   # Keyed, so the module system imports it once wherever it is used.
   settings = {
     key = "breakbulk/modules/package-settings.nix#settings";
     _file = ./package-settings.nix;
     imports = [ common ];
-    options = {
-      inherit target;
-      variant = mkOption {
-        type = types.attrsOf (types.submodule variantLayer);
-        default = { };
-        # The same options as the package level, documented there.
-        visible = "shallow";
-        example = lib.literalExpression ''
-          {
-            coverage.test.env.RUST_LOG = "debug";
-            full.inputs = p: [ p.openssl ];
-            full.target.x86_64-pc-windows-msvc.forTarget.env.OPENSSL_DIR = opensslWin;
-          }
-        '';
-        description = ''
-          Settings for this package in the plans of one variant
-          (`workspaces.<ws>.variants.<v>`), with every option of the
-          package level, `target.<triple>` included. They apply on top of
-          the package-level settings and their `target.<triple>` layer of
-          the same definition, and leave the units of other variants
-          unchanged: a lint setting for a `clippy` variant does not
-          rebuild the release variant. A variant layer's
-          `target.<triple>` applies to that variant on that triple only.
-          The layer applies in every workspace that has a variant of that
-          name; a name that no workspace has is an evaluation warning.
-        '';
-      };
+    options = { inherit target variant; };
+  };
+in
+{
+  inherit settings;
+
+  # A layer of package settings: a module of these options, kept for the
+  # evaluation of each package it applies to (lib/package-settings.nix).
+  # The options are its sub-options for the documentation only; not
+  # `types.deferredModuleWith`, which would import them with every layer.
+  # Definitions that are `{ }` are left out, so that a layer no module
+  # defines has no imports.
+  settingsModule = lib.mkOptionType {
+    name = "deferredModule";
+    description = "module";
+    descriptionClass = "noun";
+    check = m: builtins.isAttrs m || builtins.isFunction m || builtins.isPath m;
+    merge = loc: defs: {
+      imports = map (
+        def: lib.setDefaultModuleLocation "${def.file}, via option ${lib.showOption loc}" def.value
+      ) (lib.filter (def: def.value != { }) defs);
     };
+    inherit (types.submoduleWith { modules = [ settings ]; }) getSubOptions;
   };
 }
