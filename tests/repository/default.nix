@@ -2653,7 +2653,8 @@ in
   # `workspaces.<ws>.memberDefaults`: a package-shaped layer under every
   # member's own settings. A member's `test.env` merges over it, its
   # `test.runner` wins, and `extraSources` reaches every member's source
-  # view (path packages: app-b, a/inner, shared) but no registry crate's.
+  # view (path packages: app-b, a/inner, shared) but no registry crate's;
+  # a member's `lib.mkForce [ ]` clears it for that member only.
   member-defaults =
     let
       base = [ (oneWs "b") ];
@@ -2674,6 +2675,14 @@ in
       };
       repo = mkRepo (fixtures + "/multi-ws") (base ++ [ md ]);
       plain = mkRepo (fixtures + "/multi-ws") base;
+      cleared =
+        (mkRepo (fixtures + "/multi-ws") (
+          base
+          ++ [
+            md
+            { packages.app-b.extraSources = lib.mkForce [ ]; }
+          ]
+        )).workspaces.main.instances.${native}.default.sources.workspace;
       i = repo.workspaces.main.instances.${native}.default;
       run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
       script = run.drvAttrs.buildCommand;
@@ -2694,6 +2703,9 @@ in
       "a/inner"
       "shared"
     ]) "member-defaults: a member's view lacks c/";
+    assert lib.assertMsg (
+      !(hasC cleared.b) && hasC cleared.shared
+    ) "member-defaults: mkForce [ ] in packages.app-b did not clear its extraSources only";
     assert lib.assertMsg (
       i.sources.crates == (plain.workspaces.main.instances.${native}.default).sources.crates
     ) "member-defaults: registry crate sources changed";
@@ -2737,7 +2749,9 @@ in
   # Env variables, stages and checks across package layers, each by
   # itself: `lib.mkForce` in memberDefaults wins over a plain value in
   # `packages.<name>`, a plain value in a more specific layer wins, and
-  # variables and stages no other layer sets still merge in.
+  # variables and stages no other layer sets still merge in. Around a
+  # whole set, `lib.mkForce` replaces every definition of the set at a
+  # lower priority, a variable's own `lib.mkForce` in them included.
   package-layer-attr-priorities =
     let
       probe = { product, ... }: product.linked;
@@ -2768,6 +2782,7 @@ in
             forTarget.env.FORCED_TARGET = "high";
           };
           packages.app-b = {
+            env = lib.mkForce { WHOLE = "high"; };
             test.env.FORCED_TEST = "high";
             test.binaries."bin/app-b".env.FORCED_BIN = "high";
             stages.probe = {
@@ -2783,10 +2798,12 @@ in
       envOf =
         n: (builtins.fromJSON (builtins.unsafeDiscardStringContext units.${n}.drvAttrs.BREAKBULK_UNIT)).env;
       bin = envOf "shared-0.1.0-lib";
+      appB = envOf "app-b-0.1.0-bin";
       run = t.testRuns.app-b."bin/app-b".drvAttrs.buildCommand;
       product = t.packages.app-b;
       checks = {
         env = bin.FORCED == "low" && bin.PLAIN == "high" && bin.HIGH_ONLY == "high";
+        wholeSet = appB.WHOLE or null == "high" && !(appB ? FORCED) && !(appB ? PLAIN);
         forTargetEnv = bin.FORCED_TARGET == "low";
         testEnv = lib.hasInfix "export FORCED_TEST=low" run;
         binaryEnv = lib.hasInfix "export FORCED_BIN=low" run;
