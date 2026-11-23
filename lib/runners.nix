@@ -187,7 +187,10 @@ in
             [ -e "$f" ] && $adb push -q "$f" "$dir/lib/" >/dev/null
           done
         done
-        cmd="cd $dir && env LD_LIBRARY_PATH=$dir/lib"
+        # An x86_64 image's ARM translation (ndk_translation) runs arm64
+        # programs with a loader of its own, which reads the library path
+        # from NDK_TRANSLATION_GUEST_LD_LIBRARY_PATH, not LD_LIBRARY_PATH.
+        cmd="cd $dir && env LD_LIBRARY_PATH=$dir/lib NDK_TRANSLATION_GUEST_LD_LIBRARY_PATH=$dir/lib"
         while IFS= read -r -d "" kv; do
           case $kv in
             RUST_*=* | CARGO_*=*) [[ $kv == *$'\n'* ]] || cmd+=" $(quote "$kv")" ;;
