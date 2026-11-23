@@ -32,7 +32,7 @@ For a preset's target, "none" means nothing on the build machine runs the target
 The test binaries and doctests still build, but their runs fail with a
 message naming `targets.<triple>.runner` and `testSystem`, and they are
 not in `repo.checks`, so `nix flake check` checks what can be checked.
-Setting either option gives the target a runner and puts its runs back
+Setting either option gives the target a target runner and puts its runs back
 (`target.<triple>.canRunTests` says which applies).
 
 "Yours" means the toolchain you give the workspace (see below). macOS
@@ -43,7 +43,7 @@ wasm tests run in Node by default. With `browser = "chromium"` or
 `"firefox"`, every test runs in that headless browser, inside the Nix
 sandbox:
 
-| Sandbox gap | What the runner does |
+| Sandbox gap | What the target runner does |
 | --- | --- |
 | No `/etc/fonts`: Chromium aborts in its font code once a page loads ("Unable to receive message from renderer") | Points `FONTCONFIG_FILE` at a fontconfig file with DejaVu fonts (the runner's `fonts` argument) |
 | Chromium's own sandbox (user namespaces), a small `/dev/shm` | Nothing: wasm-bindgen-test-runner always starts Chromium with `--no-sandbox` and `--disable-dev-shm-usage`. The Nix sandbox still contains the browser. |

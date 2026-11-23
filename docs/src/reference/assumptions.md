@@ -680,17 +680,17 @@ Status of the 93 entries: 91 pinned; F8 in part and F10 are in [Gaps](#gaps). A 
 
 ### R3. The doctest command line
 
-- **Assumption.** Cargo passes the runner of the doctest's compile kind to rustdoc as `--test-runtool R --test-runtool-arg A …` right after `--test-run-directory D` and, for a target unit, `--target T`, and libtest arguments as `--test-args A` after the `-L` list.
+- **Assumption.** Cargo passes the target runner of the doctest's compile kind to rustdoc as `--test-runtool R --test-runtool-arg A …` right after `--test-run-directory D` and, for a target unit, `--target T`, and libtest arguments as `--test-args A` after the `-L` list.
 - **Where.** `crates/breakbulk-unit/src/doctest.rs`: invocation building (`RUNNERS_VAR`, `TEST_ARGS_VAR`); `crates/breakbulk-plan/src/graph.rs`: `doctests` (the platform); `lib/test-runs.nix`: `runnersByPlatform`.
 - **Upstream.** cargo `src/ops/cargo_test.rs`, `run_doc_tests`; spike A, surprise S8.
 - **Holds for.** 1.99.
-- **Pinned by.** `test-runs-runner` (a doctest runs through the runner); `test-runs-doctests`; `cross-doctests-aarch64` (a proc macro's doctest runs without qemu, a library's under it). Rust: `doctest::tests::invocation_places_runner_search_paths_and_test_args`, `a_host_doctest_gets_the_hosts_runner_after_the_run_directory`.
-- **If it changes.** rustdoc rejects the arguments or ignores the runner; the checks fail.
+- **Pinned by.** `test-runs-runner` (a doctest runs through the target runner); `test-runs-doctests`; `cross-doctests-aarch64` (a proc macro's doctest runs without qemu, a library's under it). Rust: `doctest::tests::invocation_places_runner_search_paths_and_test_args`, `a_host_doctest_gets_the_hosts_runner_after_the_run_directory`.
+- **If it changes.** rustdoc rejects the arguments or ignores the target runner; the checks fail.
 
 ### R4. nextest's reuse-build inputs
 
 - **Assumption.** nextest 0.9.146, given `--binaries-metadata` and `--cargo-metadata`, runs each test binary from the binary list at its path as is; takes the test's working directory, `CARGO_MANIFEST_DIR` and `CARGO_PKG_*` from the package's entry in the Cargo metadata; adds nothing to the dynamic-library path when the list names no base output directory, linked paths or libdirs; needs `<workspace root>/Cargo.toml` to exist; and checks the names `binary()` and `binary_id()` filtersets use against each package's targets. The filtersets `deps()` and `rdeps()` use guppy's `depends_on` (transitive, any dependency kind, true from a package to itself), and guppy matches each resolve edge to a declared dependency by the dependency's name and version requirement.
-- **Where.** `crates/breakbulk-instantiate/src/dynamic.rs`: `nextest_for` (the binary list and the Cargo metadata of one test run).
+- **Where.** `lib/test-runners.nix`: `nextest`, `metadataJq` (the binary list and the Cargo metadata of one test run, from the path-package graph of `crates/breakbulk-instantiate/src/test_spec.rs`).
 - **Upstream.** nextest `cargo-nextest-0.9.146` (`8af696d`): `cargo-nextest/src/dispatch/core/base.rs` (`<workspace root>/Cargo.toml` must exist); `nextest-runner/src/list/test_list.rs`, `from_binary_list`; `nextest-runner/src/test_command.rs` (`current_dir`, `CARGO_MANIFEST_DIR`, `CARGO_PKG_*` from the package); `nextest-runner/src/list/rust_build_meta.rs`; `nextest-filtering/src/expression.rs`, `ParseContextCache`; `nextest-filtering/src/compile.rs` (`depends_on`). guppy 0.17.26 (`3f7c2dd`, the version nextest locks): `guppy/src/graph/build.rs`, `DependencyReqs::matches_for` (the name, then `cargo_version_matches`, then the dependency kinds). Checked for this page.
 - **Holds for.** nextest 0.9.146 (nixpkgs).
 - **Pinned by.** `test-runs-nextest` (retries, a slow-timeout override, a default filter naming other packages, junit, package env from the synthesized metadata; an override on `package(nx) and binary(flaky)` applies to that binary only, and one on `rdeps(other)` to `nx` and not to `solo`); `test-runs-nextest-repo`; `repository-nextest-unrelated-version` (the metadata names other packages by name only). `deps()` runs in no check; it uses the same edge matching as `rdeps()`.

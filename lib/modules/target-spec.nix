@@ -327,10 +327,13 @@ in
       type = types.nullOr types.raw;
       default = null;
       description = ''
-        The program that runs this target's test binaries (wine,
-        wasmtime, qemu-user, …), invoked as `<runner> <binary> <args…>`
-        like Cargo's `target.<triple>.runner`: a program, or a list of
-        the program and its first arguments. `null`: run directly.
+        The target runner: the program that runs this target's test
+        binaries (wine, wasmtime, qemu-user, …), invoked as `<runner>
+        <binary> <args…>` like Cargo's `target.<triple>.runner`: a
+        program, or a list of the program and its first arguments.
+        `null`: run directly. Not the test runner
+        ([`packages.<name>.test.runner`](packages.md#packagesnametestrunner)),
+        which starts a binary in its run, under this one.
         May be a function `{ lockfile, workspace }: <runner>` for runners
         that depend on the workspace (wasm-bindgen-test-runner must
         match the locked wasm-bindgen).

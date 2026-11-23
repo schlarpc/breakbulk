@@ -49,9 +49,8 @@ builds them with ` cargo bench --no-run `, and each enabled one
 runs once with ` --test `, as a check of that variant
 (` <pkg>/bench-<name> `), so that a bench that no longer runs
 fails CI\. Timed runs never happen inside Nix\. A package whose
-` test.runner ` is ` nextest ` sets ` bench.runner = "libtest" ` for a
-bench without the libtest harness (Criterion), which nextest
-cannot list\.
+` test.runner ` is ` testRunners.nextest ` sets ` bench.runner = breakbulk.lib.testRunners.direct ` for a bench without the libtest
+harness (Criterion), which nextest cannot list\.
 
 *Type:*
 module of run settings
@@ -67,7 +66,7 @@ module of run settings
 ```nix
 {
   enable = false;
-  runner = "libtest";
+  runner = breakbulk.lib.testRunners.direct;
 }
 
 ```
@@ -140,7 +139,7 @@ attribute set of (null or string)
 [` test.runner `](\#packagesnametestrunner) for the package’s bench runs\.
 
 *Type:*
-one of “libtest”, “nextest”
+test runner (function from the run’s facts to a shell snippet)
 
 *Default:*
 ` test.runner `’s
@@ -837,7 +836,8 @@ true
 
 ## `packages.<name>.test.args`
 
-libtest arguments, after the binary\. A doctest run passes each to
+Arguments for the test binary, which the test runner passes on
+(libtest’s, for a binary with its harness)\. A doctest run passes each to
 ` rustdoc --test ` as ` --test-args `, so ` [ "--skip" "src/lib.rs - net" ] ` skips a doctest by name\. Bench runs start with ` --test `
 (the ` bench ` layer’s own definition: ` lib.mkForce ` replaces it)\.
 Lists concatenate ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings))\.
@@ -976,7 +976,7 @@ attribute set of (null or string)
 [` test.runner `](\#packagesnametestrunner) for this binary’s runs\.
 
 *Type:*
-one of “libtest”, “nextest”
+test runner (function from the run’s facts to a shell snippet)
 
 *Default:*
 ` test.runner `’s
@@ -1111,64 +1111,6 @@ lazy attribute set of (string or absolute path or package or signed integer or b
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
-## `packages.<name>.test.nextest.package`
-
-cargo-nextest to run with (` null `: the test platform’s ` cargo-nextest `)\.
-
-*Type:*
-null or package
-
-*Default:*
-
-```nix
-null
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.test.nextest.configFile`
-
-nextest configuration file\. ` null `: none, nextest’s
-defaults\.
-
-*Type:*
-null or absolute path
-
-*Default:*
-the workspace’s ` .config/nextest.toml ` when it exists, else ` null `
-
-*Example:*
-
-```nix
-./.config/nextest.toml
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.test.nextest.profile`
-
-nextest profile for this package’s test runs\.
-
-*Type:*
-string
-
-*Default:*
-
-```nix
-"default"
-```
-
-*Example:*
-
-```nix
-"ci"
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
 ## `packages.<name>.test.path`
 
 Packages whose ` bin ` directories go on ` PATH ` in runs and test
@@ -1203,7 +1145,9 @@ p: [ p.git ]
 
 A shell snippet run inside each passing run (test, doctest or
 bench), after the tests: ` $log ` is the run’s raw output and ` $out `
-the run’s output directory, empty otherwise\. With ` runner = "nextest" `, ` $nextestDir ` is nextest’s store (JUnit reports)\.
+the run’s output directory, empty otherwise\. Under
+` testRunners.nextest `, nextest’s store (JUnit reports) is
+` $TMPDIR/nextest-ws/target/nextest `\.
 Snippets concatenate ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings)): the package’s first, then the
 binary’s or the doctest run’s\. Whatever a snippet puts in ` $out `
 decides whether the run is reproducible: breakbulk keeps ` $out `
@@ -1227,7 +1171,7 @@ strings concatenated with “\\n”
 *Example:*
 
 ```nix
-"cp -r \"$nextestDir/ci\" \"$out/junit\""
+"cp -r \"$TMPDIR/nextest-ws/target/nextest/ci\" \"$out/junit\""
 ```
 
 *Declared by:*
@@ -1248,11 +1192,6 @@ defines:
    ` /homeless-shelter `, so a test that writes to its home fails, as
    compiles do\. ` XDG_* ` stay unset, so tools fall back to
    directories under ` HOME `\.
- - ` threads `: ` RUST_TEST_THREADS=$NIX_BUILD_CORES ` unless the
-   environment set it, and the same for nextest’s ` test-threads `
-   in ` $TMPDIR/breakbulk-nextest.toml `, a tool configuration that
-   nextest reads when it exists (the project’s configuration and
-   ` NEXTEST_TEST_THREADS ` still win)\.
  - ` coverage `, in coverage variants: ` LLVM_PROFILE_FILE ` into
    ` $TMPDIR/profraw `, which the run moves into ` $out/profraw ` when
    it passes\. breakbulk adds it to the run, so
@@ -1268,7 +1207,7 @@ user’s environment\.
 attribute set of (null or string)
 
 *Default:*
-` home ` and ` threads ` (see the description)
+` home ` (see the description)
 
 *Example:*
 
@@ -1320,26 +1259,38 @@ null
 
 ## `packages.<name>.test.runner`
 
-How a binary runs: ` libtest ` (the binary itself, as ` cargo test `
-runs it) or ` nextest ` (cargo-nextest’s reuse-build mode over the
-one binary, with the project’s nextest configuration: retries,
-timeouts, default filter, test groups)\. Each binary is still its
-own run\. Doctests run under rustdoc whatever this says
-(` test.doctest.runner ` is an error)\.
+The test runner: what starts the binary in its run, a function
+from the run’s facts (the binary, its ` args `, its platform, a
+launcher that applies the ` wrapper ` and the target runner, the
+package graph, …) to a shell snippet, so a harness breakbulk does
+not know needs no change to breakbulk
+([Test runners](\.\./presets\.md\#test-runners) lists the facts and
+the contract)\. Each binary is its own run\.
+[` breakbulk.lib.testRunners `](\.\./presets\.md\#test-runners) has
+` direct ` (the binary itself, as ` cargo test ` runs it; it sets
+libtest’s ` RUST_TEST_THREADS ` to the build’s cores unless the
+environment set it) and ` nextest { profile; configFile; package; } `
+(cargo-nextest’s reuse-build mode over the one binary, with the
+project’s nextest configuration: retries, timeouts, default
+filter, test groups)\. Doctests run under rustdoc whatever this
+says (` test.doctest.runner ` is an error)\. Test apps start the
+binary directly\. Not the target runner
+([` targets.<t>.runner `](targets\.md\#targetsnamerunner)), which
+starts every program of the target (wine, qemu)\.
 
 *Type:*
-one of “libtest”, “nextest”
+test runner (function from the run’s facts to a shell snippet)
 
 *Default:*
 
 ```nix
-"libtest"
+breakbulk.lib.testRunners.direct
 ```
 
 *Example:*
 
 ```nix
-"nextest"
+breakbulk.lib.testRunners.nextest { profile = "ci"; }
 ```
 
 *Declared by:*
@@ -1482,9 +1433,9 @@ run’s source view, or of the checkout for a test app with
 under the target’s runner, or directly without one) in its
 environment\. It ends with ` exec "$BREAKBULK_NEXT" <binary> <args…> `, the binary possibly moved\. It runs outside the target’s
 runner, on the machine that runs the test\. A program, or a
-function from the package set of that machine to one\. With
-` runner = "nextest" `, nextest starts it as the target’s runner,
-for listing as for each test\.
+function from the package set of that machine to one\. The test
+runner gets it in its launcher (` testRunners.nextest ` gives nextest
+the launcher as the target runner, for listing as for each test)\.
 [` breakbulk.lib.wrappers `](\.\./presets\.md\#test-wrappers) has
 ready-made ones\. Doctests do not use it: rustdoc runs each example
 itself (` test.doctest.wrapper ` is an error)\. ` null `: none\.

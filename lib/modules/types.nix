@@ -214,6 +214,7 @@ rec {
         "path"
         "package"
         "raw"
+        "testRunner"
       ];
 
   # The modules of a layer's sub-layers (the `target.<triple>` and

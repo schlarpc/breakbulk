@@ -18,7 +18,7 @@ differs in the output.
 | `buildPackage`, `cargoBuild` | `repo.workspaces.<ws>.packages.<pkg>`, one [product](../reference/outputs.md#products) per package |
 | `cargoTest` | a test run per test binary, in `repo.checks`; arguments after `--` in [`test.args`](../reference/options/packages.md#packagesnametestargs) |
 | `cargoDocTest` | a doctest run per library, in `repo.checks` |
-| `cargoNextest` | [`test.runner = "nextest"`](../reference/options/packages.md#packagesnametestrunner), for one package or in [`memberDefaults`](../reference/options/workspaces.md#workspacesnamememberdefaults); each test binary is still its own check |
+| `cargoNextest` | [`test.runner = breakbulk.lib.testRunners.nextest { }`](../reference/options/packages.md#packagesnametestrunner), for one package or in [`memberDefaults`](../reference/options/workspaces.md#workspacesnamememberdefaults); each test binary is still its own check |
 | `cargoClippy` | a variant with [`mode = "clippy"`](../reference/options/workspaces.md#workspacesnamevariantsnamemode); the arguments after `--` in `cargoClippyExtraArgs` go in [`clippyArgs`](../reference/options/workspaces.md#workspacesnamevariantsnameclippyargs), and `--all-targets` is the default ([`tests = false`](../reference/options/workspaces.md#workspacesnamevariantsnametests) drops it) |
 | `cargoFmt` | [`workspaces.<ws>.fmt.enable`](../reference/options/workspaces.md#workspacesnamefmtenable) |
 | `cargoLlvmCov`, `cargoTarpaulin` | a variant with `mode = "coverage"`: instrumented products, and test runs that keep their raw profiles; no report |

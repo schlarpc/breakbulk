@@ -489,7 +489,7 @@ let
         variants.default.profile = "dev";
         memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
       };
-      packages.pmn.test.runner = "nextest";
+      packages.pmn.test.runner = breakbulk.testRunners.nextest { };
       targets.${a64}.preset = presets.linux;
     }
   ];
@@ -503,9 +503,10 @@ let
       platformOf = name: inst.tests.${name}.breakbulkRoot.platform;
       checks = {
         "a runner" = t.runner != null;
-        "pmd's doctest is the host's" = plan.doctests.d-pmd.platform == "host" && !hasTarget t.doctests.pmd;
+        "pmd's doctest is the host's" =
+          plan.doctests.d-pmd.platform == "host" && !hasTarget inst.doctestDrvs.pmd;
         "user's doctest is the target's" =
-          plan.doctests.d-user.platform == "target" && hasTarget t.doctests.user;
+          plan.doctests.d-user.platform == "target" && hasTarget inst.doctestDrvs.user;
         "the proc macros' unit tests are the host's" =
           platformOf "pmd/lib-test/pmd" == "host" && platformOf "pmn/lib-test/pmn" == "host";
         "user's integration test is the target's" = platformOf "user/test/under_runner" == "target";

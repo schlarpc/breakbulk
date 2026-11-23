@@ -165,10 +165,7 @@ let
     layers:
     (bb.packageSettings.evaluate {
       layers = map (module: { inherit module; }) layers;
-      defaults = bb.packageSettings.contextDefaults {
-        ca = false;
-        nextestConfig = null;
-      };
+      defaults = bb.packageSettings.contextDefaults { ca = false; };
       specialArgs.package = {
         name = "app";
         version = "0.43.1";
@@ -1508,10 +1505,7 @@ runTests "lib-unit" {
         };
         wrapper = "pkg";
         enable = false;
-        preRun = [
-          "db"
-          "threads"
-        ];
+        preRun = [ "db" ];
       };
       other = {
         args = [
@@ -1524,7 +1518,7 @@ runTests "lib-unit" {
         };
         wrapper = "pkg";
         enable = true;
-        preRun = [ "threads" ];
+        preRun = [ ];
       };
       doctest = {
         args = [
@@ -1538,7 +1532,7 @@ runTests "lib-unit" {
         };
         wrapper = "pkg";
         enable = true;
-        preRun = [ "threads" ];
+        preRun = [ ];
       };
       bench = {
         args = [
@@ -1554,10 +1548,7 @@ runTests "lib-unit" {
         };
         wrapper = "pkg";
         enable = false;
-        preRun = [
-          "db"
-          "threads"
-        ];
+        preRun = [ "db" ];
       };
     };
   };

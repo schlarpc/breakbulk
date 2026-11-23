@@ -44,7 +44,8 @@
 #   breakbulk.runners (lib/runners.nix), breakbulk.llvmVersions.
 # Tests: breakbulk.testRuns.mkTestRuns { ... } (test runs and doctests),
 #   breakbulk.testApps.mkTestApps { ... } (test apps, for `nix run`),
-#   breakbulk.wrappers.<name> { … } (ready-made test wrappers, lib/wrappers.nix)
+#   breakbulk.wrappers.<name> { … } (ready-made test wrappers, lib/wrappers.nix),
+#   breakbulk.testRunners.{direct, nextest} (test runners, lib/test-runners.nix)
 {
   lib,
   # breakbulk's own locked nixpkgs (the flake's `nixpkgs` input), or null
@@ -135,6 +136,7 @@ let
   };
   runners = import ./runners.nix { inherit lib; };
   wrappers = import ./wrappers.nix { inherit lib util; };
+  testRunners = import ./test-runners.nix { inherit lib util; };
   presetsLib = import ./presets {
     inherit
       lib
@@ -310,6 +312,7 @@ let
       testRuns
       testApps
       wrappers
+      testRunners
       products
       variants
       ;

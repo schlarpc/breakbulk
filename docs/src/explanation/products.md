@@ -259,13 +259,13 @@ Every test, bench and example binary is an attribute
 (`target.<triple>.tests.<pkg>.<test>`), so VM tests and system tests can
 use it. Each test binary also gets:
 
-- **a test run**, a derivation that runs it with the target's `runner`
+- **a test run**, a derivation that runs it under the target runner
   and any declared environment and `PATH` additions (a software GPU
   driver, external tools). With content addressing on, it runs a
   content-addressed copy of the binary, so a byte-identical binary is not
   run again;
 - **a test app** (`testApps`), which sets up the same working directory,
-  environment and runner but runs on your machine: the way out for network
+  environment and target runner but runs on your machine: the way out for network
   tests, debuggers and running a single test.
 
 **Profile.** Tests are built in Cargo's `test` profile, as plain
@@ -279,11 +279,21 @@ with the products. See [Variants](configuration.md#variants).
 
 More behavior:
 
-- `CARGO_BIN_EXE_*` points at the right binaries, and nextest
-  configuration is respected (`test.runner = "nextest"`).
+- `CARGO_BIN_EXE_*` points at the right binaries.
+- [`test.runner`](../reference/options/packages.md#packagesnametestrunner),
+  the test runner, is what starts a binary in its run: by default
+  `breakbulk.lib.testRunners.direct`, the binary itself, as `cargo test`
+  runs it; `breakbulk.lib.testRunners.nextest { profile = "ci"; }` runs it
+  under cargo-nextest with the project's nextest configuration. A test
+  runner is a function, so a harness breakbulk does not ship needs no
+  change to breakbulk ([Test runners](../reference/presets.md#test-runners)).
+  It is not the target runner
+  ([`targets.<triple>.runner`](../reference/options/targets.md#targetsnamerunner)),
+  which starts every program of a target (wine, an emulator) and which
+  the test runner starts the binary under.
 - [`targets.<triple>.testSystem`](../reference/options/targets.md#targetsnametestsystem)
   sends a target's test runs to native builders of that system, instead
-  of emulating them through the runner.
+  of emulating them through the target runner.
 - A target that Cargo skips because its `required-features` are off
   still has an attribute. Building that product fails with the reason;
   its test run succeeds and logs that it was skipped, as `cargo test`
@@ -374,9 +384,10 @@ neither. Doctest runs work the same way.
   (a [run setting](configuration.md#run-settings): per package, per
   binary, for doctests, for bench runs) is a shell snippet that runs
   inside the run after it passes, with the
-  raw output in `$log`. Under nextest, `$nextestDir` is nextest's store,
-  so `cp -r "$nextestDir/ci" "$out/junit"` keeps a profile's JUnit
-  report, and `cp "$log" "$out/log"` keeps the raw output (see
+  raw output in `$log`. Under `testRunners.nextest`, nextest's store is
+  `$TMPDIR/nextest-ws/target/nextest`, so
+  `cp -r "$TMPDIR/nextest-ws/target/nextest/ci" "$out/junit"` keeps a
+  profile's JUnit report, and `cp "$log" "$out/log"` keeps the raw output (see
   [Keep test output as an artifact](../how-to/ci.md#keep-test-output-as-an-artifact)).
   Whether the result is reproducible depends on what the snippet puts
   in `$out`.
@@ -387,9 +398,8 @@ neither. Doctest runs work the same way.
 
 **Test threads.** Each test binary is its own derivation, and Nix builds
 up to `max-jobs` derivations at once. Each test run starts `cores` test
-threads by default: the `threads` entry of
-[`test.preRun`](../reference/options/packages.md#packagesnametestprerun)
-sets `RUST_TEST_THREADS` to `$NIX_BUILD_CORES`.
+threads by default: the test runner sets them, `testRunners.direct` as
+`RUST_TEST_THREADS=$NIX_BUILD_CORES`.
 So the real parallelism is `max-jobs × cores`, next to any compiles
 that run at the same time. Nix has no jobserver, so breakbulk cannot
 divide the cores between runs.
@@ -404,14 +414,12 @@ divide the cores between runs.
 - A timing-sensitive test should set `RUST_TEST_THREADS` in
   `test.binaries.<binary>.env` (for example to `"1"`), or skip itself
   with `test.binaries.<binary>.args`.
-- nextest does not read `RUST_TEST_THREADS`. Under nextest the default
-  is nextest's `test-threads`, set to `$NIX_BUILD_CORES` (the same
-  `threads` entry writes it to a tool configuration). A
-  `test-threads` in the project's nextest profile wins over it, and
-  `NEXTEST_TEST_THREADS` in `test.env` or `test.binaries.<binary>.env`
-  wins over both.
-- `test.preRun.threads = null` leaves both unset: libtest and nextest
-  then pick their own defaults, every CPU of the machine.
+- nextest runs each test in its own process and does not read
+  `RUST_TEST_THREADS`. Under `testRunners.nextest` the default is
+  nextest's `test-threads`, set to `$NIX_BUILD_CORES` in a tool
+  configuration. A `test-threads` in the project's nextest profile wins
+  over it, and `NEXTEST_TEST_THREADS` in `test.env` or
+  `test.binaries.<binary>.env` wins over both.
 
 **Running a test app.** A test app is a derivation whose
 `meta.mainProgram` is the app's script, so `nix run` takes it at its
@@ -453,13 +461,15 @@ use it.
   `CARGO_TARGET_TMPDIR`).
 - `BREAKBULK_SOURCE_ROOT` is the root of the run's source view (for a
   test app with `checkout`, the checkout).
-- `BREAKBULK_NEXT` is a program that starts a binary under the target's
+- `BREAKBULK_NEXT` is a program that starts a binary under the target
   runner (wine, an emulator), or directly when there is none. The
   wrapper ends with `exec "$BREAKBULK_NEXT" <binary> <args…>`, where the
   binary may be a moved copy. The wrapper itself runs on the machine that
-  runs the test, outside the runner, so `current_exe()` names the copy.
-- Under `test.runner = "nextest"`, nextest starts the wrapper as the
-  target's runner, for the listing as well as for each test.
+  runs the test, outside the target runner, so `current_exe()` names the
+  copy.
+- The test runner gets the wrapper in its launcher. Under
+  `testRunners.nextest`, nextest starts the launcher as Cargo's target
+  runner, for the listing as well as for each test.
 - Doctests do not use it: rustdoc runs them from its own temporary
   directory.
 
@@ -486,7 +496,7 @@ by its name (`--skip "src/lib.rs - net::connect"`); per-binary
 - rustdoc runs each example itself, so doctests have no `wrapper`,
   `runner`, `preRun` or `stages`: under `test.doctest` they are an error,
   and the package's do not apply. A doctest gets a fresh `HOME` and
-  `RUST_TEST_THREADS` from breakbulk-unit, and its platform's runner
+  `RUST_TEST_THREADS` from breakbulk-unit, and its platform's target runner
   through `--test-runtool`.
 - `test.doctest.enable = false` leaves the doctest run out of
   `repo.checks` and the check groups. As there is no separate compile,

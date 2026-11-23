@@ -51,10 +51,6 @@ mkWorkspace pkgs (
           layers = [ { inherit module; } ];
           defaults = packageSettings.contextDefaults {
             ca = args.ca or breakbulk.nixFeatures.defaultCa;
-            nextestConfig = breakbulk.testRuns.nextestDefaultConfig {
-              inherit (args) root;
-              wsDir = breakbulk.util.normalizeRel (args.path or ".");
-            };
           };
           specialArgs.package = {
             inherit name;

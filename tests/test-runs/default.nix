@@ -53,7 +53,7 @@
 #                           check, in the flake app shape; two of them run
 #   runner                  test runs start the binary through the runner;
 #                           doctests pass it as --test-runtool(-arg)
-#   nextest                 `test.runner = "nextest"` over the nextest
+#   nextest                 `testRunners.nextest` over the nextest
 #                           fixture: retries, a per-test slow-timeout that
 #                           terminates a hung attempt, a default filter
 #                           naming another package, junit, package env from
@@ -771,25 +771,27 @@ let
   keepJunit = {
     postRun = ''
       ${keepLogRun}
-      cp -r "$nextestDir" "$out/nextest"
+      cp -r "$TMPDIR/nextest-ws/target/nextest" "$out/nextest"
     '';
   };
   nxWs = mk "nextest" {
     packages.nx.test = keepJunit // {
-      runner = "nextest";
-      nextest.profile = "ci";
-      nextest.configFile = fixtures + "/nextest/.config/nextest.toml";
+      runner = breakbulk.testRunners.nextest {
+        profile = "ci";
+        configFile = fixtures + "/nextest/.config/nextest.toml";
+      };
       env.NX_FROM_TEST_ENV = "yes";
       env.NX_EXPECT_NIX = "1";
     };
     packages.other.test = {
       postRun = keepLogRun;
-      runner = "nextest";
+      runner = breakbulk.testRunners.nextest { };
     };
     packages.solo.test = keepJunit // {
-      runner = "nextest";
-      nextest.profile = "ci";
-      nextest.configFile = fixtures + "/nextest/.config/nextest.toml";
+      runner = breakbulk.testRunners.nextest {
+        profile = "ci";
+        configFile = fixtures + "/nextest/.config/nextest.toml";
+      };
     };
   };
 
@@ -843,9 +845,9 @@ let
         cp $flaky/log $out/
       '';
 
-  # The same through the module options: `test.runner` and
-  # `test.nextest.profile`, with the configuration file found at the
-  # workspace's `.config/nextest.toml`.
+  # The same through the module options: `test.runner` with a profile,
+  # and the configuration file found at the workspace's
+  # `.config/nextest.toml`.
   nxRepo = breakbulk.mkRepository {
     inherit pkgs tools;
     root = fixtures + "/nextest";
@@ -855,10 +857,7 @@ let
           variants.default.profile = "dev";
           memberDefaults.test.postRun = keepLogRun;
         };
-        packages.nx.test = {
-          runner = "nextest";
-          nextest.profile = "ci";
-        };
+        packages.nx.test.runner = breakbulk.testRunners.nextest { profile = "ci"; };
       }
     ];
   };
@@ -949,12 +948,11 @@ let
         workspaces.main = {
           variants.default.profile = "dev";
           memberDefaults.test = {
-            runner = "nextest";
-            nextest.profile = "ci";
+            runner = breakbulk.testRunners.nextest { profile = "ci"; };
             postRun = keepLogRun;
           };
         };
-        packages.other.test.runner = "libtest";
+        packages.other.test.runner = breakbulk.testRunners.direct;
       }
     ];
   };
@@ -990,7 +988,7 @@ let
           postRun = keepLogRun;
         };
       };
-      nx = test: test // { runner = "nextest"; };
+      nx = test: test // { runner = breakbulk.testRunners.nextest { }; };
       oneThread.RUST_TEST_THREADS = "1";
       binary = {
         binaries.one.env = oneThread;
@@ -1020,14 +1018,16 @@ let
               )
             );
             nextest-config = ws "env-config" (nx { });
-            nextest-profile = ws "plain" (nx {
+            nextest-profile = ws "plain" {
               env = oneThread;
               binaries.nextest_one.env.TT_EXPECT_NEXTEST_ONE = "1";
-              nextest.configFile = pkgs.writeText "nextest.toml" ''
-                [profile.default]
-                test-threads = 1
-              '';
-            });
+              runner = breakbulk.testRunners.nextest {
+                configFile = pkgs.writeText "nextest.toml" ''
+                  [profile.default]
+                  test-threads = 1
+                '';
+              };
+            };
           };
         }
       ]
@@ -1172,7 +1172,7 @@ let
         runner = [ pathRunner ];
       };
       nx = wrapperWs {
-        runner = "nextest";
+        runner = breakbulk.testRunners.nextest { };
         wrapper = layout;
       };
       # Only the library's unit tests get the wrapper; the integration

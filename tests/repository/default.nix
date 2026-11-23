@@ -1553,10 +1553,7 @@ in
         mkRepo root [
           (oneWs ".")
           {
-            packages.nx.test = {
-              runner = "nextest";
-              nextest.profile = "ci";
-            };
+            packages.nx.test.runner = breakbulk.testRunners.nextest { profile = "ci"; };
           }
         ];
       before = repo (fixtures + "/nextest");
@@ -2767,12 +2764,12 @@ in
             MD_ONLY = "md";
             MD_BOTH = "md";
           };
-          test.runner = "nextest";
+          test.runner = breakbulk.testRunners.nextest { };
           extraSources = [ "c" ];
         };
         packages.app-b.test = {
           env.MD_BOTH = "own";
-          runner = "libtest";
+          runner = breakbulk.testRunners.direct;
         };
       };
       repo = mkRepo (fixtures + "/multi-ws") (base ++ [ md ]);
@@ -2796,7 +2793,8 @@ in
     assert lib.assertMsg (
       lib.hasInfix "export MD_ONLY=md" script && lib.hasInfix "export MD_BOTH=own" script
     ) "member-defaults: test env in ${script}";
-    # The package's `test.runner = "libtest"` wins over the default nextest.
+    # The package's `test.runner = testRunners.direct` wins over the
+    # default nextest.
     assert lib.assertMsg (
       !(lib.hasInfix "cargo-nextest nextest run" run.drvAttrs.buildCommand)
     ) "member-defaults: app-b runs under nextest";
@@ -2826,21 +2824,23 @@ in
         (oneWs "b")
         {
           workspaces.main.memberDefaults.test = {
-            runner = lib.mkForce "nextest";
+            runner = lib.mkForce (breakbulk.testRunners.nextest { profile = "forced"; });
             preRun.probe = "echo md-probe";
           };
           packages.app-b = {
-            test.runner = "libtest";
-            test.nextest.profile = "package-layer";
-            target.${native}.test.nextest.profile = "target-layer";
+            test.runner = breakbulk.testRunners.direct;
+            test.preRun.layer = "echo package-layer";
+            target.${native}.test.preRun.layer = "echo target-layer";
             variant.default.test.preRun.probe = lib.mkDefault "echo pkg-probe";
           };
         }
       ];
       run = repo.workspaces.main.target.${native}.testRuns.app-b."bin/app-b";
       checks = {
-        targetLayerWins = lib.hasInfix "--profile target-layer" run.drvAttrs.buildCommand;
-        forcedLowerWins = lib.hasInfix "cargo-nextest nextest run" run.drvAttrs.buildCommand;
+        targetLayerWins =
+          lib.hasInfix "echo target-layer" run.drvAttrs.buildCommand
+          && !(lib.hasInfix "echo package-layer" run.drvAttrs.buildCommand);
+        forcedLowerWins = lib.hasInfix "--profile forced" run.drvAttrs.buildCommand;
         defaultHigherLoses =
           lib.hasInfix "md-probe" run.drvAttrs.buildCommand
           && !(lib.hasInfix "pkg-probe" run.drvAttrs.buildCommand);
@@ -3528,10 +3528,6 @@ in
               env.POISON = poison "${at}test.doctest.env";
               args = [ (poison "an element of ${at}test.doctest.args") ];
               postRun = poison "${at}test.doctest.postRun";
-            };
-            nextest = {
-              package = poison "${at}test.nextest.package";
-              configFile = poison "${at}test.nextest.configFile";
             };
           };
         };

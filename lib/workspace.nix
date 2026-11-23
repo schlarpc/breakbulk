@@ -214,10 +214,7 @@ let
     let
       e = packageSettings.evaluate {
         layers = [ ];
-        defaults = packageSettings.contextDefaults {
-          inherit ca;
-          nextestConfig = testRuns.nextestDefaultConfig { inherit root wsDir; };
-        };
+        defaults = packageSettings.contextDefaults { inherit ca; };
       };
     in
     e.config // { inherit (e) runs; };
@@ -931,6 +928,7 @@ let
     host = hostTest;
     packages = runPackages;
     inst = tested;
+    workspaceDir = root + "/${wsDir}";
     coverage = mode == "coverage";
     tools = testRunTools;
   };
@@ -954,6 +952,7 @@ let
       kind = "bench";
       packages = runPackages;
       inst = benched;
+      workspaceDir = root + "/${wsDir}";
       coverage = mode == "coverage";
       tools = testRunTools;
     }

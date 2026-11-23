@@ -303,7 +303,7 @@ let
           };
           packages.util.test = {
             runFiles = [ ];
-            runner = "nextest";
+            runner = breakbulk.testRunners.nextest { };
           };
         }
       ];
@@ -581,23 +581,19 @@ let
     test-wrapper = (import ../test-runs testArgs).repos.test-wrapper;
     # Doctests as plain `cargo test` selects them (`doctest = false`).
     doctest-false = mkRepo "doctest-false" [ oneWs ];
-    # nextest runs, from the metadata the wrappers carry in dynamic mode.
+    # nextest runs, from the package graph the wrappers carry.
     nextest = mkRepo "nextest" [
       oneWs
       {
         packages.nx.test = {
-          runner = "nextest";
-          nextest.profile = "ci";
+          runner = breakbulk.testRunners.nextest { profile = "ci"; };
           env.NX_FROM_TEST_ENV = "yes";
           env.NX_EXPECT_NIX = "1";
         };
-        packages.other.test.runner = "nextest";
+        packages.other.test.runner = breakbulk.testRunners.nextest { };
         # The ci profile's `binary()` and `rdeps()` overrides need the
         # targets and dependency edges in the synthesized metadata.
-        packages.solo.test = {
-          runner = "nextest";
-          nextest.profile = "ci";
-        };
+        packages.solo.test.runner = breakbulk.testRunners.nextest { profile = "ci"; };
       }
     ];
   };

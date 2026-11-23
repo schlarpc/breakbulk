@@ -7,6 +7,18 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
+  testRunners = import ../test-runners.nix {
+    inherit lib;
+    util = import ../util.nix { inherit lib; };
+  };
+
+  testRunner = lib.mkOptionType {
+    name = "testRunner";
+    description = "test runner (function from the run's facts to a shell snippet)";
+    descriptionClass = "noun";
+    check = builtins.isFunction;
+    merge = lib.options.mergeOneOption;
+  };
 
   # Which units are on which side.
   sides = "[sides](../../explanation/configuration.md#host-and-target-sides)";
@@ -67,7 +79,8 @@ let
         "net::"
       ];
       description = ''
-        libtest arguments, after the binary. A doctest run passes each to
+        Arguments for the test binary, which the test runner passes on
+        (libtest's, for a binary with its harness). A doctest run passes each to
         `rustdoc --test` as `--test-args`, so `[ "--skip" "src/lib.rs -
         net" ]` skips a doctest by name. Bench runs start with `--test`
         (the `bench` layer's own definition: `lib.mkForce` replaces it).
@@ -97,7 +110,7 @@ let
     preRun = mkOption {
       type = types.attrsOf (types.nullOr types.str);
       default = { };
-      defaultText = lib.literalMD "`home` and `threads` (see the description)";
+      defaultText = lib.literalMD "`home` (see the description)";
       example = lib.literalExpression ''
         {
           home = null;  # keep Nix's /homeless-shelter
@@ -118,11 +131,6 @@ let
           `/homeless-shelter`, so a test that writes to its home fails, as
           compiles do. `XDG_*` stay unset, so tools fall back to
           directories under `HOME`.
-        - `threads`: `RUST_TEST_THREADS=$NIX_BUILD_CORES` unless the
-          environment set it, and the same for nextest's `test-threads`
-          in `$TMPDIR/breakbulk-nextest.toml`, a tool configuration that
-          nextest reads when it exists (the project's configuration and
-          `NEXTEST_TEST_THREADS` still win).
         - `coverage`, in coverage variants: `LLVM_PROFILE_FILE` into
           `$TMPDIR/profraw`, which the run moves into `$out/profraw` when
           it passes. breakbulk adds it to the run, so
@@ -138,12 +146,13 @@ let
     postRun = mkOption {
       type = types.lines;
       default = "";
-      example = ''cp -r "$nextestDir/ci" "$out/junit"'';
+      example = ''cp -r "$TMPDIR/nextest-ws/target/nextest/ci" "$out/junit"'';
       description = ''
         A shell snippet run inside each passing run (test, doctest or
         bench), after the tests: `$log` is the run's raw output and `$out`
-        the run's output directory, empty otherwise. With `runner =
-        "nextest"`, `$nextestDir` is nextest's store (JUnit reports).
+        the run's output directory, empty otherwise. Under
+        `testRunners.nextest`, nextest's store (JUnit reports) is
+        `$TMPDIR/nextest-ws/target/nextest`.
         Snippets concatenate (${runLevels}): the package's first, then the
         binary's or the doctest run's. Whatever a snippet puts in `$out`
         decides whether the run is reproducible: breakbulk keeps `$out`
@@ -170,28 +179,38 @@ let
         environment. It ends with `exec "$BREAKBULK_NEXT" <binary>
         <args…>`, the binary possibly moved. It runs outside the target's
         runner, on the machine that runs the test. A program, or a
-        function from the package set of that machine to one. With
-        `runner = "nextest"`, nextest starts it as the target's runner,
-        for listing as for each test.
+        function from the package set of that machine to one. The test
+        runner gets it in its launcher (`testRunners.nextest` gives nextest
+        the launcher as the target runner, for listing as for each test).
         [`breakbulk.lib.wrappers`](../presets.md#test-wrappers) has
         ready-made ones. Doctests do not use it: rustdoc runs each example
         itself (`test.doctest.wrapper` is an error). `null`: none.
       '';
     };
     runner = mkOption {
-      type = types.enum [
-        "libtest"
-        "nextest"
-      ];
-      default = "libtest";
-      example = "nextest";
+      type = testRunner;
+      default = testRunners.direct;
+      defaultText = lib.literalExpression "breakbulk.lib.testRunners.direct";
+      example = lib.literalExpression "breakbulk.lib.testRunners.nextest { profile = \"ci\"; }";
       description = ''
-        How a binary runs: `libtest` (the binary itself, as `cargo test`
-        runs it) or `nextest` (cargo-nextest's reuse-build mode over the
-        one binary, with the project's nextest configuration: retries,
-        timeouts, default filter, test groups). Each binary is still its
-        own run. Doctests run under rustdoc whatever this says
-        (`test.doctest.runner` is an error).
+        The test runner: what starts the binary in its run, a function
+        from the run's facts (the binary, its `args`, its platform, a
+        launcher that applies the `wrapper` and the target runner, the
+        package graph, …) to a shell snippet, so a harness breakbulk does
+        not know needs no change to breakbulk
+        ([Test runners](../presets.md#test-runners) lists the facts and
+        the contract). Each binary is its own run.
+        [`breakbulk.lib.testRunners`](../presets.md#test-runners) has
+        `direct` (the binary itself, as `cargo test` runs it; it sets
+        libtest's `RUST_TEST_THREADS` to the build's cores unless the
+        environment set it) and `nextest { profile; configFile; package; }`
+        (cargo-nextest's reuse-build mode over the one binary, with the
+        project's nextest configuration: retries, timeouts, default
+        filter, test groups). Doctests run under rustdoc whatever this
+        says (`test.doctest.runner` is an error). Test apps start the
+        binary directly. Not the target runner
+        ([`targets.<t>.runner`](targets.md#targetsnamerunner)), which
+        starts every program of the target (wine, qemu).
       '';
     };
     stages = mkOption {
@@ -685,30 +704,6 @@ let
             here, and `test`'s do not apply to doctests.
           '';
         };
-        nextest = {
-          profile = mkOption {
-            type = types.str;
-            default = "default";
-            example = "ci";
-            description = "nextest profile for this package's test runs.";
-          };
-          configFile = mkOption {
-            type = types.nullOr types.path;
-            # Set by the evaluation that reads it (lib/package-settings.nix),
-            # from the workspace's directory.
-            defaultText = lib.literalMD "the workspace's `.config/nextest.toml` when it exists, else `null`";
-            example = lib.literalExpression "./.config/nextest.toml";
-            description = ''
-              nextest configuration file. `null`: none, nextest's
-              defaults.
-            '';
-          };
-          package = mkOption {
-            type = types.nullOr types.package;
-            default = null;
-            description = "cargo-nextest to run with (`null`: the test platform's `cargo-nextest`).";
-          };
-        };
       };
       bench = mkOption {
         type = runLayer "the package's bench runs" [ ];
@@ -716,7 +711,7 @@ let
         example = lib.literalExpression ''
           {
             enable = false;
-            runner = "libtest";
+            runner = breakbulk.lib.testRunners.direct;
           }
         '';
         description = ''
@@ -728,9 +723,9 @@ let
           runs once with `--test`, as a check of that variant
           (`<pkg>/bench-<name>`), so that a bench that no longer runs
           fails CI. Timed runs never happen inside Nix. A package whose
-          `test.runner` is `nextest` sets `bench.runner = "libtest"` for a
-          bench without the libtest harness (Criterion), which nextest
-          cannot list.
+          `test.runner` is `testRunners.nextest` sets `bench.runner =
+          breakbulk.lib.testRunners.direct` for a bench without the libtest
+          harness (Criterion), which nextest cannot list.
         '';
       };
     };
@@ -741,10 +736,6 @@ let
           export HOME=$TMPDIR/home
           mkdir -p "$HOME"
         fi
-      '';
-      threads = lib.mkOptionDefault ''
-        export RUST_TEST_THREADS=''${RUST_TEST_THREADS:-$NIX_BUILD_CORES}
-        printf '[profile.default]\ntest-threads = %s\n' "$NIX_BUILD_CORES" > "$TMPDIR/breakbulk-nextest.toml"
       '';
     };
   };

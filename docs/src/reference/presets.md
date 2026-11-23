@@ -167,6 +167,76 @@ the ELF `.comment` section (`Linker: LLD 23.1.3`, `mold 3.0.0`), and a
 large program linked with mold had a 3.9 MB larger symbol table and
 about 1 MB smaller loaded sections than with lld.
 
+## Test runners
+
+`breakbulk.lib.testRunners` has values for
+[`test.runner`](options/packages.md#packagesnametestrunner), what starts a
+test or bench binary in its run (see
+[Tests](../explanation/products.md#tests)). It is not the target runner
+([`targets.<triple>.runner`](options/targets.md#targetsnamerunner)),
+which starts every program of a target and which a test runner starts
+the binary under.
+
+**`direct`** (the default) runs the binary itself with the run's `args`,
+as `cargo test` and `cargo bench` do. It speaks libtest's protocol:
+`RUST_TEST_THREADS` is `$NIX_BUILD_CORES` unless the environment set it,
+and `#[ignore]` tests run only with `--include-ignored` or `--ignored` in
+`args`.
+
+**`nextest { profile ? "default"; configFile; package ? null; }`** runs
+the one binary under cargo-nextest's reuse-build mode, with the project's
+nextest configuration: retries, timeouts, default filter, test groups.
+`configFile` defaults to the workspace's `.config/nextest.toml` when it
+exists (`null`: none); `package` is the cargo-nextest to use (`null`: the
+test machine's). The run's `args` go after `--`, which nextest emulates
+(`--skip`, `--exact`, `--include-ignored`). It builds the binary list and
+the `cargo metadata` nextest reads from the run's facts at build time:
+every path package the test plan compiles with its Cargo targets, so
+`package()`, `binary()`, `binary_id()`, `deps()` and `rdeps()` filters
+match as under Cargo. `test-threads` is `$NIX_BUILD_CORES`, in a tool
+configuration, which the project's profile and `NEXTEST_TEST_THREADS`
+override. nextest's store (JUnit reports) is
+`$TMPDIR/nextest-ws/target/nextest`, for
+[`postRun`](options/packages.md#packagesnametestpostrun). A bench
+without the libtest harness (Criterion) cannot be listed by nextest:
+give it `bench.runner = breakbulk.lib.testRunners.direct`.
+
+```nix
+workspaces.main.memberDefaults.test.runner =
+  breakbulk.lib.testRunners.nextest { profile = "ci"; };
+```
+
+A test runner of your own is a function from the run's facts to a shell
+snippet that runs the tests. The snippet runs in a subshell of the run's
+shell, in the run's working directory, with its environment exported and
+`$binary` the test binary; its output goes to the build log and `$log`,
+and its exit status is the run's. The facts:
+
+| Fact | What it is |
+| --- | --- |
+| `pkgs` | the package set of the machine that runs the test |
+| `package` | the package name |
+| `kind` | `"test"`, or `"bench"` for a bench run |
+| `binary` | `{ key; kind; name; }`: the binary's key (`lib/<crate>`, `bin/<name>`, `<test>`), its root kind (`lib`, `bin`, `test`, `bench`, `example`) and its Cargo target's name |
+| `args` | the run's [`args`](options/packages.md#packagesnametestargs) |
+| `platform`, `triple` | `"target"`, or `"host"` for a binary built for the build machine (a proc macro's unit tests), and that platform's triple |
+| `hostTriple`, `targetTriple` | the build machine's triple and the plan's target triple |
+| `launcher` | a program that starts the program given after it under the run's [`wrapper`](options/packages.md#packagesnametestwrapper) and the target runner, or `null` with neither |
+| `withEnv` | shell words to put before a command so that it gets the variables the shell cannot export (`CARGO_BIN_EXE_<bin>` with a `-`) |
+| `libDir` | the sysroot's library directory of the platform, or `null` |
+| `pathPackages` | a JSON file: `packageId`, the tested package's id, and `packages.<name> = { dir; targets; dependencies; }` for every path package the plan compiles |
+| `workspaceDir` | the Cargo workspace's directory in the repository, for the project's own configuration |
+
+A run reads `pathPackages` only when its runner names it, so a change to
+another package's targets re-runs only such runs.
+
+```nix
+# A harness that takes its own flags, under the launcher.
+packages.app.test.runner = facts: ''
+  exec ${facts.withEnv} ${toString facts.launcher} "$binary" --format tap
+'';
+```
+
 ## Test wrappers
 
 `breakbulk.lib.wrappers` has ready-made values for

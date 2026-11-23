@@ -284,13 +284,7 @@ let
   settingsBases = lib.mapAttrs (
     wsName: ws:
     let
-      defaults = breakbulkLib.packageSettings.contextDefaults {
-        inherit (cfg) ca;
-        nextestConfig = breakbulkLib.testRuns.nextestDefaultConfig {
-          inherit root;
-          wsDir = wsDirOf ws;
-        };
-      };
+      defaults = breakbulkLib.packageSettings.contextDefaults { inherit (cfg) ca; };
       bases =
         hostOnly:
         lib.listToAttrs (

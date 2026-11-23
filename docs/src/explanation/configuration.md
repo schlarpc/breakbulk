@@ -212,9 +212,10 @@ It takes the same options as `packages.<name>`:
 workspaces.main.memberDefaults = {
   test.env.RUST_LOG = "debug";
   test.path = p: [ p.git ];
-  test.runner = "nextest";
+  test.runner = breakbulk.lib.testRunners.nextest { };
 };
-packages.legacy.test.runner = "libtest";  # the package's own value wins
+# The package's own value wins.
+packages.legacy.test.runner = breakbulk.lib.testRunners.direct;
 ```
 
 Members are the workspace's path packages. A unit's package settings are
@@ -313,11 +314,11 @@ setting wins over a default.
 
 ```nix
 workspaces.main.memberDefaults.test = {
-  runner = "nextest";
+  runner = breakbulk.lib.testRunners.nextest { };
   path = p: [ p.git ];
   # A `harness = false` binary that nextest cannot list, and that needs ssh.
   binaries."bin/cli" = {
-    runner = "libtest";
+    runner = breakbulk.lib.testRunners.direct;
     path = p: [ p.openssh ];
   };
 };
@@ -326,7 +327,7 @@ packages.app.bench.enable = false;  # no bench-run checks for app
 
 `preRun` holds named shell snippets that run before the binary, after
 its environment is set. breakbulk's own entries give each run a fresh
-`HOME` and a `RUST_TEST_THREADS`, and, in a coverage variant, the
+`HOME`, and, in a coverage variant, the
 profile path; a layer replaces one by its name or removes it with
 `null`. `stages` is the chain the binary goes through before it runs:
 with [`ca`](../reference/options/repository.md#ca) a `strip` stage, so

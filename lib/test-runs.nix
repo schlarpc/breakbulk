@@ -84,7 +84,7 @@
 #     runs in a private copy of the package directory made of symbolic
 #     links, with a real, writable `target/tmp` (`workdirScript`);
 #   - with a test wrapper (the run's `wrapper`), the wrapper starts the
-#     binary, and the runner runs inside it (`launchWords`);
+#     binary, and the target runner runs inside it (`launchWords`);
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
 #     `$out`: it holds timings and, with several test threads, lines in a
 #     varying order, and `nix build --rebuild` compares every output.
@@ -93,17 +93,13 @@
 #   - the run fails when the binary does, then prints a hint for each path
 #     its output names that its source view lacks (`hintScript`).
 #
-# With `runner = "nextest"`, the same environment is set up, then
-# cargo-nextest runs the one binary in its reuse-build mode from the
-# metadata breakbulk-instantiate synthesizes (`nextestSpec`), with the
-# package's `test.nextest.profile` and `configFile`; libtest arguments go
-# after `--`. nextest's `test-threads` comes from the tool configuration
-# the `threads` entry of `preRun` writes (`nextestToolConfig`); the
-# project's configuration and `NEXTEST_TEST_THREADS` override it.
-# nextest's store (junit and the like) is `$nextestDir` for `postRun`.
+# What starts the binary is the run's test runner (`runner`, a function
+# from the run's facts to a shell snippet: lib/test-runners.nix), which
+# owns its protocol's defaults (libtest's RUST_TEST_THREADS for `direct`,
+# the default; nextest's `test-threads` for `nextest`).
 #
 # What each run needs from the plan (env, `[env]` values, the runs for the
-# dynamic-library path and `rustc-env`, nextest's metadata) comes from
+# dynamic-library path and `rustc-env`, the path-package graph) comes from
 # breakbulk-instantiate, through the root wrapper's `breakbulk-root.json`
 # (`TestSpec` in crates/breakbulk-instantiate/src/test_spec.rs), read at
 # build time in both delivery modes.
@@ -120,7 +116,6 @@
 }:
 let
   inherit (builtins)
-    replaceStrings
     toJSON
     ;
 
@@ -348,42 +343,6 @@ rec {
     in
     if kind == "doctest" then r.doctest else r.${kind} key;
 
-  # The configuration file nextest reads by default for a workspace
-  # (`wsDir`, relative to `root`): `.config/nextest.toml` under the Cargo
-  # workspace root, or null when there is none. The default of
-  # `test.nextest.configFile`.
-  nextestDefaultConfig =
-    { root, wsDir }:
-    let
-      p = root + "/${util.joinRel wsDir ".config/nextest.toml"}";
-    in
-    if builtins.pathExists p then p else null;
-
-  # nextest's `libdir` entry for a sysroot library directory (or null),
-  # which the run's dynamic-library path already ends with; without it
-  # nextest warns.
-  # A jq command (shell words; cargo metadata on stdin) that moves the
-  # package whose directory is `dir` (a shell word) to `$__bb_wd`
-  # (`workdirScript`): nextest runs a test binary in its package's
-  # manifest directory, and sets CARGO_MANIFEST_DIR to it.
-  nextestWorkdirJq =
-    jq: dir:
-    "${jq} -c --arg o ${dir}/Cargo.toml --arg n \"$__bb_wd/Cargo.toml\" "
-    + lib.escapeShellArg ".packages |= map(if .manifest_path == $o then .manifest_path = $n else . end)";
-
-  nextestLibdir =
-    libDir:
-    if libDir != null then
-      {
-        status = "available";
-        path = libDir;
-      }
-    else
-      {
-        status = "unavailable";
-        reason = "breakbulk";
-      };
-
   # A run's test wrapper (`wrapper` of its run settings `cfg`) as a
   # program on `pkgs`' system, or null. A function is called with `pkgs`
   # (`wrappers.cargoTargetLayout`'s result is one); a derivation with
@@ -429,36 +388,32 @@ rec {
       + lib.optionalString (sourceRoot != null) "BREAKBULK_SOURCE_ROOT=${sourceRoot} "
       + lib.escapeShellArg wrapper;
 
-  # Shell lines that give nextest the runner of the binary's platform
-  # (`triple`): nextest picks a binary's runner by its build platform's
-  # triple. Under a test wrapper, the wrapper is that runner, with the
-  # variables of `launchWords` exported, so nextest starts it as Cargo's
-  # runner protocol says, for listing and for each test. Not nextest's
-  # own wrapper scripts: they need the experimental `wrapper-scripts`
-  # feature, which only the project's main configuration file can turn on
-  # (nextest 0.9.146, nextest_version.rs: tool configs cannot, and no
-  # environment variable does).
-  nextestRunnerScript =
+  # A program that starts the program given after it, with its
+  # arguments, as `launchWords` do (the wrapper with BREAKBULK_NEXT, else
+  # the runner), or null with neither: a test runner's `launcher`, one
+  # word, for runners that take a program (nextest's
+  # CARGO_TARGET_<T>_RUNNER). BREAKBULK_SOURCE_ROOT comes from the
+  # environment.
+  launcherOf =
     {
       pkgs,
-      triple,
       runner,
       wrapper,
-      sourceRoot ? null,
     }:
-    let
-      var = util.cargoTargetEnvVar triple "RUNNER";
-    in
-    if wrapper != null then
-      ''
-        export BREAKBULK_NEXT=${nextScript pkgs runner}
-        ${lib.optionalString (sourceRoot != null) "export BREAKBULK_SOURCE_ROOT=${sourceRoot}"}
-        export ${var}=${lib.escapeShellArg wrapper}
-      ''
+    if wrapper == null && runner == [ ] then
+      null
     else
-      lib.optionalString (
-        runner != [ ]
-      ) "export ${var}=${lib.escapeShellArg (lib.concatStringsSep " " runner)}";
+      "${pkgs.writeShellScript "breakbulk-test-launcher" (
+        if wrapper == null then
+          ''
+            exec ${lib.escapeShellArgs runner} "$@"
+          ''
+        else
+          ''
+            export BREAKBULK_NEXT=${nextScript pkgs runner}
+            exec ${lib.escapeShellArg wrapper} "$@"
+          ''
+      )}";
 
   # Shell lines that export BREAKBULK_SOURCE_ROOT, the root of a run's
   # source view, from `breakbulk-root.json` (`$info`; `jq`, the jq
@@ -580,23 +535,10 @@ rec {
     );
 
   # Shell lines that run a run's `preRun` entries in name order, in the
-  # run's shell (their exports reach the test), then give nextest the
-  # tool configuration an entry wrote (`nextestToolConfig`).
+  # run's shell (their exports reach the test).
   preRunScript =
     cfg: coverage:
-    lib.concatStrings (lib.mapAttrsToList (n: v: "# preRun.${n}\n${v}\n") (preRunEntries cfg coverage))
-    + ''
-      __bb_nextest=()
-      if [ -e ${nextestToolConfig} ]; then
-        __bb_nextest=(--tool-config-file breakbulk:${nextestToolConfig})
-      fi
-    '';
-
-  # The nextest tool configuration file a `preRun` entry may write
-  # (`threads` does): a tool config file ranks under the project's
-  # configuration and NEXTEST_TEST_THREADS, so the user's still win;
-  # nextest does not read RUST_TEST_THREADS.
-  nextestToolConfig = "\"$TMPDIR/breakbulk-nextest.toml\"";
+    lib.concatStrings (lib.mapAttrsToList (n: v: "# preRun.${n}\n${v}\n") (preRunEntries cfg coverage));
 
   # `CARGO_TARGET_TMPDIR` as the planner bakes it into integration tests
   # and benches (`TARGET_TMPDIR` in crates/breakbulk-plan/src/graph.rs).
@@ -808,8 +750,7 @@ rec {
   # the unit's debuginfo (`debug`), which a run does not need. `out`
   # holds `breakbulk-root.json` with `reason` and `testSpec` only, its
   # package directory narrowed to the "run" view (`narrowDir`), and
-  # without nextest's metadata for a libtest run (it names the package
-  # view).
+  # without the path-package graph (`pathPackagesOf` in mkTestRuns).
   #
   # With `stable` (with `ca`, and content-addressed: `caAttrs`) it also
   # stands in for the input-addressed paths the spec names: the `flags`
@@ -837,7 +778,6 @@ rec {
       caAttrs ? { },
       stable ? false,
       narrowDir ? null,
-      keepNextest ? false,
       linkRoot ? false,
     }:
     pkgs.runCommand name
@@ -848,7 +788,7 @@ rec {
           outputs = [ "out" ] ++ lib.optional stable "dylibs";
           nativeBuildInputs = [ pkgs.jq ];
           narrowDir = if narrowDir == null then "" else narrowDir;
-          inherit keepNextest stable;
+          inherit stable;
         }
       )
       ''
@@ -876,17 +816,14 @@ rec {
               ln -s "$(readlink "$wrapper/root")" $out/root
             ''
         }
-        jq --arg dir "$narrowDir" --arg nextest "$keepNextest" --arg stable "$stable" '
+        jq --arg dir "$narrowDir" --arg stable "$stable" '
           .testSpec
+          | del(.packageId, .pathPackages)
           | if $stable == "1" then .dylibFlags = [] | .envFlags = [] else . end
-          | (.env.CARGO_MANIFEST_DIR + "/Cargo.toml") as $orig
           | if $dir == "" then . else
               .env.CARGO_MANIFEST_DIR = $dir
               | .env.CARGO_MANIFEST_PATH = ($dir + "/Cargo.toml")
-              | .nextest.cargoMetadata.packages |= map(
-                  if .manifest_path == $orig then .manifest_path = ($dir + "/Cargo.toml") else . end)
             end
-          | if $nextest == "1" then . else del(.nextest) end
           | {reason: null, testSpec: .}
         ' "$info" > $out/breakbulk-root.json
       '';
@@ -978,6 +915,9 @@ rec {
       },
       coverage ? false,
       name ? "breakbulk",
+      # The Cargo workspace's directory in the repository (a path), for a
+      # test runner that reads the project's configuration.
+      workspaceDir ? null,
     }:
     let
       useCa = ca;
@@ -1058,7 +998,6 @@ rec {
           stable = useCa;
           dylibPath = (platformOf r).dylibPath;
           narrowDir = runDir r.breakbulkRoot.package;
-          keepNextest = cfg.runner == "nextest";
           linkRoot = !copiesBinary cfg;
         };
 
@@ -1084,59 +1023,6 @@ rec {
         log=${logFile}
       '';
 
-      # A test run through nextest's reuse-build mode: nextest reads the
-      # metadata from the wrapper (TestSpec's `nextest`, with `"@LIBDIR@"`
-      # the sysroot library directory of the binary's platform) and runs
-      # the one binary with the project's nextest configuration (retries,
-      # timeouts, default filter, test groups). libtest arguments go after
-      # `--`, which nextest emulates (`--skip`, `--exact`,
-      # `--include-ignored`, …).
-      nextestScript =
-        p: b: cfg: bin:
-        let
-          jq = jqOf p;
-          nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
-          libdir = toJSON (nextestLibdir p.libDir);
-          wrapper = wrapperOf p.testPkgs cfg;
-        in
-        ''
-          ${lib.optionalString (wrapper != null) (sourceRootExport jq null)}
-          ${nextestRunnerScript {
-            pkgs = p.testPkgs;
-            inherit (p) triple runner;
-            inherit wrapper;
-          }}
-          ws=$TMPDIR/nextest-ws
-          mkdir -p $out $ws/target
-          touch $ws/Cargo.toml
-          files=(${bin})
-          ${workdirScript p.testPkgs}
-          __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
-          libdir=${lib.escapeShellArg libdir}
-          subst() { sed -e "s|@BINARY@|''${files[0]}|g" -e "s|@TARGET@|$ws/target|g" -e "s|@WS@|$ws|g" -e "s|\"@LIBDIR@\"|$libdir|g"; }
-          ${jq} -c '.testSpec.nextest.binaries' "$info" | subst > $TMPDIR/binaries-metadata.json
-          ${jq} -c '.testSpec.nextest.cargoMetadata' "$info" | subst | ${nextestWorkdirJq jq ''"$CARGO_MANIFEST_DIR"''} > $TMPDIR/cargo-metadata.json
-          cd $TMPDIR
-          set +e
-          env "''${__bb_env[@]}" ${nextest}/bin/cargo-nextest nextest run \
-            --binaries-metadata $TMPDIR/binaries-metadata.json \
-            --cargo-metadata $TMPDIR/cargo-metadata.json \
-            ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
-            --profile ${lib.escapeShellArg cfg.nextest.profile} \
-            "''${__bb_nextest[@]}" \
-            --no-tests=warn --color never \
-            ${lib.optionalString (cfg.args != [ ]) "-- ${lib.escapeShellArgs cfg.args}"} 2>&1 | tee "$log"
-          status=''${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            echo "test binary ${b.package} ${binaryKey b} failed under nextest (exit status $status)" >&2
-            ${hint p b cfg}
-            exit "$status"
-          fi
-          nextestDir=$ws/target/nextest
-          ${postRunScript { inherit cfg coverage; }}
-        '';
-
       # hintScript, with the spec read from `$info`.
       hint =
         p: b: cfg:
@@ -1147,26 +1033,51 @@ rec {
           }
           ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), junk: (.junk // []), custom: (.custom // false), $widen}' "$info")"'';
 
-      libtestScript =
-        p: b: cfg: bin:
+      # The run: the binary, the working directory, the wrapper and the
+      # test runner's script (`facts`, lib/test-runners.nix), its output
+      # to the build log and `$log`; then a hint on failure, or the
+      # `postRun` snippets.
+      runScript =
+        r: p: cfg: bin:
         let
+          b = r.breakbulkRoot;
           wrapper = wrapperOf p.testPkgs cfg;
+          facts = {
+            pkgs = p.testPkgs;
+            inherit (b) package;
+            inherit kind;
+            binary = {
+              key = binaryKey b;
+              inherit (b) kind;
+              name = b.target;
+            };
+            inherit (cfg) args;
+            inherit (b) platform;
+            inherit (p) triple libDir;
+            hostTriple = host.triple;
+            targetTriple = target;
+            launcher = launcherOf {
+              pkgs = p.testPkgs;
+              inherit (p) runner;
+              inherit wrapper;
+            };
+            withEnv = ''env "''${__bb_env[@]}"'';
+            pathPackages = pathPackagesOf r;
+            inherit workspaceDir;
+          };
         in
         ''
           mkdir -p $out
           files=(${bin})
+          binary=''${files[0]}
           ${lib.optionalString (wrapper != null) (sourceRootExport (jqOf p) null)}
           ${workdirScript p.testPkgs}
-          __bb_workdir "''${files[0]}" "$CARGO_MANIFEST_DIR"
+          __bb_workdir "$binary" "$CARGO_MANIFEST_DIR"
           cd "$__bb_wd"
           set +e
-          env "''${__bb_env[@]}" ${
-            launchWords {
-              pkgs = p.testPkgs;
-              inherit (p) runner;
-              inherit wrapper;
-            }
-          } "''${files[0]}" ${lib.escapeShellArgs cfg.args} 2>&1 | tee "$log"
+          (
+            ${cfg.runner facts}
+          ) 2>&1 | tee "$log"
           status=''${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
@@ -1176,6 +1087,24 @@ rec {
           fi
           ${postRunScript { inherit cfg coverage; }}
         '';
+
+      # The path-package graph of a test root (TestSpec's `pathPackages`),
+      # for a test runner that reads it (`facts.pathPackages`), in a file of
+      # its own: a run whose runner does not read it does not depend on
+      # it, so a change to another package's targets does not re-run it.
+      pathPackagesOf =
+        r:
+        pkgs.runCommand "${name}-path-packages"
+          (
+            caAttrs
+            // {
+              inherit (r.breakbulkRoot) wrapper;
+              nativeBuildInputs = [ pkgs.jq ];
+            }
+          )
+          ''
+            jq -c '.testSpec // {} | {packageId, packages: .pathPackages}' "$wrapper/breakbulk-root.json" > $out
+          '';
 
       run =
         r:
@@ -1203,37 +1132,27 @@ rec {
           }
           // lib.optionalAttrs useCa { specDylibs = info.dylibs; };
         in
-        p.testPkgs.runCommand "${name}-${n}-run"
-          (
-            {
-              passthru = {
-                breakbulkTest = {
-                  package = b.package;
-                  binary = key;
-                  inherit (cfg) args;
-                  # The package directory of its "run" view, or null.
-                  runDir = runDir b.package;
-                };
-                binary = bin;
-                # The test root, whose wrapper (`breakbulkRoot.wrapper`)
-                # says what the run reads, and what it reads of it
-                # (`runInfo`).
-                root = r;
-                spec = info;
+        p.testPkgs.runCommand "${name}-${n}-run" (
+          {
+            passthru = {
+              breakbulkTest = {
+                package = b.package;
+                binary = key;
+                inherit (cfg) args;
+                # The package directory of its "run" view, or null.
+                runDir = runDir b.package;
               };
-            }
-            // inputs
-            // caAttrs
-          )
-          (
-            prelude p cfg
-            + (
-              if cfg.runner == "nextest" then
-                nextestScript p b cfg "${bin}/*"
-              else
-                libtestScript p b cfg "${bin}/*"
-            )
-          );
+              binary = bin;
+              # The test root, whose wrapper (`breakbulkRoot.wrapper`)
+              # says what the run reads, and what it reads of it
+              # (`runInfo`).
+              root = r;
+              spec = info;
+            };
+          }
+          // inputs
+          // caAttrs
+        ) (prelude p cfg + runScript r p cfg "${bin}/*");
 
       runs = lib.mapAttrs (
         _: rs: lib.listToAttrs (map (r: lib.nameValuePair (binaryKey r.breakbulkRoot) (run r)) rs)

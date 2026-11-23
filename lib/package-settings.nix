@@ -4,7 +4,7 @@
 #
 #   s = packageSettings.evaluate {
 #     layers = [ { module = …; hostOnly = false; } … ];  # lowest first
-#     defaults = packageSettings.contextDefaults { ca; nextestConfig; };
+#     defaults = packageSettings.contextDefaults { ca; };
 #     specialArgs = { package = <lockfile entry>; … };
 #   };
 #   e = s.on { triple; variant; }
@@ -167,10 +167,9 @@ in
   inherit settings doctestRefused;
 
   # Defaults that come from outside the settings: `test.stages` follows
-  # `ca`, `test.nextest.configFile` is the workspace's own
-  # (lib/test-runs.nix nextestDefaultConfig).
+  # `ca`.
   contextDefaults =
-    { ca, nextestConfig }:
+    { ca }:
     {
       _file = ./package-settings.nix;
       test.stages = lib.optionalAttrs ca {
@@ -178,7 +177,6 @@ in
           run = helpers.strip { buildId = false; };
         };
       };
-      test.nextest.configFile = lib.mkOptionDefault nextestConfig;
     };
 
   evaluate =

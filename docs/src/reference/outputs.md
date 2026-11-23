@@ -82,11 +82,11 @@ repo = {
       buildScriptPaths;
       # The bench variant's (the default variant, or the only one with benches):
       benches; benchRuns; namedBenchRuns;
-      runner;                # the runner (a list), or null
+      runner;                # the target runner (a list), or null
       testSystem;            # the system test runs build on, or null
       spec;                  # the resolved target spec
       traits;                # the target's traits
-      canRunTests;           # false: no runner; its runs not in checks, its apps not in apps
+      canRunTests;           # false: no target runner; its runs not in checks, its apps not in apps
     };
 
     plans.<triple>.<v> = { build; test; doc; };   # plan.json, for debugging
@@ -189,7 +189,7 @@ and build nothing the checks themselves do not. A group has
 
 A test app (`testApps.<pkg>.<binary>`) is a derivation whose
 `meta.mainProgram` runs the test binary with its test run's working
-directory, environment and runner, on your machine, so `nix run` takes
+directory, environment and target runner, on your machine, so `nix run` takes
 it at its attribute path. `<binary>` is the test binary's key, as in
 `testRuns`: an integration test by its name, the others as
 `<kind>/<name>` (`lib/<crate>`, `bin/<name>`).

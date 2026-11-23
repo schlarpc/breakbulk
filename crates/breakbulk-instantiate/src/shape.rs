@@ -157,13 +157,7 @@ fn wrapper(
         RootWhat::Stub { reason, .. } => (String::new(), None, Some(reason.clone())),
     };
     let spec = match (&unit, root.test) {
-        (Some(u), true) => Some(test_spec(
-            &tokens,
-            &inputs.plan,
-            u,
-            root.kind,
-            &root.target,
-        )?),
+        (Some(u), true) => Some(test_spec(&tokens, &inputs.plan, u)?),
         _ => None,
     };
     let info = RootInfo {

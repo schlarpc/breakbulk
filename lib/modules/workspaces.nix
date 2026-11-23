@@ -1249,7 +1249,7 @@ let
           example = lib.literalExpression ''
             {
               test.env.RUST_LOG = "debug";
-              test.runner = "nextest";
+              test.runner = breakbulk.lib.testRunners.nextest { };
               extraSources = [ "testdata" ];
             }
           '';

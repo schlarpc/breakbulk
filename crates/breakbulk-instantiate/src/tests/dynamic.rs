@@ -515,34 +515,13 @@ fn test_spec_of_a_test_root() {
     }
     // The package directory, for test apps in a checkout.
     assert_eq!(spec["packageDir"], "smokeapp");
-    // nextest's metadata, as lib/test-runs.nix's nextestSpec has it.
-    let nx = &spec["nextest"];
-    assert_eq!(nx["binaryId"], "smokeapp::bin/smokeapp");
-    let bin = &nx["binaries"]["rust-binaries"]["smokeapp::bin/smokeapp"];
-    assert_eq!(bin["binary-path"], "@BINARY@");
-    assert_eq!(bin["kind"], "bin");
-    assert_eq!(bin["build-platform"], "target");
-    assert_eq!(
-        nx["binaries"]["rust-build-meta"]["platforms"]["host"]["libdir"],
-        "@LIBDIR@"
-    );
-    let meta = &nx["cargoMetadata"];
-    assert_eq!(meta["workspace_root"], "@WS@");
-    let pkgs = meta["packages"].as_array().unwrap();
-    assert_eq!(pkgs.len(), 2);
-    let view = input_value("src:smokeapp");
-    // Only the tested package's manifest is in its source view; the other
-    // is listed by name, under the scratch workspace root.
-    let app = pkgs.iter().find(|p| p["name"] == "smokeapp").unwrap();
-    assert_eq!(app["id"], app_id.as_str());
-    assert_eq!(app["manifest_path"], format!("{view}/smokeapp/Cargo.toml"));
-    assert_eq!(app["version"], "0.1.0");
-    let lib = pkgs.iter().find(|p| p["name"] == "smokelib").unwrap();
-    assert_eq!(lib["id"], "smokelib");
-    assert_eq!(lib["manifest_path"], "@WS@/smokelib/Cargo.toml");
-    assert_eq!(lib["version"], "0.0.0");
-    assert_eq!(lib["description"], serde_json::Value::Null);
-    // Targets, for `binary()` filtersets: under the scratch root.
+    // The path-package graph, for a test runner that reads it.
+    assert_eq!(spec["packageId"], app_id.as_str());
+    let graph = &spec["pathPackages"];
+    assert_eq!(graph.as_object().unwrap().len(), 2);
+    let app = &graph["smokeapp"];
+    assert_eq!(app["dir"], "smokeapp");
+    assert_eq!(app["dependencies"], serde_json::json!(["smokelib"]));
     let targets: Vec<&str> = app["targets"]
         .as_array()
         .unwrap()
@@ -550,63 +529,28 @@ fn test_spec_of_a_test_root() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert_eq!(targets, ["smokeapp", "unbuilt"]);
-    assert_eq!(
-        app["targets"][1]["src_path"],
-        "@WS@/smokeapp/tests/unbuilt.rs"
-    );
-    // The edge, for `deps()`: declared under the library's name with `*`,
-    // and resolved to the library's package.
-    assert_eq!(app["dependencies"][0]["name"], "smokelib");
-    assert_eq!(app["dependencies"][0]["req"], "*");
-    let node = meta["resolve"]["nodes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|n| n["id"] == app_id.as_str())
-        .unwrap();
-    assert_eq!(node["dependencies"], serde_json::json!(["smokelib"]));
-    assert_eq!(
-        node["deps"],
-        serde_json::json!([{
-            "name": "smokelib",
-            "pkg": "smokelib",
-            "dep_kinds": [{ "kind": null, "target": null }],
-        }])
-    );
+    assert_eq!(app["targets"][1]["srcPath"], "smokeapp/tests/unbuilt.rs");
+    assert_eq!(graph["smokelib"]["dir"], "smokelib");
 }
 
 #[test]
-fn nextest_metadata_leaves_out_build_std_packages() {
-    // A `-Zbuild-std` plan: the standard library's units are path packages
-    // in the toolchain's rust-src, outside the skeleton.
+fn path_graph_leaves_out_build_std_packages() {
+    // A `-Zbuild-std` plan: the standard library's packages are path
+    // packages in the toolchain's rust-src, outside the skeleton.
     let mut plan = smoke_inputs().plan;
     let core = "path+file:///nix/store/00000000000000000000000000000000-rust/lib/rustlib/src/rust/library/core#0.0.0";
-    let mut c = plan.units[LIB].clone();
-    let breakbulk_format::Unit::Compile(cu) = &mut c else {
-        panic!()
-    };
-    cu.package = core.into();
-    plan.units.insert("c-core".into(), c);
-    let breakbulk_format::Unit::Compile(app) = &plan.units[APP] else {
-        panic!()
-    };
-    let nx = crate::test_spec::nextest_for(&plan, app, RootKind::Bin, "smokeapp", "/view").unwrap();
-    let ids: Vec<&str> = nx.cargo_metadata["packages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| p["id"].as_str().unwrap())
-        .collect();
-    // The tested package and smokelib: core is not listed under any id.
-    assert_eq!(ids.len(), 2, "{ids:?}");
-    assert!(!ids.contains(&core), "{ids:?}");
-    assert!(ids.contains(&app.package.as_str()), "{ids:?}");
-    assert!(
-        !nx.cargo_metadata["workspace_members"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!(core))
-    );
+    let app = plan.units[APP].package().to_owned();
+    for id in [core, app.as_str()] {
+        plan.path_packages.insert(
+            id.into(),
+            breakbulk_format::PathPackage {
+                targets: vec![],
+                dependencies: vec![],
+            },
+        );
+    }
+    let names: Vec<String> = crate::test_spec::path_packages(&plan).into_keys().collect();
+    assert_eq!(names, ["smokeapp"], "{app}");
 }
 
 /// The plan with a doctest for `smokelib`, made from its library unit.
