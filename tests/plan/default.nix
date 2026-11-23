@@ -414,7 +414,7 @@ in
       spliceRuns =
         u:
         map (a: a.splice) (lib.filter (a: builtins.isAttrs a && a ? splice) u.args)
-        ++ map (s: s.splice) u.envSplices
+        ++ map (s: s.splice) (u.envSplices or [ ])
         ++ (u.dylibPathFrom or [ ]);
       compiles = lib.filterAttrs (_: u: u.kind == "compile") units;
       leaks = lib.filterAttrs (
@@ -1262,8 +1262,8 @@ in
               rustcTarget = ./my-board.json;
             }).arg;
       in
-      assert lib.assertMsg (lib.hasSuffix "-my-board-target-spec/my-board.json" p.target)
-        "custom-target-test-plan: the plan's target is ${p.target}";
+      assert lib.assertMsg (lib.hasSuffix "-my-board-target-spec/my-board.json" p.target.arg)
+        "custom-target-test-plan: the plan's target is ${p.target.arg}";
       assert lib.assertMsg (!misnamed.success) "custom-target-test-plan: a misnamed spec was accepted";
       assert lib.assertMsg (
         lib.length bins == 1

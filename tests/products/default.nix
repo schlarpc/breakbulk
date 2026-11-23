@@ -1832,9 +1832,11 @@ in
       # lib-a have it, no other variant's units change.
       envOf =
         vName: k: n:
-        (builtins.fromJSON (
-          builtins.unsafeDiscardStringContext (unitsOf variantsRepo vName k).${n}.drvAttrs.BREAKBULK_UNIT
-        )).env;
+        import ../lib/unit-env.nix { inherit lib; } (
+          builtins.fromJSON (
+            builtins.unsafeDiscardStringContext (unitsOf variantsRepo vName k).${n}.drvAttrs.BREAKBULK_UNIT
+          )
+        );
       namesWith = prefix: lib.filter (lib.hasPrefix prefix) (lib.attrNames (d "clippy" "build"));
       variantLayer = {
         clippyHasIt =
@@ -3038,9 +3040,9 @@ in
         lib.filterAttrs (_: u: u.kind == "compile") (build // test)
       );
       want = {
-        "app-0.1.0-bin" = "macro,diagnostics";
-        "dep-0.1.0-lib" = "macro,diagnostics";
-        "itoa-1.0.11-lib" = "macro,diagnostics";
+        "app-0.1.0-bin" = "macro,diagnostics,coverage";
+        "dep-0.1.0-lib" = "macro,diagnostics,coverage";
+        "itoa-1.0.11-lib" = "macro,diagnostics,coverage";
         "app-0.1.0-test" = null;
         "dep-0.1.0-test" = null;
       };
@@ -3889,7 +3891,7 @@ in
         # units are the same, and differ from split's.
         keepIsStrip = unitOf keep "tool" == unitOf strip "tool";
         splitDiffers = unitOf base "tool" != unitOf keep "tool";
-        splitScope = lib.hasInfix ''"remapScope":"macro,diagnostics"'' (unitEnv base "tool");
+        splitScope = lib.hasInfix ''"remapScope":"macro,diagnostics,coverage"'' (unitEnv base "tool");
         keepScope = !(lib.hasInfix "remapScope" (unitEnv keep "tool"));
       };
       ok =

@@ -818,12 +818,16 @@ let
               builtins.unsafeDiscardStringContext (builtins.readFile "${i.plans.${kind}}/plan.json")
             );
           in
-          lib.mapAttrsToList (
-            id: u:
-            lib.nameValuePair i.units.${kind}.${id}.name (
-              builtins.unsafeDiscardStringContext i.units.${kind}.${id}.drvPath
+          lib.mapAttrsToList
+            (
+              id: u:
+              lib.nameValuePair i.units.${kind}.${id}.name (
+                builtins.unsafeDiscardStringContext i.units.${kind}.${id}.drvPath
+              )
             )
-          ) (lib.filterAttrs (_: u: u.platform == "host") plan.units)
+            (
+              lib.filterAttrs (_: u: u.platform == "host" && (u.kind == "compile" || u.kind == "run")) plan.units
+            )
         )
         [
           "build"
@@ -1839,9 +1843,11 @@ in
       exported = r: k: builtins.match ".*\nexport ${k}=([^\n]*)\n.*" (script r);
       doctestEnv =
         inst: p:
-        builtins.fromJSON (
-          builtins.unsafeDiscardStringContext inst.doctestDrvs.${p}.drvAttrs.BREAKBULK_TEST_ENV
-        );
+        unitEnv {
+          envLayers = builtins.fromJSON (
+            builtins.unsafeDiscardStringContext inst.doctestDrvs.${p}.drvAttrs.BREAKBULK_TEST_ENV
+          );
+        };
       testView = i: p: "${i.sources.workspaceTest."ws/crates/${p}"}";
       wsIn = v: "${v}/ws";
       narrowed = inst (snapshotsRepo null [ { packages.snaps.test.runFiles = [ "src/snapshots" ]; } ]);
@@ -2407,8 +2413,8 @@ in
             p = planOf kind;
           in
           {
-            inherit (p) trimPaths;
-            trimPathsDefault = p.trimPathsDefault or false;
+            inherit (p.remap) trimPaths;
+            trimPathsDefault = p.remap.trimPathsDefault or false;
           }
         )
         // {
