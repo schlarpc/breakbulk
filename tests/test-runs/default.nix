@@ -279,7 +279,7 @@ let
         --cargo ${pkgs.cargo}/bin/cargo --rustc ${pkgs.rustc}/bin/rustc \
         --rustdoc ${pkgs.rustc}/bin/rustdoc --shim ${tools.breakbulk-shim}/bin/breakbulk-shim \
         --skeleton $sk --canonical-root /build/skeleton \
-        --kind test --target ${target} --profile dev \
+        --kind test --cargo-arg test --target ${target} --profile dev \
         --scratch $NIX_BUILD_TOP/scratch \
         --capabilities ${
           breakbulk.toolchainFacts.capabilitiesFile
@@ -305,14 +305,15 @@ let
         builtins.unsafeDiscardStringContext (builtins.readFile "${doctestFalseCross}/plan.json")
       );
       runsOf = p: lib.attrNames (lib.filterAttrs (_: u: u.kind == "run") p.units);
+      doctestsOf = p: lib.filterAttrs (_: u: u.kind == "doctest") p.units;
       searchPathsOf =
         p:
         lib.mapAttrs (
           _: d: lib.concatMap (a: a.searchPathsOf or [ ]) (lib.filter builtins.isAttrs d.args)
-        ) p.doctests;
+        ) (doctestsOf p);
       checks = p: {
         "doctests of d and pmt only" =
-          lib.attrNames p.doctests == [
+          lib.attrNames (doctestsOf p) == [
             "d-d"
             "d-pmt"
           ];
@@ -324,7 +325,7 @@ let
         );
         "no runtool in a doctest" = lib.all (
           d: !lib.any (a: a == "--test-runtool" || a == "--test-runtool-arg") d.args
-        ) (lib.attrValues p.doctests);
+        ) (lib.attrValues (doctestsOf p));
       };
       failed =
         lib.attrNames (lib.filterAttrs (_: ok: !ok) (checks plan))

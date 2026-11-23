@@ -3329,9 +3329,9 @@ in
       ownRemaps = w: lib.filterAttrs (_: u: (u.remap or [ ]) != [ ]) (renderedCompiles w);
       scopes = w: lib.mapAttrs (_: u: u.remapScope or null) (renderedCompiles w);
       wantDefault = {
-        "app-0.1.0-bin" = "macro,diagnostics";
-        "shared-0.1.0-lib" = "macro,diagnostics";
-        "itoa-1.0.11-lib" = "macro,diagnostics";
+        "app-0.1.0-bin" = "macro,diagnostics,coverage";
+        "shared-0.1.0-lib" = "macro,diagnostics,coverage";
+        "itoa-1.0.11-lib" = "macro,diagnostics,coverage";
         "lib-0.1.0-test" = null;
       };
       badDefault = lib.filterAttrs (n: s: ((scopes "default").${n} or "missing") != s) wantDefault;
@@ -3367,7 +3367,7 @@ in
           mkdir -p "$(dirname ${dir})"
           cp -r --no-preserve=mode ${i.skeleton} ${dir}
           mkdir -p $out
-          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --target ${native} --profile dev             --config ${i.vendor.configFile}             --capabilities ${
+          ${tools.breakbulk-plan}/bin/breakbulk-plan             --cargo ${rust}/bin/cargo --rustc ${rust}/bin/rustc --rustdoc ${rust}/bin/rustdoc             --shim ${tools.breakbulk-shim}/bin/breakbulk-shim             --skeleton ${dir} --workspace default --canonical-root /build/skeleton             --kind build --cargo-arg build --target ${native} --profile dev             --config ${i.vendor.configFile}             --capabilities ${
             breakbulk.toolchainFacts.capabilitiesFile
               (breakbulk.toolchainFacts.of {
                 inherit pkgs;
