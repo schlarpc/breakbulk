@@ -263,7 +263,42 @@ let
 
   stageName = product: helper: "${product.name}-${helper}";
 
-  binutilsOf = cfg: pkgs: toolOf cfg.binutils pkgs "binutils-unwrapped-all-targets";
+  # The binutils an ELF stage runs and its tools' prefix: the stage's
+  # `binutils` option; else, for an ELF target with a package set
+  # (`target.packageSet`), that set's C toolchain binutils, as its linker
+  # is chosen (for the native target the stdenv's, in every closure
+  # already); else (no package set: bare metal, a custom target) the
+  # all-targets build, which reads and rewrites every ELF machine. Not the
+  # LLVM matching rustc: a large new input for a cross Linux target, and
+  # dropping debug sections does not depend on the LLVM release.
+  binutilsFor =
+    cfg: pkgs: target:
+    let
+      packageSet = target.packageSet or null;
+      b =
+        if cfg.binutils != null then
+          cfg.binutils
+        else if packageSet != null && (traitsOf target pkgs).objectFormat == "elf" then
+          packageSet.stdenv.cc.bintools
+        else
+          pkgs.binutils-unwrapped-all-targets;
+    in
+    {
+      package = b;
+      prefix = b.targetPrefix or "";
+    };
+  binutilsOption = mkOption {
+    type = types.nullOr types.package;
+    default = null;
+    description = ''
+      The binutils to run on ELF files; a wrapped cross bintools' prefixed
+      tools are found by its `targetPrefix`. By default the C toolchain
+      binutils of the stage target's package set
+      (`targets.<triple>.packageSet`, which the stages of mkRepository's
+      products and test runs get), else `binutils-unwrapped-all-targets`
+      from the stage's `pkgs`.
+    '';
+  };
 
   # Shell lines defining `splitMacho <file>` for splitDebug, after
   # `placeDebug "$debug"`: the `.dSYM` of a Mach-O file with a debug map
@@ -322,7 +357,6 @@ let
           to ship the loose `.dwo` files.
         '';
         options = {
-          binutils = toolOption "binutils-unwrapped-all-targets";
           llvm = toolOption "llvm";
         };
       }
@@ -342,10 +376,7 @@ let
         pkgs.runCommand (stageName product "packDwo")
           (
             {
-              nativeBuildInputs = [
-                (binutilsOf cfg pkgs)
-                (toolOf cfg.llvm pkgs "llvm")
-              ];
+              nativeBuildInputs = [ (toolOf cfg.llvm pkgs "llvm") ];
             }
             // lib.optionalAttrs debug {
               outputs = [
@@ -378,10 +409,11 @@ let
                 if [ -e "$debug/$d/$b.dwp" ]; then
                   continue
                 fi
-                # readelf walks an archive's members. Not binutils' dwp for
-                # packing: it reads only DWARF 4's DW_AT_GNU_dwo_id, so from
-                # DWARF 5 units it writes a .dwp with no units in it, and
-                # succeeds.
+                # llvm-dwarfdump walks an archive's members. Not readelf:
+                # LLVM's has no DWARF dump, and a target's binutils may be
+                # LLVM's. Not binutils' dwp for packing: it reads only DWARF
+                # 4's DW_AT_GNU_dwo_id, so from DWARF 5 units it writes a
+                # .dwp with no units in it, and succeeds.
                 dwos=()
                 while IFS= read -r n; do
                   n=''${n##*/}
@@ -391,7 +423,7 @@ let
                       break
                     fi
                   done
-                done < <(readelf --debug-dump=info,no-follow-links --dwarf-depth=1 "$f" 2>/dev/null | sed -n 's/^.*DW_AT_\(GNU_\)\{0,1\}dwo_name *: .*: //p' | LC_ALL=C sort -u)
+                done < <(llvm-dwarfdump --debug-info --recurse-depth=0 "$f" 2>/dev/null | sed -n 's/^[[:space:]]*DW_AT_\(GNU_\)\{0,1\}dwo_name[[:space:]]*("\(.*\)")$/\2/p' | LC_ALL=C sort -u)
                 if [ ''${#dwos[@]} -gt 0 ]; then
                   echo "packDwo: $rel: packing ''${#dwos[@]} .dwo files into $d/$b.dwp"
                   mkdir -p "$debug/$d"
@@ -435,7 +467,7 @@ let
           but no `.dSYM` of the same UUID fails the stage.
         '';
         options = {
-          binutils = toolOption "binutils-unwrapped-all-targets";
+          binutils = binutilsOption;
           llvm = toolOption "llvm";
         };
       }
@@ -448,16 +480,20 @@ let
           target ? { },
           ...
         }:
+        let
+          format = (traitsOf target pkgs).objectFormat;
+          inherit (binutilsFor cfg pkgs target) package prefix;
+        in
         pkgs.runCommand (stageName product "splitDebug")
           {
             outputs = [
               "out"
               "debug"
             ];
-            nativeBuildInputs = [
-              (binutilsOf cfg pkgs)
-              (toolOf cfg.llvm pkgs "llvm")
-            ];
+            # Only the tools of the target's object format, as `strip`.
+            nativeBuildInputs =
+              lib.optional (format != "macho") package
+              ++ lib.optional (format != "elf") (toolOf cfg.llvm pkgs "llvm");
           }
           ''
             set -euo pipefail
@@ -475,11 +511,11 @@ let
                 continue
               fi
               isElf "$f" || continue
-              if ! readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
+              if ! ${prefix}readelf -S -W "$f" | grep ' \.debug_info ' >/dev/null; then
                 echo "splitDebug: ''${f#$out/}: no debug info, left unchanged"
                 continue
               fi
-              id=$(readelf -n "$f" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p' | head -n1)
+              id=$(${prefix}readelf -n "$f" | sed -n 's/.*Build ID: \([0-9a-f]*\).*/\1/p' | head -n1)
               if [ "''${#id}" -lt 3 ]; then
                 echo "splitDebug: ''${f#$out/} has debug info but no GNU build ID; link it with --build-id (breakbulk's presets pass a content-derived one)" >&2
                 exit 1
@@ -492,9 +528,9 @@ let
               fi
               mkdir -p "$dir"
               echo "splitDebug: ''${f#$out/} (build ID $id)"
-              objcopy --only-keep-debug "$f" "$dbg"
-              objcopy --strip-debug "$f"
-              objcopy --add-gnu-debuglink="$dbg" "$f"
+              ${prefix}objcopy --only-keep-debug "$f" "$dbg"
+              ${prefix}objcopy --strip-debug "$f"
+              ${prefix}objcopy --add-gnu-debuglink="$dbg" "$f"
               b=''${f##*/}
               # gdb looks for `<binary>.dwp` next to the separate debug file
               # it found, under the binary's name (gdb 17.2,
@@ -531,10 +567,9 @@ let
           `ca`, `test.stages` runs it with `buildId = false` on each test
           binary.
 
-          When the stage's `target` has a `packageSet` (test-run stages
-          do), ELF files strip with that package set's C toolchain
-          binutils, which for the native target are already in every
-          derivation's closure; otherwise with `binutils`.
+          ELF files strip with `binutils`: by default the C toolchain
+          binutils of the target's package set, for the native target
+          already in every derivation's closure.
         '';
         options = {
           all = mkOption {
@@ -555,7 +590,7 @@ let
               it.
             '';
           };
-          binutils = toolOption "binutils-unwrapped-all-targets";
+          binutils = binutilsOption;
           llvm = toolOption "llvm";
         };
       }
@@ -571,15 +606,8 @@ let
         let
           debug = hasDebugFiles product;
           format = (traitsOf target pkgs).objectFormat;
-          packageSet = target.packageSet or null;
-          # The target's own binutils, as its linker is chosen: no
-          # all-targets build for a target whose toolchain is at hand.
-          binutils =
-            if cfg.binutils == null && packageSet != null && format == "elf" then
-              packageSet.stdenv.cc.bintools
-            else
-              binutilsOf cfg pkgs;
-          prefix = binutils.targetPrefix or "";
+          inherit (binutilsFor cfg pkgs target) prefix;
+          binutils = (binutilsFor cfg pkgs target).package;
         in
         pkgs.runCommand (stageName product "strip")
           (
@@ -2162,7 +2190,7 @@ let
             example = "a portable Linux binary loads only glibc's libraries";
             description = "Why other libraries are not allowed, for the failure message.";
           };
-          binutils = toolOption "binutils-unwrapped-all-targets";
+          binutils = binutilsOption;
         };
       }
       (
@@ -2171,11 +2199,15 @@ let
           input,
           product,
           pkgs,
+          target ? { },
           ...
         }:
+        let
+          inherit (binutilsFor cfg pkgs target) package prefix;
+        in
         pkgs.runCommand (stageName product "neededLibraries")
           {
-            nativeBuildInputs = [ (binutilsOf cfg pkgs) ];
+            nativeBuildInputs = [ package ];
             removal = removeCheckLine "neededLibraries" product "may load them";
           }
           ''
@@ -2200,7 +2232,7 @@ let
                   echo "neededLibraries: ${product.name}: $rel needs $lib, which is not an allowed run-time library$why" >&2
                   bad=1
                 fi
-              done < <(readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
+              done < <(${prefix}readelf -dW "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
             done < <(find -L ${input} -type f -print0 | LC_ALL=C sort -z)
             if [ "$bad" = 1 ]; then
               echo "$removal" >&2

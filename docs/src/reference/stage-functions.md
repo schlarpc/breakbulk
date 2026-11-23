@@ -25,7 +25,7 @@ and a package's value wins over the target's at equal priority.
 | --- | --- |
 | `input` | The output of the stage before: `linked` (the root units' files under Cargo's names, as symlinks) or an earlier stage. A derivation whose output is a directory. Stages before `install` see the flat link output; stages after it see the installed layout. |
 | `product` | What breakbulk knows about the product: the attribute set [below](#product). |
-| `target` | The product's target: `{ triple; traits; }`, the target triple and its [traits](../explanation/internals/toolchains.md#target-traits), with the user's `targets.<triple>.traits` merged in. |
+| `target` | The product's target: `{ triple; traits; packageSet; }`, the target triple, its [traits](../explanation/internals/toolchains.md#target-traits) with the user's `targets.<triple>.traits` merged in, and its nixpkgs package set (`targets.<triple>.packageSet`; for the native triple the build machine's, else null). ELF stages take their default binutils from the package set. |
 | `pkgs` | The repository's package set (`mkRepository`'s `pkgs`), which builds for the build machine. Take a stage's tools from it. |
 
 The function returns a derivation, usually `pkgs.runCommand`. Its main

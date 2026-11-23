@@ -445,6 +445,9 @@ let
       select ? null,
       triple,
       traits ? targetTraits.resolve { inherit triple; },
+      # The target's nixpkgs package set, or null: the stages' `target`
+      # (ELF stages take its C toolchain's binutils).
+      packageSet ? if triple == targetTraits.nativeTriple pkgs then pkgs else null,
       debugInfo ? null,
       targetStages ? { },
       targetChecks ? { },
@@ -542,7 +545,7 @@ let
             stages = stageSet;
             leading = lib.attrNames (debugStages effectiveDebugInfo traits);
             checks = checkSet;
-            target = { inherit triple traits; };
+            target = { inherit triple traits packageSet; };
             inherit
               pkgs
               ca

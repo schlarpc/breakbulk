@@ -10,6 +10,10 @@
 #                    splitDebug or strip, or adding `splitDebug` against
 #                    it, at target or package level, fails evaluation; a
 #                    stage with no `after` runs after the inserted ones
+#   native-binutils  a native product's derivation closure, with
+#                    debugInfo split and strip, lacks
+#                    binutils-unwrapped-all-targets: its ELF stages run
+#                    the stdenv's binutils (the target's package set)
 #   post-link        stage order from target and package stages; a stage
 #                    removed with mkForce null; a check on `linked` sees
 #                    unstripped bytes; checks in repo.checks
@@ -3930,6 +3934,37 @@ in
     in
     assert lib.assertMsg ok "debug-info: ${builtins.toJSON report}";
     evalCheck "debug-info" (builtins.toJSON report);
+
+  native-binutils =
+    let
+      mk = extra: mkRepo (fixtures + "/post-link") ([ (oneWs "." "dev") ] ++ extra);
+      split = (mk [ ]).workspaces.main.packages.tool;
+      strip = (mk [ { targets.${native}.debugInfo = "strip"; } ]).workspaces.main.packages.tool;
+    in
+    pkgs.runCommand "products-native-binutils"
+      {
+        # Each product's derivation and every derivation it needs, without
+        # building them.
+        exportReferencesGraph = [
+          "split-drvs"
+          (builtins.unsafeDiscardOutputDependency split.drvPath)
+          "strip-drvs"
+          (builtins.unsafeDiscardOutputDependency strip.drvPath)
+        ];
+        allTargets = builtins.unsafeDiscardStringContext pkgs.binutils-unwrapped-all-targets.drvPath;
+      }
+      ''
+        # The control: the stages that run binutils are there.
+        grep -q -- '-tool-splitDebug\.drv$' split-drvs
+        grep -q -- '-tool-strip\.drv$' strip-drvs
+        for f in split-drvs strip-drvs; do
+          if grep -qxF "$allTargets" $f; then
+            echo "$f: the product needs $allTargets; the native target's stages should use the stdenv's binutils" >&2
+            exit 1
+          fi
+        done
+        touch $out
+      '';
 
   post-link =
     let

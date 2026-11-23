@@ -1262,6 +1262,7 @@ let
       stageSetArgs wsName triple
       // {
         inherit pkgs inst;
+        packageSet = packageSetOf wsName triple;
         # `sourcePaths = "keep"`: no default noSourceReferences check.
         keepSourcePaths = v.sourcePaths == "keep";
         select = sel;

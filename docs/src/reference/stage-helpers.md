@@ -234,14 +234,6 @@ before `splitDebug` with `"split"`, alone with `"keep"`. It is an
 ordinary stage: configure it, replace it, or remove it with `null`
 to ship the loose `.dwo` files.
 
-#### `packDwo.binutils`
-
-The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
-
-*Type:* null or package
-
-*Default:* `null`
-
 #### `packDwo.llvm`
 
 The package to run instead of `llvm` from the stage's `pkgs`.
@@ -341,7 +333,12 @@ but no `.dSYM` of the same UUID fails the stage.
 
 #### `splitDebug.binutils`
 
-The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
+The binutils to run on ELF files; a wrapped cross bintools' prefixed
+tools are found by its `targetPrefix`. By default the C toolchain
+binutils of the stage target's package set
+(`targets.<triple>.packageSet`, which the stages of mkRepository's
+products and test runs get), else `binutils-unwrapped-all-targets`
+from the stage's `pkgs`.
 
 *Type:* null or package
 
@@ -373,10 +370,9 @@ debug files, what is left of them is the stage's `debug` output.
 `ca`, `test.stages` runs it with `buildId = false` on each test
 binary.
 
-When the stage's `target` has a `packageSet` (test-run stages
-do), ELF files strip with that package set's C toolchain
-binutils, which for the native target are already in every
-derivation's closure; otherwise with `binutils`.
+ELF files strip with `binutils`: by default the C toolchain
+binutils of the target's package set, for the native target
+already in every derivation's closure.
 
 #### `strip.all`
 
@@ -388,7 +384,12 @@ Also remove the symbol tables (`--strip-all`), not only the debug information.
 
 #### `strip.binutils`
 
-The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
+The binutils to run on ELF files; a wrapped cross bintools' prefixed
+tools are found by its `targetPrefix`. By default the C toolchain
+binutils of the stage target's package set
+(`targets.<triple>.packageSet`, which the stages of mkRepository's
+products and test runs get), else `binutils-unwrapped-all-targets`
+from the stage's `pkgs`.
 
 *Type:* null or package
 
@@ -754,7 +755,12 @@ loaders; `gccRuntimeLibraries` lists `libgcc_s.so.1` and
 
 #### `neededLibraries.binutils`
 
-The package to run instead of `binutils-unwrapped-all-targets` from the stage's `pkgs`.
+The binutils to run on ELF files; a wrapped cross bintools' prefixed
+tools are found by its `targetPrefix`. By default the C toolchain
+binutils of the stage target's package set
+(`targets.<triple>.packageSet`, which the stages of mkRepository's
+products and test runs get), else `binutils-unwrapped-all-targets`
+from the stage's `pkgs`.
 
 *Type:* null or package
 
