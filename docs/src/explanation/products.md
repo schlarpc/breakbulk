@@ -177,13 +177,16 @@ compiled as shipped libraries are, so their debug information names their
 sources and holds their line tables. Editing any file of such a library,
 even a README or a function the test never calls, changes the test binary.
 So with [`ca`](../reference/options/repository.md#ca) on, a test run
-executes a copy of the binary with its debug information stripped
-([`test.stripForRun`](../reference/options/packages.md#packagesnameteststripforrun)),
+executes a copy of the binary with its debug information and GNU build
+ID stripped (the `strip` stage of
+[`test.stages`](../reference/options/packages.md#packagesnameteststages)),
 which does not change, and the test is not re-run. Panic messages keep
 their file and line; backtraces keep function names but lose files, lines
 and inlined frames. For debugging, the unstripped binary is
 `tests.<pkg>.<binary>`. Without `ca` the run is not stripped: its input
-changes with the binary anyway.
+changes with the binary anyway. On Apple targets the stage removes the
+debug map, but the Mach-O UUID, which the linker computes over the whole
+file, stays, so the cutoff holds only when the debug map did not change.
 
 ### Cargo's trim-paths
 
@@ -368,8 +371,9 @@ libtest's and nextest's formats, and `harness = false` tests have
 neither. Doctest runs work the same way.
 
 - [`test.postRun`](../reference/options/packages.md#packagesnametestpostrun)
-  (per package, and per binary under `test.binaries.<binary>.postRun`)
-  is a shell snippet that runs inside the run after it passes, with the
+  (a [run setting](configuration.md#run-settings): per package, per
+  binary, for doctests, for bench runs) is a shell snippet that runs
+  inside the run after it passes, with the
   raw output in `$log`. Under nextest, `$nextestDir` is nextest's store,
   so `cp -r "$nextestDir/ci" "$out/junit"` keeps a profile's JUnit
   report, and `cp "$log" "$out/log"` keeps the raw output (see
@@ -383,7 +387,9 @@ neither. Doctest runs work the same way.
 
 **Test threads.** Each test binary is its own derivation, and Nix builds
 up to `max-jobs` derivations at once. Each test run starts `cores` test
-threads by default: it sets `RUST_TEST_THREADS` to `$NIX_BUILD_CORES`.
+threads by default: the `threads` entry of
+[`test.preRun`](../reference/options/packages.md#packagesnametestprerun)
+sets `RUST_TEST_THREADS` to `$NIX_BUILD_CORES`.
 So the real parallelism is `max-jobs × cores`, next to any compiles
 that run at the same time. Nix has no jobserver, so breakbulk cannot
 divide the cores between runs.
@@ -399,10 +405,13 @@ divide the cores between runs.
   `test.binaries.<binary>.env` (for example to `"1"`), or skip itself
   with `test.binaries.<binary>.args`.
 - nextest does not read `RUST_TEST_THREADS`. Under nextest the default
-  is nextest's `test-threads`, set to `$NIX_BUILD_CORES`. A
+  is nextest's `test-threads`, set to `$NIX_BUILD_CORES` (the same
+  `threads` entry writes it to a tool configuration). A
   `test-threads` in the project's nextest profile wins over it, and
   `NEXTEST_TEST_THREADS` in `test.env` or `test.binaries.<binary>.env`
   wins over both.
+- `test.preRun.threads = null` leaves both unset: libtest and nextest
+  then pick their own defaults, every CPU of the machine.
 
 **Running a test app.** A test app is a derivation whose
 `meta.mainProgram` is the app's script, so `nix run` takes it at its
@@ -470,9 +479,15 @@ by its name (`--skip "src/lib.rs - net::connect"`); per-binary
 `test.binaries.<binary>.args` do not.
 
 - [`test.doctest`](../reference/options/packages.md#packagesnametestdoctest)
-  gives a package's doctest run its own `args`, `env` and `postRun`,
-  over the package's `test.args`, `test.env` and `test.postRun`, as
-  `test.binaries.<key>` does for a test binary.
+  gives a package's doctest run its own `enable`, `args`, `env`, `path`
+  and `postRun`, over the package's `test` settings, as
+  `test.binaries.<key>` does for a binary
+  ([run settings](configuration.md#run-settings)).
+- rustdoc runs each example itself, so doctests have no `wrapper`,
+  `runner`, `preRun` or `stages`: under `test.doctest` they are an error,
+  and the package's do not apply. A doctest gets a fresh `HOME` and
+  `RUST_TEST_THREADS` from breakbulk-unit, and its platform's runner
+  through `--test-runtool`.
 - `test.doctest.enable = false` leaves the doctest run out of
   `repo.checks` and the check groups. As there is no separate compile,
   the checks then build nothing of it; `doctests.<pkg>` still builds it.
@@ -483,9 +498,15 @@ by its name (`--skip "src/lib.rs - net::connect"`); per-binary
 
 **Benches** come only from a bench variant (`cargo bench --no-run`, bench
 profile), which gives optimized bench binaries to run outside Nix.
-`cargo test --no-run` builds no benches.
-[`benchSmoke`](../reference/options/workspaces.md#workspacesnamebenchsmoke)
-runs each bench once in test mode, as a check.
+`cargo test --no-run` builds no benches. Each bench binary also runs
+once in test mode, as a check of that variant (`<pkg>/bench-<name>`),
+so that a bench that no longer runs fails CI; timed runs never happen
+inside Nix. Bench runs are runs like the others, with their own layer of
+run settings,
+[`bench`](../reference/options/packages.md#packagesnamebench): its
+`args` start with `--test` (libtest's and Criterion's test mode), and
+`bench.enable = false` leaves a package's bench runs out of the checks
+(`test.binaries."bench/<name>".enable = false` one of them).
 
 ## Documentation
 

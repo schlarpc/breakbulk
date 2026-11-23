@@ -35,7 +35,8 @@ writes to its home fails. Doctests are tests, so they get a writable home
 as under `cargo test`. No `XDG_*` variable is set, so tools fall back to
 directories under `HOME`. The package's `test.env` goes over all layers
 of a doctest and can set `HOME` back to `/homeless-shelter`. Test runs
-set up the same home in their own derivation
+set up the same home with the `home` entry of
+[`test.preRun`](options/packages.md#packagesnametestprerun)
 ([Tests](../explanation/products.md#tests)).
 
 ## `compile`

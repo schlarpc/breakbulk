@@ -649,8 +649,9 @@ let
           description = ''
             Put this build or coverage variant's outputs in `repo.checks`:
             its products (`<pkg>/build`), their checks (`<pkg>/<check>`),
-            its enabled test runs (`<pkg>/test-<name>`) and doctests
-            (`<pkg>/doctest`). The default variant's are under
+            its enabled test runs (`<pkg>/test-<name>`), doctests
+            (`<pkg>/doctest`) and bench runs (`<pkg>/bench-<name>`, with
+            `benches`). The default variant's are under
             `<ws>/<triple>/`, any other variant's under
             `<ws>/<triple>/variant-<v>/`. A product whose roots Cargo all
             skipped (required features) is left out. Check and clippy
@@ -690,7 +691,10 @@ let
             `target.<triple>.variants.<v>.benches.<pkg>.<bench>`.
             `target.<triple>.benches` is the default variant's when it has
             benches, else the one variant with `benches = true`. The test
-            plan builds no benches (`cargo test --no-run` does not).
+            plan builds no benches (`cargo test --no-run` does not). Each
+            bench binary also runs once, with `--test`, as a check of the
+            variant, under the package's
+            [`bench`](packages.md#packagesnamebench) run settings.
           '';
         };
       };
@@ -1218,16 +1222,6 @@ let
             higher priority (`lib.mkForce`)
             ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)).
             Dependencies from a registry or git do not get them.
-          '';
-        };
-
-        benchSmoke = mkOption {
-          type = types.bool;
-          default = false;
-          description = ''
-            Run each bench binary of `target.<triple>.benches` once in test
-            mode (`--test`) as a check (`<ws>/<triple>/<pkg>/bench-<name>`
-            in `repo.checks`). Timed runs never happen inside Nix.
           '';
         };
 

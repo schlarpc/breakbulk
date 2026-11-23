@@ -553,12 +553,8 @@ let
         inherit runner;
       },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
-      # As testRuns.mkTestRuns's: what strips test binaries for runs.
-      objcopy ? testRuns.objcopyOf {
-        inherit pkgs;
-        triple = target;
-        traits = if traits != null then traits else breakbulkTraits.resolve { triple = target; };
-      },
+      # As testRuns.mkTestRuns's: the target's package set.
+      packageSet ? if target == breakbulkTraits.nativeTriple pkgs then pkgs else null,
       # As testRuns.mkTestRuns's: the host triple's settings.
       host ? testRuns.defaultHost {
         inherit
@@ -572,6 +568,8 @@ let
       packages ? { },
       # As testRuns.mkTestRuns's: the package directories of "run" views.
       runDirs ? { },
+      # As testRuns.mkTestRuns's: "test", or "bench".
+      kind ? "test",
       ca ? featureGates.defaultCa,
       nixFeatures ? featureGates.standalone {
         inherit ca;
@@ -597,7 +595,7 @@ let
             testSystem
             dylibPath
             testPkgs
-            objcopy
+            packageSet
             ;
         }
         // lib.optionalAttrs (traits != null) { inherit traits; };
@@ -607,24 +605,42 @@ let
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
 
-      # Whether a run executes a copy of its binary, as in IFD mode: a
-      # content-addressed one when `ca`, a debug-stripped one with
-      # `test.stripForRun`.
-      copiesBinary = cfg: useCa || cfg.stripForRun;
+      # Each run's settings, once, as in IFD mode.
+      configs = lib.mapAttrs (
+        pkg: rs:
+        lib.listToAttrs (
+          map (
+            r:
+            let
+              key = testRuns.binaryKey r.breakbulkRoot;
+            in
+            lib.nameValuePair key (testRuns.runConfig packages pkg kind key)
+          ) rs
+        )
+      ) byPackage;
+      configOf = r: configs.${r.breakbulkRoot.package}.${testRuns.binaryKey r.breakbulkRoot};
 
-      # The copy; empty for a binary Cargo did not build.
+      # Whether a run executes something other than the binary its spec
+      # links: the output of its stages, or a content-addressed copy
+      # (testRuns.runBinary).
+      copiesBinary = cfg: useCa || lib.any (v: v != null) (lib.attrValues cfg.stages);
+
+      # The binary, copied out of its wrapper; for a binary Cargo did not
+      # build, the marker that makes the stages skip
+      # (stages.noBinariesMarker; the run itself skips before it reads the
+      # binary).
       binaryCopy =
-        r: n: cfg:
+        r: n:
         testRuns.binaryCopy {
           inherit pkgs caAttrs;
           name = n;
-          strip = cfg.stripForRun;
-          inherit (platformOf r) objcopy;
           src = "\"$wrapper\"/root/*";
           attrs = { inherit (r.breakbulkRoot) wrapper; };
           prelude = ''
-            if [ "$(${pkgs.jq}/bin/jq -r '.reason // ""' "$wrapper/breakbulk-root.json")" ]; then
+            reason=$(${pkgs.jq}/bin/jq -r '.reason // ""' "$wrapper/breakbulk-root.json")
+            if [ -n "$reason" ]; then
               mkdir -p $out
+              printf '%s\n' "$reason" > $out/${stages.noBinariesMarker}
               exit 0
             fi
           '';
@@ -710,9 +726,9 @@ let
             ' "$info" > $out/breakbulk-root.json
           '';
 
-      # What both runners share: the skip check, the environment, the test
-      # configuration's env and PATH.
-      prelude = p: cfg: key: ''
+      # What both runners share: the skip check, the environment, the run's
+      # env, PATH and `preRun` entries.
+      prelude = p: cfg: ''
         info=$spec/breakbulk-root.json
         reason=$(${jqOf p} -r '.reason // ""' "$info")
         if [ -n "$reason" ]; then
@@ -721,16 +737,14 @@ let
           printf '%s\n' "$reason" > $out
           exit 0
         fi
-        ${testRuns.homeScript}
         ${envFromInfo {
           jq = jqOf p;
           inherit (p) dylibPath;
           extra = lib.optional (p.libDir != null) p.libDir;
           stable = useCa;
         }}
-        ${testRuns.configScript cfg key}
-        ${testRuns.threadsScript}
-        ${testRuns.coverageEnvScript coverage}
+        ${testRuns.configScript p.testPkgs cfg}
+        ${testRuns.preRunScript cfg coverage}
         log=${testRuns.logFile}
       '';
 
@@ -739,12 +753,12 @@ let
       # library directory of the binary's platform, as test-runs.nix's
       # nextestSpec fills it in.
       nextestScript =
-        p: b: cfg: args: bin:
+        p: b: cfg: bin:
         let
           jq = jqOf p;
           nextest = if cfg.nextest.package != null then cfg.nextest.package else p.testPkgs.cargo-nextest;
           libdir = toJSON (testRuns.nextestLibdir p.libDir);
-          wrapper = testRuns.wrapperOf p.testPkgs cfg (testRuns.binaryKey b);
+          wrapper = testRuns.wrapperOf p.testPkgs cfg;
         in
         ''
           ${lib.optionalString (wrapper != null) (testRuns.sourceRootExport jq null)}
@@ -753,7 +767,6 @@ let
             inherit (p) triple runner;
             inherit wrapper;
           }}
-          ${testRuns.nextestThreadsScript}
           ws=$TMPDIR/nextest-ws
           mkdir -p $out $ws/target
           touch $ws/Cargo.toml
@@ -771,9 +784,9 @@ let
             --cargo-metadata $TMPDIR/cargo-metadata.json \
             ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
             --profile ${lib.escapeShellArg cfg.nextest.profile} \
-            ${testRuns.nextestThreadsFlag} \
+            "''${__bb_nextest[@]}" \
             --no-tests=warn --color never \
-            ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee "$log"
+            ${lib.optionalString (cfg.args != [ ]) "-- ${lib.escapeShellArgs cfg.args}"} 2>&1 | tee "$log"
           status=''${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
@@ -782,10 +795,7 @@ let
             exit "$status"
           fi
           nextestDir=$ws/target/nextest
-          ${testRuns.postRunScript {
-            inherit cfg coverage;
-            binary = testRuns.binaryKey b;
-          }}
+          ${testRuns.postRunScript { inherit cfg coverage; }}
         '';
 
       # testRuns.hintScript, with the spec read from `$info`.
@@ -799,9 +809,9 @@ let
           ''"$(${jqOf p} -c --arg package ${lib.escapeShellArg b.package} --arg widen ${lib.escapeShellArg (testRuns.hintWiden cfg)} '.testSpec | {$package, packageDir, testOnly: (.testOnly // []), junk: (.junk // []), custom: (.custom // false), $widen}' "$info")"'';
 
       libtestScript =
-        p: b: cfg: args: bin:
+        p: b: cfg: bin:
         let
-          wrapper = testRuns.wrapperOf p.testPkgs cfg (testRuns.binaryKey b);
+          wrapper = testRuns.wrapperOf p.testPkgs cfg;
         in
         ''
           mkdir -p $out
@@ -817,7 +827,7 @@ let
               inherit (p) runner;
               inherit wrapper;
             }
-          } "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+          } "''${files[0]}" ${lib.escapeShellArgs cfg.args} 2>&1 | tee "$log"
           status=''${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
@@ -825,10 +835,7 @@ let
             ${hint p b cfg}
             exit "$status"
           fi
-          ${testRuns.postRunScript {
-            inherit cfg coverage;
-            binary = testRuns.binaryKey b;
-          }}
+          ${testRuns.postRunScript { inherit cfg coverage; }}
         '';
 
       run =
@@ -838,10 +845,20 @@ let
           p = platformOf r;
           key = testRuns.binaryKey b;
           n = storeName "${b.package}-${key}";
-          cfg = testRuns.testConfig packages b.package;
-          args = testRuns.testArgs cfg key;
+          cfg = configOf r;
           info = runInfo r cfg;
-          bin = if copiesBinary cfg then binaryCopy r n cfg else "${info.out}/root";
+          bin =
+            if copiesBinary cfg then
+              testRuns.runBinary {
+                inherit pkgs cfg nixFeatures;
+                name = n;
+                ca = useCa;
+                platform = p;
+                linked = binaryCopy r n;
+                copy = binaryCopy r n;
+              }
+            else
+              "${info.out}/root";
           inputs = {
             spec = info.out;
           }
@@ -854,7 +871,7 @@ let
                 breakbulkTest = {
                   package = b.package;
                   binary = key;
-                  inherit args;
+                  inherit (cfg) args;
                 };
                 binary = bin;
               };
@@ -863,14 +880,12 @@ let
             // caAttrs
           )
           (
-            prelude p cfg key
+            prelude p cfg
             + (
               if cfg.runner == "nextest" then
-                nextestScript p b cfg args "${bin}/*"
-              else if cfg.runner == "libtest" then
-                libtestScript p b cfg args "${bin}/*"
+                nextestScript p b cfg "${bin}/*"
               else
-                throw "breakbulk: packages.${b.package}.test.runner must be \"libtest\" or \"nextest\", not ${toJSON cfg.runner}"
+                libtestScript p b cfg "${bin}/*"
             )
           );
 
@@ -878,13 +893,13 @@ let
         _: rs: lib.listToAttrs (map (r: lib.nameValuePair (testRuns.binaryKey r.breakbulkRoot) (run r)) rs)
       ) byPackage;
 
-      doctests = inst.doctests or { };
+      doctests = lib.optionalAttrs (kind == "test") (inst.doctests or { });
 
       checks =
         lib.concatMapAttrs (
           pkg: bs:
           lib.mapAttrs' (b: drv: lib.nameValuePair "test/${pkg}/${b}" drv) (
-            lib.filterAttrs (b: _: (testRuns.binaryConfig (testRuns.testConfig packages pkg) b).enable) bs
+            lib.filterAttrs (b: _: configs.${pkg}.${b}.enable) bs
           )
         ) runs
         // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) (
@@ -931,8 +946,8 @@ let
           b = r.breakbulkRoot;
           p = t.platforms.${b.platform};
           n = storeName "${b.package}-${testRunsLib.binaryKey b}";
-          cfg = testRunsLib.testConfig packages b.package;
-          wrapper = testRunsLib.wrapperOf pkgs cfg (testRunsLib.binaryKey b);
+          cfg = testRunsLib.runConfig packages b.package "test" (testRunsLib.binaryKey b);
+          wrapper = testRunsLib.wrapperOf pkgs cfg;
           checkoutDir = lib.removeSuffix "/" (toString checkout);
           script = pkgs.writeShellScriptBin "${name}-${n}" ''
             set -euo pipefail
@@ -962,7 +977,7 @@ let
                   export CARGO_MANIFEST_DIR=$dir CARGO_MANIFEST_PATH=$dir/Cargo.toml
                 ''
             }
-            ${testRunsLib.configScript cfg (testRunsLib.binaryKey b)}
+            ${testRunsLib.configScript pkgs cfg}
             ${lib.optionalString (wrapper != null) (testRunsLib.sourceRootExport jq checkout)}
             files=(${b.wrapper}/root/*)
             ${testRunsLib.appRunScript {

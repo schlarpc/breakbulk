@@ -10,7 +10,8 @@
 #     checkout = null;   # the user's checkout of the repository root, as a
 #                        # string (e.g. "/home/me/src/project"); null: the
 #                        # store's source view
-#     packages = { };    # packages.<name>.test (only `env` and `path` apply)
+#     packages = { };    # packages.<name>, with `runs` (only each run's `env`,
+#                        # `path` and `wrapper` apply)
 #     name = "breakbulk";
 #   };
 #   apps.<pkg>.<binary>   a derivation: the script, bin/<name>, as
@@ -23,10 +24,10 @@
 # derivation with `meta.mainProgram` anywhere (Nix's src/nix/app.cc).
 # repo.apps gives them in the app shape for `apps`.
 #
-# The app runs the test binary (not a content-addressed copy) in the
-# package's directory with the same dynamic-library path, `rustc-env`
-# values, `CARGO_*` runtime variables, `test.env`,
-# `test.binaries.<binary>.env` and `test.path` as its test run, under the
+# The app runs the test binary (not the output of its run's stages) in
+# the package's directory with the same dynamic-library path, `rustc-env`
+# values, `CARGO_*` runtime variables, `env`, `path` and `wrapper` (of
+# its run settings, testRuns.runConfig) as its test run, under the
 # runner of its platform (the build machine's for a proc macro's unit
 # tests), in a private working directory when the binary uses
 # `CARGO_TARGET_TMPDIR`, as its test run (testRuns.workdirScript; removed
@@ -36,9 +37,9 @@
 # store.
 #
 # Unlike the test run, it passes only its own command-line arguments: no
-# `test.args` skip list (the point is to run what the sandbox skips), no
-# `--include-ignored`, and no `RUST_TEST_THREADS`; and it keeps the user's
-# `HOME`, as `cargo test` does.
+# `args` skip list (the point is to run what the sandbox skips); and it
+# runs no `preRun` entries, so it keeps the user's `HOME` and has no
+# `RUST_TEST_THREADS`, as `cargo test`.
 { lib, testRunsLib }:
 {
   mkTestApps =
@@ -54,7 +55,7 @@
       app =
         spec:
         let
-          cfg = testRunsLib.testConfig packages spec.package;
+          cfg = testRunsLib.runConfig packages spec.package "test" spec.binary;
           dir =
             if checkout == null then
               spec.sourceDir
@@ -74,7 +75,7 @@
               inherit spec vars;
               jq = "${pkgs.jq}/bin/jq";
             }}
-            ${testRunsLib.configScript cfg spec.binary}
+            ${testRunsLib.configScript pkgs cfg}
             files=(${spec.unitOut}/*)
             ${testRunsLib.appRunScript {
               inherit pkgs;
@@ -83,7 +84,7 @@
                 testRunsLib.launchWords {
                   inherit pkgs;
                   inherit (spec) runner;
-                  wrapper = testRunsLib.wrapperOf pkgs cfg spec.binary;
+                  wrapper = testRunsLib.wrapperOf pkgs cfg;
                   sourceRoot = testRunsLib.sourceRootOf spec checkout;
                 }
               } "''${files[0]}" "$@"'';

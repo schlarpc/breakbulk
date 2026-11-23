@@ -37,30 +37,131 @@ let
     inputs = bt.mkInputs "Libraries for this package's ${name} units only (${sides}).";
   };
 
-  # The settings of one run over the package's: a test binary's or the
-  # doctest run's.
-  runSettings = what: {
+  # Where run settings sit, for the texts of their options.
+  runLevels = "[run settings](../../explanation/configuration.md#run-settings)";
+
+  # The options of one run (a test binary's, the doctest run's or a bench
+  # binary's): `test.<option>` for every run of the package, refined by
+  # `test.binaries.<key>`, `test.doctest` and `bench`, which are modules
+  # of these same options (lib/package-settings.nix `runsOf`).
+  runOptions = {
+    enable = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Whether a run is part of `repo.checks` and the check groups. The
+        binary is built either way (a doctest compiles and runs in one
+        rustdoc process, so a disabled doctest run builds nothing of it in
+        the checks; `doctests.<pkg>` still builds it). For a library
+        whose manifest sets `doctest = false`, there is no doctest run to
+        enable. A single value (${runLevels}):
+        `memberDefaults.test.binaries.<key>.enable = false` with `true`
+        for a few packages runs only theirs.
+      '';
+    };
     args = mkOption {
       type = types.listOf types.str;
       default = [ ];
-      description = "libtest arguments for ${what}, after `test.args`.";
+      example = [
+        "--skip"
+        "net::"
+      ];
+      description = ''
+        libtest arguments, after the binary. A doctest run passes each to
+        `rustdoc --test` as `--test-args`, so `[ "--skip" "src/lib.rs -
+        net" ]` skips a doctest by name. Bench runs start with `--test`
+        (the `bench` layer's own definition: `lib.mkForce` replaces it).
+        Lists concatenate (${runLevels}).
+      '';
     };
-    env = bt.mkTestEnv "Environment for ${what}, over `test.env`.";
+    env = bt.mkTestEnv ''
+      Environment for runs (test runs, doctests and bench runs) and test
+      apps. It comes after the environment Cargo gives the binary
+      (`[env]`, the build script's `rustc-env`, `CARGO_*`), so it can
+      replace any of it. Variables merge (${runLevels}).
+    '';
+    path = mkOption {
+      type = bt.inputs;
+      default = [ ];
+      example = lib.literalExpression "p: [ p.git ]";
+      description = ''
+        Packages whose `bin` directories go on `PATH` in runs and test
+        apps, after the environment. A function of the package set of
+        the machine that runs the test (the target's `testSystem`, else
+        the build machine; the build machine's for doctests and test
+        apps), or a list used as given. Lists concatenate (${runLevels}).
+
+        ${bt.inputsNote}
+      '';
+    };
+    preRun = mkOption {
+      type = types.attrsOf (types.nullOr types.str);
+      default = { };
+      defaultText = lib.literalMD "`home` and `threads` (see the description)";
+      example = lib.literalExpression ''
+        {
+          home = null;  # keep Nix's /homeless-shelter
+          db = "initdb -D \"$TMPDIR/db\" && pg_ctl -D \"$TMPDIR/db\" -w start";
+        }
+      '';
+      description = ''
+        Shell snippets run before the binary, in name order, in the run's
+        shell after its environment (`env`, `path`) is set: what they
+        export reaches the test. `null` removes an entry. Each entry is a
+        single value of its own (${runLevels}), so a more specific layer
+        replaces one entry and keeps the others. The entries breakbulk
+        defines:
+
+        - `home`: a fresh, empty `HOME` in `$TMPDIR`, as a test's home is
+          under `cargo test`, unless the environment set another than
+          Nix's `/homeless-shelter`. With `home = null` a run keeps
+          `/homeless-shelter`, so a test that writes to its home fails, as
+          compiles do. `XDG_*` stay unset, so tools fall back to
+          directories under `HOME`.
+        - `threads`: `RUST_TEST_THREADS=$NIX_BUILD_CORES` unless the
+          environment set it, and the same for nextest's `test-threads`
+          in `$TMPDIR/breakbulk-nextest.toml`, a tool configuration that
+          nextest reads when it exists (the project's configuration and
+          `NEXTEST_TEST_THREADS` still win).
+        - `coverage`, in coverage variants: `LLVM_PROFILE_FILE` into
+          `$TMPDIR/profraw`, which the run moves into `$out/profraw` when
+          it passes. breakbulk adds it to the run, so
+          `coverage = null` removes it and a whole-set `lib.mkForce` does
+          not.
+
+        Doctests and test apps do not run them: rustdoc runs the examples
+        itself, with a fresh `HOME` and `RUST_TEST_THREADS`
+        (`test.doctest.preRun` is an error), and a test app keeps the
+        user's environment.
+      '';
+    };
     postRun = mkOption {
       type = types.lines;
       default = "";
-      description = "A shell snippet run after ${what} passes, after the package's `test.postRun` (see there).";
+      example = ''cp -r "$nextestDir/ci" "$out/junit"'';
+      description = ''
+        A shell snippet run inside each passing run (test, doctest or
+        bench), after the tests: `$log` is the run's raw output and `$out`
+        the run's output directory, empty otherwise. With `runner =
+        "nextest"`, `$nextestDir` is nextest's store (JUnit reports).
+        Snippets concatenate (${runLevels}): the package's first, then the
+        binary's or the doctest run's. Whatever a snippet puts in `$out`
+        decides whether the run is reproducible: breakbulk keeps `$out`
+        empty so that `nix build --rebuild` of a passing run succeeds,
+        and the output stays in the build log (`nix log`).
+        `cp "$log" "$out/log"` keeps the raw output, for a binary cache
+        that does not store build logs or a CI that keeps them as
+        artifacts; it holds timings and, with several test threads, lines
+        in a varying order, so such a run is not reproducible under
+        `nix build --rebuild`.
+      '';
     };
-  };
-
-  wrapperOption =
-    what: extra:
-    mkOption {
+    wrapper = mkOption {
       type = types.nullOr types.raw;
       default = null;
       example = lib.literalExpression "breakbulk.lib.wrappers.cargoTargetLayout { profile = \"debug\"; }";
       description = ''
-        A program that starts ${what}, in its test runs and test apps:
+        A program that starts the binary, in its runs and test apps:
         Cargo's runner protocol, `<wrapper> <binary> <args…>`, in the
         package directory, with `BREAKBULK_SOURCE_ROOT` (the root of the
         run's source view, or of the checkout for a test app with
@@ -69,52 +170,98 @@ let
         environment. It ends with `exec "$BREAKBULK_NEXT" <binary>
         <args…>`, the binary possibly moved. It runs outside the target's
         runner, on the machine that runs the test. A program, or a
-        function from the package set of that machine to one.
-        With `test.runner = "nextest"`, nextest starts it as the target's
-        runner, for listing as for each test. Doctests do not use it.
-        [`breakbulk.lib.wrappers`](../presets.md#test-wrappers) has ready-made
-        ones. ${extra}`null`: none.
+        function from the package set of that machine to one. With
+        `runner = "nextest"`, nextest starts it as the target's runner,
+        for listing as for each test.
+        [`breakbulk.lib.wrappers`](../presets.md#test-wrappers) has
+        ready-made ones. Doctests do not use it: rustdoc runs each example
+        itself (`test.doctest.wrapper` is an error). `null`: none.
       '';
     };
+    runner = mkOption {
+      type = types.enum [
+        "libtest"
+        "nextest"
+      ];
+      default = "libtest";
+      example = "nextest";
+      description = ''
+        How a binary runs: `libtest` (the binary itself, as `cargo test`
+        runs it) or `nextest` (cargo-nextest's reuse-build mode over the
+        one binary, with the project's nextest configuration: retries,
+        timeouts, default filter, test groups). Each binary is still its
+        own run. Doctests run under rustdoc whatever this says
+        (`test.doctest.runner` is an error).
+      '';
+    };
+    stages = mkOption {
+      type = bt.stages;
+      default = { };
+      defaultText = lib.literalMD "with [`ca`](repository.md#ca), `strip`; else none";
+      example = lib.literalExpression ''
+        { strip = null; }  # run the unit's own binary
+      '';
+      description = ''
+        Stages the binary goes through before a run executes it, as a
+        product's [`stages`](#packagesnamestages) (`{ after ? null;
+        before ? null; run; }`; `null` removes one; there is no
+        `install`): the run executes the last stage's output, a directory
+        holding the one binary. A stage's `target` argument also has
+        `packageSet`, the platform's package set or null.
 
-  testBinary = {
-    options = runSettings "this test binary's run" // {
-      wrapper = wrapperOption "this test binary" "Over `test.wrapper`. ";
-      enable = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Whether this binary's test run is part of `repo.checks` and the
-          check groups; the binary is built either way. A more specific
-          layer's value wins over the layers it refines
-          ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
-          `memberDefaults.test.binaries.<key>.enable = false` with `true`
-          for a few packages runs only theirs.
-        '';
-      };
+        With [`ca`](repository.md#ca) (`repo.config.ca`) the default is
+        `strip = { run = breakbulk.stageHelpers.strip { buildId = false; }; }`.
+        Workspace libraries keep real source paths and line tables in
+        their debug info, so an edit to any file of such a library (a
+        README, a function the test never calls) changes the bytes of
+        every test binary that links it; the stripped copy does not
+        change, and the run is not re-run. Panic messages keep their file
+        and line; backtraces still name functions, but not files, lines
+        or inlined frames. The unstripped binary stays in
+        `tests.<pkg>.<binary>` for debugging. Without `ca` a stage's
+        output is input-addressed and saves no run, so there is none.
+        Doctests have no binary to stage (`test.doctest.stages` is an
+        error).
+      '';
     };
   };
 
-  doctest = {
-    options = runSettings "the package's doctest run" // {
-      enable = mkOption {
-        type = types.bool;
-        default = true;
-        description = ''
-          Whether the package's doctest run is part of `repo.checks` and
-          the check groups. A doctest compiles and runs in one rustdoc
-          process, so with `false` the checks build nothing of it; it
-          stays buildable as `doctests.<pkg>`. A more specific layer's
-          value wins over the layers it refines
-          ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)):
-          `memberDefaults.test.doctest.enable = false` with `true` for a
-          few packages runs only theirs. For a
-          library whose manifest sets `doctest = false`, there is no
-          doctest run to enable.
-        '';
-      };
+  # The options of `test.binaries.<key>`, `test.doctest` and `bench`, for
+  # their documentation: those of `test`, without `refused`.
+  runLayerOptions =
+    what: refused:
+    lib.mapAttrs (
+      n: o:
+      removeAttrs o [ "example" ]
+      // {
+        description = "[`test.${n}`](#packagesnametest${lib.toLower n}) for ${what}.";
+        # Not the option's own default: a layer that leaves it unset
+        # keeps what the layers it refines give.
+        defaultText = lib.literalMD "`test.${n}`'s";
+      }
+    ) (removeAttrs runOptions refused);
+
+  # A module of run settings, kept with its layer's rank for the
+  # evaluation of each run (lib/package-settings.nix `runsOf`), as
+  # `target` and `variant` keep theirs; documented with the run options.
+  runLayer =
+    what: refused:
+    bt.subLayers
+    // {
+      description = "module of run settings";
+      inherit (types.submoduleWith { modules = [ { options = runLayerOptions what refused; } ]; })
+        getSubOptions
+        ;
     };
-  };
+
+  # What a doctest run cannot honour: rustdoc runs each example itself,
+  # and its one hook, `--test-runtool`, starts the platform's runner.
+  doctestRefused = [
+    "wrapper"
+    "runner"
+    "preRun"
+    "stages"
+  ];
 
   # Every setting but the per-triple and per-variant layers, which have
   # these same options.
@@ -412,18 +559,7 @@ let
         '';
       };
 
-      test = {
-        env = bt.mkTestEnv ''
-          Environment for this package's test runs and doctests. They get
-          a fresh, empty `HOME` in their temporary directory by default;
-          `HOME = "/homeless-shelter"` makes a test that writes to its home
-          fail, as compiles and build-script runs do.
-        '';
-        path = mkOption {
-          type = types.listOf types.package;
-          default = [ ];
-          description = "Packages added to `PATH` in this package's test runs.";
-        };
+      test = runOptions // {
         sourceScope = mkOption {
           type = types.listOf (types.either types.path types.str);
           default = [ ];
@@ -498,67 +634,8 @@ let
             built-in step of ${pipeline}, after `runFiles`.
           '';
         };
-        wrapper = wrapperOption "each test binary of this package" "";
-        stripForRun = mkOption {
-          type = types.bool;
-          # The evaluation that reads it sets the default
-          # (lib/package-settings.nix), from `ca`, which is not an option
-          # of these modules.
-          defaultText = lib.literalMD "[`ca`](repository.md#ca)";
-          description = ''
-            Run a copy of each test binary with its debug info (and build
-            ID) stripped, content-addressed when `ca` is on. Workspace
-            libraries keep real source paths and line tables in their debug
-            info, so an edit to any file of such a library (a README, a
-            function the test never calls) changes the bytes of every test
-            binary that links it; the stripped copy does not change, and the
-            test is not re-run. Panic messages keep their file and line;
-            backtraces still name functions, but not files, lines or inlined
-            frames. The unstripped binary stays in `tests.<pkg>.<binary>`
-            for debugging. Off by default without
-            [`ca`](repository.md#ca) (`repo.config.ca`): the stripped copy
-            would then be input-addressed and save no run.
-          '';
-        };
-        args = mkOption {
-          type = types.listOf types.str;
-          default = [ ];
-          example = [
-            "--skip"
-            "net::"
-          ];
-          description = ''
-            libtest arguments for every test binary of this package, and
-            for its doctests: each is passed to `rustdoc --test` as
-            `--test-args`, so `[ "--skip" "src/lib.rs - net" ]` skips a
-            doctest by name. `test.binaries.<binary>.args` do not reach
-            doctests.
-          '';
-        };
-        postRun = mkOption {
-          type = types.lines;
-          default = "";
-          example = ''cp -r "$nextestDir/ci" "$out/junit"'';
-          description = ''
-            A shell snippet run inside each passing test run and doctest
-            run of this package, after the tests: `$log` is the run's raw
-            output and `$out` the run's output directory, empty otherwise.
-            With `test.runner = "nextest"`, `$nextestDir` is nextest's
-            store (JUnit reports). The package's snippet runs first, then
-            the binary's (`test.binaries.<binary>.postRun`) or the doctest
-            run's (`test.doctest.postRun`). Whatever a snippet puts in
-            `$out` decides whether the run is reproducible: breakbulk keeps
-            `$out` empty so that `nix build --rebuild` of a passing run
-            succeeds, and the output stays in the build log (`nix log`).
-            `cp "$log" "$out/log"` keeps the raw output, for a binary cache
-            that does not store build logs or a CI that keeps them as
-            artifacts; it holds timings and, with several test threads,
-            lines in a varying order, so such a run is not reproducible
-            under `nix build --rebuild`.
-          '';
-        };
         binaries = mkOption {
-          type = types.attrsOf (types.submodule testBinary);
+          type = types.attrsOf (runLayer "this binary's runs" [ ]);
           default = { };
           example = lib.literalExpression ''
             {
@@ -568,29 +645,32 @@ let
             }
           '';
           description = ''
-            Settings for one test binary of this package, by its key (and
-            the name of its check, `<ws>/<triple>/<pkg>/…`):
+            Run settings for one binary of this package, over `test`'s
+            and, for a bench run, `bench`'s (${runLevels}), by its key
+            (and the name of its check, `<ws>/<triple>/<pkg>/…`):
 
             - an integration test (`[[test]]`, `tests/cli.rs`): its name,
               `cli` (check `test-cli`);
             - the library's unit tests: `lib/` and the library's crate
-              name, `lib/my_crate` (check `test-lib`);
+              name, `lib/my_crate` (check `test-lib`, and `bench-lib` for
+              its bench run);
             - a bin's unit tests: `bin/` and the bin's name, `bin/my-tool`
-              (check `test-bin-my-tool`);
-            - an example or bench with `test = true`: `example/<name>`,
+              (check `test-bin-my-tool`, `bench-bin-my-tool`);
+            - an example, or a bench with `test = true`: `example/<name>`,
               `bench/<name>` (check `test-example-<name>`,
-              `test-bench-<name>`).
+              `test-bench-<name>`);
+            - a bench: `bench/<name>` (check `bench-<name>`).
 
-            A key that names no test binary of the package is an evaluation
-            error listing the package's keys. The keys come from the
-            package's manifest, so a test binary that only some targets or
+            A key that names no test or bench binary of the package is an
+            evaluation error listing the package's keys. The keys come from
+            the package's manifest, so a binary that only some targets or
             variants build (`required-features`) has its key on all of
-            them. Under `memberDefaults`, a key must name a test binary of
-            some member.
+            them. Under `memberDefaults`, a key must name a binary of some
+            member.
           '';
         };
         doctest = mkOption {
-          type = types.submodule doctest;
+          type = runLayer "the package's doctest run" doctestRefused;
           default = { };
           example = lib.literalExpression ''
             {
@@ -598,24 +678,11 @@ let
             }
           '';
           description = ''
-            Settings for the package's doctest run (`doctests.<pkg>`, check
-            `<ws>/<triple>/<pkg>/doctest`), as `test.binaries.<key>` has
-            for a test binary's.
-          '';
-        };
-        runner = mkOption {
-          type = types.enum [
-            "libtest"
-            "nextest"
-          ];
-          default = "libtest";
-          example = "nextest";
-          description = ''
-            How this package's test binaries run: `libtest` (the binary
-            itself, as `cargo test` runs it) or `nextest` (cargo-nextest's
-            reuse-build mode over the one binary, with the project's
-            nextest configuration: retries, timeouts, default filter, test
-            groups). Each binary is still its own test run.
+            Run settings for the package's doctest run (`doctests.<pkg>`,
+            check `<ws>/<triple>/<pkg>/doctest`), over `test`'s
+            (${runLevels}). rustdoc compiles and runs each example itself,
+            so `wrapper`, `runner`, `preRun` and `stages` are an error
+            here, and `test`'s do not apply to doctests.
           '';
         };
         nextest = {
@@ -643,6 +710,42 @@ let
           };
         };
       };
+      bench = mkOption {
+        type = runLayer "the package's bench runs" [ ];
+        default = { };
+        example = lib.literalExpression ''
+          {
+            enable = false;
+            runner = "libtest";
+          }
+        '';
+        description = ''
+          Run settings for the runs of the package's bench binaries (a
+          bench, and the library's and bins' harnesses in bench mode),
+          over `test`'s and under `test.binaries.<key>` (${runLevels}).
+          A variant with [`benches`](workspaces.md#workspacesnamevariantsnamebenches)
+          builds them with `cargo bench --no-run`, and each enabled one
+          runs once with `--test`, as a check of that variant
+          (`<pkg>/bench-<name>`), so that a bench that no longer runs
+          fails CI. Timed runs never happen inside Nix. A package whose
+          `test.runner` is `nextest` sets `bench.runner = "libtest"` for a
+          bench without the libtest harness (Criterion), which nextest
+          cannot list.
+        '';
+      };
+    };
+    # Run in every run; `null` in a layer removes one (`test.preRun`).
+    config.test.preRun = {
+      home = lib.mkOptionDefault ''
+        if [ "$HOME" = /homeless-shelter ]; then
+          export HOME=$TMPDIR/home
+          mkdir -p "$HOME"
+        fi
+      '';
+      threads = lib.mkOptionDefault ''
+        export RUST_TEST_THREADS=''${RUST_TEST_THREADS:-$NIX_BUILD_CORES}
+        printf '[profile.default]\ntest-threads = %s\n' "$NIX_BUILD_CORES" > "$TMPDIR/breakbulk-nextest.toml"
+      '';
     };
   };
   target = mkOption {
@@ -702,7 +805,11 @@ let
   };
 in
 {
-  inherit settings;
+  inherit settings doctestRefused;
+
+  # The names of the run settings: what `test.binaries.<key>`,
+  # `test.doctest` and `bench` may set.
+  runOptionNames = lib.attrNames runOptions;
 
   # A layer of package settings: a module of these options, kept for the
   # evaluation of each package it applies to (lib/package-settings.nix).

@@ -31,7 +31,7 @@
 #                   as mkRepository gives Linux), so beta's debug info
 #                   names its source view and holds its line table, and
 #                   alpha's test binary changes. With `ca` the run executes
-#                   a debug-stripped copy (`test.stripForRun`'s default),
+#                   a debug-stripped copy (`test.stages`' default),
 #                   which does not; run.sh checks the run is not re-run.
 #   run-inputs      (flake check; run.sh with `ca = true`) alpha's test run
 #                   has breakbulk-hints among its inputs (for its hints

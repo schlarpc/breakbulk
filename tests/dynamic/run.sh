@@ -444,13 +444,13 @@ for c in test-cutoff test-cutoff-source test-options; do
     fi
     case $c in
       test-cutoff | test-cutoff-source)
-        grep -q 'alpha-lib-alpha-bin-stripped\.drv' "$WORK/cutoff-after.built" || {
+        grep -q 'alpha-lib-alpha-bin-strip\.drv' "$WORK/cutoff-after.built" || {
           echo "alpha's test binary was not copied again (vacuous)" >&2
           ok=0
         }
         ;;
       test-options)
-        grep -q 'app-data-bin-stripped\.drv' "$WORK/cutoff-after.built" || {
+        grep -q 'app-data-bin-strip\.drv' "$WORK/cutoff-after.built" || {
           echo "the stripped copy was not rebuilt (vacuous)" >&2
           ok=0
         }

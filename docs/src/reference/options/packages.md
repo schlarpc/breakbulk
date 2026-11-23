@@ -39,6 +39,132 @@ attribute set of module
 *Declared by:*
  - [lib/modules/packages\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/packages.nix)
 
+## `packages.<name>.bench`
+
+Run settings for the runs of the package’s bench binaries (a
+bench, and the library’s and bins’ harnesses in bench mode),
+over ` test `’s and under ` test.binaries.<key> ` ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings))\.
+A variant with [` benches `](workspaces\.md\#workspacesnamevariantsnamebenches)
+builds them with ` cargo bench --no-run `, and each enabled one
+runs once with ` --test `, as a check of that variant
+(` <pkg>/bench-<name> `), so that a bench that no longer runs
+fails CI\. Timed runs never happen inside Nix\. A package whose
+` test.runner ` is ` nextest ` sets ` bench.runner = "libtest" ` for a
+bench without the libtest harness (Criterion), which nextest
+cannot list\.
+
+*Type:*
+module of run settings
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{
+  enable = false;
+  runner = "libtest";
+}
+
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.bench.enable`
+
+[` test.enable `](\#packagesnametestenable) for the package’s bench runs\.
+
+*Type:*
+boolean
+
+*Default:*
+` test.enable `’s
+
+## `packages.<name>.bench.args`
+
+[` test.args `](\#packagesnametestargs) for the package’s bench runs\.
+
+*Type:*
+list of string
+
+*Default:*
+` test.args `’s
+
+## `packages.<name>.bench.env`
+
+[` test.env `](\#packagesnametestenv) for the package’s bench runs\.
+
+*Type:*
+lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
+
+*Default:*
+` test.env `’s
+
+## `packages.<name>.bench.path`
+
+[` test.path `](\#packagesnametestpath) for the package’s bench runs\.
+
+*Type:*
+(function that evaluates to a(n) list of package) or (list of package) convertible to it
+
+*Default:*
+` test.path `’s
+
+## `packages.<name>.bench.postRun`
+
+[` test.postRun `](\#packagesnametestpostrun) for the package’s bench runs\.
+
+*Type:*
+strings concatenated with “\\n”
+
+*Default:*
+` test.postRun `’s
+
+## `packages.<name>.bench.preRun`
+
+[` test.preRun `](\#packagesnametestprerun) for the package’s bench runs\.
+
+*Type:*
+attribute set of (null or string)
+
+*Default:*
+` test.preRun `’s
+
+## `packages.<name>.bench.runner`
+
+[` test.runner `](\#packagesnametestrunner) for the package’s bench runs\.
+
+*Type:*
+one of “libtest”, “nextest”
+
+*Default:*
+` test.runner `’s
+
+## `packages.<name>.bench.stages`
+
+[` test.stages `](\#packagesnameteststages) for the package’s bench runs\.
+
+*Type:*
+attribute set of (null or raw value)
+
+*Default:*
+` test.stages `’s
+
+## `packages.<name>.bench.wrapper`
+
+[` test.wrapper `](\#packagesnametestwrapper) for the package’s bench runs\.
+
+*Type:*
+null or raw value
+
+*Default:*
+` test.wrapper `’s
+
 ## `packages.<name>.buildScriptPaths.allow`
 
 ` rerun-if-changed ` paths this package’s build script declares
@@ -686,13 +812,35 @@ attribute set of module
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
+## `packages.<name>.test.enable`
+
+Whether a run is part of ` repo.checks ` and the check groups\. The
+binary is built either way (a doctest compiles and runs in one
+rustdoc process, so a disabled doctest run builds nothing of it in
+the checks; ` doctests.<pkg> ` still builds it)\. For a library
+whose manifest sets ` doctest = false `, there is no doctest run to
+enable\. A single value ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings)):
+` memberDefaults.test.binaries.<key>.enable = false ` with ` true `
+for a few packages runs only theirs\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.test.args`
 
-libtest arguments for every test binary of this package, and
-for its doctests: each is passed to ` rustdoc --test ` as
-` --test-args `, so ` [ "--skip" "src/lib.rs - net" ] ` skips a
-doctest by name\. ` test.binaries.<binary>.args ` do not reach
-doctests\.
+libtest arguments, after the binary\. A doctest run passes each to
+` rustdoc --test ` as ` --test-args `, so ` [ "--skip" "src/lib.rs - net" ] ` skips a doctest by name\. Bench runs start with ` --test `
+(the ` bench ` layer’s own definition: ` lib.mkForce ` replaces it)\.
+Lists concatenate ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings))\.
 
 *Type:*
 list of string
@@ -717,28 +865,31 @@ list of string
 
 ## `packages.<name>.test.binaries`
 
-Settings for one test binary of this package, by its key (and
-the name of its check, ` <ws>/<triple>/<pkg>/… `):
+Run settings for one binary of this package, over ` test `’s
+and, for a bench run, ` bench `’s ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings)), by its key
+(and the name of its check, ` <ws>/<triple>/<pkg>/… `):
 
  - an integration test (` [[test]] `, ` tests/cli.rs `): its name,
    ` cli ` (check ` test-cli `);
  - the library’s unit tests: ` lib/ ` and the library’s crate
-   name, ` lib/my_crate ` (check ` test-lib `);
+   name, ` lib/my_crate ` (check ` test-lib `, and ` bench-lib ` for
+   its bench run);
  - a bin’s unit tests: ` bin/ ` and the bin’s name, ` bin/my-tool `
-   (check ` test-bin-my-tool `);
- - an example or bench with ` test = true `: ` example/<name> `,
+   (check ` test-bin-my-tool `, ` bench-bin-my-tool `);
+ - an example, or a bench with ` test = true `: ` example/<name> `,
    ` bench/<name> ` (check ` test-example-<name> `,
-   ` test-bench-<name> `)\.
+   ` test-bench-<name> `);
+ - a bench: ` bench/<name> ` (check ` bench-<name> `)\.
 
-A key that names no test binary of the package is an evaluation
-error listing the package’s keys\. The keys come from the
-package’s manifest, so a test binary that only some targets or
+A key that names no test or bench binary of the package is an
+evaluation error listing the package’s keys\. The keys come from
+the package’s manifest, so a binary that only some targets or
 variants build (` required-features `) has its key on all of
-them\. Under ` memberDefaults `, a key must name a test binary of
-some member\.
+them\. Under ` memberDefaults `, a key must name a binary of some
+member\.
 
 *Type:*
-attribute set of (submodule)
+attribute set of module of run settings
 
 *Default:*
 
@@ -762,127 +913,104 @@ attribute set of (submodule)
 
 ## `packages.<name>.test.binaries.<name>.enable`
 
-Whether this binary’s test run is part of ` repo.checks ` and the
-check groups; the binary is built either way\. A more specific
-layer’s value wins over the layers it refines
-([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)):
-` memberDefaults.test.binaries.<key>.enable = false ` with ` true `
-for a few packages runs only theirs\.
+[` test.enable `](\#packagesnametestenable) for this binary’s runs\.
 
 *Type:*
 boolean
 
 *Default:*
-
-```nix
-true
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+` test.enable `’s
 
 ## `packages.<name>.test.binaries.<name>.args`
 
-libtest arguments for this test binary’s run, after ` test.args `\.
+[` test.args `](\#packagesnametestargs) for this binary’s runs\.
 
 *Type:*
 list of string
 
 *Default:*
-
-```nix
-[ ]
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+` test.args `’s
 
 ## `packages.<name>.test.binaries.<name>.env`
 
-Environment for this test binary’s run, over ` test.env `\.
-
-A value can also be a function of the run, ` run: … `, with
-` run.workspaceRoot `: the absolute path of the workspace’s root
-directory in the files the run sees (its source view, or the checkout
-for a test app with ` checkout `)\. For example
-` INSTA_WORKSPACE_ROOT = run: run.workspaceRoot; `\. More attributes may
-be added, so take them with ` { workspaceRoot, ... } `\.
-
-The variables’ names are read before their values, so ` lib.mkIf `
-goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
-one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
-variable, and reading it is an error\.
+[` test.env `](\#packagesnametestenv) for this binary’s runs\.
 
 *Type:*
 lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
 
 *Default:*
+` test.env `’s
 
-```nix
-{ }
-```
+## `packages.<name>.test.binaries.<name>.path`
 
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+[` test.path `](\#packagesnametestpath) for this binary’s runs\.
+
+*Type:*
+(function that evaluates to a(n) list of package) or (list of package) convertible to it
+
+*Default:*
+` test.path `’s
 
 ## `packages.<name>.test.binaries.<name>.postRun`
 
-A shell snippet run after this test binary’s run passes, after the package’s ` test.postRun ` (see there)\.
+[` test.postRun `](\#packagesnametestpostrun) for this binary’s runs\.
 
 *Type:*
 strings concatenated with “\\n”
 
 *Default:*
+` test.postRun `’s
 
-```nix
-""
-```
+## `packages.<name>.test.binaries.<name>.preRun`
 
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+[` test.preRun `](\#packagesnametestprerun) for this binary’s runs\.
+
+*Type:*
+attribute set of (null or string)
+
+*Default:*
+` test.preRun `’s
+
+## `packages.<name>.test.binaries.<name>.runner`
+
+[` test.runner `](\#packagesnametestrunner) for this binary’s runs\.
+
+*Type:*
+one of “libtest”, “nextest”
+
+*Default:*
+` test.runner `’s
+
+## `packages.<name>.test.binaries.<name>.stages`
+
+[` test.stages `](\#packagesnameteststages) for this binary’s runs\.
+
+*Type:*
+attribute set of (null or raw value)
+
+*Default:*
+` test.stages `’s
 
 ## `packages.<name>.test.binaries.<name>.wrapper`
 
-A program that starts this test binary, in its test runs and test apps:
-Cargo’s runner protocol, ` <wrapper> <binary> <args…> `, in the
-package directory, with ` BREAKBULK_SOURCE_ROOT ` (the root of the
-run’s source view, or of the checkout for a test app with
-` checkout `) and ` BREAKBULK_NEXT ` (a program that starts the binary
-under the target’s runner, or directly without one) in its
-environment\. It ends with ` exec "$BREAKBULK_NEXT" <binary> <args…> `, the binary possibly moved\. It runs outside the target’s
-runner, on the machine that runs the test\. A program, or a
-function from the package set of that machine to one\.
-With ` test.runner = "nextest" `, nextest starts it as the target’s
-runner, for listing as for each test\. Doctests do not use it\.
-[` breakbulk.lib.wrappers `](\.\./presets\.md\#test-wrappers) has ready-made
-ones\. Over ` test.wrapper `\. ` null `: none\.
+[` test.wrapper `](\#packagesnametestwrapper) for this binary’s runs\.
 
 *Type:*
 null or raw value
 
 *Default:*
-
-```nix
-null
-```
-
-*Example:*
-
-```nix
-breakbulk.lib.wrappers.cargoTargetLayout { profile = "debug"; }
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+` test.wrapper `’s
 
 ## `packages.<name>.test.doctest`
 
-Settings for the package’s doctest run (` doctests.<pkg> `, check
-` <ws>/<triple>/<pkg>/doctest `), as ` test.binaries.<key> ` has
-for a test binary’s\.
+Run settings for the package’s doctest run (` doctests.<pkg> `,
+check ` <ws>/<triple>/<pkg>/doctest `), over ` test `’s
+([run settings](\.\./\.\./explanation/configuration\.md\#run-settings))\. rustdoc compiles and runs each example itself,
+so ` wrapper `, ` runner `, ` preRun ` and ` stages ` are an error
+here, and ` test `’s do not apply to doctests\.
 
 *Type:*
-submodule
+module of run settings
 
 *Default:*
 
@@ -904,95 +1032,60 @@ submodule
 
 ## `packages.<name>.test.doctest.enable`
 
-Whether the package’s doctest run is part of ` repo.checks ` and
-the check groups\. A doctest compiles and runs in one rustdoc
-process, so with ` false ` the checks build nothing of it; it
-stays buildable as ` doctests.<pkg> `\. A more specific layer’s
-value wins over the layers it refines
-([layer order](\.\./\.\./explanation/configuration\.md\#shared-settings-and-layer-order)):
-` memberDefaults.test.doctest.enable = false ` with ` true ` for a
-few packages runs only theirs\. For a
-library whose manifest sets ` doctest = false `, there is no
-doctest run to enable\.
+[` test.enable `](\#packagesnametestenable) for the package’s doctest run\.
 
 *Type:*
 boolean
 
 *Default:*
-
-```nix
-true
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+` test.enable `’s
 
 ## `packages.<name>.test.doctest.args`
 
-libtest arguments for the package’s doctest run, after ` test.args `\.
+[` test.args `](\#packagesnametestargs) for the package’s doctest run\.
 
 *Type:*
 list of string
 
 *Default:*
-
-```nix
-[ ]
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+` test.args `’s
 
 ## `packages.<name>.test.doctest.env`
 
-Environment for the package’s doctest run, over ` test.env `\.
-
-A value can also be a function of the run, ` run: … `, with
-` run.workspaceRoot `: the absolute path of the workspace’s root
-directory in the files the run sees (its source view, or the checkout
-for a test app with ` checkout `)\. For example
-` INSTA_WORKSPACE_ROOT = run: run.workspaceRoot; `\. More attributes may
-be added, so take them with ` { workspaceRoot, ... } `\.
-
-The variables’ names are read before their values, so ` lib.mkIf `
-goes around the whole set (` env = lib.mkIf cond { FOO = "x"; } `): on
-one value (` env.FOO = lib.mkIf false "x" `) it does not remove the
-variable, and reading it is an error\.
+[` test.env `](\#packagesnametestenv) for the package’s doctest run\.
 
 *Type:*
 lazy attribute set of (string or absolute path or package or signed integer or boolean or function that evaluates to a(n) (string or absolute path or package or signed integer or boolean))
 
 *Default:*
+` test.env `’s
 
-```nix
-{ }
-```
+## `packages.<name>.test.doctest.path`
 
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+[` test.path `](\#packagesnametestpath) for the package’s doctest run\.
+
+*Type:*
+(function that evaluates to a(n) list of package) or (list of package) convertible to it
+
+*Default:*
+` test.path `’s
 
 ## `packages.<name>.test.doctest.postRun`
 
-A shell snippet run after the package’s doctest run passes, after the package’s ` test.postRun ` (see there)\.
+[` test.postRun `](\#packagesnametestpostrun) for the package’s doctest run\.
 
 *Type:*
 strings concatenated with “\\n”
 
 *Default:*
-
-```nix
-""
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+` test.postRun `’s
 
 ## `packages.<name>.test.env`
 
-Environment for this package’s test runs and doctests\. They get
-a fresh, empty ` HOME ` in their temporary directory by default;
-` HOME = "/homeless-shelter" ` makes a test that writes to its home
-fail, as compiles and build-script runs do\.
+Environment for runs (test runs, doctests and bench runs) and test
+apps\. It comes after the environment Cargo gives the binary
+(` [env] `, the build script’s ` rustc-env `, ` CARGO_* `), so it can
+replace any of it\. Variables merge ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings))\.
 
 A value can also be a function of the run, ` run: … `, with
 ` run.workspaceRoot `: the absolute path of the workspace’s root
@@ -1078,10 +1171,18 @@ string
 
 ## `packages.<name>.test.path`
 
-Packages added to ` PATH ` in this package’s test runs\.
+Packages whose ` bin ` directories go on ` PATH ` in runs and test
+apps, after the environment\. A function of the package set of
+the machine that runs the test (the target’s ` testSystem `, else
+the build machine; the build machine’s for doctests and test
+apps), or a list used as given\. Lists concatenate ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings))\.
+
+The list’s length is read before its elements, so ` lib.mkIf ` goes
+around the whole list or function: on one element it does not remove
+the element, and reading it is an error\.
 
 *Type:*
-list of package
+(function that evaluates to a(n) list of package) or (list of package) convertible to it
 
 *Default:*
 
@@ -1089,26 +1190,30 @@ list of package
 [ ]
 ```
 
+*Example:*
+
+```nix
+p: [ p.git ]
+```
+
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
 ## `packages.<name>.test.postRun`
 
-A shell snippet run inside each passing test run and doctest
-run of this package, after the tests: ` $log ` is the run’s raw
-output and ` $out ` the run’s output directory, empty otherwise\.
-With ` test.runner = "nextest" `, ` $nextestDir ` is nextest’s
-store (JUnit reports)\. The package’s snippet runs first, then
-the binary’s (` test.binaries.<binary>.postRun `) or the doctest
-run’s (` test.doctest.postRun `)\. Whatever a snippet puts in
-` $out ` decides whether the run is reproducible: breakbulk keeps
-` $out ` empty so that ` nix build --rebuild ` of a passing run
-succeeds, and the output stays in the build log (` nix log `)\.
+A shell snippet run inside each passing run (test, doctest or
+bench), after the tests: ` $log ` is the run’s raw output and ` $out `
+the run’s output directory, empty otherwise\. With ` runner = "nextest" `, ` $nextestDir ` is nextest’s store (JUnit reports)\.
+Snippets concatenate ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings)): the package’s first, then the
+binary’s or the doctest run’s\. Whatever a snippet puts in ` $out `
+decides whether the run is reproducible: breakbulk keeps ` $out `
+empty so that ` nix build --rebuild ` of a passing run succeeds,
+and the output stays in the build log (` nix log `)\.
 ` cp "$log" "$out/log" ` keeps the raw output, for a binary cache
 that does not store build logs or a CI that keeps them as
-artifacts; it holds timings and, with several test threads,
-lines in a varying order, so such a run is not reproducible
-under ` nix build --rebuild `\.
+artifacts; it holds timings and, with several test threads, lines
+in a varying order, so such a run is not reproducible under
+` nix build --rebuild `\.
 
 *Type:*
 strings concatenated with “\\n”
@@ -1123,6 +1228,56 @@ strings concatenated with “\\n”
 
 ```nix
 "cp -r \"$nextestDir/ci\" \"$out/junit\""
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.test.preRun`
+
+Shell snippets run before the binary, in name order, in the run’s
+shell after its environment (` env `, ` path `) is set: what they
+export reaches the test\. ` null ` removes an entry\. Each entry is a
+single value of its own ([run settings](\.\./\.\./explanation/configuration\.md\#run-settings)), so a more specific layer
+replaces one entry and keeps the others\. The entries breakbulk
+defines:
+
+ - ` home `: a fresh, empty ` HOME ` in ` $TMPDIR `, as a test’s home is
+   under ` cargo test `, unless the environment set another than
+   Nix’s ` /homeless-shelter `\. With ` home = null ` a run keeps
+   ` /homeless-shelter `, so a test that writes to its home fails, as
+   compiles do\. ` XDG_* ` stay unset, so tools fall back to
+   directories under ` HOME `\.
+ - ` threads `: ` RUST_TEST_THREADS=$NIX_BUILD_CORES ` unless the
+   environment set it, and the same for nextest’s ` test-threads `
+   in ` $TMPDIR/breakbulk-nextest.toml `, a tool configuration that
+   nextest reads when it exists (the project’s configuration and
+   ` NEXTEST_TEST_THREADS ` still win)\.
+ - ` coverage `, in coverage variants: ` LLVM_PROFILE_FILE ` into
+   ` $TMPDIR/profraw `, which the run moves into ` $out/profraw ` when
+   it passes\. breakbulk adds it to the run, so
+   ` coverage = null ` removes it and a whole-set ` lib.mkForce ` does
+   not\.
+
+Doctests and test apps do not run them: rustdoc runs the examples
+itself, with a fresh ` HOME ` and ` RUST_TEST_THREADS `
+(` test.doctest.preRun ` is an error), and a test app keeps the
+user’s environment\.
+
+*Type:*
+attribute set of (null or string)
+
+*Default:*
+` home ` and ` threads ` (see the description)
+
+*Example:*
+
+```nix
+{
+  home = null;  # keep Nix's /homeless-shelter
+  db = "initdb -D \"$TMPDIR/db\" && pg_ctl -D \"$TMPDIR/db\" -w start";
+}
+
 ```
 
 *Declared by:*
@@ -1165,11 +1320,12 @@ null
 
 ## `packages.<name>.test.runner`
 
-How this package’s test binaries run: ` libtest ` (the binary
-itself, as ` cargo test ` runs it) or ` nextest ` (cargo-nextest’s
-reuse-build mode over the one binary, with the project’s
-nextest configuration: retries, timeouts, default filter, test
-groups)\. Each binary is still its own test run\.
+How a binary runs: ` libtest ` (the binary itself, as ` cargo test `
+runs it) or ` nextest ` (cargo-nextest’s reuse-build mode over the
+one binary, with the project’s nextest configuration: retries,
+timeouts, default filter, test groups)\. Each binary is still its
+own run\. Doctests run under rustdoc whatever this says
+(` test.doctest.runner ` is an error)\.
 
 *Type:*
 one of “libtest”, “nextest”
@@ -1253,26 +1409,40 @@ list of (absolute path or string)
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
-## `packages.<name>.test.stripForRun`
+## `packages.<name>.test.stages`
 
-Run a copy of each test binary with its debug info (and build
-ID) stripped, content-addressed when ` ca ` is on\. Workspace
-libraries keep real source paths and line tables in their debug
-info, so an edit to any file of such a library (a README, a
-function the test never calls) changes the bytes of every test
-binary that links it; the stripped copy does not change, and the
-test is not re-run\. Panic messages keep their file and line;
-backtraces still name functions, but not files, lines or inlined
-frames\. The unstripped binary stays in ` tests.<pkg>.<binary> `
-for debugging\. Off by default without
-[` ca `](repository\.md\#ca) (` repo.config.ca `): the stripped copy
-would then be input-addressed and save no run\.
+Stages the binary goes through before a run executes it, as a
+product’s [` stages `](\#packagesnamestages) (` { after ? null; before ? null; run; } `; ` null ` removes one; there is no
+` install `): the run executes the last stage’s output, a directory
+holding the one binary\. A stage’s ` target ` argument also has
+` packageSet `, the platform’s package set or null\.
+
+With [` ca `](repository\.md\#ca) (` repo.config.ca `) the default is
+` strip = { run = breakbulk.stageHelpers.strip { buildId = false; }; } `\.
+Workspace libraries keep real source paths and line tables in
+their debug info, so an edit to any file of such a library (a
+README, a function the test never calls) changes the bytes of
+every test binary that links it; the stripped copy does not
+change, and the run is not re-run\. Panic messages keep their file
+and line; backtraces still name functions, but not files, lines
+or inlined frames\. The unstripped binary stays in
+` tests.<pkg>.<binary> ` for debugging\. Without ` ca ` a stage’s
+output is input-addressed and saves no run, so there is none\.
+Doctests have no binary to stage (` test.doctest.stages ` is an
+error)\.
 
 *Type:*
-boolean
+attribute set of (null or raw value)
 
 *Default:*
-[` ca `](repository\.md\#ca)
+with [` ca `](repository\.md\#ca), ` strip `; else none
+
+*Example:*
+
+```nix
+{ strip = null; }  # run the unit's own binary
+
+```
 
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
@@ -1304,7 +1474,7 @@ true
 
 ## `packages.<name>.test.wrapper`
 
-A program that starts each test binary of this package, in its test runs and test apps:
+A program that starts the binary, in its runs and test apps:
 Cargo’s runner protocol, ` <wrapper> <binary> <args…> `, in the
 package directory, with ` BREAKBULK_SOURCE_ROOT ` (the root of the
 run’s source view, or of the checkout for a test app with
@@ -1312,11 +1482,12 @@ run’s source view, or of the checkout for a test app with
 under the target’s runner, or directly without one) in its
 environment\. It ends with ` exec "$BREAKBULK_NEXT" <binary> <args…> `, the binary possibly moved\. It runs outside the target’s
 runner, on the machine that runs the test\. A program, or a
-function from the package set of that machine to one\.
-With ` test.runner = "nextest" `, nextest starts it as the target’s
-runner, for listing as for each test\. Doctests do not use it\.
-[` breakbulk.lib.wrappers `](\.\./presets\.md\#test-wrappers) has ready-made
-ones\. ` null `: none\.
+function from the package set of that machine to one\. With
+` runner = "nextest" `, nextest starts it as the target’s runner,
+for listing as for each test\.
+[` breakbulk.lib.wrappers `](\.\./presets\.md\#test-wrappers) has
+ready-made ones\. Doctests do not use it: rustdoc runs each example
+itself (` test.doctest.wrapper ` is an error)\. ` null `: none\.
 
 *Type:*
 null or raw value

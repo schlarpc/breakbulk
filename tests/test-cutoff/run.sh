@@ -78,7 +78,7 @@ cutoff() {
   if grep -q 'alpha-lib-alpha-run\.drv' "$WORK/$edit.after.built"; then
     fail "$edit: alpha's test run was re-run"
   fi
-  grep -q 'alpha-lib-alpha-bin-stripped\.drv' "$WORK/$edit.after.built" \
+  grep -q 'alpha-lib-alpha-bin-strip\.drv' "$WORK/$edit.after.built" \
     || fail "$edit: alpha's test binary was not copied again (vacuous: beta's library changed)"
 }
 

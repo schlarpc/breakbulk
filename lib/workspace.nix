@@ -51,11 +51,12 @@
 #   ws.doctests.<pkg>          doctest derivations
 #   ws.checks."test/<pkg>/<binary>", ."doctest/<pkg>"
 #                              enabled test runs and doctests, flat
+#   ws.benchRuns.<pkg>.<binary>, ws.benchChecks   with `bench`: the bench
+#                              plan's runs, and the enabled ones
 #
 # Test options (set by mkRepository's module options): `runner` (null or a
-# list), `testSystem`, `packages.<name>.test` (env, path, args,
-# binaries.<binary>.{args,env,enable},
-# doctest.{args,env,postRun,enable}), `ca` (default:
+# list), `testSystem`, `packages.<name>` (settings with `runs`, each run's
+# settings: lib/package-settings.nix), `ca` (default:
 # breakbulk.nixFeatures.defaultCa), `nixFeatures` (the record every use of
 # a Nix feature is checked against, lib/nix-features.nix),
 # `checkout` (the user's checkout of the repository root, for test apps).
@@ -107,7 +108,8 @@ pkgs:
   # `packages.<name>.productInputs`).
   productInputs ? { },
   # packages.<name>: a member's settings, as mkRepository evaluates them
-  # (lib/package-settings.nix), every option set; `sources` is the
+  # (lib/package-settings.nix), every option set, and `runs`, its runs'
+  # settings (`runsOf` there); `sources` is the
   # package's list of source-view functions (lib/source-views.nix). A
   # path package without an entry has the options' defaults. Its env
   # captures and env come in `packageOverrides`.
@@ -151,12 +153,10 @@ pkgs:
   # How test processes find shared libraries ({ var; sep; } or null;
   # lib/test-runs.nix dylibPathOf): mkRepository passes the runner's.
   testDylibPath ? testRuns.dylibPathOf { inherit traits runner; },
-  # What strips test binaries for runs (path or null; lib/test-runs.nix
-  # objcopyOf): mkRepository passes the one of the target's package set.
-  testObjcopy ? testRuns.objcopyOf {
-    inherit pkgs traits;
-    triple = target;
-  },
+  # The target's package set for the stages of test-run binaries (or
+  # null; lib/test-runs.nix testPlatforms): mkRepository passes
+  # `targets.<triple>.packageSet`.
+  testPackageSet ? if target == targetTraitsLib.nativeTriple pkgs then pkgs else null,
   # The test settings of the build machine's triple, { triple; runner;
   # testSystem; dylibPath; }, which host units' tests (a proc macro's) run
   # with (lib/test-runs.nix testPlatforms): mkRepository passes the native
@@ -205,15 +205,19 @@ pkgs:
 }:
 let
   wsDir = util.normalizeRel path;
-  # The settings of a package that `packages` does not list.
+  # The settings of a package that `packages` does not list, with its
+  # runs' (lib/package-settings.nix).
   defaultSettings =
-    (packageSettings.evaluate {
-      layers = [ ];
-      defaults = packageSettings.contextDefaults {
-        inherit ca;
-        nextestConfig = testRuns.nextestDefaultConfig { inherit root wsDir; };
+    let
+      e = packageSettings.evaluate {
+        layers = [ ];
+        defaults = packageSettings.contextDefaults {
+          inherit ca;
+          nextestConfig = testRuns.nextestDefaultConfig { inherit root wsDir; };
+        };
       };
-    }).config;
+    in
+    e.config // { inherit (e) runs; };
   system = pkgs.stdenv.buildPlatform.system;
 
   fetch = mkFetch pkgs fetchArgs;
@@ -911,7 +915,7 @@ let
       traits
       ;
     dylibPath = testDylibPath;
-    objcopy = testObjcopy;
+    packageSet = testPackageSet;
     host = hostTest;
     packages = runPackages;
     doctestPackages = viewPackages;
@@ -919,6 +923,30 @@ let
     coverage = mode == "coverage";
     tools = testRunTools;
   };
+
+  benchTr = lib.optionalAttrs bench (
+    (if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
+      inherit
+        pkgs
+        target
+        runner
+        testSystem
+        runDirs
+        ca
+        nixFeatures
+        traits
+        ;
+      dylibPath = testDylibPath;
+      packageSet = testPackageSet;
+      host = hostTest;
+      name = "${name}-bench";
+      kind = "bench";
+      packages = runPackages;
+      inst = benched;
+      coverage = mode == "coverage";
+      tools = testRunTools;
+    }
+  );
 
   bins = lib.filterAttrs (_: r: r.breakbulkRoot.kind == "bin" && !r.breakbulkRoot.test) built.roots;
 in
@@ -1032,39 +1060,11 @@ in
   docs = documented.docs;
   # Bench-plan roots (benches and harnesses in bench mode), by root name.
   benches = if bench then benched.roots else { };
-  # Smoke runs of the bench plan's binaries: each once with `--test`, in
-  # its test-run environment (`test.env`, `test.path`; no test arguments).
-  # By package, then binary key as in testRuns.
-  benchRuns =
-    if !bench then
-      { }
-    else
-      ((if isDynamic then dynamic.mkTestRuns else testRuns.mkTestRuns) {
-        inherit
-          pkgs
-          target
-          runner
-          testSystem
-          runDirs
-          ca
-          nixFeatures
-          traits
-          ;
-        dylibPath = testDylibPath;
-        objcopy = testObjcopy;
-        host = hostTest;
-        name = "${name}-bench";
-        packages =
-          lib.genAttrs (lib.unique (map (r: r.breakbulkRoot.package) (lib.attrValues benched.roots)))
-            (pkg: {
-              test = (runPackages.${pkg} or defaultSettings).test // {
-                args = [ "--test" ];
-                binaries = { };
-              };
-            });
-        inst = benched;
-        tools = testRunTools;
-      }).runs;
+  # Runs of the bench plan's binaries, with their `bench` run settings
+  # (each once with `--test` by default), by package, then binary key as
+  # in testRuns; `benchChecks`: the enabled ones, as testRuns' `checks`.
+  benchRuns = benchTr.runs or { };
+  benchChecks = benchTr.checks or { };
   packages = lib.mapAttrs' (
     _: r: lib.nameValuePair r.breakbulkRoot.target (installExecutable r)
   ) bins;

@@ -1381,45 +1381,45 @@ runTests "lib-unit" {
   # Around a whole set, a priority is the module system's: `lib.mkForce`
   # on `env` replaces every lower-priority definition of `env`; on one
   # variable it forces that variable only. Single values inside sets and
-  # submodules (`env.X`, `stages.<name>`, `test.binaries.<key>.enable`,
+  # run layers (`env.X`, `stages.<name>`, `test.binaries.<key>.enable`,
   # `test.doctest.enable`) take the higher layer's at equal priority.
   testPackageSettingsSets = {
     expr =
       let
-        c =
-          (packageSettings [
-            {
-              env = {
-                A = "md";
-                B = "md";
-              };
-              forHost.env = {
-                H = "md";
-                F = lib.mkForce "md";
-              };
-              stages.sign.run = "md";
-              checks.lowOnly.run = "md";
-              test.binaries.lib.enable = false;
-              test.doctest.enable = false;
-            }
-            {
-              env = lib.mkForce { C = "pkg"; };
-              forHost.env = {
-                H = "pkg";
-                F = "pkg";
-              };
-              stages.sign = null;
-              test.binaries.lib.enable = true;
-              test.doctest.enable = true;
-            }
-          ]).config;
+        e = packageSettings [
+          {
+            env = {
+              A = "md";
+              B = "md";
+            };
+            forHost.env = {
+              H = "md";
+              F = lib.mkForce "md";
+            };
+            stages.sign.run = "md";
+            checks.lowOnly.run = "md";
+            test.binaries.lib.enable = false;
+            test.doctest.enable = false;
+          }
+          {
+            env = lib.mkForce { C = "pkg"; };
+            forHost.env = {
+              H = "pkg";
+              F = "pkg";
+            };
+            stages.sign = null;
+            test.binaries.lib.enable = true;
+            test.doctest.enable = true;
+          }
+        ];
+        c = e.config;
       in
       {
         inherit (c) env stages;
         forHost = c.forHost.env;
         checks = lib.attrNames c.checks;
-        binary = c.test.binaries.lib.enable;
-        doctest = c.test.doctest.enable;
+        binary = (e.runs.test "lib").enable;
+        doctest = e.runs.doctest.enable;
       };
     expected = {
       env.C = "pkg";
@@ -1432,6 +1432,128 @@ runTests "lib-unit" {
       binary = true;
       doctest = true;
     };
+  };
+  # Run settings: `test`, refined per run by `test.doctest` or `bench`,
+  # then `test.binaries.<key>`, each just above the layer that gives it
+  # and under that layer's `target` and `variant` layers. Lists
+  # concatenate in that order; a more specific single value wins within
+  # a layer, a higher layer's across layers. `preRun` has breakbulk's
+  # entries, which a layer replaces or removes one by one; bench runs
+  # start with `--test`.
+  testPackageSettingsRuns = {
+    expr =
+      let
+        e = packageSettings [
+          {
+            test.args = [ "--md" ];
+            test.env.A = "md";
+            test.wrapper = "md";
+            test.binaries.k = {
+              args = [ "--md-k" ];
+              env.A = "md-k";
+              wrapper = "md-k";
+              enable = false;
+            };
+            test.doctest.args = [ "--md-doc" ];
+            bench.enable = false;
+            target.t.test.env.B = "md-t";
+            target.t.test.binaries.k.env.B = "md-t-k";
+          }
+          {
+            test.args = [ "--pkg" ];
+            test.wrapper = "pkg";
+            test.preRun.home = null;
+            test.binaries.k.preRun.db = "start";
+            bench.args = [ "--bench-pkg" ];
+          }
+        ];
+        of = r: {
+          inherit (r)
+            args
+            env
+            wrapper
+            enable
+            ;
+          preRun = lib.attrNames (lib.filterAttrs (_: v: v != null) r.preRun);
+        };
+      in
+      {
+        k = of (e.runs.test "k");
+        other = of (e.runs.test "other");
+        doctest = of e.runs.doctest;
+        bench = of (e.runs.bench "k");
+      };
+    expected = {
+      k = {
+        args = [
+          "--md"
+          "--md-k"
+          "--pkg"
+        ];
+        env = {
+          A = "md-k";
+          B = "md-t-k";
+        };
+        wrapper = "pkg";
+        enable = false;
+        preRun = [
+          "db"
+          "threads"
+        ];
+      };
+      other = {
+        args = [
+          "--md"
+          "--pkg"
+        ];
+        env = {
+          A = "md";
+          B = "md-t";
+        };
+        wrapper = "pkg";
+        enable = true;
+        preRun = [ "threads" ];
+      };
+      doctest = {
+        args = [
+          "--md"
+          "--md-doc"
+          "--pkg"
+        ];
+        env = {
+          A = "md";
+          B = "md-t";
+        };
+        wrapper = "pkg";
+        enable = true;
+        preRun = [ "threads" ];
+      };
+      bench = {
+        args = [
+          "--test"
+          "--md"
+          "--md-k"
+          "--pkg"
+          "--bench-pkg"
+        ];
+        env = {
+          A = "md-k";
+          B = "md-t-k";
+        };
+        wrapper = "pkg";
+        enable = false;
+        preRun = [
+          "db"
+          "threads"
+        ];
+      };
+    };
+  };
+  # A run layer sets run settings only: under `test`, `runFiles` would be
+  # accepted and do nothing.
+  testPackageSettingsRunsOnly = {
+    expr = fails ((packageSettings [ { test.binaries.k.runFiles = [ "x" ]; } ]).runs.test "k").runFiles;
+    expected = true;
   };
   # A layer can be a module of the lockfile entry: a version condition,
   # by hand or with `whenVersion`, which takes any module.

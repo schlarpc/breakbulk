@@ -10,7 +10,7 @@
 #
 # `packages.<name>` is a settings module here, as `packages.<name>` of
 # mkRepository is, evaluated alone (lib/package-settings.nix): mkWorkspace
-# takes the evaluated settings.
+# takes the evaluated settings, with their runs'.
 { lib, breakbulk }:
 let
   mkWorkspace = import ../../lib/workspace.nix {
@@ -46,20 +46,23 @@ mkWorkspace pkgs (
   // lib.optionalAttrs (args ? packages) {
     packages = lib.mapAttrs (
       name: module:
-      (packageSettings.evaluate {
-        layers = [ { inherit module; } ];
-        defaults = packageSettings.contextDefaults {
-          ca = args.ca or breakbulk.nixFeatures.defaultCa;
-          nextestConfig = breakbulk.testRuns.nextestDefaultConfig {
-            inherit (args) root;
-            wsDir = breakbulk.util.normalizeRel (args.path or ".");
+      let
+        e = packageSettings.evaluate {
+          layers = [ { inherit module; } ];
+          defaults = packageSettings.contextDefaults {
+            ca = args.ca or breakbulk.nixFeatures.defaultCa;
+            nextestConfig = breakbulk.testRuns.nextestDefaultConfig {
+              inherit (args) root;
+              wsDir = breakbulk.util.normalizeRel (args.path or ".");
+            };
+          };
+          specialArgs.package = {
+            inherit name;
+            version = "0.0.0";
           };
         };
-        specialArgs.package = {
-          inherit name;
-          version = "0.0.0";
-        };
-      }).config
+      in
+      e.config // { inherit (e) runs; }
     ) args.packages;
   }
 )

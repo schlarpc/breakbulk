@@ -71,7 +71,7 @@ repo = {
         testApps.<pkg>.<binary>;     # the same, for nix run outside the sandbox
         doctests.<pkg>;              # each library's doctests
         benches.<pkg>.<bench>;       # bench binaries, in a bench variant
-        benchRuns.<pkg>.<binary>;    # each bench run once in test mode
+        benchRuns.<pkg>.<binary>;    # each bench binary run once in test mode
         namedBenchRuns.<pkg>.<bench>;  # the same, named as in benches; .enabled
         docs;                        # `cargo doc`'s folder
         buildScriptPaths.<plan>;     # each plan's check (build, test)
@@ -138,17 +138,20 @@ All checks and test runs, flattened for a flake's `checks.<system>`:
 | product check | `…/<pkg>/<check>` | `…/variant-<v>/<pkg>/<check>` |
 | test run | `…/<pkg>/test-<name>` | `…/variant-<v>/<pkg>/test-<name>` |
 | doctest | `…/<pkg>/doctest` | `…/variant-<v>/<pkg>/doctest` |
+| bench run, with `benches` | `…/<pkg>/bench-<name>` | `…/variant-<v>/<pkg>/bench-<name>` |
 | plan check | `…/buildScriptPaths/<plan>` | `…/variant-<v>/buildScriptPaths/<plan>` |
 | check or clippy variant | | `<ws>/<triple>/variant-<v>/check` |
 | docs, with `docs.check` | `<ws>/<triple>/docs` | `<ws>/<triple>/variant-<v>/docs` |
 
-The first five rows come from every build or coverage variant with
+The first six rows come from every build or coverage variant with
 [`checks = true`](options/workspaces.md#workspacesnamevariantsnamechecks)
 (the default for hand-written variants, not for the feature-matrix
 helpers'). A product whose roots Cargo all skipped is left out, and so
-is a test run or doctest turned off with
-[`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable)
-or [`test.doctest.enable`](options/packages.md#packagesnametestdoctestenable).
+is a run turned off with its `enable`
+([run settings](../explanation/configuration.md#run-settings):
+[`test.binaries.<key>.enable`](options/packages.md#packagesnametestbinariesnameenable),
+[`test.doctest.enable`](options/packages.md#packagesnametestdoctestenable),
+[`bench.enable`](options/packages.md#packagesnamebenchenable)).
 A plan check is
 [`buildScriptPaths`](../explanation/configuration.md#missing-build-script-paths)
 of the build plan (`<plan>` is `build`), unless the target has no

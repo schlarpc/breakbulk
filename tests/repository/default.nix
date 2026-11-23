@@ -2791,13 +2791,13 @@ in
         {
           workspaces.main.memberDefaults.test = {
             runner = lib.mkForce "nextest";
-            stripForRun = false;
+            preRun.probe = "echo md-probe";
           };
           packages.app-b = {
             test.runner = "libtest";
             test.nextest.profile = "package-layer";
             target.${native}.test.nextest.profile = "target-layer";
-            variant.default.test.stripForRun = lib.mkDefault true;
+            variant.default.test.preRun.probe = lib.mkDefault "echo pkg-probe";
           };
         }
       ];
@@ -2805,7 +2805,9 @@ in
       checks = {
         targetLayerWins = lib.hasInfix "--profile target-layer" run.drvAttrs.buildCommand;
         forcedLowerWins = run.drvAttrs ? nextestCargoMetadata;
-        defaultHigherLoses = !(lib.hasSuffix "-bin-stripped" run.passthru.binary.name);
+        defaultHigherLoses =
+          lib.hasInfix "md-probe" run.drvAttrs.buildCommand
+          && !(lib.hasInfix "pkg-probe" run.drvAttrs.buildCommand);
       };
       bad = lib.attrNames (lib.filterAttrs (_: v: !v) checks);
     in

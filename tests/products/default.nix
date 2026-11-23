@@ -247,7 +247,8 @@
 #   benches          a libtest-harness bench and a Criterion bench come
 #                    from the bench variant only (`cargo bench --no-run`,
 #                    bench profile, opt-level 3); the test plan has none;
-#                    benchSmoke runs each once with `--test` as a check
+#                    each runs once with `--test` as a check of the
+#                    bench variant, but the one `test.binaries` disables
 #
 # `repos` exposes each repository for debugging, `modules` the modules of
 # some (tests/dynamic adds its own to them).
@@ -1142,9 +1143,11 @@ let
     {
       workspaces.main = {
         path = ".";
-        benchSmoke = true;
-        # `benches` reads the smoke runs' output.
+        # `benches` reads the bench runs' output.
         memberDefaults.test.postRun = ''cp "$log" "$out/log"'';
+        # A bench run's settings: `bench`, then the binary's.
+        memberDefaults.bench.env.BENCHER_RUN = "bench";
+        memberDefaults.test.binaries."bench/libtest".enable = false;
         variants = {
           default.profile = "dev";
           bench = {
@@ -1722,8 +1725,20 @@ in
       critUnit != null && lib.elem "opt-level=3" critArgs
     ) "benches: crit unit args ${builtins.toJSON critArgs}";
     assert lib.assertMsg (
-      lib.length (lib.attrNames smoke) == 3
-    ) "benches: smoke checks ${builtins.toJSON (lib.attrNames smoke)}";
+      lib.attrNames smoke == [
+        "main/${native}/variant-bench/bencher/bench-crit"
+        "main/${native}/variant-bench/bencher/bench-lib"
+      ]
+    ) "benches: bench-run checks ${builtins.toJSON (lib.attrNames smoke)}";
+    assert lib.assertMsg (
+      t.benchRuns.bencher ? "bench/libtest"
+    ) "benches: the disabled bench run is gone from benchRuns";
+    assert lib.assertMsg (
+      lib.all (d: lib.hasInfix "export BENCHER_RUN=bench" d.drvAttrs.buildCommand) (lib.attrValues smoke)
+      && lib.all (r: !(lib.hasInfix "BENCHER_RUN" r.drvAttrs.buildCommand)) (
+        lib.attrValues (lib.filterAttrs (n: _: lib.hasPrefix "test/" n) w.instances.${native}.bench.checks)
+      )
+    ) "benches: `bench` env reaches bench runs only";
     pkgs.runCommand "benches"
       (
         {
@@ -1737,7 +1752,7 @@ in
         [ -x $crit/bin/crit ]
         [ -x $libtest/bin/libtest ]
         cat ${lib.concatMapStringsSep " " (d: "${d}/log") (lib.attrValues smoke)}
-        grep -q Success ${smoke."main/${native}/bencher/bench-crit"}/log
+        grep -q Success ${smoke."main/${native}/variant-bench/bencher/bench-crit"}/log
         touch $out
       '';
 

@@ -527,13 +527,33 @@ let
           gone. A `.dwp` that `splitDebug` moved next to a `.debug` file
           stays, since that file keeps its skeleton units. When there are
           debug files, what is left of them is the stage's `debug` output.
-          `targets.<triple>.debugInfo = "strip"` inserts this stage.
+          `targets.<triple>.debugInfo = "strip"` inserts this stage; with
+          `ca`, `test.stages` runs it with `buildId = false` on each test
+          binary.
+
+          When the stage's `target` has a `packageSet` (test-run stages
+          do), ELF files strip with that package set's C toolchain
+          binutils, which for the native target are already in every
+          derivation's closure; otherwise with `binutils`.
         '';
         options = {
           all = mkOption {
             type = types.bool;
             default = false;
             description = "Also remove the symbol tables (`--strip-all`), not only the debug information.";
+          };
+          buildId = mkOption {
+            type = types.bool;
+            default = true;
+            description = ''
+              Keep the GNU build ID (`.note.gnu.build-id`) of each ELF
+              file. The linker computes it over the whole file, debug
+              information included, so without it a file whose debug
+              information alone changed strips to the same bytes, which
+              lets a content-addressed test run skip a re-run. A Mach-O
+              file keeps its UUID either way: LLVM's tools cannot remove
+              it.
+            '';
           };
           binutils = toolOption "binutils-unwrapped-all-targets";
           llvm = toolOption "llvm";
@@ -550,14 +570,25 @@ let
         }:
         let
           debug = hasDebugFiles product;
+          format = (traitsOf target pkgs).objectFormat;
+          packageSet = target.packageSet or null;
+          # The target's own binutils, as its linker is chosen: no
+          # all-targets build for a target whose toolchain is at hand.
+          binutils =
+            if cfg.binutils == null && packageSet != null && format == "elf" then
+              packageSet.stdenv.cc.bintools
+            else
+              binutilsOf cfg pkgs;
+          prefix = binutils.targetPrefix or "";
         in
         pkgs.runCommand (stageName product "strip")
           (
             {
-              nativeBuildInputs = [
-                (binutilsOf cfg pkgs)
-                (toolOf cfg.llvm pkgs "llvm")
-              ];
+              # Only the tools of the target's object format: an LLVM is a
+              # large input for an ELF target, binutils one for Mach-O.
+              nativeBuildInputs =
+                lib.optional (format != "macho") binutils
+                ++ lib.optional (format != "elf") (toolOf cfg.llvm pkgs "llvm");
             }
             // lib.optionalAttrs debug {
               outputs = [
@@ -585,7 +616,9 @@ let
                 *) continue ;;
               esac
               isElf "$f" || continue
-              strip ${if cfg.all then "--strip-all" else "--strip-debug"} "$f"
+              ${prefix}strip ${if cfg.all then "--strip-all" else "--strip-debug"} ${
+                lib.optionalString (!cfg.buildId) "--remove-section=.note.gnu.build-id"
+              } "$f"
               ${lib.optionalString debug ''
                 # splitDebug's `.dwp` is a symlink here, to the file next to
                 # the `.debug` file, whose skeleton units still name it.

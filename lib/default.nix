@@ -101,7 +101,10 @@ let
       ;
   };
   buildScriptPaths = import ./build-script-paths.nix { inherit lib; };
-  packageSettings = import ./package-settings.nix { inherit lib; };
+  packageSettings = import ./package-settings.nix {
+    inherit lib;
+    inherit (stages) helpers;
+  };
   versionReq = import ./modules/version-req.nix { inherit lib; };
   variants = import ./variants.nix { inherit lib manifest; };
   testApps = import ./test-apps.nix {

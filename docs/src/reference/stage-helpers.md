@@ -369,7 +369,14 @@ the debug files so far (`split-debuginfo = "unpacked"`), and the
 gone. A `.dwp` that `splitDebug` moved next to a `.debug` file
 stays, since that file keeps its skeleton units. When there are
 debug files, what is left of them is the stage's `debug` output.
-`targets.<triple>.debugInfo = "strip"` inserts this stage.
+`targets.<triple>.debugInfo = "strip"` inserts this stage; with
+`ca`, `test.stages` runs it with `buildId = false` on each test
+binary.
+
+When the stage's `target` has a `packageSet` (test-run stages
+do), ELF files strip with that package set's C toolchain
+binutils, which for the native target are already in every
+derivation's closure; otherwise with `binutils`.
 
 #### `strip.all`
 
@@ -386,6 +393,20 @@ The package to run instead of `binutils-unwrapped-all-targets` from the stage's 
 *Type:* null or package
 
 *Default:* `null`
+
+#### `strip.buildId`
+
+Keep the GNU build ID (`.note.gnu.build-id`) of each ELF
+file. The linker computes it over the whole file, debug
+information included, so without it a file whose debug
+information alone changed strips to the same bytes, which
+lets a content-addressed test run skip a re-run. A Mach-O
+file keeps its UUID either way: LLVM's tools cannot remove
+it.
+
+*Type:* boolean
+
+*Default:* `true`
 
 #### `strip.llvm`
 

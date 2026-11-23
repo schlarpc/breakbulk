@@ -16,24 +16,27 @@
 #                         # the variable the test process finds shared
 #                         # libraries through (`dylibPathOf`)
 #     testPkgs = <pkgs for testSystem>;
-#     objcopy = <the target's>;  # what strips test binaries for runs, or
-#                         # null (`objcopyOf`)
+#     packageSet = <pkgs for the native triple, else null>;  # the target's
+#                         # package set, for the stages of run binaries
 #     host = <defaultHost>;  # the same settings for the build machine's
 #                         # triple, which a host unit's test (a proc macro's
 #                         # unit tests) runs with (`testPlatforms`)
-#     packages = { };     # packages.<name>.test, as in the module options
+#     packages = { };     # packages.<name>: settings with `runs`
+#                         # (lib/package-settings.nix `runsOf`)
+#     kind = "test";      # "bench": the runs of a bench plan, with the
+#                         # `bench` run settings, and no doctests
 #     ca = breakbulk.nixFeatures.defaultCa;   # true; false
 #     nixFeatures = <standalone>;  # as stages.mkProduct's
 #     coverage = false;   # coverage variants: each run keeps its profiles
-#                         # in $out/profraw (`postRunSnippets`)
+#                         # in $out/profraw (`preRunEntries`,
+#                         # `postRunSnippets`)
 #     name = "breakbulk";
 #   };
 #
 #   t.runs.<pkg>.<binary>     one test-run derivation per test binary
 #   t.doctests.<pkg>          one doctest derivation per library, with its
-#                             platform's runner, `test.args`, `test.env`,
-#                             `test.path` and `test.doctest`
-#                             (not per-binary settings)
+#                             platform's runner and the doctest run's
+#                             settings (`doctestConfig`)
 #   t.checks."test/<pkg>/<binary>", t.checks."doctest/<pkg>"
 #                             every enabled run and doctest
 #   t.specs.<pkg>.<binary>    what a run needs (lib/test-apps.nix uses it)
@@ -44,26 +47,28 @@
 # an example or bench built as a test as `example/<name>`, `bench/<name>`.
 # Integration test names cannot contain `/`, so names never collide.
 #
-# A test run, as `cargo test` runs a test binary (Cargo's `cmd_builds` and
+# Each run has its run settings (`runConfig`: `test`, refined by
+# `test.binaries.<binary>` and, for a bench run, `bench`). A test run, as
+# `cargo test` runs a test binary (Cargo's `cmd_builds` and
 # `Compilation::fill_env`, `src/cargo/ops/cargo_test.rs` and
 # `src/cargo/core/compiler/compilation.rs`):
 #
-#   - the binary (a content-addressed copy when `ca`, so that a
-#     byte-identical binary is not re-run) runs under its platform's runner
-#     (`testPlatforms`: a host unit's is the build machine's, not the
-#     target's), in the package directory of its source view, with `test.args`
-#     and `test.binaries.<binary>.args`;
-#   - its environment: a fresh, empty `HOME` in `$TMPDIR` (`homeScript`),
-#     then the dynamic-library path, then the project's
+#   - the binary, through the run's `stages` (`runBinary`: by default,
+#     with `ca`, a debug-stripped content-addressed copy, so that a binary
+#     whose code did not change is not re-run), runs under its platform's
+#     runner (`testPlatforms`: a host unit's is the build machine's, not
+#     the target's), in the package directory of its source view, with
+#     the run's `args`;
+#   - its environment: the dynamic-library path, then the project's
 #     `[env]` config variables (the plan's `configEnv`, with the values
 #     Cargo gave the test unit), then the package's build script
 #     `rustc-env` values, then `CARGO`, `CARGO_MANIFEST_DIR`,
 #     `CARGO_MANIFEST_PATH` and `CARGO_PKG_*` from the test unit's recorded
-#     env, then `test.env`, then `test.binaries.<binary>.env`, `test.path`
-#     on `PATH`, and last `RUST_TEST_THREADS=$NIX_BUILD_CORES` only when
-#     none of these set it. Cargo applies `[env]` last but never over a
-#     variable it set itself (`apply_env_config`), so `[env]` loses to all
-#     of Cargo's own;
+#     env, then the run's `env`, its `path` on `PATH`, and last its
+#     `preRun` entries (a fresh `HOME` and `RUST_TEST_THREADS` by default,
+#     each only when the environment has not set one). Cargo applies
+#     `[env]` last but never over a variable it set itself
+#     (`apply_env_config`), so `[env]` loses to all of Cargo's own;
 #   - the dynamic-library path (its platform's variable, `dylibPathOf`:
 #     LD_LIBRARY_PATH on Linux, WINEPATH under wine, none for wasm) holds,
 #     sorted as Cargo sorts paths, the
@@ -78,23 +83,24 @@
 #   - a binary that contains the planner's relative `CARGO_TARGET_TMPDIR`
 #     runs in a private copy of the package directory made of symbolic
 #     links, with a real, writable `target/tmp` (`workdirScript`);
-#   - with a test wrapper (`test.wrapper`, `test.binaries.<binary>.wrapper`),
-#     the wrapper starts the binary, and the runner runs inside it
-#     (`launchWords`);
+#   - with a test wrapper (the run's `wrapper`), the wrapper starts the
+#     binary, and the runner runs inside it (`launchWords`);
 #   - the output goes to the build log and to `$log` in $TMPDIR, not to
 #     `$out`: it holds timings and, with several test threads, lines in a
-#     varying order, and `nix build --rebuild` compares every output. `$out`
-#     is an empty directory, unless a `test.postRun` snippet puts something there after a passing run (`postRunScript`);
+#     varying order, and `nix build --rebuild` compares every output.
+#     `$out` is an empty directory, unless a `postRun` snippet puts
+#     something there after a passing run (`postRunScript`);
 #   - the run fails when the binary does, then prints a hint for each path
 #     its output names that its source view lacks (`hintScript`).
 #
-# With `test.runner = "nextest"`, the same environment is set up, then
+# With `runner = "nextest"`, the same environment is set up, then
 # cargo-nextest runs the one binary in its reuse-build mode from the
 # metadata breakbulk-instantiate synthesizes (`nextestSpec`), with the
 # package's `test.nextest.profile` and `configFile`; libtest arguments go
-# after `--`. nextest's `test-threads` defaults to `$NIX_BUILD_CORES`;
-# the project's configuration and `NEXTEST_TEST_THREADS` override it.
-# nextest's store (junit and the like) is `$nextestDir` for `test.postRun`.
+# after `--`. nextest's `test-threads` comes from the tool configuration
+# the `threads` entry of `preRun` writes (`nextestToolConfig`); the
+# project's configuration and `NEXTEST_TEST_THREADS` override it.
+# nextest's store (junit and the like) is `$nextestDir` for `postRun`.
 #
 # What each run needs from the plan (env, `[env]` values, the runs for the
 # dynamic-library path and `rustc-env`, nextest's metadata) comes from
@@ -111,7 +117,6 @@
   featureGates,
 }:
 let
-  packageSettings = import ./package-settings.nix { inherit lib; };
   inherit (builtins)
     replaceStrings
     toJSON
@@ -121,19 +126,6 @@ let
   binaryKey = r: if r.kind == "test" then r.target else "${r.kind}/${r.target}";
 
   storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
-
-  # The objcopy that strips a platform's test binaries for their runs
-  # (lib/presets/objcopy.nix), or null for a platform whose binaries the
-  # strip leaves as they are. `packageSet` is the platform's (mkRepository
-  # passes `targets.<t>.packageSet`).
-  objcopyOf =
-    {
-      pkgs,
-      triple,
-      traits ? targetTraits.resolve { inherit triple; },
-      packageSet ? if triple == targetTraits.nativeTriple pkgs then pkgs else null,
-    }:
-    (import ./presets/objcopy.nix).chooseObjcopy { inherit pkgs traits packageSet; };
 
   # How a test process of a target finds shared libraries: `{ var; sep; }`,
   # or null when it has no such variable (wasm, bare metal). The runner's
@@ -200,7 +192,6 @@ rec {
     dylibJqWith
     dylibPathOf
     exportDylib
-    objcopyOf
     ;
 
   # What test runs read from the Rust toolchain: the standard library's
@@ -404,55 +395,65 @@ rec {
       envFlags = lib.optional (spec.envFlags != [ ]) env;
     };
 
-  # `test.stripForRun`: shell lines defining `stripForRun`,
-  # which strips debug info from the copy of a test binary its run
-  # consumes, so the source paths that the debug info of workspace
-  # libraries holds do not change the run's input. The GNU build ID goes
-  # too: the linker computes it over the whole file, debug info included.
-  # A file that is not ELF is left as it is. `objcopy` is the platform's
-  # (`objcopyOf`); null on a platform whose binaries are not ELF.
-  stripScript = objcopy: ''
-    stripForRun() {
-      chmod u+w "$1"
-      if [ "$(head -c4 "$1" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then
-        ${
-          if objcopy == null then
-            ''echo "stripForRun: $1 is ELF, but its platform's traits name another object format; left unchanged"''
-          else
-            ''${objcopy} --strip-debug --remove-section=.note.gnu.build-id "$1"''
-        }
-      else
-        echo "stripForRun: $1 is not ELF; left unchanged"
-      fi
-    }
-  '';
-
-  # The copy of a test binary a run executes, from `src` (a shell glob
-  # matching the one file): content-addressed when `caAttrs` says so,
-  # debug-stripped with `strip` by `objcopy` (its platform's, `objcopyOf`).
-  # `prelude` runs first; `attrs` are extra derivation attributes.
+  # A copy of a test binary, from `src` (a shell glob matching the one
+  # file), content-addressed when `caAttrs` says so. `prelude` runs
+  # first; `attrs` are extra derivation attributes.
   binaryCopy =
     {
       pkgs,
       name,
       caAttrs,
-      strip,
-      objcopy,
       src,
       prelude ? "",
       attrs ? { },
     }:
-    pkgs.runCommand "${name}-bin${lib.optionalString strip "-stripped"}" (attrs // caAttrs) ''
+    pkgs.runCommand "${name}-bin" (attrs // caAttrs) ''
       ${prelude}
       files=(${src})
       [ ''${#files[@]} -eq 1 ] || { echo "expected one file in ${src}" >&2; exit 1; }
       mkdir -p $out
       cp "''${files[0]}" $out/
-      ${lib.optionalString strip ''
-        ${stripScript objcopy}
-        stripForRun "$out/''${files[0]##*/}"
-      ''}
     '';
+
+  # The binary a run executes: `linked` (a directory holding it) through
+  # the run's `stages` (`test.stages`), as a product's stages run
+  # (stages.mkProduct; no `install`, no checks), for `platform`
+  # (testPlatforms). Without a stage, `copy` (a content-addressed copy
+  # when `ca`, so that a byte-identical binary is not re-run) or `linked`
+  # itself.
+  runBinary =
+    {
+      pkgs,
+      name,
+      linked,
+      copy,
+      cfg,
+      platform,
+      ca,
+      nixFeatures,
+    }:
+    let
+      live = lib.filterAttrs (_: v: v != null) cfg.stages;
+    in
+    if live == { } then
+      (if ca then copy else linked)
+    else
+      stages.mkProduct {
+        name = "${name}-bin";
+        inherit
+          pkgs
+          linked
+          ca
+          nixFeatures
+          ;
+        stages = cfg.stages // {
+          install = null;
+        };
+        defaultChecks = false;
+        target = {
+          inherit (platform) triple traits packageSet;
+        };
+      };
 
   # A spec whose working directory and runtime CARGO_MANIFEST_DIR are
   # `dir`, the package directory of the package's "run" view
@@ -468,46 +469,45 @@ rec {
       };
     };
 
-  # Packages' test settings with every function value of `test.env`,
-  # `test.binaries.<binary>.env` and `test.doctest.env` applied to the
-  # facts of the runs that read them, `facts.<package>` (`{ workspaceRoot
-  # }`). Each kind of run has its own facts: a test run reads its "run"
-  # view, a doctest its test view, a test app possibly the checkout.
+  # Packages' settings with every function value of their runs' `env`
+  # applied to the facts of the runs that read them, `facts.<package>`
+  # (`{ workspaceRoot }`). Each kind of run has its own facts: a test run
+  # reads its "run" view, a doctest its test view, a test app possibly
+  # the checkout.
   resolveTestEnv =
     facts: packages:
     let
-      resolve = f: lib.mapAttrs (_: v: if lib.isFunction v then v f else v);
+      resolve = f: t: t // { env = lib.mapAttrs (_: v: if lib.isFunction v then v f else v) t.env; };
       one =
         pkg: p:
-        if !(p ? test) then
+        if !(p ? runs) then
           p
         else
           let
             f =
               facts.${pkg}
                 or (throw "breakbulk: a test env value of `${pkg}` is a function of the run, but `${pkg}` has no source view in this workspace");
-            t = p.test;
           in
           p
           // {
-            test =
-              t
-              // lib.optionalAttrs (t ? env) { env = resolve f t.env; }
-              // lib.optionalAttrs (t ? binaries) {
-                binaries = lib.mapAttrs (
-                  _: b: b // lib.optionalAttrs (b ? env) { env = resolve f b.env; }
-                ) t.binaries;
-              }
-              // lib.optionalAttrs (t ? doctest) {
-                doctest = t.doctest // lib.optionalAttrs (t.doctest ? env) { env = resolve f t.doctest.env; };
-              };
+            runs = {
+              test = key: resolve f (p.runs.test key);
+              doctest = resolve f p.runs.doctest;
+              bench = key: resolve f (p.runs.bench key);
+            };
           };
     in
     lib.mapAttrs one packages;
 
-  # The package's test settings (`packages.<name>.test`, as
-  # lib/package-settings.nix evaluates them).
-  testConfig = packages: pkg: packages.${pkg}.test;
+  # The run settings of one run of package `pkg` (`packages.<name>.runs`,
+  # lib/package-settings.nix `runsOf`): `kind` "test" or "bench", with the
+  # binary's key; "doctest" without one.
+  runConfig =
+    packages: pkg: kind: key:
+    let
+      r = packages.${pkg}.runs;
+    in
+    if kind == "doctest" then r.doctest else r.${kind} key;
 
   # The configuration file nextest reads by default for a workspace
   # (`wsDir`, relative to `root`): `.config/nextest.toml` under the Cargo
@@ -580,17 +580,14 @@ rec {
         reason = "breakbulk";
       };
 
-  binaryConfig = cfg: binary: cfg.binaries.${binary} or packageSettings.binaryDefaults;
-
-  # The test wrapper of one binary (`test.binaries.<binary>.wrapper`, else
-  # `test.wrapper`) as a program on `pkgs`' system, or null. A function is
-  # called with `pkgs` (`wrappers.cargoTargetLayout`'s result is one); a
-  # derivation with `meta.mainProgram` names that program.
+  # A run's test wrapper (`wrapper` of its run settings `cfg`) as a
+  # program on `pkgs`' system, or null. A function is called with `pkgs`
+  # (`wrappers.cargoTargetLayout`'s result is one); a derivation with
+  # `meta.mainProgram` names that program.
   wrapperOf =
-    pkgs: cfg: binary:
+    pkgs: cfg:
     let
-      b = (binaryConfig cfg binary).wrapper;
-      w = if b != null then b else cfg.wrapper;
+      w = cfg.wrapper;
       v = if builtins.isFunction w then w pkgs else w;
     in
     if v == null then
@@ -697,17 +694,16 @@ rec {
   # A run's raw output, besides the build log: `$log` in `test.postRun`.
   logFile = "$TMPDIR/breakbulk-test.log";
 
-  # Coverage: the profiles go to $TMPDIR, and a snippet of
-  # `postRunSnippets` moves them into $out. LLVM_PROFILE_FILE's `%p` (the
-  # process ID) differs on every run, so they are renamed by content.
-  # The counters themselves can still differ (hash seeds, timing), so
-  # coverage runs are outside the `--rebuild` guarantee.
-  coverageEnvScript =
-    coverage:
-    lib.optionalString coverage ''
-      mkdir -p $TMPDIR/profraw
-      export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
-    '';
+  # Coverage: the profiles go to $TMPDIR (the `coverage` entry of
+  # `preRunEntries`), and a snippet of `postRunSnippets` moves them into
+  # $out. LLVM_PROFILE_FILE's `%p` (the process ID) differs on every run,
+  # so they are renamed by content. The counters themselves can still
+  # differ (hash seeds, timing), so coverage runs are outside the
+  # `--rebuild` guarantee.
+  coverageEnv = ''
+    mkdir -p $TMPDIR/profraw
+    export LLVM_PROFILE_FILE=$TMPDIR/profraw/%m-%p.profraw
+  '';
   coverageCollect = ''
     mkdir -p "$out/profraw"
     for f in "$TMPDIR"/profraw/*.profraw; do
@@ -760,20 +756,13 @@ rec {
     });
 
   # What runs after a passing run, in order: breakbulk's own (coverage),
-  # the package's `test.postRun`, the binary's (`binary`: its key) or,
-  # without a binary, the doctest run's.
+  # then the run's `postRun` (its layers' snippets, concatenated).
   postRunSnippets =
     {
       cfg,
-      binary ? null,
       coverage ? false,
     }:
-    let
-      own = if binary == null then cfg.doctest else binaryConfig cfg binary;
-    in
-    lib.optional coverage coverageCollect
-    ++ lib.optional (cfg.postRun != "") cfg.postRun
-    ++ lib.optional (own.postRun != "") own.postRun;
+    lib.optional coverage coverageCollect ++ lib.optional (cfg.postRun != "") cfg.postRun;
 
   # The snippets in a subshell, so that a snippet's `cd` or `exit` stays
   # its own; `$log` and `$out` are set.
@@ -789,26 +778,48 @@ rec {
       )
     '';
 
-  # Shell lines that export a test binary's configuration: `test.env`, then
-  # `test.binaries.<binary>.env`, then `test.path` on PATH.
-  configScript =
-    cfg: binary:
-    lib.concatStrings (
-      lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") (
-        cfg.env // (binaryConfig cfg binary).env
-      )
-    )
-    + lib.optionalString (cfg.path != [ ]) "export PATH=$PATH:${lib.makeBinPath cfg.path}\n";
+  # The packages of a run's `path` (a function of a package set, or a
+  # list) for the machine whose package set is `pkgs`.
+  pathOf = pkgs: cfg: if lib.isFunction cfg.path then cfg.path pkgs else cfg.path;
 
-  # A test process's home: fresh, empty and writable, as a test's home is
-  # under `cargo test`, without reading the user's (doctests get the same
-  # from breakbulk-unit, `Outer::test_base`). It comes before the other
-  # layers so that `[env]` and `test.env` can replace it. `XDG_*` stay
-  # unset, so tools fall back to directories under it.
-  homeScript = ''
-    export HOME=$TMPDIR/home
-    mkdir -p "$HOME"
-  '';
+  # Shell lines that export a run's configuration (its run settings
+  # `cfg`): `env`, then `path` (packages of `pkgs`, the set of the machine
+  # that runs it) on PATH.
+  configScript =
+    pkgs: cfg:
+    let
+      path = pathOf pkgs cfg;
+    in
+    lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") cfg.env)
+    + lib.optionalString (path != [ ]) "export PATH=$PATH:${lib.makeBinPath path}\n";
+
+  # A run's `preRun` entries, without the removed ones: those of its run
+  # settings, over breakbulk's own `coverage` in a coverage variant (the
+  # settings know no variant mode, so the run adds it).
+  preRunEntries =
+    cfg: coverage:
+    lib.filterAttrs (_: v: v != null) (
+      lib.optionalAttrs coverage { coverage = coverageEnv; } // cfg.preRun
+    );
+
+  # Shell lines that run a run's `preRun` entries in name order, in the
+  # run's shell (their exports reach the test), then give nextest the
+  # tool configuration an entry wrote (`nextestToolConfig`).
+  preRunScript =
+    cfg: coverage:
+    lib.concatStrings (lib.mapAttrsToList (n: v: "# preRun.${n}\n${v}\n") (preRunEntries cfg coverage))
+    + ''
+      __bb_nextest=()
+      if [ -e ${nextestToolConfig} ]; then
+        __bb_nextest=(--tool-config-file breakbulk:${nextestToolConfig})
+      fi
+    '';
+
+  # The nextest tool configuration file a `preRun` entry may write
+  # (`threads` does): a tool config file ranks under the project's
+  # configuration and NEXTEST_TEST_THREADS, so the user's still win;
+  # nextest does not read RUST_TEST_THREADS.
+  nextestToolConfig = "\"$TMPDIR/breakbulk-nextest.toml\"";
 
   # `CARGO_TARGET_TMPDIR` as the planner bakes it into integration tests
   # and benches (`TARGET_TMPDIR` in crates/breakbulk-plan/src/graph.rs).
@@ -859,21 +870,6 @@ rec {
       ${util.forwardSignalsScript "${pkgs.coreutils}/bin/env"}
       __bb_run ${command}
     '';
-
-  # Only a default: the variable may already hold a value from `[env]` or
-  # the test configuration, which wins.
-  threadsScript = ''
-    export RUST_TEST_THREADS=''${RUST_TEST_THREADS:-$NIX_BUILD_CORES}
-  '';
-
-  # nextest does not read RUST_TEST_THREADS. Its default goes in a tool
-  # config file, not NEXTEST_TEST_THREADS: nextest ranks that variable over
-  # the project's `test-threads` and a tool config file under it, so the
-  # user's variable and profile both still win.
-  nextestThreadsScript = ''
-    printf '[profile.default]\ntest-threads = %s\n' "$NIX_BUILD_CORES" > $TMPDIR/breakbulk-nextest.toml
-  '';
-  nextestThreadsFlag = "--tool-config-file breakbulk:$TMPDIR/breakbulk-nextest.toml";
 
   # The runner of each platform's test processes, `{ host; target; }`
   # (lists), from the target's runner and the host's (`defaultHost`; null
@@ -930,7 +926,7 @@ rec {
 
   # How the test processes of each platform run, `{ host; target; }`, from
   # each platform's settings (`{ triple; runner; testSystem; dylibPath; }`,
-  # `testPkgs`, `objcopy` and `traits` optional). Cargo runs a test unit
+  # `testPkgs`, `packageSet` and `traits` optional). Cargo runs a test unit
   # with its compile kind's runner (`target_runner(unit.kind)`), library
   # directories and sysroot library directory (`fill_env`, `sysroot_target_libdir[&kind]`); a host
   # unit (a proc macro's unit tests) is built for the build machine, so it
@@ -940,8 +936,10 @@ rec {
   #   runner      a list (runnersByPlatform)
   #   testPkgs    the package set its runs build with (runners.testPkgsFor)
   #   dylibPath   { var; sep; } or null (dylibPathOf)
-  #   objcopy     what strips its test binaries for runs, or null
-  #               (objcopyOf; default: of the triple's built-in traits)
+  #   traits      its traits (default: the triple's built-in ones)
+  #   packageSet  its nixpkgs package set, or null (`targets.<t>.packageSet`;
+  #               default: `pkgs` for the native triple), for the stages
+  #               of its runs' binaries (`runBinary`)
   #   libDir      the sysroot's library directory for the triple, in a
   #               copy holding its shared libraries only (testLibs), or null
   testPlatforms =
@@ -960,15 +958,13 @@ rec {
       one =
         name: s:
         let
-          libs = testLibs pkgs sysroot (s.traits or (targetTraits.resolve { inherit (s) triple; }));
+          traits = s.traits or (targetTraits.resolve { inherit (s) triple; });
+          libs = testLibs pkgs sysroot traits;
         in
         {
           inherit (s) triple dylibPath;
-          objcopy =
-            s.objcopy or (objcopyOf {
-              inherit pkgs;
-              inherit (s) triple;
-            });
+          inherit traits;
+          packageSet = s.packageSet or (if s.triple == targetTraits.nativeTriple pkgs then pkgs else null);
           runner = runnerLists.${name};
           testPkgs =
             s.testPkgs or (runners.testPkgsFor {
@@ -983,12 +979,13 @@ rec {
       target = one "target" target;
     };
 
-  # The attributes a package's doctest derivation gets from its test
-  # configuration: the runners (`runnersByPlatform`), `test.args` and
-  # `test.doctest.args`, and `test.env`, `test.doctest.env` and
-  # `test.path` as PATH. Dynamic-derivation mode passes the same strings to
-  # its outer derivation (lib/dynamic.nix), so both modes write the same
-  # doctest derivation.
+  # The attributes a package's doctest derivation gets from its doctest
+  # run's settings (`runConfig`): the runners (`runnersByPlatform`; not
+  # the settings' `runner` or `wrapper`, which a doctest cannot honour),
+  # `args`, and `env` with `path` as PATH (packages of `pkgs`, the build
+  # machine, where the doctest runs). Dynamic-derivation mode passes the
+  # same strings to its outer derivation (lib/dynamic.nix), so both modes
+  # write the same doctest derivation.
   doctestConfig =
     {
       pkgs,
@@ -998,8 +995,9 @@ rec {
     }:
     pkg:
     let
-      cfg = testConfig packages pkg;
+      cfg = runConfig packages pkg "doctest" null;
       snippets = postRunSnippets { inherit cfg; };
+      path = pathOf pkgs cfg;
     in
     {
       # A script, run in $TMPDIR with `$log` and `$out` set, after passing
@@ -1018,20 +1016,14 @@ rec {
       BREAKBULK_TEST_RUNNERS = toJSON (runnersByPlatform {
         inherit runner hostRunner;
       });
-      BREAKBULK_TEST_ARGS = toJSON (cfg.args ++ cfg.doctest.args);
+      BREAKBULK_TEST_ARGS = toJSON cfg.args;
       BREAKBULK_TEST_ENV = toJSON (
-        cfg.env
-        // cfg.doctest.env
-        // lib.optionalAttrs (cfg.path != [ ]) { PATH = lib.makeBinPath cfg.path; }
+        cfg.env // lib.optionalAttrs (path != [ ]) { PATH = lib.makeBinPath path; }
       );
     };
 
-  # Whether a package's doctest run is in the check set
-  # (`test.doctest.enable`).
-  doctestEnabled = packages: pkg: (testConfig packages pkg).doctest.enable;
-
-  # libtest arguments of one binary.
-  testArgs = cfg: binary: cfg.args ++ (binaryConfig cfg binary).args;
+  # Whether a package's doctest run is in the check set (its `enable`).
+  doctestEnabled = packages: pkg: (runConfig packages pkg "doctest" null).enable;
 
   mkTestRuns =
     {
@@ -1044,10 +1036,8 @@ rec {
       traits ? targetTraits.resolve { triple = target; },
       dylibPath ? dylibPathOf { inherit traits runner; },
       testPkgs ? runners.testPkgsFor { inherit pkgs testSystem; },
-      objcopy ? objcopyOf {
-        inherit pkgs traits;
-        triple = target;
-      },
+      # The target's package set, or null (testPlatforms).
+      packageSet ? if target == targetTraits.nativeTriple pkgs then pkgs else null,
       host ? defaultHost {
         inherit
           pkgs
@@ -1064,6 +1054,9 @@ rec {
       # runDirs.<package> = the package directory of its "run" view, or
       # null for the test binary's own view (lib/workspace.nix).
       runDirs ? { },
+      # Whose run settings the runs take (`runConfig`): "test", or "bench"
+      # for a bench plan's binaries.
+      kind ? "test",
       ca ? featureGates.defaultCa,
       nixFeatures ? featureGates.standalone { inherit ca; },
       coverage ? false,
@@ -1084,7 +1077,7 @@ rec {
             testSystem
             dylibPath
             testPkgs
-            objcopy
+            packageSet
             traits
             ;
         };
@@ -1094,6 +1087,22 @@ rec {
       testRoots = lib.filterAttrs (_: r: r.breakbulkRoot.test) inst.roots;
       byPackage = lib.groupBy (r: r.breakbulkRoot.package) (lib.attrValues testRoots);
 
+      # Each run's settings, once: resolving them evaluates the package's
+      # settings modules again.
+      configs = lib.mapAttrs (
+        pkg: rs:
+        lib.listToAttrs (
+          map (
+            r:
+            let
+              key = binaryKey r.breakbulkRoot;
+            in
+            lib.nameValuePair key (runConfig packages pkg kind key)
+          ) rs
+        )
+      ) byPackage;
+      configOf = r: configs.${r.breakbulkRoot.package}.${binaryKey r.breakbulkRoot};
+
       spec =
         r:
         runSpec {
@@ -1102,28 +1111,13 @@ rec {
           root = r.breakbulkRoot;
         };
 
-      # The binary a run executes: a content-addressed copy when `ca`, a
-      # debug-stripped one with `test.stripForRun`, else the unit's output.
-      binaryOf =
-        r: s: cfg:
-        if !useCa && !cfg.stripForRun then
-          s.unitOut
-        else
-          binaryCopy {
-            inherit pkgs caAttrs;
-            inherit (s) name;
-            inherit (platformOf r) objcopy;
-            strip = cfg.stripForRun;
-            src = "${s.unitOut}/*";
-          };
-
       # A test run through nextest's reuse-build mode: nextest reads the
       # synthesized metadata (`nextestSpec`) and runs the one binary with
       # the project's nextest configuration (retries, timeouts, default
       # filter, test groups). libtest arguments go after `--`, which
       # nextest emulates (`--skip`, `--exact`, `--include-ignored`, …).
       nextestRun =
-        r: s: cfg: args: bin:
+        r: s: cfg: bin:
         let
           p = platformOf r;
           nx = nextestSpec {
@@ -1138,7 +1132,7 @@ rec {
             {
               passthru = {
                 breakbulkTest = s // {
-                  inherit args;
+                  inherit (cfg) args;
                   inherit (nx) binaryId;
                 };
                 binary = bin;
@@ -1153,22 +1147,19 @@ rec {
             // caAttrs
           )
           ''
-            ${homeScript}
             ${envScript {
               spec = s;
               jq = "${p.testPkgs.jq}/bin/jq";
             }}
-            ${configScript cfg s.binary}
-            ${threadsScript}
-            ${nextestThreadsScript}
+            ${configScript p.testPkgs cfg}
+            ${preRunScript cfg coverage}
             ${nextestRunnerScript {
               pkgs = p.testPkgs;
               inherit (p) triple;
               inherit (s) runner;
-              wrapper = wrapperOf p.testPkgs cfg s.binary;
+              wrapper = wrapperOf p.testPkgs cfg;
               sourceRoot = sourceRootOf s null;
             }}
-            ${coverageEnvScript coverage}
             ws=$TMPDIR/nextest-ws
             log=${logFile}
             mkdir -p $out $ws/target
@@ -1186,9 +1177,9 @@ rec {
               --cargo-metadata $TMPDIR/cargo-metadata.json \
               ${lib.optionalString (cfg.nextest.configFile != null) "--config-file ${cfg.nextest.configFile}"} \
               --profile ${lib.escapeShellArg cfg.nextest.profile} \
-              ${nextestThreadsFlag} \
+              "''${__bb_nextest[@]}" \
               --no-tests=warn --color never \
-              ${lib.optionalString (args != [ ]) "-- ${lib.escapeShellArgs args}"} 2>&1 | tee "$log"
+              ${lib.optionalString (cfg.args != [ ]) "-- ${lib.escapeShellArgs cfg.args}"} 2>&1 | tee "$log"
             status=''${PIPESTATUS[0]}
             set -e
             if [ "$status" -ne 0 ]; then
@@ -1200,16 +1191,13 @@ rec {
               exit "$status"
             fi
             nextestDir=$ws/target/nextest
-            ${postRunScript {
-              inherit cfg coverage;
-              binary = s.binary;
-            }}
+            ${postRunScript { inherit cfg coverage; }}
           '';
 
       run =
         r:
         let
-          cfg = testConfig packages r.breakbulkRoot.package;
+          cfg = configOf r;
           base = spec r;
           runDir = runDirs.${base.package} or null;
           narrowed = if runDir == null then base else narrowSpec runDir base;
@@ -1221,21 +1209,29 @@ rec {
               }
             else
               narrowed;
-          args = testArgs cfg s.binary;
-          bin = binaryOf r s cfg;
+          bin = runBinary {
+            inherit pkgs cfg nixFeatures;
+            inherit (s) name;
+            ca = useCa;
+            platform = platformOf r;
+            linked = s.unitOut;
+            copy = binaryCopy {
+              inherit pkgs caAttrs;
+              inherit (s) name;
+              src = "${s.unitOut}/*";
+            };
+          };
           inherit (platformOf r) testPkgs;
         in
         if cfg.runner == "nextest" then
-          nextestRun r s cfg args bin
-        else if cfg.runner != "libtest" then
-          throw "breakbulk: packages.${s.package}.test.runner must be \"libtest\" or \"nextest\", not ${toJSON cfg.runner}"
+          nextestRun r s cfg bin
         else
           testPkgs.runCommand "${name}-${s.name}-run"
             (
               {
                 passthru = {
                   breakbulkTest = s // {
-                    inherit args;
+                    inherit (cfg) args;
                   };
                   binary = bin;
                 };
@@ -1243,14 +1239,12 @@ rec {
               // caAttrs
             )
             ''
-              ${homeScript}
               ${envScript {
                 spec = s;
                 jq = "${testPkgs.jq}/bin/jq";
               }}
-              ${configScript cfg s.binary}
-              ${threadsScript}
-              ${coverageEnvScript coverage}
+              ${configScript testPkgs cfg}
+              ${preRunScript cfg coverage}
               mkdir -p $out
               log=${logFile}
               files=(${bin}/*)
@@ -1262,10 +1256,10 @@ rec {
                 launchWords {
                   pkgs = testPkgs;
                   inherit (s) runner;
-                  wrapper = wrapperOf testPkgs cfg s.binary;
+                  wrapper = wrapperOf testPkgs cfg;
                   sourceRoot = sourceRootOf s null;
                 }
-              } "''${files[0]}" ${lib.escapeShellArgs args} 2>&1 | tee "$log"
+              } "''${files[0]}" ${lib.escapeShellArgs cfg.args} 2>&1 | tee "$log"
               status=''${PIPESTATUS[0]}
               set -e
               if [ "$status" -ne 0 ]; then
@@ -1273,10 +1267,7 @@ rec {
                 ${hintScript { inherit tools pkgs testPkgs; } (hintSpec s cfg)}
                 exit "$status"
               fi
-              ${postRunScript {
-                inherit cfg coverage;
-                binary = s.binary;
-              }}
+              ${postRunScript { inherit cfg coverage; }}
             '';
 
       runs = lib.mapAttrs (
@@ -1297,27 +1288,29 @@ rec {
         )
       ) byPackage;
 
-      doctests = lib.mapAttrs (
-        pkg: attrs:
-        derivation (
-          attrs
-          // doctestConfig {
-            inherit pkgs runner;
-            packages = doctestPackages;
-            hostRunner = host.runner;
-          } pkg
-        )
-      ) (inst.doctestAttrs or { });
+      doctests = lib.optionalAttrs (kind == "test") (
+        lib.mapAttrs (
+          pkg: attrs:
+          derivation (
+            attrs
+            // doctestConfig {
+              inherit pkgs runner;
+              packages = doctestPackages;
+              hostRunner = host.runner;
+            } pkg
+          )
+        ) (inst.doctestAttrs or { })
+      );
 
       checks =
         lib.concatMapAttrs (
           pkg: bs:
           lib.mapAttrs' (b: drv: lib.nameValuePair "test/${pkg}/${b}" drv) (
-            lib.filterAttrs (b: _: (binaryConfig (testConfig packages pkg) b).enable) bs
+            lib.filterAttrs (b: _: configs.${pkg}.${b}.enable) bs
           )
         ) runs
         // lib.mapAttrs' (pkg: d: lib.nameValuePair "doctest/${pkg}" d) (
-          lib.filterAttrs (pkg: _: doctestEnabled packages pkg) doctests
+          lib.filterAttrs (pkg: _: doctestEnabled doctestPackages pkg) doctests
         );
     in
     {

@@ -2,16 +2,17 @@
 # target, the linux preset: workspace libraries keep source paths in
 # their debug info). Wired into the flake's checks as `test-options-*`.
 #
-#   nix build -f tests/test-options strip-for-run
+#   nix build -f tests/test-options strip-stage
 #   tests/test-options/run.sh     content-addressed, in a private store
 #
-#   strip-for-run   `workspaces.<ws>.memberDefaults.test.stripForRun`: an edit
-#                   to util's README changes the bytes of app's test binary
-#                   (util's debug info names its source view; the control),
-#                   but not those of the stripped copy the test run
-#                   consumes; the run passes. The run's derivation
-#                   closure lacks binutils-unwrapped-all-targets: the
-#                   native target strips with its stdenv's binutils.
+#   strip-stage     `memberDefaults.test.stages.strip` (the default with
+#                   `ca`, here without it): an edit to util's README
+#                   changes the bytes of app's test binary (util's debug
+#                   info names its source view; the control), but not
+#                   those of the stripped copy the test run consumes; the
+#                   run passes. The run's derivation closure lacks
+#                   binutils-unwrapped-all-targets and LLVM: the native
+#                   target strips with its stdenv's binutils.
 #   run-files       `packages.app.test.runFiles = [ "data" ]`:
 #                   the `data` test runs in a view holding only data/, with
 #                   CARGO_MANIFEST_DIR pointing at it, and passes; the
@@ -82,7 +83,9 @@ let
   runsOf = r: (instOf r).testRuns.app;
 
   strip = {
-    workspaces.main.memberDefaults.test.stripForRun = true;
+    workspaces.main.memberDefaults.test.stages.strip.run = breakbulk.stageHelpers.strip {
+      buildId = false;
+    };
   };
   narrow = {
     packages.app.test.runFiles = [ "data" ];
@@ -109,7 +112,7 @@ in
       )).data;
   };
 
-  strip-for-run =
+  strip-stage =
     let
       before = (runsOf (mkRepo fixture [ strip ]))."lib/app";
       after = (runsOf (mkRepo readmeEdited [ strip ]))."lib/app";
@@ -117,10 +120,10 @@ in
     in
     assert lib.assertMsg (
       plain.passthru.binary == plain.passthru.breakbulkTest.unitOut
-    ) "strip-for-run: without the option (and ca off) the run should use the unit's output";
-    assert lib.assertMsg (lib.hasSuffix "-bin-stripped" before.passthru.binary.name)
-      "strip-for-run: the run does not use a stripped copy";
-    pkgs.runCommand "test-options-strip-for-run"
+    ) "strip-stage: without a stage (and ca off) the run should use the unit's output";
+    assert lib.assertMsg (lib.hasSuffix "-bin-strip" before.passthru.binary.name)
+      "strip-stage: the run does not use a stripped copy";
+    pkgs.runCommand "test-options-strip-stage"
       {
         unstrippedBefore = before.passthru.breakbulkTest.unitOut;
         unstrippedAfter = after.passthru.breakbulkTest.unitOut;
@@ -134,12 +137,15 @@ in
           (builtins.unsafeDiscardOutputDependency before.drvPath)
         ];
         allTargets = builtins.unsafeDiscardStringContext pkgs.binutils-unwrapped-all-targets.drvPath;
+        llvm = builtins.unsafeDiscardStringContext pkgs.llvm.drvPath;
       }
       ''
-        if grep -qxF "$allTargets" run-drvs; then
-          echo "the run needs $allTargets; the native target's strip should not" >&2
-          exit 1
-        fi
+        for d in "$allTargets" "$llvm"; do
+          if grep -qxF "$d" run-drvs; then
+            echo "the run needs $d; the native target's strip should not" >&2
+            exit 1
+          fi
+        done
         # The control: util's debug info names its source view.
         if cmp -s $unstrippedBefore/* $unstrippedAfter/*; then
           echo "the README edit did not change app's test binary: the check is vacuous" >&2

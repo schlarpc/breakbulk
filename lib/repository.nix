@@ -144,7 +144,7 @@ let
   # the modules' own.
   projectAssertions = {
     _file = ./repository.nix;
-    config.assertions = binaryKeyAssertions;
+    config.assertions = binaryKeyAssertions ++ doctestAssertions;
   };
 
   # The project's `build.target` for a workspace path, by the planner's
@@ -317,11 +317,10 @@ let
     {
       host = bases true;
       both = bases false;
-      defaults =
-        (breakbulkLib.packageSettings.evaluate {
-          layers = [ ];
-          inherit defaults;
-        }).config;
+      defaults = breakbulkLib.packageSettings.evaluate {
+        layers = [ ];
+        inherit defaults;
+      };
     }
   ) cfg.workspaces;
 
@@ -370,14 +369,22 @@ let
     _: entries: lib.listToAttrs (map (e: lib.nameValuePair e.name e) (lib.filter isPathEntry entries))
   ) locks;
 
-  # A member's settings: its own, or the defaults.
-  memberSettings =
+  # A member's evaluated settings (`config`, `runs`): its own, or the
+  # defaults.
+  memberEval =
     wsName: triple: vName: pkg:
     let
       e = memberEntries.${wsName}.${pkg} or null;
-      s = if e == null then null else settingsOf wsName triple vName e;
+      ev =
+        if e == null then
+          null
+        else
+          settingsTable.${wsName}.${triple}.${vName}.${entryKey e} or (settingsFor wsName triple vName e);
     in
-    if s == null then settingsBases.${wsName}.defaults else s;
+    if ev == null then settingsBases.${wsName}.defaults else ev;
+  memberSettings =
+    wsName: triple: vName: pkg:
+    (memberEval wsName triple vName pkg).config;
 
   entryNames = lib.genAttrs (map (e: e.name) allEntries) (_: null);
   unmatchedWarnings = map (
@@ -504,35 +511,22 @@ let
   catFn =
     f: g: p:
     f p ++ g p;
-  # Test-run env: a function of the run stays one (lib/test-runs.nix
-  # resolveTestEnv applies it).
-  testEnvStrings = lib.mapAttrs (_: bt.testEnvString);
 
   # Product settings for mkProducts.
   productConfig = wsName: triple: vName: pkg: {
     inherit (memberSettings wsName triple vName pkg) stages checks;
   };
 
-  # mkWorkspace's `packages`: each member's settings, test env values as
-  # strings.
+  # mkWorkspace's `packages`: each member's settings, with its runs'
+  # (lib/package-settings.nix `runsOf`: test env values as strings).
   memberConfigs =
     wsName: triple: vName:
     lib.mapAttrs (
       pkg: _:
       let
-        s = memberSettings wsName triple vName pkg;
-        t = s.test;
+        ev = memberEval wsName triple vName pkg;
       in
-      s
-      // {
-        test = t // {
-          env = testEnvStrings t.env;
-          doctest = t.doctest // {
-            env = testEnvStrings t.doctest.env;
-          };
-          binaries = lib.mapAttrs (_: b: b // { env = testEnvStrings b.env; }) t.binaries;
-        };
-      }
+      ev.config // { inherit (ev) runs; }
     ) memberEntries.${wsName};
 
   # --- test binary keys --------------------------------------------------------
@@ -549,24 +543,72 @@ let
   testBinaryKeys = lib.mapAttrs (
     _: ws:
     let
-      predicted = breakbulkLib.planRoots {
-        # Path packages outside the workspace too: a selection can name
-        # one, and its test binaries are then the plan's.
-        workspaceRoots =
-          let
-            wsDir = wsDirOf ws;
-            members = breakbulkLib.roots.workspaceRoots { inherit root wsDir; };
-          in
-          breakbulkLib.skeleton.outsideRoots { inherit root wsDir; } // members;
-        planKind = "test";
-        variant = "";
-        names = ws.roots.test;
-      };
+      # Path packages outside the workspace too: a selection can name
+      # one, and its test binaries are then the plan's.
+      workspaceRoots =
+        let
+          wsDir = wsDirOf ws;
+          members = breakbulkLib.roots.workspaceRoots { inherit root wsDir; };
+        in
+        breakbulkLib.skeleton.outsideRoots { inherit root wsDir; } // members;
+      # The test plan's and the bench plan's: `test.binaries` also
+      # refines bench runs.
+      predicted =
+        planKind:
+        (breakbulkLib.planRoots {
+          inherit workspaceRoots planKind;
+          variant = "";
+          names = ws.roots.${planKind};
+        }).roots;
     in
-    lib.mapAttrs (_: rs: lib.sort lib.lessThan (map breakbulkLib.testRuns.binaryKey rs)) (
-      lib.groupBy (r: r.package) (lib.filter (r: r.test) predicted.roots)
+    lib.mapAttrs (_: rs: lib.sort lib.lessThan (lib.unique (map breakbulkLib.testRuns.binaryKey rs))) (
+      lib.groupBy (r: r.package) (lib.filter (r: r.test) (predicted "test" ++ predicted "bench"))
     )
   ) cfg.workspaces;
+
+  # A `test.doctest` setting a doctest run cannot honour (`wrapper`,
+  # `runner`, `preRun`, `stages`) is an error: rustdoc runs each example
+  # itself, so it would do nothing. Found in each member's doctest run
+  # settings by where the definition comes from (`…, via option
+  # test.doctest`), so a function module is found too.
+  doctestAssertions = lib.concatLists (
+    lib.mapAttrsToList (
+      wsName: ws:
+      let
+        found = lib.concatMap (
+          e:
+          lib.concatMap (
+            triple:
+            lib.concatMap (
+              vName:
+              let
+                ev = settingsTable.${wsName}.${triple}.${vName}.${entryKey e};
+                opts = ev.runEvals.doctest.options.test;
+              in
+              lib.optionals (ev != null && ev.config.test.doctest != [ ]) (
+                lib.concatMap (
+                  n:
+                  map
+                    (d: {
+                      name = n;
+                      file = lib.head (lib.splitString ", via option " d.file);
+                      owner = e.name;
+                    })
+                    (lib.filter (d: lib.hasInfix ", via option test.doctest" d.file) opts.${n}.definitionsWithLocations)
+                ) breakbulkLib.packageSettings.doctestRefused
+              )
+            ) (lib.attrNames ws.variants)
+          ) (lib.attrNames ws.targets)
+        ) (lib.attrValues memberEntries.${wsName});
+      in
+      map (x: {
+        assertion = false;
+        message = "breakbulk: `test.doctest.${x.name}` of `${x.owner}` in workspaces.${wsName}${
+          bt.setIn { files = [ x.file ]; }
+        }: a doctest run has no ${x.name}; rustdoc compiles and runs each example itself (the package's `test.${x.name}` does not apply to doctests either)";
+      }) (lib.unique found)
+    ) cfg.workspaces
+  );
 
   # A `test.binaries` key that names no test binary is an error: the
   # settings are looked up by key, so a misspelt one would leave enabled
@@ -665,8 +707,8 @@ let
               bt.setIn { files = lib.unique (map (p: p.file) ps); }
             }: ${quoted keys} ${
               if lib.length keys == 1 then "names" else "name"
-            } no test binary of ${p.owner}; ${
-              if p.known == [ ] then "it has none" else "the test binaries are ${quoted p.known}"
+            } no test or bench binary of ${p.owner}; ${
+              if p.known == [ ] then "it has none" else "the test and bench binaries are ${quoted p.known}"
             }";
           }
         ) (lib.groupBy (p: "${p.name} ${p.owner}") found)
@@ -843,17 +885,13 @@ let
           }
         else
           t.runner;
-      # What strips its test binaries for runs: the binutils of its
-      # package set's C toolchain, for an ELF target.
-      testObjcopy = breakbulkLib.testRuns.objcopyOf {
-        inherit pkgs triple;
-        traits = traitsOf wsName triple;
-        packageSet = packageSetOf wsName triple;
-      };
+      # The package set the stages of its test binaries get (`strip`
+      # takes its C toolchain's binutils from it).
+      testPackageSet = packageSetOf wsName triple;
     in
     if t == null then
       {
-        inherit testObjcopy;
+        inherit testPackageSet;
         mkWorkspace = { };
         canRunTests = true;
         runner = null;
@@ -862,7 +900,7 @@ let
       }
     else
       {
-        inherit testObjcopy;
+        inherit testPackageSet;
         mkWorkspace = {
           spec = {
             inherit (t) rustflags;
@@ -1279,7 +1317,7 @@ let
           runner
           testSystem
           testDylibPath
-          testObjcopy
+          testPackageSet
           ;
         # Host units' tests run with the native target's settings, as Cargo
         # gives them `target.<host>.runner`.
@@ -1291,7 +1329,7 @@ let
             triple = nativeTriple;
             inherit (h) runner testSystem;
             dylibPath = h.testDylibPath;
-            objcopy = h.testObjcopy;
+            packageSet = h.testPackageSet;
           };
       }
       // s.mkWorkspace
@@ -1514,7 +1552,9 @@ let
               );
               benches = benchesOf inst sel;
               benchRuns = selectPkgs sel inst.benchRuns;
-              namedBenchRuns = namedRuns' true inst.benchRuns (_: _: true) sel;
+              # benchRuns named as `benches` names bench binaries; `.enabled`
+              # holds those in repo.checks (`bench.enable`).
+              namedBenchRuns = namedRuns' true inst.benchRuns (pkg: k: inst.benchChecks ? "test/${pkg}/${k}") sel;
               # `cargo doc` of the variant's packages (lib/workspace.nix).
               inherit (inst) docs;
             }
@@ -1731,6 +1771,9 @@ let
                   pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/test-${n}" d) rs.enabled
                 ) v.namedTestRuns
                 // lib.mapAttrs' (pkg: d: lib.nameValuePair "${prefix}/${pkg}/doctest" d) v.enabledDoctests
+                // lib.concatMapAttrs (
+                  pkg: rs: lib.mapAttrs' (n: d: lib.nameValuePair "${prefix}/${pkg}/bench-${n}" d) rs.enabled
+                ) v.namedBenchRuns
               )
             )
           )
@@ -1741,12 +1784,6 @@ let
             "${variantPrefix wsName triple vName}/docs" = v.docs;
           }
         ) t.variants
-        // lib.optionalAttrs (cfg.workspaces.${wsName}.benchSmoke && t.canRunTests) (
-          lib.concatMapAttrs (
-            pkg: rs:
-            lib.mapAttrs' (n: d: lib.nameValuePair "${wsName}/${triple}/${pkg}/bench-${n}" d) rs.enabled
-          ) t.namedBenchRuns
-        )
         // lib.concatMapAttrs (
           vName: v:
           lib.optionalAttrs (v ? check) (

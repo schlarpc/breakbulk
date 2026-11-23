@@ -254,7 +254,7 @@ let
       oneWs
       { packages.ctl.test = ctlTest; }
     ];
-    # Test runs of a debug-stripped copy (test.stripForRun) in
+    # Test runs of a debug-stripped copy (test.stages.strip) in
     # a narrowed working directory (test.runFiles); its tests
     # assert the working directory and CARGO_MANIFEST_DIR, and read only
     # listed files.
@@ -266,7 +266,9 @@ let
         keepLogs
         oneWs
         {
-          workspaces.main.memberDefaults.test.stripForRun = true;
+          workspaces.main.memberDefaults.test.stages.strip = {
+            run = breakbulk.stageHelpers.strip { buildId = false; };
+          };
           packages.app.test.runFiles = [
             "data"
             "notes.md"
@@ -295,7 +297,9 @@ let
               "data"
               "notes.md"
             ];
-            stripForRun = true;
+            stages.strip = {
+              run = breakbulk.stageHelpers.strip { buildId = false; };
+            };
           };
           packages.util.test = {
             runFiles = [ ];
@@ -1023,7 +1027,7 @@ let
   #                  changes (beta's debug info), the debug-stripped copy
   #                  its run executes by default with `ca` does not
   #   test-options   util's README and app's notes.md, with
-  #                  test.stripForRun and test.runFiles = [ "data" ] as in
+  #                  test.stages.strip and test.runFiles = [ "data" ] as in
   #                  tests/test-options: app's test binary changes (util's
   #                  debug info), its stripped copy does not
   cutoff =
@@ -1053,7 +1057,9 @@ let
       };
       options = [
         {
-          workspaces.main.memberDefaults.test.stripForRun = true;
+          workspaces.main.memberDefaults.test.stages.strip = {
+            run = breakbulk.stageHelpers.strip { buildId = false; };
+          };
           packages.app.test.runFiles = [ "data" ];
         }
       ];

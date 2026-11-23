@@ -208,7 +208,7 @@ It takes the same options as `packages.<name>`:
 ```nix
 workspaces.main.memberDefaults = {
   test.env.RUST_LOG = "debug";
-  test.path = [ pkgs.git ];
+  test.path = p: [ p.git ];
   test.runner = "nextest";
 };
 packages.legacy.test.runner = "libtest";  # the package's own value wins
@@ -237,8 +237,8 @@ which each higher layer's single values have a slightly higher priority:
   `memberDefaults` adds, for that package only.
 - A single value (`test.runner`) is the highest layer's that sets one.
 - `env` (with `forHost.env`, `forTarget.env` and `test.env`), `stages`,
-  `checks` and `test.binaries` merge, and each variable, stage, check or
-  binary setting in them is a single value of its own.
+  `checks` and `test.preRun` merge, and each variable, stage, check or
+  snippet in them is a single value of its own.
 - Priorities count across layers: `lib.mkForce` in a lower layer wins
   over a plain value in a higher one, so
   `memberDefaults.env.FOO = lib.mkForce "a"` keeps `a` for every member,
@@ -266,8 +266,8 @@ the crate, directly or through other crates, by any kind of dependency
 in `Cargo.lock`. The one curated entry is `insta`, for
 [snapshot tests](../how-to/snapshot-tests.md#insta).
 
-A value in `test.env` (and in `test.binaries.<key>.env` and
-`test.doctest.env`) can be a function of the run, `run: …`. The run
+A value in `test.env` (and in the `env` of the run layers below) can be
+a function of the run, `run: …`. The run
 gives facts that only breakbulk knows, such as `run.workspaceRoot`, the
 workspace's root directory in the files the run reads. The function is
 called separately for each package, and for each kind of run: a test
@@ -278,6 +278,61 @@ members at any depth:
 workspaces.main.memberDefaults.test.env.FIXTURES =
   { workspaceRoot, ... }: "${workspaceRoot}/fixtures";
 ```
+
+### Run settings
+
+A package's binaries run as checks: each test binary's test run, the
+library's doctest run, and, in a variant with
+[`benches`](../reference/options/workspaces.md#workspacesnamevariantsnamebenches),
+each bench binary's bench run (once, with `--test`). What a run does is
+its run settings: `enable`, `args`, `env`, `path`, `preRun`, `postRun`,
+`wrapper`, `runner` and `stages`, documented under
+[`test`](../reference/options/packages.md#packagesnametestenable).
+`test.<option>` sets them for every run of the package, and three layers
+refine them, each a module of the same options:
+
+| Layer | Refines |
+| --- | --- |
+| [`test.doctest`](../reference/options/packages.md#packagesnametestdoctest) | the doctest run |
+| [`bench`](../reference/options/packages.md#packagesnamebench) | the bench runs |
+| [`test.binaries.<key>`](../reference/options/packages.md#packagesnametestbinaries) | the runs of one binary: its test run, and its bench run |
+
+A run's settings are `test`'s, then those of its kind (`test.doctest` or
+`bench`), then its binary's, merged as the package layers are: lists
+concatenate in that order, and a single value is the most specific
+one's. Each refinement sits just above the layer that sets it, under that
+layer's `target.<triple>` and `variant.<v>`, so across layers the usual
+order holds: `packages.<name>.test.wrapper` wins over
+`memberDefaults.test.binaries.<key>.wrapper`, as the package's own
+setting wins over a default.
+
+```nix
+workspaces.main.memberDefaults.test = {
+  runner = "nextest";
+  path = p: [ p.git ];
+  # A `harness = false` binary that nextest cannot list, and that needs ssh.
+  binaries."bin/cli" = {
+    runner = "libtest";
+    path = p: [ p.openssh ];
+  };
+};
+packages.app.bench.enable = false;  # no bench-run checks for app
+```
+
+`preRun` holds named shell snippets that run before the binary, after
+its environment is set. breakbulk's own entries give each run a fresh
+`HOME` and a `RUST_TEST_THREADS`, and, in a coverage variant, the
+profile path; a layer replaces one by its name or removes it with
+`null`. `stages` is the chain the binary goes through before it runs:
+with [`ca`](../reference/options/repository.md#ca) a `strip` stage, so
+that a binary whose debug information alone changed is not re-run
+([Source paths and debug information](products.md#source-paths-and-debug-information)).
+
+Doctests take `enable`, `args`, `env`, `path` and `postRun`. rustdoc
+compiles and runs each example itself, and its one hook,
+`--test-runtool`, starts the platform's runner. So `wrapper`, `runner`,
+`preRun` and `stages` under `test.doctest` are an evaluation error, and
+the package's own do not apply to its doctests.
 
 ### How inputs become environment
 

@@ -90,8 +90,10 @@
 #                           doctest that write under $HOME and the user
 #                           cache directory pass with no setting, in a
 #                           fresh, empty home in $TMPDIR with
-#                           XDG_CACHE_HOME unset; with `test.env.HOME =
-#                           "/homeless-shelter"` both fail
+#                           XDG_CACHE_HOME unset; without the `home` entry
+#                           of `test.preRun` the run fails, and with
+#                           `test.doctest.env.HOME =
+#                           "/homeless-shelter"` the doctest fails
 #   test-wrapper            over the `test-wrapper` fixture, whose tests
 #                           find the repository from current_exe():
 #                           with wrappers.cargoTargetLayout from
@@ -1279,7 +1281,14 @@ let
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       t = homeRepo.workspaces.main.target.${native};
-      strict = mk "test-home" { packages.th.test.env.HOME = "/homeless-shelter"; };
+      # A run keeps Nix's HOME without the `home` entry; a doctest, which
+      # runs no `preRun`, with it in its env.
+      strict = mk "test-home" {
+        packages.th.test = {
+          preRun.home = null;
+          doctest.env.HOME = "/homeless-shelter";
+        };
+      };
     in
     pkgs.runCommand "test-runs-home"
       {
@@ -1385,7 +1394,7 @@ let
     let
       native = pkgs.stdenv.hostPlatform.rust.rustcTarget;
       failed = r: map (a: a.message) (lib.filter (a: !a.assertion) r.config.assertions);
-      ctlKeys = "`bin/ctl`, `bin_exe`, `env`, `ignored`, `lib/ctl`, `needs_feat`, `net`";
+      ctlKeys = "`bin/ctl`, `bin/ctl-extra`, `bin_exe`, `env`, `ignored`, `lib/ctl`, `needs_feat`, `net`";
       # `needs_feat` needs the `extra` feature: only the `extra` variant
       # builds it.
       good = keysRepo [
@@ -1410,10 +1419,10 @@ let
         }
       ];
       want = [
-        "breakbulk: packages.ctl.target.${native}.test.binaries (set in `/checks/keys.nix'): `needs-feat` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
-        "breakbulk: packages.ctl.test.binaries (set in `/checks/keys.nix'): `ctl`, `lib` name no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
-        "breakbulk: packages.ctl.variant.extra.target.${native}.test.binaries (set in `/checks/keys.nix'): `net-x` names no test binary of `ctl` in workspaces.main; the test binaries are ${ctlKeys}"
-        "breakbulk: workspaces.main.memberDefaults.test.binaries (set in `/checks/keys.nix'): `bin` names no test binary of any member of workspaces.main; the test binaries are ${ctlKeys}"
+        "breakbulk: packages.ctl.target.${native}.test.binaries (set in `/checks/keys.nix'): `needs-feat` names no test or bench binary of `ctl` in workspaces.main; the test and bench binaries are ${ctlKeys}"
+        "breakbulk: packages.ctl.test.binaries (set in `/checks/keys.nix'): `ctl`, `lib` name no test or bench binary of `ctl` in workspaces.main; the test and bench binaries are ${ctlKeys}"
+        "breakbulk: packages.ctl.variant.extra.target.${native}.test.binaries (set in `/checks/keys.nix'): `net-x` names no test or bench binary of `ctl` in workspaces.main; the test and bench binaries are ${ctlKeys}"
+        "breakbulk: workspaces.main.memberDefaults.test.binaries (set in `/checks/keys.nix'): `bin` names no test or bench binary of any member of workspaces.main; the test and bench binaries are ${ctlKeys}"
       ];
     in
     assert lib.assertMsg (

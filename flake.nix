@@ -197,7 +197,7 @@
               ''
             );
           };
-          # stripForRun and runFiles under content addressing.
+          # Test-run stages and runFiles under content addressing.
           #   nix run .#test-options
           test-options = {
             type = "app";
@@ -559,7 +559,7 @@
               breakbulk = self.lib;
             }) [ "workspaces" ]
           )
-          # Test-run options: a debug-stripped copy (test.stripForRun) and a
+          # Test-run options: a debug-stripped copy (test.stages) and a
           # narrowed working directory (test.runFiles). The CA check:
           # tests/test-options/run.sh.
           // nixpkgs.lib.mapAttrs' (n: v: nixpkgs.lib.nameValuePair "test-options-${n}" v) (

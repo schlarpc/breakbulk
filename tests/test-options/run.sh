@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Content-addressed cutoff with `test.stripForRun` and `test.runFiles`, in
+# Content-addressed cutoff with `test.stages` (its default `strip`) and `test.runFiles`, in
 # a private store with ca-derivations, as tests/test-cutoff/run.sh does it. The system Nix's configuration is not
 # touched.
 #
@@ -11,7 +11,7 @@
 # not in runFiles). Checks: the test run is not re-run (same output path, no
 # `app-data-run` derivation built), while the stripped copy of app's test
 # binary was rebuilt, its input having changed (not vacuous; the flake
-# check test-options-strip-for-run shows the unstripped bytes differ).
+# check test-options-strip-stage shows the unstripped bytes differ).
 #
 # Environment: WORK (default $TMPDIR/breakbulk-test-options; its store is
 # recreated on each run, and read-only: `chmod -R u+w "$WORK"` before
@@ -66,6 +66,6 @@ if grep -q 'app-data-run\.drv' "$WORK/after.built"; then
 fi
 # The units come from the system store (substituted, not built here); the
 # stripped copy is rebuilt because its input, app's test binary, changed.
-grep -q 'app-data-bin-stripped\.drv' "$WORK/after.built" \
+grep -q 'app-data-bin-strip\.drv' "$WORK/after.built" \
   || fail "the stripped copy was not rebuilt (vacuous)"
 say "ok: the test run was not re-run"
