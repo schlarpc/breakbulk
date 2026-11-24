@@ -1144,6 +1144,12 @@ in
   checkVariant = lintRepo.workspaces.main.target.${native}.variants.lint.check;
   unpredicted = repository.rootsMissing.workspaces.main.packages.app;
   declaredPaths = repository.declaredPathsTest;
+  # manifest-dir with source prediction: app's bin keeps its
+  # CARGO_MANIFEST_DIR, the predicted view's path, which only the outer
+  # derivation makes. noSourceReferences must still name it.
+  manifestDirPredicted =
+    (products.manifestDir [ { packages.app.predictSources.enable = true; } ])
+    .workspaces.main.packages.app.checks.noSourceReferences;
   explain = lib.mapAttrs (
     name: repo:
     let

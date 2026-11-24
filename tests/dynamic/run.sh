@@ -546,6 +546,25 @@ case " ${fixtures[*]} " in
     ;;
 esac
 
+# With source prediction, manifest-dir's bin references its predicted
+# view, which exists only once the outer derivation runs:
+# noSourceReferences reads its path from `product.sourcePathFiles`.
+case " ${fixtures[*]} " in
+  *" manifest-dir "*)
+    say "manifest-dir with predictSources (dynamic-derivation mode)"
+    if mbuild --arg mode '"dynamic"' manifestDirPredicted >"$WORK/manifest-dir-predicted.log" 2>&1; then
+      echo "FAIL: noSourceReferences passed for a product that references its predicted view" >&2
+      status=1
+    elif grep -qE 'references source .*-source$' "$WORK/manifest-dir-predicted.log"; then
+      echo "manifest-dir with predictSources: noSourceReferences names the predicted view" >&2
+    else
+      tail -30 "$WORK/manifest-dir-predicted.log" >&2
+      echo "FAIL: manifest-dir with predictSources failed otherwise" >&2
+      status=1
+    fi
+    ;;
+esac
+
 # The plans' `buildScriptPaths` checks, failing and passing, read the runs
 # through `runs.drv`.
 case " ${fixtures[*]} " in

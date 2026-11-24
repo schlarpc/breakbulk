@@ -395,6 +395,31 @@ let
       at "src" (v.${field}.build or { }) // at "test-src" (v.${field}.test or { })
     ) allViews;
   predictedAll = specsByKey "predicted";
+  # Dynamic-derivation mode: a file listing the store paths the outer
+  # derivation gives the predicted views, one per line, for
+  # noSourceReferences (`product.sourcePathFiles`). Computed by a
+  # derivation of its own, which adds nothing to the store: evaluation
+  # cannot name the views, which exist only once the outer derivation
+  # runs. IFD mode names them in `sources.predicted`.
+  predictedPathsFile =
+    if isDynamic && predictedAll != { } then
+      derivation {
+        name = "${name}-predicted-paths";
+        inherit system;
+        builder = "${breakbulkDrv}/bin/breakbulk-drv";
+        args = [
+          "--predicted-paths"
+          (builtins.toFile "predict.json" (
+            builtins.toJSON (
+              lib.mapAttrsToList (key: spec: removeAttrs spec [ "fallback" ] // { inherit key; }) predictedAll
+            )
+          ))
+          "--out"
+          (placeholder "out")
+        ];
+      }
+    else
+      null;
   # `explainPredictions`: what each predicted unit's view holds, or why it
   # falls back, as text. A derivation of its own, not predictOut's
   # result.json: it covers `sourceOverlay` packages, whose views predictOut
@@ -991,6 +1016,7 @@ in
     test = tested.buildScriptRuns;
   };
   inherit delivery capabilities explainPredictions;
+  sourcePathFiles = lib.optional (predictedPathsFile != null) predictedPathsFile;
   # Dynamic-derivation mode: the outer derivations, by plan kind.
   outer = lib.optionalAttrs isDynamic (ofEach "outer");
   # The unit derivations through IFD mode, for explainSharing (in

@@ -470,6 +470,9 @@ let
       # The toolchain's store paths: noSourceReferences fails when a
       # product's closure has one (field-trial gap 9).
       toolchainPaths ? inst.toolchainPaths or [ ],
+      # Files listing more source paths, one per line, read at build time:
+      # the predicted views in dynamic-derivation mode.
+      sourcePathFiles ? inst.sourcePathFiles or [ ],
     }:
     let
       setArgs = {
@@ -563,7 +566,7 @@ let
               // lib.optionalAttrs (workspaceTools ? wasmBindgen) { inherit (workspaceTools) wasmBindgen; }
               // lib.optionalAttrs (cargoPackages ? ${pkg}) { package = cargoPackages.${pkg}; }
               // {
-                inherit buildScriptFlags;
+                inherit buildScriptFlags sourcePathFiles;
                 # A staticlib's objects keep their debug information with
                 # real source paths: the final link, not this product,
                 # decides whether to split or strip it.

@@ -1332,6 +1332,7 @@ in
       sourcePaths
       sourcePathsReadme
       cdylibDebug
+      manifestDir
       manifestDirRepo
       trimPathsRepo
       variantsRepo

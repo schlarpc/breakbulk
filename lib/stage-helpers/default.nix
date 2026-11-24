@@ -1714,6 +1714,9 @@ let
         }:
         let
           sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
+          # Lists of more source paths, made at build time (the predicted
+          # views in dynamic-derivation mode); not with `sources` given.
+          sourceFiles = if cfg.sources != null then [ ] else product.sourcePathFiles or [ ];
           hashes = map (s: lib.substring 0 32 (lib.removePrefix "${builtins.storeDir}/" s)) (
             lib.filter (lib.hasPrefix "${builtins.storeDir}/") (sourceStoreRoots sources)
           );
@@ -2059,7 +2062,7 @@ let
               };
           in
           {
-            sources = paths "source" "the product's `sourcePaths` (its source views and crate sources)";
+            sources = paths "source" "the product's `sourcePaths` (its source views and crate sources) and the paths its `sourcePathFiles` list";
             toolchain = paths "Rust toolchain" "the product's `toolchainPaths` (rustc, its sysroot, cargo, rust-src). `[ ]` checks sources only";
             sourcesAllowedIn = mkOption {
               type = types.nullOr (types.listOf types.str);
@@ -2085,6 +2088,9 @@ let
         }:
         let
           sources = if cfg.sources != null then cfg.sources else product.sourcePaths or [ ];
+          # Lists of more source paths, made at build time (the predicted
+          # views in dynamic-derivation mode); not with `sources` given.
+          sourceFiles = if cfg.sources != null then [ ] else product.sourcePathFiles or [ ];
           toolchain = if cfg.toolchain != null then cfg.toolchain else product.toolchainPaths or [ ];
           allowedIn =
             if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
@@ -2095,6 +2101,7 @@ let
           {
             closure = pkgs.closureInfo { rootPaths = [ input ]; };
             sourcesList = listFile "sources" sources;
+            inherit sourceFiles;
             toolchainList = listFile "toolchain" toolchain;
             # readelf reads ELF of every architecture; objdump -p prints PE
             # imports ("DLL Name:").
@@ -2106,6 +2113,8 @@ let
           }
           ''
             set -euo pipefail
+            allSources=$TMPDIR/sources
+            cat "$sourcesList" $sourceFiles > "$allSources"
             bad=0
             badSource=0
             # The shared libraries the checked output's files load (computed
@@ -2152,7 +2161,7 @@ let
                 bad=1
                 badSource=1
               fi
-            done < "$sourcesList"
+            done < "$allSources"
             while IFS= read -r s; do
               [ -n "$s" ] || continue
               if grep -qxF "$s" "$closure/store-paths" && ! loadsFrom "$s"; then

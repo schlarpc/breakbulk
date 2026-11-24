@@ -911,7 +911,7 @@ product's stage order, besides narrowing and removing the check.
 
 #### `noSourceReferences.sources`
 
-The source store paths. `null`: the product's `sourcePaths` (its source views and crate sources).
+The source store paths. `null`: the product's `sourcePaths` (its source views and crate sources) and the paths its `sourcePathFiles` list.
 
 *Type:* null or (list of (string or absolute path or package))
 

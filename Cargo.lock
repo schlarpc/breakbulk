@@ -118,6 +118,7 @@ dependencies = [
  "harmonia-store-derivation",
  "harmonia-store-path",
  "harmonia-store-remote",
+ "harmonia-utils-hash",
  "serde",
  "serde_json",
  "tokio",

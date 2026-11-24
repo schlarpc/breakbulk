@@ -29,6 +29,13 @@
 //! tree, and becomes the value of its key. One whose prediction falls back
 //! is the view it narrows.
 //!
+//! `breakbulk-drv --predicted-paths <file> --out <file>`: the store path
+//! each predicted view of `<file>` (a list of `ViewSpec`s) would have,
+//! one per line, computed without adding anything to the store: for
+//! `noSourceReferences` in dynamic-derivation mode, where the views exist
+//! only once the outer derivation runs. A view whose prediction falls
+//! back is the view it narrows, which evaluation already knows.
+//!
 //! A unit whose inputs include a content-addressed or deferred derivation
 //! (an embedded product) stays deferred: its outputs are placeholders, and
 //! so are those of every unit that depends on it. Nix resolves them at
@@ -47,7 +54,9 @@ use harmonia_protocol::types::DaemonStore as _;
 use harmonia_store_aterm::hash_modulo::{HashModulo, fill_deferred_outputs, hash_input_modulo};
 use harmonia_store_aterm::input_address::UnfilledOutput;
 use harmonia_store_aterm::{parse_derivation_aterm, print_derivation_aterm};
-use harmonia_store_content_address::ContentAddressMethodAlgorithm;
+use harmonia_store_content_address::{
+    ContentAddress, ContentAddressMethodAlgorithm, make_store_path_from_ca,
+};
 use harmonia_store_derivation::derivation::{Derivation, DerivationOutput};
 use harmonia_store_derivation::derived_path::{OutputName, SingleDerivedPath};
 use harmonia_store_derivation::placeholder::Placeholder;
@@ -58,7 +67,7 @@ type Res<T> = Result<T, String>;
 
 const USAGE: &str = "usage: breakbulk-drv --plan <plan.json> --sources <file> \
     --toolchains <file> --overrides <file> --roots <file> --values <file> --outer <file> \
-    [--predict <file>]";
+    [--predict <file>]\n   or: breakbulk-drv --predicted-paths <file> --out <file>";
 
 fn read(path: &str) -> Res<String> {
     std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))
@@ -159,8 +168,55 @@ fn to_json(sd: &StoreDir, r: &Resolved) -> Res<serde_json::Value> {
     }))
 }
 
+/// The store path `add_ca_to_store("source", r:sha256, no references)`
+/// gives the tree at `dir`.
+fn source_path(sd: &StoreDir, dir: &std::path::Path) -> Res<String> {
+    let nar = nar(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let name: StorePathName = "source".parse().map_err(|e| format!("source: {e:?}"))?;
+    let ca = ContentAddress::NixArchive(harmonia_utils_hash::Sha256::digest(&nar).into());
+    Ok(sd
+        .display(&make_store_path_from_ca(sd, name, ca))
+        .to_string())
+}
+
+fn store_dir() -> Res<StoreDir> {
+    StoreDir::new(std::env::var("NIX_STORE").unwrap_or_else(|_| "/nix/store".into()))
+        .map_err(|e| format!("{e}"))
+}
+
+/// Each predicted view of `spec`'s store path, as the outer derivation
+/// adds it (`--predicted-paths`).
+fn predicted_paths(spec: &str, out: &str) -> Res<()> {
+    let predict: Vec<ViewSpec> = parse(spec)?;
+    let sd = store_dir()?;
+    let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+    let mut lines = String::new();
+    for (i, spec) in predict.iter().enumerate() {
+        if let Outcome::Files(files) = outcome(spec) {
+            let dir = std::path::Path::new(&tmp).join(format!("predicted-{i}"));
+            materialize(
+                std::path::Path::new(&spec.view),
+                &spec.package_dir,
+                &files,
+                &dir,
+            )
+            .map_err(|e| format!("{}: {e}", spec.key))?;
+            lines.push_str(&source_path(&sd, &dir)?);
+            lines.push('\n');
+        }
+    }
+    std::fs::write(out, lines).map_err(|e| format!("{out}: {e}"))
+}
+
 async fn run() -> Res<()> {
-    let mut args = std::env::args().skip(1);
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, spec, o, out] = &all[..]
+        && flag == "--predicted-paths"
+        && o == "--out"
+    {
+        return predicted_paths(spec, out);
+    }
+    let mut args = all.into_iter();
     let mut opts = BTreeMap::new();
     while let Some(flag) = args.next() {
         let name = flag
@@ -211,8 +267,7 @@ async fn run() -> Res<()> {
     let units = instantiate(&inputs).map_err(|e| e.to_string())?;
     let dplan = dynamic::dynamic_plan(&inputs, &units, &outer).map_err(|e| e.to_string())?;
 
-    let sd = StoreDir::new(std::env::var("NIX_STORE").unwrap_or_else(|_| "/nix/store".into()))
-        .map_err(|e| format!("{e}"))?;
+    let sd = store_dir()?;
     let remote = std::env::var("NIX_REMOTE").map_err(|_| {
         "NIX_REMOTE is not set: breakbulk-drv runs as the builder of a derivation with \
          requiredSystemFeatures = [ \"builder-rpc-v0\" ]"
@@ -372,5 +427,26 @@ fn main() -> ExitCode {
             eprintln!("breakbulk-drv: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Checked against `builtins.path { name = "source"; }` of the same
+    /// tree.
+    #[test]
+    fn source_path_is_builtins_path() {
+        let dir = std::env::temp_dir().join(format!("breakbulk-drv-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("c/src")).unwrap();
+        std::fs::write(dir.join("c/src/lib.rs"), "mod a;\n").unwrap();
+        std::fs::write(dir.join("c/src/a.rs"), "").unwrap();
+        let sd = harmonia_store_path::StoreDir::new("/nix/store").unwrap();
+        let got = super::source_path(&sd, &dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            got.unwrap(),
+            "/nix/store/1fr70156xxqbbbblngwdp1g9iaivlnyd-source"
+        );
     }
 }
