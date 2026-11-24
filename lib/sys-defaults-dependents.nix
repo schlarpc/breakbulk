@@ -11,9 +11,9 @@ let
   # directives for the build script, each checked in the crate's source
   # (latest release, 2026-11): source prediction reads only the script's
   # own literal directives, so a package that build-depends on one keeps
-  # its build-script runs' whole view. Only a direct build-dependency: a
-  # crate reached through others prints for their scripts, not the
-  # package's. Not prost-build (it prints none), nor cc, pkg-config or
+  # its build-script runs' whole view. Only a build-dependency, direct or
+  # behind a local wrapper (`buildDependency`): a crate reached otherwise
+  # prints for other packages' scripts, not this package's. Not prost-build (it prints none), nor cc, pkg-config or
   # napi-build (only `rerun-if-env-changed`).
   directivePrinter =
     { buildDependency, ... }:

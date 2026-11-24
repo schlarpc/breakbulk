@@ -325,11 +325,16 @@ in
         (dev-dependencies too), directly or through other crates. Two
         arguments narrow that: `direct` is `true` when the dependent's
         `Cargo.lock` entry names the crate itself, and `buildDependency`
-        when a path package's own `Cargo.toml` names the crate under
+        when the crate's library code runs in a path package's build
+        script: its own `Cargo.toml` names the crate under
         `[build-dependencies]` (or a `[target.<cfg>.build-dependencies]`
-        table, renamed with `package` too; always `false` for a registry
-        or git package, whose manifest is not read at evaluation); the
-        manifest is read only by a function that uses it. They are a layer
+        table, renamed with `package` too), or names a path package there
+        that has the crate in its `[dependencies]`, directly or through
+        more path packages (a local crate that wraps `bindgen`). It is
+        always `false` for a registry or git package, and does not follow
+        a registry or git crate's dependencies: their manifests are not
+        read at evaluation. The manifests are read only by a function that
+        uses the argument. They are a layer
         over `sysDefaults.packages` and under `memberDefaults`
         ([layer order](../../explanation/configuration.md#shared-settings-and-layer-order)).
 

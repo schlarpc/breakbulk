@@ -488,19 +488,35 @@ let
     in
     lib.concatMap (n: byName.${n}) names;
 
-  # The crate names in the `[build-dependencies]` of each workspace's path
-  # packages, by workspace and package name, for the `buildDependency`
-  # argument of `sysDefaults.dependents` functions. A manifest is read
-  # only when a function uses the argument.
+  # The crates whose library code each path package's build script runs,
+  # by workspace and package name, for the `buildDependency` argument of
+  # `sysDefaults.dependents` functions: the crates in its
+  # `[build-dependencies]`, and through a path package among them, that
+  # package's `[dependencies]`, transitively. So bindgen behind a local
+  # wrapper crate counts as bindgen named directly. Not through a registry
+  # or git crate: Cargo.lock does not say which of its dependencies are
+  # build or dev ones, and its manifest is not read at evaluation. A
+  # manifest is read only when a function uses the argument.
   buildDependencyNames = lib.mapAttrs (
-    _:
+    _: dirs:
+    let
+      namesOf =
+        kind: dir:
+        breakbulkLib.sourceViews.dependencyNames {
+          inherit root kind;
+          pkgDir = dir;
+        };
+    in
     lib.mapAttrs (
       _: dir:
-      breakbulkLib.sourceViews.buildDependencies {
-        inherit root;
-        pkgDir = dir;
-      }
-    )
+      map (x: x.key) (
+        lib.genericClosure {
+          startSet = map (key: { inherit key; }) (namesOf "build" dir);
+          operator =
+            { key }: lib.optionals (dirs ? ${key}) (map (k: { key = k; }) (namesOf "normal" dirs.${key}));
+        }
+      )
+    ) dirs
   ) pathPackageDirs;
   # The directories of each workspace's path packages, by name: every
   # package Cargo may load for it (lib/skeleton.nix `packageClosure`).

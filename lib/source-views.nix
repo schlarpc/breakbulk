@@ -667,20 +667,27 @@ rec {
           '') places
         );
 
-  # The crate names in a package's `[build-dependencies]` (and
-  # `target.<cfg>.build-dependencies`), by the package they name.
-  buildDependencies =
-    { root, pkgDir }:
+  # The crate names in a package's `[build-dependencies]` (`kind =
+  # "build"`) or `[dependencies]` (`"normal"`), and the
+  # `target.<cfg>.` tables of that kind, by the package they name.
+  dependencyNames =
+    {
+      root,
+      pkgDir,
+      kind,
+    }:
     let
       m = builtins.fromTOML (builtins.readFile (manifest.at root (util.joinRel pkgDir "Cargo.toml")));
-      tables = [
-        (m.build-dependencies or { })
-        (m.build_dependencies or { })
-      ]
-      ++ lib.concatMap (t: [
-        (t.build-dependencies or { })
-        (t.build_dependencies or { })
-      ]) (lib.attrValues (m.target or { }));
+      of =
+        t:
+        if kind == "build" then
+          [
+            (t.build-dependencies or { })
+            (t.build_dependencies or { })
+          ]
+        else
+          [ (t.dependencies or { }) ];
+      tables = of m ++ lib.concatMap of (lib.attrValues (m.target or { }));
     in
     lib.unique (
       lib.concatMap (

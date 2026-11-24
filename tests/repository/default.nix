@@ -1533,6 +1533,34 @@ in
         }
       ]) "default";
       keepOf = p: sysNative."src:${p}".keep;
+      # bg-sys reaches bindgen only through bg-helper, a path package in
+      # its `[build-dependencies]` whose library calls bindgen: the run
+      # keeps its whole view, as with bindgen named directly.
+      wrapped = specsOf (mkRepo
+        (edited "sys-native" ''
+          mkdir -p bg-helper/src
+          printf '[package]\nname = "bg-helper"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nbindgen = "0.72"\n' > bg-helper/Cargo.toml
+          printf 'pub fn generate(h: &str, out: &std::path::Path) {\n    bindgen::Builder::default().header(h).allowlist_function("bg_.*").generate().expect("bindgen failed").write_to_file(out).unwrap();\n}\n' > bg-helper/src/lib.rs
+          sed -i 's/^bindgen = .*/bg-helper = { path = "..\/bg-helper" }/' bg-sys/Cargo.toml
+          cat > bg-sys/build.rs <<'RS'
+          use std::path::PathBuf;
+          fn main() {
+              let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+              cc::Build::new().file("csrc/bg.c").compile("bg");
+              bg_helper::generate("csrc/bg.h", &out.join("bindings.rs"));
+              println!("cargo::rerun-if-changed=csrc");
+          }
+          RS
+          sed -i 's/members = \["app", "cm-sys", "bg-sys", "plain"\]/members = ["app", "cm-sys", "bg-sys", "bg-helper", "plain"]/' Cargo.toml
+          awk '/^name = "bg-sys"$/ { sys = 1 } sys && /^ "bindgen",$/ { print " \"bg-helper\","; sys = 0; next } { print }' Cargo.lock > l
+          printf '\n[[package]]\nname = "bg-helper"\nversion = "0.1.0"\ndependencies = [\n "bindgen",\n]\n' >> l
+          mv l Cargo.lock
+        '')
+        [
+          (oneWs ".")
+          { workspaces.main.memberDefaults.predictSources.enable = true; }
+        ]
+      ) "default";
       # explainPredictions: a script without `rerun-if-*` directives falls
       # back to its whole view.
       noDirectives =
@@ -1562,6 +1590,9 @@ in
       !(sysNative ? "src:bg-sys#run/custom-build/build-script-build")
       && sysNative ? "src:cm-sys#run/custom-build/build-script-build"
     ) "predict-sources: runs predicted ${builtins.toJSON (lib.attrNames sysNative)}";
+    assert lib.assertMsg
+      (!(wrapped ? "src:bg-sys#run/custom-build/build-script-build") && wrapped ? "src:bg-sys#lib/bg_sys")
+      "predict-sources: with bindgen behind bg-helper, runs predicted ${builtins.toJSON (lib.attrNames wrapped)}";
     assert lib.assertMsg (keepOf "bg-sys#lib/bg_sys" == [ "bg-sys/k" ] && keepOf "app#bin/app" == [ ])
       "predict-sources: buildDependency keeps bg-sys ${toString (keepOf "bg-sys#lib/bg_sys")}, app ${toString (keepOf "app#bin/app")}";
     pkgs.runCommand "predict-sources"
