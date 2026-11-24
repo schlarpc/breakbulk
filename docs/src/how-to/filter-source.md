@@ -194,8 +194,12 @@ keeps them:
 packages.web.predictSources.keep = [ "templates" ];
 ```
 
-See [Source prediction](../explanation/internals/sources.md#source-prediction)
-for what it reads and when it falls back to the whole view.
+To see what each unit's view holds, or why a unit falls back to its
+whole view, build the variant's
+[`explainPredictions`](../reference/outputs.md#explainpredictions) and
+read the file. See
+[Source prediction](../explanation/internals/sources.md#source-prediction)
+for what prediction reads and when it falls back.
 
 To leave the files out by hand instead: planning reads the manifest from
 its own copy, so the units do not need it in their view. If nothing reads

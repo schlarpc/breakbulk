@@ -1388,6 +1388,9 @@ let
               benchRuns = ifBenches (selectPkgs bSel inst.benchRuns);
               # `cargo doc` of the variant's packages (lib/workspace.nix).
               inherit (inst) docs;
+              # A text report: what each predicted unit's view holds, or
+              # why it falls back to its whole view.
+              inherit (inst) explainPredictions;
             }
             // lib.optionalAttrs (checking && traced != [ ]) {
               # Every unit of the plans it traces (`cargo check` and the test

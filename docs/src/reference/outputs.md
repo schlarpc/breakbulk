@@ -78,6 +78,7 @@ repo = {
         benches.<pkg>.<binary>;      # bench binaries, in a bench variant
         benchRuns.<pkg>.<binary>;    # each bench binary run once in test mode; .enabled
         docs;                        # `cargo doc`'s folder
+        explainPredictions;          # a text file: each predicted unit's view, or why it falls back
         buildScriptPaths.<plan>;     # each plan's check (build, test)
         plans = { build; test; doc; };   # plan.json, for debugging and explainSharing
         check;                       # check variants only
@@ -306,6 +307,43 @@ each plan's `units.json`, which builds the plans and
 except the units downstream of a product named in a package's settings
 (resolved at build time in dynamic-derivation mode), which it describes
 as IFD mode builds them.
+
+### `explainPredictions`
+
+`target.<triple>.variants.<v>.explainPredictions` is a derivation whose
+output is a text file. It lists each unit of the variant that
+[`predictSources`](options/packages.md#packagesnamepredictsourcesenable)
+narrows, by its source key (`src:<dir>#<kind>/<name>` for the build
+plan's units, `test-src:…` for the test plan's), with one of:
+
+- `predicted, <n> paths`, and the paths its view holds, relative to the
+  repository root. A path from
+  [`predictSources.keep`](options/packages.md#packagesnamepredictsourceskeep)
+  or a curated keep is marked `(kept)`.
+- `whole view`, and each reason prediction cannot be trusted, with the
+  file it is in. The unit then reads the view it would have narrowed, so
+  an edit anywhere in that view rebuilds it.
+
+To build it, add it to your flake's outputs:
+
+```nix
+packages.${system}.explain-predictions =
+  repo.workspaces.default.target.x86_64-unknown-linux-gnu.variants.default.explainPredictions;
+```
+
+```console
+$ nix build .#explain-predictions
+$ cat result
+src:crates/web#lib/web: predicted, 3 paths
+  crates/web/src/lib.rs
+  crates/web/src/routes.rs
+  crates/web/templates (kept)
+src:crates/web#run/custom-build/build-script-build: whole view
+  crates/web/build.rs: the build script prints no `rerun-if-changed` or `rerun-if-env-changed`, so Cargo treats the whole package as its input
+```
+
+It is the same in both modes, and builds nothing but the predictor: it
+reads the units' source views, not their builds.
 
 ### `nixFeatures`
 

@@ -1533,6 +1533,12 @@ in
         }
       ]) "default";
       keepOf = p: sysNative."src:${p}".keep;
+      # explainPredictions: a script without `rerun-if-*` directives falls
+      # back to its whole view.
+      noDirectives =
+        predictSourcesRepo "echo 'fn main() { println!(\"cargo:rustc-env=PROTO=x\"); }' > ps/build.rs"
+          [ ];
+      explainOf = repo: repo.workspaces.main.target.${native}.variants.default.explainPredictions;
     in
     assert lib.assertMsg (
       got == want
@@ -1565,6 +1571,9 @@ in
         # A package with a sourceOverlay is predicted, the overlay on top.
         overlaidLib = (inst' overlaidRepo "main").sources.workspaceTargets.ps."lib/ps";
         overlaidPs = overlaidRepo.workspaces.main.packages.ps;
+        explained = explainOf predictSources;
+        explainedOverlaid = explainOf overlaidRepo;
+        explainedNoDirectives = explainOf noDirectives;
         hint = expectFailure "predict-sources-hint" missingLib [
           "ps/templates/page.txt"
           "packages.ps.predictSources.keep"
@@ -1575,6 +1584,17 @@ in
         [ "$($overlaidPs/bin/ps)" = "42 data page proto" ]
         test -f $overlaidLib/ps/src/lib.rs && test ! -e $overlaidLib/ps/README.md
         test -f $overlaidLib/ps/assets/a.txt
+        cat $explained
+        grep -qx 'src:ps#lib/ps: predicted, [0-9]* paths' $explained
+        grep -qx '  ps/src/data.txt' $explained
+        grep -qx '  ps/templates (kept)' $explained
+        grep -qx 'src:ps#run/custom-build/build-script-build: predicted, 2 paths' $explained
+        grep -qx '  ps/proto/x.proto' $explained
+        ! grep -q 'README.md' $explained
+        # A sourceOverlay package's units are in the report too.
+        grep -qx 'src:ps#lib/ps: predicted, [0-9]* paths' $explainedOverlaid
+        grep -qx 'src:ps#run/custom-build/build-script-build: whole view' $explainedNoDirectives
+        grep -q 'prints no `rerun-if-changed`' $explainedNoDirectives
         touch $out
       '';
 

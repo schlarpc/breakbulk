@@ -485,6 +485,40 @@ fn predicted_view_falls_back() {
 }
 
 #[test]
+fn explain_reports_paths_and_fallbacks() {
+    use crate::view::{Kind, ViewSpec, explain};
+    let v = View::new(&[
+        ("c/Cargo.toml", ""),
+        ("c/build.rs", "fn main() {}"),
+        ("c/src/lib.rs", "mod a;"),
+        ("c/src/a.rs", ""),
+    ]);
+    let spec = |key: &str, kind, root: &str| ViewSpec {
+        key: key.into(),
+        view: v.path().display().to_string(),
+        fallback: None,
+        package_dir: "c".into(),
+        kind,
+        root: root.into(),
+        keep: vec!["c/missing".into(), "c/Cargo.toml".into()],
+    };
+    let report = explain(&[
+        spec(
+            "src:c#run/custom-build/build-script-build",
+            Kind::Run,
+            "c/build.rs",
+        ),
+        spec("src:c#lib/c", Kind::Crate, "c/src/lib.rs"),
+    ]);
+    assert_eq!(
+        report,
+        "src:c#lib/c: predicted, 3 paths\n  c/Cargo.toml (kept)\n  c/src/a.rs\n  c/src/lib.rs\n\
+         src:c#run/custom-build/build-script-build: whole view\n  \
+         c/build.rs: the build script prints no `rerun-if-changed` or `rerun-if-env-changed`, so Cargo treats the whole package as its input\n"
+    );
+}
+
+#[test]
 fn nar_of_a_small_tree() {
     // Checked against `nix-store --dump` of the same tree.
     let v = View::new(&[("d/f", "x")]);

@@ -7,25 +7,37 @@
 //! `breakbulk-predict --one <file> --out <dir>`: one view, from one
 //! [`ViewSpec`], written at `<dir>` itself; when prediction falls back,
 //! the spec's `fallback` view, copied.
+//!
+//! `breakbulk-predict --explain <file> --out <file>`: for a list of
+//! [`ViewSpec`]s, a readable report of what each predicted view holds or
+//! why it falls back (`explainPredictions`); no view is written.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 
-use breakbulk_predict::view::{Outcome, ViewSpec, copy_view, materialize, outcome};
+use breakbulk_predict::view::{Outcome, ViewSpec, copy_view, explain, materialize, outcome};
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (one, spec, out) = match &args[..] {
-        [a, s, b, o] if a == "--spec" && b == "--out" => (false, s, o),
-        [a, s, b, o] if a == "--one" && b == "--out" => (true, s, o),
+    let (mode, spec, out) = match &args[..] {
+        [a, s, b, o] if b == "--out" && ["--spec", "--one", "--explain"].contains(&a.as_str()) => {
+            (a.as_str(), s, o)
+        }
         _ => {
             return Err(
-                "usage: breakbulk-predict (--spec <file> | --one <file>) --out <dir>".into(),
+                "usage: breakbulk-predict (--spec <file> | --one <file> | --explain <file>) --out <path>"
+                    .into(),
             );
         }
     };
+    let one = mode == "--one";
     let text = std::fs::read_to_string(spec).map_err(|e| format!("{spec}: {e}"))?;
+    if mode == "--explain" {
+        let specs: Vec<ViewSpec> =
+            serde_json::from_str(&text).map_err(|e| format!("{spec}: {e}"))?;
+        return std::fs::write(out, explain(&specs)).map_err(|e| format!("{out}: {e}"));
+    }
     if one {
         let s: ViewSpec = serde_json::from_str(&text).map_err(|e| format!("{spec}: {e}"))?;
         return match outcome(&s) {

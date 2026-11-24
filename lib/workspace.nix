@@ -385,13 +385,37 @@ let
   # derivation; dynamic-derivation mode's outer derivation makes the views
   # from the specs instead and never reads `value`). A view whose
   # prediction falls back is the view it would have narrowed.
-  predictedAll = lib.concatMapAttrs (
-    dir: v:
-    let
-      at = prefix: specs: lib.mapAttrs' (t: spec: lib.nameValuePair "${prefix}:${dir}#${t}" spec) specs;
-    in
-    at "src" (v.predicted.build or { }) // at "test-src" (v.predicted.test or { })
-  ) allViews;
+  specsByKey =
+    field:
+    lib.concatMapAttrs (
+      dir: v:
+      let
+        at = prefix: specs: lib.mapAttrs' (t: spec: lib.nameValuePair "${prefix}:${dir}#${t}" spec) specs;
+      in
+      at "src" (v.${field}.build or { }) // at "test-src" (v.${field}.test or { })
+    ) allViews;
+  predictedAll = specsByKey "predicted";
+  # `explainPredictions`: what each predicted unit's view holds, or why it
+  # falls back, as text. A derivation of its own, not predictOut's
+  # result.json: it covers `sourceOverlay` packages, whose views predictOut
+  # does not make, and reads the same in both delivery modes.
+  explainPredictions = derivation {
+    name = "${name}-explain-predictions";
+    inherit system;
+    builder = "${tools.breakbulk-predict}/bin/breakbulk-predict";
+    args = [
+      "--explain"
+      (builtins.toFile "predict.json" (
+        builtins.toJSON (
+          lib.mapAttrsToList (key: spec: removeAttrs spec [ "fallback" ] // { inherit key; }) (
+            specsByKey "explained"
+          )
+        )
+      ))
+      "--out"
+      (placeholder "out")
+    ];
+  };
   predictOut = derivation {
     name = "${name}-predicted-views";
     inherit system;
@@ -966,7 +990,7 @@ in
     build = built.buildScriptRuns;
     test = tested.buildScriptRuns;
   };
-  inherit delivery capabilities;
+  inherit delivery capabilities explainPredictions;
   # Dynamic-derivation mode: the outer derivations, by plan kind.
   outer = lib.optionalAttrs isDynamic (ofEach "outer");
   # The unit derivations through IFD mode, for explainSharing (in

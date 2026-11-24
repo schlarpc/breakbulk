@@ -915,10 +915,10 @@ rec {
           map (u: lib.nameValuePair u.ident u.view) (filter (u: u.pkg == pkg && u.view != null) resolved)
         );
       specsOf =
-        pkg:
+        withOverlaid: pkg:
         lib.listToAttrs (
           map (u: lib.nameValuePair u.ident u.spec) (
-            filter (u: u.pkg == pkg && u.predicted && !overlaid) resolved
+            filter (u: u.pkg == pkg && u.predicted && (withOverlaid || !overlaid)) resolved
           )
         );
       # What each view of its own left out, by identity.
@@ -967,9 +967,17 @@ rec {
       # derivations (`predictOne`) in `targetSrc`.
       predicted = lib.optionalAttrs predictOn (
         {
-          build = specsOf "build";
+          build = specsOf false "build";
         }
-        // lib.optionalAttrs tested { test = specsOf "test"; }
+        // lib.optionalAttrs tested { test = specsOf false "test"; }
+      );
+      # Every predicted unit's spec, a `sourceOverlay` package's too, in
+      # `predicted`'s shape: what `explainPredictions` reports on.
+      explained = lib.optionalAttrs predictOn (
+        {
+          build = specsOf true "build";
+        }
+        // lib.optionalAttrs tested { test = specsOf true "test"; }
       );
       targetSrc = viewsOf "build";
       # What each view left out (pipeline's `removed`), for hints: the

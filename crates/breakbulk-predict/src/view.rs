@@ -81,6 +81,38 @@ pub fn outcome(spec: &ViewSpec) -> Outcome {
     Outcome::Files(files)
 }
 
+/// A readable report of each spec's outcome, sorted by key: the paths its
+/// predicted view holds (those `view` has; a `keep` path marked so), or
+/// why it falls back.
+pub fn explain(specs: &[ViewSpec]) -> String {
+    let mut sorted: Vec<&ViewSpec> = specs.iter().collect();
+    sorted.sort_by(|a, b| a.key.cmp(&b.key));
+    let mut out = String::new();
+    for s in sorted {
+        match outcome(s) {
+            Outcome::Files(files) => {
+                let view = Path::new(&s.view);
+                let held: Vec<&String> = files
+                    .iter()
+                    .filter(|p| view.join(p).symlink_metadata().is_ok() && !under_symlink(view, p))
+                    .collect();
+                out.push_str(&format!("{}: predicted, {} paths\n", s.key, held.len()));
+                for p in held {
+                    let kept = if s.keep.contains(p) { " (kept)" } else { "" };
+                    out.push_str(&format!("  {p}{kept}\n"));
+                }
+            }
+            Outcome::Fallback(reasons) => {
+                out.push_str(&format!("{}: whole view\n", s.key));
+                for r in reasons {
+                    out.push_str(&format!("  {r}\n"));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Write the predicted view: every path of `paths` that `view` has (a
 /// directory with everything under it), at its place, and the package
 /// directory even when empty (it is the unit's working directory), as
