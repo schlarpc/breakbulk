@@ -49,7 +49,8 @@
 #
 # Environment:
 #   WORK        scratch directory (default: $TMPDIR/breakbulk-dynamic);
-#               kept between runs, so later runs are incremental. Its store
+#               kept between runs, so later runs are incremental (a full
+#               run: ~20 min with a new WORK, ~5 min reused). Its store
 #               is read-only: `chmod -R u+w "$WORK"` before deleting it.
 #   NIX_MASTER  a Nix master build (its bin/nix); default: built from
 #               github:NixOS/nix at NIX_REV with the system Nix
