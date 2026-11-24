@@ -90,6 +90,11 @@ pub enum Reason {
     /// The script prints no `rerun-if-changed` or `rerun-if-env-changed`
     /// directive, so Cargo treats the whole package as its input.
     NoRerunIf,
+    /// `env!("CARGO_MANIFEST_DIR")` (or `option_env!`) other than in an
+    /// `include*!` path: the compile's view path ends up in its output,
+    /// and whatever reads files under it when the program runs (a test
+    /// finding its fixtures) would find only the predicted files.
+    ManifestDirInOutput,
 }
 
 impl fmt::Display for Reason {
@@ -111,6 +116,9 @@ impl fmt::Display for Reason {
             Reason::UnreadableRerunIfChanged(s) => {
                 write!(f, "`rerun-if-changed` in a form source prediction does not read (`{s}`)")
             }
+            Reason::ManifestDirInOutput => f.write_str(
+                "`env!(\"CARGO_MANIFEST_DIR\")` outside an `include*!` path: the program may read files under the package directory when it runs",
+            ),
             Reason::NoRerunIf => f.write_str(
                 "the build script prints no `rerun-if-changed` or `rerun-if-env-changed`, so Cargo treats the whole package as its input",
             ),
@@ -617,6 +625,16 @@ impl FileVisitor<'_, '_> {
                         continue;
                     }
                 }
+                TokenTree::Ident(id)
+                    if (id == "env" || id == "option_env")
+                        && matches!(tts.get(i + 1), Some(TokenTree::Punct(b)) if b.as_char() == '!')
+                        && matches!(tts.get(i + 2), Some(TokenTree::Group(g)) if names_manifest_dir(&g.stream())) =>
+                {
+                    let f = self.file.clone();
+                    self.w.fall(&f, Reason::ManifestDirInOutput);
+                    i += 3;
+                    continue;
+                }
                 TokenTree::Literal(l) => {
                     if let Ok(s) = syn::parse2::<LitStr>(TokenTree::Literal(l.clone()).into()) {
                         let f = self.file.clone();
@@ -683,6 +701,10 @@ impl<'ast> Visit<'ast> for FileVisitor<'_, '_> {
             .unwrap_or_default();
         match name.as_str() {
             "include" | "include_str" | "include_bytes" => self.include(&name, mac.tokens.clone()),
+            "env" | "option_env" if names_manifest_dir(&mac.tokens) => {
+                let f = self.file.clone();
+                self.w.fall(&f, Reason::ManifestDirInOutput);
+            }
             "macro_rules" => self.tokens(mac.tokens.clone(), true),
             _ => self.tokens(mac.tokens.clone(), false),
         }
@@ -696,6 +718,15 @@ impl<'ast> Visit<'ast> for FileVisitor<'_, '_> {
         let f = self.file.clone();
         self.w.literals.push((f, s.value()));
     }
+}
+
+/// Whether `env!`'s or `option_env!`'s arguments name `CARGO_MANIFEST_DIR`.
+fn names_manifest_dir(args: &TokenStream) -> bool {
+    let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
+    syn::parse::Parser::parse2(parser, args.clone())
+        .ok()
+        .and_then(|p| p.first().and_then(lit_str))
+        .is_some_and(|s| s == "CARGO_MANIFEST_DIR")
 }
 
 /// Where an `include*!` argument points.

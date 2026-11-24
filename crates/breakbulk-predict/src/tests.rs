@@ -485,6 +485,35 @@ fn predicted_view_falls_back() {
 }
 
 #[test]
+fn manifest_dir_outside_an_include_falls_back() {
+    for src in [
+        r#"pub const F: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/f.txt");"#,
+        r#"pub fn f() -> Option<&'static str> { option_env!("CARGO_MANIFEST_DIR") }"#,
+        r#"pub fn f() -> String { format!("{}/x", env!("CARGO_MANIFEST_DIR")) }"#,
+        r#"macro_rules! d { () => { env!("CARGO_MANIFEST_DIR") } }"#,
+    ] {
+        let v = View::new(&[("c/src/lib.rs", src)]);
+        let p = predict_crate(v.path(), "c/src/lib.rs", "c");
+        assert_eq!(
+            reasons(&p.fallback),
+            [&Reason::ManifestDirInOutput],
+            "{src}"
+        );
+    }
+    // In an include's path it names a file to read, nothing more.
+    let v = View::new(&[
+        (
+            "c/src/lib.rs",
+            r#"pub const F: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/d.txt"));"#,
+        ),
+        ("c/d.txt", ""),
+    ]);
+    let p = predict_crate(v.path(), "c/src/lib.rs", "c");
+    assert!(p.fallback.is_empty());
+    assert!(p.files.contains("c/d.txt"));
+}
+
+#[test]
 fn explain_reports_paths_and_fallbacks() {
     use crate::view::{Kind, ViewSpec, explain};
     let v = View::new(&[
