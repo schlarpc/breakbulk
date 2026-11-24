@@ -56,14 +56,15 @@
 #   NIX_REV     default 94c011f5040d8c1b1e251b17b5c79ff370208663 (the
 #               commit spike B used, 2026-11-06)
 #   REPO        the breakbulk checkout (default: this script's ../..)
-#   JOBS        max-jobs for Nix master (default 2; cores 4)
+#   JOBS        max-jobs for Nix master (default: nproc, the CPUs this
+#               process may use; cores 4)
 set -euo pipefail
 
 here=$(dirname "$(readlink -f "$0")")
 REPO=${REPO:-$(readlink -f "$here/../..")}
 WORK=${WORK:-${TMPDIR:-/tmp}/breakbulk-dynamic}
 NIX_REV=${NIX_REV:-94c011f5040d8c1b1e251b17b5c79ff370208663}
-JOBS=${JOBS:-2}
+JOBS=${JOBS:-$(nproc)}
 if [ $# -gt 0 ]; then
   fixtures=("$@")
 else
@@ -118,24 +119,32 @@ for input in nixpkgs rust-overlay; do
     in fetchTarball { url = \"https://github.com/\${n.owner}/\${n.repo}/archive/\${n.rev}.tar.gz\"; sha256 = n.narHash; }")")
 done
 case $REPO in /nix/store/*) copy+=("$REPO") ;; esac
-for f in "${fixtures[@]}"; do
-  copy+=("$(sysbuild -A "prereqs.$f")")
-  out=$(sysbuild -A "build.$f")
-  echo "$f (system, IFD): $out" >&2
-  drv=$(nix-store -q --deriver "$out")
-  units=$(sysbuild -A "unitDrvs.$f")
-  # Everything the fixture's build depends on that is not a unit and not
-  # downstream of one.
-  mapfile -t up < <(
-    nix derivation show -r "$drv" | python3 -c '
+# Every fixture in one evaluation: evaluating a fixture alone costs up to
+# ~17 s (most of it shared with other fixtures: cross and static package
+# sets), every fixture together under a minute.
+sysAttrs=()
+for f in "${fixtures[@]}"; do sysAttrs+=(-A "prereqs.$f" -A "build.$f" -A "unitDrvs.$f"); done
+mapfile -t sysOut < <(sysbuild "${sysAttrs[@]}")
+[ ${#sysOut[@]} -eq $((3 * ${#fixtures[@]})) ] || fail "the system Nix built ${#sysOut[@]} paths for ${#fixtures[@]} fixtures"
+sysDrvs=()
+sysUnits=()
+for i in "${!fixtures[@]}"; do
+  copy+=("${sysOut[3 * i]}")
+  echo "${fixtures[i]} (system, IFD): ${sysOut[3 * i + 1]}" >&2
+  sysDrvs+=("$(nix-store -q --deriver "${sysOut[3 * i + 1]}")")
+  sysUnits+=("${sysOut[3 * i + 2]}")
+done
+# Everything the fixtures' builds depend on that is not a unit and not
+# downstream of one.
+mapfile -t up < <(
+  nix derivation show -r "${sysDrvs[@]}" | python3 -c '
 import json, sys
 drvs = json.load(sys.stdin)
 drvs = drvs.get("derivations", drvs)
-units = json.load(open(sys.argv[1]))
 def full(p):
     return p if p.startswith("/") else "/nix/store/" + p
 drvs = {full(k): v for k, v in drvs.items()}
-unit = {p for kind in units.values() for p in kind.values()}
+unit = {p for f in sys.argv[1:] for kind in json.load(open(f)).values() for p in kind.values()}
 def inputs(d):
     i = d.get("inputs")
     if isinstance(i, dict) and "drvs" in i:
@@ -164,11 +173,10 @@ for p, d in drvs.items():
 if unnamed:
     sys.stdout.flush()
     subprocess.run(["nix-store", "-q", "--outputs", *sorted(set(unnamed))], check=True)
-' "$units" | sort -u
-  )
-  for p in "${up[@]}"; do
-    [ -e "$p" ] && copy+=("$p")
-  done
+' "${sysUnits[@]}" | sort -u
+)
+for p in "${up[@]}"; do
+  [ -e "$p" ] && copy+=("$p")
 done
 
 # --- the private store ------------------------------------------------------
@@ -197,25 +205,43 @@ printf '%s\n' "${copy[@]}" | "$NIX_MASTER/bin/nix" copy --no-check-sigs --to "$S
 mbuild() { nixm build -f "$REPO/tests/dynamic" --no-link --print-out-paths "$@"; }
 real() { printf '%s%s' "$WORK/store" "$1"; }
 
+# Each mode's builds and evaluations for every fixture at once, so that
+# the fixtures share one evaluation and Nix builds them in parallel: each
+# mode's `batch` links every fixture's build (and IFD mode's unitDrvs),
+# and the evaluations go to $WORK/batch. `select` keeps an attribute
+# set's fixtures, for `--apply`.
+select="builtins.intersectAttrs { $(printf '"%s" = null; ' "${fixtures[@]}")}"
+mkdir -p "$WORK/batch"
+say "dynamic-derivation mode, every fixture (Nix master)"
+dynBatch=$(mbuild --keep-going --argstr only "${fixtures[*]}" --arg mode '"dynamic"' -L batch)
+dynBatch=$(real "$dynBatch")
+say "IFD mode, every fixture (Nix master)"
+# With `ca`, as dynamic mode always is: a product that names another
+# product's path (an rpath, debug info) has the same bytes only when
+# that path is content-addressed in both modes.
+ifdBatch=$(mbuild --keep-going --argstr only "${fixtures[*]}" --arg mode '"ifd"' --arg ca true batch)
+ifdBatch=$(real "$ifdBatch")
+say "outer derivations, mayDiffer and explainSharing, every fixture"
+nixm eval --json -f "$REPO/tests/dynamic" --arg mode '"dynamic"' outer \
+  --apply "o: builtins.mapAttrs (f: builtins.mapAttrs (k: d: d.drvPath)) ($select o)" >"$WORK/batch/outer.json"
+nixm eval --json -f "$REPO/tests/dynamic" --arg mode '"ifd"' mayDiffer >"$WORK/batch/may-differ.json"
+nixm eval --json -f "$REPO/tests/dynamic" --arg mode '"dynamic"' explain --apply "$select" >"$WORK/batch/explain.json"
+field() { python3 -c 'import json, sys; v = json.load(open(sys.argv[1])); [v := v.get(k, "") for k in sys.argv[2:]]; print(v if isinstance(v, str) else json.dumps(v))' "$@"; }
+
 status=0
 for f in "${fixtures[@]}"; do
-  say "$f: dynamic-derivation mode (Nix master)"
-  dyn=$(mbuild --arg mode '"dynamic"' -L "build.$f")
-  say "$f: IFD mode (Nix master)"
-  # With `ca`, as dynamic mode always is: a product that names another
-  # product's path (an rpath, debug info) has the same bytes only when
-  # that path is content-addressed in both modes.
-  ifd=$(mbuild --arg mode '"ifd"' --arg ca true "build.$f")
-
+  say "$f: comparing the modes"
+  dyn=$(readlink "$dynBatch/build/$f")
+  ifd=$(readlink "$ifdBatch/build/$f")
 
   # Unit .drv paths: IFD mode's from units.json, dynamic mode's from the
   # outer derivations' build logs, per workspace and plan kind. Units whose
   # names match mayDiffer (downstream of an embedded product) may differ.
-  ifdUnits=$(real "$(mbuild --arg mode '"ifd"' --arg ca true "unitDrvs.$f")")
-  mayDiffer=$(nix-instantiate --eval --raw "$REPO/tests/dynamic" --arg mode '"ifd"' -A "mayDiffer.$f" 2>/dev/null || true)
+  ifdUnits=$(real "$(readlink "$ifdBatch/unitDrvs/$f")")
+  mayDiffer=$(field "$WORK/batch/may-differ.json" "$f")
   mapfile -t keys < <(python3 -c 'import json, sys; print("\n".join(sorted(json.load(open(sys.argv[1])))))' "$ifdUnits")
   for key in "${keys[@]}"; do
-    outer=$(nixm path-info --derivation -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "outer.$f.\"$key\"")
+    outer=$(field "$WORK/batch/outer.json" "$f" "$key")
     nixm log "$outer" | sed -n 's/^breakbulk-drv: wrote \([cr]-[^ ]*\|doctest:[^ ]*\|docs\) \(.*\)$/\1 \2/p' >"$WORK/units.dynamic"
     if ! python3 - "$ifdUnits" "$key" "$WORK/units.dynamic" "$mayDiffer" <<'EOF'; then
 import json, re, sys
@@ -375,7 +401,7 @@ EOF
     fi
   fi
   # explainSharing in dynamic mode (through IFD mode's units.json).
-  if [ "$(nixm eval --json -f "$REPO/tests/dynamic" --arg mode '"dynamic"' "explain.$f")" = true ]; then
+  if [ "$(field "$WORK/batch/explain.json" "$f")" = true ]; then
     echo "$f: explainSharing works in dynamic-derivation mode" >&2
   else
     echo "FAIL: $f: explainSharing in dynamic-derivation mode" >&2

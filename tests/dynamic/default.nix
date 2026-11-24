@@ -83,6 +83,8 @@
   # `cutoff`'s edit: a number other than 1, new on each run.sh run, so
   # that the edited fixtures and settings are new to the store.
   cutoffEdit ? "2",
+  # `batch`'s fixtures, separated by spaces (default: every fixture).
+  only ? null,
 }:
 let
   inherit (pkgs) lib;
@@ -1008,6 +1010,11 @@ let
               pkgs.coreutils
               pkgs.jq
             ]
+            # The ELF stages' default binutils (lib/stage-helpers), every
+            # output: the stages take `dev`. Only dynamic mode strips its
+            # test binaries' copies out of their wrappers, so no IFD-mode
+            # closure holds it, and Nix master would build it from source.
+            ++ pkgs.binutils-unwrapped-all-targets.all
           )
         )
       );
@@ -1092,6 +1099,8 @@ let
         );
       };
     };
+  builds = lib.mapAttrs build repos;
+  unitDrvsAll = lib.mapAttrs unitDrvs repos;
 in
 {
   inherit
@@ -1100,10 +1109,30 @@ in
     mayDiffer
     cutoff
     ;
-  build = lib.mapAttrs build repos;
+  build = builds;
+  # build.<fixture> (and in IFD mode unitDrvs.<fixture>) of every fixture
+  # in `only`, linked as build/<fixture> and unitDrvs/<fixture>: one
+  # derivation, so that run.sh builds them in one call and reads each
+  # fixture's result by name (`nix build --json` does not give one result
+  # per installable when two installables are the same derivation).
+  batch = pkgs.linkFarm "dynamic-batch-${mode}" (
+    lib.concatMap (
+      f:
+      [
+        {
+          name = "build/${f}";
+          path = builds.${f};
+        }
+      ]
+      ++ lib.optional (mode == "ifd") {
+        name = "unitDrvs/${f}";
+        path = unitDrvsAll.${f};
+      }
+    ) (if only == null then lib.attrNames repos else lib.filter (f: f != "") (lib.splitString " " only))
+  );
   nixFeatures = lib.mapAttrs (_: r: r.nixFeatures) repos;
   devShell = lib.mapAttrs (_: r: r.workspaces.main.devShell) repos;
-  unitDrvs = lib.mapAttrs unitDrvs repos;
+  unitDrvs = unitDrvsAll;
   outer = lib.mapAttrs (
     name: repo:
     lib.listToAttrs (
