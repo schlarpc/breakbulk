@@ -104,8 +104,8 @@ Test runs, doctests and build-script runs read the package's views,
 which hold every root, so they re-run. A re-run build script rebuilds
 the package's units that depend on it, as under Cargo, which re-runs a
 script on any edit to its package. With
-[`predictSources`](../reference/options/packages.md#packagesnamepredictsourcesenable),
-a run sees only its declared `rerun-if-changed` paths. Each target with such a view costs one more copy of the
+[`predictSources`](../reference/options/packages.md#packagesnamepredictsourcesenable)
+(on by default) and its `buildScriptRuns`, a run sees only its declared `rerun-if-changed` paths. Each target with such a view costs one more copy of the
 package in the store. A target that reads another target's root fails
 with a hint; `sources.targetRoots = null` gives every target the
 package's view again. With `predictSources`, the read is predicted and
@@ -168,9 +168,9 @@ it. Cargo behaves the same way. What is changing:
   variants use only `rmeta`.
 - **Source prediction**
   ([`predictSources`](../reference/options/packages.md#packagesnamepredictsourcesenable),
-  opt-in) gives each compile the files of its module tree and literal
-  includes, and each build-script run its declared `rerun-if-changed`
-  paths, so a README line or a manifest comment changes no unit. Files a
+  on by default) gives each non-test compile the files of its module tree
+  and literal includes (test compiles and build-script runs can opt in),
+  so a README line or a manifest comment changes none of them. Files a
   proc macro reads are not seen and must be declared
   (`predictSources.keep`); see [Source
   prediction](internals/sources.md#source-prediction).

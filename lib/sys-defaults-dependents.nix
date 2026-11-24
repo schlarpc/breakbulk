@@ -18,7 +18,11 @@ let
   directivePrinter =
     { buildDependency, ... }:
     {
-      config = lib.mkIf buildDependency { predictSources.buildScriptRuns = false; };
+      # Forced: turning `buildScriptRuns` on for every member
+      # (memberDefaults) must not reach a run whose directives source
+      # prediction cannot read. `sysDefaults.dependents.<crate> = null`
+      # removes it.
+      config = lib.mkIf buildDependency { predictSources.buildScriptRuns = lib.mkForce false; };
     };
 in
 {

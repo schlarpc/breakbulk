@@ -172,21 +172,24 @@ targets, and the paths a build script reads. Then an edit to
 
 ### Leave a README and the manifest out of the build
 
-A README line or a comment in `Cargo.toml` rebuilds the crate and
-everything that depends on it. Source prediction leaves out every file
-that no compile or build-script run reads:
+Source prediction does this by default. A compile sees only its module
+tree and the files it includes with a literal path. A README line or a
+comment in `Cargo.toml` then rebuilds none of the package's non-test
+compiles. Test compiles and build-script runs keep the package's view
+unless you turn them on too, because tests and scripts often read files
+the sources do not name:
 
 ```nix
-packages.ruff_python_ast.predictSources.enable = true;
-# Or for every member: workspaces.<ws>.memberDefaults.predictSources.enable = true;
-```
+packages.web.predictSources = {
+  testCompiles = true;     # tests do not use env!("CARGO_MANIFEST_DIR") to find files
+  buildScriptRuns = true;  # build scripts declare every file they read
+};
+``` Prediction reads the
+files from the package's widest view, so a library that includes a file
+under `tests/` builds although `tests/` is not in its own view.
 
-A compile then sees its module tree and the files it includes with a
-literal path, and a build-script run the paths it declares with
-`rerun-if-changed`. Prediction reads them from the package's widest
-view, so a library that includes a file under `tests/` builds although
-`tests/` is not in its own view. Files a proc macro reads are not found: the compile
-fails naming the file, with a hint, and
+Files a proc macro reads are not found: the compile fails naming the
+file, with a hint, and
 [`predictSources.keep`](../reference/options/packages.md#packagesnamepredictsourceskeep)
 keeps them:
 
@@ -201,7 +204,14 @@ read the file. See
 [Source prediction](../explanation/internals/sources.md#source-prediction)
 for what prediction reads and when it falls back.
 
-To leave the files out by hand instead: planning reads the manifest from
+To turn prediction off:
+
+```nix
+packages.web.predictSources.enable = false;
+# Or for every member: workspaces.<ws>.memberDefaults.predictSources.enable = false;
+```
+
+With prediction off, you can leave the files out by hand: planning reads the manifest from
 its own copy, so the units do not need it in their view. If nothing reads
 these files when the crate builds, leave them out of its non-test
 units' views:

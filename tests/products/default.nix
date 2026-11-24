@@ -319,6 +319,11 @@ let
     builtins.seq (builtins.readDir drv) (/. + builtins.unsafeDiscardStringContext drv.outPath);
 
   inst = repo: repo.workspaces.main.internal.instances.${native}.default;
+  # The view a package's library compiles from: its predicted view (IFD
+  # mode), or its package view when it has none.
+  libView =
+    i: dir: name:
+    i.sources.predicted."src:${dir}#lib/${name}" or i.sources.workspace.${dir};
 
   # Rendered BREAKBULK_UNIT of each unit of a plan kind, by derivation name.
   renderedUnits =
@@ -664,7 +669,7 @@ let
         debug = p.debug;
         linkedDebug = p.stages.linked.debug;
         noSrc = p.checks.noSourceReferences;
-        depView = builtins.unsafeDiscardStringContext "${(inst repo).sources.workspace.dep}";
+        depView = builtins.unsafeDiscardStringContext "${libView (inst repo) "dep" "dep"}";
       }
       ''
         set -euo pipefail
@@ -3017,7 +3022,7 @@ in
   source-paths =
     let
       i = inst sourcePaths;
-      depView = i.sources.workspace.dep;
+      depView = libView i "dep" "dep";
       itoaSrc = lib.head (
         lib.attrValues (lib.filterAttrs (id: _: lib.hasSuffix "#itoa@1.0.11" id) i.sources.crates)
       );
@@ -3090,7 +3095,7 @@ in
         debug = p.debug;
         linkedDebug = p.stages.linked.debug;
         noSrc = p.checks.noSourceReferences;
-        depView = builtins.unsafeDiscardStringContext "${(inst sourcePaths).sources.workspace.dep}";
+        depView = builtins.unsafeDiscardStringContext "${libView (inst sourcePaths) "dep" "dep"}";
       }
       ''
         set -euo pipefail
@@ -3430,7 +3435,7 @@ in
         defaultDebugClosure = pkgs.closureInfo { rootPaths = [ (app "default").debug ]; };
         noSrcSet = (app "set").checks.noSourceReferences;
         noSrcDefault = (app "default").checks.noSourceReferences;
-        sharedView = builtins.unsafeDiscardStringContext "${(instOf "default").sources.workspace.shared}";
+        sharedView = builtins.unsafeDiscardStringContext "${libView (instOf "default") "shared" "shared"}";
         tests = (wsOf "default").target.${native}.variants.default.testRuns.lib."lib/lib";
         inherit stableAt;
       }

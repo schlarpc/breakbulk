@@ -336,8 +336,10 @@ let
         if outsideRoots ? ${pkgName} && r.success then r.value else [ ];
       tested = false;
       runCommand = pkgs.runCommandLocal;
+      # No `extraKeep`: Cargo runs the workspace wrapper on members only,
+      # and keeping its files here would make this package's units differ
+      # from the same units in a variant without the wrapper.
       inherit predictOne;
-      extraKeep = workingDirFiles dir;
     }
     // {
       name = pkgName;

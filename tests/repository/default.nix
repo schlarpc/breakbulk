@@ -47,6 +47,14 @@ let
       variants.default.profile = "dev";
     };
   };
+  # For the tests of the source views themselves: without source
+  # prediction, which narrows the views further and has tests of its own
+  # (predict-sources).
+  oneWsViews =
+    path:
+    lib.recursiveUpdate (oneWs path) {
+      workspaces.main.memberDefaults.predictSources.enable = false;
+    };
 
   # A check that asserts at evaluation time and records a report.
   evalCheck =
@@ -199,6 +207,9 @@ let
     {
       packages.reader.extraSources = [ "../../schema" ];
       packages.app.extraSources = [ "../../assets" ];
+      # app's proc macro reads the asset, which source prediction does
+      # not see.
+      packages.app.predictSources.keep = [ "../../assets" ];
     }
   ];
   outside = mkRepo (fixtures + "/outside-reads") outsideModules;
@@ -592,7 +603,7 @@ let
     edit: modules:
     mkRepo (if edit == null then fixtures + "/test-only" else edited "test-only" edit) (
       [
-        (oneWs ".")
+        (oneWsViews ".")
         testOnlyScope
         # test-only reads the run's output.
         { packages.proto.test.postRun = ''cp "$log" "$out/log"''; }
@@ -612,7 +623,7 @@ let
     edit: modules:
     mkRepo (if edit == null then fixtures + "/target-views" else edited "target-views" edit) (
       [
-        (oneWs ".")
+        (oneWsViews ".")
         # The check reads a run's output.
         { packages.tv.test.postRun = ''cp "$log" "$out/log"''; }
       ]
@@ -630,6 +641,8 @@ let
         {
           packages.ps.predictSources = {
             enable = true;
+            buildScriptRuns = true;
+            testCompiles = true;
             keep = [ "templates" ];
           };
         }
@@ -740,7 +753,7 @@ let
   sourcesRepo =
     edit:
     mkRepo (if edit == null then fixtures + "/sources" else edited "sources" edit) [
-      (oneWs ".")
+      (oneWsViews ".")
       sourcesModule
     ];
   sources = sourcesRepo null;
@@ -758,7 +771,7 @@ let
     edit: modules:
     mkRepo (if edit == null then fixtures + "/snapshots" else edited "snapshots" edit) (
       [
-        (oneWs "ws")
+        (oneWsViews "ws")
         snapshotsModule
       ]
       ++ modules
@@ -770,7 +783,7 @@ let
   # --- view-hints ----------------------------------------------------------------
 
   viewHints = mkRepo (fixtures + "/view-hints") [
-    (oneWs ".")
+    (oneWsViews ".")
     {
       packages.chosen-reads.sources.noData =
         {
@@ -785,7 +798,7 @@ let
   ];
   # With the options the hints name.
   viewHintsFixed = mkRepo (fixtures + "/view-hints") [
-    (oneWs ".")
+    (oneWsViews ".")
     {
       packages = {
         lib-reads.extraSources = [ "../../shared" ];
@@ -800,10 +813,10 @@ let
 
   # --- result-names --------------------------------------------------------------
 
-  resultNames = mkRepo (fixtures + "/result-names") [ (oneWs ".") ];
+  resultNames = mkRepo (fixtures + "/result-names") [ (oneWsViews ".") ];
   # With the option the hint names.
   resultNamesFixed = mkRepo (fixtures + "/result-names") [
-    (oneWs ".")
+    (oneWsViews ".")
     { packages.via-link.extraSources = [ "result" ]; }
   ];
 
@@ -1403,7 +1416,15 @@ in
       runOf = repo: t: (inst repo).testRuns.tv.${t}.drvPath;
       fooEdit = "echo '// edited' >> tv/tests/foo.rs";
       exampleEdit = "echo '// edited' >> tv/examples/x.rs";
-      predicted = [ { packages.tv.predictSources.enable = true; } ];
+      predicted = [
+        {
+          packages.tv.predictSources = {
+            enable = true;
+            buildScriptRuns = true;
+            testCompiles = true;
+          };
+        }
+      ];
       got = {
         foo = changedBy fooEdit [ ];
         example = changedBy exampleEdit predicted;
@@ -1514,7 +1535,7 @@ in
         }
       ];
       noRuns = specsOf (predictSourcesRepo null [
-        { packages.ps.predictSources.buildScriptRuns = false; }
+        { packages.ps.predictSources.buildScriptRuns = lib.mkForce false; }
       ]) "default";
       overlaidRepo = predictSourcesRepo null [
         { packages.ps.sourceOverlay."assets" = pkgs.writeTextDir "a.txt" "a"; }
@@ -1527,7 +1548,10 @@ in
       sysNative = specsOf (mkRepo (fixtures + "/sys-native") [
         (oneWs ".")
         {
-          workspaces.main.memberDefaults.predictSources.enable = true;
+          workspaces.main.memberDefaults.predictSources = {
+            enable = true;
+            buildScriptRuns = true;
+          };
           sysDefaults.dependents.cc =
             { buildDependency, ... }: lib.optionalAttrs buildDependency { predictSources.keep = [ "k" ]; };
         }
@@ -1558,7 +1582,12 @@ in
         '')
         [
           (oneWs ".")
-          { workspaces.main.memberDefaults.predictSources.enable = true; }
+          {
+            workspaces.main.memberDefaults.predictSources = {
+              enable = true;
+              buildScriptRuns = true;
+            };
+          }
         ]
       ) "default";
       # explainPredictions: a script without `rerun-if-*` directives falls
@@ -1584,7 +1613,7 @@ in
     ) "predict-sources: with buildScriptRuns = false the run is still predicted";
     # Its predicted views are derivations of their own, not specs.
     assert lib.assertMsg (
-      overlaid == { }
+      lib.filterAttrs (k: _: lib.hasInfix ":ps#" k) overlaid == { }
     ) "predict-sources: a package with a sourceOverlay has predicted specs";
     assert lib.assertMsg (
       !(sysNative ? "src:bg-sys#run/custom-build/build-script-build")
@@ -1602,6 +1631,16 @@ in
         # A package with a sourceOverlay is predicted, the overlay on top.
         overlaidLib = (inst' overlaidRepo "main").sources.workspaceTargets.ps."lib/ps";
         overlaidPs = overlaidRepo.workspaces.main.packages.ps;
+        # A predicted library that includes a file outside its package's
+        # view: the hint adds it to the view (extraSources), which
+        # predictSources.keep cannot.
+        outsideHint =
+          expectFailure "predict-sources-outside-hint"
+            (unitsNamed (inst (mkRepo (fixtures + "/view-hints") [ (oneWs ".") ])) "build")
+            ."lib-reads-0.1.0-lib"
+            [
+              "`shared/data.txt` is not in this unit's source view; if it is in the repository, add it to `packages.lib-reads.extraSources`"
+            ];
         explained = explainOf predictSources;
         explainedOverlaid = explainOf overlaidRepo;
         explainedNoDirectives = explainOf noDirectives;

@@ -114,8 +114,26 @@ in
 
   strip-stage =
     let
-      before = (runsOf (mkRepo fixture [ strip ]))."lib/app";
-      after = (runsOf (mkRepo readmeEdited [ strip ]))."lib/app";
+      # The README edit changes util's view path and nothing util
+      # compiles from; with source prediction util's view would not
+      # change at all.
+      viewOnly = {
+        workspaces.main.memberDefaults.predictSources.enable = false;
+      };
+      before =
+        (runsOf (
+          mkRepo fixture [
+            strip
+            viewOnly
+          ]
+        ))."lib/app";
+      after =
+        (runsOf (
+          mkRepo readmeEdited [
+            strip
+            viewOnly
+          ]
+        ))."lib/app";
       plain = (runsOf (mkRepo fixture [ ]))."lib/app";
     in
     assert lib.assertMsg (

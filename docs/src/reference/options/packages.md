@@ -771,32 +771,13 @@ and most proc macros fail naming the file, and the failure ends
 with a hint naming ` predictSources.keep `\. A unit whose files
 cannot be predicted (a ` mod ` or include in a ` macro_rules! `
 body, an include with a computed path, a file syn cannot parse,
+` env!("CARGO_MANIFEST_DIR") ` other than in an include’s path,
 a build script whose directives are computed or that prints
 none) sees its own view, as without prediction\. A package with
 a ` sourceOverlay ` has a derivation for each predicted view;
 without [` ca `](repository\.md\#ca), every edit to the package
-rebuilds its units\.
-
-*Type:*
-boolean
-
-*Default:*
-
-```nix
-false
-```
-
-*Declared by:*
- - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
-
-## `packages.<name>.predictSources.buildScriptRuns`
-
-Whether ` predictSources ` narrows this package’s build-script
-runs to their declared ` rerun-if-changed ` paths\. The curated
-[` sysDefaults.dependents `](repository\.md\#sysdefaultsdependents)
-entries set it to ` false ` for a package whose
-` [build-dependencies] ` name a crate whose library code prints
-such directives, which source prediction cannot read\.
+rebuilds its units\. ` explainPredictions ` (a variant’s output)
+lists what each unit’s view holds, or why it falls back\.
 
 *Type:*
 boolean
@@ -805,6 +786,32 @@ boolean
 
 ```nix
 true
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.predictSources.buildScriptRuns`
+
+Whether ` predictSources ` narrows this package’s build-script
+runs to their declared ` rerun-if-changed ` paths\. Off by
+default: Cargo reruns a script for those paths, but the script
+may read others (a nested ` cargo ` reads ` Cargo.toml `), and
+then fails in the narrowed view\. Turn it on for a package
+whose scripts declare every file they read\. The curated
+[` sysDefaults.dependents `](repository\.md\#sysdefaultsdependents)
+entries set it to ` false ` with ` lib.mkForce ` for a package
+whose build script runs a crate whose library code prints such
+directives, which source prediction cannot read; set that
+crate’s entry to ` null ` to predict such runs anyway\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+false
 ```
 
 *Declared by:*
@@ -844,6 +851,30 @@ list of (string or absolute path or function from { unit, test, cargoTarget, roo
     lib.fileset.fileFilter (f: f.hasExt "sql") (root + "/${packageDir}/migrations"))
 ]
 
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
+## `packages.<name>.predictSources.testCompiles`
+
+Whether ` predictSources ` narrows this package’s test compiles
+(` cargo test `’s harnesses of its library, bins and integration
+tests), not only its non-test compiles\. Off by default: a test
+that finds its fixtures through ` env!("CARGO_MANIFEST_DIR") `
+gets the compile’s view path, and a predicted view holds no
+fixtures, so the test run fails although its own view has
+them\. Turn it on for a package whose tests find their files
+otherwise (a path relative to the working directory, or
+` std::env::var("CARGO_MANIFEST_DIR") ` at run time)\.
+
+*Type:*
+boolean
+
+*Default:*
+
+```nix
+false
 ```
 
 *Declared by:*

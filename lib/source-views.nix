@@ -513,6 +513,22 @@ rec {
       inherit (entries.${n}) step;
     }) (go [ ] names);
 
+  # The deepest directory holding every path of `ps` (relative paths;
+  # `""` for the root).
+  commonDir =
+    ps:
+    let
+      split = map (lib.splitString "/") ps;
+      go =
+        i:
+        let
+          heads = map (s: if lib.length s > i then lib.elemAt s i else null) split;
+          h = lib.head heads;
+        in
+        if h != null && lib.all (x: x == h) heads then [ h ] ++ go (i + 1) else [ ];
+    in
+    lib.concatStringsSep "/" (go 0);
+
   # One unit's view (`descriptor`): every step in turn, from the empty
   # set. `files`, and `removed`: `{ step; paths; }` for each step that
   # left something out, the paths relative to the root. A step returns a
@@ -530,19 +546,6 @@ rec {
     let
       root = descriptor.root;
       rel = p: util.normalizeRel (lib.path.removePrefix root p);
-      commonDir =
-        ps:
-        let
-          split = map (lib.splitString "/") ps;
-          go =
-            i:
-            let
-              heads = map (s: if lib.length s > i then lib.elemAt s i else null) split;
-              h = lib.head heads;
-            in
-            if h != null && lib.all (x: x == h) heads then [ h ] ++ go (i + 1) else [ ];
-        in
-        lib.concatStringsSep "/" (go 0);
     in
     lib.foldl'
       (
@@ -853,13 +856,27 @@ rec {
 
       ps = settings.predictSources or { };
       predictOn = ps.enable or null == true;
-      predictRuns = ps.buildScriptRuns or null != false;
+      predictRuns = ps.buildScriptRuns or null == true;
+      predictTests = ps.testCompiles or null == true;
       isPredicted =
         u:
         predictOn
-        && (u.d.unit == "compile" || u.d.unit == "build-script-run" && predictRuns)
+        && (
+          u.d.unit == "compile" && (!u.d.test || predictTests)
+          || u.d.unit == "build-script-run" && predictRuns
+        )
         && u.d.cargoTarget != null;
 
+      # What a predicted view says it left out, for hints: the deepest
+      # directory holding the package's non-test view (the package
+      # directory, unless `extraSources` reach outside it), not the whole
+      # repository. So a missing file outside it gets the hint that adds it
+      # to the view, which `predictSources.keep` cannot. Not the widest
+      # (test) view's: it is in every predicted unit, and widening the
+      # tests' scope would then rebuild the library.
+      predictRemoved = commonDir (
+        map (p: util.normalizeRel (lib.path.removePrefix root p)) (fs.toList pkgFiles.build.files)
+      );
       unitOf =
         u:
         let
@@ -900,7 +917,7 @@ rec {
               ++ [
                 {
                   step = "predictSources";
-                  paths = [ "" ];
+                  paths = [ predictRemoved ];
                 }
               ]
             else
