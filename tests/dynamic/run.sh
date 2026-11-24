@@ -90,7 +90,7 @@ else
   )
 fi
 
-say() { printf '\n== %s\n' "$*" >&2; }
+say() { printf '\n== [%s, +%dm] %s\n' "$(date +%T)" $((SECONDS / 60)) "$*" >&2; }
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
