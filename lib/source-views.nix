@@ -70,6 +70,41 @@ rec {
     else
       util.joinRel pkgDir x;
 
+  # `settings` (as `packageViews` takes them) once every `extraSources`
+  # and `test.sourceScope` entry of package `name` is in the repository
+  # and exists. Not left to `pathOf`: the steps do not know the package's
+  # name, and lib.fileset's errors name neither it nor the option.
+  checkedSettings =
+    {
+      root,
+      name,
+      pkgDir,
+      settings,
+    }:
+    let
+      check =
+        option: x:
+        let
+          rel = relOf root pkgDir x;
+          what = "breakbulk: packages.${name}.${option} entry ${if isPath x then toString x else "`${x}`"}";
+          from = "from the package directory `${if pkgDir == "" then "." else pkgDir}`";
+        in
+        if !(isPath x || isString x) then
+          throw "breakbulk: packages.${name}.${option} entries must be paths or strings relative to the package directory, not a ${typeOf x}"
+        else if rel == null then
+          throw "${what} is outside the repository (${toString root})"
+        else if rel == ".." || lib.hasPrefix "../" rel then
+          throw "${what} leaves the repository: ${from} it is `${rel}`"
+        else if !builtins.pathExists (manifest.at root rel) then
+          throw "${what} does not exist: ${from} it is `${if rel == "" then "." else rel}` in the repository"
+        else
+          null;
+      checks =
+        map (check "extraSources") (settings.extraSources or [ ])
+        ++ map (check "test.sourceScope") ((settings.test or { }).sourceScope or [ ]);
+    in
+    builtins.deepSeq checks settings;
+
   # The entries at the top level of `dir` (relative to the root) that no
   # view holds, relative to the root: `target/`, `.git`, and the symlinks
   # `nix build` writes (`result`, `result-<output>`). By name and type,
@@ -771,7 +806,17 @@ rec {
     }:
     let
       cargoTargets = map (t: { inherit (t) kind name path; }) targets;
-      es = entriesOf { inherit name settings extraFiles; };
+      es = entriesOf {
+        inherit name extraFiles;
+        settings = checkedSettings {
+          inherit
+            root
+            name
+            pkgDir
+            settings
+            ;
+        };
+      };
       ordered = orderEntries {
         inherit name;
         inherit (es) entries removed;

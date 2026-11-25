@@ -491,6 +491,8 @@ are relative to the package directory, as every path of a
 package’s settings is\. The built-in entry
 ` sources.extraSources ` of [` sources `](\#packagesnamesources) adds them for every unit,
 and predicted views keep them (see ` predictSources.keep `)\.
+An entry outside the repository, or one that does not exist,
+is an evaluation error\.
 A library, bin or build script that fails naming a path outside
 its source view ends with a hint naming the path and this
 option\.
@@ -1768,7 +1770,9 @@ units (the library, bins, build script)\. Either way, editing
 it rebuilds only this package’s test units and re-runs its
 tests\. The package’s ` tests/ ` directory is in this scope too
 (the built-in entry ` sources.testsDir `)\. The built-in entry
-` sources.sourceScope ` of [` sources `](\#packagesnamesources) applies it\. A test unit or
+` sources.sourceScope ` of [` sources `](\#packagesnamesources) applies it\. An entry
+outside the repository, or one that does not exist, is an
+evaluation error\. A test unit or
 test run that fails naming a path outside its source view ends
 with a hint naming the path and this option\.
 

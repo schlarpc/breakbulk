@@ -421,6 +421,66 @@ let
       touch $out
     '';
 
+  # An `extraSources` or `test.sourceScope` entry that leaves the
+  # repository, is a path outside it, or does not exist fails naming the
+  # option and the package; existing entries evaluate. Nested
+  # evaluations check the messages, which builtins.tryEval does not give.
+  sourcesEntriesCheck =
+    let
+      expr = settings: ''
+        let
+          lib = import ${pkgs.path}/lib;
+          util = import ${../../lib/util.nix} { inherit lib; };
+          manifest = import ${../../lib/manifest.nix} { inherit lib util; };
+          sourceViews = import ${../../lib/source-views.nix} { inherit lib util manifest; };
+        in
+        builtins.seq (toString (sourceViews.packageViews {
+          root = /. + builtins.getEnv "ROOT";
+          name = "foo";
+          pkgDir = "foo";
+          settings = ${settings};
+        }).src) "evaluated"
+      '';
+      cases = {
+        ok = expr ''{ extraSources = [ "../shared" ]; test.sourceScope = [ "testdata" ]; }'';
+        leaves = expr ''{ test.sourceScope = [ "../.." ]; }'';
+        outside = expr "{ extraSources = [ /. ]; }";
+        missing = expr ''{ extraSources = [ "notemap.json" ]; }'';
+      };
+      want = {
+        leaves = "error: breakbulk: packages.foo.test.sourceScope entry `../..` leaves the repository: from the package directory `foo` it is `..`";
+        outside = "error: breakbulk: packages.foo.extraSources entry / is outside the repository";
+        missing = "error: breakbulk: packages.foo.extraSources entry `notemap.json` does not exist: from the package directory `foo` it is `foo/notemap.json` in the repository";
+      };
+    in
+    pkgs.runCommand "sources-entries"
+      (
+        cases
+        // {
+          nativeBuildInputs = [ pkgs.nix ];
+          passAsFile = lib.attrNames cases;
+        }
+      )
+      ''
+        export NIX_CONF_DIR=$TMPDIR/etc NIX_STATE_DIR=$TMPDIR/var/nix NIX_STORE_DIR=$TMPDIR/store
+        export NIX_LOCALSTATE_DIR=$TMPDIR/var NIX_LOG_DIR=$TMPDIR/var/log/nix
+        export ROOT=$TMPDIR/root
+        mkdir -p $ROOT/foo/src $ROOT/foo/testdata $ROOT/shared
+        touch $ROOT/foo/Cargo.toml $ROOT/foo/src/lib.rs $ROOT/shared/a $ROOT/foo/testdata/b
+        nix-store --init
+        [ "$(nix-instantiate --eval $okPath)" = '"evaluated"' ]
+        ${lib.concatStrings (
+          lib.mapAttrsToList (n: msg: ''
+            if nix-instantiate --eval ${"$"}${n}Path 2> err; then
+              echo "${n} evaluated" >&2
+              exit 1
+            fi
+            grep -F ${lib.escapeShellArg msg} err || { cat err >&2; exit 1; }
+          '') want
+        )}
+        touch $out
+      '';
+
   # A source-view function without `...` fails on its first call. One
   # that takes every other argument gets an error that names only the
   # extra one, which says to add `...`. builtins.tryEval does not catch a
@@ -740,6 +800,7 @@ in
   source-views = sourceViewsCheck;
 
   sources-sentinel = sourcesSentinelCheck;
+  sources-entries = sourcesEntriesCheck;
 
   vendor-collision = vendorBuild {
     name = "vendor-collision";

@@ -392,6 +392,8 @@ let
           package's settings is. The built-in entry
           `sources.extraSources` of ${pipeline} adds them for every unit,
           and predicted views keep them (see `predictSources.keep`).
+          An entry outside the repository, or one that does not exist,
+          is an evaluation error.
           A library, bin or build script that fails naming a path outside
           its source view ends with a hint naming the path and this
           option.
@@ -743,7 +745,9 @@ let
             it rebuilds only this package's test units and re-runs its
             tests. The package's `tests/` directory is in this scope too
             (the built-in entry `sources.testsDir`). The built-in entry
-            `sources.sourceScope` of ${pipeline} applies it. A test unit or
+            `sources.sourceScope` of ${pipeline} applies it. An entry
+            outside the repository, or one that does not exist, is an
+            evaluation error. A test unit or
             test run that fails naming a path outside its source view ends
             with a hint naming the path and this option.
           '';
