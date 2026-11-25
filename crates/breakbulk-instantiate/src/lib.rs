@@ -857,10 +857,18 @@ pub(crate) fn shell_drv(
         Value::Strings(vec!["out".into()]),
         std::iter::once((
             "args".into(),
-            Value::Strings(vec!["-c".into(), script.into()]),
+            Value::Strings(vec!["-c".into(), shell_script(script)]),
         ))
         .chain(attrs),
     )
+}
+
+/// `script` ending with a builtin. bash runs the last command of `-c` in
+/// its own place, GNU coreutils close stdout and stderr just before they
+/// exit, and the Nix daemon takes that EOF for the end of the build and
+/// SIGKILLs a builder that has not exited yet (NixOS/nix#2176).
+fn shell_script(script: &str) -> String {
+    format!("{script}\nexit $?")
 }
 
 /// A doctest's derivation: `breakbulk-doctest` over the rendered

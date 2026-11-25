@@ -800,3 +800,16 @@ fn lists_that_grow_with_the_plan_pass_as_files() {
         "debugRoot"
     );
 }
+
+#[test]
+fn shell_builders_end_with_a_builtin() {
+    let (resolved, _) = write_all(&dyn_inputs());
+    let shell: Vec<_> = resolved
+        .iter()
+        .filter(|(_, r)| r.args.first().map(String::as_str) == Some("-c"))
+        .collect();
+    assert!(!shell.is_empty());
+    for (key, r) in shell {
+        assert!(r.args[1].ends_with("\nexit $?"), "{key}: {:?}", r.args[1]);
+    }
+}
