@@ -583,7 +583,9 @@ profile.
 Clippy units find `clippy.toml` as `cargo clippy` does: clippy-driver
 gets `CLIPPY_CONF_DIR` pointing at the member's directory in a small tree
 that holds only the `.clippy.toml` and `clippy.toml` files of that
-directory and its parents. Clippy takes the nearest one. A `clippy.toml`
+directory and its parents. Clippy takes the nearest one. The member's
+`Cargo.toml` is not in the tree (clippy reads no manifest there), so an
+edit to it rebuilds only the units whose views hold it. A `clippy.toml`
 at the repository root, above the workspace, works with no setup.
 
 | | `cargo clippy` | breakbulk |

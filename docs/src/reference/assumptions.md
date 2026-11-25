@@ -237,9 +237,9 @@ Status of the 94 entries: 94 pinned; [Gaps](#gaps) lists none. A check (`docs-as
 
 ### T14. The clippy chain
 
-- **Assumption.** With `RUSTC_WORKSPACE_WRAPPER=clippy-driver`, Cargo starts `wrapper clippy-driver rustc …` for workspace members only, and passes `CLIPPY_ARGS` (each argument followed by `__CLIPPY_HACKERY__`) to every process. Clippy-driver looks for its config from `CLIPPY_CONF_DIR` (else `CARGO_MANIFEST_DIR`), canonicalized, walking up and taking the first directory with `.clippy.toml` or `clippy.toml` (`.clippy.toml` first), with no merging.
+- **Assumption.** With `RUSTC_WORKSPACE_WRAPPER=clippy-driver`, Cargo starts `wrapper clippy-driver rustc …` for workspace members only, and passes `CLIPPY_ARGS` (each argument followed by `__CLIPPY_HACKERY__`) to every process. Clippy-driver looks for its config from `CLIPPY_CONF_DIR` (else `CARGO_MANIFEST_DIR`), canonicalized (so the directory must exist), walking up and taking the first directory with `.clippy.toml` or `clippy.toml` (`.clippy.toml` first), with no merging. It reads nothing else there: the `Cargo.toml` it reads (`lint_groups_priority`) is the working directory's, and the MSRV comes from `CARGO_PKG_RUST_VERSION`.
 - **Where.** `lib/variants.nix`: `clippy` (the preset); `crates/breakbulk-plan/src/trace.rs`: `run`, `check_wrappers`; `graph.rs`: `compile_unit` (keeps `wrapperEnv`, `CLIPPY_ARGS`, on the workspace wrapper's units only); `crates/breakbulk-instantiate/src/lib.rs`: `wrapper_config_dir` (`CLIPPY_CONF_DIR`); `lib/source-views.nix`: `wrapperConfigTree`.
-- **Upstream.** cargo `src/util/rustc.rs` (workspace wrapper for members); `cargo clippy`'s driver protocol; clippy `clippy_config/src/conf.rs`: `load_conf_file`.
+- **Upstream.** cargo `src/util/rustc.rs` (workspace wrapper for members); `cargo clippy`'s driver protocol; clippy `clippy_config/src/conf.rs`: `load_conf_file`, `src/driver.rs`: `track_files`, `clippy_lints/src/cargo/lint_groups_priority.rs`.
 - **Holds for.** 1.99.
 - **Pinned by.** `products-variants` (dependencies shared between check and clippy, members not); `products-variants-clippy-strict` (a lint argument fails the member); `products-variants-clippy-conf` (a root and a member's own `clippy.toml`).
 - **If it changes.** Clippy units lose their arguments or config, or dependencies stop being shared; these checks fail.

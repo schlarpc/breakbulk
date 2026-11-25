@@ -140,7 +140,8 @@
 #                    workspace (a root `disallowed-methods` fails
 #                    `rooted`) and a member's own file instead of the
 #                    root's (`own`); an edit to the root file changes
-#                    only clippy units, and a `CLIPPY_CONF_DIR` in `env`
+#                    only clippy units, a comment in a member's
+#                    `Cargo.toml` none, and a `CLIPPY_CONF_DIR` in `env`
 #                    replaces breakbulk's
 #   variants-clippy-lint-groups   clippy's `lint_groups_priority`, which
 #                    reads the compile's working directory's `Cargo.toml`
@@ -2312,17 +2313,20 @@ in
         ];
       repo = repoAt (fixtures + "/clippy-conf") { };
       edited' = repoAt (edited "clippy-conf" "echo '# edited' >> clippy.toml") { };
+      # A comment in a member's manifest, which no predicted view holds.
+      commented = repoAt (edited "clippy-conf" "echo '# edited' >> ws/rooted/Cargo.toml") { };
       # A user's CLIPPY_CONF_DIR names `own`'s directory for `rooted` too,
       # whose config allows `len`: `rooted`'s clippy unit then passes.
       userDir = repoAt (fixtures + "/clippy-conf") {
         packages.rooted.env.CLIPPY_CONF_DIR = "${fixtures + "/clippy-conf/ws/own"}";
       };
       clippyUnits = r: unitsOf r "clippy" "build";
-      changed =
-        vName: kind:
+      changedIn =
+        other: vName: kind:
         lib.attrNames (
-          lib.filterAttrs (n: d: (drvsOf edited' vName kind).${n} or null != d) (drvsOf repo vName kind)
+          lib.filterAttrs (n: d: (drvsOf other vName kind).${n} or null != d) (drvsOf repo vName kind)
         );
+      changed = changedIn edited';
     in
     assert lib.assertMsg (
       changed "default" "build" == [ ] && changed "check" "build" == [ ] && changed "check" "test" == [ ]
@@ -2335,6 +2339,10 @@ in
         ]
       )
       "variants-clippy-conf: clippy units changed by a root clippy.toml edit: ${builtins.toJSON (changed "clippy" "build")}";
+    assert lib.assertMsg (changedIn commented "clippy" "build" == [ ])
+      "variants-clippy-conf: clippy units changed by a comment in rooted's Cargo.toml: ${
+        builtins.toJSON (changedIn commented "clippy" "build")
+      }";
     pkgs.runCommand "variants-clippy-conf"
       {
         rooted = expectFailure "rooted-clippy" (clippyUnits repo)."rooted-0.1.0-lib" [

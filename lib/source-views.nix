@@ -1037,10 +1037,13 @@ rec {
   # ancestors up to the root, at their places (clippy's `.clippy.toml` and
   # `clippy.toml`). The wrapper gets `<tree>/<pkgDir>` in its variable
   # (`CLIPPY_CONF_DIR`) and does its own lookup there, so breakbulk picks
-  # no file. The package's `Cargo.toml` is in the tree only so that
-  # `<pkgDir>` exists: clippy canonicalizes its start directory. Not in the
-  # source views, because then every edit to a config file would rebuild
-  # every unit below it, those of variants without the wrapper too.
+  # no file. `<pkgDir>` exists with no file of its own (`realize`): clippy
+  # canonicalizes its start directory, but reads the manifest from its
+  # working directory, not this one, so holding the package's `Cargo.toml`
+  # here would only make every edit to it rebuild the member's wrapped
+  # units. Not in the source views, because then every edit to a config
+  # file would rebuild every unit below it, those of variants without the
+  # wrapper too.
   wrapperConfigTree =
     {
       root,
@@ -1054,9 +1057,9 @@ rec {
         ancestors pkgDir
       );
     in
-    fs.toSource {
-      inherit root;
-      fileset = fs.unions ([ (at (util.joinRel pkgDir "Cargo.toml")) ] ++ configs);
+    realize {
+      inherit root pkgDir;
+      fileset = fs.unions configs;
     };
 
   # Views for every member of a workspace, keyed by package name
