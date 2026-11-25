@@ -616,6 +616,12 @@ rec {
     }:
     let
       storeName = s: lib.replaceStrings [ "/" ] [ "-" ] s;
+      # Each builder below ends with a builtin (`exit $?`), not the
+      # coreutils command: bash runs the last command of `-c` in its own
+      # place, coreutils close stdout and stderr just before they exit, and
+      # the Nix daemon takes that EOF for the end of the build and SIGKILLs
+      # a builder that has not exited yet (NixOS/nix#2176). With the
+      # builtin last, bash keeps the log open until it exits itself.
       link =
         name: what: output:
         derivation {
@@ -624,7 +630,7 @@ rec {
           builder = shell;
           args = [
             "-c"
-            ''${coreutils}/bin/ln -s "$target" "$out"''
+            ''${coreutils}/bin/ln -s "$target" "$out"; exit $?''
           ];
         };
       mkRoot =
@@ -649,6 +655,7 @@ rec {
                 exit 1
               fi
               ${coreutils}/bin/ln -s "$wrapper/root" "$out"
+              exit $?
             ''
           ];
         }
@@ -686,6 +693,7 @@ rec {
                 printf 'skipped: %s\n' "$(<"$wrapper/not-built")" > "$out/log"
                 ${coreutils}/bin/cat "$out/log"
               fi
+              exit $?
             ''
           ];
         }
@@ -702,7 +710,7 @@ rec {
         builder = shell;
         args = [
           "-c"
-          ''${coreutils}/bin/ln -s "$wrapper/root" "$out"''
+          ''${coreutils}/bin/ln -s "$wrapper/root" "$out"; exit $?''
         ];
       };
       allRuns = link "${outerName}-runs" "runs" "runs.drv";
