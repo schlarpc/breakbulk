@@ -2982,9 +2982,11 @@ in
     assert lib.assertMsg (
       inputsOf "libsqlite3-sys" "0.30.0" == [ "sqlite" ]
     ) "sys-defaults: libsqlite3-sys inputs";
-    # aws-lc-sys by version: a module of the lockfile entry.
+    # aws-lc-sys by version: a module of the lockfile entry. From 0.42 its
+    # build script links any AWS-LC that pkg-config finds, so the entry
+    # gives it nothing to find.
     assert lib.assertMsg (
-      inputsOf "aws-lc-sys" "0.42.0" == [ "aws-lc" ]
+      inputsOf "aws-lc-sys" "0.42.0" == [ ] && (settingsOf "aws-lc-sys" "0.42.0").nativeInputs pkgs == [ ]
     ) "sys-defaults: aws-lc-sys 0.42 inputs";
     assert lib.assertMsg (
       inputsOf "aws-lc-sys" "0.41.0" == [ ] && awsOld.env.AWS_LC_SYS_CMAKE_BUILDER or null == "1"

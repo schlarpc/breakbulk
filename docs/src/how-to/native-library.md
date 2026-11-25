@@ -61,6 +61,26 @@ crate's own switch, for example:
 packages.libsqlite3-sys.env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
 ```
 
+Some build scripts use a system library whenever they find one, and
+build the bundled copy only when they do not. For `libz-sys`, `curl-sys`
+and `libgit2-sys` that is the crate's own default, and the curated
+settings give them the Nix library; the crate's feature picks the
+bundled copy (`static`, `static-curl`, `vendored`). `aws-lc-sys` (0.42
+and later) has no such feature, so the curated settings give it nothing
+to find and it builds its bundled copy. To link the Nix AWS-LC instead:
+
+```nix
+packages.aws-lc-sys = {
+  nativeInputs = p: [ p.pkg-config ];
+  inputs = p: [ p.aws-lc ];
+  env.AWS_LC_SYS_USE_SYSTEM = "1";
+};
+```
+
+The Nix AWS-LC is a shared `libcrypto.so`, the same file name as
+OpenSSL's, so a program that also links OpenSSL can fail to start with
+an undefined symbol.
+
 ## Settings for one side only
 
 [`packages.<name>.forHost`](../reference/options/packages.md#packagesnameforhostinputs)

@@ -44,6 +44,21 @@
 #    in, e.g. `packages.libsqlite3-sys.env.LIBSQLITE3_SYS_USE_PKG_CONFIG
 #    = "1";`. `AWS_LC_SYS_CMAKE_BUILDER` (aws-lc-sys < 0.42) is kept: it
 #    picks how the bundled library is built, not which library.
+#  - aws-lc-sys >= 0.42's `aws-lc` input (with pkg-config). The build
+#    script links a system AWS-LC that pkg-config or `OPENSSL_*` finds
+#    unless `AWS_LC_SYS_USE_SYSTEM=0`, and no crate feature keeps the
+#    bundled one, so the input alone is the switch. The system library is
+#    a shared `libcrypto.so`, OpenSSL's soname too; the bundled one is
+#    static with prefixed symbols. To opt in:
+#    `packages.aws-lc-sys = { nativeInputs = p: [ p.pkg-config ];
+#    inputs = p: [ p.aws-lc ]; env.AWS_LC_SYS_USE_SYSTEM = "1"; };`.
+#
+# Kept although the library input is a switch too (the build script
+# probes for it and builds its bundled copy only when that fails):
+# libz-sys, curl-sys and libgit2-sys prefer the system library by design,
+# and their own features pick the bundled one (`static`, `static-curl`,
+# `vendored`); servo-fontconfig-sys and evdev-sys have no bundled build
+# that works without more tools (configure, autotools).
 { lib }:
 let
   pc = p: [ p.pkg-config ];
@@ -56,10 +71,7 @@ in
   aws-lc-sys =
     { package, ... }:
     if lib.versionAtLeast package.version "0.42.0" then
-      {
-        nativeInputs = pc;
-        inputs = p: [ p.aws-lc ];
-      }
+      { }
     else
       {
         # nixpkgs: force the cmake backend.

@@ -268,7 +268,9 @@ as the lowest layer under `packages`. They apply only on platforms with a
 nixpkgs package set. They declare tools and libraries only. Switches that make a crate use a
 system library instead of its bundled copy
 (`LIBSQLITE3_SYS_USE_PKG_CONFIG` and the like) change what gets built, so
-they are left to you.
+they are left to you. For the same reason they leave out a library whose
+presence alone makes the crate drop its bundled copy when the crate has
+no feature to keep it (`aws-lc-sys`).
 
 Some crates need settings in the packages that use them, not in their
 own units. [`sysDefaults.dependents`](../reference/options/repository.md#sysdefaultsdependents)

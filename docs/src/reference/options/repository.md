@@ -456,7 +456,7 @@ attribute set of (null or module)
 ```nix
 {
   libsqlite3-sys = null;  # no curated inputs
-  aws-lc-sys = breakbulk.whenVersion ">=0.42" { inputs = p: [ p.aws-lc ]; };
+  zstd-sys = { inputs = p: [ p.zstd ]; };  # replaces the curated entry
 }
 
 ```
