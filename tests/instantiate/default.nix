@@ -7,8 +7,8 @@
 # Attributes:
 #   check        builds the plan's root through instantiation and runs it;
 #                builds the skipped-test stub; builds the units and runs
-#                wrappers with their lists repeated past Linux's 128 KiB
-#                limit for one environment string
+#                wrappers with their lists repeated to about 200 KiB, past
+#                Linux's 128 KiB limit for one environment string
 #   eval-checks  evaluation-time assertions (needs IFD):
 #                - BREAKBULK_UNIT of every unit equals what
 #                  tests/unit-smoke/default.nix renders directly (with unit
@@ -371,15 +371,17 @@ let
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) assertions);
 
-  # A wrapper whose list `attr` is its own repeated 2,000 times: over Linux's
-  # 128 KiB limit for one environment string (a plan that large has as
-  # many distinct units, too many to build here).
+  # A wrapper whose list `attr` is its own repeated until it is about 200 KiB,
+  # the size of deno's clippy plan and over Linux's 128 KiB limit for one
+  # environment string (a plan that large has as many distinct units, too
+  # many to build here).
   repeated =
     output: attr:
     let
       d = inst.wrappers.${output}.drvAttrs;
+      copies = 200 * 1024 / lib.stringLength d.${attr} + 1;
     in
-    derivation (d // { ${attr} = lib.concatStrings (lib.replicate 2000 d.${attr}); });
+    derivation (d // { ${attr} = lib.concatStrings (lib.replicate copies d.${attr}); });
   longUnits = repeated "units.drv" "units";
   longRuns = repeated "runs.drv" "runs";
 in
@@ -418,7 +420,7 @@ in
         grep -qx '`admin-cli` was not built by Cargo in variant `dev`: required features `\[cli\]` not enabled' \
           ${inst.roots."smokeapp/bin/admin-cli".breakbulkRoot.wrapper}/not-built
         [ "$(wc -c < ${longRuns}/runs)" -gt $((128 * 1024)) ]
-        [ "$(wc -l < ${longRuns}/runs)" = 2000 ]
+        [ "$(wc -c < ${longUnits}/units)" -gt $((128 * 1024)) ]
         [ "$(sort -u ${longRuns}/runs)" = "$(cat ${inst.buildScriptRuns.runsFile})" ]
         [ "$(sort -u ${longUnits}/units)" = "$(sort ${inst.allUnits}/units)" ]
       '';
