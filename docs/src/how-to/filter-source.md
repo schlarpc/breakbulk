@@ -197,6 +197,11 @@ keeps them:
 packages.web.predictSources.keep = [ "templates" ];
 ```
 
+A file outside the package directory needs only
+[`extraSources`](../reference/options/packages.md#packagesnameextrasources):
+predicted views keep every file of the unit's view outside the package
+directory.
+
 To see what each unit's view holds, or why a unit falls back to its
 whole view, build the variant's
 [`explainPredictions`](../reference/outputs.md#explainpredictions) and

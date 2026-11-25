@@ -206,10 +206,10 @@ let
     (oneWs "ws")
     {
       packages.reader.extraSources = [ "../../schema" ];
-      packages.app.extraSources = [ "../../assets" ];
       # app's proc macro reads the asset, which source prediction does
-      # not see.
-      packages.app.predictSources.keep = [ "../../assets" ];
+      # not see: its predicted views keep it as an `extraSources` path
+      # outside the package, with no `predictSources.keep`.
+      packages.app.extraSources = [ "../../assets" ];
     }
   ];
   outside = mkRepo (fixtures + "/outside-reads") outsideModules;

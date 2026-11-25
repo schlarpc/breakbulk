@@ -489,7 +489,8 @@ units read (` include_str!("../../wit/x.wit") `, a sibling assets
 directory, patches), at their original relative paths\. Strings
 are relative to the package directory, as every path of a
 package’s settings is\. The built-in entry
-` sources.extraSources ` of [` sources `](\#packagesnamesources) adds them for every unit\.
+` sources.extraSources ` of [` sources `](\#packagesnamesources) adds them for every unit,
+and predicted views keep them (see ` predictSources.keep `)\.
 A library, bin or build script that fails naming a path outside
 its source view ends with a hint naming the path and this
 option\.
@@ -827,7 +828,10 @@ everything under it); a path is absolute\. A function gets the
 unit’s descriptor, as a ` sources ` step does without ` default `
 (` unit ` is ` "compile" ` or ` "build-script-run" ` here, and
 ` cargoTarget ` is never null), and returns a ` lib.fileset `
-value\. Lists concatenate in layer order\. The curated defaults keep ` Cargo.toml ` for the
+value\. Lists concatenate in layer order\. A unit’s predicted
+view also keeps every file of its own view outside the package
+directory, with no entry here: ` extraSources `, and a test
+compile’s ` test.sourceScope `\. The curated defaults keep ` Cargo.toml ` for the
 dependents of ` proc-macro-crate ` (also the workspace’s),
 ` find-crate ` and ` bevy_macro_utils `, which read it from
 ` CARGO_MANIFEST_DIR `, and a variant’s ` wrapperConfig.workingDirFiles `

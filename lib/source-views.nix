@@ -889,6 +889,15 @@ rec {
           # lacks. So a predicted read wins over a step that left the file
           # out of this unit's view.
           wider = fs.union pkgFiles.test.files files;
+          # The files of its own view outside the package directory: a
+          # step put them there on purpose (`extraSources`, a test
+          # `sourceScope`), and what reads them is usually something
+          # prediction cannot follow (a proc macro, a build script). Not
+          # left to `predictSources.keep`: every such path would then be
+          # named twice.
+          outside = map (p: util.normalizeRel (lib.path.removePrefix root p)) (
+            fs.toList (fs.difference files (manifest.at root pkgDir))
+          );
           spec = {
             view = "${if sameFiles wider pkgFiles.test.files then pkgBase.test else realizeFiles wider}";
             fallback = "${base}";
@@ -897,6 +906,7 @@ rec {
             root = util.joinRel pkgDir u.d.cargoTarget.path;
             keep = lib.unique (
               extraKeep
+              ++ outside
               ++ keepPaths {
                 inherit root name pkgDir;
                 keep = ps.keep or [ ];
