@@ -913,7 +913,7 @@ let
     options = { inherit target variant; };
   };
 in
-{
+rec {
   inherit settings doctestRefused;
 
   # The names of the run settings: what `test.binaries.<key>`,
@@ -938,4 +938,28 @@ in
     };
     inherit (types.submoduleWith { modules = [ settings ]; }) getSubOptions;
   };
+
+  # A function to a layer of package settings. Not
+  # `types.functionTo settingsModule`: a result of `lib.mkIf false …`
+  # leaves that no definition, and reading it fails naming
+  # `<function body>`. An empty result beside the others makes it a layer
+  # without imports.
+  settingsFunction =
+    let
+      base = types.functionTo settingsModule;
+    in
+    base
+    // {
+      merge =
+        loc: defs:
+        base.merge loc (
+          defs
+          ++ [
+            {
+              file = "breakbulk";
+              value = _: { };
+            }
+          ]
+        );
+    };
 }

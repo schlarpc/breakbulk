@@ -6,7 +6,7 @@
 let
   inherit (lib) types mkOption;
   bt = import ./types.nix { inherit lib; };
-  inherit (import ./package-settings.nix { inherit lib; }) settingsModule;
+  inherit (import ./package-settings.nix { inherit lib; }) settingsModule settingsFunction;
   curated = import ../sys-defaults.nix { inherit lib; };
   curatedDependents = import ../sys-defaults-dependents.nix { inherit lib; };
   curatedHints = lib.importJSON ../build-script-hints.json;
@@ -304,7 +304,7 @@ in
     };
 
     sysDefaults.dependents = mkOption {
-      type = types.attrsOf (types.nullOr (types.functionTo settingsModule));
+      type = types.attrsOf (types.nullOr settingsFunction);
       default = { };
       # The result has the options of `packages.<name>`, documented there.
       visible = "shallow";
@@ -319,7 +319,8 @@ in
         crate's name: a function of the crate's lockfile entry (`{ name,
         version, direct, buildDependency, ... }`) that returns a module
         with the options of `packages.<name>` (whose `package` argument is
-        the dependent's lockfile entry). They apply to every package of a
+        the dependent's lockfile entry), or `lib.mkIf` of one (no
+        settings when false). They apply to every package of a
         workspace's `Cargo.lock`, from the registry, git or a path, that
         has the crate among its dependencies of any kind
         (dev-dependencies too), directly or through other crates. Two

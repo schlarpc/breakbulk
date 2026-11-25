@@ -3253,6 +3253,43 @@ in
     assert lib.assertMsg (bad == [ ]) "package-sides: failed ${toString bad}";
     evalCheck "package-sides" (builtins.toJSON checks);
 
+  # A `sysDefaults.dependents` function may return `lib.mkIf`: false is
+  # no settings, true its content. The merged function keeps the
+  # arguments it names (only a function that names `buildDependency`
+  # reads manifests).
+  dependents-mkif =
+    let
+      f =
+        (mkRepo (fixtures + "/multi-ws") [
+          {
+            sysDefaults.dependents.itoa = { direct, ... }: lib.mkIf direct { env.DIRECT = "1"; };
+          }
+        ]).config.sysDefaults.dependents.itoa;
+      envOf =
+        direct:
+        (breakbulk.packageSettings.evaluate {
+          layers = [
+            {
+              module = f {
+                name = "itoa";
+                version = "1.0.11";
+                inherit direct;
+                buildDependency = false;
+              };
+            }
+          ];
+        }).config.env;
+      report = {
+        indirect = envOf false ? DIRECT == false;
+        direct = (envOf true).DIRECT or null == "1";
+        args = lib.attrNames (lib.functionArgs f) == [ "direct" ];
+      };
+    in
+    assert lib.assertMsg (lib.all lib.id (
+      lib.attrValues report
+    )) "dependents-mkif: ${builtins.toJSON report}";
+    evalCheck "dependents-mkif" (builtins.toJSON report);
+
   # Modules receive `root` (a path, also when the caller passed a
   # string-like root), the repository object (`repo`) and the library
   # (`breakbulk`) without the caller wiring them through specialArgs; the
