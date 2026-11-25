@@ -15,13 +15,17 @@
 #     sourcePaths = [ … ];   # source-view and crate-source store paths
 #     toolchainPaths = [ … ];   # rustc, its sysroot, cargo, toolchain components
 #     info = { lockfile = ./Cargo.lock; };  # extra `product` attributes
+#     drvName = "server-1.2.0";  # the product's derivation name (null:
+#                            # its last stage's own)
+#     meta = { mainProgram = "server"; };  # added to the product's `meta`
 #     ca = breakbulk.nixFeatures.defaultCa;   # true; false
 #     nixFeatures = breakbulk.nixFeatures.standalone { inherit ca; };
 #                            # the record `ca` is checked against
 #                            # (repo.nixFeatures, from mkRepository)
 #   };
 #
-#   p                  the product (the last stage's output)
+#   p                  the product (the last stage's output), named
+#                      `drvName`, with `meta`
 #   p.stages.<name>    every stage, `linked` included
 #   p.stageOrder       stage names in order, without `linked`
 #   p.debug            the `debug` output of the last stage that has one
@@ -358,9 +362,21 @@ let
       nixFeatures ? featureGates.standalone { inherit ca; },
       # The stages a stage with no `after` runs after (explainOrder).
       leading ? [ ],
+      drvName ? null,
+      meta ? { },
     }:
     let
       ordered = order { inherit name stages leading; };
+      lastStage = if ordered.order == [ ] then null else lib.last ordered.order;
+      # The last stage's derivation is the product: it gets the product's
+      # name. Not each stage helper naming itself so: a stage after
+      # `install` (`adhocSign`, `zip`) would have to know it is the last.
+      named =
+        s: drv:
+        if drvName != null && s == lastStage && drv ? drvAttrs then
+          modifyDrv drv (_: _: { name = drvName; })
+        else
+          drv;
       product = {
         inherit name sourcePaths toolchainPaths;
       }
@@ -384,15 +400,17 @@ let
             acc: s:
             let
               drv = caify "stage `${s}`" ordered.live.${s} (
-                guard pkgs acc.last (
-                  ordered.live.${s}.run {
-                    input = acc.last;
-                    product = product // {
-                      earlierDebug = acc.debug;
-                      debugSplit = acc.debug != null;
-                    };
-                    inherit target pkgs;
-                  }
+                named s (
+                  guard pkgs acc.last (
+                    ordered.live.${s}.run {
+                      input = acc.last;
+                      product = product // {
+                        earlierDebug = acc.debug;
+                        debugSplit = acc.debug != null;
+                      };
+                      inherit target pkgs;
+                    }
+                  )
                 )
               );
             in
@@ -447,12 +465,15 @@ let
         )
       ) (filterAttrs (_: isLive) checks);
     in
+    # `meta` is no input of the derivation: setting it here, not with
+    # overrideAttrs, builds nothing again.
     lib.extendDerivation true (
       {
         stages = built.stages;
         stageOrder = ordered.order;
         checks = builtChecks;
         inherit ca;
+        meta = (final.meta or { }) // meta;
       }
       // lib.optionalAttrs (debug != null && !(final ? debug)) { inherit debug; }
     ) final;

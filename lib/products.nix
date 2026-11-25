@@ -26,7 +26,10 @@
 # `definitionsOf` an evaluated option (its definitions and their
 # priority), which merge field by field.
 #
-#   products.<pkg>                 the product: linked -> stages -> install
+#   products.<pkg>                 the product: linked -> stages -> install,
+#                                  named `<pkg>-<version>`; `meta.mainProgram`
+#                                  is its one bin, or Cargo's `default-run`
+#                                  (with `install`, which puts it in bin/)
 #   products.<pkg>.stages.<name>   every stage (`linked` included)
 #   products.<pkg>.stageOrder      stage names after `linked`, in order
 #   products.<pkg>.debug           split debug info, when a stage split it
@@ -451,6 +454,7 @@ let
       debugInfo ? null,
       targetStages ? { },
       targetChecks ? { },
+      # Each package's settings: `{ stages; checks; meta; }`.
       packageConfig ? _: { },
       ca ? featureGates.defaultCa,
       nixFeatures ? featureGates.standalone { inherit ca; },
@@ -531,6 +535,22 @@ let
           );
           roots = listToAttrs (map (r: nameValuePair (rootName r) r) rs);
           conf = packageConfig pkg;
+          cargoPackage = cargoPackages.${pkg} or null;
+          # The program `lib.getExe` runs: the one bin, or the one Cargo
+          # runs (`default-run`), as `install` names it in bin/.
+          bins = map (r: r.breakbulkRoot.target) (filter (r: r.breakbulkRoot.kind == "bin") built);
+          defaultRun = if cargoPackage == null then null else cargoPackage.default-run or null;
+          mainBin =
+            if lib.length bins == 1 then
+              head bins
+            else if defaultRun != null && elem defaultRun bins then
+              defaultRun
+            else
+              null;
+          installs = stages.isLive (stageSet.install or { });
+          mainProgram = lib.optionalAttrs (mainBin != null && installs) {
+            mainProgram = mainBin + traits.executableSuffix;
+          };
           stageSet =
             assert targetChecked;
             checkDebugStages {
@@ -551,6 +571,9 @@ let
           ];
           p = stages.mkProduct {
             name = pkg;
+            # `0.0.0`: Cargo's own default for a package without a version.
+            drvName = if cargoPackage == null then null else "${pkg}-${cargoPackage.version or "0.0.0"}";
+            meta = mainProgram // (conf.meta or { });
             linked = mkLinked pkgs traits pkg built;
             stages = stageSet;
             leading = lib.attrNames (debugStages effectiveDebugInfo traits);

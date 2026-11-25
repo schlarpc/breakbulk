@@ -556,6 +556,7 @@ let
     {
       stages = products.definitionsOf o.stages;
       checks = products.definitionsOf o.checks;
+      meta = o.meta.value;
     };
 
   # mkWorkspace's `packages`: each member's settings, with its runs'

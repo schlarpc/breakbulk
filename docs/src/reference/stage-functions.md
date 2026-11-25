@@ -65,7 +65,7 @@ attributes:
 
 | Attribute | Given to | Value |
 | --- | --- | --- |
-| `name` | stages and checks | The package's name in `Cargo.toml`, which is the product's name. |
+| `name` | stages and checks | The package's name in `Cargo.toml`. The product's derivation (its last stage's) is named `<name>-<version>`. |
 | `sourcePaths` | stages and checks | The store paths of the workspace's source views, of every crate source and of the workspace's vendor directory (which a nested Cargo in a build script compiles from). `noSourceReferences` fails when the product references one. |
 | `sourcePathFiles` | stages and checks | Files that list more source paths, one per line, made at build time. In dynamic-derivation mode, the store paths of the predicted views ([`predictSources`](options/packages.md#packagesnamepredictsourcesenable)), which evaluation cannot name. Otherwise empty. `noSourceReferences` reads them with `sourcePaths`. |
 | `toolchainPaths` | stages and checks | The Rust toolchain's store paths: rustc, its sysroot, cargo and components such as rust-src. |

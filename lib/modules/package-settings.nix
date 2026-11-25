@@ -710,6 +710,20 @@ let
           from this package only.
         '';
       };
+      meta = mkOption {
+        type = types.attrsOf types.anything;
+        default = { };
+        example = lib.literalExpression ''{ mainProgram = "server"; description = "The API server"; }'';
+        description = ''
+          Attributes added to the `meta` of this package's products, over
+          breakbulk's own: `mainProgram`, which `lib.getExe` reads, is the
+          package's one bin, or the bin Cargo's `default-run` names, when
+          `install` lays it out in `bin/`. `meta` is no input of the
+          derivation, so setting it rebuilds nothing (`overrideAttrs`, as
+          `lib.addMetaAttrs` uses, makes a new derivation of the last
+          stage).
+        '';
+      };
 
       test = runOptions // {
         sourceScope = mkOption {

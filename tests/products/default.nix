@@ -54,6 +54,12 @@
 #                    and "packed": no `.dwp`
 #   pack-dwo-removed `packages.app.stages.packDwo = null` ships the loose
 #                    `.dwo` files beside splitDebug's debug file
+#   product-meta     products are named `<pkg>-<version>` (a version
+#                    inherited from the workspace too); `meta.mainProgram`
+#                    is the one bin, else Cargo's `default-run`, else
+#                    unset, and none without `install`; `lib.getExe` runs
+#                    it; `packages.<name>.meta` adds to `meta` and leaves
+#                    the derivation as it is
 #   product-attributes   the `product` a stage and a check get has the
 #                    attributes docs/src/reference/stage-functions.md
 #                    lists for each (evaluation only)
@@ -528,6 +534,20 @@ let
         after = "splitDebug";
         run = helpers.removeSourceReferences;
       };
+    }
+  ];
+
+  # --- product-meta ------------------------------------------------------------
+
+  productMeta = mkRepo (fixtures + "/product-meta") [ (oneWs "." "dev") ];
+  productMetaSet = mkRepo (fixtures + "/product-meta") [
+    (oneWs "." "dev")
+    {
+      packages.pair.meta = {
+        mainProgram = "two";
+        description = "Two programs";
+      };
+      packages.single.stages.install = null;
     }
   ];
 
@@ -1350,6 +1370,7 @@ in
       cdylibDebug
       manifestDir
       manifestDirRepo
+      productMeta
       trimPathsRepo
       variantsRepo
       benchesRepo
@@ -3145,6 +3166,53 @@ in
   # The `product` a stage and a check get has exactly the attributes the
   # reference documents, on a product whose `linked` stage has a `debug`
   # output (`split-debuginfo = "packed"`), so every optional one is there.
+  product-meta =
+    let
+      p = productMeta.workspaces.main.packages;
+      set = productMetaSet.workspaces.main.packages;
+      facts = {
+        names = lib.mapAttrs (_: d: d.name) p;
+        mainPrograms = lib.mapAttrs (_: d: d.meta.mainProgram or null) p;
+      };
+      expected = {
+        names = {
+          single = "single-1.2.3";
+          multi = "multi-0.4.0";
+          pair = "pair-0.1.0";
+        };
+        mainPrograms = {
+          single = "single-tool";
+          multi = "second";
+          pair = null;
+        };
+      };
+    in
+    assert lib.assertMsg (
+      facts == expected
+    ) "product-meta: products have ${builtins.toJSON facts}, expected ${builtins.toJSON expected}";
+    assert lib.assertMsg (
+      set.pair.drvPath == p.pair.drvPath
+    ) "product-meta: packages.pair.meta changed the product's derivation";
+    assert lib.assertMsg (
+      set.pair.meta.description == "Two programs"
+    ) "product-meta: packages.pair.meta.description is not the product's";
+    assert lib.assertMsg (
+      !(set.single.meta ? mainProgram)
+    ) "product-meta: a product without `install` has a mainProgram";
+    pkgs.runCommand "product-meta"
+      {
+        single = lib.getExe p.single;
+        multi = lib.getExe p.multi;
+        pair = lib.getExe set.pair;
+      }
+      ''
+        set -euo pipefail
+        test "$($single)" = single
+        test "$($multi)" = second
+        test "$($pair)" = two
+        echo ${lib.escapeShellArg (builtins.toJSON facts)} > $out
+      '';
+
   product-attributes =
     let
       p = probeRepo.workspaces.main.target.${native}.variants.packed.packages.app;

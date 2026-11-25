@@ -713,6 +713,34 @@ p: [ p.openssl ]
 *Declared by:*
  - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
 
+## `packages.<name>.meta`
+
+Attributes added to the ` meta ` of this package’s products, over
+breakbulk’s own: ` mainProgram `, which ` lib.getExe ` reads, is the
+package’s one bin, or the bin Cargo’s ` default-run ` names, when
+` install ` lays it out in ` bin/ `\. ` meta ` is no input of the
+derivation, so setting it rebuilds nothing (` overrideAttrs `, as
+` lib.addMetaAttrs ` uses, makes a new derivation of the last
+stage)\.
+
+*Type:*
+attribute set of anything
+
+*Default:*
+
+```nix
+{ }
+```
+
+*Example:*
+
+```nix
+{ mainProgram = "server"; description = "The API server"; }
+```
+
+*Declared by:*
+ - [lib/modules/package-settings\.nix](https://github.com/schlarpc/breakbulk/blob/main/lib/modules/package-settings.nix)
+
 ## `packages.<name>.nativeInputs`
 
 Tools that run on the build machine (` pkg-config `, ` cmake `,

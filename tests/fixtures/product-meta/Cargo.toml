@@ -1,0 +1,10 @@
+# Products' names and `meta.mainProgram`: `single` has one bin and the
+# workspace's version, `multi` two bins and a `default-run`, `pair` two
+# bins and none.
+[workspace]
+resolver = "2"
+members = ["single", "multi", "pair"]
+
+[workspace.package]
+version = "1.2.3"
+edition = "2021"

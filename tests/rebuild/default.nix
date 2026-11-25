@@ -164,6 +164,7 @@ let
     ];
     port-from-crane = [ products.repos.portFromCrane ];
     post-link = [ products.repos.postLink ];
+    product-meta = [ dynamic.repos.product-meta ];
     required-features = [ repository.repos.rf ];
     # With the option its hint names; `via-link` fails by design without.
     result-names = [ repository.repos.resultNamesFixed ];

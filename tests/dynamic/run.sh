@@ -77,7 +77,7 @@ else
     sys-native feature-unification clippy-conf test-cutoff
     multi-ws outside-reads own-view stamps missing-input test-only target-views predict-sources sources
     view-hints pkgid-short snapshots
-    post-link source-paths trim-paths trim-paths-cc variants
+    post-link product-meta source-paths trim-paths trim-paths-cc variants
     variants-coverage variants-driver cargo-config benches stdpaths git-multi-workspace git-revisions
     build-std build-std-deps same-triple static-musl static-glibc
     static-pkgconfig cross-lto cross-lto-off uefi sys-native-aarch64 cross-doctests-aarch64

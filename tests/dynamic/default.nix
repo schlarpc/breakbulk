@@ -464,6 +464,7 @@ let
 
     # tests/products
     post-link = products.postLink;
+    product-meta = products.productMeta;
     source-paths = products.sourcePaths;
     trim-paths = products.trimPathsRepo;
     trim-paths-cc = products.trimCc;

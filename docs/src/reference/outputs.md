@@ -129,11 +129,18 @@ quote a key with a `/`: `testRuns.app."lib/app"`.
 
 A product such as `packages.<pkg>` is the package's built binaries and
 libraries, passed through the target's post-link stages and installed
-(`bin/`, `lib/`). It also has:
+(`bin/`, `lib/`). Its derivation is named `<pkg>-<version>`, with the
+version from the package's `Cargo.toml`. It also has:
 
 - `.stages.<name>`: every intermediate stage, e.g. `.stages.linked`;
 - `.debug`: split debug information, where the target splits it;
-- `.checks.<name>`: the product's checks.
+- `.checks.<name>`: the product's checks;
+- `.meta.mainProgram`: the bin `lib.getExe` and `nix run` start: the
+  package's one bin, or the one Cargo's `default-run` names. A package
+  with several bins and no `default-run`, or a product without the
+  `install` stage, has none. Set it, and the rest of `meta`, with
+  [`packages.<name>.meta`](options/packages.md#packagesnamemeta), which
+  builds nothing again.
 
 ### Documentation
 

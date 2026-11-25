@@ -1,0 +1,8 @@
+[package]
+name = "single"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "single-tool"
+path = "src/main.rs"
