@@ -10,10 +10,14 @@
 //!   literal `rerun-if-changed` directives, which are all Cargo reruns it
 //!   for.
 //!
-//! A prediction may hold more files than are read (a module behind a false
-//! `#[cfg]`, a candidate file rustc does not pick); that costs only
-//! rebuilds. When the sources hold something whose files cannot be known
-//! without expanding it, the prediction says why in `fallback`, and the
+//! Of the compile's `cfg` set only `test` is known: an item whose `#[cfg]`
+//! is false for it (`#[cfg(test)]` in a non-test compile) is skipped, as
+//! rustc strips it before expanding anything, with every module, include
+//! and fallback reason in it. A prediction may hold more files than are
+//! read (a module behind any other false `#[cfg]`, a candidate file rustc
+//! does not pick); that costs only rebuilds. When the sources hold
+//! something whose files cannot be known without expanding it, the
+//! prediction says why in `fallback`, and the
 //! unit must see its whole view. A file read in a way no rule here sees (a
 //! proc macro reading a file, a module a proc macro generates) is a miss:
 //! the compile fails naming the file, because rustc fails on every module
@@ -30,7 +34,7 @@ use std::path::Path;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
-use syn::{Expr, Lit, LitStr, Meta, Token};
+use syn::{Attribute, Expr, Lit, LitStr, Meta, Token};
 
 pub mod view;
 
@@ -134,9 +138,10 @@ impl fmt::Display for Fallback {
 
 /// The files rustc reads for the crate root `crate_root`, in the view at
 /// `view`. `crate_root` and `manifest_dir` (the package directory, for
-/// `CARGO_MANIFEST_DIR`) are relative to the view root.
-pub fn predict_crate(view: &Path, crate_root: &str, manifest_dir: &str) -> Prediction {
-    let w = walk(view, crate_root, manifest_dir);
+/// `CARGO_MANIFEST_DIR`) are relative to the view root. `test`: whether
+/// the compile sets `cfg(test)` (`rustc --test`).
+pub fn predict_crate(view: &Path, crate_root: &str, manifest_dir: &str, test: bool) -> Prediction {
+    let w = walk(view, crate_root, manifest_dir, test);
     Prediction {
         files: w.files,
         fallback: w.fallback,
@@ -152,7 +157,7 @@ pub fn predict_build_script_run(
     build_script: &str,
     manifest_dir: &str,
 ) -> RunPrediction {
-    let w = walk(view, build_script, manifest_dir);
+    let w = walk(view, build_script, manifest_dir, false);
     let mut out = RunPrediction {
         declared: BTreeSet::new(),
         fallback: w.fallback,
@@ -198,6 +203,8 @@ pub fn predict_build_script_run(
 struct Walk<'a> {
     view: &'a Path,
     manifest_dir: String,
+    /// Whether the compile sets `cfg(test)`.
+    test: bool,
     files: BTreeSet<String>,
     fallback: Vec<Fallback>,
     /// Every string literal, with its file: in the syntax tree and in
@@ -207,10 +214,11 @@ struct Walk<'a> {
     seen: HashSet<(String, Module)>,
 }
 
-fn walk<'a>(view: &'a Path, crate_root: &str, manifest_dir: &str) -> Walk<'a> {
+fn walk<'a>(view: &'a Path, crate_root: &str, manifest_dir: &str, test: bool) -> Walk<'a> {
     let mut w = Walk {
         view,
         manifest_dir: normalize(manifest_dir).unwrap_or_default(),
+        test,
         files: BTreeSet::new(),
         fallback: Vec::new(),
         literals: Vec::new(),
@@ -284,6 +292,8 @@ impl Walk<'_> {
             stack: vec![module],
         };
         match syn::parse_file(&text) {
+            // rustc reads a module file before its inner `#![cfg]`.
+            Ok(f) if v.off(&f.attrs) => {}
             Ok(f) => v.visit_file(&f),
             Err(e) if included => match syn::parse_str::<Expr>(&text) {
                 Ok(x) => v.visit_expr(&x),
@@ -315,7 +325,8 @@ struct PathAttrs {
 }
 
 impl PathAttrs {
-    fn add_meta(&mut self, meta: &Meta) {
+    /// `test`: whether the compile sets `cfg(test)`.
+    fn add_meta(&mut self, meta: &Meta, test: bool) {
         match meta {
             Meta::NameValue(nv) if nv.path.is_ident("path") => {
                 if let Some(s) = lit_str(&nv.value)
@@ -325,9 +336,14 @@ impl PathAttrs {
                 }
             }
             Meta::List(l) if l.path.is_ident("cfg_attr") => {
-                for m in cfg_attr_metas(&l.tokens) {
+                let (cond, metas) = cfg_attr_metas(&l.tokens, test);
+                for m in metas {
+                    if cond == Some(true) {
+                        self.add_meta(&m, test);
+                        continue;
+                    }
                     let mut inner = PathAttrs::default();
-                    inner.add_meta(&m);
+                    inner.add_meta(&m, test);
                     self.cfg.extend(inner.plain);
                     self.cfg.extend(inner.cfg);
                 }
@@ -337,12 +353,71 @@ impl PathAttrs {
     }
 }
 
-/// The attributes `cfg_attr(cond, a, b, …)` applies: `a, b, …`.
-fn cfg_attr_metas(tokens: &TokenStream) -> Vec<Meta> {
+/// `cfg_attr(cond, a, b, …)`: the value of `cond` (see [`cfg_value`]) and
+/// the attributes it applies, `a, b, …`; none when `cond` is false.
+fn cfg_attr_metas(tokens: &TokenStream, test: bool) -> (Option<bool>, Vec<Meta>) {
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
-    match syn::parse::Parser::parse2(parser, tokens.clone()) {
-        Ok(p) => p.into_iter().skip(1).collect(),
-        Err(_) => Vec::new(),
+    let Ok(p) = syn::parse::Parser::parse2(parser, tokens.clone()) else {
+        return (None, Vec::new());
+    };
+    let mut it = p.into_iter();
+    let cond = it.next().and_then(|c| cfg_value(&c, test));
+    match cond {
+        Some(false) => (cond, Vec::new()),
+        _ => (cond, it.collect()),
+    }
+}
+
+/// The value of a `cfg` predicate when, of the compile's `cfg` set, only
+/// `test` is known: None when it depends on anything else.
+fn cfg_value(pred: &Meta, test: bool) -> Option<bool> {
+    let Meta::List(l) = pred else {
+        return match pred {
+            Meta::Path(p) if p.is_ident("test") => Some(test),
+            _ => None,
+        };
+    };
+    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
+    let args = syn::parse::Parser::parse2(parser, l.tokens.clone()).ok()?;
+    let vals: Vec<Option<bool>> = args.iter().map(|m| cfg_value(m, test)).collect();
+    if l.path.is_ident("not") {
+        return match vals[..] {
+            [v] => v.map(|v| !v),
+            _ => None,
+        };
+    }
+    // `all` is false once one argument is, `any` true once one is.
+    let decisive = if l.path.is_ident("all") {
+        false
+    } else if l.path.is_ident("any") {
+        true
+    } else {
+        return None;
+    };
+    if vals.contains(&Some(decisive)) {
+        Some(decisive)
+    } else if vals.iter().all(|v| *v == Some(!decisive)) {
+        Some(!decisive)
+    } else {
+        None
+    }
+}
+
+/// Whether one of `attrs` is a `#[cfg]` that is false for the compile:
+/// rustc strips the item it is on before expanding anything.
+fn cfg_off(attrs: &[Attribute], test: bool) -> bool {
+    attrs.iter().any(|a| cfg_meta_off(&a.meta, test))
+}
+
+fn cfg_meta_off(meta: &Meta, test: bool) -> bool {
+    match meta {
+        Meta::List(l) if l.path.is_ident("cfg") => {
+            syn::parse2::<Meta>(l.tokens.clone())
+                .ok()
+                .and_then(|p| cfg_value(&p, test))
+                == Some(false)
+        }
+        _ => false,
     }
 }
 
@@ -357,6 +432,10 @@ fn lit_str(e: &Expr) -> Option<String> {
 }
 
 impl FileVisitor<'_, '_> {
+    fn off(&self, attrs: &[Attribute]) -> bool {
+        cfg_off(attrs, self.w.test)
+    }
+
     fn module(&self) -> &Module {
         self.stack.last().expect("the file's module")
     }
@@ -485,7 +564,7 @@ impl FileVisitor<'_, '_> {
         match meta {
             Meta::NameValue(nv) => self.visit_expr(&nv.value),
             Meta::List(l) if l.path.is_ident("cfg_attr") => {
-                for m in cfg_attr_metas(&l.tokens) {
+                for m in cfg_attr_metas(&l.tokens, self.w.test).1 {
                     self.meta(&m);
                 }
             }
@@ -529,9 +608,14 @@ impl FileVisitor<'_, '_> {
                         && g.delimiter() == Delimiter::Bracket
                     {
                         match syn::parse2::<Meta>(g.stream()) {
+                            Ok(meta) if cfg_meta_off(&meta, self.w.test) => {
+                                i = skip_item(&tts, j + 1);
+                                paths = PathAttrs::default();
+                                continue;
+                            }
                             Ok(meta) => {
                                 let before = (paths.plain.is_some(), paths.cfg.len());
-                                paths.add_meta(&meta);
+                                paths.add_meta(&meta, self.w.test);
                                 if opaque && before != (paths.plain.is_some(), paths.cfg.len()) {
                                     let f = self.file.clone();
                                     self.w.fall(&f, Reason::InMacroRules);
@@ -654,14 +738,74 @@ impl FileVisitor<'_, '_> {
     }
 }
 
+/// Visit methods that skip their node when one of its `#[cfg]`s is false
+/// for the compile.
+macro_rules! unless_off {
+    ($($visit:ident($ty:ty);)*) => {$(
+        fn $visit(&mut self, n: &'ast $ty) {
+            if !self.off(&n.attrs) {
+                visit::$visit(self, n);
+            }
+        }
+    )*};
+}
+
+/// The attributes of an item enum's variants (`syn::Item`, `ImplItem`, …),
+/// which syn gives no accessor for.
+macro_rules! attrs_of {
+    ($e:expr, $ty:ident: $($v:ident),*) => {
+        match $e {
+            $(syn::$ty::$v(i) => &i.attrs[..],)*
+            _ => &[],
+        }
+    };
+}
+
 impl<'ast> Visit<'ast> for FileVisitor<'_, '_> {
+    unless_off! {
+        visit_local(syn::Local);
+        visit_stmt_macro(syn::StmtMacro);
+        visit_arm(syn::Arm);
+        visit_field(syn::Field);
+        visit_field_value(syn::FieldValue);
+        visit_variant(syn::Variant);
+        visit_expr_block(syn::ExprBlock);
+        visit_expr_macro(syn::ExprMacro);
+    }
+
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let attrs = attrs_of!(item, Item: Const, Enum, ExternCrate, Fn, ForeignMod, Impl, Macro, Mod,
+            Static, Struct, Trait, TraitAlias, Type, Union, Use);
+        if !self.off(attrs) {
+            visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        if !self.off(attrs_of!(item, ImplItem: Const, Fn, Type, Macro)) {
+            visit::visit_impl_item(self, item);
+        }
+    }
+
+    fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+        if !self.off(attrs_of!(item, TraitItem: Const, Fn, Type, Macro)) {
+            visit::visit_trait_item(self, item);
+        }
+    }
+
+    fn visit_foreign_item(&mut self, item: &'ast syn::ForeignItem) {
+        if !self.off(attrs_of!(item, ForeignItem: Fn, Static, Type, Macro)) {
+            visit::visit_foreign_item(self, item);
+        }
+    }
+
     fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
         for a in &m.attrs {
             self.visit_attribute(a);
         }
         let mut paths = PathAttrs::default();
         for a in &m.attrs {
-            paths.add_meta(&a.meta);
+            paths.add_meta(&a.meta, self.w.test);
         }
         let name = m.ident.to_string();
         let name = name.strip_prefix("r#").unwrap_or(&name).to_owned();
@@ -718,6 +862,24 @@ impl<'ast> Visit<'ast> for FileVisitor<'_, '_> {
         let f = self.file.clone();
         self.w.literals.push((f, s.value()));
     }
+}
+
+/// Where the item starting at `tts[i]` in a macro's arguments ends: after
+/// a `;` or `,`, or after its first `{ … }`. Not parsed as an item, since
+/// a macro's arguments need not be items (`cfg_if!`'s `if #[cfg(test)]
+/// { … }`). An item that goes on past that point (`const X: S = S { … };`)
+/// has the rest walked as usual, which costs at most a needless file or
+/// fallback.
+fn skip_item(tts: &[TokenTree], mut i: usize) -> usize {
+    while let Some(tt) = tts.get(i) {
+        i += 1;
+        match tt {
+            TokenTree::Punct(p) if p.as_char() == ';' || p.as_char() == ',' => break,
+            TokenTree::Group(g) if g.delimiter() == Delimiter::Brace => break,
+            _ => {}
+        }
+    }
+    i
 }
 
 /// Whether `env!`'s or `option_env!`'s arguments name `CARGO_MANIFEST_DIR`.

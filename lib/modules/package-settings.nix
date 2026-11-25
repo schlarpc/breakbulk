@@ -415,7 +415,11 @@ let
             `#[path]` and `cfg_attr(…, path = …)`), and the files of every
             `include!`, `include_str!` and `include_bytes!` with a literal
             path (also `concat!(env!("CARGO_MANIFEST_DIR"), "…")`) and of
-            `#[debugger_visualizer]`. A build-script run's is the paths its
+            `#[debugger_visualizer]`. Items under a `#[cfg]` that is false
+            for the compile (`#[cfg(test)]` in a non-test compile,
+            `#[cfg(not(test))]` in a test one) are skipped, as rustc strips
+            them: their modules and includes are not read, and nothing in
+            them makes the unit fall back. A build-script run's is the paths its
             script declares with literal `rerun-if-changed` directives,
             which is what Cargo reruns it for. Prediction reads the
             package's widest view (its test compiles' view, with the

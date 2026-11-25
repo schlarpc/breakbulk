@@ -948,6 +948,7 @@ rec {
             fallback = "${base}";
             packageDir = pkgDir;
             kind = if u.d.unit == "build-script-run" then "run" else "crate";
+            inherit (u.d) test;
             root = util.joinRel pkgDir u.d.cargoTarget.path;
             keep = lib.unique (
               extraKeep

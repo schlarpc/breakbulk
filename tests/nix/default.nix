@@ -802,6 +802,7 @@ in
           view = "${view}";
           packageDir = "pr";
           kind = "crate";
+          test = false;
           root = "pr/src/lib.rs";
         }
       ];

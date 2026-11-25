@@ -1484,11 +1484,15 @@ in
       '';
 
   # Source prediction (`predictSources`): an edit to a file no unit of ps
-  # reads (README.md, a comment in Cargo.toml) changes no unit; without
-  # it, the README edit changes every unit of ps. A file the build script
-  # declares changes the run and what reads its output; one the library
-  # includes changes the library's compiles and what links them. A proc
-  # macro's read that prediction does not see fails with a hint naming
+  # reads (README.md, a comment in Cargo.toml) changes only the library's
+  # test compile, whose unit tests use `env!("CARGO_MANIFEST_DIR")` so it
+  # reads its whole view; the library's other compiles skip those
+  # `#[cfg(test)]` items. Without prediction, the README edit changes
+  # every unit of ps. A file the build script declares changes the run
+  # and what reads its output; one the library includes changes the
+  # library's compiles and what links them; one only its `#[cfg(test)]`
+  # items include, only its test compile. A proc macro's read that
+  # prediction does not see fails with a hint naming
   # predictSources.keep, and the kept path builds.
   predict-sources =
     let
@@ -1502,11 +1506,12 @@ in
         notes = changedBy "echo more >> ps/NOTES.md" [ ];
         proto = psUnits (changedBy "echo more >> ps/proto/x.proto" [ ]);
         data = psUnits (changedBy "echo -n more >> ps/src/data.txt" [ ]);
+        expected = psUnits (changedBy "echo -n more >> ps/src/expected.txt" [ ]);
       };
       want = {
-        readme = [ ];
-        manifest = [ ];
-        notes = [ ];
+        readme = [ "ps-0.1.0-test" ];
+        manifest = [ "ps-0.1.0-test" ];
+        notes = [ "ps-0.1.0-test" ];
         proto = [
           "ps-0.1.0-bin"
           "ps-0.1.0-build-run"
@@ -1520,6 +1525,7 @@ in
           "ps-0.1.0-test"
           "ps-0.1.0-test-t"
         ];
+        expected = [ "ps-0.1.0-test" ];
       };
       off = psUnits (changedBy readme [ { packages.ps.predictSources.enable = lib.mkForce false; } ]);
       missing = predictSourcesRepo null [ { packages.ps.predictSources.keep = lib.mkForce [ ]; } ];
@@ -1603,8 +1609,14 @@ in
     assert lib.assertMsg (lib.elem "ps-0.1.0-lib" off)
       "predict-sources: without predictSources, a README edit changed only ${builtins.toJSON off}";
     assert lib.assertMsg
-      (specs.${runKey}.kind == "run" && specs."src:ps#lib/ps".keep == [ "ps/templates" ])
-      "predict-sources: specs ${builtins.toJSON (lib.mapAttrs (_: s: { inherit (s) kind keep; }) specs)}";
+      (
+        specs.${runKey}.kind == "run"
+        && specs."src:ps#lib/ps".keep == [ "ps/templates" ]
+        && !specs."src:ps#lib/ps".test
+      )
+      "predict-sources: specs ${
+        builtins.toJSON (lib.mapAttrs (_: s: { inherit (s) kind keep test; }) specs)
+      }";
     assert lib.assertMsg (lib.elem "Cargo.toml"
       (specsOf clippy "clippy")."src:ps#lib/ps".keep
     ) "predict-sources: a clippy variant's lib view does not keep the workspace's Cargo.toml";
@@ -1628,6 +1640,8 @@ in
       {
         ps = predictSources.workspaces.main.packages.ps;
         t = (inst predictSources).testRuns.ps.t;
+        # The unit tests, which read their whole view, pass.
+        libTests = (inst predictSources).testRuns.ps."lib/ps";
         # A package with a sourceOverlay is predicted, the overlay on top.
         overlaidLib = (inst' overlaidRepo "main").sources.workspaceTargets.ps."lib/ps";
         overlaidPs = overlaidRepo.workspaces.main.packages.ps;
@@ -1661,6 +1675,9 @@ in
         grep -qx 'src:ps#run/custom-build/build-script-build: predicted, 2 paths' $explained
         grep -qx '  ps/proto/x.proto' $explained
         ! grep -q 'README.md' $explained
+        ! grep -q 'expected.txt' $explained
+        grep -qx 'test-src:ps#lib/ps: whole view' $explained
+        grep -q 'ps/src/lib.rs: `env!("CARGO_MANIFEST_DIR")` outside' $explained
         # A sourceOverlay package's units are in the report too.
         grep -qx 'src:ps#lib/ps: predicted, [0-9]* paths' $explainedOverlaid
         grep -qx 'src:ps#run/custom-build/build-script-build: whole view' $explainedNoDirectives

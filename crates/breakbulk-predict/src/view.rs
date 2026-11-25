@@ -43,6 +43,9 @@ pub struct ViewSpec {
     /// The package directory, relative to the repository root.
     pub package_dir: String,
     pub kind: Kind,
+    /// Whether the compile sets `cfg(test)` (a test compile): items under
+    /// a `#[cfg]` false for it are not read. False for a run.
+    pub test: bool,
     /// The crate root or build script, relative to the repository root.
     pub root: String,
     /// Paths kept whatever the prediction says (`predictSources.keep` and
@@ -66,7 +69,7 @@ pub fn outcome(spec: &ViewSpec) -> Outcome {
     let view = Path::new(&spec.view);
     let (mut files, fallback): (BTreeSet<String>, Vec<Fallback>) = match spec.kind {
         Kind::Crate => {
-            let p = predict_crate(view, &spec.root, &spec.package_dir);
+            let p = predict_crate(view, &spec.root, &spec.package_dir, spec.test);
             (p.files, p.fallback)
         }
         Kind::Run => {

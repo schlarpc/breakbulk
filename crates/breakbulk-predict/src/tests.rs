@@ -44,7 +44,7 @@ fn reasons(f: &[Fallback]) -> Vec<&Reason> {
 /// The crate root `c/src/lib.rs` of package `c`.
 fn lib(files: &[(&str, &str)]) -> Prediction {
     let v = View::new(files);
-    predict_crate(v.path(), "c/src/lib.rs", "c")
+    predict_crate(v.path(), "c/src/lib.rs", "c", false)
 }
 
 #[test]
@@ -439,6 +439,7 @@ fn predicted_view_keeps_predicted_and_kept_paths() {
         fallback: None,
         package_dir: "c".into(),
         kind: Kind::Crate,
+        test: false,
         root: "c/src/lib.rs".into(),
         keep: vec!["c/data".into(), "c/src/link.rs".into(), "c/missing".into()],
     };
@@ -478,6 +479,7 @@ fn predicted_view_falls_back() {
         fallback: None,
         package_dir: "c".into(),
         kind: Kind::Run,
+        test: false,
         root: "c/build.rs".into(),
         keep: vec![],
     };
@@ -493,7 +495,7 @@ fn manifest_dir_outside_an_include_falls_back() {
         r#"macro_rules! d { () => { env!("CARGO_MANIFEST_DIR") } }"#,
     ] {
         let v = View::new(&[("c/src/lib.rs", src)]);
-        let p = predict_crate(v.path(), "c/src/lib.rs", "c");
+        let p = predict_crate(v.path(), "c/src/lib.rs", "c", false);
         assert_eq!(
             reasons(&p.fallback),
             [&Reason::ManifestDirInOutput],
@@ -508,9 +510,86 @@ fn manifest_dir_outside_an_include_falls_back() {
         ),
         ("c/d.txt", ""),
     ]);
-    let p = predict_crate(v.path(), "c/src/lib.rs", "c");
+    let p = predict_crate(v.path(), "c/src/lib.rs", "c", false);
     assert!(p.fallback.is_empty());
     assert!(p.files.contains("c/d.txt"));
+}
+
+#[test]
+fn cfg_false_for_the_compile_is_not_read() {
+    let v = View::new(&[
+        (
+            "c/src/lib.rs",
+            r#"
+            #[cfg(test)] mod tests;
+            #[cfg(all(test, unix))] const D: &str = env!("CARGO_MANIFEST_DIR");
+            #[cfg(not(not(test)))] const T: &str = include_str!("t.txt");
+            #[cfg(not(test))] const N: &str = include_str!("n.txt");
+            #[cfg(any(test, unix))] const U: &str = include_str!("u.txt");
+            #[cfg_attr(test, path = "x_test.rs")] mod x;
+            mod inner;
+            pub struct S;
+            impl S {
+                #[cfg(test)]
+                fn d() -> &'static str { env!("CARGO_MANIFEST_DIR") }
+            }
+            pub fn f() {
+                #[cfg(test)]
+                let _ = option_env!("CARGO_MANIFEST_DIR");
+            }
+            cfg_if::cfg_if! {
+                if #[cfg(test)] {
+                    const E: &str = env!("CARGO_MANIFEST_DIR");
+                } else {
+                    const E: &str = include_str!("e.txt");
+                }
+            }
+            "#,
+        ),
+        (
+            "c/src/tests.rs",
+            r#"const D: &str = env!("CARGO_MANIFEST_DIR");"#,
+        ),
+        ("c/src/x.rs", ""),
+        ("c/src/x_test.rs", ""),
+        (
+            "c/src/inner.rs",
+            r#"#![cfg(test)] const D: &str = env!("CARGO_MANIFEST_DIR");"#,
+        ),
+    ]);
+    let p = predict_crate(v.path(), "c/src/lib.rs", "c", false);
+    assert!(p.fallback.is_empty(), "{:?}", p.fallback);
+    assert_eq!(
+        files(&p),
+        [
+            "c/src/e.txt",
+            "c/src/inner.rs",
+            "c/src/lib.rs",
+            "c/src/n.txt",
+            "c/src/u.txt",
+            "c/src/x.rs"
+        ]
+    );
+    // A test compile reads them, and not the `cfg(not(test))` include.
+    let p = predict_crate(v.path(), "c/src/lib.rs", "c", true);
+    assert_eq!(
+        reasons(&p.fallback),
+        [&Reason::ManifestDirInOutput; 6],
+        "{:?}",
+        p.fallback
+    );
+    assert_eq!(
+        files(&p),
+        [
+            "c/src/e.txt",
+            "c/src/inner.rs",
+            "c/src/lib.rs",
+            "c/src/t.txt",
+            "c/src/tests.rs",
+            "c/src/u.txt",
+            "c/src/x_test.rs"
+        ]
+    );
 }
 
 #[test]
@@ -528,6 +607,7 @@ fn explain_reports_paths_and_fallbacks() {
         fallback: None,
         package_dir: "c".into(),
         kind,
+        test: false,
         root: root.into(),
         keep: vec!["c/missing".into(), "c/Cargo.toml".into()],
     };

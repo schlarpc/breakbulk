@@ -1,5 +1,6 @@
 # Source prediction (`predictSources`): ps's units see only the files they
-# read. README.md and NOTES.md are read by nothing; `reader` is a proc
+# read. README.md and NOTES.md are read by nothing, src/expected.txt by
+# the unit tests only; `reader` is a proc
 # macro that reads `templates/page.txt` from its caller's
 # CARGO_MANIFEST_DIR, a read prediction cannot see (`predictSources.keep`).
 [workspace]
