@@ -481,6 +481,64 @@ let
         touch $out
       '';
 
+  # A `specialArgs` entry named as one of breakbulk's own module
+  # arguments fails naming both, in mkRepository (`toolchain`, which
+  # only target specs get, and `root`) and in evalTargetSpec; another
+  # name evaluates. Nested evaluations check the messages, which
+  # builtins.tryEval does not give.
+  specialArgsCheck =
+    let
+      expr = body: ''
+        let
+          pkgs = import ${pkgs.path} { system = "${pkgs.stdenv.hostPlatform.system}"; };
+          bb = import ${../../lib} { inherit (pkgs) lib; };
+          repoWith = specialArgs: (bb.mkRepository {
+            inherit pkgs specialArgs;
+            root = /. + builtins.getEnv "ROOT";
+            modules = [ { workspaces = { }; } ];
+          }).config.workspaces;
+        in
+        builtins.deepSeq (${body}) "evaluated"
+      '';
+      cases = {
+        ok = expr "repoWith { mine = 1; }";
+        toolchain = expr "repoWith { toolchain = { }; }";
+        two = expr "repoWith { root = ./.; package = { }; }";
+        spec = expr ''(bb.evalTargetSpec { inherit pkgs; triple = "x86_64-unknown-linux-gnu"; specialArgs.name = "t"; }).config.preset'';
+      };
+      want = {
+        toolchain = "error: breakbulk: mkRepository: specialArgs.toolchain has the name of breakbulk's module argument `toolchain` (a target spec's workspace toolchain). breakbulk passes these itself; give yours another name.";
+        two = "error: breakbulk: mkRepository: specialArgs.package has the name of breakbulk's module argument `package` (package settings' lockfile entry); specialArgs.root has the name of breakbulk's module argument `root` (the repository root).";
+        spec = "error: breakbulk: evalTargetSpec: specialArgs.name has the name of breakbulk's module argument `name` (a target spec's triple).";
+      };
+    in
+    pkgs.runCommand "special-args"
+      (
+        cases
+        // {
+          nativeBuildInputs = [ pkgs.nix ];
+          passAsFile = lib.attrNames cases;
+        }
+      )
+      ''
+        export NIX_CONF_DIR=$TMPDIR/etc NIX_STATE_DIR=$TMPDIR/var/nix NIX_STORE_DIR=$TMPDIR/store
+        export NIX_LOCALSTATE_DIR=$TMPDIR/var NIX_LOG_DIR=$TMPDIR/var/log/nix
+        export ROOT=$TMPDIR/root
+        mkdir -p $ROOT
+        nix-store --init
+        [ "$(nix-instantiate --eval $okPath)" = '"evaluated"' ]
+        ${lib.concatStrings (
+          lib.mapAttrsToList (n: msg: ''
+            if nix-instantiate --eval ${"$"}${n}Path 2> err; then
+              echo "${n} evaluated" >&2
+              exit 1
+            fi
+            grep -F ${lib.escapeShellArg msg} err || { cat err >&2; exit 1; }
+          '') want
+        )}
+        touch $out
+      '';
+
   # A source-view function without `...` fails on its first call. One
   # that takes every other argument gets an error that names only the
   # extra one, which says to add `...`. builtins.tryEval does not catch a
@@ -801,6 +859,8 @@ in
 
   sources-sentinel = sourcesSentinelCheck;
   sources-entries = sourcesEntriesCheck;
+
+  special-args = specialArgsCheck;
 
   vendor-collision = vendorBuild {
     name = "vendor-collision";

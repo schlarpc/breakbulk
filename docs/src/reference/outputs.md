@@ -17,7 +17,8 @@ repo = breakbulk.lib.mkRepository {
   [Module options](options.md)). Without any, a root that has a
   `Cargo.toml` is one workspace, `default`, at `"."`; declaring any
   [`workspaces`](options/workspaces.md#workspaces) turns that default off.
-- `specialArgs`: extra module arguments.
+- `specialArgs`: extra module arguments, for the modules, package
+  settings and target specs.
 
 Modules receive these arguments:
 
@@ -27,7 +28,18 @@ Modules receive these arguments:
   input (laziness makes the cycle harmless);
 - `breakbulk`, the library: presets, stage helpers, `xwinSdk`.
 
-`specialArgs` add to these and win.
+Package settings (`packages.<name>`, `memberDefaults`,
+`sysDefaults.*`) receive these and `package`, the package's lockfile
+entry. Target specs (`targets.<triple>`, `workspaces.<ws>.targets.<triple>`
+and their presets) receive `pkgs`, `breakbulk`, `name` (the triple),
+`toolchain` and `workspace` (the workspace's; see
+[Write a preset](../how-to/write-a-preset.md)).
+
+`specialArgs` add to these. A `specialArgs` entry with the name of one
+of breakbulk's own arguments (these, and `breakbulkPresets`,
+`projectBuildTarget` and `targetsDefaultTarget`, which its modules
+read) is an evaluation error that names the entry and the argument:
+it would replace breakbulk's value wherever that argument is read.
 
 ## The flake-parts module
 

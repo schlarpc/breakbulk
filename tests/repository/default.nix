@@ -3293,7 +3293,7 @@ in
   # Modules receive `root` (a path, also when the caller passed a
   # string-like root), the repository object (`repo`) and the library
   # (`breakbulk`) without the caller wiring them through specialArgs; the
-  # caller's specialArgs still win.
+  # caller's specialArgs reach them too.
   module-args =
     let
       probe =

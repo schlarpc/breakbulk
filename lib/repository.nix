@@ -118,11 +118,18 @@ let
     modules = bbModules ++ userModules ++ [ projectAssertions ];
     specialArgs = moduleArgs;
   };
+  # The caller's specialArgs, none named as an argument breakbulk passes
+  # to any evaluation: these modules, package settings and target specs.
+  specialArgs = util.checkSpecialArgs {
+    what = "mkRepository";
+    names = lib.attrNames util.moduleArgs;
+    specialArgs = args.specialArgs or { };
+  };
   # Module arguments, of these modules and of package settings: `pkgs`;
   # `root` (the repository root, a path), for reading project files;
   # `repo` (the result, below), for products used as inputs; `breakbulk`
   # (the library: presets, stage helpers, xwinSdk); `projectBuildTarget`
-  # and `targetsDefaultTarget` (below). The caller's specialArgs win.
+  # and `targetsDefaultTarget` (below); the caller's specialArgs.
   moduleArgs = {
     inherit
       pkgs

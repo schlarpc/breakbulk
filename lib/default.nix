@@ -186,7 +186,18 @@ let
           breakbulk = self;
           breakbulkPresets = presets;
         }
-        // specialArgs;
+        // util.checkSpecialArgs {
+          what = "evalTargetSpec";
+          names = [
+            "pkgs"
+            "workspace"
+            "toolchain"
+            "name"
+            "breakbulk"
+            "breakbulkPresets"
+          ];
+          inherit specialArgs;
+        };
       };
       inherit (first.config) preset;
     in

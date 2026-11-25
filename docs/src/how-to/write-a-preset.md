@@ -28,6 +28,7 @@ these module arguments:
 | `pkgs` | The `pkgs` given to `mkRepository` |
 | `name` | The target's name: its triple |
 | `toolchain` | The workspace's [toolchain](../reference/options/workspaces.md#workspacesnametoolchain): `rustc`, `cargo`, … |
+| `workspace` | The workspace: `name`, and `tools.wasmBindgen` |
 
 Set values with `lib.mkDefault`, so the user's own settings on the target
 win without `lib.mkForce`. Lists (`rustflags`, `cflags`) concatenate with

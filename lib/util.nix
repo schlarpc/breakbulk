@@ -24,6 +24,46 @@ in
 rec {
   sha256 = hashString "sha256";
 
+  # The module arguments breakbulk passes, in some evaluation, by name:
+  # what each is.
+  moduleArgs = {
+    pkgs = "the package set given to mkRepository";
+    root = "the repository root";
+    repo = "the mkRepository result";
+    breakbulk = "the library";
+    breakbulkPresets = "the presets, for the target spec's default preset";
+    projectBuildTarget = "the project's `build.target`";
+    targetsDefaultTarget = "the default of `targets.<triple>.defaultTarget`";
+    toolchain = "a target spec's workspace toolchain";
+    workspace = "a target spec's workspace";
+    name = "a target spec's triple";
+    package = "package settings' lockfile entry";
+  };
+
+  # `specialArgs` given to `what`, once none has the name of one of
+  # breakbulk's module arguments `names`. Not letting them win: a
+  # module of breakbulk's own that reads the argument would then fail
+  # far from the cause (a preset reading `toolchain.facts`).
+  checkSpecialArgs =
+    {
+      what,
+      names,
+      specialArgs,
+    }:
+    let
+      clash = filter (n: specialArgs ? ${n}) names;
+    in
+    if clash == [ ] then
+      specialArgs
+    else
+      throw "breakbulk: ${what}: ${
+        concatStringsSep "; " (
+          map (
+            n: "specialArgs.${n} has the name of breakbulk's module argument `${n}` (${moduleArgs.${n}})"
+          ) clash
+        )
+      }. breakbulk passes these itself; give yours another name.";
+
   # Percent-decoding as done by the `url` crate's `query_pairs` (form
   # urlencoded): `%XX` sequences and `+` as space. Only the code points that
   # can appear in git ref names and URLs are covered; anything else is left
