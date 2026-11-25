@@ -2988,6 +2988,13 @@ in
     assert lib.assertMsg (
       inputsOf "aws-lc-sys" "0.42.0" == [ ] && (settingsOf "aws-lc-sys" "0.42.0").nativeInputs pkgs == [ ]
     ) "sys-defaults: aws-lc-sys 0.42 inputs";
+    # freetype-sys from 0.21 needs freetype2 through pkg-config; before,
+    # finding it would replace the bundled copy.
+    assert lib.assertMsg (
+      inputsOf "freetype-sys" "0.21.0" == [ "freetype" ]
+      && (settingsOf "freetype-sys" "0.21.0").nativeInputs pkgs == [ pkgs.pkg-config ]
+      && inputsOf "freetype-sys" "0.20.1" == [ ]
+    ) "sys-defaults: freetype-sys by version";
     assert lib.assertMsg (
       inputsOf "aws-lc-sys" "0.41.0" == [ ] && awsOld.env.AWS_LC_SYS_CMAKE_BUILDER or null == "1"
     ) "sys-defaults: aws-lc-sys 0.41 settings";

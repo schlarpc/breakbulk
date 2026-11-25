@@ -111,10 +111,19 @@ in
   expat-sys.nativeInputs = p: [ p.cmake ];
   foundationdb-sys.inputs = p: [ p.foundationdb ];
   foundationdb.inputs = p: [ p.foundationdb ];
-  freetype-sys = {
-    nativeInputs = p: [ p.cmake ];
-    inputs = p: [ p.freetype ];
-  };
+  freetype-sys =
+    { package, ... }:
+    # From 0.21 the build script requires freetype2 through pkg-config
+    # unless the `bundled` feature is on. Before, it builds its bundled
+    # copy (with cmake before 0.14) unless pkg-config finds freetype2, so
+    # an input there would be the switch to the system library.
+    if lib.versionAtLeast package.version "0.21.0" then
+      {
+        nativeInputs = pc;
+        inputs = p: [ p.freetype ];
+      }
+    else
+      { nativeInputs = p: [ p.cmake ]; };
   fuser = {
     nativeInputs = pc;
     inputs = p: [ p.fuse3 ];
