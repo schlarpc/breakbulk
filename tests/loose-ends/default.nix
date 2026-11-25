@@ -56,6 +56,9 @@
 #                variable is exported to the run; `runner = false` gives
 #                `canRunTests = false` and runs.none; an explicit
 #                `canRunTests` wins.
+#   runner-state the wine runner's prefix: in a TMPDIR of the user's own,
+#                shared by its starts; otherwise private to each start
+#                and removed.
 #   test-libs    a test run depends on the sysroot's target shared
 #                libraries (a small copy), not the whole toolchain.
 {
@@ -857,6 +860,69 @@ let
     ) "runner-record: canRunTests set explicitly did not win";
     t.variants.default.testRuns.a.runs_tool;
 
+  # --- runner-state -----------------------------------------------------------
+
+  # The wine runner (with a stand-in wine that logs HOME and WINEPREFIX)
+  # keeps its prefix in $TMPDIR when that is the user's own, shared by
+  # two starts; with TMPDIR unset or the shared, foreign /tmp (the
+  # sandbox's is owned by nobody) each start gets a private directory,
+  # stops its wineserver and removes it, and the program's exit status
+  # comes through either way.
+  runnerState =
+    let
+      fakeWine = pkgs.runCommand "fake-wine" { } ''
+        mkdir -p $out/bin
+        cat > $out/bin/wineboot <<'EOF'
+        #!${pkgs.runtimeShell}
+        mkdir -p "$WINEPREFIX" && touch "$WINEPREFIX/system.reg"
+        EOF
+        cat > $out/bin/wine <<'EOF'
+        #!${pkgs.runtimeShell}
+        [ -O "$HOME" ] && [ -O "$WINEPREFIX" ] || exit 9
+        echo "$WINEPREFIX" >> "$LOG"
+        exit 3
+        EOF
+        cat > $out/bin/wineserver <<'EOF'
+        #!${pkgs.runtimeShell}
+        echo "kill $WINEPREFIX" >> "$LOG"
+        EOF
+        chmod +x $out/bin/*
+      '';
+      wine =
+        (breakbulk.runners.wine {
+          inherit pkgs;
+          wine = fakeWine;
+        }).program;
+    in
+    pkgs.runCommand "runner-state" { } ''
+      export LOG=$PWD/log
+      starts() {
+        : > "$LOG"
+        for _ in 1 2; do
+          s=0; "$@" ${wine} prog.exe || s=$?
+          [ "$s" = 3 ] || { echo "exit status $s, not 3" >&2; exit 1; }
+        done
+        cat "$LOG"
+      }
+      mkdir own
+      starts env TMPDIR=$PWD/own
+      [ "$(grep -c "^$PWD/own/wine-prefix$" "$LOG")" = 2 ]
+      if grep -q '^kill' "$LOG"; then echo "own TMPDIR: wineserver stopped" >&2; exit 1; fi
+      test -e own/wine-prefix/system.reg
+      for e in "env -u TMPDIR" "env TMPDIR=/tmp"; do
+        starts $e
+        mapfile -t p < <(grep -v '^kill' "$LOG")
+        [ "''${#p[@]}" = 2 ]
+        [ "''${p[0]}" != "''${p[1]}" ]
+        for d in "''${p[@]}"; do
+          case $d in /tmp/breakbulk-runner.*/wine-prefix) ;; *) echo "prefix $d" >&2; exit 1 ;; esac
+          grep -qx "kill $d" "$LOG"
+          [ ! -e "''${d%/wine-prefix}" ] || { echo "$d left behind" >&2; exit 1; }
+        done
+      done
+      touch $out
+    '';
+
   # --- test-libs --------------------------------------------------------------
 
   # A test run depends on a small copy of the sysroot's standard library
@@ -911,6 +977,7 @@ in
   inherit names;
   runner-list = runnerList;
   runner-record = runnerRecord;
+  runner-state = runnerState;
   test-libs = testLibs;
   workspaces = {
     config-env = configEnvWs;

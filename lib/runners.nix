@@ -8,7 +8,9 @@
 # with the working directory, environment and TMPDIR of the test-run
 # derivation that calls it. Each runner keeps any state it needs (a wine
 # prefix, a browser profile) under $TMPDIR, so it works inside the Nix
-# sandbox with no display, network or writable home. The values the
+# sandbox with no display, network or writable home. Where TMPDIR is
+# unset or not the user's own (a test app, `/tmp`), that is a private
+# directory of its own, removed when the program exits. The values the
 # option takes (null, false, a program, a list, a record with `args` and
 # `dylibPath`) are in lib/modules/types.nix (`runner`, `runnerNote`);
 # `toRecord` reads any of them.
@@ -37,6 +39,25 @@ let
       set -euo pipefail
       ${text}
     '';
+
+  # Sets `tmp`, the directory the runner keeps its state in, and `run`,
+  # the word before the command. $TMPDIR when it is set and the user's
+  # own: a test run's build directory, which every start of the runner in
+  # that run shares (`run` is `exec`). Not a fresh directory each time,
+  # because nextest and rustdoc start the runner once per test and a wine
+  # prefix takes about 20 s to make. Otherwise a private directory, which
+  # `cleanup` (shell commands) and then `rm` empty when the runner exits,
+  # so the runner does not exec.
+  stateDir = pkgs: cleanup: ''
+    if [ -n "''${TMPDIR:-}" ] && [ -O "$TMPDIR" ]; then
+      tmp=$TMPDIR
+      run=exec
+    else
+      tmp=$(${pkgs.coreutils}/bin/mktemp -d "''${TMPDIR:-/tmp}/breakbulk-runner.XXXXXX")
+      trap '${cleanup} ${pkgs.coreutils}/bin/rm -rf "$tmp"' EXIT
+      run=
+    fi
+  '';
 in
 {
   # A runner value as `{ program; args; dylibPath; }`, or null (run
@@ -98,14 +119,16 @@ in
     }:
     {
       program = script pkgs "breakbulk-runner-wine" ''
-        tmp="''${TMPDIR:-/tmp}"
+        # wineserver outlives the program by a few seconds, holding the
+        # prefix open.
+        ${stateDir pkgs "${wine}/bin/wineserver -k 2>/dev/null || true;"}
         export HOME="$tmp/wine-home" WINEPREFIX="$tmp/wine-prefix"
         export WINEDEBUG="''${WINEDEBUG:--all}" WINEDLLOVERRIDES="''${WINEDLLOVERRIDES:-mscoree,mshtml=}"
         mkdir -p "$HOME"
         if [ ! -e "$WINEPREFIX/system.reg" ]; then
           ${wine}/bin/wineboot --init >/dev/null 2>&1 || true
         fi
-        exec ${wine}/bin/wine "$@"
+        $run ${wine}/bin/wine "$@"
       '';
       args = [ ];
       dylibPath = {
@@ -219,8 +242,9 @@ in
     script pkgs "breakbulk-runner-wasmtime" ''
       # wasmtime caches compiled components under $XDG_CACHE_HOME (or
       # $HOME/.cache), which is unwritable in the sandbox.
-      export XDG_CACHE_HOME="''${TMPDIR:-/tmp}/wasmtime-cache"
-      exec ${wasmtime}/bin/wasmtime run ${lib.escapeShellArgs extraArgs} "$@"
+      ${stateDir pkgs ""}
+      export XDG_CACHE_HOME="$tmp/wasmtime-cache"
+      $run ${wasmtime}/bin/wasmtime run ${lib.escapeShellArgs extraArgs} "$@"
     '';
 
   # wasm-bindgen-test-runner, which must be the exact version of the
@@ -270,12 +294,12 @@ in
         EOF
         prog="$(readlink -f "$1")"; shift
         cd "$work"
-        exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$prog" "$@"
+        $run ${wasmBindgen}/bin/wasm-bindgen-test-runner "$prog" "$@"
       '';
     in
     script pkgs "breakbulk-runner-wasm-bindgen-${browser}" (
       ''
-        tmp="''${TMPDIR:-/tmp}"
+        ${stateDir pkgs ""}
         export HOME="$tmp/wbt-home"
         mkdir -p "$HOME"
         export PATH="${nodejs}/bin''${PATH:+:$PATH}"
@@ -283,7 +307,7 @@ in
       + {
         node = ''
           export WASM_BINDGEN_TEST_ONLY_NODE=1
-          exec ${wasmBindgen}/bin/wasm-bindgen-test-runner "$@"
+          $run ${wasmBindgen}/bin/wasm-bindgen-test-runner "$@"
         '';
         chromium = inBrowser "CHROMEDRIVER=${chromedriver}/bin/chromedriver" ''
           {"goog:chromeOptions": {"binary": "${chromium}/bin/chromium",

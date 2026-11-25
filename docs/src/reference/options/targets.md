@@ -621,7 +621,10 @@ The value is one of:
  - a program: invoked as ` <runner> <binary> <args…> `, as Cargo invokes
    ` target.<triple>.runner `, with the run’s working directory,
    environment and ` $TMPDIR `\. It keeps any state it needs (a wine
-   prefix, a browser profile) under ` $TMPDIR `\.
+   prefix, a browser profile) under ` $TMPDIR `; the runners in
+   ` breakbulk.runners ` use a private directory of their own, removed
+   when the program exits, when ` $TMPDIR ` is unset or not the user’s
+   (a test app)\.
  - a list of the program and its first arguments (Cargo’s array form)\.
  - ` { program; args ? [ ]; dylibPath ? null; } `: the program, its first
    arguments, and ` { var; sep; } `, the variable the test process reads
