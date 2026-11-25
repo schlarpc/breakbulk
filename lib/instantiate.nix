@@ -416,9 +416,19 @@ rec {
           };
         in
         {
-          inherit units drvs shape;
+          inherit
+            units
+            drvs
+            wrappers
+            shape
+            ;
         };
-      inherit (substitute checkedInputs) units drvs shape;
+      inherit (substitute checkedInputs)
+        units
+        drvs
+        wrappers
+        shape
+        ;
       raw = substitute inputs;
 
       # The derivations no input may name, by name: the plan's roots and
@@ -470,6 +480,10 @@ rec {
       # Each root's unit output, or null for one Cargo did not build (its
       # wrapper's `root`), for tests and debugging.
       rootUnits = lib.mapAttrs (_: r: if r ? unit then units.${r.unit}.${r.output} else null) json.roots;
+      # The wrapper derivations, by the output name dynamic-derivation mode
+      # submits them as (`units.drv`, `<package>.<kind>.<target>.drv`), for
+      # tests.
+      inherit wrappers;
       delivery = "ifd";
       inherit (shape)
         roots

@@ -161,6 +161,7 @@ fn wrapper(
         outer,
         output_name,
         WRAPPER_SCRIPT,
+        WRAPPER_FILES,
         [
             ("root", target),
             ("debugRoot", debug),
@@ -174,8 +175,12 @@ fn wrapper(
 /// Every wrapper's builder: `root` and `not-built` when their attributes
 /// are set, `breakbulk-root.json` when `rootJson` is, and `debug`, a
 /// directory linking every file of the `debug` outputs `debugRoot` lists
-/// (one per line), when it lists any.
-const WRAPPER_SCRIPT: &str = r#"mkdir "$out" && { [ -z "$root" ] || ln -s "$root" "$out/root"; } && { [ -z "$debugRoot" ] || { mkdir "$out/debug" && printf '%s' "$debugRoot" | while read -r d; do for f in "$d"/*; do [ ! -e "$f" ] || [ -e "$out/debug/${f##*/}" ] || ln -s "$f" "$out/debug/" || exit 1; done; done; }; } && { [ -z "$notBuilt" ] || printf '%s\n' "$notBuilt" > "$out/not-built"; } && { [ -z "$rootJson" ] || printf '%s' "$rootJson" > "$out/breakbulk-root.json"; }"#;
+/// (one per line, passed as a file), when it lists any.
+const WRAPPER_SCRIPT: &str = r#"mkdir "$out" && { [ -z "$root" ] || ln -s "$root" "$out/root"; } && { [ ! -s "$debugRootPath" ] || { mkdir "$out/debug" && while read -r d; do for f in "$d"/*; do [ ! -e "$f" ] || [ -e "$out/debug/${f##*/}" ] || ln -s "$f" "$out/debug/" || exit 1; done; done < "$debugRootPath"; }; } && { [ -z "$notBuilt" ] || printf '%s\n' "$notBuilt" > "$out/not-built"; } && { [ -z "$rootJson" ] || printf '%s' "$rootJson" > "$out/breakbulk-root.json"; }"#;
+
+/// The wrapper attributes passed as files: a product's `debugRoot` grows
+/// with its dependencies.
+const WRAPPER_FILES: &[&str] = &["debugRoot"];
 
 /// The doctest of one predicted library: the plan's doctest derivation,
 /// whose rendered doctest names the package's test configuration
@@ -210,6 +215,7 @@ fn doctest(
         outer,
         output_name,
         WRAPPER_SCRIPT,
+        WRAPPER_FILES,
         [
             ("root", root),
             ("debugRoot", String::new()),
@@ -231,13 +237,20 @@ fn doctest_node(package: &str) -> String {
 
 /// A derivation the outer derivation submits: named
 /// `<outer name>-<output name without .drv>`, as Nix requires; bash with
-/// coreutils on `PATH` runs `script`; `attrs` are tokenized text.
+/// coreutils on `PATH` runs `script`; `attrs` are tokenized text, and the
+/// ones `files` names are passed with `passAsFile` (`$<name>Path`).
+///
+/// A list that grows with the plan is in `files` whatever its length, not
+/// only when it is long: Linux refuses an environment string over 128 KiB
+/// (`MAX_ARG_STRLEN`), and only the substituted length tells, which would
+/// make the attribute names depend on other derivations' paths.
 fn small_drv<const N: usize>(
     inputs: &Inputs,
     tokens: &Tokens,
     outer: &Outer,
     output_name: &str,
     script: &str,
+    files: &[&str],
     attrs: [(&str, String); N],
 ) -> Result<Drv, Error> {
     let base = output_name.strip_suffix(".drv").ok_or_else(|| {
@@ -257,6 +270,12 @@ fn small_drv<const N: usize>(
                 },
             ))
         })
+        .chain((!files.is_empty()).then(|| {
+            Ok((
+                "passAsFile".to_owned(),
+                Value::Strings(files.iter().map(|&f| f.to_owned()).collect()),
+            ))
+        }))
         .collect::<Result<Vec<_>, Error>>()?;
     crate::shell_drv(
         inputs,
@@ -291,7 +310,8 @@ fn all_units(
         &tokens,
         outer,
         output_name,
-        r#"mkdir "$out" && printf '%s' "$units" > "$out/units""#,
+        r#"mkdir "$out" && cp "$unitsPath" "$out/units""#,
+        &["units"],
         [("units", list)],
     )
 }
@@ -313,7 +333,8 @@ fn all_runs(inputs: &Inputs, prefix: &str, outer: &Outer, output_name: &str) -> 
         &tokens,
         outer,
         output_name,
-        r#"mkdir "$out" && printf '%s' "$runs" > "$out/runs""#,
+        r#"mkdir "$out" && cp "$runsPath" "$out/runs""#,
+        &["runs"],
         [("runs", list)],
     )
 }
@@ -406,6 +427,7 @@ pub fn shape(inputs: &Inputs, units: &UnitsJson, outer: &Outer) -> Result<Shape,
                 outer,
                 output,
                 WRAPPER_SCRIPT,
+                WRAPPER_FILES,
                 [
                     ("root", tokens.unit(DOCS_NODE, "out")),
                     ("debugRoot", String::new()),

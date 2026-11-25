@@ -769,3 +769,34 @@ fn long_units_pass_as_file() {
     let r = resolve(&n.drv, &vals, &BTreeMap::new(), 10).unwrap();
     assert_eq!(r.env["passAsFile"], "BREAKBULK_UNIT");
 }
+
+/// Linux's limit for one environment string.
+const MAX_ARG_STRLEN: usize = 128 * 1024;
+
+#[test]
+fn lists_that_grow_with_the_plan_pass_as_files() {
+    // Smoke's build-script run, cloned 2,000 times: the `units` and `runs`
+    // lists are over the limit.
+    let mut inputs = dyn_inputs();
+    let run = inputs.plan.units[RUN].clone();
+    for i in 0..2000 {
+        inputs.plan.units.insert(format!("{RUN}-{i}"), run.clone());
+    }
+    let (resolved, _) = write_all(&inputs);
+    let by_key: BTreeMap<&str, &crate::dynamic::Resolved> =
+        resolved.iter().map(|(k, r)| (k.as_str(), r)).collect();
+    for (key, attr) in [("wrapper:*units", "units"), ("wrapper:*runs", "runs")] {
+        let r = by_key[key];
+        assert!(
+            r.env[attr].len() > MAX_ARG_STRLEN,
+            "{key}: {}",
+            r.env[attr].len()
+        );
+        assert_eq!(r.env["passAsFile"], attr, "{key}");
+    }
+    // A product's debuginfo list grows with its dependencies.
+    assert_eq!(
+        by_key["wrapper:smokeapp/bin/smokeapp"].env["passAsFile"],
+        "debugRoot"
+    );
+}

@@ -71,8 +71,8 @@ pub struct UnitsJson {
 }
 
 /// The attributes of one derivation, passed to `derivation` after
-/// resolving. `BREAKBULK_UNIT` is the only attribute that may be moved to
-/// `passAsFile`.
+/// resolving. `BREAKBULK_UNIT` is the only attribute that resolving may
+/// move to `passAsFile`; a wrapper names its own in `passAsFile`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Drv {
     pub attrs: BTreeMap<String, Value>,
