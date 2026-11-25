@@ -1647,13 +1647,14 @@ let
     if rel == s then s else "${builtins.storeDir}/${lib.head (lib.splitString "/" rel)}";
   sourceStoreRoots = l: lib.unique (map (s: sourceStoreRoot (util.devirtualizeAndDiscard "${s}")) l);
 
-  # Where a stage goes that should run on the flat link output in this
-  # product: after its last stage before `install`, before `install` (when
-  # it has one). A check knows the order (`product.stageOrder`).
+  # Where stage `self` goes to run on the flat link output in this
+  # product: after its last other stage before `install`, before `install`
+  # (when it has one). A check knows the order (`product.stageOrder`),
+  # which may hold `self` already: a stage cannot run after itself.
   beforeInstallPosition =
-    product:
+    self: product:
     let
-      order = product.stageOrder or [ "install" ];
+      order = lib.remove self (product.stageOrder or [ "install" ]);
       installAt = lib.lists.findFirstIndex (s: s == "install") null order;
       before = if installAt == null then order else lib.take installAt order;
     in
@@ -1699,7 +1700,8 @@ let
           default = null;
           description = ''
             The store paths whose hashes are replaced. `null`: the
-            product's `sourcePaths` (its source views and crate sources),
+            product's `sourcePaths` (its source views, crate sources and
+            vendor directory) and the paths its `sourcePathFiles` list,
             which `noSourceReferences` checks.
           '';
         };
@@ -1725,12 +1727,20 @@ let
           {
             hashes = concatStringsSep "\n" hashes + "\n";
             passAsFile = [ "hashes" ];
+            inherit sourceFiles;
           }
           ''
             set -euo pipefail
             ${copyIn input}
             copyIn "$out"
             filler=${lib.fixedWidthString 32 "e" ""}
+            {
+              cat "$hashesPath"
+              for f in $sourceFiles; do
+                sed -n 's|^${builtins.storeDir}/\([0-9a-z]\{32\}\).*|\1|p' "$f"
+              done
+            } | LC_ALL=C sort -u > $TMPDIR/hashes
+            hashesPath=$TMPDIR/hashes
             script=()
             while IFS= read -r h; do
               [ -n "$h" ] && script+=(-e "s|$h|$filler|g")
@@ -1992,7 +2002,7 @@ let
           ...
         }:
         let
-          stanza = "packages.${product.name}.stages.buildScriptFiles = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
+          stanza = "packages.${product.name}.stages.buildScriptFiles = { ${beforeInstallPosition "buildScriptFiles" product}run = breakbulk.stageHelpers.buildScriptFiles { }; };";
           removal = removeCheckLine "buildScriptFiles" product "does not need them at run time";
         in
         pkgs.runCommand "${product.name}-build-script-files" { inherit stanza removal; } ''
@@ -2046,10 +2056,15 @@ let
           brings its rustc and cargo components along, so such a binary
           still fails there.
 
-          When a source is referenced, the failure says that
+          The failure names, for each path it reports, the paths of the
+          closure that reference it: the checked output itself (`directly`)
+          or others, such as the workspace's vendor directory, which names
+          every crate source. When a source is referenced, it says that
           `env!("CARGO_MANIFEST_DIR")` kept in a string is the usual cause,
           and names the `removeSourceReferences` stage, at its place in the
-          product's stage order, besides narrowing and removing the check.
+          product's stage order (or, when the product has that stage
+          already, its `sources`), besides narrowing and removing the
+          check.
         '';
         options =
           let
@@ -2062,7 +2077,7 @@ let
               };
           in
           {
-            sources = paths "source" "the product's `sourcePaths` (its source views and crate sources) and the paths its `sourcePathFiles` list";
+            sources = paths "source" "the product's `sourcePaths` (its source views, crate sources and vendor directory) and the paths its `sourcePathFiles` list";
             toolchain = paths "Rust toolchain" "the product's `toolchainPaths` (rustc, its sysroot, cargo, rust-src). `[ ]` checks sources only";
             sourcesAllowedIn = mkOption {
               type = types.nullOr (types.listOf types.str);
@@ -2096,6 +2111,7 @@ let
             if cfg.sourcesAllowedIn != null then cfg.sourcesAllowedIn else product.sourcesAllowedIn or [ ];
           listFile = name: l: builtins.toFile name (concatStringsSep "\n" (sourceStoreRoots l) + "\n");
           checkName = product.checkName or "noSourceReferences";
+          scrubbing = lib.elem "removeSourceReferences" (product.stageOrder or [ ]);
         in
         pkgs.runCommand "${product.name}-no-source-references"
           {
@@ -2108,7 +2124,11 @@ let
             binutils = pkgs.buildPackages.binutils-unwrapped;
             allowedIn = concatStringsSep "\n" allowedIn;
             narrowing = "packages.${product.name}.checks.${checkName}.run = breakbulk.stageHelpers.noSourceReferences { toolchain = [ ]; };";
-            scrub = "packages.${product.name}.stages.removeSourceReferences = { ${beforeInstallPosition product}run = breakbulk.stageHelpers.removeSourceReferences; };";
+            scrub =
+              if scrubbing then
+                "packages.${product.name}.stages.removeSourceReferences.run = breakbulk.stageHelpers.removeSourceReferences { sources = [ <the paths that name them> ]; };"
+              else
+                "packages.${product.name}.stages.removeSourceReferences = { ${beforeInstallPosition "removeSourceReferences" product}run = breakbulk.stageHelpers.removeSourceReferences; };";
             removal = removeCheckLine "noSourceReferences" product "may reference them";
           }
           ''
@@ -2117,6 +2137,31 @@ let
             cat "$sourcesList" $sourceFiles > "$allSources"
             bad=0
             badSource=0
+            # Which closure path references which (`<ref> <path>` lines),
+            # from closureInfo's registration: each path, its NAR hash and
+            # size, an empty deriver, the number of references, then them.
+            awk '
+              st == 0 { p = $0; st = 1; next }
+              st < 4 { st++; next }
+              st == 4 { n = $0 + 0; st = n > 0 ? 5 : 0; next }
+              { if ($0 != p) print $0 " " p; if (--n == 0) st = 0 }
+            ' "$closure/registration" > $TMPDIR/referrers
+            # How the checked output reaches closure path "$1": directly,
+            # or through the paths that reference it.
+            via() {
+              local direct= others=() r
+              while IFS= read -r r; do
+                if [ "$r" = ${input} ]; then direct=1; else others+=("$r"); fi
+              done < <(awk -v s="$1" '$1 == s { print $2 }' $TMPDIR/referrers | sort -u)
+              if [ -n "$direct" ]; then
+                printf 'directly'
+                [ ''${#others[@]} -eq 0 ] || printf ' and '
+              fi
+              if [ ''${#others[@]} -gt 0 ]; then
+                printf 'through %s' "''${others[0]}"
+                for r in "''${others[@]:1}"; do printf ', %s' "$r"; done
+              fi
+            }
             # The shared libraries the checked output's files load (computed
             # once, on first use).
             needed=
@@ -2157,7 +2202,7 @@ let
                     continue
                   fi
                 fi
-                echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references source $s" >&2
+                echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references source $s $(via "$s")" >&2
                 bad=1
                 badSource=1
               fi
@@ -2165,7 +2210,7 @@ let
             while IFS= read -r s; do
               [ -n "$s" ] || continue
               if grep -qxF "$s" "$closure/store-paths" && ! loadsFrom "$s"; then
-                echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references the Rust toolchain $s" >&2
+                echo "noSourceReferences: ${product.name} (${builtins.unsafeDiscardStringContext "${input}"}) references the Rust toolchain $s $(via "$s")" >&2
                 bad=1
               fi
             done < "$toolchainList"
@@ -2174,7 +2219,12 @@ let
                 echo "Source and toolchain paths must not reach shipped outputs; see \"Source paths and debug information\" in the breakbulk documentation: https://schlarpc.github.io/breakbulk/explanation/products.html#source-paths-and-debug-information"
                 if [ "$badSource" = 1 ]; then
                   echo "A source path in a product usually comes from env!(\"CARGO_MANIFEST_DIR\") kept in a string, which rustc's path remapping does not rewrite."
-                  echo "When the program never reads that path, blank its hash: $scrub"
+                  ${
+                    if scrubbing then
+                      ''echo "The removeSourceReferences stage runs but leaves them: blank the hashes of the paths named above in its sources: $scrub"''
+                    else
+                      ''echo "When the program never reads that path, blank its hash: $scrub"''
+                  }
                 fi
                 echo "A toolchain path is allowed only when it holds a shared library the product loads, such as libstd-*.so with -C prefer-dynamic."
                 echo "Check sources only: $narrowing"

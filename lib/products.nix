@@ -466,7 +466,11 @@ let
         attrValues inst.sources.workspace
         ++ lib.concatMap attrValues (attrValues (inst.sources.workspaceTargets or { }))
         ++ attrValues (inst.sources.predicted or { })
-        ++ attrValues inst.sources.crates,
+        ++ attrValues inst.sources.crates
+        # A nested Cargo in a build script compiles crates from the
+        # vendor directory, so what it builds names that directory, not
+        # the crate sources it links to.
+        ++ lib.optional (inst ? vendor) inst.vendor.dir,
       # The toolchain's store paths: noSourceReferences fails when a
       # product's closure has one (field-trial gap 9).
       toolchainPaths ? inst.toolchainPaths or [ ],

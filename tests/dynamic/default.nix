@@ -1150,6 +1150,15 @@ in
   manifestDirPredicted =
     (products.manifestDir [ { packages.app.predictSources.enable = true; } ])
     .workspaces.main.packages.app.checks.noSourceReferences;
+  # The same with removeSourceReferences, whose default sources take the
+  # predicted view's path from the same file: the check passes.
+  manifestDirPredictedScrubbed =
+    (products.manifestDir [
+      {
+        packages.app.predictSources.enable = true;
+        packages.app.stages.removeSourceReferences.run = breakbulk.stages.helpers.removeSourceReferences;
+      }
+    ]).workspaces.main.packages.app.checks.noSourceReferences;
   explain = lib.mapAttrs (
     name: repo:
     let

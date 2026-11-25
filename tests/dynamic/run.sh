@@ -555,11 +555,19 @@ case " ${fixtures[*]} " in
     if mbuild --arg mode '"dynamic"' manifestDirPredicted >"$WORK/manifest-dir-predicted.log" 2>&1; then
       echo "FAIL: noSourceReferences passed for a product that references its predicted view" >&2
       status=1
-    elif grep -qE 'references source .*-source$' "$WORK/manifest-dir-predicted.log"; then
+    elif grep -qE 'references source .*-source directly$' "$WORK/manifest-dir-predicted.log"; then
       echo "manifest-dir with predictSources: noSourceReferences names the predicted view" >&2
     else
       tail -30 "$WORK/manifest-dir-predicted.log" >&2
       echo "FAIL: manifest-dir with predictSources failed otherwise" >&2
+      status=1
+    fi
+    say "manifest-dir with predictSources and removeSourceReferences (dynamic-derivation mode)"
+    if mbuild --arg mode '"dynamic"' manifestDirPredictedScrubbed >"$WORK/manifest-dir-predicted-scrubbed.log" 2>&1; then
+      echo "manifest-dir with predictSources: removeSourceReferences blanks the predicted view" >&2
+    else
+      tail -30 "$WORK/manifest-dir-predicted-scrubbed.log" >&2
+      echo "FAIL: removeSourceReferences left the predicted view in manifest-dir" >&2
       status=1
     fi
     ;;

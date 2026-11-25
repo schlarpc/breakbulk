@@ -66,7 +66,7 @@ attributes:
 | Attribute | Given to | Value |
 | --- | --- | --- |
 | `name` | stages and checks | The package's name in `Cargo.toml`, which is the product's name. |
-| `sourcePaths` | stages and checks | The store paths of the workspace's source views and of every crate source. `noSourceReferences` fails when the product references one. |
+| `sourcePaths` | stages and checks | The store paths of the workspace's source views, of every crate source and of the workspace's vendor directory (which a nested Cargo in a build script compiles from). `noSourceReferences` fails when the product references one. |
 | `sourcePathFiles` | stages and checks | Files that list more source paths, one per line, made at build time. In dynamic-derivation mode, the store paths of the predicted views ([`predictSources`](options/packages.md#packagesnamepredictsourcesenable)), which evaluation cannot name. Otherwise empty. `noSourceReferences` reads them with `sourcePaths`. |
 | `toolchainPaths` | stages and checks | The Rust toolchain's store paths: rustc, its sysroot, cargo and components such as rust-src. |
 | `package` | stages and checks | The package's `[package]` table from its `Cargo.toml`, as `builtins.fromTOML` reads it, with each field inherited from the workspace (`description.workspace = true`) replaced by the workspace's value. `wasmMetadata` takes its metadata defaults from it. |

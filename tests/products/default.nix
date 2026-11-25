@@ -73,7 +73,9 @@
 #                    noSourceReferences fails, naming the cause and the
 #                    removeSourceReferences stage at its place; with that
 #                    stage only hash bytes change (to `e`), the check
-#                    passes and the product runs
+#                    passes and the product runs; with that stage blanking
+#                    nothing (`sources = [ ]`), the check fails naming its
+#                    `sources`, not a place after itself
 #   prefer-dynamic   -C prefer-dynamic: noSourceReferences allows the
 #                    sysroot that holds the libstd-*.so the binary loads
 #                    (nixpkgs' rustc), and fails on rust-overlay's rustc and
@@ -208,9 +210,13 @@
 #                    `repo.workspaces.<ws>.vendor.cargoHome` as CARGO_HOME:
 #                    the product embeds the nested build's binary, which
 #                    runs; noSourceReferences fails on the product, naming
-#                    a source view; inner's test runs `cargo run -p inner`
-#                    with the same CARGO_HOME in `test.env` and the rest of
-#                    the workspace in `test.sourceScope`
+#                    a source view, and the vendor directory, which the
+#                    product references directly and through which it
+#                    reaches the registry crate's source; with a
+#                    removeSourceReferences stage and its default
+#                    `sources` the check passes; inner's test runs `cargo
+#                    run -p inner` with the same CARGO_HOME in `test.env`
+#                    and the rest of the workspace in `test.sourceScope`
 #   nested-cargo-rustflags   the same with linuxStatic and a `--cfg` in the
 #                    target's rustflags: the nested Cargo reads both from
 #                    the run's CARGO_ENCODED_RUSTFLAGS (the inner binary is
@@ -1100,6 +1106,10 @@ let
     )
   ];
   nestedCargo = mkRepo (fixtures + "/nested-cargo") nestedCargoModules;
+  nestedCargoScrubbed = mkRepo (fixtures + "/nested-cargo") (
+    nestedCargoModules
+    ++ [ { packages.outer.stages.removeSourceReferences.run = helpers.removeSourceReferences; } ]
+  );
   nestedCargoFlags = mkRepo (fixtures + "/nested-cargo") (
     nestedCargoModules
     ++ [
@@ -1630,21 +1640,30 @@ in
   nested-cargo =
     let
       p = nestedCargo.workspaces.main.packages.outer;
-      view = builtins.unsafeDiscardStringContext "${(inst nestedCargo).sources.workspace.outer}";
+      i = inst nestedCargo;
+      plain = path: builtins.unsafeDiscardStringContext "${path}";
+      view = plain i.sources.workspace.outer;
+      vendorDir = plain i.vendor.dir;
+      itoa = lib.head (lib.filter (lib.hasInfix "itoa") (map plain (lib.attrValues i.sources.crates)));
     in
     pkgs.runCommand "nested-cargo"
       {
         run = nestedCargoRun "nested-cargo-run" p "inner says 42, nested_cfg false" false;
         failure = pkgs.testers.testBuildFailure p.checks.noSourceReferences;
         testRun = nestedCargo.workspaces.main.target.${native}.variants.default.testRuns.inner.nested;
+        scrubbed = nestedCargoScrubbed.workspaces.main.packages.outer.checks.noSourceReferences;
       }
       ''
         set -euo pipefail
         cat $run
         # The nested build's paths are not remapped: the embedded binary
-        # names the source view the build script ran in.
-        cat $failure/testBuildFailure.log
-        grep -qF ${lib.escapeShellArg view} $failure/testBuildFailure.log
+        # names the source view the build script ran in, and the vendor
+        # directory, which names every crate source.
+        log=$failure/testBuildFailure.log
+        cat $log
+        grep -qF ${lib.escapeShellArg view} $log
+        grep -qE ${lib.escapeShellArg "references source ${vendorDir} directly$"} $log
+        grep -qE ${lib.escapeShellArg "references source ${itoa} (directly and )?through ${vendorDir}$"} $log
         touch $out
       '';
 
@@ -3700,15 +3719,34 @@ in
     let
       plain = (manifestDir [ ]).workspaces.main.packages.app;
       scrubbed = manifestDirRepo.workspaces.main.packages.app;
+      # The stage, blanking nothing.
+      idle =
+        (manifestDir [
+          {
+            packages.app.stages.removeSourceReferences = {
+              after = "splitDebug";
+              run = helpers.removeSourceReferences { sources = [ ]; };
+            };
+          }
+        ]).workspaces.main.packages.app;
       fillerHash = lib.fixedWidthString 32 "e" "";
     in
     pkgs.runCommand "manifest-dir"
       {
         failure = pkgs.testers.testBuildFailure plain.checks.noSourceReferences;
+        idleFailure = pkgs.testers.testBuildFailure idle.checks.noSourceReferences;
         passing = scrubbed.checks.noSourceReferences;
       }
       ''
         set -euo pipefail
+        log=$idleFailure/testBuildFailure.log
+        cat $log
+        grep -q 'references source .* directly$' $log
+        grep -qF 'The removeSourceReferences stage runs but leaves them' $log
+        grep -qF 'packages.app.stages.removeSourceReferences.run = breakbulk.stageHelpers.removeSourceReferences { sources = [' $log
+        if grep -qF 'after = "removeSourceReferences"' $log; then
+          echo "the message places the stage after itself" >&2; exit 1
+        fi
         log=$failure/testBuildFailure.log
         cat $log
         grep -q 'references source' $log

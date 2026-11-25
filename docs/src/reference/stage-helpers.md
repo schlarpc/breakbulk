@@ -399,7 +399,8 @@ It edits bytes, so it breaks a code signature made before it
 #### `removeSourceReferences.sources`
 
 The store paths whose hashes are replaced. `null`: the
-product's `sourcePaths` (its source views and crate sources),
+product's `sourcePaths` (its source views, crate sources and
+vendor directory) and the paths its `sourcePathFiles` list,
 which `noSourceReferences` checks.
 
 *Type:* null or (list of (string or absolute path or package))
@@ -904,14 +905,19 @@ rust-src never are. A rust-overlay toolchain's joined sysroot
 brings its rustc and cargo components along, so such a binary
 still fails there.
 
-When a source is referenced, the failure says that
+The failure names, for each path it reports, the paths of the
+closure that reference it: the checked output itself (`directly`)
+or others, such as the workspace's vendor directory, which names
+every crate source. When a source is referenced, it says that
 `env!("CARGO_MANIFEST_DIR")` kept in a string is the usual cause,
 and names the `removeSourceReferences` stage, at its place in the
-product's stage order, besides narrowing and removing the check.
+product's stage order (or, when the product has that stage
+already, its `sources`), besides narrowing and removing the
+check.
 
 #### `noSourceReferences.sources`
 
-The source store paths. `null`: the product's `sourcePaths` (its source views and crate sources) and the paths its `sourcePathFiles` list.
+The source store paths. `null`: the product's `sourcePaths` (its source views, crate sources and vendor directory) and the paths its `sourcePathFiles` list.
 
 *Type:* null or (list of (string or absolute path or package))
 
