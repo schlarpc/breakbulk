@@ -181,7 +181,7 @@ the sources do not name:
 
 ```nix
 packages.web.predictSources = {
-  testCompiles = true;     # tests do not use env!("CARGO_MANIFEST_DIR") to find files
+  testCompiles = true;     # no macro from another crate gives tests env!("CARGO_MANIFEST_DIR")
   buildScriptRuns = true;  # build scripts declare every file they read
 };
 ``` Prediction reads the

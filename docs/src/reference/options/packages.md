@@ -860,13 +860,17 @@ list of (string or absolute path or function from { unit, test, cargoTarget, roo
 
 Whether ` predictSources ` narrows this package’s test compiles
 (` cargo test `’s harnesses of its library, bins and integration
-tests), not only its non-test compiles\. Off by default: a test
-that finds its fixtures through ` env!("CARGO_MANIFEST_DIR") `
-gets the compile’s view path, and a predicted view holds no
-fixtures, so the test run fails although its own view has
-them\. Turn it on for a package whose tests find their files
-otherwise (a path relative to the working directory, or
-` std::env::var("CARGO_MANIFEST_DIR") ` at run time)\.
+tests), not only its non-test compiles\. A test compile whose
+sources use ` env!("CARGO_MANIFEST_DIR") ` outside an include
+falls back to its whole view, as any unit does\. Off by default
+because a macro from another crate can expand to
+` env!("CARGO_MANIFEST_DIR") ` where prediction cannot see it: the
+test then gets the predicted view’s path, which holds no
+fixtures, and its run fails although its own view has them\. Turn
+it on for a package whose tests find their files otherwise (a
+path relative to the working directory, or
+` std::env::var("CARGO_MANIFEST_DIR") ` at run time), or through
+their own ` env! `\.
 
 *Type:*
 boolean
